@@ -311,7 +311,12 @@ public sealed class InProcessSettingsWidgetActions : ISettingsWidgetActions
         _widgetManager?.RefreshVisibleWidgetDesktopLayers(reason);
 
     public void NotifyWidgetGroupPresentationSettingsChanged() =>
-        _widgetManager?.NotifyWidgetGroupPresentationSettingsChanged();
+        // Batch R11: this arrives on a pool dispatch thread, and the
+        // manager's raise chain touches the loaded-surface registry that
+        // the UI thread mutates — the sibling notification above already
+        // marshals for exactly this reason.
+        DeskBox.Platform.UiDispatch.RunOrDefer(
+            () => _widgetManager?.NotifyWidgetGroupPresentationSettingsChanged());
 
     public Task<bool> ReorderWidgetGroupMemberAsync(string sourceWidgetId, string targetWidgetId) =>
         _widgetManager is { } manager

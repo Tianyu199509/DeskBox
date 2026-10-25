@@ -250,6 +250,8 @@ public sealed class SettingsIpcFacadeTests : IDisposable
 
             remote.SuspendHotkeysForRecording();
             remote.ResumeHotkeysAfterRecording();
+            // Fire-and-forget since batch R11: bounded poll for the pair.
+            await UntilAsync(() => hotkey.SuspendCalled && hotkey.ResumeCalled);
             Assert.True(hotkey.SuspendCalled);
             Assert.True(hotkey.ResumeCalled);
         }
@@ -295,6 +297,7 @@ public sealed class SettingsIpcFacadeTests : IDisposable
             Assert.True(remote.IsGestureOwnedByMainHotkey(gesture));
 
             remote.RefreshSearchHotkeyRegistration();
+            await UntilAsync(() => hotkey.SearchRefreshCalled);
             Assert.True(hotkey.SearchRefreshCalled);
 
             // The coordinator-facing adapter rides the same commands.
@@ -805,8 +808,12 @@ public sealed class SettingsIpcFacadeTests : IDisposable
             var remote = new RemoteSettingsWidgetActions(loop.Client, hostMirror);
 
             Assert.True(remote.IsHostAvailable);
+            // Batch R11: the getter reads the local layout mirror (layout
+            // pushes + write responses keep it current) instead of costing
+            // a synchronous roundtrip per feature entry per reload push.
+            DeskBox.Services.FeatureWidgetSettings.SetEnabled(
+                hostMirror.Settings, WidgetKind.Todo, true);
             Assert.True(remote.IsFeatureWidgetEnabled(WidgetKind.Todo));
-            Assert.Equal(WidgetKind.Todo, loop.Widget.EnabledArg);
 
             remote.RefreshVisibleWidgetDesktopLayers("test-layer");
             await UntilAsync(() => loop.Widget.LayerReason == "test-layer");
@@ -1239,6 +1246,7 @@ public sealed class SettingsIpcFacadeTests : IDisposable
             Assert.True(cloud.ScheduleRelaunch().Started);
             await cloud.ShutdownForRestartAsync();
             cloud.DeleteTemporaryDownload("C:\\dl");
+            await UntilAsync(() => loop.BackupRestore.DeletedTempDownload == "C:\\dl");
             Assert.Equal("C:\\dl", loop.BackupRestore.DeletedTempDownload);
         }
         finally

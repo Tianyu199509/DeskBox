@@ -88,14 +88,15 @@ public sealed class RemoteSettingsWidgetActions : ISettingsWidgetActions
         }
     }
 
-    public bool IsFeatureWidgetEnabled(WidgetKind kind)
-    {
-        (bool ok, string? payload, _) = _client.RequestAsync(
-                SettingsIpcMethods.WidgetIsFeatureEnabled,
-                ((int)kind).ToString())
-            .GetAwaiter().GetResult();
-        return ok && SettingsIpcPayload.DecodeBoolean(payload);
-    }
+    // Batch R11: this is a VM property-getter hot path — every settings
+    // reload push re-projects the feature list, and each entry used to cost
+    // a synchronous pipe roundtrip on the UI thread. The feature dictionary
+    // lives in the layout domain of the local mirror, which the host keeps
+    // current through layout pushes and the authoritative slice merged into
+    // every layout-write response — the same source the in-process facade
+    // reads. No roundtrip needed.
+    public bool IsFeatureWidgetEnabled(WidgetKind kind) =>
+        FeatureWidgetSettings.IsEnabled(_settingsService.Settings, kind);
 
     public async Task<bool> SetFeatureWidgetEnabled(WidgetKind kind, bool enabled)
     {

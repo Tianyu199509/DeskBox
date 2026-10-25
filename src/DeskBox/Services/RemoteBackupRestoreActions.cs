@@ -105,9 +105,33 @@ public sealed class RemoteBackupRestoreActions : IBackupRestoreActions
     public Task ShutdownForRestartAsync() =>
         RequestVoidAsync(SettingsIpcMethods.CloudShutdownForRestart);
 
+    // Fire-and-forget (batch R11 audit): the restore flow's finally block
+    // runs on the UI thread; a blocking roundtrip there freezes the window
+    // right after the result dialog, and a timeout throws out of the
+    // finally. The response is not read; main deletes the directory
+    // regardless of when the host exits (pipe FIFO keeps it ahead of any
+    // subsequent shutdown command).
     public void DeleteTemporaryDownload(string? directory) =>
-        RequestVoidAsync(SettingsIpcMethods.CloudDeleteTemporaryDownload, directory)
-            .GetAwaiter().GetResult();
+        _ = NotifyWithoutBlockingAsync(
+            SettingsIpcMethods.CloudDeleteTemporaryDownload,
+            directory,
+            nameof(DeleteTemporaryDownload));
+
+    private async Task NotifyWithoutBlockingAsync(string method, string? payload, string caller)
+    {
+        try
+        {
+            (bool ok, _, string? error) = await _client.RequestAsync(method, payload);
+            if (!ok)
+            {
+                App.Log($"[SettingsIpc] {caller} failed: {error ?? "unknown error"}");
+            }
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[SettingsIpc] {caller} failed: {ex.Message}");
+        }
+    }
 
     private async Task RequestVoidAsync(
         string method,

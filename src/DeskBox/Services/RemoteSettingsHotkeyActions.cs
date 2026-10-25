@@ -135,9 +135,16 @@ public sealed class RemoteSettingsHotkeyActions : ISettingsHotkeyActions
         return ok && SettingsIpcPayload.DecodeBoolean(payload);
     }
 
+    // Same fire-and-forget contract as the notifications above (batch R11
+    // audit): all three ride UI-thread call sites — the recorder lifecycle
+    // pair even runs inside the settings-window close/hide path, where a
+    // blocking roundtrip is the exact "X button stops closing the window"
+    // signature (see RemoteSettingsAppActions for the dump evidence).
     public void RefreshSearchHotkeyRegistration() =>
-        _client.RequestAsync(SettingsIpcMethods.SearchHotkeyRefreshRegistration)
-            .GetAwaiter().GetResult();
+        _ = NotifyWithoutBlockingAsync(
+            SettingsIpcMethods.SearchHotkeyRefreshRegistration,
+            payload: null,
+            nameof(RefreshSearchHotkeyRegistration));
 
     public DesktopDoubleClickToggleResult TrySetDesktopDoubleClickEnabled(bool enabled)
     {
@@ -151,11 +158,20 @@ public sealed class RemoteSettingsHotkeyActions : ISettingsHotkeyActions
                 : new DesktopDoubleClickToggleResult(Applied: false, ErrorCode: 0);
     }
 
+    // The recorder's OnOpened follows this with _hook.TryStart(); with the
+    // send now asynchronous the two race for a few milliseconds. User input
+    // arrives hundreds of milliseconds later, and the pre-R11 synchronous
+    // version also proceeded to TryStart on a timed-out suspend, so this
+    // widens no real window.
     public void SuspendHotkeysForRecording() =>
-        _client.RequestAsync(SettingsIpcMethods.HotkeySuspend)
-            .GetAwaiter().GetResult();
+        _ = NotifyWithoutBlockingAsync(
+            SettingsIpcMethods.HotkeySuspend,
+            payload: null,
+            nameof(SuspendHotkeysForRecording));
 
     public void ResumeHotkeysAfterRecording() =>
-        _client.RequestAsync(SettingsIpcMethods.HotkeyResume)
-            .GetAwaiter().GetResult();
+        _ = NotifyWithoutBlockingAsync(
+            SettingsIpcMethods.HotkeyResume,
+            payload: null,
+            nameof(ResumeHotkeysAfterRecording));
 }

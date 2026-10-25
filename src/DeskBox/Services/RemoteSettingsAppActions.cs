@@ -15,11 +15,35 @@ public sealed class RemoteSettingsAppActions : ISettingsAppActions
     private readonly SettingsIpcClient _client;
     private readonly uint _mainProcessId;
 
-    public RemoteSettingsAppActions(SettingsIpcClient client, uint mainProcessId = 0)
+    public RemoteSettingsAppActions(
+        SettingsIpcClient client,
+        uint mainProcessId = 0,
+        Func<Action, bool>? tryEnqueueOnUi = null)
     {
         _client = client;
         _mainProcessId = mainProcessId;
+        _tryEnqueueOnUi = tryEnqueueOnUi;
         _client.EventReceived += OnEventReceived;
+    }
+
+    /// <summary>
+    /// Marshals push-event raises off the pipe read-loop thread: display
+    /// settings handlers build thread-affine DispatcherQueueTimers straight
+    /// from these events. Injected (batch R11) so the facade stays free of
+    /// global dispatcher access; a null injector raises inline (tests).
+    /// </summary>
+    private readonly Func<Action, bool>? _tryEnqueueOnUi;
+
+    private void RaiseOnUi(Action raise)
+    {
+        if (_tryEnqueueOnUi is { } enqueue)
+        {
+            enqueue(raise);
+        }
+        else
+        {
+            raise();
+        }
     }
 
     /// <summary>
@@ -57,10 +81,16 @@ public sealed class RemoteSettingsAppActions : ISettingsAppActions
         switch (method)
         {
             case SettingsIpcMethods.AppDisplayTopologyChanged:
-                DisplayTopologyChanged?.Invoke();
+                // Batch R11: raised on the pipe read-loop thread — the
+                // display-settings section's handlers build a
+                // DispatcherQueueTimer straight from this event, a
+                // thread-affine WinRT object, so the un-marshalled raise
+                // threw RPC_E_WRONG_THREAD and the external refresh died
+                // silently.
+                RaiseOnUi(() => DisplayTopologyChanged?.Invoke());
                 break;
             case SettingsIpcMethods.AppScreenHomeChanged:
-                ScreenHomeChanged?.Invoke();
+                RaiseOnUi(() => ScreenHomeChanged?.Invoke());
                 break;
         }
     }

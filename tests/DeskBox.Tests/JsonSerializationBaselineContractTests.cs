@@ -18,8 +18,10 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
         var expected = new Dictionary<string, int>(StringComparer.Ordinal)
         {
             ["src/DeskBox/App.AotHotkeySmoke.cs"] = 1,
-            // Appearance-preview forwarder's host-graph serialize (batch 3d).
-            ["src/DeskBox/App.SettingsHost.cs"] = 1,
+            // Batch R11: the appearance-preview forwarder now serializes
+            // through SettingsService.SerializeCurrentSettings (lock-held,
+            // same as the persistence sink), so the raw call left this
+            // file — the file dropped out of the live inventory.
             ["src/DeskBox/App.AotShortcutSmoke.cs"] = 1,
             ["src/DeskBox/App.AotShellSmoke.cs"] = 1,
             ["src/DeskBox/App.AotQuickAccessMutationSmoke.cs"] = 1,
@@ -97,8 +99,8 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             Assert.Equal(expectedCount, actual[path]);
         }
 
-        Assert.Equal(45, actual.Count);
-        Assert.Equal(112, actual.Values.Sum());
+        Assert.Equal(44, actual.Count);
+        Assert.Equal(111, actual.Values.Sum());
 
         string[] expectedContextOwners =
         [

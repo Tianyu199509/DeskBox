@@ -81,7 +81,7 @@ public sealed class BackupSettingsSurfaceTests
     }
 
     [Fact]
-    public void UserEdits_WriteThroughWithoutEchoLoops()
+    public async Task UserEdits_WriteThroughWithoutEchoLoops()
     {
         var fake = new FakeBackupSettings(DefaultSnapshot(DavA) with { CloudWidgetStyleEnabled = true });
         using var editor = Create(fake);
@@ -102,6 +102,9 @@ public sealed class BackupSettingsSurfaceTests
         editor.SelectedIntervalMinutes = 61; // unknown preset normalizes back
         editor.SelectedRetentionCount = 10; // valid preset, differs from default
         editor.SelectedRetentionCount = 99; // unknown preset normalizes back
+        // Updates ride a pool thread since batch R11 (the blocking pipe
+        // pair used to run on the UI thread); drain before asserting.
+        await editor.PendingReads;
 
         Assert.Contains(fake.Changes, c => c.LocalEnabled == false);
         Assert.Contains(fake.Changes, c => c.LocalIntervalMinutes == 30);
@@ -155,15 +158,17 @@ public sealed class BackupSettingsSurfaceTests
     }
 
     [Fact]
-    public void UpdateLocalDirectory_NormalizesAndResets()
+    public async Task UpdateLocalDirectory_NormalizesAndResets()
     {
         var fake = new FakeBackupSettings(DefaultSnapshot(DavA));
         using var editor = Create(fake);
 
         editor.UpdateLocalDirectory(@"  D:\custom  ");
+        await editor.PendingReads;
         Assert.Contains(fake.Changes, c => c.LocalDirectory == @"D:\custom");
 
         editor.UpdateLocalDirectory("   ");
+        await editor.PendingReads;
         Assert.Contains(fake.Changes, c => c.LocalDirectory == "");
         Assert.True(editor.IsValidLocalDirectory(@"C:\any", out _));
     }

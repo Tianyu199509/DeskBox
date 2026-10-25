@@ -171,12 +171,42 @@ public partial class App
     }
 
     /// <summary>
+    /// The settings host announced its own exit (host.farewell, batch R11).
+    /// "Process alive" is the spawn-vs-show criterion, and the exit flush
+    /// keeps the process alive for up to ~2s after the window closed — an
+    /// open-settings inside that window pushed HostShow onto the dying
+    /// host and was silently lost. Flip the decision back to spawn; keep
+    /// the process reference so shutdown can still hard-kill a hung exit.
+    /// </summary>
+    internal void MarkSettingsHostExiting()
+    {
+        try
+        {
+            if (_settingsHostProcess is not { } exiting)
+            {
+                return;
+            }
+
+            _exitingSettingsHost = exiting;
+            _settingsHostProcess = null;
+            Log("[SettingsHost] Farewell received; treating host as not running for show decisions");
+        }
+        catch (Exception ex)
+        {
+            Log($"[SettingsHost] Farewell handling failed: {ex.Message}");
+        }
+    }
+
+    private Process? _exitingSettingsHost;
+
+    /// <summary>
     /// Shutdown step (batch 3d): tell the host to close, give it a short
     /// grace window, then hard-terminate — mirroring the updater's pattern.
     /// </summary>
     private void ShutdownSettingsHost()
     {
-        if (_settingsHostProcess is not { } host || host.HasExited)
+        Process? host = _settingsHostProcess ?? _exitingSettingsHost;
+        if (host is null || host.HasExited)
         {
             return;
         }
@@ -196,5 +226,6 @@ public partial class App
         }
 
         _settingsHostProcess = null;
+        _exitingSettingsHost = null;
     }
 }

@@ -64,7 +64,11 @@ public partial class App
             backupRestore: _backupRestoreActions,
             backupSettings: _backupSettings,
             appUpdate: AppUpdateService,
-            everythingClient: _everythingSearchService);
+            everythingClient: _everythingSearchService,
+            // Batch R11: the coordinator flips its spawn-vs-show decision
+            // the moment the host announces its exit, not when the process
+            // handle finally reports death (~2s later, mid-flush).
+            onHostFarewell: MarkSettingsHostExiting);
         _settingsIpcRouter = router;
         _settingsIpcServer = SettingsIpcServer.Start(
             DeskBoxDataPathService.Current.SettingsIpcPipeName,

@@ -21,6 +21,8 @@ public sealed class SettingsIpcServer : IAsyncDisposable
     private Task? _acceptLoop;
     private NamedPipeServerStream? _current;
     private readonly object _writeLock = new();
+    // Batch R11: see the dispatch loop and SendEventAsync.
+    private readonly SemaphoreSlim _dispatchGate = new(16, 16);
     private long _nextEventId = -1;
     private volatile bool _disposed;
 
@@ -145,45 +147,110 @@ public sealed class SettingsIpcServer : IAsyncDisposable
 
             if (envelope.Type == SettingsIpcEnvelope.TypeRequest)
             {
-                _ = Task.Run(async () =>
-                {
-                    bool ok;
-                    string? payload;
-                    string? error;
-                    try
-                    {
-                        (ok, payload, error) = await _dispatcher(envelope.Method, envelope.Payload, _cts.Token);
-                    }
-                    catch (Exception ex)
-                    {
-                        ok = false;
-                        payload = null;
-                        error = ex.Message;
-                    }
-
-                    await WriteAsync(new SettingsIpcEnvelope(
-                        envelope.Id,
-                        SettingsIpcEnvelope.TypeResponse,
-                        envelope.Method,
-                        ok,
-                        payload,
-                        error));
-                });
+                // Batch R11: bounded concurrent dispatch. Unbounded Task.Run
+                // per request let a chatty host (preview spam + commits +
+                // reads) spawn unbounded pool threads, each ending in a
+                // locked write — under a wedged pipe that turned into pool
+                // starvation. The cap keeps a burst from amplifying; long
+                // ops (10min migrate) still run without blocking others.
+                // Task.Run keeps the dispatch off the read loop (a sync
+                // dispatcher prefix would otherwise head-of-line block
+                // reads); the gate bounds how many run at once.
+                _ = Task.Run(() => RunBoundedDispatchAsync(envelope));
             }
             // Client→server events have no consumer yet; batch 3d routes them.
         }
     }
 
-    /// <summary>Pushes an event envelope to the connected host, if any.</summary>
-    public async Task SendEventAsync(string method, string? payload)
+    private async Task RunBoundedDispatchAsync(SettingsIpcEnvelope envelope)
     {
-        await WriteAsync(new SettingsIpcEnvelope(
+        await _dispatchGate.WaitAsync(_cts.Token).ConfigureAwait(false);
+        try
+        {
+            bool ok;
+            string? payload;
+            string? error;
+            try
+            {
+                (ok, payload, error) = await _dispatcher(envelope.Method, envelope.Payload, _cts.Token);
+            }
+            catch (Exception ex)
+            {
+                ok = false;
+                payload = null;
+                error = ex.Message;
+            }
+
+            await WriteAsync(new SettingsIpcEnvelope(
+                envelope.Id,
+                SettingsIpcEnvelope.TypeResponse,
+                envelope.Method,
+                ok,
+                payload,
+                error));
+        }
+        finally
+        {
+            _dispatchGate.Release();
+        }
+    }
+
+    /// <summary>Pushes an event envelope to the connected host, if any.</summary>
+    /// <remarks>
+    /// Batch R11: the write is a synchronous stream.Write under the send
+    /// lock — when the host stops draining its pipe (suspended or wedged)
+    /// the OS buffer fills and the write blocks indefinitely. Pushers
+    /// include main-process UI threads (topology, local-persist, tray,
+    /// shutdown), so the write now runs on a single dedicated writer task
+    /// fed by this queue: callers enqueue and return immediately, event
+    /// order is preserved, and even a wedged pipe costs exactly one
+    /// blocked writer thread instead of a pile-up.
+    /// </remarks>
+    public Task SendEventAsync(string method, string? payload)
+    {
+        _eventQueue.Enqueue(new SettingsIpcEnvelope(
             Interlocked.Decrement(ref _nextEventId),
             SettingsIpcEnvelope.TypeEvent,
             method,
             Ok: true,
             payload,
             Error: null));
+        _eventQueueSignal.Release();
+        // Single-writer discipline (batch R11 self-review): two concurrent
+        // first-pushes could both see a null writer and race two drain
+        // loops onto the same queue — the write lock would still serialize
+        // the bytes, but cross-writer interleaving could flip two events'
+        // order. The guard keeps exactly one writer alive for FIFO.
+        lock (_eventQueue)
+        {
+            _eventWriter ??= Task.Run(EventWriterLoopAsync);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private readonly System.Collections.Concurrent.ConcurrentQueue<SettingsIpcEnvelope> _eventQueue = new();
+    private readonly SemaphoreSlim _eventQueueSignal = new(0);
+    private Task? _eventWriter;
+
+    private async Task EventWriterLoopAsync()
+    {
+        while (true)
+        {
+            try
+            {
+                await _eventQueueSignal.WaitAsync(_cts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+
+            while (_eventQueue.TryDequeue(out SettingsIpcEnvelope? envelope))
+            {
+                await WriteAsync(envelope).ConfigureAwait(false);
+            }
+        }
     }
 
     private async Task WriteAsync(SettingsIpcEnvelope envelope)

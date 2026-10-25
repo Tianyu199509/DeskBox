@@ -356,9 +356,13 @@ public partial class App
         // pre-split single-process flow.
         settings.AppearancePreviewChanged += () =>
         {
-            string previewJson = System.Text.Json.JsonSerializer.Serialize(
-                settings.Settings,
-                DeskBox.Services.SettingsJsonContext.Default.AppSettings);
+            // Batch R11: serialize under the settings lock — this handler
+            // runs on the 66ms debounce pool thread, exactly when the UI
+            // thread is still mutating the live graph. The persistence
+            // sink got the same fix in R9; this forwarder kept the
+            // lock-free Serialize call and could ship a torn preview (or
+            // throw on a mutated collection, silently dropping the frame).
+            string previewJson = settings.SerializeCurrentSettings();
             _ = client.RequestAsync(
                 DeskBox.Services.SettingsIpcMethods.AppearancePreview,
                 previewJson);
@@ -437,7 +441,12 @@ public partial class App
         SettingsIpcClient client)
     {
         var widgetActions = new RemoteSettingsWidgetActions(client, settings);
-        var appActions = new RemoteSettingsAppActions(client, (uint)_settingsHostMainProcessId);
+        var appActions = new RemoteSettingsAppActions(
+            client,
+            (uint)_settingsHostMainProcessId,
+            // Batch R11: push events (topology/screen-home) must hop to the
+            // UI thread — see the facade's RaiseOnUi.
+            action => UiDispatcherQueue is { } queue && queue.TryEnqueue(() => action()));
         // Forward the display-topology push onto the App-level event: the
         // host's identify-display overlay self-closes on it, and nothing
         // raised it in the host process — the guard was dead code here
@@ -651,13 +660,35 @@ public partial class App
     /// </summary>
     internal void ExitSettingsHost()
     {
+        // Farewell first (batch R11): the exit flush below keeps this
+        // process alive for up to ~2s, and "process alive" is the main
+        // process's spawn-vs-show criterion — without this notice, an
+        // open-settings inside the window is pushed onto the dying host
+        // and silently lost. Fire-and-forget: the flush that follows gives
+        // the request its flight time, and a lost farewell merely falls
+        // back to the old process-exit detection.
+        try
+        {
+            _ = _settingsHostClient?.RequestAsync(SettingsIpcMethods.HostFarewell, null);
+        }
+        catch (Exception ex)
+        {
+            Log($"[SettingsHost] Farewell send failed: {ex.Message}");
+        }
+
         // Flush any debounced (1s) pending save first: the host process is
         // the writer, and dying inside the debounce window used to silently
         // drop the user's last edit (batch R5).
+        // Batch R11: the flush must run on a pool thread. Its await chain
+        // (SaveToFileOnlyAsync → sink) posts continuations through the
+        // calling context — started on this UI thread they queued behind
+        // the very Wait() below, so every close burned the full 2s budget
+        // and logged a false "edit may be lost" (and an in-flight debounce
+        // could genuinely outlive the wait).
         try
         {
             if (SettingsHostSettingsService is { } pendingService &&
-                !pendingService.FlushPendingSaveAsync().Wait(TimeSpan.FromSeconds(2)))
+                !Task.Run(() => pendingService.FlushPendingSaveAsync()).Wait(TimeSpan.FromSeconds(2)))
             {
                 // A lost race with the in-flight debounced write: the wait
                 // timed out. Without this line the dropped edit left no trace.

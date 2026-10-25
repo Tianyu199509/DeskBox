@@ -208,6 +208,13 @@ public static class SettingsIpcMethods
     public const string HostDesktopOrgRefresh = "host.desktop-org-refresh";
     public const string HostOneClickUpdate = "host.one-click-update";
     public const string HostShutdown = "host.shutdown";
+    // Host → main farewell (batch R11): sent at the very start of the
+    // host's exit sequence. The main process treats a still-alive host
+    // process as show-capable ("!HasExited"), so during the exit window
+    // (flush + pipe dispose, up to ~2s) an incoming open-settings pushed
+    // HostShow onto the dying host and was silently lost. The farewell
+    // flips the spawn-vs-show decision back to spawn immediately.
+    public const string HostFarewell = "host.farewell";
 
     // ── Everything integration (batch 3d follow-up) ─────────────────
     public const string SearchEverythingState = "search.everything-state";

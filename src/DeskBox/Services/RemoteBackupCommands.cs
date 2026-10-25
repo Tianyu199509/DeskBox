@@ -14,13 +14,29 @@ public sealed class RemoteBackupCommands : IBackupCommands
         _client = client;
     }
 
+    // Batch R11: every button guard and catch filter used to cost a full
+    // synchronous pipe roundtrip on the UI thread — and one click evaluates
+    // the guard two or three times. A short read-through cache serves the
+    // burst from one roundtrip; "stop in progress" tolerates a 200ms-stale
+    // answer, and each new click re-reads fresh.
+    private long _isStoppingCacheTicks;
+    private bool _isStoppingCacheValue;
+
     public bool IsStopping
     {
         get
         {
+            long now = Environment.TickCount64;
+            if (now - _isStoppingCacheTicks < 200)
+            {
+                return _isStoppingCacheValue;
+            }
+
             (bool ok, string? payload, _) = _client.RequestAsync(SettingsIpcMethods.BackupIsStopping)
                 .GetAwaiter().GetResult();
-            return ok && SettingsIpcPayload.DecodeBoolean(payload);
+            _isStoppingCacheTicks = now;
+            _isStoppingCacheValue = ok && SettingsIpcPayload.DecodeBoolean(payload);
+            return _isStoppingCacheValue;
         }
     }
 

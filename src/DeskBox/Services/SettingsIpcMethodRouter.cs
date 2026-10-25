@@ -31,6 +31,11 @@ public sealed class SettingsIpcMethodRouter
     // itself cannot cross the wire, so the main side keeps it and the host
     // gets an opaque handle to send back.
     private readonly Dictionary<long, WidgetMoveAllUndoToken> _moveAllTokens = new();
+    // Batch R11: dispatches run concurrently on pool threads — these three
+    // were bare (Dictionary corruption on concurrent add/remove can hang
+    // the process; the counters are cosmetic but cost nothing to make
+    // atomic).
+    private readonly object _moveAllTokenLock = new();
     private long _nextMoveAllHandle;
     private long _activeMigrationHandle;
 
@@ -46,7 +51,8 @@ public sealed class SettingsIpcMethodRouter
         IBackupRestoreActions? backupRestore = null,
         IBackupSettings? backupSettings = null,
         IAppUpdateService? appUpdate = null,
-        DeskBox.Contracts.ISearchConnectionClient? everythingClient = null)
+        DeskBox.Contracts.ISearchConnectionClient? everythingClient = null,
+        Action? onHostFarewell = null)
     {
         _settings = settings;
         _hotkey = hotkey;
@@ -59,8 +65,16 @@ public sealed class SettingsIpcMethodRouter
         _backupRestore = backupRestore;
         _backupSettings = backupSettings;
         _appUpdate = appUpdate;
+        OnHostFarewell = onHostFarewell;
         PushEvent = pushEvent;
     }
+
+    /// <summary>
+    /// Raised when the settings host announces its own exit (host.farewell)
+    /// so the coordinator can flip the spawn-vs-show decision before the
+    /// process actually terminates (batch R11).
+    /// </summary>
+    private Action? OnHostFarewell { get; }
 
     /// <summary>
     /// Optional event push (the owning server), used for migration progress.
@@ -90,6 +104,10 @@ public sealed class SettingsIpcMethodRouter
         {
             case SettingsIpcMethods.Ping:
                 return (true, "pong", null);
+
+            case SettingsIpcMethods.HostFarewell:
+                OnHostFarewell?.Invoke();
+                return (true, null, null);
 
             case SettingsIpcMethods.AppearancePreview:
                 if (_settings is null)
@@ -474,7 +492,7 @@ public sealed class SettingsIpcMethodRouter
 
                 // The host dialog's IProgress cannot ride the request; the
                 // main side re-reports progress as pushed events instead.
-                long migrationHandle = ++_activeMigrationHandle;
+                long migrationHandle = Interlocked.Increment(ref _activeMigrationHandle);
                 var progress = new Progress<ManagedStorageMigrationProgress>(p =>
                 {
                     _ = PushEvent?.Invoke(
@@ -552,16 +570,30 @@ public sealed class SettingsIpcMethodRouter
                 if (_widget is null) return unavailable(method);
                 (int movedCount, WidgetMoveAllUndoToken token) = await _widget
                     .MoveAllWidgetSurfacesToDisplayAsync(payload ?? string.Empty);
-                long handle = ++_nextMoveAllHandle;
-                _moveAllTokens[handle] = token;
+                long handle;
+                lock (_moveAllTokenLock)
+                {
+                    handle = ++_nextMoveAllHandle;
+                    _moveAllTokens[handle] = token;
+                }
                 return (true, SettingsIpcPayload.Encode(
                     new SettingsIpcMoveAllResult(movedCount, handle),
                     SettingsIpcJsonContext.Default.SettingsIpcMoveAllResult), null);
 
             case SettingsIpcMethods.WidgetMoveAllUndo:
                 if (_widget is null) return unavailable(method);
-                if (!long.TryParse(payload, out long undoHandle) ||
-                    !_moveAllTokens.Remove(undoHandle, out WidgetMoveAllUndoToken? undoToken))
+                WidgetMoveAllUndoToken? undoToken;
+                if (!long.TryParse(payload, out long undoHandle))
+                {
+                    return (false, null, "unknown undo handle");
+                }
+
+                lock (_moveAllTokenLock)
+                {
+                    _ = _moveAllTokens.Remove(undoHandle, out undoToken);
+                }
+
+                if (undoToken is null)
                 {
                     return (false, null, "unknown undo handle");
                 }
