@@ -369,7 +369,14 @@ public sealed class AppearanceSettingsCoordinator : IAppearanceSettings
     {
         ThrowIfStopped();
         WidgetShellSettingsSlice shell = _settings.Settings.WidgetShell;
-        if (shell.WidgetBackgroundUnifiedImage == fileName) return;
+        // Deep review R13-4 (E8 audit): a same-extension repick lands the
+        // SAME storage name (background.png → background.png) with NEW file
+        // content underneath. Skipping on value-equal turned the explicit
+        // user action into a full no-op — no preview, no save, no notify —
+        // and the live windows kept the old pixels until a rebuild. Equal
+        // non-null picks now run the full apply; the stamp-keyed shared
+        // cache picks up the new content. Only null==null stays a no-op.
+        if (shell.WidgetBackgroundUnifiedImage == fileName && fileName is null) return;
         shell.WidgetBackgroundUnifiedImage = fileName;
         _settings.RequestAppearancePreview();
         _settings.SaveDebounced();

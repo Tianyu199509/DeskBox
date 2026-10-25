@@ -4070,7 +4070,10 @@ public partial class App : Application
                     ResizeGuideOverlay.IsSnapEnabled = snapEnabled;
                     ResizeGuideOverlay.SnapSpacingDips = snapSpacingDips;
                 },
-                UpdateTrayIcon,
+                // Deep review R13-4 (E10): the appliers run on an IPC pool
+                // thread; UpdateTrayIcon writes XAML dependency properties
+                // and must hop to the UI thread exactly like theme/language.
+                () => UiDispatch.RunOrDefer(UpdateTrayIcon),
                 () => UiDispatch.RunOrDefer(RefreshThemeAppearanceOnUi),
                 // The commit lands on an IPC pool thread; language replay
                 // touches XAML across the whole main process (same reason

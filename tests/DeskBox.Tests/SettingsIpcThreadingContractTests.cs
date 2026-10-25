@@ -12,9 +12,12 @@ namespace DeskBox.Tests;
 /// </summary>
 public sealed class SettingsIpcThreadingContractTests
 {
-    // 32 at deep-review R13 (R11 graded the family ~26 by member count;
-    // this counts every call site, including overloads).
-    private const int FrozenSyncCallCeiling = 32;
+    // 27 at deep review R13-3 (was 32 at R13-7; the hot-path pass moved the
+    // gesture-ownership predicates to local mirror computations and the
+    // registration state to a push-fed cache). The remaining set is the
+    // rare-path bounded-wait contract (construction/refresh paths); lower
+    // this ceiling as further families convert.
+    private const int FrozenSyncCallCeiling = 27;
 
     [Fact]
     public void RemoteFacades_SyncOverAsyncCalls_OnlyShrink()

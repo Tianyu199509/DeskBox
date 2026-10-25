@@ -723,7 +723,14 @@ public sealed class SettingsIpcMethodRouter
 
             case SettingsIpcMethods.AppUpdateTrayIcon:
                 if (_appActions is null) return unavailable(method);
-                _appActions.UpdateTrayIcon();
+                // Deep review R13-4 (E10 audit): the tray icon is a mounted
+                // XAML object — writing its properties from this dispatch
+                // pool thread throws RPC_E_WRONG_THREAD, which the fire-and-
+                // forget caller never saw (the style switch silently did
+                // nothing until a restart). Marshal like the neighboring
+                // window-affecting commands.
+                await DeskBox.Platform.UiDispatch.RunAsync(
+                    async () => _appActions.UpdateTrayIcon());
                 return (true, null, null);
 
             case SettingsIpcMethods.AppSetSnapEnabled:

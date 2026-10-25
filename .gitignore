@@ -64,6 +64,12 @@ backups/
 # Local Microsoft Store listing artboards
 store-assets-html/
 
+# Store asset production tree (deep review R13-4, E14 audit): contains the
+# real-user-data snapshot backup-20261023/ and ~29MB of rendered output —
+# never enters the repository; this line is the mechanical guard for what
+# was previously convention only.
+store-assets/
+
 # Development debug screenshots and scripts
 shots/
 
