@@ -173,7 +173,15 @@ public sealed class SettingsIpcMethodRouter
 
             case SettingsIpcMethods.SearchHotkeySetEnabled:
                 if (_hotkey is null) return unavailable(method);
-                _hotkey.SetSearchHotkeyEnabled(SettingsIpcPayload.DecodeBoolean(payload));
+                // UI thread (batch R10): first enable installs the tray
+                // window subclass, and SetWindowSubclass must run on the
+                // window-owning thread — a pool-thread install silently
+                // fails.
+                await DeskBox.Platform.UiDispatch.RunAsync(() =>
+                {
+                    _hotkey.SetSearchHotkeyEnabled(SettingsIpcPayload.DecodeBoolean(payload));
+                    return Task.CompletedTask;
+                });
                 return (true, null, null);
 
             case SettingsIpcMethods.SearchHotkeyApplyGesture:
@@ -184,7 +192,11 @@ public sealed class SettingsIpcMethodRouter
                     return (false, null, "missing gesture payload");
                 }
 
-                bool searchApplied = _hotkey.TryApplySearchHotkeyGesture(searchGesture, out string? searchError);
+                (bool searchApplied, string? searchError) = await DeskBox.Platform.UiDispatch.RunAsync(() =>
+                {
+                    bool ok = _hotkey.TryApplySearchHotkeyGesture(searchGesture, out string? err);
+                    return Task.FromResult((ok, err));
+                }).ConfigureAwait(false);
                 return (searchApplied, null, searchError);
 
             case SettingsIpcMethods.SearchHotkeyGestureOwnedByMain:
@@ -200,7 +212,12 @@ public sealed class SettingsIpcMethodRouter
 
             case SettingsIpcMethods.SearchHotkeyRefreshRegistration:
                 if (_hotkey is null) return unavailable(method);
-                _hotkey.RefreshSearchHotkeyRegistration();
+                // UI thread, same subclass-install reason as set-enabled.
+                await DeskBox.Platform.UiDispatch.RunAsync(() =>
+                {
+                    _hotkey.RefreshSearchHotkeyRegistration();
+                    return Task.CompletedTask;
+                });
                 return (true, null, null);
 
             case SettingsIpcMethods.HotkeyDoubleClickSet:

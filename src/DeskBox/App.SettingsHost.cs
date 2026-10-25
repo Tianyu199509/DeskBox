@@ -164,6 +164,11 @@ public partial class App
         UnhandledException += (_, eventArgs) =>
         {
             Log($"[SettingsHost] Unhandled exception: {eventArgs.Message}");
+            if (eventArgs.Exception is { } unhandled)
+            {
+                Log($"[SettingsHost] Unhandled exception detail: {unhandled}");
+            }
+
             eventArgs.Handled = true;
         };
     }

@@ -543,13 +543,33 @@ public sealed partial class SettingsWindow
         }
 
         // Section navigation may still be mid-layout; a queued pass runs
-        // after the frame has composed the target panel.
+        // after the frame has composed the target panel. The About panel is
+        // instantiated lazily with its section template: on a cold
+        // navigation (update-state push arriving before the section was
+        // ever opened) the named field is still null. Dereferencing it
+        // inside the DispatcherQueue callback threw a NullReferenceException
+        // that XAML stowed and the whole host process died with it
+        // (0xc000027b, batch R10) — null-guard and retry one layout tick.
         _ = DispatcherQueue.TryEnqueue(() =>
         {
-            if (!_isClosed)
+            if (_isClosed)
             {
-                UpdateCheckActionsPanel.StartBringIntoView();
+                return;
             }
+
+            if (UpdateCheckActionsPanel is { } panel)
+            {
+                panel.StartBringIntoView();
+                return;
+            }
+
+            _ = DispatcherQueue.TryEnqueue(() =>
+            {
+                if (!_isClosed)
+                {
+                    UpdateCheckActionsPanel?.StartBringIntoView();
+                }
+            });
         });
     }
 

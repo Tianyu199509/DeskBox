@@ -13,6 +13,7 @@ public sealed class InProcessSettingsHotkeyActions : ISettingsHotkeyActions
 {
     private readonly GlobalHotkeyService? _hotkeyService;
     private readonly SearchHotkeyService? _searchHotkeyService;
+    private readonly Func<SearchHotkeyService?>? _searchHotkeyProvider;
     private readonly DesktopDoubleClickActivationService? _doubleClickService;
     private readonly SettingsService _settingsService;
 
@@ -20,10 +21,12 @@ public sealed class InProcessSettingsHotkeyActions : ISettingsHotkeyActions
         GlobalHotkeyService? hotkeyService,
         SearchHotkeyService? searchHotkeyService,
         DesktopDoubleClickActivationService? doubleClickService,
-        SettingsService settingsService)
+        SettingsService settingsService,
+        Func<SearchHotkeyService?>? searchHotkeyProvider = null)
     {
         _hotkeyService = hotkeyService;
         _searchHotkeyService = searchHotkeyService;
+        _searchHotkeyProvider = searchHotkeyProvider;
         _doubleClickService = doubleClickService;
         _settingsService = settingsService;
         // Subscribed eagerly for the facade's lifetime: the settings window
@@ -39,15 +42,26 @@ public sealed class InProcessSettingsHotkeyActions : ISettingsHotkeyActions
 
     private void OnRegistrationChanged() => RegistrationChanged?.Invoke();
 
+    /// <summary>
+    /// Live resolution (batch R10): the router is constructed at MAIN boot,
+    /// when the search feature is usually still disabled and the service
+    /// does not exist yet (it is created lazily at first enable). The
+    /// constructor snapshot was null forever in that state, and every
+    /// search-hotkey command silently no-opped — the settings page showed
+    /// "hotkey failed / combination in use" for a key nobody held.
+    /// </summary>
+    private SearchHotkeyService? SearchHotkey =>
+        _searchHotkeyProvider?.Invoke() ?? _searchHotkeyService;
+
     public bool IsSearchHotkeyRegistered() =>
-        _searchHotkeyService?.IsRegistered == true;
+        SearchHotkey?.IsRegistered == true;
 
     public void SetSearchHotkeyEnabled(bool enabled) =>
-        _searchHotkeyService?.SetEnabled(enabled);
+        SearchHotkey?.SetEnabled(enabled);
 
     public bool TryApplySearchHotkeyGesture(GlobalHotkeyGesture gesture, out string? error)
     {
-        if (_searchHotkeyService is not { } search)
+        if (SearchHotkey is not { } search)
         {
             error = "search hotkey service unavailable";
             return false;
@@ -57,10 +71,10 @@ public sealed class InProcessSettingsHotkeyActions : ISettingsHotkeyActions
     }
 
     public bool IsGestureOwnedByMainHotkey(GlobalHotkeyGesture gesture) =>
-        _searchHotkeyService?.IsGestureOwnedByMainHotkey(gesture) == true;
+        SearchHotkey?.IsGestureOwnedByMainHotkey(gesture) == true;
 
     public void RefreshSearchHotkeyRegistration() =>
-        _searchHotkeyService?.RefreshRegistration();
+        SearchHotkey?.RefreshRegistration();
 
     public GlobalHotkeyRuntimeState? GetRuntimeState()
     {

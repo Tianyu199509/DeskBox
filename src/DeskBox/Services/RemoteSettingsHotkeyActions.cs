@@ -58,15 +58,24 @@ public sealed class RemoteSettingsHotkeyActions : ISettingsHotkeyActions
         return ok;
     }
 
+    // Fire-and-forget notifications (batch R10): invoked from settings-page
+    // handlers and the restore-defaults chain on the UI thread — a blocking
+    // pipe roundtrip there parks the thread in the COM modal loop and the
+    // window stops responding to close input entirely (see
+    // RemoteSettingsAppActions.NotifyWithoutBlockingAsync for the dump
+    // evidence). The bool-returning reads below keep their synchronous
+    // bounded-wait contract.
     public void RefreshRegistration() =>
-        _client.RequestAsync(SettingsIpcMethods.HotkeyRefreshRegistration)
-            .GetAwaiter().GetResult();
+        _ = NotifyWithoutBlockingAsync(
+            SettingsIpcMethods.HotkeyRefreshRegistration,
+            payload: null,
+            nameof(RefreshRegistration));
 
     public void SetEnabled(bool enabled) =>
-        _client.RequestAsync(
-                SettingsIpcMethods.HotkeySetEnabled,
-                SettingsIpcPayload.EncodeBoolean(enabled))
-            .GetAwaiter().GetResult();
+        _ = NotifyWithoutBlockingAsync(
+            SettingsIpcMethods.HotkeySetEnabled,
+            SettingsIpcPayload.EncodeBoolean(enabled),
+            nameof(SetEnabled));
 
     public bool IsGestureOwnedBySearchHotkey(GlobalHotkeyGesture gesture)
     {
@@ -86,10 +95,26 @@ public sealed class RemoteSettingsHotkeyActions : ISettingsHotkeyActions
     }
 
     public void SetSearchHotkeyEnabled(bool enabled) =>
-        _client.RequestAsync(
-                SettingsIpcMethods.SearchHotkeySetEnabled,
-                SettingsIpcPayload.EncodeBoolean(enabled))
-            .GetAwaiter().GetResult();
+        _ = NotifyWithoutBlockingAsync(
+            SettingsIpcMethods.SearchHotkeySetEnabled,
+            SettingsIpcPayload.EncodeBoolean(enabled),
+            nameof(SetSearchHotkeyEnabled));
+
+    private async Task NotifyWithoutBlockingAsync(string method, string? payload, string caller)
+    {
+        try
+        {
+            (bool ok, _, string? error) = await _client.RequestAsync(method, payload);
+            if (!ok)
+            {
+                App.Log($"[SettingsIpc] {caller} failed: {error ?? "unknown error"}");
+            }
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[SettingsIpc] {caller} failed: {ex.Message}");
+        }
+    }
 
     public bool TryApplySearchHotkeyGesture(GlobalHotkeyGesture gesture, out string? error)
     {

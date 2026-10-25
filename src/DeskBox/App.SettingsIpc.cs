@@ -29,7 +29,13 @@ public partial class App
                 GlobalHotkeyService,
                 SearchHotkeyService,
                 DesktopDoubleClickActivationService,
-                SettingsService),
+                SettingsService,
+                // Live resolution (batch R10): the search hotkey service is
+                // created lazily when the feature is first enabled — long
+                // after this router construction — so the constructor
+                // snapshot was null and every search-hotkey command
+                // silently no-opped.
+                searchHotkeyProvider: () => _searchHotkeyService),
             new InProcessSettingsDataActions(
                 QuickCaptureService ?? throw new InvalidOperationException("Quick Capture service is not initialized."),
                 LocalizationService),

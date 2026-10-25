@@ -130,16 +130,46 @@ public sealed class RemoteSettingsAppActions : ISettingsAppActions
                 SettingsIpcJsonContext.Default.SettingsIpcReleaseNotes));
     }
 
+    // Fire-and-forget notifications (batch R10): these ride VM property
+    // setters and restore-defaults chains that run on the UI thread. A
+    // blocking roundtrip there parks the thread in the COM modal loop,
+    // which stops pumping window messages — the window then ignores the
+    // X button and WM_CLOSE while the awaited IPC never returns, wedging
+    // the host for good (dump-proven on RestoreDefaultPreferencesAsync →
+    // SetSnapEnabled, batch R10 acceptance). Nothing reads their outcome.
     public void UpdateTrayIcon() =>
-        RequestVoidAsync(SettingsIpcMethods.AppUpdateTrayIcon).GetAwaiter().GetResult();
+        _ = NotifyWithoutBlockingAsync(
+            SettingsIpcMethods.AppUpdateTrayIcon,
+            payload: null,
+            nameof(UpdateTrayIcon));
 
     public void SetSnapEnabled(bool value) =>
-        RequestVoidAsync(SettingsIpcMethods.AppSetSnapEnabled, SettingsIpcPayload.EncodeBoolean(value))
-            .GetAwaiter().GetResult();
+        _ = NotifyWithoutBlockingAsync(
+            SettingsIpcMethods.AppSetSnapEnabled,
+            SettingsIpcPayload.EncodeBoolean(value),
+            nameof(SetSnapEnabled));
 
     public void SetSnapSpacingDips(double value) =>
-        RequestVoidAsync(SettingsIpcMethods.AppSetSnapSpacing, value.ToString(System.Globalization.CultureInfo.InvariantCulture))
-            .GetAwaiter().GetResult();
+        _ = NotifyWithoutBlockingAsync(
+            SettingsIpcMethods.AppSetSnapSpacing,
+            value.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            nameof(SetSnapSpacingDips));
+
+    private async Task NotifyWithoutBlockingAsync(string method, string? payload, string caller)
+    {
+        try
+        {
+            (bool ok, _, string? error) = await _client.RequestAsync(method, payload);
+            if (!ok)
+            {
+                App.Log($"[SettingsIpc] {caller} failed: {error ?? "unknown error"}");
+            }
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[SettingsIpc] {caller} failed: {ex.Message}");
+        }
+    }
 
     public void ScheduleLightMemoryCleanup()
     {
@@ -152,21 +182,25 @@ public sealed class RemoteSettingsAppActions : ISettingsAppActions
         // No-op in the host process (see ScheduleLightMemoryCleanup).
     }
 
+    // Band notifications stay fire-and-forget like the trio above: the
+    // raise-band variant runs inside the host's pushed-event handler on
+    // the UI thread, where a blocking roundtrip deadlocked against the
+    // main process's concurrent push (dump-proven, batch R10).
     public void BringSettingsWindowToRaisedBand(nint windowHandle, string reason) =>
-        RequestVoidAsync(
-                SettingsIpcMethods.AppRaiseBand,
-                SettingsIpcPayload.Encode(
-                    new SettingsIpcStringPair(((long)windowHandle).ToString(), reason),
-                    SettingsIpcJsonContext.Default.SettingsIpcStringPair))
-            .GetAwaiter().GetResult();
+        _ = NotifyWithoutBlockingAsync(
+            SettingsIpcMethods.AppRaiseBand,
+            SettingsIpcPayload.Encode(
+                new SettingsIpcStringPair(((long)windowHandle).ToString(), reason),
+                SettingsIpcJsonContext.Default.SettingsIpcStringPair),
+            nameof(BringSettingsWindowToRaisedBand));
 
     public void ReleaseRaisedBandGuest(nint windowHandle, string reason) =>
-        RequestVoidAsync(
-                SettingsIpcMethods.AppReleaseBand,
-                SettingsIpcPayload.Encode(
-                    new SettingsIpcStringPair(((long)windowHandle).ToString(), reason),
-                    SettingsIpcJsonContext.Default.SettingsIpcStringPair))
-            .GetAwaiter().GetResult();
+        _ = NotifyWithoutBlockingAsync(
+            SettingsIpcMethods.AppReleaseBand,
+            SettingsIpcPayload.Encode(
+                new SettingsIpcStringPair(((long)windowHandle).ToString(), reason),
+                SettingsIpcJsonContext.Default.SettingsIpcStringPair),
+            nameof(ReleaseRaisedBandGuest));
 
     public bool HasManagedStorageDesktopShortcut()
     {

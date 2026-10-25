@@ -21,6 +21,26 @@ public sealed class SettingsIpcFacadeTests : IDisposable
         Directory.CreateDirectory(_tempRoot);
     }
 
+    /// <summary>
+    /// Batch R10: the void notifications on the remote facades became
+    /// fire-and-forget (they used to block the host UI thread in the COM
+    /// modal loop), so their loopback effects need a bounded poll instead
+    /// of an immediate assert.
+    /// </summary>
+    private static async Task UntilAsync(Func<bool> condition, int timeoutMs = 2000)
+    {
+        long deadline = Environment.TickCount64 + timeoutMs;
+        while (Environment.TickCount64 < deadline)
+        {
+            if (condition())
+            {
+                return;
+            }
+
+            await Task.Delay(20);
+        }
+    }
+
     private sealed class FakeHotkeyActions : ISettingsHotkeyActions
     {
         public GlobalHotkeyRuntimeState? StateToReturn;
@@ -211,9 +231,13 @@ public sealed class SettingsIpcFacadeTests : IDisposable
             Assert.Equal("reset failed", resetError);
 
             remote.RefreshRegistration();
+            // Fire-and-forget since batch R10: the send rides the pipe
+            // asynchronously, so the effect needs a bounded poll.
+            await UntilAsync(() => hotkey.RefreshCalled);
             Assert.True(hotkey.RefreshCalled);
 
             remote.SetEnabled(false);
+            await UntilAsync(() => hotkey.SetEnabledArg is false);
             Assert.False(hotkey.SetEnabledArg);
 
             hotkey.GestureOwnedResult = true;
@@ -254,6 +278,7 @@ public sealed class SettingsIpcFacadeTests : IDisposable
             Assert.True(remote.IsSearchHotkeyRegistered());
 
             remote.SetSearchHotkeyEnabled(false);
+            await UntilAsync(() => hotkey.SearchSetEnabledArg is false);
             Assert.False(hotkey.SearchSetEnabledArg);
 
             var gesture = new GlobalHotkeyGesture(HotkeyModifierKeys.Alt, 0x44);
@@ -281,6 +306,7 @@ public sealed class SettingsIpcFacadeTests : IDisposable
                 new GlobalHotkeyGesture(HotkeyModifierKeys.Alt, 0x44),
                 controller.CurrentGesture);
             controller.SetEnabled(true);
+            await UntilAsync(() => hotkey.SearchSetEnabledArg is true);
             Assert.True(hotkey.SearchSetEnabledArg);
             Assert.True(controller.IsGestureOwnedByMainHotkey(gesture));
         }
@@ -783,8 +809,10 @@ public sealed class SettingsIpcFacadeTests : IDisposable
             Assert.Equal(WidgetKind.Todo, loop.Widget.EnabledArg);
 
             remote.RefreshVisibleWidgetDesktopLayers("test-layer");
+            await UntilAsync(() => loop.Widget.LayerReason == "test-layer");
             Assert.Equal("test-layer", loop.Widget.LayerReason);
             remote.NotifyWidgetGroupPresentationSettingsChanged();
+            await UntilAsync(() => loop.Widget.NotifiedGroup);
             Assert.True(loop.Widget.NotifiedGroup);
 
             Assert.NotNull(remote.GetOrphanManagedStorageFolders());
@@ -898,16 +926,21 @@ public sealed class SettingsIpcFacadeTests : IDisposable
             Assert.Equal((nint)0x42, loop.AppActions.DesktopOrgOwnerHwnd);
 
             remote.UpdateTrayIcon();
+            await UntilAsync(() => loop.AppActions.TrayIconRefreshed);
             Assert.True(loop.AppActions.TrayIconRefreshed);
 
             remote.SetSnapEnabled(false);
+            await UntilAsync(() => loop.AppActions.SnapEnabledArg is false);
             Assert.False(loop.AppActions.SnapEnabledArg);
             remote.SetSnapSpacingDips(12.5);
+            await UntilAsync(() => loop.AppActions.SnapSpacingArg == 12.5);
             Assert.Equal(12.5, loop.AppActions.SnapSpacingArg);
 
             remote.BringSettingsWindowToRaisedBand(0x99, "shown");
+            await UntilAsync(() => loop.AppActions.RaiseBand == ((nint)0x99, "shown"));
             Assert.Equal(((nint)0x99, "shown"), loop.AppActions.RaiseBand);
             remote.ReleaseRaisedBandGuest(0x99, "hidden");
+            await UntilAsync(() => loop.AppActions.ReleaseBand == ((nint)0x99, "hidden"));
             Assert.Equal(((nint)0x99, "hidden"), loop.AppActions.ReleaseBand);
 
             Assert.True(remote.HasManagedStorageDesktopShortcut());

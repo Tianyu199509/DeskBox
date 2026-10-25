@@ -139,13 +139,42 @@ public sealed class RemoteSettingsWidgetActions : ISettingsWidgetActions
             SettingsIpcMethods.WidgetResetFeature,
             ((int)kind).ToString());
 
+    // Fire-and-forget notifications (batch R10): both are invoked from
+    // VM property setters driven by XAML bindings, i.e. synchronously on
+    // the UI thread. A blocking roundtrip there parks the thread in the
+    // COM modal loop, where an incoming accessibility callback that never
+    // returns (a UIA client that died mid-call) keeps the loop from ever
+    // checking the wait handles — a permanently wedged, unclosable
+    // settings window even after the awaited task completes (dump-proven,
+    // 0x73d8, batch R10 acceptance). Nothing reads their outcome, so they
+    // fly without waiting; failures surface through the log.
     public void RefreshVisibleWidgetDesktopLayers(string reason) =>
-        RequestVoidAsync(SettingsIpcMethods.WidgetRefreshLayers, reason)
-            .GetAwaiter().GetResult();
+        _ = NotifyWithoutBlockingAsync(
+            SettingsIpcMethods.WidgetRefreshLayers,
+            reason,
+            nameof(RefreshVisibleWidgetDesktopLayers));
 
     public void NotifyWidgetGroupPresentationSettingsChanged() =>
-        RequestVoidAsync(SettingsIpcMethods.WidgetNotifyGroupPresentation)
-            .GetAwaiter().GetResult();
+        _ = NotifyWithoutBlockingAsync(
+            SettingsIpcMethods.WidgetNotifyGroupPresentation,
+            payload: null,
+            nameof(NotifyWidgetGroupPresentationSettingsChanged));
+
+    private async Task NotifyWithoutBlockingAsync(string method, string? payload, string caller)
+    {
+        try
+        {
+            (bool ok, _, string? error) = await _client.RequestAsync(method, payload);
+            if (!ok)
+            {
+                App.Log($"[SettingsIpc] {caller} failed: {error ?? "unknown error"}");
+            }
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[SettingsIpc] {caller} failed: {ex.Message}");
+        }
+    }
 
     public async Task<bool> ReorderWidgetGroupMemberAsync(string sourceWidgetId, string targetWidgetId)
     {
