@@ -92,7 +92,9 @@ public static class SettingsIpcMethods
     public const string RestoreAttachmentHealth = "restore.attachment-health";
 
     // ── Widget facade (batch 3c-2) ──────────────────────────────────
-    public const string WidgetIsFeatureEnabled = "widget.is-feature-enabled";
+    // (widget.is-feature-enabled was retired with the R11 local-mirror
+    // switch: the host reads its mirror instead of a round trip, and no
+    // sender remained — deep review R13 removed the dead wire.)
     public const string WidgetSyncFeatureEnabled = "widget.sync-feature-enabled";
     public const string WidgetResetFeature = "widget.reset-feature";
     public const string WidgetRefreshLayers = "widget.refresh-layers";
@@ -143,8 +145,10 @@ public static class SettingsIpcMethods
     public const string AppUpdateTrayIcon = "app.update-tray-icon";
     public const string AppSetSnapEnabled = "app.set-snap-enabled";
     public const string AppSetSnapSpacing = "app.set-snap-spacing";
-    public const string AppScheduleLightCleanup = "app.schedule-light-cleanup";
-    public const string AppScheduleHiddenCleanup = "app.schedule-hidden-cleanup";
+    // (app.schedule-light-cleanup / app.schedule-hidden-cleanup wires were
+    // never connected: the host facade implements both as process-local
+    // no-ops, so no sender ever existed — deep review R13 removed the dead
+    // router cases and constants; the interface + host no-op remain.)
     public const string AppRaiseBand = "app.raise-band";
     public const string AppReleaseBand = "app.release-band";
     public const string AppHasShortcut = "app.has-shortcut";

@@ -110,6 +110,17 @@ public sealed class SettingsIpcClient : IAsyncDisposable
             [SettingsIpcMethods.WidgetDeleteOrphan] = TimeSpan.FromMinutes(10),
             [SettingsIpcMethods.CloudDeleteSnapshot] = TimeSpan.FromMinutes(2),
             [SettingsIpcMethods.DataQuickCaptureCacheCleanup] = TimeSpan.FromMinutes(2),
+            // Deep review R13: long-task stragglers the R3/R9 sweeps missed,
+            // graded by the same rule as their families. Inventory walks
+            // every snapshot zip's manifest; orphan discovery recursively
+            // counts directory trees; the quick-capture clears delete all
+            // captured data (files included); external-state recovery runs
+            // display + Everything connection probes.
+            [SettingsIpcMethods.RestoreInventory] = TimeSpan.FromMinutes(10),
+            [SettingsIpcMethods.WidgetGetOrphans] = TimeSpan.FromMinutes(10),
+            [SettingsIpcMethods.DataQuickCaptureClear] = TimeSpan.FromMinutes(2),
+            [SettingsIpcMethods.DataQuickCaptureClearRecent] = TimeSpan.FromMinutes(2),
+            [SettingsIpcMethods.AppForceExternalRecovery] = TimeSpan.FromSeconds(60),
         };
 
     private static TimeSpan TimeoutFor(string method) =>

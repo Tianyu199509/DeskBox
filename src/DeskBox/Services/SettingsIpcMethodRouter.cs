@@ -395,11 +395,6 @@ public sealed class SettingsIpcMethodRouter
                 if (_settings is null) return unavailable(method);
                 return (true, SerializeLayout(_settings), null);
 
-            case SettingsIpcMethods.WidgetIsFeatureEnabled:
-                if (_widget is null) return unavailable(method);
-                return (true, SettingsIpcPayload.EncodeBoolean(
-                    _widget.IsFeatureWidgetEnabled(DecodeKind(payload))), null);
-
             case SettingsIpcMethods.WidgetSyncFeatureEnabled:
                 if (_widget is null) return unavailable(method);
                 SettingsIpcKindArg sync = DecodeKindArg(payload);
@@ -749,16 +744,6 @@ public sealed class SettingsIpcMethodRouter
                 }
 
                 _appActions.SetSnapSpacingDips(spacingDips);
-                return (true, null, null);
-
-            case SettingsIpcMethods.AppScheduleLightCleanup:
-                if (_appActions is null) return unavailable(method);
-                _appActions.ScheduleLightMemoryCleanup();
-                return (true, null, null);
-
-            case SettingsIpcMethods.AppScheduleHiddenCleanup:
-                if (_appActions is null) return unavailable(method);
-                _appActions.ScheduleSettingsHiddenCleanup();
                 return (true, null, null);
 
             case SettingsIpcMethods.AppRaiseBand:
