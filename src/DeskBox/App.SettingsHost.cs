@@ -115,6 +115,7 @@ public partial class App
     private bool _isSettingsHost;
     private SettingsIpcClient? _settingsHostClient;
     private int _settingsHostMainProcessId;
+    private bool _settingsHostExitStarted;
     private Views.SettingsWindow? _settingsHostWindow;
     private RemoteSearchConnectionClient? _settingsHostEverythingConnection;
 
@@ -206,6 +207,15 @@ public partial class App
         }
 
         _settingsHostClient = client;
+        // Batch R12 (sequence audit, defect E): a broken pipe with the
+        // main process still alive used to leave this window running with
+        // every subsequent command failing into the silent-loss chain.
+        // The host is useless without the pipe — say so and exit in order.
+        client.Disconnected += () =>
+        {
+            Log("[SettingsHost] Pipe disconnected while the main process lives; exiting host");
+            UiDispatcherQueue?.TryEnqueue(ExitSettingsHost);
+        };
         try
         {
             await RunSettingsHostBootAsync(client);
@@ -660,6 +670,15 @@ public partial class App
     /// </summary>
     internal void ExitSettingsHost()
     {
+        // Re-entrancy guard (batch R12): the pipe Disconnected subscription
+        // fires from the reader task — including during this very method's
+        // own client dispose — and would schedule a second exit pass.
+        if (_settingsHostExitStarted)
+        {
+            return;
+        }
+
+        _settingsHostExitStarted = true;
         // Farewell first (batch R11): the exit flush below keeps this
         // process alive for up to ~2s, and "process alive" is the main
         // process's spawn-vs-show criterion — without this notice, an

@@ -248,23 +248,29 @@ public sealed class SettingsExternalCommitTests : IDisposable
         Assert.Equal(after.ResizeSnapEnabled, snap.Enabled);
         Assert.Equal(after.WidgetSnapSpacing, snap.Spacing);
 
-        // Identical states: no applier runs at all.
+        // Identical states: no applier runs — except snap, which is
+        // replayed unconditionally (batch R12: the convergence point for
+        // out-of-order fire-and-forget set-snap commands).
         int any = 0;
+        int identicalSnapCalls = 0;
         ExternalSettingsAppliers.ApplyValueAppliers(
             before,
             new AppSettings(),
             new ExternalSettingsAppliers.Delegates(
                 () => any++,
                 () => any++,
-                (_, _) => any++,
+                (_, _) => identicalSnapCalls++,
                 () => any++,
                 () => any++,
                 () => any++,
                 _ => any++));
         Assert.Equal(0, any);
+        Assert.Equal(1, identicalSnapCalls);
 
-        // The desktop double-click group trips only its own delegate.
+        // The desktop double-click group trips only its own delegate
+        // (snap is the unconditional-replay exception, batch R12).
         int doubleClickOnly = 0;
+        int toggledSnapCalls = 0;
         var toggled = new AppSettings { DesktopDoubleClickEnabled = !before.DesktopDoubleClickEnabled };
         ExternalSettingsAppliers.ApplyValueAppliers(
             before,
@@ -272,12 +278,13 @@ public sealed class SettingsExternalCommitTests : IDisposable
             new ExternalSettingsAppliers.Delegates(
                 () => Assert.Fail("hotkey applier must not run"),
                 () => doubleClickOnly++,
-                (_, _) => Assert.Fail("snap applier must not run"),
+                (_, _) => toggledSnapCalls++,
                 () => Assert.Fail("tray applier must not run"),
                 () => Assert.Fail("theme applier must not run"),
                 () => Assert.Fail("language applier must not run"),
                 _ => Assert.Fail("search applier must not run")));
         Assert.Equal(1, doubleClickOnly);
+        Assert.Equal(1, toggledSnapCalls);
     }
 
     public void Dispose()

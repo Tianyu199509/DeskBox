@@ -72,7 +72,10 @@ public partial class App
         _settingsIpcRouter = router;
         _settingsIpcServer = SettingsIpcServer.Start(
             DeskBoxDataPathService.Current.SettingsIpcPipeName,
-            router.DispatchAsync);
+            router.DispatchAsync,
+            // Batch R12: only the settings host this process spawned (or
+            // the dying one saying goodbye) may use the pipe.
+            expectedClientPidProvider: () => SettingsHostPipeClientPid);
 
         SettingsService.LocalPersistCompleted += OnSettingsIpcLocalPersistCompleted;
         SettingsService.LayoutPersistCompleted += OnSettingsIpcLayoutPersistCompleted;

@@ -197,6 +197,14 @@ public partial class App
         }
     }
 
+    /// <summary>
+    /// The pipe identity gate (batch R12): the pid of the settings host this
+    /// process spawned, or the dying one still saying goodbye. Zero/absent
+    /// disables the gate (loopback tests).
+    /// </summary>
+    internal uint SettingsHostPipeClientPid =>
+        (uint?)(_settingsHostProcess?.Id ?? _exitingSettingsHost?.Id) ?? 0u;
+
     private Process? _exitingSettingsHost;
 
     /// <summary>

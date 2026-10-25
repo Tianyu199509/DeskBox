@@ -1307,6 +1307,25 @@ settings.FocusClickedWidgetOnRaise = false;
     /// the normal path, then broadcast SettingsChanged and raise
     /// <see cref="ExternalSnapshotApplied"/> for diff-driven appliers.
     /// </summary>
+    /// <summary>
+    /// Batch R12 security audit: JSON allows an explicit null to overwrite
+    /// a settable collection's non-null default, and every consumer reads
+    /// these as never-null — a crafted snapshot (or a buggy peer) would
+    /// plant nulls that surface as NREs much later. Reject at the gate.
+    /// The slice objects themselves are get-only and cannot be nulled.
+    /// </summary>
+    private static bool SnapshotCarriesNullCollections(AppSettings parsed) =>
+        parsed.WidgetLayout.Widgets is null ||
+        parsed.WidgetLayout.WidgetGroups is null ||
+        parsed.WidgetLayout.FeatureWidgetEnabledStates is null ||
+        parsed.WidgetLayout.WidgetTopologyLayouts is null ||
+        parsed.WidgetLayout.DeletedWidgetIds is null ||
+        parsed.FileWidget.FileStackCustomRules is null ||
+        parsed.DesktopOrganization.RecentOrganizationHistory is null ||
+        parsed.DesktopOrganization.DesktopOrganizationRules is null ||
+        parsed.WidgetShell.WidgetCapsuleBarOrder is null ||
+        parsed.WidgetShell.WidgetCapsuleFreePlacements is null;
+
     public async Task<bool> ApplyExternalSnapshotAsync(string settingsJson)
     {
         if (string.IsNullOrWhiteSpace(settingsJson))
@@ -1329,6 +1348,12 @@ settings.FocusClickedWidgetOnRaise = false;
 
         if (parsed is null)
         {
+            return false;
+        }
+
+        if (SnapshotCarriesNullCollections(parsed))
+        {
+            App.Log("[SettingsService] External snapshot carried explicit nulls into non-nullable collections; refused");
             return false;
         }
 
@@ -1430,7 +1455,8 @@ settings.FocusClickedWidgetOnRaise = false;
         }
 
         if (parsed is null ||
-            parsed.SchemaVersion > SettingsMigrationPipeline.CurrentSchemaVersion)
+            parsed.SchemaVersion > SettingsMigrationPipeline.CurrentSchemaVersion ||
+            SnapshotCarriesNullCollections(parsed))
         {
             return false;
         }
@@ -1876,7 +1902,8 @@ settings.FocusClickedWidgetOnRaise = false;
         }
 
         if (parsed is null ||
-            parsed.SchemaVersion > SettingsMigrationPipeline.CurrentSchemaVersion)
+            parsed.SchemaVersion > SettingsMigrationPipeline.CurrentSchemaVersion ||
+            SnapshotCarriesNullCollections(parsed))
         {
             return false;
         }

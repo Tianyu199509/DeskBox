@@ -19,7 +19,13 @@ public sealed class SettingsIpcClient : IAsyncDisposable
 {
     private readonly NamedPipeClientStream _stream;
     private readonly CancellationTokenSource _cts = new();
-    private readonly ConcurrentDictionary<long, TaskCompletionSource<SettingsIpcEnvelope>> _pending = new();
+    private readonly ConcurrentDictionary<long, PendingCall> _pending = new();
+
+    /// <summary>
+    /// An in-flight request: the method rides along so a response is only
+    /// matched when both id and method agree (batch R12 bleed-through gate).
+    /// </summary>
+    private sealed record PendingCall(string Method, TaskCompletionSource<SettingsIpcEnvelope> Completion);
     private long _nextRequestId;
     private volatile bool _disposed;
     // Serializes request writes: the appearance-preview forwarder fires from
@@ -126,6 +132,13 @@ public sealed class SettingsIpcClient : IAsyncDisposable
                         break;
                     }
 
+                    // Batch R12: same 32MB runaway guard as the server side.
+                    if (line.Length > 32 * 1024 * 1024)
+                    {
+                        App.Log($"[SettingsIpc] Main process sent a {line.Length}-char envelope; treating the pipe as broken");
+                        break;
+                    }
+
                     if (string.IsNullOrWhiteSpace(line))
                     {
                         continue;
@@ -148,10 +161,17 @@ public sealed class SettingsIpcClient : IAsyncDisposable
                         continue;
                     }
 
+                    // Batch R12 (sequence audit, defect D): correlate by id
+                    // AND method — a stale response bleeding in from another
+                    // connection epoch (the server binds responses to their
+                    // origin now, this is the second gate) must never
+                    // mis-complete an unrelated in-flight request.
                     if (envelope.Type == SettingsIpcEnvelope.TypeResponse &&
-                        _pending.TryRemove(envelope.Id, out var completion))
+                        _pending.TryGetValue(envelope.Id, out var completion) &&
+                        string.Equals(completion.Method, envelope.Method, StringComparison.Ordinal))
                     {
-                        completion.TrySetResult(envelope);
+                        _pending.Remove(envelope.Id, out _);
+                        completion.Completion.TrySetResult(envelope);
                     }
                     else if (envelope.Type == SettingsIpcEnvelope.TypeEvent)
                     {
@@ -194,7 +214,7 @@ public sealed class SettingsIpcClient : IAsyncDisposable
         long id = Interlocked.Increment(ref _nextRequestId);
         var completion = new TaskCompletionSource<SettingsIpcEnvelope>(
             TaskCreationOptions.RunContinuationsAsynchronously);
-        _pending[id] = completion;
+        _pending[id] = new PendingCall(method, completion);
 
         var envelope = new SettingsIpcEnvelope(
             id,
@@ -241,9 +261,9 @@ public sealed class SettingsIpcClient : IAsyncDisposable
 
     private void FailPending(string reason)
     {
-        foreach ((_, TaskCompletionSource<SettingsIpcEnvelope> completion) in _pending)
+        foreach ((_, PendingCall call) in _pending)
         {
-            completion.TrySetException(new IOException(reason));
+            call.Completion.TrySetException(new IOException(reason));
         }
 
         _pending.Clear();

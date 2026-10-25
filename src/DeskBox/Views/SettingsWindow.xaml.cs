@@ -324,6 +324,12 @@ public sealed partial class SettingsWindow : Window
         _sectionLayoutSettleTimer.Tick += SectionLayoutSettleTimer_Tick;
         Activated += SettingsWindow_Activated;
         _appWindow.Closing += SettingsWindow_AppWindowClosing;
+        // Batch R12 (window-state audit, third time this debt surfaced):
+        // unplug/resolution changes can leave this window pressed outside
+        // the remaining work area with no in-app path back. The main
+        // process has a whole topology-archive system for its widgets;
+        // this window only needs the cheap clamp.
+        App.Current.DisplayTopologyChanged += SettingsWindow_DisplayTopologyChanged;
         // Subscribed only after _appWindow exists: ActualThemeChanged can
         // also fire on an OS theme flip while RequestedTheme is Default,
         // and the handler touches _appWindow.TitleBar.
@@ -446,6 +452,107 @@ public sealed partial class SettingsWindow : Window
     // process, so a user close really closes, the Closed teardown runs, and
     // the host process exits right after — no reuse means no leak and no
     // hide branch to run.
+    /// <summary>
+    /// Clamps the window back inside the nearest monitor's work area after
+    /// a display-topology change (batch R12): the OS relocates windows off
+    /// a vanished display without clamping, and this window's minimum size
+    /// can exceed small-screen work areas entirely.
+    /// </summary>
+    private void SettingsWindow_DisplayTopologyChanged()
+    {
+        if (_isClosed || _hWnd == IntPtr.Zero)
+        {
+            return;
+        }
+
+        if (DispatcherQueue is { } queue && !queue.HasThreadAccess)
+        {
+            queue.TryEnqueue(SettingsWindow_DisplayTopologyChanged);
+            return;
+        }
+
+        try
+        {
+            if (!Win32Helper.GetWindowRect(_hWnd, out Win32Helper.RECT rect))
+            {
+                return;
+            }
+
+            // A minimized window reports the (-32000,-32000) placeholder —
+            // clamping that would teleport the restore position.
+            if (rect.Left <= -30000 && rect.Top <= -30000)
+            {
+                return;
+            }
+
+            IntPtr monitor = Win32Helper.MonitorFromWindow(_hWnd, 2 /* MONITOR_DEFAULTTONEAREST */);
+            var info = new Win32Helper.MONITORINFO();
+            info.cbSize = System.Runtime.InteropServices.Marshal.SizeOf<Win32Helper.MONITORINFO>();
+            if (!Win32Helper.GetMonitorInfo(monitor, ref info))
+            {
+                return;
+            }
+
+            Win32Helper.RECT work = info.rcWork;
+            int x = rect.Left;
+            int y = rect.Top;
+            int width = rect.Right - rect.Left;
+            int height = rect.Bottom - rect.Top;
+            bool changed = false;
+            if (width > work.Right - work.Left)
+            {
+                width = work.Right - work.Left;
+                changed = true;
+            }
+
+            if (height > work.Bottom - work.Top)
+            {
+                height = work.Bottom - work.Top;
+                changed = true;
+            }
+
+            if (x < work.Left)
+            {
+                x = work.Left;
+                changed = true;
+            }
+
+            if (y < work.Top)
+            {
+                y = work.Top;
+                changed = true;
+            }
+
+            if (x + width > work.Right)
+            {
+                x = work.Right - width;
+                changed = true;
+            }
+
+            if (y + height > work.Bottom)
+            {
+                y = work.Bottom - height;
+                changed = true;
+            }
+
+            if (changed)
+            {
+                Win32Helper.SetWindowPos(
+                    _hWnd,
+                    IntPtr.Zero,
+                    x,
+                    y,
+                    width,
+                    height,
+                    0x0040 /* SWP_NOZORDER */ | 0x0004 /* SWP_NOACTIVATE */);
+            }
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[SettingsWindow] Topology clamp failed: {ex.Message}");
+        }
+    }
+
     private void SettingsWindow_AppWindowClosing(
         AppWindow sender,
         AppWindowClosingEventArgs args)
@@ -490,6 +597,7 @@ public sealed partial class SettingsWindow : Window
         _backupSettingsViewModel.Deactivate();
         Activated -= SettingsWindow_Activated;
         _appWindow.Closing -= SettingsWindow_AppWindowClosing;
+        App.Current.DisplayTopologyChanged -= SettingsWindow_DisplayTopologyChanged;
         Closed -= SettingsWindow_Closed;
         SizeChanged -= SettingsWindow_SizeChanged;
         SettingsRoot.Loaded -= SettingsRoot_Loaded;

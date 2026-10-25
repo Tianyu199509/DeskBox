@@ -2090,6 +2090,18 @@ public static partial class Win32Helper
     private static extern IntPtr GetCurrentProcess();
 
     [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GetNamedPipeClientProcessId(
+        IntPtr hNamedPipe,
+        out uint lpClientProcessId);
+
+    /// <summary>
+    /// Identifies the process on the other end of a named-pipe server
+    /// handle (batch R12 pipe identity gate).
+    /// </summary>
+    internal static bool GetNamedPipeClientProcessId(Microsoft.Win32.SafeHandles.SafePipeHandle pipeHandle, out uint clientPid) =>
+        GetNamedPipeClientProcessId(pipeHandle.DangerousGetHandle(), out clientPid);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool SetProcessWorkingSetSize(
         IntPtr hProcess,
         IntPtr dwMinWorkingSetSize,

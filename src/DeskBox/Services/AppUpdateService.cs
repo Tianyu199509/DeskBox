@@ -434,6 +434,25 @@ public sealed partial class AppUpdateService : IAppUpdateService
             return AppUpdateInstallResult.Failed("The downloaded installer no longer exists.");
         }
 
+        // Batch R12 security audit: this method hands an arbitrary path to
+        // the detached updater, which runs it verbatim — over IPC it was a
+        // launch-any-executable primitive. Only installers inside the
+        // managed update root (where this service downloads them) are
+        // legitimate; everything else is rejected before the updater is
+        // spawned. On fully-elevated desktops the child inherits High
+        // integrity, so the guard is a containment boundary, not cosmetic.
+        string resolvedInstaller = Path.GetFullPath(installerPath);
+        string managedRoot = Path.GetFullPath(_updateRootPath);
+        if (!resolvedInstaller.StartsWith(
+                managedRoot + Path.DirectorySeparatorChar,
+                StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(Path.GetExtension(resolvedInstaller), ".exe", StringComparison.OrdinalIgnoreCase))
+        {
+            App.Log($"[Update] Rejected installer outside the managed update root: {installerPath}");
+            return AppUpdateInstallResult.Failed(
+                "The installer path is not inside DeskBox's managed update directory.");
+        }
+
         // From here to process exit this app hands the installer over to the
         // detached updater: a periodic check landing in that window must not
         // retire (delete) the directory the armed installer lives in.

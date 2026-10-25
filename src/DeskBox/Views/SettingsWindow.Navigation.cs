@@ -462,6 +462,20 @@ public sealed partial class SettingsWindow
     {
         EnsureSettingsSectionCreated("GlanceSettings");
         GlanceSettingsSection.SelectWidget(widgetId);
+        // Deep-linking a different glance instance while the section is
+        // already on screen hits NavigateToSettingsSection's same-section
+        // early exit — which also skips the section's enter-time refresh,
+        // leaving the previously selected instance's settings on display
+        // (batch R12 window-state audit: users could edit the wrong
+        // instance). SelectWidget staged the new selection; run the
+        // refresh the navigation would have triggered.
+        if (SettingsRoot.IsLoaded &&
+            string.Equals(_currentSettingsSection, "GlanceSettings", StringComparison.Ordinal))
+        {
+            _ = GlanceSettingsSection.RefreshFromStoreAsync();
+            return;
+        }
+
         NavigateToSettingsSection("GlanceSettings");
     }
 

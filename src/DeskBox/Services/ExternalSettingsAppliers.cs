@@ -40,11 +40,14 @@ internal static class ExternalSettingsAppliers
             delegates.RefreshDesktopDoubleClickRegistration();
         }
 
-        if (before.ResizeSnapEnabled != after.ResizeSnapEnabled ||
-            before.WidgetSnapSpacing != after.WidgetSnapSpacing)
-        {
-            delegates.ApplySnapOptions(after.ResizeSnapEnabled, after.WidgetSnapSpacing);
-        }
+        // Snap replayed unconditionally (batch R12, sequence audit defect
+        // F): the set-snap fire-and-forget commands can be applied out of
+        // order under the server's bounded-concurrent dispatch, and when
+        // the commit's before/after happen to match (rapid double-toggle
+        // netting to zero) the diff below would skip the replay — leaving
+        // the live snap overlay stuck on the older value with no
+        // convergence mechanism. The replay is two property writes.
+        delegates.ApplySnapOptions(after.ResizeSnapEnabled, after.WidgetSnapSpacing);
 
         if (!string.Equals(before.TrayIconStyle, after.TrayIconStyle, StringComparison.Ordinal))
         {
