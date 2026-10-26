@@ -1912,6 +1912,8 @@
   "Search.Action.Renamed": "Переименован",
   "Search.Action.Deleted": "Перемещено в корзину",
   "Search.Batch.OpenAll": "Открыть элементы {0}",
+  "Search.Batch.OpenAll.ConfirmTitle": "Открыть элементы ({0})?",
+  "Search.Batch.OpenAll.ConfirmBody": "Элементы ({0}) будут открыты по одному. Это может занять некоторое время.",
   "Search.Rename.Title": "Переименовать",
   "Search.Tab.All": "Все",
   "Search.Tab.App": "Приложения",

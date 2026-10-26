@@ -1,4 +1,4 @@
-using System.Collections.Specialized;
+﻿using System.Collections.Specialized;
 using System.Diagnostics;
 using DeskBox.Controls;
 using DeskBox.Contracts;
@@ -1444,16 +1444,23 @@ public sealed partial class FileSurfaceContent :
             return;
         }
 
-        // The StorageItem broker call below is synchronous on the UI STA, and
-        // DragStartingEventArgs gives no reason to defer it. The drag path
-        // already bypasses the broker for .lnk payloads, so measure what it
-        // actually costs for ordinary files before restructuring this
-        // sequence; the number rides along on the existing protocol log.
+        // The StorageItem broker call below is synchronous on the UI STA.
+        // Deep review R18 (item D): the native attach leg (existence probing
+        // + SHParseDisplayName + SHCreateDataObject) runs for EVERY drag and
+        // was never timed — only the rare broker fallback leg was. Both
+        // numbers now ride the protocol log; the closed decision record
+        // (whether to restructure) awaits real samples.
+        // NOTE: DragStartingEventArgs DOES offer GetDeferral since the event
+        // moved to per-item UIElement.DragStarting — the reason not to defer
+        // is "no data yet proving it matters", not "cannot".
         long storageBrokerMs = 0;
+        long nativeShellMs = 0;
         var storageBrokerWatch = System.Diagnostics.Stopwatch.StartNew();
+        var nativeShellWatch = System.Diagnostics.Stopwatch.StartNew();
         bool isManagedShortcutDrag = IsManagedShortcutDrag(
             selectedItems.Select(item => item.Path).ToArray());
-        if (!FileItemDragPackage.TryPrepare(
+        nativeShellWatch.Start();
+        bool prepared = FileItemDragPackage.TryPrepare(
                 e.Data,
                 selectedItems,
                 WidgetId,
@@ -1467,12 +1474,15 @@ public sealed partial class FileSurfaceContent :
                 paths => paths.Count == 1
                     ? Path.GetFileName(paths[0])
                     : paths.Count.ToString(),
-                out FileItemDragPackageResult result))
+                out FileItemDragPackageResult result);
+        if (!prepared)
         {
+            nativeShellMs = nativeShellWatch.ElapsedMilliseconds;
             _activeDragSessionId = null;
             CancelDrag($"prepare-failed items={selectedItems.Length}");
             return;
         }
+        nativeShellMs = nativeShellWatch.ElapsedMilliseconds;
 
         if (result.SourcePaths.Count > 0 &&
             HasActiveTransferSource(result.SourcePaths))
@@ -1530,6 +1540,7 @@ public sealed partial class FileSurfaceContent :
             $"kind=file popover={fromStackPopover} paths=" +
             $"{result.SourcePaths.Count} storage={result.HasStorageItems} " +
             $"storageBrokerMs={storageBrokerMs} " +
+            $"nativeShellMs={nativeShellMs} " +
             $"nativeShell={result.UsesNativeShellDataObject} " +
             $"managedShortcut={isManagedShortcutDrag} " +
             $"requested={e.Data.RequestedOperation} " +

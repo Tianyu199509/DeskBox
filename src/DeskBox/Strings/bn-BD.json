@@ -1912,6 +1912,8 @@
   "Search.Action.Renamed": "নাম পরিবর্তন করা হয়েছে",
   "Search.Action.Deleted": "রিসাইকেল বিনে সরানো হয়েছে",
   "Search.Batch.OpenAll": "{0} আইটেম খুলুন",
+  "Search.Batch.OpenAll.ConfirmTitle": "{0} আইটেম খুলবেন?",
+  "Search.Batch.OpenAll.ConfirmBody": "{0} আইটেম একে একে খোলা হবে। এতে কিছু সময় লাগতে পারে।",
   "Search.Rename.Title": "নাম পরিবর্তন করুন",
   "Search.Tab.All": "সব",
   "Search.Tab.App": "অ্যাপস",

@@ -1912,6 +1912,8 @@
   "Search.Action.Renamed": "Renamed",
   "Search.Action.Deleted": "Moved to Recycle Bin",
   "Search.Batch.OpenAll": "Open {0} items",
+  "Search.Batch.OpenAll.ConfirmTitle": "Open {0} items?",
+  "Search.Batch.OpenAll.ConfirmBody": "{0} items will be opened one by one. This may take a while.",
   "Search.Rename.Title": "Rename",
   "Search.Tab.All": "All",
   "Search.Tab.App": "Apps",

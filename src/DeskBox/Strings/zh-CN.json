@@ -1898,6 +1898,8 @@
   "Search.Action.Renamed": "已重命名",
   "Search.Action.Deleted": "已移入回收站",
   "Search.Batch.OpenAll": "打开 {0} 项",
+  "Search.Batch.OpenAll.ConfirmTitle": "打开 {0} 项？",
+  "Search.Batch.OpenAll.ConfirmBody": "将依次打开 {0} 项。这可能需要一些时间。",
   "Search.Rename.Title": "重命名",
   "Search.Delete.Action": "移入回收站",
   "Search.Tab.All": "全部",

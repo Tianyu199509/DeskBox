@@ -1912,6 +1912,8 @@
   "Search.Action.Renamed": "Renommé",
   "Search.Action.Deleted": "Déplacé vers la corbeille",
   "Search.Batch.OpenAll": "Ouvrir {0} éléments",
+  "Search.Batch.OpenAll.ConfirmTitle": "Ouvrir {0} éléments ?",
+  "Search.Batch.OpenAll.ConfirmBody": "{0} éléments seront ouverts un par un. Cela peut prendre un moment.",
   "Search.Rename.Title": "Renommer",
   "Search.Tab.All": "Tout",
   "Search.Tab.App": "Applications",

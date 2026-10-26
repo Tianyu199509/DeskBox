@@ -1900,6 +1900,8 @@
   "Search.Action.Renamed": "Renomeado",
   "Search.Action.Deleted": "Movido para a Lixeira",
   "Search.Batch.OpenAll": "Abrir {0} itens",
+  "Search.Batch.OpenAll.ConfirmTitle": "Abrir {0} itens?",
+  "Search.Batch.OpenAll.ConfirmBody": "{0} itens serão abertos um por um. Isso pode levar algum tempo.",
   "Search.Rename.Title": "Renomear",
   "Search.Tab.All": "Tudo",
   "Search.Tab.App": "Apps",

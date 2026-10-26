@@ -1912,6 +1912,8 @@
   "Search.Action.Renamed": "Renombrado",
   "Search.Action.Deleted": "Movido a la papelera de reciclaje",
   "Search.Batch.OpenAll": "Abrir {0} elementos",
+  "Search.Batch.OpenAll.ConfirmTitle": "¿Abrir {0} elementos?",
+  "Search.Batch.OpenAll.ConfirmBody": "Se abrirán {0} elementos uno por uno. Esto puede tardar un poco.",
   "Search.Rename.Title": "Cambiar nombre",
   "Search.Tab.All": "Todos",
   "Search.Tab.App": "Aplicaciones",

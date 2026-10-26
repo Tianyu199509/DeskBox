@@ -1912,6 +1912,8 @@
   "Search.Action.Renamed": "नाम बदला गया",
   "Search.Action.Deleted": "रीसायकल बिन में ले जाया गया",
   "Search.Batch.OpenAll": "{0} आइटम खोलें",
+  "Search.Batch.OpenAll.ConfirmTitle": "{0} आइटम खोलें?",
+  "Search.Batch.OpenAll.ConfirmBody": "{0} आइटम एक-एक करके खोले जाएँगे। इसमें कुछ समय लग सकता है।",
   "Search.Rename.Title": "नाम बदलें",
   "Search.Tab.All": "सब",
   "Search.Tab.App": "ऐप्स",

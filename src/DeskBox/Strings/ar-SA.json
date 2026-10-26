@@ -1912,6 +1912,8 @@
   "Search.Action.Renamed": "تمت إعادة تسميته",
   "Search.Action.Deleted": "تم النقل إلى سلة المحذوفات",
   "Search.Batch.OpenAll": "افتح {0} عنصرًا",
+  "Search.Batch.OpenAll.ConfirmTitle": "فتح {0} عنصرًا؟",
+  "Search.Batch.OpenAll.ConfirmBody": "سيتم فتح {0} عنصرًا واحدًا تلو الآخر. قد يستغرق ذلك بعض الوقت.",
   "Search.Rename.Title": "إعادة تسمية",
   "Search.Tab.All": "الكل",
   "Search.Tab.App": "تطبيقات",

@@ -3538,7 +3538,7 @@ public sealed partial class SearchPopupWindow : Window
                 Text = string.Format(_localizationService.T("Search.Batch.OpenAll"), count),
                 Icon = new FontIcon { Glyph = "\uE8E5" }
             };
-            openAll.Click += (_, _) => OpenSelectedItems();
+            openAll.Click += (_, _) => _ = OpenSelectedItemsWithGuardAsync();
             flyout.Items.Add(openAll);
             return flyout;
         }
@@ -3579,6 +3579,34 @@ public sealed partial class SearchPopupWindow : Window
             _viewModel.ExecuteItem(item);
         }
         ClearMultiSelection();
+    }
+
+    private async Task OpenSelectedItemsWithGuardAsync()
+    {
+        // Deep review R18 (item C): the batch menu only appears for mixed
+        // selections, where "open all" launches N Shell operations one by
+        // one with no ceiling — a wide query's Ctrl+A could reach hundreds
+        // of items. Explorer confirms past 15; match that precedent.
+        var items = _multiSelectedItems.ToList();
+        const int OpenAllConfirmationThreshold = 15;
+        if (items.Count > OpenAllConfirmationThreshold)
+        {
+            var dialog = new ContentDialog
+            {
+                XamlRoot = RootGrid.XamlRoot,
+                Title = _localizationService.Format("Search.Batch.OpenAll.ConfirmTitle", items.Count),
+                Content = _localizationService.Format("Search.Batch.OpenAll.ConfirmBody", items.Count),
+                PrimaryButtonText = _localizationService.T("Common.Open"),
+                CloseButtonText = _localizationService.T("Common.Cancel"),
+                DefaultButton = ContentDialogButton.Primary
+            };
+            if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+            {
+                return;
+            }
+        }
+
+        OpenSelectedItems();
     }
 
     private async Task CopySelectedItemsAsync(DataPackageOperation operation)
