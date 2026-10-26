@@ -1,4 +1,4 @@
-namespace DeskBox.Contracts;
+﻿namespace DeskBox.Contracts;
 
 using System.Threading;
 using DeskBox.Models;
@@ -158,8 +158,11 @@ public interface ISettingsWidgetActions
 
     // ── Diagnostics ─────────────────────────────────────────────────
 
-    /// <summary>Watcher health snapshots, or null when no manager exists.</summary>
-    IReadOnlyList<FolderWatcherHealthSnapshot>? GetFolderWatcherHealthSnapshots();
+    // GetFolderWatcherHealthSnapshots removed (deep review R18, A-#27): the
+    // host never called it — the runtime-health diagnostics path goes through
+    // ISettingsAppActions.GetRuntimeHealthSnapshot, which reads the watcher
+    // snapshots directly on the main process. The widget-facade wire, router
+    // case, and both implementations went with it.
 
     // ── Desktop organization undo ───────────────────────────────────
 

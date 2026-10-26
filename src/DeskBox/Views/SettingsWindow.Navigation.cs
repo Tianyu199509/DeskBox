@@ -648,7 +648,7 @@ public sealed partial class SettingsWindow
         }
         if (sectionTag == "ManagedStorage")
         {
-            RefreshManagedStorageFolderList();
+            _ = RefreshManagedStorageFolderListAsync();
         }
         else if (sectionTag == "FileStorageSettings")
         {

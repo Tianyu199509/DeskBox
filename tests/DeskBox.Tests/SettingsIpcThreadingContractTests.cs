@@ -1,4 +1,4 @@
-namespace DeskBox.Tests;
+﻿namespace DeskBox.Tests;
 
 /// <summary>
 /// Pins the structural invariant "the settings-host UI thread never blocks
@@ -12,12 +12,13 @@ namespace DeskBox.Tests;
 /// </summary>
 public sealed class SettingsIpcThreadingContractTests
 {
-    // 27 at deep review R13-3 (was 32 at R13-7; the hot-path pass moved the
-    // gesture-ownership predicates to local mirror computations and the
-    // registration state to a push-fed cache). The remaining set is the
-    // rare-path bounded-wait contract (construction/refresh paths); lower
-    // this ceiling as further families convert.
-    private const int FrozenSyncCallCeiling = 27;
+    // 25 at deep review R18 (32 at R13 → 27 at R15 → 25 now: A-#3 moved
+    // GetRuntimeState to a push-fed cache, A-#27 removed the dead
+    // folder-watcher wire, and A-#24's orphan scan now runs on a pool
+    // thread even though its facade member stays sync). The remaining set
+    // is the rare-path bounded-wait contract (construction/refresh paths,
+    // one-command dialogs); lower this ceiling as further families convert.
+    private const int FrozenSyncCallCeiling = 25;
 
     [Fact]
     public void RemoteFacades_SyncOverAsyncCalls_OnlyShrink()

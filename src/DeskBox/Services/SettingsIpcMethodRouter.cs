@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using DeskBox.Contracts;
@@ -606,15 +606,6 @@ public sealed class SettingsIpcMethodRouter
                     binding.BoundScreenId,
                     binding.Persist);
                 return (true, null, null);
-
-            case SettingsIpcMethods.WidgetFolderWatcherHealth:
-                if (_widget is null) return unavailable(method);
-                IReadOnlyList<FolderWatcherHealthSnapshot>? watcherHealth = _widget.GetFolderWatcherHealthSnapshots();
-                return (true, watcherHealth is null
-                    ? null
-                    : SettingsIpcPayload.Encode(
-                        watcherHealth.ToList(),
-                        SettingsIpcJsonContext.Default.ListFolderWatcherHealthSnapshot), null);
 
             case SettingsIpcMethods.WidgetLatestUndoableOrgEntry:
                 if (_widget is null) return unavailable(method);

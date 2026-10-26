@@ -1,4 +1,4 @@
-using DeskBox.Helpers;
+﻿using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Platform;
 using DeskBox.Services;
@@ -141,35 +141,45 @@ public sealed partial class SettingsWindow
 
     private void RefreshManagedStorageButton_Click(object sender, RoutedEventArgs e)
     {
-        RefreshManagedStorageFolderList();
+        _ = RefreshManagedStorageFolderListAsync();
     }
 
-    private void RefreshManagedStorageFolderList()
+    private async Task RefreshManagedStorageFolderListAsync()
     {
         ManagedStorageFolderList.Children.Clear();
+        ManagedStorageEmptyState.Visibility = Visibility.Visible;
+        ManagedStorageFolderList.Visibility = Visibility.Collapsed;
 
-        if (_widgetActions.GetOrphanManagedStorageFolders() is not { } candidates)
+        // Deep review R18 (A-#24): the orphan scan recursively counts every
+        // candidate directory tree on the MAIN process with a 10-MINUTE IPC
+        // ceiling — running it inline on the UI thread froze the settings
+        // host for as long as that scan took. It now runs on a pool thread;
+        // the section shows the empty state until results arrive.
+        IReadOnlyList<ManagedStorageFolderCleanupCandidate>? candidates =
+            await Task.Run(() => _widgetActions.GetOrphanManagedStorageFolders());
+
+        if (candidates is not { } list)
         {
             ManagedStorageEmptyState.Visibility = Visibility.Visible;
             ManagedStorageFolderList.Visibility = Visibility.Collapsed;
             ManagedStorageSummaryText.Text = _localizationService.T("Settings.ManagedStorage.SummaryUnavailable");
             return;
         }
-        bool hasCandidates = candidates.Count > 0;
+        bool hasCandidates = list.Count > 0;
         ManagedStorageEmptyState.Visibility = hasCandidates ? Visibility.Collapsed : Visibility.Visible;
         ManagedStorageFolderList.Visibility = hasCandidates ? Visibility.Visible : Visibility.Collapsed;
         ManagedStorageSummaryText.Text = hasCandidates
-            ? _localizationService.Format("Settings.ManagedStorage.Summary", candidates.Count)
+            ? _localizationService.Format("Settings.ManagedStorage.Summary", list.Count)
             : _localizationService.T("Settings.ManagedStorage.SummaryEmpty");
 
-        for (int index = 0; index < candidates.Count; index++)
+        for (int index = 0; index < list.Count; index++)
         {
             if (index > 0)
             {
                 ManagedStorageFolderList.Children.Add(CreateSettingDivider());
             }
 
-            ManagedStorageFolderList.Children.Add(CreateManagedStorageFolderRow(candidates[index]));
+            ManagedStorageFolderList.Children.Add(CreateManagedStorageFolderRow(list[index]));
         }
 
         DispatcherQueue.TryEnqueue(() =>
@@ -274,14 +284,14 @@ public sealed partial class SettingsWindow
         try
         {
             int restoredCount = await _widgetActions.RestoreOrphanManagedStorageFoldersAsync([folderPath]);
-            RefreshManagedStorageFolderList();
+            _ = RefreshManagedStorageFolderListAsync();
             await ShowInfoDialogAsync(
                 _localizationService.T("Settings.ManagedStorage.RestoreCompleteTitle"),
                 _localizationService.Format("Settings.ManagedStorage.RestoreCompleteBody", restoredCount));
         }
         catch (Exception ex)
         {
-            RefreshManagedStorageFolderList();
+            _ = RefreshManagedStorageFolderListAsync();
             await ShowInfoDialogAsync(
                 _localizationService.T("Settings.ManagedStorage.ActionFailedTitle"),
                 _localizationService.Format("Settings.ManagedStorage.ActionFailedBody", ex.Message));
@@ -292,7 +302,7 @@ public sealed partial class SettingsWindow
     {
         if (!Directory.Exists(folderPath))
         {
-            RefreshManagedStorageFolderList();
+            _ = RefreshManagedStorageFolderListAsync();
             await ShowInfoDialogAsync(
                 _localizationService.T("Settings.ManagedStorage.ActionFailedTitle"),
                 _localizationService.T("Settings.ManagedStorage.MissingFolder"));
@@ -316,14 +326,14 @@ public sealed partial class SettingsWindow
         try
         {
             await _widgetActions.MoveOrphanManagedStorageFolderContentsToDesktopAsync(folderPath);
-            RefreshManagedStorageFolderList();
+            _ = RefreshManagedStorageFolderListAsync();
             await ShowInfoDialogAsync(
                 _localizationService.T("Settings.ManagedStorage.MoveCompleteTitle"),
                 _localizationService.Format("Settings.ManagedStorage.MoveCompleteBody", folderName));
         }
         catch (Exception ex)
         {
-            RefreshManagedStorageFolderList();
+            _ = RefreshManagedStorageFolderListAsync();
             await ShowInfoDialogAsync(
                 _localizationService.T("Settings.ManagedStorage.ActionFailedTitle"),
                 _localizationService.Format("Settings.ManagedStorage.ActionFailedBody", ex.Message));
@@ -346,14 +356,14 @@ public sealed partial class SettingsWindow
             await _widgetActions.DeleteOrphanManagedStorageFolderAsync(
                 folderPath,
                 _hWnd);
-            RefreshManagedStorageFolderList();
+            _ = RefreshManagedStorageFolderListAsync();
             await ShowInfoDialogAsync(
                 _localizationService.T("Settings.ManagedStorage.DeleteCompleteTitle"),
                 _localizationService.Format("Settings.ManagedStorage.DeleteCompleteBody", folderName));
         }
         catch (Exception ex)
         {
-            RefreshManagedStorageFolderList();
+            _ = RefreshManagedStorageFolderListAsync();
             await ShowInfoDialogAsync(
                 _localizationService.T("Settings.ManagedStorage.ActionFailedTitle"),
                 _localizationService.Format("Settings.ManagedStorage.ActionFailedBody", ex.Message));

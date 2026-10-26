@@ -1,4 +1,4 @@
-namespace DeskBox.Services;
+﻿namespace DeskBox.Services;
 
 using DeskBox.Contracts;
 using DeskBox.Models;
@@ -409,15 +409,6 @@ public sealed class RemoteSettingsWidgetActions : ISettingsWidgetActions
             SettingsIpcPayload.Encode(
                 new SettingsIpcScreenBinding(widgetId, (int)mode, boundScreenId, persistImmediately),
                 SettingsIpcJsonContext.Default.SettingsIpcScreenBinding));
-
-    public IReadOnlyList<FolderWatcherHealthSnapshot>? GetFolderWatcherHealthSnapshots()
-    {
-        (bool ok, string? payload, _) = _client.RequestAsync(SettingsIpcMethods.WidgetFolderWatcherHealth)
-            .GetAwaiter().GetResult();
-        return ok
-            ? SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.ListFolderWatcherHealthSnapshot)
-            : null;
-    }
 
     public OrganizationHistoryEntry? GetLatestUndoableDesktopOrganizationEntry()
     {

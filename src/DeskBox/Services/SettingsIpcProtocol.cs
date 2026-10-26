@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using DeskBox.Contracts;
@@ -130,7 +130,9 @@ public static class SettingsIpcMethods
     public const string WidgetMoveAll = "widget.move-all";
     public const string WidgetMoveAllUndo = "widget.move-all-undo";
     public const string WidgetApplyScreenBinding = "widget.apply-screen-binding";
-    public const string WidgetFolderWatcherHealth = "widget.folder-watcher-health";
+    // (widget.folder-watcher-health removed in deep review R18, A-#27: the
+    // host never sent it — runtime-health diagnostics ride the app facade,
+    // which reads watcher snapshots directly on the main process.)
     public const string WidgetLatestUndoableOrgEntry = "widget.latest-undoable-org-entry";
     public const string WidgetOrgHistoryEntry = "widget.org-history-entry";
     public const string WidgetOrgUndo = "widget.org-undo";

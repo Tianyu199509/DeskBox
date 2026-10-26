@@ -1,4 +1,4 @@
-namespace DeskBox.Services;
+﻿namespace DeskBox.Services;
 
 using DeskBox.Contracts;
 using DeskBox.Models;
@@ -14,10 +14,19 @@ public sealed class RemoteSettingsHotkeyActions : ISettingsHotkeyActions
 {
     private readonly SettingsIpcClient _client;
 
+    // Deep review R18 (A-#3): GetRuntimeState used to take a blocking pipe
+    // roundtrip on EVERY settings push (the host's ApplySettingsSnapshot →
+    // RefreshGlobalHotkeyState chain) — a warm path mislabeled as cold.
+    // Cache fed by the registration push + mutation-triggered refreshes,
+    // same shape as the R13-3 registration cache; the sync signature stays
+    // (callers are property refresh chains), only the transport disappears.
+    private volatile GlobalHotkeyRuntimeState? _cachedRuntimeState;
+
     public RemoteSettingsHotkeyActions(SettingsIpcClient client)
     {
         _client = client;
         _client.EventReceived += OnEventReceived;
+        RefreshRuntimeStateCache();
     }
 
     public event Action? RegistrationChanged;
@@ -26,19 +35,37 @@ public sealed class RemoteSettingsHotkeyActions : ISettingsHotkeyActions
     {
         if (method == SettingsIpcMethods.HotkeyRegistrationChanged)
         {
+            RefreshRuntimeStateCache();
             RegistrationChanged?.Invoke();
         }
     }
 
-    public GlobalHotkeyRuntimeState? GetRuntimeState()
+    private void RefreshRuntimeStateCache()
     {
-        (bool ok, string? payload, _) = _client
-            .RequestAsync(SettingsIpcMethods.HotkeyState)
-            .GetAwaiter().GetResult();
-        return ok
-            ? SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.GlobalHotkeyRuntimeState)
-            : null;
+        // Fire-and-forget: the answer lands a roundtrip later; until then
+        // callers see the previous state (or null before the first refresh
+        // completes — matching the pre-split no-service behavior).
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                (bool ok, string? payload, _) = await _client.RequestAsync(
+                    SettingsIpcMethods.HotkeyState);
+                if (ok &&
+                    SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.GlobalHotkeyRuntimeState)
+                        is { } state)
+                {
+                    _cachedRuntimeState = state;
+                }
+            }
+            catch (Exception ex)
+            {
+                App.Log($"[SearchHotkey] Runtime state cache refresh failed: {ex.Message}");
+            }
+        });
     }
+
+    public GlobalHotkeyRuntimeState? GetRuntimeState() => _cachedRuntimeState;
 
     public bool TryApplyActivation(GlobalHotkeyActivation activation, out string? applyError)
     {
@@ -47,6 +74,11 @@ public sealed class RemoteSettingsHotkeyActions : ISettingsHotkeyActions
                 SettingsIpcPayload.Encode(activation, SettingsIpcJsonContext.Default.GlobalHotkeyActivation))
             .GetAwaiter().GetResult();
         applyError = error;
+        if (ok)
+        {
+            RefreshRuntimeStateCache();
+        }
+
         return ok;
     }
 
@@ -55,6 +87,11 @@ public sealed class RemoteSettingsHotkeyActions : ISettingsHotkeyActions
         (bool ok, _, string? resetError) = _client.RequestAsync(SettingsIpcMethods.HotkeyReset)
             .GetAwaiter().GetResult();
         error = resetError;
+        if (ok)
+        {
+            RefreshRuntimeStateCache();
+        }
+
         return ok;
     }
 

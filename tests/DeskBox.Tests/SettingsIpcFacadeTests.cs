@@ -1,4 +1,4 @@
-using DeskBox.Contracts;
+﻿using DeskBox.Contracts;
 using DeskBox.Models;
 using DeskBox.Services;
 
@@ -254,6 +254,9 @@ public sealed class SettingsIpcFacadeTests : IDisposable
                 // VK_F7 = 0x78
                 GlobalHotkeyActivation.FromChord(new GlobalHotkeyGesture(HotkeyModifierKeys.None, 0x78)));
             hotkey.StateToReturn = expectedState;
+            // Deep review R18 (A-#3): GetRuntimeState is a push-fed cache now —
+            // the constructor primes it asynchronously, so bounded-poll for it.
+            await UntilAsync(() => remote.GetRuntimeState() is not null);
             Assert.Equal(expectedState, remote.GetRuntimeState());
 
             var activation = GlobalHotkeyActivation.FromChord(
@@ -652,11 +655,6 @@ public sealed class SettingsIpcFacadeTests : IDisposable
             return Task.CompletedTask;
         }
 
-        public IReadOnlyList<FolderWatcherHealthSnapshot>? GetFolderWatcherHealthSnapshots() =>
-        [
-            new FolderWatcherHealthSnapshot("C:\\watch", FolderWatcherHealth.Watching, true, true, false, 0, null, null),
-        ];
-
         public OrganizationHistoryEntry? GetLatestUndoableDesktopOrganizationEntry() => LatestEntry;
 
         public OrganizationHistoryEntry? GetDesktopOrganizationHistoryEntry(string historyId) =>
@@ -908,7 +906,6 @@ public sealed class SettingsIpcFacadeTests : IDisposable
             await remote.ApplyScreenBindingAsync("w1", WidgetScreenBindingMode.Pinned, "screen-2");
             Assert.Equal(("w1", WidgetScreenBindingMode.Pinned, "screen-2"), loop.Widget.Binding);
 
-            Assert.NotNull(remote.GetFolderWatcherHealthSnapshots());
 
             OrganizationHistoryEntry? latest = remote.GetLatestUndoableDesktopOrganizationEntry();
             Assert.NotNull(latest);

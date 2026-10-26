@@ -1,4 +1,4 @@
-namespace DeskBox.Services;
+﻿namespace DeskBox.Services;
 
 using System.Threading;
 using DeskBox.Contracts;
@@ -475,8 +475,6 @@ public sealed class InProcessSettingsWidgetActions : ISettingsWidgetActions
             ? manager.ApplyScreenBindingAsync(widgetId, mode, boundScreenId, persistImmediately)
             : Task.CompletedTask;
 
-    public IReadOnlyList<FolderWatcherHealthSnapshot>? GetFolderWatcherHealthSnapshots() =>
-        _widgetManager?.GetFolderWatcherHealthSnapshots();
 
     public OrganizationHistoryEntry? GetLatestUndoableDesktopOrganizationEntry() =>
         _organizerService?.GetLatestUndoableEntry();

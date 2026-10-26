@@ -1,4 +1,4 @@
-using DeskBox.Contracts;
+﻿using DeskBox.Contracts;
 using DeskBox.Services;
 
 namespace DeskBox.Tests;
@@ -193,7 +193,6 @@ public sealed class LayoutWriteSyncTests : IDisposable
         public Task<(int MovedCount, Services.WidgetMoveAllUndoToken Token)> MoveAllWidgetSurfacesToDisplayAsync(string displayStableId) => throw new NotImplementedException();
         public Task<bool> UndoMoveAllWidgetSurfacesAsync(Services.WidgetMoveAllUndoToken token) => Task.FromResult(true);
         public Task ApplyScreenBindingAsync(string widgetId, Models.WidgetScreenBindingMode mode, string? boundScreenId, bool persistImmediately = true) => Task.CompletedTask;
-        public IReadOnlyList<Services.FolderWatcherHealthSnapshot>? GetFolderWatcherHealthSnapshots() => null;
         public Models.OrganizationHistoryEntry? GetLatestUndoableDesktopOrganizationEntry() => null;
         public Models.OrganizationHistoryEntry? GetDesktopOrganizationHistoryEntry(string historyId) => null;
         public Task<DesktopOrganizationUndoResult> UndoDesktopOrganizationAsync(string historyId, nint ownerWindowHandle) => throw new NotImplementedException();
