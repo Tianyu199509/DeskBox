@@ -189,12 +189,33 @@ public sealed class WidgetTitleIconAssetStore
             fileStem + extension!.ToLowerInvariant());
 
         // Replace semantics: a previous pick with a different extension must
-        // not survive as a second {stem}.* file.
+        // not survive as a second {stem}.* file. Best-effort with the same
+        // decode-handle tolerance as the swap below (deep review R15, F8
+        // audit): the stale file can equally be held by an in-flight decode,
+        // and a hard failure here aborted the whole copy with no user
+        // feedback — keeping the stale file is harmless (the next pick or
+        // cleanup removes it; only the fresh target path matters).
         foreach (string stale in Directory.EnumerateFiles(directory, fileStem + ".*"))
         {
             if (!string.Equals(stale, targetPath, StringComparison.OrdinalIgnoreCase))
             {
-                File.Delete(stale);
+                for (int attempt = 0; ; attempt++)
+                {
+                    try
+                    {
+                        File.Delete(stale);
+                        break;
+                    }
+                    catch (IOException) when (attempt == 0)
+                    {
+                        await Task.Delay(50);
+                    }
+                    catch (Exception deleteEx)
+                    {
+                        App.Log($"[AssetStore] Stale asset delete failed (kept, harmless): {deleteEx.Message}");
+                        break;
+                    }
+                }
             }
         }
 

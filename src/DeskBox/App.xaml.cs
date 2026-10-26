@@ -4477,6 +4477,10 @@ public partial class App : Application
         Localized.RefreshAll(LocalizationService);
         RefreshTrayMenuText();
         RefreshTrayToolTipText();
+        // Deep review R15 (F9 audit): the taskbar Jump List kept the old
+        // language until the next launch — reconfigure it now (idempotent,
+        // fully fault-tolerant per its contract).
+        _ = JumpListService.ConfigureAsync(LocalizationService);
     }
 
     private void OpenSettings()

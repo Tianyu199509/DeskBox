@@ -1,4 +1,4 @@
-using DeskBox.Models;
+﻿using DeskBox.Models;
 
 namespace DeskBox.Services;
 
@@ -466,7 +466,9 @@ public sealed partial class DesktopOrganizationTransaction
         // (legacy journals written before this field existed, captures that
         // failed, or the rare crash between the physical move and the
         // receipt write) have NO automatic restore authority — the item
-        // stays where it is and the journal keeps the record for the user.
+        // stays where it is, and forward recovery drops it from the journal
+        // (deep review R15, F4 audit: the old comment claimed the record
+        // was kept; the filter in RecoverPendingAsync evicts it).
         if (item.DestinationIdentity is not { } identity)
         {
             return false;

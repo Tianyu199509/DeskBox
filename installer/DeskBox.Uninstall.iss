@@ -1,4 +1,4 @@
-[Code]
+﻿[Code]
 const
   DeskBoxProcessName = 'DeskBox.exe';
   DeskBoxDataSettingsPath = '{localappdata}\DeskBox\data\settings.json';
@@ -937,7 +937,12 @@ begin
   else
   begin
     Result := ConfirmManagedStoragePreserved;
-    if Result then
+    if not Result then
+      // Deep review R15 (F7 audit): in /VERYSILENT runs the suppressed
+      // dialog takes its DEFBUTTON2 default (No) and the uninstaller exited
+      // here with NO log line — automated fleets saw a silent no-op. Say why.
+      Log('DeskBox uninstall aborted: the managed storage folder is not empty (suppressed confirmation defaulted to keep).')
+    else
       OfferManagedStorageShortcut;
     if Result then
       Result := ChooseAppDataRemoval;

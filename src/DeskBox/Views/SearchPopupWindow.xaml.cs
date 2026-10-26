@@ -1,4 +1,4 @@
-using DeskBox.Controls;
+﻿using DeskBox.Controls;
 using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Platform;
@@ -2465,7 +2465,6 @@ public sealed partial class SearchPopupWindow : Window
         e.Handled = true;
     }
 
-    /// <summary>
     private void OnAppIcon_ImageOpened(object sender, RoutedEventArgs e)
     {
         // Icon loaded successfully.
@@ -2488,7 +2487,7 @@ public sealed partial class SearchPopupWindow : Window
         }
     }
 
-    // 鈹€鈹€ Tab bar 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+    // ── Tab bar ─────────────────────────────────────────────────────────────
 
     private void TabsList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
@@ -2519,7 +2518,7 @@ public sealed partial class SearchPopupWindow : Window
         }
     }
 
-    // 鈹€鈹€ Sort headers 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+    // ── Sort headers ────────────────────────────────────────────────────────
 
     private void SortNameHeader_Click(object sender, RoutedEventArgs e)
     {

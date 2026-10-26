@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using DeskBox.FileSafety;
 using DeskBox.Models;
 using DeskBox.Services;
@@ -211,7 +211,7 @@ public sealed class DesktopOrganizationHistoryStoreTests : IDisposable
         var store = new DesktopOrganizationHistoryStore(StorePath);
         store.Entries.Add(CreateEntry("x"));
 
-        Assert.False(store.SaveChecked());
+        Assert.False(store.SaveCheckedAsync().GetAwaiter().GetResult());
     }
 
     [Fact]
