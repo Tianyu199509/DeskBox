@@ -75,6 +75,13 @@
 - A15 崩溃复放：三轮 `repro-plain.ps1`（boot+6s 开设置）全部双进程存活、宿主构造完整（SettingsPerf complete）、当日零 fatal/unhandled。
 - A16 语言：`语言=English` → settings.json `language=en-US`（主进程写盘）+ UI 同会话英文化 → 切回 `zh-CN` 同步。
 
+## 附：R17 第三轮深审（覆盖普查后的真未覆盖域，2026-10-26，本地零推送）
+
+- 覆盖普查（848 文件 28 万行对照前两轮精读清单）+三域探员（G1 窗口层六件/G2 Rust 原生+代理六件/G3+G4 widget 服务与 VM 族约 23k 行）+修复批 eb2b821a，账本=`160-deep-review-ledger-3-20261026.md`。
+- **P1×2 全修**：组拖入回退 async void 无兜底（B 族遗留缺口）；拓扑进闸 R15-2 修一半（三处裸写点补齐）。
+- **P2×7 修**：传输取消回执合并/QC async void×3/托盘动画公共入口/Rust unreachable 地雷/ABI 头镜像。死码四处。
+- G2 总判定=全仓质量最高区域（ABI 纪律/panic 面/协议健壮性）；三批修复对读全完整；第三轮后 P5-1 复跑 17/17。
+
 ## 附：R15 第二轮深审（未覆盖代码域，2026-10-26，本地零推送）
 
 - 六域探员（F1-F9 组）+四批修复（3ae9be52/35a62e8d/4b00a24c/1fbb6372），账本=`160-deep-review-ledger-2-20261026.md`。
