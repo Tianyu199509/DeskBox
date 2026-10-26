@@ -1730,12 +1730,30 @@ public partial class App : Application
             // The availability probe can block on offline devices for the
             // network timeout, so it runs after startup on a pool thread —
             // never inside the settings load/save normalize passes.
-            await RunOptionalStartupStepAsync(
+            // Deep review R15 (F1 audit): this step used to be AWAITED by
+            // the pipeline, so an offline mapped drive stalled every later
+            // step (display watcher, onboarding, surface ensure) for the
+            // SMB timeout, and could trip the 90s startup watchdog into the
+            // unattended-exit loop. The probe is advisory only — truly fire
+            // and forget, matching the comment above.
+            RunOptionalStartupStep(
                 "desktop-organization-target-availability",
-                () => Task.Run(() =>
-                    DesktopOrganizationTargetAvailabilityAdvisor.WarnIfUnavailableTargets(
-                        SettingsService,
-                        ShowDesktopAutoOrganizationTargetUnavailableNotification)));
+                () =>
+                {
+                    _ = Task.Run(() =>
+                    {
+                        try
+                        {
+                            DesktopOrganizationTargetAvailabilityAdvisor.WarnIfUnavailableTargets(
+                                SettingsService,
+                                ShowDesktopAutoOrganizationTargetUnavailableNotification);
+                        }
+                        catch (Exception ex)
+                        {
+                            Log($"[Startup] Target availability probe failed: {ex.Message}");
+                        }
+                    });
+                });
 
             if (!recoveryDecisionPending)
             {
@@ -2383,6 +2401,19 @@ public partial class App : Application
         // The OS ends the process after this flush without the shutdown
         // sequence, so the launch breadcrumb is closed here.
         _startupSessionLedger?.MarkCleanExit();
+        // Deep review R15 (F1 audit): QUERYENDSESSION and ENDSESSION both
+        // route here, and each pass used to perform an unconditional full
+        // settings rewrite (up to 2x3s of UI-thread blocking inside
+        // wndproc). With nothing pending the write is pure cost — skip it.
+        // (The flush itself still clears the pending flag on failure, so
+        // the second phase keeps its own safety net.)
+        if (!SettingsService.HasPendingSave)
+        {
+            Log($"[Lifecycle] No pending settings to flush for {reason}.");
+            DrainLogQueue();
+            return;
+        }
+
         Log($"[Lifecycle] Flushing settings for {reason}.");
         try
         {
@@ -2401,6 +2432,11 @@ public partial class App : Application
         {
             Log($"[Lifecycle] Settings flush threw for {reason}: {ex}");
         }
+
+        // The log queue is asynchronous; the OS terminates the process the
+        // moment this returns, so the tail lines (including the flush
+        // result itself) must be pushed out here or they are lost.
+        DrainLogQueue();
     }
 
     private void ScheduleBackgroundUpdateCheck()
@@ -3714,6 +3750,15 @@ public partial class App : Application
             else
             {
                 DrainPendingNativeNotificationActivations();
+                // Deep review R15 (F1 audit): a secondary instance writes the
+                // pending jump-list/update-result file and then sets the
+                // event; if the primary died in that window the signal died
+                // with it and the stale file survived. Without consuming it
+                // here, the next bare activation hours later replayed the
+                // stale argument (an unexpected toggle/open-storage).
+                // Running the same handler drains those files harmlessly —
+                // no event means no envelope work, just the file take.
+                await HandleExternalActivationAsync();
             }
         }
         finally
@@ -6727,12 +6772,21 @@ public partial class App : Application
             ShutdownStep.Sync("recovery-offer-window", () => { _recoveryOfferWindow?.Close(); _recoveryOfferWindow = null; }),
             ShutdownStep.Sync("elevation-notice-window", () => { _elevationNoticeWindow?.Close(); _elevationNoticeWindow = null; }),
             // Closing a surface may commit its final edit/order. Flush after
-            // those consumers are closed, while persistence services still live.
-            new("settings-flush", async () =>
+            // those consumers are closed, while persistence services still
+            // live. Deep review R15 (F1 audit): this was the ONLY unbounded
+            // IO teardown step — FlushPendingSaveAsync first awaits the
+            // per-directory FileWriteLock, which an in-flight debounced save
+            // stuck on a bad disk could hold forever; with no deadline the
+            // exit backstop (armed only after ShutdownCoreAsync returns)
+            // never armed, leaving the exact zombie shape the backstop was
+            // built to prevent. Same semantics as the backup step: bounded,
+            // no abort — the write itself is IO-only and later teardown
+            // cannot race it into a disposed state.
+            ShutdownStep.Bounded("settings-flush", async () =>
             {
                 if (!await SettingsService.FlushPendingSaveAsync(notifySubscribers: false))
                     throw new IOException("Final settings flush failed.");
-            }),
+            }, shutdownGrace),
             ShutdownStep.Sync("app-subscriptions", () =>
             {
                 SettingsService.PersistenceFailed -= OnSettingsPersistenceFailed;

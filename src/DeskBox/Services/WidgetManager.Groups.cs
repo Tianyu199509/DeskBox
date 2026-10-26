@@ -898,7 +898,15 @@ public sealed partial class WidgetManager
             {
                 if (!topologyPersisted)
                 {
-                    settings.WidgetLayout.WidgetGroups = groupSnapshot;
+                    // Deep review R15 (F2 audit): the `settings` local was
+                    // captured before the awaits above (window creation,
+                    // topology save); if a settings-host commit swapped the
+                    // graph in that window, writing through the STALE local
+                    // evaporated into an orphaned slice — the one true
+                    // lost-write form the reference-sharing guarantee does
+                    // NOT cover. Re-resolve the live graph inside the gate.
+                    _settingsService.MutateGraphUnderLock(() =>
+                        _settingsService.Settings.WidgetLayout.WidgetGroups = groupSnapshot);
                     if (topologySaveAttempted)
                     {
                         try
@@ -935,12 +943,14 @@ public sealed partial class WidgetManager
                 {
                     rollbackSaved = await WidgetGroupPersistedTopologyRecovery
                         .TryRestorePreviousAsync(
-                             () => settings.WidgetLayout.WidgetGroups = groupSnapshot,
+                             () => _settingsService.MutateGraphUnderLock(() =>
+                                 _settingsService.Settings.WidgetLayout.WidgetGroups = groupSnapshot),
                              () => WidgetGroupFailureProbe.Consume("merge-rollback-save")
                                  ? Task.FromResult(false)
                                  : _settingsService.SaveCheckedAsync(
                                      notifySubscribers: false),
-                            () => settings.WidgetLayout.WidgetGroups = committedGroups);
+                            () => _settingsService.MutateGraphUnderLock(() =>
+                                _settingsService.Settings.WidgetLayout.WidgetGroups = committedGroups));
                 }
                 catch (Exception rollbackSaveException)
                 {

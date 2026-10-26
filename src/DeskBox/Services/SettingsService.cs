@@ -1983,6 +1983,14 @@ settings.FocusClickedWidgetOnRaise = false;
         // reverted main-side state (deep review R13).
         parsed.Backup.CopyFrom(before.Backup);
         parsed.CloudBackup.CopyFrom(before.CloudBackup);
+        // Deep review R15 (F2 audit): the managed-storage root is written
+        // only by the MAIN-process migration command; without preserving
+        // it, a host debounced commit racing the migration's disk write
+        // rolled the in-memory root back to the OLD path while widget
+        // MappedFolderPaths already pointed at the new one (orphan-detection
+        // and cleanup silently degraded). Same ownership argument as the
+        // backup domains above.
+        parsed.FileWidget.DefaultManagedStorageRootPath = before.FileWidget.DefaultManagedStorageRootPath;
         // Capsule bar order and free placements are desktop-surface
         // drag state, owned by the main process; the settings tree never
         // writes them.

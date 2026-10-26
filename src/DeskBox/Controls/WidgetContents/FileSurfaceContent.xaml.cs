@@ -4531,7 +4531,15 @@ public sealed partial class FileSurfaceContent :
             : preferredManualIndex;
         ClearDragSessionVisualState();
 
-        DroppedFilePath[] droppedFiles = paths
+        // Deep review R15 (F3 audit): the existence probing below used to
+        // run inline on the UI thread — while the ROUTED drop channel's
+        // identical probe (GetSurfaceDropFilesAsync) was hardened to a
+        // pool thread precisely because provider/ACL/reparse-point probes
+        // on unusual sources (browsers, IM file drops, dead SMB paths) can
+        // block. The native channel exists exactly FOR those unusual
+        // sources; it must not freeze the dispatcher before the busy card
+        // even appears.
+        DroppedFilePath[] droppedFiles = await Task.Run(() => paths
             .Where(path => !string.IsNullOrWhiteSpace(path))
             .Select(path =>
             {
@@ -4550,7 +4558,7 @@ public sealed partial class FileSurfaceContent :
                 path,
                 Path.GetFileName(path),
                 ForceManagedCopy: containsTemporaryFiles))
-            .ToArray();
+            .ToArray());
         if (droppedFiles.Length == 0)
         {
             return false;

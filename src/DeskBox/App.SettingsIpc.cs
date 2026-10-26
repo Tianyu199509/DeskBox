@@ -90,7 +90,14 @@ public partial class App
 
         SettingsService.LocalPersistCompleted += OnSettingsIpcLocalPersistCompleted;
         SettingsService.LayoutPersistCompleted += OnSettingsIpcLayoutPersistCompleted;
-        GlobalHotkeyService.RegistrationChanged += OnSettingsIpcHotkeyRegistrationChanged;
+        // Deep review R15 (F1 audit): global-hotkey-service is an optional
+        // startup step whose constructor failures are swallowed internally,
+        // leaving the property null — R10's live-resolution hardening was
+        // only applied to the SEARCH hotkey side. A null here NRE'd this
+        // step and silently degraded the settings IPC server for the whole
+        // session (settings unopenable). Guard the subscription; the
+        // registration-changed push is a convenience, not a dependency.
+        GlobalHotkeyService?.RegistrationChanged += OnSettingsIpcHotkeyRegistrationChanged;
         DisplayTopologyChanged += OnSettingsIpcDisplayTopologyChanged;
         ScreenHomeChanged += OnSettingsIpcScreenHomeChanged;
         CloudBackupService.BackupRunCompleted += OnSettingsIpcBackupRunCompleted;

@@ -54,6 +54,11 @@ internal sealed class ManagedStorageMigrationService(string journalDirectory)
         return await Task.Run(async () =>
         {
             RequireSupportedVolume(newRoot);
+            // Deep review R15 (F2 audit): the destination-ancestry guard
+            // (rejects reparse-point ancestors) only ran at copy time, so a
+            // junction root previewed green and failed late. Fail at preview
+            // so the user picks a different root before any copying.
+            FileService.RequireStorageDestinationAncestry(newRoot);
             var saved = await ReadAsync(GetJournalPath(newRoot), repair: false);
             bool cleared = false;
             if (saved is { State: not "Committed" })
