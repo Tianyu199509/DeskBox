@@ -1,4 +1,4 @@
-// Copyright (c) DeskBox. All rights reserved.
+﻿// Copyright (c) DeskBox. All rights reserved.
 
 using DeskBox.Helpers;
 using DeskBox.Models;
@@ -244,11 +244,9 @@ public abstract partial class WidgetWindowBase
 
         if (!force && (IsDragging || IsResizing || HasBlockingFlyoutOpen()))
         {
-            if (force || RestoreDesktopLayerWhenIdle)
-            {
-                RestoreDesktopLayerWhenIdle = true;
-            }
-
+            // Deep review R17 (G1 audit): the inner `force ||` was dead
+            // (always false here) — simplified to the plain idempotent set.
+            RestoreDesktopLayerWhenIdle = true;
             return;
         }
 

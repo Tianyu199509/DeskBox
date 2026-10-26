@@ -1,4 +1,4 @@
-use std::slice;
+﻿use std::slice;
 
 use windows::{
     Win32::{
@@ -18,7 +18,8 @@ use windows::{
 };
 
 use crate::{
-    DESKBOX_NATIVE_S_FALSE, DESKBOX_NATIVE_S_OK, DESKBOX_NATIVE_STATUS_COM_INITIALIZATION_FAILED,
+    DESKBOX_NATIVE_E_INVALIDARG, DESKBOX_NATIVE_S_FALSE, DESKBOX_NATIVE_S_OK,
+    DESKBOX_NATIVE_STATUS_COM_INITIALIZATION_FAILED, DESKBOX_NATIVE_STATUS_INVALID_ARGUMENT,
     DESKBOX_NATIVE_STATUS_OBJECT_CREATION_FAILED, DESKBOX_NATIVE_STATUS_OK,
     DESKBOX_NATIVE_STATUS_OPERATION_FAILED, DESKBOX_QUICK_ACCESS_OPERATION_PIN,
     DESKBOX_QUICK_ACCESS_OPERATION_QUERY_PIN_STATE, DESKBOX_QUICK_ACCESS_OPERATION_UNPIN,
@@ -120,7 +121,15 @@ pub(crate) unsafe fn execute(
                 )
             }
         }
-        _ => unreachable!("Quick Access operation was validated before dispatch"),
+        // Deep review R17 (G2 audit): the library is loaded in-process with
+        // panic = "abort" — a validate/dispatch drift here killed the whole
+        // host app instead of reporting an error. Defensive return instead.
+        _ => finish(
+            result,
+            DESKBOX_NATIVE_STATUS_INVALID_ARGUMENT,
+            DESKBOX_NATIVE_E_INVALIDARG,
+            false,
+        ),
     }
 }
 

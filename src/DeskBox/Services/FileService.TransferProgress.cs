@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 using DeskBox.Helpers;
@@ -189,7 +189,7 @@ public sealed partial class FileService
                     operation.DestinationPath))
                 .ToList();
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException exception)
         {
             // Explorer semantics: completed items stay, the in-flight item's
             // partial destination was already removed through its own open
@@ -209,14 +209,22 @@ public sealed partial class FileService
                 $"elapsedMs={reporter.ElapsedMilliseconds}");
             // The completed results ride the exception so callers (history,
             // journals, undo) learn what physically moved even though the
-            // batch stopped early.
-            throw new FileTransferCanceledException(
-                completedOperations
-                    .Select(operation => new FileTransferResult(
-                        operation.SourcePath,
-                        operation.DestinationPath))
-                    .ToList(),
-                cancellationToken);
+            // batch stopped early. Deep review R17 (G3 audit): an item-level
+            // cancel that already carried its own receipts (the cross-volume
+            // directory window: copy done, source not yet deleted) used to be
+            // re-wrapped WITHOUT them — mirroring the failure path's merge
+            // keeps that carefully constructed receipt alive.
+            var cancelSnapshot = completedOperations
+                .Select(operation => new FileTransferResult(
+                    operation.SourcePath,
+                    operation.DestinationPath))
+                .ToList();
+            if (exception is IFileTransferWithCompletedResults itemLevelCancelResults)
+            {
+                cancelSnapshot.AddRange(itemLevelCancelResults.CompletedResults);
+            }
+
+            throw new FileTransferCanceledException(cancelSnapshot, cancellationToken);
         }
         catch (Exception exception)
         {
