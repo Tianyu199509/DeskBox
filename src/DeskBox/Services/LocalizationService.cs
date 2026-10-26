@@ -1,4 +1,4 @@
-﻿﻿﻿﻿using System.Globalization;
+﻿using System.Globalization;
 using System.Reflection;
 using Microsoft.Win32;
 using System.Text.Json;
@@ -35,16 +35,30 @@ public sealed class LocalizationService
 
     public string LanguageSetting => NormalizeLanguageSetting(_settingsService.Settings.Language);
 
+    // Deep review R15 (F8 audit): T() runs on the UI thread ~1000x across
+    // tray menus, notifications, and settings construction, and the default
+    // Language=System setting made EVERY call hit the registry (twice for
+    // locales falling through IsEnglish). Cache the effective culture; it
+    // only changes at SetLanguage/NotifyExternalLanguageChange, both of
+    // which bust the cache.
+    private string? _cachedCultureName;
+
     public string CurrentCultureName
     {
         get
         {
+            if (_cachedCultureName is { } cached)
+            {
+                return cached;
+            }
+
             string language = LanguageSetting;
             if (language == LanguageSystem)
             {
                 language = ResolveDefaultLanguage();
             }
 
+            _cachedCultureName = language;
             return language;
         }
     }
@@ -131,6 +145,7 @@ public sealed class LocalizationService
         }
         // RaiseLanguageChanged must always be called, even if SaveDebounced
         // failed, so that the UI updates to the new language immediately.
+        _cachedCultureName = null;
         RaiseLanguageChanged();
     }
 
@@ -140,7 +155,11 @@ public sealed class LocalizationService
     /// string reads pick the language up from Settings directly, but every
     /// already-rendered surface only refreshes through this event.
     /// </summary>
-    internal void NotifyExternalLanguageChange() => RaiseLanguageChanged();
+    internal void NotifyExternalLanguageChange()
+    {
+        _cachedCultureName = null;
+        RaiseLanguageChanged();
+    }
 
     /// <summary>
     /// Invokes all LanguageChanged handlers, catching exceptions per-handler

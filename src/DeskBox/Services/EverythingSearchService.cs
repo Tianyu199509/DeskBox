@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Threading;
 using DeskBox.Models;
 using DeskBox.Contracts;
 using DeskBox.Platform;
@@ -429,9 +430,28 @@ public sealed class EverythingSearchService : IDisposable, ISearchConnectionClie
                 EverythingNativeMethods.RequestSize |
                 EverythingNativeMethods.RequestDateModified);
 
-            if (EverythingNativeMethods.Query(1) == 0)
+            // Deep review R15 (F6 audit): Query(1) blocks on the IPC reply
+            // with no timeout; an alive-but-hung Everything pinned the gate
+            // forever. Non-blocking submit + bounded poll instead — on
+            // timeout or cancel the query is stopped and the failure routes
+            // through the same EverythingIpcException path as an IPC error.
+            if (EverythingNativeMethods.Query(0) == 0)
             {
                 throw new EverythingIpcException(EverythingNativeMethods.GetLastError());
+            }
+
+            const int QueryWatchdogMs = 10_000;
+            var watchdog = Stopwatch.StartNew();
+            while (!EverythingNativeMethods.IsQueryAvailable())
+            {
+                if (watchdog.ElapsedMilliseconds >= QueryWatchdogMs)
+                {
+                    EverythingNativeMethods.StopQuery();
+                    throw new EverythingIpcException(EverythingNativeMethods.GetLastError());
+                }
+
+                cancellationToken.ThrowIfCancellationRequested();
+                Thread.Sleep(50);
             }
 
             nativeCount = EverythingNativeMethods.GetNumResults();

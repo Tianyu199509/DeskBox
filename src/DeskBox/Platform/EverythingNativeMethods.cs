@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 
 namespace DeskBox.Platform;
 
@@ -59,6 +59,20 @@ internal static class EverythingNativeMethods
     [DllImport(DllName, EntryPoint = "Everything_QueryW", ExactSpelling = true,
         CallingConvention = CallingConvention.StdCall)]
     internal static extern int Query(int wait);
+
+    // Deep review R15 (F6 audit): the blocking Query(1) waits on the IPC
+    // reply with NO timeout — an alive-but-hung Everything pinned a pool
+    // thread AND the service's global native gate forever (every later
+    // search silently queued behind it). The non-blocking form plus a
+    // bounded availability poll (QueryNative) closes that hole.
+    [DllImport(DllName, EntryPoint = "Everything_IsQueryAvailable", ExactSpelling = true,
+        CallingConvention = CallingConvention.StdCall)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool IsQueryAvailable();
+
+    [DllImport(DllName, EntryPoint = "Everything_StopQuery", ExactSpelling = true,
+        CallingConvention = CallingConvention.StdCall)]
+    internal static extern void StopQuery();
 
     [DllImport(DllName, EntryPoint = "Everything_GetLastError", ExactSpelling = true,
         CallingConvention = CallingConvention.StdCall)]

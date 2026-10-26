@@ -2763,7 +2763,29 @@ public partial class App : Application
             SettingsService,
             LocalizationService,
             UiDispatcherQueue,
-            ShowTodoReminderNotification);
+            ShowTodoReminderNotification,
+            TryGetLiveTodoViewModel);
+    }
+
+    /// <summary>
+    /// Single-writer routing target for reminder-side todo mutations (deep
+    /// review R15, F5): returns the materialized todo widget's view model so
+    /// notification completions/snoozes mutate the same in-memory graph the
+    /// live surface saves, instead of racing it with a second file writer.
+    /// Reminder activations arrive marshaled on the UI thread, matching the
+    /// VM's apartment.
+    /// </summary>
+    private ViewModels.TodoWidgetViewModel? TryGetLiveTodoViewModel(string widgetId)
+    {
+        if (WidgetManager?.ContentWidgets.TryGetValue(widgetId, out var window) != true)
+        {
+            return null;
+        }
+
+        return window.CurrentContent is Controls.WidgetContents.TodoWidgetContentAdapter adapter &&
+            adapter.ViewModel.IsInitialized
+                ? adapter.ViewModel
+                : null;
     }
 
     private void StartNativeNotificationService()
