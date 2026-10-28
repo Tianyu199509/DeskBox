@@ -830,6 +830,7 @@ public sealed partial class FileSurfaceContent :
     }
 
     private static bool? s_isProcessElevated;
+    private static bool s_dragAffordanceDisabledLogged;
 
     // Elevated widget windows cannot receive OLE drops from Explorer (UIPI),
     // so the empty state calls that case out instead of letting the drop fail
@@ -849,6 +850,34 @@ public sealed partial class FileSurfaceContent :
         return s_isProcessElevated.Value;
     }
 
+    // The gate itself is silent by design, which made "elevated, affordance
+    // removed" indistinguishable from a dead drag pipeline in field logs —
+    // the 1.5.8+ reorder complaints could not be bucketed without trusting
+    // user-described environments (FB#566 proved those unreliable). One line
+    // per session carries the triage triple: cause attribution, distribution
+    // channel, and the Windows App Runtime build (store installs float it,
+    // direct installs pin it).
+    private static void LogDragAffordanceDisabledOnce()
+    {
+        if (s_dragAffordanceDisabledLogged)
+        {
+            return;
+        }
+
+        s_dragAffordanceDisabledLogged = true;
+        StartupElevationAssessment assessment =
+            DragDropPermissionService.AssessStartupElevation();
+        string runtimeVersion = Win32Helper.GetLoadedModuleProductVersion(
+            "Microsoft.WindowsAppRuntime.dll");
+        App.Log(
+            $"[DragProtocol] stage=DragAffordanceDisabled " +
+            $"attribution={assessment.FullyElevatedAttribution} " +
+            $"mismatch={assessment.Mismatch} " +
+            $"uacDisabled={assessment.IsUacDisabled} " +
+            $"channel={App.Current?.DistributionService.ChannelName ?? "unknown"} " +
+            $"runtime={(runtimeVersion.Length > 0 ? runtimeVersion : "unknown")}");
+    }
+
     // UIElement.CanDrag routes its gesture through StartDragAsync, which
     // WinUI does not support for an elevated process: the call throws inside
     // the drag pipeline before DragStarting could cancel it. Elevated mode
@@ -860,6 +889,7 @@ public sealed partial class FileSurfaceContent :
         if (IsCurrentProcessElevatedCached())
         {
             args.ItemContainer.CanDrag = false;
+            LogDragAffordanceDisabledOnce();
             return;
         }
 
@@ -1302,6 +1332,12 @@ public sealed partial class FileSurfaceContent :
             !_isBoxSelecting &&
             _selectionPressOnRowBlank)
         {
+            // Silent by design (the marquee owns the gesture), but the cancel
+            // needs a fingerprint: without this line a DragStarting log with
+            // no follow-up stage hid the cause entirely.
+            App.Log(
+                $"[DragProtocol] stage=DragCancelled widget={WidgetId} " +
+                $"reason=marquee-pending sender={sender?.GetType().Name}");
             e.Cancel = true;
             return;
         }
@@ -5137,9 +5173,16 @@ public sealed partial class FileSurfaceContent :
             return;
         }
 
-        ViewModel.MoveItemsForReorder(
+        bool flatMoved = ViewModel.MoveItemsForReorder(
             draggedItems,
             targetIndex);
+        if (flatMoved)
+        {
+            // The block lands through a remove+insert rebuild (see
+            // ApplyItemBlockReorder), which drops the ListView selection —
+            // restore it by path like the projection branch above.
+            ScheduleSurfaceReorderSelectionRestore(draggedItems);
+        }
     }
 
     private void PersistSurfaceReorder()

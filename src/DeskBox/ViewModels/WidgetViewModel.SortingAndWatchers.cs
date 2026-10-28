@@ -55,39 +55,13 @@ public partial class WidgetViewModel
     }
 
     /// <summary>
-    /// Moves an item to a new position without persisting to config.
-    /// Used for real-time reordering during drag-over for visual feedback.
-    /// Switches to Manual mode if needed.  Call PersistManualOrder on drop.
-    /// </summary>
-    public bool MoveItemForReorder(WidgetItem item, int targetIndex)
-    {
-        if (Config.SortMode != WidgetSortMode.Manual)
-        {
-            return false;
-        }
-
-        int currentIndex = Items.IndexOf(item);
-        if (currentIndex < 0)
-        {
-            return false;
-        }
-
-        targetIndex = Math.Clamp(targetIndex, 0, Items.Count - 1);
-        if (currentIndex == targetIndex)
-        {
-            return false;
-        }
-
-        Items.Move(currentIndex, targetIndex);
-        return true;
-    }
-
-    /// <summary>
-    /// Block-aware multi-selection variant of <see cref="MoveItemForReorder"/>.
-    /// The dragged items keep their relative order and land as one contiguous
-    /// block. The block is applied through sequential collection moves rather
-    /// than a remove/insert rebuild, which preserves the ListView selection
-    /// across the reorder.
+    /// Applies a reorder drop on the flat (non-stack-projection) item list.
+    /// Single items and multi-selections share one landing primitive: the
+    /// computed insertion index already carries the moving-before-target
+    /// compensation, so both shapes land exactly on the insertion line. The
+    /// rebuild drops the ListView selection; the surface restores it by path
+    /// (ScheduleSurfaceReorderSelectionRestore), mirroring the projection
+    /// path. Call PersistManualOrder on drop.
     /// </summary>
     public bool MoveItemsForReorder(
         IReadOnlyList<WidgetItem> draggedItems,
@@ -99,13 +73,6 @@ public partial class WidgetViewModel
             return false;
         }
 
-        if (draggedItems.Count == 1)
-        {
-            return MoveItemForReorder(
-                draggedItems[0],
-                targetIndex);
-        }
-
         if (!TryComputeItemBlockReorder(
                 Items,
                 draggedItems,
@@ -115,23 +82,43 @@ public partial class WidgetViewModel
             return false;
         }
 
+        ApplyItemBlockReorder(Items, draggedItems, insertionIndex);
+        return true;
+    }
+
+    // Lands the dragged block at the post-removal insertion index through
+    // one remove+insert rebuild. Sequential Items.Move calls cannot express
+    // a block landing — removing a not-yet-placed dragged item shifts the
+    // members already placed, so downward drops scattered (single items one
+    // slot past the insertion line, multi-selections broke apart; regression
+    // window 1.5.8-1.5.9, 9e414687 removed the single-item compensation).
+    // The flat-path twin of the display-unit rebuild in Stacks.cs.
+    internal static void ApplyItemBlockReorder(
+        ObservableCollection<WidgetItem> items,
+        IReadOnlyList<WidgetItem> draggedItems,
+        int insertionIndex)
+    {
         HashSet<WidgetItem> draggedSet = new(
             draggedItems,
             ReferenceEqualityComparer.Instance);
-        foreach (WidgetItem item in Items
-                     .Where(draggedSet.Contains)
-                     .ToList())
+        List<WidgetItem> block = items
+            .Where(draggedSet.Contains)
+            .ToList();
+        foreach (WidgetItem item in block)
         {
-            int currentIndex = IndexOfReference(Items, item, 0);
-            if (currentIndex >= 0 && currentIndex != insertionIndex)
+            int currentIndex = IndexOfReference(items, item, 0);
+            if (currentIndex >= 0)
             {
-                Items.Move(currentIndex, insertionIndex);
+                items.RemoveAt(currentIndex);
             }
-
-            insertionIndex++;
         }
 
-        return true;
+        for (int offset = 0; offset < block.Count; offset++)
+        {
+            items.Insert(
+                Math.Clamp(insertionIndex + offset, 0, items.Count),
+                block[offset]);
+        }
     }
 
     // Computes where a contiguous block move lands: the insertion index

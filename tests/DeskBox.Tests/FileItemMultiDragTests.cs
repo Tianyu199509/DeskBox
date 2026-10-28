@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using DeskBox.Controls;
 using DeskBox.Controls.WidgetContents;
 using DeskBox.Models;
@@ -894,6 +895,165 @@ public sealed class FileItemMultiDragTests
 
         Assert.False(moved);
         Assert.Equal(0, insertionIndex);
+    }
+
+    // The compute→apply pipeline MoveItemsForReorder runs, pinned on the
+    // FINAL order (the index-only tests above could not see the application
+    // loop: between 1.5.8 and 1.5.9 every downward drop landed wrong —
+    // single items one slot past the insertion line, multi-selections
+    // scattered — while these tests' predecessors stayed green).
+    private static List<string> ApplyFlatBlockReorder(
+        ObservableCollection<WidgetItem> items,
+        WidgetItem[] draggedItems,
+        int targetIndex)
+    {
+        bool moved = WidgetViewModel.TryComputeItemBlockReorder(
+            items,
+            draggedItems,
+            targetIndex,
+            out int insertionIndex);
+        if (moved)
+        {
+            WidgetViewModel.ApplyItemBlockReorder(
+                items,
+                draggedItems,
+                insertionIndex);
+        }
+
+        Assert.True(moved);
+        return items.Select(item => item.Path).ToList();
+    }
+
+    [Fact]
+    public void FlatBlockReorder_SingleItemLandsOnInsertionLine_Downward()
+    {
+        WidgetItem first = CreateItem("first.txt");
+        WidgetItem second = CreateItem("second.txt");
+        WidgetItem third = CreateItem("third.txt");
+        WidgetItem fourth = CreateItem("fourth.txt");
+        ObservableCollection<WidgetItem> items = [first, second, third, fourth];
+
+        // Insertion line before fourth: first must land between third and
+        // fourth, not appended after fourth.
+        List<string> order = ApplyFlatBlockReorder(items, [first], targetIndex: 3);
+
+        Assert.Equal(
+        [
+            "second.txt",
+            "third.txt",
+            "first.txt",
+            "fourth.txt"
+        ], order);
+    }
+
+    [Fact]
+    public void FlatBlockReorder_SingleItemLandsOnInsertionLine_Upward()
+    {
+        WidgetItem first = CreateItem("first.txt");
+        WidgetItem second = CreateItem("second.txt");
+        WidgetItem third = CreateItem("third.txt");
+        ObservableCollection<WidgetItem> items = [first, second, third];
+
+        List<string> order = ApplyFlatBlockReorder(items, [third], targetIndex: 0);
+
+        Assert.Equal(
+        [
+            "third.txt",
+            "first.txt",
+            "second.txt"
+        ], order);
+    }
+
+    [Fact]
+    public void FlatBlockReorder_SingleItemAppendsPastLastRealizedItem()
+    {
+        WidgetItem first = CreateItem("first.txt");
+        WidgetItem second = CreateItem("second.txt");
+        WidgetItem third = CreateItem("third.txt");
+        ObservableCollection<WidgetItem> items = [first, second, third];
+
+        List<string> order = ApplyFlatBlockReorder(items, [first], targetIndex: 3);
+
+        Assert.Equal(
+        [
+            "second.txt",
+            "third.txt",
+            "first.txt"
+        ], order);
+    }
+
+    [Fact]
+    public void FlatBlockReorder_BlockLandsContiguousBeforeTarget()
+    {
+        WidgetItem first = CreateItem("first.txt");
+        WidgetItem second = CreateItem("second.txt");
+        WidgetItem third = CreateItem("third.txt");
+        WidgetItem fourth = CreateItem("fourth.txt");
+        WidgetItem fifth = CreateItem("fifth.txt");
+        ObservableCollection<WidgetItem> items = [first, second, third, fourth, fifth];
+
+        // Same shape as TryComputeItemBlockReorder_CompensatesMovingItemsBeforeTarget:
+        // dragging first+third onto the slot before fifth must land the block
+        // at index 2 — contiguous, in display order, before fifth.
+        List<string> order = ApplyFlatBlockReorder(
+            items,
+            [first, third],
+            targetIndex: 4);
+
+        Assert.Equal(
+        [
+            "second.txt",
+            "fourth.txt",
+            "first.txt",
+            "third.txt",
+            "fifth.txt"
+        ], order);
+    }
+
+    [Fact]
+    public void FlatBlockReorder_BlockMovesUpwardContiguous()
+    {
+        WidgetItem first = CreateItem("first.txt");
+        WidgetItem second = CreateItem("second.txt");
+        WidgetItem third = CreateItem("third.txt");
+        WidgetItem fourth = CreateItem("fourth.txt");
+        ObservableCollection<WidgetItem> items = [first, second, third, fourth];
+
+        List<string> order = ApplyFlatBlockReorder(
+            items,
+            [third, fourth],
+            targetIndex: 0);
+
+        Assert.Equal(
+        [
+            "third.txt",
+            "fourth.txt",
+            "first.txt",
+            "second.txt"
+        ], order);
+    }
+
+    [Fact]
+    public void FlatBlockReorder_StraddledDropKeepsRelativeBlockOrder()
+    {
+        WidgetItem first = CreateItem("first.txt");
+        WidgetItem second = CreateItem("second.txt");
+        WidgetItem third = CreateItem("third.txt");
+        ObservableCollection<WidgetItem> items = [first, second, third];
+
+        // Insertion line before third while first is also dragged: the block
+        // keeps its relative order (first stays ahead of third).
+        List<string> order = ApplyFlatBlockReorder(
+            items,
+            [first, third],
+            targetIndex: 2);
+
+        Assert.Equal(
+        [
+            "second.txt",
+            "first.txt",
+            "third.txt"
+        ], order);
     }
 
     private static WidgetItem CreateItem(string path) => new()

@@ -158,10 +158,10 @@ DeskBox 私有文件载荷的移动/快捷方式意图由目标端自行执行�
 
 - 提交端必须解析**全部**被拖项（`ResolveSurfaceReorderItems` + `_surfaceReorderDraggedItems`），禁止回退到 `FirstOrDefault` 单锚点坍缩——那是"多选拖动只动一个"旧缺陷的根因；
 - 块内相对顺序 = 拖动起算时的可见顺序；落点换算用"非移动显示单元计数"（`TryMoveDisplayUnitOverrides` / `TryComputeItemBlockReorder`），不依赖会被成员变更移位的裸索引；
-- 非投影路径用逐项 `Items.Move` 施加（保留 ListView 选择）；投影路径整批只允许**常数次**投影重建 + persist（`MoveVisibleItemsForReorder` 按相位各一次），禁止对 N 个选中项循环调用单项原语——那是投影重建风暴（#576 同型）；
+- 非投影路径以一次「整块移除+整块插回」重建施加（`ApplyItemBlockReorder`，2026-10-26 起）——逐项 `Items.Move` 表达不了整块落位：移除尚未放置的被拖项会把已放置成员左移，1.5.8-1.5.9 因此每一次下移落点都错（单项落后插线一位、多项散块），且当批测试只钉了落点索引、没钉应用后的最终顺序；两条路径的多选保留统一走按路径重放（见末条）；投影路径整批只允许**常数次**投影重建 + persist（`MoveVisibleItemsForReorder` 按相位各一次），禁止对 N 个选中项循环调用单项原语——那是投影重建风暴（#576 同型）；
 - 内联展开叠放的成员：插入点落在本叠放成员区内 → 复用 `MoveStackMembersForReorder` 成员整块排序；落在区外 → 先批量解除成员关系（`DetachStackMembersForBlockReorder`，语义镜像 `RemoveItemsFromStack` 的解散/转手动分支）再作为散件入块；
 - 叠放卡片与文件混选拖动排序维持既有语义（锚点为叠放头时只重排叠放卡片，`GetSelectedItems` 本就剔除卡片）；
-- 投影重建会丢掉拖动用的多选；主表面与弹窗的重排成功路径都必须按路径重放选择（`ScheduleSurfaceReorderSelectionRestore` / `ScheduleStackPopoverReorderSelectionRestore`，低优先级延迟——弹窗侧需双跳以落在 `ApplyStackProjectionChange` 的延迟清选之后）。
+- 重排施加的集合重建（投影与扁平两路）都会丢掉拖动用的多选；主表面与弹窗的重排成功路径都必须按路径重放选择（`ScheduleSurfaceReorderSelectionRestore` / `ScheduleStackPopoverReorderSelectionRestore`，低优先级延迟——弹窗侧需双跳以落在 `ApplyStackProjectionChange` 的延迟清选之后）。
 
 ## 6. 事件链与状态清理
 
