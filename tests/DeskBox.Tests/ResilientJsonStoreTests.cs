@@ -43,12 +43,12 @@ public sealed class ResilientJsonStoreTests : IDisposable
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task SaveAsync_OtherReplaceFailure_PropagatesWithoutChangingPrimary(bool useUtf8)
+    public async Task SaveAsync_NonTransientReplaceFailure_PropagatesWithoutChangingPrimary(bool useUtf8)
     {
         string storePath = Path.Combine(_tempRoot, "settings.json");
         const string originalJson = "{\"value\":\"original\"}";
         await File.WriteAllTextAsync(storePath, originalJson);
-        var expected = new IOException("sharing violation", unchecked((int)0x80070020));
+        var expected = new IOException("disk full", unchecked((int)0x80070070));
 
         IOException actual = await Assert.ThrowsAsync<IOException>(() =>
             SaveAsync(
@@ -62,6 +62,193 @@ public sealed class ResilientJsonStoreTests : IDisposable
         Assert.Equal(originalJson, await File.ReadAllTextAsync(storePath));
         Assert.False(File.Exists(ResilientJsonStore.GetBackupPath(storePath)));
         Assert.Empty(Directory.EnumerateFiles(_tempRoot, "*.tmp"));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SaveAsync_SharingViolationTransientlyHeld_RecoversOnRetry(bool useUtf8)
+    {
+        string storePath = Path.Combine(_tempRoot, "settings.json");
+        const string originalJson = "{\"value\":\"original\"}";
+        const string updatedJson = "{\"value\":\"更新 🌏\"}";
+        await File.WriteAllTextAsync(storePath, originalJson);
+        int replaceAttempts = 0;
+
+        await SaveAsync(
+            storePath,
+            updatedJson,
+            useUtf8,
+            (sourcePath, destinationPath, backupPath, ignoreMetadataErrors) =>
+            {
+                replaceAttempts++;
+                if (replaceAttempts <= 2)
+                {
+                    throw new IOException(
+                        "sharing violation",
+                        ResilientJsonStore.SharingViolationHResult);
+                }
+
+                File.Replace(sourcePath, destinationPath, backupPath, ignoreMetadataErrors);
+            },
+            _ => Task.CompletedTask);
+
+        Assert.Equal(3, replaceAttempts);
+        Assert.Equal(updatedJson, await File.ReadAllTextAsync(storePath));
+        Assert.Equal(
+            originalJson,
+            await File.ReadAllTextAsync(ResilientJsonStore.GetBackupPath(storePath)));
+        Assert.Empty(Directory.EnumerateFiles(_tempRoot, "*.tmp"));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SaveAsync_SharingViolationHeldTooLong_UsesVerifiedInPlaceFallback(bool useUtf8)
+    {
+        string storePath = Path.Combine(_tempRoot, "settings.json");
+        const string originalJson = "{\"value\":\"original\"}";
+        const string updatedJson = "{\"value\":\"更新 🌏\"}";
+        await File.WriteAllTextAsync(storePath, originalJson);
+        int replaceAttempts = 0;
+
+        await SaveAsync(
+            storePath,
+            updatedJson,
+            useUtf8,
+            (_, _, _, _) =>
+            {
+                replaceAttempts++;
+                throw new IOException(
+                    "sharing violation",
+                    ResilientJsonStore.SharingViolationHResult);
+            },
+            _ => Task.CompletedTask);
+
+        // 1 initial attempt + both retry delays, then the guarded fallback.
+        Assert.Equal(3, replaceAttempts);
+        Assert.Equal(updatedJson, await File.ReadAllTextAsync(storePath));
+        Assert.Equal(
+            originalJson,
+            await File.ReadAllTextAsync(ResilientJsonStore.GetBackupPath(storePath)));
+        Assert.Empty(Directory.EnumerateFiles(_tempRoot, "*.tmp"));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SaveAsync_SharingViolationAfterPartialReplace_DoesNotUseFallback(bool useUtf8)
+    {
+        string storePath = Path.Combine(_tempRoot, "settings.json");
+        const string originalJson = "{\"value\":\"original\"}";
+        await File.WriteAllTextAsync(storePath, originalJson);
+
+        // A replace stopped mid-way can leave the primary renamed away; the
+        // existence guard must fail closed instead of trusting the fallback.
+        await Assert.ThrowsAsync<IOException>(() =>
+            SaveAsync(
+                storePath,
+                "{\"value\":\"updated\"}",
+                useUtf8,
+                (_, destinationPath, _, _) =>
+                {
+                    File.Delete(destinationPath);
+                    throw new IOException(
+                        "sharing violation",
+                        ResilientJsonStore.SharingViolationHResult);
+                },
+                _ => Task.CompletedTask));
+
+        Assert.False(File.Exists(storePath));
+        Assert.False(File.Exists(ResilientJsonStore.GetBackupPath(storePath)));
+        Assert.Empty(Directory.EnumerateFiles(_tempRoot, "*.tmp"));
+    }
+
+    [Fact]
+    public async Task LoadAsync_PrimaryLockedByExternalHandle_KeepsPrimaryAndUsesBackup()
+    {
+        string storePath = Path.Combine(_tempRoot, "locked-primary.json");
+        const string firstJson = "{\"value\":\"第一次 📁\"}";
+        const string secondJson = "{\"value\":\"第二次 🌏\"}";
+        await File.WriteAllTextAsync(storePath, firstJson);
+        await File.WriteAllTextAsync(ResilientJsonStore.GetBackupPath(storePath), secondJson);
+
+        await using (new FileStream(
+            storePath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.None))
+        {
+            var result = await ResilientJsonStore.LoadWithResultAsync(
+                storePath,
+                json =>
+                {
+                    using var document = JsonDocument.Parse(json);
+                    return document.RootElement.GetProperty("value").GetString()!;
+                },
+                () => "default",
+                "ResilientJsonStoreTests");
+
+            Assert.Equal(ResilientJsonLoadSource.Backup, result.Source);
+            Assert.Equal("第二次 🌏", result.Value);
+            Assert.Empty(Directory.EnumerateFiles(_tempRoot, "*.corrupt-*"));
+        }
+
+        // A locked-but-valid primary must not be quarantined, and the backup
+        // must not be restored over it: both would silently roll the store
+        // back once the external handle goes away. The next load converges
+        // on the primary bytes.
+        Assert.Equal(firstJson, await File.ReadAllTextAsync(storePath));
+        Assert.Equal(
+            secondJson,
+            await File.ReadAllTextAsync(ResilientJsonStore.GetBackupPath(storePath)));
+        var converged = await ResilientJsonStore.LoadWithResultAsync(
+            storePath,
+            json =>
+            {
+                using var document = JsonDocument.Parse(json);
+                return document.RootElement.GetProperty("value").GetString()!;
+            },
+            () => "default",
+            "ResilientJsonStoreTests");
+        Assert.Equal(ResilientJsonLoadSource.Primary, converged.Source);
+        Assert.Equal("第一次 📁", converged.Value);
+    }
+
+    [Fact]
+    public async Task LoadAsync_BackupLockedByExternalHandle_KeepsBackupAndFallsBackToDefault()
+    {
+        string storePath = Path.Combine(_tempRoot, "locked-backup.json");
+        const string backupJson = "{\"value\":\"备份 📁\"}";
+        await File.WriteAllTextAsync(storePath, "{invalid");
+        string backupPath = ResilientJsonStore.GetBackupPath(storePath);
+        await File.WriteAllTextAsync(backupPath, backupJson);
+
+        await using (new FileStream(
+            backupPath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.None))
+        {
+            var result = await ResilientJsonStore.LoadWithResultAsync(
+                storePath,
+                json =>
+                {
+                    using var document = JsonDocument.Parse(json);
+                    return document.RootElement.GetProperty("value").GetString()!;
+                },
+                () => "default",
+                "ResilientJsonStoreTests");
+
+            Assert.Equal(ResilientJsonLoadSource.DefaultAfterFailure, result.Source);
+            Assert.Equal("default", result.Value);
+            // The genuinely corrupt primary is still quarantined; the merely
+            // locked backup is not — it keeps its bytes for the next load.
+            Assert.Single(Directory.EnumerateFiles(_tempRoot, "*.corrupt-*"));
+            Assert.False(File.Exists(storePath));
+        }
+
+        Assert.Equal(backupJson, await File.ReadAllTextAsync(backupPath));
     }
 
     [Theory]
