@@ -1234,6 +1234,108 @@ public static partial class Win32Helper
     [LibraryImport("kernel32.dll", EntryPoint = "GetModuleHandleW", StringMarshalling = StringMarshalling.Utf16)]
     public static partial IntPtr GetModuleHandle(string? lpModuleName);
 
+    [LibraryImport("kernel32.dll", EntryPoint = "GetModuleFileNameW", SetLastError = true)]
+    public static partial int GetModuleFileName(IntPtr hModule, IntPtr lpFilename, int nSize);
+
+    [LibraryImport("version.dll", EntryPoint = "GetFileVersionInfoSizeW", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
+    public static partial int GetFileVersionInfoSize(string lpFilename, out uint lpdwHandle);
+
+    [LibraryImport("version.dll", EntryPoint = "GetFileVersionInfoW", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool GetFileVersionInfo(string lpFilename, uint dwHandle, int dwLen, IntPtr lpData);
+
+    [LibraryImport("version.dll", EntryPoint = "VerQueryValueW", StringMarshalling = StringMarshalling.Utf16)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool VerQueryValue(IntPtr pBlock, string lpSubBlock, out IntPtr lplpBuffer, out int puLen);
+
+    /// <summary>
+    /// Product version of a module loaded into this process, e.g.
+    /// "Microsoft.WindowsAppRuntime.dll" → "2.5.1". Empty when the module is
+    /// absent or carries no version resource — callers render a fallback.
+    /// </summary>
+    public static string GetLoadedModuleProductVersion(string moduleName)
+    {
+        try
+        {
+            IntPtr module = GetModuleHandle(moduleName);
+            if (module == IntPtr.Zero)
+            {
+                return string.Empty;
+            }
+
+            const int pathCapacityChars = 1024;
+            IntPtr pathBuffer = Marshal.AllocHGlobal(pathCapacityChars * 2);
+            try
+            {
+                int pathLength = GetModuleFileName(
+                    module,
+                    pathBuffer,
+                    pathCapacityChars);
+                if (pathLength <= 0)
+                {
+                    return string.Empty;
+                }
+
+                string? modulePath = Marshal.PtrToStringUni(pathBuffer, pathLength);
+                if (string.IsNullOrWhiteSpace(modulePath))
+                {
+                    return string.Empty;
+                }
+
+                int infoSize = GetFileVersionInfoSize(modulePath, out _);
+                if (infoSize <= 0)
+                {
+                    return string.Empty;
+                }
+
+                IntPtr infoBuffer = Marshal.AllocHGlobal(infoSize);
+                try
+                {
+                    if (!GetFileVersionInfo(modulePath, 0, infoSize, infoBuffer) ||
+                        !VerQueryValue(
+                            infoBuffer,
+                            @"\VarFileInfo\Translation",
+                            out IntPtr translation,
+                            out _))
+                    {
+                        return string.Empty;
+                    }
+
+                    if (translation == IntPtr.Zero)
+                    {
+                        return string.Empty;
+                    }
+
+                    // The translation table carries the language/codepage the
+                    // version strings are keyed under; read the first entry.
+                    short language = Marshal.ReadInt16(translation);
+                    short codePage = Marshal.ReadInt16(translation, 2);
+                    string versionBlock =
+                        $@"\StringFileInfo\{language:X4}{codePage:X4}\ProductVersion";
+                    if (VerQueryValue(infoBuffer, versionBlock, out IntPtr value, out _) &&
+                        value != IntPtr.Zero)
+                    {
+                        return Marshal.PtrToStringUni(value) ?? string.Empty;
+                    }
+
+                    return string.Empty;
+                }
+                finally
+                {
+                    Marshal.FreeHGlobal(infoBuffer);
+                }
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(pathBuffer);
+            }
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
     [LibraryImport("shell32.dll", EntryPoint = "ShellExecuteW", StringMarshalling = StringMarshalling.Utf16)]
     public static partial IntPtr ShellExecute(
         IntPtr hwnd,

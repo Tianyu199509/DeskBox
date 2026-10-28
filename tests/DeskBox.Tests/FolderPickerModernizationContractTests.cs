@@ -6,25 +6,31 @@ namespace DeskBox.Tests;
 public sealed class FolderPickerModernizationContractTests
 {
     [Fact]
-    public void FolderPickerService_UsesModernWindowIdPickerWithoutLegacyCom()
+    public void FolderPickerService_ShowsTheNativeStaDialogAndLogsEveryOutcome()
     {
+        // Decision reversal (2026-10-27, WeChat map-folder diagnostics): the
+        // WinAppSDK FolderPicker runs IFileOpenDialog::Show on a background
+        // MTA thread and folds every failure — including the dialog never
+        // appearing — into a silent null, which users saw as "clicking does
+        // nothing". The native STA dialog replaces it; every pick must leave
+        // an outcome line (owner source + HRESULT + elapsed separate an
+        // environment-killed dialog from a human-paced one).
         string source = ReadSource("src/DeskBox/Services/FolderPickerService.cs");
 
-        Assert.Contains("using Microsoft.Windows.Storage.Pickers;", source, StringComparison.Ordinal);
+        Assert.Contains("NativeFileOpenDialog.ShowPickFolder(", source, StringComparison.Ordinal);
         Assert.Contains(
-            "public static async Task<string?> PickFolderAsync(IntPtr ownerHwnd)",
+            "public static FolderPickResult PickFolderWithOutcome(",
             source,
             StringComparison.Ordinal);
-        Assert.Contains("Win32Interop.GetWindowIdFromWindow(ownerHwnd)", source, StringComparison.Ordinal);
-        Assert.Contains("new FolderPicker(ownerWindowId)", source, StringComparison.Ordinal);
-        Assert.Contains("await picker.PickSingleFolderAsync()", source, StringComparison.Ordinal);
-        Assert.Contains("result?.Path", source, StringComparison.Ordinal);
+        Assert.Contains("[FolderPicker] outcome=", source, StringComparison.Ordinal);
+        Assert.Contains("owner={owner}", source, StringComparison.Ordinal);
+        Assert.Contains("elapsedMs={stopwatch.ElapsedMilliseconds}", source, StringComparison.Ordinal);
+        Assert.Contains("hr=0x{ex.HResult:X8}", source, StringComparison.Ordinal);
+        Assert.Contains("FolderPickOutcome.Failed", source, StringComparison.Ordinal);
 
-        Assert.DoesNotContain("ComImport", source, StringComparison.Ordinal);
-        Assert.DoesNotContain("IFileOpenDialog", source, StringComparison.Ordinal);
-        Assert.DoesNotContain("FileOpenDialog", source, StringComparison.Ordinal);
-        Assert.DoesNotContain("StartDialogTopMostMonitor", source, StringComparison.Ordinal);
-        Assert.DoesNotContain("dialog.Show(ownerHwnd)", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("using Microsoft.Windows.Storage.Pickers;", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("PickSingleFolderAsync", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("Win32Interop.GetWindowIdFromWindow", source, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -100,10 +106,9 @@ public sealed class FolderPickerModernizationContractTests
     [Fact]
     public void AllSevenProductEntrances_AwaitTheOwnerAwarePicker()
     {
+        // The five settings-side entrances keep awaiting the task wrapper.
         var expectedCalls = new Dictionary<string, int>
         {
-            ["src/DeskBox/App.Tray.cs"] = 1,
-            ["src/DeskBox/Services/JumpListService.cs"] = 1,
             ["src/DeskBox/Views/SettingsSections/GlanceWidgetSettingsSection.xaml.cs"] = 1,
             ["src/DeskBox/Views/SettingsWindow.Maintenance.cs"] = 3,
             ["src/DeskBox/Views/SettingsWindow.StorageAndUpdates.cs"] = 1
@@ -127,7 +132,21 @@ public sealed class FolderPickerModernizationContractTests
             totalCalls += callCount;
         }
 
-        Assert.Equal(7, totalCalls);
+        Assert.Equal(5, totalCalls);
+
+        // Tray and jump-list entrances route through the shared
+        // CreateFolderWidgetFromPickerAsync (with the owner-source label and
+        // the failure toast) instead of duplicating the pick inline.
+        string tray = ReadSource("src/DeskBox/App.Tray.cs");
+        Assert.Contains(
+            "FolderPickerService.PickFolderWithOutcome(",
+            tray,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("await FolderPickerService.PickFolderAsync(", tray, StringComparison.Ordinal);
+
+        string jumpList = ReadSource("src/DeskBox/Services/JumpListService.cs");
+        Assert.DoesNotContain("FolderPickerService.PickFolder", jumpList, StringComparison.Ordinal);
+        Assert.Contains("app.CreateFolderWidgetFromPickerAsync()", jumpList, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -136,11 +155,17 @@ public sealed class FolderPickerModernizationContractTests
         string tray = ReadSource("src/DeskBox/App.Tray.cs");
         string jumpList = ReadSource("src/DeskBox/Services/JumpListService.cs");
 
-        Assert.Contains("internal IntPtr GetFolderPickerOwnerWindowHandle()", tray, StringComparison.Ordinal);
+        Assert.Contains("internal IntPtr GetFolderPickerOwner(out PickerOwnerSource source)", tray, StringComparison.Ordinal);
         Assert.Contains("WindowNative.GetWindowHandle(_trayWindow)", tray, StringComparison.Ordinal);
         Assert.Contains("Win32Helper.IsWindow(ownerHwnd)", tray, StringComparison.Ordinal);
-        Assert.Contains("GetFolderPickerOwnerWindowHandle());", tray, StringComparison.Ordinal);
-        Assert.Contains("app.GetFolderPickerOwnerWindowHandle());", jumpList, StringComparison.Ordinal);
+        Assert.Contains("GetFolderPickerOwner(out PickerOwnerSource ownerSource)", tray, StringComparison.Ordinal);
+
+        // The owner source is a diagnostic discriminator for map-folder
+        // failures, and the jump-list folder-map pick must leave its
+        // activation frame before showing the modal dialog so a cold-start
+        // activation cannot hold the launch pipeline hostage.
+        Assert.Contains("DescribePickerOwner(", tray, StringComparison.Ordinal);
+        Assert.Contains("UiDispatch.PostAfterCallback(", jumpList, StringComparison.Ordinal);
     }
 
     [Fact]

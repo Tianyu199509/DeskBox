@@ -1196,18 +1196,32 @@ public partial class App
 
     internal async Task CreateFolderWidgetFromPickerAsync()
     {
-        string? folderPath = await FolderPickerService.PickFolderAsync(
-            GetFolderPickerOwnerWindowHandle());
-        if (!string.IsNullOrWhiteSpace(folderPath))
+        FolderPickResult pick = FolderPickerService.PickFolderWithOutcome(
+            GetFolderPickerOwner(out PickerOwnerSource ownerSource),
+            DescribePickerOwner(ownerSource));
+        if (pick.Outcome == FolderPickOutcome.Failed)
         {
-            await TryCreateFolderWidgetAsync(folderPath);
+            // The picker used to fold this into a silent null (a click that
+            // did nothing at all); the toast makes a dead picker visible and
+            // carries the HRESULT for support.
+            ShowFolderMappingFailure(LocalizationService.Format(
+                "Widget.MapFolder.PickerFailedBody",
+                $"0x{pick.HResult:X8}"));
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(pick.Folder))
+        {
+            await TryCreateFolderWidgetAsync(pick.Folder);
         }
     }
 
     /// <summary>
-    /// Creates a mapped widget, or resolves a path conflict visibly: the
-    /// conflicting widget is revealed, or the storage settings open. A toast
-    /// alone was easy to miss and left users thinking mapping was broken.
+    /// Creates a mapped widget, or resolves a path conflict visibly through
+    /// <see cref="FolderMappingConflictWindow"/>. The earlier design (toast
+    /// plus an unasked settings jump) explained nothing on machines where
+    /// notifications never render — elevated processes above all — and field
+    /// users read it as "confirm does nothing".
     /// </summary>
     internal async Task TryCreateFolderWidgetAsync(string folderPath)
     {
@@ -1219,7 +1233,7 @@ public partial class App
         if (widgetManager.TryGetFileWidgetPathConflict(folderPath, out FileWidgetPathConflict? conflict) &&
             conflict is not null)
         {
-            await HandleFolderMappingConflictAsync(conflict);
+            await HandleFolderMappingConflictAsync(folderPath, conflict);
             return;
         }
 
@@ -1233,30 +1247,125 @@ public partial class App
         }
     }
 
-    private async Task HandleFolderMappingConflictAsync(FileWidgetPathConflict conflict)
+    private async Task HandleFolderMappingConflictAsync(
+        string folderPath,
+        FileWidgetPathConflict conflict)
     {
-        if (conflict.Kind == FileWidgetPathConflictKind.ExistingWidget &&
-            conflict.ConflictingWidget is { } existing &&
-            WidgetManager is { } widgetManager)
+        if (WidgetManager is not { } widgetManager)
         {
-            ShowFolderMappingFailure(LocalizationService.Format(
-                "Widget.MapFolder.ConflictWidgetHint",
-                existing.Name));
-            try
-            {
-                await widgetManager.ShowWidgetAsync(existing.Id, reveal: true);
-            }
-            catch (Exception ex)
-            {
-                Log($"[WidgetMapping] Could not reveal the conflicting widget: {ex.Message}");
-            }
-
             return;
         }
 
-        ShowFolderMappingFailure(LocalizationService.T("Widget.MapFolder.ConflictRootHint"));
-        ShowSettings("FileStorageSettings");
+        string kindToken;
+        string relationToken;
+        string body;
+        string? conflictingWidgetId = null;
+        FileWidgetPathRelation relation;
+        if (conflict.Kind == FileWidgetPathConflictKind.ExistingWidget &&
+            conflict.ConflictingWidget is { } existing)
+        {
+            kindToken = "existing-widget";
+            relation = global::DeskBox.Services.WidgetManager.DescribeFileWidgetPathRelation(
+                folderPath,
+                existing.MappedFolderPath!);
+            relationToken = DescribeFileWidgetRelation(relation);
+            body = LocalizationService.Format(
+                "Widget.MapFolder.ConflictDialogWidgetBody",
+                existing.Name);
+            conflictingWidgetId = existing.Id;
+        }
+        else
+        {
+            string storageRoot = SettingsService.NormalizeManagedStorageRootPath(
+                SettingsService.Settings.FileWidget.DefaultManagedStorageRootPath);
+            kindToken = "storage-root";
+            relation = global::DeskBox.Services.WidgetManager.DescribeFileWidgetPathRelation(folderPath, storageRoot);
+            relationToken = DescribeFileWidgetRelation(relation);
+            body = widgetManager.FormatFileWidgetPathConflictMessage(
+                folderPath,
+                LocalizationService.T("WidgetTitleIcon.Label.ManagedStorage"),
+                storageRoot);
+            if (relation == FileWidgetPathRelation.CandidateInsideOther)
+            {
+                // Moving the storage root migrates the whole tree, so the
+                // "move it out first" guidance is the only real way out for
+                // a folder inside the managed tree.
+                body += "\n\n" + LocalizationService.T("Widget.MapFolder.ConflictInsideExtraHint");
+            }
+        }
+
+        // The conflict flow used to be zero-log, which sent the first
+        // diagnostics round after a picker failure that never happened.
+        Log($"[WidgetMapping] outcome=conflict kind={kindToken} relation={relationToken}");
+
+        FolderMappingConflictWindow window = ShowFolderMappingConflictWindow(
+            body,
+            FolderMappingConflictWindow.PlanButtons(conflict.Kind, relation));
+        switch (await window.Completion)
+        {
+            case FolderMappingConflictResult.OpenWidget when conflictingWidgetId is not null:
+                try
+                {
+                    await widgetManager.ShowWidgetAsync(conflictingWidgetId, reveal: true);
+                }
+                catch (Exception ex)
+                {
+                    Log($"[WidgetMapping] Could not reveal the conflicting widget: {ex.Message}");
+                }
+
+                break;
+
+            case FolderMappingConflictResult.ChangeStorage:
+                ShowSettings("FileStorageSettings");
+                break;
+
+            case FolderMappingConflictResult.Repick:
+                await CreateFolderWidgetFromPickerAsync();
+                break;
+        }
     }
+
+    private Window? _folderMappingConflictWindow;
+
+    private FolderMappingConflictWindow ShowFolderMappingConflictWindow(
+        string body,
+        FolderMappingConflictButtonPlan plan)
+    {
+        if (_folderMappingConflictWindow is not null)
+        {
+            try
+            {
+                _folderMappingConflictWindow.Close();
+            }
+            catch (Exception ex)
+            {
+                Log($"[WidgetMapping] Stale conflict window close failed: {ex.Message}");
+            }
+
+            _folderMappingConflictWindow = null;
+        }
+
+        var window = new FolderMappingConflictWindow(LocalizationService, body, plan);
+        window.Closed += (_, _) =>
+        {
+            if (ReferenceEquals(_folderMappingConflictWindow, window))
+            {
+                _folderMappingConflictWindow = null;
+            }
+        };
+        ThemeService.TrackWindow(window);
+        _folderMappingConflictWindow = window;
+        window.Activate();
+        return window;
+    }
+
+    private static string DescribeFileWidgetRelation(FileWidgetPathRelation relation) => relation switch
+    {
+        FileWidgetPathRelation.SameDirectory => "same",
+        FileWidgetPathRelation.CandidateInsideOther => "inside",
+        FileWidgetPathRelation.CandidateContainsOther => "contains",
+        _ => "unresolvable",
+    };
 
     private void ShowFolderMappingFailure(string message)
     {
@@ -1290,7 +1399,7 @@ public partial class App
         }
     }
 
-    internal IntPtr GetFolderPickerOwnerWindowHandle()
+    internal IntPtr GetFolderPickerOwner(out PickerOwnerSource source)
     {
         // A picker dialog follows its owner's virtual desktop and DWM cloak
         // state: when the tray host stays behind on a desktop the user has
@@ -1309,18 +1418,33 @@ public partial class App
             ? IntPtr.Zero
             : WindowNative.GetWindowHandle(_folderPickerHelperWindow);
 
-        return PickerOwnerResolutionPolicy.Resolve(
+        PickerOwnerSource resolved = PickerOwnerResolutionPolicy.Resolve(
             IsUsablePickerOwner(trayHwnd),
             IsUsablePickerOwner(settingsHwnd) &&
                 Win32Helper.IsWindowVisible(settingsHwnd),
-            IsUsablePickerOwner(helperHwnd)) switch
+            IsUsablePickerOwner(helperHwnd));
+        source = resolved;
+        return resolved switch
         {
             PickerOwnerSource.TrayWindow => trayHwnd,
             PickerOwnerSource.SettingsWindow => settingsHwnd,
             PickerOwnerSource.CachedHelperWindow => helperHwnd,
-            _ => RecreateFolderPickerHelperWindow()
+            _ => RecreateFolderPickerHelperWindow(),
         };
     }
+
+    /// <summary>
+    /// The picker-owner source is a diagnostic discriminator: folder-pick
+    /// failures that only ever happen with one owner source point at the
+    /// owner window, not at the dialog.
+    /// </summary>
+    internal static string DescribePickerOwner(PickerOwnerSource source) => source switch
+    {
+        PickerOwnerSource.TrayWindow => "tray",
+        PickerOwnerSource.SettingsWindow => "settings",
+        PickerOwnerSource.CachedHelperWindow => "helper-cached",
+        _ => "helper-fresh",
+    };
 
     private static bool IsUsablePickerOwner(IntPtr ownerHwnd)
     {

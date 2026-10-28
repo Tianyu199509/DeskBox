@@ -118,7 +118,14 @@ public sealed partial class ContentWidgetWindow
             Icon = new SymbolIcon(Symbol.OpenFile)
         };
         mapFolderItem.Click += async (_, _) =>
+        {
+            // The native picker is modal on this thread; give the flyout its
+            // close before the dialog takes over the message loop (the tray
+            // entrance hides + yields for the same reason).
+            flyout.Hide();
+            await Task.Yield();
             await App.Current.CreateFolderWidgetFromPickerAsync();
+        };
         flyout.Items.Add(mapFolderItem);
 
         var addFeatureWidgetItem = new MenuFlyoutItem

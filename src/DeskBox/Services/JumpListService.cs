@@ -147,12 +147,19 @@ public static class JumpListService
                 case ArgNewFolderWidget:
                     if (app.WidgetManager is not null)
                     {
-                        string? folderPath = await FolderPickerService.PickFolderAsync(
-                            app.GetFolderPickerOwnerWindowHandle());
-                        if (!string.IsNullOrWhiteSpace(folderPath))
-                        {
-                            await app.TryCreateFolderWidgetAsync(folderPath);
-                        }
+                        // The native folder dialog is modal on the UI thread,
+                        // and jump-list activation can arrive mid-startup:
+                        // blocking OnLaunched inside the dialog would hold
+                        // the launch pipeline hostage until it closes. Leave
+                        // the activation frame first (the same
+                        // callback-isolation invariant the tray uses), so the
+                        // modal runs once startup's synchronous work drains —
+                        // its message loop keeps pumping queued startup work
+                        // while it is up.
+                        UiDispatch.PostAfterCallback(() =>
+                            App.SafeFireAndForget(
+                                () => app.CreateFolderWidgetFromPickerAsync(),
+                                "jump-list-folder-map"));
                     }
                     break;
 

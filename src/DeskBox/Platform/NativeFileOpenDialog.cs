@@ -14,7 +14,8 @@ namespace DeskBox.Platform;
 /// returns the target's path, which turned "add file" into a move of the
 /// target entity (issue 458). This dialog pins the no-dereference option so
 /// a selected shortcut is added as the .lnk itself, matching Explorer's own
-/// picker semantics.
+/// picker semantics. The folder mode deliberately keeps dereferencing:
+/// mapping a shortcut should map the real target folder it points to.
 /// </remarks>
 internal static unsafe class NativeFileOpenDialog
 {
@@ -30,8 +31,16 @@ internal static unsafe class NativeFileOpenDialog
     private const uint FosPathMustExist = 0x00000800;
     private const uint FosFileMustExist = 0x00001000;
     private const uint FosNoDereferenceLinks = 0x00100000;
+    private const uint FosPickFolders = 0x00000020;
     private const uint SigdnFileSysPath = 0x80058000;
-    private const int HResultCancelled = unchecked((int)0x800704C5);
+
+    // ERROR_CANCELLED is 1223 (0x4C7): IFileDialog::Show returns
+    // HRESULT_FROM_WIN32(ERROR_CANCELLED) when the user dismisses the
+    // dialog without a selection.
+    private const int HResultCancelled = unchecked((int)0x800704C7);
+
+    /// <summary>True when the dialog ended with a plain user cancel.</summary>
+    internal static bool IsUserCancelled(int hr) => hr == HResultCancelled;
 
     [DllImport("ole32.dll")]
     private static extern int CoCreateInstance(
@@ -51,14 +60,7 @@ internal static unsafe class NativeFileOpenDialog
     [DllImport("ole32.dll")]
     private static extern void CoTaskMemFree(IntPtr block);
 
-    /// <summary>
-    /// Shows the modal multi-select open dialog on the caller's STA thread
-    /// (the owner window's UI thread). Returns the picked file-system
-    /// paths; cancelling returns an empty list.
-    /// </summary>
-    public static IReadOnlyList<string> ShowPickFiles(
-        IntPtr ownerHwnd,
-        string? defaultFolder)
+    private static FileOpenDialogNative CreateDialog()
     {
         Guid classId = FileOpenDialogClassId;
         Guid interfaceId = FileOpenDialogInterfaceId;
@@ -73,7 +75,65 @@ internal static unsafe class NativeFileOpenDialog
             Marshal.ThrowExceptionForHR(hr);
         }
 
-        using var dialog = new FileOpenDialogNative(dialogPointer);
+        return new FileOpenDialogNative(dialogPointer);
+    }
+
+    /// <summary>
+    /// Shows the modal folder picker on the caller's STA thread (the owner
+    /// window's UI thread). Returns the picked folder's file-system path;
+    /// cancelling returns null.
+    /// </summary>
+    public static string? ShowPickFolder(IntPtr ownerHwnd)
+    {
+        using var dialog = CreateDialog();
+        Marshal.ThrowExceptionForHR(dialog.SetOptions(FosPickFolders | FosForceFileSystem));
+
+        int hr = dialog.Show(ownerHwnd);
+        if (IsUserCancelled(hr))
+        {
+            return null;
+        }
+
+        Marshal.ThrowExceptionForHR(hr);
+        Marshal.ThrowExceptionForHR(dialog.GetResult(out IntPtr item));
+        if (item == IntPtr.Zero)
+        {
+            return null;
+        }
+
+        try
+        {
+            hr = ShellItemNative.GetDisplayName(item, SigdnFileSysPath, out IntPtr name);
+            if (hr != 0 || name == IntPtr.Zero)
+            {
+                return null;
+            }
+
+            try
+            {
+                return Marshal.PtrToStringUni(name) is { Length: > 0 } path ? path : null;
+            }
+            finally
+            {
+                CoTaskMemFree(name);
+            }
+        }
+        finally
+        {
+            Marshal.Release(item);
+        }
+    }
+
+    /// <summary>
+    /// Shows the modal multi-select open dialog on the caller's STA thread
+    /// (the owner window's UI thread). Returns the picked file-system
+    /// paths; cancelling returns an empty list.
+    /// </summary>
+    public static IReadOnlyList<string> ShowPickFiles(
+        IntPtr ownerHwnd,
+        string? defaultFolder)
+    {
+        using var dialog = CreateDialog();
         uint options = FosForceFileSystem |
             FosAllowMultiSelect |
             FosPathMustExist |
@@ -81,6 +141,7 @@ internal static unsafe class NativeFileOpenDialog
             FosNoDereferenceLinks;
         Marshal.ThrowExceptionForHR(dialog.SetOptions(options));
 
+        int hr;
         if (!string.IsNullOrWhiteSpace(defaultFolder))
         {
             Guid shellItemId = ShellItemInterfaceId;
@@ -99,7 +160,7 @@ internal static unsafe class NativeFileOpenDialog
         }
 
         hr = dialog.Show(ownerHwnd);
-        if (hr == HResultCancelled)
+        if (IsUserCancelled(hr))
         {
             return [];
         }
@@ -151,6 +212,16 @@ internal static unsafe class NativeFileOpenDialog
 
         public int Show(IntPtr owner) =>
             ((delegate* unmanaged[Stdcall]<IntPtr, IntPtr, int>)Table[3])(pointer, owner);
+
+        public int GetResult(out IntPtr result)
+        {
+            fixed (IntPtr* value = &result)
+            {
+                return ((delegate* unmanaged[Stdcall]<IntPtr, IntPtr*, int>)Table[20])(
+                    pointer,
+                    value);
+            }
+        }
 
         public int SetOptions(uint options) =>
             ((delegate* unmanaged[Stdcall]<IntPtr, uint, int>)Table[9])(pointer, options);
