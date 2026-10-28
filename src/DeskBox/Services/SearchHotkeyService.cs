@@ -33,6 +33,7 @@ public sealed class SearchHotkeyService : IDisposable, IHookHealthProbeTarget, I
     private bool _isRegistered;
     private bool _usesReservedHook;
     private bool _isInvoking;
+    private volatile bool _pendingInvoke;
     private bool _suspendedForRecording;
     private long _receivedSequence;
     private long _invocationSequence;
@@ -430,6 +431,12 @@ public sealed class SearchHotkeyService : IDisposable, IHookHealthProbeTarget, I
     {
         if (_isInvoking)
         {
+            // Deep review R15 (F6 audit): dropping a concurrent press broke
+            // the toggle semantic — a quick double-tap (show then hide) had
+            // its second half silently swallowed while the first invoke was
+            // still in flight across its await yield. Coalesce instead: one
+            // pending re-run max, drained when the current invoke completes.
+            _pendingInvoke = true;
             return;
         }
 
@@ -438,7 +445,12 @@ public sealed class SearchHotkeyService : IDisposable, IHookHealthProbeTarget, I
         App.Log($"[SearchHotkey] Triggered id={invocationId}");
         try
         {
-            await _invokeAsync();
+            do
+            {
+                _pendingInvoke = false;
+                await _invokeAsync();
+            }
+            while (_pendingInvoke);
         }
         catch (Exception ex)
         {

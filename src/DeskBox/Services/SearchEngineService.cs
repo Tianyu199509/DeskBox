@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using DeskBox.Models;
 
@@ -390,47 +390,10 @@ public sealed class SearchEngineService : IDisposable
         }
     }
 
-    private async Task<IReadOnlyList<SearchRecommendationItem>> GetRecentNotesAsync(
-        CancellationToken cancellationToken)
-    {
-        var recommendations = new List<SearchRecommendationItem>();
-
-        try
-        {
-            var store = new QuickCaptureStore();
-            var data = await store.LoadAsync();
-
-            var recent = data.Items
-                .Where(i => !i.IsDeleted)
-                .OrderByDescending(i => i.UpdatedAt)
-                .Take(3);
-
-            foreach (var item in recent)
-            {
-                if (cancellationToken.IsCancellationRequested)
-                {
-                    break;
-                }
-
-                recommendations.Add(new SearchRecommendationItem
-                {
-                    Kind = SearchResultKind.QuickCapture,
-                    Title = !string.IsNullOrWhiteSpace(item.Title)
-                        ? item.Title
-                        : TruncateText(item.Body, 60),
-                    Subtitle = item.Type.ToString(),
-                    Glyph = "\uE70F",
-                    QuickCaptureItemId = item.Id
-                });
-            }
-        }
-        catch
-        {
-            // Skip if QuickCapture data fails to load
-        }
-
-        return recommendations;
-    }
+    // GetRecentNotesAsync / GetUpcomingTodosAsync removed (deep review
+    // R15, F6 audit): zero callers; the notes path also bypassed the
+    // QuickCapture service by newing a raw store, inconsistent with
+    // every other path in this file.
 
     private async Task<IReadOnlyList<SearchResultItem>> SearchDeskBoxContentAsync(
         string query,
@@ -730,57 +693,6 @@ public sealed class SearchEngineService : IDisposable
         }
 
         return results;
-    }
-
-    private async Task<IReadOnlyList<SearchRecommendationItem>> GetUpcomingTodosAsync(
-        CancellationToken cancellationToken)
-    {
-        var recommendations = new List<SearchRecommendationItem>();
-        var settings = _settingsService.Settings;
-
-        var todoWidgets = settings.Widgets
-            .Where(w => w.WidgetKind == WidgetKind.Todo && !w.IsDisabled)
-            .ToList();
-
-        foreach (var widget in todoWidgets)
-        {
-            if (cancellationToken.IsCancellationRequested || recommendations.Count >= 3)
-            {
-                break;
-            }
-
-            try
-            {
-                var store = new TodoWidgetStore(widget.Id);
-                var data = await store.LoadAsync();
-
-                var upcoming = data.Items
-                    .Where(i => !i.IsCompleted && i.DueDate.HasValue &&
-                                i.DueDate.Value >= DateTimeOffset.Now &&
-                                i.DueDate.Value <= DateTimeOffset.Now.AddDays(7))
-                    .OrderBy(i => i.DueDate)
-                    .Take(3 - recommendations.Count);
-
-                foreach (var item in upcoming)
-                {
-                    recommendations.Add(new SearchRecommendationItem
-                    {
-                        Kind = SearchResultKind.Todo,
-                        Title = item.Text,
-                        Subtitle = $"{_localizationService.T("Search.Todo.Due")}: {item.DueDate!.Value:MM-dd}",
-                        Glyph = "\uE9D5",
-                        TodoWidgetId = widget.Id,
-                        TodoItemId = item.Id
-                    });
-                }
-            }
-            catch
-            {
-                // Skip
-            }
-        }
-
-        return recommendations;
     }
 
     private IReadOnlyList<SearchResultGroup> BuildGroups(

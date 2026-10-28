@@ -37,7 +37,7 @@ public partial class SettingsViewModel
     // shell because it reaches the host's widget manager.
     private void OnInteractionLayerModeUserChanged()
     {
-        App.Current?.WidgetManager?.RefreshVisibleWidgetDesktopLayers("settings-layer-mode");
+        _widgetActions.RefreshVisibleWidgetDesktopLayers("settings-layer-mode");
     }
 
     public string SelectedLanguage
@@ -81,7 +81,7 @@ public partial class SettingsViewModel
     {
         // The editor already persisted the style through the appearance
         // coordinator; the tray icon refresh reaches the host.
-        App.Current.UpdateTrayIcon();
+        _appActions.UpdateTrayIcon();
     }
 
     private void OnAppearanceAccentColorSourceUserChanged(bool useSystem)

@@ -319,6 +319,19 @@ public sealed partial class BackupSettingsViewModel
             }
 
             Update(new(CloudProvider: normalized));
+
+            // The provider dropdown is the cloud-backup master switch:
+            // turning it OFF switches every cloud domain off in the same
+            // breath (the coordinator clears them in the same persisted
+            // write; these local flips make the page reflect it instantly
+            // and send idempotent no-op updates — by then the coordinator
+            // already holds them false).
+            if (normalized == BackupOptionKinds.ProviderNone)
+            {
+                IncludeTodoData = false;
+                IncludeQuickCaptureData = false;
+                IncludeWidgetStyle = false;
+            }
         }
     }
 

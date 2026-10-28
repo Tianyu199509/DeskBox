@@ -3,7 +3,7 @@ using DeskBox.Contracts;
 namespace DeskBox.Services;
 
 /// <summary>Explicit boundary for destructive remote actions and the staged restore transaction.</summary>
-public sealed class BackupRestoreActions
+public sealed class BackupRestoreActions : IBackupRestoreActions
 {
     private readonly object _operationGate = new();
     private readonly HashSet<Task> _pending = [];

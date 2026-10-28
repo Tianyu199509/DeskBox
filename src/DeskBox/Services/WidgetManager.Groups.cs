@@ -1,4 +1,4 @@
-using DeskBox.Controls;
+﻿using DeskBox.Controls;
 using DeskBox.Controls.WidgetContents;
 using DeskBox.Contracts;
 using DeskBox.Helpers;
@@ -898,7 +898,15 @@ public sealed partial class WidgetManager
             {
                 if (!topologyPersisted)
                 {
-                    settings.WidgetLayout.WidgetGroups = groupSnapshot;
+                    // Deep review R15 (F2 audit): the `settings` local was
+                    // captured before the awaits above (window creation,
+                    // topology save); if a settings-host commit swapped the
+                    // graph in that window, writing through the STALE local
+                    // evaporated into an orphaned slice — the one true
+                    // lost-write form the reference-sharing guarantee does
+                    // NOT cover. Re-resolve the live graph inside the gate.
+                    _settingsService.MutateGraphUnderLock(() =>
+                        _settingsService.Settings.WidgetLayout.WidgetGroups = groupSnapshot);
                     if (topologySaveAttempted)
                     {
                         try
@@ -935,12 +943,14 @@ public sealed partial class WidgetManager
                 {
                     rollbackSaved = await WidgetGroupPersistedTopologyRecovery
                         .TryRestorePreviousAsync(
-                             () => settings.WidgetLayout.WidgetGroups = groupSnapshot,
+                             () => _settingsService.MutateGraphUnderLock(() =>
+                                 _settingsService.Settings.WidgetLayout.WidgetGroups = groupSnapshot),
                              () => WidgetGroupFailureProbe.Consume("merge-rollback-save")
                                  ? Task.FromResult(false)
                                  : _settingsService.SaveCheckedAsync(
                                      notifySubscribers: false),
-                            () => settings.WidgetLayout.WidgetGroups = committedGroups);
+                            () => _settingsService.MutateGraphUnderLock(() =>
+                                _settingsService.Settings.WidgetLayout.WidgetGroups = committedGroups));
                 }
                 catch (Exception rollbackSaveException)
                 {
@@ -3436,6 +3446,10 @@ public sealed partial class WidgetManager
         }
 
         bool changed = false;
+        // Deep review R15 (F2 audit): collection mutations on the shared
+        // graph run under the graph gate (see TransferCapsuleIdentity).
+        _settingsService.MutateGraphUnderLock(() =>
+        {
         AppSettings settings = _settingsService.Settings;
         var memberIds = group.MemberIds.ToHashSet(StringComparer.Ordinal);
 
@@ -3489,7 +3503,8 @@ public sealed partial class WidgetManager
             settings.WidgetCapsuleFreePlacements[group.ActiveMemberId] = freePlacement;
         }
         changed |= existingPlacementCount > 1 ||
-                   (existingPlacementCount == 1 && !activeHadFreePlacement);
+                       (existingPlacementCount == 1 && !activeHadFreePlacement);
+        });
 
         return changed;
     }
@@ -3501,24 +3516,32 @@ public sealed partial class WidgetManager
             return;
         }
 
-        AppSettings settings = _settingsService.Settings;
-        int previousIndex = settings.WidgetCapsuleBarOrder.FindIndex(id =>
-            string.Equals(id, previousWidgetId, StringComparison.Ordinal));
-        settings.WidgetCapsuleBarOrder.RemoveAll(id =>
-            string.Equals(id, targetWidgetId, StringComparison.Ordinal));
-        if (previousIndex >= 0)
+        // Deep review R15 (F2 audit): collection mutations on the shared
+        // graph must run under the graph gate — concurrent locked
+        // serialization of the capsule collections turns an interleaved
+        // RemoveAll/Insert into an InvalidOperationException that surfaced
+        // as a failed group-switch operation.
+        _settingsService.MutateGraphUnderLock(() =>
         {
-            previousIndex = Math.Clamp(previousIndex, 0, settings.WidgetCapsuleBarOrder.Count - 1);
-            settings.WidgetCapsuleBarOrder[previousIndex] = targetWidgetId;
-        }
+            AppSettings settings = _settingsService.Settings;
+            int previousIndex = settings.WidgetCapsuleBarOrder.FindIndex(id =>
+                string.Equals(id, previousWidgetId, StringComparison.Ordinal));
+            settings.WidgetCapsuleBarOrder.RemoveAll(id =>
+                string.Equals(id, targetWidgetId, StringComparison.Ordinal));
+            if (previousIndex >= 0)
+            {
+                previousIndex = Math.Clamp(previousIndex, 0, settings.WidgetCapsuleBarOrder.Count - 1);
+                settings.WidgetCapsuleBarOrder[previousIndex] = targetWidgetId;
+            }
 
-        if (settings.WidgetCapsuleFreePlacements.Remove(
-                previousWidgetId,
-                out WidgetCompactPlacement? placement))
-        {
-            settings.WidgetCapsuleFreePlacements[targetWidgetId] =
-                CloneCompactPlacement(placement)!;
-        }
+            if (settings.WidgetCapsuleFreePlacements.Remove(
+                    previousWidgetId,
+                    out WidgetCompactPlacement? placement))
+            {
+                settings.WidgetCapsuleFreePlacements[targetWidgetId] =
+                    CloneCompactPlacement(placement)!;
+            }
+        });
 
         if (_lastCapsuleBarBounds.Remove(previousWidgetId, out RectInt32 bounds))
         {

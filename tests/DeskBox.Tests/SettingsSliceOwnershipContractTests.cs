@@ -237,6 +237,21 @@ public sealed class SettingsSliceOwnershipContractTests
         ["src/DeskBox/App.ImmediateHiddenWorkingSetTrim.cs"] = 2,
         ["src/DeskBox/App.Tray.cs"] = 3,
         ["src/DeskBox/App.xaml.cs"] = 36,
+        // Layout-write facade (batch R2/R5/R9): 10 = R2's eight plus the
+        // switch-animation default write (R5) plus the groups master switch
+        // the restore-defaults command carries (R9 — snapshots strip the
+        // layout domain, so the reset rides ApplyGroupNavigationDefaults).
+        ["src/DeskBox/Services/InProcessSettingsWidgetActions.cs"] = 10,
+        // Capsule override resetter (batch R2): 8 = Widgets/WidgetGroups
+        // scans shared by the host mirror and the main-process executor.
+        ["src/DeskBox/Services/CapsuleOverrideResetter.cs"] = 8,
+        // Settings host (batch 3c-3b): 8 = the reload bridge diffing theme
+        // (3 fields), language, and nothing else against the pre-reload
+        // state to decide which host-side replay to run. Deep review R13-3
+        // (+3): the search-hotkey controller's local mirror computations
+        // (Search gesture 2 fields + main activation kind/modifiers/key)
+        // replaced per-keystroke pipe round trips.
+        ["src/DeskBox/App.SettingsHost.cs"] = 11,
         ["src/DeskBox/Controls/DesktopOrganizationPreviewCard.xaml.cs"] = 11,
         ["src/DeskBox/Controls/DesktopOrganizationTaskView.Appearance.cs"] = 1,
         ["src/DeskBox/Controls/DesktopOrganizationTaskView.xaml.cs"] = 1,
@@ -257,6 +272,10 @@ public sealed class SettingsSliceOwnershipContractTests
         // 5 = legacy 4 + DesktopDoubleClickEnabled read backing the hook
         // watchdog's HookProbeWanted gate (activation service line 122).
         ["src/DeskBox/Services/DesktopDoubleClickActivationService.cs"] = 5,
+        // Hotkey facade: 1 = the desktop double-click no-service fallback
+        // writing the preference directly, exactly the passthrough the
+        // settings window used inline before the facade.
+        ["src/DeskBox/Services/InProcessSettingsHotkeyActions.cs"] = 1,
         // TodoSettingsCoordinator reads Settings.Widgets once in the
         // reminder-reconcile change guard: the Todo widget id set has no
         // slice projection, and watching it keeps external widget deletions
@@ -272,7 +291,10 @@ public sealed class SettingsSliceOwnershipContractTests
         ["src/DeskBox/Services/DirectStartupService.cs"] = 2,
         ["src/DeskBox/Services/DragDropPermissionService.cs"] = 3,
         ["src/DeskBox/Services/EverythingSearchService.cs"] = 12,
-        ["src/DeskBox/Services/FeatureWidgetSettings.cs"] = 13,
+        // +2: the missing-dictionary-key fallback reads the widgets list and
+        // deleted ids to decide whether a feature widget is live (the list
+        // IS the enabled state for never-authored keys).
+        ["src/DeskBox/Services/FeatureWidgetSettings.cs"] = 15,
         ["src/DeskBox/Services/FileWidgetFolderOpenBehaviorNames.cs"] = 1,
         ["src/DeskBox/Services/FileWidgetIconLayout.cs"] = 6,
         // +1 each: the watchdog chord heartbeat reads the enabled flag once
@@ -289,7 +311,11 @@ public sealed class SettingsSliceOwnershipContractTests
         ["src/DeskBox/Services/SearchResultActionService.cs"] = 2,
         ["src/DeskBox/Services/SettingsMigrationService.cs"] = 55,
         ["src/DeskBox/Services/SettingsSearchCatalog.cs"] = 25,
-        ["src/DeskBox/Services/SettingsService.cs"] = 613,
+        // +5: the appearance-preview apply preserves the runtime markers and the
+// layout domain before the preview broadcast (batch 3d follow-up).
+        // +3: the appearance-preview swap preserves the onboarding markers too
+        // (batch R7).
+        ["src/DeskBox/Services/SettingsService.cs"] = 621,
         ["src/DeskBox/Services/ThemeService.cs"] = 11,
         ["src/DeskBox/Views/SettingsSections/DisplaySettingsSection.xaml.cs"] = 14,
         ["src/DeskBox/Services/TodoReminderService.cs"] = 8,

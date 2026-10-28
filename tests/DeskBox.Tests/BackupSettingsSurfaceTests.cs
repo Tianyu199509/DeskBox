@@ -81,7 +81,7 @@ public sealed class BackupSettingsSurfaceTests
     }
 
     [Fact]
-    public void UserEdits_WriteThroughWithoutEchoLoops()
+    public async Task UserEdits_WriteThroughWithoutEchoLoops()
     {
         var fake = new FakeBackupSettings(DefaultSnapshot(DavA) with { CloudWidgetStyleEnabled = true });
         using var editor = Create(fake);
@@ -102,6 +102,9 @@ public sealed class BackupSettingsSurfaceTests
         editor.SelectedIntervalMinutes = 61; // unknown preset normalizes back
         editor.SelectedRetentionCount = 10; // valid preset, differs from default
         editor.SelectedRetentionCount = 99; // unknown preset normalizes back
+        // Updates ride a pool thread since batch R11 (the blocking pipe
+        // pair used to run on the UI thread); drain before asserting.
+        await editor.PendingReads;
 
         Assert.Contains(fake.Changes, c => c.LocalEnabled == false);
         Assert.Contains(fake.Changes, c => c.LocalIntervalMinutes == 30);
@@ -134,6 +137,36 @@ public sealed class BackupSettingsSurfaceTests
     }
 
     [Fact]
+    public async Task TurningProviderOff_SwitchesEveryCloudDomainOff()
+    {
+        // Batch R12 product decision: the provider dropdown is the cloud
+        // master switch — WebDAV off means cloud backup is fully off. The
+        // page must flip all three domain toggles immediately and send the
+        // off writes (the coordinator clears the persisted domains in the
+        // same write; these are the idempotent follow-ups).
+        var fake = new FakeBackupSettings(DefaultSnapshot(DavA) with
+        {
+            CloudTodoEnabled = true,
+            CloudQuickCaptureEnabled = true,
+            CloudWidgetStyleEnabled = true,
+        });
+        using var editor = Create(fake);
+
+        Assert.True(editor.IncludeTodoData);
+        editor.SelectedProvider = "none";
+        await editor.PendingReads;
+
+        Assert.False(editor.IncludeTodoData);
+        Assert.False(editor.IncludeQuickCaptureData);
+        Assert.False(editor.IncludeWidgetStyle);
+        Assert.False(editor.ShowWebDavFields);
+        Assert.Contains(fake.Changes, c => c.CloudProvider == "none");
+        Assert.Contains(fake.Changes, c => c.CloudTodoEnabled == false);
+        Assert.Contains(fake.Changes, c => c.CloudQuickCaptureEnabled == false);
+        Assert.Contains(fake.Changes, c => c.CloudWidgetStyleEnabled == false);
+    }
+
+    [Fact]
     public void ProjectionRefresh_DoesNotWriteBack()
     {
         var fake = new FakeBackupSettings(DefaultSnapshot(DavA));
@@ -155,15 +188,17 @@ public sealed class BackupSettingsSurfaceTests
     }
 
     [Fact]
-    public void UpdateLocalDirectory_NormalizesAndResets()
+    public async Task UpdateLocalDirectory_NormalizesAndResets()
     {
         var fake = new FakeBackupSettings(DefaultSnapshot(DavA));
         using var editor = Create(fake);
 
         editor.UpdateLocalDirectory(@"  D:\custom  ");
+        await editor.PendingReads;
         Assert.Contains(fake.Changes, c => c.LocalDirectory == @"D:\custom");
 
         editor.UpdateLocalDirectory("   ");
+        await editor.PendingReads;
         Assert.Contains(fake.Changes, c => c.LocalDirectory == "");
         Assert.True(editor.IsValidLocalDirectory(@"C:\any", out _));
     }

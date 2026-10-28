@@ -1234,6 +1234,108 @@ public static partial class Win32Helper
     [LibraryImport("kernel32.dll", EntryPoint = "GetModuleHandleW", StringMarshalling = StringMarshalling.Utf16)]
     public static partial IntPtr GetModuleHandle(string? lpModuleName);
 
+    [LibraryImport("kernel32.dll", EntryPoint = "GetModuleFileNameW", SetLastError = true)]
+    public static partial int GetModuleFileName(IntPtr hModule, IntPtr lpFilename, int nSize);
+
+    [LibraryImport("version.dll", EntryPoint = "GetFileVersionInfoSizeW", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
+    public static partial int GetFileVersionInfoSize(string lpFilename, out uint lpdwHandle);
+
+    [LibraryImport("version.dll", EntryPoint = "GetFileVersionInfoW", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool GetFileVersionInfo(string lpFilename, uint dwHandle, int dwLen, IntPtr lpData);
+
+    [LibraryImport("version.dll", EntryPoint = "VerQueryValueW", StringMarshalling = StringMarshalling.Utf16)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool VerQueryValue(IntPtr pBlock, string lpSubBlock, out IntPtr lplpBuffer, out int puLen);
+
+    /// <summary>
+    /// Product version of a module loaded into this process, e.g.
+    /// "Microsoft.WindowsAppRuntime.dll" → "2.5.1". Empty when the module is
+    /// absent or carries no version resource — callers render a fallback.
+    /// </summary>
+    public static string GetLoadedModuleProductVersion(string moduleName)
+    {
+        try
+        {
+            IntPtr module = GetModuleHandle(moduleName);
+            if (module == IntPtr.Zero)
+            {
+                return string.Empty;
+            }
+
+            const int pathCapacityChars = 1024;
+            IntPtr pathBuffer = Marshal.AllocHGlobal(pathCapacityChars * 2);
+            try
+            {
+                int pathLength = GetModuleFileName(
+                    module,
+                    pathBuffer,
+                    pathCapacityChars);
+                if (pathLength <= 0)
+                {
+                    return string.Empty;
+                }
+
+                string? modulePath = Marshal.PtrToStringUni(pathBuffer, pathLength);
+                if (string.IsNullOrWhiteSpace(modulePath))
+                {
+                    return string.Empty;
+                }
+
+                int infoSize = GetFileVersionInfoSize(modulePath, out _);
+                if (infoSize <= 0)
+                {
+                    return string.Empty;
+                }
+
+                IntPtr infoBuffer = Marshal.AllocHGlobal(infoSize);
+                try
+                {
+                    if (!GetFileVersionInfo(modulePath, 0, infoSize, infoBuffer) ||
+                        !VerQueryValue(
+                            infoBuffer,
+                            @"\VarFileInfo\Translation",
+                            out IntPtr translation,
+                            out _))
+                    {
+                        return string.Empty;
+                    }
+
+                    if (translation == IntPtr.Zero)
+                    {
+                        return string.Empty;
+                    }
+
+                    // The translation table carries the language/codepage the
+                    // version strings are keyed under; read the first entry.
+                    short language = Marshal.ReadInt16(translation);
+                    short codePage = Marshal.ReadInt16(translation, 2);
+                    string versionBlock =
+                        $@"\StringFileInfo\{language:X4}{codePage:X4}\ProductVersion";
+                    if (VerQueryValue(infoBuffer, versionBlock, out IntPtr value, out _) &&
+                        value != IntPtr.Zero)
+                    {
+                        return Marshal.PtrToStringUni(value) ?? string.Empty;
+                    }
+
+                    return string.Empty;
+                }
+                finally
+                {
+                    Marshal.FreeHGlobal(infoBuffer);
+                }
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(pathBuffer);
+            }
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
     [LibraryImport("shell32.dll", EntryPoint = "ShellExecuteW", StringMarshalling = StringMarshalling.Utf16)]
     public static partial IntPtr ShellExecute(
         IntPtr hwnd,
@@ -2088,6 +2190,142 @@ public static partial class Win32Helper
 
     [DllImport("kernel32.dll")]
     private static extern IntPtr GetCurrentProcess();
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool GetNamedPipeClientProcessId(
+        IntPtr hNamedPipe,
+        out uint lpClientProcessId);
+
+    /// <summary>
+    /// Identifies the process on the other end of a named-pipe server
+    /// handle (batch R12 pipe identity gate).
+    /// </summary>
+    internal static bool GetNamedPipeClientProcessId(Microsoft.Win32.SafeHandles.SafePipeHandle pipeHandle, out uint clientPid) =>
+        GetNamedPipeClientProcessId(pipeHandle.DangerousGetHandle(), out clientPid);
+
+    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern bool ConvertStringSecurityDescriptorToSecurityDescriptorW(
+        string stringSecurityDescriptor,
+        uint stringSecurityDescriptorRevision,
+        out IntPtr securityDescriptor,
+        IntPtr securityDescriptorSize);
+
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr LocalFree(IntPtr hMem);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct SecurityAttributes
+    {
+        public nint Length;
+        public IntPtr SecurityDescriptor;
+        public IntPtr InheritHandle;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern Microsoft.Win32.SafeHandles.SafePipeHandle CreateNamedPipeW(
+        string pipeName,
+        uint openMode,
+        uint pipeMode,
+        uint maxInstances,
+        uint outBufferSize,
+        uint inBufferSize,
+        uint defaultTimeOut,
+        ref SecurityAttributes securityAttributes);
+
+    private const uint PipeAccessDuplex = 0x00000003;
+    // No FILE_FLAG_FIRST_PIPE_INSTANCE here on purpose: raw CreateNamedPipeW
+    // with that flag fails with ERROR_INVALID_PARAMETER on this OS family
+    // (probe matrix, deep review R13 — the managed ACL creator never passed
+    // it either). The pipe name is already instance-scope + session unique
+    // and maxInstances=1, so a foreign pre-created instance cannot hide
+    // under our name; the pid identity gate covers the rest.
+    private const uint FileFlagOverlapped = 0x40000000;
+    // PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT are ALL zero — a
+    // literal 1 here is PIPE_TYPE_MESSAGE | PIPE_NOWAIT, and NOWAIT makes
+    // ConnectNamedPipe return ERROR_PIPE_LISTENING immediately (probe-
+    // verified the hard way, deep review R13).
+    private const uint PipeModeByteWaiting = 0x00000000;
+
+    /// <summary>
+    /// Creates the settings-IPC named pipe with a user-only DACL AND a
+    /// medium-integrity "no write up" mandatory label stamped at creation
+    /// (deep review R13, R12 debt ④). The label must ride the creation
+    /// descriptor: setting it afterwards via SetKernelObjectSecurity needs
+    /// WRITE_OWNER on the handle, which the managed ACL creator does not
+    /// grant (probe-verified — the post-create attempt failed with access
+    /// denied). Low-integrity same-user processes (sandboxed browser
+    /// content is the canonical case) are thereby denied by the kernel.
+    /// Returns null when creation fails (caller retries like the previous
+    /// accept-failure path).
+    /// </summary>
+    internal static Microsoft.Win32.SafeHandles.SafePipeHandle? TryCreateSettingsIpcPipe(
+        string pipeName,
+        int bufferSize)
+    {
+        string? sid = null;
+        try
+        {
+            sid = System.Security.Principal.WindowsIdentity.GetCurrent().User?.Value;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+
+        if (string.IsNullOrEmpty(sid))
+        {
+            return null;
+        }
+
+        // D:(A;;GWGR;;;<sid>) — generic read+write for the current user
+        // only (equivalent to the previous PipeAccessRights.ReadWrite rule);
+        // S:(ML;;NW;;;ME) — mandatory label at MEDIUM integrity (the SDDL
+        // alias is ME — MW is not a valid SID alias and fails conversion
+        // with ERROR_INVALID_SID), no-write-up: the kernel denies write
+        // access from lower-integrity processes.
+        // TEMP-DIAG removed: null-SD experiment proved the descriptor was
+        // NOT the WaitForConnection failure — the pipe mode constant was.
+        if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                $"D:(A;;GWGR;;;{sid})S:(ML;;NW;;;ME)",
+                1,
+                out IntPtr descriptor,
+                IntPtr.Zero))
+        {
+            return null;
+        }
+
+        try
+        {
+            var attributes = new SecurityAttributes
+            {
+                Length = (nint)System.Runtime.InteropServices.Marshal.SizeOf<SecurityAttributes>(),
+                SecurityDescriptor = descriptor,
+                InheritHandle = IntPtr.Zero,
+            };
+            Microsoft.Win32.SafeHandles.SafePipeHandle handle = CreateNamedPipeW(
+                pipeName,
+                PipeAccessDuplex | FileFlagOverlapped,
+                PipeModeByteWaiting,
+                maxInstances: 1,
+                outBufferSize: (uint)bufferSize,
+                inBufferSize: (uint)bufferSize,
+                defaultTimeOut: 0,
+                ref attributes);
+            if (handle.IsInvalid)
+            {
+                int error = System.Runtime.InteropServices.Marshal.GetLastWin32Error();
+                handle.Dispose();
+                throw new InvalidOperationException(
+                    $"CreateNamedPipeW failed with win32 error {error} for {pipeName}");
+            }
+
+            return handle;
+        }
+        finally
+        {
+            LocalFree(descriptor);
+        }
+    }
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool SetProcessWorkingSetSize(

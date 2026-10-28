@@ -72,6 +72,10 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     // (batch 50); the shell keeps it for the settings-broadcast refresh
     // and the language-change relocalization below.
     private readonly DeskBox.Features.Performance.PerformanceSettingsViewModel _performanceSettings;
+    private readonly ISettingsHotkeyActions _hotkeyActions;
+    private readonly ISettingsWidgetActions _widgetActions;
+    private readonly ISettingsAppActions _appActions;
+    private readonly ISettingsDataActions _dataActions;
     // The backup family's binding surface and visit state machine live on
     // the backup editor (batch 49); the shell keeps it for the settings-
     // broadcast refresh and the diagnostics pushes below.
@@ -194,6 +198,10 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         DeskBox.Features.ManagedStorage.ManagedStorageSettingsViewModel managedStorageSettings,
         DeskBox.Features.Maintenance.MaintenanceSettingsViewModel maintenanceSettings,
         DeskBox.Features.Performance.PerformanceSettingsViewModel performanceSettings,
+        ISettingsHotkeyActions hotkeyActions,
+        ISettingsWidgetActions widgetActions,
+        ISettingsAppActions appActions,
+        ISettingsDataActions dataActions,
         LocalizationService? localizationService = null,
         IAppUpdateService? appUpdateService = null)
     {
@@ -216,6 +224,10 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         _managedStorageSettings = managedStorageSettings;
         _maintenanceSettings = maintenanceSettings;
         _performanceSettings = performanceSettings;
+        _hotkeyActions = hotkeyActions;
+        _widgetActions = widgetActions;
+        _appActions = appActions;
+        _dataActions = dataActions;
         _themeService = themeService;
         _localizationService = localizationService ?? new LocalizationService(settingsService);
         _widgetContentFactory = new WidgetContentFactory(_localizationService);

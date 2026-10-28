@@ -1,4 +1,4 @@
-using System.Collections.Specialized;
+﻿using System.Collections.Specialized;
 using System.Diagnostics;
 using DeskBox.Controls;
 using DeskBox.Contracts;
@@ -830,6 +830,7 @@ public sealed partial class FileSurfaceContent :
     }
 
     private static bool? s_isProcessElevated;
+    private static bool s_dragAffordanceDisabledLogged;
 
     // Elevated widget windows cannot receive OLE drops from Explorer (UIPI),
     // so the empty state calls that case out instead of letting the drop fail
@@ -849,6 +850,34 @@ public sealed partial class FileSurfaceContent :
         return s_isProcessElevated.Value;
     }
 
+    // The gate itself is silent by design, which made "elevated, affordance
+    // removed" indistinguishable from a dead drag pipeline in field logs —
+    // the 1.5.8+ reorder complaints could not be bucketed without trusting
+    // user-described environments (FB#566 proved those unreliable). One line
+    // per session carries the triage triple: cause attribution, distribution
+    // channel, and the Windows App Runtime build (store installs float it,
+    // direct installs pin it).
+    private static void LogDragAffordanceDisabledOnce()
+    {
+        if (s_dragAffordanceDisabledLogged)
+        {
+            return;
+        }
+
+        s_dragAffordanceDisabledLogged = true;
+        StartupElevationAssessment assessment =
+            DragDropPermissionService.AssessStartupElevation();
+        string runtimeVersion = Win32Helper.GetLoadedModuleProductVersion(
+            "Microsoft.WindowsAppRuntime.dll");
+        App.Log(
+            $"[DragProtocol] stage=DragAffordanceDisabled " +
+            $"attribution={assessment.FullyElevatedAttribution} " +
+            $"mismatch={assessment.Mismatch} " +
+            $"uacDisabled={assessment.IsUacDisabled} " +
+            $"channel={App.Current?.DistributionService.ChannelName ?? "unknown"} " +
+            $"runtime={(runtimeVersion.Length > 0 ? runtimeVersion : "unknown")}");
+    }
+
     // UIElement.CanDrag routes its gesture through StartDragAsync, which
     // WinUI does not support for an elevated process: the call throws inside
     // the drag pipeline before DragStarting could cancel it. Elevated mode
@@ -860,6 +889,7 @@ public sealed partial class FileSurfaceContent :
         if (IsCurrentProcessElevatedCached())
         {
             args.ItemContainer.CanDrag = false;
+            LogDragAffordanceDisabledOnce();
             return;
         }
 
@@ -1302,6 +1332,12 @@ public sealed partial class FileSurfaceContent :
             !_isBoxSelecting &&
             _selectionPressOnRowBlank)
         {
+            // Silent by design (the marquee owns the gesture), but the cancel
+            // needs a fingerprint: without this line a DragStarting log with
+            // no follow-up stage hid the cause entirely.
+            App.Log(
+                $"[DragProtocol] stage=DragCancelled widget={WidgetId} " +
+                $"reason=marquee-pending sender={sender?.GetType().Name}");
             e.Cancel = true;
             return;
         }
@@ -1444,16 +1480,23 @@ public sealed partial class FileSurfaceContent :
             return;
         }
 
-        // The StorageItem broker call below is synchronous on the UI STA, and
-        // DragStartingEventArgs gives no reason to defer it. The drag path
-        // already bypasses the broker for .lnk payloads, so measure what it
-        // actually costs for ordinary files before restructuring this
-        // sequence; the number rides along on the existing protocol log.
+        // The StorageItem broker call below is synchronous on the UI STA.
+        // Deep review R18 (item D): the native attach leg (existence probing
+        // + SHParseDisplayName + SHCreateDataObject) runs for EVERY drag and
+        // was never timed — only the rare broker fallback leg was. Both
+        // numbers now ride the protocol log; the closed decision record
+        // (whether to restructure) awaits real samples.
+        // NOTE: DragStartingEventArgs DOES offer GetDeferral since the event
+        // moved to per-item UIElement.DragStarting — the reason not to defer
+        // is "no data yet proving it matters", not "cannot".
         long storageBrokerMs = 0;
+        long nativeShellMs = 0;
         var storageBrokerWatch = System.Diagnostics.Stopwatch.StartNew();
+        var nativeShellWatch = System.Diagnostics.Stopwatch.StartNew();
         bool isManagedShortcutDrag = IsManagedShortcutDrag(
             selectedItems.Select(item => item.Path).ToArray());
-        if (!FileItemDragPackage.TryPrepare(
+        nativeShellWatch.Start();
+        bool prepared = FileItemDragPackage.TryPrepare(
                 e.Data,
                 selectedItems,
                 WidgetId,
@@ -1467,12 +1510,15 @@ public sealed partial class FileSurfaceContent :
                 paths => paths.Count == 1
                     ? Path.GetFileName(paths[0])
                     : paths.Count.ToString(),
-                out FileItemDragPackageResult result))
+                out FileItemDragPackageResult result);
+        if (!prepared)
         {
+            nativeShellMs = nativeShellWatch.ElapsedMilliseconds;
             _activeDragSessionId = null;
             CancelDrag($"prepare-failed items={selectedItems.Length}");
             return;
         }
+        nativeShellMs = nativeShellWatch.ElapsedMilliseconds;
 
         if (result.SourcePaths.Count > 0 &&
             HasActiveTransferSource(result.SourcePaths))
@@ -1530,6 +1576,7 @@ public sealed partial class FileSurfaceContent :
             $"kind=file popover={fromStackPopover} paths=" +
             $"{result.SourcePaths.Count} storage={result.HasStorageItems} " +
             $"storageBrokerMs={storageBrokerMs} " +
+            $"nativeShellMs={nativeShellMs} " +
             $"nativeShell={result.UsesNativeShellDataObject} " +
             $"managedShortcut={isManagedShortcutDrag} " +
             $"requested={e.Data.RequestedOperation} " +
@@ -4531,7 +4578,15 @@ public sealed partial class FileSurfaceContent :
             : preferredManualIndex;
         ClearDragSessionVisualState();
 
-        DroppedFilePath[] droppedFiles = paths
+        // Deep review R15 (F3 audit): the existence probing below used to
+        // run inline on the UI thread — while the ROUTED drop channel's
+        // identical probe (GetSurfaceDropFilesAsync) was hardened to a
+        // pool thread precisely because provider/ACL/reparse-point probes
+        // on unusual sources (browsers, IM file drops, dead SMB paths) can
+        // block. The native channel exists exactly FOR those unusual
+        // sources; it must not freeze the dispatcher before the busy card
+        // even appears.
+        DroppedFilePath[] droppedFiles = await Task.Run(() => paths
             .Where(path => !string.IsNullOrWhiteSpace(path))
             .Select(path =>
             {
@@ -4550,7 +4605,7 @@ public sealed partial class FileSurfaceContent :
                 path,
                 Path.GetFileName(path),
                 ForceManagedCopy: containsTemporaryFiles))
-            .ToArray();
+            .ToArray());
         if (droppedFiles.Length == 0)
         {
             return false;
@@ -5118,9 +5173,16 @@ public sealed partial class FileSurfaceContent :
             return;
         }
 
-        ViewModel.MoveItemsForReorder(
+        bool flatMoved = ViewModel.MoveItemsForReorder(
             draggedItems,
             targetIndex);
+        if (flatMoved)
+        {
+            // The block lands through a remove+insert rebuild (see
+            // ApplyItemBlockReorder), which drops the ListView selection —
+            // restore it by path like the projection branch above.
+            ScheduleSurfaceReorderSelectionRestore(draggedItems);
+        }
     }
 
     private void PersistSurfaceReorder()

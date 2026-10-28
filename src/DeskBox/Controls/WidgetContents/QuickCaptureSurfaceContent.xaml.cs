@@ -1,4 +1,4 @@
-using DeskBox.Contracts;
+﻿using DeskBox.Contracts;
 using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Platform;
@@ -924,7 +924,6 @@ public sealed partial class QuickCaptureSurfaceContent :
         }
 
         await OpenDetailAfterSavingAsync(item);
-        await Task.CompletedTask;
     }
 
     private void SearchButton_Click(object sender, RoutedEventArgs e)
@@ -1628,14 +1627,23 @@ public sealed partial class QuickCaptureSurfaceContent :
         object? sender,
         AttachmentTileEventArgs e)
     {
-        TodoAttachmentViewModel attachment = e.Attachment;
-        if (!File.Exists(attachment.FilePath))
+        try
         {
-            return;
-        }
+            TodoAttachmentViewModel attachment = e.Attachment;
+            if (!File.Exists(attachment.FilePath))
+            {
+                return;
+            }
 
-        StorageFile file = await StorageFile.GetFileFromPathAsync(attachment.FilePath);
-        await Windows.System.Launcher.LaunchFileAsync(file);
+            StorageFile file = await StorageFile.GetFileFromPathAsync(attachment.FilePath);
+            await Windows.System.Launcher.LaunchFileAsync(file);
+        }
+        catch (Exception ex)
+        {
+            // Deep review R17 (G3 audit): async void without a catch kills
+            // the process on launcher failures — match the sibling handlers.
+            App.Log($"[QuickCapture] Attachment open failed: {ex.Message}");
+        }
     }
 
     private async void DetailAttachmentStrip_RemoveRequested(
@@ -1852,11 +1860,18 @@ public sealed partial class QuickCaptureSurfaceContent :
         object? sender,
         MarkdownAttachmentRequestedEventArgs e)
     {
-        string? path = ResolveDetailAttachmentPath(e.AttachmentId);
-        if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
+        try
         {
-            StorageFile file = await StorageFile.GetFileFromPathAsync(path);
-            await Windows.System.Launcher.LaunchFileAsync(file);
+            string? path = ResolveDetailAttachmentPath(e.AttachmentId);
+            if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
+            {
+                StorageFile file = await StorageFile.GetFileFromPathAsync(path);
+                await Windows.System.Launcher.LaunchFileAsync(file);
+            }
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[QuickCapture] Markdown attachment open failed: {ex.Message}");
         }
     }
 
@@ -2261,6 +2276,13 @@ public sealed partial class QuickCaptureSurfaceContent :
                 ItemsList.SelectedItems.Clear();
                 UpdateSelectedViewVisual();
             }
+        }
+        catch (Exception ex)
+        {
+            // Deep review R17 (G3 audit): async void drop handler — an
+            // ApplyTabDropAsync throw rode straight to the dispatcher.
+            App.Log($"[QuickCapture] Tab drop failed: {ex.Message}");
+            e.AcceptedOperation = DataPackageOperation.None;
         }
         finally
         {

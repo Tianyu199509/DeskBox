@@ -33,6 +33,9 @@ public sealed partial class BackupSettingsViewModel : ObservableObject, IDisposa
     // disposed immediately: disposing a source a pending read still uses
     // throws ObjectDisposedException from token members such as WaitHandle.
     private Task _readDrain = Task.CompletedTask;
+
+    /// <summary>Awaits every queued background read/update (tests, batch R11).</summary>
+    internal Task PendingReads => _readDrain;
     private int _visitGeneration;
     private int _endpointGeneration;
     private int _commandGeneration;
@@ -170,11 +173,42 @@ public sealed partial class BackupSettingsViewModel : ObservableObject, IDisposa
         InvalidateEndpoint(recheckCredential);
     }
 
+    // Batch R11: the write+read-back pair is two pipe roundtrips. On the
+    // host UI thread (every backup toggle/combo/text binding setter lands
+    // here) that is the modal-loop wedge family — both calls now run on a
+    // serialized background drain: writes leave in the order the user made
+    // them, and the authoritative re-read hops back to the UI thread
+    // through the injected enqueuer.
+    private readonly SemaphoreSlim _updateDrain = new(1, 1);
+
     public void Update(BackupSettingsChange change)
     {
         if (_disposed) return;
-        _settings.Update(change);
-        RefreshState();
+        TrackRead(Task.Run(async () =>
+        {
+            await _updateDrain.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                _settings.Update(change);
+            }
+            catch (Exception ex)
+            {
+                _reportError(ex);
+                return;
+            }
+            finally
+            {
+                _updateDrain.Release();
+            }
+
+            _tryEnqueue(() =>
+            {
+                if (!_disposed)
+                {
+                    RefreshState();
+                }
+            });
+        }));
     }
 
     public bool IsValidLocalDirectory(string path, out string? reason) =>

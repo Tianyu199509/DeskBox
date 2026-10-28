@@ -240,7 +240,23 @@ public sealed partial class TodoWidgetContent
             return;
         }
 
-        bool updated = await ViewModel.UpdateItemTextAsync(item.Id, TodoInlineEditor.Text);
+        bool updated;
+        try
+        {
+            updated = await ViewModel.UpdateItemTextAsync(item.Id, TodoInlineEditor.Text);
+        }
+        catch (Exception ex)
+        {
+            // A failed store commit must not escape the async void callers
+            // (save button / Enter key) — an uncaught IO failure crash-kills
+            // the process. Keep the editor open with the user's text so the
+            // input is not lost while the failure is logged.
+            App.Log($"[Todo] Save edit failed id={item.Id}: {ex}");
+            TodoEditTextBox.Focus(FocusState.Programmatic);
+            TodoEditTextBox.SelectAll();
+            return;
+        }
+
         if (!updated)
         {
             TodoEditTextBox.Focus(FocusState.Programmatic);

@@ -78,16 +78,9 @@ public sealed class TodoSettingsCoordinator : ITodoSettings
         _settings.SaveDebounced();
     }
 
-    public void SetLegacyWideDetailPane(bool enabled)
-    {
-        // The compatibility property remains writable for old callers; the
-        // layout selector uses SetLayoutMode to update both fields together.
-        ObjectDisposedException.ThrowIf(_stopped, this);
-        TodoSettingsSlice todo = _settings.Settings.Todo;
-        if (todo.TodoUseWideDetailPane == enabled) return;
-        todo.TodoUseWideDetailPane = enabled;
-        _settings.SaveDebounced();
-    }
+    // SetLegacyWideDetailPane removed (deep review R13-2, D12 audit): the
+    // "old callers" the comment mentioned do not exist in this repository —
+    // the layout selector is the only writer and it uses SetLayoutMode.
 
     public void ResetLayoutPreferences(bool scheduleSave = true)
     {

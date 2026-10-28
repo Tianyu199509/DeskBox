@@ -19,6 +19,13 @@ internal static class ResilientJsonStore
     // files remain readable and writable through ordinary file handles.
     internal const int UnableToRemoveReplacedFileHResult = unchecked((int)0x80070497);
 
+    // Win32 ERROR_SHARING_VIOLATION (32): some other handle holds the target
+    // — an antivirus/indexer/sync scan, or a racing writer in another
+    // process. Same class of transient commit conflict as the 1175 above,
+    // but it used to propagate uncaught (stowed-exception fail-fast,
+    // 2026-10-26) instead of entering the retry ladder.
+    internal const int SharingViolationHResult = unchecked((int)0x80070020);
+
     private static readonly TimeSpan[] s_replaceRetryDelays =
     [
         TimeSpan.FromMilliseconds(50),
@@ -52,6 +59,7 @@ internal static class ResilientJsonStore
         ArgumentNullException.ThrowIfNull(createDefault);
 
         bool primaryFailed = false;
+        bool primaryUnreadable = false;
         if (File.Exists(storePath))
         {
             try
@@ -63,8 +71,22 @@ internal static class ResilientJsonStore
             catch (Exception ex)
             {
                 primaryFailed = true;
-                App.Log($"[{logName}] Primary store is invalid: {ex}");
-                QuarantineCorruptFile(storePath, logName);
+                if (ex is IOException or UnauthorizedAccessException)
+                {
+                    // An external handle (antivirus/indexer/sync scan) or an
+                    // ACL denial fails the read without corrupting the bytes.
+                    // Quarantining here would rotate a perfectly good primary
+                    // to .corrupt-* and silently fall the store back to an
+                    // older .bak; keep the primary so the next load converges
+                    // on it once the handle is gone.
+                    primaryUnreadable = true;
+                    App.Log($"[{logName}] Primary store could not be read: {ex}");
+                }
+                else
+                {
+                    App.Log($"[{logName}] Primary store is invalid: {ex}");
+                    QuarantineCorruptFile(storePath, logName);
+                }
             }
         }
 
@@ -84,28 +106,50 @@ internal static class ResilientJsonStore
             string backupJson = await File.ReadAllTextAsync(backupPath);
             recovered = deserialize(backupJson);
 
-            try
+            if (primaryUnreadable)
             {
-                await RestorePrimaryAsync(storePath, backupJson);
-                App.Log($"[{logName}] Restored store from '{backupPath}'.");
-            }
-            catch (Exception restoreException)
-            {
-                // A read-only or temporarily locked data directory must not
-                // turn a valid backup into an apparent total settings loss.
+                // The primary never proved corrupt — restoring the older
+                // backup bytes over it would be a silent rollback of newer
+                // committed state once the transient handle goes away.
                 App.Log(
-                    $"[{logName}] Backup loaded, but primary restore failed: " +
-                    restoreException);
+                    $"[{logName}] Backup loaded; primary kept for the next " +
+                    $"read after its transient read failure.");
+            }
+            else
+            {
+                try
+                {
+                    await RestorePrimaryAsync(storePath, backupJson);
+                    App.Log($"[{logName}] Restored store from '{backupPath}'.");
+                }
+                catch (Exception restoreException)
+                {
+                    // A read-only or temporarily locked data directory must not
+                    // turn a valid backup into an apparent total settings loss.
+                    App.Log(
+                        $"[{logName}] Backup loaded, but primary restore failed: " +
+                        restoreException);
+                }
             }
         }
         catch (Exception ex)
         {
-            App.Log($"[{logName}] Backup store is invalid: {ex}");
-            // Quarantine symmetric to the primary path: a corrupt .bak left
-            // in place keeps "backup exists" probes true forever while every
-            // load still fails — callers checking File.Exists(backup) would
-            // deadlock on a recovery source that can never succeed.
-            QuarantineCorruptFile(backupPath, logName);
+            if (ex is IOException or UnauthorizedAccessException)
+            {
+                // Symmetric to the primary path: an unreadable backup keeps
+                // its bytes for the next load.
+                App.Log($"[{logName}] Backup store could not be read: {ex}");
+            }
+            else
+            {
+                App.Log($"[{logName}] Backup store is invalid: {ex}");
+                // Quarantine symmetric to the primary path: a corrupt .bak left
+                // in place keeps "backup exists" probes true forever while every
+                // load still fails — callers checking File.Exists(backup) would
+                // deadlock on a recovery source that can never succeed.
+                QuarantineCorruptFile(backupPath, logName);
+            }
+
             return new ResilientJsonLoadResult<T>(
                 createDefault(),
                 ResilientJsonLoadSource.DefaultAfterFailure);
@@ -223,18 +267,41 @@ internal static class ResilientJsonStore
             {
                 await File.WriteAllBytesAsync(tempPath, utf8Json);
             }
-            if (File.Exists(storePath))
+
+            // The existence probe routes the commit: replace when a primary
+            // exists, plain move for the first save. A racing writer can
+            // flip the answer between the probe and the move, so a failed
+            // initial move loops back through the probe (attempt 2 then
+            // sees the racing writer's primary and replaces it).
+            for (int commitAttempt = 0; ; commitAttempt++)
             {
-                await ReplaceOrFallbackAsync(
-                    tempPath,
-                    storePath,
-                    GetBackupPath(storePath),
-                    replaceFile,
-                    delayAsync);
-            }
-            else
-            {
-                File.Move(tempPath, storePath);
+                if (File.Exists(storePath))
+                {
+                    await ReplaceOrFallbackAsync(
+                        tempPath,
+                        storePath,
+                        GetBackupPath(storePath),
+                        replaceFile,
+                        delayAsync);
+                    return;
+                }
+
+                try
+                {
+                    File.Move(tempPath, storePath);
+                    return;
+                }
+                catch (IOException ex) when (commitAttempt < s_replaceRetryDelays.Length)
+                {
+                    // Initial-move failures at this point are races or
+                    // transient locks (the temp write already succeeded, so
+                    // media-level errors have already surfaced there).
+                    App.Log(
+                        $"[ResilientJsonStore] Initial move hit a transient " +
+                        $"conflict; retrying commit. HResult=0x{ex.HResult:X8}, " +
+                        $"File='{Path.GetFileName(storePath)}'.");
+                    await delayAsync(s_replaceRetryDelays[commitAttempt]);
+                }
             }
         }
         finally
@@ -261,24 +328,27 @@ internal static class ResilientJsonStore
                     true);
                 return;
             }
-            catch (IOException ex) when (IsUnableToRemoveReplacedFile(ex))
+            catch (IOException ex) when (IsTransientReplaceConflict(ex))
             {
                 if (retryIndex < s_replaceRetryDelays.Length)
                 {
                     TimeSpan delay = s_replaceRetryDelays[retryIndex];
                     App.Log(
-                        $"[ResilientJsonStore] Atomic replace could not remove the " +
-                        $"destination; retrying in {delay.TotalMilliseconds:0} ms. " +
+                        $"[ResilientJsonStore] Atomic replace hit a transient " +
+                        $"conflict; retrying in {delay.TotalMilliseconds:0} ms. " +
                         $"HResult=0x{ex.HResult:X8}, " +
                         $"File='{Path.GetFileName(storePath)}'.");
                     await delayAsync(delay);
                     continue;
                 }
 
-                // ERROR_UNABLE_TO_REMOVE_REPLACED documents that both source and
-                // destination retain their original names. Guard that invariant
-                // before using the non-atomic path so other partial replace errors
-                // are never treated as safe fallbacks.
+                // The in-place fallback is only safe when the failed replace
+                // left BOTH files under their original names. For
+                // ERROR_UNABLE_TO_REMOVE_REPLACED that is documented; for a
+                // sharing violation it is not (the replace can stop in any
+                // intermediate rename step), so this existence probe is the
+                // only guard standing between a partial replace and the
+                // non-atomic path — it must fail closed.
                 if (!File.Exists(tempPath) || !File.Exists(storePath))
                 {
                     throw;
@@ -321,6 +391,10 @@ internal static class ResilientJsonStore
 
     private static bool IsUnableToRemoveReplacedFile(IOException exception) =>
         exception.HResult == UnableToRemoveReplacedFileHResult;
+
+    private static bool IsTransientReplaceConflict(IOException exception) =>
+        exception.HResult == UnableToRemoveReplacedFileHResult ||
+        exception.HResult == SharingViolationHResult;
 
     private static async Task SaveInPlaceWithVerifiedBackupAsync(
         string storePath,

@@ -1,5 +1,6 @@
 using System.Globalization;
 using DeskBox.Controls;
+using DeskBox.Contracts;
 using DeskBox.Models;
 using DeskBox.Services;
 using Microsoft.UI.Xaml;
@@ -33,6 +34,7 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
     private GlanceWidgetData _settings = new();
     private string? _selectedWidgetId;
     private IntPtr _ownerWindow;
+    private ISettingsWidgetActions _widgetActions = null!;
     private bool _isLoading;
     private bool _isSectionLoaded;
     private bool _instanceRefreshQueued;
@@ -53,7 +55,11 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
 
     private LocalizationService Localization => App.Current.LocalizationService;
 
-    public void SetOwnerWindow(IntPtr ownerWindow) => _ownerWindow = ownerWindow;
+    public void Configure(ISettingsWidgetActions widgetActions, IntPtr ownerWindow)
+    {
+        _widgetActions = widgetActions;
+        _ownerWindow = ownerWindow;
+    }
 
     public void SelectWidget(string widgetId)
     {
@@ -96,16 +102,16 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
                 try
                 {
                     if (!_isSectionLoaded ||
-                        App.Current.WidgetManager is not { } manager)
+                        !_widgetActions.IsHostAvailable)
                     {
                         return;
                     }
 
                     IReadOnlyList<GlanceWidgetInstanceInfo> instances =
-                        manager.GetGlanceWidgetInstances();
+                        _widgetActions.GetGlanceWidgetInstances();
                     if (!string.Equals(
                             _instanceStateSignature,
-                            CreateInstanceStateSignature(manager, instances),
+                            CreateInstanceStateSignature(_widgetActions, instances),
                             StringComparison.Ordinal))
                     {
                         await RefreshInstancesAsync(_selectedWidgetId);
@@ -141,14 +147,14 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
     private async Task RefreshInstancesCoreAsync(string? preferredWidgetId)
     {
         UpdateInstanceLocalization();
-        if (App.Current.WidgetManager is not { } manager)
+        if (!_widgetActions.IsHostAvailable)
         {
             ApplyEmptyInstanceState();
             return;
         }
 
-        IReadOnlyList<GlanceWidgetInstanceInfo> instances = manager.GetGlanceWidgetInstances();
-        _instanceStateSignature = CreateInstanceStateSignature(manager, instances);
+        IReadOnlyList<GlanceWidgetInstanceInfo> instances = _widgetActions.GetGlanceWidgetInstances();
+        _instanceStateSignature = CreateInstanceStateSignature(_widgetActions, instances);
         GlanceWidgetInstanceInfo? selected = instances.FirstOrDefault(instance =>
             string.Equals(instance.Id, preferredWidgetId, StringComparison.Ordinal)) ??
             instances.FirstOrDefault();
@@ -160,7 +166,7 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
             InstanceComboBox.SelectedItem = SynchronizeInstanceOptions(
                 instances,
                 selected?.Id);
-            ApplyInstanceManagerState(manager, instances, selected);
+            ApplyInstanceManagerState(_widgetActions, instances, selected);
             EnsureOptionsPopulated();
 
             if (selected is null)
@@ -182,10 +188,10 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
     }
 
     private static string CreateInstanceStateSignature(
-        WidgetManager manager,
+        ISettingsWidgetActions widgetActions,
         IEnumerable<GlanceWidgetInstanceInfo> instances)
     {
-        return $"{manager.IsGlanceFeatureEnabled}:" + string.Join(
+        return $"{widgetActions.IsGlanceFeatureEnabled}:" + string.Join(
             "|",
             instances.Select(instance =>
                 $"{instance.Id.Length}:{instance.Id}" +
@@ -368,13 +374,13 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
         string selectedWidgetId,
         long selectionVersion)
     {
-        if (App.Current.WidgetManager is not { } manager)
+        if (!_widgetActions.IsHostAvailable)
         {
             await RefreshInstancesCoreAsync(null);
             return;
         }
 
-        IReadOnlyList<GlanceWidgetInstanceInfo> instances = manager.GetGlanceWidgetInstances();
+        IReadOnlyList<GlanceWidgetInstanceInfo> instances = _widgetActions.GetGlanceWidgetInstances();
         GlanceWidgetInstanceInfo? selected = instances.FirstOrDefault(instance =>
             string.Equals(instance.Id, selectedWidgetId, StringComparison.Ordinal));
         if (selected is null)
@@ -395,9 +401,9 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
         _isLoading = true;
         try
         {
-            _instanceStateSignature = CreateInstanceStateSignature(manager, instances);
+            _instanceStateSignature = CreateInstanceStateSignature(_widgetActions, instances);
             _selectedWidgetId = selected.Id;
-            ApplyInstanceManagerState(manager, instances, selected);
+            ApplyInstanceManagerState(_widgetActions, instances, selected);
             EnsureOptionsPopulated();
             _store = store;
             _settings = settings;
@@ -411,7 +417,7 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
     }
 
     private void ApplyInstanceManagerState(
-        WidgetManager manager,
+        ISettingsWidgetActions widgetActions,
         IReadOnlyCollection<GlanceWidgetInstanceInfo> instances,
         GlanceWidgetInstanceInfo? selected)
     {
@@ -422,12 +428,12 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
         DuplicateInstanceMenuItem.IsEnabled = hasSelection;
         RenameInstanceMenuItem.IsEnabled = hasSelection;
         DeleteInstanceMenuItem.IsEnabled = hasSelection;
-        InstanceEnabledToggle.IsEnabled = hasSelection && manager.IsGlanceFeatureEnabled;
+        InstanceEnabledToggle.IsEnabled = hasSelection && widgetActions.IsGlanceFeatureEnabled;
         InstanceEnabledToggle.IsOn = selected?.IsEnabled == true;
         InstanceManagerCard.Description = Localization.Format(
             "Glance.Instances.Description",
             instances.Count);
-        if (!manager.IsGlanceFeatureEnabled)
+        if (!widgetActions.IsGlanceFeatureEnabled)
         {
             InstanceManagerCard.Description =
                 $"{InstanceManagerCard.Description} {Localization.T("Glance.Instances.MasterOff")}";
@@ -515,7 +521,27 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
         }
 
         update(_settings);
-        await store.SaveAsync(_settings);
+        await SaveSettingsToStoreAsync(store);
+    }
+
+    /// <summary>
+    /// Persists the in-memory settings through the store. A failed save
+    /// (locked data file, refused relay) must not escape into the async void
+    /// event handlers that reach this — that path crash-killed the settings
+    /// host with no log. The in-memory state stays applied; the UI keeps
+    /// reflecting what the user chose while the failure is logged for
+    /// diagnosis.
+    /// </summary>
+    private async Task SaveSettingsToStoreAsync(GlanceWidgetStore store)
+    {
+        try
+        {
+            await store.SaveAsync(_settings);
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[GlanceSettings] Save failed instance={_selectedWidgetId}: {ex}");
+        }
     }
 
     private async Task FlushPendingSavesAsync()
@@ -528,7 +554,7 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
         _calendarTransparencySaveTimer.Stop();
         if (hasPendingSave && _store is { } store)
         {
-            await store.SaveAsync(_settings);
+            await SaveSettingsToStoreAsync(store);
         }
     }
 
@@ -575,61 +601,89 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
     {
         if (_isLoading ||
             string.IsNullOrWhiteSpace(_selectedWidgetId) ||
-            App.Current.WidgetManager is not { } manager)
+            !_widgetActions.IsHostAvailable)
         {
             return;
         }
 
-        await manager.SetGlanceWidgetInstanceEnabledAsync(
-            _selectedWidgetId,
-            InstanceEnabledToggle.IsOn);
-        await RefreshInstancesAsync(_selectedWidgetId);
+        try
+        {
+            await _widgetActions.SetGlanceWidgetInstanceEnabledAsync(
+                _selectedWidgetId,
+                InstanceEnabledToggle.IsOn);
+            await RefreshInstancesAsync(_selectedWidgetId);
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[GlanceSettings] Toggle instance failed id={_selectedWidgetId}: {ex}");
+        }
     }
 
     private async void AddInstanceButton_Click(object sender, RoutedEventArgs e)
     {
-        if (App.Current.WidgetManager is not { } manager)
+        if (!_widgetActions.IsHostAvailable)
         {
             return;
         }
 
-        await FlushPendingSavesAsync();
-        GlanceWidgetInstanceInfo created = await manager.CreateGlanceWidgetAsync();
-        await RefreshInstancesAsync(created.Id);
+        try
+        {
+            await FlushPendingSavesAsync();
+            GlanceWidgetInstanceInfo created = await _widgetActions.CreateGlanceWidgetAsync(null);
+            await RefreshInstancesAsync(created.Id);
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[GlanceSettings] Create instance failed: {ex}");
+        }
     }
 
     private async void LocateInstanceMenuItem_Click(object sender, RoutedEventArgs e)
     {
-        if (!string.IsNullOrWhiteSpace(_selectedWidgetId) &&
-            App.Current.WidgetManager is { } manager)
+        try
         {
-            await manager.LocateGlanceWidgetAsync(_selectedWidgetId);
+            if (!string.IsNullOrWhiteSpace(_selectedWidgetId) &&
+                _widgetActions.IsHostAvailable)
+            {
+                await _widgetActions.LocateGlanceWidgetAsync(_selectedWidgetId);
+            }
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[GlanceSettings] Locate instance failed id={_selectedWidgetId}: {ex}");
         }
     }
 
     private async void DuplicateInstanceMenuItem_Click(object sender, RoutedEventArgs e)
     {
         if (string.IsNullOrWhiteSpace(_selectedWidgetId) ||
-            App.Current.WidgetManager is not { } manager)
+            !_widgetActions.IsHostAvailable)
         {
             return;
         }
 
-        await FlushPendingSavesAsync();
-        GlanceWidgetInstanceInfo created = await manager.CreateGlanceWidgetAsync(_selectedWidgetId);
-        await RefreshInstancesAsync(created.Id);
+        try
+        {
+            await FlushPendingSavesAsync();
+            GlanceWidgetInstanceInfo created = await _widgetActions.CreateGlanceWidgetAsync(_selectedWidgetId);
+            await RefreshInstancesAsync(created.Id);
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[GlanceSettings] Duplicate instance failed id={_selectedWidgetId}: {ex}");
+        }
     }
 
     private async void RenameInstanceMenuItem_Click(object sender, RoutedEventArgs e)
     {
         if (string.IsNullOrWhiteSpace(_selectedWidgetId) ||
-            App.Current.WidgetManager is not { } manager ||
+            !_widgetActions.IsHostAvailable ||
             XamlRoot is null)
         {
             return;
         }
 
-        GlanceWidgetInstanceInfo? selected = manager.GetGlanceWidgetInstances()
+        GlanceWidgetInstanceInfo? selected = _widgetActions.GetGlanceWidgetInstances()
             .FirstOrDefault(instance =>
                 string.Equals(instance.Id, _selectedWidgetId, StringComparison.Ordinal));
         if (selected is null)
@@ -659,20 +713,27 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
             return;
         }
 
-        await manager.RenameWidgetAsync(selected.Id, nameBox.Text);
-        await RefreshInstancesAsync(selected.Id);
+        try
+        {
+            await _widgetActions.RenameWidgetAsync(selected.Id, nameBox.Text);
+            await RefreshInstancesAsync(selected.Id);
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[GlanceSettings] Rename instance failed id={selected.Id}: {ex}");
+        }
     }
 
     private async void DeleteInstanceMenuItem_Click(object sender, RoutedEventArgs e)
     {
         if (string.IsNullOrWhiteSpace(_selectedWidgetId) ||
-            App.Current.WidgetManager is not { } manager ||
+            !_widgetActions.IsHostAvailable ||
             XamlRoot is null)
         {
             return;
         }
 
-        GlanceWidgetInstanceInfo? selected = manager.GetGlanceWidgetInstances()
+        GlanceWidgetInstanceInfo? selected = _widgetActions.GetGlanceWidgetInstances()
             .FirstOrDefault(instance =>
                 string.Equals(instance.Id, _selectedWidgetId, StringComparison.Ordinal));
         if (selected is null)
@@ -698,10 +759,17 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
             return;
         }
 
-        await FlushPendingSavesAsync();
-        await manager.RemoveGlanceWidgetAsync(selected.Id);
-        _selectedWidgetId = null;
-        await RefreshInstancesAsync(null);
+        try
+        {
+            await FlushPendingSavesAsync();
+            await _widgetActions.RemoveGlanceWidgetAsync(selected.Id);
+            _selectedWidgetId = null;
+            await RefreshInstancesAsync(null);
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[GlanceSettings] Delete instance failed id={selected.Id}: {ex}");
+        }
     }
 
     private void DisplayContentDropDown_Click(object sender, RoutedEventArgs e)
@@ -749,7 +817,7 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
         UpdateCalendarMaterialState();
         if (_store is { } store)
         {
-            await store.SaveAsync(_settings);
+            await SaveSettingsToStoreAsync(store);
         }
     }
 
@@ -868,7 +936,7 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
         _imageTransparencySaveTimer.Stop();
         if (_store is { } store)
         {
-            await store.SaveAsync(_settings);
+            await SaveSettingsToStoreAsync(store);
         }
     }
 
@@ -892,7 +960,7 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
         _calendarTransparencySaveTimer.Stop();
         if (_store is { } store)
         {
-            await store.SaveAsync(_settings);
+            await SaveSettingsToStoreAsync(store);
         }
     }
 
@@ -940,7 +1008,7 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
         _scaleSaveTimer.Stop();
         if (_store is { } store)
         {
-            await store.SaveAsync(_settings);
+            await SaveSettingsToStoreAsync(store);
         }
     }
 
@@ -962,7 +1030,7 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
             return;
         }
 
-        await store.SaveAsync(_settings);
+        await SaveSettingsToStoreAsync(store);
         ApplySettingsToControls();
     }
 
@@ -981,7 +1049,7 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
             return;
         }
 
-        await store.SaveAsync(_settings);
+        await SaveSettingsToStoreAsync(store);
         ApplySettingsToControls();
     }
 
@@ -994,14 +1062,21 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
             return;
         }
 
-        await store.SaveAsync(_settings);
+        await SaveSettingsToStoreAsync(store);
         ApplySettingsToControls();
     }
 
     private async void ClearCacheButton_Click(object sender, RoutedEventArgs e)
     {
-        await _imageService.ClearCacheAsync();
-        UpdateCacheSize();
+        try
+        {
+            await _imageService.ClearCacheAsync();
+            UpdateCacheSize();
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[GlanceSettings] Clear image cache failed: {ex}");
+        }
     }
 
     private void UpdateLocalSourceState()

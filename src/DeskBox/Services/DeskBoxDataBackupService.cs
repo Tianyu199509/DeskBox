@@ -1,4 +1,4 @@
-using System.IO.Compression;
+﻿using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -30,9 +30,8 @@ public sealed partial class DeskBoxDataBackupService
     private const int MaxScopedRestoreApplyAttempts = 3;
     /// <summary>
     /// <see cref="Exception.Data"/> key stamped on the InvalidDataException
-    /// <summary>Stamped on the
-    /// InvalidDataException for an unsupported schema version so the UI can
-    /// localize the failure. Carries the unsupported version number.</summary>
+    /// for an unsupported schema version so the UI can localize the
+    /// failure. Carries the unsupported version number.</summary>
     public const string BackupSchemaVersionDataKey = "DeskBox.BackupSchemaVersion";
     /// <summary>Stamped on InvalidDataException when the archive lacks a usable
     /// manifest — i.e. the picked file is not a DeskBox backup at all.</summary>
@@ -314,10 +313,23 @@ public sealed partial class DeskBoxDataBackupService
                 target.Directory,
                 $"DeskBox-Auto-{DateTime.Now:yyyyMMdd-HHmmss}.zip");
             await CreateArchiveCoreAsync(snapshotPath, "automatic", cancellationToken);
-            PruneAutomaticSnapshots(
-                target.Directory,
-                options.RetentionCount,
-                _recoverySnapshotRetentionPin?.Invoke());
+            // Deep review R15 (F7 audit): the archive is durable at this
+            // point — a retention-prune or directory enumeration throwing
+            // (custom directory on a slow network share) used to report the
+            // WHOLE run as Failed and skip the fallback-status bookkeeping,
+            // even though the snapshot itself was fine. Prune and the
+            // fallback bookkeeping now degrade to log lines.
+            try
+            {
+                PruneAutomaticSnapshots(
+                    target.Directory,
+                    options.RetentionCount,
+                    _recoverySnapshotRetentionPin?.Invoke());
+            }
+            catch (Exception pruneEx)
+            {
+                App.Log($"[DataBackup] Automatic snapshot retention prune failed (snapshot kept): {pruneEx}");
+            }
             if (target.UsedFallback)
             {
                 string fallbackMessage =
@@ -1361,6 +1373,14 @@ public sealed partial class DeskBoxDataBackupService
         catch (Exception ex)
         {
             App.Log($"[DataBackup] Pending restore failed: {ex}");
+            // Deep review R15 (F7 audit): when BOTH rename attempts failed,
+            // the user's entire data set only exists in the rollback
+            // directory — name it explicitly so it can be recovered by hand.
+            if (!string.IsNullOrWhiteSpace(rollbackRoot) && Directory.Exists(rollbackRoot))
+            {
+                App.Log($"[DataBackup] User data preserved at rollback path '{rollbackRoot}'.");
+            }
+
             DeletePendingRestoreCore();
             return new DeskBoxRestoreApplyResult(true, false, ex.Message, DeskBoxRestoreApplyKind.Full);
         }

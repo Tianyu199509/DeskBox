@@ -128,6 +128,12 @@ public partial class SettingsViewModel
                 "Settings.Update.Status.Downloading",
                 _availableUpdateManifest?.Version ?? string.Empty);
             UpdateDetailText = _localizationService.T("Settings.Update.Detail.Downloading");
+            // Entering the downloading state flips every computed binding
+            // (progress rows, badge, activity card, action buttons); the
+            // service-mirror path must notify them all or a settings page
+            // that was already open keeps the stale "available" face until
+            // the download completes.
+            NotifyUpdateActionPropertiesChanged();
         }
 
         OnPropertyChanged(nameof(UpdateProgressText));
@@ -259,6 +265,19 @@ public partial class SettingsViewModel
             return null;
         }
 
+        // A background auto-download may already own the service's single
+        // download slot; entering here anyway would lose the Interlocked
+        // race and briefly paint a "cancelled / use manual download"
+        // failure over a download that is still running. Mirror the
+        // in-progress state instead — the service's completion event
+        // settles it.
+        if (_appUpdateService.IsDownloadInProgress)
+        {
+            IsDownloadingUpdate = true;
+            NotifyUpdateActionPropertiesChanged();
+            return null;
+        }
+
         // If already downloaded, the caller should handle install confirmation.
         if (IsUpdateDownloaded)
         {
@@ -305,6 +324,22 @@ public partial class SettingsViewModel
             // SettingsChanged pass), exactly as the direct write did.
             _maintenanceSettings.RecordUpdateCheck(DateTimeOffset.Now);
             ApplyUpdateCheckResult(result);
+        }
+        catch (OperationCanceledException)
+        {
+            // A cancelled check returns to the idle status; the caller's
+            // next action re-arms the Checking text.
+        }
+        catch (Exception ex)
+        {
+            // Deep review R13-2 (D19): without this catch a failed check
+            // (IPC refusal, slow-network timeout) left the status row
+            // stuck on "checking" forever — the in-process service reports
+            // failures as a Failed result, so mirror that here.
+            ApplyUpdateCheckResult(new AppUpdateCheckResult(
+                DeskBox.Models.AppUpdateCheckStatus.Failed,
+                AppVersion,
+                errorMessage: ex.Message));
         }
         finally
         {
@@ -450,6 +485,18 @@ public partial class SettingsViewModel
         if (_appUpdateService.LastCheckResult is { } result)
         {
             ApplyUpdateCheckResult(result);
+        }
+
+        // A background auto-download may have finished while this surface
+        // was closed: the check result alone says "update available" while
+        // the button already reads "install". Keep the status text in the
+        // downloaded state when the package is on disk.
+        if (_availableUpdateManifest is not null && IsUpdateDownloaded)
+        {
+            UpdateStatusText = _localizationService.Format(
+                "Settings.Update.Status.Downloaded",
+                _availableUpdateManifest.Version);
+            UpdateDetailText = _localizationService.T("Settings.Update.Detail.Downloaded");
         }
     }
 

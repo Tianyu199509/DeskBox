@@ -228,6 +228,77 @@ public sealed class GlanceWidgetStoreTests : IDisposable
         Assert.Equal(0, secondReloaded.BackgroundImageTransparency);
     }
 
+    [Fact]
+    public async Task SaveAsync_WithRelay_ForwardsSerializedDataAndSkipsDisk()
+    {
+        // The settings host's boot arms the relay: per-widget saves become
+        // IPC forwards so the MAIN process stays the sole writer and its
+        // store instance raises Changed for the live desktop widgets
+        // (batch R8 — the host's direct file writes used to be invisible to
+        // open widgets and could be reverted by the main store's cached
+        // write-back).
+        var store = new GlanceWidgetStore(_tempRoot, "relay-widget");
+        string? relayedWidgetId = null;
+        string? relayedJson = null;
+        GlanceWidgetStore.SaveRelay = (widgetId, json) =>
+        {
+            relayedWidgetId = widgetId;
+            relayedJson = json;
+            return Task.CompletedTask;
+        };
+        try
+        {
+            await store.SaveAsync(new GlanceWidgetData { RotationIntervalMinutes = 5 });
+        }
+        finally
+        {
+            GlanceWidgetStore.SaveRelay = null;
+        }
+
+        Assert.Equal("relay-widget", relayedWidgetId);
+        Assert.NotNull(relayedJson);
+        Assert.Contains("\"rotationIntervalMinutes\": 5", relayedJson);
+        Assert.False(File.Exists(store.StorePath),
+            "the host store must never write the glance file");
+
+        // Stores without a widget identity (the legacy shared instance)
+        // keep direct disk semantics even while the relay is armed.
+        GlanceWidgetStore.SaveRelay = (_, _) => Task.CompletedTask;
+        try
+        {
+            var legacy = new GlanceWidgetStore(_tempRoot);
+            await legacy.SaveAsync(new GlanceWidgetData());
+            Assert.True(File.Exists(legacy.StorePath));
+        }
+        finally
+        {
+            GlanceWidgetStore.SaveRelay = null;
+        }
+    }
+
+    [Fact]
+    public async Task SaveAsync_WithFailingRelay_RollsTheCacheBackAndThrows()
+    {
+        // A relay failure means the authoritative save never landed in the
+        // MAIN process: the local cache must not keep the fabricated value
+        // (batch R9).
+        var store = new GlanceWidgetStore(_tempRoot, "relay-fail-widget");
+        GlanceWidgetStore.SaveRelay = (_, _) =>
+            throw new InvalidOperationException("pipe broken");
+        try
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(
+                () => store.SaveAsync(new GlanceWidgetData { TimeScale = 1.35 }));
+        }
+        finally
+        {
+            GlanceWidgetStore.SaveRelay = null;
+        }
+
+        GlanceWidgetData reloaded = await store.LoadAsync();
+        Assert.NotEqual(1.35, reloaded.TimeScale);
+    }
+
     public void Dispose()
     {
         try

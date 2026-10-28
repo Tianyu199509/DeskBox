@@ -104,8 +104,11 @@ begin
   if not StopDeskBoxProcessesAtPath(WizardDirValue) then
     Log('DeskBox path-scoped process shutdown failed; Setup will continue with Restart Manager handling file locks.');
 
-  // Give the process time to fully exit before Restart Manager runs.
-  Sleep(2000);
+  // Give the process time to fully exit before Restart Manager runs —
+  // only meaningful when an existing install was just asked to close; a
+  // first install has nothing to wait for.
+  if DirectInstallUpgrade then
+    Sleep(2000);
   Log('DeskBox process termination completed.');
 
   // DeskBox must continue to run at normal user integrity so Explorer drag and

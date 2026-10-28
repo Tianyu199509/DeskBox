@@ -18,12 +18,14 @@
 | 更新方式 | 应用内更新 + `DeskBox.Updater.exe` + Inno 覆盖安装 | `Windows.Services.Store.StoreContext` + Microsoft Store 更新 |
 | 开机自启 | HKCU Run 注册表 | MSIX `StartupTask` |
 | 包身份 | 无 package identity | 有 package identity |
-| 数据路径 | 当前继续使用 DeskBox 自有本地数据目录 | 首版 Store 也继续使用相同数据目录，避免用户切换通道后数据丢失 |
+| 数据路径 | 当前继续使用 DeskBox 自有本地数据目录 | 首次以 Store 版启动时可**读穿**直装版遗留数据（一次性继承：MSIX 合并视图读到 `%LOCALAPPDATA%\DeskBox`），此后两侧写入各自分叉、互不可见；卸载商店包会连同其 LocalCache 影子副本（含其内恢复快照）一并删除。两通道共用同一把单实例互斥体与激活事件（命名内核对象不受 MSIX 虚拟化）——这是有意设计：双通道同装时按启动顺序互斥，避免两份写入并发踩同一逻辑数据；代价是双开自启按竞速定胜负，用户感知为「另一个通道装了没反应」 |
 | 关于页渠道文案 | `官网版` | `Microsoft Store` |
 | 商店支持入口 | 显示，跳转付费 Microsoft Store 版 | 隐藏 |
 | 国内网盘入口 | 可显示 | 不作为独立卡片显示，更新失败时只提供合适提示 |
 | Updater 产物 | 构建并复制 | 不构建、不打包 |
 | 运行时依赖 | 安装器检测 .NET / Windows App Runtime | Store 包建议自包含 .NET，Windows App Runtime 由包依赖或 Store 处理 |
+
+双通道并存提示：同一台机器可以同时装直装版与商店版（数据按上表「数据路径」分叉），但两者争用同一把单实例锁——安装商店版前先退出正在运行的直装版，且只保留一个通道的开机自启，否则登录时按竞速决定哪个通道生效。
 
 当前项目使用的关键 MSBuild 属性：
 
@@ -216,14 +218,20 @@ https://deskbox.fun/update/stable.json
    - 安装包 digest / `.sha256` 和本地 `Get-FileHash` 一致
    - （签名版）`Get-AuthenticodeSignature` 显示签名者为 SignPath 证书且带 RFC 3161 时间戳，签名者 CN 与发版门禁 `expected-signer-cn` 输入一致
 
-3. 更新并部署官网清单：
+3. 更新并部署官网清单（**发布日硬门**：跳过此步时，manifest 若仍指旧版本，全部存量直装用户拿到假「已是最新」，且 GitHub 兜底不会触发）：
    - `deskbox-site/public/update/stable.json`
    - `version`
    - `downloadUrl`
    - `sha256`
    - `size`
+   - `arm64DownloadUrl`
+   - `arm64Sha256`
+   - `arm64Size`
    - `releaseNotesUrl`
    - `summary`
+   - `manualDownloadUrl`、`mirrorUrl`（如有）
+
+   注意：缺 `arm64Sha256`/`arm64Size` 时官网通道对 ARM64 客户端判 InvalidManifest 并回退 GitHub 检查（用户仍可更新，但官网对 arm64 的灰度/成本控制失效）；分字段手工编辑曾把版本与哈希改成两个版本，改完必须跑一致性断言：`version`/`downloadUrl`/`arm64DownloadUrl` 与 `sha256`/`arm64Sha256`/`size`/`arm64Size` 六字段与 GitHub latest Release 资产逐一一致。
 
 4. 部署后从公网验证：
 
@@ -345,7 +353,7 @@ Store 通道启用 MSIX / Windows App Runtime 相关能力后，普通未打包 
 如果后续需要清理本地测试包：
 
 ```powershell
-Get-AppxPackage DeskBox.Desktop | Remove-AppxPackage
+Get-AppxPackage D1FC332A.DeskBoxWidgets | Remove-AppxPackage
 ```
 
 如果需要清理本地测试证书，先确认 thumbprint，再删除：

@@ -32,6 +32,7 @@ public static class FileOpenPickerService
             suggestedFolder = normalizedFolder;
         }
 
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         try
         {
             IReadOnlyList<string> paths = NativeFileOpenDialog.ShowPickFiles(
@@ -44,7 +45,9 @@ public static class FileOpenPickerService
         }
         catch (Exception ex)
         {
-            App.Log($"[FileOpenPicker] Failed to pick files: {ex}");
+            // elapsedMs separates an environment-killed dialog (a
+            // cancel-looking failure at near-zero ms) from a human-paced one.
+            App.Log($"[FileOpenPicker] Failed to pick files (elapsedMs={stopwatch.ElapsedMilliseconds}): {ex}");
             return Task.FromResult<IReadOnlyList<string>>([]);
         }
     }

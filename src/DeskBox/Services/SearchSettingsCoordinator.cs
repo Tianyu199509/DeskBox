@@ -211,7 +211,14 @@ public sealed class SearchSettingsCoordinator : ISearchSettings, ISearchFeatureS
         if (hotkey is null) return UnavailableHotkey();
         hotkey.SetEnabled(enabled);
         StateChanged?.Invoke();
-        return enabled && !hotkey.IsRegistered ? FailedHotkey() : new(true);
+        // Deep review R13-2 (D11 audit): do NOT read IsRegistered here —
+        // the enable command is fire-and-forget and still queued on the
+        // main UI thread, so a just-enabled hotkey read as unregistered
+        // and reported a failure the registration push then contradicted.
+        // The hotkey.registration-changed push converges the card; the
+        // command's refusal path already reports through its own failure
+        // handling.
+        return new(true);
     }
 
     public SearchHotkeyUpdateResult ApplyHotkey(GlobalHotkeyGesture gesture)

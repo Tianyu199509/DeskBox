@@ -3,6 +3,7 @@ using System.Collections.ObjectModel;
 using System.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using DeskBox.Contracts;
 using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Services;
@@ -34,7 +35,7 @@ public partial class SettingsViewModel
         // final slider value. Persist without broadcasting the same appearance
         // pass a second time through SettingsChanged.
         _settingsService.SaveDebounced(notifySubscribers: false);
-        App.ScheduleLightMemoryCleanup();
+        _appActions.ScheduleLightMemoryCleanup();
     }
 
     public void SetCustomAccentColor(Color color)
@@ -68,18 +69,34 @@ public partial class SettingsViewModel
         try
         {
             SettingsService.ApplyDefaultPreferences(_settingsService.Settings);
+
+            // The group-level defaults (nav style, title mode, wheel/hover
+            // switch, switch animation, groups master switch) live in the
+            // layout domain, which a snapshot commit strips as main-owned:
+            // reset them through the dedicated command or the restore
+            // silently kept the user's custom group presentation
+            // (batch R9).
+            _ = _widgetActions.ApplyGroupNavigationDefaults(new GroupNavigationDefaultsChange(
+                NavigationStyle: WidgetGroupNavigationStyles.Tabs,
+                TitleDisplayMode: WidgetGroupTitleDisplayModes.IconAndText,
+                WheelSwitchEnabled: true,
+                HoverSwitchEnabled: false,
+                SwitchAnimationStyle: WidgetGroupSwitchAnimationStyles.Auto,
+                GroupsEnabled: true));
             ApplySettingsSnapshot();
             IconHelper.ClearAllThumbnailCaches();
 
-            if (App.Current is { } app)
-            {
-                // ApplySettingsSnapshot above already re-projected the
-                // restored snap state onto the interaction editor.
-                app.ResizeGuideOverlay.IsSnapEnabled = _interactionSettings.SnapEnabled;
-            }
+            // ApplySettingsSnapshot above already re-projected the
+            // restored snap state onto the interaction editor.
+            _appActions.SetSnapEnabled(_interactionSettings.SnapEnabled);
 
-            App.Current?.GlobalHotkeyService?.RefreshRegistration();
-            App.Current?.UpdateTrayIcon();
+            _hotkeyActions.RefreshRegistration();
+            // The reset flipped SearchHotkeyEnabled back to its default in
+            // settings.json; re-run the live registration or the old
+            // gesture kept triggering search until the next restart
+            // (batch R9).
+            _hotkeyActions.RefreshSearchHotkeyRegistration();
+            _appActions.UpdateTrayIcon();
             RefreshGlobalHotkeyState();
             _themeService.RefreshAppearance();
             RefreshAccentPreview();

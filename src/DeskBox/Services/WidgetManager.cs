@@ -865,7 +865,17 @@ public sealed partial class WidgetManager
         // multiple independently configured instances.
         DeduplicateFeatureWidgets();
         NormalizeWidgetGroupsForRuntime();
-        if (_topologyLayoutService.ActivateCurrentTopology(_settingsService.Settings))
+        // Deep review R17 (G3 audit): topology dictionary mutations run under
+        // the graph gate — the settings-host snapshot apply swaps the whole
+        // graph under the same lock, and an ungated write lands on an
+        // orphaned slice (R15-2 gated one of four write sites; these are the
+        // remaining three).
+        bool activated = false;
+        _settingsService.MutateGraphUnderLock(() =>
+        {
+            activated = _topologyLayoutService.ActivateCurrentTopology(_settingsService.Settings);
+        });
+        if (activated)
         {
             _settingsService.SaveDebounced(notifySubscribers: false);
         }
@@ -1606,7 +1616,12 @@ public sealed partial class WidgetManager
 
         try
         {
-            if (_topologyLayoutService.ActivateCurrentTopology(_settingsService.Settings))
+            bool activated = false;
+            _settingsService.MutateGraphUnderLock(() =>
+            {
+                activated = _topologyLayoutService.ActivateCurrentTopology(_settingsService.Settings);
+            });
+            if (activated)
             {
                 _settingsService.SaveDebounced(notifySubscribers: false);
             }
@@ -1984,7 +1999,12 @@ public sealed partial class WidgetManager
 
     internal void CaptureCurrentTopologyLayout(WidgetConfig config)
     {
-        if (_topologyLayoutService.CaptureCurrentSurface(_settingsService.Settings, config))
+        bool captured = false;
+        _settingsService.MutateGraphUnderLock(() =>
+        {
+            captured = _topologyLayoutService.CaptureCurrentSurface(_settingsService.Settings, config);
+        });
+        if (captured)
         {
             _settingsService.SaveDebounced(notifySubscribers: false);
         }

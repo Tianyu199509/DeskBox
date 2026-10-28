@@ -1,4 +1,4 @@
-using DeskBox.Controls;
+﻿using DeskBox.Controls;
 using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Services;
@@ -96,7 +96,7 @@ public sealed partial class SettingsWindow
         }
         if (string.Equals(_currentSettingsSection, "ManagedStorage", StringComparison.Ordinal))
         {
-            RefreshManagedStorageFolderList();
+            _ = RefreshManagedStorageFolderListAsync();
         }
         if (string.Equals(_currentSettingsSection, "BackupRestoreSettings", StringComparison.Ordinal))
         {

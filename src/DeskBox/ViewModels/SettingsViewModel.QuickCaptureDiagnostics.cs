@@ -14,7 +14,7 @@ public partial class SettingsViewModel
     public async Task RefreshQuickCaptureImageCacheInfoAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken = cancellationToken.CanBeCanceled ? cancellationToken : _lifetimeCts.Token;
-        if (App.Current?.QuickCaptureService is not { } quickCaptureService)
+        if (await _dataActions.GetQuickCaptureImageCacheInfoAsync() is not { } info)
         {
             _quickCaptureSettingsEditor.UpdateImageCachePresentation(
                 _localizationService.T("Settings.QuickCapture.ImageCacheUnavailable"),
@@ -24,7 +24,6 @@ public partial class SettingsViewModel
 
         try
         {
-            var info = await quickCaptureService.GetImageCacheInfoAsync().WaitAsync(cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
             if (info.TotalFileCount == 0)
             {

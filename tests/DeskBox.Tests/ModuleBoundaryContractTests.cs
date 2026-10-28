@@ -328,8 +328,13 @@ public sealed class ModuleBoundaryContractTests
             manager, StringComparison.Ordinal);
         Assert.Contains("_searchFeatureSettings.CommitEnabledStateAsync(enabled)",
             manager, StringComparison.Ordinal);
-        Assert.Contains("TrackSearchFeatureAction(_searchFeatureSettings.SetEnabledAsync(enabled, reveal: enabled))",
+        // Batch 3d follow-up: the switch rides the facade command; the main
+        // process runs the coordinator chain (delegates wired in App).
+        Assert.Contains("bool applied = await _widgetActions.SetFeatureWidgetEnabled(kind, enabled);",
             settings, StringComparison.Ordinal);
+        string app = ProductionSource().Single(item =>
+            item.Path == "src/DeskBox/App.xaml.cs").Source;
+        Assert.Contains("applySearchEnabled: enabled =>", app, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -459,6 +464,9 @@ public sealed class ModuleBoundaryContractTests
         new Dictionary<string, int>(StringComparer.Ordinal)
     {
         ["src/DeskBox/App.AotHotkeySmoke.cs"] = 1,
+        // Settings app facade: 1 = deleting the feedback diagnostics archive
+        // after upload (moved verbatim from the feedback window partial).
+        ["src/DeskBox/Services/InProcessSettingsAppActions.cs"] = 1,
         ["src/DeskBox/App.AotLocalFilePersistenceSmoke.cs"] = 3,
         ["src/DeskBox/App.AotManagedUiSmoke.cs"] = 1,
         ["src/DeskBox/App.AotMusicVolumeMutationSmoke.cs"] = 3,
@@ -475,12 +483,18 @@ public sealed class ModuleBoundaryContractTests
         ["src/DeskBox/App.AotTodoNotificationForwardingSmoke.cs"] = 1,
         ["src/DeskBox/App.AotTodoNotificationLifecycleSmoke.cs"] = 1,
         ["src/DeskBox/App.AotTodoRecurrenceReminderSmoke.cs"] = 1,
-        ["src/DeskBox/App.xaml.cs"] = 3,
+        // +1: the secondary-instance update-result forwarder deletes its
+        // pending marker file under the app data root after the primary
+        // consumes it (TakePendingUpdateInstallResult).
+        ["src/DeskBox/App.xaml.cs"] = 4,
         ["src/DeskBox/Helpers/NativeDropTarget.cs"] = 5,
         ["src/DeskBox/Services/AotShellMoveFixture.cs"] = 1,
         // +1: retiring a downloaded installer reclaims its version-scoped
         // directory under the updates root (TryDeleteRetiredInstallerDirectory).
-        ["src/DeskBox/Services/AppUpdateService.cs"] = 6,
+        // +2: the startup sweep (PruneStaleInstallerDirectories) deletes
+        // stale version directories and stale installer logs under the same
+        // updates root.
+        ["src/DeskBox/Services/AppUpdateService.cs"] = 8,
         ["src/DeskBox/Services/AttachmentStorageService.cs"] = 1,
         // Cloud backup orchestrator cleans up its own %TEMP% upload staging
         // directory — it never touches the data root (that stays inside

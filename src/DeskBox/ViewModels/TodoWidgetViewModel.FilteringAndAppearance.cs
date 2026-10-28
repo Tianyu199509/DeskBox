@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using DeskBox.Models;
 using DeskBox.Services;
@@ -33,7 +33,7 @@ public sealed partial class TodoWidgetViewModel
         ApplyTodoSettings(_settingsService.Settings, updateFilter);
     }
 
-    private TodoItemViewModel? FindItem(string itemId)
+    internal TodoItemViewModel? FindItem(string itemId)  // internal: TodoReminderService single-writer routing (R15)
     {
         TodoItemViewModel? item = Items.FirstOrDefault(entry =>
             string.Equals(entry.Id, itemId, StringComparison.Ordinal));
@@ -68,7 +68,7 @@ public sealed partial class TodoWidgetViewModel
             : FindItem(item.Item.GeneratedNextItemId);
     }
 
-    private async Task SaveAsync()
+    internal async Task SaveAsync()  // internal: TodoReminderService single-writer routing (R15)
     {
         NormalizeSortOrders();
         var liveIds = new HashSet<string>(

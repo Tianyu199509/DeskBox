@@ -84,17 +84,27 @@ public partial class App : Application
     private const string QuickCaptureFeatureRuntimeId = "quick-capture";
     private const string TodoRemindersFeatureRuntimeId = "todo-reminders";
     private const string PendingJumpListArgumentFileName = "pending-jumplist-arg.txt";
+    private const string PendingUpdateInstallResultFileName = "pending-update-install-result.txt";
     private const string VerboseLoggingEnvironmentVariable = "DESKBOX_VERBOSE_LOG";
     private static readonly bool EnableVerboseLogging = IsEnabledEnvironmentValue(
         Environment.GetEnvironmentVariable(VerboseLoggingEnvironmentVariable));
 
-    private static readonly string LogPath = DeskBoxDataPathService.Current.LogFilePath;
+    // The settings-host process logs to its own file (batch 3c-3b): the
+    // static initializer must judge by command line because the instance
+    // IsSettingsProcess flag flips later, inside the App constructor.
+    private static readonly string LogPath =
+        App.SettingsHostLaunch.IsSettingsHostLaunch(Environment.GetCommandLineArgs())
+            ? DeskBoxDataPathService.Current.SettingsHostLogFilePath
+            : DeskBoxDataPathService.Current.LogFilePath;
     private static readonly NativeNotificationActivationEnvelopeStore
         PendingNativeNotificationActivationStore = new(
             DeskBoxDataPathService.Current.RootPath);
     private static readonly string PendingJumpListArgumentPath = Path.Combine(
         DeskBoxDataPathService.Current.RootPath,
         PendingJumpListArgumentFileName);
+    private static readonly string PendingUpdateInstallResultPath = Path.Combine(
+        DeskBoxDataPathService.Current.RootPath,
+        PendingUpdateInstallResultFileName);
     private static readonly System.Collections.Concurrent.ConcurrentQueue<string> s_logQueue = new();
     private static readonly SemaphoreSlim s_logSignal = new(0);
     private static int s_logWorkerStarted;
@@ -301,6 +311,16 @@ public partial class App : Application
         // for a secondary instance and forwarded into the old process.
         WaitForRelaunchParentExit(Environment.GetCommandLineArgs());
 
+        // Settings host (batch 3c-3b): a second-process settings launch skips
+        // every primary-instance responsibility below (AUMID, activation
+        // event, single-instance mutex, watchdog, elevation gate, DI
+        // container) — see App.SettingsHost.cs.
+        if (SettingsHostLaunch.IsSettingsHostLaunch(Environment.GetCommandLineArgs()))
+        {
+            InitializeSettingsHost();
+            return;
+        }
+
         // Register AUMID early so the taskbar button and Jump List work
         // for both packaged (MSIX) and unpackaged (Direct) distributions.
         JumpListService.RegisterAppUserModelId();
@@ -391,6 +411,18 @@ public partial class App : Application
                 {
                     StorePendingJumpListArgument(jumpListArg);
                 }
+
+                // The updater restarts the app with the update-result
+                // argument after a failed install; when this secondary
+                // launch races a still-living primary, forward the outcome
+                // the same way instead of dropping it (the dialog would
+                // otherwise never appear anywhere).
+                string? pendingUpdateResult = TryGetUpdateInstallOutcome(
+                    Environment.GetCommandLineArgs());
+                if (!string.IsNullOrWhiteSpace(pendingUpdateResult))
+                {
+                    StorePendingUpdateInstallResult(pendingUpdateResult);
+                }
             }
 
             Log("Another instance running, signaling existing instance");
@@ -473,6 +505,7 @@ public partial class App : Application
 
         SettingsService = Services.GetRequiredService<SettingsService>();
         SettingsService.PersistenceFailed += OnSettingsPersistenceFailed;
+        SettingsService.ExternalSnapshotApplied += OnExternalSettingsSnapshotApplied;
         DataBackupService = Services.GetRequiredService<DeskBoxDataBackupService>();
         DataBackupService.AutomaticSnapshotFallbackDetected += OnAutomaticBackupFallbackDetected;
         // While a wipe-recovery decision is pending, scheduled automatic
@@ -1096,6 +1129,12 @@ public partial class App : Application
 
     protected override async void OnLaunched(LaunchActivatedEventArgs args)
     {
+        if (IsSettingsHost)
+        {
+            LaunchSettingsHostAsync();
+            return;
+        }
+
         if (_isLaunched)
         {
             Log("OnLaunched skipped: already launched");
@@ -1538,6 +1577,9 @@ public partial class App : Application
 
             RunOptionalStartupStep("global-hotkey-service", () => InitializeGlobalHotkeyService(localizationService));
             RunOptionalStartupStep("shell-context-menu-prewarm", ScheduleShellContextMenuPrewarm);
+            // Settings-host IPC server: must exist before any second-process
+            // settings host tries to connect (batch 3c).
+            RunOptionalStartupStep("settings-ipc-server", StartSettingsIpcServer);
 
             RunOptionalStartupStep("todo-reminders", () => RefreshTodoReminderService());
             RunOptionalStartupStep("native-notifications", StartNativeNotificationService);
@@ -1603,13 +1645,34 @@ public partial class App : Application
             // Unattended launches defer the whole block — the offer surfaces on
             // the first external activation instead.
             RecoveryOfferOutcome recoveryOfferOutcome = RecoveryOfferOutcome.NotOffered;
+            bool recoveryDecisionPending = false;
             if (!IsStartupMode && !IsShuttingDown)
             {
-                recoveryOfferOutcome = await ShowRecoveryOfferIfNeededAsync();
+                // The offer window blocks the pipeline on a human decision:
+                // keep feeding the startup watchdog while it is open so an
+                // unanswered question on a tray-less machine cannot become a
+                // "startup failed" fatal box — the surface step that marks
+                // the lifeline runs only after this await.
+                Task<RecoveryOfferOutcome> offerTask = ShowRecoveryOfferIfNeededAsync();
+                while (!offerTask.IsCompleted)
+                {
+                    MarkStartupProgress();
+                    await Task.WhenAny(offerTask, Task.Delay(TimeSpan.FromSeconds(30)));
+                }
+
+                recoveryOfferOutcome = await offerTask;
                 if (recoveryOfferOutcome == RecoveryOfferOutcome.RestoreScheduled)
                 {
                     return;
                 }
+
+                // A Dismissed return from an in-flight call means "the offer
+                // is being asked elsewhere", not "declined": the activation
+                // path defers the first-run flows while the window is open,
+                // and the pipeline must honor the same contract or it walks
+                // a wipe victim through onboarding under the open question.
+                recoveryDecisionPending =
+                    _recoveryOfferWindow is not null || _recoveryOfferInFlight;
             }
 
             // A restore may also have been scheduled from an activation that
@@ -1621,11 +1684,14 @@ public partial class App : Application
                 return;
             }
 
-            await RunOptionalStartupStepAsync(
-                "initial-file-widget-setup",
-                () => EnsureInitialFileWidgetSetupAsync(
-                    isInteractiveLaunch: !IsStartupMode,
-                    allowDefaultAfterRecoveryFailure: recoveryOfferOutcome == RecoveryOfferOutcome.FreshStart));
+            if (!recoveryDecisionPending)
+            {
+                await RunOptionalStartupStepAsync(
+                    "initial-file-widget-setup",
+                    () => EnsureInitialFileWidgetSetupAsync(
+                        isInteractiveLaunch: !IsStartupMode,
+                        allowDefaultAfterRecoveryFailure: recoveryOfferOutcome == RecoveryOfferOutcome.FreshStart));
+            }
             await RunOptionalStartupStepAsync(
                 "managed-storage-desktop-shortcut",
                 () => ManagedStorageDesktopShortcutService.SyncAsync());
@@ -1664,22 +1730,49 @@ public partial class App : Application
             // The availability probe can block on offline devices for the
             // network timeout, so it runs after startup on a pool thread —
             // never inside the settings load/save normalize passes.
-            await RunOptionalStartupStepAsync(
+            // Deep review R15 (F1 audit): this step used to be AWAITED by
+            // the pipeline, so an offline mapped drive stalled every later
+            // step (display watcher, onboarding, surface ensure) for the
+            // SMB timeout, and could trip the 90s startup watchdog into the
+            // unattended-exit loop. The probe is advisory only — truly fire
+            // and forget, matching the comment above.
+            RunOptionalStartupStep(
                 "desktop-organization-target-availability",
-                () => Task.Run(() =>
-                    DesktopOrganizationTargetAvailabilityAdvisor.WarnIfUnavailableTargets(
-                        SettingsService,
-                        ShowDesktopAutoOrganizationTargetUnavailableNotification)));
+                () =>
+                {
+                    _ = Task.Run(() =>
+                    {
+                        try
+                        {
+                            DesktopOrganizationTargetAvailabilityAdvisor.WarnIfUnavailableTargets(
+                                SettingsService,
+                                ShowDesktopAutoOrganizationTargetUnavailableNotification);
+                        }
+                        catch (Exception ex)
+                        {
+                            Log($"[Startup] Target availability probe failed: {ex.Message}");
+                        }
+                    });
+                });
 
-            await RunOptionalStartupStepAsync(
-                "onboarding",
-                () => EnsureOnboardingAsync(isInteractiveLaunch: !IsStartupMode));
+            if (!recoveryDecisionPending)
+            {
+                await RunOptionalStartupStepAsync(
+                    "onboarding",
+                    () => EnsureOnboardingAsync(isInteractiveLaunch: !IsStartupMode));
+            }
 
             RunOptionalStartupStep(
                 "release-notes-after-update",
                 () => ShowReleaseNotesAfterUpdateOnce());
 
             RunOptionalStartupStep("background-update-check", ScheduleBackgroundUpdateCheck);
+            RunOptionalStartupStep(
+                "update-installer-prune",
+                // Interface-typed property: pruning only exists on the
+                // direct service (the store channel never downloads
+                // installers, so skipping it there is the old no-op).
+                () => (AppUpdateService as Services.AppUpdateService)?.PruneStaleInstallerDirectories());
             RunOptionalStartupStep("diagnostics-service", () =>
             {
                 _diagnosticsService = new AppDiagnosticsService(UiDispatcherQueue);
@@ -1740,8 +1833,15 @@ public partial class App : Application
             {
                 RunOptionalStartupStep("update-install-result", () =>
                 {
+#if DESKBOX_AOT_SMOKE_HARNESS
                     ShowSettings("About");
                     _settingsWindow?.QueueUpdateInstallResultDialog(updateInstallOutcome!);
+#else
+                    // The result rides the spawn (cold) or the connected
+                    // pipe (warm) — a bare push after ShowSettings raced the
+                    // host's pipe connection and was dropped (batch R1).
+                    ShowSettingsViaHost("About", null, installResult: updateInstallOutcome);
+#endif
                 });
             }
 
@@ -2301,6 +2401,19 @@ public partial class App : Application
         // The OS ends the process after this flush without the shutdown
         // sequence, so the launch breadcrumb is closed here.
         _startupSessionLedger?.MarkCleanExit();
+        // Deep review R15 (F1 audit): QUERYENDSESSION and ENDSESSION both
+        // route here, and each pass used to perform an unconditional full
+        // settings rewrite (up to 2x3s of UI-thread blocking inside
+        // wndproc). With nothing pending the write is pure cost — skip it.
+        // (The flush itself still clears the pending flag on failure, so
+        // the second phase keeps its own safety net.)
+        if (!SettingsService.HasPendingSave)
+        {
+            Log($"[Lifecycle] No pending settings to flush for {reason}.");
+            DrainLogQueue();
+            return;
+        }
+
         Log($"[Lifecycle] Flushing settings for {reason}.");
         try
         {
@@ -2319,6 +2432,11 @@ public partial class App : Application
         {
             Log($"[Lifecycle] Settings flush threw for {reason}: {ex}");
         }
+
+        // The log queue is asynchronous; the OS terminates the process the
+        // moment this returns, so the tail lines (including the flush
+        // result itself) must be pushed out here or they are lost.
+        DrainLogQueue();
     }
 
     private void ScheduleBackgroundUpdateCheck()
@@ -2443,6 +2561,21 @@ public partial class App : Application
 
     private void OpenAppReleaseNotesWindow(string version)
     {
+        OpenAppReleaseNotesWindow(
+            manifest: null,
+            version,
+            manifestLoader: cancellationToken => LoadReleaseNotesManifestForVersionAsync(version, cancellationToken));
+    }
+
+    // Single flight for every release-notes opener (the automatic post-
+    // update window, the update toast, and the settings-page button) so two
+    // windows can never stack for the same surface.
+    internal void OpenAppReleaseNotesWindow(
+        AppUpdateManifest? manifest,
+        string version,
+        Func<CancellationToken, Task<AppUpdateManifest?>>? manifestLoader,
+        IntPtr ownerHwnd = default)
+    {
         if (IsShuttingDown)
         {
             return;
@@ -2453,11 +2586,11 @@ public partial class App : Application
             if (_appReleaseNotesWindow is null)
             {
                 var window = new ReleaseNotesWindow(
-                    manifest: null,
+                    manifest,
                     version,
                     ThemeService,
                     LocalizationService,
-                    manifestLoader: cancellationToken => LoadReleaseNotesManifestForVersionAsync(version, cancellationToken));
+                    manifestLoader);
                 _appReleaseNotesWindow = window;
                 window.Closed += (_, _) =>
                 {
@@ -2467,8 +2600,16 @@ public partial class App : Application
                     }
                 };
             }
+            else if (manifest is not null)
+            {
+                _appReleaseNotesWindow.UpdateManifest(manifest, version);
+            }
+            else
+            {
+                _appReleaseNotesWindow.RetryManifestLoad();
+            }
 
-            _appReleaseNotesWindow.ShowWindow();
+            _appReleaseNotesWindow.ShowWindow(ownerHwnd);
         }
         catch (Exception ex)
         {
@@ -2514,9 +2655,15 @@ public partial class App : Application
     {
         try
         {
+#if DESKBOX_AOT_SMOKE_HARNESS
             if (_settingsWindow is not null)
             {
                 await _settingsWindow.RunOneClickUpdateFlowAsync();
+#else
+            if (IsSettingsHostRunning)
+            {
+                _ = PushSettingsIpcEventAsync(SettingsIpcMethods.HostOneClickUpdate, null);
+#endif
             }
         }
         catch (Exception ex)
@@ -2616,7 +2763,29 @@ public partial class App : Application
             SettingsService,
             LocalizationService,
             UiDispatcherQueue,
-            ShowTodoReminderNotification);
+            ShowTodoReminderNotification,
+            TryGetLiveTodoViewModel);
+    }
+
+    /// <summary>
+    /// Single-writer routing target for reminder-side todo mutations (deep
+    /// review R15, F5): returns the materialized todo widget's view model so
+    /// notification completions/snoozes mutate the same in-memory graph the
+    /// live surface saves, instead of racing it with a second file writer.
+    /// Reminder activations arrive marshaled on the UI thread, matching the
+    /// VM's apartment.
+    /// </summary>
+    private ViewModels.TodoWidgetViewModel? TryGetLiveTodoViewModel(string widgetId)
+    {
+        if (WidgetManager?.ContentWidgets.TryGetValue(widgetId, out var window) != true)
+        {
+            return null;
+        }
+
+        return window.CurrentContent is Controls.WidgetContents.TodoWidgetContentAdapter adapter &&
+            adapter.ViewModel.IsInitialized
+                ? adapter.ViewModel
+                : null;
     }
 
     private void StartNativeNotificationService()
@@ -2716,8 +2885,15 @@ public partial class App : Application
                     // Same target as the tray's About entry, without the
                     // tray-flyout close delay the tray path waits out; the
                     // one-click flow then spares the user finding the button.
+                    // The spawn carries the intent: pushing right after a
+                    // cold spawn lands before the host pipe connects and
+                    // would be silently dropped (batch R1).
+#if DESKBOX_AOT_SMOKE_HARNESS
                     OpenAboutSettingsFromTray();
                     _ = RunOneClickUpdateFromToastAsync();
+#else
+                    ShowSettingsViaHost("About", null, oneClickUpdate: true);
+#endif
                     return;
                 }
 
@@ -3273,6 +3449,40 @@ public partial class App : Application
         }
     }
 
+    private static void StorePendingUpdateInstallResult(string outcome)
+    {
+        try
+        {
+            Directory.CreateDirectory(DeskBoxDataPathService.Current.RootPath);
+            File.WriteAllText(PendingUpdateInstallResultPath, outcome);
+            Log($"[Update] Forwarded update install result to running instance outcome={outcome}");
+        }
+        catch (Exception ex)
+        {
+            Log($"[Update] Failed to forward update install result: {ex}");
+        }
+    }
+
+    private static string? TakePendingUpdateInstallResult()
+    {
+        try
+        {
+            if (!File.Exists(PendingUpdateInstallResultPath))
+            {
+                return null;
+            }
+
+            string outcome = File.ReadAllText(PendingUpdateInstallResultPath);
+            File.Delete(PendingUpdateInstallResultPath);
+            return string.IsNullOrWhiteSpace(outcome) ? null : outcome;
+        }
+        catch (Exception ex)
+        {
+            Log($"[Update] Failed to take pending update install result: {ex.Message}");
+            return null;
+        }
+    }
+
     private static string? TakePendingJumpListArgument()
     {
         try
@@ -3311,7 +3521,11 @@ public partial class App : Application
             ClearUpdateAvailableReminder();
         }
 
-        _settingsWindow?.RefreshUpdateStateFromService();
+        // Deep review R13-2 (D8 census): the smoke-harness branch here was
+        // never consumed (managed-ui smoke disables the update check) and
+        // the retail push is a safe no-op without the IPC server — the
+        // unconditional push replaced the #if split.
+        _ = PushSettingsIpcEventAsync(SettingsIpcMethods.HostUpdateStateRefresh, null);
     }
 
     /// <summary>
@@ -3378,7 +3592,7 @@ public partial class App : Application
 
         // The settings page shows the downloaded state live; a toast on top
         // of it would repeat what is already on screen.
-        if (_settingsWindow is { IsVisibleToUser: true })
+        if (IsSettingsHostVisible)
         {
             return;
         }
@@ -3437,7 +3651,7 @@ public partial class App : Application
         string message = LocalizationService.Format("Tray.UpdateAvailableMessage", manifest.Version);
         // A manual check that surfaces a version already on screen (the
         // settings About page) does not need a toast repeating it.
-        if (_settingsWindow is { IsVisibleToUser: true })
+        if (IsSettingsHostVisible)
         {
             return;
         }
@@ -3558,6 +3772,15 @@ public partial class App : Application
             else
             {
                 DrainPendingNativeNotificationActivations();
+                // Deep review R15 (F1 audit): a secondary instance writes the
+                // pending jump-list/update-result file and then sets the
+                // event; if the primary died in that window the signal died
+                // with it and the stale file survived. Without consuming it
+                // here, the next bare activation hours later replayed the
+                // stale argument (an unexpected toggle/open-storage).
+                // Running the same handler drains those files harmlessly —
+                // no event means no envelope work, just the file take.
+                await HandleExternalActivationAsync();
             }
         }
         finally
@@ -3607,13 +3830,28 @@ public partial class App : Application
                     activationHandled = true;
                 }
 
+                // Forwarded from a secondary launch that raced a living
+                // primary: show the same About + result dialog the direct
+                // --update-install-result startup path shows.
+                string? pendingUpdateInstallOutcome = TakePendingUpdateInstallResult();
+                if (!string.IsNullOrWhiteSpace(pendingUpdateInstallOutcome))
+                {
+#if DESKBOX_AOT_SMOKE_HARNESS
+                    ShowSettings("About");
+                    _settingsWindow?.QueueUpdateInstallResultDialog(pendingUpdateInstallOutcome);
+#else
+                    ShowSettingsViaHost("About", null, installResult: pendingUpdateInstallOutcome);
+#endif
+                    activationHandled = true;
+                }
+
                 if (activationHandled)
                 {
                     continue;
                 }
 
                 DateTimeOffset activationAtUtc = DateTimeOffset.UtcNow;
-                bool settingsWindowOpen = _settingsWindow is { IsVisibleToUser: true };
+                bool settingsWindowOpen = IsSettingsHostVisible;
                 bool coalesceBareActivation =
                     ExternalActivationPolicy.ShouldCoalesceBareActivation(
                         _lastBareExternalActivationAtUtc,
@@ -3658,12 +3896,6 @@ public partial class App : Application
                     continue;
                 }
 
-                // The first interactive activation of a startup-mode session
-                // stands in for the startup pipeline's deferred
-                // release-notes step (the recovery offer and onboarding
-                // above outrank it).
-                ShowReleaseNotesAfterUpdateOnce(isInteractiveActivation: true);
-
                 if (WidgetManager is not null)
                 {
                     bool hasConfiguredWidgets = SettingsService.Settings.Widgets.Any(widget =>
@@ -3689,6 +3921,13 @@ public partial class App : Application
                 }
 
                 OpenSettings();
+
+                // The first interactive activation of a startup-mode session
+                // stands in for the startup pipeline's deferred
+                // release-notes step (the recovery offer and onboarding
+                // above outrank it). Shown after OpenSettings so the notes
+                // window is the one that lands on top.
+                ShowReleaseNotesAfterUpdateOnce(isInteractiveActivation: true);
             }
             while (_externalActivationRequestedWhileBusy);
         }
@@ -3876,9 +4115,44 @@ public partial class App : Application
         }
     }
 
-    private void OnSettingsPersistenceFailed(SettingsPersistenceFailure failure)
+    /// <summary>
+    /// Batch 3a of the settings-process split: an external snapshot (the
+    /// settings host's commit) was applied, so the value-shaped fields that
+    /// have no coordinator subscription on the main side get their diff
+    /// appliers run against the live services. Runs on a pipe reader thread
+    /// for theme changes — marshal window-affecting work to the UI thread.
+    /// </summary>
+    private void OnExternalSettingsSnapshotApplied(
+        DeskBox.Models.AppSettings before,
+        DeskBox.Models.AppSettings after)
     {
-        Log(
+        ExternalSettingsAppliers.ApplyValueAppliers(
+            before,
+            after,
+            new ExternalSettingsAppliers.Delegates(
+                () => GlobalHotkeyService?.RefreshRegistration(),
+                () => DesktopDoubleClickActivationService?.RefreshRegistration(),
+                (snapEnabled, snapSpacingDips) =>
+                {
+                    ResizeGuideOverlay.IsSnapEnabled = snapEnabled;
+                    ResizeGuideOverlay.SnapSpacingDips = snapSpacingDips;
+                },
+                // Deep review R13-4 (E10): the appliers run on an IPC pool
+                // thread; UpdateTrayIcon writes XAML dependency properties
+                // and must hop to the UI thread exactly like theme/language.
+                () => UiDispatch.RunOrDefer(UpdateTrayIcon),
+                () => UiDispatch.RunOrDefer(RefreshThemeAppearanceOnUi),
+                // The commit lands on an IPC pool thread; language replay
+                // touches XAML across the whole main process (same reason
+                // the theme delegate marshals).
+                () => UiDispatch.RunOrDefer(LocalizationService.NotifyExternalLanguageChange),
+                enabled => _searchEngineService?.SetDeskBoxContentSearchEnabled(enabled)));
+    }
+
+    private void RefreshThemeAppearanceOnUi() => ThemeService.RefreshAppearance();
+
+    private void OnSettingsPersistenceFailed(SettingsPersistenceFailure failure)
+    {        Log(
             $"[SettingsService] Persistence failure operation={failure.Operation} " +
             $"at={failure.OccurredAt:O} message={failure.Message}");
         if (UiDispatcherQueue is { HasThreadAccess: false } dispatcher)
@@ -4225,89 +4499,86 @@ public partial class App : Application
         Localized.RefreshAll(LocalizationService);
         RefreshTrayMenuText();
         RefreshTrayToolTipText();
+        // Deep review R15 (F9 audit): the taskbar Jump List kept the old
+        // language until the next launch — reconfigure it now (idempotent,
+        // fully fault-tolerant per its contract).
+        _ = JumpListService.ConfigureAsync(LocalizationService);
     }
 
     private void OpenSettings()
     {
+#if DESKBOX_AOT_SMOKE_HARNESS
+        // The harness drives the settings window inside its own single
+        // process; a second-process host cannot exist there.
         CancelBackgroundMemoryCleanup();
         var settingsWindow = _settingsWindow ?? CreateSettingsWindow();
         settingsWindow.ShowWindow();
+#else
+        ShowSettingsViaHost(null, null);
+#endif
     }
 
+#if DESKBOX_AOT_SMOKE_HARNESS
+    // In-process settings window construction — smoke harness only (batch 4:
+    // the retail binary opens settings exclusively in the settings-host
+    // process).
     private SettingsWindow CreateSettingsWindow()
     {
-        _settingsWindow = new SettingsWindow(
+        var input = new SettingsWindowFactoryInput(
             SettingsService, ThemeService, LocalizationService,
-            new TodoSettingsViewModel(
-                _todoSettings ?? throw new InvalidOperationException("Todo settings are not initialized."),
-                LocalizationService.T,
-                (key, args) => LocalizationService.Format(key, args),
-                ex => Log($"[TodoSettings] Update failed: {ex}")),
-            new DeskBox.Features.Weather.WeatherSettingsViewModel(
-                _featureWidgetsSettings ?? throw new InvalidOperationException("Feature widgets settings are not initialized."),
-                LocalizationService.T,
-                (key, args) => LocalizationService.Format(key, args),
-                ex => Log($"[WeatherSettings] Update failed: {ex}")),
-            new SearchSettingsViewModel(
-                _searchSettings ?? throw new InvalidOperationException("Search settings are not initialized."),
-                action => UiDispatcherQueue.TryEnqueue(() => action()),
-                ex => Log($"[SearchSettings] Operation failed: {ex}")),
-            new BackupSettingsViewModel(
-                _backupSettings ?? throw new InvalidOperationException("Backup settings are not initialized."),
-                action => UiDispatcherQueue.TryEnqueue(() => action()),
-                ex => Log($"[BackupSettings] Operation failed: {ex}"),
-                localize: LocalizationService.T,
-                format: (key, args) => LocalizationService.Format(key, args),
-                isStoreChannel: AppDistributionService.Current.IsMicrosoftStore),
+            _todoSettings ?? throw new InvalidOperationException("Todo settings are not initialized."),
+            _featureWidgetsSettings ?? throw new InvalidOperationException("Feature widgets settings are not initialized."),
+            _searchSettings ?? throw new InvalidOperationException("Search settings are not initialized."),
+            _backupSettings ?? throw new InvalidOperationException("Backup settings are not initialized."),
             _backupRestoreActions ?? throw new InvalidOperationException(
                 "Backup restore actions are not initialized."),
             _quickCaptureSettings ?? throw new InvalidOperationException("Quick Capture is not initialized."),
-            new DeskBox.Features.QuickCapture.QuickCaptureSettingsViewModel(
-                _quickCaptureSettings ?? throw new InvalidOperationException("Quick Capture is not initialized."),
-                LocalizationService.T,
-                (key, args) => LocalizationService.Format(key, args),
-                message => Log(message),
-                ex => Log($"[QuickCapture] Settings operation failed: {ex}")),
-            _searchSettings ?? throw new InvalidOperationException("Search settings are not initialized."),
             _backupRuntime ?? throw new InvalidOperationException("Backup runtime is not initialized."),
-            new DeskBox.Features.Appearance.AppearanceSettingsViewModel(
-                _appearanceSettings ?? throw new InvalidOperationException("Appearance settings are not initialized."),
-                LocalizationService.T),
-            new DeskBox.Features.Capsule.CapsuleSettingsViewModel(
-                _capsuleSettings ?? throw new InvalidOperationException("Capsule settings are not initialized."),
-                LocalizationService.T,
-                (key, args) => LocalizationService.Format(key, args)),
-            new DeskBox.Features.Interaction.InteractionSettingsViewModel(
-                _interactionSettings ?? throw new InvalidOperationException("Interaction settings are not initialized."),
-                LocalizationService.T),
-            new DeskBox.Features.FileDisplay.FileDisplaySettingsViewModel(
-                _fileDisplaySettings ?? throw new InvalidOperationException("File display settings are not initialized.")),
-            new DeskBox.Features.FileStack.FileStackSettingsViewModel(
-                _fileStackSettings ?? throw new InvalidOperationException("File stack settings are not initialized."),
-                LocalizationService.T,
-                (key, args) => LocalizationService.Format(key, args)),
-            new DeskBox.Features.GroupNavigation.GroupNavigationSettingsViewModel(
-                _groupNavigationSettings ?? throw new InvalidOperationException("Group navigation settings are not initialized."),
-                LocalizationService.T),
-            new DeskBox.Features.FeatureWidgets.FeatureWidgetsSettingsViewModel(
-                _featureWidgetsSettings ?? throw new InvalidOperationException("Feature widgets settings are not initialized."),
-                LocalizationService.T),
-            new DeskBox.Features.Music.MusicSettingsViewModel(
-                _featureWidgetsSettings ?? throw new InvalidOperationException("Feature widgets settings are not initialized."),
-                LocalizationService.T),
-            new DeskBox.Features.ManagedStorage.ManagedStorageSettingsViewModel(
-                _managedStorageSettings ?? throw new InvalidOperationException("Managed storage settings are not initialized."),
-                LocalizationService.T),
-            new DeskBox.Features.Maintenance.MaintenanceSettingsViewModel(
-                _maintenanceSettings ?? throw new InvalidOperationException("Maintenance settings are not initialized.")),
-            new DeskBox.Features.Performance.PerformanceSettingsViewModel(
-                _performanceSettings ?? throw new InvalidOperationException("Performance settings are not initialized."),
-                _interactionSettings ?? throw new InvalidOperationException("Interaction settings are not initialized."),
-                LocalizationService.T,
-                () => LocalizationService.IsChinese));
+            _appearanceSettings ?? throw new InvalidOperationException("Appearance settings are not initialized."),
+            _capsuleSettings ?? throw new InvalidOperationException("Capsule settings are not initialized."),
+            _interactionSettings ?? throw new InvalidOperationException("Interaction settings are not initialized."),
+            _fileDisplaySettings ?? throw new InvalidOperationException("File display settings are not initialized."),
+            _fileStackSettings ?? throw new InvalidOperationException("File stack settings are not initialized."),
+            _groupNavigationSettings ?? throw new InvalidOperationException("Group navigation settings are not initialized."),
+            _managedStorageSettings ?? throw new InvalidOperationException("Managed storage settings are not initialized."),
+            _maintenanceSettings ?? throw new InvalidOperationException("Maintenance settings are not initialized."),
+            _performanceSettings ?? throw new InvalidOperationException("Performance settings are not initialized."),
+            CreateSettingsHotkeyActions(),
+            new InProcessSettingsWidgetActions(
+                WidgetManager,
+                SettingsService,
+                FileService,
+                OrganizerService,
+                LocalizationService,
+                applyQuickCaptureEnabled: enabled =>
+                    (_quickCaptureSettings ?? throw new InvalidOperationException(
+                        "Quick Capture is not initialized.")).SetEnabledAsync(enabled, reveal: enabled),
+                applyTodoEnabled: enabled =>
+                    (_todoSettings ?? throw new InvalidOperationException(
+                        "Todo settings are not initialized.")).SetEnabledAsync(enabled),
+                applySearchEnabled: enabled =>
+                    (_searchSettings ?? throw new InvalidOperationException(
+                        "Search settings are not initialized.")).SetEnabledAsync(enabled, reveal: enabled)),
+            new InProcessSettingsRestoreActions(
+                DataBackupService ?? throw new InvalidOperationException("Backup service is not initialized."),
+                AttachmentHealthService ?? throw new InvalidOperationException("Attachment health service is not initialized.")),
+            new InProcessSettingsAppActions(this, LocalizationService),
+            new InProcessSettingsDataActions(
+                QuickCaptureService ?? throw new InvalidOperationException("Quick Capture service is not initialized."),
+                LocalizationService),
+            AppUpdateService,
+            action => UiDispatcherQueue.TryEnqueue(() => action()));
+        _settingsWindow = input.CreateWindow();
         _settingsWindow.Closed += SettingsWindow_ClosedForApp;
         return _settingsWindow;
     }
+
+    private Contracts.ISettingsHotkeyActions CreateSettingsHotkeyActions() =>
+        new InProcessSettingsHotkeyActions(
+            GlobalHotkeyService,
+            SearchHotkeyService,
+            DesktopDoubleClickActivationService,
+            SettingsService);
 
     private void SettingsWindow_ClosedForApp(object sender, WindowEventArgs args)
     {
@@ -4326,6 +4597,7 @@ public partial class App : Application
         ScheduleLightMemoryCleanup(completedHeavyOperation: true);
         ScheduleBackgroundMemoryCleanup("settings-closed");
     }
+#endif
 
     public void ShowSettings()
     {
@@ -4336,19 +4608,27 @@ public partial class App : Application
     public void ShowSettings(string sectionTag)
     {
         if (IsShuttingDown) return;
+#if DESKBOX_AOT_SMOKE_HARNESS
         CancelBackgroundMemoryCleanup();
         var settingsWindow = _settingsWindow ?? CreateSettingsWindow();
         settingsWindow.ShowWindow();
         settingsWindow.ShowSection(sectionTag);
+#else
+        ShowSettingsViaHost(sectionTag, null);
+#endif
     }
 
     public void ShowGlanceSettings(string widgetId)
     {
         if (IsShuttingDown) return;
+#if DESKBOX_AOT_SMOKE_HARNESS
         CancelBackgroundMemoryCleanup();
         var settingsWindow = _settingsWindow ?? CreateSettingsWindow();
         settingsWindow.ShowWindow();
         settingsWindow.ShowGlanceSection(widgetId);
+#else
+        ShowSettingsViaHost(null, widgetId);
+#endif
     }
 
     private async Task EnsureInitialFileWidgetSetupAsync(
@@ -4675,16 +4955,26 @@ public partial class App : Application
                     ["section"] = "BackupRestoreSettings"
                 }) != true)
         {
-            _trayIcon?.ShowNotification(
-                title,
-                message,
-                isError ? NotificationIcon.Error : NotificationIcon.Info,
-                customIconHandle: null,
-                largeIcon: false,
-                sound: false,
-                respectQuietTime: true,
-                realtime: false,
-                timeout: TimeSpan.FromSeconds(10));
+            // Same guard as every other balloon fallback: the tray icon may
+            // be absent (the hidden style removes it at startup), and
+            // ShowNotification throws rather than no-ops in that state.
+            try
+            {
+                _trayIcon?.ShowNotification(
+                    title,
+                    message,
+                    isError ? NotificationIcon.Error : NotificationIcon.Info,
+                    customIconHandle: null,
+                    largeIcon: false,
+                    sound: false,
+                    respectQuietTime: true,
+                    realtime: false,
+                    timeout: TimeSpan.FromSeconds(10));
+            }
+            catch (Exception ex)
+            {
+                Log($"[Recovery] Tray balloon fallback failed: {ex.Message}");
+            }
         }
     }
 
@@ -5142,7 +5432,7 @@ public partial class App : Application
         return new MemoryCleanupActivitySnapshot(
             HasVisibleWidgets: visibility.HasNativeVisibleWidgets,
             IsWidgetInteractionActive: widgetManager?.IsWidgetInteractionActive == true,
-            IsSettingsOpen: _settingsWindow is { IsVisibleToUser: true },
+            IsSettingsOpen: IsSettingsHostVisible,
             IsOnboardingOpen: _onboardingWindow is not null,
             IsSearchPopupVisible: _searchPopupWindow?.IsPopupVisible == true,
             IsDeskBoxForeground: isDeskBoxForeground,
@@ -5857,7 +6147,7 @@ public partial class App : Application
             return false;
         }
 
-        if (_settingsWindow is { IsVisibleToUser: true })
+        if (IsSettingsHostVisible)
         {
             blockReason = "settings-open";
             return false;
@@ -6497,18 +6787,32 @@ public partial class App : Application
             ShutdownStep.Sync("global-hotkey", () => { GlobalHotkeyService?.Dispose(); GlobalHotkeyService = null; }),
             ShutdownStep.Sync("widgets", () => WidgetManager?.CloseAll()),
             ShutdownStep.Sync("desktop-organization-window", () => { _desktopOrganizationWindow?.CloseForShutdown(); _desktopOrganizationWindow = null; }),
-            ShutdownStep.Sync("settings-window", () => { _settingsWindow?.CloseForShutdown(); _settingsWindow = null; }),
+            ShutdownStep.Sync("settings-window", () =>
+            {
+                _settingsWindow?.CloseForShutdown();
+                _settingsWindow = null;
+                ShutdownSettingsHost();
+            }),
             ShutdownStep.Sync("backup-settings", () => _backupSettings?.Dispose()),
             ShutdownStep.Sync("onboarding-window", () => { _onboardingWindow?.Close(); _onboardingWindow = null; }),
             ShutdownStep.Sync("recovery-offer-window", () => { _recoveryOfferWindow?.Close(); _recoveryOfferWindow = null; }),
             ShutdownStep.Sync("elevation-notice-window", () => { _elevationNoticeWindow?.Close(); _elevationNoticeWindow = null; }),
             // Closing a surface may commit its final edit/order. Flush after
-            // those consumers are closed, while persistence services still live.
-            new("settings-flush", async () =>
+            // those consumers are closed, while persistence services still
+            // live. Deep review R15 (F1 audit): this was the ONLY unbounded
+            // IO teardown step — FlushPendingSaveAsync first awaits the
+            // per-directory FileWriteLock, which an in-flight debounced save
+            // stuck on a bad disk could hold forever; with no deadline the
+            // exit backstop (armed only after ShutdownCoreAsync returns)
+            // never armed, leaving the exact zombie shape the backstop was
+            // built to prevent. Same semantics as the backup step: bounded,
+            // no abort — the write itself is IO-only and later teardown
+            // cannot race it into a disposed state.
+            ShutdownStep.Bounded("settings-flush", async () =>
             {
                 if (!await SettingsService.FlushPendingSaveAsync(notifySubscribers: false))
                     throw new IOException("Final settings flush failed.");
-            }),
+            }, shutdownGrace),
             ShutdownStep.Sync("app-subscriptions", () =>
             {
                 SettingsService.PersistenceFailed -= OnSettingsPersistenceFailed;

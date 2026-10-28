@@ -36,7 +36,9 @@ internal sealed class StorageMigrationStoppedException(Exception inner, long? te
     internal long? TemporaryBytes { get; } = temporaryBytes;
 }
 
-internal sealed record ManagedStorageMigrationPreview(
+// Public so the settings widget facade contract can surface the preview to
+// a settings host process (the dialog data is plain numbers).
+public sealed record ManagedStorageMigrationPreview(
     int WidgetCount, int FileCount, long TotalBytes, bool CopiesRemoved, long? TemporaryBytes);
 
 internal sealed record ManagedStorageMigrationFolder(

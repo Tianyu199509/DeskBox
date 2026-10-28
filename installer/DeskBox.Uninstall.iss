@@ -1,4 +1,4 @@
-[Code]
+﻿[Code]
 const
   DeskBoxProcessName = 'DeskBox.exe';
   DeskBoxDataSettingsPath = '{localappdata}\DeskBox\data\settings.json';
@@ -632,7 +632,11 @@ end;
 procedure StopDeskBoxProcess;
 begin
   Log('正在停止 DeskBox 进程。');
-  if not StopDeskBoxProcessesAtPath(ExpandConstant('{app}')) then
+  if StopDeskBoxProcessesAtPath(ExpandConstant('{app}')) then
+    // The uninstaller does not run Restart Manager, so give the killed
+    // processes a beat to release their file handles before DelTree.
+    Sleep(1500)
+  else
     Log('DeskBox uninstall could not stop only the current installation processes.');
 end;
 
@@ -823,11 +827,14 @@ begin
         'DeskBox-Recovery') then
       AppendFailedCleanupPath(FailedPaths, RecoveryPath);
 
+    // The product registry key carries the installer language and install
+    // state a re-install may want; it is purge data, so it belongs inside
+    // the purge branch. Outside it, a "keep app data" uninstall deleted it
+    // unconditionally (the admin branch never did — asymmetric).
+    if RegKeyExists(HKEY_CURRENT_USER, DeskBoxProductRegistryKey) and
+       not RegDeleteKeyIncludingSubkeys(HKEY_CURRENT_USER, DeskBoxProductRegistryKey) then
+      Log('DeskBox uninstall could not remove the DeskBox product registry key.');
   end;
-
-  if RegKeyExists(HKEY_CURRENT_USER, DeskBoxProductRegistryKey) and
-     not RegDeleteKeyIncludingSubkeys(HKEY_CURRENT_USER, DeskBoxProductRegistryKey) then
-    Log('DeskBox uninstall could not remove the DeskBox product registry key.');
 
   if FailedPaths <> '' then
     SuppressibleMsgBox(
@@ -930,7 +937,12 @@ begin
   else
   begin
     Result := ConfirmManagedStoragePreserved;
-    if Result then
+    if not Result then
+      // Deep review R15 (F7 audit): in /VERYSILENT runs the suppressed
+      // dialog takes its DEFBUTTON2 default (No) and the uninstaller exited
+      // here with NO log line — automated fleets saw a silent no-op. Say why.
+      Log('DeskBox uninstall aborted: the managed storage folder is not empty (suppressed confirmation defaulted to keep).')
+    else
       OfferManagedStorageShortcut;
     if Result then
       Result := ChooseAppDataRemoval;

@@ -57,10 +57,10 @@ public sealed partial class SettingsWindow
                 continue;
             }
 
-            if (App.Current.WidgetManager is not { } manager) return;
+            if (!_widgetActions.IsHostAvailable) return;
             var choice = await ManagedStorageMigrationDialog.ConfirmAsync(SettingsRoot.XamlRoot, _localizationService,
-                manager.GetDefaultManagedStorageWidgetCount(), ViewModel.ManagedStorageRootPath, normalizedPath,
-                token => manager.PreviewManagedStorageMigrationAsync(normalizedPath, token));
+                _widgetActions.GetDefaultManagedStorageWidgetCount(), ViewModel.ManagedStorageRootPath, normalizedPath,
+                token => _widgetActions.PreviewManagedStorageMigrationAsync(normalizedPath, token));
             if (choice is null) return;
             if (choice == StorageMigrationStartChoice.ChooseLocation)
             {
@@ -69,7 +69,7 @@ public sealed partial class SettingsWindow
             var outcome = await ManagedStorageMigrationDialog.RunAsync(
                 SettingsRoot.XamlRoot, SettingsRoot.DispatcherQueue, _localizationService,
                 ViewModel.ManagedStorageRootPath, normalizedPath,
-                options => manager.UpdateDefaultManagedStorageRootAsync(normalizedPath, options),
+                options => _widgetActions.UpdateDefaultManagedStorageRootAsync(normalizedPath, options),
                 restart: choice == StorageMigrationStartChoice.Restart);
             if (outcome.ChooseLocation)
             {
@@ -79,7 +79,7 @@ public sealed partial class SettingsWindow
             if (result is not null)
             {
                 ViewModel.UpdateManagedStorageRootPath(result.NewRootPath);
-                try { await App.Current.ManagedStorageDesktopShortcutService.SyncAsync(result.OldRootPath); }
+                try { await _appActions.SyncManagedStorageDesktopShortcutAsync(result.OldRootPath); }
                 catch (Exception ex) { App.Log($"[ManagedStorageMigration] Desktop shortcut sync deferred: {ex.Message}"); }
             }
             RefreshManagedStoragePathWarning();
@@ -183,7 +183,7 @@ public sealed partial class SettingsWindow
 
         SetManagedStorageDesktopShortcutToggleState(
             toggle,
-            App.Current.ManagedStorageDesktopShortcutService.HasShortcut());
+            _appActions.HasManagedStorageDesktopShortcut());
     }
 
     private async void ManagedStorageDesktopShortcutToggle_Toggled(
@@ -200,11 +200,9 @@ public sealed partial class SettingsWindow
         toggle.IsEnabled = false;
         try
         {
-            ManagedStorageDesktopShortcutService shortcutService =
-                App.Current.ManagedStorageDesktopShortcutService;
             bool succeeded = requestedState
-                ? await shortcutService.CreateAsync()
-                : await shortcutService.RemoveAsync();
+                ? await _appActions.CreateManagedStorageDesktopShortcutAsync()
+                : await _appActions.RemoveManagedStorageDesktopShortcutAsync();
             if (succeeded)
             {
                 return;
@@ -399,7 +397,13 @@ public sealed partial class SettingsWindow
                 DefaultButton = ContentDialogButton.Primary
             };
 
-            if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+            // Routed through the coordinator: a toast "update now" click can
+            // reach this flow while another dialog is already open, and a
+            // raw ShowAsync would throw and be swallowed as a silent no-op.
+            // Being displaced here reads as Cancel — the install simply does
+            // not start.
+            ContentDialogResult confirmation = await ShowDialogWhenFreeAsync(() => dialog);
+            if (confirmation != ContentDialogResult.Primary) return;
 
             if (!await CreatePreUpdateRecoverySnapshotAsync())
             {
@@ -415,7 +419,7 @@ public sealed partial class SettingsWindow
                 return;
             }
 
-            await App.Current.ShutdownForUpdateAsync();
+            await _appActions.ShutdownForUpdateAsync();
             return;
         }
 
@@ -539,13 +543,33 @@ public sealed partial class SettingsWindow
         }
 
         // Section navigation may still be mid-layout; a queued pass runs
-        // after the frame has composed the target panel.
+        // after the frame has composed the target panel. The About panel is
+        // instantiated lazily with its section template: on a cold
+        // navigation (update-state push arriving before the section was
+        // ever opened) the named field is still null. Dereferencing it
+        // inside the DispatcherQueue callback threw a NullReferenceException
+        // that XAML stowed and the whole host process died with it
+        // (0xc000027b, batch R10) — null-guard and retry one layout tick.
         _ = DispatcherQueue.TryEnqueue(() =>
         {
-            if (!_isClosed)
+            if (_isClosed)
             {
-                UpdateCheckActionsPanel.StartBringIntoView();
+                return;
             }
+
+            if (UpdateCheckActionsPanel is { } panel)
+            {
+                panel.StartBringIntoView();
+                return;
+            }
+
+            _ = DispatcherQueue.TryEnqueue(() =>
+            {
+                if (!_isClosed)
+                {
+                    UpdateCheckActionsPanel?.StartBringIntoView();
+                }
+            });
         });
     }
 
@@ -611,34 +635,17 @@ public sealed partial class SettingsWindow
     {
         // The button is always visible: when no check has produced a
         // manifest yet the window still opens and resolves its manifest
-        // lazily inside itself.
+        // lazily inside itself. Routed through App's single flight so the
+        // settings button and the automatic/toast openers can never show
+        // two release-notes windows at once.
         AppUpdateManifest? manifest = ViewModel.LatestUpdateManifest;
-        if (_releaseNotesWindow is null)
-        {
-            var releaseNotesWindow = new ReleaseNotesWindow(
-                manifest,
-                ViewModel.AppVersion,
-                _themeService,
-                _localizationService,
-                manifest is null ? ViewModel.FetchLatestManifestForReleaseNotesAsync : null);
-            _releaseNotesWindow = releaseNotesWindow;
-            releaseNotesWindow.Closed += (_, _) =>
-            {
-                if (ReferenceEquals(_releaseNotesWindow, releaseNotesWindow))
-                {
-                    _releaseNotesWindow = null;
-                }
-            };
-        }
-        else if (manifest is not null)
-        {
-            _releaseNotesWindow.UpdateManifest(manifest, ViewModel.AppVersion);
-        }
-        else
-        {
-            _releaseNotesWindow.RetryManifestLoad();
-        }
-
-        _releaseNotesWindow.ShowWindow(_hWnd);
+        // No cross-process ownership: the release-notes window lives in the
+        // main process while this HWND dies with the settings host — an
+        // owner here made Windows destroy the child window too (batch R6).
+        _appActions.OpenReleaseNotesWindow(
+            manifest,
+            ViewModel.AppVersion,
+            manifest is null ? ViewModel.FetchLatestManifestForReleaseNotesAsync : null,
+            0);
     }
 }

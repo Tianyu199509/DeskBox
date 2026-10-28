@@ -1,4 +1,4 @@
-using DeskBox.Contracts;
+﻿using DeskBox.Contracts;
 using DeskBox.Controls;
 using DeskBox.Controls.WidgetContents;
 using DeskBox.Helpers;
@@ -453,17 +453,10 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
         };
     }
 
-    private static double? GetMusicCompactProgress(MusicWidgetContentAdapter music)
-    {
-        double duration = music.ViewModel.Duration.TotalSeconds;
-        // Return 0 (not null) when Duration is unknown so the determinate branch
-        // keeps the track visible — matching the expanded view, which always
-        // shows the track even at 0% fill. Returning null would hit the hide
-        // branch and make the whole bar disappear until Duration arrives.
-        return duration > 0
-            ? Math.Clamp(music.ViewModel.Position.TotalSeconds / duration, 0, 1)
-            : 0;
-    }
+    // GetMusicCompactProgress removed (deep review R17, G1 audit): zero
+    // callers — the music capsule progress was rewritten inline in
+    // CreateMusicCompactPresentation with the "0 when Duration unknown"
+    // semantics preserved there.
 
     private static bool IsCompactWeatherAttentionRequired(WeatherWidgetContentAdapter weather)
     {

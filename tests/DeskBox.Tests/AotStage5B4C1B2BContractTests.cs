@@ -207,7 +207,7 @@ public sealed class AotStage5B4C1B2BContractTests
         Assert.Contains("stage5B4C1B2BMissingRunnerPatterns", audit, StringComparison.Ordinal);
         Assert.Contains("stage5B4C1B2BForbiddenScopePatterns", audit, StringComparison.Ordinal);
         Assert.Contains("stage5B4C1B2BRustAbiUnchanged", audit, StringComparison.Ordinal);
-        Assert.Contains("stage5B4C1B2BExpectedWmc1510Count = 790", audit, StringComparison.Ordinal);
+        Assert.Contains("stage5B4C1B2BExpectedWmc1510Count = 802", audit, StringComparison.Ordinal);
         Assert.Contains("$RequiredAuditProfileVersion = 59", launcher, StringComparison.Ordinal);
         Assert.Contains("$RequiredSummarySchemaVersion = 55", launcher, StringComparison.Ordinal);
         Assert.Contains("stage 5B-4C3B2B1", project, StringComparison.Ordinal);

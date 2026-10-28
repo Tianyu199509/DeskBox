@@ -67,6 +67,7 @@ public sealed partial class AppUpdateService : IAppUpdateService
     private string? _lastDownloadedInstallerPath;
     private string? _lastDownloadedVersion;
     private int _downloadInProgress;
+    private volatile bool _installerHelperArmed;
 
     public string? LastDownloadedInstallerPath => _lastDownloadedInstallerPath;
     public bool IsDownloadInProgress => Volatile.Read(ref _downloadInProgress) != 0;
@@ -112,6 +113,69 @@ public sealed partial class AppUpdateService : IAppUpdateService
         catch (Exception ex)
         {
             App.Log($"[Update] Failed to delete retired installer directory: {ex.Message}");
+        }
+    }
+
+    // One successful update leaves its installer directory behind: the
+    // process that downloaded it exits for the install, and the next process
+    // starts with empty download fields, so the in-session retirement above
+    // never fires for it. Sweep the updates root at startup: keep only the
+    // running version's directory (still a retry source until the first
+    // check retires it), the updater helper, the offline release-notes
+    // cache, and the current version's installer log.
+    public void PruneStaleInstallerDirectories()
+    {
+        try
+        {
+            string currentSegment = SanitizePathSegment(GetCurrentAppVersion());
+            foreach (string directory in Directory.EnumerateDirectories(_updateRootPath))
+            {
+                string name = Path.GetFileName(directory);
+                if (string.Equals(name, currentSegment, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(name, "helper", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(name, "release-notes", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    Directory.Delete(directory, recursive: true);
+                    App.Log($"[Update] Pruned stale installer directory '{name}'");
+                }
+                catch (Exception ex)
+                {
+                    App.Log($"[Update] Failed to prune stale installer directory '{name}': {ex.Message}");
+                }
+            }
+
+            string currentLogName = $"installer-{currentSegment}.log";
+            foreach (string logFile in Directory.EnumerateFiles(
+                         _updateRootPath,
+                         "installer-*.log"))
+            {
+                if (string.Equals(
+                        Path.GetFileName(logFile),
+                        currentLogName,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    File.Delete(logFile);
+                    App.Log($"[Update] Pruned stale installer log '{Path.GetFileName(logFile)}'");
+                }
+                catch (Exception ex)
+                {
+                    App.Log($"[Update] Failed to prune stale installer log: {ex.Message}");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[Update] Failed to sweep the updates root: {ex.Message}");
         }
     }
 
@@ -228,8 +292,17 @@ public sealed partial class AppUpdateService : IAppUpdateService
         AppUpdateDownloadResult result;
         try
         {
+            // Deep review R13 (R12 debt ③): the core reports every 128KB
+            // chunk; the throttler collapses that to percent steps / 100ms
+            // beats so the IPC push lane and the About page stop flooding.
+            var throttle = new AppUpdateDownloadProgressThrottle();
             var reportingProgress = new Progress<AppUpdateDownloadProgress>(p =>
             {
+                if (!throttle.ShouldPush(p, Environment.TickCount64))
+                {
+                    return;
+                }
+
                 progress?.Report(p);
                 DownloadProgressChanged?.Invoke(p);
             });
@@ -369,6 +442,30 @@ public sealed partial class AppUpdateService : IAppUpdateService
         {
             return AppUpdateInstallResult.Failed("The downloaded installer no longer exists.");
         }
+
+        // Batch R12 security audit: this method hands an arbitrary path to
+        // the detached updater, which runs it verbatim — over IPC it was a
+        // launch-any-executable primitive. Only installers inside the
+        // managed update root (where this service downloads them) are
+        // legitimate; everything else is rejected before the updater is
+        // spawned. On fully-elevated desktops the child inherits High
+        // integrity, so the guard is a containment boundary, not cosmetic.
+        string resolvedInstaller = Path.GetFullPath(installerPath);
+        string managedRoot = Path.GetFullPath(_updateRootPath);
+        if (!resolvedInstaller.StartsWith(
+                managedRoot + Path.DirectorySeparatorChar,
+                StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(Path.GetExtension(resolvedInstaller), ".exe", StringComparison.OrdinalIgnoreCase))
+        {
+            App.Log($"[Update] Rejected installer outside the managed update root: {installerPath}");
+            return AppUpdateInstallResult.Failed(
+                "The installer path is not inside DeskBox's managed update directory.");
+        }
+
+        // From here to process exit this app hands the installer over to the
+        // detached updater: a periodic check landing in that window must not
+        // retire (delete) the directory the armed installer lives in.
+        _installerHelperArmed = true;
 
         string? appPath = Environment.ProcessPath;
         if (string.IsNullOrWhiteSpace(appPath) || !File.Exists(appPath))
@@ -809,12 +906,20 @@ public sealed partial class AppUpdateService : IAppUpdateService
         if (result.IsUpdateAvailable && result.Manifest is { } offered &&
             !string.Equals(offered.Version, _lastDownloadedVersion, StringComparison.Ordinal))
         {
-            TryDeleteRetiredInstallerDirectory();
+            if (!_installerHelperArmed)
+            {
+                TryDeleteRetiredInstallerDirectory();
+            }
+
             ClearLastDownloadedInstaller();
         }
         else if (result.Status == AppUpdateCheckStatus.UpToDate && _lastDownloadedInstallerPath is not null)
         {
-            TryDeleteRetiredInstallerDirectory();
+            if (!_installerHelperArmed)
+            {
+                TryDeleteRetiredInstallerDirectory();
+            }
+
             ClearLastDownloadedInstaller();
         }
 

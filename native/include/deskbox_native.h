@@ -1,4 +1,4 @@
-#ifndef DESKBOX_NATIVE_H
+﻿#ifndef DESKBOX_NATIVE_H
 #define DESKBOX_NATIVE_H
 
 #include <stdint.h>
@@ -141,6 +141,10 @@
 #define DESKBOX_EXPLORER_SHELL_LAUNCH_MAX_INPUT_CHARS 32767u
 #define DESKBOX_QUICK_ACCESS_MAX_INPUT_CHARS 32767u
 #define DESKBOX_RECYCLE_BIN_MAX_INPUT_CHARS 32767u
+// Deep review R17 (G2 audit): mirrors DESKBOX_MUSIC_VOLUME_MAX_INPUT_CHARS
+// in lib.rs and MusicVolumeNativeBackend — the header was the one of the
+// three mirror sites missing it.
+#define DESKBOX_MUSIC_VOLUME_MAX_INPUT_CHARS 32767u
 
 #define DESKBOX_NATIVE_UTF16_BUFFER_V1_SIZE_64 16u
 #define DESKBOX_NATIVE_UTF16_STRING_V1_SIZE_64 16u

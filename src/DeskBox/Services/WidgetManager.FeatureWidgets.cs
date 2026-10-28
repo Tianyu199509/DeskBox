@@ -98,9 +98,18 @@ public sealed partial class WidgetManager
             _settingsService.Settings.Widgets.Add(config);
         }
 
+        // Deep review R18 (item C): batch "open all" over N quick-capture
+        // results re-enters here N times against the same single widget —
+        // an unconditional full-graph save per item was pure write
+        // amplification. Save only when this call actually changed
+        // durable state (creation or visibility/disabled flip).
+        bool durableStateChanged = isNewConfig || config.IsDisabled || !config.IsVisible;
         config.IsDisabled = false;
         config.IsVisible = true;
-        await _settingsService.SaveAsync();
+        if (durableStateChanged)
+        {
+            await _settingsService.SaveAsync();
+        }
 
         if (isNewConfig)
         {

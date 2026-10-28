@@ -1,4 +1,5 @@
-using DeskBox.Models;
+﻿using DeskBox.Models;
+using DeskBox.ViewModels;
 using DeskBox.Contracts;
 using Microsoft.UI.Dispatching;
 
@@ -24,6 +25,13 @@ public sealed class TodoReminderService : IDisposable, ITodoReminderSession
     private readonly Action<TodoReminderNotification> _notify;
     private readonly Func<string, TodoWidgetStore> _storeFactory;
     private readonly Func<DateTimeOffset> _clock;
+
+    // Deep review R15 (F5 audit): the reminder service and the widget VM are
+    // two uncoordinated full-file writers of todo.json — a notification-side
+    // mutation racing a live VM save silently rolled the other's change back.
+    // When the widget is materialized, route reminder mutations through its
+    // single-writer VM instead of the store.
+    private readonly Func<string, TodoWidgetViewModel?>? _tryGetLiveViewModel;
     private readonly HashSet<string> _sessionNotifiedKeys = new(StringComparer.Ordinal);
 
     // The 30s scan used to read and deserialize every todo store on every
@@ -49,14 +57,16 @@ public sealed class TodoReminderService : IDisposable, ITodoReminderSession
         SettingsService settingsService,
         LocalizationService localizationService,
         DispatcherQueue dispatcherQueue,
-        Action<TodoReminderNotification> notify)
+        Action<TodoReminderNotification> notify,
+        Func<string, TodoWidgetViewModel?>? tryGetLiveViewModel = null)
         : this(
             settingsService,
             localizationService,
             dispatcherQueue,
             notify,
             widgetId => new TodoWidgetStore(widgetId),
-            () => DateTimeOffset.Now)
+            () => DateTimeOffset.Now,
+            tryGetLiveViewModel)
     {
     }
 
@@ -66,7 +76,8 @@ public sealed class TodoReminderService : IDisposable, ITodoReminderSession
         DispatcherQueue? dispatcherQueue,
         Action<TodoReminderNotification> notify,
         Func<string, TodoWidgetStore> storeFactory,
-        Func<DateTimeOffset> clock)
+        Func<DateTimeOffset> clock,
+        Func<string, TodoWidgetViewModel?>? tryGetLiveViewModel = null)
     {
         _settingsService = settingsService;
         _localizationService = localizationService;
@@ -74,6 +85,7 @@ public sealed class TodoReminderService : IDisposable, ITodoReminderSession
         _notify = notify;
         _storeFactory = storeFactory;
         _clock = clock;
+        _tryGetLiveViewModel = tryGetLiveViewModel;
     }
 
     public void Start()
@@ -281,6 +293,18 @@ public sealed class TodoReminderService : IDisposable, ITodoReminderSession
                 return false;
             }
 
+            // Single-writer routing (see CompleteAsync).
+            if (_tryGetLiveViewModel?.Invoke(widget.Id) is { } liveViewModel &&
+                liveViewModel.FindItem(itemId) is { } liveItem)
+            {
+                liveItem.Item.SnoozedUntil = snoozedUntil;
+                liveItem.Item.SnoozeLastNotifiedAt = null;
+                liveItem.Item.UpdatedAt = DateTimeOffset.UtcNow;
+                await liveViewModel.SaveAsync();
+                App.Log($"[TodoReminder] Snoozed via live VM widget={widgetId} item={itemId}");
+                return true;
+            }
+
             var store = _storeFactory(widget.Id);
             var data = await store.LoadAsync();
             var item = data.Items.FirstOrDefault(item =>
@@ -322,6 +346,21 @@ public sealed class TodoReminderService : IDisposable, ITodoReminderSession
             if (!TryGetTodoReminderWidget(widgetId, requireReminderEnabled: false, out WidgetConfig? widget))
             {
                 return false;
+            }
+
+            // Single-writer routing (deep review R15, F5): when the widget
+            // VM is live, its in-memory graph is the freshest state and its
+            // save pipeline is the only writer — mutate through it so a
+            // concurrent VM save cannot roll this completion back.
+            if (_tryGetLiveViewModel?.Invoke(widget.Id) is { } liveViewModel)
+            {
+                bool routed = await liveViewModel.SetCompletedAsync(itemId, isCompleted: true);
+                if (routed)
+                {
+                    App.Log($"[TodoReminder] Completed via live VM widget={widgetId} item={itemId}");
+                }
+
+                return routed;
             }
 
             var store = _storeFactory(widget.Id);

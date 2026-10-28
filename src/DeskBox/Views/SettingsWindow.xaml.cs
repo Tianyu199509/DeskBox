@@ -53,6 +53,8 @@ public sealed partial class SettingsWindow : Window
     private static readonly TimeSpan ResizeSettleDelay = TimeSpan.FromMilliseconds(120);
     private static readonly TimeSpan SectionLayoutSettleDelay = TimeSpan.FromMilliseconds(90);
     private const uint WmGetMinMaxInfo = 0x0024;
+    private const uint WmQueryEndSession = 0x0011;
+    private const uint WmEndSession = 0x0016;
     private const uint WmNcDestroy = 0x0082;
     private static readonly UIntPtr SettingsWindowSubclassId = new(1);
 
@@ -73,6 +75,10 @@ public sealed partial class SettingsWindow : Window
     private bool _isSubclassInstalled;
     private bool _isClosed;
     private bool _allowRealClose;
+
+    // Set only by the settings-host process (batch 3c-3b): user close means
+    // real close there — the process exits with the window.
+    internal bool _isHostProcessWindow;
     private bool _hasShownOnce;
     private bool _isAppearanceSliderDragging;
     private bool _isRefreshingHotkeyControls;
@@ -80,7 +86,6 @@ public sealed partial class SettingsWindow : Window
     private bool _isSyncingNavigationSelection;
     private bool _isSelectingCity;
     private bool _isRefreshingBackupSnapshots;
-    private ReleaseNotesWindow? _releaseNotesWindow;
     private string _currentSettingsSection = "General";
     private readonly Dictionary<string, FrameworkElement> _settingsSectionElements = new(StringComparer.Ordinal);
     private int _settingsNavigationGeneration;
@@ -125,7 +130,7 @@ public sealed partial class SettingsWindow : Window
     public SettingsViewModel ViewModel { get; }
     private readonly SearchSettingsViewModel _searchSettingsViewModel;
     private readonly BackupSettingsViewModel _backupSettingsViewModel;
-    private readonly BackupRestoreActions _backupRestoreActions;
+    private readonly IBackupRestoreActions _backupRestoreActions;
     private readonly IBackupCommands _backupCommands;
     private readonly DeskBox.Features.Music.MusicSettingsViewModel _musicSettingsViewModel;
     private readonly DeskBox.Features.QuickCapture.QuickCaptureSettingsViewModel _quickCaptureSettingsViewModel;
@@ -140,6 +145,11 @@ public sealed partial class SettingsWindow : Window
     private readonly DeskBox.Features.Capsule.CapsuleSettingsViewModel _capsuleSettingsViewModel;
     private readonly DeskBox.Features.GroupNavigation.GroupNavigationSettingsViewModel _groupNavigationSettingsViewModel;
     private readonly DeskBox.Features.Performance.PerformanceSettingsViewModel _performanceSettingsViewModel;
+    private readonly ISettingsHotkeyActions _hotkeyActions;
+    private readonly ISettingsWidgetActions _widgetActions;
+    private readonly ISettingsRestoreActions _restoreActions;
+    private readonly ISettingsAppActions _appActions;
+    private readonly ISettingsDataActions _dataActions;
 
     /// <summary>
     /// The file-display section's editor. Exposed for the AOT managed-UI
@@ -170,7 +180,7 @@ public sealed partial class SettingsWindow : Window
         TodoSettingsViewModel todoSettings,
         DeskBox.Features.Weather.WeatherSettingsViewModel weatherSettings,
         SearchSettingsViewModel searchSettings,
-        BackupSettingsViewModel backupSettings, BackupRestoreActions backupRestoreActions,
+        BackupSettingsViewModel backupSettings, IBackupRestoreActions backupRestoreActions,
             IQuickCaptureSettings quickCaptureSettings,
             DeskBox.Features.QuickCapture.QuickCaptureSettingsViewModel quickCaptureSettingsEditor,
             ISearchFeatureSettings searchFeatureSettings,
@@ -185,7 +195,13 @@ public sealed partial class SettingsWindow : Window
         DeskBox.Features.Music.MusicSettingsViewModel musicSettings,
         DeskBox.Features.ManagedStorage.ManagedStorageSettingsViewModel managedStorageSettings,
         DeskBox.Features.Maintenance.MaintenanceSettingsViewModel maintenanceSettings,
-        DeskBox.Features.Performance.PerformanceSettingsViewModel performanceSettings)
+        DeskBox.Features.Performance.PerformanceSettingsViewModel performanceSettings,
+        ISettingsHotkeyActions hotkeyActions,
+        ISettingsWidgetActions widgetActions,
+        ISettingsRestoreActions restoreActions,
+        ISettingsAppActions appActions,
+        ISettingsDataActions dataActions,
+        IAppUpdateService? appUpdateService)
     {
         var constructionStopwatch = Stopwatch.StartNew();
         long previousCheckpointMilliseconds = 0;
@@ -217,14 +233,20 @@ public sealed partial class SettingsWindow : Window
         _capsuleSettingsViewModel = capsuleSettings;
         _groupNavigationSettingsViewModel = groupNavigationSettings;
         _performanceSettingsViewModel = performanceSettings;
+        _hotkeyActions = hotkeyActions;
+        _widgetActions = widgetActions;
+        _restoreActions = restoreActions;
+        _appActions = appActions;
+        _dataActions = dataActions;
         _themeService = themeService;
         _localizationService = localizationService;
         ViewModel = new SettingsViewModel(settingsService, themeService, todoSettings, weatherSettings,
             backupSettings, quickCaptureSettings, quickCaptureSettingsEditor, searchFeatureSettings, appearanceSettings,
             capsuleSettings, interactionSettings, fileDisplaySettings, fileStackSettings,
             groupNavigationSettings, featureWidgetsSettings, musicSettings,
-            managedStorageSettings, maintenanceSettings, performanceSettings, localizationService,
-            App.Current.AppUpdateService);
+            managedStorageSettings, maintenanceSettings, performanceSettings, hotkeyActions,
+            widgetActions, appActions, dataActions, localizationService,
+            appUpdateService);
         LogConstructionCheckpoint("view-model");
         _settingsRootPointerPressedHandler = SettingsRoot_PointerPressedHandled;
         _settingsRootPointerReleasedHandler = SettingsRoot_PointerReleasedHandled;
@@ -285,10 +307,7 @@ public sealed partial class SettingsWindow : Window
         _themeService.AppearanceChanged += OnAppearanceChanged;
         _localizationService.LanguageChanged += OnLanguageChanged;
         ViewModel.PropertyChanged += ViewModel_PropertyChanged;
-        if (App.Current.GlobalHotkeyService is { } hotkeyService)
-        {
-            hotkeyService.RegistrationChanged += OnGlobalHotkeyRegistrationChanged;
-        }
+        _hotkeyActions.RegistrationChanged += OnGlobalHotkeyRegistrationChanged;
 
         ApplyTitleBarButtonColors();
         ApplyLocalizedText();
@@ -305,6 +324,12 @@ public sealed partial class SettingsWindow : Window
         _sectionLayoutSettleTimer.Tick += SectionLayoutSettleTimer_Tick;
         Activated += SettingsWindow_Activated;
         _appWindow.Closing += SettingsWindow_AppWindowClosing;
+        // Batch R12 (window-state audit, third time this debt surfaced):
+        // unplug/resolution changes can leave this window pressed outside
+        // the remaining work area with no in-app path back. The main
+        // process has a whole topology-archive system for its widgets;
+        // this window only needs the cheap clamp.
+        App.Current.DisplayTopologyChanged += SettingsWindow_DisplayTopologyChanged;
         // Subscribed only after _appWindow exists: ActualThemeChanged can
         // also fire on an OS theme flip while RequestedTheme is Default,
         // and the handler touches _appWindow.TitleBar.
@@ -335,7 +360,7 @@ public sealed partial class SettingsWindow : Window
         // group held topmost) lifts this window above the widgets instead of
         // leaving it in the normal band below them. Outside a session this is
         // the ordinary bring-to-front pulse, matching the other popups.
-        App.Current.WidgetManager?.BringAuxiliaryWindowToFront(
+        _appActions.BringSettingsWindowToRaisedBand(
             _hWnd,
             "settings-shown");
         Activate();
@@ -422,11 +447,117 @@ public sealed partial class SettingsWindow : Window
     // via CloseForShutdown. Window.Closed therefore keeps its pure
     // real-close meaning, which also keeps ThemeService's
     // closed-means-untrack bookkeeping honest.
+    //
+    // Host mode (batch 3c-3b) bypasses both: this window lives in its own
+    // process, so a user close really closes, the Closed teardown runs, and
+    // the host process exits right after — no reuse means no leak and no
+    // hide branch to run.
+    /// <summary>
+    /// Clamps the window back inside the nearest monitor's work area after
+    /// a display-topology change (batch R12): the OS relocates windows off
+    /// a vanished display without clamping, and this window's minimum size
+    /// can exceed small-screen work areas entirely.
+    /// </summary>
+    private void SettingsWindow_DisplayTopologyChanged()
+    {
+        if (_isClosed || _hWnd == IntPtr.Zero)
+        {
+            return;
+        }
+
+        if (DispatcherQueue is { } queue && !queue.HasThreadAccess)
+        {
+            queue.TryEnqueue(SettingsWindow_DisplayTopologyChanged);
+            return;
+        }
+
+        try
+        {
+            if (!Win32Helper.GetWindowRect(_hWnd, out Win32Helper.RECT rect))
+            {
+                return;
+            }
+
+            // A minimized window reports the (-32000,-32000) placeholder —
+            // clamping that would teleport the restore position.
+            if (rect.Left <= -30000 && rect.Top <= -30000)
+            {
+                return;
+            }
+
+            IntPtr monitor = Win32Helper.MonitorFromWindow(_hWnd, 2 /* MONITOR_DEFAULTTONEAREST */);
+            var info = new Win32Helper.MONITORINFO();
+            info.cbSize = System.Runtime.InteropServices.Marshal.SizeOf<Win32Helper.MONITORINFO>();
+            if (!Win32Helper.GetMonitorInfo(monitor, ref info))
+            {
+                return;
+            }
+
+            Win32Helper.RECT work = info.rcWork;
+            int x = rect.Left;
+            int y = rect.Top;
+            int width = rect.Right - rect.Left;
+            int height = rect.Bottom - rect.Top;
+            bool changed = false;
+            if (width > work.Right - work.Left)
+            {
+                width = work.Right - work.Left;
+                changed = true;
+            }
+
+            if (height > work.Bottom - work.Top)
+            {
+                height = work.Bottom - work.Top;
+                changed = true;
+            }
+
+            if (x < work.Left)
+            {
+                x = work.Left;
+                changed = true;
+            }
+
+            if (y < work.Top)
+            {
+                y = work.Top;
+                changed = true;
+            }
+
+            if (x + width > work.Right)
+            {
+                x = work.Right - width;
+                changed = true;
+            }
+
+            if (y + height > work.Bottom)
+            {
+                y = work.Bottom - height;
+                changed = true;
+            }
+
+            if (changed)
+            {
+                Win32Helper.SetWindowPos(
+                    _hWnd,
+                    IntPtr.Zero,
+                    x,
+                    y,
+                    width,
+                    height,
+                    0x0040 /* SWP_NOZORDER */ | 0x0004 /* SWP_NOACTIVATE */);
+            }
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[SettingsWindow] Topology clamp failed: {ex.Message}");
+        }
+    }
+
     private void SettingsWindow_AppWindowClosing(
         AppWindow sender,
         AppWindowClosingEventArgs args)
     {
-        if (_allowRealClose)
+        if (_allowRealClose || _isHostProcessWindow)
         {
             return;
         }
@@ -439,10 +570,10 @@ public sealed partial class SettingsWindow : Window
         _appWindow.Hide();
         UpdateSearchSettingsActivity();
         UpdateBackupSettingsActivity();
-        App.Current.WidgetManager?.ReleaseRaisedBandGuest(
+        _appActions.ReleaseRaisedBandGuest(
             _hWnd,
             "settings-hidden");
-        App.ScheduleBackgroundMemoryCleanup("settings-hidden");
+        _appActions.ScheduleSettingsHiddenCleanup();
     }
 
     private void SettingsRoot_ActualThemeChanged(FrameworkElement sender, object args) =>
@@ -466,6 +597,7 @@ public sealed partial class SettingsWindow : Window
         _backupSettingsViewModel.Deactivate();
         Activated -= SettingsWindow_Activated;
         _appWindow.Closing -= SettingsWindow_AppWindowClosing;
+        App.Current.DisplayTopologyChanged -= SettingsWindow_DisplayTopologyChanged;
         Closed -= SettingsWindow_Closed;
         SizeChanged -= SettingsWindow_SizeChanged;
         SettingsRoot.Loaded -= SettingsRoot_Loaded;
@@ -492,10 +624,7 @@ public sealed partial class SettingsWindow : Window
         _themeService.AppearanceChanged -= OnAppearanceChanged;
         _localizationService.LanguageChanged -= OnLanguageChanged;
         ViewModel.PropertyChanged -= ViewModel_PropertyChanged;
-        if (App.Current.GlobalHotkeyService is { } hotkeyService)
-        {
-            hotkeyService.RegistrationChanged -= OnGlobalHotkeyRegistrationChanged;
-        }
+        _hotkeyActions.RegistrationChanged -= OnGlobalHotkeyRegistrationChanged;
 
         if (AppearanceDetailSection is not null)
         {
@@ -510,8 +639,8 @@ public sealed partial class SettingsWindow : Window
         Bindings.StopTracking();
         Localized.UntrackTree(SettingsRoot);
         SettingsRoot.DataContext = null;
-        _releaseNotesWindow?.Close();
-        _releaseNotesWindow = null;
+        // The release-notes window is owned by App's single flight now; it
+        // outlives this window on purpose and is closed by shutdown steps.
         ClearFeatureWidgetRows();
         ManagedStorageFolderList?.Children.Clear();
         ViewModel.Dispose();
@@ -885,6 +1014,21 @@ public sealed partial class SettingsWindow : Window
         if (message == WmNcDestroy)
         {
             RemoveMinimumSizeHook();
+        }
+
+        if (_isHostProcessWindow &&
+            (message == WmQueryEndSession || message == WmEndSession))
+        {
+            // Session end never raises Window.Closed — without this the
+            // host's debounced (1s) pending save was silently lost on
+            // "edit setting → sign out". ExitSettingsHost flushes it while
+            // the pipe to the main process is still alive (batch R6).
+            // QUERYENDSESSION must answer TRUE — returning zero would
+            // REFUSE the sign-off system-wide. Flushing already on QUERY
+            // (not only ENDSESSION) covers a death mid-broadcast; a second
+            // call from ENDSESSION is an idempotent no-op.
+            App.Current.ExitSettingsHost();
+            return new IntPtr(1);
         }
 
         return Win32Helper.DefSubclassProc(hWnd, message, wParam, lParam);

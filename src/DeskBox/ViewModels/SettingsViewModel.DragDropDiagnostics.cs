@@ -17,7 +17,7 @@ public partial class SettingsViewModel
     {
         try
         {
-            _dragDropPermissionDiagnostic = DragDropPermissionService.Diagnose(_localizationService);
+            _dragDropPermissionDiagnostic = _appActions.DiagnoseDragDropPermissions();
             App.Log(
                 "[DragDropPermission] " +
                 $"issue={_dragDropPermissionDiagnostic.Issue} severity={_dragDropPermissionDiagnostic.Severity} " +
@@ -58,7 +58,7 @@ public partial class SettingsViewModel
         _backupSettings.SetDragDropRepairBusy(true);
         try
         {
-            var result = DragDropPermissionService.Repair(_settingsService);
+            var result = _appActions.RepairDragDropPermissions();
             _backupSettings.SetDragDropRepairStatus(result.Success
                 ? _localizationService.Format("Settings.DragDropPermission.RepairStatus", result.RepairedCount)
                 : _localizationService.Format("Settings.DragDropPermission.RepairFailedStatus", result.FailureMessage));

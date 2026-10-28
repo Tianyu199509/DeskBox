@@ -6872,9 +6872,6 @@ try {
             AppearanceDensitySettings = @{ parent = "Appearance"; nav = "Appearance" }
             AppearanceWindowSettings = @{ parent = "Appearance"; nav = "Appearance" }
             AppearanceAnimationSettings = @{ parent = "Appearance"; nav = "Appearance" }
-            CapsuleBehaviorSettings = @{ parent = "CapsuleMode"; nav = "CapsuleMode" }
-            CapsuleArrangementSettings = @{ parent = "CapsuleMode"; nav = "CapsuleMode" }
-            CapsuleAnimationSettings = @{ parent = "CapsuleMode"; nav = "CapsuleMode" }
             CapsuleOverridesSettings = @{ parent = "CapsuleMode"; nav = "CapsuleMode" }
             BackupRestoreSettings = @{ parent = "Maintenance"; nav = "Maintenance" }
             DataHealthSettings = @{ parent = "Maintenance"; nav = "Maintenance" }

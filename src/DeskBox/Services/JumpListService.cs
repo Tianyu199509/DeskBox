@@ -41,6 +41,24 @@ public static class JumpListService
     }
 
     /// <summary>
+    /// Registers only the process AUMID — for the settings-host process,
+    /// whose window must group with the main app's taskbar button but which
+    /// must not touch the Start Menu shortcut (batch R6).
+    /// </summary>
+    public static void RegisterProcessAppUserModelIdOnly()
+    {
+        try
+        {
+            JumpListNativeMethods.SetCurrentProcessExplicitAppUserModelID(AppUserModelId);
+            App.LogVerbose($"[JumpList] Process AUMID registered: {AppUserModelId}");
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[JumpList] Failed to register process AUMID: {ex.Message}");
+        }
+    }
+
+    /// <summary>
     /// Configure the taskbar Jump List with quick action items.
     /// Safe to call for both packaged (MSIX) and unpackaged apps.
     /// </summary>
@@ -129,12 +147,19 @@ public static class JumpListService
                 case ArgNewFolderWidget:
                     if (app.WidgetManager is not null)
                     {
-                        string? folderPath = await FolderPickerService.PickFolderAsync(
-                            app.GetFolderPickerOwnerWindowHandle());
-                        if (!string.IsNullOrWhiteSpace(folderPath))
-                        {
-                            await app.TryCreateFolderWidgetAsync(folderPath);
-                        }
+                        // The native folder dialog is modal on the UI thread,
+                        // and jump-list activation can arrive mid-startup:
+                        // blocking OnLaunched inside the dialog would hold
+                        // the launch pipeline hostage until it closes. Leave
+                        // the activation frame first (the same
+                        // callback-isolation invariant the tray uses), so the
+                        // modal runs once startup's synchronous work drains —
+                        // its message loop keeps pumping queued startup work
+                        // while it is up.
+                        UiDispatch.PostAfterCallback(() =>
+                            App.SafeFireAndForget(
+                                () => app.CreateFolderWidgetFromPickerAsync(),
+                                "jump-list-folder-map"));
                     }
                     break;
 

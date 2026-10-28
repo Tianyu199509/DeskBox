@@ -312,9 +312,9 @@ public sealed class AotStage5B4B2B2B2ContractTests
         string baseline = ReadRepositoryFile(
             "tests/DeskBox.Tests/JsonSerializationBaselineContractTests.cs");
 
-        Assert.Contains("Assert.Equal(41, actual.Count);", baseline, StringComparison.Ordinal);
-        Assert.Contains("Assert.Equal(96, actual.Values.Sum());", baseline, StringComparison.Ordinal);
-        Assert.Contains("Assert.Equal(37, actualContextOwners.Length);", baseline, StringComparison.Ordinal);
+        Assert.Contains("Assert.Equal(44, actual.Count);", baseline, StringComparison.Ordinal);
+        Assert.Contains("Assert.Equal(111, actual.Values.Sum());", baseline, StringComparison.Ordinal);
+        Assert.Contains("Assert.Equal(38, actualContextOwners.Length);", baseline, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -212,7 +212,11 @@ public enum AppUpdateDownloadFailureKind
 
 public sealed class AppUpdateDownloadResult
 {
-    private AppUpdateDownloadResult(
+    // JsonConstructor: the settings-host IPC pipe deserializes download
+    // results in the second process (batch 3c-3a); the parameter names
+    // mirror the properties for source-generated mapping.
+    [System.Text.Json.Serialization.JsonConstructor]
+    internal AppUpdateDownloadResult(
         bool success,
         string? filePath,
         AppUpdateDownloadFailureKind failureKind,
@@ -238,7 +242,9 @@ public sealed class AppUpdateDownloadResult
 
 public sealed class AppUpdateInstallResult
 {
-    private AppUpdateInstallResult(bool success, string? errorMessage)
+    // JsonConstructor: see AppUpdateDownloadResult (batch 3c-3a).
+    [System.Text.Json.Serialization.JsonConstructor]
+    internal AppUpdateInstallResult(bool success, string? errorMessage)
     {
         Success = success;
         ErrorMessage = errorMessage;

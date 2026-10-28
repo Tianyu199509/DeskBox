@@ -462,6 +462,20 @@ public sealed partial class SettingsWindow
     {
         EnsureSettingsSectionCreated("GlanceSettings");
         GlanceSettingsSection.SelectWidget(widgetId);
+        // Deep-linking a different glance instance while the section is
+        // already on screen hits NavigateToSettingsSection's same-section
+        // early exit — which also skips the section's enter-time refresh,
+        // leaving the previously selected instance's settings on display
+        // (batch R12 window-state audit: users could edit the wrong
+        // instance). SelectWidget staged the new selection; run the
+        // refresh the navigation would have triggered.
+        if (SettingsRoot.IsLoaded &&
+            string.Equals(_currentSettingsSection, "GlanceSettings", StringComparison.Ordinal))
+        {
+            _ = GlanceSettingsSection.RefreshFromStoreAsync();
+            return;
+        }
+
         NavigateToSettingsSection("GlanceSettings");
     }
 
@@ -634,7 +648,7 @@ public sealed partial class SettingsWindow
         }
         if (sectionTag == "ManagedStorage")
         {
-            RefreshManagedStorageFolderList();
+            _ = RefreshManagedStorageFolderListAsync();
         }
         else if (sectionTag == "FileStorageSettings")
         {
@@ -990,13 +1004,12 @@ public sealed partial class SettingsWindow
                 {
                     MoveUpTargetWidgetId: string targetId
                 } member
-            } ||
-            App.Current.WidgetManager is not { } manager)
+            })
         {
             return;
         }
 
-        if (await manager.ReorderWidgetGroupMemberAsync(
+        if (await _widgetActions.ReorderWidgetGroupMemberAsync(
                 member.WidgetId,
                 targetId))
         {
@@ -1014,13 +1027,12 @@ public sealed partial class SettingsWindow
                 {
                     MoveDownTargetWidgetId: string targetId
                 } member
-            } ||
-            App.Current.WidgetManager is not { } manager)
+            })
         {
             return;
         }
 
-        if (await manager.ReorderWidgetGroupMemberAsync(
+        if (await _widgetActions.ReorderWidgetGroupMemberAsync(
                 member.WidgetId,
                 targetId))
         {
@@ -1035,15 +1047,12 @@ public sealed partial class SettingsWindow
         if (sender is not Button
             {
                 Tag: WidgetGroupMemberSettingsItem member
-            } ||
-            App.Current.WidgetManager is not { } manager)
+            })
         {
             return;
         }
 
-        if (await manager.RemoveWidgetFromGroupAsync(
-                member.WidgetId,
-                revealStandalone: true))
+        if (await _widgetActions.RemoveWidgetFromGroupAsync(member.WidgetId))
         {
             ViewModel.RefreshWidgetGroupSettings();
         }
@@ -1054,7 +1063,6 @@ public sealed partial class SettingsWindow
         RoutedEventArgs e)
     {
         if (sender is not Button { Tag: string memberId } ||
-            App.Current.WidgetManager is not { } manager ||
             SettingsRoot.XamlRoot is null)
         {
             return;
@@ -1082,7 +1090,7 @@ public sealed partial class SettingsWindow
             return;
         }
 
-        if (await manager.DissolveWidgetGroupContainingAsync(memberId))
+        if (await _widgetActions.DissolveWidgetGroupContainingAsync(memberId))
         {
             ViewModel.RefreshWidgetGroupSettings();
         }

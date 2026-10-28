@@ -42,23 +42,23 @@ public partial class SettingsViewModel
         {
             statusText = _localizationService.T("Settings.GlobalHotkey.Status.Disabled");
         }
-        else if (App.Current?.GlobalHotkeyService is not { } hotkeyService)
+        else if (_hotkeyActions.GetRuntimeState() is not { } hotkeyState)
         {
             statusText = _localizationService.T("Settings.GlobalHotkey.Status.Unavailable");
         }
-        else if (hotkeyService.IsRegistered)
+        else if (hotkeyState.IsRegistered)
         {
             // The risky-activation flag only tinted the legacy status kind,
             // which had no visual consumer; the status text is identical.
             statusText = _localizationService.Format(
                 "Settings.GlobalHotkey.Status.Active",
-                hotkeyService.CurrentGestureText);
+                hotkeyState.CurrentGestureText);
         }
         else
         {
-            statusText = string.IsNullOrWhiteSpace(hotkeyService.LastError)
+            statusText = string.IsNullOrWhiteSpace(hotkeyState.LastError)
                 ? _localizationService.T("Settings.GlobalHotkey.Status.Unregistered")
-                : hotkeyService.LastError;
+                : hotkeyState.LastError;
         }
 
         string warningText = activation.Kind == HotkeyActivationKind.WindowsTap

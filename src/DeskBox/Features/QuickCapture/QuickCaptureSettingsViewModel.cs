@@ -767,12 +767,23 @@ public sealed partial class QuickCaptureSettingsViewModel : ObservableObject
     }
 
     /// <summary>
-    /// The feature-card toggle's write path (the overview row in the
-    /// feature-widgets section): mirrors the section switch's enable chain.
+    /// The feature-card toggle's mirror path (the overview row in the
+    /// feature-widgets section): flips the projection without re-entering
+    /// the section switch's enable chain — the card itself sends the
+    /// SetFeatureWidgetEnabled command, and a plain Enabled assignment here
+    /// would fire a second, racing one (batch R8).
     /// </summary>
     public void SetFeatureEnabled(bool enabled)
     {
-        Enabled = enabled;
+        _isSyncingPresentation = true;
+        try
+        {
+            Enabled = enabled;
+        }
+        finally
+        {
+            _isSyncingPresentation = false;
+        }
     }
 
     /// <summary>

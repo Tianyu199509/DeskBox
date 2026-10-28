@@ -1,4 +1,4 @@
-using DeskBox.Helpers;
+﻿using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Platform;
 using DeskBox.Services;
@@ -28,9 +28,7 @@ public sealed partial class SettingsWindow
             return;
         }
 
-        var data = await App.Current.QuickCaptureService.GetDataAsync();
-        int recordCount = data.Items.Count(item => !item.IsDeleted);
-        int recentCount = data.RecentItems.Count(item => !item.IsDeleted);
+        var (recordCount, recentCount) = await _dataActions.GetQuickCaptureCountsAsync();
         var dialog = new ContentDialog
         {
             XamlRoot = SettingsRoot.XamlRoot,
@@ -53,10 +51,7 @@ public sealed partial class SettingsWindow
             return;
         }
 
-        await App.Current.QuickCaptureService.ClearAsync();
-        await WidgetFirstRunGuideFactory.EnsureQuickCaptureGuideAsync(
-            App.Current.QuickCaptureService,
-            _localizationService);
+        await _dataActions.ClearQuickCaptureDataAsync();
         await ViewModel.RefreshQuickCaptureImageCacheInfoAsync();
     }
 
@@ -67,8 +62,7 @@ public sealed partial class SettingsWindow
             return;
         }
 
-        var data = await App.Current.QuickCaptureService.GetDataAsync();
-        int recentCount = data.RecentItems.Count(item => !item.IsDeleted);
+        var (_, recentCount) = await _dataActions.GetQuickCaptureCountsAsync();
         var dialog = new ContentDialog
         {
             XamlRoot = SettingsRoot.XamlRoot,
@@ -90,7 +84,7 @@ public sealed partial class SettingsWindow
             return;
         }
 
-        await App.Current.QuickCaptureService.ClearRecentAsync();
+        await _dataActions.ClearQuickCaptureRecentAsync();
         await ViewModel.RefreshQuickCaptureImageCacheInfoAsync();
     }
 
@@ -101,7 +95,7 @@ public sealed partial class SettingsWindow
             return;
         }
 
-        var result = await App.Current.QuickCaptureService.CleanupUnusedImageCacheAsync();
+        var result = await _dataActions.ClearUnusedQuickCaptureImageCacheAsync();
         await ViewModel.RefreshQuickCaptureImageCacheInfoAsync();
 
         var dialog = new ContentDialog
@@ -125,7 +119,7 @@ public sealed partial class SettingsWindow
 
     private void ShowOnboardingButton_Click(object sender, RoutedEventArgs e)
     {
-        App.Current.ShowOnboarding();
+        _appActions.ShowOnboarding();
     }
 
     private async void ShowAboutMeButton_Click(object sender, RoutedEventArgs e)
@@ -147,37 +141,45 @@ public sealed partial class SettingsWindow
 
     private void RefreshManagedStorageButton_Click(object sender, RoutedEventArgs e)
     {
-        RefreshManagedStorageFolderList();
+        _ = RefreshManagedStorageFolderListAsync();
     }
 
-    private void RefreshManagedStorageFolderList()
+    private async Task RefreshManagedStorageFolderListAsync()
     {
         ManagedStorageFolderList.Children.Clear();
+        ManagedStorageEmptyState.Visibility = Visibility.Visible;
+        ManagedStorageFolderList.Visibility = Visibility.Collapsed;
 
-        if (App.Current.WidgetManager is not { } widgetManager)
+        // Deep review R18 (A-#24): the orphan scan recursively counts every
+        // candidate directory tree on the MAIN process with a 10-MINUTE IPC
+        // ceiling — running it inline on the UI thread froze the settings
+        // host for as long as that scan took. It now runs on a pool thread;
+        // the section shows the empty state until results arrive.
+        IReadOnlyList<ManagedStorageFolderCleanupCandidate>? candidates =
+            await Task.Run(() => _widgetActions.GetOrphanManagedStorageFolders());
+
+        if (candidates is not { } list)
         {
             ManagedStorageEmptyState.Visibility = Visibility.Visible;
             ManagedStorageFolderList.Visibility = Visibility.Collapsed;
             ManagedStorageSummaryText.Text = _localizationService.T("Settings.ManagedStorage.SummaryUnavailable");
             return;
         }
-
-        var candidates = widgetManager.GetOrphanManagedStorageFolders();
-        bool hasCandidates = candidates.Count > 0;
+        bool hasCandidates = list.Count > 0;
         ManagedStorageEmptyState.Visibility = hasCandidates ? Visibility.Collapsed : Visibility.Visible;
         ManagedStorageFolderList.Visibility = hasCandidates ? Visibility.Visible : Visibility.Collapsed;
         ManagedStorageSummaryText.Text = hasCandidates
-            ? _localizationService.Format("Settings.ManagedStorage.Summary", candidates.Count)
+            ? _localizationService.Format("Settings.ManagedStorage.Summary", list.Count)
             : _localizationService.T("Settings.ManagedStorage.SummaryEmpty");
 
-        for (int index = 0; index < candidates.Count; index++)
+        for (int index = 0; index < list.Count; index++)
         {
             if (index > 0)
             {
                 ManagedStorageFolderList.Children.Add(CreateSettingDivider());
             }
 
-            ManagedStorageFolderList.Children.Add(CreateManagedStorageFolderRow(candidates[index]));
+            ManagedStorageFolderList.Children.Add(CreateManagedStorageFolderRow(list[index]));
         }
 
         DispatcherQueue.TryEnqueue(() =>
@@ -274,22 +276,22 @@ public sealed partial class SettingsWindow
 
     private async Task RestoreManagedStorageFolderAsync(string folderPath)
     {
-        if (App.Current.WidgetManager is null)
+        if (!_widgetActions.IsHostAvailable)
         {
             return;
         }
 
         try
         {
-            int restoredCount = await App.Current.WidgetManager.RestoreOrphanManagedStorageFoldersAsync([folderPath]);
-            RefreshManagedStorageFolderList();
+            int restoredCount = await _widgetActions.RestoreOrphanManagedStorageFoldersAsync([folderPath]);
+            _ = RefreshManagedStorageFolderListAsync();
             await ShowInfoDialogAsync(
                 _localizationService.T("Settings.ManagedStorage.RestoreCompleteTitle"),
                 _localizationService.Format("Settings.ManagedStorage.RestoreCompleteBody", restoredCount));
         }
         catch (Exception ex)
         {
-            RefreshManagedStorageFolderList();
+            _ = RefreshManagedStorageFolderListAsync();
             await ShowInfoDialogAsync(
                 _localizationService.T("Settings.ManagedStorage.ActionFailedTitle"),
                 _localizationService.Format("Settings.ManagedStorage.ActionFailedBody", ex.Message));
@@ -300,7 +302,7 @@ public sealed partial class SettingsWindow
     {
         if (!Directory.Exists(folderPath))
         {
-            RefreshManagedStorageFolderList();
+            _ = RefreshManagedStorageFolderListAsync();
             await ShowInfoDialogAsync(
                 _localizationService.T("Settings.ManagedStorage.ActionFailedTitle"),
                 _localizationService.T("Settings.ManagedStorage.MissingFolder"));
@@ -312,7 +314,7 @@ public sealed partial class SettingsWindow
 
     private async Task MoveManagedStorageFolderToDesktopAsync(string folderPath, string folderName)
     {
-        if (App.Current.WidgetManager is null ||
+        if (!_widgetActions.IsHostAvailable ||
             !await ConfirmManagedStorageActionAsync(
                 _localizationService.T("Settings.ManagedStorage.MoveConfirmTitle"),
                 _localizationService.Format("Settings.ManagedStorage.MoveConfirmBody", folderName),
@@ -323,15 +325,15 @@ public sealed partial class SettingsWindow
 
         try
         {
-            await App.Current.WidgetManager.MoveOrphanManagedStorageFolderContentsToDesktopAsync(folderPath);
-            RefreshManagedStorageFolderList();
+            await _widgetActions.MoveOrphanManagedStorageFolderContentsToDesktopAsync(folderPath);
+            _ = RefreshManagedStorageFolderListAsync();
             await ShowInfoDialogAsync(
                 _localizationService.T("Settings.ManagedStorage.MoveCompleteTitle"),
                 _localizationService.Format("Settings.ManagedStorage.MoveCompleteBody", folderName));
         }
         catch (Exception ex)
         {
-            RefreshManagedStorageFolderList();
+            _ = RefreshManagedStorageFolderListAsync();
             await ShowInfoDialogAsync(
                 _localizationService.T("Settings.ManagedStorage.ActionFailedTitle"),
                 _localizationService.Format("Settings.ManagedStorage.ActionFailedBody", ex.Message));
@@ -340,7 +342,7 @@ public sealed partial class SettingsWindow
 
     private async Task DeleteManagedStorageFolderAsync(string folderPath, string folderName)
     {
-        if (App.Current.WidgetManager is null ||
+        if (!_widgetActions.IsHostAvailable ||
             !await ConfirmManagedStorageActionAsync(
                 _localizationService.T("Settings.ManagedStorage.DeleteConfirmTitle"),
                 _localizationService.Format("Settings.ManagedStorage.DeleteConfirmBody", folderName),
@@ -351,17 +353,17 @@ public sealed partial class SettingsWindow
 
         try
         {
-            await App.Current.WidgetManager.DeleteOrphanManagedStorageFolderAsync(
+            await _widgetActions.DeleteOrphanManagedStorageFolderAsync(
                 folderPath,
                 _hWnd);
-            RefreshManagedStorageFolderList();
+            _ = RefreshManagedStorageFolderListAsync();
             await ShowInfoDialogAsync(
                 _localizationService.T("Settings.ManagedStorage.DeleteCompleteTitle"),
                 _localizationService.Format("Settings.ManagedStorage.DeleteCompleteBody", folderName));
         }
         catch (Exception ex)
         {
-            RefreshManagedStorageFolderList();
+            _ = RefreshManagedStorageFolderListAsync();
             await ShowInfoDialogAsync(
                 _localizationService.T("Settings.ManagedStorage.ActionFailedTitle"),
                 _localizationService.Format("Settings.ManagedStorage.ActionFailedBody", ex.Message));
@@ -407,6 +409,8 @@ public sealed partial class SettingsWindow
             }
         };
 
-        await dialog.ShowAsync();
+        // Coordinator-routed like the update dialogs: this surfaces failure
+        // notices whose triggers can land while another dialog is open.
+        await ShowDialogWhenFreeAsync(() => dialog);
     }
 }

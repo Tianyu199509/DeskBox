@@ -162,23 +162,17 @@ public partial class SettingsViewModel
     // they reach host services.
     private void OnInteractionSnapEnabledUserChanged(bool value)
     {
-        if (App.Current is { } app)
-        {
-            app.ResizeGuideOverlay.IsSnapEnabled = value;
-        }
+        _appActions.SetSnapEnabled(value);
     }
 
     private void OnInteractionSnapSpacingUserChanged(double value)
     {
-        if (App.Current is { } app)
-        {
-            app.ResizeGuideOverlay.SnapSpacingDips = value;
-        }
+        _appActions.SetSnapSpacingDips(value);
     }
 
     private void OnInteractionShowDesktopBehaviorUserChanged()
     {
-        App.Current?.WidgetManager?.RefreshVisibleWidgetDesktopLayers(
+        _widgetActions.RefreshVisibleWidgetDesktopLayers(
             "settings-show-desktop-visibility");
     }
 

@@ -551,6 +551,12 @@ public sealed partial class ContentWidgetWindow
             !_isGroupFileDropTracking)
         {
             batch?.Dispose();
+            // Deep review R17 (G1 audit): clear the in-flight flag here too.
+            // Correctness currently depends on the indirect chain "every
+            // generation bump goes through StopGroupFileDropTracking, which
+            // clears the flag" — any future bump path that skips Stop would
+            // leave the cache task wedged forever.
+            _isCachingGroupFileDrop = false;
             return;
         }
 
@@ -654,6 +660,14 @@ public sealed partial class ContentWidgetWindow
                     batch.Files.Select(droppedFile => droppedFile.Path).ToArray(),
                     containsTemporaryFiles);
             }
+        }
+        catch (Exception ex)
+        {
+            // Deep review R17 (G1 audit): this is an async void handler — an
+            // exception from the import's front matter (intent resolution,
+            // hit testing) rides straight to the dispatcher and kills the
+            // process. Every sibling path here logs instead; match them.
+            App.Log($"[DropDiagnostic] Group fallback import failed: {ex}");
         }
         finally
         {

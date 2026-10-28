@@ -529,7 +529,12 @@ public sealed partial class SettingsWindow
             restartScheduled = true;
             await _backupRestoreActions.ShutdownForRestartAsync();
         }
-        catch (OperationCanceledException) when (!prepareStarted ||
+        // A mid-download cancellation with a still-current visit is a
+        // transport failure (timeout/disconnect), not staleness — let it
+        // fall to the generic catch so the user sees the failure instead
+        // of a silent no-op with a hundreds-of-MB orphaned temp dir
+        // (batch R3).
+        catch (OperationCanceledException) when (_backupCommands.IsStopping ||
             !CurrentCloudBackupVisit(generation, visit)) { }
         catch (Exception ex)
         {

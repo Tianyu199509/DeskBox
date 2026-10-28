@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 using DeskBox.Models;
 using DeskBox.Services;
@@ -103,7 +103,6 @@ public sealed class DesktopOrganizationHistoryStore
     public Task SaveAsync() =>
         ResilientJsonStore.SaveAsync(_historyPath, WriteTempFileAsync);
 
-    public bool SaveChecked() => SaveCheckedAsync().GetAwaiter().GetResult();
 
     /// <summary>
     /// Same load-bearing semantics as <c>SettingsService.SaveCheckedAsync</c>:

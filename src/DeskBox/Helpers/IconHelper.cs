@@ -1,4 +1,4 @@
-using System.Drawing;
+﻿using System.Drawing;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Collections.Concurrent;
@@ -1501,20 +1501,30 @@ public static class IconHelper
 
             // Get the system icon index, then extract the highest-resolution
             // version available via ShellIconNativeMethods.SHGetImageList (Jumbo 256 → ExtraLarge 48 → Large 32).
+            // Deep review R18 (E-1): the index probe used the real path, which
+            // binds a PIDL and can invoke a third-party IconHandler in this
+            // process (the exact code class the menu/thumbnail proxies exist
+            // to keep out). USEFILEATTRIBUTES resolves the index from the
+            // registry association alone — no file access, no handler — and
+            // the image-list leg below only reads the shared system list.
+            // Cost: extensions whose icon is ONLY produced dynamically by a
+            // handler show the generic per-type icon in the proxy-fallback
+            // window (the same degradation the pinned WIC decoder accepted).
             var shinfo = new ShellIconNativeMethods.SHFILEINFO();
+            const uint fileAttributeNormal = 0x80;
             IntPtr hImg = ShellIconNativeMethods.SHGetFileInfo(
                 iconSource.Path,
-                0,
+                fileAttributeNormal,
                 ref shinfo,
                 (uint)Marshal.SizeOf(shinfo),
-                ShellIconNativeMethods.SHGFI_SYSICONINDEX);
+                ShellIconNativeMethods.SHGFI_SYSICONINDEX |
+                ShellIconNativeMethods.SHGFI_USEFILEATTRIBUTES);
 
             if (hImg == IntPtr.Zero)
             {
-                // Fallback: direct large icon via ShellIconNativeMethods.SHGetFileInfo
-                return LoadIconBytesFromShGetFileInfo(
-                    iconSource.Path,
-                    rejectPaddedShortcutIcon);
+                // Fallback: registry-only direct large icon (same
+                // USEFILEATTRIBUTES stance as the index probe).
+                return GetFileTypeIconPngBytes(iconSource.Path);
             }
 
             int iconIndex = shinfo.iIcon;
@@ -1604,13 +1614,19 @@ public static class IconHelper
         string path,
         bool rejectPaddedShortcutIcon = false)
     {
+        // Deep review R18 (E-1): registry-only — the real-path form of this
+        // query could invoke a third-party IconHandler in-process. See the
+        // SYSICONINDEX probe above for the degradation trade-off.
+        const uint fileAttributeNormal = 0x80;
         var shinfo = new ShellIconNativeMethods.SHFILEINFO();
         IntPtr hImg = ShellIconNativeMethods.SHGetFileInfo(
             path,
-            0,
+            fileAttributeNormal,
             ref shinfo,
             (uint)Marshal.SizeOf(shinfo),
-            ShellIconNativeMethods.SHGFI_ICON | ShellIconNativeMethods.SHGFI_LARGEICON);
+            ShellIconNativeMethods.SHGFI_ICON |
+            ShellIconNativeMethods.SHGFI_LARGEICON |
+            ShellIconNativeMethods.SHGFI_USEFILEATTRIBUTES);
 
         if (hImg == IntPtr.Zero || shinfo.hIcon == IntPtr.Zero)
         {
@@ -1782,95 +1798,9 @@ public static class IconHelper
         int iconIndex,
         int size) => TryExtractHighResIndexedIcon(filePath, iconIndex, size);
 
-    /// <summary>
-    /// Icon for a shell-namespace item addressed by its parsing name
-    /// ("::{645FF040-5081-101B-9F08-00AA002F954E}", "shell:ControlPanelFolder",
-    /// …) as PNG bytes. Unlike file-path icons, namespace icons can be
-    /// state-aware — the Recycle Bin returns the empty or the full graphic
-    /// for the same PIDL — so callers re-query when the state may have moved.
-    /// Safe to call from background threads.
-    /// </summary>
-    internal static byte[]? GetShellItemIconPngBytes(string parsingName)
-    {
-        IntPtr pidl = IntPtr.Zero;
-        IntPtr hImg = IntPtr.Zero;
-        try
-        {
-            int hr = ShellIconNativeMethods.SHParseDisplayName(
-                parsingName,
-                IntPtr.Zero,
-                out pidl,
-                0,
-                out _);
-            if (hr != 0 || pidl == IntPtr.Zero)
-            {
-                return null;
-            }
-
-            // Resolve the system image-list index, then pull the large
-            // (32px) icon out of SHIL_LARGE-quality handles for crispness.
-            var shinfo = new ShellIconNativeMethods.SHFILEINFO();
-            hImg = ShellIconNativeMethods.SHGetFileInfoPidl(
-                pidl,
-                0,
-                ref shinfo,
-                (uint)Marshal.SizeOf(shinfo),
-                ShellIconNativeMethods.SHGFI_PIDL |
-                ShellIconNativeMethods.SHGFI_SYSICONINDEX);
-            if (hImg != IntPtr.Zero)
-            {
-                byte[]? bytes = TryGetIconFromImageList(
-                    ShellIconNativeMethods.SHIL_EXTRALARGE,
-                    shinfo.iIcon);
-                bytes ??= TryGetIconFromImageList(
-                    ShellIconNativeMethods.SHIL_LARGE,
-                    shinfo.iIcon);
-                if (bytes is not null)
-                {
-                    return bytes;
-                }
-            }
-
-            // Fallback: let the shell hand us the icon handle directly.
-            var direct = new ShellIconNativeMethods.SHFILEINFO();
-            hImg = ShellIconNativeMethods.SHGetFileInfoPidl(
-                pidl,
-                0,
-                ref direct,
-                (uint)Marshal.SizeOf(direct),
-                ShellIconNativeMethods.SHGFI_PIDL |
-                ShellIconNativeMethods.SHGFI_ICON |
-                ShellIconNativeMethods.SHGFI_LARGEICON);
-            if (hImg == IntPtr.Zero || direct.hIcon == IntPtr.Zero)
-            {
-                return null;
-            }
-
-            try
-            {
-                using var icon = Icon.FromHandle(direct.hIcon);
-                using var bitmap = icon.ToBitmap();
-                return EncodeIconBitmapAsPng(bitmap, rejectPaddedShortcutIcon: false);
-            }
-            finally
-            {
-                ShellIconNativeMethods.DestroyIcon(direct.hIcon);
-            }
-        }
-        catch (Exception ex)
-        {
-            App.Log($"[IconHelper] Shell item icon failed for {parsingName}: {ex.Message}");
-            return null;
-        }
-        finally
-        {
-            if (pidl != IntPtr.Zero)
-            {
-                ShellIconNativeMethods.ILFree(pidl);
-            }
-        }
-    }
-
+    // GetShellItemIconPngBytes removed (deep review R18, E-1 audit): zero
+    // callers in src+tests — and its PIDL path was the one remaining form
+    // that could bind third-party icon handlers in-process.
     internal static Task<BitmapImage?> CreateBitmapImageAsync(
         Microsoft.UI.Dispatching.DispatcherQueue dispatcher,
         byte[]? bytes,

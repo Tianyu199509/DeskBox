@@ -248,6 +248,22 @@ public abstract partial class WidgetWindowBase
                     path,
                     loadFailed: () => OnCustomBackgroundLoadFailed(path));
         }
+        else if (shared &&
+                 WidgetSharedImageSourceCache.TryGet(
+                     path,
+                     WidgetBackgroundImageSourceFactory.CreateSource,
+                     loadFailed: () => OnCustomBackgroundLoadFailed(path)) is { } refreshed)
+        {
+            // Deep review R13-4 (E8 audit): the SHARED background must not
+            // be short-circuited by the same-path memo — the storage name
+            // is stable across repicks (background.png → background.png)
+            // while the file content changes, and the stamp-keyed cache
+            // re-query is exactly how a same-name repick reaches live
+            // windows. It costs one file stat on unchanged content; the
+            // per-widget branch keeps its memo because its factory decodes
+            // on every call.
+            _customBackgroundSource = refreshed;
+        }
 
         return _customBackgroundSource;
     }

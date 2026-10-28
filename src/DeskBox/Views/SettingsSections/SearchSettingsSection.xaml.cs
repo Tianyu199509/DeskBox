@@ -22,6 +22,7 @@ public sealed partial class SearchSettingsSection : UserControl
     private bool _isLoading;
     private SearchSettingsViewModel? _viewModel;
     private LocalizationService _localization = null!;
+    private ISettingsHotkeyActions _hotkeyActions = null!;
     private nint _ownerWindow;
     private bool _hostActive;
     private bool _observingModel;
@@ -38,10 +39,15 @@ public sealed partial class SearchSettingsSection : UserControl
 
     private LocalizationService Localization => _localization;
 
-    public void Configure(SearchSettingsViewModel viewModel, LocalizationService localization, nint ownerWindow)
+    public void Configure(
+        SearchSettingsViewModel viewModel,
+        LocalizationService localization,
+        ISettingsHotkeyActions hotkeyActions,
+        nint ownerWindow)
     {
         _viewModel = viewModel;
         _localization = localization;
+        _hotkeyActions = hotkeyActions;
         _ownerWindow = ownerWindow;
         RefreshFromSettings();
     }
@@ -432,6 +438,7 @@ private void UpdateEverythingDashboard(EverythingConnectionSnapshot snapshot)
         var dialog = new HotkeyRecorderDialog(
             XamlRoot,
             Localization,
+            _hotkeyActions,
             HotkeyRecorderDialog.Scope.Search,
             GlobalHotkeyActivation.FromChord(editor.State.Hotkey.Gesture),
             presets,

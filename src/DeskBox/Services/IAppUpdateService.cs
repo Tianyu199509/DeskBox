@@ -39,7 +39,12 @@ public interface IAppUpdateService
         AppUpdateManifest manifest,
         IProgress<AppUpdateDownloadProgress>? progress = null,
         CancellationToken cancellationToken = default);
-    void ClearLastDownloadedInstaller();
+
+    // ClearLastDownloadedInstaller / PruneStaleInstallerDirectories are
+    // deliberately NOT on this interface: they have no settings-host
+    // caller — the main process invokes its own service directly (deep
+    // review R13-2 removed the dead IPC wires that used to mirror them).
+
     AppUpdateInstallResult StartInstallerHelper(
         string installerPath,
         bool silent = true,

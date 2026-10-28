@@ -83,18 +83,25 @@ public sealed partial class SettingsWindow
         switch (section)
         {
             case SearchSettingsSection searchSettings:
-                searchSettings.Configure(_searchSettingsViewModel, _localizationService, _hWnd);
+                searchSettings.Configure(_searchSettingsViewModel, _localizationService, _hotkeyActions, _hWnd);
                 break;
             case FileWidgetSettingsSection fileSettings:
                 fileSettings.FileStack = _fileStackSettingsViewModel;
                 fileSettings.FeatureWidgets = _featureWidgetsSettingsViewModel;
                 fileSettings.Interaction = _interactionSettingsViewModel;
+                fileSettings.AppActions = _appActions;
                 break;
             case CapsuleModeSettingsSection capsuleSettings:
                 capsuleSettings.ViewModel = ViewModel;
                 break;
             case GlanceWidgetSettingsSection glanceSettings:
-                glanceSettings.SetOwnerWindow(_hWnd);
+                glanceSettings.Configure(_widgetActions, _hWnd);
+                break;
+            case DisplaySettingsSection displaySettings:
+                displaySettings.Configure(_widgetActions, _appActions);
+                break;
+            case DesktopOrganizationSettingsSection organizationSettings:
+                organizationSettings.Configure(_widgetActions, _appActions, _hWnd);
                 break;
         }
 

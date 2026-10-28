@@ -53,7 +53,6 @@ public interface ITodoSettings
     TodoLayoutSettings ReadLayout();
     void SetLayoutMode(string? mode);
     void SetAutoSelectFirstInWideLayout(bool enabled);
-    void SetLegacyWideDetailPane(bool enabled);
     void ResetLayoutPreferences(bool scheduleSave = true);
     TodoTabSettings ReadTabs();
     void SetDefaultFilter(string? filter);

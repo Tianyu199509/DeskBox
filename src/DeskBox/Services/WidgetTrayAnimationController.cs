@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.ComponentModel;
 using System.Numerics;
 using System.Runtime.InteropServices;
@@ -976,6 +976,14 @@ public sealed class WidgetTrayAnimationController : IDisposable
                     MoveNativeWindow(target);
                 }
             }
+            catch (Exception ex)
+            {
+                // Deep review R17 (G3 audit): a destroyed-window race made
+                // SetWindowPos throw out of this public restore path — the
+                // frame-driving internals already catch; the public entry
+                // points now match them instead of surfacing to callers.
+                App.Log($"[TrayAnimation] RestoreWindowPosition failed: {ex.Message}");
+            }
             finally
             {
                 IsApplyingBounds = false;
@@ -1068,6 +1076,14 @@ public sealed class WidgetTrayAnimationController : IDisposable
         {
             MoveNativeWindow(nextPosition);
             _lastCommittedPosition = nextPosition;
+        }
+        catch (Exception ex)
+        {
+            // Deep review R17 (G3 audit): destroyed-window race on
+            // SetWindowPos — the public PrepareVisualState/restore paths
+            // reach here without their own catch.
+            App.Log($"[TrayAnimation] ApplyWindowOffset failed: {ex.Message}");
+            return false;
         }
         finally
         {

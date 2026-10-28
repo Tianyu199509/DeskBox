@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using DeskBox.Helpers;
@@ -205,7 +205,7 @@ internal sealed class WidgetTopologyLayoutService
                 // keys influenced by the transient \\.\DISPLAYn alias. Lazily
                 // project the newest semantically equivalent profile into the
                 // stable v3 key instead of making the user arrange it again.
-                SeedProfile(settings, compatibleProfile, targetProfile);
+                SeedProfile(settings, targetProfile);
                 targetWasSeededFromCompatibleProfile = true;
                 App.Log(
                     $"[DisplayTopology] Migrated compatible layout profile " +
@@ -217,7 +217,7 @@ internal sealed class WidgetTopologyLayoutService
             }
             else
             {
-                SeedProfile(settings, sourceProfile, targetProfile);
+                SeedProfile(settings, targetProfile);
                 // First-seen combination: provisional until it survives 10 s
                 // or receives a user placement commit (spec 5.6) — a
                 // transient topology cannot evict real arrangements via LRU.
@@ -529,9 +529,10 @@ internal sealed class WidgetTopologyLayoutService
     /// old whole-profile seeding propagated fallback-state placements into
     /// brand-new display combinations (defect B3).
     /// </summary>
+    // Deep review R17 (G3 audit): the sourceProfile parameter was never
+    // read — removed.
     private static void SeedProfile(
         AppSettings settings,
-        WidgetTopologyLayoutProfile? sourceProfile,
         WidgetTopologyLayoutProfile targetProfile)
     {
         foreach ((string surfaceId, WidgetConfig config, WidgetGroupConfig? group) in EnumerateSurfaces(settings))

@@ -202,39 +202,47 @@ public sealed partial class WidgetManager
         string? stableIdOverride = null,
         string? deviceNameOverride = null)
     {
-        var settings = _settingsService.Settings;
-        string? activeKey = settings.ActiveWidgetTopologyKey;
-        if (string.IsNullOrWhiteSpace(activeKey) ||
-            !settings.WidgetTopologyLayouts.TryGetValue(activeKey, out var profile))
+        // Deep review R15 (F2 audit): the capture + promote below mutates
+        // the topology dictionary and entry fields on the shared graph —
+        // run under the graph gate so a concurrent locked serialization
+        // cannot interleave (dictionary mutation during enumeration throws
+        // and surfaces as a failed placement commit).
+        _settingsService.MutateGraphUnderLock(() =>
         {
-            return;
-        }
+            var settings = _settingsService.Settings;
+            string? activeKey = settings.ActiveWidgetTopologyKey;
+            if (string.IsNullOrWhiteSpace(activeKey) ||
+                !settings.WidgetTopologyLayouts.TryGetValue(activeKey, out var profile))
+            {
+                return;
+            }
 
-        // Refresh/create the entry from the just-committed config first
-        // (no-op when the topology key is transiently mismatched), then
-        // promote it. Capture never promotes on its own (spec 4.2), so the
-        // promotion has to happen here.
-        _topologyLayoutService.CaptureCurrentSurface(settings, config);
-        WidgetGroupConfig? group = WidgetGroupSettings.FindByMember(settings, config.Id);
-        string surfaceId = group is not null
-            ? _topologyLayoutService.ResolveSurfaceIdForGroup(group)
-            : config.Id;
-        if (!profile.Surfaces.TryGetValue(surfaceId, out var entry) || entry is null)
-        {
-            return;
-        }
+            // Refresh/create the entry from the just-committed config first
+            // (no-op when the topology key is transiently mismatched), then
+            // promote it. Capture never promotes on its own (spec 4.2), so the
+            // promotion has to happen here.
+            _topologyLayoutService.CaptureCurrentSurface(settings, config);
+            WidgetGroupConfig? group = WidgetGroupSettings.FindByMember(settings, config.Id);
+            string surfaceId = group is not null
+                ? _topologyLayoutService.ResolveSurfaceIdForGroup(group)
+                : config.Id;
+            if (!profile.Surfaces.TryGetValue(surfaceId, out var entry) || entry is null)
+            {
+                return;
+            }
 
-        entry.IsAuthoritative = true;
-        entry.AuthoredAtUtc = DateTimeOffset.UtcNow;
-        if (!string.IsNullOrWhiteSpace(stableIdOverride))
-        {
-            entry.PositionMonitorStableId = stableIdOverride;
-        }
+            entry.IsAuthoritative = true;
+            entry.AuthoredAtUtc = DateTimeOffset.UtcNow;
+            if (!string.IsNullOrWhiteSpace(stableIdOverride))
+            {
+                entry.PositionMonitorStableId = stableIdOverride;
+            }
 
-        if (!string.IsNullOrWhiteSpace(deviceNameOverride))
-        {
-            entry.PositionMonitorDeviceName = deviceNameOverride;
-        }
+            if (!string.IsNullOrWhiteSpace(deviceNameOverride))
+            {
+                entry.PositionMonitorDeviceName = deviceNameOverride;
+            }
+        });
     }
 
     /// <summary>
