@@ -47,6 +47,8 @@ internal static class SettingsSearchCatalog
         new("AppearanceDensitySettings", "Settings.Density.Scale.Title", "Settings.Density.Scale.Description"),
         new("AppearanceDensitySettings", "Settings.TextSize.Title", "Settings.TextSize.Description"),
         new("AppearanceDensitySettings", "Settings.IconSize.Title", "Settings.IconSize.Description"),
+        new("AppearanceDensitySettings", "Settings.ContentPadding.Title", "Settings.ContentPadding.Description"),
+        new("AppearanceDensitySettings", "Settings.FileWidgetScrollBars.Title", "Settings.FileWidgetScrollBars.Description"),
         new("AppearanceDensitySettings", "Settings.HorizontalSpacing.Title", "Settings.HorizontalSpacing.Description"),
         new("AppearanceDensitySettings", "Settings.VerticalSpacing.Title", "Settings.VerticalSpacing.Description"),
         new("AppearanceWindowSettings", "Settings.WidgetTitleIcon.Title", "Settings.WidgetTitleIcon.Description"),

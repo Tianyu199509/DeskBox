@@ -56,6 +56,46 @@ public sealed class AppearanceSettingsCoordinatorTests : IDisposable
     }
 
     [Fact]
+    public void ContentPaddingUpdate_ClampsToTheSupportedRange_AndRejectsNonFiniteInput()
+    {
+        var settings = new SettingsService(_root);
+        var coordinator = new AppearanceSettingsCoordinator(settings);
+        WidgetShellSettingsSlice shell = settings.Settings.WidgetShell;
+        Assert.Equal(SettingsService.DefaultContentPadding, shell.ContentPadding);
+
+        AppearanceValueUpdate clampedHigh = coordinator.UpdateContentPadding(50);
+        Assert.False(clampedHigh.Committed);
+        Assert.Equal(SettingsService.MaxContentPadding, clampedHigh.Value);
+        Assert.Equal(SettingsService.DefaultContentPadding, shell.ContentPadding);
+
+        AppearanceValueUpdate clampedLow = coordinator.UpdateContentPadding(-4);
+        Assert.False(clampedLow.Committed);
+        Assert.Equal(SettingsService.MinContentPadding, clampedLow.Value);
+
+        Assert.True(coordinator.UpdateContentPadding(0).Committed);
+        Assert.Equal(0, shell.ContentPadding);
+        Assert.True(coordinator.UpdateContentPadding(24).Committed);
+        Assert.Equal(24, shell.ContentPadding);
+
+        AppearanceValueUpdate nan = coordinator.UpdateContentPadding(double.NaN);
+        Assert.False(nan.Committed);
+        Assert.Equal(24, nan.Value);
+        Assert.Equal(24, shell.ContentPadding);
+
+        // A corrupt settings file cannot smuggle a non-finite value past the
+        // normalizer: infinities and NaN fall back to the default padding.
+        Assert.Equal(
+            SettingsService.DefaultContentPadding,
+            SettingsService.NormalizeContentPadding(double.PositiveInfinity));
+        Assert.Equal(
+            SettingsService.DefaultContentPadding,
+            SettingsService.NormalizeContentPadding(double.NaN));
+        Assert.Equal(
+            SettingsService.MaxContentPadding,
+            SettingsService.NormalizeContentPadding(100));
+    }
+
+    [Fact]
     public void SliderUpdates_RejectNonFiniteInput_AndRestoreStoredValue()
     {
         var settings = new SettingsService(_root);

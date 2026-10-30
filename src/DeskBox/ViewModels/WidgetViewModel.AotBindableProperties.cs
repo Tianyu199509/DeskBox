@@ -4,6 +4,7 @@ namespace DeskBox.ViewModels;
 // FileSurfaceContent keeps its established runtime Binding surface. Expose
 // only the root and layout properties consumed by the real File Widget XAML.
 [WinRT.GeneratedBindableCustomProperty([
+    nameof(ContentPadding),
     nameof(CurrentFolderDisplayName),
     nameof(CurrentFolderRelativePath),
     nameof(EmptyStateGlyph),
@@ -28,6 +29,7 @@ namespace DeskBox.ViewModels;
     nameof(ListLabelFontSize),
     nameof(ListViewVisibility),
     nameof(LoadingVisibility),
+    nameof(ScrollBarsEnabled),
     nameof(ShowFileItemPathTooltips),
     nameof(VisibleItems),
     nameof(RenderedItems)

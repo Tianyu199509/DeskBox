@@ -711,6 +711,40 @@ Text="DeskBox" />
                                     </StackPanel>
                                 </toolkit:SettingsCard>
 
+                                <toolkit:SettingsCard HorizontalContentAlignment="Right" svc:Localized.DescriptionKey="Settings.ContentPadding.Description" svc:Localized.HeaderKey="Settings.ContentPadding.Title">
+                                    <toolkit:SettingsCard.HeaderIcon>
+                                        <FontIcon Glyph="&#xE7C4;" />
+                                    </toolkit:SettingsCard.HeaderIcon>
+                                    <StackPanel VerticalAlignment="Center" Orientation="Horizontal" Spacing="8">
+                                        <TextBlock Style="{StaticResource SliderSettingValueTextStyle}" Text="{Binding ContentPaddingValueText}" />
+                                        <Slider svc:Localized.AutomationNameKey="Settings.ContentPadding.Title"
+                                            Maximum="24"
+                                            Minimum="0"
+                                            StepFrequency="1"
+                                            Style="{StaticResource InlineMetricSliderStyle}"
+                                            Value="{Binding ContentPadding, Mode=TwoWay}"
+                                            ManipulationMode="TranslateX"
+                                            ManipulationStarted="AppearanceSlider_ManipulationStarted"
+                                            ManipulationCompleted="AppearanceSlider_ManipulationCompleted"
+                                            ValueChanged="AppearanceSlider_ValueChanged"
+                                            PointerPressed="AppearanceSlider_PointerPressed"
+                                            PointerReleased="AppearanceSlider_PointerReleased"
+                                            LostFocus="AppearanceSlider_LostFocus" />
+                                    </StackPanel>
+                                </toolkit:SettingsCard>
+
+                                <toolkit:SettingsCard
+                                    HorizontalContentAlignment="Right"
+                                    svc:Localized.DescriptionKey="Settings.FileWidgetScrollBars.Description"
+                                    svc:Localized.HeaderKey="Settings.FileWidgetScrollBars.Title">
+                                    <toolkit:SettingsCard.HeaderIcon>
+                                        <FontIcon Glyph="&#xE8A5;" />
+                                    </toolkit:SettingsCard.HeaderIcon>
+                                    <ToggleSwitch svc:Localized.AutomationNameKey="Settings.FileWidgetScrollBars.Title"
+                                        MinWidth="{StaticResource SettingsControlMinWidth}"
+                                        IsOn="{Binding FileWidgetScrollBarsEnabled, Mode=TwoWay}" />
+                                </toolkit:SettingsCard>
+
                                 <toolkit:SettingsCard HorizontalContentAlignment="Right" svc:Localized.DescriptionKey="Settings.HorizontalSpacing.Description" svc:Localized.HeaderKey="Settings.HorizontalSpacing.Title">
                                     <StackPanel VerticalAlignment="Center" Orientation="Horizontal" Spacing="8">
                                         <TextBlock Style="{StaticResource SliderSettingValueTextStyle}" Text="{Binding HorizontalSpacingValueText}" />

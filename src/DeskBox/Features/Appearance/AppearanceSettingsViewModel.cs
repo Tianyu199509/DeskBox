@@ -197,6 +197,9 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
     // Density state.
     private string _layoutDensity = LayoutDensityKinds.Standard;
     private double _iconSize;
+    // Mirrors the SettingsService defaults; SyncPresentation overwrites both.
+    private double _contentPadding = 8;
+    private bool _fileWidgetScrollBarsEnabled;
     private double _textSize;
     private double _layoutDensityScale;
     private double _horizontalSpacingScale;
@@ -1192,6 +1195,60 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
     public string IconSizeValueText =>
         $"{Math.Round(_iconSize):0}px";
 
+    public double ContentPadding
+    {
+        get => _contentPadding;
+        set
+        {
+            if (Math.Abs(value - _contentPadding) <= EqualityEpsilon)
+            {
+                return;
+            }
+
+            _contentPadding = value;
+            OnPropertyChanged(nameof(ContentPadding));
+            OnPropertyChanged(nameof(ContentPaddingValueText));
+            if (_isSyncingPresentation)
+            {
+                return;
+            }
+
+            AppearanceValueUpdate update = _settings.UpdateContentPadding(value);
+            if (!update.Committed)
+            {
+                ContentPadding = update.Value;
+                return;
+            }
+
+            // Padding is not part of the density presets, so committing it must
+            // not flag the density combo as Custom.
+            AppearanceValueCommitted?.Invoke();
+        }
+    }
+
+    public string ContentPaddingValueText =>
+        $"{Math.Round(_contentPadding):0}px";
+
+    public bool FileWidgetScrollBarsEnabled
+    {
+        get => _fileWidgetScrollBarsEnabled;
+        set
+        {
+            if (!SetProperty(ref _fileWidgetScrollBarsEnabled, value))
+            {
+                return;
+            }
+
+            if (_isSyncingPresentation)
+            {
+                return;
+            }
+
+            _settings.SetFileWidgetScrollBarsEnabled(value);
+            AppearanceValueCommitted?.Invoke();
+        }
+    }
+
     public double HorizontalSpacingScale
     {
         get => _horizontalSpacingScale;
@@ -1757,6 +1814,8 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
             _settings.ApplyLayoutDensityPreset(preset);
             AppearanceDensitySettings snapshot = _settings.ReadDensity();
             IconSize = snapshot.IconSize;
+            ContentPadding = snapshot.ContentPadding;
+            FileWidgetScrollBarsEnabled = snapshot.FileWidgetScrollBarsEnabled;
             TextSize = snapshot.TextSize;
             LayoutDensityScale = snapshot.LayoutDensityScale;
             HorizontalSpacingScale = snapshot.HorizontalSpacingScale;
@@ -1963,6 +2022,8 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
 
             LayoutDensity = density.LayoutDensity;
             IconSize = density.IconSize;
+            ContentPadding = density.ContentPadding;
+            FileWidgetScrollBarsEnabled = density.FileWidgetScrollBarsEnabled;
             TextSize = density.TextSize;
             LayoutDensityScale = density.LayoutDensityScale;
             HorizontalSpacingScale = density.HorizontalSpacingScale;

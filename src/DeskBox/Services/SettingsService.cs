@@ -297,6 +297,13 @@ public sealed class SettingsService
     public const double DefaultIconSize = 30;
     public const double MinIconSize = 24;
     public const double MaxIconSize = 56;
+    // Padding between the file widget icon area and the window border; 0 means
+    // icons touch the edge, 24 is the roomiest preset users can pick.
+    public const double DefaultContentPadding = 8;
+    public const double MinContentPadding = 0;
+    public const double MaxContentPadding = 24;
+    // File widget scroll bars stay hidden by default so the icon area stays clean.
+    public const bool DefaultFileWidgetScrollBarsEnabled = false;
     public const double DefaultTextSize = 11.5;
     public const double MinTextSize = QuickCaptureOptionKinds.MinTextSize;
     public const double MaxTextSize = QuickCaptureOptionKinds.MaxTextSize;
@@ -605,6 +612,9 @@ public const int DefaultSearchMaxResults = 100;
         settings.WidgetTitleIconMode = WidgetTitleIconModeColor;
         settings.WidgetOpacity = DefaultWidgetOpacity;
         settings.IconSize = DefaultIconSize;
+        // Written through the slice so the facade-access ratchet stays untouched.
+        settings.WidgetShell.ContentPadding = DefaultContentPadding;
+        settings.WidgetShell.FileWidgetScrollBarsEnabled = DefaultFileWidgetScrollBarsEnabled;
         settings.TextSize = DefaultTextSize;
         settings.LayoutDensityScale = DefaultLayoutDensityScale;
         settings.LayoutDensity = LayoutDensityStandard;
@@ -2657,6 +2667,15 @@ settings.FocusClickedWidgetOnRaise = false;
             changed = true;
         }
 
+        // Clamped through the slice so the facade-access ratchet stays flat.
+        WidgetShellSettingsSlice paddingShell = settings.WidgetShell;
+        double normalizedContentPadding = NormalizeContentPadding(paddingShell.ContentPadding);
+        if (Math.Abs(paddingShell.ContentPadding - normalizedContentPadding) > 0.0001)
+        {
+            paddingShell.ContentPadding = normalizedContentPadding;
+            changed = true;
+        }
+
         double normalizedTextSize = NormalizeTextSize(settings.TextSize);
         if (Math.Abs(settings.TextSize - normalizedTextSize) > 0.0001)
         {
@@ -2780,6 +2799,17 @@ settings.FocusClickedWidgetOnRaise = false;
         return double.IsFinite(value)
             ? Math.Clamp(value, MinIconSize, MaxIconSize)
             : DefaultIconSize;
+    }
+
+    /// <summary>
+    /// Clamps the icon-area padding to the supported 0-24 range; non-finite
+    /// values fall back to the default so a corrupt settings file stays usable.
+    /// </summary>
+    public static double NormalizeContentPadding(double value)
+    {
+        return double.IsFinite(value)
+            ? Math.Clamp(value, MinContentPadding, MaxContentPadding)
+            : DefaultContentPadding;
     }
 
     public static double NormalizeTextSize(double value)

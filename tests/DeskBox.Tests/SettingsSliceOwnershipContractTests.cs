@@ -48,7 +48,10 @@ public sealed class SettingsSliceOwnershipContractTests
         // and lastRunVersion.
         // +2 = autoDownloadUpdates + showUpdateToastNotification (background
         // auto-download and update toasts).
-        Assert.Equal(243, FacadeProperties.Length);
+        // +2 = contentPadding + fileWidgetScrollBarsEnabled (file-widget icon
+        // area inset and its scroll-bar switch; additive slice-backed
+        // members).
+        Assert.Equal(245, FacadeProperties.Length);
 
         foreach (PropertyInfo facade in FacadeProperties)
         {
@@ -310,7 +313,10 @@ public sealed class SettingsSliceOwnershipContractTests
         ["src/DeskBox/Services/SearchHotkeyService.cs"] = 13,
         ["src/DeskBox/Services/SearchResultActionService.cs"] = 2,
         ["src/DeskBox/Services/SettingsMigrationService.cs"] = 55,
-        ["src/DeskBox/Services/SettingsSearchCatalog.cs"] = 25,
+        // 25->27: two new matches are localization-key string literals
+        // ("Settings.ContentPadding.*" / "Settings.FileWidgetScrollBars.*"),
+        // not facade accesses — the catalog only stores key names.
+        ["src/DeskBox/Services/SettingsSearchCatalog.cs"] = 27,
         // +5: the appearance-preview apply preserves the runtime markers and the
 // layout domain before the preview broadcast (batch 3d follow-up).
         // +3: the appearance-preview swap preserves the onboarding markers too

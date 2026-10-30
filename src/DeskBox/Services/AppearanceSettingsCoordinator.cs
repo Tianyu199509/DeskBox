@@ -62,6 +62,8 @@ public sealed class AppearanceSettingsCoordinator : IAppearanceSettings
                 shell.VerticalSpacingScale,
                 fileWidget.FileNameWidthScale),
             shell.IconSize,
+            SettingsService.NormalizeContentPadding(shell.ContentPadding),
+            shell.FileWidgetScrollBarsEnabled,
             shell.TextSize,
             shell.LayoutDensityScale,
             shell.HorizontalSpacingScale,
@@ -190,6 +192,26 @@ public sealed class AppearanceSettingsCoordinator : IAppearanceSettings
         return AppearanceValueUpdate.CommittedValue(normalized);
     }
 
+    public AppearanceValueUpdate UpdateContentPadding(double value)
+    {
+        ThrowIfStopped();
+        if (double.IsNaN(value))
+        {
+            return AppearanceValueUpdate.Rejected(
+                _settings.Settings.WidgetShell.ContentPadding);
+        }
+
+        double normalized = Normalize(value, 1d,
+            SettingsService.MinContentPadding, SettingsService.MaxContentPadding);
+        if (NeedsReentry(normalized, value))
+        {
+            return AppearanceValueUpdate.NeedsNormalization(normalized);
+        }
+
+        _settings.Settings.WidgetShell.ContentPadding = normalized;
+        return AppearanceValueUpdate.CommittedValue(normalized);
+    }
+
     public AppearanceValueUpdate UpdateTextSize(double value)
     {
         ThrowIfStopped();
@@ -287,6 +309,17 @@ public sealed class AppearanceSettingsCoordinator : IAppearanceSettings
         shell.WidgetMaterialType = normalized;
         // Same order the settings page used: preview the new backdrop, then
         // schedule the debounced save.
+        _settings.RequestAppearancePreview();
+        _settings.SaveDebounced();
+    }
+
+    public void SetFileWidgetScrollBarsEnabled(bool value)
+    {
+        ThrowIfStopped();
+        WidgetShellSettingsSlice shell = _settings.Settings.WidgetShell;
+        if (shell.FileWidgetScrollBarsEnabled == value) return;
+        shell.FileWidgetScrollBarsEnabled = value;
+        // Mirror the other Set* option fields: preview, then debounced save.
         _settings.RequestAppearancePreview();
         _settings.SaveDebounced();
     }

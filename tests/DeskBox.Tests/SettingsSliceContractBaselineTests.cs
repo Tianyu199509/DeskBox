@@ -176,6 +176,8 @@ public sealed class SettingsSliceContractBaselineTests
         Assert.Equal(10, s.DesktopAutoOrganizationDelaySeconds);
         Assert.Null(s.DesktopAutoOrganizationBaselineUtc);
         Assert.Equal(30, s.IconSize);
+        Assert.Equal(8, s.ContentPadding);
+        Assert.False(s.FileWidgetScrollBarsEnabled);
         Assert.Equal(11.5, s.TextSize);
         Assert.Equal("Standard", s.LayoutDensity);
         Assert.Equal(0.56, s.LayoutDensityScale);
@@ -428,6 +430,8 @@ public sealed class SettingsSliceContractBaselineTests
         "desktopAutoOrganizationDelaySeconds",
         "desktopAutoOrganizationBaselineUtc",
         "iconSize",
+        "contentPadding",
+        "fileWidgetScrollBarsEnabled",
         "textSize",
         "layoutDensity",
         "layoutDensityScale",

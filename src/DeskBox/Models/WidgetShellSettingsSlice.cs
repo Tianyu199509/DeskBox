@@ -240,6 +240,18 @@ public sealed class WidgetShellSettingsSlice
     public double IconSize { get; set; } = 30;
 
     /// <summary>
+    /// Padding, in effective pixels, between the file widget icon area and the
+    /// window border; larger values push icons further from the edges.
+    /// </summary>
+    public double ContentPadding { get; set; } = 8;
+
+    /// <summary>
+    /// When false (default) the file widget icon area never shows its scroll
+    /// bar; wheel and touchpad scrolling keep working.
+    /// </summary>
+    public bool FileWidgetScrollBarsEnabled { get; set; }
+
+    /// <summary>
     /// Label text size used by widgets in both icon and list views.
     /// </summary>
     public double TextSize { get; set; } = 11.5;

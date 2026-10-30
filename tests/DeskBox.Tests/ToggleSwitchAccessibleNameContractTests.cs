@@ -14,7 +14,8 @@ public sealed class ToggleSwitchAccessibleNameContractTests
 {
     public static TheoryData<string, int> ToggleSwitchHostFiles => new()
     {
-        { "src/DeskBox/Views/SettingsWindow.xaml", 51 },
+        // 51->52: the file-widget scroll-bar switch on the icon-area card.
+        { "src/DeskBox/Views/SettingsWindow.xaml", 52 },
         { "src/DeskBox/Views/SettingsSections/SearchSettingsSection.xaml", 4 },
         { "src/DeskBox/Views/SettingsSections/GlanceWidgetSettingsSection.xaml", 4 },
         { "src/DeskBox/Views/SettingsSections/FileWidgetSettingsSection.xaml", 1 },

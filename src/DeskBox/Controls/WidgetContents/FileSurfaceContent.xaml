@@ -530,7 +530,7 @@
 
     <Grid
         x:Name="Root"
-        Padding="10,4,8,8"
+        Padding="{Binding ContentPadding}"
         AllowDrop="True"
         DragEnter="Root_DragEnter"
         DragOver="Root_DragOver"

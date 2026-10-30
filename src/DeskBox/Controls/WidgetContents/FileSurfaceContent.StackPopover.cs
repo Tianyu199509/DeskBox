@@ -1039,9 +1039,7 @@ public sealed partial class FileSurfaceContent
         view.Loaded += StackPopoverItemsView_Loaded;
         ScrollViewer.SetVerticalScrollBarVisibility(
             view,
-            layout.HasVerticalOverflow
-                ? ScrollBarVisibility.Auto
-                : ScrollBarVisibility.Disabled);
+            ResolveOverflowScrollBarVisibility(layout.HasVerticalOverflow));
         ScrollViewer.SetHorizontalScrollBarVisibility(
             view,
             ScrollBarVisibility.Disabled);
@@ -1973,8 +1971,8 @@ public sealed partial class FileSurfaceContent
         ScrollViewer.SetVerticalScrollBarVisibility(
             view,
             visibleItemCount > visibleCapacity
-                ? ScrollBarVisibility.Auto
-                : ScrollBarVisibility.Disabled);
+                ? ResolveOverflowScrollBarVisibility(hasOverflow: true)
+                : ResolveOverflowScrollBarVisibility(hasOverflow: false));
     }
 
     private void CloseStackPopover(bool releaseImmediately = false)

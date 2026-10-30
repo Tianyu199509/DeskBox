@@ -217,6 +217,39 @@ public sealed class AppearanceSettingsEditorTests : IDisposable
     }
 
     [Fact]
+    public void IconAreaEdits_WriteThroughWithoutFlaggingTheDensityPresetCustom()
+    {
+        (SettingsService settings, AppearanceSettingsViewModel editor) = CreateEditor(_root);
+        Assert.Equal(LayoutDensityKinds.Standard, editor.LayoutDensity);
+        int valueCommitted = 0;
+        editor.AppearanceValueCommitted += () => valueCommitted++;
+
+        editor.ContentPadding = 14d;
+        Assert.Equal(14d, editor.ContentPadding);
+        Assert.Equal("14px", editor.ContentPaddingValueText);
+        Assert.Equal(14d, settings.Settings.WidgetShell.ContentPadding);
+        // Padding is not one of the density preset fields, so the combo keeps
+        // its preset instead of flipping to Custom.
+        Assert.Equal(LayoutDensityKinds.Standard, editor.LayoutDensity);
+        Assert.Equal(1, valueCommitted);
+
+        editor.FileWidgetScrollBarsEnabled = true;
+        Assert.True(editor.FileWidgetScrollBarsEnabled);
+        Assert.True(settings.Settings.WidgetShell.FileWidgetScrollBarsEnabled);
+        Assert.Equal(LayoutDensityKinds.Standard, editor.LayoutDensity);
+        Assert.Equal(2, valueCommitted);
+
+        // A later preset application writes the seven preset fields and leaves
+        // the icon-area options alone.
+        editor.LayoutDensity = LayoutDensityKinds.Relaxed;
+        Assert.Equal(LayoutDensityKinds.Relaxed, editor.LayoutDensity);
+        Assert.Equal(36d, settings.Settings.WidgetShell.IconSize);
+        Assert.Equal(14d, settings.Settings.WidgetShell.ContentPadding);
+        Assert.Equal(14d, editor.ContentPadding);
+        Assert.True(editor.FileWidgetScrollBarsEnabled);
+    }
+
+    [Fact]
     public void DensityPreset_WritesSevenFieldsAndRaisesASingleSaveEvent()
     {
         (SettingsService settings, AppearanceSettingsViewModel editor) = CreateEditor(_root);
