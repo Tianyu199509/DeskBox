@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param(
     [string]$SummaryPath,
 
@@ -3801,6 +3801,7 @@ elseif ($scenario -in @(
     $settings["todoShowAllTab"] = $true
     $settings["todoShowActiveTab"] = $false
     $settings["todoShowTodayTab"] = $false
+    $settings["todoShowOverdueTab"] = $false
     $settings["todoShowThisWeekTab"] = $false
     $settings["todoShowThisMonthTab"] = $false
     $settings["todoShowImportantTab"] = $false
@@ -6869,14 +6870,14 @@ try {
             GlanceSettings = @{ parent = "FeatureWidgets"; nav = "FeatureWidgets" }
             SearchSettings = @{ parent = "FeatureWidgets"; nav = "FeatureWidgets" }
             AppearanceMaterialSettings = @{ parent = "Appearance"; nav = "Appearance" }
-            AppearanceDensitySettings = @{ parent = "Appearance"; nav = "Appearance" }
-            AppearanceWindowSettings = @{ parent = "Appearance"; nav = "Appearance" }
-            AppearanceAnimationSettings = @{ parent = "Appearance"; nav = "Appearance" }
             CapsuleOverridesSettings = @{ parent = "CapsuleMode"; nav = "CapsuleMode" }
             BackupRestoreSettings = @{ parent = "Maintenance"; nav = "Maintenance" }
             DataHealthSettings = @{ parent = "Maintenance"; nav = "Maintenance" }
             CompatibilityDiagnosticsSettings = @{ parent = "Maintenance"; nav = "Maintenance" }
             PerformanceSettings = @{ parent = "General"; nav = "General" }
+            CustomWidgetSettings = @{ parent = $null; nav = "CustomWidgetSettings" }
+            ClipboardSettings = @{ parent = "FeatureWidgets"; nav = "FeatureWidgets" }
+            AiSettings = @{ parent = $null; nav = "AiSettings" }
         }
         $pageTransitions = @($deepSettings.pageTransitions)
         $searchSuggestions = @($deepSettings.searchSuggestions)

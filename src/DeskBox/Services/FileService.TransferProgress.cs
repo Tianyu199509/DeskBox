@@ -1,4 +1,5 @@
-﻿using System.Diagnostics;
+using System.Buffers;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 using DeskBox.Helpers;
@@ -65,7 +66,8 @@ public sealed partial class FileService
             IProgress<FileTransferProgress>? progress,
             CancellationToken cancellationToken,
             Func<FileTransferItemError, Task<FileTransferItemAction>>? onItemError = null,
-            ICollection<FileTransferSkippedItem>? skippedItems = null)
+            ICollection<FileTransferSkippedItem>? skippedItems = null,
+            Action<FileTransferResult>? itemCompleted = null)
     {
         var reporter = new TransferProgressReporter(progress, operations.Count);
         var completedOperations = new List<TransferOperation>(operations.Count);
@@ -116,6 +118,9 @@ public sealed partial class FileService
                         }
 
                         completedOperations.Add(operation);
+                        itemCompleted?.Invoke(new FileTransferResult(
+                            operation.SourcePath,
+                            operation.DestinationPath));
                         break;
                     }
                     catch (Exception itemException) when (
@@ -422,13 +427,12 @@ public sealed partial class FileService
         FileTransferSourceIdentity? destinationIdentity;
         try
         {
-            const int bufferSize = 256 * 1024;
             await using var source = new FileStream(
                 sourceFilePath,
                 FileMode.Open,
                 FileAccess.Read,
                 FileShare.Read,
-                bufferSize,
+                4096,
                 FileOptions.Asynchronous | FileOptions.SequentialScan);
             sourceIdentity = IdentityFromHandle(source.SafeFileHandle);
             (destination, destinationIdentity) = await CopyFileCoreAsync(
@@ -465,13 +469,13 @@ public sealed partial class FileService
     {
         const int bufferSize = 256 * 1024;
         FileStream destination = CreateTransferDestinationStream(destinationFilePath);
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(bufferSize);
         try
         {
-            byte[] buffer = new byte[bufferSize];
             while (true)
             {
                 int bytesRead = await source.ReadAsync(
-                    buffer.AsMemory(0, buffer.Length),
+                    buffer.AsMemory(0, bufferSize),
                     cancellationToken);
                 if (bytesRead == 0)
                 {
@@ -485,6 +489,10 @@ public sealed partial class FileService
             }
 
             await destination.FlushAsync(cancellationToken);
+            await StorageMigrationNativeMethods.CopyAlternateDataStreamsAsync(
+                sourceInfo.FullName,
+                destinationFilePath,
+                cancellationToken);
             // Still exclusively held (ShareNone), so the path cannot point
             // anywhere else while metadata is applied.
             CopyFileMetadata(sourceInfo, destinationFilePath);
@@ -497,6 +505,10 @@ public sealed partial class FileService
             // someone else placed at the path.
             TryDisposeWithHandleDeletion(destination);
             throw;
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
         }
     }
 
@@ -658,7 +670,7 @@ public sealed partial class FileService
             await using var source = new FileStream(
                 sourceHandle,
                 FileAccess.Read,
-                256 * 1024,
+                4096,
                 isAsync: true);
             if (IdentityFromHandle(sourceHandle) is null)
             {
@@ -1186,7 +1198,7 @@ public sealed partial class FileService
         return new FileStream(
             destinationHandle,
             FileAccess.Write,
-            256 * 1024,
+            4096,
             isAsync: true);
     }
 

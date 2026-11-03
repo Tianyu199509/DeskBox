@@ -1,10 +1,13 @@
-﻿using DeskBox.Helpers;
+using System.Runtime.InteropServices;
+using DeskBox.Helpers;
 using DeskBox.Platform;
 using DeskBox.Services;
+using static DeskBox.Platform.MonitorAndBackdropInterop;
 using Microsoft.UI;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Composition;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Hosting;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
@@ -18,27 +21,38 @@ namespace DeskBox.Views;
 /// unconstrained XAML Popup, whose top-level hwnd island leaked native memory
 /// on every open/close cycle (verified: constrained popups return to baseline,
 /// unconstrained ones never do). The window is created once per surface,
-/// hidden between shows, and its content tree stays realized — no container
-/// churn, no island churn.
+/// hidden with its SystemBackdrop released between shows, and its content tree
+/// stays realized — no container churn, no island churn, and no offscreen
+/// TopMost swapchain compositing while closed.
 /// </summary>
 internal sealed class StackPopoverHostWindow : Window
 {
+    private const int DwmwaCloak = 13;
+    private const int SwShowNoActivate = 4;
+    private const uint GwChild = 5;
 
     private readonly AppWindow _appWindow;
     private WidgetMaterialSystemBackdrop? _materialBackdrop;
     private DesktopAcrylicBackdrop? _neutralBackdrop;
+    private SolidTintSystemBackdrop? _fallbackTransparentBackdrop;
+    private WidgetMaterialBackdropAppearance? _savedAppearance;
+    private bool _savedFollowMaterialStyle;
     private FrameworkElement? _content;
     private KeyEventHandler? _previewKeyDownHandler;
+    private KeyEventHandler? _keyDownHandler;
     private bool _closed;
-    private readonly IntPtr _ownerWindowHandle;
+    private bool _isShown;
+    private bool _isPreparing;
+
     private readonly Win32Helper.SubclassProc _inputSubclassProc;
     private bool _inputSubclassInstalled;
 
     private static readonly UIntPtr InputSubclassId = new(0xDDB2);
+
     public StackPopoverHostWindow(IntPtr ownerWindowHandle)
     {
         Title = "DeskBox Stack Popover";
-        _ownerWindowHandle = ownerWindowHandle;
+
         _inputSubclassProc = CallbackDepth.WrapSubclassProc(InputSubclassProc);
         WindowHandle = WindowNative.GetWindowHandle(this);
         WindowId windowId = Win32Interop.GetWindowIdFromWindow(WindowHandle);
@@ -58,12 +72,6 @@ internal sealed class StackPopoverHostWindow : Window
             WindowHandle,
             Win32Helper.GWL_EXSTYLE);
         extendedStyle |= Win32Helper.WS_EX_TOOLWINDOW;
-        // Permanently topmost: quick-reveal layer keeps widgets in the
-        // TOPMOST band, and dynamically toggling WS_EX_TOPMOST on open/close
-        // reorders the whole band through DWM (the flash/layering cycle we
-        // kept hitting). A permanently-topmost popover is invisible while
-        // hidden, sits above its owner in every layer mode while shown, and
-        // never triggers a band migration at runtime.
         extendedStyle |= Win32Helper.WS_EX_TOPMOST;
         extendedStyle &= ~Win32Helper.WS_EX_NOACTIVATE;
         _ = Win32Helper.SetWindowLong(
@@ -94,10 +102,6 @@ internal sealed class StackPopoverHostWindow : Window
                 Win32Helper.SWP_NOZORDER |
                 Win32Helper.SWP_NOACTIVATE |
                 Win32Helper.SWP_FRAMECHANGED);
-        // WS_EX_TOPMOST alone is a style flag; the window must also be
-        // placed into the TOPMOST band via SetWindowPos for it to take
-        // effect. Do this while the window is still invisible — it cannot
-        // affect any other window's z-order or repaint.
         _ = Win32Helper.SetWindowPos(
             WindowHandle,
             Win32Helper.HWND_TOPMOST,
@@ -112,6 +116,7 @@ internal sealed class StackPopoverHostWindow : Window
             WindowHandle,
             unchecked((int)0xFFFFFFFE));
         Win32Helper.ApplyFullWindowFrame(WindowHandle);
+        SetCloaked(true);
 
         // The popover is TOPMOST and can swallow clicks that should dismiss a
         // native Shell menu opened from inside it (the menu lives in the
@@ -122,28 +127,22 @@ internal sealed class StackPopoverHostWindow : Window
             InputSubclassId,
             UIntPtr.Zero);
 
-        // Bring the window into the shown state exactly once, parked off the
-        // visible desktop. From this point the window is permanently visible
-        // in z-order and permanently TOPMOST; open/close cycles only move it
-        // between the off-screen parking slot and its on-screen bounds.
-        //
-        // Parking (instead of DWM cloaking) matters for correctness: a cloaked
-        // window stops presenting frames, so revealing it composed the
-        // previously opened stack's stale frame for a visible beat before the
-        // refreshed content arrived. An off-screen window keeps rendering, so
-        // the first on-screen frame is always the current one. Parking also
-        // preserves the original reason for avoiding Show/Hide here: neither
-        // z-order nor the TOPMOST band changes when only the position moves.
-        _appWindow.MoveAndResize(BuildParkedBounds(320, 240));
-        _appWindow.Show();
-
         Activated += (_, args) =>
         {
-            if (args.WindowActivationState == WindowActivationState.Deactivated &&
-                !_closed)
+            if (args.WindowActivationState != WindowActivationState.Deactivated ||
+                _closed ||
+                !_isShown)
             {
-                DeactivatedByOutsideClick?.Invoke();
+                return;
             }
+
+            if (_content?.XamlRoot is { } xamlRoot &&
+                VisualTreeHelper.GetOpenPopupsForXamlRoot(xamlRoot).Count > 0)
+            {
+                return;
+            }
+
+            DeactivatedByOutsideClick?.Invoke();
         };
     }
 
@@ -154,33 +153,58 @@ internal sealed class StackPopoverHostWindow : Window
     internal event Action? DeactivatedByOutsideClick;
 
     /// <summary>
-    /// Raised from the host root's preview route so Escape works regardless
-    /// of whether the list, title, or close button currently owns focus.
+    /// Raised from the host root's key route so Escape works regardless of
+    /// whether the list, title, or close button currently owns focus, while
+    /// allowing an active text editor (such as stack rename) to handle Escape first.
     /// </summary>
     internal event Action? EscapeRequested;
 
     internal IntPtr WindowHandle { get; }
 
-    internal bool IsVisible => !_closed && !_parked;
-
-    private bool _parked = true;
+    internal bool IsVisible => !_closed && _isShown;
 
     internal void SetContent(FrameworkElement content)
     {
-        if (_content is not null && _previewKeyDownHandler is not null)
+        if (_content is not null)
         {
-            _content.RemoveHandler(
-                UIElement.PreviewKeyDownEvent,
-                _previewKeyDownHandler);
+            if (_previewKeyDownHandler is not null)
+            {
+                _content.RemoveHandler(
+                    UIElement.PreviewKeyDownEvent,
+                    _previewKeyDownHandler);
+            }
+
+            if (_keyDownHandler is not null)
+            {
+                _content.RemoveHandler(
+                    UIElement.KeyDownEvent,
+                    _keyDownHandler);
+            }
         }
 
         _content = content;
         _previewKeyDownHandler = new KeyEventHandler(Content_PreviewKeyDown);
+        _keyDownHandler = new KeyEventHandler(Content_KeyDown);
         content.AddHandler(
             UIElement.PreviewKeyDownEvent,
             _previewKeyDownHandler,
             handledEventsToo: true);
+        content.AddHandler(
+            UIElement.KeyDownEvent,
+            _keyDownHandler,
+            handledEventsToo: false);
         Content = content;
+    }
+
+    internal void ShowAt(RectInt32 bounds)
+    {
+        if (_closed)
+        {
+            return;
+        }
+
+        PrepareForShow(bounds);
+        RevealPrepared(bounds);
     }
 
     internal void PrepareForShow(RectInt32 bounds)
@@ -190,17 +214,19 @@ internal sealed class StackPopoverHostWindow : Window
             return;
         }
 
-        // Apply the final size while still parked off-screen, then flush layout
-        // so the island rebinds and re-measures its content at the new geometry.
-        // Moving on-screen is deliberately a separate operation: when a cached
-        // tree switches stacks, its new surface needs time to reach the
-        // compositor before the old presented texture may be exposed again.
-        _appWindow.MoveAndResize(new RectInt32(
-            -32000,
-            -32000,
-            Math.Max(1, bounds.Width),
-            Math.Max(1, bounds.Height)));
-        _parked = true;
+        _isPreparing = true;
+        if (!_isShown)
+        {
+            SetCloaked(true);
+        }
+
+        EnsureBackdropAttached();
+        _appWindow.MoveAndResize(bounds);
+        if (!_appWindow.IsVisible)
+        {
+            _ = ShowWindow(WindowHandle, SwShowNoActivate);
+        }
+
         _content?.UpdateLayout();
     }
 
@@ -211,12 +237,7 @@ internal sealed class StackPopoverHostWindow : Window
             return;
         }
 
-        // A parked popover can be dragged out of the TOPMOST band by
-        // owner-following z transactions on its owner widget (SetWindowPos
-        // without SWP_NOOWNERZORDER — live-captured 2026-10-21 with the bit
-        // stripped). Re-assert the band on every reveal so the popover's z
-        // contract is deterministic instead of depending on which funnel ran
-        // last; when already in the band this is a cheap no-reorder insert.
+        EnsureBackdropAttached();
         _ = Win32Helper.SetWindowPos(
             WindowHandle,
             Win32Helper.HWND_TOPMOST,
@@ -226,14 +247,65 @@ internal sealed class StackPopoverHostWindow : Window
             0,
             Win32Helper.SWP_NOMOVE |
                 Win32Helper.SWP_NOSIZE |
-                Win32Helper.SWP_NOACTIVATE);
+                Win32Helper.SWP_NOACTIVATE |
+                Win32Helper.SWP_NOOWNERZORDER);
 
-        // Position-only reveal. The caller decides whether the prepared tree
-        // can move immediately (first/same-stack open) or after two committed
-        // composition frames (switching between cached stacks).
         _appWindow.MoveAndResize(bounds);
-        _parked = false;
+        if (_appWindow.Size.Width != bounds.Width ||
+            _appWindow.Size.Height != bounds.Height)
+        {
+            _appWindow.MoveAndResize(bounds);
+        }
+
+        if (!_appWindow.IsVisible)
+        {
+            _appWindow.Show();
+        }
+
+        SetCloaked(false);
+        _isPreparing = false;
+        _isShown = true;
+        ActivateInput();
+    }
+
+    /// <summary>
+    /// Ensures the popover window owns Win32 foreground/island keyboard focus so
+    /// hosted text controls (such as stack title rename) receive keyboard and IME input.
+    /// </summary>
+    internal void ActivateInput(UIElement? focusTarget = null)
+    {
+        if (_closed)
+        {
+            return;
+        }
+
+        int extendedStyle = Win32Helper.GetWindowLong(
+            WindowHandle,
+            Win32Helper.GWL_EXSTYLE);
+        if ((extendedStyle & Win32Helper.WS_EX_NOACTIVATE) != 0)
+        {
+            extendedStyle &= ~Win32Helper.WS_EX_NOACTIVATE;
+            _ = Win32Helper.SetWindowLong(
+                WindowHandle,
+                Win32Helper.GWL_EXSTYLE,
+                extendedStyle);
+        }
+
+        _ = SetForegroundWindow(WindowHandle);
+        _ = SetActiveWindow(WindowHandle);
         Activate();
+
+        IntPtr childIslandHwnd = GetWindow(WindowHandle, GwChild);
+        _ = SetFocus(childIslandHwnd != IntPtr.Zero ? childIslandHwnd : WindowHandle);
+
+        if (focusTarget is Control control)
+        {
+            _ = control.Focus(FocusState.Programmatic);
+        }
+        else
+        {
+            focusTarget?.Focus(FocusState.Programmatic);
+        }
     }
 
     internal void UpdateBounds(RectInt32 bounds)
@@ -251,16 +323,16 @@ internal sealed class StackPopoverHostWindow : Window
             return;
         }
 
-        // Park off-screen instead of hiding or cloaking: the window keeps its
-        // z-order and TOPMOST band, and it keeps presenting frames so the next
-        // reveal never shows stale content.
-        _appWindow.MoveAndResize(
-            BuildParkedBounds(_appWindow.Size.Width, _appWindow.Size.Height));
-        _parked = true;
-    }
+        _isShown = false;
+        _isPreparing = false;
+        SetCloaked(true);
+        if (_appWindow.IsVisible)
+        {
+            _appWindow.Hide();
+        }
 
-    private static RectInt32 BuildParkedBounds(int width, int height) =>
-        new(-32000, -32000, Math.Max(1, width), Math.Max(1, height));
+        ReleaseActiveBackdrop();
+    }
 
     internal void UpdateAppearance(
         WidgetMaterialBackdropAppearance materialAppearance,
@@ -271,17 +343,41 @@ internal sealed class StackPopoverHostWindow : Window
             return;
         }
 
-        // Both styles MUST keep a SystemBackdrop on the window. Without one,
-        // WinUI falls back to the layered-window composition path (per-pixel
-        // alpha blending), which makes show/hide of a rounded popover visibly
-        // slower and causes the busy-cursor stall. Neutral keeps the plain
-        // acrylic backdrop under a semi-transparent solid surface — the
-        // painted look stays, the fast DWM composition path is preserved.
+        _savedAppearance = materialAppearance;
+        _savedFollowMaterialStyle = followMaterialStyle;
+        Win32Helper.SetWindowTheme(WindowHandle, materialAppearance.IsDark);
+
+        if (_isShown || _isPreparing)
+        {
+            ApplyBackdropCore(materialAppearance, followMaterialStyle);
+        }
+    }
+
+    private void EnsureBackdropAttached()
+    {
+        if (_closed || _savedAppearance is not { } appearance)
+        {
+            return;
+        }
+
+        if (SystemBackdrop is not null)
+        {
+            return;
+        }
+
+        ApplyBackdropCore(appearance, _savedFollowMaterialStyle);
+    }
+
+    private void ApplyBackdropCore(
+        WidgetMaterialBackdropAppearance materialAppearance,
+        bool followMaterialStyle)
+    {
         if (followMaterialStyle &&
             WidgetMaterialSystemBackdrop.IsSupported(
                 materialAppearance.MaterialType))
         {
             _neutralBackdrop = null;
+            DisposeFallbackBackdrop();
             _materialBackdrop ??= new WidgetMaterialSystemBackdrop(
                 materialAppearance);
             _materialBackdrop.UpdateAppearance(materialAppearance);
@@ -290,17 +386,86 @@ internal sealed class StackPopoverHostWindow : Window
                 SystemBackdrop = _materialBackdrop;
             }
         }
-        else
+        else if (WindowsCompatibilityService.SupportsDesktopAcrylic)
         {
-            _materialBackdrop = null;
-            _neutralBackdrop ??= new DesktopAcrylicBackdrop();
-            if (!ReferenceEquals(SystemBackdrop, _neutralBackdrop))
+            DisposeMaterialBackdrop();
+            DisposeFallbackBackdrop();
+            try
             {
-                SystemBackdrop = _neutralBackdrop;
+                _neutralBackdrop ??= new DesktopAcrylicBackdrop();
+                if (!ReferenceEquals(SystemBackdrop, _neutralBackdrop))
+                {
+                    SystemBackdrop = _neutralBackdrop;
+                }
+            }
+            catch (Exception ex)
+            {
+                App.LogVerbose($"[FileStack] Popover DesktopAcrylicBackdrop unavailable: {ex.Message}");
+                _neutralBackdrop = null;
+                ApplyTransparentFallbackBackdrop();
             }
         }
+        else
+        {
+            DisposeMaterialBackdrop();
+            _neutralBackdrop = null;
+            ApplyTransparentFallbackBackdrop();
+        }
+    }
 
-        Win32Helper.SetWindowTheme(WindowHandle, materialAppearance.IsDark);
+    private void ApplyTransparentFallbackBackdrop()
+    {
+        try
+        {
+            _fallbackTransparentBackdrop ??= new SolidTintSystemBackdrop(
+                Windows.UI.Color.FromArgb(0, 0, 0, 0));
+            if (!ReferenceEquals(SystemBackdrop, _fallbackTransparentBackdrop))
+            {
+                SystemBackdrop = _fallbackTransparentBackdrop;
+            }
+        }
+        catch (Exception ex)
+        {
+            App.LogVerbose($"[FileStack] Popover transparent tint fallback unavailable: {ex.Message}");
+            DisposeFallbackBackdrop();
+            SystemBackdrop = null;
+        }
+    }
+
+    private void ReleaseActiveBackdrop()
+    {
+        SystemBackdrop = null;
+        DisposeMaterialBackdrop();
+        _neutralBackdrop = null;
+        DisposeFallbackBackdrop();
+    }
+
+    private void DisposeMaterialBackdrop()
+    {
+        if (_materialBackdrop is null)
+        {
+            return;
+        }
+
+        _materialBackdrop.Dispose();
+        _materialBackdrop = null;
+    }
+
+    private void DisposeFallbackBackdrop()
+    {
+        if (_fallbackTransparentBackdrop is null)
+        {
+            return;
+        }
+
+        _fallbackTransparentBackdrop.Dispose();
+        _fallbackTransparentBackdrop = null;
+    }
+
+    private void SetCloaked(bool cloaked)
+    {
+        int value = cloaked ? 1 : 0;
+        Win32Helper.TrySetDwmWindowAttribute(WindowHandle, DwmwaCloak, ref value);
     }
 
     internal void Destroy()
@@ -311,6 +476,8 @@ internal sealed class StackPopoverHostWindow : Window
         }
 
         _closed = true;
+        _isShown = false;
+        _isPreparing = false;
         if (_inputSubclassInstalled)
         {
             _ = Win32Helper.RemoveWindowSubclass(
@@ -320,16 +487,27 @@ internal sealed class StackPopoverHostWindow : Window
             _inputSubclassInstalled = false;
         }
 
-        if (_content is not null && _previewKeyDownHandler is not null)
+        if (_content is not null)
         {
-            _content.RemoveHandler(
-                UIElement.PreviewKeyDownEvent,
-                _previewKeyDownHandler);
+            if (_previewKeyDownHandler is not null)
+            {
+                _content.RemoveHandler(
+                    UIElement.PreviewKeyDownEvent,
+                    _previewKeyDownHandler);
+            }
+
+            if (_keyDownHandler is not null)
+            {
+                _content.RemoveHandler(
+                    UIElement.KeyDownEvent,
+                    _keyDownHandler);
+            }
         }
-        SystemBackdrop = null;
-        _materialBackdrop = null;
+
+        ReleaseActiveBackdrop();
         _content = null;
         _previewKeyDownHandler = null;
+        _keyDownHandler = null;
         Content = null;
         Close();
     }
@@ -343,8 +521,44 @@ internal sealed class StackPopoverHostWindow : Window
             return;
         }
 
+        // Let focused text editors (such as stack rename TextBox or active IME)
+        // process Escape first; unhandled Escape still reaches Content_KeyDown.
+        if (IsInsideTextInputControl(args.OriginalSource as DependencyObject))
+        {
+            return;
+        }
+
         args.Handled = true;
         EscapeRequested?.Invoke();
+    }
+
+    private void Content_KeyDown(
+        object sender,
+        KeyRoutedEventArgs args)
+    {
+        if (args.Key != Windows.System.VirtualKey.Escape || args.Handled || _closed)
+        {
+            return;
+        }
+
+        args.Handled = true;
+        EscapeRequested?.Invoke();
+    }
+
+    private static bool IsInsideTextInputControl(DependencyObject? source)
+    {
+        DependencyObject? current = source;
+        for (int depth = 0; depth < 8 && current is not null; depth++)
+        {
+            if (current is TextBox or RichEditBox or PasswordBox or AutoSuggestBox)
+            {
+                return true;
+            }
+
+            current = VisualTreeHelper.GetParent(current);
+        }
+
+        return false;
     }
 
     private IntPtr InputSubclassProc(
@@ -368,4 +582,5 @@ internal sealed class StackPopoverHostWindow : Window
 
         return Win32Helper.DefSubclassProc(hWnd, message, wParam, lParam);
     }
+
 }

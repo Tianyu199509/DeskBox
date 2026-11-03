@@ -104,13 +104,25 @@ public static class QuickCaptureDragPackage
             !string.IsNullOrWhiteSpace(item.ImagePath) &&
             File.Exists(item.ImagePath))
         {
-            string imagePath = item.ImagePath;
-            if (Uri.TryCreate(imagePath, UriKind.Absolute, out Uri? imageUri))
+            string imagePath = Path.GetFullPath(item.ImagePath);
+            dataPackage.SetDataProvider(StandardDataFormats.Bitmap, async request =>
             {
-                dataPackage.SetBitmap(
-                    Windows.Storage.Streams.RandomAccessStreamReference.CreateFromUri(
-                        imageUri));
-            }
+                var deferral = request.GetDeferral();
+                try
+                {
+                    StorageFile file = await StorageFile.GetFileFromPathAsync(imagePath);
+                    request.SetData(
+                        Windows.Storage.Streams.RandomAccessStreamReference.CreateFromFile(file));
+                }
+                catch (Exception ex)
+                {
+                    App.Log($"[QuickCapture] Failed to provide dragged bitmap: {ex}");
+                }
+                finally
+                {
+                    deferral.Complete();
+                }
+            });
 
             dataPackage.SetDataProvider(StandardDataFormats.StorageItems, async request =>
             {

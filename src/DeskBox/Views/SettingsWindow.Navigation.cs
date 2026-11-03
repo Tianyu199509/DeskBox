@@ -1,4 +1,4 @@
-﻿using DeskBox.Controls;
+using DeskBox.Controls;
 using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Services;
@@ -30,11 +30,16 @@ public sealed partial class SettingsWindow
 
     private Storyboard? _settingsSearchHighlightStoryboard;
     private EventHandler<object>? _settingsSearchHighlightCompletedHandler;
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _settingsSearchHighlightTimer;
+    private Windows.Foundation.TypedEventHandler<Microsoft.UI.Dispatching.DispatcherQueueTimer, object>? _settingsSearchHighlightTimerTickHandler;
     private FrameworkElement? _settingsSearchHighlightTarget;
     private double _settingsSearchHighlightOriginalOpacity = 1;
+    private object? _settingsSearchHighlightOriginalBorderBrush = DependencyProperty.UnsetValue;
+    private object? _settingsSearchHighlightOriginalBorderThickness = DependencyProperty.UnsetValue;
     private readonly List<SettingsExpander> _featureSettingsExpanders = [];
     private readonly Dictionary<SettingsExpander, long> _featureSettingsExpanderCallbacks = [];
     private bool _isSynchronizingFeatureSettingsExpanders;
+    private bool _isSyncingFeatureWidgetsHubTab;
     private List<string>? _navigationTagOrder;
     private readonly HashSet<InfoBar> _pinnedNoticeInfoBars = [];
 
@@ -51,10 +56,9 @@ public sealed partial class SettingsWindow
     [
         // FeatureWidgets family
         "QuickCaptureSettings", "TodoSettings", "MusicSettings",
-        "WeatherSettings", "GlanceSettings", "SearchSettings",
+        "WeatherSettings", "GlanceSettings", "ClipboardSettings", "SearchSettings",
         // Appearance family
-        "AppearanceMaterialSettings", "AppearanceDensitySettings",
-        "AppearanceWindowSettings", "AppearanceAnimationSettings",
+        "AppearanceMaterialSettings",
         // AppearanceDetail family
         "FileDisplaySettings", "ManagedStorage", "FileStackSettings",
         "DesktopOrganizationSettings",
@@ -91,6 +95,41 @@ public sealed partial class SettingsWindow
         if (args.SelectedItem is NavigationViewItem { Tag: string sectionTag })
         {
             ShowSettingsSection(sectionTag, isNestedSection: false);
+        }
+    }
+
+    private void SettingsNavigationView_ItemInvoked(NavigationView sender, NavigationViewItemInvokedEventArgs args)
+    {
+        if (_isSyncingNavigationSelection ||
+            args.InvokedItemContainer is not NavigationViewItem { Tag: string invokedTag })
+        {
+            return;
+        }
+
+        if (string.Equals(invokedTag, "FeatureWidgets", StringComparison.Ordinal) &&
+            string.Equals(_currentSettingsSection, "CustomWidgetSettings", StringComparison.Ordinal) &&
+            _settingsSectionElements.TryGetValue("CustomWidgetSettings", out FrameworkElement? customEl) &&
+            customEl is CustomWidgetSettingsSection customSection &&
+            customSection.TryNavigateBackToStudio())
+        {
+            CloseTransientNavigationOverlayIfNeeded();
+            return;
+        }
+
+        if (!string.Equals(invokedTag, _currentSettingsSection, StringComparison.Ordinal))
+        {
+            ShowSettingsSection(invokedTag, isNestedSection: false);
+        }
+
+        CloseTransientNavigationOverlayIfNeeded();
+    }
+
+    private void CloseTransientNavigationOverlayIfNeeded()
+    {
+        if (SettingsNavigationView.PaneDisplayMode != NavigationViewPaneDisplayMode.Left &&
+            SettingsNavigationView.IsPaneOpen)
+        {
+            SettingsNavigationView.IsPaneOpen = false;
         }
     }
 
@@ -167,6 +206,8 @@ public sealed partial class SettingsWindow
 
     private IEnumerable<SettingsSearchResult> CreateSettingItemSearchResults()
     {
+        bool isStoreBuild = AppDistributionService.Current.IsMicrosoftStore;
+
         foreach (SettingsSearchCatalogEntry entry in SettingsSearchCatalog.Entries)
         {
             // Store-channel filter (route 1): the entries flagged by the
@@ -174,7 +215,7 @@ public sealed partial class SettingsWindow
             // search results would dead-end in Store builds. The key set is
             // pinned against the catalog by SettingsSearchChannelPolicyTests.
             if (SettingsSearchChannelPolicy.IsHiddenInStore(entry.HeaderKey) &&
-                AppDistributionService.Current.IsMicrosoftStore)
+                isStoreBuild)
             {
                 continue;
             }
@@ -202,6 +243,11 @@ public sealed partial class SettingsWindow
 
     private string BuildSettingsRouteBreadcrumb(SettingsSectionRoute route)
     {
+        if (string.Equals(route.Tag, "CustomWidgetSettings", StringComparison.Ordinal))
+        {
+            return $"{_localizationService.T("Settings.Section.FeatureWidgets")} / {_localizationService.T(route.TitleKey)}";
+        }
+
         var titles = new Stack<string>();
         var visited = new HashSet<string>(StringComparer.Ordinal);
         SettingsSectionRoute? current = route;
@@ -237,6 +283,14 @@ public sealed partial class SettingsWindow
             .ToArray();
     }
 
+    private void SettingsSearchBox_GotFocus(object sender, RoutedEventArgs e)
+    {
+        if (sender is AutoSuggestBox searchBox && !string.IsNullOrWhiteSpace(searchBox.Text))
+        {
+            UpdateSettingsSearchSuggestions(searchBox.Text);
+        }
+    }
+
     private void SettingsSearchBox_TextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
     {
         if (args.Reason == AutoSuggestionBoxTextChangeReason.UserInput)
@@ -269,8 +323,8 @@ public sealed partial class SettingsWindow
     {
         NavigateToSettingsSection(result.SectionTag);
         ScheduleSettingsSearchTarget(result);
-        sender.Text = string.Empty;
-        UpdateSettingsSearchSuggestions(string.Empty);
+        sender.IsSuggestionListOpen = false;
+        CloseTransientNavigationOverlayIfNeeded();
     }
 
     private void ScheduleSettingsSearchTarget(SettingsSearchResult result)
@@ -307,15 +361,102 @@ public sealed partial class SettingsWindow
                     return;
                 }
 
-                target.StartBringIntoView(new BringIntoViewOptions
+                FrameworkElement effectiveTarget = ResolveVisibleSettingsSearchTarget(target, section);
+                effectiveTarget.StartBringIntoView(new BringIntoViewOptions
                 {
-                    AnimationDesired = true,
+                    AnimationDesired = WindowsCompatibilityService.ShouldAnimate,
                     VerticalAlignmentRatio = 0.18
                 });
-                HighlightSettingsSearchTarget(target);
-                FocusSettingsSearchTarget(target);
+                HighlightSettingsSearchTarget(effectiveTarget);
+                FocusSettingsSearchTarget(effectiveTarget);
             });
         });
+    }
+
+    private static FrameworkElement ResolveVisibleSettingsSearchTarget(
+        FrameworkElement target,
+        FrameworkElement sectionRoot)
+    {
+        if (IsEffectivelyVisibleWithinSection(target, sectionRoot))
+        {
+            return target;
+        }
+
+        DependencyObject? branch = target;
+        DependencyObject? parent = VisualTreeHelper.GetParent(target);
+        while (parent is not null && !ReferenceEquals(branch, sectionRoot))
+        {
+            if (parent is SettingsExpander expander &&
+                IsEffectivelyVisibleWithinSection(expander, sectionRoot))
+            {
+                return expander;
+            }
+
+            if (parent is Panel panel &&
+                IsEffectivelyVisibleWithinSection(panel, sectionRoot))
+            {
+                int branchIndex = -1;
+                for (int index = 0; index < panel.Children.Count; index++)
+                {
+                    if (ReferenceEquals(panel.Children[index], branch))
+                    {
+                        branchIndex = index;
+                        break;
+                    }
+                }
+
+                if (branchIndex >= 0)
+                {
+                    for (int index = branchIndex - 1; index >= 0; index--)
+                    {
+                        if (panel.Children[index] is FrameworkElement previous &&
+                            previous.Visibility == Visibility.Visible)
+                        {
+                            return previous;
+                        }
+                    }
+
+                    for (int index = branchIndex + 1; index < panel.Children.Count; index++)
+                    {
+                        if (panel.Children[index] is FrameworkElement next &&
+                            next.Visibility == Visibility.Visible)
+                        {
+                            return next;
+                        }
+                    }
+                }
+
+                return panel;
+            }
+
+            branch = parent;
+            parent = VisualTreeHelper.GetParent(parent);
+        }
+
+        return target;
+    }
+
+    private static bool IsEffectivelyVisibleWithinSection(
+        FrameworkElement element,
+        FrameworkElement sectionRoot)
+    {
+        DependencyObject? current = element;
+        while (current is not null)
+        {
+            if (current is UIElement uiElement && uiElement.Visibility != Visibility.Visible)
+            {
+                return false;
+            }
+
+            if (ReferenceEquals(current, sectionRoot))
+            {
+                break;
+            }
+
+            current = VisualTreeHelper.GetParent(current);
+        }
+
+        return true;
     }
 
     private static void ExpandSettingsSearchTargetAncestors(DependencyObject target)
@@ -356,42 +497,95 @@ public sealed partial class SettingsWindow
 
         _settingsSearchHighlightTarget = target;
         _settingsSearchHighlightOriginalOpacity = target.Opacity;
-        target.Opacity = Math.Min(0.68, _settingsSearchHighlightOriginalOpacity);
 
-        var animation = new DoubleAnimation
+        if (target is Control targetControl)
         {
-            From = target.Opacity,
-            To = _settingsSearchHighlightOriginalOpacity,
-            Duration = TimeSpan.FromMilliseconds(650),
-            EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
-        };
-        Storyboard.SetTarget(animation, target);
-        Storyboard.SetTargetProperty(animation, nameof(UIElement.Opacity));
+            _settingsSearchHighlightOriginalBorderBrush = targetControl.ReadLocalValue(Control.BorderBrushProperty);
+            _settingsSearchHighlightOriginalBorderThickness = targetControl.ReadLocalValue(Control.BorderThicknessProperty);
 
-        var storyboard = new Storyboard();
-        storyboard.Children.Add(animation);
-        EventHandler<object>? completedHandler = null;
-        completedHandler = (_, _) =>
+            Brush? accentBrush = NeutralInteractionBrush.ResolveThemedResource(
+                "AccentFillColorDefaultBrush",
+                targetControl);
+            if (accentBrush is not null)
+            {
+                targetControl.BorderBrush = accentBrush;
+                targetControl.BorderThickness = new Thickness(2);
+            }
+        }
+        else
         {
-            storyboard.Completed -= completedHandler;
-            if (!ReferenceEquals(_settingsSearchHighlightStoryboard, storyboard))
+            _settingsSearchHighlightOriginalBorderBrush = DependencyProperty.UnsetValue;
+            _settingsSearchHighlightOriginalBorderThickness = DependencyProperty.UnsetValue;
+        }
+
+        if (WindowsCompatibilityService.ShouldAnimate)
+        {
+            target.Opacity = Math.Min(0.76, _settingsSearchHighlightOriginalOpacity);
+            var animation = new DoubleAnimation
+            {
+                From = target.Opacity,
+                To = _settingsSearchHighlightOriginalOpacity,
+                Duration = TimeSpan.FromMilliseconds(450),
+                EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
+            };
+            Storyboard.SetTarget(animation, target);
+            Storyboard.SetTargetProperty(animation, nameof(UIElement.Opacity));
+
+            var storyboard = new Storyboard();
+            storyboard.Children.Add(animation);
+            EventHandler<object>? completedHandler = null;
+            completedHandler = (_, _) =>
+            {
+                storyboard.Completed -= completedHandler;
+                if (!ReferenceEquals(_settingsSearchHighlightStoryboard, storyboard))
+                {
+                    return;
+                }
+
+                target.Opacity = _settingsSearchHighlightOriginalOpacity;
+                _settingsSearchHighlightStoryboard = null;
+                _settingsSearchHighlightCompletedHandler = null;
+            };
+            _settingsSearchHighlightCompletedHandler = completedHandler;
+            storyboard.Completed += completedHandler;
+            _settingsSearchHighlightStoryboard = storyboard;
+            storyboard.Begin();
+        }
+
+        Microsoft.UI.Dispatching.DispatcherQueueTimer timer = DispatcherQueue.CreateTimer();
+        timer.Interval = TimeSpan.FromMilliseconds(1600);
+        timer.IsRepeating = false;
+        Windows.Foundation.TypedEventHandler<Microsoft.UI.Dispatching.DispatcherQueueTimer, object>? tickHandler = null;
+        tickHandler = (senderTimer, _) =>
+        {
+            senderTimer.Tick -= tickHandler;
+            senderTimer.Stop();
+            if (!ReferenceEquals(_settingsSearchHighlightTimer, senderTimer))
             {
                 return;
             }
 
-            target.Opacity = _settingsSearchHighlightOriginalOpacity;
-            _settingsSearchHighlightStoryboard = null;
-            _settingsSearchHighlightCompletedHandler = null;
-            _settingsSearchHighlightTarget = null;
+            ClearSettingsSearchHighlight();
         };
-        _settingsSearchHighlightCompletedHandler = completedHandler;
-        storyboard.Completed += completedHandler;
-        _settingsSearchHighlightStoryboard = storyboard;
-        storyboard.Begin();
+        _settingsSearchHighlightTimerTickHandler = tickHandler;
+        timer.Tick += tickHandler;
+        _settingsSearchHighlightTimer = timer;
+        timer.Start();
     }
 
     private void ClearSettingsSearchHighlight()
     {
+        Microsoft.UI.Dispatching.DispatcherQueueTimer? timer = _settingsSearchHighlightTimer;
+        Windows.Foundation.TypedEventHandler<Microsoft.UI.Dispatching.DispatcherQueueTimer, object>? tickHandler =
+            _settingsSearchHighlightTimerTickHandler;
+        if (timer is not null && tickHandler is not null)
+        {
+            timer.Tick -= tickHandler;
+        }
+        timer?.Stop();
+        _settingsSearchHighlightTimer = null;
+        _settingsSearchHighlightTimerTickHandler = null;
+
         Storyboard? storyboard = _settingsSearchHighlightStoryboard;
         EventHandler<object>? completedHandler =
             _settingsSearchHighlightCompletedHandler;
@@ -405,15 +599,38 @@ public sealed partial class SettingsWindow
         {
             storyboard.Children.Clear();
         }
+
         if (_settingsSearchHighlightTarget is not null)
         {
             _settingsSearchHighlightTarget.Opacity = _settingsSearchHighlightOriginalOpacity;
+            if (_settingsSearchHighlightTarget is Control targetControl)
+            {
+                if (ReferenceEquals(_settingsSearchHighlightOriginalBorderBrush, DependencyProperty.UnsetValue))
+                {
+                    targetControl.ClearValue(Control.BorderBrushProperty);
+                }
+                else
+                {
+                    targetControl.BorderBrush = _settingsSearchHighlightOriginalBorderBrush as Brush;
+                }
+
+                if (ReferenceEquals(_settingsSearchHighlightOriginalBorderThickness, DependencyProperty.UnsetValue))
+                {
+                    targetControl.ClearValue(Control.BorderThicknessProperty);
+                }
+                else if (_settingsSearchHighlightOriginalBorderThickness is Thickness originalThickness)
+                {
+                    targetControl.BorderThickness = originalThickness;
+                }
+            }
         }
 
         _settingsSearchHighlightStoryboard = null;
         _settingsSearchHighlightCompletedHandler = null;
         _settingsSearchHighlightTarget = null;
         _settingsSearchHighlightOriginalOpacity = 1;
+        _settingsSearchHighlightOriginalBorderBrush = DependencyProperty.UnsetValue;
+        _settingsSearchHighlightOriginalBorderThickness = DependencyProperty.UnsetValue;
     }
 
     /// <summary>
@@ -446,11 +663,40 @@ public sealed partial class SettingsWindow
 
     private void SettingsNavigationView_BackRequested(NavigationView sender, NavigationViewBackRequestedEventArgs args)
     {
+        _ = TryNavigateBack();
+    }
+
+    internal bool TryNavigateBack()
+    {
+        if (_isClosed)
+        {
+            return false;
+        }
+
+        if (string.Equals(_currentSettingsSection, "CustomWidgetSettings", StringComparison.Ordinal) &&
+            _settingsSectionElements.TryGetValue("CustomWidgetSettings", out FrameworkElement? customEl) &&
+            customEl is CustomWidgetSettingsSection customSection &&
+            customSection.TryNavigateBackToStudio())
+        {
+            return true;
+        }
+
+        if (string.Equals(_currentSettingsSection, "DesktopOrganizationSettings", StringComparison.Ordinal) &&
+            _settingsSectionElements.TryGetValue("DesktopOrganizationSettings", out FrameworkElement? orgEl) &&
+            orgEl is DesktopOrganizationSettingsSection orgSection &&
+            orgSection.TryNavigateBackToRuleList())
+        {
+            return true;
+        }
+
         if (TryGetSectionRoute(_currentSettingsSection, out var route) &&
             !string.IsNullOrWhiteSpace(route.ParentTag))
         {
             NavigateToSettingsSection(route.ParentTag);
+            return true;
         }
+
+        return false;
     }
 
     public void ShowSection(string sectionTag)
@@ -521,6 +767,36 @@ public sealed partial class SettingsWindow
 
     private void NavigateToSettingsSection(string sectionTag)
     {
+        if (string.Equals(sectionTag, "CustomWidgetSettings:agent-hub", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(sectionTag, "AiSettings:agent-hub", StringComparison.OrdinalIgnoreCase))
+        {
+            EnsureSettingsSectionCreated("AiSettings");
+            AiSettingsSection.StageFocusAgentHub();
+            if (SettingsRoot.IsLoaded &&
+                string.Equals(_currentSettingsSection, "AiSettings", StringComparison.Ordinal))
+            {
+                AiSettingsSection.RefreshState();
+                return;
+            }
+
+            sectionTag = "AiSettings";
+        }
+        else if (!string.IsNullOrWhiteSpace(sectionTag) &&
+            sectionTag.StartsWith("CustomWidgetSettings:", StringComparison.Ordinal))
+        {
+            string deepLinkPayload = sectionTag["CustomWidgetSettings:".Length..];
+            EnsureSettingsSectionCreated("CustomWidgetSettings");
+            CustomWidgetSettingsSection.StageDeepLink(deepLinkPayload);
+            if (SettingsRoot.IsLoaded &&
+                string.Equals(_currentSettingsSection, "CustomWidgetSettings", StringComparison.Ordinal))
+            {
+                CustomWidgetSettingsSection.RefreshInstances();
+                return;
+            }
+
+            sectionTag = "CustomWidgetSettings";
+        }
+
         sectionTag = NormalizeSettingsSectionTag(sectionTag);
 
         ShowSettingsSection(sectionTag);
@@ -570,13 +846,33 @@ public sealed partial class SettingsWindow
         string previousSectionTag = _currentSettingsSection;
         isNestedSection = !string.IsNullOrWhiteSpace(route.ParentTag);
         _currentSettingsSection = sectionTag;
+        if (string.Equals(previousSectionTag, "CustomWidgetSettings", StringComparison.Ordinal) &&
+            !string.Equals(sectionTag, "CustomWidgetSettings", StringComparison.Ordinal) &&
+            _settingsSectionElements.TryGetValue("CustomWidgetSettings", out FrameworkElement? prevCustomEl) &&
+            prevCustomEl is CustomWidgetSettingsSection prevCustomSection)
+        {
+            prevCustomSection.CloseDetailView(animate: false);
+        }
+        if (string.Equals(previousSectionTag, "DesktopOrganizationSettings", StringComparison.Ordinal) &&
+            !string.Equals(sectionTag, "DesktopOrganizationSettings", StringComparison.Ordinal) &&
+            _settingsSectionElements.TryGetValue("DesktopOrganizationSettings", out FrameworkElement? prevOrgEl) &&
+            prevOrgEl is DesktopOrganizationSettingsSection prevOrgSection)
+        {
+            prevOrgSection.CloseRuleDetail(animate: false);
+        }
         int navigationGeneration = ++_settingsNavigationGeneration;
         ClearSettingsSearchHighlight();
-        string visibleSectionTag = sectionTag == "Advanced" ? "Interaction" : sectionTag;
+        string visibleSectionTag = sectionTag switch
+        {
+            "Advanced" => "Interaction",
+            "CustomWidgetSettings" => "FeatureWidgets",
+            _ => sectionTag
+        };
         EnsureSettingsSectionCreated(visibleSectionTag);
         string? inlineSectionTag = sectionTag switch
         {
             "AppearanceDetail" => "FileStorageSettings",
+            "CustomWidgetSettings" => "CustomWidgetSettings",
             "Interaction" or "Advanced" => "InteractionWindowSettings",
             "Maintenance" => "ResetSettings",
             _ => null
@@ -595,6 +891,7 @@ public sealed partial class SettingsWindow
             bool isInlineSection = sectionTag switch
             {
                 "AppearanceDetail" => tag == "FileStorageSettings",
+                "CustomWidgetSettings" => tag == "CustomWidgetSettings",
                 "Interaction" or "Advanced" => tag == "InteractionWindowSettings",
                 "Maintenance" => tag == "ResetSettings",
                 _ => false
@@ -602,6 +899,8 @@ public sealed partial class SettingsWindow
             sectionElement.Visibility = isPrimarySection || isInlineSection
                 ? Visibility.Visible : Visibility.Collapsed;
         }
+
+        SyncFeatureWidgetsHubState(sectionTag);
 
         // Reset scrolling before the enter transition starts: a page sliding
         // in at a stale scroll offset would visibly jump to the top mid-slide.
@@ -633,7 +932,6 @@ public sealed partial class SettingsWindow
         }
         if (sectionTag == "QuickCaptureSettings")
         {
-            ViewModel.RefreshQuickCaptureClipboardDiagnostics();
             _ = ViewModel.RefreshQuickCaptureImageCacheInfoAsync();
         }
         UpdateSearchSettingsActivity();
@@ -641,6 +939,14 @@ public sealed partial class SettingsWindow
         if (sectionTag == "GlanceSettings")
         {
             _ = GlanceSettingsSection.RefreshFromStoreAsync();
+        }
+        if (sectionTag == "CustomWidgetSettings")
+        {
+            CustomWidgetSettingsSection.RefreshInstances();
+        }
+        if (sectionTag == "AiSettings")
+        {
+            AiSettingsSection.RefreshState();
         }
         if (sectionTag == "CloudBackupSettings")
         {
@@ -697,6 +1003,18 @@ public sealed partial class SettingsWindow
             return;
         }
 
+        if (IsFeatureWidgetsHubSiblingSwitch(previousSectionTag, sectionTag))
+        {
+            FrameworkElement tabContent = string.Equals(sectionTag, "CustomWidgetSettings", StringComparison.Ordinal)
+                ? CustomWidgetSettingsSection
+                : FeatureWidgetListHost;
+            tabContent.UpdateLayout();
+            float tabOffsetX = DetermineNavigationEnterOffset(previousSectionTag, sectionTag);
+            DetailPageTransitionHelper.PlayNavigationEnter(tabContent, tabOffsetX);
+            App.Log($"[SettingsNav] transition tag={sectionTag} offset={tabOffsetX}");
+            return;
+        }
+
         // Force layout (notably the first, lazy instantiation of the section)
         // before animating so the page does not visibly grow while sliding.
         enteringSection.UpdateLayout();
@@ -708,6 +1026,7 @@ public sealed partial class SettingsWindow
         // with Maintenance) enter together with the primary page in the same
         // direction so the composed page slides as one.
         if (inlineSectionTag is not null &&
+            !string.Equals(inlineSectionTag, "CustomWidgetSettings", StringComparison.Ordinal) &&
             _settingsSectionElements.TryGetValue(inlineSectionTag, out FrameworkElement? inlineSection) &&
             !ReferenceEquals(inlineSection, enteringSection))
         {
@@ -791,7 +1110,9 @@ public sealed partial class SettingsWindow
             return null;
         }
 
-        int subIndex = route.ParentTag is null ? 0 : IndexOfTag(subSectionTagOrder, sectionTag);
+        int subIndex = route.ParentTag is null
+            ? (string.Equals(sectionTag, "CustomWidgetSettings", StringComparison.Ordinal) ? 1 : 0)
+            : IndexOfTag(subSectionTagOrder, sectionTag);
         return (navIndex, subIndex);
     }
 
@@ -855,6 +1176,40 @@ public sealed partial class SettingsWindow
 
     private void UpdateBreadcrumb(SettingsSectionRoute route)
     {
+        if (string.Equals(route.Tag, "CustomWidgetSettings", StringComparison.Ordinal) &&
+            _settingsSectionElements.TryGetValue("CustomWidgetSettings", out FrameworkElement? customEl) &&
+            customEl is CustomWidgetSettingsSection { IsDetailViewOpen: true, ActiveDetailTitle: { Length: > 0 } detailTitle })
+        {
+            SettingsBreadcrumbBar.ItemsSource = new object[]
+            {
+                new SettingsBreadcrumbItem("FeatureWidgets", _localizationService.T("Settings.Section.FeatureWidgets"), 0.62),
+                new SettingsBreadcrumbItem(route.Tag, _localizationService.T(route.TitleKey), 0.62),
+                new SettingsBreadcrumbItem("CustomWidgetSettings:__detail__", detailTitle, 1.0)
+            };
+            SettingsBreadcrumbHost.Visibility = Visibility.Visible;
+            SettingsBreadcrumbBar.Visibility = Visibility.Visible;
+            SettingsNavigationView.IsBackButtonVisible = NavigationViewBackButtonVisible.Visible;
+            return;
+        }
+
+        if (string.Equals(route.Tag, "DesktopOrganizationSettings", StringComparison.Ordinal) &&
+            route.ParentTag is not null &&
+            TryGetSectionRoute(route.ParentTag, out var orgParentRoute) &&
+            _settingsSectionElements.TryGetValue("DesktopOrganizationSettings", out FrameworkElement? orgEl) &&
+            orgEl is DesktopOrganizationSettingsSection { IsRuleDetailOpen: true, ActiveRuleDetailTitle: { Length: > 0 } ruleTitle })
+        {
+            SettingsBreadcrumbBar.ItemsSource = new object[]
+            {
+                new SettingsBreadcrumbItem(orgParentRoute.Tag, _localizationService.T(orgParentRoute.TitleKey), 0.62),
+                new SettingsBreadcrumbItem(route.Tag, _localizationService.T(route.TitleKey), 0.62),
+                new SettingsBreadcrumbItem("DesktopOrganizationSettings:__detail__", ruleTitle, 1.0)
+            };
+            SettingsBreadcrumbHost.Visibility = Visibility.Visible;
+            SettingsBreadcrumbBar.Visibility = Visibility.Visible;
+            SettingsNavigationView.IsBackButtonVisible = NavigationViewBackButtonVisible.Visible;
+            return;
+        }
+
         if (string.IsNullOrWhiteSpace(route.ParentTag) ||
             !TryGetSectionRoute(route.ParentTag, out var parentRoute))
         {
@@ -869,6 +1224,7 @@ public sealed partial class SettingsWindow
             new SettingsBreadcrumbItem(parentRoute.Tag, _localizationService.T(parentRoute.TitleKey), 0.62),
             new SettingsBreadcrumbItem(route.Tag, _localizationService.T(route.TitleKey), 1.0)
         };
+
         SettingsBreadcrumbHost.Visibility = Visibility.Visible;
         SettingsBreadcrumbBar.Visibility = Visibility.Visible;
     }
@@ -883,6 +1239,30 @@ public sealed partial class SettingsWindow
 
     private void NavigateFromSettingsBreadcrumbItem(SettingsBreadcrumbItem item)
     {
+        if (string.Equals(item.SectionTag, "CustomWidgetSettings:__detail__", StringComparison.Ordinal) ||
+            string.Equals(item.SectionTag, "DesktopOrganizationSettings:__detail__", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        if (string.Equals(item.SectionTag, "CustomWidgetSettings", StringComparison.Ordinal) &&
+            string.Equals(_currentSettingsSection, "CustomWidgetSettings", StringComparison.Ordinal) &&
+            _settingsSectionElements.TryGetValue("CustomWidgetSettings", out FrameworkElement? customEl) &&
+            customEl is CustomWidgetSettingsSection customSection &&
+            customSection.TryNavigateBackToStudio())
+        {
+            return;
+        }
+
+        if (string.Equals(item.SectionTag, "DesktopOrganizationSettings", StringComparison.Ordinal) &&
+            string.Equals(_currentSettingsSection, "DesktopOrganizationSettings", StringComparison.Ordinal) &&
+            _settingsSectionElements.TryGetValue("DesktopOrganizationSettings", out FrameworkElement? orgEl) &&
+            orgEl is DesktopOrganizationSettingsSection orgSection &&
+            orgSection.TryNavigateBackToRuleList())
+        {
+            return;
+        }
+
         if (string.Equals(item.SectionTag, _currentSettingsSection, StringComparison.Ordinal))
         {
             return;
@@ -903,8 +1283,98 @@ public sealed partial class SettingsWindow
             "FileStorageSettings" => "AppearanceDetail",
             "InteractionWindowSettings" => "Interaction",
             "ResetSettings" => "Maintenance",
+            "AppearanceDensitySettings" or "AppearanceWindowSettings" or "AppearanceAnimationSettings" => "Appearance",
             _ => sectionTag
         };
+    }
+
+    private static bool IsFeatureWidgetsHubSiblingSwitch(string previousSectionTag, string sectionTag) =>
+        (string.Equals(previousSectionTag, "FeatureWidgets", StringComparison.Ordinal) &&
+         string.Equals(sectionTag, "CustomWidgetSettings", StringComparison.Ordinal)) ||
+        (string.Equals(previousSectionTag, "CustomWidgetSettings", StringComparison.Ordinal) &&
+         string.Equals(sectionTag, "FeatureWidgets", StringComparison.Ordinal));
+
+    private void SyncFeatureWidgetsHubState(string sectionTag)
+    {
+        if (!_settingsSectionElements.ContainsKey("FeatureWidgets"))
+        {
+            return;
+        }
+
+        if (string.Equals(sectionTag, "FeatureWidgets", StringComparison.Ordinal))
+        {
+            Localized.SetKey(FeatureWidgetsHubTitleText, "Settings.Section.FeatureWidgets");
+            FeatureWidgetsHubHeaderPanel.Visibility = Visibility.Visible;
+            CustomWidgetsToolbarPanel.Visibility = Visibility.Collapsed;
+            FeatureWidgetListHost.Visibility = Visibility.Visible;
+            CustomWidgetHostPanel.Visibility = Visibility.Collapsed;
+            SetFeatureWidgetsHubTabIndex(0);
+        }
+        else if (string.Equals(sectionTag, "CustomWidgetSettings", StringComparison.Ordinal))
+        {
+            bool isDetailOpen =
+                _settingsSectionElements.TryGetValue("CustomWidgetSettings", out FrameworkElement? customEl) &&
+                customEl is CustomWidgetSettingsSection { IsDetailViewOpen: true };
+            Localized.SetKey(FeatureWidgetsHubTitleText, "CustomWidget.Settings.Title");
+            FeatureWidgetsHubHeaderPanel.Visibility = isDetailOpen ? Visibility.Collapsed : Visibility.Visible;
+            CustomWidgetsToolbarPanel.Visibility = isDetailOpen ? Visibility.Collapsed : Visibility.Visible;
+            FeatureWidgetListHost.Visibility = Visibility.Collapsed;
+            CustomWidgetHostPanel.Visibility = Visibility.Visible;
+            SetFeatureWidgetsHubTabIndex(1);
+        }
+    }
+
+    private void SetFeatureWidgetsHubTabIndex(int index)
+    {
+        Segmented segmented = FeatureWidgetsHubSegmented;
+        if (segmented.SelectedIndex == index)
+        {
+            return;
+        }
+
+        _isSyncingFeatureWidgetsHubTab = true;
+        try
+        {
+            segmented.SelectedIndex = index;
+        }
+        finally
+        {
+            _isSyncingFeatureWidgetsHubTab = false;
+        }
+    }
+
+    private void FeatureWidgetsHubSegmented_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_isSyncingFeatureWidgetsHubTab || _isClosed)
+        {
+            return;
+        }
+
+        string targetSection = FeatureWidgetsHubSegmented.SelectedIndex == 1
+            ? "CustomWidgetSettings"
+            : "FeatureWidgets";
+        if (!string.Equals(_currentSettingsSection, targetSection, StringComparison.Ordinal))
+        {
+            NavigateToSettingsSection(targetSection);
+        }
+    }
+
+    private void CustomWidgetsApiDocsButton_Click(object sender, RoutedEventArgs e)
+    {
+        EnsureSettingsSectionCreated("CustomWidgetSettings");
+        CustomWidgetSettingsSection.TriggerOpenApiDocs();
+    }
+
+    private void CustomWidgetsImportButton_Click(object sender, RoutedEventArgs e)
+    {
+        EnsureSettingsSectionCreated("CustomWidgetSettings");
+        CustomWidgetSettingsSection.TriggerImportPackage();
+    }
+
+    private void CustomWidgetsQuickCreateButton_Click(object sender, RoutedEventArgs e)
+    {
+        EnsureSettingsSectionCreated("CustomWidgetSettings");
+        CustomWidgetSettingsSection.TriggerQuickCreate();
     }
 
     private void NestedSettingsButton_Click(object sender, RoutedEventArgs e)
@@ -1068,24 +1538,27 @@ public sealed partial class SettingsWindow
             return;
         }
 
-        var dialog = new ContentDialog
-        {
-            XamlRoot = SettingsRoot.XamlRoot,
-            Title = _localizationService.T(
-                "Settings.WidgetGroups.DissolveDialog.Title"),
-            PrimaryButtonText = _localizationService.T(
-                "Settings.WidgetGroups.DissolveDialog.Confirm"),
-            CloseButtonText = _localizationService.T("Common.Cancel"),
-            DefaultButton = ContentDialogButton.Close,
-            Content = new TextBlock
-            {
-                Text = _localizationService.T(
-                    "Settings.WidgetGroups.DissolveDialog.Description"),
-                TextWrapping = TextWrapping.Wrap
-            }
-        };
+        ContentDialogResult choice = await ShowDialogWhenFreeAsync(() =>
+            SettingsRoot.XamlRoot is null
+                ? null
+                : new ContentDialog
+                {
+                    XamlRoot = SettingsRoot.XamlRoot,
+                    Title = _localizationService.T(
+                        "Settings.WidgetGroups.DissolveDialog.Title"),
+                    PrimaryButtonText = _localizationService.T(
+                        "Settings.WidgetGroups.DissolveDialog.Confirm"),
+                    CloseButtonText = _localizationService.T("Common.Cancel"),
+                    DefaultButton = ContentDialogButton.Close,
+                    Content = new TextBlock
+                    {
+                        Text = _localizationService.T(
+                            "Settings.WidgetGroups.DissolveDialog.Description"),
+                        TextWrapping = TextWrapping.Wrap
+                    }
+                });
 
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        if (choice != ContentDialogResult.Primary)
         {
             return;
         }
@@ -1122,6 +1595,20 @@ public sealed partial class SettingsWindow
         if (sender is Button { DataContext: FileStackCustomRuleEditor editor })
         {
             _fileStackSettingsViewModel.MoveRule(editor, 1);
+        }
+    }
+
+    private void FileStackRulesListView_Loaded(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (sender is ListView listView &&
+            DragDropPermissionService.IsCurrentProcessElevatedCached())
+        {
+            // WinUI's ListView drag/reorder throws inside an elevated process;
+            // Up/Down rule buttons remain available.
+            listView.CanDragItems = false;
+            listView.CanReorderItems = false;
         }
     }
 
@@ -1246,6 +1733,29 @@ public sealed partial class SettingsWindow
             todoSettings.IsFooterDisplayOptionSelected,
             _ => true,
             todoSettings.ToggleFooterDisplayOption);
+    }
+
+    private void TodoAllDayReminderTimeButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement anchor)
+        {
+            return;
+        }
+
+        var todoSettings = _todoSettingsViewModel;
+        var flyout = new TimePickerFlyout
+        {
+            ClockIdentifier = "24HourClock",
+            MinuteIncrement = 1,
+            Time = TimeSpan.FromMinutes(
+                DeskBox.Contracts.TodoOptionKinds.NormalizeAllDayReminderTimeMinutes(todoSettings.AllDayReminderTimeMinutes))
+        };
+        flyout.TimePicked += (_, args) =>
+        {
+            todoSettings.AllDayReminderTimeMinutes = DeskBox.Contracts.TodoOptionKinds.NormalizeAllDayReminderTimeMinutes(
+                (int)Math.Round(args.NewTime.TotalMinutes));
+        };
+        flyout.ShowAt(anchor);
     }
 
     private void ContinuousDecorativeAnimationsDropDown_Click(

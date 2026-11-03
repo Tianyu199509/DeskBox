@@ -150,7 +150,7 @@ DeskBox 私有文件载荷的移动/快捷方式意图由目标端自行执行�
 
 跨格传输由目标格子实际执行文件移动，并通过 `NotifyItemsMovedOutAsync` 告知源格子哪些路径成功。对于 DeskBox 自己的原生 Shell 载荷，再向源端返回 `Move` 会形成第二次源清理。因此 `ResolveSafeDropCompletionOperation` 在“DeskBox 来源 + 目标已完成真实移动”时返回 `None`；目标完成通知和后续磁盘协调才是事实依据。
 
-非 DeskBox 来源只有在请求移动数与实际完成数完全一致时才返回 `Move`。部分完成、取消或失败必须返回 `None`。
+非 DeskBox 来源由于目标格子已直接执行文件系统移动，只有在请求移动数与实际完成数完全一致时才降级返回 `Copy`（若源端未通告 `Copy` 则返回 `None`），绝不返回 `Move` 触发源端二次清理；部分完成、取消或失败必须返回 `None`。
 
 ### 5.3 多选拖动排序的整块提交语义（2026-10-14）
 
@@ -162,6 +162,14 @@ DeskBox 私有文件载荷的移动/快捷方式意图由目标端自行执行�
 - 内联展开叠放的成员：插入点落在本叠放成员区内 → 复用 `MoveStackMembersForReorder` 成员整块排序；落在区外 → 先批量解除成员关系（`DetachStackMembersForBlockReorder`，语义镜像 `RemoveItemsFromStack` 的解散/转手动分支）再作为散件入块；
 - 叠放卡片与文件混选拖动排序维持既有语义（锚点为叠放头时只重排叠放卡片，`GetSelectedItems` 本就剔除卡片）；
 - 重排施加的集合重建（投影与扁平两路）都会丢掉拖动用的多选；主表面与弹窗的重排成功路径都必须按路径重放选择（`ScheduleSurfaceReorderSelectionRestore` / `ScheduleStackPopoverReorderSelectionRestore`，低优先级延迟——弹窗侧需双跳以落在 `ApplyStackProjectionChange` 的延迟清选之后）。
+
+### 5.4 管理员提权会话下的指针拖拽豁免（Elevated Pointer Drag）
+
+当 DeskBox 运行在管理员提权进程（`IsCurrentProcessElevated`）中时，WinUI 3 的 XAML `CanDrag` / `StartDragAsync` 拖拽源在系统层面不可用，跨完整性级别（UIPI）的 OLE `DoDragDrop` 亦被常规权限的 Explorer/桌面目标拒绝。此场景启用独立受控的 `FileSurfaceContent.ElevatedPointerDrag` 路径：
+
+- **同格/跨格内部路由**：由指针命中与 `ContentWidgetWindow.ElevatedPointerDrag` 直接驱动，悬停阶段仅执行纯词法路径重叠校验（`FileService.IsLexicallyUnsafeDirectoryTransfer`），落点提交阶段在后台线程执行完整的重解析点校验（`FileService.IsUnsafeDirectoryTransfer`）。
+- **外部桌面 / Explorer 文件夹拖出**：此路径不经过 OLE `IDataObject` 回执协商，而是作为 §1「源端不主动改盘」规则的唯一显式架构豁免——由 DeskBox 在释放落点后，通过后台单飞 STA `IShellWindows` 解析出的真实文件系统目录，直接调用 `FileService.TransferItemsWithResultAsync` 执行复制/移动/创建快捷方式（桌面目标随后经 `IFolderView::SelectAndPositionItems` 对齐光标落点），并基于返回的 `CompletedPairs` 精确协调源集合，绝不盲目按意图删除未传输成功的源文件。
+- **第三方非 Explorer 窗口**：跨 UIPI 无法直接投递 OLE 拖放时，自动将选中文件写入系统文件剪贴板（`StageElevatedOutboundClipboardAsync`）并提示用户粘贴，不执行任何源文件移动或删除。
 
 ## 6. 事件链与状态清理
 

@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using DeskBox.Contracts;
@@ -294,6 +294,35 @@ public sealed class SettingsIpcMethodRouter
                 return (true, SerializeNullable(info,
                     SettingsIpcJsonContext.Default.QuickCaptureImageCacheInfo), null);
 
+            case SettingsIpcMethods.DataQuickCaptureMirrorFolderGet:
+                if (_data is null) return unavailable(method);
+                string? mirrorFolder = await _data.GetQuickCaptureMirrorFolderAsync();
+                return (true, mirrorFolder ?? string.Empty, null);
+
+            case SettingsIpcMethods.DataQuickCaptureMirrorFolderSet:
+                if (_data is null) return unavailable(method);
+                await _data.SetQuickCaptureMirrorFolderAsync(
+                    string.IsNullOrWhiteSpace(payload) ? null : payload);
+                return (true, null, null);
+
+            case SettingsIpcMethods.DataClipboardStats:
+                if (_data is null) return unavailable(method);
+                ClipboardStorageStats? clipStats = await _data.GetClipboardStorageStatsAsync();
+                return (true, SerializeNullable(clipStats,
+                    SettingsIpcJsonContext.Default.ClipboardStorageStats), null);
+
+            case SettingsIpcMethods.DataClipboardClearUnpinned:
+                if (_data is null) return unavailable(method);
+                int clipCleared = await _data.ClearClipboardUnpinnedAsync();
+                return (true, clipCleared.ToString(System.Globalization.CultureInfo.InvariantCulture), null);
+
+            case SettingsIpcMethods.DataClipboardObservedApps:
+                if (_data is null) return unavailable(method);
+                List<ClipboardObservedApp> observedApps = (await _data.GetClipboardObservedAppsAsync()).ToList();
+                return (true, SettingsIpcPayload.Encode(
+                    observedApps,
+                    SettingsIpcJsonContext.Default.ListClipboardObservedApp), null);
+
             // ── Restore facade (batch 3c-2) ──────────────────────────
 
             case SettingsIpcMethods.RestorePrepare:
@@ -413,6 +442,7 @@ public sealed class SettingsIpcMethodRouter
                 if (_widget is null) return unavailable(method);
                 _widget.NotifyWidgetGroupPresentationSettingsChanged();
                 return (true, null, null);
+
 
             case SettingsIpcMethods.WidgetReorderGroupMember:
                 if (_widget is null) return unavailable(method);
@@ -558,6 +588,48 @@ public sealed class SettingsIpcMethodRouter
             case SettingsIpcMethods.WidgetGlanceApplyData:
                 return await HandleGlanceApplyDataAsync(payload);
 
+            case SettingsIpcMethods.WidgetCustomList:
+                if (_widget is null) return unavailable(method);
+                IReadOnlyList<GlanceWidgetInstanceInfo> customInstances = await _widget.GetCustomWidgetInstancesAsync();
+                return (true, SettingsIpcPayload.Encode(
+                    customInstances.ToList(),
+                    SettingsIpcJsonContext.Default.ListGlanceWidgetInstanceInfo), null);
+
+            case SettingsIpcMethods.WidgetCustomCreate:
+                if (_widget is null) return unavailable(method);
+                GlanceWidgetInstanceInfo createdCustom = await _widget.CreateCustomWidgetAsync(
+                    string.IsNullOrEmpty(payload) ? null : payload);
+                return (true, SettingsIpcPayload.Encode(
+                    createdCustom,
+                    SettingsIpcJsonContext.Default.GlanceWidgetInstanceInfo), null);
+
+            case SettingsIpcMethods.WidgetCustomSetEnabled:
+                if (_widget is null) return unavailable(method);
+                if (SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.SettingsIpcGlanceSetEnabled)
+                    is not { } customToggle)
+                {
+                    return (false, null, "missing payload");
+                }
+
+                await _widget.SetCustomWidgetInstanceEnabledAsync(customToggle.WidgetId, customToggle.Enabled);
+                return (true, null, null);
+
+            case SettingsIpcMethods.WidgetCustomLocate:
+                if (_widget is null) return unavailable(method);
+                return (await _widget.LocateCustomWidgetAsync(payload ?? string.Empty), null, null);
+
+            case SettingsIpcMethods.WidgetCustomOpenStudio:
+                if (_widget is null) return unavailable(method);
+                (string? studioWidgetId, string? studioIdea) =
+                    RemoteSettingsWidgetActions.DecodeStudioRequest(payload);
+                await _widget.OpenCustomWidgetStudioAsync(studioWidgetId, studioIdea);
+                return (true, null, null);
+
+            case SettingsIpcMethods.WidgetCustomRemove:
+                if (_widget is null) return unavailable(method);
+                await _widget.RemoveCustomWidgetAsync(payload ?? string.Empty);
+                return (true, null, null);
+
             case SettingsIpcMethods.WidgetMoveAll:
                 if (_widget is null) return unavailable(method);
                 (int movedCount, WidgetMoveAllUndoToken token) = await _widget
@@ -569,7 +641,11 @@ public sealed class SettingsIpcMethodRouter
                     _moveAllTokens[handle] = token;
                 }
                 return (true, SettingsIpcPayload.Encode(
-                    new SettingsIpcMoveAllResult(movedCount, handle),
+                    new SettingsIpcMoveAllResult(
+                        movedCount,
+                        handle,
+                        token.Persisted,
+                        SerializeLayout(_settings)),
                     SettingsIpcJsonContext.Default.SettingsIpcMoveAllResult), null);
 
             case SettingsIpcMethods.WidgetMoveAllUndo:
@@ -590,7 +666,16 @@ public sealed class SettingsIpcMethodRouter
                     return (false, null, "unknown undo handle");
                 }
 
-                return (await _widget.UndoMoveAllWidgetSurfacesAsync(undoToken), null, null);
+                bool undone = await _widget.UndoMoveAllWidgetSurfacesAsync(undoToken);
+                return (undone, undone ? SerializeLayout(_settings) : null, null);
+
+            case SettingsIpcMethods.WidgetRecalibrateDisplayLayout:
+                if (_widget is null) return unavailable(method);
+                int recalibrated = await _widget.RecalibrateDisplayLayoutAsync();
+                return (
+                    true,
+                    recalibrated.ToString(System.Globalization.CultureInfo.InvariantCulture) + "\n" + SerializeLayout(_settings),
+                    null);
 
             case SettingsIpcMethods.WidgetApplyScreenBinding:
                 if (_widget is null) return unavailable(method);
@@ -605,7 +690,7 @@ public sealed class SettingsIpcMethodRouter
                     (WidgetScreenBindingMode)binding.Mode,
                     binding.BoundScreenId,
                     binding.Persist);
-                return (true, null, null);
+                return (true, SerializeLayout(_settings), null);
 
             case SettingsIpcMethods.WidgetLatestUndoableOrgEntry:
                 if (_widget is null) return unavailable(method);

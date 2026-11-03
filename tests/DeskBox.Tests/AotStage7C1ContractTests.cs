@@ -1,4 +1,4 @@
-﻿namespace DeskBox.Tests;
+namespace DeskBox.Tests;
 
 public sealed class AotStage7C1ContractTests
 {
@@ -61,29 +61,34 @@ public sealed class AotStage7C1ContractTests
     }
 
     [Fact]
-    public void ReleaseGates_RequireEverythingSdkAndLicenseInEveryPayload()
+    public void ReleaseGates_ForbidExternalEverythingSdkDllAndEnforceUniversalPeVcCrtAudit()
     {
         string retail = Read("scripts/publish-aot-retail.ps1");
         string stage7c1 = Read("scripts/build-stage-7c1-distribution.ps1");
         string storeAudit = Read("scripts/audit-store-native-aot-package.ps1");
 
-        foreach (string script in new[] { retail, stage7c1, storeAudit })
-        {
-            Assert.Contains("EverythingSdk.dll", script, StringComparison.Ordinal);
-            Assert.Contains("ThirdParty/Everything/LICENSE.txt", script, StringComparison.Ordinal);
-        }
-
-        // The retail gate must list the SDK twice: once in required files and
-        // once in the PE architecture check.
-        Assert.True(
-            retail.Split("EverythingSdk.dll").Length - 1 >= 2,
-            "publish-aot-retail.ps1 must gate EverythingSdk.dll in requiredFiles and the PE list.");
+        Assert.DoesNotContain("EverythingSdk.dll", retail, StringComparison.Ordinal);
+        Assert.DoesNotContain("EverythingSdk.dll", stage7c1, StringComparison.Ordinal);
+        Assert.Contains("EverythingSdk\\.dll", retail, StringComparison.Ordinal);
+        Assert.Contains("H\\.NotifyIcon", retail, StringComparison.Ordinal);
+        Assert.Contains("Strings\\zh-CN.json", retail, StringComparison.Ordinal);
+        Assert.Contains("Strings\\en-US.json", retail, StringComparison.Ordinal);
+        Assert.Contains("'(^|/)EverythingSdk\\.dll$'", stage7c1, StringComparison.Ordinal);
+        Assert.Contains("'(^|/)H\\.NotifyIcon(?:\\.WinUI)?\\.dll$'", stage7c1, StringComparison.Ordinal);
+        Assert.Contains("\"Strings/zh-CN.json\"", stage7c1, StringComparison.Ordinal);
+        Assert.Contains("run-aot-agent-clipboard-companion-smoke.ps1", stage7c1, StringComparison.Ordinal);
+        Assert.Contains("'(^|/)H\\.NotifyIcon(?:\\.WinUI)?\\.dll$'", storeAudit, StringComparison.Ordinal);
+        Assert.Contains("\"Strings/zh-CN.json\"", storeAudit, StringComparison.Ordinal);
         Assert.Contains(
-            "$everythingSdkMachine = Get-PeMachine",
-            stage7c1,
+            "'(^|/)EverythingSdk\\.dll$'",
+            storeAudit,
             StringComparison.Ordinal);
         Assert.Contains(
-            "$everythingSdkPe = Get-PeFacts",
+            "$packagedPeFiles = @(",
+            storeAudit,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "imports non-inbox VC++ runtime DLLs",
             storeAudit,
             StringComparison.Ordinal);
     }
@@ -131,6 +136,7 @@ public sealed class AotStage7C1ContractTests
                      "DeskBox\\.runtimeconfig\\.json",
                      "deskbox_search_core",
                      "DeskBox\\.Updater",
+                     "DeskBox\\.Settings",
                      "HasClrHeader",
                      "publishPayloadHashesMatch",
                      "DeskBox.pdb",

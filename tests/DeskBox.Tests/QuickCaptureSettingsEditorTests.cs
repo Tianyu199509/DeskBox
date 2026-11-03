@@ -1,4 +1,4 @@
-﻿using System.Text.RegularExpressions;
+using System.Text.RegularExpressions;
 using DeskBox.Contracts;
 using DeskBox.Features.QuickCapture;
 using DeskBox.Models;
@@ -7,19 +7,6 @@ using DeskBox.ViewModels;
 
 namespace DeskBox.Tests;
 
-/// <summary>
-/// Sixth copy batch of the settings-shell binding-facade retirement: the
-/// Quick Capture section (the largest single section, 35 unique binding
-/// properties) is re-bound to a dedicated editor through a section-level
-/// DataContext switch. These tests pin the editor's behavior (read snapshot
-/// projection with the old shell normalization, write-through with
-/// unchanged-write skip, no write-back on external sync, the recording
-/// chain's coordinator-side enablement push-back, the tab flyout state
-/// machine, the recent-capacity write chain, text-size step normalization
-/// and commit events, the derived gates/summaries, localization refresh,
-/// the shell-pushed image-cache presentation) and the migration pattern
-/// itself (XAML paths, AOT bridges, window wiring, facade removal).
-/// </summary>
 public sealed class QuickCaptureSettingsEditorTests : IDisposable
 {
     private readonly string _root = Path.Combine(
@@ -43,10 +30,8 @@ public sealed class QuickCaptureSettingsEditorTests : IDisposable
     {
         var settings = new SettingsService(root);
         arrange?.Invoke(settings);
-        var clipboard = new QuickCaptureClipboardRuntime(
-            () => false, () => throw new InvalidOperationException(), _ => { });
         var coordinator = new QuickCaptureSettingsCoordinator(
-            settings, clipboard,
+            settings,
             (_, _) => Task.CompletedTask,
             action => { action(); return true; },
             _ => { });
@@ -67,7 +52,6 @@ public sealed class QuickCaptureSettingsEditorTests : IDisposable
                 slice.QuickCaptureWideLayout = QuickCaptureOptionKinds.WideLayoutDualPane;
                 slice.QuickCaptureWideOpenMode = QuickCaptureOptionKinds.WideOpenEditing;
                 slice.QuickCaptureShowTabBar = false;
-                slice.QuickCaptureShowRecentTab = false;
                 slice.QuickCaptureDefaultView = QuickCaptureOptionKinds.DefaultViewPinned;
                 slice.QuickCaptureTabStyle = SettingsService.WidgetTabStylePivot;
                 slice.QuickCaptureShowCreatedTime = false;
@@ -76,14 +60,12 @@ public sealed class QuickCaptureSettingsEditorTests : IDisposable
                 slice.QuickCaptureEditorEnterBehavior =
                     QuickCaptureOptionKinds.EnterBehaviorEnterSaves;
                 slice.QuickCaptureAllowRemoteImages = true;
-                slice.QuickCaptureRecentLimit = 80;
             });
 
         Assert.True(editor.Enabled);
         Assert.Equal(QuickCaptureOptionKinds.WideLayoutDualPane, editor.WideLayout);
         Assert.Equal(QuickCaptureOptionKinds.WideOpenEditing, editor.WideOpenMode);
         Assert.False(editor.ShowTabBar);
-        Assert.False(editor.ShowRecentTab);
         Assert.True(editor.ShowPinnedTab);
         Assert.Equal(QuickCaptureOptionKinds.DefaultViewPinned, editor.SelectedDefaultView);
         Assert.Equal(0, editor.TabStyleIndex);
@@ -94,8 +76,6 @@ public sealed class QuickCaptureSettingsEditorTests : IDisposable
             QuickCaptureOptionKinds.EnterBehaviorEnterSaves,
             editor.EditorEnterBehavior);
         Assert.True(editor.AllowRemoteImages);
-        Assert.Equal(80, editor.RecentLimit);
-        // Effective text sizes inherit the global default (stored zero).
         Assert.Equal(SettingsService.DefaultTextSize, editor.ListTextSize);
     }
 
@@ -127,9 +107,7 @@ public sealed class QuickCaptureSettingsEditorTests : IDisposable
     public void EditorWrites_PersistThroughTheCoordinator()
     {
         (SettingsService settings, QuickCaptureSettingsCoordinator coordinator, QuickCaptureSettingsViewModel editor) =
-            CreateEditor(_root);
-        // Mirror the production wiring: the coordinator's Changed broadcast
-        // re-projects the editor (the shell owns the subscription).
+            CreateEditor(_root, s => s.Settings.QuickCapture.QuickCaptureShowPinnedTab = false);
         coordinator.Changed += () => editor.SyncPresentation();
 
         editor.WideLayout = QuickCaptureOptionKinds.WideLayoutDualPane;
@@ -141,7 +119,7 @@ public sealed class QuickCaptureSettingsEditorTests : IDisposable
         editor.ItemPreviewLineCount = 4;
         editor.TabStyleIndex = 0;
         editor.ShowTabBar = false;
-        editor.SelectedDefaultView = QuickCaptureOptionKinds.DefaultViewRecent;
+        editor.SelectedDefaultView = QuickCaptureOptionKinds.DefaultViewPinned;
 
         QuickCaptureSettingsSlice slice = settings.Settings.QuickCapture;
         Assert.Equal(QuickCaptureOptionKinds.WideLayoutDualPane, slice.QuickCaptureWideLayout);
@@ -155,11 +133,10 @@ public sealed class QuickCaptureSettingsEditorTests : IDisposable
         Assert.Equal(4, slice.QuickCaptureItemPreviewLineCount);
         Assert.Equal(SettingsService.WidgetTabStylePivot, slice.QuickCaptureTabStyle);
         Assert.False(slice.QuickCaptureShowTabBar);
-        // Selecting a hidden default view makes the coordinator reveal it.
         Assert.Equal(
-            QuickCaptureOptionKinds.DefaultViewRecent,
+            QuickCaptureOptionKinds.DefaultViewPinned,
             slice.QuickCaptureDefaultView);
-        Assert.True(slice.QuickCaptureShowRecentTab);
+        Assert.True(slice.QuickCaptureShowPinnedTab);
     }
 
     [Fact]
@@ -180,35 +157,11 @@ public sealed class QuickCaptureSettingsEditorTests : IDisposable
     }
 
     [Fact]
-    public void RecordingChain_ImageSwitchOnFromDisabledState_ChainsThroughCoordinator()
-    {
-        (SettingsService settings, QuickCaptureSettingsCoordinator coordinator, QuickCaptureSettingsViewModel editor) =
-            CreateEditor(_root);
-        coordinator.Changed += () => editor.SyncPresentation();
-        Assert.False(editor.Enabled);
-
-        // Turning image recording on while the feature is off enables the
-        // feature and text recording in the coordinator; the Changed
-        // broadcast re-projects all three switches on the editor.
-        editor.ImageClipboardEnabled = true;
-
-        Assert.True(settings.Settings.QuickCapture.QuickCaptureImageClipboardEnabled);
-        Assert.True(settings.Settings.QuickCapture.QuickCaptureClipboardEnabled);
-        Assert.True(FeatureWidgetSettings.IsEnabled(
-            settings.Settings, WidgetKind.QuickCapture));
-        Assert.True(editor.Enabled);
-        Assert.True(editor.ClipboardEnabled);
-        Assert.True(editor.ImageClipboardEnabled);
-    }
-
-    [Fact]
     public void TabFlyout_GuardsTheLastSelectedTabAndDrivesDerivedSurfaces()
     {
-        (_, _, QuickCaptureSettingsViewModel editor) = CreateEditor(
-            _root,
-            settings => settings.Settings.QuickCapture.QuickCaptureShowRecentTab = false);
+        (_, _, QuickCaptureSettingsViewModel editor) = CreateEditor(_root);
 
-        Assert.False(editor.IsTabSelected(QuickCaptureOptionKinds.DefaultViewRecent));
+        Assert.True(editor.IsTabSelected(QuickCaptureOptionKinds.DefaultViewRecords));
         Assert.True(editor.CanToggleTab(QuickCaptureOptionKinds.DefaultViewPinned));
         Assert.Equal(2, editor.VisibleDefaultViewOptions.Count);
         Assert.Contains(
@@ -218,39 +171,17 @@ public sealed class QuickCaptureSettingsEditorTests : IDisposable
             QuickCaptureOptionKinds.DefaultViewRecent,
             editor.VisibleDefaultViewOptions.Select(option => (string)option.Value!));
 
-        // Deselecting the last two remaining tabs is refused.
+        // Deselecting the last remaining tab is refused.
         editor.ShowPinnedTab = false;
         editor.ToggleTab(QuickCaptureOptionKinds.DefaultViewRecords);
         Assert.True(editor.ShowRecordsTab);
 
-        // The default-view combo only offers visible tabs.
         editor.ShowTabBar = false;
         Assert.Equal(PassthroughLocalize("Settings.Toggle.Off"), editor.TabsSummaryText);
         editor.ShowTabBar = true;
         string joined = editor.VisibleTabsText;
         Assert.Contains(PassthroughLocalize("Settings.QuickCapture.DefaultView.Records"), joined);
         Assert.DoesNotContain(PassthroughLocalize("Settings.QuickCapture.DefaultView.Recent"), joined);
-    }
-
-    [Fact]
-    public void RecentLimit_WritesThroughTheCoordinatorNormalizeChain()
-    {
-        (SettingsService settings, QuickCaptureSettingsCoordinator coordinator, QuickCaptureSettingsViewModel editor) =
-            CreateEditor(_root);
-        coordinator.Changed += () => editor.SyncPresentation();
-
-        editor.RecentLimit = 500;
-
-        Assert.Equal(100, settings.Settings.QuickCapture.QuickCaptureRecentLimit);
-        Assert.Equal(100, editor.RecentLimit);
-        Assert.Equal(
-            PassthroughFormat("Settings.QuickCapture.RecentLimitValue", [100]),
-            editor.RecentLimitText);
-
-        // Below-minimum input falls back to the default like the old chain.
-        editor.RecentLimit = 1;
-        Assert.Equal(30, settings.Settings.QuickCapture.QuickCaptureRecentLimit);
-        Assert.Equal(30, editor.RecentLimit);
     }
 
     [Fact]
@@ -261,14 +192,11 @@ public sealed class QuickCaptureSettingsEditorTests : IDisposable
         editor.ListTextSizeCommitted += () => commits++;
         editor.ContentTextSizeCommitted += () => commits++;
 
-        // Off-grid input snaps back onto the grid and commits through the
-        // re-entry (the old shell's two-pass behavior).
         editor.ListTextSize = 12.34;
         Assert.Equal(12.5, editor.ListTextSize);
         Assert.Equal(1, commits);
         Assert.Equal(12.5, settings.Settings.QuickCapture.QuickCaptureListTextSize);
 
-        // Equal re-writes do not commit again.
         editor.ListTextSize = 12.5;
         Assert.Equal(1, commits);
 
@@ -337,7 +265,7 @@ public sealed class QuickCaptureSettingsEditorTests : IDisposable
         Assert.Equal(2, editor.AvailableFormatOptions.Count);
         Assert.Equal(2, editor.AvailableEnterBehaviorOptions.Count);
         Assert.Equal(10, editor.AvailablePreviewLineOptions.Count);
-        Assert.Equal(3, editor.AvailableDefaultViews.Length);
+        Assert.Equal(2, editor.AvailableDefaultViews.Length);
     }
 
     [Fact]
@@ -352,11 +280,6 @@ public sealed class QuickCaptureSettingsEditorTests : IDisposable
         Assert.Equal(
             PassthroughLocalize("Settings.QuickCapture.WideLayout.Auto"),
             editor.AvailableWideLayoutOptions[0].DisplayName);
-        Assert.Equal(
-            PassthroughFormat(
-                "Settings.QuickCapture.ClipboardDiagnosticsNotRecordingNoCapture",
-                [PassthroughLocalize("Settings.QuickCapture.ClipboardReason.QuickCaptureOff")]),
-            editor.ClipboardDiagnosticsText);
     }
 
     [Fact]
@@ -461,30 +384,40 @@ public sealed class QuickCaptureSettingsEditorTests : IDisposable
         string bindableShell = File.ReadAllText(
             TestPaths.FromRepository("src/DeskBox/ViewModels/SettingsViewModel.AotBindableProperties.cs"));
 
-        // Section-level DataContext switch; the template stays {Binding}-only
-        // (no x:Bind, so its x:DataType keeps pointing at the shell type).
         Assert.Contains(
             "IsOn=\"{Binding Enabled, Mode=TwoWay}\"",
             windowXaml,
             StringComparison.Ordinal);
-        Assert.Contains(
-            "IsOn=\"{Binding ImageClipboardEnabled, Mode=TwoWay}\"",
+        Assert.DoesNotContain(
+            "ImageClipboardEnabled",
             windowXaml,
             StringComparison.Ordinal);
         Assert.Contains(
-            "controls:SettingsComboBox.Value=\"{Binding EditorFormat, Mode=TwoWay}\"",
+            "x:DataType=\"quickCapture:QuickCaptureSettingsViewModel\"",
+            windowXaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "SelectedIndex=\"{x:Bind EditorFormatIndex, Mode=TwoWay}\"",
+            windowXaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "SelectedIndex=\"{x:Bind WideOpenModeIndex, Mode=TwoWay}\"",
+            windowXaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "IsEnabled=\"{x:Bind CanConfigureWideOpenMode, Mode=OneWay}\"",
+            windowXaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "IsEnabled=\"{x:Bind CanConfigureRemoteImages, Mode=OneWay}\"",
             windowXaml,
             StringComparison.Ordinal);
         Assert.Contains(
             "ItemsSource=\"{Binding VisibleDefaultViewOptions}\"",
             windowXaml,
             StringComparison.Ordinal);
-        Assert.Contains(
-            "Value=\"{Binding RecentLimit, Mode=TwoWay}\"",
-            windowXaml,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "Visibility=\"{Binding ShowWideOptions, Converter={StaticResource SettingsBoolToVisibilityConverter}}\"",
+        Assert.DoesNotContain(
+            "RecentLimit",
             windowXaml,
             StringComparison.Ordinal);
         Assert.DoesNotContain("{Binding QuickCapture", windowXaml, StringComparison.Ordinal);
@@ -496,6 +429,10 @@ public sealed class QuickCaptureSettingsEditorTests : IDisposable
             deferred,
             StringComparison.Ordinal);
         Assert.Contains(
+            "? _quickCaptureSettingsViewModel",
+            deferred,
+            StringComparison.Ordinal);
+        Assert.Contains(
             "quickCaptureSettings.AvailableDefaultViews,",
             navigation,
             StringComparison.Ordinal);
@@ -504,12 +441,62 @@ public sealed class QuickCaptureSettingsEditorTests : IDisposable
             navigation,
             StringComparison.Ordinal);
 
-        // The editor's {Binding} bridge and the shrunken shell bridge.
         Assert.Contains("[WinRT.GeneratedBindableCustomProperty([", bridge, StringComparison.Ordinal);
         Assert.Contains("nameof(Enabled)", bridge, StringComparison.Ordinal);
-        Assert.Contains("nameof(ImageClipboardEnabled)", bridge, StringComparison.Ordinal);
-        Assert.Equal(35, Regex.Matches(bridge, @"nameof\(").Count);
+        Assert.DoesNotContain("nameof(ImageClipboardEnabled)", bridge, StringComparison.Ordinal);
+        Assert.Equal(30, Regex.Matches(bridge, @"nameof\(").Count);
         Assert.DoesNotContain("nameof(ShowRecordsTab)", bridge, StringComparison.Ordinal);
         Assert.Equal(39, Regex.Matches(bindableShell, @"nameof\(").Count);
+    }
+
+    [Fact]
+    public void SegmentedModes_LastTabGuard_AndMirrorFolderPresentation_StaySynchronized()
+    {
+        (_, _, QuickCaptureSettingsViewModel editor) = CreateEditor(
+            _root,
+            s => FeatureWidgetSettings.SetEnabled(s.Settings, WidgetKind.QuickCapture, true));
+
+        Assert.True(editor.Enabled);
+        Assert.Equal(0, editor.WideOpenModeIndex);
+        Assert.True(editor.CanConfigureWideOpenMode);
+
+        editor.WideOpenModeIndex = 1;
+        Assert.Equal(QuickCaptureOptionKinds.WideOpenEditing, editor.WideOpenMode);
+
+        editor.WideLayout = QuickCaptureOptionKinds.WideLayoutSinglePane;
+        Assert.False(editor.CanConfigureWideOpenMode);
+
+        Assert.Equal(0, editor.EditorFormatIndex);
+        Assert.True(editor.CanConfigureRemoteImages);
+
+        editor.EditorFormatIndex = 1;
+        Assert.Equal(QuickCaptureOptionKinds.FormatPlainText, editor.EditorFormat);
+        Assert.False(editor.CanConfigureRemoteImages);
+
+        Assert.True(editor.ShowRecordsTab);
+        Assert.True(editor.ShowPinnedTab);
+        Assert.True(editor.CanEditRecordsTab);
+        Assert.True(editor.CanEditPinnedTab);
+
+        editor.ShowPinnedTab = false;
+        Assert.False(editor.ShowPinnedTab);
+        Assert.False(editor.CanEditRecordsTab);
+        Assert.True(editor.CanEditPinnedTab);
+
+        editor.ShowRecordsTab = false;
+        Assert.True(editor.ShowRecordsTab);
+
+        Assert.False(editor.HasMirrorFolder);
+        Assert.Equal("Settings.QuickCapture.MirrorFolder.Unset", editor.MirrorFolderDisplayText);
+
+        editor.UpdateMirrorFolderPresentation("  D:\\Notes\\QuickCapture  ");
+        Assert.True(editor.HasMirrorFolder);
+        Assert.Equal("D:\\Notes\\QuickCapture", editor.MirrorFolderPath);
+        Assert.Equal("D:\\Notes\\QuickCapture", editor.MirrorFolderDisplayText);
+
+        editor.UpdateMirrorFolderPresentation("   ");
+        Assert.False(editor.HasMirrorFolder);
+        Assert.Null(editor.MirrorFolderPath);
+        Assert.Equal("Settings.QuickCapture.MirrorFolder.Unset", editor.MirrorFolderDisplayText);
     }
 }

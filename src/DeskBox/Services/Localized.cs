@@ -1,4 +1,6 @@
+#if DESKBOX_AOT_SMOKE_HARNESS || DESKBOX_STORE
 using CommunityToolkit.WinUI.Controls;
+#endif
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
@@ -17,48 +19,47 @@ public static class Localized
     // at runtime by design.
 
     public static readonly DependencyProperty KeyProperty =
-        DependencyProperty.RegisterAttached(
-            "Key",
-            typeof(string),
-            typeof(Localized),
-            new PropertyMetadata(null, OnLocalizationPropertyChanged));
+        RegisterAttachedSafe("Key", typeof(string), typeof(Localized), OnLocalizationPropertyChanged);
 
     public static readonly DependencyProperty ToolTipKeyProperty =
-        DependencyProperty.RegisterAttached(
-            "ToolTipKey",
-            typeof(string),
-            typeof(Localized),
-            new PropertyMetadata(null, OnLocalizationPropertyChanged));
+        RegisterAttachedSafe("ToolTipKey", typeof(string), typeof(Localized), OnLocalizationPropertyChanged);
 
     public static readonly DependencyProperty HeaderKeyProperty =
-        DependencyProperty.RegisterAttached(
-            "HeaderKey",
-            typeof(string),
-            typeof(Localized),
-            new PropertyMetadata(null, OnLocalizationPropertyChanged));
+        RegisterAttachedSafe("HeaderKey", typeof(string), typeof(Localized), OnLocalizationPropertyChanged);
 
     public static readonly DependencyProperty DescriptionKeyProperty =
-        DependencyProperty.RegisterAttached(
-            "DescriptionKey",
-            typeof(string),
-            typeof(Localized),
-            new PropertyMetadata(null, OnLocalizationPropertyChanged));
+        RegisterAttachedSafe("DescriptionKey", typeof(string), typeof(Localized), OnLocalizationPropertyChanged);
 
     public static readonly DependencyProperty PlaceholderKeyProperty =
-        DependencyProperty.RegisterAttached(
-            "PlaceholderKey",
-            typeof(string),
-            typeof(Localized),
-            new PropertyMetadata(null, OnLocalizationPropertyChanged));
+        RegisterAttachedSafe("PlaceholderKey", typeof(string), typeof(Localized), OnLocalizationPropertyChanged);
 
     public static readonly DependencyProperty AutomationNameKeyProperty =
-        DependencyProperty.RegisterAttached(
-            "AutomationNameKey",
-            typeof(string),
-            typeof(Localized),
-            new PropertyMetadata(null, OnLocalizationPropertyChanged));
+        RegisterAttachedSafe("AutomationNameKey", typeof(string), typeof(Localized), OnLocalizationPropertyChanged);
 
+    private static DependencyProperty RegisterAttachedSafe(
+        string name,
+        Type propertyType,
+        Type ownerType,
+        PropertyChangedCallback callback)
+    {
+        try
+        {
+            return DependencyProperty.RegisterAttached(
+                name,
+                propertyType,
+                ownerType,
+                new PropertyMetadata(null, callback));
+        }
+        catch (System.Runtime.InteropServices.COMException)
+        {
+            return null!;
+        }
+    }
+
+    private static readonly object s_lock = new();
+    private static readonly object s_trackedSentinel = new();
     private static readonly List<WeakReference<DependencyObject>> s_targets = [];
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<DependencyObject, object> s_trackedSet = new();
 
     public static string? GetKey(DependencyObject obj)
     {
@@ -120,16 +121,27 @@ public static class Localized
         obj.SetValue(AutomationNameKeyProperty, value);
     }
 
-        public static void RefreshAll(LocalizationService localizationService)
+    public static void RefreshAll(LocalizationService localizationService)
     {
-        for (int index = s_targets.Count - 1; index >= 0; index--)
+        List<DependencyObject> snapshot;
+        lock (s_lock)
         {
-            if (!s_targets[index].TryGetTarget(out var target))
+            snapshot = new List<DependencyObject>(s_targets.Count);
+            for (int index = s_targets.Count - 1; index >= 0; index--)
             {
-                s_targets.RemoveAt(index);
-                continue;
-            }
+                if (!s_targets[index].TryGetTarget(out var target))
+                {
+                    s_targets.RemoveAt(index);
+                    continue;
+                }
 
+                snapshot.Add(target);
+            }
+        }
+
+        for (int index = snapshot.Count - 1; index >= 0; index--)
+        {
+            DependencyObject target = snapshot[index];
             try
             {
                 Apply(target, localizationService);
@@ -146,24 +158,35 @@ public static class Localized
 
     public static void UntrackTree(DependencyObject root)
     {
-        for (int index = s_targets.Count - 1; index >= 0; index--)
+        lock (s_lock)
         {
-            if (!s_targets[index].TryGetTarget(out var target) ||
-                ReferenceEquals(target, root) ||
-                IsDescendantOf(target, root))
+            for (int index = s_targets.Count - 1; index >= 0; index--)
             {
-                s_targets.RemoveAt(index);
+                if (!s_targets[index].TryGetTarget(out var target))
+                {
+                    s_targets.RemoveAt(index);
+                    continue;
+                }
+
+                if (ReferenceEquals(target, root) || IsDescendantOf(target, root))
+                {
+                    s_trackedSet.Remove(target);
+                    s_targets.RemoveAt(index);
+                }
             }
         }
     }
 
     public static void PruneDeadTargets()
     {
-        for (int index = s_targets.Count - 1; index >= 0; index--)
+        lock (s_lock)
         {
-            if (!s_targets[index].TryGetTarget(out _))
+            for (int index = s_targets.Count - 1; index >= 0; index--)
             {
-                s_targets.RemoveAt(index);
+                if (!s_targets[index].TryGetTarget(out _))
+                {
+                    s_targets.RemoveAt(index);
+                }
             }
         }
     }
@@ -189,28 +212,35 @@ public static class Localized
     /// shared InfoTip flyout fills its text at open time). Falls back to
     /// the key itself, matching LocalizationService.T's fallback.
     /// </summary>
+    public static string ActiveCultureName =>
+        CurrentService?.CurrentCultureName ?? LocalizationService.ResolveAmbientCultureName();
+
+    public static bool IsActiveChinese =>
+        ActiveCultureName.StartsWith("zh", StringComparison.OrdinalIgnoreCase);
+
     public static string T(string key)
     {
-        return CurrentService?.T(key) ?? key;
+        return CurrentService is { } svc
+            ? svc.T(key)
+            : LocalizationService.TranslateForCulture(LocalizationService.ResolveAmbientCultureName(), key);
+    }
+
+    public static string Format(string key, params object[] args)
+    {
+        return string.Format(System.Globalization.CultureInfo.CurrentCulture, T(key), args);
     }
 
     private static void Track(DependencyObject target)
     {
-        for (int index = s_targets.Count - 1; index >= 0; index--)
+        lock (s_lock)
         {
-            if (!s_targets[index].TryGetTarget(out var existing))
-            {
-                s_targets.RemoveAt(index);
-                continue;
-            }
-
-            if (ReferenceEquals(existing, target))
+            if (!s_trackedSet.TryAdd(target, s_trackedSentinel))
             {
                 return;
             }
-        }
 
-        s_targets.Add(new WeakReference<DependencyObject>(target));
+            s_targets.Add(new WeakReference<DependencyObject>(target));
+        }
     }
 
     private static bool IsDescendantOf(DependencyObject target, DependencyObject root)
@@ -293,16 +323,34 @@ public static class Localized
         }
     }
 
+    private static Func<DependencyObject, string, bool>? s_externalTrySetHeader;
+    private static Func<DependencyObject, string, bool>? s_externalTrySetDescription;
+
+    internal static void RegisterExternalHeaderDescriptionAdapter(
+        Func<DependencyObject, string, bool> trySetHeader,
+        Func<DependencyObject, string, bool> trySetDescription)
+    {
+        s_externalTrySetHeader = trySetHeader;
+        s_externalTrySetDescription = trySetDescription;
+    }
+
     private static void SetLocalizedHeader(DependencyObject target, string value)
     {
+        if (s_externalTrySetHeader?.Invoke(target, value) == true)
+        {
+            return;
+        }
+
         switch (target)
         {
+#if DESKBOX_AOT_SMOKE_HARNESS || DESKBOX_STORE
             case SettingsCard settingsCard:
                 settingsCard.Header = InfoTip.TryCreateHeaderContent(settingsCard, value) ?? value;
                 break;
             case SettingsExpander settingsExpander:
                 settingsExpander.Header = InfoTip.TryCreateHeaderContent(settingsExpander, value) ?? value;
                 break;
+#endif
             case TextBox textBox:
                 textBox.Header = value;
                 break;
@@ -318,14 +366,21 @@ public static class Localized
 
     private static void SetLocalizedDescription(DependencyObject target, string value)
     {
+        if (s_externalTrySetDescription?.Invoke(target, value) == true)
+        {
+            return;
+        }
+
         switch (target)
         {
+#if DESKBOX_AOT_SMOKE_HARNESS || DESKBOX_STORE
             case SettingsCard settingsCard:
                 settingsCard.Description = value;
                 break;
             case SettingsExpander settingsExpander:
                 settingsExpander.Description = value;
                 break;
+#endif
             case InfoBar infoBar:
                 infoBar.Message = value;
                 break;

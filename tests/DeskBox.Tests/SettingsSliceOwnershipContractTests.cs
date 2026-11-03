@@ -1,4 +1,4 @@
-﻿using System.Reflection;
+using System.Reflection;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using DeskBox.Models;
@@ -28,7 +28,7 @@ public sealed class SettingsSliceOwnershipContractTests
     [Fact]
     public void EverySlice_IsExposedAsGetOnlyAndJsonIgnored()
     {
-        Assert.Equal(13, SliceProperties.Length);
+        Assert.Equal(14, SliceProperties.Length);
         Assert.All(SliceProperties, p =>
         {
             Assert.False(p.CanWrite, $"{p.Name} must be get-only");
@@ -48,7 +48,10 @@ public sealed class SettingsSliceOwnershipContractTests
         // and lastRunVersion.
         // +2 = autoDownloadUpdates + showUpdateToastNotification (background
         // auto-download and update toasts).
-        Assert.Equal(243, FacadeProperties.Length);
+        // +2 = todoAllDayReminderEnabled + todoAllDayReminderTimeMinutes.
+        // +1 = cloudBackupCustomWidgetsEnabled.
+        // +1 = widgetDisplayScalingMode (display layout scaling mode).
+        Assert.Equal(267, FacadeProperties.Length);
 
         foreach (PropertyInfo facade in FacadeProperties)
         {
@@ -305,12 +308,13 @@ public sealed class SettingsSliceOwnershipContractTests
         ["src/DeskBox/Services/LocalizationService.cs"] = 3,
         ["src/DeskBox/Services/ManagedStorageDesktopShortcutService.cs"] = 12,
         ["src/DeskBox/Services/PerformanceSettingsPolicy.cs"] = 78,
-        ["src/DeskBox/Services/QuickCaptureClipboardService.cs"] = 6,
         ["src/DeskBox/Services/SearchEngineService.cs"] = 7,
         ["src/DeskBox/Services/SearchHotkeyService.cs"] = 13,
         ["src/DeskBox/Services/SearchResultActionService.cs"] = 2,
         ["src/DeskBox/Services/SettingsMigrationService.cs"] = 55,
-        ["src/DeskBox/Services/SettingsSearchCatalog.cs"] = 25,
+        // Generated localization-key string literals only ("Settings.TextSize.*",
+        // "Settings.DefaultWidth.*", etc.), not runtime facade reads.
+        ["src/DeskBox/Services/SettingsSearchCatalog.cs"] = 29,
         // +5: the appearance-preview apply preserves the runtime markers and the
 // layout domain before the preview broadcast (batch 3d follow-up).
         // +3: the appearance-preview swap preserves the onboarding markers too

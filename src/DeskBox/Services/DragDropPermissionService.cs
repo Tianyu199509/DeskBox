@@ -192,7 +192,9 @@ public static class DragDropPermissionService
         List<AppCompatEntry> appCompatEntries = GetRelevantAppCompatEntries(currentExePath);
         string? startupValue = StartupService.GetRunValue();
         StartupRegistrationState startupState = StartupService.GetState();
-        List<ShortcutProbe> shortcutProbes = GetShortcutProbes(currentExePath, localizationService);
+        List<ShortcutProbe> shortcutProbes = AppDistributionService.Current.IsMicrosoftStore
+            ? []
+            : GetShortcutProbes(currentExePath, localizationService);
 
         bool isUacDisabled = uacPolicy.EnableLua == 0;
         bool hasAppCompatIssue = appCompatEntries.Any(entry => ContainsIncompatibleAppCompatToken(entry.Value));
@@ -355,7 +357,8 @@ public static class DragDropPermissionService
             lines.Add(Text(localizationService, "Settings.DragDropPermission.Summary.AppCompatIssue"));
         }
 
-        if (GetKnownShortcutPaths().Any(path =>
+        if (!AppDistributionService.Current.IsMicrosoftStore &&
+            GetKnownShortcutPaths().Any(path =>
                 File.Exists(path) && TryGetShortcutRunAsFlag(path)))
         {
             lines.Add(Text(localizationService, "Settings.DragDropPermission.Summary.ShortcutRunAs"));
@@ -373,6 +376,8 @@ public static class DragDropPermissionService
     /// token's default owner stays the Administrators SID) and therefore
     /// misfires on every admin-account machine.
     /// </summary>
+    private static bool? s_cachedIsCurrentProcessElevated;
+
     public static bool IsCurrentProcessElevated()
     {
         try
@@ -385,6 +390,14 @@ public static class DragDropPermissionService
             return false;
         }
     }
+
+    /// <summary>
+    /// Cached per-process wrapper around <see cref="IsCurrentProcessElevated"/>
+    /// for UI constructors and pointer hot paths (process token elevation is
+    /// immutable for the lifetime of a Windows process).
+    /// </summary>
+    public static bool IsCurrentProcessElevatedCached() =>
+        s_cachedIsCurrentProcessElevated ??= IsCurrentProcessElevated();
 
     public static StartupElevationAssessment AssessStartupElevation()
     {
@@ -610,7 +623,7 @@ public static class DragDropPermissionService
                         repairedCount++;
                     }
                 }
-                else
+                else if (startupResult.State != StartupRegistrationState.Pending)
                 {
                     requiresStartupSettings =
                         startupResult.RequiresSystemSettings;
@@ -627,26 +640,29 @@ public static class DragDropPermissionService
             failures.Add($"Startup: {ex.Message}");
         }
 
-        foreach (var shortcut in GetKnownShortcutDefinitions())
+        if (!AppDistributionService.Current.IsMicrosoftStore)
         {
-            try
+            foreach (var shortcut in GetKnownShortcutDefinitions())
             {
-                if (!shortcut.EnsureExists && !File.Exists(shortcut.Path))
+                try
                 {
-                    continue;
-                }
+                    if (!shortcut.EnsureExists && !File.Exists(shortcut.Path))
+                    {
+                        continue;
+                    }
 
-                CreateOrUpdateShortcut(
-                    shortcut.Path,
-                    currentExePath,
-                    shortcut.Arguments,
-                    DeskBoxIconPath);
-                repairedCount++;
-                App.Log($"[DragDropPermission] Rewrote shortcut '{shortcut.Path}' target='{currentExePath}' args='{shortcut.Arguments}'");
-            }
-            catch (Exception ex)
-            {
-                failures.Add($"Shortcut {shortcut.Path}: {ex.Message}");
+                    CreateOrUpdateShortcut(
+                        shortcut.Path,
+                        currentExePath,
+                        shortcut.Arguments,
+                        DeskBoxIconPath);
+                    repairedCount++;
+                    App.Log($"[DragDropPermission] Rewrote shortcut '{shortcut.Path}' target='{currentExePath}' args='{shortcut.Arguments}'");
+                }
+                catch (Exception ex)
+                {
+                    failures.Add($"Shortcut {shortcut.Path}: {ex.Message}");
+                }
             }
         }
 
@@ -681,23 +697,110 @@ public static class DragDropPermissionService
     /// </summary>
     public static bool TryRelaunchAsExplorerUser(string additionalArguments = "")
     {
+        if (AppDistributionService.Current.IsMicrosoftStore &&
+            AppDistributionService.Current.TryGetPackagedAppUserModelId() is { Length: > 0 } aumid)
+        {
+            if (PackagedUnelevatedRelaunch.TryRelaunchPackagedAppViaExplorer(
+                    aumid,
+                    additionalArguments,
+                    App.Log))
+            {
+                return true;
+            }
+
+            // Secondary Store channel: parent explorer.exe to the desktop shell
+            // to activate shell:AppsFolder\<AUMID> with Medium integrity and
+            // preserved MSIX package identity when COM ShellWindows automation
+            // is unavailable. Guarded by IsShellWindowElevated() == false so an
+            // elevated desktop can never enter a relaunch loop.
+            if (ShellUnelevatedLaunch.IsShellWindowElevated() == false &&
+                PackagedUnelevatedRelaunch.TryFormatAppsFolderTarget(aumid, out string appsFolderTarget))
+            {
+                string explorerExe = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.Windows),
+                    "explorer.exe");
+                if (ShellUnelevatedLaunch.TryStartAtShellIntegrity(
+                        explorerExe,
+                        appsFolderTarget,
+                        App.Log))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         string exePath = GetCurrentExePath();
         if (!File.Exists(exePath))
         {
             return false;
         }
 
-        return ShellUnelevatedLaunch.TryStartAtShellIntegrity(exePath, additionalArguments, App.Log) ||
-            TryShellExecute(exePath);
+        if (ShellUnelevatedLaunch.TryStartAtShellIntegrity(exePath, additionalArguments, App.Log))
+        {
+            return true;
+        }
+
+        // Secondary Direct channel: delegate ShellExecute to Explorer's hosted
+        // IShellDispatch2 object when PROC_THREAD_ATTRIBUTE_PARENT_PROCESS is
+        // blocked (e.g. third-party HIPS filtering OpenProcess on explorer.exe),
+        // provided Explorer itself runs unelevated.
+        if (ShellUnelevatedLaunch.IsShellWindowElevated() == false &&
+            PackagedUnelevatedRelaunch.TryShellExecuteViaExplorer(
+                exePath,
+                additionalArguments,
+                Path.GetDirectoryName(exePath),
+                App.Log))
+        {
+            return true;
+        }
+
+        // Never fall back to plain in-process ShellExecute while elevated: it
+        // inherits the elevated token (re-triggering the elevation gate loop)
+        // instead of landing at Explorer's Medium integrity.
+        if (IsCurrentProcessElevated())
+        {
+            return false;
+        }
+
+        return TryShellExecute(exePath, additionalArguments);
     }
 
-    private static bool TryShellExecute(string exePath)
+    internal static string ResolveUserAccountControlSettingsLauncherPath(
+        string? systemDirectoryOverride = null)
+    {
+        string systemDirectory = string.IsNullOrWhiteSpace(systemDirectoryOverride)
+            ? Environment.SystemDirectory
+            : systemDirectoryOverride;
+        if (!string.IsNullOrWhiteSpace(systemDirectory))
+        {
+            string candidate = Path.Combine(
+                systemDirectory,
+                "UserAccountControlSettings.exe");
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return "UserAccountControlSettings.exe";
+    }
+
+    public static bool OpenUserAccountControlSettings(IntPtr ownerWindow = default)
+    {
+        string target = ResolveUserAccountControlSettingsLauncherPath();
+        return Win32Helper.OpenFile(ownerWindow, target);
+    }
+
+    private static bool TryShellExecute(string exePath, string additionalArguments = "")
     {
         try
         {
             Process.Start(new ProcessStartInfo
             {
                 FileName = exePath,
+                Arguments = additionalArguments,
                 UseShellExecute = true,
                 WorkingDirectory = Path.GetDirectoryName(exePath) ?? AppContext.BaseDirectory
             });
@@ -939,8 +1042,196 @@ public static class DragDropPermissionService
         uint mode);
 
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int PersistFileSaveInvoker(
+        IntPtr self,
+        [MarshalAs(UnmanagedType.LPWStr)] string? fileName,
+        int remember);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
     private delegate int ShellLinkDataListGetFlagsInvoker(
         IntPtr self, out uint dwFlags);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int ShellLinkDataListSetFlagsInvoker(
+        IntPtr self, uint dwFlags);
+
+    private const uint StgmReadWrite = 0x0000_0002;
+
+    /// <summary>
+    /// Clears <c>SLDF_RUNAS_USER</c> in-place on known DeskBox shortcuts when
+    /// set, preserving any custom icon, hotkey, description, or working
+    /// directory configured by the user. Safe to run on the silent startup
+    /// de-elevation path without recreating missing shortcuts.
+    /// </summary>
+    public static int ClearShortcutRunAsFlags(List<string>? failures = null)
+    {
+        if (AppDistributionService.Current.IsMicrosoftStore)
+        {
+            return 0;
+        }
+
+        int clearedCount = 0;
+        foreach (string shortcutPath in GetKnownShortcutPaths())
+        {
+            if (!File.Exists(shortcutPath))
+            {
+                continue;
+            }
+
+            if (TryClearShortcutRunAsFlag(shortcutPath, out bool wasModified, out string? error))
+            {
+                if (wasModified)
+                {
+                    clearedCount++;
+                    App.Log($"[DragDropPermission] Cleared SLDF_RUNAS_USER in-place on '{shortcutPath}'");
+                }
+            }
+            else if (!string.IsNullOrWhiteSpace(error))
+            {
+                if (failures is null)
+                {
+                    App.Log($"[DragDropPermission] Failed to clear SLDF_RUNAS_USER on '{shortcutPath}': {error}");
+                }
+                else
+                {
+                    failures.Add($"Shortcut RunAs {shortcutPath}: {error}");
+                }
+            }
+        }
+
+        return clearedCount;
+    }
+
+    internal static bool TryClearShortcutRunAsFlag(
+        string shortcutPath,
+        out bool wasModified,
+        out string? error) =>
+        TryUpdateShortcutRunAsFlag(shortcutPath, enableRunAs: false, out wasModified, out error);
+
+    internal static bool TrySetShortcutRunAsFlag(
+        string shortcutPath,
+        bool enableRunAs,
+        out bool wasModified,
+        out string? error) =>
+        TryUpdateShortcutRunAsFlag(shortcutPath, enableRunAs, out wasModified, out error);
+
+    private static bool TryUpdateShortcutRunAsFlag(
+        string shortcutPath,
+        bool enableRunAs,
+        out bool wasModified,
+        out string? error)
+    {
+        wasModified = false;
+        error = null;
+        if (string.IsNullOrWhiteSpace(shortcutPath) || !File.Exists(shortcutPath))
+        {
+            return true;
+        }
+
+        IntPtr shellLink = IntPtr.Zero;
+        try
+        {
+            Guid clsid = s_clsid_ShellLink;
+            Guid persistFileIid = s_iid_IPersistFile;
+            if (!ComVtable.TryCreateInProcessInstance(
+                    ref clsid,
+                    ref persistFileIid,
+                    out shellLink))
+            {
+                error = "CoCreateInstance(CLSID_ShellLink) failed";
+                return false;
+            }
+
+            int loadHr = ComVtable.Slot<PersistFileLoadInvoker>(shellLink, 5)(
+                shellLink,
+                shortcutPath,
+                StgmReadWrite);
+            if (loadHr < 0)
+            {
+                // Fall back to read mode if share/mode flags were rejected;
+                // IPersistFile::Save receives shortcutPath explicitly below.
+                loadHr = ComVtable.Slot<PersistFileLoadInvoker>(shellLink, 5)(
+                    shellLink,
+                    shortcutPath,
+                    0);
+                if (loadHr < 0)
+                {
+                    error = $"IPersistFile::Load hr=0x{loadHr:X8}";
+                    return false;
+                }
+            }
+
+            Guid dataListIid = s_iid_IShellLinkDataList;
+            int qiHr = ComVtable.QueryInterface(
+                shellLink,
+                ref dataListIid,
+                out IntPtr dataList);
+            if (qiHr < 0 || dataList == IntPtr.Zero)
+            {
+                error = $"QI(IShellLinkDataList) hr=0x{qiHr:X8}";
+                return false;
+            }
+
+            try
+            {
+                int getHr = ComVtable.Slot<ShellLinkDataListGetFlagsInvoker>(
+                    dataList,
+                    6)(dataList, out uint flags);
+                if (getHr < 0)
+                {
+                    error = $"IShellLinkDataList::GetFlags hr=0x{getHr:X8}";
+                    return false;
+                }
+
+                uint updatedFlags = enableRunAs
+                    ? (flags | SldfRunAsUser)
+                    : (flags & ~SldfRunAsUser);
+                if (updatedFlags == flags)
+                {
+                    return true;
+                }
+
+                int setHr = ComVtable.Slot<ShellLinkDataListSetFlagsInvoker>(
+                    dataList,
+                    7)(dataList, updatedFlags);
+                if (setHr < 0)
+                {
+                    error = $"IShellLinkDataList::SetFlags hr=0x{setHr:X8}";
+                    return false;
+                }
+            }
+            finally
+            {
+                Marshal.Release(dataList);
+            }
+
+            int saveHr = ComVtable.Slot<PersistFileSaveInvoker>(shellLink, 6)(
+                shellLink,
+                shortcutPath,
+                1);
+            if (saveHr < 0)
+            {
+                error = $"IPersistFile::Save hr=0x{saveHr:X8}";
+                return false;
+            }
+
+            wasModified = true;
+            ShortcutHelper.InvalidateStoredMetadataCache(shortcutPath);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            return false;
+        }
+        finally
+        {
+            if (shellLink != IntPtr.Zero)
+            {
+                Marshal.Release(shellLink);
+            }
+        }
+    }
 
     internal static bool TryGetShortcutRunAsFlag(string shortcutPath)
     {

@@ -452,6 +452,85 @@ public sealed class TodoReminderServiceTests : IDisposable
         Assert.Null(nextItem.SnoozedUntil);
     }
 
+    [Fact]
+    public async Task CheckNowAsync_AllDayItem_NotifiesAtConfiguredMorningTimeWithoutZeroZeroTimestamp()
+    {
+        var settingsService = CreateSettingsService("todo-widget");
+        settingsService.Settings.Todo.TodoAllDayReminderEnabled = true;
+        settingsService.Settings.Todo.TodoAllDayReminderTimeMinutes = 9 * 60 + 30;
+
+        var localDueMidnight = new DateTimeOffset(new DateTime(2026, 7, 20, 0, 0, 0, DateTimeKind.Local));
+        var createdBeforeMorning = localDueMidnight.AddHours(-2);
+        await CreateStore("todo-widget").SaveAsync(new TodoWidgetData
+        {
+            Items =
+            [
+                new TodoItem
+                {
+                    Id = "all-day-1",
+                    Text = "Submit report",
+                    DueDate = localDueMidnight,
+                    HasDueTime = false,
+                    CreatedAt = createdBeforeMorning,
+                    UpdatedAt = createdBeforeMorning
+                }
+            ]
+        });
+
+        var beforeNotifications = new List<TodoReminderNotification>();
+        var beforeService = CreateService(
+            settingsService,
+            new DateTimeOffset(new DateTime(2026, 7, 20, 9, 0, 0, DateTimeKind.Local)),
+            beforeNotifications);
+        Assert.Equal(0, await beforeService.CheckNowAsync(new DateTimeOffset(new DateTime(2026, 7, 20, 9, 0, 0, DateTimeKind.Local))));
+        Assert.Empty(beforeNotifications);
+
+        var atTimeNotifications = new List<TodoReminderNotification>();
+        var atTimeNow = new DateTimeOffset(new DateTime(2026, 7, 20, 9, 30, 10, DateTimeKind.Local));
+        var atTimeService = CreateService(settingsService, atTimeNow, atTimeNotifications);
+        Assert.Equal(1, await atTimeService.CheckNowAsync(atTimeNow));
+        var notification = Assert.Single(atTimeNotifications);
+        Assert.DoesNotContain("00:00", notification.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("23:59", notification.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CheckNowAsync_AllDayItem_RespectsDisabledSwitchAndAfternoonCreationGuard()
+    {
+        var settingsService = CreateSettingsService("todo-widget");
+        var localDueMidnight = new DateTimeOffset(new DateTime(2026, 7, 20, 0, 0, 0, DateTimeKind.Local));
+        var afternoonCreated = new DateTimeOffset(new DateTime(2026, 7, 20, 14, 0, 0, DateTimeKind.Local));
+
+        await CreateStore("todo-widget").SaveAsync(new TodoWidgetData
+        {
+            Items =
+            [
+                new TodoItem
+                {
+                    Id = "afternoon-task",
+                    Text = "Created after 09:00",
+                    DueDate = localDueMidnight,
+                    HasDueTime = false,
+                    CreatedAt = afternoonCreated,
+                    UpdatedAt = afternoonCreated
+                }
+            ]
+        });
+
+        var afternoonNotifications = new List<TodoReminderNotification>();
+        var afternoonNow = new DateTimeOffset(new DateTime(2026, 7, 20, 14, 5, 0, DateTimeKind.Local));
+        var afternoonService = CreateService(settingsService, afternoonNow, afternoonNotifications);
+        Assert.Equal(0, await afternoonService.CheckNowAsync(afternoonNow));
+        Assert.Empty(afternoonNotifications);
+
+        settingsService.Settings.Todo.TodoAllDayReminderEnabled = false;
+        var morningNow = new DateTimeOffset(new DateTime(2026, 7, 20, 9, 0, 5, DateTimeKind.Local));
+        var disabledNotifications = new List<TodoReminderNotification>();
+        var disabledService = CreateService(settingsService, morningNow, disabledNotifications);
+        Assert.Equal(0, await disabledService.CheckNowAsync(morningNow));
+        Assert.Empty(disabledNotifications);
+    }
+
     public void Dispose()
     {
         try

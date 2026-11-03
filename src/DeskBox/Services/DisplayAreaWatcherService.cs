@@ -6,27 +6,14 @@ namespace DeskBox.Services;
 
 /// <summary>
 /// Monitors display configuration changes (hot-plug add/remove, resolution
-/// changes, DPI changes) by periodically polling the display topology via
-/// Win32 <c>EnumDisplayMonitors</c>.
-/// <para>
-/// This service provides a consolidated <see cref="DisplaysChanged"/> event
-/// with debouncing, allowing the application to reposition widgets and
-/// invalidate caches when the display topology changes.
-/// </para>
-/// <para>
-/// The native change signal is already delivered through other windows:
-/// <c>WidgetDisplayChangeWatcher</c> subclasses each widget window for
-/// <c>WM_DISPLAYCHANGE</c> / <c>WM_DPICHANGED</c> / <c>WM_SETTINGCHANGE</c>
-/// (work area), and the lifecycle paths call <see cref="RefreshNow"/> on
-/// resume, unlock and shell restart. Polling is therefore a fallback for the
-/// cases those cannot observe (for example no widget window is alive yet),
-/// which is why its interval is deliberately coarse.
-/// </para>
+/// changes, DPI changes). When attached to a native message window via
+/// <see cref="AttachToMessageWindow"/>, <c>WM_DISPLAYCHANGE</c>,
+/// <c>WM_DPICHANGED</c>, and <c>WM_SETTINGCHANGE</c> deliver immediate
+/// notifications and background polling is completely stopped.
 /// </summary>
 public sealed class DisplayAreaWatcherService : IDisposable
 {
-    private const int PollIntervalMs = 10000;
-    private const int EventDrivenPollIntervalMs = 30000;
+    private const int PollIntervalMs = 30000;
     private const int DebounceDelayMs = 500;
     private const uint WmDisplayChange = 0x007E;
     private const uint WmSettingChange = 0x001A;
@@ -48,10 +35,13 @@ public sealed class DisplayAreaWatcherService : IDisposable
 
     /// <summary>
     /// Fired when the set of displays has changed (add, remove, resolution,
-    /// or DPI change).  Fires after a short debounce to avoid spamming
+    /// or DPI change). Fires after a short debounce to avoid spamming
     /// during rapid display configuration changes.
     /// </summary>
     public event Action? DisplaysChanged;
+
+    internal bool IsWindowSubclassAttached => _isMessageSubclassInstalled;
+    internal bool IsFallbackPollRunning => _pollTimer.IsRunning;
 
     public DisplayAreaWatcherService(DispatcherQueue dispatcherQueue)
     {
@@ -79,9 +69,12 @@ public sealed class DisplayAreaWatcherService : IDisposable
         _displaySignature = CaptureCurrentSignature();
         App.Log($"[DisplayAreaWatcher] Started, initial display count: {_displayCount}, signature: {_displaySignature}");
 
-        // After AttachToMessageWindow the timer is already running at the slow
-        // safety interval; starting again is a no-op but keeps a future
-        // attach-before-start ordering on the slow poll instead of none.
+        if (_isMessageSubclassInstalled)
+        {
+            _pollTimer.Stop();
+            return;
+        }
+
         _pollTimer.Start();
     }
 
@@ -89,10 +82,7 @@ public sealed class DisplayAreaWatcherService : IDisposable
     /// Subscribes this watcher to the native topology signals
     /// (<c>WM_DISPLAYCHANGE</c>, <c>WM_DPICHANGED</c>, and
     /// <c>WM_SETTINGCHANGE</c> for the work area) on an application-lifetime
-    /// message window, which slows the periodic poll in <see cref="Start"/>
-    /// to a safety net. The window is subclassed rather than created here so
-    /// the service keeps no window of its own; pass <see cref="IntPtr.Zero"/>
-    /// to stay poll-driven.
+    /// message window, stopping the fallback poll timer completely while attached.
     /// </summary>
     public void AttachToMessageWindow(IntPtr hWnd)
     {
@@ -124,14 +114,8 @@ public sealed class DisplayAreaWatcherService : IDisposable
         _messageWindow = hWnd;
         _isEventDriven = true;
         _pollTimer.Stop();
-        // Pure DPI changes, topology reflows, and RDP sessions do not raise
-        // WM_DISPLAYCHANGE, so the event path keeps a slow signature poll as
-        // the safety net instead of stopping it entirely.
-        _pollTimer.Interval = TimeSpan.FromMilliseconds(EventDrivenPollIntervalMs);
-        _pollTimer.Start();
         App.Log(
-            $"[DisplayAreaWatcher] Event driven on hwnd=0x{hWnd.ToInt64():X}; " +
-            $"slow safety poll every {EventDrivenPollIntervalMs / 1000}s.");
+            $"[DisplayAreaWatcher] Event driven on hwnd=0x{hWnd.ToInt64():X}; fallback poll stopped.");
     }
 
     private IntPtr MessageWindowSubclassProc(
@@ -145,8 +129,6 @@ public sealed class DisplayAreaWatcherService : IDisposable
         if (message is WmDisplayChange or WmDpiChanged ||
             message == WmSettingChange && wParam.ToUInt64() == SpiSetWorkArea)
         {
-            // Cheap Win32 query plus signature compare; the debounce timer
-            // already coalesces the burst a topology change produces.
             PollForChanges();
         }
         else if (message == WmNcDestroy)
@@ -159,6 +141,12 @@ public sealed class DisplayAreaWatcherService : IDisposable
 
     private void PollTimer_Tick(DispatcherQueueTimer sender, object args)
     {
+        if (_isMessageSubclassInstalled)
+        {
+            sender.Stop();
+            return;
+        }
+
         PollForChanges();
     }
 

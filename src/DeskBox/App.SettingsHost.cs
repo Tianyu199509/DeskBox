@@ -17,6 +17,7 @@ using DeskBox.Services;
 /// the remote facades, and the main process pushes reloads, hotkey
 /// registration changes, and backup/update events back.
 /// </summary>
+#if !DESKBOX_SETTINGS_HOST_BINARY
 public partial class App
 {
     /// <summary>
@@ -112,18 +113,13 @@ public partial class App
         }
     }
 
-    private bool _isSettingsHost;
-    private SettingsIpcClient? _settingsHostClient;
-    private int _settingsHostMainProcessId;
-    private bool _settingsHostExitStarted;
-    private Views.SettingsWindow? _settingsHostWindow;
-    private RemoteSearchConnectionClient? _settingsHostEverythingConnection;
+    protected bool _isSettingsHost;
 
     // Spawn-to-shown trace for the measurement script and crash diagnosis,
     // in the temp directory so it never touches the data root.
     private static readonly long SettingsHostBaselineTimestamp = Stopwatch.GetTimestamp();
 
-    private static void SettingsHostTrace(string marker)
+    internal static void SettingsHostTrace(string marker)
     {
         double elapsedMs =
             (Stopwatch.GetTimestamp() - SettingsHostBaselineTimestamp) * 1000.0 /
@@ -142,9 +138,46 @@ public partial class App
 
     internal bool IsSettingsHost => _isSettingsHost;
 
+    internal void ExitSettingsHost() => ExitSettingsHostCore();
+
+    protected virtual void ExitSettingsHostCore() => ExitSettingsHostInBinary();
+
+    partial void ExitSettingsHostInBinary();
+}
+#endif
+
+#if DESKBOX_AOT_SMOKE_HARNESS || DESKBOX_STORE || DESKBOX_SETTINGS_HOST_BINARY
+#if DESKBOX_SETTINGS_HOST_BINARY
+public sealed partial class SettingsHostApp : global::DeskBox.App
+#else
+public partial class App
+#endif
+{
+    private SettingsIpcClient? _settingsHostClient;
+    private int _settingsHostMainProcessId;
+    private bool _settingsHostExitStarted;
+    private Views.SettingsWindow? _settingsHostWindow;
+    private RemoteSearchConnectionClient? _settingsHostEverythingConnection;
+
     private SettingsService? SettingsHostSettingsService { get; set; }
 
     private LocalizationService? SettingsHostLocalizationService { get; set; }
+
+#if DESKBOX_SETTINGS_HOST_BINARY
+    protected override IntPtr GetVisibleSettingsWindowHandleCore()
+    {
+        return _settingsHostWindow is { IsVisibleToUser: true } hostWindow
+            ? WinRT.Interop.WindowNative.GetWindowHandle(hostWindow)
+            : base.GetVisibleSettingsWindowHandleCore();
+    }
+
+    protected override IntPtr GetSettingsHostWindowHandleCore()
+    {
+        return _settingsHostWindow is { } hostWindow
+            ? WinRT.Interop.WindowNative.GetWindowHandle(hostWindow)
+            : base.GetSettingsHostWindowHandleCore();
+    }
+#endif
 
     /// <summary>
     /// App-constructor branch for the settings host: initialize XAML only.
@@ -496,7 +529,7 @@ public partial class App
         // raised it in the host process — the guard was dead code here
         // (batch R9).
         appActions.DisplayTopologyChanged += () => UiDispatcherQueue.TryEnqueue(
-            () => DisplayTopologyChanged?.Invoke());
+            RaiseDisplayTopologyChanged);
 
         // The Todo/QuickCapture enable switches are feature-widget state: the
         // enabled dictionary lives in the widget-layout domain, which the main
@@ -557,14 +590,8 @@ public partial class App
             setRuntimeEnabled: null,
             tryEnqueue: action => UiDispatcherQueue.TryEnqueue(() => action()),
             reportError: ex => Log($"[SearchSettings] Operation failed: {ex}"));
-        var quickCaptureClipboard = new QuickCaptureClipboardRuntime(
-            shouldListen: () => false,
-            create: () => throw new InvalidOperationException(
-                "The settings host never listens to the clipboard"),
-            reportError: ex => Log($"[QuickCapture] Clipboard runtime failed: {ex}"));
         var quickCapture = new QuickCaptureSettingsCoordinator(
             settings,
-            quickCaptureClipboard,
             // The enable chain rides the feature-switch command (see the Todo
             // wiring above): the main process owns the dictionary and the
             // widget window, and decides reveal like every other
@@ -721,7 +748,11 @@ public partial class App
     /// bare Application.Exit defers through the XAML message loop and a
     /// half-dead settings window must not linger.
     /// </summary>
-    internal void ExitSettingsHost()
+#if DESKBOX_SETTINGS_HOST_BINARY
+    protected override void ExitSettingsHostCore()
+#else
+    partial void ExitSettingsHostInBinary()
+#endif
     {
         // Re-entrancy guard (batch R12): the pipe Disconnected subscription
         // fires from the reader task — including during this very method's
@@ -787,3 +818,4 @@ public partial class App
         Environment.Exit(0);
     }
 }
+#endif

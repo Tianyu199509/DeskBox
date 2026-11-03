@@ -41,11 +41,6 @@ public sealed class IdleRuntimeLifecycleContractTests
             app,
             "protected override async void OnLaunched(LaunchActivatedEventArgs args)",
             "private void OnDisplaysChanged()");
-        string clipboard = Slice(
-            app,
-            "internal void RefreshQuickCaptureClipboardService(bool captureCurrent = false)",
-            "internal TodoReminderService? RefreshTodoReminderService");
-        string clipboardRuntime = Read("src/DeskBox/Features/QuickCapture/QuickCaptureClipboardRuntime.cs");
         string quickCaptureCoordinator = Read("src/DeskBox/Services/QuickCaptureSettingsCoordinator.cs");
         string reminder = Slice(
             app,
@@ -53,19 +48,12 @@ public sealed class IdleRuntimeLifecycleContractTests
             "private TodoReminderService CreateTodoReminderService()");
         string manager = Read("src/DeskBox/Services/WidgetManager.FeatureWidgets.cs");
 
-        Assert.Contains("() => RefreshQuickCaptureClipboardService()", launch, StringComparison.Ordinal);
+        Assert.DoesNotContain("QuickCaptureClipboardRuntime", app, StringComparison.Ordinal);
+        Assert.DoesNotContain("QuickCaptureClipboardService", app, StringComparison.Ordinal);
+        Assert.DoesNotContain("RefreshQuickCaptureClipboardService", app, StringComparison.Ordinal);
         Assert.Contains("() => RefreshTodoReminderService()", launch, StringComparison.Ordinal);
-        Assert.Contains("new QuickCaptureClipboardRuntime(", launch, StringComparison.Ordinal);
-        Assert.Contains("() => new QuickCaptureClipboardService(SettingsService, QuickCaptureService)",
-            launch, StringComparison.Ordinal);
         Assert.DoesNotContain("StartTodoReminderService();", launch, StringComparison.Ordinal);
-
-        Assert.Contains("_quickCaptureSettings?.RefreshFromSettings(captureCurrent)", clipboard, StringComparison.Ordinal);
-        Assert.Contains("IQuickCaptureClipboardSession? Current", clipboardRuntime, StringComparison.Ordinal);
-        Assert.Contains("await session.StopAsync()", clipboardRuntime, StringComparison.Ordinal);
-        Assert.Contains("session.Dispose()", clipboardRuntime, StringComparison.Ordinal);
         Assert.Contains("_settings.SettingsChanged += OnSettingsChanged", quickCaptureCoordinator, StringComparison.Ordinal);
-        Assert.Contains("_clipboard.StopAsync()", quickCaptureCoordinator, StringComparison.Ordinal);
 
         // Session lifetime is exercised by TodoReminderRuntimeTests; this
         // integration guard only pins the host's delegation to that owner.

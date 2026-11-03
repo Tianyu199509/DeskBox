@@ -112,19 +112,15 @@ public sealed partial class ContentWidgetWindow
         };
         flyout.Items.Add(createWidgetItem);
 
+        bool mapFolderWhenClosed = false;
         var mapFolderItem = new MenuFlyoutItem
         {
             Text = localization.T("Common.NewFolderMapping"),
             Icon = new SymbolIcon(Symbol.OpenFile)
         };
-        mapFolderItem.Click += async (_, _) =>
+        mapFolderItem.Click += (_, _) =>
         {
-            // The native picker is modal on this thread; give the flyout its
-            // close before the dialog takes over the message loop (the tray
-            // entrance hides + yields for the same reason).
-            flyout.Hide();
-            await Task.Yield();
-            await App.Current.CreateFolderWidgetFromPickerAsync();
+            mapFolderWhenClosed = true;
         };
         flyout.Items.Add(mapFolderItem);
 
@@ -136,6 +132,28 @@ public sealed partial class ContentWidgetWindow
         addFeatureWidgetItem.Click += (_, _) =>
             App.Current.ShowSettings("FeatureWidgets");
         flyout.Items.Add(addFeatureWidgetItem);
+
+        var createAiWidgetItem = new MenuFlyoutItem
+        {
+            Text = localization.T("Common.CreateAiWidget"),
+            Icon = new FontIcon { Glyph = "\uE945" }
+        };
+        createAiWidgetItem.Click += (_, _) =>
+            App.Current.ShowCustomWidgetStudio();
+        flyout.Items.Add(createAiWidgetItem);
+
+        flyout.Closed += (_, _) =>
+        {
+            if (!mapFolderWhenClosed)
+            {
+                return;
+            }
+
+            mapFolderWhenClosed = false;
+            IntPtr preferredOwner = HWnd;
+            _ = DispatcherQueue.TryEnqueue(async () =>
+                await App.Current.CreateFolderWidgetFromPickerAsync(preferredOwner));
+        };
 
         ShowFlyoutWithInteraction(
             flyout,
@@ -152,17 +170,28 @@ public sealed partial class ContentWidgetWindow
         {
             if (_contentHost.CurrentContent is IWidgetAddActionContent addActionContent)
             {
+                PrepareSurfaceForExternalInteraction();
                 await addActionContent.AddFromTitleButtonAsync();
             }
         });
     }
 
+    internal void PrepareSurfaceForExternalInteraction()
+    {
+        ExpandWidgetFromHost();
+
+        EnsureCollapsedContentViewAttached();
+    }
+
     internal Task RevealItemAsync(string? itemId)
     {
+        PrepareSurfaceForExternalInteraction();
         return _contentHost.CurrentContent is QuickCaptureWidgetContentAdapter quickCapture
             ? quickCapture.RevealItemAsync(itemId)
             : Task.CompletedTask;
     }
+
+
 
     private void CloseButton_Click(object sender, RoutedEventArgs e)
     {
@@ -177,18 +206,9 @@ public sealed partial class ContentWidgetWindow
         if (FeatureWidgetSettings.IsFeatureWidget(_config.WidgetKind) &&
             App.Current.WidgetManager is { } widgetManager)
         {
-            var localization = App.Current.LocalizationService;
-            var flyout = WidgetCompactConfirmationMenuBuilder.CreateDeleteConfirmation(
-                new WidgetCompactConfirmationOptions(
-                    localization.Format("Widget.FeatureWidget.DisableConfirmTitle", _config.Name),
-                    localization.T("Widget.FeatureWidget.Disable"),
-                    async () => await DisableCurrentFeatureWidgetAsync(widgetManager))
-                {
-                    Message = localization.T("Widget.FeatureWidget.DisableConfirmNote"),
-                    MessageGlyph = "\uE946",
-                    CancelText = localization.T("Common.Cancel")
-                });
-            ShowFlyoutWithInteraction(flyout, ContentWidgetShell.CloseActionButton);
+            ShowFlyoutWithInteraction(
+                CreateFeatureWidgetCloseFlyout(widgetManager),
+                ContentWidgetShell.CloseActionButton);
             return;
         }
 
@@ -277,13 +297,51 @@ public sealed partial class ContentWidgetWindow
     private MenuFlyout CreateMoreFlyout()
     {
         var flyout = new MenuFlyout();
+        bool startRenameWhenClosed = false;
+        bool showCloseWhenClosed = false;
+        IDisposable? closeWidgetFlyoutHandoff = null;
+        bool showForegroundColorPickerWhenClosed = false;
+        bool showTitleIconCustomizerWhenClosed = false;
+        bool showBackgroundCustomizerWhenClosed = false;
+        bool showTodoExportWhenClosed = false;
+        TodoWidgetContentAdapter? pendingTodoExportAdapter = null;
+        IDisposable? pickerHandoff = null;
 
-        if (CurrentContent is GlanceWidgetContentAdapter glance)
+        if (CurrentContent is ClipboardWidgetContentAdapter clipboardContent)
+        {
+            PopulateClipboardMoreMenuItems(flyout, clipboardContent);
+        }
+        else if (CurrentContent is TodoWidgetContentAdapter todoContent)
+        {
+            var exportTodoItem = new MenuFlyoutItem
+            {
+                Text = App.Current.LocalizationService.T("Todo.Export.MenuItem"),
+                Icon = new FontIcon { Glyph = "\uEDE1" }
+            };
+            exportTodoItem.Click += (_, _) =>
+            {
+                showTodoExportWhenClosed = true;
+                pendingTodoExportAdapter = todoContent;
+                pickerHandoff ??= AcquireCloseWidgetFlyoutHandoff();
+            };
+            flyout.Items.Add(exportTodoItem);
+            flyout.Items.Add(new MenuFlyoutSeparator());
+        }
+        else if (CurrentContent is GlanceWidgetContentAdapter glance)
         {
             GlanceWidgetContextMenuBuilder.Append(
                 flyout,
                 glance.ViewModel,
                 App.Current.LocalizationService);
+        }
+        else if (CurrentContent is CustomWidgetContentAdapter customContent)
+        {
+            CustomWidgetContextMenuBuilder.PopulateMenuItems(
+                flyout,
+                customContent,
+                App.Current.LocalizationService,
+                section => App.Current.ShowSettings(section),
+                widgetId => App.Current.ShowCustomWidgetStudio(widgetId));
         }
 
         var rename = new MenuFlyoutItem
@@ -291,13 +349,6 @@ public sealed partial class ContentWidgetWindow
             Text = App.Current.LocalizationService.T("Common.Rename"),
             Icon = new FontIcon { Glyph = "\uE8AC" }
         };
-        bool startRenameWhenClosed = false;
-        bool showCloseWhenClosed = false;
-        IDisposable? closeWidgetFlyoutHandoff = null;
-        bool showForegroundColorPickerWhenClosed = false;
-        bool showTitleIconCustomizerWhenClosed = false;
-        bool showBackgroundCustomizerWhenClosed = false;
-        IDisposable? pickerHandoff = null;
         rename.Click += (_, _) => startRenameWhenClosed = true;
         flyout.Closed += (_, _) =>
         {
@@ -345,6 +396,13 @@ public sealed partial class ContentWidgetWindow
                             ShowWidgetBackgroundCustomizer();
                             return Task.CompletedTask;
                         });
+                    pickerHandoff = null;
+                }
+                else if (showTodoExportWhenClosed && pendingTodoExportAdapter is { } exportAdapter)
+                {
+                    QueueInteractionGuardedFlyout(
+                        pickerHandoff,
+                        () => ShowTodoExportFlyoutAsync(exportAdapter));
                     pickerHandoff = null;
                 }
             }
@@ -476,7 +534,7 @@ public sealed partial class ContentWidgetWindow
         var disableWidget = new MenuFlyoutItem
         {
             Text = GetFeatureWidgetCloseMenuText(),
-            Icon = new FontIcon { Glyph = "\uE7E8" }
+            Icon = new FontIcon { Glyph = GetFeatureWidgetCloseMenuGlyph() }
         };
         WidgetDangerActionStyle.Apply(disableWidget);
         disableWidget.Click += (_, _) =>
@@ -518,7 +576,7 @@ public sealed partial class ContentWidgetWindow
         var closeWidget = new MenuFlyoutItem
         {
             Text = GetFeatureWidgetCloseMenuText(),
-            Icon = new FontIcon { Glyph = "\uE7E8" }
+            Icon = new FontIcon { Glyph = GetFeatureWidgetCloseMenuGlyph() }
         };
         WidgetDangerActionStyle.Apply(closeWidget);
         closeWidget.Click += (_, _) =>
@@ -538,14 +596,22 @@ public sealed partial class ContentWidgetWindow
         e.CloseWidgetItem = closeWidget;
     }
 
+    private string GetFeatureWidgetCloseMenuGlyph() =>
+        _config.WidgetKind == WidgetKind.Custom ? "\uE74D" : "\uE7E8";
+
     private string GetFeatureWidgetCloseMenuText()
     {
         LocalizationService localization = App.Current.LocalizationService;
-        return _config.WidgetKind == WidgetKind.Glance
-            ? localization.Format(
+        return _config.WidgetKind switch
+        {
+            WidgetKind.Custom => localization.Format(
+                "CustomWidget.Menu.DeleteWidget",
+                _config.Name),
+            WidgetKind.Glance => localization.Format(
                 "Widget.FeatureWidget.DisableConfirmTitle",
-                _config.Name)
-            : localization.T("Widget.FeatureWidget.Disable");
+                _config.Name),
+            _ => localization.T("Widget.FeatureWidget.Disable")
+        };
     }
 
     private Task ShowCloseWidgetFlyout(FrameworkElement target)
@@ -650,12 +716,21 @@ public sealed partial class ContentWidgetWindow
         WidgetManager widgetManager)
     {
         LocalizationService localization = App.Current.LocalizationService;
+        bool isCustomDelete = _config.WidgetKind == WidgetKind.Custom;
+        string confirmTitle = isCustomDelete
+            ? localization.Format("CustomWidget.DeleteConfirm.Title", _config.Name)
+            : localization.Format("Widget.FeatureWidget.DisableConfirmTitle", _config.Name);
+        string confirmActionText = isCustomDelete
+            ? localization.T("Common.Delete")
+            : localization.T("Widget.FeatureWidget.Disable");
+        string confirmNote = isCustomDelete
+            ? localization.T("CustomWidget.DeleteConfirm.Note")
+            : localization.T("Widget.FeatureWidget.DisableConfirmNote");
+
         return WidgetCompactConfirmationMenuBuilder.CreateDeleteConfirmation(
             new WidgetCompactConfirmationOptions(
-                localization.Format(
-                    "Widget.FeatureWidget.DisableConfirmTitle",
-                    _config.Name),
-                localization.T("Widget.FeatureWidget.Disable"),
+                confirmTitle,
+                confirmActionText,
                 async () =>
                 {
                     if (_isCloseWidgetPending)
@@ -674,21 +749,23 @@ public sealed partial class ContentWidgetWindow
                     }
                 })
             {
-                Message = localization.T(
-                    "Widget.FeatureWidget.DisableConfirmNote"),
-                MessageGlyph = "\uE946",
+                Message = confirmNote,
+                MessageGlyph = isCustomDelete ? "\uE74D" : "\uE946",
                 CancelText = localization.T("Common.Cancel")
             });
     }
 
     private Task DisableCurrentFeatureWidgetAsync(WidgetManager widgetManager)
     {
-        return _config.WidgetKind == WidgetKind.Glance
-            ? widgetManager.SetGlanceWidgetInstanceEnabledAsync(_config.Id, enabled: false)
-            : widgetManager.SetFeatureWidgetEnabledAsync(
+        return _config.WidgetKind switch
+        {
+            WidgetKind.Glance => widgetManager.SetGlanceWidgetInstanceEnabledAsync(_config.Id, enabled: false),
+            WidgetKind.Custom => widgetManager.RemoveCustomWidgetAsync(_config.Id),
+            _ => widgetManager.SetFeatureWidgetEnabledAsync(
                 _config.WidgetKind,
                 enabled: false,
-                reveal: false);
+                reveal: false)
+        };
     }
 
     private MenuFlyout CreateFileWidgetCloseFlyout(
@@ -1191,7 +1268,7 @@ public sealed partial class ContentWidgetWindow
             ContentWidgetShell);
     }
 
-    private void ShowFlyoutWithInteraction(FlyoutBase flyout, FrameworkElement target, Windows.Foundation.Point? position = null)
+    private void ShowFlyoutWithInteraction(FlyoutBase flyout, FrameworkElement target, Windows.Foundation.Point? position = null, FlyoutPlacementMode? placement = null)
     {
         BeginCompactInteraction();
         App.Current.WidgetManager?.BeginWidgetInteraction("content-flyout-opened");
@@ -1209,11 +1286,23 @@ public sealed partial class ContentWidgetWindow
 
         try
         {
-            if (position is Windows.Foundation.Point point)
+            if (position is Windows.Foundation.Point point && placement is FlyoutPlacementMode placedMode)
             {
                 flyout.ShowAt(
                     target,
-                    new FlyoutShowOptions { Position = point });
+                    new FlyoutShowOptions { Position = point, Placement = placedMode });
+            }
+            else if (position is Windows.Foundation.Point posOnly)
+            {
+                flyout.ShowAt(
+                    target,
+                    new FlyoutShowOptions { Position = posOnly });
+            }
+            else if (placement is FlyoutPlacementMode modeOnly)
+            {
+                flyout.ShowAt(
+                    target,
+                    new FlyoutShowOptions { Placement = modeOnly });
             }
             else
             {
@@ -1259,6 +1348,161 @@ public sealed partial class ContentWidgetWindow
             owner.EndCompactInteraction();
             widgetManager?.EndWidgetInteraction(
                 "content-close-confirmation-handoff-completed");
+        }
+    }
+
+    private void PopulateClipboardMoreMenuItems(
+        MenuFlyout flyout,
+        ClipboardWidgetContentAdapter clipboardContent)
+    {
+        var localization = App.Current.LocalizationService;
+        bool isPaused = clipboardContent.ViewModel.IsPaused;
+
+        var pauseItem = new MenuFlyoutItem
+        {
+            Text = localization.T(isPaused ? "Clipboard.Action.ResumeCapture" : "Clipboard.Action.PauseCapture"),
+            Icon = new FontIcon { Glyph = isPaused ? "\uE768" : "\uE769" }
+        };
+        pauseItem.Click += (_, _) =>
+        {
+            flyout.Hide();
+            clipboardContent.ViewModel.TogglePause();
+        };
+        flyout.Items.Add(pauseItem);
+
+        var clearItem = new MenuFlyoutItem
+        {
+            Text = localization.T("Clipboard.Action.ClearUnpinned"),
+            Icon = new FontIcon { Glyph = "\uE74D" },
+            IsEnabled = clipboardContent.ViewModel.TotalItemCount > 0
+        };
+        clearItem.Click += async (_, _) =>
+        {
+            flyout.Hide();
+            int removed = await clipboardContent.ViewModel.ClearUnpinnedAsync();
+            if (removed > 0)
+            {
+                ContentWidgetShell.ShowFeedback(new WidgetFeedbackRequest(
+                    localization.Format("Clipboard.Feedback.ClearedCount", removed),
+                    WidgetFeedbackSeverity.Info,
+                    "clipboard-cleared"));
+            }
+        };
+        flyout.Items.Add(clearItem);
+        flyout.Items.Add(new MenuFlyoutSeparator());
+    }
+
+    private async Task ShowTodoExportFlyoutAsync(TodoWidgetContentAdapter todoContent)
+    {
+        LocalizationService loc = App.Current.LocalizationService;
+        IReadOnlyList<TodoItem> items;
+        TodoExportStatusScope initialScope;
+        try
+        {
+            (items, initialScope) = await todoContent.PrepareExportSnapshotAsync();
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[TodoExport] Failed to snapshot Todo items: {ex}");
+            ContentWidgetShell.ShowFeedback(new WidgetFeedbackRequest(
+                loc.Format("Todo.Export.Status.Failed", ex.Message),
+                WidgetFeedbackSeverity.Error,
+                "todo-export-failed"));
+            return;
+        }
+
+        if (items.Count == 0)
+        {
+            ContentWidgetShell.ShowFeedback(new WidgetFeedbackRequest(
+                loc.T("Todo.Export.NoTasksInStore"),
+                WidgetFeedbackSeverity.Info,
+                "todo-export-empty"));
+            return;
+        }
+
+        var panel = new DeskBox.Controls.Todo.TodoExportPanel(
+            items,
+            loc,
+            initialScope,
+            isSelectionSubset: false,
+            showFlyoutChrome: true);
+
+        Flyout exportFlyout = DeskBox.Controls.Todo.TodoExportPanel.CreateAnchoredFlyout(
+            panel,
+            FlyoutPlacementMode.BottomEdgeAlignedRight);
+
+        bool exportStarted = false;
+        panel.CancelRequested += (_, _) => exportFlyout.Hide();
+        panel.ExportRequested += async (_, _) =>
+        {
+            if (exportStarted || !panel.CanExport)
+            {
+                return;
+            }
+
+            exportStarted = true;
+            TodoExportOptions chosenOptions = panel.CurrentOptions;
+            TodoItem[] itemsToExport = panel.CurrentPreview.Items.ToArray();
+            IDisposable pickerLease = AcquireCloseWidgetFlyoutHandoff();
+            try
+            {
+                exportFlyout.Hide();
+                string? savedPath = await DeskBox.Controls.Todo.TodoExportWorkflow.PickAndExportAsync(
+                    HWnd,
+                    itemsToExport,
+                    chosenOptions,
+                    loc);
+
+                if (!string.IsNullOrWhiteSpace(savedPath))
+                {
+                    ContentWidgetShell.ShowFeedback(new WidgetFeedbackRequest(
+                        loc.Format("Todo.Export.Status.Exported", itemsToExport.Length),
+                        WidgetFeedbackSeverity.Success,
+                        "todo-export-succeeded",
+                        loc.T("Todo.Export.Action.OpenFile"),
+                        () =>
+                        {
+                            DeskBox.Controls.Todo.TodoExportWorkflow.OpenExportedFile(savedPath);
+                            return Task.CompletedTask;
+                        }));
+                }
+            }
+            catch (Exception ex)
+            {
+                App.Log($"[TodoExport] Widget export failed: {ex}");
+                ContentWidgetShell.ShowFeedback(new WidgetFeedbackRequest(
+                    loc.Format("Todo.Export.Status.Failed", ex.Message),
+                    WidgetFeedbackSeverity.Error,
+                    "todo-export-failed"));
+            }
+            finally
+            {
+                pickerLease.Dispose();
+            }
+        };
+
+        if (ContentWidgetShell.IsCollapsed)
+        {
+            ShowFlyoutWithInteraction(
+                exportFlyout,
+                ContentWidgetShell,
+                placement: FlyoutPlacementMode.BottomEdgeAlignedRight);
+        }
+        else if (ContentWidgetShell.TitleBar is { IsLoaded: true, Visibility: Visibility.Visible, ActualHeight: > 0 } titleBar)
+        {
+            ShowFlyoutWithInteraction(
+                exportFlyout,
+                titleBar,
+                placement: FlyoutPlacementMode.BottomEdgeAlignedRight);
+        }
+        else
+        {
+            double rightX = Math.Max(16, ContentWidgetShell.ActualWidth - 16);
+            ShowFlyoutWithInteraction(
+                exportFlyout,
+                ContentWidgetShell,
+                position: new Windows.Foundation.Point(rightX, 24),
+                placement: FlyoutPlacementMode.BottomEdgeAlignedRight);
         }
     }
 

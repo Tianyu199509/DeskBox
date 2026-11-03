@@ -1,4 +1,4 @@
-﻿using DeskBox.Helpers;
+using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Platform;
 using DeskBox.Services;
@@ -111,6 +111,11 @@ public sealed partial class FileSurfaceContent
         UIElement pointerSurface,
         PointerRoutedEventArgs e)
     {
+        if (TryHandleElevatedPointerMoved(e))
+        {
+            return;
+        }
+
         if (!_selectionPointerPressed)
         {
             return;
@@ -154,6 +159,11 @@ public sealed partial class FileSurfaceContent
         UIElement pointerSurface,
         PointerRoutedEventArgs e)
     {
+        if (TryHandleElevatedPointerReleased(e))
+        {
+            return;
+        }
+
         bool wasBoxSelecting = _isBoxSelecting;
         bool completedRightMarquee =
             wasBoxSelecting && _selectionStartedWithRightButton;
@@ -197,6 +207,7 @@ public sealed partial class FileSurfaceContent
         object sender,
         PointerRoutedEventArgs e)
     {
+        HandleElevatedPointerCaptureLost(e.Pointer.PointerId);
         if (sender is ListViewBase listView)
         {
             HandleItemsPointerCaptureLost(listView);
@@ -872,10 +883,20 @@ public sealed partial class FileSurfaceContent
                 return;
             }
 
+            bool isDirectory = Directory.Exists(item.Path);
             string linkPath = FileService.GetAvailablePath(
-                Path.Combine(directory, GetShortcutDisplayName(item.Path)));
+                Path.Combine(directory, GetShortcutDisplayName(item.Path, isDirectory)));
 
-            if (item.NamespaceShortcutKind != NamespaceShortcutKind.None &&
+            if (!isDirectory &&
+                ShortcutHelper.IsShortcutPath(item.Path) &&
+                File.Exists(item.Path))
+            {
+                DropStagingFileOps.CopyShortcutFilePreservingStreams(
+                    item.Path,
+                    linkPath);
+                ShortcutHelper.InvalidateStoredMetadataCache(linkPath);
+            }
+            else if (item.NamespaceShortcutKind != NamespaceShortcutKind.None &&
                 !string.IsNullOrWhiteSpace(item.NamespaceShortcutParsingName))
             {
                 ShortcutHelper.CreateShellNamespaceShortcut(
@@ -883,7 +904,7 @@ public sealed partial class FileSurfaceContent
                     item.NamespaceShortcutParsingName,
                     T("Widget.CreateShortcut"));
             }
-            else if (Directory.Exists(item.Path))
+            else if (isDirectory)
             {
                 ShortcutHelper.CreateOrUpdateFolderShortcut(
                     linkPath,
@@ -1587,7 +1608,7 @@ public sealed partial class FileSurfaceContent
         var item = new ToggleMenuFlyoutItem
         {
             Text = T(localizationKey),
-            IsChecked = ViewModel.Config.SortMode == mode
+            IsChecked = ViewModel.EffectiveSortMode == mode
         };
         item.Click += (_, _) =>
         {

@@ -1,4 +1,4 @@
-﻿using System.Text.RegularExpressions;
+using System.Text.RegularExpressions;
 using System.Reflection;
 using System.Reflection.Emit;
 using DeskBox.Models;
@@ -147,7 +147,6 @@ public sealed class ModuleBoundaryContractTests
         ["src/DeskBox/Services/DesktopDoubleClickActivationService.cs"] = 2,
         ["src/DeskBox/Services/FileMetaService.cs"] = 1,
         ["src/DeskBox/Services/GlobalHotkeyService.cs"] = 2,
-        ["src/DeskBox/Services/QuickCaptureClipboardService.cs"] = 3,
         ["src/DeskBox/Services/PerformanceLogger.cs"] = 1,
         ["src/DeskBox/Services/Localized.cs"] = 1,
         ["src/DeskBox/Services/ResizeGuideOverlayService.cs"] = 4,
@@ -279,7 +278,6 @@ public sealed class ModuleBoundaryContractTests
     {
         foreach (string path in new[]
         {
-            "src/DeskBox/Features/QuickCapture/QuickCaptureClipboardRuntime.cs",
             "src/DeskBox/Services/QuickCaptureSettingsCoordinator.cs",
             "src/DeskBox/ViewModels/SettingsViewModel.QuickCaptureSettings.cs",
             // Batch 46: the enablement/recording switch chain (the old
@@ -523,7 +521,7 @@ public sealed class ModuleBoundaryContractTests
         ["src/DeskBox/Services/LegacySearchIndexCleanupService.cs"] = 1,
         ["src/DeskBox/Services/ManagedStorageDesktopShortcutService.cs"] = 1,
         ["src/DeskBox/Services/NativeNotificationActivationEnvelopeStore.cs"] = 6,
-        ["src/DeskBox/Services/QuickCaptureService.cs"] = 8,
+        ["src/DeskBox/Services/QuickCaptureService.cs"] = 6,
         ["src/DeskBox/Services/ReleaseNotesService.cs"] = 1,
         // +2: RevertLastCommit restores its own .bak (File.Copy) or deletes
         // a primary the same commit created — composite-save rollback inside

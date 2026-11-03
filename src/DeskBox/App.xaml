@@ -23,6 +23,7 @@
                     <SolidColorBrush x:Key="WidgetOverlayStrokeBrush" Color="#24000000" />
                     <SolidColorBrush x:Key="WidgetLayerFillSecondaryBrush" Color="#70FFFFFF" />
                     <SolidColorBrush x:Key="WidgetLayerStrokeBrush" Color="#16000000" />
+                    <SolidColorBrush x:Key="WidgetGroupTabStripBorderBrush" Color="{ThemeResource TextFillColorPrimary}" Opacity="0.10" />
                     <!-- Code-resolved neutral interaction tones. WinUI's themed
                          tokens cannot be resolved by element theme from code
                          (an application-scope lookup follows the system theme,
@@ -50,6 +51,7 @@
                     <SolidColorBrush x:Key="WidgetOverlayStrokeBrush" Color="#52FFFFFF" />
                     <SolidColorBrush x:Key="WidgetLayerFillSecondaryBrush" Color="#0DFFFFFF" />
                     <SolidColorBrush x:Key="WidgetLayerStrokeBrush" Color="#20FFFFFF" />
+                    <SolidColorBrush x:Key="WidgetGroupTabStripBorderBrush" Color="{ThemeResource TextFillColorPrimary}" Opacity="0.10" />
                     <SolidColorBrush x:Key="DeskBoxNeutralFillSecondaryBrush" Color="#0FFFFFFF" />
                     <SolidColorBrush x:Key="DeskBoxNeutralFillTertiaryBrush" Color="#0AFFFFFF" />
                     <SolidColorBrush x:Key="DeskBoxNeutralLineBrush" Color="#8BFFFFFF" />
@@ -73,6 +75,7 @@
                     <SolidColorBrush x:Key="WidgetOverlayStrokeBrush" Color="#52FFFFFF" />
                     <SolidColorBrush x:Key="WidgetLayerFillSecondaryBrush" Color="#0DFFFFFF" />
                     <SolidColorBrush x:Key="WidgetLayerStrokeBrush" Color="#20FFFFFF" />
+                    <SolidColorBrush x:Key="WidgetGroupTabStripBorderBrush" Color="{ThemeResource TextFillColorPrimary}" Opacity="0.10" />
                     <SolidColorBrush x:Key="DeskBoxNeutralFillSecondaryBrush" Color="#0FFFFFFF" />
                     <SolidColorBrush x:Key="DeskBoxNeutralFillTertiaryBrush" Color="#0AFFFFFF" />
                     <SolidColorBrush x:Key="DeskBoxNeutralLineBrush" Color="#8BFFFFFF" />
@@ -106,6 +109,7 @@
                     <SolidColorBrush x:Key="WidgetOverlayStrokeBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
                     <SolidColorBrush x:Key="WidgetLayerFillSecondaryBrush" Color="{ThemeResource SystemColorWindowColor}" />
                     <SolidColorBrush x:Key="WidgetLayerStrokeBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+                    <SolidColorBrush x:Key="WidgetGroupTabStripBorderBrush" Color="{ThemeResource SystemColorHighlightColor}" />
                     <SolidColorBrush x:Key="DeskBoxNeutralFillSecondaryBrush" Color="Transparent" />
                     <SolidColorBrush x:Key="DeskBoxNeutralFillTertiaryBrush" Color="Transparent" />
                     <SolidColorBrush x:Key="DeskBoxNeutralLineBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
@@ -246,6 +250,10 @@
                 <Setter Property="TextAlignment" Value="Center" />
                 <Setter Property="TextTrimming" Value="CharacterEllipsis" />
                 <Setter Property="TextWrapping" Value="Wrap" />
+            </Style>
+
+            <Style TargetType="FlyoutPresenter" BasedOn="{StaticResource DefaultFlyoutPresenterStyle}">
+                <Setter Property="CornerRadius" Value="{StaticResource OverlayCornerRadius}" />
             </Style>
 
             <Style TargetType="MenuFlyoutPresenter" BasedOn="{StaticResource DefaultMenuFlyoutPresenterStyle}">

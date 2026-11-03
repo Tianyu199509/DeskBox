@@ -3,12 +3,10 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Services;
+using DeskBox.Services.Lyrics;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
-using Windows.Foundation;
-using Windows.Graphics.Imaging;
-using Windows.Storage.Streams;
 using Windows.UI;
 
 namespace DeskBox.ViewModels;
@@ -16,9 +14,10 @@ namespace DeskBox.ViewModels;
 public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
 {
     private const int MaxTransientEmptyInfoRetries = 4;
-    private const int ExpandedProgressRefreshMs = 500;
-    private const int CompactProgressRefreshMs = 1000;
-    private const int MediaPropertiesSettleDelayMs = 180;
+    private const int ExpandedProgressRefreshMs = 1000;
+    private const int CompactProgressRefreshMs = 2000;
+    private const int MediaPropertiesSettleDelayMs = 220;
+    private const int LyricsLookupDebounceMs = 300;
     private static readonly TimeSpan RevealFullRefreshFreshness =
         TimeSpan.FromSeconds(30);
 
@@ -33,9 +32,12 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
     private readonly MusicVolumeService _musicVolumeService;
     private readonly LocalizationService _localizationService;
     private readonly SettingsService? _settingsService;
+    private readonly LyricsService _lyricsService;
     private readonly WidgetConfig _config;
     private readonly Microsoft.UI.Dispatching.DispatcherQueue? _dispatcherQueue;
     private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer? _progressTimer;
+    private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer? _lyricTimer;
+    private readonly MusicTimelineExtrapolator _timelineExtrapolator = new();
 
     private string? _preferredSessionId;
     private string _title = string.Empty;
@@ -46,6 +48,7 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
     private MusicPlaybackState _playbackState = MusicPlaybackState.Unknown;
     private TimeSpan _position;
     private TimeSpan _duration;
+    private string _displayedPositionText = "--:--";
     private BitmapImage? _thumbnailImage;
     private bool _canPlay;
     private bool _canPause;
@@ -62,8 +65,17 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
     private int _playbackRefreshGeneration;
     private int _coverGeneration;
     private string? _lastCoverSignature;
+    private ulong _lastCoverFingerprint;
+    private string? _confirmedEmptyCoverSignature;
     private string? _coverRetrySignature;
     private int _coverRetryCount;
+    private bool _coverRetryInFlight;
+    private string? _lastTrackIdentitySignature;
+    private TimeSpan _previousTrackNativeDuration;
+    private TimeSpan _currentTrackInitialNativeDuration;
+    private bool _currentTrackDurationUntrusted;
+    private TimeSpan _lastLyricsQueryDuration;
+    private bool _hasRetriedLyricsWithUpdatedDuration;
     private int _transientEmptyInfoRetryCount;
     private int _transientEmptyInfoGeneration;
     private bool _fullRefreshPending;
@@ -73,25 +85,51 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
     private bool _isSeeking;
     private bool _isChangingPlaybackMode;
     private bool _isChangingSystemVolume;
+    private bool _isChangingSessionVolume;
     private bool _isRefreshingVolume;
     private double? _pendingSystemVolume;
+    private double? _pendingSessionVolume;
     private bool _isDisposed;
-    private DateTimeOffset _lastPositionSyncAt;
-    private TimeSpan _lastSyncedPosition;
     private double _textSize = SettingsService.DefaultTextSize;
     private double _seekValue;
     private double _systemVolume = 0.5;
-    private double _sessionVolume = 0.5;
+    private double _sessionVolume = 1.0;
     private bool _hasSessionVolume;
     private bool _useArtworkBackdrop = true;
     private bool _enableCoverHoverMotion = true;
     private bool _hideTimelineWhenUnavailable = true;
+    private bool _showLyrics = true;
+    private bool _showCapsuleLyrics = true;
+    private string _localLyricsFolder = string.Empty;
     private bool _timelineRowHidden;
     private DateTimeOffset? _timelineUnavailableSince;
     private string _displayMode = SettingsService.MusicDisplayModeAuto;
     private Color _artworkColor = AccentColorHelper.DefaultAccentColor;
+    private Color _backdropColor = AccentColorHelper.DefaultAccentColor;
     private bool _hasArtworkColor;
+    private SolidColorBrush? _cachedMusicAccentBrush;
+    private Color _cachedMusicAccentBrushColor;
+    private SolidColorBrush? _cachedPlayPauseBrush;
+    private Color _cachedPlayPauseBrushColor;
     private MusicPlaybackMode _playbackMode = MusicPlaybackMode.Normal;
+
+    // Synchronized lyrics state (event-driven, zero polling)
+    private CancellationTokenSource? _lyricsFetchCts;
+    private string? _lastLyricsTrackSignature;
+    private LrcDocument _currentLyrics = LrcDocument.Empty;
+    private int _activeLyricIndex = -1;
+    private string _currentLyricLine = string.Empty;
+    private string? _currentLyricSecondaryLine;
+    private bool _isLoadingLyrics;
+    private bool _isLyricIntroPreview;
+    private bool _isLyricsViewOpen;
+    private string _cachedSubtitleText = string.Empty;
+    private Visibility _cachedSubtitleVisibility = Visibility.Visible;
+    private double _cachedSubtitleOpacity = 0.82;
+    private string _cachedInlineLyricText = string.Empty;
+    private Visibility _cachedInlineLyricVisibility = Visibility.Collapsed;
+    private double _cachedInlineLyricOpacity = 0.96;
+    private Visibility _cachedActiveLyricAccentVisibility = Visibility.Collapsed;
 
     public MusicWidgetViewModel(
         WidgetConfig config,
@@ -99,13 +137,15 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
         LocalizationService localizationService,
         SettingsService? settingsService = null,
         Microsoft.UI.Dispatching.DispatcherQueue? dispatcherQueue = null,
-        MusicVolumeService? musicVolumeService = null)
+        MusicVolumeService? musicVolumeService = null,
+        LyricsService? lyricsService = null)
     {
         _config = config;
         _musicSessionService = musicSessionService;
         _musicVolumeService = musicVolumeService ?? new MusicVolumeService();
         _localizationService = localizationService;
         _settingsService = settingsService;
+        _lyricsService = lyricsService ?? LyricsService.Shared;
         _dispatcherQueue = dispatcherQueue ?? TryGetCurrentDispatcherQueue();
 
         if (_settingsService is not null)
@@ -125,8 +165,14 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
             _progressTimer.IsRepeating = true;
             _progressTimer.Tick += ProgressTimer_Tick;
             PerformanceLogger.RecordTransientUiTimerCreated();
+
+            _lyricTimer = _dispatcherQueue.CreateTimer();
+            _lyricTimer.IsRepeating = false;
+            _lyricTimer.Tick += LyricTimer_Tick;
+            PerformanceLogger.RecordTransientUiTimerCreated();
         }
 
+        RefreshSubtitleState(notify: false);
         AttachServiceEvents();
     }
 
@@ -148,8 +194,15 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
     internal static bool ShouldRunProgressTimer(
         MusicPlaybackState playbackState,
         bool hasCurrentMediaInfo) =>
+        ShouldRunProgressTimer(playbackState, hasCurrentMediaInfo, isUnknownBufferingExpired: false);
+
+    internal static bool ShouldRunProgressTimer(
+        MusicPlaybackState playbackState,
+        bool hasCurrentMediaInfo,
+        bool isUnknownBufferingExpired) =>
         hasCurrentMediaInfo &&
-        playbackState is (MusicPlaybackState.Playing or MusicPlaybackState.Unknown);
+        (playbackState == MusicPlaybackState.Playing ||
+         (playbackState == MusicPlaybackState.Unknown && !isUnknownBufferingExpired));
 
     /// <summary>
     /// Gate for the "hide the timeline row when the player publishes no
@@ -168,6 +221,8 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
 
     public ObservableCollection<string> SessionIds { get; } = [];
 
+    public ObservableCollection<LrcLine> LyricLines { get; } = [];
+
     public bool IsFollowingSystemSession => string.IsNullOrWhiteSpace(_preferredSessionId);
 
     public string? PreferredSessionId => _preferredSessionId;
@@ -179,25 +234,52 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
     public string Title
     {
         get => string.IsNullOrWhiteSpace(_title) ? _localizationService.T("Music.EmptyTitle") : _title;
-        private set => SetProperty(ref _title, value);
+        private set
+        {
+            if (SetProperty(ref _title, value))
+            {
+                OnPropertyChanged(nameof(LyricsHeaderSubtitle));
+                RefreshSubtitleState();
+            }
+        }
     }
 
     public string Artist
     {
         get => string.IsNullOrWhiteSpace(_artist) ? SourceDisplayName : _artist;
-        private set => SetProperty(ref _artist, value);
+        private set
+        {
+            if (SetProperty(ref _artist, value))
+            {
+                OnPropertyChanged(nameof(LyricsHeaderSubtitle));
+            }
+        }
     }
 
     public string Album
     {
         get => _album;
-        private set => SetProperty(ref _album, value);
+        private set
+        {
+            if (SetProperty(ref _album, value))
+            {
+                RefreshSubtitleState();
+            }
+        }
     }
 
     public string SourceDisplayName
     {
         get => string.IsNullOrWhiteSpace(_sourceDisplayName) ? _localizationService.T("Music.SourceUnknown") : _sourceDisplayName;
-        private set => SetProperty(ref _sourceDisplayName, value);
+        private set
+        {
+            if (SetProperty(ref _sourceDisplayName, value))
+            {
+                OnPropertyChanged(nameof(Artist));
+                OnPropertyChanged(nameof(LyricsHeaderSubtitle));
+                RefreshSubtitleState();
+            }
+        }
     }
 
     public bool UseArtworkBackdrop
@@ -225,6 +307,173 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
         private set => SetProperty(ref _displayMode, SettingsService.NormalizeMusicDisplayMode(value));
     }
 
+    public bool ShowLyrics
+    {
+        get => _showLyrics;
+        private set
+        {
+            if (SetProperty(ref _showLyrics, value))
+            {
+                if (!value)
+                {
+                    IsLyricsViewOpen = false;
+                    ClearLyricsState();
+                }
+
+                OnPropertyChanged(nameof(LyricsOverlayVisibility));
+                OnPropertyChanged(nameof(ArtworkBackdropVisibility));
+                OnPropertyChanged(nameof(LyricsToggleVisibility));
+                RefreshSubtitleState();
+                UpdateLyricActiveLineAndScheduleTimer();
+            }
+        }
+    }
+
+    public bool ShowCapsuleLyrics
+    {
+        get => _showCapsuleLyrics;
+        private set
+        {
+            if (SetProperty(ref _showCapsuleLyrics, value))
+            {
+                UpdateLyricActiveLineAndScheduleTimer();
+            }
+        }
+    }
+
+    public bool IsLyricsViewOpen
+    {
+        get => _isLyricsViewOpen;
+        private set
+        {
+            if (SetProperty(ref _isLyricsViewOpen, value))
+            {
+                OnPropertyChanged(nameof(LyricsOverlayVisibility));
+                OnPropertyChanged(nameof(ArtworkBackdropVisibility));
+            }
+        }
+    }
+
+    public int ActiveLyricIndex
+    {
+        get => _activeLyricIndex;
+        private set
+        {
+            if (SetProperty(ref _activeLyricIndex, value))
+            {
+                OnPropertyChanged(nameof(CurrentLyricDurationSeconds));
+            }
+        }
+    }
+
+    public double CurrentLyricDurationSeconds
+    {
+        get
+        {
+            if (!_currentLyrics.HasSyncedLines)
+            {
+                return 0;
+            }
+
+            int idx = _activeLyricIndex;
+            if (idx >= 0 && idx < _currentLyrics.Lines.Count)
+            {
+                TimeSpan start = _currentLyrics.Lines[idx].Timestamp;
+                if (idx + 1 < _currentLyrics.Lines.Count)
+                {
+                    return Math.Max(0, (_currentLyrics.Lines[idx + 1].Timestamp - start).TotalSeconds);
+                }
+
+                if (Duration > start)
+                {
+                    return Math.Max(0, (Duration - start).TotalSeconds);
+                }
+
+                return 0;
+            }
+
+            return Math.Max(0, _currentLyrics.Lines[0].Timestamp.TotalSeconds);
+        }
+    }
+
+    public string CurrentLyricLine
+    {
+        get => _currentLyricLine;
+        private set
+        {
+            if (SetProperty(ref _currentLyricLine, value))
+            {
+                RefreshSubtitleState();
+            }
+        }
+    }
+
+    public string? CurrentLyricSecondaryLine
+    {
+        get => _currentLyricSecondaryLine;
+        private set
+        {
+            if (SetProperty(ref _currentLyricSecondaryLine, value))
+            {
+                OnPropertyChanged(nameof(InlineLyricTooltip));
+            }
+        }
+    }
+
+    public string SubtitleText => _cachedSubtitleText;
+
+    public Visibility SubtitleVisibility => _cachedSubtitleVisibility;
+
+    public double SubtitleOpacity => _cachedSubtitleOpacity;
+
+    public string InlineLyricText => _cachedInlineLyricText;
+
+    public Visibility InlineLyricVisibility => _cachedInlineLyricVisibility;
+
+    public double InlineLyricOpacity => _cachedInlineLyricOpacity;
+
+    public Visibility HasActiveSyncedLyricVisibility => _cachedActiveLyricAccentVisibility;
+
+    public string? InlineLyricTooltip => string.IsNullOrWhiteSpace(_cachedInlineLyricText)
+        ? null
+        : string.IsNullOrWhiteSpace(_currentLyricSecondaryLine)
+            ? _cachedInlineLyricText
+            : $"{_cachedInlineLyricText}\n{_currentLyricSecondaryLine}";
+
+    public Visibility LyricsOverlayVisibility =>
+        ShowLyrics && IsLyricsViewOpen ? Visibility.Visible : Visibility.Collapsed;
+
+    public Visibility LyricsToggleVisibility =>
+        ShowLyrics && HasSession ? Visibility.Visible : Visibility.Collapsed;
+
+    public Visibility LyricsListVisibility =>
+        _currentLyrics.HasSyncedLines ? Visibility.Visible : Visibility.Collapsed;
+
+    public Visibility LyricsPlaceholderVisibility =>
+        _currentLyrics.HasSyncedLines ? Visibility.Collapsed : Visibility.Visible;
+
+    public string LyricsPlaceholderText => _currentLyrics.IsInstrumental
+        ? _localizationService.T("Music.Lyrics.Instrumental")
+        : _localizationService.T("Music.Lyrics.Empty");
+
+    public string LyricsToggleTooltip => _localizationService.T("Music.Lyrics.Toggle");
+
+    public string LyricsOffsetEarlierTooltip => _localizationService.T("Music.Lyrics.OffsetEarlier");
+
+    public string LyricsOffsetLaterTooltip => _localizationService.T("Music.Lyrics.OffsetLater");
+
+    public string LyricsOffsetResetTooltip => _localizationService.T("Music.Lyrics.OffsetReset");
+
+    public string LyricsOffsetText => _currentLyrics.UserOffsetMs == 0
+        ? "0.0s"
+        : $"{_currentLyrics.UserOffsetMs / 1000.0:+0.0;-0.0;0.0}s";
+
+    public bool HasNonZeroLyricsOffset => _currentLyrics.UserOffsetMs != 0;
+
+    public string LyricsHeaderSubtitle => string.IsNullOrWhiteSpace(_artist)
+        ? Title
+        : $"{Title} · {Artist}";
+
     public MusicPlaybackState PlaybackState
     {
         get => _playbackState;
@@ -238,12 +487,16 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
                 OnPropertyChanged(nameof(PauseIconVisibility));
                 OnPropertyChanged(nameof(PlayPauseTooltip));
                 OnPropertyChanged(nameof(StatusText));
+                OnPropertyChanged(nameof(HasSession));
+                OnPropertyChanged(nameof(LyricsToggleVisibility));
+                RefreshSubtitleState();
 
                 // Start or stop the progress timer based on playback state.
                 // Also start for Unknown when a current media snapshot exists — many
                 // players report "Changing" (buffering) at song start, which maps to
                 // Unknown. A missing session also maps to Unknown and must stay idle.
                 UpdateProgressTimerState();
+                UpdateLyricActiveLineAndScheduleTimer();
             }
         }
     }
@@ -260,7 +513,7 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
                     SeekValue = Math.Clamp(value.TotalSeconds, 0, SeekMaximum);
                 }
 
-                OnPropertyChanged(nameof(PositionText));
+                RefreshPositionText();
                 UpdateTimelineRowEligibility();
             }
         }
@@ -277,9 +530,7 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
                 OnPropertyChanged(nameof(HasSeekableTimeline));
                 OnPropertyChanged(nameof(CanInteractWithProgress));
                 OnPropertyChanged(nameof(DurationText));
-                // PositionText also depends on Duration (unknown-duration
-                // sessions flip between elapsed time and the placeholder).
-                OnPropertyChanged(nameof(PositionText));
+                RefreshPositionText();
                 UpdateTimelineRowEligibility();
                 if (!_isSeeking)
                 {
@@ -320,7 +571,10 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
                 OnPropertyChanged(nameof(TitleTextSize));
                 OnPropertyChanged(nameof(MinimalTitleTextSize));
                 OnPropertyChanged(nameof(SecondaryTextSize));
+                OnPropertyChanged(nameof(LyricTextSize));
+                OnPropertyChanged(nameof(MinimalLyricTextSize));
                 OnPropertyChanged(nameof(CaptionTextSize));
+                OnPropertyChanged(nameof(VolumeTextSize));
             }
         }
     }
@@ -330,6 +584,10 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
     public double MinimalTitleTextSize => Math.Min(SettingsService.MaxTextSize + 1, TextSize + 1.5);
 
     public double SecondaryTextSize => Math.Max(SettingsService.MinTextSize, TextSize - 1);
+
+    public double LyricTextSize => Math.Max(SettingsService.MinTextSize - 0.5, TextSize - 1.5);
+
+    public double MinimalLyricTextSize => Math.Max(SettingsService.MinTextSize - 1, TextSize - 2);
 
     public double CaptionTextSize => Math.Max(SettingsService.MinTextSize - 1, TextSize - 2);
 
@@ -440,7 +698,10 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
 
     public Visibility SessionPickerVisibility => SessionIds.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
 
-    public Visibility ArtworkBackdropVisibility => UseArtworkBackdrop ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility ArtworkBackdropVisibility =>
+        UseArtworkBackdrop && LyricsOverlayVisibility != Visibility.Visible
+            ? Visibility.Visible
+            : Visibility.Collapsed;
 
     /// <summary>
     /// Collapses the progress bar and both time labels in every layout when
@@ -450,15 +711,41 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
 
     public CornerRadius ArtworkBackdropCornerRadius => new(GetArtworkBackdropCornerRadius());
 
-    public Color ArtworkBackdropStartColor => Color.FromArgb(0x5A, _artworkColor.R, _artworkColor.G, _artworkColor.B);
+    public Color ArtworkBackdropStartColor => Color.FromArgb(0x5A, _backdropColor.R, _backdropColor.G, _backdropColor.B);
 
-    public Color ArtworkBackdropMidColor => Color.FromArgb(0x20, _artworkColor.R, _artworkColor.G, _artworkColor.B);
+    public Color ArtworkBackdropMidColor => Color.FromArgb(0x20, _backdropColor.R, _backdropColor.G, _backdropColor.B);
 
-    public Color ArtworkBackdropEndColor => Color.FromArgb(0x00, _artworkColor.R, _artworkColor.G, _artworkColor.B);
+    public Color ArtworkBackdropEndColor => Color.FromArgb(0x00, _backdropColor.R, _backdropColor.G, _backdropColor.B);
 
-    public SolidColorBrush MusicAccentBrush => new(GetMusicAccentColor());
+    public SolidColorBrush MusicAccentBrush
+    {
+        get
+        {
+            Color target = GetMusicAccentColor();
+            if (_cachedMusicAccentBrush is null || !_cachedMusicAccentBrushColor.Equals(target))
+            {
+                _cachedMusicAccentBrushColor = target;
+                _cachedMusicAccentBrush = new SolidColorBrush(target);
+            }
 
-    public SolidColorBrush PlayPauseButtonBackgroundBrush => new(GetMusicAccentColor());
+            return _cachedMusicAccentBrush;
+        }
+    }
+
+    public SolidColorBrush PlayPauseButtonBackgroundBrush
+    {
+        get
+        {
+            Color target = GetMusicAccentColor();
+            if (_cachedPlayPauseBrush is null || !_cachedPlayPauseBrushColor.Equals(target))
+            {
+                _cachedPlayPauseBrushColor = target;
+                _cachedPlayPauseBrush = new SolidColorBrush(target);
+            }
+
+            return _cachedPlayPauseBrush;
+        }
+    }
 
     public string StatusText => PlaybackState switch
     {
@@ -492,6 +779,7 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
     {
         MusicPlaybackMode.Shuffle => "\uE8B1",
         MusicPlaybackMode.Repeat => "\uE8EE",
+        MusicPlaybackMode.RepeatOne => "\uE8ED",
         _ => "\uE8AB"
     };
 
@@ -499,12 +787,21 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
     {
         MusicPlaybackMode.Shuffle => _localizationService.T("Music.Control.Mode.Shuffle"),
         MusicPlaybackMode.Repeat => _localizationService.T("Music.Control.Mode.Repeat"),
+        MusicPlaybackMode.RepeatOne => _localizationService.T("Music.Control.Mode.RepeatOne"),
         _ => _localizationService.T("Music.Control.Mode.Normal")
     };
 
     public double PlaybackModeOpacity => PlaybackMode == MusicPlaybackMode.Normal ? 0.74 : 1.0;
 
     public string VolumeTooltip => _localizationService.T("Music.Control.Volume");
+
+    public string VolumeGlyph => SystemVolume switch
+    {
+        <= 0.005 => "\uE74F",
+        < 0.34 => "\uE993",
+        < 0.67 => "\uE994",
+        _ => "\uE995"
+    };
 
     public double SystemVolume
     {
@@ -515,6 +812,7 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _systemVolume, normalizedValue))
             {
                 OnPropertyChanged(nameof(SystemVolumeText));
+                OnPropertyChanged(nameof(VolumeGlyph));
             }
         }
     }
@@ -540,10 +838,14 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _hasSessionVolume, value))
             {
                 OnPropertyChanged(nameof(SessionVolumeSliderOpacity));
+                OnPropertyChanged(nameof(SessionVolumeRowVisibility));
                 OnPropertyChanged(nameof(SessionVolumeText));
             }
         }
     }
+
+    public Visibility SessionVolumeRowVisibility =>
+        HasSessionVolume ? Visibility.Visible : Visibility.Collapsed;
 
     public double SessionVolumeSliderOpacity => HasSessionVolume ? 1.0 : 0.45;
 
@@ -561,7 +863,7 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
 
     public string RefreshTooltip => _localizationService.T("Common.Refresh");
 
-    public string PositionText => FormatPositionText(Position, Duration);
+    public string PositionText => _displayedPositionText;
 
     public string DurationText => Duration > TimeSpan.Zero ? FormatTime(Duration) : "--:--";
 
@@ -592,11 +894,19 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
         ++_transientEmptyInfoGeneration;
         ++_timelineRefreshGeneration;
         ++_playbackRefreshGeneration;
+        CancelPendingLyricsLookup();
         DetachServiceEvents();
         if (_progressTimer is not null)
         {
             _progressTimer.Stop();
             _progressTimer.Tick -= ProgressTimer_Tick;
+            PerformanceLogger.RecordTransientUiTimerReleased();
+        }
+
+        if (_lyricTimer is not null)
+        {
+            _lyricTimer.Stop();
+            _lyricTimer.Tick -= LyricTimer_Tick;
             PerformanceLogger.RecordTransientUiTimerReleased();
         }
 
@@ -614,6 +924,138 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
 
         PerformanceLogger.ActiveMusicTimerCount = 0;
         PerformanceLogger.MusicProgressTimerIntervalMs = 0;
+    }
+
+    private void RefreshPositionText()
+    {
+        string formatted = FormatPositionText(Position, Duration);
+        if (!string.Equals(_displayedPositionText, formatted, StringComparison.Ordinal))
+        {
+            _displayedPositionText = formatted;
+            OnPropertyChanged(nameof(PositionText));
+        }
+    }
+
+    private void RefreshSubtitleState(bool notify = true)
+    {
+        string nextInlineText;
+        Visibility nextInlineVis;
+        double nextInlineOpacity;
+        Visibility nextAccentVis;
+
+        if (!ShowLyrics || !HasSession)
+        {
+            nextInlineText = string.Empty;
+            nextInlineVis = Visibility.Collapsed;
+            nextInlineOpacity = 0.0;
+            nextAccentVis = Visibility.Collapsed;
+        }
+        else
+        {
+            nextInlineVis = Visibility.Visible;
+            if (!string.IsNullOrWhiteSpace(_currentLyricLine))
+            {
+                nextInlineText = _currentLyricLine;
+                nextInlineOpacity = _isLyricIntroPreview ? 0.76 : 0.96;
+                nextAccentVis = Visibility.Visible;
+            }
+            else if (_currentLyrics.IsInstrumental)
+            {
+                nextInlineText = _localizationService.T("Music.Lyrics.Instrumental");
+                nextInlineOpacity = 0.74;
+                nextAccentVis = Visibility.Visible;
+            }
+            else if (_isLoadingLyrics)
+            {
+                nextInlineText = string.Empty;
+                nextInlineOpacity = 0.56;
+                nextAccentVis = Visibility.Collapsed;
+            }
+            else
+            {
+                nextInlineText = _localizationService.T("Music.Lyrics.Empty");
+                nextInlineOpacity = 0.56;
+                nextAccentVis = Visibility.Collapsed;
+            }
+        }
+
+        string nextSubtitleText;
+        Visibility nextSubtitleVis;
+        double nextSubtitleOpacity;
+
+        if (!HasSession)
+        {
+            nextSubtitleText = StatusText;
+            nextSubtitleVis = Visibility.Visible;
+            nextSubtitleOpacity = 0.82;
+        }
+        else if (ShowLyrics)
+        {
+            nextSubtitleText = nextInlineText;
+            nextSubtitleVis = Visibility.Visible;
+            nextSubtitleOpacity = nextInlineOpacity;
+        }
+        else
+        {
+            nextSubtitleText = string.Empty;
+            nextSubtitleVis = Visibility.Collapsed;
+            nextSubtitleOpacity = 0.0;
+        }
+
+        bool inlineTextChanged = !string.Equals(_cachedInlineLyricText, nextInlineText, StringComparison.Ordinal);
+        bool inlineVisChanged = _cachedInlineLyricVisibility != nextInlineVis;
+        bool inlineOpacityChanged = Math.Abs(_cachedInlineLyricOpacity - nextInlineOpacity) > 0.001;
+        bool accentVisChanged = _cachedActiveLyricAccentVisibility != nextAccentVis;
+        bool subtitleTextChanged = !string.Equals(_cachedSubtitleText, nextSubtitleText, StringComparison.Ordinal);
+        bool subtitleVisChanged = _cachedSubtitleVisibility != nextSubtitleVis;
+        bool subtitleOpacityChanged = Math.Abs(_cachedSubtitleOpacity - nextSubtitleOpacity) > 0.001;
+
+        _cachedInlineLyricText = nextInlineText;
+        _cachedInlineLyricVisibility = nextInlineVis;
+        _cachedInlineLyricOpacity = nextInlineOpacity;
+        _cachedActiveLyricAccentVisibility = nextAccentVis;
+        _cachedSubtitleText = nextSubtitleText;
+        _cachedSubtitleVisibility = nextSubtitleVis;
+        _cachedSubtitleOpacity = nextSubtitleOpacity;
+
+        if (notify)
+        {
+            if (inlineTextChanged)
+            {
+                OnPropertyChanged(nameof(InlineLyricText));
+                OnPropertyChanged(nameof(InlineLyricTooltip));
+            }
+
+            if (inlineVisChanged)
+            {
+                OnPropertyChanged(nameof(InlineLyricVisibility));
+            }
+
+            if (inlineOpacityChanged)
+            {
+                OnPropertyChanged(nameof(InlineLyricOpacity));
+            }
+
+            if (accentVisChanged)
+            {
+                OnPropertyChanged(nameof(HasActiveSyncedLyricVisibility));
+            }
+
+            if (subtitleTextChanged)
+            {
+                OnPropertyChanged(nameof(SubtitleText));
+            }
+
+            if (subtitleVisChanged)
+            {
+                OnPropertyChanged(nameof(SubtitleVisibility));
+            }
+
+            if (subtitleOpacityChanged)
+            {
+                OnPropertyChanged(nameof(SubtitleOpacity));
+            }
+        }
     }
 
     private IReadOnlyList<MusicSessionOption> RefreshSessionList()
@@ -677,13 +1119,6 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
         _musicSessionService.TimelinePropertiesChanged -= OnTimelineChanged;
     }
 
-    /// <summary>
-    /// Full refresh: reloads everything including cover art.
-    /// Triggered by session list changes or media property changes (song change).
-    /// Debounced: SMTC can fire MediaPropertiesChanged multiple times in quick
-    /// succession during a song transition. We coalesce them into a single refresh
-    /// to prevent the title/artist from flickering.
-    /// </summary>
     private int _mediaPropertiesPendingGeneration;
     private int? _pendingFullRefreshMediaGeneration;
     private void OnSessionsChanged(object? sender, EventArgs e) => ScheduleFullRefresh();
@@ -695,9 +1130,6 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
 
     private void ScheduleDebouncedMediaRefresh()
     {
-        // SMTC commonly publishes old, partial, and final metadata snapshots while
-        // changing tracks. Wait for that burst to settle and let the newest request
-        // supersede every earlier one, including the fallback queued by the button.
         int gen = Interlocked.Increment(ref _mediaPropertiesPendingGeneration);
         if (!CanRunWindowMediaRefresh())
         {
@@ -721,13 +1153,10 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
         {
             return;
         }
+
         _ = RefreshAsync(generation);
     }
 
-    /// <summary>
-    /// Lightweight refresh: only updates position/duration without reloading cover.
-    /// Timeline events fire very frequently (every ~1s), so we must avoid cover reload.
-    /// </summary>
     private void OnTimelineChanged(object? sender, EventArgs e)
     {
         if (!CanRunWindowMediaRefresh())
@@ -745,9 +1174,6 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
         _ = RefreshTimelineAsync();
     }
 
-    /// <summary>
-    /// Lightweight refresh: only updates playback state/capabilities without reloading cover.
-    /// </summary>
     private void OnPlaybackInfoChanged(object? sender, EventArgs e)
     {
         if (!CanRunWindowMediaRefresh())
@@ -782,86 +1208,133 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
         _ = RefreshAsync();
     }
 
-    /// <summary>
-    /// Lightweight timeline-only refresh. Updates position and duration from SMTC
-    /// without reloading cover art or media properties.
-    /// </summary>
     private async Task RefreshTimelineAsync()
     {
-        if (!CanRunWindowMediaRefresh()) return;
+        if (!CanRunWindowMediaRefresh())
+        {
+            return;
+        }
 
         int gen = ++_timelineRefreshGeneration;
         try
         {
-            var info = await _musicSessionService.GetCurrentTimelineAsync(_preferredSessionId);
-            if (!CanRunWindowMediaRefresh() || gen != _timelineRefreshGeneration || info is null) return;
+            MusicTimelineSnapshot? info = await _musicSessionService.GetCurrentTimelineAsync(_preferredSessionId);
+            if (!CanRunWindowMediaRefresh() || gen != _timelineRefreshGeneration || info is null)
+            {
+                return;
+            }
 
-            Position = info.Position;
-            Duration = info.Duration;
-            _lastSyncedPosition = info.Position;
-            _lastPositionSyncAt = DateTimeOffset.UtcNow;
+            DateTimeOffset nowUtc = DateTimeOffset.UtcNow;
+            (TimeSpan extrapolatedPos, TimeSpan effectiveDur) = _timelineExtrapolator.ApplyTimelineSnapshot(
+                info.PlaybackState,
+                info.Position,
+                info.Duration,
+                info.PositionUpdatedUtc,
+                info.PlaybackRate,
+                nowUtc);
+
+            Duration = effectiveDur;
+            Position = ShouldExposeTimelinePosition() ? extrapolatedPos : TimeSpan.Zero;
+            CanSeek = CanSeek || (_timelineExtrapolator.HasNativeDuration && CanInteractWithProgress);
+            if (_timelineExtrapolator.HasNativeDuration)
+            {
+                NotifyTimelineDurationUpdated(info.Duration, info.Position, info.PositionUpdatedUtc, nowUtc);
+            }
+
+            UpdateLyricActiveLineAndScheduleTimer();
         }
         catch (Exception ex)
         {
             if (!_isDisposed)
+            {
                 App.Log($"[MusicWidget] Timeline refresh failed: {ex.Message}");
+            }
         }
     }
 
-    /// <summary>
-    /// Lightweight playback-only refresh. Updates playback state and capabilities
-    /// without reloading cover art or media properties.
-    /// </summary>
     private async Task RefreshPlaybackAsync()
     {
-        if (!CanRunWindowMediaRefresh()) return;
+        if (!CanRunWindowMediaRefresh())
+        {
+            return;
+        }
 
         int gen = ++_playbackRefreshGeneration;
         try
         {
-            var info = await _musicSessionService.GetCurrentPlaybackAsync(_preferredSessionId);
-            if (!CanRunWindowMediaRefresh() || gen != _playbackRefreshGeneration || info is null) return;
+            MusicPlaybackSnapshot? info = await _musicSessionService.GetCurrentPlaybackAsync(_preferredSessionId);
+            if (!CanRunWindowMediaRefresh() || gen != _playbackRefreshGeneration || info is null)
+            {
+                return;
+            }
+
+            DateTimeOffset nowUtc = DateTimeOffset.UtcNow;
+            TimeSpan anchoredPos = _timelineExtrapolator.ApplyPlaybackStateChange(
+                info.PlaybackState,
+                info.PlaybackRate,
+                nowUtc);
 
             PlaybackState = info.PlaybackState;
+            if (ShouldExposeTimelinePosition() && !_isSeeking)
+            {
+                Position = anchoredPos;
+            }
+
             CanPlay = info.CanPlay;
             CanPause = info.CanPause;
             CanGoPrevious = info.CanGoPrevious;
             CanGoNext = info.CanGoNext;
-            CanSeek = info.CanSeek && Duration > TimeSpan.Zero;
+            CanSeek = info.CanSeek && _timelineExtrapolator.HasNativeDuration;
             CanChangeShuffle = info.CanChangeShuffle;
             CanChangeRepeat = info.CanChangeRepeat;
             PlaybackMode = info.PlaybackMode;
-            RaiseDisplayPropertiesChanged();
+            OnPropertyChanged(nameof(HasSession));
+            UpdateLyricActiveLineAndScheduleTimer();
         }
         catch (Exception ex)
         {
             if (!_isDisposed)
+            {
                 App.Log($"[MusicWidget] Playback refresh failed: {ex.Message}");
+            }
         }
     }
 
+    private bool ShouldExposeTimelinePosition() =>
+        !_timelineExtrapolator.UsesLocalFallbackClock ||
+        _timelineExtrapolator.EffectiveDuration > TimeSpan.Zero ||
+        !_hideTimelineWhenUnavailable;
+
     private void ProgressTimer_Tick(Microsoft.UI.Dispatching.DispatcherQueueTimer sender, object args)
     {
+        DateTimeOffset nowUtc = DateTimeOffset.UtcNow;
         if (_isDisposed ||
             !_isWindowVisible ||
             !_isWindowRevealCompleted ||
-            !ShouldRunProgressTimer(PlaybackState, _hasCurrentMediaInfo))
+            !ShouldRunProgressTimer(
+                PlaybackState,
+                _hasCurrentMediaInfo,
+                _timelineExtrapolator.IsUnknownBufferingExpired(nowUtc)))
         {
             sender.Stop();
             UpdateMusicTimerDiagnostics();
             return;
         }
 
-        if (Duration > TimeSpan.Zero && !_isSeeking)
+        if (!_isSeeking && ShouldExposeTimelinePosition())
         {
-            // Extrapolate from the last SMTC-synced position so the progress bar
-            // grows smoothly from zero. This also covers the buffering/Changing
-            // window (mapped to Unknown) where the player is actually outputting
-            // audio but SMTC hasn't reported Playing yet.
-            double elapsedSinceSync = (DateTimeOffset.UtcNow - _lastPositionSyncAt).TotalSeconds;
-            double newPosition = Math.Min(Duration.TotalSeconds, _lastSyncedPosition.TotalSeconds + elapsedSinceSync);
-            Position = TimeSpan.FromSeconds(newPosition);
+            Position = _timelineExtrapolator.GetPosition(nowUtc);
         }
+    }
+
+    private void LyricTimer_Tick(Microsoft.UI.Dispatching.DispatcherQueueTimer sender, object args)
+    {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        UpdateLyricActiveLineAndScheduleTimer();
     }
 
     private bool CanRunWindowMediaRefresh() =>
@@ -869,7 +1342,9 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
 
     private void UpdateMusicTimerDiagnostics()
     {
-        PerformanceLogger.ActiveMusicTimerCount = _progressTimer?.IsRunning == true ? 1 : 0;
+        int activeTimers = (_progressTimer?.IsRunning == true ? 1 : 0) +
+                           (_lyricTimer?.IsRunning == true ? 1 : 0);
+        PerformanceLogger.ActiveMusicTimerCount = activeTimers;
         PerformanceLogger.MusicProgressTimerIntervalMs = _progressTimer is null
             ? 0
             : ResolveProgressRefreshIntervalMs(_isCompactCollapsed);
@@ -890,7 +1365,10 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
         if (!_isDisposed &&
             _isWindowVisible &&
             _isWindowRevealCompleted &&
-            ShouldRunProgressTimer(PlaybackState, _hasCurrentMediaInfo))
+            ShouldRunProgressTimer(
+                PlaybackState,
+                _hasCurrentMediaInfo,
+                _timelineExtrapolator.IsUnknownBufferingExpired(DateTimeOffset.UtcNow)))
         {
             _progressTimer.Start();
         }
@@ -905,15 +1383,30 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
             return;
         }
 
-        // These properties have localized fallbacks in their getters, so they must
-        // be raised explicitly when the language changes (the backing fields haven't
-        // changed, but the displayed string may differ).
         OnPropertyChanged(nameof(DisplayName));
         OnPropertyChanged(nameof(Title));
         OnPropertyChanged(nameof(Artist));
+        OnPropertyChanged(nameof(LyricsHeaderSubtitle));
         OnPropertyChanged(nameof(SourceDisplayName));
         OnPropertyChanged(nameof(SourcePickerTooltip));
-        RaiseDisplayPropertiesChanged();
+        OnPropertyChanged(nameof(FollowSystemSourceLabel));
+        OnPropertyChanged(nameof(NoAvailableSourcesLabel));
+        OnPropertyChanged(nameof(PlayPauseTooltip));
+        OnPropertyChanged(nameof(PreviousTooltip));
+        OnPropertyChanged(nameof(NextTooltip));
+        OnPropertyChanged(nameof(PlaybackModeTooltip));
+        OnPropertyChanged(nameof(VolumeTooltip));
+        OnPropertyChanged(nameof(SystemVolumeLabel));
+        OnPropertyChanged(nameof(SessionVolumeLabel));
+        OnPropertyChanged(nameof(SessionVolumeText));
+        OnPropertyChanged(nameof(RefreshTooltip));
+        OnPropertyChanged(nameof(StatusText));
+        OnPropertyChanged(nameof(LyricsPlaceholderText));
+        OnPropertyChanged(nameof(LyricsToggleTooltip));
+        OnPropertyChanged(nameof(LyricsOffsetEarlierTooltip));
+        OnPropertyChanged(nameof(LyricsOffsetLaterTooltip));
+        OnPropertyChanged(nameof(LyricsOffsetResetTooltip));
+        RefreshSubtitleState();
         RefreshSessionList();
     }
 
@@ -939,17 +1432,30 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
         EnableCoverHoverMotion = settings.MusicEnableCoverHoverMotion;
         DisplayMode = settings.MusicDisplayMode;
         _hideTimelineWhenUnavailable = settings.Music.MusicHideTimelineWhenUnavailable;
+        ShowLyrics = settings.Music.MusicShowLyrics;
+        ShowCapsuleLyrics = settings.Music.MusicShowCapsuleLyrics;
+
+        string nextLocalFolder = settings.Music.MusicLocalLyricsFolder ?? string.Empty;
+        bool folderChanged = !string.Equals(_localLyricsFolder, nextLocalFolder, StringComparison.Ordinal);
+        _localLyricsFolder = nextLocalFolder;
+
         OnPropertyChanged(nameof(ArtworkBackdropCornerRadius));
+        if (!_isSeeking && _hasCurrentMediaInfo)
+        {
+            Position = ShouldExposeTimelinePosition()
+                ? _timelineExtrapolator.GetPosition(DateTimeOffset.UtcNow)
+                : TimeSpan.Zero;
+        }
+
         UpdateTimelineRowEligibility();
+
+        if ((folderChanged || (_showLyrics && _lastLyricsTrackSignature is null)) && _hasCurrentMediaInfo)
+        {
+            _lastLyricsTrackSignature = null;
+            ScheduleLyricsLookupForCurrentTrack();
+        }
     }
 
-    /// <summary>
-    /// Evaluates the timeline-row hide gate. Showing is always immediate;
-    /// hiding a live session waits out <see cref="TimelineRowHideDelay"/> so
-    /// transient empty-timeline bursts around track changes never flash the
-    /// row away. A missing session skips the grace period — that state is
-    /// stable, and the empty widget should never render the blank row.
-    /// </summary>
     private void UpdateTimelineRowEligibility()
     {
         bool eligible = ShouldHideTimelineRow(_hideTimelineWhenUnavailable, HasSeekableTimeline, Position);
@@ -978,7 +1484,6 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
     {
         if (_dispatcherQueue is null)
         {
-            // No dispatcher (unit-test hosting): skip the grace period.
             SetTimelineRowHidden(true);
             return;
         }
@@ -1050,51 +1555,27 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
 
     private void RaiseDisplayPropertiesChanged()
     {
-        // Title, Artist, SourceDisplayName, and DisplayName are backed by fields
-        // whose setters already raise PropertyChanged when the value changes.
-        // We must NOT raise them here unconditionally — doing so during playback
-        // (when RefreshAsync fires from SMTC events) causes the marquee to restart
-        // on every refresh, preventing it from ever scrolling.
-        // Localized fallback notifications are handled explicitly in OnLanguageChanged.
         OnPropertyChanged(nameof(HasSession));
         OnPropertyChanged(nameof(StatusText));
-        OnPropertyChanged(nameof(PlayIconVisibility));
-        OnPropertyChanged(nameof(PauseIconVisibility));
-        OnPropertyChanged(nameof(PlayPauseTooltip));
-        OnPropertyChanged(nameof(PreviousTooltip));
-        OnPropertyChanged(nameof(NextTooltip));
-        OnPropertyChanged(nameof(PlaybackModeTooltip));
-        OnPropertyChanged(nameof(VolumeTooltip));
-        OnPropertyChanged(nameof(SystemVolumeLabel));
-        OnPropertyChanged(nameof(SessionVolumeLabel));
-        OnPropertyChanged(nameof(SessionVolumeText));
-        OnPropertyChanged(nameof(RefreshTooltip));
-        OnPropertyChanged(nameof(ThumbnailVisibility));
-        OnPropertyChanged(nameof(ThumbnailPlaceholderVisibility));
-        OnPropertyChanged(nameof(ArtworkBackdropVisibility));
-        OnPropertyChanged(nameof(ArtworkBackdropCornerRadius));
-        OnPropertyChanged(nameof(MusicAccentBrush));
-        OnPropertyChanged(nameof(PlayPauseButtonBackgroundBrush));
+        OnPropertyChanged(nameof(LyricsToggleVisibility));
         OnPropertyChanged(nameof(HasSeekableTimeline));
         OnPropertyChanged(nameof(CanInteractWithProgress));
+        RefreshSubtitleState();
     }
 
     private MusicPlaybackMode GetNextPlaybackMode()
     {
         return PlaybackMode switch
         {
-            MusicPlaybackMode.Normal when CanChangeShuffle => MusicPlaybackMode.Shuffle,
             MusicPlaybackMode.Normal when CanChangeRepeat => MusicPlaybackMode.Repeat,
-            MusicPlaybackMode.Shuffle when CanChangeRepeat => MusicPlaybackMode.Repeat,
+            MusicPlaybackMode.Normal when CanChangeShuffle => MusicPlaybackMode.Shuffle,
+            MusicPlaybackMode.Repeat when CanChangeRepeat => MusicPlaybackMode.RepeatOne,
+            MusicPlaybackMode.Repeat when CanChangeShuffle => MusicPlaybackMode.Shuffle,
+            MusicPlaybackMode.RepeatOne when CanChangeShuffle => MusicPlaybackMode.Shuffle,
+            MusicPlaybackMode.RepeatOne => MusicPlaybackMode.Normal,
             MusicPlaybackMode.Shuffle => MusicPlaybackMode.Normal,
-            MusicPlaybackMode.Repeat => MusicPlaybackMode.Normal,
             _ => MusicPlaybackMode.Normal
         };
-    }
-
-    private static byte ClampByte(double value)
-    {
-        return (byte)Math.Clamp((int)Math.Round(value), 0, 255);
     }
 
     private static string FormatTime(TimeSpan value)
@@ -1107,14 +1588,6 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
         return $"{value.Minutes:00}:{value.Seconds:00}";
     }
 
-    /// <summary>
-    /// Players that never publish a timeline — and live streams, which reach
-    /// SMTC exactly the same way (a position with no end time; there is no
-    /// live flag to tell them apart) — must not read as a stuck 00:00. Show
-    /// real elapsed time whenever any of it is known; the "--:--" placeholder
-    /// appears only when both position and duration are unknown, matching
-    /// DurationText.
-    /// </summary>
     internal static string FormatPositionText(TimeSpan position, TimeSpan duration) =>
         duration > TimeSpan.Zero || position > TimeSpan.Zero
             ? FormatTime(position)

@@ -52,8 +52,22 @@ public sealed partial class TodoWidgetContent
         {
             if (File.Exists(attachment.FilePath))
             {
-                StorageFile file = await StorageFile.GetFileFromPathAsync(attachment.FilePath);
-                await Launcher.LaunchFileAsync(file);
+                bool launched = false;
+                try
+                {
+                    StorageFile file = await StorageFile.GetFileFromPathAsync(attachment.FilePath);
+                    launched = await Launcher.LaunchFileAsync(file);
+                }
+                catch (Exception launchEx)
+                {
+                    App.LogVerbose($"[Todo] Launcher.LaunchFileAsync declined '{attachment.FilePath}': {launchEx.Message}");
+                }
+
+                if (!launched)
+                {
+                    DeskBox.Platform.Win32Helper.OpenFileOrChooseApp(IntPtr.Zero, attachment.FilePath);
+                }
+
                 return;
             }
 

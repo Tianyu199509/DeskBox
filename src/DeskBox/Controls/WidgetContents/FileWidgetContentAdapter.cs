@@ -29,6 +29,10 @@ public sealed class FileWidgetContentAdapter :
 {
     private readonly LocalizationService _localizationService;
     private IntPtr _hostWindowHandle;
+    private bool _hasBeenWindowVisible;
+    private bool _isWindowVisible = true;
+    private bool _isWindowRevealCompleted;
+    private bool _isCompactCollapsed;
 
     public FileWidgetContentAdapter(
         WidgetConfig config,
@@ -96,8 +100,10 @@ public sealed class FileWidgetContentAdapter :
     }
 
     public bool IsReadyForReuse =>
-        MaterializedView is FileSurfaceContent content &&
-        content.IsReadyForReuse;
+        !IsDisposed &&
+        (MaterializedView is FileSurfaceContent content
+            ? content.IsReadyForReuse
+            : ViewModel.IsInitialized);
 
     public event EventHandler<WidgetFeedbackRequestedEventArgs>? FeedbackRequested;
 
@@ -112,7 +118,9 @@ public sealed class FileWidgetContentAdapter :
     internal string? CurrentFolderPath =>
         MaterializedView is FileSurfaceContent content
             ? content.ViewModel.CurrentFolderPath
-            : null;
+            : ViewModel.IsInitialized
+                ? ViewModel.CurrentFolderPath
+                : null;
 
     internal long? ImportBusyElapsedMilliseconds =>
         Surface?.ImportBusyElapsedMilliseconds;
@@ -121,6 +129,7 @@ public sealed class FileWidgetContentAdapter :
     {
         if (view is FileSurfaceContent content)
         {
+            ViewModel.ResumeIconHydrationFromDormancy();
             content.FeedbackRequested += Content_FeedbackRequested;
             content.HostContextMenuOpening +=
                 Content_HostContextMenuOpening;
@@ -129,6 +138,32 @@ public sealed class FileWidgetContentAdapter :
             {
                 content.SetHostWindowHandle(_hostWindowHandle);
             }
+
+            content.OnWindowVisibilityChanged(_isWindowVisible);
+            content.OnCompactStateChanged(_isCompactCollapsed);
+            content.SyncFromResidentViewModel();
+            content.QueueRenderWindowViewportCoverage();
+            if (_isWindowVisible && _isWindowRevealCompleted)
+            {
+                content.OnWindowRevealCompleted();
+            }
+            else if (_isWindowVisible && ViewModel.IsInitialized)
+            {
+                ViewModel.HealReleasedItemIconsIfIdle();
+            }
+        }
+    }
+
+    protected override void OnHibernatingView(FrameworkElement view)
+    {
+        if (view is FileSurfaceContent content)
+        {
+            content.FeedbackRequested -= Content_FeedbackRequested;
+            content.HostContextMenuOpening -=
+                Content_HostContextMenuOpening;
+            content.ImportBusyChanged -= Content_ImportBusyChanged;
+            content.DisposeLeafOnly();
+            ViewModel.ReleaseAllItemIcons(resetRenderWindow: true);
         }
     }
 
@@ -153,18 +188,27 @@ public sealed class FileWidgetContentAdapter :
 
     public override Task InitializeAsync()
     {
-        return AsContent(View).InitializeAsync();
+        return Surface is { } content
+            ? content.InitializeAsync()
+            : ViewModel.InitializeAsync();
     }
 
     public Task InitializeAsync(CancellationToken cancellationToken)
     {
-        return AsContent(View).InitializeAsync(cancellationToken);
+        return Surface is { } content
+            ? content.InitializeAsync(cancellationToken)
+            : ViewModel.InitializeAsync(cancellationToken);
     }
 
     public override Task RefreshAsync()
     {
-        return Surface is { } content
-            ? content.RefreshAsync()
+        if (Surface is { } content)
+        {
+            return content.RefreshAsync();
+        }
+
+        return ViewModel.IsInitialized
+            ? ViewModel.RefreshFolderContentsAsync()
             : Task.CompletedTask;
     }
 
@@ -178,7 +222,14 @@ public sealed class FileWidgetContentAdapter :
 
     public override void ApplyAppearance()
     {
-        Surface?.ApplyAppearance();
+        if (Surface is { } content)
+        {
+            content.ApplyAppearance();
+        }
+        else
+        {
+            ViewModel.ApplyAppearancePreview();
+        }
     }
 
     public override void OnActivated()
@@ -193,12 +244,65 @@ public sealed class FileWidgetContentAdapter :
 
     public override void OnWindowVisibilityChanged(bool visible)
     {
-        Surface?.OnWindowVisibilityChanged(visible);
+        _isWindowVisible = visible;
+        if (visible)
+        {
+            _hasBeenWindowVisible = true;
+            if (Surface is { } visibleContent)
+            {
+                ViewModel.ResumeIconHydrationFromDormancy();
+                visibleContent.OnWindowVisibilityChanged(true);
+                if (!_isCompactCollapsed)
+                {
+                    visibleContent.QueueRenderWindowViewportCoverage();
+                    if (ViewModel.IsInitialized && !IsDisposed)
+                    {
+                        ViewModel.HealReleasedItemIconsIfIdle();
+                    }
+                }
+            }
+            else if (!_isCompactCollapsed && ViewModel.IsInitialized && !IsDisposed)
+            {
+                ViewModel.ResumeIconHydrationFromDormancy();
+                ViewModel.HealReleasedItemIconsIfIdle();
+            }
+
+            return;
+        }
+
+        _isWindowRevealCompleted = false;
+        if (Surface is { } hiddenContent)
+        {
+            hiddenContent.OnWindowVisibilityChanged(false);
+        }
+        else if (_hasBeenWindowVisible && !IsDisposed)
+        {
+            ViewModel.SuspendBackgroundActivity();
+        }
     }
 
     public override void OnWindowRevealCompleted()
     {
-        Surface?.OnWindowRevealCompleted();
+        if (IsDisposed || !_isWindowVisible)
+        {
+            return;
+        }
+
+        _isWindowRevealCompleted = true;
+        if (Surface is { } content)
+        {
+            ViewModel.ResumeIconHydrationFromDormancy();
+            content.OnWindowRevealCompleted();
+        }
+        else
+        {
+            ViewModel.ResumeBackgroundActivity();
+            if (!_isCompactCollapsed && ViewModel.IsInitialized)
+            {
+                ViewModel.ResumeIconHydrationFromDormancy();
+                ViewModel.HealReleasedItemIconsIfIdle();
+            }
+        }
     }
 
     public override void OnWindowLongHidden()
@@ -209,31 +313,85 @@ public sealed class FileWidgetContentAdapter :
         // WidgetVisualActivityContractTests), so this goes straight to the
         // view model instead of through the surface.
         ViewModel.ReleaseUnrenderedItemIcons();
+        ViewModel.ReleaseAllItemIcons(resetRenderWindow: true);
     }
 
     public override void OnCompactStateChanged(bool collapsed)
     {
-        Surface?.OnCompactStateChanged(collapsed);
+        _isCompactCollapsed = collapsed;
+        if (!collapsed)
+        {
+            ViewModel.ResumeIconHydrationFromDormancy();
+        }
+
+        if (Surface is { } content)
+        {
+            content.OnCompactStateChanged(collapsed);
+            if (!collapsed)
+            {
+                content.QueueRenderWindowViewportCoverage();
+                if (ViewModel.IsInitialized && !IsDisposed)
+                {
+                    ViewModel.HealReleasedItemIconsIfIdle();
+                }
+            }
+        }
+        else if (!collapsed && ViewModel.IsInitialized && !IsDisposed)
+        {
+            ViewModel.HealReleasedItemIconsIfIdle();
+        }
     }
 
     public override void OnCompactBoundsTransitionActiveChanged(bool isActive)
     {
-        Surface?.OnCompactBoundsTransitionActiveChanged(isActive);
+        if (Surface is { } content)
+        {
+            content.OnCompactBoundsTransitionActiveChanged(isActive);
+        }
+        else if (isActive)
+        {
+            ViewModel.PauseIconHydrationForCompactTransition();
+        }
+        else
+        {
+            ViewModel.ResumeIconHydrationAfterCompactTransition();
+        }
     }
 
     public void PrepareForReuse()
     {
-        Surface?.PrepareForReuse();
+        ViewModel.ResumeIconHydrationFromDormancy();
+        if (Surface is { } content)
+        {
+            content.PrepareForReuse();
+            content.QueueRenderWindowViewportCoverage();
+        }
+        else if (ViewModel.IsInitialized && !IsDisposed)
+        {
+            ViewModel.PrepareStackDisplayForReuse();
+            ViewModel.HealReleasedItemIconsIfIdle();
+        }
     }
 
     object? IWidgetTransientStateContent.CaptureTransientState()
     {
-        return Surface?.CaptureTransientState();
+        if (Surface is { } content)
+        {
+            return content.CaptureTransientState();
+        }
+
+        return HasHibernatedTransientState ? HibernatedTransientState : null;
     }
 
     void IWidgetTransientStateContent.RestoreTransientState(object? state)
     {
-        Surface?.RestoreTransientState(state);
+        if (Surface is { } content)
+        {
+            content.RestoreTransientState(state);
+            return;
+        }
+
+        SaveHibernatedTransientState(state);
     }
 
     internal void SetHostWindowHandle(IntPtr windowHandle)
@@ -262,7 +420,10 @@ public sealed class FileWidgetContentAdapter :
 
     internal void RevealSavedItem(string itemPath)
     {
-        Surface?.RevealSavedItem(itemPath);
+        if (View is FileSurfaceContent content)
+        {
+            content.RevealSavedItem(itemPath);
+        }
     }
 
     internal void SetMigrationBusy(bool isBusy)
@@ -277,14 +438,32 @@ public sealed class FileWidgetContentAdapter :
 
     internal void ClearItemSelection()
     {
-        Surface?.ClearItemSelection();
+        if (Surface is { } content)
+        {
+            content.ClearItemSelection();
+            return;
+        }
+
+        foreach (WidgetItem item in ViewModel.Items)
+        {
+            if (item.IsCut)
+            {
+                item.IsCut = false;
+            }
+        }
+
+        if (HasHibernatedTransientState &&
+            HibernatedTransientState is FileWidgetTransientState)
+        {
+            SaveHibernatedTransientState(new FileWidgetTransientState([], []));
+        }
     }
 
     internal Task ApplyFolderOpenBehaviorChangeAsync()
     {
         return Surface is { } content
             ? content.ApplyFolderOpenBehaviorChangeAsync()
-            : Task.CompletedTask;
+            : ViewModel.RefreshFolderOpenBehaviorAsync();
     }
 
     internal void SuspendItemContainerTransitionsForHostSwitch()
@@ -395,7 +574,7 @@ public sealed class FileWidgetContentAdapter :
         int? screenY = null,
         uint? allowedEffects = null)
     {
-        return Surface is { } content
+        return View is FileSurfaceContent content
             ? content.ImportNativeDroppedFilesAsync(
                 paths,
                 containsTemporaryFiles,

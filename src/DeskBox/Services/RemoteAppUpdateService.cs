@@ -119,6 +119,19 @@ public sealed class RemoteAppUpdateService : IAppUpdateService
         IProgress<AppUpdateDownloadProgress>? progress = null,
         CancellationToken cancellationToken = default)
     {
+        if (AppDistributionService.Current.IsMicrosoftStore)
+        {
+            // StoreContext.RequestDownloadAndInstallStorePackageUpdatesAsync
+            // requires an in-process foreground HWND via IInitializeWithWindow;
+            // run directly inside the settings-host MSIX process so it binds to
+            // the live SettingsWindow handle and streams real progress.
+            var inProcessStoreUpdate = new StoreAppUpdateService();
+            return await inProcessStoreUpdate.DownloadUpdateAsync(
+                manifest,
+                progress,
+                cancellationToken);
+        }
+
         (bool ok, string? payload, string? error) = await _client.RequestAsync(
             SettingsIpcMethods.UpdateDownload,
             SettingsIpcPayload.Encode(manifest, SettingsIpcJsonContext.Default.AppUpdateManifest),

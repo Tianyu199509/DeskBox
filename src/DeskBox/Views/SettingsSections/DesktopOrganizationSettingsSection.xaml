@@ -133,24 +133,12 @@
         </StackPanel>
 
         <StackPanel x:Name="RuleDetailPanel" Visibility="Collapsed" Spacing="4">
-            <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
-                <Button svc:Localized.AutomationNameKey="DesktopOrganization.Common.Back"
-                    Width="36"
-                    Height="36"
-                    Padding="0"
-                    Click="CloseRuleDetailButton_Click"
-                    svc:Localized.ToolTipKey="DesktopOrganization.Common.Back">
-                    <FontIcon Glyph="&#xE72B;" FontSize="16" />
-                </Button>
-                <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
-                    <TextBlock x:Name="RuleDetailTitle" FontSize="20" FontWeight="SemiBold" />
-                    <TextBlock
-                        x:Name="RuleDetailPath"
-                        Style="{StaticResource SettingDescriptionTextStyle}"
-                        TextTrimming="CharacterEllipsis"
-                        ToolTipService.ToolTip="{x:Bind RuleDetailPath.Text, Mode=OneWay}" />
-                </StackPanel>
-            </Grid>
+            <TextBlock
+                x:Name="RuleDetailPath"
+                Margin="2,0,2,4"
+                Style="{StaticResource SettingDescriptionTextStyle}"
+                TextTrimming="CharacterEllipsis"
+                ToolTipService.ToolTip="{x:Bind RuleDetailPath.Text, Mode=OneWay}" />
 
             <toolkit:SettingsCard
                 x:Name="RuleEnabledCard"

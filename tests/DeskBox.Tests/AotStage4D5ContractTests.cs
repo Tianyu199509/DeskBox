@@ -1,81 +1,45 @@
-using H.NotifyIcon;
-using System.Reflection;
+using DeskBox.Platform;
 
 namespace DeskBox.Tests;
 
 public sealed class AotStage4D5ContractTests
 {
     [Fact]
-    public void NotifyIconDependency_ExposesTheRequiredPublicTrayContracts()
+    public void NativeTrayHost_ExposesBlittableWin32AbiWithoutManagedNotifyIconDependency()
     {
-        const BindingFlags publicInstance = BindingFlags.Instance | BindingFlags.Public;
+        string project = ReadRepositoryFile("src/DeskBox/DeskBox.csproj");
 
-        PropertyInfo? trayIconProperty = typeof(TaskbarIcon).GetProperty("TrayIcon", publicInstance);
-        EventInfo? openedEvent = typeof(TaskbarIcon).GetEvent(
-            "SecondWindowContextMenuOpened",
-            publicInstance);
-        PropertyInfo? windowHandleProperty = typeof(H.NotifyIcon.Core.TrayIcon).GetProperty(
-            "WindowHandle",
-            publicInstance);
-        PropertyInfo? idProperty = typeof(H.NotifyIcon.Core.TrayIcon).GetProperty(
-            "Id",
-            publicInstance);
-
-        Assert.NotNull(trayIconProperty);
-        Assert.Equal(typeof(H.NotifyIcon.Core.TrayIcon), trayIconProperty!.PropertyType);
-        Assert.NotNull(openedEvent);
-        Assert.NotNull(windowHandleProperty);
-        Assert.Equal(typeof(nint), windowHandleProperty!.PropertyType);
-        Assert.NotNull(idProperty);
-        Assert.Equal(typeof(Guid), idProperty!.PropertyType);
+        Assert.DoesNotContain("H.NotifyIcon", project, StringComparison.Ordinal);
+        Assert.Equal(IntPtr.Size == 8 ? 976 : 956, NativeTrayIconHost.SizeOfNotifyIconDataW);
+        Assert.True(NativeTrayIconHost.ProbeWin32EntryPoints());
+        Assert.True(ShellIconNativeMethods.ProbeIconBitmapEntryPoints());
     }
 
     [Fact]
-    public void TrayIdentity_UsesThePublicTypedContractWithoutReflection()
+    public void TrayIdentity_UsesTypedNativeTrayHostWithoutReflection()
     {
         string source = ReadRepositoryFile("src/DeskBox/App.Tray.cs");
 
-        Assert.Contains("_trayIcon.TrayIcon", source, StringComparison.Ordinal);
-        Assert.Contains("trayIcon.WindowHandle", source, StringComparison.Ordinal);
-        Assert.Contains("trayIcon.Id", source, StringComparison.Ordinal);
+        Assert.Contains("new NativeTrayIconHost(", source, StringComparison.Ordinal);
+        Assert.Contains("trayHost.WindowHandle", source, StringComparison.Ordinal);
+        Assert.Contains("trayHost.IconId", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("H.NotifyIcon", source, StringComparison.Ordinal);
         Assert.DoesNotContain("GetProperty(\"TrayIcon\"", source, StringComparison.Ordinal);
         Assert.DoesNotContain("GetProperty(\"WindowHandle\"", source, StringComparison.Ordinal);
         Assert.DoesNotContain("GetProperty(\"Id\"", source, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void SecondWindowPresenter_UsesPublicLifecycleAndVisualTreeWithoutPrivateReflection()
-    {
-        string source = ReadRepositoryFile("src/DeskBox/App.Tray.cs");
-
-        Assert.Contains("SecondWindowContextMenuOpened +=", source, StringComparison.Ordinal);
-        Assert.Contains("VisualTreeHelper.GetParent", source, StringComparison.Ordinal);
-        Assert.Contains("VisualTreeHelper.GetOpenPopupsForXamlRoot", source, StringComparison.Ordinal);
-        Assert.Contains("MenuFlyoutPresenter", source, StringComparison.Ordinal);
-        Assert.Contains("Popup", source, StringComparison.Ordinal);
-        Assert.DoesNotContain("TryGetSecondWindowContextMenuFlyout", source, StringComparison.Ordinal);
-        Assert.DoesNotContain("GetProperty(\"ContextMenuFlyout\"", source, StringComparison.Ordinal);
         Assert.DoesNotContain("System.Reflection.BindingFlags", source, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void TrayBehavior_KeepsSecondWindowPlacementAndNoScrollConstraints()
+    public void TrayBehavior_UsesNativePopupMenuAndTaskbarEdgePlacement()
     {
         string source = ReadRepositoryFile("src/DeskBox/App.Tray.cs");
 
-        Assert.Contains("ContextMenuMode = ContextMenuMode.SecondWindow", source, StringComparison.Ordinal);
-        // The library call now runs on the locally captured icon (the whole
-        // menu open is deferred one dispatcher turn off the tray WndProc
-        // frame, 2026-10-14 callback-isolation batch); the pin anchors the
-        // captured-local shape so the unguarded field access cannot return.
-        Assert.Contains("trayIcon.ShowContextMenu(point)", source, StringComparison.Ordinal);
-        Assert.DoesNotContain("_trayIcon.ShowContextMenu", source, StringComparison.Ordinal);
+        Assert.Contains("trayHost.ShowContextMenu(", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("_trayHost.ShowContextMenu(", source, StringComparison.Ordinal);
         Assert.Contains("Win32Helper.TryGetNotifyIconRect", source, StringComparison.Ordinal);
         Assert.Contains("GetFallbackTrayContextMenuAnchorPoint", source, StringComparison.Ordinal);
-        Assert.Contains("ScrollViewer.VerticalScrollModeProperty", source, StringComparison.Ordinal);
-        Assert.Contains("ScrollViewer.VerticalScrollBarVisibilityProperty", source, StringComparison.Ordinal);
-        Assert.Contains("double.PositiveInfinity", source, StringComparison.Ordinal);
-        Assert.Contains("ShouldConstrainToRootBounds = false", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("new Window { Title = \"DeskBox Tray Host\" }", source, StringComparison.Ordinal);
     }
 
     [Fact]

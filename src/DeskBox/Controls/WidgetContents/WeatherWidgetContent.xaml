@@ -96,6 +96,8 @@
         <!-- Mini: one open hero, with no nested cards or metric pills. -->
         <Grid
             x:Name="MiniLayout"
+            x:Load="{x:Bind IsMiniLayoutLoaded}"
+            Loaded="SubtreeLayout_Loaded"
             Padding="10,7"
             RowSpacing="2"
             Visibility="{Binding MiniLayoutVisibility}">
@@ -196,6 +198,8 @@
         <!-- Compact: open hero plus a single typographic metric band. -->
         <Grid
             x:Name="CompactLayout"
+            x:Load="{x:Bind IsCompactLayoutLoaded}"
+            Loaded="SubtreeLayout_Loaded"
             Padding="11,8"
             RowSpacing="4"
             Visibility="{Binding CompactLayoutVisibility}">
@@ -364,6 +368,8 @@
         <!-- Expanded: one continuous hierarchy instead of a dashboard of cards. -->
         <Grid
             x:Name="ExpandedLayout"
+            x:Load="{x:Bind IsExpandedLayoutLoaded}"
+            Loaded="ExpandedLayout_Loaded"
             Padding="14,9"
             RowSpacing="5"
             Visibility="{Binding ExpandedLayoutVisibility}">
@@ -728,7 +734,7 @@
                             </ItemsPanelTemplate>
                         </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
-                            <DataTemplate x:DataType="viewModels:WeatherHourViewModel">
+                            <DataTemplate>
                                 <Grid
                                     Width="{Binding DataContext.HourlyCardWidth, ElementName=ExpandedLayout}"
                                     Height="{Binding DataContext.ExpandedHourlyCardHeight, ElementName=ExpandedLayout}">
@@ -741,11 +747,11 @@
                                             <RowDefinition Height="7" />
                                         </Grid.RowDefinitions>
                                         <TextBlock
-                                            helpers:WidgetTextShadow.Cast="True"
+                                            helpers:WidgetTextShadow.Cast="False"
                                             x:Name="HourlyHourText"
                                             Grid.Row="0"
                                             HorizontalAlignment="Center"
-                                            FontSize="{x:Bind ForecastHourTextSize, Mode=OneWay}"
+                                            FontSize="{Binding ForecastHourTextSize}"
                                             Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                                             Text="{Binding HourLabel}" />
                                         <Image
@@ -758,7 +764,7 @@
                                             Source="{Binding Icon}"
                                             Stretch="Uniform" />
                                         <TextBlock
-                                            helpers:WidgetTextShadow.Cast="True"
+                                            helpers:WidgetTextShadow.Cast="False"
                                             x:Name="HourlyTemperatureText"
                                             Grid.Row="2"
                                             HorizontalAlignment="Center"
@@ -766,10 +772,10 @@
                                             FontWeight="SemiBold"
                                             Text="{Binding TemperatureText}" />
                                         <TextBlock
-                                            helpers:WidgetTextShadow.Cast="True"
+                                            helpers:WidgetTextShadow.Cast="False"
                                             Grid.Row="3"
                                             HorizontalAlignment="Center"
-                                            FontSize="{x:Bind ForecastHourTextSize, Mode=OneWay}"
+                                            FontSize="{Binding ForecastHourTextSize}"
                                             Foreground="{StaticResource WeatherAccentBrush}"
                                             Text="{Binding PrecipitationText}"
                                             Visibility="{Binding DataContext.ExpandedHourlyPrecipVisibility, ElementName=ExpandedLayout}" />
@@ -830,7 +836,7 @@
                                             <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
                                         <TextBlock
-                                            helpers:WidgetTextShadow.Cast="True"
+                                            helpers:WidgetTextShadow.Cast="False"
                                             x:Name="DailyDayText"
                                             Grid.Column="0"
                                             VerticalAlignment="Center"
@@ -866,7 +872,7 @@
                                             </Border>
                                         </Grid>
                                         <TextBlock
-                                            helpers:WidgetTextShadow.Cast="True"
+                                            helpers:WidgetTextShadow.Cast="False"
                                             x:Name="DailyMaxText"
                                             Grid.Column="4"
                                             VerticalAlignment="Center"
@@ -874,7 +880,7 @@
                                             FontWeight="SemiBold"
                                             Text="{Binding TempMaxText}" />
                                         <TextBlock
-                                            helpers:WidgetTextShadow.Cast="True"
+                                            helpers:WidgetTextShadow.Cast="False"
                                             x:Name="DailyMinText"
                                             Grid.Column="5"
                                             VerticalAlignment="Center"
@@ -919,7 +925,7 @@
                 <ProgressRing
                     Width="24"
                     Height="24"
-                    IsActive="True" />
+                    IsActive="{x:Bind IsLoadingActive(ViewModel.LoadingVisibility), Mode=OneWay}" />
                 <TextBlock
                     HorizontalAlignment="Center"
                     FontSize="{x:Bind ViewModel.BodyTextSize, Mode=OneWay}"

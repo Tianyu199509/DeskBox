@@ -14,6 +14,17 @@ public static class WidgetLayerModes
 }
 
 /// <summary>
+/// Canonical click-raise scope values for Dynamic widget layering: raising only
+/// the clicked widget (<see cref="Single"/>) or raising all visible widgets as
+/// one group when any part of a widget is clicked (<see cref="Group"/>).
+/// </summary>
+public static class DynamicClickRaiseScopes
+{
+    public const string Single = "Single";
+    public const string Group = "Group";
+}
+
+/// <summary>
 /// Canonical file-open method combo values (the page-level projection of the
 /// persisted <c>DoubleClickToOpen</c> flag), owned here so the interaction
 /// editor can build its option list and map selections without referencing
@@ -46,6 +57,7 @@ public readonly record struct InteractionSettingsSnapshot(
     double WidgetSnapSpacing,
     bool KeepWidgetsVisibleOnShowDesktop,
     string WidgetLayerMode,
+    string DynamicClickRaiseScope,
     bool ShowHoverButtons,
     string WidgetHoverButtonActions,
     bool IdleWorkingSetTrimEnabled,
@@ -77,6 +89,7 @@ public readonly record struct InteractionSettingsSnapshot(
 /// </summary>
 public sealed record InteractionPresentationSettings(
     string LayerMode,
+    string ClickRaiseScope,
     bool SnapEnabled,
     double SnapSpacing,
     bool DoubleClickToOpen,
@@ -121,6 +134,7 @@ public interface IInteractionSettings
 
     void SetKeepWidgetsVisibleOnShowDesktop(bool value);
     void SetWidgetLayerMode(string? mode);
+    void SetDynamicClickRaiseScope(string? scope);
 
     void SetShowHoverButtons(bool value);
     // Stores only: the shell schedules the save through its appearance-save

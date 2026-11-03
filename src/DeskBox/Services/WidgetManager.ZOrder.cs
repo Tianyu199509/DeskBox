@@ -1,4 +1,4 @@
-﻿// Copyright (c) DeskBox. All rights reserved.
+// Copyright (c) DeskBox. All rights reserved.
 
 using DeskBox.Models;
 using DeskBox.Helpers;
@@ -78,6 +78,17 @@ public sealed partial class WidgetManager
     private bool _lastMouseButtonsDown;
     private bool _outsideMousePressObserved;
     private bool _quickRevealDismissQueued;
+    private QuickRevealOutsideInteractionState _quickRevealOutsideInteraction;
+    private DispatcherQueueTimer? _dynamicBlankDesktopTimer;
+    private bool _dynamicBlankDesktopPromoted;
+    private bool _dynamicBlankDesktopAwaitingClickRelease;
+    private bool _dynamicBlankDesktopVisitedDeskBox;
+    private IntPtr _dynamicBlankDesktopShellForeground;
+    private Win32Helper.POINT _dynamicBlankDesktopPressOrigin;
+    private long _lastDynamicDesktopCandidateTick;
+    private int _dynamicDesktopProbeInFlight;
+
+    internal bool HasActiveTemporaryRaiseLease => _temporaryRaiseLease.IsActive;
     private readonly QuickRevealDesktopDismissTracker _quickRevealDesktopDismissTracker =
         QuickRevealDesktopDismissTracker.CreateForCurrentSystem();
     private WidgetExpandedLayerLease _expandedWidgetLayerLease;
@@ -422,7 +433,15 @@ public sealed partial class WidgetManager
         // before the first file-open dispatch. Runs before the shadow gate:
         // a shadows-off system skips idle reorders but still needs the
         // bedding watchdog.
-        EnsureDesktopPinnedBeddingWatchdogArmed();
+        if (WidgetLayerService.UsesDesktopPinnedMode() && HasVisibleWidgets)
+        {
+            EnsureDesktopPinnedBeddingWatchdogArmed();
+        }
+        else
+        {
+            StopDesktopPinnedBeddingWatchdog();
+        }
+        ApplyMonitorOcclusionState();
 
         // Idle normalization is shadow-protection work only; queueing it while
         // Windows drop shadows are off can only produce needless reorders.
@@ -603,13 +622,24 @@ public sealed partial class WidgetManager
             return;
         }
 
-        if (!WidgetLayerService.UsesDesktopPinnedMode() || !HasVisibleWidgets)
+        if (ShouldStopDesktopPinnedBeddingWatchdogOnTick())
         {
             ResetBeddingLeakTracking();
             return;
         }
 
         VerifyDesktopPinnedBedding("watchdog", requireConfirmation: true);
+    }
+
+    private bool ShouldStopDesktopPinnedBeddingWatchdogOnTick()
+    {
+        if (!WidgetLayerService.UsesDesktopPinnedMode() || !HasVisibleWidgets)
+        {
+            StopDesktopPinnedBeddingWatchdog();
+            return true;
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -644,7 +674,15 @@ public sealed partial class WidgetManager
             return;
         }
 
-        EnsureDesktopPinnedBeddingWatchdogArmed();
+        if (WidgetLayerService.UsesDesktopPinnedMode() && HasVisibleWidgets)
+        {
+            EnsureDesktopPinnedBeddingWatchdogArmed();
+        }
+        else
+        {
+            StopDesktopPinnedBeddingWatchdog();
+        }
+        ApplyMonitorOcclusionState();
         // RunOrDefer instead of a bare dispatcher enqueue: the bare call
         // would NullReference before dispatcher-init.
         UiDispatch.RunOrDefer(async () =>
@@ -831,6 +869,7 @@ public sealed partial class WidgetManager
             $"[ZOrder] TemporaryRaise acquired reason={reason} " +
             $"generation={_temporaryRaiseLease.Generation} " +
             $"count={_temporaryRaiseLease.ActiveWindowHandles.Count}");
+        ApplyMonitorOcclusionState();
         return _temporaryRaiseLease.Generation;
     }
 
@@ -857,16 +896,16 @@ public sealed partial class WidgetManager
         });
     }
 
-    public void RestoreTemporarilyRaisedWidgetsToDesktopLayer(string reason)
+    public bool RestoreTemporarilyRaisedWidgetsToDesktopLayer(string reason)
     {
         if (!HasUiThreadAccess())
         {
             UiDispatch.RunOrDefer(
-                () => RestoreTemporarilyRaisedWidgetsToDesktopLayer(reason));
-            return;
+                () => _ = RestoreTemporarilyRaisedWidgetsToDesktopLayer(reason));
+            return true;
         }
 
-        RestoreTemporarilyRaisedWidgetsToDesktopLayerCore(
+        return RestoreTemporarilyRaisedWidgetsToDesktopLayerCore(
             reason,
             _temporaryRaiseLease.Generation,
             retryWhenBusy: false);
@@ -918,6 +957,20 @@ public sealed partial class WidgetManager
             return false;
         }
 
+        if (reason.EndsWith("-fallback", StringComparison.Ordinal) &&
+            IsForegroundDeskBoxWindow())
+        {
+            // Keep the group lease alive while the user is still working inside
+            // DeskBox so leaving to a foreign application later lowers the
+            // entire group in one atomic DeferWindowPos frame instead of
+            // tearing into a two-stage drop.
+            QueueTemporaryRaisedWidgetRestore(
+                reason,
+                generation,
+                TimeSpan.FromMilliseconds(2300));
+            return false;
+        }
+
         IReadOnlyList<IntPtr> handles =
             _temporaryRaiseLease.ActiveWindowHandles.ToList();
         _temporaryRaiseLease = WidgetTemporaryRaiseLeasePolicy.Release(
@@ -929,37 +982,72 @@ public sealed partial class WidgetManager
                 .Where(window => window.WindowHandle != IntPtr.Zero)
                 .GroupBy(window => window.WindowHandle)
                 .ToDictionary(group => group.Key, group => group.First());
-        int restored = 0;
-        foreach (IntPtr handle in handles)
+        List<IDesktopWidgetWindow> visibleWindows = handles
+            .Select(handle => windowsByHandle.GetValueOrDefault(handle))
+            .Where(static window => window is { Visible: true })
+            .Cast<IDesktopWidgetWindow>()
+            .ToList();
+        int restored = visibleWindows.Count;
+        if (restored > 1)
         {
-            if (!windowsByHandle.TryGetValue(handle, out IDesktopWidgetWindow? window) ||
-                !window.Visible)
+            foreach (IDesktopWidgetWindow window in visibleWindows)
             {
-                continue;
+                try
+                {
+                    window.PrepareForGroupDesktopRestoreFromManager();
+                }
+                catch (Exception ex)
+                {
+                    App.Log(
+                        $"[WidgetManager] Temporary desktop layer prepare failed " +
+                        $"reason={reason} {FormatHostWindow(window)}: {ex}");
+                }
             }
 
+            _idlePeerOrderGeneration++;
+            _ = WidgetLayerService.RestoreGroupPreservingForeground(
+                visibleWindows.Select(static window => window.WindowHandle).ToList(),
+                $"temp-raise-{reason}",
+                out RelativeLayerRestoreDisposition disposition);
+            bool placedAtDesktopLayer =
+                disposition != RelativeLayerRestoreDisposition.PreservePeerOrder;
+            foreach (IDesktopWidgetWindow window in visibleWindows)
+            {
+                try
+                {
+                    window.CompleteGroupDesktopRestoreFromManager(placedAtDesktopLayer);
+                }
+                catch (Exception ex)
+                {
+                    App.Log(
+                        $"[WidgetManager] Temporary desktop layer finalize failed " +
+                        $"reason={reason} {FormatHostWindow(window)}: {ex}");
+                }
+            }
+        }
+        else if (restored == 1)
+        {
             try
             {
-                window.ForceRestoreDesktopLayerFromManager();
-                restored++;
+                visibleWindows[0].ForceRestoreDesktopLayerFromManager();
             }
             catch (Exception ex)
             {
                 App.Log(
                     $"[WidgetManager] Temporary desktop layer restore failed " +
-                    $"reason={reason} {FormatHostWindow(window)}: {ex}");
+                    $"reason={reason} {FormatHostWindow(visibleWindows[0])}: {ex}");
             }
         }
 
         App.Log(
             $"[ZOrder] TemporaryRaise restored reason={reason} " +
             $"generation={generation} tracked={handles.Count} restored={restored}");
-        QueueIdleWidgetZOrderNormalization(reason);
         return true;
     }
 
     private void ClearTemporaryRaiseLease(string reason)
     {
+        CancelDynamicBlankDesktopPromotion(reason);
         if (!_temporaryRaiseLease.IsActive)
         {
             return;
@@ -1135,6 +1223,16 @@ public sealed partial class WidgetManager
 
         IReadOnlyList<IDesktopWidgetWindow> ordered =
             GetWindowsInIdleHighestFirstOrder(candidates);
+        if (!cohesionExit &&
+            ordered.Count >= 2 &&
+            !IdleWidgetZOrderPolicy.HasAnyShadowOverlapRisk(
+                ordered.Select(static window => window.RestingAnimationBounds)))
+        {
+            App.LogVerbose(
+                $"[ZOrder] Idle peer normalize skipped (shadow-disjoint) reason={reason} count={ordered.Count}");
+            return false;
+        }
+
         // Normalization is deliberately peer-only. The current highest widget
         // supplies the global boundary, so a group restored directly behind an
         // activated application is not subsequently flattened to HWND_BOTTOM.
@@ -1336,6 +1434,15 @@ public sealed partial class WidgetManager
             return;
         }
 
+        if (WidgetLayerService.UsesQuickRevealMode() &&
+            (_quickRevealOutsideInteraction.ShouldHoldForegroundDismiss ||
+             Win32Helper.IsAnyMouseButtonDown()))
+        {
+            App.LogVerbose(
+                $"[QuickReveal] RaisedState held during external pointer press/drag reason={reason}");
+            return;
+        }
+
         IntPtr foreground = Win32Helper.GetForegroundWindow();
         if (foreground == IntPtr.Zero)
         {
@@ -1348,6 +1455,16 @@ public sealed partial class WidgetManager
 
         if (IsDeskBoxForegroundWindow(foreground))
         {
+            if (_outsideMousePressObserved && !WidgetLayerService.UsesQuickRevealMode())
+            {
+                _outsideMousePressObserved = false;
+                App.Log($"[TrayBatch] RaisedState released reason={reason}-outside-click foreground=0x{foreground.ToInt64():X}");
+                CompleteRaisedSessionAfterExternalInteraction(
+                    $"{reason}-outside-click",
+                    outsideInteraction: true);
+                return;
+            }
+
             _hasDeskBoxForegroundSinceRaise = true;
             App.LogVerbose($"[TrayBatch] RaisedState kept reason={reason} foreground=0x{foreground.ToInt64():X}");
             return;
@@ -1512,7 +1629,7 @@ public sealed partial class WidgetManager
             !preserveSourceForeground && IsForegroundDeskBoxWindow();
         _trayLayerRestoreTimer ??= App.UiDispatcherQueue.CreateTimer();
         _trayLayerRestoreTimer.Stop();
-        int restoreIntervalMs = WidgetLayerService.UsesQuickRevealMode() ? 50 : 200;
+        int restoreIntervalMs = WidgetLayerService.UsesQuickRevealMode() ? 50 : 80;
         _trayLayerRestoreTimer.Interval = TimeSpan.FromMilliseconds(restoreIntervalMs);
         _trayLayerRestoreTimer.Tick -= TrayLayerRestoreTimer_Tick;
         _trayLayerRestoreTimer.Tick += TrayLayerRestoreTimer_Tick;
@@ -1543,18 +1660,22 @@ public sealed partial class WidgetManager
         // (via keyboard hook) isn't mistaken for a new outside click.
         _lastMouseButtonsDown = Win32Helper.IsAnyMouseButtonDown();
         _outsideMousePressObserved = false;
+        _quickRevealOutsideInteraction =
+            QuickRevealOutsideInteractionState.CreateInitial(_lastMouseButtonsDown);
 
+        int intervalMs = WidgetLayerService.UsesQuickRevealMode() ? 16 : 50;
         _trayMouseSamplerTimer ??= App.UiDispatcherQueue.CreateTimer();
         _trayMouseSamplerTimer.Stop();
-        _trayMouseSamplerTimer.Interval = TimeSpan.FromMilliseconds(50);
+        _trayMouseSamplerTimer.Interval = TimeSpan.FromMilliseconds(intervalMs);
         _trayMouseSamplerTimer.Tick -= TrayMouseSamplerTimer_Tick;
         _trayMouseSamplerTimer.Tick += TrayMouseSamplerTimer_Tick;
         _trayMouseSamplerTimer.Start();
-        App.LogVerbose("[TrayBatch] MouseSampler started intervalMs=50");
+        App.LogVerbose($"[TrayBatch] MouseSampler started intervalMs={intervalMs}");
     }
 
     private void StopTrayMouseSampler()
     {
+        _quickRevealOutsideInteraction = default;
         if (_trayMouseSamplerTimer is null)
         {
             return;
@@ -1574,6 +1695,47 @@ public sealed partial class WidgetManager
         }
 
         bool isDown = Win32Helper.IsAnyMouseButtonDown();
+        if (WidgetLayerService.UsesQuickRevealMode())
+        {
+            Win32Helper.POINT? cursor = TryGetCursorPosition();
+            bool overDeskBox = IsPointerOverDeskBoxWindow(cursor);
+            bool overTaskbar = IsPointerOverTaskbar(cursor);
+            QuickRevealOutsideSampleResult step = _quickRevealOutsideInteraction.Step(
+                isDown,
+                cursor,
+                overDeskBox,
+                overTaskbar,
+                Win32Helper.GetSystemMetrics(Win32Helper.SM_CXDRAG),
+                Win32Helper.GetSystemMetrics(Win32Helper.SM_CYDRAG));
+            _lastMouseButtonsDown = isDown;
+            switch (step.Action)
+            {
+                case QuickRevealOutsideSampleActionKind.DismissOutsideClick:
+                    QueueQuickRevealDismiss(
+                        "mouse-sampler-outside-click",
+                        outsideInteraction: true,
+                        taskbarOrigin: step.TaskbarOrigin);
+                    return;
+
+                case QuickRevealOutsideSampleActionKind.DismissOutsideDragEnded:
+                    QueueQuickRevealDismiss(
+                        "mouse-sampler-outside-drag-ended",
+                        outsideInteraction: true,
+                        taskbarOrigin: false);
+                    return;
+
+                case QuickRevealOutsideSampleActionKind.KeepOpenAfterDropIntoDeskBox:
+                    _foregroundAtRaiseTime = Win32Helper.GetForegroundWindow();
+                    _hasDeskBoxForegroundSinceRaise = IsForegroundDeskBoxWindow();
+                    _suppressTrayLayerRestoreUntilUtc =
+                        DateTime.UtcNow + TimeSpan.FromMilliseconds(260);
+                    App.Log("[QuickReveal] Kept open after external drag-drop into DeskBox");
+                    return;
+
+                default:
+                    return;
+            }
+        }
 
         // Detect up→down edge (new press).
         if (isDown && !_lastMouseButtonsDown)
@@ -1581,21 +1743,15 @@ public sealed partial class WidgetManager
             // Check cursor position at the moment of pressing.
             Win32Helper.POINT? cursor = TryGetCursorPosition();
             bool pressOverTaskbar = IsPointerOverTaskbar(cursor);
-            if (!IsPointerOverDeskBoxWindow(cursor) &&
-                (!pressOverTaskbar || WidgetLayerService.UsesQuickRevealMode()))
+            if (!IsPointerOverDeskBoxWindow(cursor) && !pressOverTaskbar)
             {
-                if (WidgetLayerService.UsesQuickRevealMode())
-                {
-                    _lastMouseButtonsDown = isDown;
-                    QueueQuickRevealDismiss(
-                        "mouse-sampler-outside-click",
-                        outsideInteraction: true,
-                        taskbarOrigin: pressOverTaskbar);
-                    return;
-                }
-
                 _outsideMousePressObserved = true;
                 App.LogVerbose($"[TrayBatch] MouseSampler detected outside-press at={FormatPoint(cursor)}");
+                _lastMouseButtonsDown = isDown;
+                TryRestoreRaisedWidgetsAfterInteraction(
+                    "mouse-sampler",
+                    _trayRaiseBatchGeneration);
+                return;
             }
         }
 
@@ -1686,10 +1842,9 @@ public sealed partial class WidgetManager
 
     private static bool IsDesktopShellWindow(IntPtr hWnd)
     {
-        return WindowOrAncestorHasClass(
+        return DesktopBlankHitTest.IsVerifiedDesktopShellWindow(
             hWnd,
-            value => string.Equals(value, "Progman", StringComparison.Ordinal) ||
-                     string.Equals(value, "WorkerW", StringComparison.Ordinal));
+            allowDefView: false);
     }
 
     private static bool WindowOrAncestorHasClass(IntPtr hWnd, Func<string, bool> predicate)
@@ -1759,6 +1914,7 @@ public sealed partial class WidgetManager
         }
 
         TrayLayerStateChanged?.Invoke(raised);
+        ApplyMonitorOcclusionState();
     }
 
     private static string FormatWidgetList(IReadOnlyList<WidgetConfig> widgets)
@@ -1789,6 +1945,403 @@ public sealed partial class WidgetManager
     private static string FormatPoint(Win32Helper.POINT? point)
     {
         return point.HasValue ? $"{point.Value.X},{point.Value.Y}" : "unknown";
+    }
+
+    internal void ApplyImmediateRestingPeerOrderAfterRestore(string reason)
+    {
+        if (_widgetsRaisedFromTray ||
+            _isTogglingWidgetsDesktopLayer ||
+            _sessionManager.IsInteractionActive ||
+            _sessionManager.State == WidgetSessionState.Hidden ||
+            HasActiveExpandedWidgetLayerLease())
+        {
+            return;
+        }
+
+        if (!Win32Helper.TryGetWindowDropShadowEnabled(out bool dropShadowEnabled))
+        {
+            dropShadowEnabled = true;
+        }
+
+        if (!IdleWidgetZOrderPolicy.ShouldNormalizeIdlePeerOrder(dropShadowEnabled))
+        {
+            return;
+        }
+
+        List<IDesktopWidgetWindow> candidates = GetLoadedDesktopWindows()
+            .Where(static window => window.Visible && !window.IsRaisedAboveDesktopLayer)
+            .ToList();
+        if (candidates.Count < 2)
+        {
+            return;
+        }
+
+        if (candidates.Any(static window => window.IsBoundsTransitionActive))
+        {
+            QueueIdleWidgetZOrderNormalization(reason);
+            return;
+        }
+
+        IReadOnlyList<IDesktopWidgetWindow> ordered =
+            GetWindowsInIdleHighestFirstOrder(candidates);
+        if (!IdleWidgetZOrderPolicy.HasAnyShadowOverlapRisk(
+                ordered.Select(static window => window.RestingAnimationBounds)))
+        {
+            return;
+        }
+
+        _idlePeerOrderGeneration++;
+        _ = WidgetLayerService.ApplyPeerOrderHighestToLowest(
+            ordered.Select(static window => window.WindowHandle).ToList());
+    }
+
+    internal void PromotePeerWidgetsAfterDynamicBodyActivation(
+        IntPtr activeWindowHandle)
+    {
+        if (activeWindowHandle == IntPtr.Zero ||
+            _widgetsRaisedFromTray ||
+            _isTogglingWidgetsDesktopLayer ||
+            WidgetLayerService.UsesDesktopPinnedMode() ||
+            WidgetLayerService.UsesQuickRevealMode() ||
+            !WidgetLayerService.UsesDynamicGroupClickRaiseMode())
+        {
+            return;
+        }
+
+        CancelDynamicBlankDesktopPromotion("group-body-activated");
+        IReadOnlyList<IDesktopWidgetWindow> visibleWindows =
+            GetWindowsInIdleHighestFirstOrder(
+                GetLoadedDesktopWindows().Where(static window => window.Visible));
+        if (visibleWindows.Count == 0)
+        {
+            return;
+        }
+
+        List<IntPtr> handles = visibleWindows
+            .Select(static window => window.WindowHandle)
+            .ToList();
+        if (!WidgetLayerService.BringGroupToNormalBandWithoutActivation(
+                handles,
+                "dynamic-body-group-activated"))
+        {
+            return;
+        }
+
+        foreach (IDesktopWidgetWindow window in visibleWindows)
+        {
+            window.MarkRaisedAboveDesktopLayerFromManager();
+        }
+
+        long generation = TrackTemporarilyRaisedWidgets(
+            handles,
+            "dynamic-body-group-activated");
+        QueueTemporaryRaisedWidgetRestore(
+            "dynamic-body-group-activated-fallback",
+            generation,
+            TimeSpan.FromMilliseconds(2300));
+    }
+
+    internal void RebedDynamicPassiveSiblingsAfterSingleActivation(
+        IntPtr activeWindowHandle,
+        string reason)
+    {
+        if (activeWindowHandle == IntPtr.Zero ||
+            _widgetsRaisedFromTray ||
+            _isTogglingWidgetsDesktopLayer ||
+            WidgetLayerService.UsesDesktopPinnedMode() ||
+            WidgetLayerService.UsesQuickRevealMode() ||
+            WidgetLayerService.UsesDynamicGroupClickRaiseMode())
+        {
+            return;
+        }
+
+        CancelDynamicBlankDesktopPromotion("single-widget-activated");
+        WidgetLayerService.DetachSingleDynamicWidgetForInteraction(activeWindowHandle);
+
+        IntPtr expandedOwner = _expandedWidgetLayerLease.WindowHandle;
+        List<IDesktopWidgetWindow> passiveSiblings = GetLoadedDesktopWindows()
+            .Where(window =>
+                window.Visible &&
+                !window.IsRaisedAboveDesktopLayer &&
+                window.WindowHandle != IntPtr.Zero &&
+                window.WindowHandle != activeWindowHandle &&
+                window.WindowHandle != expandedOwner &&
+                Win32Helper.IsWindow(window.WindowHandle))
+            .ToList();
+        if (passiveSiblings.Count == 0)
+        {
+            return;
+        }
+
+        bool anyLeakedAboveForeign = passiveSiblings.Any(static sibling =>
+            WidgetLayerService.FindForeignWindowBelow(sibling.WindowHandle) != IntPtr.Zero);
+        if (!anyLeakedAboveForeign)
+        {
+            return;
+        }
+
+        IReadOnlyList<IDesktopWidgetWindow> orderedSiblings =
+            GetWindowsInIdleHighestFirstOrder(passiveSiblings);
+        _ = WidgetLayerService.RestoreGroupPreservingForeground(
+            orderedSiblings.Select(static sibling => sibling.WindowHandle).ToList(),
+            $"dynamic-single-passive-{reason}");
+    }
+
+    internal void NotifyPotentialDynamicDesktopClick(
+        Win32Helper.POINT screenPoint,
+        bool alreadyVerifiedBlank = false)
+    {
+        if (WidgetLayerService.UsesDesktopPinnedMode() ||
+            WidgetLayerService.UsesQuickRevealMode() ||
+            _widgetsRaisedFromTray ||
+            _isTogglingWidgetsDesktopLayer ||
+            !HasVisibleWidgets)
+        {
+            return;
+        }
+
+        long nowTick = Environment.TickCount64;
+        long previousTick = Volatile.Read(ref _lastDynamicDesktopCandidateTick);
+        if (previousTick > 0 && nowTick - previousTick < 120)
+        {
+            return;
+        }
+
+        Volatile.Write(ref _lastDynamicDesktopCandidateTick, nowTick);
+        if (alreadyVerifiedBlank)
+        {
+            DeskBox.Platform.UiDispatch.RunOrDefer(
+                () => BeginDynamicBlankDesktopClickTracking(screenPoint));
+            return;
+        }
+
+        if (Interlocked.CompareExchange(ref _dynamicDesktopProbeInFlight, 1, 0) != 0)
+        {
+            return;
+        }
+
+        _ = ThreadPool.QueueUserWorkItem(_ =>
+        {
+            try
+            {
+                if (DesktopBlankHitTest.IsBlankDesktopPoint(screenPoint))
+                {
+                    DeskBox.Platform.UiDispatch.RunOrDefer(
+                        () => BeginDynamicBlankDesktopClickTracking(screenPoint));
+                }
+            }
+            finally
+            {
+                Volatile.Write(ref _dynamicDesktopProbeInFlight, 0);
+            }
+        });
+    }
+
+    private void BeginDynamicBlankDesktopClickTracking(Win32Helper.POINT pressOrigin)
+    {
+        if (WidgetLayerService.UsesDesktopPinnedMode() ||
+            WidgetLayerService.UsesQuickRevealMode() ||
+            _widgetsRaisedFromTray ||
+            _isTogglingWidgetsDesktopLayer ||
+            !HasVisibleWidgets)
+        {
+            return;
+        }
+
+        _dynamicBlankDesktopPressOrigin = pressOrigin;
+        if (!Win32Helper.IsLeftMouseButtonDown())
+        {
+            // Short tap already released before UI dispatch arrived: verify the
+            // cursor did not drag across desktop icons before promoting.
+            if (Win32Helper.GetCursorPos(out Win32Helper.POINT current) &&
+                ExceedsSystemDragThreshold(pressOrigin, current))
+            {
+                return;
+            }
+
+            PromoteWidgetsFromDynamicBlankDesktopClick();
+            return;
+        }
+
+        _dynamicBlankDesktopAwaitingClickRelease = true;
+        EnsureDynamicBlankDesktopTimer(intervalMs: 24);
+    }
+
+    private void EnsureDynamicBlankDesktopTimer(int intervalMs)
+    {
+        var dispatcher = DispatcherQueue.GetForCurrentThread();
+        if (dispatcher is null)
+        {
+            return;
+        }
+
+        _dynamicBlankDesktopTimer ??= dispatcher.CreateTimer();
+        _dynamicBlankDesktopTimer.Stop();
+        _dynamicBlankDesktopTimer.Interval = TimeSpan.FromMilliseconds(intervalMs);
+        _dynamicBlankDesktopTimer.Tick -= DynamicBlankDesktopTimer_Tick;
+        _dynamicBlankDesktopTimer.Tick += DynamicBlankDesktopTimer_Tick;
+        _dynamicBlankDesktopTimer.Start();
+    }
+
+    private void DynamicBlankDesktopTimer_Tick(DispatcherQueueTimer sender, object args)
+    {
+        if (WidgetLayerService.UsesDesktopPinnedMode() ||
+            WidgetLayerService.UsesQuickRevealMode() ||
+            _widgetsRaisedFromTray ||
+            _isTogglingWidgetsDesktopLayer ||
+            !HasVisibleWidgets)
+        {
+            CancelDynamicBlankDesktopPromotion("mode-or-session-changed");
+            return;
+        }
+
+        if (_dynamicBlankDesktopAwaitingClickRelease)
+        {
+            if (Win32Helper.GetCursorPos(out Win32Helper.POINT current) &&
+                ExceedsSystemDragThreshold(_dynamicBlankDesktopPressOrigin, current))
+            {
+                // User started a marquee selection drag on the desktop; keep
+                // widgets resting undisturbed behind foreign windows.
+                CancelDynamicBlankDesktopPromotion("desktop-marquee-drag");
+                return;
+            }
+
+            if (!Win32Helper.IsLeftMouseButtonDown())
+            {
+                _dynamicBlankDesktopAwaitingClickRelease = false;
+                PromoteWidgetsFromDynamicBlankDesktopClick();
+            }
+
+            return;
+        }
+
+        if (!_dynamicBlankDesktopPromoted)
+        {
+            StopDynamicBlankDesktopTimer();
+            return;
+        }
+
+        IntPtr foreground = Win32Helper.GetForegroundWindow();
+        if (foreground == IntPtr.Zero)
+        {
+            return;
+        }
+
+        if (IsDeskBoxForegroundWindow(foreground))
+        {
+            _dynamicBlankDesktopVisitedDeskBox = true;
+            return;
+        }
+
+        if (!_dynamicBlankDesktopVisitedDeskBox &&
+            (foreground == _dynamicBlankDesktopShellForeground ||
+             IsDesktopShellWindow(foreground) ||
+             IsTaskbarWindow(foreground)))
+        {
+            return;
+        }
+
+        RestoreDynamicBlankDesktopPromotedWidgets("foreground-left-desktop");
+    }
+
+    private void PromoteWidgetsFromDynamicBlankDesktopClick()
+    {
+        IReadOnlyList<IDesktopWidgetWindow> visibleWindows =
+            GetWindowsInIdleHighestFirstOrder(
+                GetLoadedDesktopWindows().Where(static window => window.Visible));
+        if (visibleWindows.Count == 0)
+        {
+            CancelDynamicBlankDesktopPromotion("no-visible-windows");
+            return;
+        }
+
+        List<IntPtr> handles = visibleWindows
+            .Select(static window => window.WindowHandle)
+            .ToList();
+        if (!WidgetLayerService.BringGroupToNormalBandWithoutActivation(
+                handles,
+                "dynamic-blank-desktop"))
+        {
+            CancelDynamicBlankDesktopPromotion("raise-failed");
+            return;
+        }
+
+        foreach (IDesktopWidgetWindow window in visibleWindows)
+        {
+            window.MarkRaisedAboveDesktopLayerFromManager();
+        }
+
+        _dynamicBlankDesktopPromoted = true;
+        _dynamicBlankDesktopVisitedDeskBox = false;
+        _dynamicBlankDesktopShellForeground = Win32Helper.GetForegroundWindow();
+        EnsureDynamicBlankDesktopTimer(intervalMs: 80);
+        App.LogVerbose(
+            $"[ZOrder] Dynamic blank-desktop click raised group count={handles.Count}");
+    }
+
+    private void RestoreDynamicBlankDesktopPromotedWidgets(string reason)
+    {
+        bool wasPromoted = _dynamicBlankDesktopPromoted;
+        CancelDynamicBlankDesktopPromotion(reason);
+        if (!wasPromoted)
+        {
+            return;
+        }
+
+        IReadOnlyList<IDesktopWidgetWindow> visibleWindows =
+            GetWindowsInIdleHighestFirstOrder(
+                GetLoadedDesktopWindows().Where(static window => window.Visible));
+        if (visibleWindows.Count == 0)
+        {
+            return;
+        }
+
+        foreach (IDesktopWidgetWindow window in visibleWindows)
+        {
+            window.PrepareForGroupDesktopRestoreFromManager();
+        }
+
+        _idlePeerOrderGeneration++;
+        _ = WidgetLayerService.RestoreGroupPreservingForeground(
+            visibleWindows.Select(static window => window.WindowHandle).ToList(),
+            $"dynamic-blank-desktop-{reason}",
+            out RelativeLayerRestoreDisposition disposition);
+        bool placedAtDesktopLayer =
+            disposition != RelativeLayerRestoreDisposition.PreservePeerOrder;
+        foreach (IDesktopWidgetWindow window in visibleWindows)
+        {
+            window.CompleteGroupDesktopRestoreFromManager(placedAtDesktopLayer);
+        }
+    }
+
+    private void CancelDynamicBlankDesktopPromotion(string reason)
+    {
+        _dynamicBlankDesktopPromoted = false;
+        _dynamicBlankDesktopAwaitingClickRelease = false;
+        _dynamicBlankDesktopVisitedDeskBox = false;
+        _dynamicBlankDesktopShellForeground = IntPtr.Zero;
+        StopDynamicBlankDesktopTimer();
+    }
+
+    private void StopDynamicBlankDesktopTimer()
+    {
+        if (_dynamicBlankDesktopTimer is null)
+        {
+            return;
+        }
+
+        _dynamicBlankDesktopTimer.Stop();
+        _dynamicBlankDesktopTimer.Tick -= DynamicBlankDesktopTimer_Tick;
+    }
+
+    private static bool ExceedsSystemDragThreshold(
+        Win32Helper.POINT origin,
+        Win32Helper.POINT current)
+    {
+        int dragX = Math.Max(4, Win32Helper.GetSystemMetrics(Win32Helper.SM_CXDRAG));
+        int dragY = Math.Max(4, Win32Helper.GetSystemMetrics(Win32Helper.SM_CYDRAG));
+        return Math.Abs(current.X - origin.X) >= dragX ||
+               Math.Abs(current.Y - origin.Y) >= dragY;
     }
 
 }

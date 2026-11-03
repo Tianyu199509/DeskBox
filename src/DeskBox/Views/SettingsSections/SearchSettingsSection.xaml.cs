@@ -137,6 +137,7 @@ public sealed partial class SearchSettingsSection : UserControl
             EverythingAdvancedSyntaxToggle.IsOn =
                 settings.AdvancedSyntax;
             EverythingAdvancedSyntaxToggle.IsEnabled = settings.EverythingEnabled;
+            EverythingAdvancedSyntaxCard.IsEnabled = settings.EverythingEnabled;
             SearchDeskBoxContentToggle.IsOn = settings.IncludeDeskBoxContent;
             SearchRecommendationsToggle.IsOn = settings.ShowRecommendations;
             SearchDefaultTabComboBox.SelectedItem = SearchDefaultTabComboBox.Items

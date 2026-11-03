@@ -61,35 +61,45 @@ public sealed class SettingsAccordionAndOrderingContractTests
 
     // -------------------------------------------------- B. 文件叠放（文件堆叠）
 
-    // Spec B1 + B2: the section is headed by the auto-stacking expander
-    // (header binds Settings.FileStacks.Auto.Title with the toggle in the
-    // expander header) whose items are Threshold < GroupBy < Unmatched <
-    // OrderBy, followed by the open-mode expander (header binds
-    // Settings.FileStacks.OpenMode.Title with the combo in the expander
-    // header) whose items are PopoverLayout < PopoverStyle. The retired
-    // master switch and every child-card prefix icon are gone.
+    // Spec B1 + B2: OpenMode + PopoverLayout/PopoverStyle live inline in
+    // FileWidgetSettingsSection.xaml, while FileStackSettingsSectionTemplate
+    // owns the expanded AutoStacking expander (Threshold < GroupBy <
+    // Unmatched < OrderBy) and custom rules with zero control duplication.
     [Fact]
     public void FileStack_TwoExpanders_GroupTheirChildCards()
     {
+        string overview = ReadRepositoryFile(
+            "src/DeskBox/Views/SettingsSections/FileWidgetSettingsSection.xaml");
         string slice = FileStackSlice();
+
+        Match? openModeExpander = FindOpeningTag(
+            overview, "toolkit:SettingsExpander", "HeaderKey=\"Settings.FileStacks.Title\"");
+        Assert.NotNull(openModeExpander);
+        int openModeClose = overview.IndexOf(
+            "</toolkit:SettingsExpander>", openModeExpander.Index + openModeExpander.Length, StringComparison.Ordinal);
+        Assert.True(openModeClose >= 0);
+
+        foreach (string header in new[]
+        {
+            "HeaderKey=\"Settings.FileStacks.PopoverLayout.Title\"",
+            "HeaderKey=\"Settings.FileStacks.PopoverStyle.Title\"",
+            "HeaderKey=\"Settings.FileStacks.MoreSettings\""
+        })
+        {
+            int index = IndexOfOrFail(overview, header, "FileWidget overview");
+            Assert.True(openModeExpander.Index + openModeExpander.Length <= index && index < openModeClose,
+                $"FileWidget overview: {header} must be an item of the inline file-stacks expander.");
+        }
+        Assert.DoesNotContain("HeaderKey=\"Settings.FileStacks.Auto.Title\"", overview, StringComparison.Ordinal);
 
         Match? autoExpander = FindOpeningTag(
             slice, "toolkit:SettingsExpander", "HeaderKey=\"Settings.FileStacks.Auto.Title\"");
         Assert.NotNull(autoExpander);
-        Match? openModeExpander = FindOpeningTag(
-            slice, "toolkit:SettingsExpander", "HeaderKey=\"Settings.FileStacks.OpenMode.Title\"");
-        Assert.NotNull(openModeExpander);
-
+        Assert.Contains("IsExpanded=\"True\"", autoExpander.Value, StringComparison.Ordinal);
         int autoClose = slice.IndexOf(
             "</toolkit:SettingsExpander>", autoExpander.Index + autoExpander.Length, StringComparison.Ordinal);
-        int openModeClose = slice.IndexOf(
-            "</toolkit:SettingsExpander>", openModeExpander.Index + openModeExpander.Length, StringComparison.Ordinal);
-        Assert.True(autoClose >= 0 && openModeClose >= 0,
-            "FileStack section: both expanders must have closing tags.");
-        Assert.True(openModeClose < autoExpander.Index,
-            "FileStack section: the open-mode expander must come before the auto-stacking expander.");
+        Assert.True(autoClose >= 0);
 
-        // Auto-stacking children live between the auto expander's tags.
         foreach (string header in new[]
         {
              "HeaderKey=\"Settings.FileStacks.Threshold.Title\"",
@@ -103,26 +113,11 @@ public sealed class SettingsAccordionAndOrderingContractTests
                 $"FileStack section: {header} must be an item of the auto-stacking expander.");
         }
 
-        // Popover-only children live between the open-mode expander's tags.
-        foreach (string header in new[]
-        {
-             "HeaderKey=\"Settings.FileStacks.PopoverLayout.Title\"",
-             "HeaderKey=\"Settings.FileStacks.PopoverStyle.Title\""
-        })
-        {
-            int index = IndexOfOrFail(slice, header, "FileStack section");
-            Assert.True(openModeExpander.Index + openModeExpander.Length <= index && index < openModeClose,
-                $"FileStack section: {header} must be an item of the open-mode expander.");
-        }
-
-        // The retired master switch and the old flat enable card header are
-        // gone; the popover-only cards freeze through IsPopoverOpenMode.
+        Assert.DoesNotContain("HeaderKey=\"Settings.FileStacks.OpenMode.Title\"", slice, StringComparison.Ordinal);
         Assert.DoesNotContain("HeaderKey=\"Settings.FileStacks.Enable.Title\"", slice, StringComparison.Ordinal);
         Assert.DoesNotContain("HeaderKey=\"Settings.FileStacks.Mode.Title\"", slice, StringComparison.Ordinal);
         Assert.DoesNotContain("{Binding StacksEnabled", slice, StringComparison.Ordinal);
-        Assert.Contains("IsEnabled=\"{Binding IsPopoverOpenMode}\"", slice, StringComparison.Ordinal);
-
-        // The accordion items keep title + description only — no prefix icons.
+        Assert.Contains("IsEnabled=\"{x:Bind FileStack.IsPopoverOpenMode, Mode=OneWay}\"", overview, StringComparison.Ordinal);
         Assert.DoesNotContain("SettingsCard.HeaderIcon", slice, StringComparison.Ordinal);
     }
 
@@ -208,71 +203,89 @@ public sealed class SettingsAccordionAndOrderingContractTests
         Assert.Contains("HeaderKey=\"Settings.Capsule.AnimationDuration.Title\"", xaml, StringComparison.Ordinal);
     }
 
-    // ------------------------------------------------------------ D. 外观动画
+    // ------------------------------------------------------------ D. 外观动画与折叠子页退役
 
-    // Spec D: the animation template is flattened — no SettingsExpander left;
-    // the preset card (Settings.Group.Animation.Title) leads the page and the
-    // five detail cards (Effect/Speed/Direction/Easing/Stagger) follow in order.
+    // Spec D: the three folded sub-page templates/routes (Density, Window,
+    // Animation) are retired, and AppearanceSettingsSection.xaml owns the
+    // animation expander with Preview + Direction/Speed/Easing/Stagger in order.
     [Fact]
     public void AppearanceAnimation_DetailCards_AreFlattenedWithoutExpander()
     {
-        string slice = Slice(
-            ReadRepositoryFile(SettingsWindowXaml),
-            "x:Key=\"AppearanceAnimationSettingsSectionTemplate\"",
-            "x:Key=\"WidgetGroupsSectionTemplate\"");
+        string windowXaml = ReadRepositoryFile(SettingsWindowXaml);
+        string codeBehind = ReadRepositoryFile(SettingsWindowCodeBehind);
+        string catalog = ReadRepositoryFile(SearchCatalog);
+        string appearanceXaml = ReadRepositoryFile(
+            "src/DeskBox/Views/SettingsSections/AppearanceSettingsSection.xaml");
 
-        Assert.DoesNotContain("<toolkit:SettingsExpander", slice, StringComparison.Ordinal);
+        Assert.DoesNotContain("AppearanceDensitySettingsSectionTemplate", windowXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("AppearanceWindowSettingsSectionTemplate", windowXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("AppearanceAnimationSettingsSectionTemplate", windowXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"AppearanceDensitySettings\"", codeBehind, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"AppearanceWindowSettings\"", codeBehind, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"AppearanceAnimationSettings\"", codeBehind, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"AppearanceDensitySettings\"", catalog, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"AppearanceWindowSettings\"", catalog, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"AppearanceAnimationSettings\"", catalog, StringComparison.Ordinal);
 
-        AssertAscending(slice, "AppearanceAnimation flattened card order",
+        Assert.DoesNotContain("PreviewWidgetAnimationButton_Click", appearanceXaml, StringComparison.Ordinal);
+        AssertAscending(appearanceXaml, "Appearance animation expander card order",
             "HeaderKey=\"Settings.Group.Animation.Title\"",
-            "HeaderKey=\"Settings.Animation.Effect.Title\"",
-            "HeaderKey=\"Settings.Animation.Speed.Title\"",
             "HeaderKey=\"Settings.Animation.Direction.Title\"",
+            "HeaderKey=\"Settings.Animation.Speed.Title\"",
             "HeaderKey=\"Settings.Animation.Easing.Title\"",
             "HeaderKey=\"Settings.Animation.Stagger.Title\"");
     }
 
     // -------------------------------------------------------------- E. 材质
 
-    // Spec E1 + E3: exactly two expanders — the material parent
-    // (Settings.Material.Title) and the text parent (Settings.WidgetForeground.Title),
-    // plus the pre-existing widget-background expander which stays as-is;
-    // the exact count also locks that border/corner cards are not folded in.
+    // Spec E1 + E3: Material/Opacity/MaterialIntensity live inline on
+    // AppearanceSettingsSection.xaml, while AppearanceMaterialSettingsSectionTemplate
+    // keeps the 2 advanced expanders (WidgetForeground + WidgetBackground)
+    // and flat border/corner/system-effect cards with zero duplication.
     [Fact]
     public void AppearanceMaterial_HasExactlyTheThreeParentExpanders()
     {
         string slice = MaterialSlice();
+        string appearanceXaml = ReadRepositoryFile(
+            "src/DeskBox/Views/SettingsSections/AppearanceSettingsSection.xaml");
 
         int expanderCount = CountOpeningTags(slice, "toolkit:SettingsExpander");
-        Assert.True(expanderCount == 3,
-            $"AppearanceMaterial section: expected exactly 3 SettingsExpander elements " +
-            $"(material parent + text parent + widget background), found {expanderCount}.");
+        Assert.True(expanderCount == 2,
+            $"AppearanceMaterial section: expected exactly 2 SettingsExpander elements " +
+            $"(text parent + widget background), found {expanderCount}.");
 
-        Assert.NotNull(FindOpeningTag(
+        Assert.Null(FindOpeningTag(
             slice, "toolkit:SettingsExpander", "HeaderKey=\"Settings.Material.Title\""));
+        Assert.NotNull(FindOpeningTag(
+            appearanceXaml, "toolkit:SettingsExpander", "HeaderKey=\"Settings.Material.Title\""));
         Assert.NotNull(FindOpeningTag(
             slice, "toolkit:SettingsExpander", "HeaderKey=\"Settings.WidgetForeground.Title\""));
     }
 
-    // Spec E2 + E3: Opacity and MaterialIntensity are children of the material
-    // expander, CustomColor is a child of the text expander, while border color,
-    // border style and corner stay flat cards in the template.
+    // Spec E2 + E3: Opacity and MaterialIntensity are children of the inline
+    // material expander on AppearanceSettingsSection.xaml, CustomColor is a
+    // child of the text expander, while border color, border style and corner
+    // stay flat cards in AppearanceMaterialSettingsSectionTemplate.
     [Fact]
     public void AppearanceMaterial_ChildCards_FollowTheirParentsAndBordersStayFlat()
     {
+        string appearanceXaml = ReadRepositoryFile(
+            "src/DeskBox/Views/SettingsSections/AppearanceSettingsSection.xaml");
         string slice = MaterialSlice();
 
         Match? material = FindOpeningTag(
-            slice, "toolkit:SettingsExpander", "HeaderKey=\"Settings.Material.Title\"");
+            appearanceXaml, "toolkit:SettingsExpander", "HeaderKey=\"Settings.Material.Title\"");
         Match? text = FindOpeningTag(
             slice, "toolkit:SettingsExpander", "HeaderKey=\"Settings.WidgetForeground.Title\"");
         Assert.NotNull(material);
         Assert.NotNull(text);
 
-        AssertInsideExpander(slice, material, "HeaderKey=\"Settings.Opacity.Title\"", "material");
-        AssertInsideExpander(slice, material, "HeaderKey=\"Settings.MaterialIntensity.Title\"", "material");
+        AssertInsideExpander(appearanceXaml, material, "HeaderKey=\"Settings.Opacity.Title\"", "material");
+        AssertInsideExpander(appearanceXaml, material, "HeaderKey=\"Settings.MaterialIntensity.Title\"", "material");
         AssertInsideExpander(slice, text, "HeaderKey=\"Settings.WidgetForeground.CustomColor.Title\"", "text");
 
+        Assert.DoesNotContain("HeaderKey=\"Settings.Opacity.Title\"", slice, StringComparison.Ordinal);
+        Assert.DoesNotContain("HeaderKey=\"Settings.MaterialIntensity.Title\"", slice, StringComparison.Ordinal);
         Assert.Contains("HeaderKey=\"Settings.BorderColor.Title\"", slice, StringComparison.Ordinal);
         Assert.Contains("HeaderKey=\"Settings.Border.Title\"", slice, StringComparison.Ordinal);
         Assert.Contains("HeaderKey=\"Settings.Corner.Title\"", slice, StringComparison.Ordinal);
@@ -310,10 +323,8 @@ public sealed class SettingsAccordionAndOrderingContractTests
             ReadRepositoryFile(SettingsWindowXaml),
             "x:Key=\"FileDisplaySettingsSectionTemplate\"",
             "x:Key=\"FileStorageSettingsSectionTemplate\"");
-        string density = Slice(
-            ReadRepositoryFile(SettingsWindowXaml),
-            "x:Key=\"AppearanceDensitySettingsSectionTemplate\"",
-            "x:Key=\"AppearanceWindowSettingsSectionTemplate\"");
+        string density = ReadRepositoryFile(
+            "src/DeskBox/Views/SettingsSections/AppearanceSettingsSection.xaml");
 
         Assert.Contains("HeaderKey=\"Settings.FileNameWidth.Title\"", display, StringComparison.Ordinal);
         Assert.Contains("HeaderKey=\"Settings.FileNameLines.Title\"", display, StringComparison.Ordinal);
@@ -454,21 +465,19 @@ public sealed class SettingsAccordionAndOrderingContractTests
     [Fact]
     public void AppearanceWindow_DefaultSizeCards_AreMergedAndTitleIconLeads()
     {
-        string slice = Slice(
-            ReadRepositoryFile(SettingsWindowXaml),
-            "x:Key=\"AppearanceWindowSettingsSectionTemplate\"",
-            "x:Key=\"AppearanceAnimationSettingsSectionTemplate\"");
+        string slice = ReadRepositoryFile(
+            "src/DeskBox/Views/SettingsSections/AppearanceSettingsSection.xaml");
 
-        int width = IndexOfOrFail(slice, "x:Name=\"DefaultWidthBox\"", "AppearanceWindow section");
-        int height = IndexOfOrFail(slice, "x:Name=\"DefaultHeightBox\"", "AppearanceWindow section");
+        int width = IndexOfOrFail(slice, "x:Name=\"DefaultWidthBox\"", "Appearance section");
+        int height = IndexOfOrFail(slice, "x:Name=\"DefaultHeightBox\"", "Appearance section");
         Assert.True(Math.Abs(height - width) < 1200,
-            $"AppearanceWindow section: DefaultWidthBox and DefaultHeightBox must share one " +
+            $"Appearance section: DefaultWidthBox and DefaultHeightBox must share one " +
             $"SettingsCard (distance {Math.Abs(height - width)} chars >= 1200).");
 
         int titleIcon = IndexOfOrFail(
-            slice, "HeaderKey=\"Settings.WidgetTitleIcon.Title\"", "AppearanceWindow section");
+            slice, "HeaderKey=\"Settings.Group.AppVisual.Title\"", "Appearance section");
         Assert.True(titleIcon < width && titleIcon < height,
-            "AppearanceWindow section: the title-icon card must come before the merged default-size card.");
+            "Appearance section: the app-visual expander header must come before the merged default-size card.");
     }
 
     // ---------------------------------------------------------------- K. 词典
@@ -589,6 +598,8 @@ public sealed class SettingsAccordionAndOrderingContractTests
         string[] xamlFiles =
         {
             SettingsWindowXaml,
+            "src/DeskBox/Views/SettingsSections/AppearanceSettingsSection.xaml",
+            "src/DeskBox/Views/SettingsSections/FileWidgetSettingsSection.xaml",
             "src/DeskBox/Views/SettingsSections/CapsuleModeSettingsSection.xaml",
             "src/DeskBox/Views/SettingsSections/SearchSettingsSection.xaml",
         };
@@ -616,7 +627,7 @@ public sealed class SettingsAccordionAndOrderingContractTests
         return Slice(
             ReadRepositoryFile(SettingsWindowXaml),
             "x:Key=\"AppearanceMaterialSettingsSectionTemplate\"",
-            "x:Key=\"AppearanceDensitySettingsSectionTemplate\"");
+            "x:Key=\"WidgetGroupsSectionTemplate\"");
     }
 
     private static string FileStackSlice()

@@ -366,6 +366,329 @@ public sealed class WidgetScreenBindingTests
         Assert.InRange(resolved.Y, 0, 1040 - 10);
     }
 
+    [Fact]
+    public void NegativeLeftNonPrimaryEnumeratedFirst_RightPrimaryWidget_StaysOnRightPrimaryScreen()
+    {
+        var leftNonPrimary = new RectInt32(-1920, 0, 1920, 1040);
+        var rightPrimary = new RectInt32(0, 0, 1920, 1040);
+        var widget = new WidgetConfig
+        {
+            X = 120,
+            Y = 80,
+            Width = 320,
+            Height = 240,
+            BoundsCoordinateVersion = WidgetConfig.CurrentBoundsCoordinateVersion,
+            PositionAnchor = WidgetPositionAnchors.LeftTop,
+            PositionMarginX = 120,
+            PositionMarginY = 80,
+            ScreenBindingMode = WidgetScreenBindingMode.Pinned,
+            BoundScreenId = "RIGHT-PRIMARY-ID",
+            PositionMonitorStableId = "RIGHT-PRIMARY-ID",
+            PositionMonitorDeviceName = @"\\.\DISPLAY1",
+            PositionMonitorKey = "0:0:1920:1040",
+            PositionMonitorWasPrimary = true
+        };
+
+        // EnumDisplayMonitors can enumerate the left monitor (-1920, 0) at index 0
+        // before the primary right monitor (0, 0) at index 1. When full screen
+        // identity + IsPrimary metadata is preserved, the widget stays on (0, 0).
+        RectInt32 resolved = ResolveWithScreens(
+            widget,
+            rightPrimary,
+            new List<(RectInt32, string?, string?, bool)>
+            {
+                (leftNonPrimary, @"\\.\DISPLAY2", "LEFT-EXT-ID", false),
+                (rightPrimary, @"\\.\DISPLAY1", "RIGHT-PRIMARY-ID", true)
+            });
+
+        Assert.Equal(120, resolved.X);
+        Assert.Equal(80, resolved.Y);
+        Assert.InRange(resolved.X, rightPrimary.X, rightPrimary.X + rightPrimary.Width - resolved.Width);
+    }
+
+    [Fact]
+    public void ResolveActualDisplay_OnePixelSeamOverlapOnLeftEdge_SelectsMajorityRightDisplay()
+    {
+        var leftScreen = new WidgetScreenInfo(
+            1,
+            "LEFT-ID",
+            @"\\.\DISPLAY1",
+            new RectInt32(0, 0, 1920, 1080),
+            new RectInt32(0, 0, 1920, 1040),
+            true,
+            1.0);
+        var rightScreen = new WidgetScreenInfo(
+            2,
+            "RIGHT-ID",
+            @"\\.\DISPLAY2",
+            new RectInt32(1920, 0, 1920, 1080),
+            new RectInt32(1920, 0, 1920, 1040),
+            false,
+            1.0);
+
+        // Top-left X=1919 is 1px inside leftScreen, while 319x240 sits on rightScreen.
+        var widget = new WidgetConfig
+        {
+            X = 1919,
+            Y = 100,
+            Width = 320,
+            Height = 240,
+            BoundsCoordinateVersion = WidgetConfig.CurrentBoundsCoordinateVersion
+        };
+
+        WidgetScreenInfo? actual = WidgetScreenMenuBuilder.ResolveActualDisplay(
+            widget,
+            [leftScreen, rightScreen]);
+
+        Assert.NotNull(actual);
+        Assert.Equal("RIGHT-ID", actual!.StableId);
+    }
+
+    [Fact]
+    public void PreviewResolver_ExcludesUnimplementedAndDisabledFeatureWidgets()
+    {
+        var monitor = new WidgetScreenInfo(
+            2,
+            "RIGHT-MAIN",
+            @"\\.\DISPLAY2",
+            new RectInt32(0, 0, 1920, 1080),
+            new RectInt32(0, 0, 1920, 1032),
+            true,
+            1.0);
+
+        var settings = new AppSettings();
+        FeatureWidgetSettings.SetEnabled(settings, WidgetKind.Weather, false);
+        settings.WidgetLayout.Widgets =
+        [
+            new WidgetConfig
+            {
+                Id = "sys-mon",
+                Name = "系统监控",
+                WidgetKind = WidgetKind.SystemMonitor,
+                Width = 299,
+                Height = 994,
+                BoundsCoordinateVersion = WidgetConfig.CurrentBoundsCoordinateVersion
+            },
+            new WidgetConfig
+            {
+                Id = "weather-off",
+                Name = "天气",
+                WidgetKind = WidgetKind.Weather,
+                Width = 319,
+                Height = 321,
+                BoundsCoordinateVersion = WidgetConfig.CurrentBoundsCoordinateVersion
+            },
+            new WidgetConfig
+            {
+                Id = "clipboard-on",
+                Name = "剪贴板",
+                WidgetKind = WidgetKind.Clipboard,
+                X = 1006,
+                Y = 25,
+                Width = 324,
+                Height = 617,
+                PositionAnchor = WidgetPositionAnchors.LeftTop,
+                PositionMarginX = 1006,
+                PositionMarginY = 25,
+                PositionMonitorStableId = "RIGHT-MAIN",
+                BoundsCoordinateVersion = WidgetConfig.CurrentBoundsCoordinateVersion
+            }
+        ];
+
+        List<WidgetSurfacePreviewItem> surfaces = WidgetPlacementPreviewResolver.ResolveSurfaces(
+            settings,
+            [monitor],
+            count => $"分组 ({count})",
+            names => names);
+
+        WidgetSurfacePreviewItem single = Assert.Single(surfaces);
+        Assert.Equal("clipboard-on", single.ApplyWidgetId);
+        Assert.Equal("剪贴板", single.ShortLabel);
+        Assert.False(single.IsCompact);
+        Assert.Equal(new RectInt32(1006, 25, 324, 617), single.PreviewBounds);
+    }
+
+    [Fact]
+    public void PreviewResolver_MatchesRuntimeExpandedAndSmartCapsuleGeometry()
+    {
+        var monitor = new WidgetScreenInfo(
+            2,
+            "RIGHT-MAIN",
+            @"\\.\DISPLAY2",
+            new RectInt32(0, 0, 1920, 1080),
+            new RectInt32(0, 0, 1920, 1032),
+            true,
+            1.0);
+
+        var settings = new AppSettings();
+        FeatureWidgetSettings.SetEnabled(settings, WidgetKind.Search, true);
+        FeatureWidgetSettings.SetEnabled(settings, WidgetKind.Todo, true);
+        FeatureWidgetSettings.SetEnabled(settings, WidgetKind.QuickCapture, true);
+        settings.WidgetShell.WidgetCollapseBehavior = WidgetCollapseBehaviorNames.Expanded;
+        settings.WidgetShell.WidgetCompactWidthMode = SettingsService.WidgetCompactWidthModeAligned;
+        settings.WidgetShell.WidgetCompactContentMode = SettingsService.WidgetCompactContentModeSmart;
+
+        settings.WidgetLayout.Widgets =
+        [
+            // Stale IsCollapsed=true while effective CollapseBehavior=Expanded -> full 253x301 card.
+            new WidgetConfig
+            {
+                Id = "work-file",
+                Name = "Work",
+                WidgetKind = WidgetKind.File,
+                IsCollapsed = true,
+                Metadata = new Dictionary<string, string>
+                {
+                    [WidgetCollapseBehaviorNames.MetadataKey] = WidgetCollapseBehaviorNames.Expanded
+                },
+                X = 1659,
+                Y = 722,
+                Width = 253,
+                Height = 301,
+                PositionAnchor = WidgetPositionAnchors.RightBottom,
+                PositionMarginX = 8,
+                PositionMarginY = 9,
+                PositionMonitorStableId = "RIGHT-MAIN",
+                BoundsCoordinateVersion = WidgetConfig.CurrentBoundsCoordinateVersion
+            },
+            // Smart override with IsCollapsed=false -> rests as 253x52 capsule at CompactPlacement.
+            new WidgetConfig
+            {
+                Id = "search-smart",
+                Name = "搜索",
+                WidgetKind = WidgetKind.Search,
+                IsCollapsed = false,
+                Metadata = new Dictionary<string, string>
+                {
+                    [WidgetCollapseBehaviorNames.MetadataKey] = WidgetCollapseBehaviorNames.Smart
+                },
+                X = 1659,
+                Y = 82,
+                Width = 253,
+                Height = 321,
+                PositionAnchor = WidgetPositionAnchors.RightTop,
+                PositionMarginX = 8,
+                PositionMarginY = 82,
+                PositionMonitorStableId = "RIGHT-MAIN",
+                BoundsCoordinateVersion = WidgetConfig.CurrentBoundsCoordinateVersion,
+                CompactPlacement = new WidgetCompactPlacement
+                {
+                    BoundsCoordinateVersion = WidgetConfig.CurrentBoundsCoordinateVersion,
+                    X = 1659,
+                    Y = 82,
+                    PositionAnchor = WidgetPositionAnchors.RightTop,
+                    PositionMarginX = 8,
+                    PositionMarginY = 82,
+                    PositionMonitorStableId = "RIGHT-MAIN"
+                }
+            },
+            new WidgetConfig
+            {
+                Id = "todo-member",
+                Name = "待办",
+                WidgetKind = WidgetKind.Todo,
+                BoundsCoordinateVersion = WidgetConfig.CurrentBoundsCoordinateVersion
+            },
+            new WidgetConfig
+            {
+                Id = "capture-member",
+                Name = "随记",
+                WidgetKind = WidgetKind.QuickCapture,
+                BoundsCoordinateVersion = WidgetConfig.CurrentBoundsCoordinateVersion
+            },
+            new WidgetConfig
+            {
+                Id = "doc-a",
+                Name = "综合",
+                WidgetKind = WidgetKind.File,
+                BoundsCoordinateVersion = WidgetConfig.CurrentBoundsCoordinateVersion
+            },
+            new WidgetConfig
+            {
+                Id = "doc-b",
+                Name = "需求文档",
+                WidgetKind = WidgetKind.File,
+                BoundsCoordinateVersion = WidgetConfig.CurrentBoundsCoordinateVersion
+            }
+        ];
+
+        settings.WidgetLayout.WidgetGroups =
+        [
+            // Smart group -> rests as aligned 577x52 capsule.
+            new WidgetGroupConfig
+            {
+                Id = "group-smart",
+                MemberIds = ["todo-member", "capture-member"],
+                ActiveMemberId = "todo-member",
+                CollapseBehavior = WidgetCollapseBehaviorNames.Smart,
+                IsCollapsed = false,
+                X = 1335,
+                Y = 25,
+                Width = 577,
+                Height = 690,
+                PositionAnchor = WidgetPositionAnchors.RightTop,
+                PositionMarginX = 8,
+                PositionMarginY = 25,
+                PositionMonitorStableId = "RIGHT-MAIN",
+                BoundsCoordinateVersion = WidgetConfig.CurrentBoundsCoordinateVersion,
+                CompactPlacement = new WidgetCompactPlacement
+                {
+                    BoundsCoordinateVersion = WidgetConfig.CurrentBoundsCoordinateVersion,
+                    X = 1335,
+                    Y = 25,
+                    PositionAnchor = WidgetPositionAnchors.RightTop,
+                    PositionMarginX = 8,
+                    PositionMarginY = 25,
+                    PositionMonitorStableId = "RIGHT-MAIN"
+                }
+            },
+            // Expanded group with stale IsCollapsed=true -> full 319x301 card.
+            new WidgetGroupConfig
+            {
+                Id = "group-expanded",
+                MemberIds = ["doc-a", "doc-b"],
+                ActiveMemberId = "doc-a",
+                CollapseBehavior = "System",
+                IsCollapsed = true,
+                X = 1335,
+                Y = 722,
+                Width = 319,
+                Height = 301,
+                PositionAnchor = WidgetPositionAnchors.RightBottom,
+                PositionMarginX = 266,
+                PositionMarginY = 9,
+                PositionMonitorStableId = "RIGHT-MAIN",
+                BoundsCoordinateVersion = WidgetConfig.CurrentBoundsCoordinateVersion
+            }
+        ];
+
+        List<WidgetSurfacePreviewItem> surfaces = WidgetPlacementPreviewResolver.ResolveSurfaces(
+            settings,
+            [monitor],
+            count => $"分组 ({count})",
+            names => names);
+
+        Assert.Equal(4, surfaces.Count);
+
+        WidgetSurfacePreviewItem work = Assert.Single(surfaces, s => s.ApplyWidgetId == "work-file");
+        Assert.False(work.IsCompact);
+        Assert.Equal(new RectInt32(1659, 722, 253, 301), work.PreviewBounds);
+
+        WidgetSurfacePreviewItem search = Assert.Single(surfaces, s => s.ApplyWidgetId == "search-smart");
+        Assert.True(search.IsCompact);
+        Assert.Equal(new RectInt32(1659, 82, 253, 52), search.PreviewBounds);
+
+        WidgetSurfacePreviewItem smartGroup = Assert.Single(surfaces, s => s.ApplyWidgetId == "todo-member");
+        Assert.True(smartGroup.IsCompact);
+        Assert.Equal("待办 / 随记", smartGroup.ShortLabel);
+        Assert.Equal(new RectInt32(1335, 25, 577, 52), smartGroup.PreviewBounds);
+
+        WidgetSurfacePreviewItem expandedGroup = Assert.Single(surfaces, s => s.ApplyWidgetId == "doc-a");
+        Assert.False(expandedGroup.IsCompact);
+        Assert.Equal("综合 / 需求文档", expandedGroup.ShortLabel);
+        Assert.Equal(new RectInt32(1335, 722, 319, 301), expandedGroup.PreviewBounds);
+    }
+
     private static WidgetTopologyMonitorProfile Monitor(
         string stableId,
         string deviceName,

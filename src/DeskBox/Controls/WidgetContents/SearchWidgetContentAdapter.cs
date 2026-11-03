@@ -106,6 +106,22 @@ public sealed class SearchWidgetContentAdapter :
         }
     }
 
+    public override void OnWindowLongHidden()
+    {
+        // Leaf hibernation is owned exclusively by WidgetShell.HibernateHostedContentView()
+        // after detaching ShellContent when collapsed.
+    }
+
+    protected override void OnHibernatingView(FrameworkElement view)
+    {
+        if (view is SearchWidgetContent content)
+        {
+            content.SearchRequested -= Content_SearchRequested;
+        }
+
+        (view as IDisposable)?.Dispose();
+    }
+
     protected override void Dispose(bool disposing)
     {
         if (MaterializedView is SearchWidgetContent content)

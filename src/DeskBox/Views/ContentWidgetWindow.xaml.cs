@@ -1,4 +1,4 @@
-﻿using DeskBox.Contracts;
+using DeskBox.Contracts;
 using DeskBox.Controls;
 using DeskBox.Controls.WidgetContents;
 using DeskBox.Helpers;
@@ -107,11 +107,18 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
 
     public override WidgetConfig Config => _config;
     protected override double WidgetOpacity => SettingsService.Settings.WidgetOpacity;
+    protected override bool IsWindowVisibleForBackdrop => Visible || IsHideAnimationRunning;
     protected override FrameworkElement RootElement => RootGrid;
     protected override WidgetShell WidgetShellControl => ContentWidgetShell;
     protected override string LogPrefix => "Content";
     protected override bool IsSizeLocked => _config.IsSizeLocked;
     protected override bool IsPositionLocked => _config.IsPositionLocked;
+    protected override bool IsCollapsedContentHibernated =>
+        _contentHost.IsCurrentContentHibernated;
+    protected override bool TryHibernateCollapsedContent() =>
+        _contentHost.TryHibernateCurrentContentView();
+    protected override bool EnsureCollapsedContentViewAttached() =>
+        _contentHost.EnsureCurrentContentViewAttached();
     protected override bool IsCompactExpansionWarmupContentReady =>
         _contentHost.CurrentContent is not null;
 
@@ -155,6 +162,8 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
                 CreateQuickCaptureCompactPresentation(quickCapture, contentMode),
             WeatherWidgetContentAdapter weather => CreateWeatherCompactPresentation(weather, contentMode),
             SearchWidgetContentAdapter => CreateSearchCompactPresentation(contentMode, localization),
+            CustomWidgetContentAdapter custom => CreateCustomCompactPresentation(custom, contentMode, localization),
+            ClipboardWidgetContentAdapter clipboard => CreateClipboardCompactPresentation(clipboard, contentMode, localization),
             _ => new WidgetCompactPresentation(
                 _titleViewModel.DisplayName,
                 string.Empty,
@@ -163,6 +172,79 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
                 EnableMarquee: true,
                 LiveStateKey: _titleViewModel.DisplayName)
         };
+    }
+
+    private WidgetCompactPresentation CreateCustomCompactPresentation(
+        CustomWidgetContentAdapter custom,
+        string contentMode,
+        LocalizationService localization)
+    {
+        CustomWidgetViewModel viewModel = custom.ViewModel;
+        bool hideSensitive = SettingsService.Settings.WidgetShell.WidgetCompactHideSensitiveContent;
+        string title = string.IsNullOrWhiteSpace(viewModel.CapsuleTitle)
+            ? _titleViewModel.DisplayName
+            : viewModel.CapsuleTitle;
+        string summary = contentMode == SettingsService.WidgetCompactContentModeMinimal || hideSensitive
+            ? string.Empty
+            : viewModel.CapsuleSummary;
+        if (!string.IsNullOrWhiteSpace(viewModel.CapsuleBadge) && !hideSensitive)
+        {
+            summary = string.IsNullOrWhiteSpace(summary)
+                ? viewModel.CapsuleBadge
+                : $"{viewModel.CapsuleBadge} · {summary}";
+        }
+
+        string glyph = string.IsNullOrWhiteSpace(viewModel.CapsuleGlyph)
+            ? _descriptor.DefaultGlyph
+            : viewModel.CapsuleGlyph;
+        string dropHint = viewModel.AcceptsFileDrops
+            ? localization.T(viewModel.EffectiveDropMode == "copy"
+                ? "CustomWidget.DropHint.Copy"
+                : "CustomWidget.DropHint.Link")
+            : localization.T("Widget.Compact.DropHint");
+
+        return new WidgetCompactPresentation(
+            title,
+            summary,
+            glyph,
+            dropHint,
+            UseStackedText: !string.IsNullOrWhiteSpace(summary),
+            EnableMarquee: true,
+            Progress: viewModel.CapsuleProgress,
+            IsAttention: viewModel.CapsuleBadgeIsWarning,
+            LiveStateKey: viewModel.LiveStateKey);
+    }
+
+    private WidgetCompactPresentation CreateClipboardCompactPresentation(
+        ClipboardWidgetContentAdapter clipboard,
+        string contentMode,
+        LocalizationService localization)
+    {
+        bool hidesSensitiveContent =
+            SettingsService.Settings.WidgetShell.WidgetCompactHideSensitiveContent;
+        (string primaryText, string countText) =
+            clipboard.ViewModel.BuildCapsuleSummary(hidesSensitiveContent);
+
+        string summary = contentMode switch
+        {
+            DeskBox.Services.SettingsService.WidgetCompactContentModeMinimal => string.Empty,
+            DeskBox.Services.SettingsService.WidgetCompactContentModeSmart when !hidesSensitiveContent =>
+                string.IsNullOrWhiteSpace(primaryText) ? countText : primaryText,
+            _ => countText
+        };
+
+        return new WidgetCompactPresentation(
+            _titleViewModel.DisplayName,
+            summary,
+            "\uE77F",
+            localization.T("Clipboard.Drop.AddToHistory"),
+            UseStackedText: !string.IsNullOrWhiteSpace(summary),
+            IsAttention: clipboard.ViewModel.IsPaused,
+            LiveStateKey: string.Join(
+                "|",
+                clipboard.ViewModel.CapsuleRevision,
+                clipboard.ViewModel.IsPaused,
+                summary));
     }
 
     private WidgetCompactPresentation CreateGlanceCompactPresentation(
@@ -202,7 +284,10 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
 
         string summary = string.Join(" · ", summaryParts);
         bool hasText = !string.IsNullOrWhiteSpace(title) || !string.IsNullOrWhiteSpace(summary);
-        ImageSource? backgroundImage = viewModel.HasVisibleCurrentImage
+        ImageSource? backgroundImage = viewModel.HasVisibleCurrentImage &&
+            Visible &&
+            (IsWidgetCollapsed || IsCompactTransitionActive)
+
             ? glance.GetCompactBackgroundImage(
                 ResolveGlanceCompactBackgroundDecodeWidth())
             : null;
@@ -303,7 +388,12 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
             ? string.Empty
             : hidesSensitiveContent
                 ? music.ViewModel.StatusText
-                : music.ViewModel.Artist;
+                : music.ViewModel.HasSession &&
+                  music.ViewModel.ShowLyrics &&
+                  music.ViewModel.ShowCapsuleLyrics &&
+                  !string.IsNullOrWhiteSpace(music.ViewModel.CurrentLyricLine)
+                    ? music.ViewModel.CurrentLyricLine
+                    : music.ViewModel.Artist;
 
         // Plain, determinate progress shown below the artist name inside the
         // capsule. Mirrors the EXPANDED music view: the track is always
@@ -408,7 +498,7 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
         int overdueCount = todo.ViewModel.Items.Count(item => item.IsOverdue);
         string countSummary = localization.Format(
             "Widget.Compact.TodoSummary",
-            todo.ViewModel.TodayFilterCount,
+            todo.ViewModel.TodayDueOnlyCount,
             overdueCount);
 
         WidgetCompactPresentation presentation = contentMode switch
@@ -494,12 +584,16 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
         DateTime today = DateTime.Today;
         if (localDueDate.Date == today)
         {
-            return localization.Format("Todo.Due.TodayAt", localDueDate.ToString("HH:mm"));
+            return item.HasDueTime
+                ? localization.Format("Todo.Due.TodayAt", localDueDate.ToString("HH:mm"))
+                : localization.T("Todo.Due.Today");
         }
 
         if (localDueDate.Date == today.AddDays(1))
         {
-            return localization.Format("Todo.Due.TomorrowAt", localDueDate.ToString("HH:mm"));
+            return item.HasDueTime
+                ? localization.Format("Todo.Due.TomorrowAt", localDueDate.ToString("HH:mm"))
+                : localization.T("Todo.Due.Tomorrow");
         }
 
         return localDueDate.ToString("M/d");
@@ -675,11 +769,20 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
             accentColor.G,
             accentColor.B);
 
-        ContentWidgetShell.BackgroundSurface.BorderThickness = new Thickness(borderThickness);
+        var desiredBorderThickness = new Thickness(borderThickness);
+        if (ContentWidgetShell.BackgroundSurface.BorderThickness != desiredBorderThickness)
+        {
+            ContentWidgetShell.BackgroundSurface.BorderThickness = desiredBorderThickness;
+        }
+
         ContentWidgetShell.BackgroundSurface.BorderBrush = GetOrUpdateSolidColorBrush(
             ContentWidgetShell.BackgroundSurface.BorderBrush,
             borderColor);
-        ContentWidgetShell.BackgroundSurface.CornerRadius = new CornerRadius(GetCurrentSurfaceCornerRadius());
+        var desiredCornerRadius = new CornerRadius(GetCurrentSurfaceCornerRadius());
+        if (ContentWidgetShell.BackgroundSurface.CornerRadius != desiredCornerRadius)
+        {
+            ContentWidgetShell.BackgroundSurface.CornerRadius = desiredCornerRadius;
+        }
         ContentWidgetShell.Divider.Background = GetOrUpdateSolidColorBrush(
             ContentWidgetShell.Divider.Background,
             dividerColor);
@@ -687,6 +790,16 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
         ContentWidgetShell.TitleIconMode = SettingsService.Settings.WidgetTitleIconMode;
         ApplyCustomTitleIcon();
         ApplyCustomWidgetBackground();
+        bool hasImageBackground =
+            ContentWidgetShell.CustomBackgroundSource is not null ||
+            ContentWidgetShell.CustomBackgroundPanoramaSource is not null ||
+            Config.WidgetKind is WidgetKind.Glance or WidgetKind.Music;
+        WidgetTextShadow.SetPlateOpaque(
+            RootGrid,
+            WidgetTextShadow.ShouldSuppressForOpaquePlate(
+                surfaceOpacity,
+                materialType,
+                hasImageBackground));
         WidgetTextShadow.SetEnabled(
             SettingsService.Settings.WidgetShell.WidgetTextShadowEnabled);
     }
@@ -700,7 +813,20 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
     protected override void OnCustomWidgetBackgroundChanged(bool active)
     {
         // User-set background wins over the Glance surface's own background
-        // image (per-widget customization rule).
+        // image (per-widget customization rule). Never touch .View on any
+        // WidgetContentAdapterBase here, or collapsed capsules materialize
+        // their expanded XAML tree eagerly during appearance updates.
+        if (CurrentContent is GlanceWidgetContentAdapter glanceAdapter)
+        {
+            glanceAdapter.SetShellCustomBackgroundActive(active);
+            return;
+        }
+
+        if (CurrentContent is DeskBox.Controls.WidgetContents.WidgetContentAdapterBase)
+        {
+            return;
+        }
+
         if (CurrentContent?.View is DeskBox.Controls.WidgetContents.GlanceWidgetContent glance)
         {
             glance.SetShellCustomBackgroundActive(active);
@@ -750,9 +876,16 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
         _contentHost.ApplyAppearance(invalidate: invalidateContent);
     }
 
+    private bool _prepareAsSingleWidgetLifecycle;
+
     public void SetTrayAnimationOffsetOverride(double? offsetX, double? offsetY)
     {
         TrayAnimation.SetOffsetOverride(offsetX, offsetY);
+    }
+
+    public void SetTrayAnimationOptionsOverride(WidgetAnimationOptions? optionsOverride)
+    {
+        SetTrayAnimationOptionsOverrideCore(optionsOverride);
     }
 
     public void CancelTrayAnimationAndRestorePosition()
@@ -766,6 +899,7 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
         long animationGeneration = TrayAnimation.NextGeneration();
         TrayAnimation.Stop();
         SetTrayAnimationOffsetOverride(null, null);
+        SetTrayAnimationOptionsOverride(null);
         TrayAnimation.RestoreVisualState();
         TrayAnimation.RestoreWindowPosition();
         TrayAnimation.RevealWindowForTrayShow();
@@ -778,6 +912,19 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
 public void PrepareTrayShowAnimation()
 {
 PrepareTrayShowAnimationCore(restoreBoundsForCurrentTopology: false);
+}
+
+public void PrepareSingleWidgetShowAnimation()
+{
+_prepareAsSingleWidgetLifecycle = true;
+try
+{
+    PrepareTrayShowAnimationCore(restoreBoundsForCurrentTopology: true);
+}
+finally
+{
+    _prepareAsSingleWidgetLifecycle = false;
+}
 }
 
 internal bool PrepareTrayShowAnimationForCurrentTopology()
@@ -804,11 +951,14 @@ private bool PrepareTrayShowAnimationCore(bool restoreBoundsForCurrentTopology)
             boundsRestored = !restoreBoundsForCurrentTopology ||
                 TryRestoreBoundsForCurrentTopology(allowHidden: true);
 
-            var profile = GetTrayAnimationProfile();
+            var options = GetEffectiveTrayAnimationOptions();
+            var profile = _prepareAsSingleWidgetLifecycle
+                ? GetSingleWidgetAnimationProfile(isShowing: true)
+                : GetTrayAnimationProfile(isShowing: true);
             LogTrayWindow(
                 $"PrepareShow gen={TrayAnimation.Generation} topologyRetarget={restoreBoundsForCurrentTopology} " +
-                $"boundsRestored={boundsRestored} effect={SettingsService.Settings.WidgetAnimationEffect} " +
-                $"speed={SettingsService.Settings.WidgetAnimationSpeed} enabled={profile.IsEnabled} durationMs={profile.DurationMs}");
+                $"boundsRestored={boundsRestored} effect={options.Effect} " +
+                $"speed={options.Speed} enabled={profile.IsEnabled} durationMs={profile.DurationMs}");
             TrayAnimation.PrepareVisualState(
                 profile.ShowOffsetX,
                 profile.ShowOffsetY,
@@ -861,7 +1011,7 @@ private bool PrepareTrayShowAnimationCore(bool restoreBoundsForCurrentTopology)
 
     public void RevealFromTray(bool autoRestore = true)
     {
-        PrepareTrayShowAnimation();
+        PrepareSingleWidgetShowAnimation();
         ShowPreparedRaisedFromTray();
         ActivateRaisedFromTrayBatch();
         PlayTrayShowAnimation();
@@ -1022,6 +1172,43 @@ IsHideAnimationRunning = true;
         _contentHost.OnDeactivated();
     }
 
+    public void PrepareForGroupDesktopRestoreFromManager()
+    {
+        if (!Visible)
+        {
+            return;
+        }
+
+        EndExpandedWidgetLayerLease();
+        CancelPendingDesktopLayerRestore();
+    }
+
+    public void CompleteGroupDesktopRestoreFromManager(bool placedAtDesktopLayer)
+    {
+        if (!Visible)
+        {
+            return;
+        }
+
+        if (placedAtDesktopLayer)
+        {
+            IsAtDesktopLayer = true;
+        }
+
+        ApplyBackdropPreference();
+        _contentHost.OnDeactivated();
+    }
+
+    public void MarkRaisedAboveDesktopLayerFromManager()
+    {
+        if (!Visible)
+        {
+            return;
+        }
+
+        IsAtDesktopLayer = false;
+    }
+
     public void HideWindow()
     {
         App.Current?.WidgetManager?.CancelWidgetSurfaceSwitch(_config.Id);
@@ -1037,6 +1224,8 @@ IsHideAnimationRunning = true;
         WidgetLayerService.ClearTopMost(HWnd);
         Win32Helper.ShowWindow(HWnd, Win32Helper.SW_HIDE);
         AppWindow.Hide();
+        SuspendBackdropTargetsForHiddenWindow();
+        ContentWidgetShell.ClearCompactBitmaps();
         WidgetShellControl.SuspendVisualActivity();
         NotifyCompactHostVisibilityChanged(false);
         TrayAnimation.RestoreVisualState();
@@ -1084,6 +1273,7 @@ IsHideAnimationRunning = true;
         AttachCompactPresentationSource(content);
         AttachFeedbackSource(content);
         AttachHostContextMenuSource(content);
+        ArmCollapsedContentHibernationIfSettled();
         RefreshCompactPresentation();
         ApplyTitleActionButtonConfiguration();
     }
@@ -1155,6 +1345,8 @@ IsHideAnimationRunning = true;
             MusicWidgetContentAdapter music => music.ViewModel,
             WeatherWidgetContentAdapter weather => weather.ViewModel,
             QuickCaptureWidgetContentAdapter quickCapture => quickCapture.ViewModel,
+            CustomWidgetContentAdapter custom => custom.ViewModel,
+            ClipboardWidgetContentAdapter clipboard => clipboard.ViewModel,
             _ => null
         };
 
@@ -1204,6 +1396,16 @@ IsHideAnimationRunning = true;
             ContentWidgetShell.TitleGlyph = fileViewModel.IconGlyph;
             ContentWidgetShell.TitleIconKind = fileViewModel.TitleIconKind;
         }
+        else if (sender is CustomWidgetViewModel customViewModel &&
+                 e.PropertyName is nameof(CustomWidgetViewModel.ManifestEmojiIcon)
+                     or nameof(CustomWidgetViewModel.TitleIconKind)
+                     or nameof(CustomWidgetViewModel.TitleGlyph))
+        {
+            ContentWidgetShell.TitleGlyph = customViewModel.TitleGlyph;
+            ContentWidgetShell.TitleIconKind = customViewModel.TitleIconKind;
+            SettingsService.UpdateWidget(Config, notifySubscribers: false);
+            ApplyCustomTitleIconAndGroupIdentity();
+        }
 
         if (!IsCompactPresentationPropertyRelevant(Config.WidgetKind, e.PropertyName))
         {
@@ -1228,7 +1430,7 @@ IsHideAnimationRunning = true;
             _compactPresentationRefreshQueued = false;
             if (!IsClosing && IsWidgetCollapsed)
             {
-                RefreshCompactPresentation();
+                RefreshCompactPresentation(reapplySurfaceState: false);
             }
         }))
         {
@@ -1261,6 +1463,9 @@ IsHideAnimationRunning = true;
             WidgetKind.Music => propertyName is
                 nameof(MusicWidgetViewModel.Title) or
                 nameof(MusicWidgetViewModel.Artist) or
+                nameof(MusicWidgetViewModel.CurrentLyricLine) or
+                nameof(MusicWidgetViewModel.ShowLyrics) or
+                nameof(MusicWidgetViewModel.ShowCapsuleLyrics) or
                 nameof(MusicWidgetViewModel.StatusText) or
                 nameof(MusicWidgetViewModel.ThumbnailImage) or
                 nameof(MusicWidgetViewModel.HasSession) or
@@ -1285,6 +1490,20 @@ IsHideAnimationRunning = true;
                 nameof(GlanceWidgetViewModel.ShowTime) or
                 nameof(GlanceWidgetViewModel.ShowDate) or
                 nameof(GlanceWidgetViewModel.ShowWeekday),
+            WidgetKind.Custom => propertyName is
+                nameof(CustomWidgetViewModel.CapsuleTitle) or
+                nameof(CustomWidgetViewModel.CapsuleSummary) or
+                nameof(CustomWidgetViewModel.CapsuleGlyph) or
+                nameof(CustomWidgetViewModel.CapsuleProgress) or
+                nameof(CustomWidgetViewModel.CapsuleBadge) or
+                nameof(CustomWidgetViewModel.CapsuleBadgeIsWarning) or
+                nameof(CustomWidgetViewModel.LiveStateKey) or
+                nameof(CustomWidgetViewModel.AcceptsFileDrops) or
+                nameof(CustomWidgetViewModel.EffectiveDropMode),
+            WidgetKind.Clipboard => propertyName is
+                nameof(ClipboardWidgetViewModel.CapsuleRevision) or
+                nameof(ClipboardWidgetViewModel.TotalItemCount) or
+                nameof(ClipboardWidgetViewModel.IsPaused),
             _ => true
         };
     }
@@ -1350,9 +1569,20 @@ IsHideAnimationRunning = true;
             try { RemoveNativeFileDropBridge(); } catch (Exception ex) { App.Log($"[ContentWidget] Remove native file drop bridge failed during close: {ex.Message}"); }
             App.Current.LocalizationService.LanguageChanged -= OnLanguageChanged;
             SettingsService.SettingsChanged -= OnSettingsChanged;
+            Activated -= ContentWidgetWindow_Activated;
             AppWindow.Changed -= OnAppWindowChanged;
             ContentWidgetShell.RightTapped -= ContentWidgetShell_RightTapped;
             ContentWidgetShell.TitleDoubleTapped -= ContentWidgetShell_TitleDoubleTapped;
+            if (_feedbackSource is not null)
+            {
+                _feedbackSource.FeedbackRequested -= FeedbackSource_FeedbackRequested;
+                _feedbackSource = null;
+            }
+            if (_hostContextMenuSource is not null)
+            {
+                _hostContextMenuSource.HostContextMenuOpening -= HostContextMenuSource_HostContextMenuOpening;
+                _hostContextMenuSource = null;
+            }
             if (_compactPresentationSource is not null)
             {
                 _compactPresentationSource.PropertyChanged -= CompactPresentationSource_PropertyChanged;
@@ -1380,6 +1610,10 @@ IsHideAnimationRunning = true;
             }
         };
     }
+
+    internal void DisposeHostedContentEarly() => _contentHost.DisposeContent();
+
+    internal void RefreshCompactPresentationFromHost() => RefreshCompactPresentation();
 
     private void OnSettingsChanged()
     {
@@ -1411,7 +1645,7 @@ IsHideAnimationRunning = true;
         // Search capsule subtitle depends on SearchSaveHistory / hide-sensitive flags.
         if (CurrentContent is SearchWidgetContentAdapter)
         {
-            RefreshCompactPresentation();
+            RefreshCompactPresentation(reapplySurfaceState: false);
         }
     }
 
@@ -1459,6 +1693,8 @@ IsHideAnimationRunning = true;
                         WidgetKind.Tags => "Tags.Title",
                         WidgetKind.Music => "Music.Title",
                         WidgetKind.Glance => "Glance.Title",
+                        WidgetKind.Custom => "CustomWidget.Title",
+                        WidgetKind.Clipboard => "Clipboard.Title",
                         WidgetKind.Search => "Search.Title",
                         WidgetKind.SystemMonitor => "SystemMonitor.Title",
                         _ => ""
@@ -1468,6 +1704,24 @@ IsHideAnimationRunning = true;
                         var localized = localization.T(key);
                         if (!string.IsNullOrEmpty(localized))
                             return localized;
+                    }
+                }
+
+                if (Config.WidgetKind == WidgetKind.Custom &&
+                    Config.Metadata.TryGetValue(CustomWidgetViewModel.TemplateMetadataKey, out string? tplId) &&
+                    CustomWidgetTemplates.MatchPresetOrNull(tplId) is { } matchedPreset &&
+                    (string.IsNullOrWhiteSpace(Config.Name) ||
+                     string.Equals(Config.Name, matchedPreset.DefaultTitle, StringComparison.Ordinal) ||
+                     LocalizationService.SupportedLanguageCodes.Any(code =>
+                         string.Equals(
+                             Config.Name,
+                             LocalizationService.TranslateForCulture(code, matchedPreset.NameKey),
+                             StringComparison.Ordinal))))
+                {
+                    string presetTitle = App.Current.LocalizationService.T(matchedPreset.NameKey);
+                    if (!string.IsNullOrWhiteSpace(presetTitle))
+                    {
+                        return presetTitle;
                     }
                 }
 

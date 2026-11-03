@@ -192,6 +192,28 @@ public sealed class WidgetTrayAdaptiveMotionTests
     }
 
     [Fact]
+    public void StationaryEntries_CompleteWithoutNativePositionCommits()
+    {
+        var run = new FakeAnimationRun();
+        int completedCount = 0;
+        run.Driver.Start(
+            [Entry(1, destination: 0, completed: () => completedCount++),
+             Entry(2, destination: 0, completed: () => completedCount++)],
+            durationMs: 180,
+            SettingsService.WidgetAnimationEasingStandard,
+            isShowing: true,
+            startDelayFrames: 0);
+
+        run.Tick(0);
+        run.Tick(90);
+        run.Tick(180);
+
+        Assert.Empty(run.CommittedPositions);
+        Assert.Equal(2, completedCount);
+        Assert.False(run.Driver.IsRunning);
+    }
+
+    [Fact]
     public void Tracker_DistinguishesCpuCallbacksFromSuccessfulNativeCommits()
     {
         long start = Stopwatch.GetTimestamp();

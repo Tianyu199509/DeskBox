@@ -15,8 +15,14 @@ namespace DeskBox.Controls.WidgetContents;
 /// Weather widget content view. Adapts its layout based on the available size
 /// (Mini / Compact / Expanded) and supports switching between Today and Week views.
 /// </summary>
-public sealed partial class WeatherWidgetContent : UserControl
+public sealed partial class WeatherWidgetContent : UserControl, IDisposable
 {
+    private static readonly bool s_keepAllLayoutsLoadedForAotSmoke =
+        string.Equals(
+            Environment.GetEnvironmentVariable("DESKBOX_AOT_MANAGED_UI_SMOKE"),
+            "WeatherSurfacePersistenceRestart",
+            StringComparison.Ordinal);
+
     private readonly WeatherWidgetViewModel _viewModel;
     private Storyboard? _refreshRotationStoryboard;
 
@@ -39,18 +45,62 @@ public sealed partial class WeatherWidgetContent : UserControl
         Loaded += WeatherWidgetContent_Loaded;
         Unloaded += WeatherWidgetContent_Unloaded;
         ActualThemeChanged += WeatherWidgetContent_ActualThemeChanged;
-
-        // Collect all refresh icon FontIcons after template is applied
-        FindRefreshIcons();
     }
 
     public WeatherWidgetViewModel ViewModel => _viewModel;
+
+    public bool IsMiniLayoutLoaded =>
+        _isViewLoaded && (s_keepAllLayoutsLoadedForAotSmoke || _viewModel.IsMiniLayout);
+
+    public bool IsCompactLayoutLoaded =>
+        _isViewLoaded && (s_keepAllLayoutsLoadedForAotSmoke || _viewModel.IsCompactLayout);
+
+    public bool IsExpandedLayoutLoaded =>
+        _isViewLoaded && (s_keepAllLayoutsLoadedForAotSmoke || _viewModel.IsExpandedLayout);
+
+    internal bool IsLoadingActive(Visibility loadingVisibility) =>
+        loadingVisibility == Visibility.Visible;
 
     private void WeatherWidgetContent_ActualThemeChanged(FrameworkElement sender, object args)
     {
         UpdateRichSkinTextTheme();
         UpdateWeatherPalette();
         ApplySegmentedAccent();
+    }
+
+    private void SubtreeLayout_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (!_isViewLoaded || _isDisposed)
+        {
+            return;
+        }
+
+        UpdateRefreshRotation();
+    }
+
+    private void ExpandedLayout_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (!_isViewLoaded || _isDisposed)
+        {
+            return;
+        }
+
+        UpdateWeatherViewSelection();
+        ApplySegmentedAccent();
+        UpdateRefreshRotation();
+    }
+
+    private void ReconcileActiveWeatherLayout()
+    {
+        if (_isDisposed || !_isViewLoaded)
+        {
+            return;
+        }
+
+        Bindings.Update();
+        UpdateWeatherViewSelection();
+        ApplySegmentedAccent();
+        UpdateRefreshRotation();
     }
 
     private void FindRefreshIcons()
@@ -84,13 +134,9 @@ public sealed partial class WeatherWidgetContent : UserControl
     private void WeatherWidgetContent_Loaded(object sender, RoutedEventArgs e)
     {
         _isViewLoaded = true;
-        FindRefreshIcons();
-
-        InitializeRefreshRotation();
         UpdateRichSkinTextTheme();
         ApplyRichSkinCornerRadius();
         UpdateWeatherPalette();
-        UpdateWeatherViewSelection();
         App.Current.ThemeService.AppearanceChanged -= OnThemeAppearanceChanged;
         App.Current.ThemeService.AppearanceChanged += OnThemeAppearanceChanged;
         WindowsCompatibilityService.TextScaleFactorChanged -=
@@ -98,7 +144,6 @@ public sealed partial class WeatherWidgetContent : UserControl
         WindowsCompatibilityService.TextScaleFactorChanged +=
             WeatherWidgetContent_TextScaleFactorChanged;
         RefreshWeatherTextScaleFactor();
-        ApplySegmentedAccent();
 
         // Ensure the layout mode reflects the actual control size.
         // SizeChanged may fire with 0x0 before the control is fully laid out.
@@ -106,6 +151,8 @@ public sealed partial class WeatherWidgetContent : UserControl
         {
             _viewModel.UpdateAvailableSize(ActualWidth, ActualHeight);
         }
+
+        ReconcileActiveWeatherLayout();
     }
 
     private void WeatherWidgetContent_Unloaded(object sender, RoutedEventArgs e)
@@ -117,16 +164,64 @@ public sealed partial class WeatherWidgetContent : UserControl
         try { _refreshRotationStoryboard?.Stop(); } catch { }
     }
 
+    private bool _isDisposed;
+
+    public void Dispose()
+    {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        _isDisposed = true;
+        _isViewLoaded = false;
+        _viewModel.PropertyChanged -= ViewModel_PropertyChanged;
+        Loaded -= WeatherWidgetContent_Loaded;
+        Unloaded -= WeatherWidgetContent_Unloaded;
+        ActualThemeChanged -= WeatherWidgetContent_ActualThemeChanged;
+        if (App.Current?.ThemeService is { } themeService)
+        {
+            themeService.AppearanceChanged -= OnThemeAppearanceChanged;
+        }
+        WindowsCompatibilityService.TextScaleFactorChanged -=
+            WeatherWidgetContent_TextScaleFactorChanged;
+        StopAndClearRefreshStoryboard();
+        _refreshIcons.Clear();
+        Bindings?.StopTracking();
+        DataContext = null;
+        Content = null;
+    }
+
+    internal void OnWindowVisibilityChanged(bool isVisible)
+    {
+        if (!isVisible)
+        {
+            try { _refreshRotationStoryboard?.Stop(); } catch { }
+        }
+        else if (_isViewLoaded && !_isDisposed)
+        {
+            UpdateRefreshRotation();
+        }
+    }
+
     private void WeatherWidgetContent_TextScaleFactorChanged()
     {
-        if (!_isViewLoaded)
+        if (!_isViewLoaded || _isDisposed)
         {
             return;
         }
 
         if (!DispatcherQueue.HasThreadAccess)
         {
-            _ = DispatcherQueue.TryEnqueue(RefreshWeatherTextScaleFactor);
+            _ = DispatcherQueue.TryEnqueue(() =>
+            {
+                if (!_isViewLoaded || _isDisposed)
+                {
+                    return;
+                }
+
+                RefreshWeatherTextScaleFactor();
+            });
             return;
         }
 
@@ -141,9 +236,22 @@ public sealed partial class WeatherWidgetContent : UserControl
 
     private void OnThemeAppearanceChanged()
     {
+        if (!_isViewLoaded || _isDisposed)
+        {
+            return;
+        }
+
         if (!DispatcherQueue.HasThreadAccess)
         {
-            _ = DispatcherQueue.TryEnqueue(OnThemeAppearanceChanged);
+            _ = DispatcherQueue.TryEnqueue(() =>
+            {
+                if (!_isViewLoaded || _isDisposed)
+                {
+                    return;
+                }
+
+                ApplySegmentedAccent();
+            });
             return;
         }
 
@@ -152,6 +260,11 @@ public sealed partial class WeatherWidgetContent : UserControl
 
     private void ApplySegmentedAccent()
     {
+        if (WeatherViewSegmented is null)
+        {
+            return;
+        }
+
         // Same neutral pointer states every widget tab strip uses; this widget
         // only needs that part because its style comes from XAML.
         WidgetSegmentedStyleHelper.ApplyNeutralPointerStates(WeatherViewSegmented);
@@ -193,6 +306,22 @@ public sealed partial class WeatherWidgetContent : UserControl
 
     private void ViewModel_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
+        if (string.IsNullOrEmpty(e.PropertyName) ||
+            e.PropertyName is nameof(WeatherWidgetViewModel.LayoutMode) or
+                nameof(WeatherWidgetViewModel.IsMiniLayout) or
+                nameof(WeatherWidgetViewModel.IsCompactLayout) or
+                nameof(WeatherWidgetViewModel.IsExpandedLayout) or
+                nameof(WeatherWidgetViewModel.MiniLayoutVisibility) or
+                nameof(WeatherWidgetViewModel.CompactLayoutVisibility) or
+                nameof(WeatherWidgetViewModel.ExpandedLayoutVisibility))
+        {
+            ReconcileActiveWeatherLayout();
+            if (!string.IsNullOrEmpty(e.PropertyName))
+            {
+                return;
+            }
+        }
+
         if (e.PropertyName is nameof(WeatherWidgetViewModel.RichBackdropTopColor) or
             nameof(WeatherWidgetViewModel.RichBackdropBottomColor))
         {
@@ -261,6 +390,7 @@ public sealed partial class WeatherWidgetContent : UserControl
         if (_isViewLoaded &&
             !_isSynchronizingViewSelection &&
             DataContext is WeatherWidgetViewModel viewModel &&
+            WeatherViewSegmented is not null &&
             WeatherViewSegmented.SelectedIndex >= 0)
         {
             viewModel.SetViewMode(useWeekView: WeatherViewSegmented.SelectedIndex == 1);
@@ -269,6 +399,11 @@ public sealed partial class WeatherWidgetContent : UserControl
 
     private void UpdateWeatherViewSelection()
     {
+        if (WeatherViewSegmented is null)
+        {
+            return;
+        }
+
         int selectedIndex = _viewModel.IsWeekView ? 1 : 0;
         if (WeatherViewSegmented.SelectedIndex != selectedIndex)
         {
@@ -386,7 +521,7 @@ public sealed partial class WeatherWidgetContent : UserControl
         if (_forecastDragging && sender is ScrollViewer sv)
         {
             var pos = e.GetCurrentPoint(sv).Position;
-            if (ReferenceEquals(sv, ExpandedHourlyScroll))
+            if (ExpandedHourlyScroll is not null && ReferenceEquals(sv, ExpandedHourlyScroll))
             {
                 // Horizontal drag: moving the pointer right drags content right (scrolls left).
                 double delta = pos.X - _forecastDragStart.X;
@@ -415,10 +550,22 @@ public sealed partial class WeatherWidgetContent : UserControl
         _forecastDragging = false;
     }
 
+    private void StopAndClearRefreshStoryboard()
+    {
+        if (_refreshRotationStoryboard is null)
+        {
+            return;
+        }
+
+        try { _refreshRotationStoryboard.Stop(); } catch { }
+        _refreshRotationStoryboard.Children.Clear();
+        _refreshRotationStoryboard = null;
+    }
+
     private void InitializeRefreshRotation()
     {
         // Rebuild storyboard each time icons may have changed (layout switch)
-        _refreshRotationStoryboard?.Stop();
+        StopAndClearRefreshStoryboard();
         _refreshRotationStoryboard = new Storyboard { RepeatBehavior = RepeatBehavior.Forever };
 
         foreach (var icon in _refreshIcons)

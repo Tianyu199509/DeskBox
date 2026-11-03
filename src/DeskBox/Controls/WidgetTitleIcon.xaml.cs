@@ -13,9 +13,15 @@ namespace DeskBox.Controls;
 public sealed partial class WidgetTitleIcon : UserControl
 {
     private const double DesktopTitleIconScale = 1.3d;
-    private string? _currentColorAssetName;
+    [ThreadStatic]
+    private static WidgetTitleIconResources? s_sharedMonoResources;
+    [ThreadStatic]
+    private static Dictionary<string, SvgImageSource>? s_sharedColorSvgSources;
+    private string? _currentColorAssetKey;
     private XamlPath? _activeMonoIconPath;
     private readonly Dictionary<string, XamlPath> _monoIconPaths = new(StringComparer.Ordinal);
+    private SolidColorBrush? _transparentBrush;
+    private SolidColorBrush? _accentBrush;
     private double? _surfaceCornerRadiusOverride;
     private bool _isCompactPresentation;
 
@@ -204,7 +210,7 @@ public sealed partial class WidgetTitleIcon : UserControl
         IconSurface.Padding = new Thickness(0);
         IconSurface.BorderThickness = new Thickness(0);
         IconSurface.BorderBrush = null;
-        IconSurface.Background = new SolidColorBrush(Colors.Transparent);
+        IconSurface.Background = _transparentBrush ??= new SolidColorBrush(Colors.Transparent);
         IconSurface.CornerRadius = new CornerRadius(0);
         IconSurface.Width = Math.Clamp(Math.Round(iconSize + 2), 15, 34);
         IconSurface.Height = Math.Clamp(Math.Round(iconSize + 2), 15, 34);
@@ -267,11 +273,11 @@ public sealed partial class WidgetTitleIcon : UserControl
         IconSurface.Height = imageSize;
         ColorIcon.Width = imageSize;
         ColorIcon.Height = imageSize;
-        if (!string.Equals(_currentColorAssetName, assetName, StringComparison.Ordinal))
+        string assetKey = $"{assetName}@{(int)imageSize}";
+        if (!string.Equals(_currentColorAssetKey, assetKey, StringComparison.Ordinal))
         {
-            ColorIcon.Source = new SvgImageSource(new Uri(
-                $"ms-appx:///Assets/WidgetTitleIcons/{assetName}.svg"));
-            _currentColorAssetName = assetName;
+            ColorIcon.Source = GetOrCreateColorSvgSource(assetName, assetKey);
+            _currentColorAssetKey = assetKey;
         }
 
         ColorIcon.Visibility = Visibility.Visible;
@@ -281,9 +287,12 @@ public sealed partial class WidgetTitleIcon : UserControl
     {
         double surfaceSize = Math.Clamp(Math.Round(iconSize + 3), 18, 34);
         IconSurface.Width = surfaceSize;
-        IconSurface.Height = surfaceSize;
+        double emojiFontSize = Math.Clamp(Math.Round(iconSize * 0.85), 11, 22);
+        IconSurface.Height = Math.Clamp(Math.Ceiling(emojiFontSize * 1.6), surfaceSize, 32);
         CustomEmojiElement.Text = CustomEmoji;
-        CustomEmojiElement.FontSize = Math.Clamp(Math.Round(iconSize), 12, 26);
+        CustomEmojiElement.FontSize = emojiFontSize;
+        CustomEmojiElement.TextLineBounds = TextLineBounds.Full;
+        CustomEmojiElement.Margin = new Thickness(0, -1, 0, 0);
         CustomEmojiElement.Visibility = Visibility.Visible;
     }
 
@@ -303,7 +312,7 @@ public sealed partial class WidgetTitleIcon : UserControl
         var iconPath = GetMonoIconPath(kind, filled);
         iconPath.Width = iconSize;
         iconPath.Height = iconSize;
-        var accentBrush = new SolidColorBrush(accent);
+        var accentBrush = GetOrUpdateAccentBrush(accent);
         if (filled || IsFluentFilledPathKind(kind))
         {
             iconPath.Fill = accentBrush;
@@ -312,7 +321,7 @@ public sealed partial class WidgetTitleIcon : UserControl
         }
         else
         {
-            iconPath.Fill = new SolidColorBrush(Colors.Transparent);
+            iconPath.Fill = _transparentBrush ??= new SolidColorBrush(Colors.Transparent);
             iconPath.Stroke = accentBrush;
             iconPath.StrokeThickness = Math.Clamp(Math.Round(iconSize * 0.105, 1), 1.25, 1.7);
         }
@@ -347,6 +356,10 @@ public sealed partial class WidgetTitleIcon : UserControl
                 WidgetTitleIconKind.Tags => "FilledTagsPath",
                 WidgetTitleIconKind.Search => "FilledSearchPath",
                 WidgetTitleIconKind.SystemMonitor => "FilledSystemMonitorPath",
+                WidgetTitleIconKind.Pomodoro => "FilledPomodoroPath",
+                WidgetTitleIconKind.Countdown => "FilledCountdownPath",
+                WidgetTitleIconKind.AiMonitor => "FilledAiMonitorPath",
+                WidgetTitleIconKind.Clipboard => "FilledClipboardPath",
                 _ => "FilledDefaultPath"
             }
             : kind switch
@@ -360,6 +373,10 @@ public sealed partial class WidgetTitleIcon : UserControl
                 WidgetTitleIconKind.Tags => "LineTagsPath",
                 WidgetTitleIconKind.Search => "LineSearchPath",
                 WidgetTitleIconKind.SystemMonitor => "LineSystemMonitorPath",
+                WidgetTitleIconKind.Pomodoro => "LinePomodoroPath",
+                WidgetTitleIconKind.Countdown => "LineCountdownPath",
+                WidgetTitleIconKind.AiMonitor => "LineAiMonitorPath",
+                WidgetTitleIconKind.Clipboard => "LineClipboardPath",
                 _ => "LineDefaultPath"
             };
 
@@ -372,7 +389,14 @@ public sealed partial class WidgetTitleIcon : UserControl
 
         if (!_monoIconPaths.TryGetValue(pathName, out var iconPath))
         {
-            iconPath = (Resources[pathName + "Template"] as DataTemplate)?.LoadContent() as XamlPath ??
+            var sharedResources = s_sharedMonoResources ??= new WidgetTitleIconResources();
+            string templateKey = pathName + "Template";
+            var template = (sharedResources.TryGetValue(templateKey, out object? resource)
+                ? resource as DataTemplate
+                : null) ?? (Resources.TryGetValue(templateKey, out object? localResource)
+                    ? localResource as DataTemplate
+                    : null);
+            iconPath = template?.LoadContent() as XamlPath ??
                 throw new InvalidOperationException($"Missing title icon template: {pathName}");
             (filled ? FilledIconHost : LineIconHost).Children.Add(iconPath);
             _monoIconPaths.Add(pathName, iconPath);
@@ -382,6 +406,38 @@ public sealed partial class WidgetTitleIcon : UserControl
         return iconPath;
     }
 
+    private SvgImageSource GetOrCreateColorSvgSource(string assetName, string assetKey)
+    {
+        var uri = new Uri($"ms-appx:///Assets/WidgetTitleIcons/{assetName}.svg");
+        if (DispatcherQueue?.HasThreadAccess != true)
+        {
+            return new SvgImageSource(uri);
+        }
+
+        var cache = s_sharedColorSvgSources ??= new Dictionary<string, SvgImageSource>(StringComparer.Ordinal);
+        if (!cache.TryGetValue(assetKey, out var svgSource))
+        {
+            svgSource = new SvgImageSource(uri);
+            cache[assetKey] = svgSource;
+        }
+
+        return svgSource;
+    }
+
+    private SolidColorBrush GetOrUpdateAccentBrush(Color accent)
+    {
+        if (_accentBrush is null)
+        {
+            _accentBrush = new SolidColorBrush(accent);
+        }
+        else if (!_accentBrush.Color.Equals(accent))
+        {
+            _accentBrush.Color = accent;
+        }
+
+        return _accentBrush;
+    }
+
     private static bool IsFluentFilledPathKind(WidgetTitleIconKind kind)
     {
         return kind is WidgetTitleIconKind.ManagedStorage
@@ -389,7 +445,11 @@ public sealed partial class WidgetTitleIcon : UserControl
             or WidgetTitleIconKind.QuickCapture
             or WidgetTitleIconKind.Todo
             or WidgetTitleIconKind.Music
-            or WidgetTitleIconKind.Search;
+            or WidgetTitleIconKind.Search
+            or WidgetTitleIconKind.Pomodoro
+            or WidgetTitleIconKind.Countdown
+            or WidgetTitleIconKind.AiMonitor
+            or WidgetTitleIconKind.Clipboard;
     }
 
     private void ApplyLegacyGlyphFallback()

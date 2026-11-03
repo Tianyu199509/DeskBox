@@ -24,6 +24,7 @@ public sealed class WidgetTrayBatchAnimationEntry
     public required int RefreshRateHz { get; init; }
     public int? RefreshAnchorX { get; init; }
     public int? RefreshAnchorY { get; init; }
+    public int DelayMs { get; init; }
 
     /// <summary>
     /// Optional per-frame visual hook (eased progress) for effects whose
@@ -210,7 +211,30 @@ public sealed class WidgetTrayBatchAnimationDriver
 
         _entries.AddRange(entries);
         double maxDelayMs = 0;
-        if (staggerIntervalMs > 0 && entries.Count > 1)
+        bool hasExplicitDelays = false;
+        for (int index = 0; index < entries.Count; index++)
+        {
+            if (entries[index].DelayMs > 0)
+            {
+                hasExplicitDelays = true;
+                break;
+            }
+        }
+
+        if (hasExplicitDelays)
+        {
+            for (int index = 0; index < entries.Count; index++)
+            {
+                var entry = entries[index];
+                double delay = Math.Max(0, entry.DelayMs);
+                _motionStates[entry] = new EntryMotionState(entry)
+                {
+                    DelayMs = delay
+                };
+                maxDelayMs = Math.Max(maxDelayMs, delay);
+            }
+        }
+        else if (staggerIntervalMs > 0 && entries.Count > 1)
         {
             // Wave order: top-left window leads, the rest follow by position.
             var ordered = entries
@@ -380,6 +404,10 @@ public sealed class WidgetTrayBatchAnimationDriver
         foreach (var entry in _entries)
         {
             EntryMotionState state = _motionStates[entry];
+            if (state.IsStationary)
+            {
+                continue;
+            }
             double budgetMs = _getFrameBudget(entry);
             if (!state.Pacing.ShouldSubmit(nowMs, budgetMs, force: finalFrame))
             {
@@ -521,9 +549,17 @@ public sealed class WidgetTrayBatchAnimationDriver
     {
         public EntryMotionState(WidgetTrayBatchAnimationEntry entry)
         {
+            IsStationary =
+                entry.FromOffsetX == 0 &&
+                entry.FromOffsetY == 0 &&
+                entry.ToOffsetX == 0 &&
+                entry.ToOffsetY == 0 &&
+                entry.FrameVisual is null;
             LastPosition = GetEntryFramePosition(entry, 0);
             Pacing.Reset(0, 1000.0 / Math.Max(1, entry.RefreshRateHz));
         }
+
+        public bool IsStationary { get; }
 
         public WidgetAnimationFramePacingPolicy Pacing { get; } = new();
 

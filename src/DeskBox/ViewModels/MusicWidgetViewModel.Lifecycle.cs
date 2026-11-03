@@ -1,15 +1,4 @@
-using System.Collections.ObjectModel;
-using CommunityToolkit.Mvvm.ComponentModel;
-using DeskBox.Helpers;
-using DeskBox.Models;
 using DeskBox.Services;
-using Microsoft.UI.Xaml;
-using Microsoft.UI.Xaml.Media;
-using Microsoft.UI.Xaml.Media.Imaging;
-using Windows.Foundation;
-using Windows.Graphics.Imaging;
-using Windows.Storage.Streams;
-using Windows.UI;
 
 namespace DeskBox.ViewModels;
 
@@ -37,6 +26,7 @@ public sealed partial class MusicWidgetViewModel
         if (_isWindowRevealCompleted)
         {
             UpdateProgressTimerState();
+            UpdateLyricActiveLineAndScheduleTimer();
             _ = RefreshAsync();
         }
     }
@@ -69,7 +59,9 @@ public sealed partial class MusicWidgetViewModel
                 _playbackRefreshGeneration++;
             }
         }
+
         UpdateProgressTimerState();
+        UpdateLyricActiveLineAndScheduleTimer();
     }
 
     public void OnWindowRevealCompleted()
@@ -80,7 +72,14 @@ public sealed partial class MusicWidgetViewModel
         }
 
         _isWindowRevealCompleted = true;
+        if (!_isSeeking && _hasCurrentMediaInfo && ShouldExposeTimelinePosition())
+        {
+            Position = _timelineExtrapolator.GetPosition(DateTimeOffset.UtcNow);
+        }
+
         UpdateProgressTimerState();
+        UpdateLyricActiveLineAndScheduleTimer();
+
         bool hasHiddenChanges =
             Interlocked.Exchange(ref _hiddenMediaStateDirty, 0) != 0;
         long lastRefreshTicks =
@@ -109,7 +108,7 @@ public sealed partial class MusicWidgetViewModel
 
     /// <summary>
     /// Keeps capsule progress live at a lower cadence while avoiding the
-    /// expanded surface's 500 ms refresh cost when it is fully covered.
+    /// expanded surface's refresh cost when it is fully covered.
     /// </summary>
     public void OnCompactStateChanged(bool collapsed)
     {
@@ -120,6 +119,7 @@ public sealed partial class MusicWidgetViewModel
 
         _isCompactCollapsed = collapsed;
         UpdateProgressTimerState();
+        UpdateLyricActiveLineAndScheduleTimer();
         if (!collapsed && _isWindowVisible && _isWindowRevealCompleted)
         {
             _ = RefreshTimelineAsync();

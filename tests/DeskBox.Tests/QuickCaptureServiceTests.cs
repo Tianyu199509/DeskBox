@@ -558,22 +558,31 @@ public sealed class QuickCaptureServiceTests : IDisposable
     [Fact]
     public async Task ClearAsync_ReplacesAllItemsWithTombstoneStubs()
     {
+        var store = new QuickCaptureStore(_storeRoot);
+        var recentSeed = new QuickCaptureItem
+        {
+            Id = "legacy-recent-1",
+            Body = "recent",
+            IsRecent = true,
+            CreatedAt = DateTimeOffset.UtcNow.AddMinutes(-2),
+            UpdatedAt = DateTimeOffset.UtcNow.AddMinutes(-2)
+        };
+        await store.SaveAsync(new QuickCaptureStoreData
+        {
+            RecentItems = [recentSeed]
+        });
+
         var service = CreateService();
         var first = await service.AddItemAsync("first");
         var second = await service.AddItemAsync("second");
-        var recent = await service.AddRecentClipboardItemAsync("recent", QuickCaptureService.DefaultRecentLimit);
         await Task.Delay(5);
 
         await service.ClearAsync();
         var data = await service.GetDataAsync();
 
-        // Read API: records and recents are empty.
         Assert.Empty(data.Items.Where(item => !item.IsDeleted));
         Assert.Empty(data.RecentItems.Where(item => !item.IsDeleted));
 
-        // Underlying store: every original entry leaves a content-stripped
-        // tombstone stub (id + timestamps only) so a later merge restore
-        // cannot resurrect the wiped items.
         QuickCaptureStoreData persisted = await new QuickCaptureStore(_storeRoot).LoadAsync();
         Assert.Equal(2, persisted.Items.Count);
         foreach (var original in new[] { first, second })
@@ -588,171 +597,10 @@ public sealed class QuickCaptureServiceTests : IDisposable
         }
 
         var recentStub = Assert.Single(persisted.RecentItems);
-        Assert.Equal(recent!.Id, recentStub.Id);
+        Assert.Equal(recentSeed.Id, recentStub.Id);
         Assert.True(recentStub.IsDeleted);
         Assert.True(recentStub.IsRecent);
         Assert.True(string.IsNullOrWhiteSpace(recentStub.Body));
-    }
-
-    [Fact]
-    public async Task AddRecentClipboardItemAsync_TrimsAndPersistsNewestFirst()
-    {
-        var service = CreateService();
-
-        var first = await service.AddRecentClipboardItemAsync(" first copied ", QuickCaptureService.DefaultRecentLimit);
-        var second = await service.AddRecentClipboardItemAsync("https://example.com/path", QuickCaptureService.DefaultRecentLimit);
-
-        var reloaded = CreateService();
-        var data = await reloaded.GetDataAsync();
-
-        Assert.NotNull(first);
-        Assert.NotNull(second);
-        Assert.Empty(data.Items);
-        Assert.Collection(
-            data.RecentItems,
-            item =>
-            {
-                Assert.Equal(second.Id, item.Id);
-                Assert.Equal("https://example.com/path", item.Body);
-                Assert.Equal(QuickCaptureItemType.Link, item.Type);
-                Assert.True(item.IsRecent);
-                Assert.Equal(0, item.SortOrder);
-            },
-            item =>
-            {
-                Assert.Equal(first.Id, item.Id);
-                Assert.Equal("first copied", item.Body);
-                Assert.Equal(QuickCaptureItemType.Text, item.Type);
-                Assert.True(item.IsRecent);
-                Assert.Equal(1, item.SortOrder);
-            });
-    }
-
-    [Fact]
-    public async Task AddRecentClipboardItemAsync_DeduplicatesByBodyAndKeepsNewest()
-    {
-        var service = CreateService();
-
-        await service.AddRecentClipboardItemAsync("same", QuickCaptureService.DefaultRecentLimit);
-        await Task.Delay(5);
-        var newest = await service.AddRecentClipboardItemAsync("other", QuickCaptureService.DefaultRecentLimit);
-        await Task.Delay(5);
-        var duplicate = await service.AddRecentClipboardItemAsync("same", QuickCaptureService.DefaultRecentLimit);
-        var data = await service.GetDataAsync();
-
-        Assert.NotNull(newest);
-        Assert.NotNull(duplicate);
-        Assert.Collection(
-            data.RecentItems,
-            item =>
-            {
-                Assert.Equal(duplicate.Id, item.Id);
-                Assert.Equal("same", item.Body);
-                Assert.Equal(0, item.SortOrder);
-            },
-            item =>
-            {
-                Assert.Equal(newest.Id, item.Id);
-                Assert.Equal("other", item.Body);
-                Assert.Equal(1, item.SortOrder);
-            });
-    }
-
-    [Fact]
-    public async Task AddRecentClipboardItemAsync_IgnoresLatestDuplicate()
-    {
-        var service = CreateService();
-
-        var first = await service.AddRecentClipboardItemAsync("same", QuickCaptureService.DefaultRecentLimit);
-        var duplicate = await service.AddRecentClipboardItemAsync("same", QuickCaptureService.DefaultRecentLimit);
-        var data = await service.GetDataAsync();
-
-        Assert.NotNull(first);
-        Assert.Null(duplicate);
-        Assert.Single(data.RecentItems);
-    }
-
-    [Fact]
-    public async Task AddRecentClipboardItemAsync_IgnoresTextWrittenByDeskBox()
-    {
-        var service = CreateService();
-
-        service.MarkClipboardTextWrittenByDeskBox("copied from deskbox");
-        var item = await service.AddRecentClipboardItemAsync("copied from deskbox", QuickCaptureService.DefaultRecentLimit);
-        var data = await service.GetDataAsync();
-
-        Assert.Null(item);
-        Assert.Empty(data.RecentItems);
-    }
-
-    [Fact]
-    public async Task AddRecentClipboardItemAsync_TrimsToLimit()
-    {
-        var service = CreateService();
-
-        for (int index = 0; index < 12; index++)
-        {
-            await service.AddRecentClipboardItemAsync($"item {index}", 10);
-        }
-
-        var data = await service.GetDataAsync();
-
-        Assert.Equal(10, data.RecentItems.Count);
-        Assert.Equal("item 11", data.RecentItems[0].Body);
-        Assert.Equal("item 2", data.RecentItems[^1].Body);
-        Assert.Equal(Enumerable.Range(0, 10), data.RecentItems.Select(item => item.SortOrder));
-    }
-
-    [Fact]
-    public async Task SaveRecentItemToRecordsAsync_CreatesRecord()
-    {
-        var service = CreateService();
-        var recent = await service.AddRecentClipboardItemAsync("save me", QuickCaptureService.DefaultRecentLimit);
-
-        var saved = await service.SaveRecentItemToRecordsAsync(recent!.Id, pin: false);
-        var data = await service.GetDataAsync();
-
-        Assert.NotNull(saved);
-        Assert.False(saved.IsPinned);
-        Assert.False(saved.IsRecent);
-        Assert.Equal("save me", saved.Body);
-        Assert.Single(data.RecentItems);
-        var record = Assert.Single(data.Items);
-        Assert.Equal(saved.Id, record.Id);
-        Assert.False(record.IsPinned);
-    }
-
-    [Fact]
-    public async Task SaveRecentItemToRecordsAsync_CanPinRecord()
-    {
-        var service = CreateService();
-        var recent = await service.AddRecentClipboardItemAsync("pin me", QuickCaptureService.DefaultRecentLimit);
-
-        var saved = await service.SaveRecentItemToRecordsAsync(recent!.Id, pin: true);
-        var data = await service.GetDataAsync();
-
-        Assert.NotNull(saved);
-        Assert.True(saved.IsPinned);
-        var record = Assert.Single(data.Items);
-        Assert.True(record.IsPinned);
-        Assert.False(record.IsRecent);
-    }
-
-    [Fact]
-    public async Task SaveRecentItemToRecordsAsync_PreservesImageMetadata()
-    {
-        var service = CreateService();
-        var recent = await service.AddRecentClipboardImageAsync([1, 2, 3, 4], QuickCaptureService.DefaultRecentLimit);
-
-        var saved = await service.SaveRecentItemToRecordsAsync(recent!.Id, pin: false);
-        var data = await service.GetDataAsync();
-
-        Assert.NotNull(saved);
-        Assert.Equal(QuickCaptureItemType.Image, saved.Type);
-        Assert.False(string.IsNullOrWhiteSpace(saved.ImagePath));
-        var record = Assert.Single(data.Items);
-        Assert.Equal(saved.ImagePath, record.ImagePath);
-        Assert.Equal(saved.ContentHash, record.ContentHash);
     }
 
     [Fact]
@@ -783,7 +631,9 @@ public sealed class QuickCaptureServiceTests : IDisposable
     public async Task GetImageCacheInfoAsync_ReportsUnusedImageFiles()
     {
         var service = CreateService();
-        var image = await service.AddRecentClipboardImageAsync([1, 2, 3, 4], QuickCaptureService.DefaultRecentLimit);
+        string sourcePath = Path.Combine(_tempRoot, "cache-info.png");
+        await File.WriteAllBytesAsync(sourcePath, [1, 2, 3, 4]);
+        var image = await service.AddImageFileItemAsync(sourcePath);
         string orphanPath = Path.Combine(_storeRoot, "images", "orphan.png");
         Directory.CreateDirectory(Path.GetDirectoryName(orphanPath)!);
         await File.WriteAllBytesAsync(orphanPath, [9, 9, 9]);
@@ -801,7 +651,9 @@ public sealed class QuickCaptureServiceTests : IDisposable
     public async Task CleanupUnusedImageCacheAsync_DeletesOnlyUnreferencedFiles()
     {
         var service = CreateService();
-        var image = await service.AddRecentClipboardImageAsync([1, 2, 3, 4], QuickCaptureService.DefaultRecentLimit);
+        string sourcePath = Path.Combine(_tempRoot, "cache-cleanup.png");
+        await File.WriteAllBytesAsync(sourcePath, [1, 2, 3, 4]);
+        var image = await service.AddImageFileItemAsync(sourcePath);
         string orphanPath = Path.Combine(_storeRoot, "images", "orphan.png");
         string orphanThumbnailPath = Path.Combine(_storeRoot, "thumbnails", "orphan.png");
         Directory.CreateDirectory(Path.GetDirectoryName(orphanPath)!);
@@ -826,7 +678,9 @@ public sealed class QuickCaptureServiceTests : IDisposable
     public async Task ClearAsync_RemovesImageCache()
     {
         var service = CreateService();
-        await service.AddRecentClipboardImageAsync([1, 2, 3, 4], QuickCaptureService.DefaultRecentLimit);
+        string sourcePath = Path.Combine(_tempRoot, "cache-clear.png");
+        await File.WriteAllBytesAsync(sourcePath, [1, 2, 3, 4]);
+        await service.AddImageFileItemAsync(sourcePath);
 
         await service.ClearAsync();
         var info = await service.GetImageCacheInfoAsync();
@@ -850,23 +704,7 @@ public sealed class QuickCaptureServiceTests : IDisposable
         Assert.StartsWith(Path.Combine(_storeRoot, "thumbnails"), thumbnailPath!, StringComparison.OrdinalIgnoreCase);
     }
 
-    [Fact]
-    public async Task AddRecentClipboardImageAsync_PersistsImageAndReadyThumbnail()
-    {
-        var service = CreateService();
-        byte[] imageBytes = Convert.FromBase64String(
-            "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVR4nGNkYPj/nwEJMDGgAQAAMQIEA3mLB4MAAAAASUVORK5CYII=");
 
-        QuickCaptureItem? item = await service.AddRecentClipboardImageAsync(
-            imageBytes,
-            QuickCaptureService.DefaultRecentLimit);
-        Assert.NotNull(item);
-        string? thumbnailPath = await service.GetOrCreateImageThumbnailPathAsync(item!.ImagePath);
-
-        Assert.True(File.Exists(item!.ImagePath));
-        Assert.False(string.IsNullOrWhiteSpace(thumbnailPath));
-        Assert.True(File.Exists(thumbnailPath));
-    }
 
     [Fact]
     public async Task UpdateImageItemDetailsAsync_PreservesImageAndAddsBodyText()
@@ -942,109 +780,42 @@ public sealed class QuickCaptureServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task DeleteRecentItemAsync_TombstonesOnlyRecentItem()
-    {
-        var service = CreateService();
-        var record = await service.AddItemAsync("record");
-        var recent = await service.AddRecentClipboardItemAsync("recent", QuickCaptureService.DefaultRecentLimit);
-        await Task.Delay(5);
-
-        var deleted = await service.DeleteRecentItemAsync(recent!.Id);
-        var data = await service.GetDataAsync();
-
-        Assert.NotNull(deleted);
-        Assert.Equal(recent.Id, deleted.Item.Id);
-        Assert.True(deleted.IsRecent);
-        // Read API: the recent entry is gone; the main list is untouched.
-        Assert.Empty(data.RecentItems.Where(item => !item.IsDeleted));
-        var liveRecord = Assert.Single(data.Items.Where(item => !item.IsDeleted));
-        Assert.Equal(record.Id, liveRecord.Id);
-
-        // Underlying store: the tombstone stays in the recents segment while
-        // the main list keeps its live record.
-        QuickCaptureStoreData persisted = await new QuickCaptureStore(_storeRoot).LoadAsync();
-        var tombstone = Assert.Single(persisted.RecentItems.Where(item => item.Id == recent.Id));
-        Assert.True(tombstone.IsDeleted);
-        Assert.True(tombstone.UpdatedAt > recent.UpdatedAt);
-        // Content stripping: deletes must not leave payload in the file.
-        Assert.True(string.IsNullOrWhiteSpace(tombstone.Body));
-        Assert.Empty(tombstone.Attachments);
-        var storedRecord = Assert.Single(persisted.Items.Where(item => item.Id == record.Id));
-        Assert.False(storedRecord.IsDeleted);
-    }
-
-    [Fact]
     public async Task ClearRecentAsync_TombstonesRecentsWithoutTouchingRecords()
     {
+        var store = new QuickCaptureStore(_storeRoot);
+        var recentSeed = new QuickCaptureItem
+        {
+            Id = "legacy-recent-clear",
+            Body = "recent",
+            IsRecent = true,
+            CreatedAt = DateTimeOffset.UtcNow.AddMinutes(-2),
+            UpdatedAt = DateTimeOffset.UtcNow.AddMinutes(-2)
+        };
+        await store.SaveAsync(new QuickCaptureStoreData
+        {
+            RecentItems = [recentSeed]
+        });
+
         var service = CreateService();
         var record = await service.AddItemAsync("record");
-        var recent = await service.AddRecentClipboardItemAsync("recent", QuickCaptureService.DefaultRecentLimit);
         await Task.Delay(5);
 
         await service.ClearRecentAsync();
         var data = await service.GetDataAsync();
 
-        // Read API: recents wiped, records untouched.
         Assert.Empty(data.RecentItems.Where(item => !item.IsDeleted));
         var liveRecord = Assert.Single(data.Items.Where(item => !item.IsDeleted));
         Assert.Equal(record.Id, liveRecord.Id);
 
-        // Underlying store: recents carry only a content-stripped tombstone
-        // stub; the main list keeps its live content.
         QuickCaptureStoreData persisted = await new QuickCaptureStore(_storeRoot).LoadAsync();
         var storedRecord = Assert.Single(persisted.Items);
         Assert.Equal(record.Id, storedRecord.Id);
         Assert.False(storedRecord.IsDeleted);
         Assert.Equal("record", storedRecord.Body);
         var recentStub = Assert.Single(persisted.RecentItems);
-        Assert.Equal(recent!.Id, recentStub.Id);
+        Assert.Equal(recentSeed.Id, recentStub.Id);
         Assert.True(recentStub.IsDeleted);
         Assert.True(string.IsNullOrWhiteSpace(recentStub.Body));
-    }
-
-    [Fact]
-    public async Task DeleteRecentItem_TombstoneSurvivesRecentsTrim()
-    {
-        var service = CreateService();
-        var doomed = await service.AddRecentClipboardItemAsync("doomed", QuickCaptureService.MaxRecentLimit);
-        Assert.NotNull(doomed);
-
-        await service.DeleteRecentItemAsync(doomed.Id);
-        // Push the live window past the hard cap so the trim runs on every
-        // add and again on reload.
-        for (int index = 0; index <= QuickCaptureService.MaxRecentLimit; index++)
-        {
-            await service.AddRecentClipboardItemAsync($"filler {index}", QuickCaptureService.MaxRecentLimit);
-        }
-
-        QuickCaptureStoreData reloaded = await new QuickCaptureStore(_storeRoot).LoadAsync();
-
-        // The tombstone still rides outside the live window...
-        QuickCaptureItem tombstone = Assert.Single(reloaded.RecentItems.Where(item => item.IsDeleted));
-        Assert.Equal(doomed.Id, tombstone.Id);
-        Assert.True(tombstone.IsRecent);
-        // ...and it does not consume a live slot: exactly the cap's worth of
-        // live entries survive, none of them the deleted one.
-        var liveItems = reloaded.RecentItems.Where(item => !item.IsDeleted).ToList();
-        Assert.Equal(QuickCaptureService.MaxRecentLimit, liveItems.Count);
-        Assert.DoesNotContain(liveItems, item => item.Id == doomed.Id);
-    }
-
-    [Fact]
-    public async Task TrimRecentItemsAsync_UsesConfiguredLimit()
-    {
-        var service = CreateService();
-        for (int index = 0; index < 12; index++)
-        {
-            await service.AddRecentClipboardItemAsync($"item {index}", QuickCaptureService.DefaultRecentLimit);
-        }
-
-        await service.TrimRecentItemsAsync(10);
-        var data = await service.GetDataAsync();
-
-        Assert.Equal(10, data.RecentItems.Count);
-        Assert.Equal("item 11", data.RecentItems[0].Body);
-        Assert.Equal("item 2", data.RecentItems[^1].Body);
     }
 
     [Fact]

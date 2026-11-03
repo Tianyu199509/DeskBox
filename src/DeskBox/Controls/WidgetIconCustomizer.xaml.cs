@@ -1,4 +1,4 @@
-﻿using DeskBox.Helpers;
+using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Services;
 using Microsoft.UI.Xaml;
@@ -79,9 +79,7 @@ public sealed partial class WidgetIconCustomizer : UserControl
 
     private static string ResolveDefaultIconKind(WidgetConfig config)
     {
-        return config.WidgetKind == WidgetKind.File
-            ? WidgetTitleIconKindNames.FromFileWidget(config.FollowsDefaultStoragePath)
-            : WidgetTitleIconKindNames.FromWidgetKind(config.WidgetKind);
+        return WidgetTitleIconKindNames.FromWidgetConfig(config);
     }
 
     private static List<WidgetEmojiCategoryOption> BuildCategoryOptions()

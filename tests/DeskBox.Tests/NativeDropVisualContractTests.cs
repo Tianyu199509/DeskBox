@@ -78,23 +78,23 @@ public sealed class NativeDropVisualContractTests
             StringComparison.Ordinal);
 
         Assert.Contains(
-            "NativeDropImageManager.TryCreate()",
+            "NativeDropImageManager.Show(this, visible: true);",
             target,
             StringComparison.Ordinal);
         Assert.Contains(
-            "_dropImageManager?.DragEnter(",
+            "NativeDropImageManager.TryDragEnter(",
             target,
             StringComparison.Ordinal);
         Assert.Contains(
-            "_dropImageManager?.DragOver(point, effect);",
+            "NativeDropImageManager.DragOver(this, point, effect);",
             target,
             StringComparison.Ordinal);
         Assert.Contains(
-            "_dropImageManager?.DragLeave();",
+            "NativeDropImageManager.DragLeave(this);",
             target,
             StringComparison.Ordinal);
         Assert.Contains(
-            "_dropImageManager?.Drop(",
+            "NativeDropImageManager.Drop(",
             target,
             StringComparison.Ordinal);
         Assert.Contains(

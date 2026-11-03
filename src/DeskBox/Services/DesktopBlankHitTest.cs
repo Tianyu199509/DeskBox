@@ -133,10 +133,69 @@ internal static partial class DesktopBlankHitTest
                shellProcessId == rootProcessId;
     }
 
+    internal static bool IsVerifiedDesktopShellWindow(
+        IntPtr windowHandle,
+        bool allowDefView = true)
+    {
+        if (windowHandle == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        IntPtr root = Win32Helper.GetAncestor(windowHandle, Win32Helper.GA_ROOT);
+        if (root != IntPtr.Zero)
+        {
+            string rootClass = GetWindowClass(root);
+            // An Explorer folder window (CabinetWClass/ExploreWClass) or common
+            // file dialog (#32770) also hosts SHELLDLL_DefView inside explorer.exe
+            // or the host app, and must never be mistaken for the desktop surface.
+            if (string.Equals(rootClass, "CabinetWClass", StringComparison.Ordinal) ||
+                string.Equals(rootClass, "ExploreWClass", StringComparison.Ordinal) ||
+                string.Equals(rootClass, "#32770", StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        IntPtr current = windowHandle;
+        while (current != IntPtr.Zero)
+        {
+            string className = GetWindowClass(current);
+            if (string.Equals(className, "Progman", StringComparison.Ordinal) ||
+                string.Equals(className, "WorkerW", StringComparison.Ordinal) ||
+                (allowDefView &&
+                 string.Equals(className, "SHELLDLL_DefView", StringComparison.Ordinal)))
+            {
+                return IsDesktopHostWindow(current);
+            }
+
+            current = Win32Helper.GetParent(current);
+        }
+
+        if (root != IntPtr.Zero)
+        {
+            string rootClass = GetWindowClass(root);
+            if (string.Equals(rootClass, "Progman", StringComparison.Ordinal) ||
+                string.Equals(rootClass, "WorkerW", StringComparison.Ordinal))
+            {
+                return IsDesktopHostWindow(root);
+            }
+        }
+
+        return false;
+    }
+
     private static bool IsBlankListViewPoint(
         IntPtr listView,
         Win32Helper.POINT screenPoint)
     {
+        // When Windows "Show desktop icons" is unchecked, SHELLDLL_DefView hides
+        // its child SysListView32. Every point on the desktop is visually blank.
+        if (!Win32Helper.IsWindowVisible(listView))
+        {
+            return true;
+        }
+
         Win32Helper.POINT clientPoint = screenPoint;
         if (!Win32Helper.ScreenToClient(listView, ref clientPoint))
         {

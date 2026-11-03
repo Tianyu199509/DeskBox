@@ -1,4 +1,4 @@
-﻿namespace DeskBox.Tests;
+namespace DeskBox.Tests;
 
 public sealed class AotStage5B4B2B2AContractTests
 {
@@ -363,9 +363,9 @@ public sealed class AotStage5B4B2B2AContractTests
         string baseline = ReadRepositoryFile(
             "tests/DeskBox.Tests/JsonSerializationBaselineContractTests.cs");
 
-        Assert.Contains("Assert.Equal(44, actual.Count);", baseline, StringComparison.Ordinal);
-        Assert.Contains("Assert.Equal(111, actual.Values.Sum());", baseline, StringComparison.Ordinal);
-        Assert.Contains("Assert.Equal(38, actualContextOwners.Length);", baseline, StringComparison.Ordinal);
+        Assert.Contains("Assert.Equal(52, actual.Count);", baseline, StringComparison.Ordinal);
+        Assert.Contains("Assert.Equal(143, actual.Values.Sum());", baseline, StringComparison.Ordinal);
+        Assert.Contains("Assert.Equal(45, actualContextOwners.Length);", baseline, StringComparison.Ordinal);
     }
 
     [Fact]

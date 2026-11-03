@@ -22,7 +22,8 @@ public sealed partial class FileService
         {
             try
             {
-                if ((File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
+                if ((File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0 &&
+                    !StorageMigrationNativeMethods.IsHydratedCloudReparsePoint(current, out _))
                     throw new IOException($"A linked destination cannot be used for migration: '{current}'.");
             }
             catch (FileNotFoundException) { }
@@ -41,16 +42,27 @@ public sealed partial class FileService
     internal static void RequireStoragePath(string path, bool directory)
     {
         FileAttributes attributes = File.GetAttributes(path);
-        if ((attributes & (FileAttributes.ReparsePoint | FileAttributes.Encrypted)) != 0 ||
+        if ((attributes & FileAttributes.Encrypted) != 0 ||
             attributes.HasFlag(FileAttributes.Directory) != directory)
             throw new StorageMigrationException(StorageMigrationProblem.Unsupported,
                 $"This migration cannot safely copy a link, EFS-encrypted item or changed item: '{path}'.");
+
+        if ((attributes & FileAttributes.ReparsePoint) != 0 &&
+            !StorageMigrationNativeMethods.IsHydratedCloudReparsePoint(path, out bool isUnhydratedCloud))
+        {
+            throw new StorageMigrationException(
+                StorageMigrationProblem.Unsupported,
+                isUnhydratedCloud
+                    ? $"Cloud-only file must be downloaded locally before migration: '{path}'."
+                    : $"This migration cannot safely copy a link, EFS-encrypted item or changed item: '{path}'.");
+        }
 
         // A replaced ancestor must not redirect either a copy or its verification.
         for (string? parent = Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(Path.GetFullPath(path)));
              !string.IsNullOrEmpty(parent); parent = Path.GetDirectoryName(parent))
         {
-            if ((File.GetAttributes(parent) & FileAttributes.ReparsePoint) != 0)
+            if ((File.GetAttributes(parent) & FileAttributes.ReparsePoint) != 0 &&
+                !StorageMigrationNativeMethods.IsHydratedCloudReparsePoint(parent, out _))
                 throw new IOException($"A linked ancestor cannot be used for this migration: '{parent}'.");
         }
     }
@@ -87,16 +99,23 @@ public sealed partial class FileService
 
     internal static string CopyStorageFileVerified(
         string source, string temporaryDestination, CancellationToken token, Action<long> copyProgress,
-        Action<long>? verificationProgress = null)
+        Action<long>? verificationProgress = null, bool verifyDestinationImmediately = true)
     {
         RequireStoragePath(source, directory: false);
         RequireStorageDirectory(Path.GetDirectoryName(temporaryDestination)!);
         // The source cannot be modified, renamed or deleted while copying and hashing.
         using var lease = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read);
-        StorageMigrationNativeMethods.Copy(source, temporaryDestination, copyProgress, token);
-        string sourceHash = HashStorageFile(source, token, verificationProgress);
-        if (!string.Equals(sourceHash, HashStorageFile(temporaryDestination, token, verificationProgress), StringComparison.Ordinal))
+        string sourceHash = StorageMigrationNativeMethods.CopyStreamsAndHash(
+            source,
+            temporaryDestination,
+            copyProgress,
+            token);
+        if (verifyDestinationImmediately &&
+            !string.Equals(sourceHash, HashStorageFile(temporaryDestination, token, verificationProgress), StringComparison.Ordinal))
+        {
             throw new IOException($"Content verification failed for '{source}'. Both locations have been preserved.");
+        }
+
         return sourceHash;
     }
 }

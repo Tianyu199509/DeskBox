@@ -40,7 +40,10 @@ public sealed record MusicPresentationSettings(
     bool UseArtworkBackdrop,
     bool EnableCoverHoverMotion,
     string DisplayMode,
-    bool HideTimelineWhenUnavailable);
+    bool HideTimelineWhenUnavailable,
+    bool ShowLyrics = true,
+    bool ShowCapsuleLyrics = true,
+    string LocalLyricsFolder = "");
 
 /// <summary>
 /// Immutable read snapshot of the weather presentation preferences, mirroring
@@ -98,6 +101,12 @@ public interface IFeatureWidgetsSettings
     /// one debounced save, exactly like the other music presentation setters.
     /// </summary>
     bool SetMusicHideTimelineWhenUnavailable(bool value);
+
+    bool SetMusicShowLyrics(bool value);
+
+    bool SetMusicShowCapsuleLyrics(bool value);
+
+    bool SetMusicLocalLyricsFolder(string? folderPath);
 
     /// <summary>
     /// Writes the fresh-install music presentation defaults. Used by the

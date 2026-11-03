@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using CommunityToolkit.WinUI.Controls;
 using DeskBox.Services;
 using DeskBox.Views.SettingsSections;
@@ -34,6 +34,24 @@ public sealed partial class SettingsWindow
             search is SearchSettingsSection section)
         {
             section.RefreshFromSettings();
+        }
+        if (_currentSettingsSection == "CustomWidgetSettings" &&
+            _settingsSectionElements.TryGetValue("CustomWidgetSettings", out FrameworkElement? customEl) &&
+            customEl is CustomWidgetSettingsSection customSection)
+        {
+            customSection.RefreshInstances();
+        }
+        if (_currentSettingsSection == "AiSettings" &&
+            _settingsSectionElements.TryGetValue("AiSettings", out FrameworkElement? aiEl) &&
+            aiEl is AiSettingsSection aiSection)
+        {
+            aiSection.RefreshState();
+        }
+        if (_currentSettingsSection == "ClipboardSettings" &&
+            _settingsSectionElements.TryGetValue("ClipboardSettings", out FrameworkElement? clipboardEl) &&
+            clipboardEl is ClipboardSettingsSection clipboardSection)
+        {
+            clipboardSection.RefreshFromSettings();
         }
     }
 
@@ -77,7 +95,17 @@ public sealed partial class SettingsWindow
         // editor instead of the shell view model.
         object compiledBindingsRoot = sectionTag == "FileStackSettings"
             ? _fileStackSettingsViewModel
-            : ViewModel;
+            : sectionTag == "MusicSettings"
+                ? _musicSettingsViewModel
+                : sectionTag == "InteractionWindowSettings"
+                    ? _interactionSettingsViewModel
+                    : sectionTag == "QuickCaptureSettings"
+                        ? _quickCaptureSettingsViewModel
+                        : sectionTag == "TodoSettings"
+                            ? _todoSettingsViewModel
+                            : ViewModel;
+
+
         XamlBindingHelper.GetDataTemplateComponent(section)?.ProcessBindings(compiledBindingsRoot, 0, 0, out _);
 
         switch (section)
@@ -91,17 +119,37 @@ public sealed partial class SettingsWindow
                 fileSettings.Interaction = _interactionSettingsViewModel;
                 fileSettings.AppActions = _appActions;
                 break;
+            case AppearanceSettingsSection appearanceSettings:
+                appearanceSettings.ViewModel = ViewModel;
+                break;
             case CapsuleModeSettingsSection capsuleSettings:
                 capsuleSettings.ViewModel = ViewModel;
                 break;
             case GlanceWidgetSettingsSection glanceSettings:
                 glanceSettings.Configure(_widgetActions, _hWnd);
                 break;
+            case CustomWidgetSettingsSection customWidgetSettings:
+                customWidgetSettings.Configure(_widgetActions, _hWnd);
+                customWidgetSettings.SubPageChanged -= OnCustomWidgetSubPageChanged;
+                customWidgetSettings.SubPageChanged += OnCustomWidgetSubPageChanged;
+                customWidgetSettings.NavigateToAiSettingsRequested -= OnNavigateToAiSettingsRequested;
+                customWidgetSettings.NavigateToAiSettingsRequested += OnNavigateToAiSettingsRequested;
+                break;
+            case AiSettingsSection aiSettings:
+                aiSettings.Configure(_widgetActions, _hWnd);
+                aiSettings.NavigateToCustomWidgetRequested -= OnAiNavigateToCustomWidgetRequested;
+                aiSettings.NavigateToCustomWidgetRequested += OnAiNavigateToCustomWidgetRequested;
+                break;
             case DisplaySettingsSection displaySettings:
                 displaySettings.Configure(_widgetActions, _appActions);
                 break;
             case DesktopOrganizationSettingsSection organizationSettings:
                 organizationSettings.Configure(_widgetActions, _appActions, _hWnd);
+                organizationSettings.SubPageChanged -= OnDesktopOrganizationSubPageChanged;
+                organizationSettings.SubPageChanged += OnDesktopOrganizationSubPageChanged;
+                break;
+            case ClipboardSettingsSection clipboardSettings:
+                clipboardSettings.Configure(_settingsService, _localizationService, _widgetActions, _dataActions, _hWnd);
                 break;
         }
 
@@ -201,15 +249,12 @@ public sealed partial class SettingsWindow
             RefreshDragOutWin10State();
         }
 
-        // The appearance family (main section plus the material, density,
-        // window and animation subsections) binds through the appearance
-        // editor; {Binding} markup resolves through its generated custom
-        // property provider under Native AOT.
+        // The appearance family (main section plus the advanced material
+        // subsection) binds through the appearance editor; {Binding} markup
+        // resolves through its generated custom property provider under
+        // Native AOT.
         if (sectionTag is "Appearance" or
-            "AppearanceMaterialSettings" or
-            "AppearanceDensitySettings" or
-            "AppearanceWindowSettings" or
-            "AppearanceAnimationSettings")
+            "AppearanceMaterialSettings")
         {
             section.DataContext = _appearanceSettingsViewModel;
             if (sectionTag == "AppearanceMaterialSettings")
@@ -240,6 +285,14 @@ public sealed partial class SettingsWindow
             section.DataContext = _capsuleSettingsViewModel;
         }
 
+        if (sectionTag == "FeatureWidgets")
+        {
+            Segmented hubSegmented = FeatureWidgetsHubSegmented;
+            WidgetSegmentedStyleHelper.ApplyNeutralPointerStates(hubSegmented);
+            hubSegmented.Loaded += (_, _) => WidgetSegmentedStyleHelper.ApplyNeutralPointerStates(hubSegmented);
+            hubSegmented.ActualThemeChanged += (_, _) => WidgetSegmentedStyleHelper.ApplyNeutralPointerStates(hubSegmented);
+        }
+
         if (sectionTag == "InteractionWindowSettings")
         {
             ViewModel.RefreshGlobalHotkeyState();
@@ -252,6 +305,11 @@ public sealed partial class SettingsWindow
             parent is FileWidgetSettingsSection fileWidgetSection)
         {
             fileWidgetSection.AttachManagedStorageSection(section);
+        }
+        else if (sectionTag == "CustomWidgetSettings")
+        {
+            EnsureSettingsSectionCreated("FeatureWidgets");
+            CustomWidgetHostPanel.Children.Add(section);
         }
         else
         {
@@ -334,5 +392,93 @@ public sealed partial class SettingsWindow
             }
         }
         return null;
+    }
+
+    private async void MusicLocalLyricsBrowseButton_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            string? folderPath = await FolderPickerService.PickFolderAsync(_hWnd);
+            if (!string.IsNullOrWhiteSpace(folderPath))
+            {
+                _musicSettingsViewModel.LocalLyricsFolder = folderPath;
+            }
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[MusicSettings] Failed to pick local lyrics folder: {ex}");
+        }
+    }
+
+    private void MusicLocalLyricsClearButton_Click(object sender, RoutedEventArgs e)
+    {
+        _musicSettingsViewModel.LocalLyricsFolder = string.Empty;
+    }
+
+    private void OnNavigateToAiSettingsRequested(object? sender, bool focusAgentHub)
+    {
+        if (_isClosed)
+        {
+            return;
+        }
+
+        if (focusAgentHub)
+        {
+            NavigateToSettingsSection("AiSettings:agent-hub");
+        }
+        else
+        {
+            NavigateToSettingsSection("AiSettings");
+        }
+    }
+
+    private void OnAiNavigateToCustomWidgetRequested(object? sender, string widgetId)
+    {
+        if (_isClosed)
+        {
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(widgetId))
+        {
+            EnsureSettingsSectionCreated("CustomWidgetSettings");
+            CustomWidgetSettingsSection.SelectWidget(widgetId);
+        }
+
+        NavigateToSettingsSection("CustomWidgetSettings");
+    }
+
+    private void OnCustomWidgetSubPageChanged(object? sender, EventArgs e)
+    {
+        if (_isClosed || !string.Equals(_currentSettingsSection, "CustomWidgetSettings", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        SyncFeatureWidgetsHubState("CustomWidgetSettings");
+        PageScroller.ChangeView(null, 0d, null, disableAnimation: true);
+        if (TryGetSectionRoute("CustomWidgetSettings", out SettingsSectionRoute route))
+        {
+            SettingsNavigationView.IsBackButtonVisible =
+                _settingsSectionElements.TryGetValue("CustomWidgetSettings", out FrameworkElement? customEl) &&
+                customEl is CustomWidgetSettingsSection { IsDetailViewOpen: true }
+                    ? NavigationViewBackButtonVisible.Visible
+                    : NavigationViewBackButtonVisible.Collapsed;
+            UpdateBreadcrumb(route);
+        }
+    }
+
+    private void OnDesktopOrganizationSubPageChanged(object? sender, EventArgs e)
+    {
+        if (_isClosed || !string.Equals(_currentSettingsSection, "DesktopOrganizationSettings", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        PageScroller.ChangeView(null, 0d, null, disableAnimation: true);
+        if (TryGetSectionRoute("DesktopOrganizationSettings", out SettingsSectionRoute route))
+        {
+            UpdateBreadcrumb(route);
+        }
     }
 }

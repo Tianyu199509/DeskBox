@@ -6,7 +6,7 @@ namespace DeskBox.Features.Music;
 
 /// <summary>
 /// Music-section settings editor. Owns the section's XAML binding surface
-/// (display mode combo and the two presentation toggles): reads project
+/// (display mode combo, presentation toggles, and synchronized lyrics options): reads project
 /// through the read snapshot of <see cref="IFeatureWidgetsSettings"/>, user
 /// edits write through the same coordinator ports the legacy shell used,
 /// and external refresh paths (settings broadcasts, feature-card default
@@ -86,6 +86,48 @@ public sealed partial class MusicSettingsViewModel : ObservableObject
         }
     }
 
+    [ObservableProperty]
+    public partial bool ShowLyrics { get; set; } = true;
+
+    partial void OnShowLyricsChanged(bool value)
+    {
+        if (!_isSyncingPresentation)
+        {
+            _settings.SetMusicShowLyrics(value);
+        }
+    }
+
+    [ObservableProperty]
+    public partial bool ShowCapsuleLyrics { get; set; } = true;
+
+    partial void OnShowCapsuleLyricsChanged(bool value)
+    {
+        if (!_isSyncingPresentation)
+        {
+            _settings.SetMusicShowCapsuleLyrics(value);
+        }
+    }
+
+    [ObservableProperty]
+    public partial string LocalLyricsFolder { get; set; } = string.Empty;
+
+    partial void OnLocalLyricsFolderChanged(string value)
+    {
+        if (!_isSyncingPresentation)
+        {
+            _settings.SetMusicLocalLyricsFolder(value);
+        }
+
+        OnPropertyChanged(nameof(HasLocalLyricsFolder));
+        OnPropertyChanged(nameof(LocalLyricsFolderDisplayText));
+    }
+
+    public bool HasLocalLyricsFolder => !string.IsNullOrWhiteSpace(LocalLyricsFolder);
+
+    public string LocalLyricsFolderDisplayText => HasLocalLyricsFolder
+        ? LocalLyricsFolder
+        : _localize("Settings.Music.LocalLyricsFolder.Unset");
+
     public string DisplayMode
     {
         get => _displayMode;
@@ -139,6 +181,9 @@ public sealed partial class MusicSettingsViewModel : ObservableObject
             EnableCoverHoverMotion = snapshot.EnableCoverHoverMotion;
             DisplayMode = snapshot.DisplayMode;
             HideTimelineWhenUnavailable = snapshot.HideTimelineWhenUnavailable;
+            ShowLyrics = snapshot.ShowLyrics;
+            ShowCapsuleLyrics = snapshot.ShowCapsuleLyrics;
+            LocalLyricsFolder = snapshot.LocalLyricsFolder ?? string.Empty;
         }
         finally
         {
@@ -154,5 +199,6 @@ public sealed partial class MusicSettingsViewModel : ObservableObject
     {
         _cachedDisplayModeNames = null;
         OnPropertyChanged(nameof(AvailableDisplayModeOptions));
+        OnPropertyChanged(nameof(LocalLyricsFolderDisplayText));
     }
 }

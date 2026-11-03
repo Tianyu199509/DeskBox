@@ -153,7 +153,6 @@ private void OnLanguageChanged()
         RefreshGlobalHotkeyState();
         OnPropertyChanged(nameof(FeatureWidgetEntries));
         NotifyCapsuleOverridePropertiesChanged();
-        RefreshQuickCaptureClipboardDiagnostics();
         _ = RefreshQuickAccessStateAsync();
     }
 
@@ -190,7 +189,6 @@ private void OnLanguageChanged()
         // The group-navigation editor rebuilds its option tables itself; the
         // existing-groups projection rebuild follows.
         RefreshWidgetGroupSettings();
-        RefreshQuickCaptureClipboardDiagnostics();
     }
 
     private void RefreshSelectionProperties(bool refreshLocalizedOptions)

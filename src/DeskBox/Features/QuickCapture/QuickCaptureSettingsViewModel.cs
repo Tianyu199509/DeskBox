@@ -1,4 +1,3 @@
-using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using DeskBox.Contracts;
 using DeskBox.Models;
@@ -7,38 +6,18 @@ namespace DeskBox.Features.QuickCapture;
 
 /// <summary>
 /// Quick Capture-section settings editor. Owns the section's XAML binding
-/// surface (the feature switch, the recording switches with their
-/// coordinator-side enablement chaining, wide layout/open mode, the tab
-/// group incl. the visibility flyout state machine, default view, tab
-/// style, content editor preferences, preview line count, created-time
-/// visibility, remote images, the recent-capacity NumberBox and the pushed
-/// clipboard-diagnostics/image-cache texts): reads project through the
-/// snapshots of <see cref="IQuickCaptureSettings"/> (normalized with the
-/// old shell-constructor semantics), user edits write through the same
-/// coordinator ports the legacy shell used, and external refresh paths
-/// (settings broadcasts, feature-card default restores, language changes)
-/// re-sync the projection instead of writing back. The recording chain's
-/// host work (enabling the widget when a recording switch turns on, the
-/// debounced recent-item trims) stays inside the coordinator; the editor
-/// re-projects from the coordinator's <c>Changed</c> broadcasts so the
-/// three linked switches follow each other. The image-cache line and its
-/// cleanup gate need host services the editor must not reference, so the
-/// shell scans and pushes them through <see cref="UpdateImageCachePresentation"/>.
-/// The bindable property names intentionally drop the legacy
-/// <c>QuickCapture</c>/<c>Selected</c> prefixes: the section-level
-/// DataContext switch means they no longer need to be unique across the
-/// whole shell, and unprefixed names keep the flat <c>AppSettings</c>
-/// facade-name ratchet shrinking. This class references neither App nor
-/// WinUI nor the settings adapter; localization and logging arrive as
-/// delegates.
+/// surface (the feature switch, wide layout/open mode, the tab group incl. the
+/// visibility flyout state machine, default view, tab style, content editor
+/// preferences, preview line count, created-time visibility, remote images,
+/// and the pushed image-cache text). This class references neither App nor
+/// WinUI nor the settings adapter; localization and logging arrive as delegates.
 /// </summary>
 public sealed partial class QuickCaptureSettingsViewModel : ObservableObject
 {
     private static readonly string[] DefaultViewValues =
     [
         QuickCaptureOptionKinds.DefaultViewRecords,
-        QuickCaptureOptionKinds.DefaultViewPinned,
-        QuickCaptureOptionKinds.DefaultViewRecent
+        QuickCaptureOptionKinds.DefaultViewPinned
     ];
 
     private static readonly string[] WideLayoutValues =
@@ -73,12 +52,9 @@ public sealed partial class QuickCaptureSettingsViewModel : ObservableObject
     private readonly Action<Exception> _reportError;
     private bool _isSyncingPresentation;
     private bool _enabled;
-    private bool _clipboardEnabled;
-    private bool _imageClipboardEnabled;
     private bool _showTabBar = true;
     private bool _showRecordsTab = true;
     private bool _showPinnedTab = true;
-    private bool _showRecentTab = true;
     private string _selectedDefaultView = QuickCaptureOptionKinds.DefaultViewRecords;
     private string _tabStyle = QuickCaptureOptionKinds.TabStyleButton;
     private bool _showCreatedTime = true;
@@ -88,12 +64,11 @@ public sealed partial class QuickCaptureSettingsViewModel : ObservableObject
     private string _wideLayout = QuickCaptureOptionKinds.WideLayoutAuto;
     private string _wideOpenMode = QuickCaptureOptionKinds.WideOpenReading;
     private bool _allowRemoteImages;
-    private int _recentLimit;
     private double _listTextSize;
     private double _contentTextSize;
-    private string _clipboardDiagnosticsText;
     private string _imageCacheText;
     private bool _canClearImageCache;
+    private string? _mirrorFolderPath;
     private string[]? _cachedDefaultViewNames;
     private string[]? _cachedWideLayoutNames;
     private string[]? _cachedWideOpenModeNames;
@@ -119,21 +94,12 @@ public sealed partial class QuickCaptureSettingsViewModel : ObservableObject
         _format = format;
         _log = log;
         _reportError = reportError;
-        _clipboardDiagnosticsText = localize("Settings.QuickCapture.ClipboardDiagnosticsUnavailable");
         _imageCacheText = localize("Settings.QuickCapture.ImageCacheLoading");
         SyncPresentation();
-        RefreshClipboardDiagnostics();
     }
 
-    /// <summary>
-    /// Raised after a user edit committed a Quick Capture text-size write
-    /// with <c>scheduleSave:false</c>; the shell answers with the shared
-    /// appearance save pass (preview + debounced persistence, incl. the
-    /// slider-drag suppression flags).
-    /// </summary>
     public event Action? ListTextSizeCommitted;
 
-    /// <summary>See <see cref="ListTextSizeCommitted"/>.</summary>
     public event Action? ContentTextSizeCommitted;
 
     public bool Enabled
@@ -147,6 +113,10 @@ public sealed partial class QuickCaptureSettingsViewModel : ObservableObject
             }
 
             OnPropertyChanged(nameof(StatusText));
+            OnPropertyChanged(nameof(CanConfigureWideOpenMode));
+            OnPropertyChanged(nameof(CanConfigureRemoteImages));
+            OnPropertyChanged(nameof(CanEditRecordsTab));
+            OnPropertyChanged(nameof(CanEditPinnedTab));
             if (_isSyncingPresentation)
             {
                 return;
@@ -160,51 +130,6 @@ public sealed partial class QuickCaptureSettingsViewModel : ObservableObject
         ? _localize("Settings.QuickCapture.Status.Enabled")
         : _localize("Settings.QuickCapture.Status.Disabled");
 
-    public bool ClipboardEnabled
-    {
-        get => _clipboardEnabled;
-        set
-        {
-            if (!SetProperty(ref _clipboardEnabled, value))
-            {
-                return;
-            }
-
-            if (_isSyncingPresentation)
-            {
-                return;
-            }
-
-            if (!value)
-            {
-                _log("[QuickCaptureClipboard] Disabled from settings");
-            }
-
-            RunUserAction(_settings.SetClipboardEnabledAsync(
-                value, captureCurrent: value));
-        }
-    }
-
-    public bool ImageClipboardEnabled
-    {
-        get => _imageClipboardEnabled;
-        set
-        {
-            if (!SetProperty(ref _imageClipboardEnabled, value))
-            {
-                return;
-            }
-
-            if (_isSyncingPresentation)
-            {
-                return;
-            }
-
-            RunUserAction(_settings.SetImageEnabledAsync(
-                value, captureCurrent: value));
-        }
-    }
-
     public bool ShowTabBar
     {
         get => _showTabBar;
@@ -216,6 +141,8 @@ public sealed partial class QuickCaptureSettingsViewModel : ObservableObject
             }
 
             OnPropertyChanged(nameof(TabsSummaryText));
+            OnPropertyChanged(nameof(CanEditRecordsTab));
+            OnPropertyChanged(nameof(CanEditPinnedTab));
             if (_isSyncingPresentation)
             {
                 return;
@@ -237,18 +164,19 @@ public sealed partial class QuickCaptureSettingsViewModel : ObservableObject
         set => SetTabVisible(QuickCaptureOptionKinds.DefaultViewPinned, value);
     }
 
-    public bool ShowRecentTab
-    {
-        get => _showRecentTab;
-        set => SetTabVisible(QuickCaptureOptionKinds.DefaultViewRecent, value);
-    }
-
     private void SetTabVisible(string view, bool visible)
     {
+        if (!visible && !CanToggleTab(view) && !_isSyncingPresentation)
+        {
+            OnPropertyChanged(view == QuickCaptureOptionKinds.DefaultViewPinned
+                ? nameof(ShowPinnedTab)
+                : nameof(ShowRecordsTab));
+            return;
+        }
+
         bool changed = view switch
         {
             QuickCaptureOptionKinds.DefaultViewPinned => SetProperty(ref _showPinnedTab, visible),
-            QuickCaptureOptionKinds.DefaultViewRecent => SetProperty(ref _showRecentTab, visible),
             _ => SetProperty(ref _showRecordsTab, visible)
         };
         if (!changed)
@@ -358,7 +286,9 @@ public sealed partial class QuickCaptureSettingsViewModel : ObservableObject
                 return;
             }
 
+            OnPropertyChanged(nameof(EditorFormatIndex));
             OnPropertyChanged(nameof(ShowRemoteImages));
+            OnPropertyChanged(nameof(CanConfigureRemoteImages));
             OnPropertyChanged(nameof(ContentSummaryText));
             if (_isSyncingPresentation)
             {
@@ -403,6 +333,7 @@ public sealed partial class QuickCaptureSettingsViewModel : ObservableObject
 
             OnPropertyChanged(nameof(LayoutSummaryText));
             OnPropertyChanged(nameof(ShowWideOptions));
+            OnPropertyChanged(nameof(CanConfigureWideOpenMode));
             if (_isSyncingPresentation)
             {
                 return;
@@ -429,6 +360,7 @@ public sealed partial class QuickCaptureSettingsViewModel : ObservableObject
                 return;
             }
 
+            OnPropertyChanged(nameof(WideOpenModeIndex));
             _settings.SetWideOpenMode(normalized);
         }
     }
@@ -452,33 +384,6 @@ public sealed partial class QuickCaptureSettingsViewModel : ObservableObject
         }
     }
 
-    public int RecentLimit
-    {
-        get => _recentLimit;
-        set
-        {
-            if (!SetProperty(ref _recentLimit, value))
-            {
-                return;
-            }
-
-            OnPropertyChanged(nameof(RecentLimitText));
-            if (_isSyncingPresentation)
-            {
-                return;
-            }
-
-            // The coordinator owns the normalization, the debounced save and
-            // the 350 ms quiet-period recent-item trim chain; its Changed
-            // broadcast re-projects the normalized value back here.
-            RunWithFailureProjection(() => _settings.SetRecentLimit(value));
-        }
-    }
-
-    public string RecentLimitText => _format(
-        "Settings.QuickCapture.RecentLimitValue",
-        [RecentLimit]);
-
     public double ListTextSize
     {
         get => _listTextSize;
@@ -499,8 +404,6 @@ public sealed partial class QuickCaptureSettingsViewModel : ObservableObject
 
             if (!double.IsFinite(value))
             {
-                // Non-finite slider input re-projects from the effective
-                // snapshot (stored zero inherits the global size).
                 SyncPresentation();
                 return;
             }
@@ -508,8 +411,6 @@ public sealed partial class QuickCaptureSettingsViewModel : ObservableObject
             double normalized = QuickCaptureOptionKinds.NormalizeTextSizeStep(value);
             if (Math.Abs(normalized - value) > 0.0001)
             {
-                // Snap the control back onto the half-point grid; the
-                // re-entry carries the store write and the commit event.
                 ListTextSize = normalized;
                 return;
             }
@@ -669,12 +570,6 @@ public sealed partial class QuickCaptureSettingsViewModel : ObservableObject
         GetFormatDisplayName(EditorFormat),
         GetEnterBehaviorDisplayName(EditorEnterBehavior));
 
-    public string ClipboardDiagnosticsText
-    {
-        get => _clipboardDiagnosticsText;
-        private set => SetProperty(ref _clipboardDiagnosticsText, value);
-    }
-
     public string ImageCacheText
     {
         get => _imageCacheText;
@@ -689,13 +584,61 @@ public sealed partial class QuickCaptureSettingsViewModel : ObservableObject
 
     public string[] AvailableDefaultViews => DefaultViewValues;
 
+    public bool CanConfigureWideOpenMode => Enabled && ShowWideOptions;
+
+    public int WideOpenModeIndex
+    {
+        get => WideOpenMode == QuickCaptureOptionKinds.WideOpenEditing ? 1 : 0;
+        set => WideOpenMode = value == 1
+            ? QuickCaptureOptionKinds.WideOpenEditing
+            : QuickCaptureOptionKinds.WideOpenReading;
+    }
+
+    public int EditorFormatIndex
+    {
+        get => EditorFormat == QuickCaptureOptionKinds.FormatPlainText ? 1 : 0;
+        set => EditorFormat = value == 1
+            ? QuickCaptureOptionKinds.FormatPlainText
+            : QuickCaptureOptionKinds.FormatMarkdown;
+    }
+
+    public bool CanConfigureRemoteImages => Enabled && ShowRemoteImages;
+
+    public bool CanEditRecordsTab =>
+        Enabled && ShowTabBar && CanToggleTab(QuickCaptureOptionKinds.DefaultViewRecords);
+
+    public bool CanEditPinnedTab =>
+        Enabled && ShowTabBar && CanToggleTab(QuickCaptureOptionKinds.DefaultViewPinned);
+
+    public string? MirrorFolderPath => _mirrorFolderPath;
+
+    public bool HasMirrorFolder => !string.IsNullOrWhiteSpace(_mirrorFolderPath);
+
+    public string MirrorFolderDisplayText => HasMirrorFolder
+        ? _mirrorFolderPath!
+        : _localize("Settings.QuickCapture.MirrorFolder.Unset");
+
+    public void UpdateMirrorFolderPresentation(string? folderPath)
+    {
+        string? normalized = string.IsNullOrWhiteSpace(folderPath)
+            ? null
+            : folderPath.Trim();
+        if (string.Equals(_mirrorFolderPath, normalized, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _mirrorFolderPath = normalized;
+        OnPropertyChanged(nameof(MirrorFolderPath));
+        OnPropertyChanged(nameof(HasMirrorFolder));
+        OnPropertyChanged(nameof(MirrorFolderDisplayText));
+    }
+
     public string GetDefaultViewDisplayName(string view) =>
         QuickCaptureOptionKinds.NormalizeDefaultView(view) switch
         {
             QuickCaptureOptionKinds.DefaultViewPinned =>
                 _localize("Settings.QuickCapture.DefaultView.Pinned"),
-            QuickCaptureOptionKinds.DefaultViewRecent =>
-                _localize("Settings.QuickCapture.DefaultView.Recent"),
             _ => _localize("Settings.QuickCapture.DefaultView.Records")
         };
 
@@ -737,7 +680,6 @@ public sealed partial class QuickCaptureSettingsViewModel : ObservableObject
         QuickCaptureOptionKinds.NormalizeDefaultView(view) switch
         {
             QuickCaptureOptionKinds.DefaultViewPinned => _showPinnedTab,
-            QuickCaptureOptionKinds.DefaultViewRecent => _showRecentTab,
             _ => _showRecordsTab
         };
 
@@ -757,22 +699,12 @@ public sealed partial class QuickCaptureSettingsViewModel : ObservableObject
             case QuickCaptureOptionKinds.DefaultViewPinned:
                 ShowPinnedTab = !selected;
                 break;
-            case QuickCaptureOptionKinds.DefaultViewRecent:
-                ShowRecentTab = !selected;
-                break;
             default:
                 ShowRecordsTab = !selected;
                 break;
         }
     }
 
-    /// <summary>
-    /// The feature-card toggle's mirror path (the overview row in the
-    /// feature-widgets section): flips the projection without re-entering
-    /// the section switch's enable chain — the card itself sends the
-    /// SetFeatureWidgetEnabled command, and a plain Enabled assignment here
-    /// would fire a second, racing one (batch R8).
-    /// </summary>
     public void SetFeatureEnabled(bool enabled)
     {
         _isSyncingPresentation = true;
@@ -786,12 +718,6 @@ public sealed partial class QuickCaptureSettingsViewModel : ObservableObject
         }
     }
 
-    /// <summary>
-    /// Re-projects the persisted Quick Capture state onto the binding
-    /// surface without writing back. Called on construction, settings
-    /// broadcasts and default restores; the coordinator snapshots already
-    /// normalize with the old shell-constructor semantics.
-    /// </summary>
     public void SyncPresentation()
     {
         QuickCaptureSettingsSnapshot state = _settings.Read();
@@ -799,17 +725,13 @@ public sealed partial class QuickCaptureSettingsViewModel : ObservableObject
         QuickCapturePresentationSettings presentation = _settings.ReadPresentation();
         QuickCaptureTextSizeSettings textSizes = _settings.ReadTextSizes();
         QuickCaptureEditorSettings editor = _settings.ReadEditorSettings();
-        int recentLimit = _settings.ReadRecentLimit();
         _isSyncingPresentation = true;
         try
         {
             Enabled = state.Enabled;
-            ClipboardEnabled = state.ClipboardEnabled;
-            ImageClipboardEnabled = state.ImageEnabled;
             ShowTabBar = tabs.ShowTabBar;
             ShowRecordsTab = tabs.ShowRecordsTab;
             ShowPinnedTab = tabs.ShowPinnedTab;
-            ShowRecentTab = tabs.ShowRecentTab;
             SelectedDefaultView = tabs.DefaultView;
             TabStyleIndex = presentation.TabStyle ==
                     QuickCaptureOptionKinds.TabStylePivot
@@ -822,7 +744,6 @@ public sealed partial class QuickCaptureSettingsViewModel : ObservableObject
             WideLayout = editor.WideLayout;
             WideOpenMode = editor.WideOpenMode;
             AllowRemoteImages = editor.AllowRemoteImages;
-            RecentLimit = recentLimit;
             ListTextSize = textSizes.ListTextSize;
             ContentTextSize = textSizes.ContentTextSize;
         }
@@ -834,16 +755,15 @@ public sealed partial class QuickCaptureSettingsViewModel : ObservableObject
         RefreshTabDerivedProperties();
         OnPropertyChanged(nameof(LayoutSummaryText));
         OnPropertyChanged(nameof(ShowWideOptions));
+        OnPropertyChanged(nameof(CanConfigureWideOpenMode));
+        OnPropertyChanged(nameof(WideOpenModeIndex));
         OnPropertyChanged(nameof(ContentSummaryText));
         OnPropertyChanged(nameof(ShowRemoteImages));
+        OnPropertyChanged(nameof(CanConfigureRemoteImages));
+        OnPropertyChanged(nameof(EditorFormatIndex));
         OnPropertyChanged(nameof(StatusText));
     }
 
-    /// <summary>
-    /// Drops the localized option-name caches after a language change so the
-    /// option tables, summaries and the tab texts re-project in the new
-    /// language.
-    /// </summary>
     public void RefreshLocalization()
     {
         _cachedDefaultViewNames = null;
@@ -858,10 +778,14 @@ public sealed partial class QuickCaptureSettingsViewModel : ObservableObject
         OnPropertyChanged(nameof(AvailableEnterBehaviorOptions));
         OnPropertyChanged(nameof(AvailablePreviewLineOptions));
         OnPropertyChanged(nameof(VisibleDefaultViewOptions));
-        // Re-notify the current selections: replacing the localized option
-        // arrays makes WinUI reset every bound ComboBox.SelectedIndex to -1.
+        OnPropertyChanged(nameof(SelectedDefaultView));
+        OnPropertyChanged(nameof(CanEditRecordsTab));
+        OnPropertyChanged(nameof(CanEditPinnedTab));
         OnPropertyChanged(nameof(WideLayout));
         OnPropertyChanged(nameof(WideOpenMode));
+        OnPropertyChanged(nameof(WideOpenModeIndex));
+        OnPropertyChanged(nameof(EditorFormatIndex));
+        OnPropertyChanged(nameof(MirrorFolderDisplayText));
         OnPropertyChanged(nameof(SelectedDefaultView));
         OnPropertyChanged(nameof(ItemPreviewLineCount));
         OnPropertyChanged(nameof(EditorFormat));
@@ -869,88 +793,15 @@ public sealed partial class QuickCaptureSettingsViewModel : ObservableObject
         OnPropertyChanged(nameof(LayoutSummaryText));
         OnPropertyChanged(nameof(ContentSummaryText));
         OnPropertyChanged(nameof(StatusText));
-        OnPropertyChanged(nameof(RecentLimitText));
         OnPropertyChanged(nameof(ListTextSizeValueText));
         OnPropertyChanged(nameof(ContentTextSizeValueText));
         RefreshTabDerivedProperties();
-        RefreshClipboardDiagnostics();
     }
 
-    /// <summary>
-    /// Rebuilds the clipboard-diagnostics line from the coordinator's
-    /// current diagnostics snapshot (called by the shell on the
-    /// diagnostics-changed broadcast and after enable-state changes).
-    /// </summary>
-    public void RefreshClipboardDiagnostics()
-    {
-        var diagnostics = _settings.ClipboardDiagnostics;
-        if (diagnostics is null)
-        {
-            QuickCaptureSettingsSnapshot state = _settings.Read();
-            string inactiveReason = !state.Enabled
-                ? "disabled:quick-capture-off"
-                : !state.ClipboardEnabled
-                    ? "disabled:clipboard-off"
-                    : "disabled:unknown";
-            ClipboardDiagnosticsText = _format(
-                "Settings.QuickCapture.ClipboardDiagnosticsNotRecordingNoCapture",
-                [GetClipboardReasonText(inactiveReason)]);
-            return;
-        }
-
-        string reasonText = GetClipboardReasonText(diagnostics.LastReason);
-        if (diagnostics.LastCapturedAt is { } capturedAt)
-        {
-            ClipboardDiagnosticsText = _format(
-                diagnostics.IsRecording && diagnostics.IsListening
-                    ? "Settings.QuickCapture.ClipboardDiagnosticsRecording"
-                    : "Settings.QuickCapture.ClipboardDiagnosticsNotRecording",
-                [
-                    capturedAt.ToLocalTime().ToString("HH:mm", CultureInfo.CurrentCulture),
-                    reasonText
-                ]);
-            return;
-        }
-
-        ClipboardDiagnosticsText = _format(
-            diagnostics.IsRecording && diagnostics.IsListening
-                ? "Settings.QuickCapture.ClipboardDiagnosticsNoCapture"
-                : "Settings.QuickCapture.ClipboardDiagnosticsNotRecordingNoCapture",
-            [reasonText]);
-    }
-
-    /// <summary>
-    /// Pushed by the shell after scanning the host-side image cache (the
-    /// shell owns the Quick Capture service); carries the localized line and
-    /// the cleanup gate.
-    /// </summary>
     public void UpdateImageCachePresentation(string text, bool canClear)
     {
         ImageCacheText = text;
         CanClearImageCache = canClear;
-    }
-
-    private string GetClipboardReasonText(string reason)
-    {
-        string key = reason switch
-        {
-            "enabled" => "Settings.QuickCapture.ClipboardReason.Enabled",
-            "disabled:quick-capture-off" => "Settings.QuickCapture.ClipboardReason.QuickCaptureOff",
-            "disabled:clipboard-off" => "Settings.QuickCapture.ClipboardReason.ClipboardOff",
-            "disabled:notice-unconfirmed" => "Settings.QuickCapture.ClipboardReason.NoticeUnconfirmed",
-            "ignored:empty-or-unsupported" => "Settings.QuickCapture.ClipboardReason.EmptyOrUnsupported",
-            "ignored:deskbox-write" => "Settings.QuickCapture.ClipboardReason.DeskBoxWrite",
-            "ignored:image-recording-off" => "Settings.QuickCapture.ClipboardReason.ImageOff",
-            "ignored:image-too-large" => "Settings.QuickCapture.ClipboardReason.ImageTooLarge",
-            "ignored:text-too-large" => "Settings.QuickCapture.ClipboardReason.TextTooLarge",
-            "ignored:duplicate-or-app-write" => "Settings.QuickCapture.ClipboardReason.Duplicate",
-            "failed:read-or-save" => "Settings.QuickCapture.ClipboardReason.Failed",
-            _ when reason.StartsWith("captured:", StringComparison.Ordinal) =>
-                "Settings.QuickCapture.ClipboardReason.Captured",
-            _ => "Settings.QuickCapture.ClipboardReason.Unknown"
-        };
-
-        return _localize(key);
     }
 
     private void RefreshTabDerivedProperties()
@@ -958,14 +809,14 @@ public sealed partial class QuickCaptureSettingsViewModel : ObservableObject
         OnPropertyChanged(nameof(VisibleTabsText));
         OnPropertyChanged(nameof(TabsSummaryText));
         OnPropertyChanged(nameof(VisibleDefaultViewOptions));
+        OnPropertyChanged(nameof(SelectedDefaultView));
+        OnPropertyChanged(nameof(CanEditRecordsTab));
+        OnPropertyChanged(nameof(CanEditPinnedTab));
     }
 
     private int CountSelectedTabs() =>
         DefaultViewValues.Count(IsTabSelected);
 
-    // Mirrors the recording-switch chain the legacy shell tracked around
-    // the coordinator calls: await the host work, report failures, and
-    // re-project from the (possibly chained) coordinator state afterwards.
     private async void RunUserAction(Task action)
     {
         try
@@ -982,13 +833,10 @@ public sealed partial class QuickCaptureSettingsViewModel : ObservableObject
             if (!_isSyncingPresentation)
             {
                 SyncPresentation();
-                RefreshClipboardDiagnostics();
             }
         }
     }
 
-    // The old shell wrapped these coordinator ports with a log-and-resync
-    // catch (they throw once the coordinator is stopping); keep that.
     private void RunWithFailureProjection(Action write)
     {
         try
@@ -1022,9 +870,6 @@ public sealed partial class QuickCaptureSettingsViewModel : ObservableObject
         }
     }
 
-    // Build real SettingsOption[] arrays (not collection expressions): the
-    // hidden read-only-array type cannot marshal across the WinRT ABI in
-    // Native AOT builds and would leave the ItemsSource empty.
     private static SettingsOption[] BuildOptions<T>(T[] values, string[] displayNames)
     {
         var options = new SettingsOption[values.Length];

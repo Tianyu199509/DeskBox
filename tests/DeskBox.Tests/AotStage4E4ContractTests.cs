@@ -1,4 +1,4 @@
-﻿namespace DeskBox.Tests;
+namespace DeskBox.Tests;
 
 public sealed class AotStage4E4ContractTests
 {
@@ -89,7 +89,7 @@ public sealed class AotStage4E4ContractTests
 
         Assert.DoesNotContain("{Binding ", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("{x:Bind ViewModel.", xaml, StringComparison.Ordinal);
-        Assert.Equal(6, CountOccurrences(xaml, "{x:Bind "));
+        Assert.Equal(12, CountOccurrences(xaml, "{x:Bind "));
     }
 
     [Fact]

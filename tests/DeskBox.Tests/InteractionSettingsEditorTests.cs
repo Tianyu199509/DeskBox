@@ -50,6 +50,7 @@ public sealed class InteractionSettingsEditorTests : IDisposable
             {
                 WidgetShellSettingsSlice shell = settings.Settings.WidgetShell;
                 shell.WidgetLayerMode = WidgetLayerModes.QuickReveal;
+                shell.DynamicClickRaiseScope = DynamicClickRaiseScopes.Group;
                 shell.ResizeSnapEnabled = false;
                 shell.WidgetSnapSpacing = 12d;
                 settings.Settings.FileWidget.DoubleClickToOpen = true;
@@ -57,6 +58,8 @@ public sealed class InteractionSettingsEditorTests : IDisposable
             });
 
         Assert.Equal(WidgetLayerModes.QuickReveal, editor.LayerMode);
+        Assert.False(editor.IsDynamicLayerMode);
+        Assert.Equal(DynamicClickRaiseScopes.Group, editor.ClickRaiseScope);
         Assert.False(editor.SnapEnabled);
         Assert.Equal(12d, editor.SnapSpacing);
         Assert.Equal(FileOpenMethods.DoubleClick, editor.FileOpenMethod);
@@ -71,10 +74,13 @@ public sealed class InteractionSettingsEditorTests : IDisposable
             settings =>
             {
                 settings.Settings.WidgetShell.WidgetLayerMode = "Nonsense";
+                settings.Settings.WidgetShell.DynamicClickRaiseScope = "Nonsense";
                 settings.Settings.WidgetShell.WidgetSnapSpacing = 9_999d;
             });
 
         Assert.Equal(WidgetLayerModes.Dynamic, editor.LayerMode);
+        Assert.True(editor.IsDynamicLayerMode);
+        Assert.Equal(DynamicClickRaiseScopes.Single, editor.ClickRaiseScope);
         Assert.Equal(SettingsService.MaxWidgetSnapSpacing, editor.SnapSpacing);
     }
 
@@ -86,6 +92,7 @@ public sealed class InteractionSettingsEditorTests : IDisposable
         settings.SettingsChanged += () => notified++;
 
         editor.LayerMode = WidgetLayerModes.DesktopPinned;
+        editor.ClickRaiseScope = DynamicClickRaiseScopes.Group;
         editor.SnapEnabled = false;
         editor.SnapSpacing = 14d;
         editor.FileOpenMethod = FileOpenMethods.SingleClick;
@@ -93,11 +100,13 @@ public sealed class InteractionSettingsEditorTests : IDisposable
 
         WidgetShellSettingsSlice shell = settings.Settings.WidgetShell;
         Assert.Equal(WidgetLayerModes.DesktopPinned, shell.WidgetLayerMode);
+        Assert.False(editor.IsDynamicLayerMode);
+        Assert.Equal(DynamicClickRaiseScopes.Group, shell.DynamicClickRaiseScope);
         Assert.False(shell.ResizeSnapEnabled);
         Assert.Equal(14d, shell.WidgetSnapSpacing);
         Assert.False(settings.Settings.FileWidget.DoubleClickToOpen);
         Assert.False(shell.KeepWidgetsVisibleOnShowDesktop);
-        Assert.Equal(5, notified);
+        Assert.Equal(6, notified);
     }
 
     [Fact]
@@ -161,6 +170,7 @@ public sealed class InteractionSettingsEditorTests : IDisposable
         // External mutation (restore, snapshot apply, feature-card reset).
         WidgetShellSettingsSlice shell = settings.Settings.WidgetShell;
         shell.WidgetLayerMode = WidgetLayerModes.DesktopPinned;
+        shell.DynamicClickRaiseScope = DynamicClickRaiseScopes.Group;
         shell.ResizeSnapEnabled = false;
         shell.WidgetSnapSpacing = 20d;
         settings.Settings.FileWidget.DoubleClickToOpen = true;
@@ -170,6 +180,8 @@ public sealed class InteractionSettingsEditorTests : IDisposable
         editor.SyncPresentation();
 
         Assert.Equal(WidgetLayerModes.DesktopPinned, editor.LayerMode);
+        Assert.False(editor.IsDynamicLayerMode);
+        Assert.Equal(DynamicClickRaiseScopes.Group, editor.ClickRaiseScope);
         Assert.False(editor.SnapEnabled);
         Assert.Equal(20d, editor.SnapSpacing);
         Assert.Equal(FileOpenMethods.DoubleClick, editor.FileOpenMethod);
@@ -189,6 +201,13 @@ public sealed class InteractionSettingsEditorTests : IDisposable
         Assert.Equal(WidgetLayerModes.QuickReveal, layerModes[2].Value);
         Assert.Equal("Settings.WidgetLayerMode.Dynamic", layerModes[0].DisplayName);
         Assert.Equal("Settings.WidgetLayerMode.QuickReveal", layerModes[2].DisplayName);
+
+        SettingsOption[] clickRaiseScopes = [.. editor.AvailableClickRaiseScopeOptions];
+        Assert.Equal(2, clickRaiseScopes.Length);
+        Assert.Equal(DynamicClickRaiseScopes.Single, clickRaiseScopes[0].Value);
+        Assert.Equal(DynamicClickRaiseScopes.Group, clickRaiseScopes[1].Value);
+        Assert.Equal("Settings.ClickRaiseScope.Single", clickRaiseScopes[0].DisplayName);
+        Assert.Equal("Settings.ClickRaiseScope.Group", clickRaiseScopes[1].DisplayName);
 
         SettingsOption[] openMethods = [.. editor.AvailableFileOpenMethodOptions];
         Assert.Equal(FileOpenMethods.SingleClick, openMethods[0].Value);
@@ -232,6 +251,8 @@ public sealed class InteractionSettingsEditorTests : IDisposable
         Assert.Equal(WidgetLayerModes.Dynamic, SettingsService.WidgetLayerModeDynamic);
         Assert.Equal(WidgetLayerModes.DesktopPinned, SettingsService.WidgetLayerModeDesktopPinned);
         Assert.Equal(WidgetLayerModes.QuickReveal, SettingsService.WidgetLayerModeQuickReveal);
+        Assert.Equal(DynamicClickRaiseScopes.Single, SettingsService.DynamicClickRaiseScopeSingle);
+        Assert.Equal(DynamicClickRaiseScopes.Group, SettingsService.DynamicClickRaiseScopeGroup);
     }
 
     [Fact]
@@ -289,6 +310,9 @@ public sealed class InteractionSettingsEditorTests : IDisposable
         // and the section DataContext change.
         Assert.Contains("ItemsSource=\"{Binding AvailableLayerModeOptions}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("controls:SettingsComboBox.Value=\"{Binding LayerMode, Mode=TwoWay}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("ItemsSource=\"{x:Bind AvailableClickRaiseScopeOptions, Mode=OneWay}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("controls:SettingsComboBox.Value=\"{x:Bind ClickRaiseScope, Mode=TwoWay}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("IsEnabled=\"{x:Bind IsDynamicLayerMode, Mode=OneWay}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Content=\"{Binding HoverButtonActionsSummary}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("controls:SettingsComboBox.Value=\"{Binding FileOpenMethod, Mode=TwoWay}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("controls:SettingsComboBox.Value=\"{Binding ShowDesktopBehavior, Mode=TwoWay}\"", xaml, StringComparison.Ordinal);
@@ -354,10 +378,12 @@ public sealed class InteractionSettingsEditorTests : IDisposable
         Assert.Contains("[WinRT.GeneratedBindableCustomProperty([", editorBridge, StringComparison.Ordinal);
         foreach (string name in new[]
                  {
+                     "AvailableClickRaiseScopeOptions",
                      "AvailableFileOpenMethodOptions",
                      "AvailableLayerModeOptions",
                      "AvailableShowDesktopBehaviorOptions",
                      "CanShowHotkeyWarning",
+                     "ClickRaiseScope",
                      "FileOpenMethod",
                      "HoverButtonActionsSummary",
                      "HotkeyDescription",
@@ -365,6 +391,7 @@ public sealed class InteractionSettingsEditorTests : IDisposable
                      "HotkeyStatusText",
                      "HotkeyText",
                      "HotkeyWarningText",
+                     "IsDynamicLayerMode",
                      "LayerMode",
                      "ShowDesktopBehavior",
                      "SnapEnabled",

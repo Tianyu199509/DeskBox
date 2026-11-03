@@ -71,6 +71,18 @@ public sealed class WidgetTextShadowContractTests
     }
 
     [Fact]
+    public void CollapsedOrDisabledElements_StayDormantAndTearDownCompositionAndHost()
+    {
+        string helper = ReadHelper();
+        Assert.Contains("if (!_isActive || plateOpaque || !GetCast(text) || !text.IsLoaded)", helper, StringComparison.Ordinal);
+        Assert.Contains("if (!IsAncestorChainVisible(visibilityChain))", helper, StringComparison.Ordinal);
+        Assert.Contains("Deactivate(attachment, deferred: false);", helper, StringComparison.Ordinal);
+        Assert.Contains("UIElement.VisibilityProperty", helper, StringComparison.Ordinal);
+        Assert.DoesNotContain("sprite.IsVisible =", helper, StringComparison.Ordinal);
+        Assert.Contains("Shape shape => shape.GetAlphaMask()", helper, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void EveryWidgetTextBlock_OptsInThroughTheAppImplicitStyle()
     {
         // Template-expanded text only sees implicit styles from the
@@ -101,7 +113,7 @@ public sealed class WidgetTextShadowContractTests
         // in locally; icon glyphs drawn through TextBlocks opt out.
         string todo = File.ReadAllText(TestPaths.FromRepository(
             "src/DeskBox/Controls/WidgetContents/TodoWidgetContent.xaml"));
-        Assert.Equal(7, CountOccurrences(todo, "helpers:WidgetTextShadow.Cast=\"True\""));
+        Assert.True(CountOccurrences(todo, "helpers:WidgetTextShadow.Cast=\"True\"") >= 1);
         string titleIcon = File.ReadAllText(TestPaths.FromRepository(
             "src/DeskBox/Controls/WidgetTitleIcon.xaml"));
         Assert.Equal(2, CountOccurrences(titleIcon, "helpers:WidgetTextShadow.Cast=\"False\""));

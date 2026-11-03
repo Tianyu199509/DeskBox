@@ -12,7 +12,10 @@ public sealed partial class FileService
     private const uint ClsContextInProcessServer = 0x1;
     private const uint CoInitApartmentThreaded = 0x2;
     private const uint ShellDisplayNameFileSystemPath = 0x80058000;
+    private const uint TransferSourceDeleteRecycleIfPossible = 0x0080;
     private const int ErrorCancelledHResult = unchecked((int)0x800704C7);
+    private const int CopyEngineUserCancelledHResult = unchecked((int)0x80270000);
+    private const int CopyEngineRecycleBinNotFoundHResult = unchecked((int)0x8027000A);
     private static readonly Guid s_fileOperationClassId =
         new("3AD05575-8857-4850-9277-11B85BDB8E09");
     private static readonly Guid s_fileOperationInterfaceId =
@@ -496,13 +499,26 @@ public sealed partial class FileService
         CancellationToken cancellationToken)
     {
         Guid interfaceId = s_shellItemInterfaceId;
-        ThrowForShellHResult(
-            FileOperationNativeMethods.SHCreateItemFromParsingName(
-                path,
+        int hr = FileOperationNativeMethods.SHCreateItemFromParsingName(
+            path,
+            IntPtr.Zero,
+            ref interfaceId,
+            out IntPtr shellItem);
+        if (hr < 0 &&
+            path.Length >= 240 &&
+            !path.StartsWith(@"\\?\", StringComparison.Ordinal))
+        {
+            string extendedPath = path.StartsWith(@"\\", StringComparison.Ordinal)
+                ? @"\\?\UNC\" + path[2..]
+                : @"\\?\" + path;
+            hr = FileOperationNativeMethods.SHCreateItemFromParsingName(
+                extendedPath,
                 IntPtr.Zero,
                 ref interfaceId,
-                out IntPtr shellItem),
-            cancellationToken);
+                out shellItem);
+        }
+
+        ThrowForShellHResult(hr, cancellationToken);
         return shellItem;
     }
 
@@ -561,6 +577,331 @@ public sealed partial class FileService
         int FinishHResult,
         int FailedItemCount,
         int FirstFailedItemHResult);
+
+    internal sealed record ShellDeleteItemFailure(
+        string Path,
+        int HResult);
+
+    internal sealed record ShellDeleteOutcome(
+        IReadOnlySet<string> DeletedPaths,
+        IReadOnlySet<string> RecycledPaths,
+        IReadOnlySet<string> PermanentlyDeletedPaths,
+        IReadOnlyList<ShellDeleteItemFailure> Failures,
+        bool Canceled,
+        int PerformHResult);
+
+    private static ShellDeleteOutcome ExecuteShellDeleteOnStaThread(
+        IReadOnlyList<string> existingPaths,
+        IntPtr ownerWindowHandle,
+        uint operationFlags,
+        bool allowUndo)
+    {
+        bool interactive = ownerWindowHandle != IntPtr.Zero;
+        var watchdog = new StaOperationWatchdog(
+            interactive
+                ? InteractiveShellTransferInactivityTimeout
+                : HeadlessShellTransferInactivityTimeout);
+        StaOperationResult<ShellDeleteOutcome> result =
+            s_shellTransferRunner.RunAsync(
+                () => ExecuteShellDeleteOnCurrentThread(
+                    existingPaths,
+                    ownerWindowHandle,
+                    operationFlags,
+                    interactive,
+                    allowUndo,
+                    watchdog),
+                CancellationToken.None,
+                watchdog).GetAwaiter().GetResult();
+        if (!result.Started)
+        {
+            throw new IOException(
+                "The Windows file operation engine was busy; the delete " +
+                "was not started (queueWaitMs=" +
+                $"{(long)result.QueueWait.TotalMilliseconds}).");
+        }
+
+        return result.Value!;
+    }
+
+    private static ShellDeleteOutcome ExecuteShellDeleteOnCurrentThread(
+        IReadOnlyList<string> existingPaths,
+        IntPtr ownerWindowHandle,
+        uint operationFlags,
+        bool interactive,
+        bool allowUndo,
+        StaOperationWatchdog watchdog)
+    {
+        int initializeResult = FileOperationNativeMethods.CoInitializeEx(
+            IntPtr.Zero,
+            CoInitApartmentThreaded);
+        ThrowForShellHResult(initializeResult, CancellationToken.None);
+        bool uninitialize = initializeResult >= 0;
+        IFileOperationNative? fileOperation = null;
+        var retainedShellItems = new List<IntPtr>(existingPaths.Count);
+        uint adviseCookie = 0;
+        var sink = new ShellDeleteProgressSink(
+            existingPaths,
+            interactive,
+            allowUndo,
+            watchdog);
+        try
+        {
+            Guid classId = s_fileOperationClassId;
+            Guid interfaceId = s_fileOperationInterfaceId;
+            ThrowForShellHResult(
+                FileOperationNativeMethods.CoCreateInstance(
+                    ref classId,
+                    IntPtr.Zero,
+                    ClsContextInProcessServer,
+                    ref interfaceId,
+                    out IntPtr operationPointer),
+                CancellationToken.None);
+
+            fileOperation = new IFileOperationNative(operationPointer);
+            ThrowForShellHResult(
+                fileOperation.Advise(sink, out adviseCookie),
+                CancellationToken.None);
+            watchdog.Pulse();
+            ThrowForShellHResult(
+                fileOperation.SetOperationFlags(operationFlags),
+                CancellationToken.None);
+            if (ownerWindowHandle != IntPtr.Zero)
+            {
+                ThrowForShellHResult(
+                    fileOperation.SetOwnerWindow(ownerWindowHandle),
+                    CancellationToken.None);
+            }
+
+            foreach (string path in existingPaths)
+            {
+                IntPtr item = CreateShellItem(path, CancellationToken.None);
+                retainedShellItems.Add(item);
+                ThrowForShellHResult(
+                    fileOperation.DeleteItem(item, IntPtr.Zero),
+                    CancellationToken.None);
+                watchdog.Pulse();
+            }
+
+            watchdog.Pulse();
+            int performResult = fileOperation.PerformOperations();
+            int abortedResult = fileOperation.GetAnyOperationsAborted(out bool aborted);
+            if (abortedResult < 0 && performResult >= 0)
+            {
+                performResult = abortedResult;
+            }
+
+            return sink.BuildOutcome(aborted, performResult);
+        }
+        finally
+        {
+            if (fileOperation is not null && adviseCookie != 0)
+            {
+                try
+                {
+                    _ = fileOperation.Unadvise(adviseCookie);
+                }
+                catch
+                {
+                }
+            }
+
+            foreach (IntPtr shellItem in retainedShellItems)
+            {
+                Marshal.Release(shellItem);
+            }
+
+            fileOperation?.Dispose();
+            GC.KeepAlive(sink);
+            if (uninitialize)
+            {
+                FileOperationNativeMethods.CoUninitialize();
+            }
+        }
+    }
+
+    [GeneratedComClass]
+    private sealed partial class ShellDeleteProgressSink(
+        IReadOnlyList<string> requestedPaths,
+        bool interactive,
+        bool allowUndo,
+        StaOperationWatchdog watchdog) : IFileOperationProgressSinkNative
+    {
+        private const int SuccessHResult = 0;
+        private readonly HashSet<string> _deleted = new(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> _recycled = new(StringComparer.OrdinalIgnoreCase);
+        private readonly HashSet<string> _permanentlyDeleted = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, int> _failed = new(StringComparer.OrdinalIgnoreCase);
+        private bool _userCanceled;
+
+        private void Pulse() => watchdog.Pulse();
+
+        internal ShellDeleteOutcome BuildOutcome(bool aborted, int performHResult)
+        {
+            bool canceled = _userCanceled ||
+                performHResult == ErrorCancelledHResult ||
+                performHResult == CopyEngineUserCancelledHResult ||
+                (aborted && _failed.Count == 0);
+
+            foreach (string rawPath in requestedPaths)
+            {
+                string fullPath = NormalizeExtendedPath(rawPath);
+                if (_deleted.Contains(fullPath))
+                {
+                    continue;
+                }
+
+                if (!File.Exists(fullPath) && !Directory.Exists(fullPath))
+                {
+                    _deleted.Add(fullPath);
+                    if (!allowUndo)
+                    {
+                        _permanentlyDeleted.Add(fullPath);
+                    }
+                    else
+                    {
+                        _recycled.Add(fullPath);
+                    }
+
+                    _failed.Remove(fullPath);
+                }
+            }
+
+            var failures = _failed
+                .Select(kvp => new ShellDeleteItemFailure(kvp.Key, kvp.Value))
+                .ToArray();
+            return new ShellDeleteOutcome(
+                _deleted,
+                _recycled,
+                _permanentlyDeleted,
+                failures,
+                canceled,
+                performHResult);
+        }
+
+        public int StartOperations()
+        {
+            Pulse();
+            return SuccessHResult;
+        }
+
+        public int FinishOperations(int result)
+        {
+            Pulse();
+            if (result == ErrorCancelledHResult || result == CopyEngineUserCancelledHResult)
+            {
+                _userCanceled = true;
+            }
+
+            return SuccessHResult;
+        }
+
+        public int PreRenameItem(uint flags, IntPtr item, IntPtr newName) { Pulse(); return SuccessHResult; }
+        public int PostRenameItem(uint flags, IntPtr item, IntPtr newName, int renameResult, IntPtr newlyCreatedItem) { Pulse(); return SuccessHResult; }
+        public int PreMoveItem(uint flags, IntPtr item, IntPtr destinationFolder, IntPtr newName) { Pulse(); return SuccessHResult; }
+        public int PostMoveItem(uint flags, IntPtr item, IntPtr destinationFolder, IntPtr newName, int moveResult, IntPtr newlyCreatedItem) { Pulse(); return SuccessHResult; }
+        public int PreCopyItem(uint flags, IntPtr item, IntPtr destinationFolder, IntPtr newName) { Pulse(); return SuccessHResult; }
+        public int PostCopyItem(uint flags, IntPtr item, IntPtr destinationFolder, IntPtr newName, int copyResult, IntPtr newlyCreatedItem) { Pulse(); return SuccessHResult; }
+
+        public int PreDeleteItem(uint flags, IntPtr item)
+        {
+            Pulse();
+            if (!interactive &&
+                allowUndo &&
+                (flags & TransferSourceDeleteRecycleIfPossible) == 0)
+            {
+                // Never allow a headless recycle request to degrade silently
+                // into permanent deletion (oversized file, USB/RAM/SUBST, or
+                // disabled Recycle Bin).
+                string? path = NormalizeOptionalPath(TryGetShellItemPath(item));
+                if (!string.IsNullOrWhiteSpace(path))
+                {
+                    _failed[path] = CopyEngineRecycleBinNotFoundHResult;
+                }
+
+                return CopyEngineRecycleBinNotFoundHResult;
+            }
+
+            return SuccessHResult;
+        }
+
+        public int PostDeleteItem(
+            uint flags,
+            IntPtr item,
+            int deleteResult,
+            IntPtr newlyCreatedItem)
+        {
+            Pulse();
+            string? path = NormalizeOptionalPath(TryGetShellItemPath(item));
+            if (deleteResult >= 0)
+            {
+                if (!string.IsNullOrWhiteSpace(path))
+                {
+                    _deleted.Add(path);
+                    _failed.Remove(path);
+                    if (newlyCreatedItem != IntPtr.Zero)
+                    {
+                        _recycled.Add(path);
+                    }
+                    else
+                    {
+                        _permanentlyDeleted.Add(path);
+                    }
+                }
+
+                return SuccessHResult;
+            }
+
+            if (deleteResult == ErrorCancelledHResult ||
+                deleteResult == CopyEngineUserCancelledHResult)
+            {
+                _userCanceled = true;
+                return SuccessHResult;
+            }
+
+            if (!string.IsNullOrWhiteSpace(path))
+            {
+                _failed[path] = deleteResult;
+            }
+
+            return SuccessHResult;
+        }
+
+        public int PreNewItem(uint flags, IntPtr destinationFolder, IntPtr newName) { Pulse(); return SuccessHResult; }
+        public int PostNewItem(uint flags, IntPtr destinationFolder, IntPtr newName, IntPtr templateName, uint fileAttributes, int newItemResult, IntPtr newItem) { Pulse(); return SuccessHResult; }
+        public int UpdateProgress(uint totalWork, uint completedWork) { Pulse(); return SuccessHResult; }
+        public int ResetTimer() { Pulse(); return SuccessHResult; }
+        public int PauseTimer() { Pulse(); return SuccessHResult; }
+        public int ResumeTimer() { Pulse(); return SuccessHResult; }
+
+        private static string? NormalizeOptionalPath(string? rawPath)
+        {
+            return string.IsNullOrWhiteSpace(rawPath)
+                ? null
+                : NormalizeExtendedPath(rawPath);
+        }
+
+        private static string NormalizeExtendedPath(string rawPath)
+        {
+            string candidate = rawPath;
+            if (candidate.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase))
+            {
+                candidate = @"\\" + candidate[8..];
+            }
+            else if (candidate.StartsWith(@"\\?\", StringComparison.OrdinalIgnoreCase))
+            {
+                candidate = candidate[4..];
+            }
+
+            try
+            {
+                return Path.GetFullPath(candidate);
+            }
+            catch
+            {
+                return candidate;
+            }
+        }
+    }
 
     [GeneratedComClass]
     private sealed partial class ShellFileOperationProgressSink :
@@ -928,6 +1269,7 @@ public sealed partial class FileService
         public int SetOwnerWindow(IntPtr owner) => ((delegate* unmanaged[Stdcall]<IntPtr, IntPtr, int>)Table[9])(pointer, owner);
         public int MoveItem(IntPtr source, IntPtr folder, string name, IntPtr sink) => Queue(14, source, folder, name, sink);
         public int CopyItem(IntPtr source, IntPtr folder, string name, IntPtr sink) => Queue(16, source, folder, name, sink);
+        public int DeleteItem(IntPtr item, IntPtr sink) => ((delegate* unmanaged[Stdcall]<IntPtr, IntPtr, IntPtr, int>)Table[18])(pointer, item, sink);
         private int Queue(int slot, IntPtr source, IntPtr folder, string name, IntPtr sink)
         {
             fixed (char* text = name)

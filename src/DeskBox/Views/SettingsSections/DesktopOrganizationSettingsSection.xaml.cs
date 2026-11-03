@@ -20,6 +20,13 @@ public sealed partial class DesktopOrganizationSettingsSection : UserControl
     private ISettingsAppActions _appActions = null!;
     private nint _ownerWindow;
 
+    public event EventHandler? SubPageChanged;
+
+    public bool IsRuleDetailOpen =>
+        _selectedWidget is not null && RuleDetailPanel.Visibility == Visibility.Visible;
+
+    public string? ActiveRuleDetailTitle => _selectedWidget?.Name;
+
     /// <summary>
     /// Injected by the settings window when the deferred section is created,
     /// before the first Loaded (host commands plus this window's owner
@@ -403,12 +410,15 @@ public sealed partial class DesktopOrganizationSettingsSection : UserControl
             return;
         }
 
+        bool wasDetailAlreadyOpen = RuleDetailPanel.Visibility == Visibility.Visible;
         RuleListPanel.Visibility = Visibility.Collapsed;
         RuleDetailPanel.Visibility = Visibility.Visible;
         RuleStatusInfo.IsOpen = false;
         ResetHostScrollToTop();
-        RuleDetailTitle.Text = _selectedWidget.Name;
         RuleDetailPath.Text = _selectedWidget.MappedFolderPath ?? string.Empty;
+        RuleDetailPath.Visibility = string.IsNullOrWhiteSpace(RuleDetailPath.Text)
+            ? Visibility.Collapsed
+            : Visibility.Visible;
         _isRefreshing = true;
         RuleEnabledToggle.IsOn = _selectedRule.IsEnabled;
         _isRefreshing = false;
@@ -417,6 +427,12 @@ public sealed partial class DesktopOrganizationSettingsSection : UserControl
         BuildExtensionChips();
         BuildExcludedExtensionChips();
         BuildRuleTokens();
+        SubPageChanged?.Invoke(this, EventArgs.Empty);
+        if (!wasDetailAlreadyOpen && IsLoaded)
+        {
+            RuleDetailPanel.UpdateLayout();
+            DetailPageTransitionHelper.PlayNavigationEnter(RuleDetailPanel, 40f);
+        }
     }
 
     /// <summary>
@@ -849,15 +865,38 @@ public sealed partial class DesktopOrganizationSettingsSection : UserControl
         RefreshStatusOnly();
     }
 
-    private void CloseRuleDetailButton_Click(object sender, RoutedEventArgs e)
+    public bool TryNavigateBackToRuleList()
     {
+        if (!IsRuleDetailOpen)
+        {
+            return false;
+        }
+
+        CloseRuleDetail(animate: true);
+        return true;
+    }
+
+    public void CloseRuleDetail(bool animate = true)
+    {
+        if (_selectedWidget is null && RuleDetailPanel.Visibility == Visibility.Collapsed)
+        {
+            return;
+        }
+
         _selectedWidget = null;
         _selectedRule = null;
         _selectedRuleIsDraft = false;
         RuleDetailPanel.Visibility = Visibility.Collapsed;
         RuleListPanel.Visibility = Visibility.Visible;
         RuleStatusInfo.IsOpen = false;
+        ResetHostScrollToTop();
         Refresh();
+        SubPageChanged?.Invoke(this, EventArgs.Empty);
+        if (animate && IsLoaded)
+        {
+            RuleListPanel.UpdateLayout();
+            DetailPageTransitionHelper.PlayNavigationEnter(RuleListPanel, -40f);
+        }
     }
 
     private void BuildTypeOverview()

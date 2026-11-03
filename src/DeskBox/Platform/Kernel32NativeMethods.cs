@@ -28,6 +28,11 @@ internal static partial class Kernel32NativeMethods
         ref int packageFullNameLength,
         StringBuilder? packageFullName);
 
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
+    internal static extern int GetCurrentApplicationUserModelId(
+        ref uint applicationUserModelIdLength,
+        StringBuilder? applicationUserModelId);
+
     [LibraryImport("kernel32.dll", EntryPoint = "LoadLibraryExW",
         SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
     internal static partial nint LoadLibraryEx(string fileName, nint file, uint flags);

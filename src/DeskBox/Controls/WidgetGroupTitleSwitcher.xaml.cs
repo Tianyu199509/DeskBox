@@ -104,43 +104,141 @@ public sealed partial class WidgetGroupTitleSwitcher : UserControl
             typeof(WidgetGroupTitleSwitcher),
             new PropertyMetadata(14d, OnTitleIconAppearanceChanged));
 
+    private long _fontSizeCallbackToken;
+    private bool _visualHandlersReleased;
+    private PointerEventHandler? _selectorPointerPressedHandler;
+    private PointerEventHandler? _selectorPointerMovedHandler;
+    private PointerEventHandler? _selectorPointerReleasedHandler;
+    private PointerEventHandler? _selectorPointerCanceledHandler;
+    private PointerEventHandler? _selectorPointerCaptureLostHandler;
+
     public WidgetGroupTitleSwitcher()
     {
         InitializeComponent();
+        if (DragDropPermissionService.IsCurrentProcessElevatedCached())
+        {
+            TabsView.CanDragTabs = false;
+            TabsView.CanReorderTabs = false;
+        }
+
         RegisterSelectorPointerHandlers();
         RegisterTabPointerHandlers();
         RegisterKeyboardAccelerators();
         ApplyWheelFeedbackAccent();
         // The wheel feedback and the position rail copy neutral colors at
         // paint time, so a light/dark flip must re-resolve both.
-        ActualThemeChanged += (_, _) =>
-        {
-            ApplyWheelFeedbackAccent();
-            SetPositionRail(CurrentPositionRailLayer, _displayedIdentity);
-            SetPositionRail(OutgoingPositionRailLayer, null);
-        };
-        CurrentTitle.RegisterPropertyChangedCallback(
+        ActualThemeChanged += OnActualThemeChanged;
+        _fontSizeCallbackToken = CurrentTitle.RegisterPropertyChangedCallback(
             TextBlock.FontSizeProperty,
-            (_, _) =>
-            {
-                if (_displayedIdentity is { } identity &&
-                    _identityStoryboard is null)
-                {
-                    UpdateIdentityViewportWidth(identity);
-                }
-                SynchronizeTabs();
-            });
+            OnCurrentTitleFontSizeChanged);
         ApplyDisplayMode();
         ApplyNavigationStyle();
-        Unloaded += (_, _) =>
-        {
-            CancelDetachLongPress();
-            CancelTabInteraction();
-            CancelAllHoverSwitches();
-            CancelDragHoverSwitch();
-            ExitFileDragStripFreeze();
-        };
+        Unloaded += OnSwitcherUnloaded;
         Visibility = Visibility.Collapsed;
+    }
+
+    private void OnActualThemeChanged(FrameworkElement sender, object args)
+    {
+        ApplyWheelFeedbackAccent();
+        SetPositionRail(CurrentPositionRailLayer, _displayedIdentity);
+        SetPositionRail(OutgoingPositionRailLayer, null);
+    }
+
+    private void OnCurrentTitleFontSizeChanged(DependencyObject sender, DependencyProperty dp)
+    {
+        if (_visualHandlersReleased)
+        {
+            return;
+        }
+
+        if (_displayedIdentity is { } identity &&
+            _identityStoryboard is null)
+        {
+            UpdateIdentityViewportWidth(identity);
+        }
+
+        SynchronizeTabs();
+    }
+
+    private void OnSwitcherUnloaded(object sender, RoutedEventArgs e)
+    {
+        if (IsLoaded)
+        {
+            return;
+        }
+
+        CancelDetachLongPress();
+        CancelTabInteraction();
+        CancelAllHoverSwitches();
+        CancelDragHoverSwitch();
+        CancelWheelFeedback();
+        StopAndClearStoryboard(ref _identityStoryboard);
+        StopAndClearStoryboard(ref _interactionChromeStoryboard);
+        ExitFileDragStripFreeze();
+    }
+
+    internal void ReleaseVisualHandlers()
+    {
+        if (_visualHandlersReleased)
+        {
+            return;
+        }
+
+        _visualHandlersReleased = true;
+        ActualThemeChanged -= OnActualThemeChanged;
+        Unloaded -= OnSwitcherUnloaded;
+        if (_fontSizeCallbackToken != 0)
+        {
+            CurrentTitle.UnregisterPropertyChangedCallback(TextBlock.FontSizeProperty, _fontSizeCallbackToken);
+            _fontSizeCallbackToken = 0;
+        }
+
+        if (_selectorPointerPressedHandler is not null)
+        {
+            SelectorButton.RemoveHandler(UIElement.PointerPressedEvent, _selectorPointerPressedHandler);
+            _selectorPointerPressedHandler = null;
+        }
+        if (_selectorPointerMovedHandler is not null)
+        {
+            SelectorButton.RemoveHandler(UIElement.PointerMovedEvent, _selectorPointerMovedHandler);
+            _selectorPointerMovedHandler = null;
+        }
+        if (_selectorPointerReleasedHandler is not null)
+        {
+            SelectorButton.RemoveHandler(UIElement.PointerReleasedEvent, _selectorPointerReleasedHandler);
+            _selectorPointerReleasedHandler = null;
+        }
+        if (_selectorPointerCanceledHandler is not null)
+        {
+            SelectorButton.RemoveHandler(UIElement.PointerCanceledEvent, _selectorPointerCanceledHandler);
+            _selectorPointerCanceledHandler = null;
+        }
+        if (_selectorPointerCaptureLostHandler is not null)
+        {
+            SelectorButton.RemoveHandler(UIElement.PointerCaptureLostEvent, _selectorPointerCaptureLostHandler);
+            _selectorPointerCaptureLostHandler = null;
+        }
+
+        UnregisterTabPointerHandlers();
+        ReleaseInteractionTimersAndAccelerators();
+        CancelDetachLongPress();
+        CancelTabInteraction();
+        CancelAllHoverSwitches();
+        CancelDragHoverSwitch();
+        CancelWheelFeedback();
+        StopAndClearStoryboard(ref _identityStoryboard);
+        StopAndClearStoryboard(ref _interactionChromeStoryboard);
+        ExitFileDragStripFreeze();
+        ClearTabs();
+        MemberInvoked = null;
+        RemoveMemberRequested = null;
+        DetachMemberRequested = null;
+        DetachDragStarted = null;
+        DetachDragCompleted = null;
+        ReorderRequested = null;
+        DissolveRequested = null;
+        PickerOpened = null;
+        PickerClosed = null;
     }
 
     public event EventHandler<WidgetGroupMemberEventArgs>? MemberInvoked;
@@ -207,25 +305,30 @@ public sealed partial class WidgetGroupTitleSwitcher : UserControl
 
     private void RegisterSelectorPointerHandlers()
     {
+        _selectorPointerPressedHandler = SelectorButton_PointerPressed;
+        _selectorPointerMovedHandler = GroupTitle_PointerMoved;
+        _selectorPointerReleasedHandler = SelectorButton_PointerReleased;
+        _selectorPointerCanceledHandler = GroupTitle_PointerCanceled;
+        _selectorPointerCaptureLostHandler = GroupTitle_PointerCaptureLost;
         SelectorButton.AddHandler(
             UIElement.PointerPressedEvent,
-            new PointerEventHandler(SelectorButton_PointerPressed),
+            _selectorPointerPressedHandler,
             handledEventsToo: true);
         SelectorButton.AddHandler(
             UIElement.PointerMovedEvent,
-            new PointerEventHandler(GroupTitle_PointerMoved),
+            _selectorPointerMovedHandler,
             handledEventsToo: true);
         SelectorButton.AddHandler(
             UIElement.PointerReleasedEvent,
-            new PointerEventHandler(SelectorButton_PointerReleased),
+            _selectorPointerReleasedHandler,
             handledEventsToo: true);
         SelectorButton.AddHandler(
             UIElement.PointerCanceledEvent,
-            new PointerEventHandler(GroupTitle_PointerCanceled),
+            _selectorPointerCanceledHandler,
             handledEventsToo: true);
         SelectorButton.AddHandler(
             UIElement.PointerCaptureLostEvent,
-            new PointerEventHandler(GroupTitle_PointerCaptureLost),
+            _selectorPointerCaptureLostHandler,
             handledEventsToo: true);
     }
 
@@ -616,7 +719,11 @@ public sealed partial class WidgetGroupTitleSwitcher : UserControl
         }
 
         _hoveredTabMemberId = memberId;
-        _tabHoverSwitchCancellation?.Cancel();
+        if (_tabHoverSwitchCancellation is { } oldHoverCts)
+        {
+            oldHoverCts.Cancel();
+            oldHoverCts.Dispose();
+        }
         var cancellation = new CancellationTokenSource();
         _tabHoverSwitchCancellation = cancellation;
         long generation = ++_tabHoverSwitchGeneration;
@@ -668,15 +775,23 @@ public sealed partial class WidgetGroupTitleSwitcher : UserControl
         }
 
         _hoveredTabMemberId = null;
-        _tabHoverSwitchCancellation?.Cancel();
-        _tabHoverSwitchCancellation = null;
+        if (_tabHoverSwitchCancellation is { } hoverCts)
+        {
+            hoverCts.Cancel();
+            hoverCts.Dispose();
+            _tabHoverSwitchCancellation = null;
+        }
         _tabHoverSwitchGeneration++;
     }
 
     private void CancelAllHoverSwitches()
     {
-        _tabHoverSwitchCancellation?.Cancel();
-        _tabHoverSwitchCancellation = null;
+        if (_tabHoverSwitchCancellation is { } hoverCts)
+        {
+            hoverCts.Cancel();
+            hoverCts.Dispose();
+            _tabHoverSwitchCancellation = null;
+        }
         _hoveredTabMemberId = null;
         _tabHoverSwitchGeneration++;
     }
@@ -791,6 +906,11 @@ public sealed partial class WidgetGroupTitleSwitcher : UserControl
         UIElement source,
         PointerRoutedEventArgs e)
     {
+        if (DragDropPermissionService.IsCurrentProcessElevatedCached())
+        {
+            return;
+        }
+
         Microsoft.UI.Input.PointerPoint point = e.GetCurrentPoint(source);
         string? memberId =
             (source as FrameworkElement)?.Tag as string ??
@@ -863,6 +983,7 @@ public sealed partial class WidgetGroupTitleSwitcher : UserControl
         Microsoft.UI.Input.PointerPoint pointerPoint)
     {
         if (_isStartingDetachDrag ||
+            DragDropPermissionService.IsCurrentProcessElevatedCached() ||
             !_isDetachLongPressArmed ||
             !ReferenceEquals(source, _detachLongPressSource) ||
             string.IsNullOrWhiteSpace(_pendingDetachMemberId))

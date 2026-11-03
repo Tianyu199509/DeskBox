@@ -25,6 +25,9 @@ public partial class WidgetViewModel
     private string? _expandedStackKey;
     private bool _stackRebuildQueued;
     private bool _hasBuiltStackDisplay;
+    private bool _isSynchronizingItemsFromStackProjection;
+    private int _deferredStackRebuildDepth;
+    private bool _deferredStackRebuildPending;
     private bool _legacyStackMigrationQueued;
     private DispatcherQueueTimer? _stackDateBoundaryTimer;
     private HashSet<string> _disabledStacks = new(StringComparer.Ordinal);
@@ -32,6 +35,12 @@ public partial class WidgetViewModel
     private List<string> _stackOrder = [];
     private Dictionary<string, List<string>> _stackMemberOverrides =
         new(StringComparer.Ordinal);
+    private Dictionary<string, WidgetFolderSortOverride> _subfolderSortOverrides =
+        new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, List<string>> _subfolderDisplayOrders =
+        new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, List<string>> _subfolderManualItemOrders =
+        new(StringComparer.OrdinalIgnoreCase);
 
     public IEnumerable<WidgetItem> VisibleItems => UsesStackProjection
         ? _stackDisplayItems
@@ -111,11 +120,12 @@ public partial class WidgetViewModel
         // Keep unknown historical keys. They are intentionally retained so a
         // temporarily unavailable item can recover its prior position. Only
         // the explicitly imported units are removed and reinserted.
+        IReadOnlyList<string> activeOrder = GetActiveFolderDisplayOrder();
         List<string> order;
         if (detachedStackKeys.Length > 0)
         {
             // Removing the last members of a manual stack can dissolve its
-            // display unit. In that case the old _stackOrder no longer
+            // display unit. In that case the old active order no longer
             // contains the newly loose members, so start from the rebuilt
             // visible order and retain only genuinely unknown historical
             // keys as a recovery tail.
@@ -124,14 +134,14 @@ public partial class WidgetViewModel
             HashSet<string> detachedKeys = detachedStackKeys
                 .ToHashSet(StringComparer.Ordinal);
             order = GetCurrentDisplayUnitOrder();
-            order.AddRange(_stackOrder.Where(key =>
+            order.AddRange(activeOrder.Where(key =>
                 !currentKeys.Contains(key) &&
                 !detachedKeys.Contains(key)));
         }
         else
         {
-            order = _stackOrder.Count > 0
-                ? _stackOrder.ToList()
+            order = activeOrder.Count > 0
+                ? activeOrder.ToList()
                 : GetCurrentDisplayUnitOrder();
         }
         order.RemoveAll(key => movingKeys.Contains(key, StringComparer.Ordinal));
@@ -151,7 +161,7 @@ public partial class WidgetViewModel
         order.InsertRange(
             Math.Clamp(insertionIndex, 0, order.Count),
             movingKeys);
-        _stackOrder = order;
+        SetActiveFolderDisplayOrder(order);
         if (detachedStackKeys.Length > 0)
         {
             PersistStackCustomizations();
@@ -755,14 +765,45 @@ public partial class WidgetViewModel
             if (visibleInsertionIndex <= stackIndex ||
                 visibleInsertionIndex >= insertionAfterMembers)
             {
+                int cappedDetachIndex = Math.Clamp(
+                    visibleInsertionIndex,
+                    0,
+                    _stackDisplayItems.Count);
+                string movingKey = GetLooseItemOrderKey(item);
+                HashSet<string> singleMovingKey = new(StringComparer.Ordinal)
+                {
+                    movingKey
+                };
+                int targetTopLevelPosition = 0;
+                for (int index = 0; index < cappedDetachIndex; index++)
+                {
+                    WidgetItem candidate = _stackDisplayItems[index];
+                    if (WillTopLevelDisplayUnitRemainAfterDetach(
+                            candidate,
+                            singleMovingKey))
+                    {
+                        targetTopLevelPosition++;
+                    }
+                }
+
                 if (!RemoveItemFromStack(item))
                 {
                     return false;
                 }
 
-                return MoveDisplayUnitForReorder(
-                    GetLooseItemOrderKey(item),
-                    visibleInsertionIndex);
+                List<string> currentOrder = GetCurrentDisplayUnitOrder();
+                if (TryMoveDisplayUnitOverrides(
+                        currentOrder,
+                        [movingKey],
+                        targetTopLevelPosition))
+                {
+                    EnsureSubfolderManualSortOverrideOnLooseReorder();
+                    SetActiveFolderDisplayOrder(
+                        MergeWithRetainedNonVisibleOrderKeys(currentOrder));
+                    PersistStackDisplayOrder();
+                }
+
+                return true;
             }
 
             int targetVisibleIndex = visibleInsertionIndex;
@@ -883,8 +924,7 @@ public partial class WidgetViewModel
         for (int index = 0; index < cappedIndex; index++)
         {
             WidgetItem candidate = _stackDisplayItems[index];
-            if (IsTopLevelDisplayUnit(candidate) &&
-                !movingKeys.Contains(GetDisplayUnitOrderKey(candidate)))
+            if (WillTopLevelDisplayUnitRemainAfterDetach(candidate, movingKeys))
             {
                 targetTopLevelPosition++;
             }
@@ -939,7 +979,9 @@ public partial class WidgetViewModel
                 targetTopLevelPosition);
             if (orderChanged)
             {
-                _stackOrder = currentOrder;
+                EnsureSubfolderManualSortOverrideOnLooseReorder();
+                SetActiveFolderDisplayOrder(
+                    MergeWithRetainedNonVisibleOrderKeys(currentOrder));
             }
 
             if (membershipChanged)
@@ -1009,7 +1051,19 @@ public partial class WidgetViewModel
             {
                 if (stack.IsManual)
                 {
-                    RemoveManualStackCustomization(stack.StackKey);
+                    List<string>? replacementOrder = null;
+                    if (_stackMemberOverrides.TryGetValue(
+                            stack.StackKey,
+                            out List<string>? storedMembers))
+                    {
+                        replacementOrder = BuildDissolvedRemovalOrder(
+                            storedMembers,
+                            removedPaths);
+                    }
+
+                    RemoveManualStackCustomization(
+                        stack.StackKey,
+                        replacementOrder);
                 }
                 else
                 {
@@ -1036,16 +1090,30 @@ public partial class WidgetViewModel
                 continue;
             }
 
-            int removed = members.RemoveAll(path => removedPaths.Contains(
-                NormalizeStackMemberPath(path)));
-            if (removed == 0)
+            List<string> detachedOrderedPaths = members
+                .Where(path => removedPaths.Contains(NormalizeStackMemberPath(path)))
+                .ToList();
+            List<string> survivingOrderedPaths = members
+                .Where(path => !removedPaths.Contains(NormalizeStackMemberPath(path)))
+                .ToList();
+            if (detachedOrderedPaths.Count == 0)
             {
                 continue;
             }
 
-            if (members.Count < 2)
+            if (survivingOrderedPaths.Count < 2)
             {
-                RemoveManualStackCustomization(stack.StackKey);
+                RemoveManualStackCustomization(
+                    stack.StackKey,
+                    survivingOrderedPaths.Concat(detachedOrderedPaths).ToList());
+            }
+            else
+            {
+                members.Clear();
+                members.AddRange(survivingOrderedPaths);
+                InsertDetachedMembersAfterStackInOrder(
+                    stack.StackKey,
+                    detachedOrderedPaths);
             }
 
             changed = true;
@@ -1152,21 +1220,36 @@ public partial class WidgetViewModel
 
     public void SetStackOrder(List<string> order)
     {
-        _stackOrder = order.ToList();
-        WidgetFileStackSettings.SetStackOrder(Config, _stackOrder);
+        SetActiveFolderDisplayOrder(order.ToList());
+        PersistActiveFolderDisplayOrderToMetadata();
         PersistStackOverrides();
         QueueStackDisplayRebuild();
     }
 
     public void ClearStackDisplayOrderOverride()
     {
-        if (_stackOrder.Count == 0)
+        if (TryGetCurrentSubfolderScopeKey(out string scopeKey))
         {
-            return;
+            if (!_subfolderDisplayOrders.Remove(scopeKey))
+            {
+                return;
+            }
+
+            WidgetFileStackSettings.SetSubfolderDisplayOrders(
+                Config,
+                _subfolderDisplayOrders);
+        }
+        else
+        {
+            if (_stackOrder.Count == 0)
+            {
+                return;
+            }
+
+            _stackOrder = [];
+            WidgetFileStackSettings.SetStackOrder(Config, null);
         }
 
-        _stackOrder = [];
-        WidgetFileStackSettings.SetStackOrder(Config, null);
         _settingsService.UpdateWidget(
             Config,
             notifySubscribers: false);
@@ -1186,42 +1269,43 @@ public partial class WidgetViewModel
             return false;
         }
 
-        List<string> currentOrder = projectionWasEnabled
-            ? GetCurrentDisplayUnitOrder()
-            : Items.Select(GetLooseItemOrderKey).ToList();
-        int insertionIndex = ResolveManualStackInsertionIndex(
-            currentOrder,
-            members);
+        IReadOnlyList<string> activeOrder = GetActiveFolderDisplayOrder();
+        bool maintainExplicitOrder =
+            EffectiveSortMode == WidgetSortMode.Manual ||
+            activeOrder.Count > 0;
+        List<string> visibleOrder = maintainExplicitOrder
+            ? (projectionWasEnabled
+                ? GetCurrentDisplayUnitOrder()
+                : Items.Select(GetLooseItemOrderKey).ToList())
+            : [];
+        int insertionIndex = maintainExplicitOrder
+            ? ResolveManualStackInsertionIndex(
+                visibleOrder,
+                members)
+            : 0;
+        if (maintainExplicitOrder)
+        {
+            SetActiveFolderDisplayOrder(
+                MergeWithRetainedNonVisibleOrderKeys(visibleOrder));
+        }
+
         HashSet<string> memberPaths = members
             .Select(item => NormalizeStackMemberPath(item.Path))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         RemoveMemberOverrides(memberPaths);
-        currentOrder.RemoveAll(key =>
-            key.StartsWith(
-                ManualStackKeyPrefix,
-                StringComparison.Ordinal) &&
-            !_stackMemberOverrides.ContainsKey(key));
 
         string stackKey =
             $"{ManualStackKeyPrefix}{Guid.NewGuid():N}";
         _stackMemberOverrides[stackKey] = members
             .Select(item => NormalizeStackMemberPath(item.Path))
             .ToList();
-        currentOrder.RemoveAll(key =>
-            memberPaths.Any(path =>
-                string.Equals(
-                    key,
-                    LooseItemOrderKeyPrefix +
-                        path.ToUpperInvariant(),
-                    StringComparison.Ordinal)));
-        insertionIndex = Math.Clamp(
-            insertionIndex,
-            0,
-            currentOrder.Count);
-        currentOrder.Insert(insertionIndex, stackKey);
-        _stackOrder = currentOrder
-            .Distinct(StringComparer.Ordinal)
-            .ToList();
+        if (maintainExplicitOrder)
+        {
+            InsertStackIntoOrderRemovingMembers(
+                stackKey,
+                memberPaths,
+                insertionIndex);
+        }
         _expandedStackKey = null;
         PersistStackCustomizations();
         if (projectionWasEnabled != UsesStackProjection)
@@ -1242,15 +1326,17 @@ public partial class WidgetViewModel
             return sourceStack;
         }
 
-        List<string> currentOrder = GetCurrentDisplayUnitOrder();
-        int insertionIndex = currentOrder.IndexOf(sourceStack.StackKey);
+        List<string> visibleOrder = GetCurrentDisplayUnitOrder();
+        int insertionIndex = visibleOrder.IndexOf(sourceStack.StackKey);
         if (insertionIndex < 0)
         {
             insertionIndex = ResolveManualStackInsertionIndex(
-                currentOrder,
+                visibleOrder,
                 members);
         }
 
+        SetActiveFolderDisplayOrder(
+            MergeWithRetainedNonVisibleOrderKeys(visibleOrder));
         HashSet<string> memberPaths = members
             .Select(item => NormalizeStackMemberPath(item.Path))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -1265,27 +1351,11 @@ public partial class WidgetViewModel
         _stackNameOverrides[manualKey] = sourceStack.Name;
         _disabledStacks.Remove(sourceStack.StackKey);
 
-        currentOrder.RemoveAll(key =>
-            string.Equals(
-                key,
-                sourceStack.StackKey,
-                StringComparison.Ordinal) ||
-            key.StartsWith(
-                ManualStackKeyPrefix,
-                StringComparison.Ordinal) &&
-            !_stackMemberOverrides.ContainsKey(key) ||
-            memberPaths.Any(path => string.Equals(
-                key,
-                LooseItemOrderKeyPrefix + path.ToUpperInvariant(),
-                StringComparison.Ordinal)));
-        insertionIndex = Math.Clamp(
+        InsertStackIntoOrderRemovingMembers(
+            manualKey,
+            memberPaths,
             insertionIndex,
-            0,
-            currentOrder.Count);
-        currentOrder.Insert(insertionIndex, manualKey);
-        _stackOrder = currentOrder
-            .Distinct(StringComparer.Ordinal)
-            .ToList();
+            replacedStackKey: sourceStack.StackKey);
         _expandedStackKey = sourceStack.IsExpanded
             ? manualKey
             : null;
@@ -1329,6 +1399,9 @@ public partial class WidgetViewModel
             return true;
         }
 
+        SetActiveFolderDisplayOrder(
+            MergeWithRetainedNonVisibleOrderKeys(
+                GetCurrentDisplayUnitOrder()));
         HashSet<string> memberPaths = members
             .Select(item => NormalizeStackMemberPath(item.Path))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -1351,13 +1424,11 @@ public partial class WidgetViewModel
             }
         }
 
-        _stackOrder = GetCurrentDisplayUnitOrder()
-            .Where(key => !memberPaths.Any(path =>
-                string.Equals(
-                    key,
-                    LooseItemOrderKeyPrefix +
-                        path.ToUpperInvariant(),
-                    StringComparison.Ordinal)))
+        HashSet<string> addedLooseKeys = memberPaths
+            .Select(path => LooseItemOrderKeyPrefix + path.ToUpperInvariant())
+            .ToHashSet(StringComparer.Ordinal);
+        List<string> updatedOrder = GetActiveFolderDisplayOrder()
+            .Where(key => !addedLooseKeys.Contains(key))
             .Where(key =>
                 !key.StartsWith(
                     ManualStackKeyPrefix,
@@ -1365,6 +1436,7 @@ public partial class WidgetViewModel
                 _stackMemberOverrides.ContainsKey(key))
             .Distinct(StringComparer.Ordinal)
             .ToList();
+        SetActiveFolderDisplayOrder(updatedOrder);
         PersistStackCustomizations();
         return true;
     }
@@ -1403,7 +1475,19 @@ public partial class WidgetViewModel
         {
             if (stack.IsManual)
             {
-                RemoveManualStackCustomization(stack.StackKey);
+                List<string>? replacementOrder = null;
+                if (_stackMemberOverrides.TryGetValue(
+                        stack.StackKey,
+                        out List<string>? storedMembers))
+                {
+                    replacementOrder = BuildDissolvedRemovalOrder(
+                        storedMembers,
+                        removedPaths);
+                }
+
+                RemoveManualStackCustomization(
+                    stack.StackKey,
+                    replacementOrder);
             }
             else
             {
@@ -1431,16 +1515,30 @@ public partial class WidgetViewModel
             return false;
         }
 
-        int removed = members.RemoveAll(path => removedPaths.Contains(
-            NormalizeStackMemberPath(path)));
-        if (removed == 0)
+        List<string> detachedOrderedPaths = members
+            .Where(path => removedPaths.Contains(NormalizeStackMemberPath(path)))
+            .ToList();
+        List<string> survivingOrderedPaths = members
+            .Where(path => !removedPaths.Contains(NormalizeStackMemberPath(path)))
+            .ToList();
+        if (detachedOrderedPaths.Count == 0)
         {
             return false;
         }
 
-        if (members.Count < 2)
+        if (survivingOrderedPaths.Count < 2)
         {
-            RemoveManualStackCustomization(stack.StackKey);
+            RemoveManualStackCustomization(
+                stack.StackKey,
+                survivingOrderedPaths.Concat(detachedOrderedPaths).ToList());
+        }
+        else
+        {
+            members.Clear();
+            members.AddRange(survivingOrderedPaths);
+            InsertDetachedMembersAfterStackInOrder(
+                stack.StackKey,
+                detachedOrderedPaths);
         }
 
         PersistStackCustomizations();
@@ -1481,18 +1579,36 @@ public partial class WidgetViewModel
 
         bool projectionWasEnabled = UsesStackProjection;
         string itemPath = NormalizeStackMemberPath(item.Path);
-        int removed = members.RemoveAll(path => string.Equals(
-            NormalizeStackMemberPath(path),
-            itemPath,
-            StringComparison.OrdinalIgnoreCase));
-        if (removed == 0)
+        List<string> detachedOrderedPaths = members
+            .Where(path => string.Equals(
+                NormalizeStackMemberPath(path),
+                itemPath,
+                StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (detachedOrderedPaths.Count == 0)
         {
             return false;
         }
 
-        if (members.Count < 2)
+        List<string> survivingOrderedPaths = members
+            .Where(path => !string.Equals(
+                NormalizeStackMemberPath(path),
+                itemPath,
+                StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (survivingOrderedPaths.Count < 2)
         {
-            RemoveManualStackCustomization(stack.StackKey);
+            RemoveManualStackCustomization(
+                stack.StackKey,
+                survivingOrderedPaths.Concat(detachedOrderedPaths).ToList());
+        }
+        else
+        {
+            members.Clear();
+            members.AddRange(survivingOrderedPaths);
+            InsertDetachedMembersAfterStackInOrder(
+                stack.StackKey,
+                detachedOrderedPaths);
         }
 
         PersistStackCustomizations();
@@ -1530,15 +1646,254 @@ public partial class WidgetViewModel
         _stackDisplayItems.OfType<WidgetStackItem>().FirstOrDefault(stack =>
             stack.Members.Any(member => ReferenceEquals(member, item)));
 
-    private void RemoveManualStackCustomization(string stackKey)
+    private bool ShouldPreserveLooseMemberOrderInStackOrder() =>
+        EffectiveSortMode == WidgetSortMode.Manual ||
+        GetActiveFolderDisplayOrder().Any(key =>
+            key.StartsWith(LooseItemOrderKeyPrefix, StringComparison.Ordinal));
+
+    private static List<string> BuildDissolvedRemovalOrder(
+        IReadOnlyList<string> storedMembers,
+        IReadOnlySet<string> removedPaths)
     {
+        List<string> survivors = [];
+        List<string> detached = [];
+        foreach (string path in storedMembers)
+        {
+            if (removedPaths.Contains(NormalizeStackMemberPath(path)))
+            {
+                detached.Add(path);
+            }
+            else
+            {
+                survivors.Add(path);
+            }
+        }
+
+        survivors.AddRange(detached);
+        return survivors;
+    }
+
+    private void InsertStackIntoOrderRemovingMembers(
+        string stackKey,
+        IReadOnlySet<string> memberPaths,
+        int insertionIndex,
+        string? replacedStackKey = null)
+    {
+        List<string> order = GetActiveFolderDisplayOrder().ToList();
+        HashSet<string> memberOrderKeys = memberPaths
+            .Select(path => LooseItemOrderKeyPrefix + path.ToUpperInvariant())
+            .ToHashSet(StringComparer.Ordinal);
+        if (!string.IsNullOrEmpty(replacedStackKey))
+        {
+            int replacedIndex = order.IndexOf(replacedStackKey);
+            if (replacedIndex >= 0)
+            {
+                insertionIndex = replacedIndex;
+            }
+        }
+
+        for (int index = order.Count - 1; index >= 0; index--)
+        {
+            string key = order[index];
+            bool shouldRemove =
+                (!string.IsNullOrEmpty(replacedStackKey) &&
+                 string.Equals(key, replacedStackKey, StringComparison.Ordinal)) ||
+                (key.StartsWith(ManualStackKeyPrefix, StringComparison.Ordinal) &&
+                 !_stackMemberOverrides.ContainsKey(key)) ||
+                memberOrderKeys.Contains(key);
+            if (!shouldRemove)
+            {
+                continue;
+            }
+
+            order.RemoveAt(index);
+            if (index < insertionIndex)
+            {
+                insertionIndex--;
+            }
+        }
+
+        int clampedIndex = Math.Clamp(insertionIndex, 0, order.Count);
+        order.Insert(clampedIndex, stackKey);
+        SetActiveFolderDisplayOrder(order);
+    }
+
+    private void InsertDetachedMembersAfterStackInOrder(
+        string stackKey,
+        IReadOnlyList<string> detachedMemberPaths)
+    {
+        if (detachedMemberPaths.Count == 0 ||
+            !ShouldPreserveLooseMemberOrderInStackOrder())
+        {
+            return;
+        }
+
+        List<string> order = GetActiveFolderDisplayOrder().ToList();
+        if (order.Count == 0 &&
+            EffectiveSortMode == WidgetSortMode.Manual &&
+            _hasBuiltStackDisplay)
+        {
+            order = GetCurrentDisplayUnitOrder();
+        }
+
+        if (!order.Contains(stackKey, StringComparer.Ordinal))
+        {
+            return;
+        }
+
+        List<string> detachedKeys = detachedMemberPaths
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(path =>
+                LooseItemOrderKeyPrefix +
+                NormalizeStackMemberPath(path).ToUpperInvariant())
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (detachedKeys.Count == 0)
+        {
+            return;
+        }
+
+        HashSet<string> detachedSet = detachedKeys.ToHashSet(StringComparer.Ordinal);
+        order.RemoveAll(detachedSet.Contains);
+        int stackIndex = order.IndexOf(stackKey);
+        if (stackIndex >= 0)
+        {
+            order.InsertRange(stackIndex + 1, detachedKeys);
+        }
+
+        SetActiveFolderDisplayOrder(order);
+    }
+
+    private void RemoveManualStackCustomization(
+        string stackKey,
+        IReadOnlyList<string>? explicitReplacementMemberPaths = null)
+    {
+        IReadOnlyList<string>? memberPaths = explicitReplacementMemberPaths;
+        if (memberPaths is null &&
+            _stackMemberOverrides.TryGetValue(stackKey, out List<string>? storedPaths))
+        {
+            memberPaths = storedPaths;
+        }
+
+        string? owningSubfolderKey = null;
+        List<string>? targetOrder = null;
+        bool preserveMemberOrderSlots = false;
+
+        if (_stackOrder.Contains(stackKey, StringComparer.Ordinal))
+        {
+            targetOrder = _stackOrder;
+            preserveMemberOrderSlots =
+                memberPaths is { Count: > 0 } &&
+                (Config.SortMode == WidgetSortMode.Manual ||
+                 _stackOrder.Any(key =>
+                     key.StartsWith(LooseItemOrderKeyPrefix, StringComparison.Ordinal)));
+        }
+        else
+        {
+            foreach ((string folderKey, List<string> subOrder) in _subfolderDisplayOrders)
+            {
+                if (subOrder.Contains(stackKey, StringComparer.Ordinal))
+                {
+                    owningSubfolderKey = folderKey;
+                    targetOrder = subOrder.ToList();
+                    preserveMemberOrderSlots =
+                        memberPaths is { Count: > 0 } &&
+                        ShouldPreserveLooseSlotsForSubfolder(folderKey, subOrder);
+                    break;
+                }
+            }
+        }
+
+        if (targetOrder is null &&
+            memberPaths is { Count: > 0 } &&
+            EffectiveSortMode == WidgetSortMode.Manual &&
+            _hasBuiltStackDisplay &&
+            GetActiveFolderDisplayOrder().Count == 0)
+        {
+            List<string> liveUnits = GetCurrentDisplayUnitOrder();
+            if (liveUnits.Contains(stackKey, StringComparer.Ordinal))
+            {
+                targetOrder = liveUnits;
+                preserveMemberOrderSlots = true;
+                if (TryGetCurrentSubfolderScopeKey(out string activeSubKey))
+                {
+                    owningSubfolderKey = activeSubKey;
+                }
+            }
+        }
+
         _stackMemberOverrides.Remove(stackKey);
         _stackNameOverrides.Remove(stackKey);
         _disabledStacks.Remove(stackKey);
-        _stackOrder.RemoveAll(key => string.Equals(
-            key,
-            stackKey,
-            StringComparison.Ordinal));
+        if (targetOrder is not null)
+        {
+            int stackOrderIndex = targetOrder.IndexOf(stackKey);
+            if (preserveMemberOrderSlots &&
+                stackOrderIndex >= 0 &&
+                memberPaths is not null)
+            {
+                List<string> memberOrderKeys = memberPaths
+                    .Where(path => !string.IsNullOrWhiteSpace(path))
+                    .Select(path =>
+                        LooseItemOrderKeyPrefix +
+                        NormalizeStackMemberPath(path).ToUpperInvariant())
+                    .Distinct(StringComparer.Ordinal)
+                    .ToList();
+                HashSet<string> memberOrderKeySet =
+                    memberOrderKeys.ToHashSet(StringComparer.Ordinal);
+                for (int index = targetOrder.Count - 1; index >= 0; index--)
+                {
+                    if (memberOrderKeySet.Contains(targetOrder[index]))
+                    {
+                        targetOrder.RemoveAt(index);
+                        if (index < stackOrderIndex)
+                        {
+                            stackOrderIndex--;
+                        }
+                    }
+                }
+
+                int currentStackIndex = targetOrder.IndexOf(stackKey);
+                if (currentStackIndex >= 0)
+                {
+                    targetOrder.RemoveAt(currentStackIndex);
+                    targetOrder.InsertRange(currentStackIndex, memberOrderKeys);
+                }
+                else
+                {
+                    int clampedIndex = Math.Clamp(stackOrderIndex, 0, targetOrder.Count);
+                    targetOrder.InsertRange(clampedIndex, memberOrderKeys);
+                }
+            }
+            else
+            {
+                targetOrder.RemoveAll(key => string.Equals(
+                    key,
+                    stackKey,
+                    StringComparison.Ordinal));
+            }
+
+            List<string> deduplicated = targetOrder
+                .Where(key => !string.IsNullOrWhiteSpace(key))
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+            if (owningSubfolderKey is not null)
+            {
+                if (deduplicated.Count == 0)
+                {
+                    _subfolderDisplayOrders.Remove(owningSubfolderKey);
+                }
+                else
+                {
+                    _subfolderDisplayOrders[owningSubfolderKey] = deduplicated;
+                }
+            }
+            else
+            {
+                _stackOrder = deduplicated;
+            }
+        }
+
         if (string.Equals(
                 _expandedStackKey,
                 stackKey,
@@ -1548,13 +1903,28 @@ public partial class WidgetViewModel
         }
     }
 
+    private bool ShouldPreserveLooseSlotsForSubfolder(
+        string folderKey,
+        IReadOnlyList<string> subOrder)
+    {
+        if (_subfolderSortOverrides.TryGetValue(folderKey, out WidgetFolderSortOverride overrideState))
+        {
+            return overrideState.SortMode == WidgetSortMode.Manual;
+        }
+
+        return (_subfolderManualItemOrders.TryGetValue(folderKey, out List<string>? manualItems) &&
+                manualItems.Count > 0) ||
+               subOrder.Any(key => key.StartsWith(LooseItemOrderKeyPrefix, StringComparison.Ordinal));
+    }
+
     public void MoveStackUp(string stackKey)
     {
-        var order = GetOrCreateOrder();
-        int idx = order.IndexOf(stackKey);
+        List<string> visibleOrder = GetCurrentDisplayUnitOrder();
+        int idx = visibleOrder.IndexOf(stackKey);
         if (idx <= 0) return;
-        (order[idx - 1], order[idx]) = (order[idx], order[idx - 1]);
-        SetStackOrder(order);
+        (visibleOrder[idx - 1], visibleOrder[idx]) =
+            (visibleOrder[idx], visibleOrder[idx - 1]);
+        SetStackOrder(MergeWithRetainedNonVisibleOrderKeys(visibleOrder));
     }
 
     public bool CanMoveStackUp(string stackKey) =>
@@ -1562,11 +1932,12 @@ public partial class WidgetViewModel
 
     public void MoveStackDown(string stackKey)
     {
-        var order = GetOrCreateOrder();
-        int idx = order.IndexOf(stackKey);
-        if (idx < 0 || idx >= order.Count - 1) return;
-        (order[idx + 1], order[idx]) = (order[idx], order[idx + 1]);
-        SetStackOrder(order);
+        List<string> visibleOrder = GetCurrentDisplayUnitOrder();
+        int idx = visibleOrder.IndexOf(stackKey);
+        if (idx < 0 || idx >= visibleOrder.Count - 1) return;
+        (visibleOrder[idx + 1], visibleOrder[idx]) =
+            (visibleOrder[idx], visibleOrder[idx + 1]);
+        SetStackOrder(MergeWithRetainedNonVisibleOrderKeys(visibleOrder));
     }
 
     public bool CanMoveStackDown(string stackKey)
@@ -1642,16 +2013,236 @@ public partial class WidgetViewModel
             return false;
         }
 
-        _stackOrder = reordered;
+        if (orderKey.StartsWith(LooseItemOrderKeyPrefix, StringComparison.Ordinal))
+        {
+            EnsureSubfolderManualSortOverrideOnLooseReorder();
+        }
+
+        SetActiveFolderDisplayOrder(
+            MergeWithRetainedNonVisibleOrderKeys(reordered));
         PersistStackDisplayOrder();
         return true;
     }
 
-    private List<string> GetOrCreateOrder()
+    private List<string> MergeWithRetainedNonVisibleOrderKeys(
+        IReadOnlyList<string> reorderedVisibleUnits)
     {
-        if (_stackOrder.Count > 0) return _stackOrder;
-        _stackOrder = GetCurrentDisplayUnitOrder();
+        IReadOnlyList<string> activeOrder = GetActiveFolderDisplayOrder();
+        var result = new List<string>(reorderedVisibleUnits.Count + activeOrder.Count);
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (string key in reorderedVisibleUnits)
+        {
+            if (seen.Add(key))
+            {
+                result.Add(key);
+            }
+        }
+
+        if (activeOrder.Count == 0)
+        {
+            return result;
+        }
+
+        HashSet<string> loadedItemOrderKeys = Items
+            .Where(item => !string.IsNullOrWhiteSpace(item.Path))
+            .Select(GetLooseItemOrderKey)
+            .ToHashSet(StringComparer.Ordinal);
+        foreach (string historicalKey in activeOrder)
+        {
+            if (string.IsNullOrWhiteSpace(historicalKey) ||
+                seen.Contains(historicalKey))
+            {
+                continue;
+            }
+
+            if (historicalKey.StartsWith(ManualStackKeyPrefix, StringComparison.Ordinal) &&
+                !_stackMemberOverrides.ContainsKey(historicalKey))
+            {
+                continue;
+            }
+
+            if (historicalKey.StartsWith(LooseItemOrderKeyPrefix, StringComparison.Ordinal) &&
+                loadedItemOrderKeys.Contains(historicalKey))
+            {
+                continue;
+            }
+
+            if (seen.Add(historicalKey))
+            {
+                result.Add(historicalKey);
+            }
+        }
+
+        return result;
+    }
+
+    private IReadOnlyList<string> GetActiveFolderDisplayOrder()
+    {
+        if (TryGetCurrentSubfolderScopeKey(out string scopeKey))
+        {
+            return _subfolderDisplayOrders.TryGetValue(scopeKey, out List<string>? order)
+                ? order
+                : [];
+        }
+
         return _stackOrder;
+    }
+
+    private void SetActiveFolderDisplayOrder(IEnumerable<string> order)
+    {
+        List<string> normalized = order
+            .Where(key => !string.IsNullOrWhiteSpace(key))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (TryGetCurrentSubfolderScopeKey(out string scopeKey))
+        {
+            if (normalized.Count == 0)
+            {
+                _subfolderDisplayOrders.Remove(scopeKey);
+            }
+            else
+            {
+                _subfolderDisplayOrders[scopeKey] = normalized;
+            }
+
+            return;
+        }
+
+        _stackOrder = normalized;
+    }
+
+    private void PersistActiveFolderDisplayOrderToMetadata()
+    {
+        WidgetFileStackSettings.SetStackOrder(
+            Config,
+            _stackOrder.Count == 0 ? null : _stackOrder);
+        WidgetFileStackSettings.SetSubfolderDisplayOrders(
+            Config,
+            _subfolderDisplayOrders);
+    }
+
+    private void EnsureSubfolderManualSortOverrideOnLooseReorder()
+    {
+        if (!TryGetCurrentSubfolderScopeKey(out string scopeKey))
+        {
+            return;
+        }
+
+        if (_subfolderSortOverrides.TryGetValue(scopeKey, out WidgetFolderSortOverride existing) &&
+            existing.SortMode == WidgetSortMode.Manual)
+        {
+            return;
+        }
+
+        _subfolderSortOverrides[scopeKey] = new WidgetFolderSortOverride(
+            WidgetSortMode.Manual,
+            false);
+        WidgetFileStackSettings.SetSubfolderSortOverrides(
+            Config,
+            _subfolderSortOverrides);
+        NotifyFolderSortPropertiesChanged();
+    }
+
+    internal void SyncFlatReorderWithDormantStackDisplayOrder()
+    {
+        IReadOnlyList<string> activeOrder = GetActiveFolderDisplayOrder();
+        if (!activeOrder.Any(key =>
+                key.StartsWith(LooseItemOrderKeyPrefix, StringComparison.Ordinal)))
+        {
+            return;
+        }
+
+        var pathToManualStackKey = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach ((string stackKey, List<string> memberPaths) in _stackMemberOverrides)
+        {
+            if (!stackKey.StartsWith(ManualStackKeyPrefix, StringComparison.Ordinal) ||
+                memberPaths.Count < 2)
+            {
+                continue;
+            }
+
+            foreach (string memberPath in memberPaths)
+            {
+                string normalizedPath = NormalizeStackMemberPath(memberPath);
+                if (!string.IsNullOrWhiteSpace(normalizedPath))
+                {
+                    pathToManualStackKey.TryAdd(normalizedPath, stackKey);
+                }
+            }
+        }
+
+        var rebuilt = new List<string>(Items.Count);
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (WidgetItem item in Items)
+        {
+            string normalizedPath = NormalizeStackMemberPath(item.Path);
+            if (pathToManualStackKey.TryGetValue(normalizedPath, out string? manualStackKey))
+            {
+                if (seen.Add(manualStackKey))
+                {
+                    rebuilt.Add(manualStackKey);
+                }
+
+                continue;
+            }
+
+            string looseKey = GetLooseItemOrderKey(item);
+            if (seen.Add(looseKey))
+            {
+                rebuilt.Add(looseKey);
+            }
+        }
+
+        HashSet<string> loadedItemKeys = Items
+            .Where(item => !string.IsNullOrWhiteSpace(item.Path))
+            .Select(GetLooseItemOrderKey)
+            .ToHashSet(StringComparer.Ordinal);
+        foreach (string historicalKey in activeOrder)
+        {
+            if (seen.Contains(historicalKey))
+            {
+                continue;
+            }
+
+            if (historicalKey.StartsWith(LooseItemOrderKeyPrefix, StringComparison.Ordinal) &&
+                loadedItemKeys.Contains(historicalKey))
+            {
+                continue;
+            }
+
+            if (historicalKey.StartsWith(ManualStackKeyPrefix, StringComparison.Ordinal) &&
+                !_stackMemberOverrides.ContainsKey(historicalKey))
+            {
+                continue;
+            }
+
+            if (seen.Add(historicalKey))
+            {
+                rebuilt.Add(historicalKey);
+            }
+        }
+
+        SetActiveFolderDisplayOrder(rebuilt);
+        PersistActiveFolderDisplayOrderToMetadata();
+    }
+
+    private static bool WillTopLevelDisplayUnitRemainAfterDetach(
+        WidgetItem candidate,
+        IReadOnlySet<string> movingKeys)
+    {
+        if (!IsTopLevelDisplayUnit(candidate))
+        {
+            return false;
+        }
+
+        if (candidate is WidgetStackItem stack)
+        {
+            return !movingKeys.Contains(stack.StackKey) &&
+                stack.Members.Any(member =>
+                    !movingKeys.Contains(GetLooseItemOrderKey(member)));
+        }
+
+        return !movingKeys.Contains(GetDisplayUnitOrderKey(candidate));
     }
 
     private List<string> GetCurrentDisplayUnitOrder()
@@ -1723,9 +2314,10 @@ public partial class WidgetViewModel
 
     private void PersistStackDisplayOrder()
     {
-        WidgetFileStackSettings.SetStackOrder(
+        PersistActiveFolderDisplayOrderToMetadata();
+        WidgetFileStackSettings.SetSubfolderSortOverrides(
             Config,
-            _stackOrder);
+            _subfolderSortOverrides);
         _settingsService.UpdateWidget(
             Config,
             notifySubscribers: false);
@@ -1745,9 +2337,13 @@ public partial class WidgetViewModel
         WidgetFileStackSettings.SetStackMemberOverrides(
             Config,
             _stackMemberOverrides);
-        WidgetFileStackSettings.SetStackOrder(
+        PersistActiveFolderDisplayOrderToMetadata();
+        WidgetFileStackSettings.SetSubfolderSortOverrides(
             Config,
-            _stackOrder);
+            _subfolderSortOverrides);
+        WidgetFileStackSettings.SetSubfolderManualItemOrders(
+            Config,
+            _subfolderManualItemOrders);
         _settingsService.UpdateWidget(
             Config,
             notifySubscribers: false);
@@ -1790,6 +2386,13 @@ public partial class WidgetViewModel
         _stackOrder = WidgetFileStackSettings.GetStackOrder(Config);
         _stackMemberOverrides =
             WidgetFileStackSettings.GetStackMemberOverrides(Config);
+        _subfolderSortOverrides =
+            WidgetFileStackSettings.GetSubfolderSortOverrides(Config);
+        _subfolderDisplayOrders =
+            WidgetFileStackSettings.GetSubfolderDisplayOrders(Config);
+        _subfolderManualItemOrders =
+            WidgetFileStackSettings.GetSubfolderManualItemOrders(Config);
+        MigrateLegacySubfolderOrdersFromRoot();
         Items.CollectionChanged += StackSourceItems_CollectionChanged;
         ScheduleStackDateBoundaryRefresh();
         QueueStackDisplayRebuild();
@@ -1808,12 +2411,48 @@ public partial class WidgetViewModel
 
     private void StackSourceItems_CollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
+        if (_isSynchronizingItemsFromStackProjection)
+        {
+            return;
+        }
+
         QueueStackDisplayRebuild();
+    }
+
+    private StackRebuildDeferralScope DeferStackDisplayRebuild()
+    {
+        _deferredStackRebuildDepth++;
+        return new StackRebuildDeferralScope(this);
+    }
+
+    private void EndDeferredStackDisplayRebuild()
+    {
+        if (_deferredStackRebuildDepth <= 0 || --_deferredStackRebuildDepth > 0)
+        {
+            return;
+        }
+
+        if (_deferredStackRebuildPending)
+        {
+            _deferredStackRebuildPending = false;
+            QueueStackDisplayRebuild();
+        }
+    }
+
+    private readonly struct StackRebuildDeferralScope(WidgetViewModel owner) : IDisposable
+    {
+        public void Dispose() => owner.EndDeferredStackDisplayRebuild();
     }
 
     private void QueueStackDisplayRebuild()
     {
         _hasBuiltStackDisplay = false;
+        if (_deferredStackRebuildDepth > 0)
+        {
+            _deferredStackRebuildPending = true;
+            return;
+        }
+
         if (_stackRebuildQueued)
         {
             return;
@@ -1826,6 +2465,12 @@ public partial class WidgetViewModel
             // per dispatcher pass. The staleness flag above stays set so
             // mid-batch readers know the projection is behind.
             MarkItemMutationBatchDirty();
+            return;
+        }
+
+        if (_dispatcherQueue is null)
+        {
+            RebuildStackDisplayItems();
             return;
         }
 
@@ -1865,6 +2510,12 @@ public partial class WidgetViewModel
         var stackOrder = WidgetFileStackSettings.GetStackOrder(Config);
         var stackMemberOverrides =
             WidgetFileStackSettings.GetStackMemberOverrides(Config);
+        var subfolderSortOverrides =
+            WidgetFileStackSettings.GetSubfolderSortOverrides(Config);
+        var subfolderDisplayOrders =
+            WidgetFileStackSettings.GetSubfolderDisplayOrders(Config);
+        var subfolderManualItemOrders =
+            WidgetFileStackSettings.GetSubfolderManualItemOrders(Config);
 
         if (projectionWasEnabled && !enabled)
         {
@@ -1872,6 +2523,9 @@ public partial class WidgetViewModel
             // the currently visible stack order first so switching the mode
             // does not suddenly reveal an older, unrelated Items order.
             SynchronizeItemsOrderFromStackProjection();
+            subfolderManualItemOrders = new Dictionary<string, List<string>>(
+                _subfolderManualItemOrders,
+                StringComparer.OrdinalIgnoreCase);
         }
 
         FileStacksEnabled = enabled;
@@ -1883,6 +2537,10 @@ public partial class WidgetViewModel
         _stackNameOverrides = nameOverrides;
         _stackOrder = stackOrder;
         _stackMemberOverrides = stackMemberOverrides;
+        _subfolderSortOverrides = subfolderSortOverrides;
+        _subfolderDisplayOrders = subfolderDisplayOrders;
+        _subfolderManualItemOrders = subfolderManualItemOrders;
+        MigrateLegacySubfolderOrdersFromRoot();
         if (UsesStackPopover)
         {
             _expandedStackKey = null;
@@ -1919,7 +2577,7 @@ public partial class WidgetViewModel
         // Automatic sort modes remain governed by their selected comparator;
         // only Manual mode needs the visual stack order flattened into the
         // underlying collection.
-        if (Config.SortMode != WidgetSortMode.Manual)
+        if (EffectiveSortMode != WidgetSortMode.Manual)
         {
             SortItems();
             return;
@@ -1960,16 +2618,25 @@ public partial class WidgetViewModel
             }
         }
 
-        for (int targetIndex = 0; targetIndex < desired.Count; targetIndex++)
+        _isSynchronizingItemsFromStackProjection = true;
+        try
         {
-            int currentIndex = Items.IndexOf(desired[targetIndex]);
-            if (currentIndex >= 0 && currentIndex != targetIndex)
+            for (int targetIndex = 0; targetIndex < desired.Count; targetIndex++)
             {
-                Items.Move(currentIndex, targetIndex);
+                int currentIndex = Items.IndexOf(desired[targetIndex]);
+                if (currentIndex >= 0 && currentIndex != targetIndex)
+                {
+                    Items.Move(currentIndex, targetIndex);
+                }
             }
+
+            NormalizeSortOrder();
+        }
+        finally
+        {
+            _isSynchronizingItemsFromStackProjection = false;
         }
 
-        NormalizeSortOrder();
         PersistManualOrderSnapshotIfChanged();
     }
 
@@ -2060,6 +2727,11 @@ public partial class WidgetViewModel
 
         QueueLegacyAutomaticStackMigration(projected);
         _hasBuiltStackDisplay = true;
+        if (EffectiveSortMode == WidgetSortMode.Manual &&
+            Items.Count > 0)
+        {
+            SynchronizeItemsOrderFromStackProjection();
+        }
     }
 
     private void QueueLegacyAutomaticStackMigration(
@@ -2075,6 +2747,28 @@ public partial class WidgetViewModel
         }
 
         string stackKey = legacyStack.StackKey;
+        if (_dispatcherQueue is null)
+        {
+            _legacyStackMigrationQueued = true;
+            try
+            {
+                if (_stackItems.TryGetValue(
+                        stackKey,
+                        out WidgetStackItem? current) &&
+                    !current.IsManual &&
+                    _stackMemberOverrides.ContainsKey(stackKey))
+                {
+                    ConvertStackToManual(current, []);
+                }
+            }
+            finally
+            {
+                _legacyStackMigrationQueued = false;
+            }
+
+            return;
+        }
+
         _legacyStackMigrationQueued = true;
         if (!_dispatcherQueue.TryEnqueue(() =>
         {
@@ -2151,12 +2845,18 @@ public partial class WidgetViewModel
                 StringComparer.OrdinalIgnoreCase);
         var assignedPaths = new HashSet<string>(
             StringComparer.OrdinalIgnoreCase);
+        var manualStackKeyByMemberPath =
+            new Dictionary<string, string>(
+                StringComparer.OrdinalIgnoreCase);
         var forcedByStack =
             new Dictionary<string, List<WidgetItem>>(
                 StringComparer.Ordinal);
         foreach ((string stackKey, List<string> paths) in
                  _stackMemberOverrides)
         {
+            bool isManual = stackKey.StartsWith(
+                ManualStackKeyPrefix,
+                StringComparison.Ordinal);
             var members = new List<WidgetItem>();
             foreach (string path in paths)
             {
@@ -2168,6 +2868,10 @@ public partial class WidgetViewModel
                         out WidgetItem? item))
                 {
                     members.Add(item);
+                    if (isManual)
+                    {
+                        manualStackKeyByMemberPath[normalizedPath] = stackKey;
+                    }
                 }
             }
 
@@ -2180,6 +2884,21 @@ public partial class WidgetViewModel
         var result = new List<WidgetStackGroup>();
         foreach (WidgetStackGroup group in automaticGroups)
         {
+            var referencedManualStackKeys = new List<string>();
+            foreach (WidgetItem candidate in group.Items)
+            {
+                if (manualStackKeyByMemberPath.TryGetValue(
+                        NormalizeStackMemberPath(candidate.Path),
+                        out string? manualStackKey) &&
+                    forcedByStack.ContainsKey(manualStackKey) &&
+                    !referencedManualStackKeys.Contains(
+                        manualStackKey,
+                        StringComparer.Ordinal))
+                {
+                    referencedManualStackKeys.Add(manualStackKey);
+                }
+            }
+
             List<WidgetItem> members = group.Items
                 .Where(item => !assignedPaths.Contains(
                     NormalizeStackMemberPath(item.Path)))
@@ -2202,35 +2921,57 @@ public partial class WidgetViewModel
                     ForceStack = hasForcedMembers
                 });
             }
+
+            foreach (string manualStackKey in referencedManualStackKeys)
+            {
+                if (forcedByStack.Remove(
+                        manualStackKey,
+                        out List<WidgetItem>? manualMembers) &&
+                    manualMembers is not null)
+                {
+                    result.Add(CreateForcedStackGroup(
+                        manualStackKey,
+                        manualMembers));
+                }
+            }
         }
 
         foreach ((string stackKey, List<WidgetItem> members) in
                  forcedByStack)
         {
-            bool manual = stackKey.StartsWith(
-                ManualStackKeyPrefix,
-                StringComparison.Ordinal);
-            WidgetStackCategory category =
-                !manual &&
-                Enum.TryParse(
-                    stackKey,
-                    ignoreCase: false,
-                    out WidgetStackCategory parsedCategory)
-                    ? parsedCategory
-                    : WidgetStackCategory.Other;
-            result.Add(new WidgetStackGroup(
-                category,
-                members,
+            result.Add(CreateForcedStackGroup(
                 stackKey,
-                manual
-                    ? _localizationService.T(
-                        "Widget.Stack.ManualDefaultName")
-                    : null,
-                CanStack: true,
-                ForceStack: true));
+                members));
         }
 
         return result;
+    }
+
+    private WidgetStackGroup CreateForcedStackGroup(
+        string stackKey,
+        List<WidgetItem> members)
+    {
+        bool manual = stackKey.StartsWith(
+            ManualStackKeyPrefix,
+            StringComparison.Ordinal);
+        WidgetStackCategory category =
+            !manual &&
+            Enum.TryParse(
+                stackKey,
+                ignoreCase: false,
+                out WidgetStackCategory parsedCategory)
+                ? parsedCategory
+                : WidgetStackCategory.Other;
+        return new WidgetStackGroup(
+            category,
+            members,
+            stackKey,
+            manual
+                ? _localizationService.T(
+                    "Widget.Stack.ManualDefaultName")
+                : null,
+            CanStack: true,
+            ForceStack: true);
     }
 
     private List<WidgetItem> NormalizeStackMembers(
@@ -2275,9 +3016,12 @@ public partial class WidgetViewModel
                     containingStack.StackKey);
                 if (index >= 0)
                 {
+                    bool anySurvivor = containingStack.Members.Any(candidate =>
+                        !members.Any(selected =>
+                            ReferenceEquals(selected, candidate)));
                     insertionIndex = Math.Min(
                         insertionIndex,
-                        index + 1);
+                        anySurvivor ? index + 1 : index);
                 }
             }
         }
@@ -2334,35 +3078,239 @@ public partial class WidgetViewModel
         return detachedStackKeys;
     }
 
-    private void UpdateStackMemberOverridePath(
+    internal void UpdateStackMemberOverridePath(
         string sourcePath,
         string destinationPath)
     {
         string normalizedSource =
-            NormalizeStackMemberPath(sourcePath);
+            NormalizeStackMemberPath(sourcePath)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         string normalizedDestination =
-            NormalizeStackMemberPath(destinationPath);
+            NormalizeStackMemberPath(destinationPath)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (string.IsNullOrWhiteSpace(normalizedSource) ||
+            string.IsNullOrWhiteSpace(normalizedDestination))
+        {
+            return;
+        }
+
         bool changed = false;
         foreach (List<string> paths in
                  _stackMemberOverrides.Values)
         {
-            int index = paths.FindIndex(path =>
-                string.Equals(
-                    NormalizeStackMemberPath(path),
-                    normalizedSource,
-                    StringComparison.OrdinalIgnoreCase));
-            if (index < 0)
+            for (int index = 0; index < paths.Count; index++)
             {
-                continue;
+                string rebased = WidgetPathRebaseHelper.RebasePath(
+                    paths[index],
+                    normalizedSource,
+                    normalizedDestination);
+                if (!string.Equals(paths[index], rebased, StringComparison.Ordinal))
+                {
+                    paths[index] = rebased;
+                    changed = true;
+                }
+            }
+        }
+
+        if (RebaseLooseOrderKeyListInPlace(_stackOrder, normalizedSource, normalizedDestination))
+        {
+            changed = true;
+        }
+
+        var rebasedSubfolderSorts = new Dictionary<string, WidgetFolderSortOverride>(
+            StringComparer.OrdinalIgnoreCase);
+        bool subfolderSortsChanged = false;
+        foreach ((string folderKey, WidgetFolderSortOverride sortState) in _subfolderSortOverrides)
+        {
+            string rebasedKey = WidgetFileStackSettings.NormalizeFolderScopeKey(
+                WidgetPathRebaseHelper.RebasePath(folderKey, normalizedSource, normalizedDestination));
+            if (!string.Equals(folderKey, rebasedKey, StringComparison.Ordinal))
+            {
+                subfolderSortsChanged = true;
             }
 
-            paths[index] = normalizedDestination;
+            rebasedSubfolderSorts[rebasedKey] = sortState;
+        }
+
+        if (subfolderSortsChanged)
+        {
+            _subfolderSortOverrides = rebasedSubfolderSorts;
+            changed = true;
+        }
+
+        var rebasedSubfolderDisplayOrders = new Dictionary<string, List<string>>(
+            StringComparer.OrdinalIgnoreCase);
+        bool subfolderDisplayOrdersChanged = false;
+        foreach ((string folderKey, List<string> subOrder) in _subfolderDisplayOrders)
+        {
+            string rebasedKey = WidgetFileStackSettings.NormalizeFolderScopeKey(
+                WidgetPathRebaseHelper.RebasePath(folderKey, normalizedSource, normalizedDestination));
+            List<string> copy = subOrder.ToList();
+            bool listChanged = RebaseLooseOrderKeyListInPlace(
+                copy,
+                normalizedSource,
+                normalizedDestination);
+            if (!string.Equals(folderKey, rebasedKey, StringComparison.Ordinal) || listChanged)
+            {
+                subfolderDisplayOrdersChanged = true;
+            }
+
+            rebasedSubfolderDisplayOrders[rebasedKey] = copy;
+        }
+
+        if (subfolderDisplayOrdersChanged)
+        {
+            _subfolderDisplayOrders = rebasedSubfolderDisplayOrders;
+            changed = true;
+        }
+
+        var rebasedSubfolderItemOrders = new Dictionary<string, List<string>>(
+            StringComparer.OrdinalIgnoreCase);
+        bool subfolderItemOrdersChanged = false;
+        foreach ((string folderKey, List<string> itemPaths) in _subfolderManualItemOrders)
+        {
+            string rebasedKey = WidgetFileStackSettings.NormalizeFolderScopeKey(
+                WidgetPathRebaseHelper.RebasePath(folderKey, normalizedSource, normalizedDestination));
+            var rebasedPaths = new List<string>(itemPaths.Count);
+            bool listChanged = false;
+            foreach (string itemPath in itemPaths)
+            {
+                string rebasedPath = WidgetPathRebaseHelper.RebasePath(
+                    itemPath,
+                    normalizedSource,
+                    normalizedDestination);
+                if (!string.Equals(itemPath, rebasedPath, StringComparison.Ordinal))
+                {
+                    listChanged = true;
+                }
+
+                rebasedPaths.Add(rebasedPath);
+            }
+
+            if (!string.Equals(folderKey, rebasedKey, StringComparison.Ordinal) || listChanged)
+            {
+                subfolderItemOrdersChanged = true;
+            }
+
+            rebasedSubfolderItemOrders[rebasedKey] = rebasedPaths;
+        }
+
+        if (subfolderItemOrdersChanged)
+        {
+            _subfolderManualItemOrders = rebasedSubfolderItemOrders;
             changed = true;
         }
 
         if (changed)
         {
             PersistStackCustomizations();
+        }
+    }
+
+    private static bool RebaseLooseOrderKeyListInPlace(
+        List<string> orderKeys,
+        string oldRoot,
+        string newRoot)
+    {
+        bool changed = false;
+        for (int index = 0; index < orderKeys.Count; index++)
+        {
+            string key = orderKeys[index];
+            if (!key.StartsWith(LooseItemOrderKeyPrefix, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            string path = key[LooseItemOrderKeyPrefix.Length..];
+            string rebasedPath = WidgetPathRebaseHelper.RebasePath(path, oldRoot, newRoot);
+            if (!string.Equals(path, rebasedPath, StringComparison.OrdinalIgnoreCase))
+            {
+                orderKeys[index] = LooseItemOrderKeyPrefix + rebasedPath.ToUpperInvariant();
+                changed = true;
+            }
+        }
+
+        return changed;
+    }
+
+    private void MigrateLegacySubfolderOrdersFromRoot()
+    {
+        string? rootCandidate = _mappedFolderTraversalPath ?? MappedFolderPath ?? Config.MappedFolderPath;
+        if (string.IsNullOrWhiteSpace(rootCandidate) || _stackOrder.Count == 0)
+        {
+            return;
+        }
+
+        string rootFullPath;
+        try
+        {
+            rootFullPath = Path.GetFullPath(rootCandidate)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        }
+        catch
+        {
+            return;
+        }
+
+        string rootPrefix = rootFullPath + Path.DirectorySeparatorChar;
+        var remainingRootOrder = new List<string>(_stackOrder.Count);
+        foreach (string key in _stackOrder)
+        {
+            string? ownerDirectory = ResolveOrderKeyParentDirectory(key);
+            if (!string.IsNullOrWhiteSpace(ownerDirectory) &&
+                ownerDirectory.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                string subScopeKey = WidgetFileStackSettings.NormalizeFolderScopeKey(ownerDirectory);
+                if (!string.IsNullOrWhiteSpace(subScopeKey))
+                {
+                    if (!_subfolderDisplayOrders.TryGetValue(subScopeKey, out List<string>? subOrder))
+                    {
+                        subOrder = [];
+                        _subfolderDisplayOrders[subScopeKey] = subOrder;
+                    }
+
+                    if (!subOrder.Contains(key, StringComparer.Ordinal))
+                    {
+                        subOrder.Add(key);
+                    }
+
+                    continue;
+                }
+            }
+
+            remainingRootOrder.Add(key);
+        }
+
+        _stackOrder = remainingRootOrder;
+    }
+
+    private string? ResolveOrderKeyParentDirectory(string key)
+    {
+        string? itemPath = null;
+        if (key.StartsWith(LooseItemOrderKeyPrefix, StringComparison.Ordinal))
+        {
+            itemPath = key[LooseItemOrderKeyPrefix.Length..];
+        }
+        else if (key.StartsWith(ManualStackKeyPrefix, StringComparison.Ordinal) &&
+                 _stackMemberOverrides.TryGetValue(key, out List<string>? members) &&
+                 members.Count > 0)
+        {
+            itemPath = members[0];
+        }
+
+        if (string.IsNullOrWhiteSpace(itemPath))
+        {
+            return null;
+        }
+
+        try
+        {
+            return Path.GetDirectoryName(Path.GetFullPath(itemPath))
+                ?.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        }
+        catch
+        {
+            return null;
         }
     }
 
@@ -2412,7 +3360,8 @@ public partial class WidgetViewModel
     private List<StackDisplayUnit> OrderDisplayUnits(
         IReadOnlyList<StackDisplayUnit> units)
     {
-        if (_stackOrder.Count == 0)
+        IReadOnlyList<string> activeOrder = GetActiveFolderDisplayOrder();
+        if (activeOrder.Count == 0)
         {
             return units.ToList();
         }
@@ -2420,7 +3369,7 @@ public partial class WidgetViewModel
         var ordered = new List<StackDisplayUnit>();
         var known = new HashSet<string>(StringComparer.Ordinal);
 
-        foreach (string key in _stackOrder)
+        foreach (string key in activeOrder)
         {
             StackDisplayUnit? unit = units.FirstOrDefault(candidate =>
                 string.Equals(
@@ -2558,6 +3507,11 @@ public partial class WidgetViewModel
 
     private void ScheduleStackDateBoundaryRefresh()
     {
+        if (_dispatcherQueue is null)
+        {
+            return;
+        }
+
         _stackDateBoundaryTimer ??= _dispatcherQueue.CreateTimer();
         _stackDateBoundaryTimer.Stop();
         _stackDateBoundaryTimer.Tick -= StackDateBoundaryTimer_Tick;

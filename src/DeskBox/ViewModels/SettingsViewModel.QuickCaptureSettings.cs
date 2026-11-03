@@ -12,7 +12,6 @@ public partial class SettingsViewModel
         // capacity and text sizes) lives on the Quick Capture editor; the
         // coordinator broadcast re-projects it there.
         _quickCaptureSettingsEditor.SyncPresentation();
-        _quickCaptureSettingsEditor.RefreshClipboardDiagnostics();
         OnPropertyChanged(nameof(FeatureWidgetEntries));
     }
 

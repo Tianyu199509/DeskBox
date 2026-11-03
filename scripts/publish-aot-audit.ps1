@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param(
     [ValidateSet("x64", "ARM64")]
     [string]$Platform = "x64",
@@ -746,12 +746,12 @@ $stage4D5LegacyReflectionPatterns = @(
     "GetProperty(`"Id`""
 )
 $stage4D5RequiredPublicPatterns = @(
-    "_trayIcon.TrayIcon",
-    "trayIcon.WindowHandle",
-    "trayIcon.Id",
-    "SecondWindowContextMenuOpened +=",
-    "VisualTreeHelper.GetParent",
-    "VisualTreeHelper.GetOpenPopupsForXamlRoot"
+    "new NativeTrayIconHost(",
+    "trayHost.WindowHandle",
+    "trayHost.IconId",
+    "trayHost.ShowContextMenu(",
+    "Win32Helper.TryGetNotifyIconRect",
+    "GetFallbackTrayContextMenuAnchorPoint"
 )
 $stage4D5SourcePath = Join-Path $repoRoot $stage4D5SourceFiles[0]
 $stage4D5Source = Get-Content -LiteralPath $stage4D5SourcePath -Raw
@@ -774,8 +774,8 @@ $stage4D5WarningMessages = @(
             $line = $_
             $warningCodeRegex.IsMatch($line) -and
                 (
-                    $line -match "App\.Tray\.cs\(" -or
-                    $line -match "DeskBox\.App\.(?:TryGetTrayIconIdentity|ApplySecondWindowTrayPresenterSettings|ConfigureOwningPopup)"
+                    $line -match "(?:App\.Tray|NativeTrayIconHost)\.cs\(" -or
+                    $line -match "DeskBox\.Platform\.NativeTrayIconHost|DeskBox\.App\.TryGetTrayIconIdentity"
                 )
         } |
         ForEach-Object { $_.Trim() } |
@@ -2162,7 +2162,7 @@ $stage5B1RequiredRunnerPatterns = @(
     'ShortcutNativeBackend.CaptureDiagnosticState()',
     'ShortcutNativeModule.Default',
     'RuntimeFeature.IsDynamicCodeSupported',
-    'WindowNative.GetWindowHandle(_trayWindow)',
+    'nint ownerHwnd = TrayHostWindowHandle;',
     'AwaitingShellUi',
     'result.json',
     'AotShortcutSmokeJsonContext.Default.AotShortcutSmokeResult'
@@ -3194,7 +3194,7 @@ $stage5B4ARequiredRunnerPatterns = @(
     'aot-managed-ui-smoke',
     'aot-5b4a-file',
     'aot-5b4a-search',
-    '_trayIcon.TrayIcon.WindowHandle',
+    '_trayHost.WindowHandle',
     'WidgetManager.CreateDiagnosticsSnapshot()',
     'WidgetKind.File',
     'WidgetKind.Search',
@@ -3482,7 +3482,8 @@ $stage5B4B1SourceFiles = @(
     "src/DeskBox/Views/SettingsWindow.HotkeyAndAppearance.cs",
     # Deferred-section host owns the lazy typed-ViewModel bridges that used to
     # live eagerly in SettingsWindow.xaml.cs.
-    "src/DeskBox/Views/SettingsWindow.DeferredSections.cs"
+    "src/DeskBox/Views/SettingsWindow.DeferredSections.cs",
+    "src/DeskBox/Views/SettingsSections/AppearanceSettingsSection.xaml"
 )
 $stage5B4B1Sources = [ordered]@{}
 foreach ($sourceFile in $stage5B4B1SourceFiles) {
@@ -3498,7 +3499,7 @@ $stage5B4B1RequiredRunnerPatterns = @(
     'FileStackRuleCount',
     'BackupSnapshotCount',
     'DeepSettingsCompleted',
-    'result.DeepSettings.PageTransitions.Count == 22',
+    'result.DeepSettings.PageTransitions.Count == 21',
     'AotManagedUiSmokeJsonContext.Default.AotManagedUiSmokeResult'
 )
 $stage5B4B1MissingRunnerPatterns = @(
@@ -3663,9 +3664,11 @@ $stage5B4B1RequiredFileStackXamlPatterns = @(
     'ItemsSource="{x:Bind CustomRules, Mode=OneWay}"'
 )
 $stage5B4B1RequiredCommandXamlPatterns = @(
-    'Command="{x:Bind ResetDisplayWidgetChromeOverridesCommand, Mode=OneWay}"',
-    'Command="{x:Bind ResetInteractiveWidgetChromeOverridesCommand, Mode=OneWay}"',
     'Command="{x:Bind ResetAllCapsuleOverridesCommand, Mode=OneWay}"'
+)
+$stage5B4B1RequiredAppearanceCommandXamlPatterns = @(
+    'Command="{x:Bind ViewModel.ResetDisplayWidgetChromeOverridesCommand, Mode=OneWay}"',
+    'Command="{x:Bind ViewModel.ResetInteractiveWidgetChromeOverridesCommand, Mode=OneWay}"'
 )
 $stage5B4B1MissingCommandXamlPatterns = @(
     foreach ($pattern in $stage5B4B1RequiredCommandXamlPatterns) {
@@ -3673,6 +3676,14 @@ $stage5B4B1MissingCommandXamlPatterns = @(
                 $pattern,
                 [StringComparison]::Ordinal) -lt 0) {
             "$($stage5B4B1SourceFiles[8])::$pattern"
+        }
+    }
+    foreach ($pattern in $stage5B4B1RequiredAppearanceCommandXamlPatterns) {
+        $appearanceSectionFile = "src/DeskBox/Views/SettingsSections/AppearanceSettingsSection.xaml"
+        if ($stage5B4B1Sources[$appearanceSectionFile].IndexOf(
+                $pattern,
+                [StringComparison]::Ordinal) -lt 0) {
+            "${appearanceSectionFile}::$pattern"
         }
     }
 )
@@ -3803,13 +3814,14 @@ $stage5B4B1RoutePatterns = @(
     '"GlanceSettings"',
     '"SearchSettings"',
     '"AppearanceMaterialSettings"',
-    '"AppearanceDensitySettings"',
-    '"AppearanceWindowSettings"',
-    '"AppearanceAnimationSettings"',
     '"CapsuleOverridesSettings"',
     '"BackupRestoreSettings"',
     '"DataHealthSettings"',
-    '"CompatibilityDiagnosticsSettings"'
+    '"CompatibilityDiagnosticsSettings"',
+    '"PerformanceSettings"',
+    '"CustomWidgetSettings"',
+    '"ClipboardSettings"',
+    '"AiSettings"'
 )
 $stage5B4B1MissingRoutePatterns = @(
     foreach ($pattern in $stage5B4B1RoutePatterns) {
@@ -4356,7 +4368,7 @@ $stage5B4B2B2ARequiredProductPatterns = @(
     '[WinRT.GeneratedBindableCustomProperty]',
     'partial class TodoWidgetViewModel',
     'partial class TodoItemViewModel',
-    'Math.Max(3, data.Version)'
+    'Math.Max(4, data.Version)'
 )
 $stage5B4B2B2AProductSource =
     $stage5B4B2B2ASources[$stage5B4B2B2ASourceFiles[5]] +
@@ -6025,8 +6037,8 @@ $stage5B4C1B1RequiredProductPatterns = @(
     'bool permanently = false',
     '_fileService.DeleteEntriesWithShellAsync(',
     'DeleteEntryWithShell(normalizedPath, ownerHandle',
-    'SHFileOperation(ref operation)',
-    'FofAllowUndo'
+    'ExecuteShellDeleteOnStaThread(',
+    'ShellDeleteRecycleOnDelete'
 )
 $stage5B4C1B1MissingProductPatterns = @(
     foreach ($pattern in $stage5B4C1B1RequiredProductPatterns) {
@@ -6312,7 +6324,7 @@ $stage5B4C1B2ARequiredProductPatterns = @(
     'ExecuteTransferPlanAsync(',
     'ExecuteModernShellTransferPlanAsync(',
     'catch (FileService.FileTransferCanceledException',
-    'SHFileOperation(ref operation)'
+    'ExecuteShellDeleteOnStaThread('
 )
 $stage5B4C1B2AMissingProductPatterns = @(
     foreach ($pattern in $stage5B4C1B2ARequiredProductPatterns) {
@@ -9303,7 +9315,7 @@ $summary = [ordered]@{
             asynchronousApartment = "dedicated STA"
         }
         recycleBinBackendPolicy = [ordered]@{
-            productDelete = "C# SHFileOperationW"
+            productDelete = "C# IFileOperation (FOFX_RECYCLEONDELETE)"
             nativeAotExactQueryAndRestore = "rust"
             nativeAotCompileTimeDefine = "DESKBOX_NATIVE_AOT"
             fallbackOnNativeFailure = $false

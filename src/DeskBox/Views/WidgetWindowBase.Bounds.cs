@@ -24,6 +24,8 @@ namespace DeskBox.Views;
 public abstract partial class WidgetWindowBase
 {
     private bool _desktopPinnedInputActivationInProgress;
+    private IntPtr _lastCornerPreferenceHwnd;
+    private int _lastAppliedWindowCornerPreference = -1;
 
     // WM_MOUSEACTIVATE suppression runs before the same click is routed to
     // XAML, so without this stamp one suppressed click would run the bottom
@@ -31,6 +33,7 @@ public abstract partial class WidgetWindowBase
     // only needs to cover the native-message → XAML-dispatch hop of a single
     // click; anything older is a genuinely new click.
     private long _desktopPinnedNativeSuppressionTimestamp;
+    private long _lastDirectMouseActivateTick;
     private static readonly long DesktopPinnedNativeSuppressionWindowTicks =
         TimeSpan.FromMilliseconds(150).Ticks;
 
@@ -77,23 +80,33 @@ public abstract partial class WidgetWindowBase
             (int)Math.Round(config.Y),
             (int)Math.Round(config.Width),
             (int)Math.Round(config.Height));
-        var initCenter = new PointInt32(
-            initBounds.X + Math.Max(1, initBounds.Width) / 2,
-            initBounds.Y + Math.Max(1, initBounds.Height) / 2);
+
+
+
         // The display-area lookup can come back empty while the topology is in
         // flux; falling back to the configured bounds keeps the widget instead
         // of failing its construction.
-        var workArea = DisplayArea.GetFromPoint(
-            initCenter,
-            DisplayAreaFallback.Nearest)?.WorkArea;
-        var bounds = workArea is { } resolvedWorkArea
-            ? WidgetPositioningService.ResolveBounds(
-                config,
-                resolvedWorkArea,
-                WidgetPositioningService.GetAvailableWorkAreas())
-            : initBounds;
+
+
+
+        bool placementFellBack = false;
+        RectInt32 bounds;
+        try
+        {
+            bounds = WidgetPositioningService.ResolveBoundsForCurrentTopology(config, out placementFellBack);
+        }
+        catch
+        {
+            bounds = initBounds;
+            placementFellBack = true;
+        }
+
+
+
+
+
         bounds = ExpandContentBoundsToHost(bounds);
-        ApplyWindowBounds(bounds.X, bounds.Y, bounds.Width, bounds.Height, persist: false);
+        ApplyWindowBounds(bounds.X, bounds.Y, bounds.Width, bounds.Height, persist: false, updateConfig: !placementFellBack);
 
         ApplyDwmBorderStyle(RootElement.ActualTheme == ElementTheme.Dark);
         ApplyWindowCornerPreference();
@@ -109,6 +122,7 @@ public abstract partial class WidgetWindowBase
         RootElement.Loaded += (_, _) =>
         {
             AttachXamlRootScaleWatcher();
+            _ = TryRestoreBoundsForCurrentTopology(allowHidden: true, updateConfig: false);
             OnRootElementLoaded();
             SettleCompactBoundsAfterHostShown();
             ApplyWidgetForegroundAppearance();
@@ -192,6 +206,7 @@ public abstract partial class WidgetWindowBase
         object sender,
         PointerRoutedEventArgs args)
     {
+        App.NotifyMemoryCleanupActivity();
         if (!WidgetLayerService.UsesDesktopPinnedMode())
         {
             return;
@@ -329,23 +344,9 @@ public abstract partial class WidgetWindowBase
             return false;
         }
 
-        IntPtr current = windowHandle;
-        while (current != IntPtr.Zero)
-        {
-            var className = new System.Text.StringBuilder(256);
-            int length = Win32Helper.GetClassName(current, className, className.Capacity);
-            if (length > 0 &&
-                (string.Equals(className.ToString(), "Progman", StringComparison.Ordinal) ||
-                 string.Equals(className.ToString(), "WorkerW", StringComparison.Ordinal) ||
-                 string.Equals(className.ToString(), "SHELLDLL_DefView", StringComparison.Ordinal)))
-            {
-                return true;
-            }
-
-            current = Win32Helper.GetParent(current);
-        }
-
-        return false;
+        return DesktopBlankHitTest.IsVerifiedDesktopShellWindow(
+            windowHandle,
+            allowDefView: true);
     }
 
     private void WidgetWindowBase_ActivatedForDesktopPinnedLayer(
@@ -477,18 +478,20 @@ public abstract partial class WidgetWindowBase
         // widget. Never let that repair carry SWP_SHOWWINDOW: Explorer can
         // deliver activation changes while a desktop drag is in progress, and
         // a hidden desktop-owned widget must stay hidden.
-        WidgetLayerService.MoveToDesktopBottom(HWnd, showWindow: false);
+        bool movedToBottom = WidgetLayerService.MoveToDesktopBottom(HWnd, showWindow: false);
         IsAtDesktopLayer = true;
         IsRaisedFromManager = false;
         KeepRaisedUntilDeactivate = false;
         RestoreDesktopLayerWhenIdle = false;
         TopMostSafetyTimer?.Stop();
-        // HWND_BOTTOM also places this widget below every sibling, which
-        // breaks the shadow-safe peer order. Queue a normalization so the
-        // repair cannot leave the group misordered until an unrelated
-        // trigger happens to fix it.
-        App.Current.WidgetManager?.QueueIdleWidgetZOrderNormalization(
-            $"{LogPrefix}-pinned-bottom-reasserted");
+        // Only reorder peers when Z-order actually moved: an already-bedded
+        // suppressed click short-circuits inside MoveToDesktopBottom and must
+        // not schedule a delayed 120ms normalization pass.
+        if (movedToBottom)
+        {
+            App.Current.WidgetManager?.ApplyImmediateRestingPeerOrderAfterRestore(
+                $"{LogPrefix}-pinned-bottom-reasserted");
+        }
         App.LogVerbose(
             $"[ZOrder] {LogPrefix} fixed-layer bottom reasserted reason={reason} " +
             $"hwnd=0x{HWnd.ToInt64():X}");
@@ -516,6 +519,8 @@ public abstract partial class WidgetWindowBase
             _desktopPinnedNativeSuppressionTimestamp = DateTime.UtcNow.Ticks;
             UiDispatch.PostAfterCallback(() =>
             {
+                NativeTrayIconHost.DismissActiveMenuIfOpen();
+                TrayContextMenuWindow.DismissActiveIfOpen();
                 if (Win32Helper.IsWindowInCurrentProcess(hWnd) &&
                     !(IsDragging && HasMovedTitleBarDrag))
                 {
@@ -525,16 +530,40 @@ public abstract partial class WidgetWindowBase
             return new IntPtr(Win32Helper.MA_NOACTIVATE);
         }
 
-        if (message == Win32Helper.WM_MOUSEACTIVATE &&
-            WidgetLayerService.ShouldPreserveQuickRevealActivatingClick())
+        if (message == Win32Helper.WM_MOUSEACTIVATE)
         {
-            // Quick Reveal activates only the highest widget. Explicitly keep
-            // the activating mouse message for every other revealed HWND so a
-            // stack, button, or item responds to the first click.
-            return new IntPtr(Win32Helper.MA_ACTIVATE);
+            _lastDirectMouseActivateTick = Environment.TickCount64;
+            WidgetLayerService.RecordWidgetMouseActivate();
+            if (WidgetLayerService.ShouldPreserveQuickRevealActivatingClick())
+            {
+                // Quick Reveal activates only the highest widget. Explicitly keep
+                // the activating mouse message for every other revealed HWND so a
+                // stack, button, or item responds to the first click.
+                return new IntPtr(Win32Helper.MA_ACTIVATE);
+            }
         }
 
-        return Win32Helper.DefSubclassProc(hWnd, message, wParam, lParam);
+        if (message == Win32Helper.WM_WINDOWPOSCHANGING &&
+            Win32Helper.TryReadWindowPos(lParam, out Win32Helper.WINDOWPOS windowPos) &&
+            WidgetLayerService.ShouldSuppressUnsolicitedZOrderChange(
+                hWnd,
+                windowPos.hwndInsertAfter,
+                windowPos.flags,
+                IsAtDesktopLayer,
+                _expandedWidgetLayerLeaseGeneration != 0,
+                IsDragging || IsResizing || IsBoundsTransitionActive,
+                App.Current?.WidgetManager?.WidgetsRaisedFromTray == true,
+                _lastDirectMouseActivateTick,
+                out bool mayBeDynamicDesktopClick))
+        {
+            Win32Helper.SuppressWindowPosZOrder(lParam, windowPos);
+            if (mayBeDynamicDesktopClick && Win32Helper.GetCursorPos(out Win32Helper.POINT clickPt))
+            {
+                App.Current?.WidgetManager?.NotifyPotentialDynamicDesktopClick(clickPt);
+            }
+        }
+
+        return Win32Helper.DefSubclassProc(hWnd, CreateObservedCompactSubclassMessage(hWnd, message), wParam, lParam);
     }
 
     // ── Bounds management ──────────────────────────────────────
@@ -845,7 +874,8 @@ public abstract partial class WidgetWindowBase
         // Panorama backgrounds sample the slice under the window, so they
         // must follow drags and resizes in real time — this runs before the
         // drag/resize config guards below on purpose.
-        if (args.DidPositionChange || args.DidSizeChange)
+        if ((args.DidPositionChange || args.DidSizeChange) &&
+            !_isCollapseAnimationRendering)
         {
             UpdateCustomPanoramaViewport();
         }
@@ -871,6 +901,11 @@ public abstract partial class WidgetWindowBase
 
     protected void ApplyWindowCornerPreference()
     {
+        if (HWnd == IntPtr.Zero)
+        {
+            return;
+        }
+
         string effectivePreference = WindowsCompatibilityService.ResolveEffectiveWidgetCornerPreference(
             SettingsService.Settings.WidgetCornerPreference);
         int cornerPreference = effectivePreference switch
@@ -880,7 +915,17 @@ public abstract partial class WidgetWindowBase
             _ => Win32Helper.DWMWCP_ROUND
         };
 
-        Win32Helper.TrySetDwmWindowAttribute(HWnd, Win32Helper.DWMWA_WINDOW_CORNER_PREFERENCE, ref cornerPreference);
+        if (_lastCornerPreferenceHwnd == HWnd &&
+            _lastAppliedWindowCornerPreference == cornerPreference)
+        {
+            return;
+        }
+
+        if (Win32Helper.TrySetDwmWindowAttribute(HWnd, Win32Helper.DWMWA_WINDOW_CORNER_PREFERENCE, ref cornerPreference) == 0)
+        {
+            _lastCornerPreferenceHwnd = HWnd;
+            _lastAppliedWindowCornerPreference = cornerPreference;
+        }
     }
 
     protected void ApplyDwmBorderStyle(bool isDark)

@@ -22,6 +22,9 @@ public sealed class AppDistributionService
     public bool IsMicrosoftStore => CurrentChannel == AppDistributionChannel.MicrosoftStore;
     public string ChannelName => IsMicrosoftStore ? "Microsoft Store" : "Direct";
 
+    public string? TryGetPackagedAppUserModelId() =>
+        IsPackaged ? PackageIdentityHelper.TryGetApplicationUserModelId() : null;
+
     private static class PackageIdentityHelper
     {
         private const int AppModelErrorNoPackage = 15700;
@@ -43,6 +46,25 @@ public sealed class AppDistributionService
             }
 
             return result == 0;
+        }
+
+        public static string? TryGetApplicationUserModelId()
+        {
+            uint length = 0;
+            int result = Kernel32NativeMethods.GetCurrentApplicationUserModelId(ref length, null);
+            if (result != ErrorInsufficientBuffer || length == 0)
+            {
+                return null;
+            }
+
+            var buffer = new StringBuilder((int)length);
+            if (Kernel32NativeMethods.GetCurrentApplicationUserModelId(ref length, buffer) != 0)
+            {
+                return null;
+            }
+
+            string aumid = buffer.ToString().TrimEnd('\0').Trim();
+            return string.IsNullOrWhiteSpace(aumid) ? null : aumid;
         }
     }
 }

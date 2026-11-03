@@ -91,6 +91,11 @@ internal static class CloudBackupSettingsPolicy
             scope |= CloudBackupDomain.WidgetStyle;
         }
 
+        if (slice.CloudBackupCustomWidgetsEnabled)
+        {
+            scope |= CloudBackupDomain.CustomWidgets;
+        }
+
         return new CloudBackupOptions(
             Provider: slice.CloudBackupProvider?.Trim().ToLowerInvariant() is { Length: > 0 } provider
                 ? provider

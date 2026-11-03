@@ -300,6 +300,27 @@ public sealed class SettingsServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task SaveAsync_PreservesDisabledStateForIndividualCustomWidgets()
+    {
+        var service = new SettingsService(_settingsRoot);
+        await service.LoadAsync();
+        service.Settings.WidgetLayout.Widgets.Add(new WidgetConfig
+        {
+            Name = "Agent Status",
+            WidgetKind = WidgetKind.Custom,
+            IsVisible = false,
+            IsDisabled = true
+        });
+
+        await service.SaveAsync();
+
+        Assert.True(Assert.Single(service.Settings.WidgetLayout.Widgets).IsDisabled);
+        var reloaded = new SettingsService(_settingsRoot);
+        await reloaded.LoadAsync();
+        Assert.True(Assert.Single(reloaded.Settings.WidgetLayout.Widgets).IsDisabled);
+    }
+
+    [Fact]
     public async Task LoadAsync_ExistingProfilePreservesManagedStoragePath()
     {
         const string existingPath = @"C:\DeskBox\Existing";
@@ -1146,18 +1167,23 @@ public sealed class SettingsServiceTests : IDisposable
     [Theory]
     [InlineData(
         SettingsService.WidgetAnimationEffectSlideLeftFade,
+        SettingsService.WidgetAnimationEffectSlideFade,
         SettingsService.WidgetAnimationSlideDirectionLeft)]
     [InlineData(
         SettingsService.WidgetAnimationEffectSlideRight,
+        SettingsService.WidgetAnimationEffectScreenEdgeSlide,
         SettingsService.WidgetAnimationSlideDirectionRight)]
     [InlineData(
         SettingsService.WidgetAnimationEffectSlideUpFade,
+        SettingsService.WidgetAnimationEffectSlideFade,
         SettingsService.WidgetAnimationSlideDirectionUp)]
     [InlineData(
         SettingsService.WidgetAnimationEffectSlideDown,
+        SettingsService.WidgetAnimationEffectScreenEdgeSlide,
         SettingsService.WidgetAnimationSlideDirectionDown)]
     public async Task LoadAsync_MigratesLegacyDirectionalAnimation(
         string legacyEffect,
+        string expectedEffect,
         string expectedDirection)
     {
         var settings = new AppSettings
@@ -1172,12 +1198,12 @@ public sealed class SettingsServiceTests : IDisposable
         var service = new SettingsService(_settingsRoot);
         await service.LoadAsync();
 
-        Assert.Equal(SettingsService.WidgetAnimationEffectSlideFade, service.Settings.WidgetAnimationEffect);
+        Assert.Equal(expectedEffect, service.Settings.WidgetAnimationEffect);
         Assert.Equal(expectedDirection, service.Settings.WidgetAnimationSlideDirection);
     }
 
     [Fact]
-    public async Task LoadAsync_SlideAnimationWithoutDirectionDefaultsToRight()
+    public async Task LoadAsync_SlideAnimationWithoutDirectionDefaultsToDown()
     {
         var settings = new AppSettings
         {
@@ -1192,24 +1218,24 @@ public sealed class SettingsServiceTests : IDisposable
         await service.LoadAsync();
 
         Assert.Equal(
-            SettingsService.WidgetAnimationSlideDirectionRight,
+            SettingsService.WidgetAnimationSlideDirectionDown,
             service.Settings.WidgetAnimationSlideDirection);
     }
 
     [Theory]
-    [InlineData(SettingsService.WidgetAnimationEffectEdgeScale)]
-    [InlineData(SettingsService.WidgetAnimationEffectTilt)]
-    [InlineData(SettingsService.WidgetAnimationEffectWipe)]
-    public async Task LoadAsync_PreservesDirectionalStationaryEffects(string effect)
+    [InlineData(SettingsService.WidgetAnimationEffectEdgeScale, SettingsService.WidgetAnimationEffectWipe, SettingsService.WidgetAnimationSlideDirectionUp)]
+    [InlineData(SettingsService.WidgetAnimationEffectTilt, SettingsService.WidgetAnimationEffectScaleFade, SettingsService.WidgetAnimationSlideDirectionNone)]
+    [InlineData(SettingsService.WidgetAnimationEffectZoom, SettingsService.WidgetAnimationEffectScaleFade, SettingsService.WidgetAnimationSlideDirectionNone)]
+    [InlineData(SettingsService.WidgetAnimationEffectWipe, SettingsService.WidgetAnimationEffectWipe, SettingsService.WidgetAnimationSlideDirectionUp)]
+    [InlineData(SettingsService.WidgetAnimationEffectScreenEdgeSlide, SettingsService.WidgetAnimationEffectScreenEdgeSlide, SettingsService.WidgetAnimationSlideDirectionUp)]
+    public async Task LoadAsync_NormalizesAndMigratesStoredEffects(
+        string storedEffect,
+        string expectedEffect,
+        string expectedDirection)
     {
-        // The persistence whitelist once knew only the four legacy effects
-        // and rewrote every new effect back to SlideFade on the next
-        // save/load cycle, which the user saw as "the effect drifts back to
-        // slide after a few toggles". These effects consume the direction
-        // too, so the stored direction must survive with them.
         var settings = new AppSettings
         {
-            WidgetAnimationEffect = effect,
+            WidgetAnimationEffect = storedEffect,
             WidgetAnimationSlideDirection = SettingsService.WidgetAnimationSlideDirectionUp
         };
         await File.WriteAllTextAsync(
@@ -1219,10 +1245,8 @@ public sealed class SettingsServiceTests : IDisposable
         var service = new SettingsService(_settingsRoot);
         await service.LoadAsync();
 
-        Assert.Equal(effect, service.Settings.WidgetAnimationEffect);
-        Assert.Equal(
-            SettingsService.WidgetAnimationSlideDirectionUp,
-            service.Settings.WidgetAnimationSlideDirection);
+        Assert.Equal(expectedEffect, service.Settings.WidgetAnimationEffect);
+        Assert.Equal(expectedDirection, service.Settings.WidgetAnimationSlideDirection);
     }
 
     [Fact]
@@ -1246,7 +1270,7 @@ public sealed class SettingsServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task LoadAsync_MigratesRemovedNoAnimationOptionToStandardSlideFade()
+    public async Task LoadAsync_PreservesExplicitNoAnimationSelectionAndNormalizesRemovedTiers()
     {
         var settings = new AppSettings
         {
@@ -1262,9 +1286,9 @@ public sealed class SettingsServiceTests : IDisposable
         var service = new SettingsService(_settingsRoot);
         await service.LoadAsync();
 
-        Assert.Equal(SettingsService.WidgetAnimationEffectSlideFade, service.Settings.WidgetAnimationEffect);
-        Assert.Equal(SettingsService.WidgetAnimationSpeedStandard, service.Settings.WidgetAnimationSpeed);
-        Assert.Equal(SettingsService.WidgetAnimationSlideDirectionRight, service.Settings.WidgetAnimationSlideDirection);
+        Assert.Equal(SettingsService.WidgetAnimationEffectNone, service.Settings.WidgetAnimationEffect);
+        Assert.Equal(SettingsService.WidgetAnimationSpeedRelaxed, service.Settings.WidgetAnimationSpeed);
+        Assert.Equal(SettingsService.WidgetAnimationSlideDirectionNone, service.Settings.WidgetAnimationSlideDirection);
         Assert.Equal(SettingsService.WidgetAnimationEasingStandard, service.Settings.WidgetAnimationEasingIntensity);
     }
 
@@ -1281,6 +1305,7 @@ public sealed class SettingsServiceTests : IDisposable
             TodoShowAllTab = false,
             TodoShowActiveTab = false,
             TodoShowTodayTab = false,
+            TodoShowOverdueTab = false,
             TodoShowThisWeekTab = false,
             TodoShowThisMonthTab = false,
             TodoShowImportantTab = false,
@@ -1309,6 +1334,7 @@ public sealed class SettingsServiceTests : IDisposable
             TodoDefaultFilter = filter,
             TodoShowAllTab = false,
             TodoShowTodayTab = false,
+            TodoShowOverdueTab = false,
             TodoShowImportantTab = false,
             TodoShowCompletedTab = false,
             TodoShowThisWeekTab = filter == SettingsService.TodoDefaultFilterThisWeek,
@@ -1373,7 +1399,7 @@ public sealed class SettingsServiceTests : IDisposable
 
         SettingsService.ApplyDefaultPreferences(restoredDefaults);
 
-        Assert.Equal(SettingsService.WidgetAnimationEffectSlideFade, newUserDefaults.WidgetAnimationEffect);
+        Assert.Equal(SettingsService.WidgetAnimationEffectScaleFade, newUserDefaults.WidgetAnimationEffect);
         Assert.Equal(newUserDefaults.WidgetAnimationEffect, restoredDefaults.WidgetAnimationEffect);
         Assert.Null(newUserDefaults.LegacyWidgetCapsuleModeEnabled);
         Assert.Null(restoredDefaults.LegacyWidgetCapsuleModeEnabled);
@@ -1967,6 +1993,28 @@ public sealed class SettingsServiceTests : IDisposable
     private static string SerializeSettingValue(object? value, Type type)
     {
         return JsonSerializer.Serialize(value, type, s_jsonOptions);
+    }
+
+    [Fact]
+    public async Task LoadAsync_MigratesLegacyQuickCaptureClipboardEnabledToClipboardFeatureWidget()
+    {
+        await File.WriteAllTextAsync(
+            Path.Combine(_settingsRoot, "settings.json"),
+            """
+            {
+              "quickCaptureEnabled": true,
+              "quickCaptureClipboardEnabled": true,
+              "quickCaptureImageClipboardEnabled": true
+            }
+            """);
+
+        var service = new SettingsService(_settingsRoot);
+        await service.LoadAsync();
+
+        Assert.True(FeatureWidgetSettings.IsEnabled(service.Settings, WidgetKind.QuickCapture));
+        Assert.True(FeatureWidgetSettings.IsEnabled(service.Settings, WidgetKind.Clipboard));
+        Assert.False(service.Settings.QuickCaptureClipboardEnabled);
+        Assert.False(service.Settings.QuickCaptureImageClipboardEnabled);
     }
 
     public void Dispose()

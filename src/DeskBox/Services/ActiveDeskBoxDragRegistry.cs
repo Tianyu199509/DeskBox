@@ -69,6 +69,20 @@ internal static class ActiveDeskBoxDragRegistry
         }
     }
 
+    internal static bool HasActiveDrag
+    {
+        get
+        {
+            DateTime now = DateTime.UtcNow;
+            lock (Gate)
+            {
+                Active.RemoveAll(
+                    entry => now - entry.RegisteredAtUtc > EntryLifetime);
+                return Active.Count > 0;
+            }
+        }
+    }
+
     /// <summary>
     /// True when every dropped path belongs to one in-flight DeskBox drag —
     /// i.e. the payload is DeskBox's own file drag and not an Explorer or

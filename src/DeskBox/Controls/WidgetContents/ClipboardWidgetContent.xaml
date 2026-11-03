@@ -1,0 +1,478 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="DeskBox.Controls.WidgetContents.ClipboardWidgetContent"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:helpers="using:DeskBox.Helpers"
+    xmlns:controls="using:DeskBox.Controls"
+    xmlns:viewModels="using:DeskBox.ViewModels"
+    xmlns:toolkit="using:CommunityToolkit.WinUI.Controls"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+    KeyDown="Root_KeyDown"
+    mc:Ignorable="d">
+
+    <Grid
+        x:Name="RootGrid"
+        AllowDrop="True"
+        DragOver="RootGrid_DragOver"
+        Drop="RootGrid_Drop"
+        Padding="{x:Bind ViewModel.RootPadding, Mode=OneWay}"
+        PointerEntered="RootGrid_PointerEntered"
+        RowSpacing="5"
+        SizeChanged="RootGrid_SizeChanged">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- Row 0: Filter Segmented + Pause/Search Controls (or Search Box) -->
+        <Grid Grid.Row="0" ColumnSpacing="4">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <toolkit:Segmented
+                x:Name="FilterSegmented"
+                Grid.Column="0"
+                MinHeight="{x:Bind ViewModel.SegmentHeight, Mode=OneWay}"
+                HorizontalAlignment="Stretch"
+                FontSize="{x:Bind ViewModel.SegmentTextSize, Mode=OneWay}"
+                SelectedIndex="0"
+                SelectionChanged="FilterSegmented_SelectionChanged"
+                Visibility="{x:Bind ViewModel.TopFilterBarVisibility, Mode=OneWay}">
+                <toolkit:SegmentedItem Tag="All">
+                    <TextBlock
+                        FontSize="{x:Bind ViewModel.SegmentTextSize, Mode=OneWay}"
+                        MaxLines="1"
+                        Text="{x:Bind ViewModel.FilterAllText, Mode=OneWay}"
+                        TextAlignment="Center"
+                        TextTrimming="CharacterEllipsis" />
+                </toolkit:SegmentedItem>
+                <toolkit:SegmentedItem Tag="Text">
+                    <TextBlock
+                        FontSize="{x:Bind ViewModel.SegmentTextSize, Mode=OneWay}"
+                        MaxLines="1"
+                        Text="{x:Bind ViewModel.FilterTextText, Mode=OneWay}"
+                        TextAlignment="Center"
+                        TextTrimming="CharacterEllipsis" />
+                </toolkit:SegmentedItem>
+                <toolkit:SegmentedItem Tag="Images">
+                    <TextBlock
+                        FontSize="{x:Bind ViewModel.SegmentTextSize, Mode=OneWay}"
+                        MaxLines="1"
+                        Text="{x:Bind ViewModel.FilterImagesText, Mode=OneWay}"
+                        TextAlignment="Center"
+                        TextTrimming="CharacterEllipsis" />
+                </toolkit:SegmentedItem>
+                <toolkit:SegmentedItem Tag="Files">
+                    <TextBlock
+                        FontSize="{x:Bind ViewModel.SegmentTextSize, Mode=OneWay}"
+                        MaxLines="1"
+                        Text="{x:Bind ViewModel.FilterFilesText, Mode=OneWay}"
+                        TextAlignment="Center"
+                        TextTrimming="CharacterEllipsis" />
+                </toolkit:SegmentedItem>
+                <toolkit:SegmentedItem Tag="Pinned">
+                    <TextBlock
+                        FontSize="{x:Bind ViewModel.SegmentTextSize, Mode=OneWay}"
+                        MaxLines="1"
+                        Text="{x:Bind ViewModel.FilterPinnedText, Mode=OneWay}"
+                        TextAlignment="Center"
+                        TextTrimming="CharacterEllipsis" />
+                </toolkit:SegmentedItem>
+            </toolkit:Segmented>
+
+            <StackPanel
+                Grid.Column="1"
+                Orientation="Horizontal"
+                Spacing="2"
+                VerticalAlignment="Center"
+                Visibility="{x:Bind ViewModel.TopFilterBarVisibility, Mode=OneWay}">
+                <Button
+                    x:Name="PauseToggleButton"
+                    Width="24"
+                    Height="24"
+                    MinWidth="24"
+                    AutomationProperties.Name="{x:Bind ViewModel.PauseToggleTooltip, Mode=OneWay}"
+                    Click="PauseToggleButton_Click"
+                    Style="{StaticResource WidgetCompactIconButtonStyle}"
+                    ToolTipService.ToolTip="{x:Bind ViewModel.PauseToggleTooltip, Mode=OneWay}">
+                    <FontIcon FontSize="11" Glyph="{x:Bind ViewModel.PauseToggleGlyph, Mode=OneWay}" />
+                </Button>
+                <Button
+                    x:Name="SearchButton"
+                    Width="24"
+                    Height="24"
+                    MinWidth="24"
+                    AutomationProperties.Name="{x:Bind ViewModel.SearchPlaceholderText, Mode=OneWay}"
+                    Click="SearchButton_Click"
+                    Style="{StaticResource WidgetCompactIconButtonStyle}"
+                    ToolTipService.ToolTip="{x:Bind ViewModel.SearchPlaceholderText, Mode=OneWay}">
+                    <FontIcon FontSize="12" Glyph="&#xE721;" />
+                </Button>
+            </StackPanel>
+
+            <TextBox
+                x:Name="SearchTextBox"
+                Grid.Column="0"
+                MinHeight="{x:Bind ViewModel.InputHeight, Mode=OneWay}"
+                Padding="8,4"
+                AutomationProperties.Name="{x:Bind ViewModel.SearchPlaceholderText, Mode=OneWay}"
+                FontSize="{x:Bind ViewModel.TextSize, Mode=OneWay}"
+                KeyDown="SearchTextBox_KeyDown"
+                PlaceholderText="{x:Bind ViewModel.SearchPlaceholderText, Mode=OneWay}"
+                Style="{StaticResource WidgetSearchTextBoxStyle}"
+                Text="{x:Bind ViewModel.SearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                Visibility="{x:Bind ViewModel.SearchBoxVisibility, Mode=OneWay}" />
+
+            <Button
+                x:Name="CloseSearchButton"
+                Grid.Column="1"
+                MinWidth="0"
+                MinHeight="{x:Bind ViewModel.InputHeight, Mode=OneWay}"
+                Padding="8,0"
+                AutomationProperties.Name="{x:Bind ViewModel.SearchCancelText, Mode=OneWay}"
+                Click="CloseSearchButton_Click"
+                Style="{StaticResource SubtleButtonStyle}"
+                Visibility="{x:Bind ViewModel.SearchBoxVisibility, Mode=OneWay}">
+                <TextBlock FontSize="{x:Bind ViewModel.SecondaryTextSize, Mode=OneWay}" Text="{x:Bind ViewModel.SearchCancelText, Mode=OneWay}" />
+            </Button>
+        </Grid>
+
+        <!-- Row 1: Subtle Paused Recording Banner -->
+        <Border
+            Grid.Row="1"
+            Padding="8,4"
+            Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="{StaticResource WidgetCornerRadiusSmall}"
+            Visibility="{x:Bind ViewModel.PausedBannerVisibility, Mode=OneWay}">
+            <Grid ColumnSpacing="6">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <FontIcon
+                    VerticalAlignment="Center"
+                    FontSize="11"
+                    Foreground="{ThemeResource SystemFillColorCautionBrush}"
+                    Glyph="&#xE769;" />
+                <TextBlock
+                    Grid.Column="1"
+                    VerticalAlignment="Center"
+                    FontSize="{x:Bind ViewModel.SecondaryTextSize, Mode=OneWay}"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    MaxLines="1"
+                    Text="{x:Bind ViewModel.PausedBannerText, Mode=OneWay}"
+                    TextTrimming="CharacterEllipsis" />
+                <Button
+                    Grid.Column="2"
+                    MinWidth="0"
+                    MinHeight="22"
+                    Height="22"
+                    Padding="8,0"
+                    AutomationProperties.Name="{x:Bind ViewModel.ResumeActionText, Mode=OneWay}"
+                    Click="ResumeBannerButton_Click"
+                    CornerRadius="{StaticResource WidgetCornerRadiusSmall}"
+                    Style="{StaticResource SubtleButtonStyle}">
+                    <TextBlock
+                        FontSize="{x:Bind ViewModel.SecondaryTextSize, Mode=OneWay}"
+                        FontWeight="SemiBold"
+                        Text="{x:Bind ViewModel.ResumeActionText, Mode=OneWay}" />
+                </Button>
+            </Grid>
+        </Border>
+
+        <!-- Row 2: Virtualized Clipboard Card Stream + Empty State -->
+        <Grid Grid.Row="2">
+            <ListView
+                x:Name="ItemsList"
+                AllowDrop="True"
+                Background="Transparent"
+                CanDragItems="True"
+                CanReorderItems="False"
+                ContainerContentChanging="ItemsList_ContainerContentChanging"
+                DragItemsStarting="ItemsList_DragItemsStarting"
+                IsItemClickEnabled="False"
+                ItemsSource="{x:Bind ViewModel.VisibleItems, Mode=OneWay}"
+                KeyDown="ItemsList_KeyDown"
+                SelectionMode="Single"
+                Visibility="{x:Bind ViewModel.ListVisibility, Mode=OneWay}">
+                <ListView.ItemContainerTransitions>
+                    <TransitionCollection />
+                </ListView.ItemContainerTransitions>
+                <ListView.ItemContainerStyle>
+                    <Style TargetType="ListViewItem">
+                        <Setter Property="Padding" Value="0" />
+                        <Setter Property="Margin" Value="0" />
+                        <Setter Property="MinHeight" Value="0" />
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                        <Setter Property="Background" Value="Transparent" />
+                        <Setter Property="BorderThickness" Value="0" />
+                    </Style>
+                </ListView.ItemContainerStyle>
+                <ListView.ItemTemplate>
+                    <DataTemplate x:DataType="viewModels:ClipboardItemViewModel">
+                        <Border
+                            x:Name="CardRoot"
+                            Margin="0,2"
+                            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                            BorderBrush="Transparent"
+                            BorderThickness="0"
+                            CornerRadius="{StaticResource WidgetCornerRadiusSmall}"
+                            DoubleTapped="CardRoot_DoubleTapped"
+                            Loaded="CardRoot_Loaded"
+                            PointerEntered="CardRoot_PointerEntered"
+                            PointerExited="CardRoot_PointerExited"
+                            PointerPressed="CardRoot_PointerPressed"
+                            RightTapped="CardRoot_RightTapped"
+                            Tapped="CardRoot_Tapped">
+                            <Grid
+                                MinHeight="{x:Bind CardMinHeight, Mode=OneWay}"
+                                Padding="{x:Bind CardPadding, Mode=OneWay}"
+                                ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+
+                                <!-- Fluent 2 hover wash (sits beneath content, zero layout shift) -->
+                                <Border
+                                    x:Name="HoverWash"
+                                    Grid.ColumnSpan="2"
+                                    Margin="-10,-8"
+                                    Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                                    CornerRadius="{StaticResource WidgetCornerRadiusSmall}"
+                                    IsHitTestVisible="False"
+                                    Opacity="0" />
+
+                                <!-- Left 64x48 Image Thumbnail Preview -->
+                                <Border
+                                    Grid.Column="0"
+                                    Width="64"
+                                    Height="48"
+                                    VerticalAlignment="Center"
+                                    Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
+                                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="{StaticResource WidgetCornerRadiusSmall}"
+                                    IsHitTestVisible="False"
+                                    Visibility="{x:Bind ImagePreviewVisibility, Mode=OneWay}">
+                                    <Grid>
+                                        <FontIcon
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Center"
+                                            FontSize="16"
+                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                            Glyph="&#xEB9F;"
+                                            Visibility="{x:Bind ImagePlaceholderVisibility, Mode=OneWay}" />
+                                        <Image
+                                            AutomationProperties.AccessibilityView="Raw"
+                                            Source="{x:Bind Thumbnail, Mode=OneWay}"
+                                            Stretch="UniformToFill"
+                                            Visibility="{x:Bind ThumbnailVisibility, Mode=OneWay}" />
+                                    </Grid>
+                                </Border>
+
+                                <!-- Main Content + Metadata Footer -->
+                                <StackPanel
+                                    Grid.Column="1"
+                                    MinWidth="0"
+                                    VerticalAlignment="Center"
+                                    Opacity="{x:Bind ContentOpacity, Mode=OneWay}"
+                                    Spacing="3">
+                                    <Grid ColumnSpacing="6">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+
+                                        <!-- Live 16x16 Color Swatch -->
+                                        <Border
+                                            Grid.Column="0"
+                                            Width="16"
+                                            Height="16"
+                                            VerticalAlignment="Center"
+                                            Background="{x:Bind ColorSwatchBrush, Mode=OneWay}"
+                                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                            BorderThickness="1"
+                                            CornerRadius="4"
+                                            Visibility="{x:Bind ColorSwatchVisibility, Mode=OneWay}" />
+
+                                        <!-- Subtle Kind Glyph (URL / Files / Masked Secret) -->
+                                        <FontIcon
+                                            Grid.Column="1"
+                                            Margin="0,1,0,0"
+                                            VerticalAlignment="Top"
+                                            FontSize="12"
+                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                            Glyph="{x:Bind KindPrefixGlyph, Mode=OneWay}"
+                                            Visibility="{x:Bind KindPrefixVisibility, Mode=OneWay}" />
+
+                                        <TextBlock
+                                            Grid.Column="2"
+                                            helpers:WidgetTextShadow.Cast="True"
+                                            FontSize="{x:Bind TextSize, Mode=OneWay}"
+                                            MaxLines="{x:Bind PreviewMaxLines, Mode=OneWay}"
+                                            Text="{x:Bind DisplayText, Mode=OneWay}"
+                                            TextDecorations="{x:Bind TitleDecorations, Mode=OneWay}"
+                                            TextTrimming="CharacterEllipsis"
+                                            TextWrapping="Wrap" />
+                                    </Grid>
+
+                                    <!-- Footer: 14x14 Source App Icon + Meta + Pin Indicator + Tabular Relative Time -->
+                                    <Grid ColumnSpacing="5">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+
+                                        <Image
+                                            Grid.Column="0"
+                                            Width="13"
+                                            Height="13"
+                                            VerticalAlignment="Center"
+                                            AutomationProperties.AccessibilityView="Raw"
+                                            Source="{x:Bind SourceAppIcon, Mode=OneWay}"
+                                            Visibility="{x:Bind SourceAppIconVisibility, Mode=OneWay}" />
+
+                                        <TextBlock
+                                            Grid.Column="1"
+                                            VerticalAlignment="Center"
+                                            helpers:WidgetTextShadow.Cast="False"
+                                            FontSize="{x:Bind SecondaryTextSize, Mode=OneWay}"
+                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                            MaxLines="1"
+                                            Text="{x:Bind MetaText, Mode=OneWay}"
+                                            TextTrimming="CharacterEllipsis"
+                                            Visibility="{x:Bind MetaVisibility, Mode=OneWay}" />
+
+                                        <FontIcon
+                                            Grid.Column="2"
+                                            VerticalAlignment="Center"
+                                            FontSize="10"
+                                            Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                            Glyph="&#xE718;"
+                                            Opacity="0.82"
+                                            Visibility="{x:Bind PinnedBadgeVisibility, Mode=OneWay}" />
+
+                                        <TextBlock
+                                            Grid.Column="3"
+                                            VerticalAlignment="Center"
+                                            helpers:WidgetTextShadow.Cast="False"
+                                            FontSize="{x:Bind SecondaryTextSize, Mode=OneWay}"
+                                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                            MaxLines="1"
+                                            Text="{x:Bind RelativeTimeText, Mode=OneWay}" />
+                                    </Grid>
+                                </StackPanel>
+
+                                <!-- Zero-Shift Right Hover Action Bar -->
+                                <Border
+                                    x:Name="ActionButtonsOverlay"
+                                    Grid.ColumnSpan="2"
+                                    Padding="1"
+                                    HorizontalAlignment="Right"
+                                    VerticalAlignment="Center"
+                                    Background="{ThemeResource WidgetOverlaySurfaceBrush}"
+                                    Canvas.ZIndex="2"
+                                    CornerRadius="4"
+                                    IsHitTestVisible="False"
+                                    Opacity="0">
+                                    <StackPanel Orientation="Horizontal" Spacing="1">
+                                        <Button
+                                            Width="26"
+                                            Height="26"
+                                            MinWidth="26"
+                                            MinHeight="26"
+                                            AutomationProperties.Name="{x:Bind CopyTooltip, Mode=OneWay}"
+                                            Click="CopyItemButton_Click"
+                                            IsTabStop="False"
+                                            Style="{StaticResource WidgetCompactIconButtonStyle}"
+                                            Tag="{x:Bind}"
+                                            ToolTipService.ToolTip="{x:Bind CopyTooltip, Mode=OneWay}">
+                                            <FontIcon FontSize="11" Glyph="{x:Bind CopyButtonGlyph, Mode=OneWay}" Opacity="0.86" />
+                                        </Button>
+                                        <Button
+                                            Width="26"
+                                            Height="26"
+                                            MinWidth="26"
+                                            MinHeight="26"
+                                            AutomationProperties.Name="{x:Bind PinTooltip, Mode=OneWay}"
+                                            Click="PinItemButton_Click"
+                                            IsTabStop="False"
+                                            Style="{StaticResource WidgetCompactIconButtonStyle}"
+                                            Tag="{x:Bind}"
+                                            ToolTipService.ToolTip="{x:Bind PinTooltip, Mode=OneWay}">
+                                            <controls:PinStateIcon Width="13" Height="13" IsPinned="{x:Bind IsPinned, Mode=OneWay}" Opacity="0.82" />
+                                        </Button>
+                                        <Button
+                                            Width="26"
+                                            Height="26"
+                                            MinWidth="26"
+                                            MinHeight="26"
+                                            AutomationProperties.Name="{x:Bind DeleteTooltip, Mode=OneWay}"
+                                            Click="DeleteItemButton_Click"
+                                            IsTabStop="False"
+                                            Style="{StaticResource WidgetCompactIconButtonStyle}"
+                                            Tag="{x:Bind}"
+                                            ToolTipService.ToolTip="{x:Bind DeleteTooltip, Mode=OneWay}">
+                                            <FontIcon FontSize="11" Glyph="&#xE74D;" Opacity="0.82" />
+                                        </Button>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- Subtle 2px Left Accent Bar While Peek Preview Is Open -->
+                                <Border
+                                    Grid.ColumnSpan="2"
+                                    Width="2"
+                                    Margin="-10,-8"
+                                    HorizontalAlignment="Left"
+                                    Background="{ThemeResource ControlStrongStrokeColorDefaultBrush}"
+                                    CornerRadius="1"
+                                    IsHitTestVisible="False"
+                                    Visibility="{x:Bind PeekSelectionVisibility, Mode=OneWay}" />
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </ListView.ItemTemplate>
+            </ListView>
+
+            <!-- Empty State -->
+            <StackPanel
+                Margin="16"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                Spacing="7"
+                Visibility="{x:Bind ViewModel.EmptyStateVisibility, Mode=OneWay}">
+                <FontIcon
+                    HorizontalAlignment="Center"
+                    FontSize="24"
+                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                    Glyph="{x:Bind ViewModel.EmptyStateGlyph, Mode=OneWay}" />
+                <TextBlock
+                    HorizontalAlignment="Center"
+                    FontSize="{x:Bind ViewModel.TitleTextSize, Mode=OneWay}"
+                    FontWeight="SemiBold"
+                    Text="{x:Bind ViewModel.EmptyStateTitle, Mode=OneWay}"
+                    TextAlignment="Center" />
+                <TextBlock
+                    HorizontalAlignment="Center"
+                    FontSize="{x:Bind ViewModel.SecondaryTextSize, Mode=OneWay}"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Text="{x:Bind ViewModel.EmptyStateSubtitle, Mode=OneWay}"
+                    TextAlignment="Center"
+                    TextWrapping="Wrap" />
+            </StackPanel>
+        </Grid>
+    </Grid>
+</UserControl>

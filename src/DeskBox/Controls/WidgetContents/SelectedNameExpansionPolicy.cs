@@ -11,34 +11,40 @@ public static class SelectedNameExpansionPolicy
 {
     /// <summary>
     /// Sole selection may expand its trimmed label only in double-click-to-
-    /// open mode. In single-click mode a click opens the item immediately, so
-    /// there is no "selected, then pause" state for an expanded label or a
-    /// slow second click to act on. Marquee box selection and active drags
-    /// pass through momentary single-selection states and must not flash an
-    /// expansion while they do.
+    /// open mode while the surface window actually holds keyboard focus. In
+    /// single-click mode a click opens the item immediately, and in unfocused
+    /// desktop-pinned mode (MA_NOACTIVATE) expanding a floating selection card
+    /// would falsely suggest keyboard shortcuts apply to the widget. Marquee
+    /// box selection and active drags pass through momentary single-selection
+    /// states and must not flash an expansion while they do.
     /// </summary>
     public static bool ShouldExpandSelectedItemName(
         bool isDoubleClickToOpen,
         int selectedItemCount,
         bool isBoxSelecting,
-        bool isDragActive) =>
+        bool isDragActive,
+        bool isWindowFocused = true) =>
+        isWindowFocused &&
         isDoubleClickToOpen &&
         selectedItemCount == 1 &&
         !isBoxSelecting &&
         !isDragActive;
 
     /// <summary>
-    /// A click may start inline rename only when it lands on the name label
-    /// of the item that was already the sole selection before this click,
-    /// with no modifier keys, in double-click-to-open mode. The caller reads
-    /// the selection snapshot before the native selector commits this click
-    /// (see ItemSurface_PointerPressed for that ordering).
+    /// A click may start inline rename only when the surface window holds
+    /// keyboard focus and the click lands on the name label of the item that
+    /// was already the sole selection before this click, with no modifier
+    /// keys, in double-click-to-open mode. The caller reads the selection
+    /// snapshot before the native selector commits this click (see
+    /// ItemSurface_PointerPressed for that ordering).
     /// </summary>
     public static bool ShouldStartRenameFromItemClick(
         bool isDoubleClickToOpen,
         bool hasModifierKey,
         bool wasSoleSelectedItemBeforeClick,
-        bool pointerPressedOnLabel) =>
+        bool pointerPressedOnLabel,
+        bool isWindowFocused = true) =>
+        isWindowFocused &&
         isDoubleClickToOpen &&
         !hasModifierKey &&
         wasSoleSelectedItemBeforeClick &&

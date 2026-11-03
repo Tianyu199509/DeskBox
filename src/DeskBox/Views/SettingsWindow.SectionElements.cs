@@ -44,12 +44,6 @@ public sealed partial class SettingsWindow
         FindCreatedSectionElement<global::DeskBox.Views.SettingsSections.AppearanceSettingsSection>("Appearance", "AppearanceSection")!;
     private global::Microsoft.UI.Xaml.Controls.StackPanel AppearanceMaterialSettingsSection =>
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("AppearanceMaterialSettings", "AppearanceMaterialSettingsSection")!;
-    private global::Microsoft.UI.Xaml.Controls.StackPanel AppearanceDensitySettingsSection =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("AppearanceDensitySettings", "AppearanceDensitySettingsSection")!;
-    private global::Microsoft.UI.Xaml.Controls.StackPanel AppearanceWindowSettingsSection =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("AppearanceWindowSettings", "AppearanceWindowSettingsSection")!;
-    private global::Microsoft.UI.Xaml.Controls.StackPanel AppearanceAnimationSettingsSection =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("AppearanceAnimationSettings", "AppearanceAnimationSettingsSection")!;
     private global::Microsoft.UI.Xaml.Controls.StackPanel WidgetGroupsSection =>
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("WidgetGroups", "WidgetGroupsSection")!;
     private global::DeskBox.Views.SettingsSections.CapsuleModeSettingsSection CapsuleModeSection =>
@@ -118,12 +112,27 @@ public sealed partial class SettingsWindow
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("ManagedStorage", "ManagedStorageFolderList")!;
     private global::Microsoft.UI.Xaml.Controls.StackPanel FeatureWidgetsSection =>
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("FeatureWidgets", "FeatureWidgetsSection")!;
+    private global::Microsoft.UI.Xaml.Controls.StackPanel FeatureWidgetsHubHeaderPanel =>
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("FeatureWidgets", "FeatureWidgetsHubHeaderPanel")!;
+    private global::Microsoft.UI.Xaml.Controls.TextBlock FeatureWidgetsHubTitleText =>
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.TextBlock>("FeatureWidgets", "FeatureWidgetsHubTitleText")!;
+    [DynamicDependency(
+        DynamicallyAccessedMemberTypes.All,
+        typeof(global::CommunityToolkit.WinUI.Controls.Segmented))]
+    private global::CommunityToolkit.WinUI.Controls.Segmented? FindFeatureWidgetsHubSegmented() =>
+        FindCreatedSectionElement<global::CommunityToolkit.WinUI.Controls.Segmented>("FeatureWidgets", "FeatureWidgetsHubSegmented");
+    private global::CommunityToolkit.WinUI.Controls.Segmented FeatureWidgetsHubSegmented =>
+        FindFeatureWidgetsHubSegmented()!;
+    private global::Microsoft.UI.Xaml.Controls.StackPanel CustomWidgetsToolbarPanel =>
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("FeatureWidgets", "CustomWidgetsToolbarPanel")!;
+    private global::Microsoft.UI.Xaml.Controls.StackPanel FeatureWidgetListHost =>
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("FeatureWidgets", "FeatureWidgetListHost")!;
+    private global::Microsoft.UI.Xaml.Controls.StackPanel CustomWidgetHostPanel =>
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("FeatureWidgets", "CustomWidgetHostPanel")!;
     private global::Microsoft.UI.Xaml.Controls.StackPanel FeatureWidgetList =>
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("FeatureWidgets", "FeatureWidgetList")!;
     private global::Microsoft.UI.Xaml.Controls.StackPanel QuickCaptureSettingsSection =>
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("QuickCaptureSettings", "QuickCaptureSettingsSection")!;
-    private global::Microsoft.UI.Xaml.Controls.ToggleSwitch QuickCaptureClipboardToggle =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.ToggleSwitch>("QuickCaptureSettings", "QuickCaptureClipboardToggle")!;
     private global::Microsoft.UI.Xaml.Controls.StackPanel TodoSettingsSection =>
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("TodoSettings", "TodoSettingsSection")!;
     private global::Microsoft.UI.Xaml.Controls.StackPanel MusicSettingsSection =>
@@ -134,6 +143,12 @@ public sealed partial class SettingsWindow
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.AutoSuggestBox>("WeatherSettings", "WeatherCitySearchBox")!;
     private global::DeskBox.Views.SettingsSections.GlanceWidgetSettingsSection GlanceSettingsSection =>
         FindCreatedSectionElement<global::DeskBox.Views.SettingsSections.GlanceWidgetSettingsSection>("GlanceSettings", "GlanceSettingsSection")!;
+    private global::DeskBox.Views.SettingsSections.CustomWidgetSettingsSection CustomWidgetSettingsSection =>
+        FindCreatedSectionElement<global::DeskBox.Views.SettingsSections.CustomWidgetSettingsSection>("CustomWidgetSettings", "CustomWidgetSettingsSection")!;
+    private global::DeskBox.Views.SettingsSections.AiSettingsSection AiSettingsSection =>
+        FindCreatedSectionElement<global::DeskBox.Views.SettingsSections.AiSettingsSection>("AiSettings", "AiSettingsSection")!;
+    private global::DeskBox.Views.SettingsSections.ClipboardSettingsSection ClipboardSettingsSection =>
+        FindCreatedSectionElement<global::DeskBox.Views.SettingsSections.ClipboardSettingsSection>("ClipboardSettings", "ClipboardSettingsSection")!;
     private global::DeskBox.Views.SettingsSections.SearchSettingsSection SearchSettingsSection =>
         FindCreatedSectionElement<global::DeskBox.Views.SettingsSections.SearchSettingsSection>("SearchSettings", "SearchSettingsSection")!;
     private global::Microsoft.UI.Xaml.Controls.StackPanel PerformanceSettingsSection =>

@@ -1,4 +1,3 @@
-using System.Drawing;
 using Microsoft.UI.Windowing;
 
 namespace DeskBox.Helpers;
@@ -16,7 +15,7 @@ public static class AppBranding
 
     public static Uri LogoSvgUri { get; } = new(LogoSvgUriString);
 
-    public static Icon? CreateTrayIcon(string style, bool isDarkTheme)
+    public static string? ResolveTrayIconPath(string? style, bool isDarkTheme)
     {
         string trayIconPath = style switch
         {
@@ -26,20 +25,7 @@ public static class AppBranding
             _ => isDarkTheme ? TrayIconDarkPath : TrayIconLightPath
         };
 
-        if (!File.Exists(trayIconPath))
-        {
-            return null;
-        }
-
-        try
-        {
-            return new Icon(trayIconPath);
-        }
-        catch (Exception ex)
-        {
-            global::DeskBox.App.Log($"[Branding] Failed to load tray icon: {ex.Message}");
-            return null;
-        }
+        return File.Exists(trayIconPath) ? trayIconPath : null;
     }
 
     public static void ApplyWindowIcon(AppWindow? appWindow)

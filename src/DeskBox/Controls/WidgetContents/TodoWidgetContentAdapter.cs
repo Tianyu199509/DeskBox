@@ -1,4 +1,5 @@
 using DeskBox.Contracts;
+using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Services;
 using DeskBox.ViewModels;
@@ -26,14 +27,28 @@ public sealed class TodoWidgetContentAdapter :
     }
 
     public TodoWidgetContentAdapter(WidgetConfig config, TodoWidgetStore store, LocalizationService localizationService)
-        : this(config, new TodoWidgetViewModel(store, localizationService, config))
+        : this(config, new TodoWidgetViewModel(
+            store,
+            localizationService,
+            config,
+            recycleAttachmentFileAsync: CreateDefaultRecycleKernel()))
     {
     }
 
     public TodoWidgetContentAdapter(WidgetConfig config, TodoWidgetStore store, LocalizationService localizationService, SettingsService settingsService)
-        : this(config, new TodoWidgetViewModel(store, localizationService, config, settingsService))
+        : this(config, new TodoWidgetViewModel(
+            store,
+            localizationService,
+            config,
+            settingsService,
+            recycleAttachmentFileAsync: CreateDefaultRecycleKernel()))
     {
     }
+
+    private static Func<string, Task<bool>>? CreateDefaultRecycleKernel() =>
+        (App.Current as App)?.FileService is { } fileService
+            ? path => fileService.DeleteEntryAsync(path, recycle: true)
+            : null;
 
     internal TodoWidgetContentAdapter(
         WidgetConfig config,
@@ -57,10 +72,14 @@ public sealed class TodoWidgetContentAdapter :
 
     public event EventHandler<WidgetFeedbackRequestedEventArgs>? FeedbackRequested;
 
+    private bool _pendingWideSelectionWasAutomatic;
+    private bool _isCompactCollapsed;
+
     protected override void OnViewMaterialized(FrameworkElement view)
     {
         if (view is TodoWidgetContent todoContent)
         {
+            todoContent.WideSelectionWasAutomatic = _pendingWideSelectionWasAutomatic;
             todoContent.FeedbackRequested += TodoContent_FeedbackRequested;
         }
     }
@@ -87,11 +106,44 @@ public sealed class TodoWidgetContentAdapter :
         ViewModel.ApplyAppearance();
     }
 
+    public override void OnCompactStateChanged(bool collapsed)
+    {
+        _isCompactCollapsed = collapsed;
+        if (collapsed)
+        {
+            if (MaterializedView is TodoWidgetContent todoContent)
+            {
+                todoContent.ReleaseTransientRenderingSubscriptions();
+            }
+
+            ViewModel.ReleaseAttachmentThumbnails();
+            IconHelper.ClearCacheScope(ViewModel.PreviewCacheScope);
+        }
+        else if (MaterializedView is not null)
+        {
+            ViewModel.EnsureSelectedDetailThumbnailsLoaded();
+        }
+    }
+
     public override void OnWindowLongHidden()
     {
         if (MaterializedView is TodoWidgetContent todoContent)
         {
             todoContent.ReleaseTransientRenderingSubscriptions();
+        }
+
+        // Keep any expanded live view intact; collapsed leaf hibernation is owned
+        // exclusively by WidgetShell.HibernateHostedContentView().
+        ViewModel.ReleaseAttachmentThumbnails(
+            includeSelectedDetail: MaterializedView is null || _isCompactCollapsed);
+        IconHelper.ClearCacheScope(ViewModel.PreviewCacheScope);
+    }
+
+    public override void OnWindowRevealCompleted()
+    {
+        if (!_isCompactCollapsed && MaterializedView is not null)
+        {
+            ViewModel.EnsureSelectedDetailThumbnailsLoaded();
         }
     }
 
@@ -147,10 +199,10 @@ public sealed class TodoWidgetContentAdapter :
 
     public object? CaptureTransientState()
     {
-        return new TodoTransientState(
-            ViewModel.InputText,
-            ViewModel.DraftImportant,
-            ViewModel.DraftDueDate);
+        bool wideSelectionWasAutomatic = MaterializedView is TodoWidgetContent todoContent
+            ? todoContent.WideSelectionWasAutomatic
+            : _pendingWideSelectionWasAutomatic;
+        return new TodoTransientState(wideSelectionWasAutomatic);
     }
 
     public void RestoreTransientState(object? state)
@@ -160,56 +212,208 @@ public sealed class TodoWidgetContentAdapter :
             return;
         }
 
-        ViewModel.InputText = todoState.InputText;
-        ViewModel.DraftImportant = todoState.DraftImportant;
-        ViewModel.DraftDueDate = todoState.DraftDueDate;
+        _pendingWideSelectionWasAutomatic = todoState.WideSelectionWasAutomatic;
+        if (MaterializedView is TodoWidgetContent todoContent)
+        {
+            todoContent.WideSelectionWasAutomatic = todoState.WideSelectionWasAutomatic;
+        }
     }
 
     public Task AddFromTitleButtonAsync()
     {
         if (View is TodoWidgetContent todoContent)
         {
-            todoContent.OpenAddEditor();
+            todoContent.FocusQuickAdd();
         }
 
         return Task.CompletedTask;
     }
 
     private sealed record TodoTransientState(
-        string InputText,
-        bool DraftImportant,
-        DateTimeOffset? DraftDueDate);
+        bool WideSelectionWasAutomatic);
 
     internal bool CanImportExternalDrop(DataPackageView dataView)
     {
-        return View is TodoWidgetContent todoContent
+        return MaterializedView is TodoWidgetContent todoContent
             ? todoContent.CanImportExternalDrop(dataView)
-            : false;
+            : TodoWidgetContent.CanImportExternalDropData(dataView);
     }
 
     internal Task<bool> ImportExternalDropAsync(DataPackageView dataView)
     {
-        return View is TodoWidgetContent todoContent
+        return MaterializedView is TodoWidgetContent todoContent
             ? todoContent.ImportExternalDropAsync(dataView)
-            : Task.FromResult(false);
+            : ImportHibernatedExternalDropAsync(dataView);
     }
 
     internal Task<bool> ImportNativeDroppedFilesAsync(
         IReadOnlyList<DroppedFilePath> files,
         TodoItemViewModel? targetItem)
     {
-        return View is TodoWidgetContent todoContent
+        return MaterializedView is TodoWidgetContent todoContent
             ? todoContent.ImportNativeDroppedFilesAsync(files, targetItem)
-            : Task.FromResult(false);
+            : ImportHibernatedNativeDroppedFilesAsync(files, targetItem);
+    }
+
+    private async Task<bool> ImportHibernatedExternalDropAsync(DataPackageView dataView)
+    {
+        if (IsDisposed)
+        {
+            return false;
+        }
+
+        try
+        {
+            if (DeskBoxDragData.HasDroppedFiles(dataView))
+            {
+                using DroppedFileBatch batch = await DeskBoxDragData.TryGetDroppedFilesAsync(dataView);
+                if (batch.Files.Count == 0)
+                {
+                    string? fallbackText = await TodoWidgetContent.TryGetDroppedTodoTextAsync(dataView);
+                    if (string.IsNullOrWhiteSpace(fallbackText))
+                    {
+                        return false;
+                    }
+
+                    await ViewModel.AddItemAsync(fallbackText);
+                    RaiseHibernatedTodoFeedback("Todo.Dropped", WidgetFeedbackSeverity.Success);
+                    return true;
+                }
+
+                return await ImportHibernatedNativeDroppedFilesCoreAsync(batch.Files, targetItem: null);
+            }
+
+            string? text = await TodoWidgetContent.TryGetDroppedTodoTextAsync(dataView);
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return false;
+            }
+
+            await ViewModel.AddItemAsync(text);
+            RaiseHibernatedTodoFeedback("Todo.Dropped", WidgetFeedbackSeverity.Success);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[Todo] Failed to import dropped content while hibernated: {ex}");
+            RaiseHibernatedTodoFeedback("Todo.DropFailed", WidgetFeedbackSeverity.Error);
+            return false;
+        }
+    }
+
+    private async Task<bool> ImportHibernatedNativeDroppedFilesAsync(
+        IReadOnlyList<DroppedFilePath> files,
+        TodoItemViewModel? targetItem)
+    {
+        if (files.Count == 0 || IsDisposed)
+        {
+            return false;
+        }
+
+        try
+        {
+            return await ImportHibernatedNativeDroppedFilesCoreAsync(files, targetItem);
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[Todo] Failed to import native dropped files while hibernated: {ex}");
+            RaiseHibernatedTodoFeedback("Todo.DropFailed", WidgetFeedbackSeverity.Error);
+            return false;
+        }
+    }
+
+    private async Task<bool> ImportHibernatedNativeDroppedFilesCoreAsync(
+        IReadOnlyList<DroppedFilePath> files,
+        TodoItemViewModel? targetItem)
+    {
+        TodoItemViewModel? item = targetItem ??
+            (ViewModel.IsDetailPageOpen
+                ? ViewModel.SelectedDetailItem
+                : await ViewModel.AddItemAsync(TodoWidgetContent.BuildDroppedTodoTitle(files)));
+        if (item is null)
+        {
+            return false;
+        }
+
+        int addedCount = await ViewModel.AddDroppedAttachmentsAsync(item.Id, files);
+        if (addedCount <= 0)
+        {
+            return false;
+        }
+
+        RaiseHibernatedTodoFeedback("Todo.Dropped", WidgetFeedbackSeverity.Success);
+        return true;
+    }
+
+    private void RaiseHibernatedTodoFeedback(string resourceKey, WidgetFeedbackSeverity severity) => RaiseHibernatedTodoFeedbackCore(resourceKey, severity);
+
+    internal async Task<(IReadOnlyList<TodoItem> Items, TodoExportStatusScope InitialScope)> PrepareExportSnapshotAsync()
+    {
+        if (!ViewModel.IsInitialized)
+        {
+            await ViewModel.InitializeAsync();
+        }
+
+        if (MaterializedView is TodoWidgetContent todoContent)
+        {
+            await todoContent.FlushPendingEditsForExportAsync();
+        }
+
+        TodoItem[] snapshot = ViewModel.Items
+            .Select(vm => vm.Item)
+            .Where(item => !item.IsDeleted && !string.IsNullOrWhiteSpace(item.Text))
+            .ToArray();
+
+        TodoExportStatusScope initialScope = ViewModel.SelectedFilter switch
+        {
+            TodoFilter.Completed => TodoExportStatusScope.CompletedOnly,
+            TodoFilter.Active => TodoExportStatusScope.ActiveOnly,
+            _ => TodoExportStatusScope.All
+        };
+
+        return (snapshot, initialScope);
+    }
+
+    private void RaiseHibernatedTodoFeedbackCore(
+        string resourceKey,
+        WidgetFeedbackSeverity severity)
+    {
+        LocalizationService? localization = App.Current?.LocalizationService;
+        string text = localization is not null ? localization.T(resourceKey) : resourceKey;
+        FeedbackRequested?.Invoke(
+            this,
+            new WidgetFeedbackRequestedEventArgs(
+                new WidgetFeedbackRequest(
+                    text,
+                    severity,
+                    "todo-status")));
+    }
+
+    protected override void OnHibernatingView(FrameworkElement view)
+    {
+        if (view is TodoWidgetContent todoContent)
+        {
+            todoContent.FlushPendingEditsBeforeTeardown();
+            todoContent.FeedbackRequested -= TodoContent_FeedbackRequested;
+            todoContent.Dispose();
+        }
+
+        ViewModel.ReleaseAttachmentThumbnails();
+        IconHelper.ClearCacheScope(ViewModel.PreviewCacheScope);
     }
 
     protected override void Dispose(bool disposing)
     {
         if (MaterializedView is TodoWidgetContent todoContent)
         {
+            todoContent.FlushPendingEditsBeforeTeardown();
             todoContent.ReleaseTransientRenderingSubscriptions();
             todoContent.FeedbackRequested -= TodoContent_FeedbackRequested;
+            todoContent.Dispose();
         }
+
+        ViewModel.ReleaseAttachmentThumbnails();
+        IconHelper.ClearCacheScope(ViewModel.PreviewCacheScope);
 
         if (ViewModel is IDisposable disposable)
         {

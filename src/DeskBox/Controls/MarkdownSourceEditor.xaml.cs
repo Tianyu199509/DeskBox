@@ -33,46 +33,96 @@ public sealed partial class MarkdownSourceEditor : UserControl
     private int _textRevision;
     private bool _isTextCompositionActive;
     private bool _isEditorPointerActive;
+    private bool _visualHandlersReleased;
+    private readonly PointerEventHandler _toolbarPointerPressedHandler;
+    private readonly KeyEventHandler _editorPreviewKeyDownHandler;
+    private readonly PointerEventHandler _editorPointerPressedHandler;
+    private readonly PointerEventHandler _editorPointerReleasedHandler;
+    private readonly TappedEventHandler _editorTappedHandler;
+    private readonly KeyEventHandler _editorKeyUpHandler;
 
     public MarkdownSourceEditor()
     {
         InitializeComponent();
+        _toolbarPointerPressedHandler = new PointerEventHandler(FormattingToolbar_PointerPressed);
+        _editorPreviewKeyDownHandler = new KeyEventHandler(EditorTextBox_PreviewKeyDown);
+        _editorPointerPressedHandler = new PointerEventHandler(EditorTextBox_PointerPressed);
+        _editorPointerReleasedHandler = new PointerEventHandler(EditorTextBox_PointerReleased);
+        _editorTappedHandler = new TappedEventHandler(EditorTextBox_Tapped);
+        _editorKeyUpHandler = new KeyEventHandler(EditorTextBox_KeyUp);
+
         FormattingToolbar.AddHandler(
             PointerPressedEvent,
-            new PointerEventHandler(FormattingToolbar_PointerPressed),
+            _toolbarPointerPressedHandler,
             handledEventsToo: true);
         FormattingMenuPanel.AddHandler(
             PointerPressedEvent,
-            new PointerEventHandler(FormattingToolbar_PointerPressed),
+            _toolbarPointerPressedHandler,
             handledEventsToo: true);
         EditorTextBox.AddHandler(
             PreviewKeyDownEvent,
-            new KeyEventHandler(EditorTextBox_PreviewKeyDown),
+            _editorPreviewKeyDownHandler,
             handledEventsToo: true);
         EditorTextBox.AddHandler(
             PointerPressedEvent,
-            new PointerEventHandler(EditorTextBox_PointerPressed),
+            _editorPointerPressedHandler,
             handledEventsToo: true);
         EditorTextBox.AddHandler(
             PointerReleasedEvent,
-            new PointerEventHandler(EditorTextBox_PointerReleased),
+            _editorPointerReleasedHandler,
             handledEventsToo: true);
         EditorTextBox.AddHandler(
             TappedEvent,
-            new TappedEventHandler(EditorTextBox_Tapped),
+            _editorTappedHandler,
             handledEventsToo: true);
         EditorTextBox.AddHandler(
             KeyUpEvent,
-            new KeyEventHandler(EditorTextBox_KeyUp),
+            _editorKeyUpHandler,
             handledEventsToo: true);
-        EditorTextBox.TextCompositionStarted += (_, _) => _isTextCompositionActive = true;
-        EditorTextBox.TextCompositionEnded += (_, _) =>
-        {
-            _isTextCompositionActive = false;
-            QueueEditorViewportCapture();
-        };
+        EditorTextBox.TextCompositionStarted += EditorTextBox_TextCompositionStarted;
+        EditorTextBox.TextCompositionEnded += EditorTextBox_TextCompositionEnded;
+        InitializeSmartEditing();
         ApplyToolbarVisibility();
         ApplyLocalizedText();
+    }
+
+    private void EditorTextBox_TextCompositionStarted(TextBox sender, TextCompositionStartedEventArgs args)
+    {
+        _isTextCompositionActive = true;
+    }
+
+    private void EditorTextBox_TextCompositionEnded(TextBox sender, TextCompositionEndedEventArgs args)
+    {
+        _isTextCompositionActive = false;
+        QueueEditorViewportCapture();
+    }
+
+    internal void ReleaseVisualHandlers()
+    {
+        if (_visualHandlersReleased)
+        {
+            return;
+        }
+
+        _visualHandlersReleased = true;
+        _textResolver = null;
+        FormattingMoreFlyout?.Hide();
+        ReleaseSmartEditingHandlers();
+        EditorLayoutRoot.SizeChanged -= EditorLayoutRoot_SizeChanged;
+        FormattingToolbar.RemoveHandler(PointerPressedEvent, _toolbarPointerPressedHandler);
+        FormattingMenuPanel.RemoveHandler(PointerPressedEvent, _toolbarPointerPressedHandler);
+        EditorTextBox.RemoveHandler(PreviewKeyDownEvent, _editorPreviewKeyDownHandler);
+        EditorTextBox.RemoveHandler(PointerPressedEvent, _editorPointerPressedHandler);
+        EditorTextBox.RemoveHandler(PointerReleasedEvent, _editorPointerReleasedHandler);
+        EditorTextBox.RemoveHandler(TappedEvent, _editorTappedHandler);
+        EditorTextBox.RemoveHandler(KeyUpEvent, _editorKeyUpHandler);
+        EditorTextBox.SelectionChanged -= EditorTextBox_SelectionChanged;
+        EditorTextBox.BeforeTextChanging -= EditorTextBox_BeforeTextChanging;
+        EditorTextBox.TextChanged -= EditorTextBox_TextChanged;
+        EditorTextBox.TextCompositionStarted -= EditorTextBox_TextCompositionStarted;
+        EditorTextBox.TextCompositionEnded -= EditorTextBox_TextCompositionEnded;
+        Bindings.StopTracking();
+        Content = null;
     }
 
     public static readonly DependencyProperty TextProperty = DependencyProperty.Register(
@@ -408,6 +458,7 @@ public sealed partial class MarkdownSourceEditor : UserControl
     private void EditorTextBox_TextChanged(object sender, TextChangedEventArgs e)
     {
         UpdateLargeDocumentBehavior(EditorTextBox.Text.Length);
+        HideSelectionBubble();
         if (_isSynchronizingText)
         {
             return;
@@ -441,6 +492,11 @@ public sealed partial class MarkdownSourceEditor : UserControl
         DispatcherQueue.TryEnqueue(() =>
         {
             _isTextLimitUpdateQueued = false;
+            if (_visualHandlersReleased)
+            {
+                return;
+            }
+
             _isApplyingTextLimit = true;
             try
             {
@@ -474,6 +530,11 @@ public sealed partial class MarkdownSourceEditor : UserControl
 
     private void EditorTextBox_SelectionChanged(object sender, RoutedEventArgs e)
     {
+        if (EditorTextBox.SelectionLength <= 0)
+        {
+            HideSelectionBubble();
+        }
+
         if (_isEditorPointerActive)
         {
             RememberEditorViewport();
@@ -503,7 +564,7 @@ public sealed partial class MarkdownSourceEditor : UserControl
 
     private void QueueEditorViewportCapture()
     {
-        if (EditorTextBox.Text.Length > LargeDocumentThreshold)
+        if (_visualHandlersReleased || EditorTextBox.Text.Length > LargeDocumentThreshold)
         {
             return;
         }
@@ -513,6 +574,11 @@ public sealed partial class MarkdownSourceEditor : UserControl
             Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
             () =>
             {
+                if (_visualHandlersReleased)
+                {
+                    return;
+                }
+
                 if (revision == _textRevision &&
                     EditorTextBox.FocusState != FocusState.Unfocused)
                 {
@@ -583,6 +649,12 @@ public sealed partial class MarkdownSourceEditor : UserControl
             return;
         }
 
+        if (TryHandleExtraFormattingShortcut(e.Key, control, shift))
+        {
+            e.Handled = true;
+            return;
+        }
+
         if (control && e.Key is VirtualKey.B or VirtualKey.I or VirtualKey.K)
         {
             e.Handled = true;
@@ -606,6 +678,7 @@ public sealed partial class MarkdownSourceEditor : UserControl
         if (e.Key == VirtualKey.Escape)
         {
             e.Handled = true;
+            HideSelectionBubble();
             CancelRequested?.Invoke(this, EventArgs.Empty);
             return;
         }
@@ -687,6 +760,11 @@ public sealed partial class MarkdownSourceEditor : UserControl
 
         void RestoreScrollOffset()
         {
+            if (_visualHandlersReleased)
+            {
+                return;
+            }
+
             FindDescendant<ScrollViewer>(EditorTextBox)?.ChangeView(
                 viewport.HorizontalOffset,
                 viewport.VerticalOffset,

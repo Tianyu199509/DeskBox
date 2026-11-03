@@ -86,6 +86,7 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
     {
         _isSectionLoaded = false;
         App.Current.SettingsService.SettingsChanged -= OnAppSettingsChanged;
+        _ = FlushPendingSavesAsync();
     }
 
     private void OnAppSettingsChanged()

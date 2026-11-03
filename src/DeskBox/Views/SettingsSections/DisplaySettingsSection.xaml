@@ -15,8 +15,9 @@
     </UserControl.Resources>
 
     <!-- Stage-4 layout (spec 6.3): header + Identify, arrangement preview,
-         selected display card with "把所有格子移到这里", "新格子出现在",
-         "多显示器" expander with the disconnect behavior, per-widget rows.
+         selected display card with recalibrate + "把所有格子移到这里",
+         "新格子出现在", "多显示器" expander with scaling & disconnect behavior,
+         and filterable per-widget rows.
          Selection styling stays in code-behind (accent fill per R8). -->
     <StackPanel Style="{StaticResource SectionPanelStyle}">
         <InfoBar
@@ -41,19 +42,25 @@
                 svc:Localized.Key="Settings.Displays.Identify" />
         </toolkit:SettingsCard>
 
-        <StackPanel x:Name="PreviewArea" Spacing="8">
-            <TextBlock
-                x:Name="PreviewHintText"
-                FontSize="12"
-                svc:Localized.Key="Settings.Displays.PreviewHint" />
-            <Viewbox
-                x:Name="PreviewViewbox"
-                MaxHeight="280"
-                HorizontalAlignment="Stretch"
-                Stretch="Uniform">
-                <Canvas x:Name="DisplayPreviewCanvas" />
-            </Viewbox>
-        </StackPanel>
+        <Border
+            x:Name="PreviewArea"
+            Padding="20,14,20,20"
+            BorderThickness="1"
+            CornerRadius="8">
+            <StackPanel Spacing="12">
+                <TextBlock
+                    x:Name="PreviewHintText"
+                    FontSize="12"
+                    svc:Localized.Key="Settings.Displays.PreviewHint" />
+                <Viewbox
+                    x:Name="PreviewViewbox"
+                    MaxHeight="280"
+                    HorizontalAlignment="Stretch"
+                    Stretch="Uniform">
+                    <Canvas x:Name="DisplayPreviewCanvas" />
+                </Viewbox>
+            </StackPanel>
+        </Border>
 
         <toolkit:SettingsCard
             x:Name="ScreenDetailCard"
@@ -62,11 +69,18 @@
             <toolkit:SettingsCard.HeaderIcon>
                 <FontIcon Glyph="&#xE7F4;" />
             </toolkit:SettingsCard.HeaderIcon>
-            <Button svc:Localized.AutomationNameKey="Settings.Displays.MoveAll"
-                x:Name="MoveAllWidgetsButton"
-                Style="{StaticResource ActionButtonStyle}"
-                Click="MoveAllWidgetsButton_Click"
-                svc:Localized.Key="Settings.Displays.MoveAll" />
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button svc:Localized.AutomationNameKey="Settings.Displays.Recalibrate"
+                    x:Name="RecalibrateLayoutButton"
+                    Style="{StaticResource ActionButtonStyle}"
+                    Click="RecalibrateLayoutButton_Click"
+                    svc:Localized.Key="Settings.Displays.Recalibrate" />
+                <Button svc:Localized.AutomationNameKey="Settings.Displays.MoveAll"
+                    x:Name="MoveAllWidgetsButton"
+                    Style="{StaticResource ActionButtonStyle}"
+                    Click="MoveAllWidgetsButton_Click"
+                    svc:Localized.Key="Settings.Displays.MoveAll" />
+            </StackPanel>
         </toolkit:SettingsCard>
 
         <toolkit:SettingsCard
@@ -84,11 +98,21 @@
 
         <toolkit:SettingsExpander
             HorizontalContentAlignment="Stretch"
+            IsExpanded="True"
             svc:Localized.HeaderKey="Settings.Displays.MultipleDisplays.Header">
             <toolkit:SettingsExpander.HeaderIcon>
                 <FontIcon Glyph="&#xE7F4;" />
             </toolkit:SettingsExpander.HeaderIcon>
             <toolkit:SettingsExpander.Items>
+                <toolkit:SettingsCard
+                    HorizontalContentAlignment="Right"
+                    svc:Localized.DescriptionKey="Settings.Displays.ScalingMode.Description"
+                    svc:Localized.HeaderKey="Settings.Displays.ScalingMode.Header">
+                    <ComboBox svc:Localized.AutomationNameKey="Settings.Displays.ScalingMode.Header"
+                        x:Name="ScalingModeCombo"
+                        MinWidth="240"
+                        SelectionChanged="ScalingModeCombo_SelectionChanged" />
+                </toolkit:SettingsCard>
                 <toolkit:SettingsCard
                     HorizontalContentAlignment="Right"
                     svc:Localized.DescriptionKey="Settings.Displays.Disconnect.Description"
@@ -102,10 +126,22 @@
         </toolkit:SettingsExpander>
 
         <StackPanel x:Name="WidgetListPanel" Spacing="6">
-            <TextBlock
-                Style="{StaticResource SettingsSubsectionTitleTextStyle}" AutomationProperties.HeadingLevel="Level2"
-                VerticalAlignment="Center"
-                svc:Localized.Key="Settings.Displays.Widgets.SectionTitle" />
+            <Grid ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock
+                    Grid.Column="0"
+                    Style="{StaticResource SettingsSubsectionTitleTextStyle}" AutomationProperties.HeadingLevel="Level2"
+                    VerticalAlignment="Center"
+                    svc:Localized.Key="Settings.Displays.Widgets.SectionTitle" />
+                <ComboBox svc:Localized.AutomationNameKey="Settings.Displays.Widgets.SectionTitle"
+                    x:Name="WidgetFilterCombo"
+                    Grid.Column="1"
+                    MinWidth="180"
+                    SelectionChanged="WidgetFilterCombo_SelectionChanged" />
+            </Grid>
             <StackPanel x:Name="WidgetBindingCards" Spacing="4" />
         </StackPanel>
     </StackPanel>

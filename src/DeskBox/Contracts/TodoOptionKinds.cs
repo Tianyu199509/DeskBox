@@ -13,6 +13,7 @@ public static class TodoOptionKinds
     public const string DefaultFilterAll = "All";
     public const string DefaultFilterActive = "Active";
     public const string DefaultFilterToday = "Today";
+    public const string DefaultFilterOverdue = "Overdue";
     public const string DefaultFilterThisWeek = "ThisWeek";
     public const string DefaultFilterThisMonth = "ThisMonth";
     public const string DefaultFilterImportant = "Important";
@@ -30,6 +31,10 @@ public static class TodoOptionKinds
     public const int DefaultReminderOffsetMinutes = 5;
     public const int MinReminderOffsetMinutes = 0;
     public const int MaxReminderOffsetMinutes = 1440;
+
+    public const int DefaultAllDayReminderTimeMinutes = 9 * 60;
+    public const int MinAllDayReminderTimeMinutes = 0;
+    public const int MaxAllDayReminderTimeMinutes = (23 * 60) + 59;
 
     /// <summary>The offset choices offered by the reminder-offset combo.</summary>
     public static readonly int[] ReminderOffsetSteps = [0, 5, 10, 15, 30, 60, 1440];
@@ -63,6 +68,7 @@ public static class TodoOptionKinds
     public static string NormalizeDefaultFilter(string? filter) => filter is
         DefaultFilterActive or
         DefaultFilterToday or
+        DefaultFilterOverdue or
         DefaultFilterThisWeek or
         DefaultFilterThisMonth or
         DefaultFilterImportant or
@@ -75,5 +81,12 @@ public static class TodoOptionKinds
         return minutes is 0 or 5 or 10 or 15 or 30 or 60 or 1440
             ? minutes
             : DefaultReminderOffsetMinutes;
+    }
+
+    public static int NormalizeAllDayReminderTimeMinutes(int minutes)
+    {
+        return minutes is >= MinAllDayReminderTimeMinutes and <= MaxAllDayReminderTimeMinutes
+            ? minutes
+            : DefaultAllDayReminderTimeMinutes;
     }
 }

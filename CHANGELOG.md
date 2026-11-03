@@ -1,5 +1,43 @@
 # Changelog
 
+## 1.6.0 - 2026-11-02
+
+### English
+
+#### New features
+
+- **Declarative Custom Widgets & Widget Studio.** Build, customize, and share native WinUI 3 desktop widgets with zero WebView overhead. Widget Studio includes built-in official templates, AI prompt & repair workflows, live schema/diagnostics preview, `.dbxwidget` package import/export, `deskbox://` protocol deep links, and a local Agent bridge (`--mcp` stdio plus authenticated loopback HTTP) so external coding agents can validate and hot-reload widgets directly on your desktop.
+- **Clipboard History widget.** A dedicated widget captures text, HTML/RTF, images, files, and color swatches with instant search, pinning, per-app exclusion rules, content-addressed payload externalization for large entries, and automatic DPAPI at-rest encryption and UI masking for sensitive secrets.
+- **Dedicated Settings companion process (Direct channel).** Settings now runs in an isolated `DeskBox.Settings.exe` companion process over authenticated named-pipe IPC, keeping the resident desktop host lightweight and reclaiming all Settings UI memory immediately when the window closes.
+- **Search Recommendation Edit Mode & app folders.** Organize recommended apps in the search popup into custom folders, drag to reorder single or multi-selected items across apps and folders, and batch-hide or unhide entries directly in place.
+- **QuickCapture & Music widget upgrades.** QuickCapture adds an independent popout note window, inline composer keyboard refinements (`Enter` to save, `Ctrl+Enter` / `Shift+Enter` for newline, full IME composition safety), and Markdown folder mirror sync; the Music widget adds synchronized scrolling lyrics powered by LRCLIB alongside local `.lrc` files.
+- **Elevated-session outbound file drag.** When DeskBox runs elevated above a standard Explorer shell, dragging files out of widgets automatically switches to a cursor-tracked pointer drag engine with lexical cycle protection so drops into desktop and Explorer folders work seamlessly.
+
+#### Fixes & Architecture
+
+- Replaced `EverythingSdk.dll` and `H.NotifyIcon` with a zero-dependency native IPC client and self-drawn Win32 tray host, reducing startup overhead and eliminating third-party DLL payload drift across Direct and Store Native AOT builds.
+- Refined tiered idle working-set trimming and unified backup/restore snapshots to cover Custom Widgets and DPAPI-protected Clipboard history.
+- Hardened `CustomWidget` expression bounds, SSRF/redirect validation across remote catalog and protocol fetches, atomic storage replacement, and owner-checked `deskbox://` protocol cleanup during uninstallation.
+- **Upgrade note:** Profiles that create Custom Widgets or Clipboard History widgets in 1.6.0 should not be downgraded to 1.5.9 or earlier, as older builds do not recognize these widget types and would omit them on save. Back up your configuration before testing older versions.
+
+### 中文
+
+#### 新功能
+
+- **声明式自定义组件与组件工坊（Widget Studio）。** 基于原生 WinUI 3 渲染引擎打造自定义桌面组件（零 WebView 开销）。内置官方模板库、AI 提示词生成与诊断修复流、实时预览、`.dbxwidget` 组件包导入导出、`deskbox://` 协议深链，以及本地 Agent 桥接（`--mcp` 标准流与带鉴权的本机回环 HTTP 服务），支持外部编程智能体直接校验并热重载桌面组件。
+- **剪贴板历史组件。** 支持文本、富文本（HTML/RTF）、图片、文件列表与颜色值的自动采集、即时检索、置顶与来源应用排除规则；大文本自动外置落盘以保持常驻内存紧凑，敏感凭据全程启用本机 DPAPI 静态加密与界面脱敏展示。
+- **独立设置伴侣进程（官网直装版）。** 设置中心现运行于独立的 `DeskBox.Settings.exe` 伴侣进程并通过鉴权命名管道通信，主程序常驻体积更轻，关闭设置窗口后即可彻底释放全部设置界面内存。
+- **搜索推荐编辑模式与应用文件夹。** 搜索弹窗推荐区支持创建应用文件夹、单选及多选跨项/跨文件夹拖拽排序，以及批量隐藏与恢复展示。
+- **随手记与音乐组件升级。** 随手记支持独立置顶小窗、行内输入快捷键优化（`Enter` 保存、`Ctrl+Enter` / `Shift+Enter` 换行并完整兼容输入法组词态）及本地 Markdown 目录镜像；音乐组件新增基于 LRCLIB 与本地 `.lrc` 的同步滚动歌词。
+- **提权会话拖出增强。** 当 DeskBox 高于资源管理器权限运行时，从文件格子向外拖出文件会自动切换至指针跟踪拖拽链路并内置目录环路词法防护，顺畅投放至桌面与资源管理器窗口。
+
+#### 修复与架构优化
+
+- 移除外部 `EverythingSdk.dll` 与 `H.NotifyIcon` 依赖，全面切换至原生 IPC 客户端与自绘 Win32 托盘宿主，进一步降低启动开销并收紧官网直装与商店 Native AOT 产物白名单审计。
+- 优化分级闲置工作集内存修剪策略；备份与还原快照完整纳入自定义组件与加密剪贴板数据。
+- 收紧自定义组件表达式边界、远程目录与协议跳转的逐跳安全校验、原子文件替换，以及卸载时对 `deskbox://` 协议注册项的归属核验清理。
+- **升级提示：** 在 1.6.0 中创建「自定义组件」或「剪贴板」格子后，请勿直接降级覆盖安装 1.5.9 及更早版本（旧版无法识别新增组件类型并在保存配置时将其忽略）；如需回退旧版请先导出备份。
+
 ## 1.5.9 - 2026-10-23
 
 ### English

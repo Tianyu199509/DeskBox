@@ -1,4 +1,5 @@
-﻿using DeskBox.Helpers;
+using DeskBox.Controls.Todo;
+using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Platform;
 using DeskBox.Services;
@@ -28,7 +29,7 @@ public sealed partial class SettingsWindow
             return;
         }
 
-        var (recordCount, recentCount) = await _dataActions.GetQuickCaptureCountsAsync();
+        var (recordCount, _) = await _dataActions.GetQuickCaptureCountsAsync();
         var dialog = new ContentDialog
         {
             XamlRoot = SettingsRoot.XamlRoot,
@@ -38,10 +39,11 @@ public sealed partial class SettingsWindow
             DefaultButton = ContentDialogButton.Close,
             Content = new TextBlock
             {
-                Text = _localizationService.Format(
-                    "QuickCapture.ClearDataDescriptionWithCount",
-                    recordCount,
-                    recentCount),
+                Text = recordCount > 0
+                    ? _localizationService.Format(
+                        "QuickCapture.ClearDataDescriptionWithCount",
+                        recordCount)
+                    : _localizationService.T("QuickCapture.ClearDataDescription"),
                 TextWrapping = TextWrapping.Wrap
             }
         };
@@ -52,39 +54,6 @@ public sealed partial class SettingsWindow
         }
 
         await _dataActions.ClearQuickCaptureDataAsync();
-        await ViewModel.RefreshQuickCaptureImageCacheInfoAsync();
-    }
-
-    private async void ClearQuickCaptureRecentButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (SettingsRoot.XamlRoot is null)
-        {
-            return;
-        }
-
-        var (_, recentCount) = await _dataActions.GetQuickCaptureCountsAsync();
-        var dialog = new ContentDialog
-        {
-            XamlRoot = SettingsRoot.XamlRoot,
-            Title = _localizationService.T("QuickCapture.ClearRecentTitle"),
-            PrimaryButtonText = _localizationService.T("QuickCapture.ClearRecent"),
-            CloseButtonText = _localizationService.T("Common.Cancel"),
-            DefaultButton = ContentDialogButton.Close,
-            Content = new TextBlock
-            {
-                Text = _localizationService.Format(
-                    "QuickCapture.ClearRecentDescriptionWithCount",
-                    recentCount),
-                TextWrapping = TextWrapping.Wrap
-            }
-        };
-
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
-        {
-            return;
-        }
-
-        await _dataActions.ClearQuickCaptureRecentAsync();
         await ViewModel.RefreshQuickCaptureImageCacheInfoAsync();
     }
 
@@ -115,6 +84,57 @@ public sealed partial class SettingsWindow
         };
 
         await dialog.ShowAsync();
+    }
+
+    private async void QuickCaptureMirrorFolderBrowseButton_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            string? folderPath = await FolderPickerService.PickFolderAsync(_hWnd);
+            if (string.IsNullOrWhiteSpace(folderPath))
+            {
+                return;
+            }
+
+            await _dataActions.SetQuickCaptureMirrorFolderAsync(folderPath);
+            _quickCaptureSettingsViewModel.UpdateMirrorFolderPresentation(folderPath);
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[QuickCaptureSettings] Failed to pick mirror folder: {ex}");
+        }
+    }
+
+    private void QuickCaptureMirrorFolderOpenButton_Click(object sender, RoutedEventArgs e)
+    {
+        string? folderPath = _quickCaptureSettingsViewModel.MirrorFolderPath;
+        if (string.IsNullOrWhiteSpace(folderPath))
+        {
+            return;
+        }
+
+        try
+        {
+            Directory.CreateDirectory(folderPath);
+            Win32Helper.ShowInExplorer(folderPath);
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[QuickCaptureSettings] Failed to open mirror folder: {ex}");
+        }
+    }
+
+    private async void QuickCaptureMirrorFolderClearButton_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            await _dataActions.SetQuickCaptureMirrorFolderAsync(null);
+            _quickCaptureSettingsViewModel.UpdateMirrorFolderPresentation(null);
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[QuickCaptureSettings] Failed to clear mirror folder: {ex}");
+        }
     }
 
     private void ShowOnboardingButton_Click(object sender, RoutedEventArgs e)
@@ -412,5 +432,125 @@ public sealed partial class SettingsWindow
         // Coordinator-routed like the update dialogs: this surfaces failure
         // notices whose triggers can land while another dialog is open.
         await ShowDialogWhenFreeAsync(() => dialog);
+    }
+
+    private async void ExportTodoDataButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (SettingsRoot.XamlRoot is null)
+        {
+            return;
+        }
+
+        IReadOnlyList<TodoItem> items;
+        try
+        {
+            items = await TodoExportService.LoadPrimaryTodoItemsAsync(
+                DeskBoxDataPathService.Current.DataDirectory);
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[TodoExport] Failed to load primary Todo items in Settings: {ex}");
+            await ShowInfoDialogAsync(
+                _localizationService.T("Todo.Export.DialogTitle"),
+                _localizationService.Format("Todo.Export.Status.Failed", ex.Message));
+            return;
+        }
+
+        if (items.Count == 0)
+        {
+            await ShowInfoDialogAsync(
+                _localizationService.T("Todo.Export.DialogTitle"),
+                _localizationService.T("Todo.Export.NoTasksInStore"));
+            return;
+        }
+
+        var panel = new TodoExportPanel(
+            items,
+            _localizationService,
+            initialScope: TodoExportStatusScope.All,
+            isSelectionSubset: false,
+            showFlyoutChrome: false);
+
+        var configDialog = new ContentDialog
+        {
+            XamlRoot = SettingsRoot.XamlRoot,
+            Title = _localizationService.T("Todo.Export.DialogTitle"),
+            PrimaryButtonText = _localizationService.T("Todo.Export.ConfirmButton"),
+            CloseButtonText = _localizationService.T("Common.Cancel"),
+            DefaultButton = ContentDialogButton.Primary,
+            IsPrimaryButtonEnabled = panel.CanExport,
+            Content = panel
+        };
+
+        panel.PreviewChanged += (_, _) =>
+        {
+            configDialog.IsPrimaryButtonEnabled = panel.CanExport;
+        };
+
+        if (await configDialog.ShowAsync() != ContentDialogResult.Primary || !panel.CanExport)
+        {
+            return;
+        }
+
+        TodoExportOptions chosenOptions = panel.CurrentOptions;
+        TodoItem[] itemsToExport = panel.CurrentPreview.Items.ToArray();
+
+        string? savedPath;
+        try
+        {
+            savedPath = await TodoExportWorkflow.PickAndExportAsync(
+                _hWnd,
+                itemsToExport,
+                chosenOptions,
+                _localizationService);
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[TodoExport] Export failed in Settings: {ex}");
+            await ShowInfoDialogAsync(
+                _localizationService.T("Todo.Export.DialogTitle"),
+                _localizationService.Format("Todo.Export.Status.Failed", ex.Message));
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(savedPath) || SettingsRoot.XamlRoot is null)
+        {
+            return;
+        }
+
+        var doneContent = new StackPanel { Spacing = 6 };
+        doneContent.Children.Add(new TextBlock
+        {
+            Text = _localizationService.Format("Todo.Export.Status.Exported", itemsToExport.Length),
+            TextWrapping = TextWrapping.Wrap
+        });
+        doneContent.Children.Add(new TextBlock
+        {
+            Text = savedPath,
+            FontSize = 12,
+            Opacity = 0.72,
+            TextWrapping = TextWrapping.Wrap
+        });
+
+        var doneDialog = new ContentDialog
+        {
+            XamlRoot = SettingsRoot.XamlRoot,
+            Title = _localizationService.T("Todo.Export.CompletedDialogTitle"),
+            PrimaryButtonText = _localizationService.T("Todo.Export.Action.OpenFile"),
+            SecondaryButtonText = _localizationService.T("Todo.Export.Action.RevealInFolder"),
+            CloseButtonText = _localizationService.T("Common.GotIt"),
+            DefaultButton = ContentDialogButton.Primary,
+            Content = doneContent
+        };
+
+        ContentDialogResult doneResult = await doneDialog.ShowAsync();
+        if (doneResult == ContentDialogResult.Primary)
+        {
+            TodoExportWorkflow.OpenExportedFile(savedPath);
+        }
+        else if (doneResult == ContentDialogResult.Secondary)
+        {
+            TodoExportWorkflow.RevealExportedFile(savedPath);
+        }
     }
 }

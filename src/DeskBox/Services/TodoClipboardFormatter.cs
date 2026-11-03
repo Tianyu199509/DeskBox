@@ -133,6 +133,8 @@ public static class TodoClipboardFormatter
             "green" => "\U0001F7E2",
             "blue" => "\U0001F535",
             "purple" => "\U0001F7E3",
+            "teal" => "\U0001F7E6",
+            "pink" => "\U0001F497",
             _ => string.Empty
         };
     }

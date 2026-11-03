@@ -1,4 +1,4 @@
-﻿using DeskBox.Services;
+using DeskBox.Services;
 
 namespace DeskBox.Tests;
 
@@ -92,8 +92,6 @@ public sealed class SolidColorBackdropTests
     [Fact]
     public void Windows10Appearance_UsesCapabilityFirstAcrylicWithLegacyFallback()
     {
-        string featureOptions = File.ReadAllText(TestPaths.FromRepository(
-            "src/DeskBox/ViewModels/SettingsViewModel.FeatureOptions.cs"));
         string settingsWindow = File.ReadAllText(TestPaths.FromRepository(
             "src/DeskBox/Views/SettingsWindow.xaml"));
         string backdrop = File.ReadAllText(TestPaths.FromRepository(
@@ -120,19 +118,27 @@ public sealed class SolidColorBackdropTests
     }
 
     [Fact]
-    public void WidgetWindow_UsesWinUIExTransparentTintBackdropForSolidMaterial()
+    public void WidgetWindow_UsesNativeSolidTintSystemBackdropForSolidMaterial()
     {
-        string project = File.ReadAllText(TestPaths.FromRepository("src/DeskBox/DeskBox.csproj"));
+        string materialBackdrop = File.ReadAllText(TestPaths.FromRepository("src/DeskBox/Services/WidgetMaterialSystemBackdrop.cs"));
         string baseWindow = File.ReadAllText(TestPaths.FromRepository("src/DeskBox/Views/WidgetWindowBase.cs"));
         string backdrop = File.ReadAllText(TestPaths.FromRepository("src/DeskBox/Views/WidgetWindowBase.Backdrop.cs"));
+        string popoverHost = File.ReadAllText(TestPaths.FromRepository("src/DeskBox/Views/StackPopoverHostWindow.cs"));
         string contentWindow = File.ReadAllText(TestPaths.FromRepository("src/DeskBox/Views/ContentWidgetWindow.xaml.cs"));
 
-        Assert.Contains("<PackageReference Include=\"WinUIEx\" Version=\"2.9.3\" />", project, StringComparison.Ordinal);
-        Assert.Contains("WinUIEx.TransparentTintBackdrop? _solidColorBackdrop", baseWindow, StringComparison.Ordinal);
-        Assert.Contains("new WinUIEx.TransparentTintBackdrop(tintColor)", backdrop, StringComparison.Ordinal);
+        Assert.Contains("internal sealed partial class SolidTintSystemBackdrop : SystemBackdrop, IDisposable", materialBackdrop, StringComparison.Ordinal);
+        Assert.Contains("compositor.CreateColorBrush(_tintColor)", materialBackdrop, StringComparison.Ordinal);
+        Assert.Contains("SolidTintSystemBackdrop? _solidColorBackdrop", baseWindow, StringComparison.Ordinal);
+        Assert.Contains("new SolidTintSystemBackdrop(tintColor)", backdrop, StringComparison.Ordinal);
         Assert.Contains("SystemBackdrop = _solidColorBackdrop", backdrop, StringComparison.Ordinal);
         Assert.Contains("ClearSolidColorBackdrop();", baseWindow, StringComparison.Ordinal);
         Assert.Contains("!IsSolidColorBackdropActive", contentWindow, StringComparison.Ordinal);
+        Assert.Contains("SolidTintSystemBackdrop", popoverHost, StringComparison.Ordinal);
+        Assert.DoesNotContain("WinUIEx", baseWindow, StringComparison.Ordinal);
+        Assert.DoesNotContain("WinUIEx", backdrop, StringComparison.Ordinal);
+        Assert.DoesNotContain("WinUIEx", popoverHost, StringComparison.Ordinal);
+        Assert.DoesNotContain("_inactiveBackdropCleanupTimer", baseWindow, StringComparison.Ordinal);
+        Assert.DoesNotContain("ScheduleInactiveBackdropControllerCleanup", backdrop, StringComparison.Ordinal);
         Assert.DoesNotContain("ApplyTransparentAcrylicController", backdrop, StringComparison.Ordinal);
     }
 }

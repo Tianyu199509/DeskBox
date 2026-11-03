@@ -1,4 +1,6 @@
-﻿using DeskBox.Helpers;
+﻿using DeskBox.Features.Appearance;
+using DeskBox.Helpers;
+using DeskBox.Models;
 using DeskBox.Services;
 using DeskBox.ViewModels;
 using Microsoft.UI.Xaml;
@@ -14,6 +16,8 @@ public sealed partial class AppearanceSettingsSection : UserControl
     {
         InitializeComponent();
     }
+
+    public SettingsViewModel ViewModel { get; set; } = null!;
 
     public event EventHandler<SettingsSectionNavigationRequestedEventArgs>? NavigationRequested;
 
@@ -33,7 +37,7 @@ public sealed partial class AppearanceSettingsSection : UserControl
         // The section's DataContext is the appearance editor; the custom
         // accent write stays on the settings shell (theme service state), so
         // the preset pick surfaces as an editor event the shell handles.
-        if (DataContext is not DeskBox.Features.Appearance.AppearanceSettingsViewModel editor ||
+        if (DataContext is not AppearanceSettingsViewModel editor ||
             sender is not Button { Tag: string hex } ||
             !AccentColorHelper.TryParseHex(hex, out var color))
         {
@@ -42,4 +46,5 @@ public sealed partial class AppearanceSettingsSection : UserControl
 
         editor.NotifyAccentPresetPicked(AccentColorHelper.ToHex(color));
     }
+
 }

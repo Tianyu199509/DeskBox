@@ -1,8 +1,9 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <UserControl
     x:Class="DeskBox.Views.SettingsSections.SearchSettingsSection"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:DeskBox.Controls"
     xmlns:svc="using:DeskBox.Services"
     xmlns:toolkit="using:CommunityToolkit.WinUI.Controls">
 
@@ -60,29 +61,7 @@
                             svc:Localized.Key="Settings.Search.Everything.Consent" />
                     </CheckBox>
 
-                    <Grid ColumnSpacing="12">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <StackPanel Grid.Column="0" Spacing="2">
-                            <TextBlock svc:Localized.Key="Settings.Search.Everything.AdvancedSyntax.Title" />
-                            <TextBlock
-                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                Style="{StaticResource SettingDescriptionTextStyle}"
-                                TextWrapping="Wrap"
-                                svc:Localized.Key="Settings.Search.Everything.AdvancedSyntax.Description" />
-                        </StackPanel>
-                        <ToggleSwitch svc:Localized.AutomationNameKey="Settings.Search.Everything.Title"
-                            x:Name="EverythingAdvancedSyntaxToggle"
-                            Grid.Column="1"
-                            MinWidth="0"
-                            OffContent=""
-                            OnContent=""
-                            Toggled="EverythingAdvancedSyntaxToggle_Toggled" />
-                    </Grid>
-
-                    <StackPanel Orientation="Horizontal" Spacing="8">
+                    <controls:WrapFlowPanel HorizontalSpacing="8" VerticalSpacing="8">
                         <Button
                             x:Name="EverythingAboutButton"
                             Click="EverythingAboutButton_Click"
@@ -128,8 +107,24 @@
                             Visibility="Collapsed">
                             <TextBlock svc:Localized.Key="Settings.Search.Everything.SetupHelp" />
                         </Button>
-                    </StackPanel>
+                    </controls:WrapFlowPanel>
                 </StackPanel>
+            </toolkit:SettingsCard>
+
+            <toolkit:SettingsCard
+                x:Name="EverythingAdvancedSyntaxCard"
+                HorizontalContentAlignment="Right"
+                svc:Localized.DescriptionKey="Settings.Search.Everything.AdvancedSyntax.Description"
+                svc:Localized.HeaderKey="Settings.Search.Everything.AdvancedSyntax.Title">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE943;" />
+                </toolkit:SettingsCard.HeaderIcon>
+                <ToggleSwitch svc:Localized.AutomationNameKey="Settings.Search.Everything.AdvancedSyntax.Title"
+                    x:Name="EverythingAdvancedSyntaxToggle"
+                    MinWidth="0"
+                    OffContent=""
+                    OnContent=""
+                    Toggled="EverythingAdvancedSyntaxToggle_Toggled" />
             </toolkit:SettingsCard>
 
             <!-- The search hotkey depends on the search widget service, so keep it with search. -->

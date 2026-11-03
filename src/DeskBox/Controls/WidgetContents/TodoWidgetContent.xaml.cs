@@ -20,7 +20,7 @@ using Windows.System;
 
 namespace DeskBox.Controls.WidgetContents;
 
-public sealed partial class TodoWidgetContent : UserControl
+public sealed partial class TodoWidgetContent : UserControl, IDisposable
 {
     public event EventHandler<WidgetFeedbackRequestedEventArgs>? FeedbackRequested;
     private sealed record TodoSelectionHitTestItem(
@@ -29,13 +29,15 @@ public sealed partial class TodoWidgetContent : UserControl
 
     private const int CopyTapDelayMs = 210;
 
+    private readonly DeskBox.Controls.Todo.TodoRowVisualController _rowVisuals = new();
     private string? _draggedTodoItemId;
     private readonly List<string> _draggedTodoItemIds = [];
-    private Border? _todoReorderDropTarget;
     private TodoItemViewModel? _editingItem;
     private TodoItemViewModel? _customDueDateItem;
     private IReadOnlyList<string>? _customDueDateItemIds;
-    private TimeSpan _customDueTime = new(23, 59, 0);
+    private TimeSpan _customDueTime = new(9, 0, 0);
+    private bool _customDueIncludeTime;
+    private bool _isSyncingCustomDueIncludeTime;
     private string? _copySelectionAnchorId;
     private long _undoToastGeneration;
     private long _copyTapGeneration;
@@ -43,8 +45,12 @@ public sealed partial class TodoWidgetContent : UserControl
     private bool _selectionPointerPressed;
     private bool _isBoxSelecting;
     private bool _isClosingDetail;
-    private bool _isSavingDetailDraft;
     private bool _isChangingTodoFilter;
+    private readonly DispatcherTimer _titleAutosaveTimer = new()
+    {
+        Interval = TimeSpan.FromMilliseconds(450)
+    };
+    private readonly SemaphoreSlim _titleSaveGate = new(1, 1);
     private Button? _pressedColorFilterButton;
     private bool _isStartingColorFilterDrag;
     private bool _colorFilterHandledEventsRegistered;
@@ -75,21 +81,36 @@ public sealed partial class TodoWidgetContent : UserControl
 
     private Button TodoEditCloseButton => TodoInlineEditor.CloseButton;
 
+    private readonly KeyEventHandler _detailTitlePreviewKeyDownHandler;
+
     public TodoWidgetContent()
     {
         InitializeComponent();
-        InitializeDetailNotesAndSteps();
-        DetailTitleTextBox.AddHandler(
-            UIElement.PreviewKeyDownEvent,
-            new KeyEventHandler(DetailTitleTextBox_KeyDown),
-            handledEventsToo: true);
+        if (DragDropPermissionService.IsCurrentProcessElevatedCached())
+        {
+            // WinUI's StartDragAsync pipeline throws inside an elevated process;
+            // disable native ListView item dragging up front so row clicks and
+            // marquee selection stay healthy on elevated sessions.
+            TodoListView.CanDragItems = false;
+        }
+
+        _notesAutosaveTimer.Tick += NotesAutosaveTimer_Tick;
+        _titleAutosaveTimer.Tick += TitleAutosaveTimer_Tick;
+        _detailTitlePreviewKeyDownHandler = new KeyEventHandler(DetailTitleTextBox_KeyDown);
         Loaded += TodoWidgetContent_Loaded;
         Unloaded += TodoWidgetContent_Unloaded;
-        ActualThemeChanged += (_, _) =>
+        ActualThemeChanged += TodoWidgetContent_ActualThemeChanged;
+    }
+
+    private void TodoWidgetContent_ActualThemeChanged(FrameworkElement sender, object args)
+    {
+        if (_isDisposed)
         {
-            ApplyEditorVisualStyle();
-            ApplySelectionRectangleStyle();
-        };
+            return;
+        }
+
+        ApplyEditorVisualStyle();
+        ApplySelectionRectangleStyle();
     }
 
     public TodoWidgetContent(TodoWidgetViewModel viewModel)
@@ -127,12 +148,22 @@ public sealed partial class TodoWidgetContent : UserControl
             {
                 _ = SaveActiveNotesAsync(keepEditing: false);
                 _notesAutosaveTimer.Stop();
+                _titleAutosaveTimer.Stop();
                 _notesEditingItemId = null;
                 oldViewModel.PropertyChanged -= ViewModel_PropertyChanged;
                 oldViewModel.VisibleItems.CollectionChanged -= VisibleItems_CollectionChanged;
+                ClearSubscribedTodoRows();
             }
 
             DataContext = value;
+
+            if (_isDisposed)
+            {
+                return;
+            }
+
+            QuickAddBar.ViewModel = value;
+            OverdueSectionBar.ViewModel = value;
 
             if (value is not null)
             {
@@ -191,9 +222,23 @@ public sealed partial class TodoWidgetContent : UserControl
         _copyTapGeneration++;
         _detailTransitionGeneration++;
         _notesAutosaveTimer.Stop();
-        _ = SaveActiveNotesAsync(keepEditing: false);
-        DetailPageTransitionHelper.Reset(DetailPage);
-        CloseTodoEdit();
+        _titleAutosaveTimer.Stop();
+        if (!_isDisposed && !_isFlushingTeardown)
+        {
+            _ = SaveActiveNotesAsync(keepEditing: false);
+            _ = FlushDetailTitleAsync(finalizeBlankDraft: false, closeDetailOnFinalize: false);
+            CommitOrCloseTodoInlineEdit();
+        }
+        else
+        {
+            CloseTodoEdit();
+        }
+
+        if (DetailPage is not null)
+        {
+            DetailPageTransitionHelper.Reset(DetailPage);
+        }
+
         CloseCustomDueDateOverlay();
     }
 
@@ -486,14 +531,9 @@ public sealed partial class TodoWidgetContent : UserControl
             }
         }
 
-        if (e.PropertyName == nameof(TodoWidgetViewModel.IsCreatingDetailItem))
-        {
-            ApplyDetailSaveButtonVisibility();
-        }
-
         if (e.PropertyName == nameof(TodoWidgetViewModel.SelectedDetailItem))
         {
-            ApplyDetailSaveButtonVisibility();
+            _titleAutosaveTimer.Stop();
             QueueDetailTitleHeightUpdate();
         }
 
@@ -515,6 +555,11 @@ public sealed partial class TodoWidgetContent : UserControl
 
     private void QueueDetailEnterAnimation()
     {
+        if (!EnsureDetailPageRealized())
+        {
+            return;
+        }
+
         long generation = ++_detailTransitionGeneration;
         DetailPage.IsHitTestVisible = true;
         DispatcherQueue.TryEnqueue(() =>
@@ -537,20 +582,87 @@ public sealed partial class TodoWidgetContent : UserControl
 
     private void ApplyLocalizedText()
     {
-        if (TodoInlineEditor is null)
+        var localization = App.Current.LocalizationService;
+        if (DetailNotesEditor is not null)
+        {
+            DetailNotesEditor.TextResolver = localization.T;
+        }
+
+        if (TodoInlineEditor is not null)
+        {
+            TodoInlineEditor.Title = localization.T("Todo.Menu.Edit");
+            TodoInlineEditor.CancelText = localization.T("Common.Cancel");
+            TodoInlineEditor.SaveText = localization.T("Common.Save");
+        }
+
+        ApplyCustomDueDateLocalization(localization);
+    }
+
+    private void ApplyCustomDueDateLocalization(LocalizationService localization)
+    {
+        if (CustomDueDateOverlay is null)
         {
             return;
         }
 
-        var localization = App.Current.LocalizationService;
-        DetailNotesEditor.TextResolver = localization.T;
-        TodoInlineEditor.Title = localization.T("Todo.Menu.Edit");
-        TodoInlineEditor.CancelText = localization.T("Common.Cancel");
-        TodoInlineEditor.SaveText = localization.T("Common.Save");
-        CustomDueDateTitleText.Text = localization.T("Todo.Due.Custom");
-        CustomDueDatePicker.PlaceholderText = localization.T("Todo.Due.Custom");
-        CustomDueDateCancelButton.Content = localization.T("Common.Cancel");
-        CustomDueDateSaveButton.Content = localization.T("Common.Save");
+        if (CustomDueDateTitleText is not null)
+        {
+            CustomDueDateTitleText.Text = localization.T("Todo.Due.Custom");
+        }
+
+        if (CustomDueDatePicker is not null)
+        {
+            CustomDueDatePicker.PlaceholderText = localization.T("Todo.Due.Custom");
+        }
+
+        if (CustomDueDateCancelButton is not null)
+        {
+            CustomDueDateCancelButton.Content = localization.T("Common.Cancel");
+        }
+
+        if (CustomDueDateSaveButton is not null)
+        {
+            CustomDueDateSaveButton.Content = localization.T("Common.Save");
+        }
+
+        if (CustomDueIncludeTimeLabel is not null)
+        {
+            CustomDueIncludeTimeLabel.Text = localization.T("Todo.Due.IncludeTime");
+            CustomDueIncludeTimeLabel.FontSize = ViewModel?.FilterTextSize ?? 12d;
+        }
+    }
+
+    public void FocusQuickAdd() => _ = FocusQuickAddAsync();
+
+    private async Task FocusQuickAddAsync()
+    {
+        if (ViewModel is null)
+        {
+            return;
+        }
+
+        if (!_isDualPane && ViewModel.IsDetailPageOpen)
+        {
+            await CloseDetailAsync();
+        }
+
+        ClearCopySelection();
+        CloseCustomDueDateOverlay();
+        CloseTodoEdit();
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (_isDisposed)
+            {
+                return;
+            }
+
+            if (ViewModel?.VisibleItems.Count > 0)
+            {
+                TodoListView.ScrollIntoView(ViewModel.VisibleItems[0]);
+            }
+
+            QuickAddBar.FocusInput();
+        });
     }
 
     public void OpenAddEditor() => _ = OpenAddEditorAsync();
@@ -570,12 +682,46 @@ public sealed partial class TodoWidgetContent : UserControl
         ClearCopySelection();
         CloseCustomDueDateOverlay();
         CloseTodoEdit();
+        QuickAddBar.CloseComposer(clearDraft: false);
         MarkDetailSelectionExplicit();
         ViewModel.OpenNewDetail();
+        _ = EnsureDetailPageRealized();
         DispatcherQueue.TryEnqueue(() =>
         {
-            DetailTitleTextBox.Focus(FocusState.Programmatic);
-            DetailTitleTextBox.SelectAll();
+            if (DetailTitleTextBox is not null)
+            {
+                DetailTitleTextBox.Focus(FocusState.Programmatic);
+                DetailTitleTextBox.SelectAll();
+            }
+        });
+    }
+
+    private async Task OpenAddEditorFromDraftAsync()
+    {
+        if (ViewModel is null)
+        {
+            return;
+        }
+
+        if (!await PrepareForDetailSelectionChangeAsync(nextItemId: null))
+        {
+            return;
+        }
+
+        ClearCopySelection();
+        CloseCustomDueDateOverlay();
+        CloseTodoEdit();
+        MarkDetailSelectionExplicit();
+        ViewModel.OpenNewDetailFromDraft();
+        _ = EnsureDetailPageRealized();
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (DetailTitleTextBox is not null)
+            {
+                DetailTitleTextBox.Focus(FocusState.Programmatic);
+                int caret = DetailTitleTextBox.Text?.Length ?? 0;
+                DetailTitleTextBox.Select(caret, 0);
+            }
         });
     }
 
@@ -584,9 +730,105 @@ public sealed partial class TodoWidgetContent : UserControl
         OpenAddEditor();
     }
 
-    private void ExpandInputButton_Click(object sender, RoutedEventArgs e)
+    private async void QuickAddBar_SubmitRequested(object? sender, EventArgs e)
     {
-        OpenAddEditor();
+        if (ViewModel is null)
+        {
+            return;
+        }
+
+        TodoItemViewModel? created = await ViewModel.AddInputAsync();
+        if (created is not null)
+        {
+            TodoListView.ScrollIntoView(created);
+            ShowTodoStatus("Todo.Status.Saved");
+        }
+
+        QuickAddBar.FocusInput();
+    }
+
+    private void QuickAddBar_ExpandRequested(object? sender, EventArgs e)
+    {
+        _ = OpenAddEditorFromDraftAsync();
+    }
+
+    private void QuickAddBar_EscapeUnfocusRequested(object? sender, EventArgs e)
+    {
+        Focus(FocusState.Programmatic);
+    }
+
+    private void OverdueSectionBar_ToggleExpandRequested(object? sender, EventArgs e)
+    {
+        ViewModel?.ToggleTodayOverdueExpanded();
+    }
+
+    private async void OverdueSectionBar_RescheduleRequested(object? sender, EventArgs e)
+    {
+        if (ViewModel is null)
+        {
+            return;
+        }
+
+        await ViewModel.RescheduleOverdueToTodayAsync();
+    }
+
+    private void QuickAddBar_DueDateFlyoutRequested(object? sender, FrameworkElement anchor)
+    {
+        if (ViewModel is null)
+        {
+            return;
+        }
+
+        MenuFlyout flyout = CreateDraftDueDateFlyout();
+        flyout.ShowAt(anchor, new FlyoutShowOptions { Placement = FlyoutPlacementMode.Bottom });
+    }
+
+    private MenuFlyout CreateDraftDueDateFlyout()
+    {
+        var flyout = new MenuFlyout();
+        var localization = App.Current.LocalizationService;
+
+        flyout.Items.Add(CreateDraftDuePresetItem(TodoDuePreset.Today, localization.T("Todo.Due.Today")));
+        flyout.Items.Add(CreateDraftDuePresetItem(TodoDuePreset.Tomorrow, localization.T("Todo.Due.Tomorrow")));
+        flyout.Items.Add(CreateDraftDuePresetItem(TodoDuePreset.ThisWeek, localization.T("Todo.Due.ThisWeek")));
+        flyout.Items.Add(CreateDraftDuePresetItem(TodoDuePreset.NextMonday, localization.T("Todo.Due.NextMonday")));
+        flyout.Items.Add(new MenuFlyoutSeparator());
+
+        var customItem = new MenuFlyoutItem
+        {
+            Text = localization.T("Todo.Due.Custom"),
+            Icon = new FontIcon { Glyph = "\uE8A5" }
+        };
+        customItem.Click += async (_, _) => await PickCustomDueDateAsync(item: null);
+        flyout.Items.Add(customItem);
+
+        if (ViewModel?.DraftDueDate is not null)
+        {
+            var clearItem = new MenuFlyoutItem
+            {
+                Text = localization.T("Todo.Due.Clear"),
+                Icon = new FontIcon { Glyph = "\uE711" }
+            };
+            clearItem.Click += (_, _) =>
+            {
+                ViewModel?.SetDraftDueDatePreset(TodoDuePreset.Clear);
+                QuickAddBar.FocusInput();
+            };
+            flyout.Items.Add(clearItem);
+        }
+
+        return flyout;
+    }
+
+    private MenuFlyoutItem CreateDraftDuePresetItem(TodoDuePreset preset, string text)
+    {
+        var item = new MenuFlyoutItem { Text = text };
+        item.Click += (_, _) =>
+        {
+            ViewModel?.SetDraftDueDatePreset(preset);
+            QuickAddBar.FocusInput();
+        };
+        return item;
     }
 
     private async void TodoFilterSegmented_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -606,6 +848,7 @@ public sealed partial class TodoWidgetContent : UserControl
         _isChangingTodoFilter = true;
         try
         {
+            _titleAutosaveTimer.Stop();
             if (ViewModel.IsCreatingDetailItem)
             {
                 if (!await SaveActiveNotesAsync(keepEditing: false))
@@ -614,9 +857,10 @@ public sealed partial class TodoWidgetContent : UserControl
                     return;
                 }
 
-                bool hasTitle = !string.IsNullOrWhiteSpace(DetailTitleTextBox.Text);
+                string? draftTitle = DetailTitleTextBox?.Text ?? ViewModel.SelectedDetailItem?.EditText;
+                bool hasTitle = !string.IsNullOrWhiteSpace(draftTitle);
                 TodoItemViewModel? finalized = await ViewModel.FinalizeDetailAsync(
-                    DetailTitleTextBox.Text,
+                    draftTitle,
                     closeDetail: true);
                 if (hasTitle && finalized is null)
                 {
@@ -628,6 +872,10 @@ public sealed partial class TodoWidgetContent : UserControl
                 {
                     ShowTodoStatus("Todo.Status.Saved");
                 }
+            }
+            else if (ViewModel.SelectedDetailItem is not null)
+            {
+                await FlushDetailTitleAsync(finalizeBlankDraft: false, closeDetailOnFinalize: false);
             }
 
             SelectFilter(filter);
@@ -762,14 +1010,15 @@ public sealed partial class TodoWidgetContent : UserControl
         _isClosingDetail = true;
         try
         {
+            _titleAutosaveTimer.Stop();
             if (!await SaveActiveNotesAsync(keepEditing: false))
             {
                 return;
             }
 
-            TodoItemViewModel? finalizedItem = await ViewModel.FinalizeDetailAsync(
-                DetailTitleTextBox.Text,
-                closeDetail: false);
+            TodoItemViewModel? finalizedItem = await FlushDetailTitleAsync(
+                finalizeBlankDraft: true,
+                closeDetailOnFinalize: false);
             if (_isDualPane)
             {
                 ApplyMasterDetailVisibility();
@@ -802,6 +1051,11 @@ public sealed partial class TodoWidgetContent : UserControl
 
     private async Task<bool> PlayDetailExitAnimationAsync(TodoItemViewModel expectedItem)
     {
+        if (DetailPage is null)
+        {
+            return ReferenceEquals(ViewModel?.SelectedDetailItem, expectedItem);
+        }
+
         long generation = ++_detailTransitionGeneration;
         DetailPage.IsHitTestVisible = false;
         await DetailPageTransitionHelper.PlayExitAsync(DetailPage);
@@ -811,8 +1065,12 @@ public sealed partial class TodoWidgetContent : UserControl
 
     private void ResetDetailTransition()
     {
-        DetailPageTransitionHelper.Reset(DetailPage);
-        DetailPage.IsHitTestVisible = true;
+        if (DetailPage is not null)
+        {
+            DetailPageTransitionHelper.Reset(DetailPage);
+            DetailPage.IsHitTestVisible = true;
+        }
+
         _isClosingDetail = false;
     }
 
@@ -828,7 +1086,8 @@ public sealed partial class TodoWidgetContent : UserControl
             return false;
         }
 
-        if (ViewModel.IsCreatingDetailItem)
+        _titleAutosaveTimer.Stop();
+        if (ViewModel.IsCreatingDetailItem || DetailTitleTextBox is null)
         {
             return true;
         }
@@ -836,58 +1095,101 @@ public sealed partial class TodoWidgetContent : UserControl
         return await ViewModel.UpdateItemTextAsync(item.Id, DetailTitleTextBox.Text);
     }
 
-    private async void DetailSaveButton_Click(object sender, RoutedEventArgs e)
+    private void ScheduleDetailTitleAutoSave()
     {
-        if (_isSavingDetailDraft ||
+        if (_isDisposed ||
+            _isFlushingTeardown ||
+            DetailTitleTextBox is null ||
             ViewModel?.SelectedDetailItem is not { } item)
         {
+            _titleAutosaveTimer.Stop();
             return;
         }
 
-        if (string.IsNullOrWhiteSpace(DetailTitleTextBox.Text))
+        string trimmed = (DetailTitleTextBox.Text ?? string.Empty).Trim();
+        if (ViewModel.IsCreatingDetailItem)
         {
-            DetailTitleTextBox.Focus(FocusState.Programmatic);
-            return;
-        }
-
-        _isSavingDetailDraft = true;
-        try
-        {
-            if (!await SaveActiveNotesAsync(keepEditing: false))
+            if (string.IsNullOrWhiteSpace(trimmed))
             {
+                _titleAutosaveTimer.Stop();
                 return;
             }
+        }
+        else if (string.IsNullOrWhiteSpace(trimmed) ||
+                 string.Equals(item.Text, trimmed, StringComparison.Ordinal))
+        {
+            _titleAutosaveTimer.Stop();
+            return;
+        }
 
-            TodoItemViewModel? savedItem;
+        _titleAutosaveTimer.Stop();
+        _titleAutosaveTimer.Start();
+    }
+
+    private async void TitleAutosaveTimer_Tick(object? sender, object e)
+    {
+        _titleAutosaveTimer.Stop();
+        await FlushDetailTitleAsync(finalizeBlankDraft: false, closeDetailOnFinalize: false);
+    }
+
+    private async Task<TodoItemViewModel?> FlushDetailTitleAsync(
+        bool finalizeBlankDraft = false,
+        bool closeDetailOnFinalize = false)
+    {
+        _titleAutosaveTimer.Stop();
+        if (_isDisposed || ViewModel?.SelectedDetailItem is not { } currentItem)
+        {
+            return null;
+        }
+
+        await _titleSaveGate.WaitAsync();
+        try
+        {
+            if (_isDisposed ||
+                ViewModel?.SelectedDetailItem is not { } item ||
+                !ReferenceEquals(item, currentItem))
+            {
+                return null;
+            }
+
+            string currentText = DetailTitleTextBox?.Text ?? item.EditText ?? string.Empty;
+            string trimmed = currentText.Trim();
+
             if (ViewModel.IsCreatingDetailItem)
             {
-                savedItem = await ViewModel.FinalizeDetailAsync(
-                    DetailTitleTextBox.Text,
-                    closeDetail: false);
-                if (savedItem is null)
+                if (string.IsNullOrWhiteSpace(trimmed) && !finalizeBlankDraft)
                 {
-                    DetailTitleTextBox.Focus(FocusState.Programmatic);
-                    return;
+                    return null;
                 }
+
+                TodoItemViewModel? finalized = await ViewModel.FinalizeDetailAsync(
+                    currentText,
+                    closeDetail: closeDetailOnFinalize);
+                if (finalized is not null)
+                {
+                    ApplyMasterDetailVisibility();
+                }
+
+                return finalized;
             }
-            else
+
+            if (!string.IsNullOrWhiteSpace(trimmed) &&
+                !string.Equals(item.Text, trimmed, StringComparison.Ordinal))
             {
-                if (!await ViewModel.UpdateItemTextAsync(item.Id, DetailTitleTextBox.Text))
-                {
-                    DetailTitleTextBox.Focus(FocusState.Programmatic);
-                    return;
-                }
-
-                savedItem = item;
+                await ViewModel.UpdateItemTextAsync(item.Id, currentText);
             }
 
-            ApplyMasterDetailVisibility();
-            TodoListView.ScrollIntoView(savedItem);
-            ShowTodoStatus("Todo.Status.Saved");
+            if (closeDetailOnFinalize)
+            {
+                item.CancelEdit();
+                ViewModel.CloseDetail();
+            }
+
+            return item;
         }
         finally
         {
-            _isSavingDetailDraft = false;
+            _titleSaveGate.Release();
         }
     }
 
@@ -903,10 +1205,7 @@ public sealed partial class TodoWidgetContent : UserControl
 
     private async void DetailTitleTextBox_LostFocus(object sender, RoutedEventArgs e)
     {
-        if (ViewModel is { IsCreatingDetailItem: false, SelectedDetailItem: { } item })
-        {
-            await ViewModel.UpdateItemTextAsync(item.Id, DetailTitleTextBox.Text);
-        }
+        await FlushDetailTitleAsync(finalizeBlankDraft: false, closeDetailOnFinalize: false);
     }
 
     private async void DetailTitleTextBox_KeyDown(object sender, KeyRoutedEventArgs e)
@@ -943,6 +1242,115 @@ public sealed partial class TodoWidgetContent : UserControl
         return SettingsService.ShouldSubmitEditorOnEnter(
             App.Current.SettingsService.Settings.TodoEditorEnterBehavior,
             controlPressed);
+    }
+
+    private bool _isDisposed;
+    private bool _isFlushingTeardown;
+
+    internal void FlushPendingEditsBeforeTeardown()
+    {
+        if (_isDisposed || _isFlushingTeardown)
+        {
+            return;
+        }
+
+        _isFlushingTeardown = true;
+        try
+        {
+            CommitOrCloseTodoInlineEdit();
+            if (ViewModel is not { } vm)
+            {
+                return;
+            }
+
+            if (vm.SelectedDetailItem is { } detailItem)
+            {
+                if (vm.IsCreatingDetailItem)
+                {
+                    _ = vm.FinalizeDetailAsync(DetailTitleTextBox?.Text, closeDetail: false);
+                }
+                else if (DetailTitleTextBox is not null &&
+                         !string.IsNullOrWhiteSpace(DetailTitleTextBox.Text) &&
+                         !string.Equals(detailItem.Text, DetailTitleTextBox.Text.Trim(), StringComparison.Ordinal))
+                {
+                    _ = vm.UpdateItemTextAsync(detailItem.Id, DetailTitleTextBox.Text);
+                }
+            }
+
+            if (vm.SelectedDetailItem is { } persistedDetailItem &&
+                DetailStepsItemsControl is not null)
+            {
+                int stepCount = DetailStepsItemsControl.Items.Count;
+                for (int index = 0; index < stepCount; index++)
+                {
+                    if (DetailStepsItemsControl.ContainerFromIndex(index) is DependencyObject container &&
+                        FindVisualChild<TextBox>(container, "DetailStepTextBox") is { } stepTextBox &&
+                        stepTextBox.DataContext is TodoStepViewModel step &&
+                        !string.IsNullOrWhiteSpace(stepTextBox.Text) &&
+                        !string.Equals(step.Text, stepTextBox.Text.Trim(), StringComparison.Ordinal))
+                    {
+                        _ = vm.UpdateStepTextAsync(persistedDetailItem.Id, step.Id, stepTextBox.Text);
+                    }
+                }
+            }
+
+            _titleAutosaveTimer.Stop();
+            _notesAutosaveTimer.Stop();
+            if (_notesEditingItemId is not null)
+            {
+                _ = SaveActiveNotesAsync(keepEditing: false);
+            }
+        }
+        finally
+        {
+            _isFlushingTeardown = false;
+        }
+    }
+
+    public void Dispose()
+    {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        FlushPendingEditsBeforeTeardown();
+        _isDisposed = true;
+        ReleaseTransientRenderingSubscriptions();
+        ClearSubscribedTodoRows();
+        UnregisterColorFilterHandledEvents();
+        if (DetailTitleTextBox is not null)
+        {
+            DetailTitleTextBox.RemoveHandler(
+                UIElement.PreviewKeyDownEvent,
+                _detailTitlePreviewKeyDownHandler);
+        }
+        ActualThemeChanged -= TodoWidgetContent_ActualThemeChanged;
+        _titleAutosaveTimer.Stop();
+        _titleAutosaveTimer.Tick -= TitleAutosaveTimer_Tick;
+        _notesAutosaveTimer.Stop();
+        _notesAutosaveTimer.Tick -= NotesAutosaveTimer_Tick;
+        Loaded -= TodoWidgetContent_Loaded;
+        Unloaded -= TodoWidgetContent_Unloaded;
+        if (App.Current?.LocalizationService is { } localizationService)
+        {
+            localizationService.LanguageChanged -= OnLanguageChanged;
+        }
+        if (App.Current?.ThemeService is { } themeService)
+        {
+            themeService.AppearanceChanged -= OnThemeAppearanceChanged;
+        }
+        ViewModel = null;
+        QuickAddBar.ReleaseVisualHandlers();
+        OverdueSectionBar.ReleaseVisualHandlers();
+        TodoListView.ItemsSource = null;
+        if (TodoInlineEditor is not null)
+        {
+            TodoInlineEditor.ReleaseVisualHandlers();
+        }
+        ReleaseDetailNotesAndStepsVisualHandlers();
+        RootGrid.DataContext = null;
+        Content = null;
     }
 
     private async void DetailDeleteButton_Click(object sender, RoutedEventArgs e)

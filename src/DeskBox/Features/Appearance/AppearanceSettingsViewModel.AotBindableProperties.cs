@@ -1,4 +1,4 @@
-﻿#if DESKBOX_NATIVE_AOT
+#if DESKBOX_NATIVE_AOT
 namespace DeskBox.Features.Appearance;
 
 // The appearance settings sections keep their runtime {Binding} surface and
@@ -15,6 +15,7 @@ namespace DeskBox.Features.Appearance;
     nameof(AnimationSlideDirection),
     nameof(AnimationSpeed),
     nameof(AnimationStaggerEnabled),
+    nameof(AnimationSummaryText),
     nameof(AvailableAccentColorSourceOptions),
     nameof(AvailableAnimationEasingIntensityOptions),
     nameof(AvailableAnimationEffectOptions),
@@ -52,6 +53,7 @@ namespace DeskBox.Features.Appearance;
     nameof(IconSize),
     nameof(IconSizeValueText),
     nameof(InteractiveChromeMode),
+    nameof(IsAnimationEnabled),
     nameof(IsBorderStyleEnabled),
     nameof(IsDirectionEnabled),
     nameof(IsEasingEnabled),
@@ -67,6 +69,7 @@ namespace DeskBox.Features.Appearance;
     nameof(MaterialTypeText),
     nameof(NativeCornersSupported),
     nameof(SelectedAccentColorHex),
+    nameof(ShowAnimationDirection),
     nameof(ShowForegroundCustomColor),
     nameof(ShowImageBackgroundOptions),
     nameof(ShowMaterialIntensitySlider),

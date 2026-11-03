@@ -156,6 +156,11 @@ public sealed class OrganizerService
                 ownerWindowHandle,
                 progress,
                 cancellationToken);
+            if (move && results.Count > 0)
+            {
+                await RebaseMovedShortcutsOffThreadAsync(results);
+            }
+
             // Capture undo receipts off the UI thread: each is a native
             // open+stat pair, and a 2000-item drop would otherwise freeze
             // the caller for seconds after the transfer already finished.
@@ -203,6 +208,11 @@ public sealed class OrganizerService
                     result =>
                         !File.Exists(result.SourcePath) &&
                         !Directory.Exists(result.SourcePath));
+                if (move)
+                {
+                    await RebaseMovedShortcutsOffThreadAsync(completedResults);
+                }
+
                 var partialReceipts = canUndoCompletedMove
                     ? await CaptureUndoReceiptsAsync(completedResults)
                     : UndoReceiptBatch.Empty;
@@ -356,6 +366,11 @@ public sealed class OrganizerService
                 operationId,
                 results.Select(result => result.DestinationPath));
 
+            if (results.Count > 0)
+            {
+                await RebaseMovedShortcutsOffThreadAsync(results);
+            }
+
             var receipts = await CaptureUndoReceiptsAsync(results);
             var historyEntry = CreateHistoryEntry(
                 widget.Id,
@@ -397,6 +412,7 @@ public sealed class OrganizerService
                     : [];
             if (completed.Count > 0)
             {
+                await RebaseMovedShortcutsOffThreadAsync(completed);
                 var partialReceipts = await CaptureUndoReceiptsAsync(completed);
                 await AddHistoryEntryAsync(CreateHistoryEntry(
                     widget.Id,
@@ -441,6 +457,22 @@ public sealed class OrganizerService
 
             throw;
         }
+    }
+
+    private static Task RebaseMovedShortcutsOffThreadAsync(
+        IReadOnlyList<FileService.FileTransferResult> results)
+    {
+        if (results.Count == 0)
+        {
+            return Task.CompletedTask;
+        }
+
+        (string SourcePath, string DestinationPath)[] movedPairs = results
+            .Select(result => (result.SourcePath, result.DestinationPath))
+            .ToArray();
+        return Task.Run(
+            () => _ = Helpers.ShortcutHelper.RebaseMovedShortcuts(movedPairs),
+            CancellationToken.None);
     }
 
     private static string GetDefaultDesktopPath()
@@ -528,6 +560,10 @@ public sealed class OrganizerService
             _autoOrganizationSuppressions.CompleteOperation(
                 operationId,
                 results.Select(result => result.DestinationPath));
+            if (results.Count > 0)
+            {
+                await RebaseMovedShortcutsOffThreadAsync(results);
+            }
         }
         catch (Exception ex)
         {
@@ -538,6 +574,10 @@ public sealed class OrganizerService
             // before the failure so a retry only targets the rest.
             if (ex is FileService.IFileTransferWithCompletedResults partial)
             {
+                if (partial.CompletedResults.Count > 0)
+                {
+                    await RebaseMovedShortcutsOffThreadAsync(partial.CompletedResults);
+                }
                 foreach (FileService.FileTransferResult result in partial.CompletedResults)
                 {
                     var match = pending.FirstOrDefault(pair => string.Equals(

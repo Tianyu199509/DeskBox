@@ -1,0 +1,1832 @@
+using System.Diagnostics;
+using System.Net;
+using System.Net.Http.Headers;
+using System.Text;
+using System.Text.Encodings.Web;
+using System.Text.Json;
+using System.Text.RegularExpressions;
+using DeskBox.Models;
+
+namespace DeskBox.Services;
+
+public enum AiThinkingMode
+{
+    Auto = 0,
+    Enabled = 1,
+    Disabled = 2
+}
+
+public enum AiThinkingProtocol
+{
+    None = 0,
+    DeepSeekModelSwap = 1,
+    EnableThinkingFlag = 2,
+    ThinkingTypeObject = 3,
+    OpenRouterReasoning = 4,
+    ReasoningEffort = 5,
+    AutoDetectByModel = 6
+}
+
+public enum AiGenerationStage
+{
+    Connecting = 0,
+    Thinking = 1,
+    GeneratingJson = 2,
+    Validating = 3,
+    AutoRepairing = 4
+}
+
+public sealed record CustomWidgetAiProviderPreset(
+    string Id,
+    string DefaultDisplayName,
+    string DefaultEndpoint,
+    string DefaultModel,
+    IReadOnlyList<string>? RecommendedModels = null,
+    AiThinkingProtocol ThinkingProtocol = AiThinkingProtocol.None,
+    string? DisplayNameKey = null,
+    bool RequiresApiKey = true,
+    string? ConsoleUrl = null,
+    string? GlobalDefaultEndpoint = null,
+    bool IsMainlandFocused = false)
+{
+    public string DisplayName =>
+        !string.IsNullOrEmpty(DisplayNameKey)
+            ? Localized.T(DisplayNameKey)
+            : DefaultDisplayName;
+
+    public IReadOnlyList<string> Models =>
+        RecommendedModels is { Count: > 0 } ? RecommendedModels : [DefaultModel];
+}
+
+public sealed record ResolvedAiInvocation(
+    CustomWidgetAiProviderPreset Preset,
+    string Endpoint,
+    string Model,
+    string ApiKey,
+    AiThinkingMode ThinkingMode,
+    bool UsesCustomEndpoint);
+
+public sealed record AiGenerationStreamProgress(
+    AiGenerationStage Stage,
+    string ProviderName,
+    string Model,
+    string ThinkingText,
+    string ContentText,
+    int ReasoningChars,
+    int ContentChars,
+    string? DetectedWidgetName,
+    TimeSpan Elapsed);
+
+public sealed record AiConnectionTestResult(
+    bool Success,
+    long LatencyMs,
+    string EffectiveEndpoint,
+    string EffectiveModel,
+    string? ReplyPreview,
+    string? ErrorMessage);
+
+public sealed record AiModelListResult(
+    bool Success,
+    IReadOnlyList<string> Models,
+    string? ErrorMessage);
+
+public sealed record CustomWidgetAiGenerationResult(
+    bool Success,
+    string ManifestJson,
+    CustomWidgetParseResult? ParseResult,
+    string? ErrorMessage,
+    string ProviderId,
+    bool WasAutoRepaired = false,
+    string? EffectiveModel = null);
+
+public sealed record StudioTurnResult(
+    bool Success,
+    string Kind,
+    string Reply,
+    string ChangeSummary,
+    StudioBriefUpdateSpec? BriefUpdates,
+    IReadOnlyList<string> Suggestions,
+    string? SampleDataJson,
+    string ManifestJson,
+    CustomWidgetParseResult? ParseResult,
+    string? ErrorMessage,
+    string ProviderId,
+    bool WasAutoRepaired = false,
+    string? EffectiveModel = null);
+
+/// <summary>
+/// AOT-safe in-app LLM manifest generator, SSE streamer, connectivity tester, and model explorer
+/// for DeskBox Studio. Reuses DPAPI-encrypted keys from <see cref="CustomWidgetAiCredentialStore"/>
+/// and performs automatic single-round schema self-healing using <see cref="CustomWidgetManifestParser"/>.
+/// </summary>
+public sealed class CustomWidgetAiGeneratorService
+{
+    public const string CustomProviderId = "studio-custom";
+
+    private static readonly Regex StreamingNameRegex = new(
+        "\"name\"\\s*:\\s*\"(?<name>[^\"\\\\\\r\\n]{1,48})\"",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    public static IReadOnlyList<CustomWidgetAiProviderPreset> SupportedProviders { get; } =
+    [
+        new(
+            "deepseek",
+            "DeepSeek",
+            "https://api.deepseek.com/chat/completions",
+            "deepseek-chat",
+            ["deepseek-chat", "deepseek-reasoner"],
+            AiThinkingProtocol.DeepSeekModelSwap,
+            ConsoleUrl: "https://platform.deepseek.com/api_keys"),
+        new(
+            "openai",
+            "OpenAI",
+            "https://api.openai.com/v1/chat/completions",
+            "gpt-4.1-mini",
+            ["gpt-4.1-mini", "gpt-4.1", "gpt-4o", "gpt-4o-mini", "o4-mini", "o3-mini"],
+            AiThinkingProtocol.ReasoningEffort,
+            ConsoleUrl: "https://platform.openai.com/api-keys"),
+        new(
+            "anthropic",
+            "Anthropic Claude",
+            "https://api.anthropic.com/v1/chat/completions",
+            "claude-sonnet-4-20250514",
+            ["claude-sonnet-4-20250514", "claude-3-7-sonnet-latest", "claude-3-5-haiku-latest"],
+            AiThinkingProtocol.None,
+            ConsoleUrl: "https://console.anthropic.com/settings/keys"),
+        new(
+            "gemini",
+            "Google Gemini",
+            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+            "gemini-2.5-flash",
+            ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"],
+            AiThinkingProtocol.ReasoningEffort,
+            ConsoleUrl: "https://aistudio.google.com/apikey"),
+        new(
+            "openrouter",
+            "OpenRouter",
+            "https://openrouter.ai/api/v1/chat/completions",
+            "deepseek/deepseek-chat-v3-0324",
+            ["deepseek/deepseek-chat-v3-0324", "deepseek/deepseek-r1", "anthropic/claude-sonnet-4", "openai/gpt-4.1-mini", "google/gemini-2.5-flash"],
+            AiThinkingProtocol.OpenRouterReasoning,
+            ConsoleUrl: "https://openrouter.ai/keys"),
+        new(
+            "groq",
+            "Groq",
+            "https://api.groq.com/openai/v1/chat/completions",
+            "llama-3.3-70b-versatile",
+            ["llama-3.3-70b-versatile", "deepseek-r1-distill-llama-70b", "qwen-qwq-32b"],
+            AiThinkingProtocol.None,
+            ConsoleUrl: "https://console.groq.com/keys"),
+        new(
+            "ollama",
+            "Ollama (Local)",
+            "http://127.0.0.1:11434/v1/chat/completions",
+            "qwen2.5-coder:7b",
+            ["qwen2.5-coder:7b", "llama3.2", "deepseek-r1:8b", "gemma3:12b"],
+            AiThinkingProtocol.None,
+            DisplayNameKey: "CustomWidget.AiApi.Provider.Ollama",
+            RequiresApiKey: false,
+            ConsoleUrl: "https://ollama.com/library"),
+        new(
+            "lmstudio",
+            "LM Studio (Local)",
+            "http://127.0.0.1:1234/v1/chat/completions",
+            "local-model",
+            ["local-model"],
+            AiThinkingProtocol.None,
+            DisplayNameKey: "CustomWidget.AiApi.Provider.LmStudio",
+            RequiresApiKey: false,
+            ConsoleUrl: "https://lmstudio.ai/"),
+        new(
+            "qwen",
+            "Qwen (Alibaba Cloud)",
+            "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+            "qwen-plus",
+            ["qwen-plus", "qwen3-coder-plus", "qwen-max", "qwen-turbo", "qwq-32b"],
+            AiThinkingProtocol.EnableThinkingFlag,
+            DisplayNameKey: "CustomWidget.AiApi.Provider.Qwen",
+            ConsoleUrl: "https://bailian.console.aliyun.com/",
+            GlobalDefaultEndpoint: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions",
+            IsMainlandFocused: true),
+        new(
+            "glm",
+            "Zhipu GLM",
+            "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+            "glm-4.5",
+            ["glm-4.5", "glm-4.5-air", "glm-4-plus", "glm-4-flash", "glm-z1-air"],
+            AiThinkingProtocol.ThinkingTypeObject,
+            DisplayNameKey: "CustomWidget.AiApi.Provider.Glm",
+            ConsoleUrl: "https://open.bigmodel.cn/usercenter/apikeys",
+            GlobalDefaultEndpoint: "https://api.z.ai/api/paas/v4/chat/completions",
+            IsMainlandFocused: true),
+        new(
+            "doubao",
+            "Doubao (Volcengine)",
+            "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
+            "doubao-seed-1-6-250615",
+            ["doubao-seed-1-6-250615", "doubao-1-5-pro-32k-250115", "deepseek-v3-250324", "deepseek-r1-250528"],
+            AiThinkingProtocol.ThinkingTypeObject,
+            DisplayNameKey: "CustomWidget.AiApi.Provider.Doubao",
+            ConsoleUrl: "https://console.volcengine.com/ark",
+            IsMainlandFocused: true),
+        new(
+            "kimi",
+            "Kimi (Moonshot)",
+            "https://api.moonshot.cn/v1/chat/completions",
+            "kimi-k2-0711-preview",
+            ["kimi-k2-0711-preview", "moonshot-v1-32k", "moonshot-v1-128k", "kimi-thinking-preview"],
+            AiThinkingProtocol.None,
+            ConsoleUrl: "https://platform.moonshot.cn/console/api-keys",
+            GlobalDefaultEndpoint: "https://api.moonshot.ai/v1/chat/completions",
+            IsMainlandFocused: true),
+        new(
+            "siliconflow",
+            "SiliconFlow",
+            "https://api.siliconflow.cn/v1/chat/completions",
+            "deepseek-ai/DeepSeek-V3",
+            ["deepseek-ai/DeepSeek-V3", "deepseek-ai/DeepSeek-R1", "Qwen/Qwen3-32B", "Qwen/Qwen2.5-Coder-32B-Instruct"],
+            AiThinkingProtocol.EnableThinkingFlag,
+            DisplayNameKey: "CustomWidget.AiApi.Provider.SiliconFlow",
+            ConsoleUrl: "https://cloud.siliconflow.cn/account/ak",
+            GlobalDefaultEndpoint: "https://api.siliconflow.com/v1/chat/completions",
+            IsMainlandFocused: true),
+        new(
+            CustomProviderId,
+            "Custom OpenAI-Compatible API",
+            "https://api.openai.com/v1/chat/completions",
+            "gpt-4.1-mini",
+            ["gpt-4.1-mini", "deepseek-chat", "deepseek-reasoner", "claude-sonnet-4-20250514", "gemini-2.5-flash", "qwen-plus"],
+            AiThinkingProtocol.AutoDetectByModel,
+            DisplayNameKey: "CustomWidget.AiApi.Provider.Custom")
+    ];
+
+    private static readonly string[] MainlandProviderOrder =
+    [
+        "deepseek", "qwen", "doubao", "kimi", "glm", "siliconflow",
+        "openai", "anthropic", "gemini", "openrouter", "groq",
+        "ollama", "lmstudio", CustomProviderId
+    ];
+
+    private static readonly string[] GlobalProviderOrder =
+    [
+        "openai", "anthropic", "gemini", "openrouter", "deepseek", "groq",
+        "ollama", "lmstudio",
+        "qwen", "kimi", "glm", "siliconflow", "doubao", CustomProviderId
+    ];
+
+    public static bool IsSimplifiedChineseRegion(string? cultureName = null)
+    {
+        string effective = string.IsNullOrWhiteSpace(cultureName) ||
+                           string.Equals(cultureName, "System", StringComparison.OrdinalIgnoreCase)
+            ? Localized.ActiveCultureName
+            : cultureName.Trim();
+
+        if (effective.StartsWith("zh-TW", StringComparison.OrdinalIgnoreCase) ||
+            effective.StartsWith("zh-HK", StringComparison.OrdinalIgnoreCase) ||
+            effective.StartsWith("zh-MO", StringComparison.OrdinalIgnoreCase) ||
+            effective.StartsWith("zh-Hant", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return effective.StartsWith("zh", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static string GetDefaultStarterProviderId(string? cultureName = null) =>
+        IsSimplifiedChineseRegion(cultureName) ? "deepseek" : "openai";
+
+    public static IReadOnlyList<CustomWidgetAiProviderPreset> GetOrderedProvidersForCulture(string? cultureName = null)
+    {
+        string[] order = IsSimplifiedChineseRegion(cultureName) ? MainlandProviderOrder : GlobalProviderOrder;
+        var map = SupportedProviders.ToDictionary(static p => p.Id, StringComparer.OrdinalIgnoreCase);
+        var result = new List<CustomWidgetAiProviderPreset>(SupportedProviders.Count);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (string id in order)
+        {
+            if (map.TryGetValue(id, out CustomWidgetAiProviderPreset? preset) && seen.Add(preset.Id))
+            {
+                result.Add(preset);
+            }
+        }
+
+        foreach (CustomWidgetAiProviderPreset preset in SupportedProviders)
+        {
+            if (seen.Add(preset.Id))
+            {
+                result.Add(preset);
+            }
+        }
+
+        return result;
+    }
+
+    private readonly DeskBoxAiService _aiService;
+    private readonly CustomWidgetNetworkSourceEngine? _networkSourceEngine;
+
+    public static CustomWidgetAiGeneratorService Shared { get; } =
+        new(DeskBoxAiService.Shared, CustomWidgetNetworkSourceEngine.Shared);
+
+    public CustomWidgetAiGeneratorService(
+        CustomWidgetAiCredentialStore? credentialStore = null,
+        HttpClient? httpClient = null,
+        CustomWidgetNetworkSourceEngine? networkSourceEngine = null)
+        : this(
+            new DeskBoxAiService(credentialStore, CustomWidgetStudioPreferencesStore.Shared, httpClient),
+            networkSourceEngine ?? (httpClient is null ? CustomWidgetNetworkSourceEngine.Shared : null))
+    {
+    }
+
+    public CustomWidgetAiGeneratorService(
+        DeskBoxAiService aiService,
+        CustomWidgetNetworkSourceEngine? networkSourceEngine = null)
+    {
+        ArgumentNullException.ThrowIfNull(aiService);
+        _aiService = aiService;
+        _networkSourceEngine = networkSourceEngine;
+    }
+
+    public DeskBoxAiService AiService => _aiService;
+
+    public static AiThinkingMode ParseThinkingMode(string? raw)
+    {
+        if (string.Equals(raw?.Trim(), "enabled", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(raw?.Trim(), "on", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(raw?.Trim(), "true", StringComparison.OrdinalIgnoreCase))
+        {
+            return AiThinkingMode.Enabled;
+        }
+
+        if (string.Equals(raw?.Trim(), "disabled", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(raw?.Trim(), "off", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(raw?.Trim(), "false", StringComparison.OrdinalIgnoreCase))
+        {
+            return AiThinkingMode.Disabled;
+        }
+
+        return AiThinkingMode.Auto;
+    }
+
+    public static string ToThinkingWireValue(AiThinkingMode mode) => mode switch
+    {
+        AiThinkingMode.Enabled => "enabled",
+        AiThinkingMode.Disabled => "disabled",
+        _ => "auto"
+    };
+
+    public static CustomWidgetAiProviderPreset FindProviderPreset(string? providerId) =>
+        SupportedProviders.FirstOrDefault(p =>
+            string.Equals(p.Id, providerId?.Trim(), StringComparison.OrdinalIgnoreCase))
+        ?? SupportedProviders[0];
+
+    public IReadOnlyList<CustomWidgetAiProviderPreset> GetConfiguredProviders() =>
+        _aiService.GetConfiguredProviders();
+
+    public bool HasAnyConfiguredProvider() => _aiService.HasAnyConfiguredProvider();
+
+    public (string Endpoint, string Model, string ApiKey) ResolveEndpointAndModel(string providerId)
+    {
+        ResolvedAiInvocation resolved = ResolveEffectiveSettings(providerId);
+        return (resolved.Endpoint, resolved.Model, resolved.ApiKey);
+    }
+
+    public ResolvedAiInvocation ResolveEffectiveSettings(
+        string providerId,
+        string? endpointOverride = null,
+        string? modelOverride = null,
+        string? apiKeyOverride = null,
+        AiThinkingMode? thinkingOverride = null) =>
+        _aiService.ResolveEffectiveSettings(
+            providerId,
+            endpointOverride,
+            modelOverride,
+            apiKeyOverride,
+            thinkingOverride);
+
+    public static string NormalizeChatCompletionsEndpoint(string rawUrl)
+    {
+        if (string.IsNullOrWhiteSpace(rawUrl))
+        {
+            return "https://api.openai.com/v1/chat/completions";
+        }
+
+        string trimmed = rawUrl.Trim().TrimEnd('/');
+        if (trimmed.EndsWith("/chat/completions", StringComparison.OrdinalIgnoreCase))
+        {
+            return trimmed;
+        }
+
+        if (trimmed.EndsWith("/v1", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.EndsWith("/v3", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.EndsWith("/v4", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.EndsWith("/openai", StringComparison.OrdinalIgnoreCase))
+        {
+            return trimmed + "/chat/completions";
+        }
+
+        return trimmed + "/v1/chat/completions";
+    }
+
+    public static string DeriveModelsEndpoint(string chatCompletionsOrBaseUrl)
+    {
+        string normalized = NormalizeChatCompletionsEndpoint(chatCompletionsOrBaseUrl);
+        if (normalized.EndsWith("/chat/completions", StringComparison.OrdinalIgnoreCase))
+        {
+            return normalized[..^"/chat/completions".Length] + "/models";
+        }
+
+        return normalized.TrimEnd('/') + "/models";
+    }
+
+    public static bool IsReasoningOnlyModel(string model)
+    {
+        if (string.IsNullOrWhiteSpace(model))
+        {
+            return false;
+        }
+
+        string lower = model.Trim().ToLowerInvariant();
+        string leaf = lower.Contains('/') ? lower[(lower.LastIndexOf('/') + 1)..] : lower;
+        return leaf.StartsWith("o1", StringComparison.Ordinal) ||
+               leaf.StartsWith("o3", StringComparison.Ordinal) ||
+               leaf.StartsWith("o4", StringComparison.Ordinal) ||
+               leaf.StartsWith("gpt-5", StringComparison.Ordinal) ||
+               leaf.Contains("reasoner", StringComparison.Ordinal) ||
+               leaf.Contains("deepseek-r1", StringComparison.Ordinal) ||
+               leaf.StartsWith("qwq", StringComparison.Ordinal) ||
+               leaf.Contains("thinking", StringComparison.Ordinal) ||
+               leaf.StartsWith("glm-z1", StringComparison.Ordinal);
+    }
+
+    public Task<AiModelListResult> FetchAvailableModelsAsync(
+        string providerId,
+        string? endpointOverride = null,
+        string? apiKeyOverride = null,
+        CancellationToken cancellationToken = default) =>
+        _aiService.FetchAvailableModelsAsync(
+            providerId,
+            endpointOverride,
+            apiKeyOverride,
+            cancellationToken);
+
+    public Task<AiConnectionTestResult> TestConnectionAsync(
+        string providerId,
+        string? endpointOverride = null,
+        string? apiKeyOverride = null,
+        string? modelOverride = null,
+        AiThinkingMode? thinkingOverride = null,
+        CancellationToken cancellationToken = default) =>
+        _aiService.TestConnectionAsync(
+            providerId,
+            endpointOverride,
+            apiKeyOverride,
+            modelOverride,
+            thinkingOverride,
+            cancellationToken);
+
+    public async Task<CustomWidgetAiGenerationResult> GenerateOrRefineAsync(
+        string providerId,
+        string userPrompt,
+        string? existingManifestJson = null,
+        string? preferredEmoji = null,
+        CancellationToken cancellationToken = default,
+        Action<AiGenerationStreamProgress>? onProgress = null,
+        string? uiLanguage = null,
+        CustomWidgetEffectivePromptPack? promptPackOverride = null,
+        IReadOnlyList<string>? pinnedCapabilityIds = null)
+    {
+        ResolvedAiInvocation resolved = ResolveEffectiveSettings(providerId);
+        if (resolved.Preset.RequiresApiKey && string.IsNullOrWhiteSpace(resolved.ApiKey))
+        {
+            return new CustomWidgetAiGenerationResult(
+                false,
+                string.Empty,
+                null,
+                Localized.T("CustomWidget.AiApi.Error.MissingConfiguredApiKey"),
+                providerId,
+                EffectiveModel: resolved.Model);
+        }
+
+        var sw = Stopwatch.StartNew();
+        onProgress?.Invoke(new AiGenerationStreamProgress(
+            AiGenerationStage.Connecting,
+            resolved.Preset.DisplayName,
+            resolved.Model,
+            string.Empty,
+            string.Empty,
+            0,
+            0,
+            null,
+            sw.Elapsed));
+
+        string effectiveLanguage = string.IsNullOrWhiteSpace(uiLanguage)
+            ? Localized.ActiveCultureName
+            : uiLanguage;
+        bool isChinese = CustomWidgetRemotePromptService.IsChineseCulture(effectiveLanguage);
+        CustomWidgetEffectivePromptPack promptPack = promptPackOverride
+            ?? CustomWidgetRemotePromptService.Shared.GetEffectivePromptPack();
+
+        string fullUserPrompt = CustomWidgetTemplates.BuildChatAiPrompt(
+            userPrompt,
+            existingManifestJson,
+            preferredEmoji,
+            effectiveLanguage,
+            promptPack,
+            pinnedCapabilityIds: pinnedCapabilityIds);
+
+        string systemPrompt = CustomWidgetTemplates.BuildDirectApiSystemPrompt(
+            effectiveLanguage,
+            promptPack);
+
+        (bool ok, string assistantReply, string thinkingReply, string? httpErr) =
+            await SendChatCompletionStreamingAsync(
+                resolved,
+                systemPrompt,
+                fullUserPrompt,
+                assistantPrefill: null,
+                repairPrompt: null,
+                isRepairRound: false,
+                sw,
+                onProgress,
+                cancellationToken);
+
+        if (!ok)
+        {
+            return new CustomWidgetAiGenerationResult(
+                false,
+                string.Empty,
+                null,
+                httpErr ?? Localized.T("CustomWidget.AiApi.Error.InvocationFailed"),
+                providerId,
+                EffectiveModel: resolved.Model);
+        }
+
+        onProgress?.Invoke(new AiGenerationStreamProgress(
+            AiGenerationStage.Validating,
+            resolved.Preset.DisplayName,
+            resolved.Model,
+            thinkingReply,
+            assistantReply,
+            thinkingReply.Length,
+            assistantReply.Length,
+            TryExtractStreamingWidgetName(assistantReply),
+            sw.Elapsed));
+
+        string extracted = CustomWidgetTemplates.ExtractJsonFromClipboardText(assistantReply);
+        if (string.IsNullOrWhiteSpace(extracted))
+        {
+            return new CustomWidgetAiGenerationResult(
+                false,
+                string.Empty,
+                null,
+                Localized.T("CustomWidget.AiApi.Error.NoJsonBlockReturned"),
+                providerId,
+                EffectiveModel: resolved.Model);
+        }
+
+        bool isInitialCreation = string.IsNullOrWhiteSpace(existingManifestJson);
+        extracted = CustomWidgetManifestAutoFixer.AutoWireMissingCapabilities(extracted);
+        if (isInitialCreation)
+        {
+            extracted = CalibrateInitialDefaultHeightJson(extracted);
+        }
+        if (CustomWidgetTemplates.IsEmojiIcon(preferredEmoji))
+        {
+            try
+            {
+                extracted = CustomWidgetTemplates.WithUpdatedIconJson(extracted, preferredEmoji!.Trim());
+            }
+            catch
+            {
+            }
+        }
+
+        CustomWidgetParseResult firstValidation = CustomWidgetManifestParser.ValidateWithRuntimeHints(extracted);
+        bool firstStructurallyValid = firstValidation.Manifest is not null && !firstValidation.Diagnostics.Any(d => d.IsError);
+        string? preflightFeedback = null;
+
+        if (firstStructurallyValid)
+        {
+            preflightFeedback = await BuildPreFlightFeedbackAsync(
+                firstValidation.Manifest!,
+                isChinese,
+                cancellationToken);
+            if (string.IsNullOrWhiteSpace(preflightFeedback))
+            {
+                string stamped = CustomWidgetManifestCompatibility.StampRequiredMinAppVersion(extracted);
+                return new CustomWidgetAiGenerationResult(
+                    true,
+                    stamped,
+                    firstValidation,
+                    null,
+                    providerId,
+                    WasAutoRepaired: false,
+                    EffectiveModel: resolved.Model);
+            }
+        }
+
+        // Silent 1-round auto-heal using exact parser diagnostics + pre-flight probe skeleton
+        string repairPrompt = CustomWidgetTemplates.BuildChatAiRepairPrompt(
+            extracted,
+            firstValidation.Diagnostics,
+            effectiveLanguage,
+            promptPack,
+            preflightFeedback);
+
+        onProgress?.Invoke(new AiGenerationStreamProgress(
+            AiGenerationStage.AutoRepairing,
+            resolved.Preset.DisplayName,
+            resolved.Model,
+            thinkingReply,
+            extracted,
+            thinkingReply.Length,
+            extracted.Length,
+            TryExtractStreamingWidgetName(extracted),
+            sw.Elapsed));
+
+        (bool repairOk, string repairReply, _, _) = await SendChatCompletionStreamingAsync(
+            resolved,
+            systemPrompt,
+            fullUserPrompt,
+            assistantPrefill: assistantReply,
+            repairPrompt: repairPrompt,
+            isRepairRound: true,
+            sw,
+            onProgress,
+            cancellationToken);
+
+        if (repairOk)
+        {
+            string repairedJson = CustomWidgetTemplates.ExtractJsonFromClipboardText(repairReply);
+            if (!string.IsNullOrWhiteSpace(repairedJson))
+            {
+                repairedJson = CustomWidgetManifestAutoFixer.AutoWireMissingCapabilities(repairedJson);
+                if (CustomWidgetTemplates.IsEmojiIcon(preferredEmoji))
+                {
+                    try
+                    {
+                        repairedJson = CustomWidgetTemplates.WithUpdatedIconJson(repairedJson, preferredEmoji!.Trim());
+                    }
+                    catch
+                    {
+                    }
+                }
+
+                CustomWidgetParseResult secondValidation = CustomWidgetManifestParser.ValidateWithRuntimeHints(repairedJson);
+                if (secondValidation.Manifest is not null && !secondValidation.Diagnostics.Any(d => d.IsError))
+                {
+                    string stampedRepair = CustomWidgetManifestCompatibility.StampRequiredMinAppVersion(repairedJson);
+                    return new CustomWidgetAiGenerationResult(
+                        true,
+                        stampedRepair,
+                        secondValidation,
+                        null,
+                        providerId,
+                        WasAutoRepaired: true,
+                        EffectiveModel: resolved.Model);
+                }
+
+                if (!firstStructurallyValid)
+                {
+                    return new CustomWidgetAiGenerationResult(
+                        false,
+                        repairedJson,
+                        secondValidation,
+                        secondValidation.Diagnostics.FirstOrDefault(d => d.IsError)?.Message ??
+                        Localized.T("CustomWidget.AiApi.Error.AutoRepairStillInvalid"),
+                        providerId,
+                        WasAutoRepaired: true,
+                        EffectiveModel: resolved.Model);
+                }
+            }
+        }
+
+        if (firstStructurallyValid)
+        {
+            string fallbackStamped = CustomWidgetManifestCompatibility.StampRequiredMinAppVersion(extracted);
+            return new CustomWidgetAiGenerationResult(
+                true,
+                fallbackStamped,
+                firstValidation,
+                null,
+                providerId,
+                WasAutoRepaired: false,
+                EffectiveModel: resolved.Model);
+        }
+
+        return new CustomWidgetAiGenerationResult(
+            false,
+            extracted,
+            firstValidation,
+            firstValidation.Diagnostics.FirstOrDefault(d => d.IsError)?.Message ??
+            Localized.T("CustomWidget.AiApi.Error.ValidationFailed"),
+            providerId,
+            WasAutoRepaired: false,
+            EffectiveModel: resolved.Model);
+    }
+
+    public async Task<StudioTurnResult> RunStudioTurnAsync(
+        string providerId,
+        string userMessage,
+        string? currentManifestJson = null,
+        string? briefMarkdown = null,
+        IReadOnlyList<StudioChatMessage>? recentMessages = null,
+        CustomWidgetHealthReport? healthReport = null,
+        string? targetNodePath = null,
+        string? preferredEmoji = null,
+        bool allowSampleData = false,
+        CancellationToken cancellationToken = default,
+        Action<AiGenerationStreamProgress>? onProgress = null,
+        string? uiLanguage = null,
+        CustomWidgetEffectivePromptPack? promptPackOverride = null,
+        IReadOnlyList<string>? pinnedCapabilityIds = null)
+    {
+        ResolvedAiInvocation resolved = ResolveEffectiveSettings(providerId);
+        if (resolved.Preset.RequiresApiKey && string.IsNullOrWhiteSpace(resolved.ApiKey))
+        {
+            return new StudioTurnResult(
+                Success: false,
+                Kind: "edit",
+                Reply: string.Empty,
+                ChangeSummary: string.Empty,
+                BriefUpdates: null,
+                Suggestions: [],
+                SampleDataJson: null,
+                ManifestJson: string.Empty,
+                ParseResult: null,
+                ErrorMessage: Localized.T("CustomWidget.AiApi.Error.MissingConfiguredApiKey"),
+                ProviderId: providerId,
+                EffectiveModel: resolved.Model);
+        }
+
+        var sw = Stopwatch.StartNew();
+        onProgress?.Invoke(new AiGenerationStreamProgress(
+            AiGenerationStage.Connecting,
+            resolved.Preset.DisplayName,
+            resolved.Model,
+            string.Empty,
+            string.Empty,
+            0,
+            0,
+            null,
+            sw.Elapsed));
+
+        string effectiveLanguage = string.IsNullOrWhiteSpace(uiLanguage)
+            ? Localized.ActiveCultureName
+            : uiLanguage;
+        bool isChinese = CustomWidgetRemotePromptService.IsChineseCulture(effectiveLanguage);
+        CustomWidgetEffectivePromptPack promptPack = promptPackOverride
+            ?? CustomWidgetRemotePromptService.Shared.GetEffectivePromptPack();
+
+        string systemPrompt = CustomWidgetTemplates.BuildStudioCoCreationSystemPrompt(
+            effectiveLanguage,
+            promptPack);
+        string userPrompt = CustomWidgetTemplates.BuildStudioCoCreationUserPrompt(
+            userMessage,
+            currentManifestJson,
+            briefMarkdown,
+            recentMessages,
+            healthReport,
+            targetNodePath,
+            preferredEmoji,
+            allowSampleData,
+            effectiveLanguage,
+            pinnedCapabilityIds);
+
+        (bool ok, string assistantReply, string thinkingReply, string? httpErr) =
+            await SendChatCompletionStreamingAsync(
+                resolved,
+                systemPrompt,
+                userPrompt,
+                assistantPrefill: null,
+                repairPrompt: null,
+                isRepairRound: false,
+                sw,
+                onProgress,
+                cancellationToken);
+
+        if (!ok)
+        {
+            return new StudioTurnResult(
+                Success: false,
+                Kind: "edit",
+                Reply: string.Empty,
+                ChangeSummary: string.Empty,
+                BriefUpdates: null,
+                Suggestions: [],
+                SampleDataJson: null,
+                ManifestJson: string.Empty,
+                ParseResult: null,
+                ErrorMessage: httpErr ?? Localized.T("CustomWidget.AiApi.Error.InvocationFailed"),
+                ProviderId: providerId,
+                EffectiveModel: resolved.Model);
+        }
+
+        onProgress?.Invoke(new AiGenerationStreamProgress(
+            AiGenerationStage.Validating,
+            resolved.Preset.DisplayName,
+            resolved.Model,
+            thinkingReply,
+            assistantReply,
+            thinkingReply.Length,
+            assistantReply.Length,
+            TryExtractStreamingWidgetName(assistantReply),
+            sw.Elapsed));
+
+        bool isInitialTurn = string.IsNullOrWhiteSpace(currentManifestJson);
+        StudioTurnResult parsedTurn = ParseStudioTurnResponse(
+            assistantReply,
+            preferredEmoji: isInitialTurn ? preferredEmoji : null,
+            providerId: providerId,
+            effectiveModel: resolved.Model,
+            isInitialCreation: isInitialTurn);
+
+        if (!string.Equals(parsedTurn.Kind, "edit", StringComparison.OrdinalIgnoreCase))
+        {
+            return parsedTurn;
+        }
+
+        bool firstStructurallyValid = parsedTurn.Success &&
+                                      parsedTurn.ParseResult is { Manifest: not null } &&
+                                      !parsedTurn.ParseResult.Diagnostics.Any(d => d.IsError);
+        string? preflightFeedback = null;
+
+        if (firstStructurallyValid)
+        {
+            preflightFeedback = await BuildPreFlightFeedbackAsync(
+                parsedTurn.ParseResult!.Manifest!,
+                isChinese,
+                cancellationToken);
+            if (string.IsNullOrWhiteSpace(preflightFeedback))
+            {
+                return parsedTurn;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(parsedTurn.ManifestJson))
+        {
+            return parsedTurn;
+        }
+
+        // Silent 1-round auto-repair of broken manifest or failed pre-flight verification inside an edit turn
+        IReadOnlyList<CustomWidgetValidationDiagnostic> firstDiags = parsedTurn.ParseResult?.Diagnostics ?? [];
+        string repairPrompt = CustomWidgetTemplates.BuildChatAiRepairPrompt(
+            parsedTurn.ManifestJson,
+            firstDiags,
+            effectiveLanguage,
+            promptPack,
+            preflightFeedback);
+
+        onProgress?.Invoke(new AiGenerationStreamProgress(
+            AiGenerationStage.AutoRepairing,
+            resolved.Preset.DisplayName,
+            resolved.Model,
+            thinkingReply,
+            parsedTurn.ManifestJson,
+            thinkingReply.Length,
+            parsedTurn.ManifestJson.Length,
+            TryExtractStreamingWidgetName(parsedTurn.ManifestJson),
+            sw.Elapsed));
+
+        (bool repairOk, string repairReply, _, _) = await SendChatCompletionStreamingAsync(
+            resolved,
+            CustomWidgetTemplates.BuildDirectApiSystemPrompt(effectiveLanguage, promptPack),
+            userPrompt,
+            assistantPrefill: parsedTurn.ManifestJson,
+            repairPrompt: repairPrompt,
+            isRepairRound: true,
+            sw,
+            onProgress,
+            cancellationToken);
+
+        if (repairOk)
+        {
+            StudioTurnResult repairedCandidate = ParseStudioTurnResponse(
+                repairReply,
+                preferredEmoji: isInitialTurn ? preferredEmoji : null,
+                providerId: providerId,
+                effectiveModel: resolved.Model,
+                isInitialCreation: isInitialTurn);
+
+            string candidateManifest = repairedCandidate.ManifestJson;
+            if (!string.IsNullOrWhiteSpace(candidateManifest))
+            {
+                CustomWidgetParseResult secondValidation = CustomWidgetManifestParser.ValidateWithRuntimeHints(candidateManifest);
+                if (secondValidation.Manifest is not null && !secondValidation.Diagnostics.Any(d => d.IsError))
+                {
+                    string stamped = CustomWidgetManifestCompatibility.StampRequiredMinAppVersion(candidateManifest);
+                    return parsedTurn with
+                    {
+                        Success = true,
+                        ManifestJson = stamped,
+                        ParseResult = secondValidation,
+                        ErrorMessage = null,
+                        WasAutoRepaired = true
+                    };
+                }
+
+                if (!firstStructurallyValid)
+                {
+                    return parsedTurn with
+                    {
+                        Success = false,
+                        ManifestJson = candidateManifest,
+                        ParseResult = secondValidation,
+                        ErrorMessage = secondValidation.Diagnostics.FirstOrDefault(d => d.IsError)?.Message ??
+                                       Localized.T("CustomWidget.AiApi.Error.AutoRepairStillInvalid"),
+                        WasAutoRepaired = true
+                    };
+                }
+            }
+        }
+
+        if (firstStructurallyValid)
+        {
+            return parsedTurn;
+        }
+
+        return parsedTurn with
+        {
+            Success = false,
+            ErrorMessage = firstDiags.FirstOrDefault(d => d.IsError)?.Message ??
+                           Localized.T("CustomWidget.AiApi.Error.ValidationFailed")
+        };
+    }
+
+    public static StudioTurnResult ParseStudioTurnResponse(
+        string? rawAssistantText,
+        string? preferredEmoji = null,
+        string providerId = "",
+        string? effectiveModel = null,
+        bool isInitialCreation = false)
+    {
+        if (string.IsNullOrWhiteSpace(rawAssistantText))
+        {
+            return new StudioTurnResult(
+                false, "edit", string.Empty, string.Empty, null, [], null, string.Empty, null,
+                Localized.T("CustomWidget.AiApi.Error.EmptyContent"), providerId, EffectiveModel: effectiveModel);
+        }
+
+        SplitInlineThinkBlock(rawAssistantText, out _, out string visibleText, out _);
+        string trimmedVisible = visibleText.Trim();
+        string extractedJson = CustomWidgetTemplates.ExtractJsonFromClipboardText(trimmedVisible);
+
+        if (string.IsNullOrWhiteSpace(extractedJson))
+        {
+            // Plain conversational reply with no JSON block -> treat as an answer turn
+            if (trimmedVisible.Length > 0)
+            {
+                return new StudioTurnResult(
+                    Success: true,
+                    Kind: "answer",
+                    Reply: trimmedVisible,
+                    ChangeSummary: string.Empty,
+                    BriefUpdates: null,
+                    Suggestions: [],
+                    SampleDataJson: null,
+                    ManifestJson: string.Empty,
+                    ParseResult: null,
+                    ErrorMessage: null,
+                    ProviderId: providerId,
+                    EffectiveModel: effectiveModel);
+            }
+
+            return new StudioTurnResult(
+                false, "edit", string.Empty, string.Empty, null, [], null, string.Empty, null,
+                Localized.T("CustomWidget.AiApi.Error.NoJsonBlockReturned"), providerId, EffectiveModel: effectiveModel);
+        }
+
+        try
+        {
+            using JsonDocument doc = JsonDocument.Parse(
+                extractedJson,
+                new JsonDocumentOptions
+                {
+                    AllowTrailingCommas = true,
+                    CommentHandling = JsonCommentHandling.Skip
+                });
+            JsonElement root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                return new StudioTurnResult(
+                    false, "edit", string.Empty, string.Empty, null, [], null, extractedJson, null,
+                    Localized.T("CustomWidget.AiApi.Error.MalformedResponse"), providerId, EffectiveModel: effectiveModel);
+            }
+
+            // Case A: Bare manifest.json object (legacy / Web AI paste / repair output)
+            bool isBareManifest = !root.TryGetProperty("kind", out _) &&
+                                  (root.TryGetProperty("schemaVersion", out _) || root.TryGetProperty("view", out _));
+            if (isBareManifest)
+            {
+                string prettyManifest = PrettyPrintJsonElement(root);
+                prettyManifest = ApplyEmojiAndMinVersion(prettyManifest, preferredEmoji, isInitialCreation);
+                CustomWidgetParseResult validation = CustomWidgetManifestParser.ValidateWithRuntimeHints(prettyManifest);
+                bool valid = validation.Manifest is not null && !validation.Diagnostics.Any(d => d.IsError);
+                return new StudioTurnResult(
+                    Success: valid,
+                    Kind: "edit",
+                    Reply: string.Empty,
+                    ChangeSummary: validation.Manifest?.Name ?? string.Empty,
+                    BriefUpdates: null,
+                    Suggestions: [],
+                    SampleDataJson: null,
+                    ManifestJson: prettyManifest,
+                    ParseResult: validation,
+                    ErrorMessage: valid ? null : validation.Diagnostics.FirstOrDefault(d => d.IsError)?.Message,
+                    ProviderId: providerId,
+                    EffectiveModel: effectiveModel);
+            }
+
+            // Case B: Structured co-creation envelope
+            string rawKind = GetStringProp(root, "kind").Trim().ToLowerInvariant();
+            string reply = GetStringProp(root, "reply").Trim();
+            string changeSummary = GetStringProp(root, "changeSummary").Trim();
+            StudioBriefUpdateSpec? briefUpdates = ParseBriefUpdatesElement(root);
+            List<string> suggestions = ReadStringListProp(root, "suggestions", maxItems: 4);
+            string? sampleDataJson = root.TryGetProperty("sampleData", out JsonElement sampleEl) &&
+                                     sampleEl.ValueKind == JsonValueKind.Object
+                ? PrettyPrintJsonElement(sampleEl)
+                : null;
+
+            bool hasManifestObject = root.TryGetProperty("manifest", out JsonElement manifestEl) &&
+                                     manifestEl.ValueKind == JsonValueKind.Object;
+            string? manifestStringCandidate = !hasManifestObject &&
+                                              root.TryGetProperty("manifest", out JsonElement manifestStrEl) &&
+                                              manifestStrEl.ValueKind == JsonValueKind.String
+                ? manifestStrEl.GetString()
+                : null;
+
+            string normalizedKind = rawKind switch
+            {
+                "answer" when !hasManifestObject && string.IsNullOrWhiteSpace(manifestStringCandidate) => "answer",
+                "clarify" when !hasManifestObject && string.IsNullOrWhiteSpace(manifestStringCandidate) => "clarify",
+                _ => (hasManifestObject || !string.IsNullOrWhiteSpace(manifestStringCandidate)) ? "edit" :
+                     (rawKind is "answer" or "clarify" ? rawKind : "answer")
+            };
+
+            if (!string.Equals(normalizedKind, "edit", StringComparison.Ordinal))
+            {
+                return new StudioTurnResult(
+                    Success: true,
+                    Kind: normalizedKind,
+                    Reply: string.IsNullOrWhiteSpace(reply) ? trimmedVisible : reply,
+                    ChangeSummary: string.Empty,
+                    BriefUpdates: briefUpdates,
+                    Suggestions: suggestions,
+                    SampleDataJson: null,
+                    ManifestJson: string.Empty,
+                    ParseResult: null,
+                    ErrorMessage: null,
+                    ProviderId: providerId,
+                    EffectiveModel: effectiveModel);
+            }
+
+            string manifestJson = hasManifestObject
+                ? PrettyPrintJsonElement(manifestEl)
+                : CustomWidgetTemplates.ExtractJsonFromClipboardText(manifestStringCandidate);
+            manifestJson = ApplyEmojiAndMinVersion(manifestJson, preferredEmoji, isInitialCreation);
+            CustomWidgetParseResult parseRes = CustomWidgetManifestParser.ValidateWithRuntimeHints(manifestJson);
+            bool isOk = parseRes.Manifest is not null && !parseRes.Diagnostics.Any(d => d.IsError);
+
+            return new StudioTurnResult(
+                Success: isOk,
+                Kind: "edit",
+                Reply: reply,
+                ChangeSummary: changeSummary,
+                BriefUpdates: briefUpdates,
+                Suggestions: suggestions,
+                SampleDataJson: sampleDataJson,
+                ManifestJson: manifestJson,
+                ParseResult: parseRes,
+                ErrorMessage: isOk ? null : parseRes.Diagnostics.FirstOrDefault(d => d.IsError)?.Message,
+                ProviderId: providerId,
+                EffectiveModel: effectiveModel);
+        }
+        catch (JsonException ex)
+        {
+            CustomWidgetParseResult fallbackParse = CustomWidgetManifestParser.ValidateWithRuntimeHints(extractedJson);
+            return new StudioTurnResult(
+                Success: false,
+                Kind: "edit",
+                Reply: string.Empty,
+                ChangeSummary: string.Empty,
+                BriefUpdates: null,
+                Suggestions: [],
+                SampleDataJson: null,
+                ManifestJson: extractedJson,
+                ParseResult: fallbackParse,
+                ErrorMessage: ex.Message,
+                ProviderId: providerId,
+                EffectiveModel: effectiveModel);
+        }
+    }
+
+    private static string ApplyEmojiAndMinVersion(
+        string manifestJson,
+        string? preferredEmoji,
+        bool isInitialCreation = false)
+    {
+        if (string.IsNullOrWhiteSpace(manifestJson))
+        {
+            return string.Empty;
+        }
+
+        string updated = manifestJson;
+        try
+        {
+            updated = CustomWidgetManifestAutoFixer.AutoWireMissingCapabilities(updated);
+        }
+        catch
+        {
+        }
+
+        if (isInitialCreation)
+        {
+            updated = CalibrateInitialDefaultHeightJson(updated);
+        }
+
+        if (CustomWidgetTemplates.IsEmojiIcon(preferredEmoji))
+        {
+            try
+            {
+                updated = CustomWidgetTemplates.WithUpdatedIconJson(updated, preferredEmoji!.Trim());
+            }
+            catch
+            {
+            }
+        }
+
+        try
+        {
+            updated = CustomWidgetManifestCompatibility.StampRequiredMinAppVersion(updated);
+        }
+        catch
+        {
+        }
+
+        return updated;
+    }
+
+    private static string CalibrateInitialDefaultHeightJson(string manifestJson)
+    {
+        try
+        {
+            CustomWidgetParseResult parsed = CustomWidgetManifestParser.Parse(manifestJson);
+            if (parsed.Manifest is not { } m)
+            {
+                return manifestJson;
+            }
+
+            CustomWidgetNodeSpec root = m.View;
+            if ((!string.Equals(root.Type, "Stack", StringComparison.OrdinalIgnoreCase) &&
+                 !string.Equals(root.Type, "ModuleStack", StringComparison.OrdinalIgnoreCase)) ||
+                string.Equals(root.Orientation, "horizontal", StringComparison.OrdinalIgnoreCase) ||
+                root.Children.Count < 3)
+            {
+                return manifestJson;
+            }
+
+            if (root.Children.Any(static c =>
+                    string.Equals(c.Type, "List", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(c.Type, "Scroll", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(c.Type, "Tabs", StringComparison.OrdinalIgnoreCase)))
+            {
+                return manifestJson;
+            }
+
+            double estimated = 64; // Frame chrome + root padding
+            foreach (CustomWidgetNodeSpec section in root.Children)
+            {
+                estimated += EstimateStaticSectionHeight(section) + Math.Max(4, root.Spacing);
+            }
+
+            int recommendedHeight = Math.Clamp((int)Math.Ceiling(estimated / 10.0) * 10, 260, 620);
+            if (m.DefaultSize.Height + 36 < recommendedHeight)
+            {
+                return CustomWidgetManifestCompatibility.WithUpdatedMetadataJson(
+                    manifestJson,
+                    newDefaultSize: new CustomWidgetSizeSpec(m.DefaultSize.Width, recommendedHeight));
+            }
+        }
+        catch
+        {
+        }
+
+        return manifestJson;
+    }
+
+    private static double EstimateStaticSectionHeight(CustomWidgetNodeSpec node)
+    {
+        if (node.Height is > 0)
+        {
+            return node.Height.Value;
+        }
+
+        return node.Type switch
+        {
+            "Divider" => 9,
+            "Spacer" => node.Size ?? 8,
+            "Text" => 24,
+            "Button" or "Input" or "Select" or "Segmented" or "Toggle" or "Slider" => 40,
+            "Grid" => EstimateGridSectionHeight(node),
+            "Card" or "Expander" => 24 + node.Children.Sum(c => EstimateStaticSectionHeight(c) + 6),
+            "RingGauge" => (node.Size ?? 88) + 28,
+            "CalendarGrid" => 230,
+            _ => 56
+        };
+    }
+
+    private static double EstimateGridSectionHeight(CustomWidgetNodeSpec grid)
+    {
+        if (grid.Children.Count == 0)
+        {
+            return 44;
+        }
+
+        int colCount = string.IsNullOrWhiteSpace(grid.Columns)
+            ? 1
+            : Math.Max(1, grid.Columns.Split(',', StringSplitOptions.RemoveEmptyEntries).Length);
+        int rowCount = Math.Max(1, (int)Math.Ceiling(grid.Children.Count / (double)colCount));
+        return rowCount * 54 + Math.Max(0, rowCount - 1) * Math.Max(4, grid.Spacing);
+    }
+
+    private async Task<string?> BuildPreFlightFeedbackAsync(
+        CustomWidgetManifest manifest,
+        bool isChinese,
+        CancellationToken ct)
+    {
+        var sb = new StringBuilder();
+
+        // 1. Static anti-facade & dead-control audit
+        IReadOnlyList<CustomWidgetHealthIssue> facadeIssues =
+            CustomWidgetHealthAnalyzer.DetectDeadControlsAndUnreadMutations(manifest, isChinese);
+        foreach (CustomWidgetHealthIssue issue in facadeIssues.Take(3))
+        {
+            sb.Append("- [Interaction Audit] ").Append(issue.Message)
+              .Append(" -> ").AppendLine(issue.SuggestedPrompt);
+        }
+
+        // 2. Bounded live network probe for httpJson / rss sources (Option B Pre-Flight Gate)
+        if (_networkSourceEngine is not null && manifest.Sources.Count > 0)
+        {
+            var defaultSettings = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (CustomWidgetSettingDefinition def in manifest.Settings)
+            {
+                if (!string.Equals(def.Type, "secret", StringComparison.OrdinalIgnoreCase))
+                {
+                    defaultSettings[def.Key] = def.DefaultValue ?? string.Empty;
+                }
+            }
+
+            var initialState = new Dictionary<string, string>(manifest.State, StringComparer.Ordinal);
+            var evalCtx = new CustomWidgetEvaluationContext
+            {
+                State = initialState,
+                Settings = defaultSettings
+            };
+
+            int probedCount = 0;
+            foreach (CustomWidgetSourceSpec src in manifest.Sources)
+            {
+                if (!string.Equals(src.Type, "httpJson", StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(src.Type, "rss", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (probedCount >= 3)
+                {
+                    break;
+                }
+                probedCount++;
+
+                bool hasSecretRef =
+                    (src.Url?.Contains("$secrets.", StringComparison.OrdinalIgnoreCase) ?? false) ||
+                    (src.Headers?.Values.Any(static v => v.Contains("$secrets.", StringComparison.OrdinalIgnoreCase)) ?? false);
+
+                string resolvedUrl = CustomWidgetExpressionEvaluator.Interpolate(src.Url, evalCtx).Trim();
+                Dictionary<string, string>? resolvedHeaders = null;
+                if (src.Headers is { Count: > 0 })
+                {
+                    resolvedHeaders = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    foreach ((string hk, string hv) in src.Headers)
+                    {
+                        string rv = CustomWidgetExpressionEvaluator.Interpolate(hv, evalCtx).Trim();
+                        if (!string.IsNullOrWhiteSpace(hk) && !string.IsNullOrWhiteSpace(rv))
+                        {
+                            resolvedHeaders[hk.Trim()] = rv;
+                        }
+                    }
+                }
+
+                CustomWidgetNetworkProbeResult probe = await _networkSourceEngine.ProbeSourceAsync(
+                    src,
+                    resolvedUrl,
+                    resolvedHeaders,
+                    hasSecretRef,
+                    ct);
+                if (!probe.IsHealthy)
+                {
+                    sb.Append("- [Live Network Probe Failed for source '")
+                      .Append(src.Id ?? src.Type)
+                      .Append("']: ")
+                      .AppendLine(probe.SummaryDiagnosis);
+                    if (!string.IsNullOrWhiteSpace(probe.JsonSkeleton))
+                    {
+                        sb.Append("  Actual Live JSON Response Skeleton: `")
+                          .Append(probe.JsonSkeleton)
+                          .AppendLine("`");
+                    }
+                }
+            }
+        }
+
+        return sb.Length > 0 ? sb.ToString().TrimEnd() : null;
+    }
+
+    private static string PrettyPrintJsonElement(JsonElement element)
+    {
+        using var ms = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(
+                   ms,
+                   new JsonWriterOptions
+                   {
+                       Indented = true,
+                       Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+                   }))
+        {
+            element.WriteTo(writer);
+        }
+        return Encoding.UTF8.GetString(ms.ToArray());
+    }
+
+    private static StudioBriefUpdateSpec? ParseBriefUpdatesElement(JsonElement root)
+    {
+        if (!root.TryGetProperty("briefUpdates", out JsonElement bu) || bu.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        var spec = new StudioBriefUpdateSpec
+        {
+            Purpose = bu.TryGetProperty("purpose", out JsonElement p) && p.ValueKind == JsonValueKind.String
+                ? p.GetString()
+                : null,
+            AddConfirmed = ReadStringListProp(bu, "addConfirmed", maxItems: 6),
+            AddRejected = ReadStringListProp(bu, "addRejected", maxItems: 6),
+            AddStylePreferences = ReadStringListProp(bu, "addStylePreferences", maxItems: 6)
+        };
+        return spec.HasAnyChange ? spec : null;
+    }
+
+    private static string GetStringProp(JsonElement obj, string name) =>
+        obj.TryGetProperty(name, out JsonElement el) && el.ValueKind == JsonValueKind.String
+            ? el.GetString() ?? string.Empty
+            : string.Empty;
+
+    private static List<string> ReadStringListProp(JsonElement obj, string name, int maxItems)
+    {
+        var list = new List<string>();
+        if (obj.TryGetProperty(name, out JsonElement arr) && arr.ValueKind == JsonValueKind.Array)
+        {
+            foreach (JsonElement item in arr.EnumerateArray())
+            {
+                if (item.ValueKind == JsonValueKind.String && item.GetString() is { Length: > 0 } s)
+                {
+                    list.Add(s.Trim());
+                    if (list.Count >= maxItems)
+                    {
+                        break;
+                    }
+                }
+            }
+        }
+        return list;
+    }
+
+    private async Task<(bool Success, string Content, string? Error)> SendProbeCompletionAsync(
+        ResolvedAiInvocation resolved,
+        bool includeThinkingParams,
+        CancellationToken requestToken,
+        CancellationToken callerToken = default)
+    {
+        (bool ok, int statusCode, string content, string? err) = await _aiService.SendSingleNonStreamingCompletionAsync(
+            resolved,
+            systemPrompt: null,
+            userPrompt: "Reply with OK.",
+            includeThinkingParams: includeThinkingParams,
+            isProbe: true,
+            requestToken: requestToken,
+            callerToken: callerToken);
+
+        if (!ok && includeThinkingParams && (statusCode == 400 || statusCode == 422))
+        {
+            return await SendProbeCompletionAsync(resolved, includeThinkingParams: false, requestToken, callerToken);
+        }
+
+        return (ok, string.IsNullOrWhiteSpace(content) ? "OK" : content, err);
+    }
+
+    private async Task<(bool Success, string Content, string Thinking, string? Error)> SendChatCompletionStreamingAsync(
+        ResolvedAiInvocation resolved,
+        string systemPrompt,
+        string userPrompt,
+        string? assistantPrefill,
+        string? repairPrompt,
+        bool isRepairRound,
+        Stopwatch sw,
+        Action<AiGenerationStreamProgress>? onProgress,
+        CancellationToken cancellationToken,
+        bool allowParamFallback = true)
+    {
+        bool includeThinkingParams = allowParamFallback && resolved.ThinkingMode != AiThinkingMode.Auto;
+        try
+        {
+            byte[] payload = DeskBoxAiService.BuildChatRequestPayload(
+                resolved,
+                systemPrompt,
+                userPrompt,
+                assistantPrefill,
+                repairPrompt,
+                stream: true,
+                includeThinkingParams: includeThinkingParams,
+                isProbe: false);
+
+            using var req = new HttpRequestMessage(HttpMethod.Post, resolved.Endpoint)
+            {
+                Content = DeskBoxAiService.CreateJsonContent(payload)
+            };
+            req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+            req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            DeskBoxAiService.ApplyAuthHeaders(req, resolved.Endpoint, resolved.ApiKey);
+
+            // Overall 5-minute ceiling so runaway connections still terminate, paired with 75s per-read idle guard.
+            using var overallCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            overallCts.CancelAfter(TimeSpan.FromMinutes(5));
+
+            using HttpResponseMessage resp = await _aiService.HttpClient.SendAsync(
+                req,
+                HttpCompletionOption.ResponseHeadersRead,
+                overallCts.Token);
+
+            if (!resp.IsSuccessStatusCode)
+            {
+                string errBody = await resp.Content.ReadAsStringAsync(overallCts.Token);
+                if (includeThinkingParams &&
+                    ((int)resp.StatusCode == 400 || (int)resp.StatusCode == 422))
+                {
+                    return await SendChatCompletionStreamingAsync(
+                        resolved,
+                        systemPrompt,
+                        userPrompt,
+                        assistantPrefill,
+                        repairPrompt,
+                        isRepairRound,
+                        sw,
+                        onProgress,
+                        cancellationToken,
+                        allowParamFallback: false);
+                }
+
+                return (false, string.Empty, string.Empty, DeskBoxAiService.FormatHttpError(resp.StatusCode, errBody));
+            }
+
+            string? mediaType = resp.Content.Headers.ContentType?.MediaType;
+            bool isJsonNonStream = string.Equals(mediaType, "application/json", StringComparison.OrdinalIgnoreCase);
+            if (isJsonNonStream)
+            {
+                string jsonBody = await resp.Content.ReadAsStringAsync(overallCts.Token);
+                if (DeskBoxAiService.TryExtractNonStreamingReply(jsonBody, out string fullContent, out string fullReasoning))
+                {
+                    SplitInlineThinkBlock(fullContent, out string inlineThink, out string visibleContent, out _);
+                    string mergedThink = MergeThinking(fullReasoning, inlineThink);
+                    EmitProgress(
+                        onProgress,
+                        isRepairRound ? AiGenerationStage.AutoRepairing : AiGenerationStage.GeneratingJson,
+                        resolved,
+                        mergedThink,
+                        visibleContent,
+                        sw.Elapsed);
+                    return (true, fullContent, mergedThink, null);
+                }
+
+                return (false, string.Empty, string.Empty, Localized.T("CustomWidget.AiApi.Error.MalformedResponse"));
+            }
+
+            await using Stream bodyStream = await resp.Content.ReadAsStreamAsync(overallCts.Token);
+            using var reader = new StreamReader(bodyStream, Encoding.UTF8);
+
+            var rawContentBuilder = new StringBuilder(2048);
+            var reasoningBuilder = new StringBuilder(1024);
+            var nonSseFallbackBuilder = new StringBuilder();
+            bool sawAnySseData = false;
+            long lastEmitMs = -1000;
+            AiGenerationStage lastStage = AiGenerationStage.Connecting;
+
+            while (true)
+            {
+                using var idleCts = CancellationTokenSource.CreateLinkedTokenSource(overallCts.Token);
+                idleCts.CancelAfter(TimeSpan.FromSeconds(75));
+
+                string? line = await reader.ReadLineAsync(idleCts.Token);
+                if (line is null)
+                {
+                    break;
+                }
+
+                if (line.Length == 0 || line.StartsWith(':'))
+                {
+                    continue;
+                }
+
+                string trimmedLine = line.Trim();
+                if (!trimmedLine.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!sawAnySseData && nonSseFallbackBuilder.Length < 262_144)
+                    {
+                        nonSseFallbackBuilder.AppendLine(line);
+                    }
+                    continue;
+                }
+
+                sawAnySseData = true;
+                string dataPayload = trimmedLine["data:".Length..].Trim();
+                if (string.Equals(dataPayload, "[DONE]", StringComparison.Ordinal))
+                {
+                    break;
+                }
+
+                if (dataPayload.Length == 0)
+                {
+                    continue;
+                }
+
+                if (!DeskBoxAiService.TryAppendSseDelta(dataPayload, rawContentBuilder, reasoningBuilder, out string? streamError))
+                {
+                    if (!string.IsNullOrWhiteSpace(streamError))
+                    {
+                        return (false, string.Empty, string.Empty, streamError);
+                    }
+                    continue;
+                }
+
+                SplitInlineThinkBlock(
+                    rawContentBuilder.ToString(),
+                    out string inlineThinking,
+                    out string visibleContent,
+                    out bool insideInlineThink);
+                string combinedThinking = MergeThinking(reasoningBuilder.ToString(), inlineThinking);
+
+                AiGenerationStage stage = isRepairRound
+                    ? AiGenerationStage.AutoRepairing
+                    : (visibleContent.Length == 0 && (combinedThinking.Length > 0 || insideInlineThink)
+                        ? AiGenerationStage.Thinking
+                        : AiGenerationStage.GeneratingJson);
+
+                long nowMs = sw.ElapsedMilliseconds;
+                if (stage != lastStage || nowMs - lastEmitMs >= 65)
+                {
+                    lastStage = stage;
+                    lastEmitMs = nowMs;
+                    EmitProgress(onProgress, stage, resolved, combinedThinking, visibleContent, sw.Elapsed);
+                }
+            }
+
+            if (!sawAnySseData && nonSseFallbackBuilder.Length > 0)
+            {
+                string rawBody = nonSseFallbackBuilder.ToString();
+                if (DeskBoxAiService.TryExtractNonStreamingReply(rawBody, out string fallbackContent, out string fallbackReasoning))
+                {
+                    SplitInlineThinkBlock(fallbackContent, out string inlineThink, out string visible, out _);
+                    string mergedThink = MergeThinking(fallbackReasoning, inlineThink);
+                    EmitProgress(
+                        onProgress,
+                        isRepairRound ? AiGenerationStage.AutoRepairing : AiGenerationStage.GeneratingJson,
+                        resolved,
+                        mergedThink,
+                        visible,
+                        sw.Elapsed);
+                    return (true, fallbackContent, mergedThink, null);
+                }
+            }
+
+            string finalContent = rawContentBuilder.ToString();
+            SplitInlineThinkBlock(finalContent, out string finalInlineThink, out string finalVisible, out _);
+            string finalThinking = MergeThinking(reasoningBuilder.ToString(), finalInlineThink);
+
+            if (finalContent.Length == 0)
+            {
+                return (false, string.Empty, finalThinking, Localized.T("CustomWidget.AiApi.Error.EmptyContent"));
+            }
+
+            EmitProgress(
+                onProgress,
+                isRepairRound ? AiGenerationStage.AutoRepairing : AiGenerationStage.GeneratingJson,
+                resolved,
+                finalThinking,
+                finalVisible,
+                sw.Elapsed);
+
+            return (true, finalContent, finalThinking, null);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return (false, string.Empty, string.Empty, Localized.T("CustomWidget.AiApi.Error.GenerationCancelled"));
+        }
+        catch (OperationCanceledException)
+        {
+            return (false, string.Empty, string.Empty, Localized.T("CustomWidget.AiApi.Error.StreamTimeout"));
+        }
+        catch (Exception ex)
+        {
+            return (false, string.Empty, string.Empty, ex.Message);
+        }
+    }
+
+    public static void SplitInlineThinkBlock(
+        string rawContent,
+        out string inlineThinking,
+        out string visibleContent,
+        out bool stillInsideThink)
+    {
+        inlineThinking = string.Empty;
+        visibleContent = rawContent;
+        stillInsideThink = false;
+
+        if (string.IsNullOrEmpty(rawContent))
+        {
+            return;
+        }
+
+        int openIdx = rawContent.IndexOf("<think>", StringComparison.OrdinalIgnoreCase);
+        if (openIdx < 0)
+        {
+            return;
+        }
+
+        int afterOpen = openIdx + "<think>".Length;
+        int closeIdx = rawContent.IndexOf("</think>", afterOpen, StringComparison.OrdinalIgnoreCase);
+        if (closeIdx < 0)
+        {
+            inlineThinking = rawContent[afterOpen..].TrimStart();
+            visibleContent = rawContent[..openIdx].Trim();
+            stillInsideThink = true;
+            return;
+        }
+
+        inlineThinking = rawContent[afterOpen..closeIdx].Trim();
+        visibleContent = (rawContent[..openIdx] + rawContent[(closeIdx + "</think>".Length)..]).TrimStart();
+    }
+
+    private static string MergeThinking(string deltaReasoning, string inlineThinking)
+    {
+        if (string.IsNullOrWhiteSpace(deltaReasoning))
+        {
+            return inlineThinking;
+        }
+
+        if (string.IsNullOrWhiteSpace(inlineThinking))
+        {
+            return deltaReasoning;
+        }
+
+        return deltaReasoning.TrimEnd() + "\n" + inlineThinking;
+    }
+
+    public static string? TryExtractStreamingWidgetName(string partialContent)
+    {
+        if (string.IsNullOrWhiteSpace(partialContent))
+        {
+            return null;
+        }
+
+        Match match = StreamingNameRegex.Match(partialContent);
+        if (!match.Success)
+        {
+            return null;
+        }
+
+        string candidate = match.Groups["name"].Value.Trim();
+        return candidate.Length > 0 ? candidate : null;
+    }
+
+    private static void EmitProgress(
+        Action<AiGenerationStreamProgress>? onProgress,
+        AiGenerationStage stage,
+        ResolvedAiInvocation resolved,
+        string thinkingText,
+        string visibleContent,
+        TimeSpan elapsed)
+    {
+        if (onProgress is null)
+        {
+            return;
+        }
+
+        onProgress(new AiGenerationStreamProgress(
+            stage,
+            resolved.Preset.DisplayName,
+            resolved.Model,
+            thinkingText,
+            visibleContent,
+            thinkingText.Length,
+            visibleContent.Length,
+            TryExtractStreamingWidgetName(visibleContent),
+            elapsed));
+    }
+
+    private static List<string> ParseModelListJson(string rawJson)
+    {
+        var list = new List<string>();
+        if (string.IsNullOrWhiteSpace(rawJson))
+        {
+            return list;
+        }
+
+        try
+        {
+            using JsonDocument doc = JsonDocument.Parse(rawJson);
+            JsonElement root = doc.RootElement;
+            JsonElement arrayEl = default;
+            bool hasArray = false;
+
+            if (root.ValueKind == JsonValueKind.Object)
+            {
+                if (root.TryGetProperty("data", out arrayEl) && arrayEl.ValueKind == JsonValueKind.Array)
+                {
+                    hasArray = true;
+                }
+                else if (root.TryGetProperty("models", out arrayEl) && arrayEl.ValueKind == JsonValueKind.Array)
+                {
+                    hasArray = true;
+                }
+            }
+            else if (root.ValueKind == JsonValueKind.Array)
+            {
+                arrayEl = root;
+                hasArray = true;
+            }
+
+            if (!hasArray)
+            {
+                return list;
+            }
+
+            foreach (JsonElement item in arrayEl.EnumerateArray())
+            {
+                string? id = null;
+                if (item.ValueKind == JsonValueKind.String)
+                {
+                    id = item.GetString();
+                }
+                else if (item.ValueKind == JsonValueKind.Object)
+                {
+                    if (item.TryGetProperty("id", out JsonElement idEl) && idEl.ValueKind == JsonValueKind.String)
+                    {
+                        id = idEl.GetString();
+                    }
+                    else if (item.TryGetProperty("name", out JsonElement nameEl) && nameEl.ValueKind == JsonValueKind.String)
+                    {
+                        id = nameEl.GetString();
+                    }
+                }
+
+                if (string.IsNullOrWhiteSpace(id))
+                {
+                    continue;
+                }
+
+                string cleaned = id.Trim();
+                if (cleaned.StartsWith("models/", StringComparison.OrdinalIgnoreCase))
+                {
+                    cleaned = cleaned["models/".Length..];
+                }
+
+                if (IsNonChatModelId(cleaned))
+                {
+                    continue;
+                }
+
+                list.Add(cleaned);
+            }
+        }
+        catch
+        {
+        }
+
+        return list;
+    }
+
+    private static bool IsNonChatModelId(string modelId)
+    {
+        string lower = modelId.ToLowerInvariant();
+        return lower.Contains("embedding", StringComparison.Ordinal) ||
+               lower.Contains("rerank", StringComparison.Ordinal) ||
+               lower.Contains("whisper", StringComparison.Ordinal) ||
+               lower.Contains("tts", StringComparison.Ordinal) ||
+               lower.Contains("dall-e", StringComparison.Ordinal) ||
+               lower.Contains("moderation", StringComparison.Ordinal) ||
+               lower.StartsWith("babbage-", StringComparison.Ordinal) ||
+               lower.StartsWith("davinci-", StringComparison.Ordinal);
+    }
+}

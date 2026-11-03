@@ -1,0 +1,227 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="DeskBox.Views.SettingsSections.AiSettingsSection"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:svc="using:DeskBox.Services"
+    xmlns:toolkit="using:CommunityToolkit.WinUI.Controls">
+
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="ms-appx:///Styles/SettingsOverviewResources.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </UserControl.Resources>
+
+    <StackPanel Style="{StaticResource SectionPanelStyle}" Spacing="12">
+        <InfoBar
+            x:Name="AiStatusInfoBar"
+            IsClosable="True"
+            IsOpen="False" />
+
+        <StackPanel Spacing="4">
+            <TextBlock
+                Style="{StaticResource SectionTitleTextStyle}"
+                AutomationProperties.HeadingLevel="Level1"
+                svc:Localized.Key="Settings.Nav.AiSettings" />
+            <TextBlock
+                Style="{StaticResource SettingDescriptionTextStyle}"
+                TextWrapping="Wrap"
+                svc:Localized.Key="Settings.AiSettings.Subtitle" />
+        </StackPanel>
+
+        <!-- Group 1: Keyless Web AI Synergy (Zero-Setup Default for Beginners) -->
+        <StackPanel Spacing="4">
+            <StackPanel Style="{StaticResource SettingsSubsectionHeaderStyle}">
+                <TextBlock
+                    Style="{StaticResource SettingsSubsectionTitleTextStyle}"
+                    AutomationProperties.HeadingLevel="Level2"
+                    svc:Localized.Key="Settings.AiSettings.Group.WebFallback" />
+            </StackPanel>
+
+            <toolkit:SettingsCard
+                HorizontalContentAlignment="Right"
+                svc:Localized.DescriptionKey="CustomWidget.Settings.WebAi.Description"
+                svc:Localized.HeaderKey="CustomWidget.Settings.WebAi.Header">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE774;" />
+                </toolkit:SettingsCard.HeaderIcon>
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Border
+                        CornerRadius="11"
+                        Padding="9,3"
+                        VerticalAlignment="Center"
+                        Background="{ThemeResource SubtleFillColorSecondaryBrush}">
+                        <TextBlock
+                            x:Name="WebAiReadyBadgeText"
+                            FontSize="11.5"
+                            Foreground="{ThemeResource SystemFillColorSuccessBrush}" />
+                    </Border>
+                    <ComboBox
+                        x:Name="WebAiTargetComboBox"
+                        MinWidth="172"
+                        SelectionChanged="WebAiTargetComboBox_SelectionChanged"
+                        svc:Localized.AutomationNameKey="CustomWidget.Settings.WebAi.Header" />
+                </StackPanel>
+            </toolkit:SettingsCard>
+        </StackPanel>
+
+        <!-- Group 2: Direct API & Local Model Service -->
+        <StackPanel Spacing="4">
+            <StackPanel Style="{StaticResource SettingsSubsectionHeaderStyle}">
+                <TextBlock
+                    Style="{StaticResource SettingsSubsectionTitleTextStyle}"
+                    AutomationProperties.HeadingLevel="Level2"
+                    svc:Localized.Key="Settings.AiSettings.Group.ModelService" />
+            </StackPanel>
+
+            <toolkit:SettingsExpander
+                x:Name="AiKeyExpander"
+                IsExpanded="False"
+                svc:Localized.HeaderKey="CustomWidget.Settings.AiKey.Header">
+                <toolkit:SettingsExpander.HeaderIcon>
+                    <FontIcon Glyph="&#xE8D7;" />
+                </toolkit:SettingsExpander.HeaderIcon>
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <ComboBox
+                        x:Name="AiProviderComboBox"
+                        MinWidth="176"
+                        VerticalAlignment="Center"
+                        SelectionChanged="AiProviderComboBox_SelectionChanged"
+                        svc:Localized.AutomationNameKey="CustomWidget.Studio.Direct.ProviderTitle" />
+                    <HyperlinkButton
+                        x:Name="AiGetKeyHeaderLink"
+                        Padding="8,4"
+                        FontSize="12"
+                        VerticalAlignment="Center"
+                        Visibility="Collapsed" />
+                    <Button
+                        x:Name="AiKeyTestHeaderButton"
+                        Height="34"
+                        MinHeight="34"
+                        Padding="12,0"
+                        CornerRadius="6"
+                        Visibility="Collapsed"
+                        Click="AiInlineTestButton_Click"
+                        svc:Localized.Key="CustomWidget.AiConfig.TestConnection" />
+                    <Button
+                        x:Name="AiKeyActionButton"
+                        Click="AiKeyButton_Click"
+                        Style="{StaticResource ActionButtonStyle}" />
+                </StackPanel>
+                <toolkit:SettingsExpander.Items>
+                    <toolkit:SettingsCard
+                        HorizontalContentAlignment="Right"
+                        svc:Localized.DescriptionKey="CustomWidget.AiConfig.ModelCardDesc"
+                        svc:Localized.HeaderKey="CustomWidget.AiConfig.ModelCardHeader">
+                        <toolkit:SettingsCard.HeaderIcon>
+                            <FontIcon Glyph="&#xE950;" />
+                        </toolkit:SettingsCard.HeaderIcon>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <ComboBox
+                                x:Name="AiInlineModelComboBox"
+                                IsEditable="True"
+                                MinWidth="208"
+                                VerticalAlignment="Center"
+                                LostFocus="AiInlineModelComboBox_LostFocus"
+                                SelectionChanged="AiInlineModelComboBox_SelectionChanged"
+                                svc:Localized.AutomationNameKey="CustomWidget.AiConfig.ModelCardHeader" />
+                            <Button
+                                x:Name="AiInlineFetchModelsButton"
+                                Height="32"
+                                MinHeight="32"
+                                Padding="12,0"
+                                CornerRadius="6"
+                                VerticalAlignment="Center"
+                                Click="AiInlineFetchModelsButton_Click"
+                                svc:Localized.Key="CustomWidget.AiConfig.FetchModels" />
+                        </StackPanel>
+                    </toolkit:SettingsCard>
+
+                    <toolkit:SettingsCard
+                        HorizontalContentAlignment="Right"
+                        svc:Localized.DescriptionKey="Settings.AiSettings.RoutingThinkingHint"
+                        svc:Localized.HeaderKey="CustomWidget.AiConfig.ThinkingHeader">
+                        <toolkit:SettingsCard.HeaderIcon>
+                            <FontIcon Glyph="&#xE945;" />
+                        </toolkit:SettingsCard.HeaderIcon>
+                        <ComboBox
+                            x:Name="AiInlineThinkingComboBox"
+                            MinWidth="188"
+                            SelectionChanged="AiInlineThinkingComboBox_SelectionChanged"
+                            svc:Localized.AutomationNameKey="CustomWidget.AiConfig.ThinkingHeader" />
+                    </toolkit:SettingsCard>
+
+                    <toolkit:SettingsCard
+                        x:Name="AiEndpointStatusCard"
+                        HorizontalContentAlignment="Right"
+                        svc:Localized.HeaderKey="CustomWidget.AiConfig.EndpointCardHeader">
+                        <toolkit:SettingsCard.HeaderIcon>
+                            <FontIcon Glyph="&#xE774;" />
+                        </toolkit:SettingsCard.HeaderIcon>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Button
+                                x:Name="AiInlineTestButton"
+                                Click="AiInlineTestButton_Click"
+                                Style="{StaticResource ActionButtonStyle}"
+                                svc:Localized.Key="CustomWidget.AiConfig.TestConnection" />
+                            <Button
+                                Click="AiKeyButton_Click"
+                                Style="{StaticResource ActionButtonStyle}"
+                                svc:Localized.Key="CustomWidget.AiConfig.EndpointEditButton" />
+                        </StackPanel>
+                    </toolkit:SettingsCard>
+                </toolkit:SettingsExpander.Items>
+            </toolkit:SettingsExpander>
+        </StackPanel>
+
+        <!-- Group 3: External Agent Ecosystem (Collapsed by Default for Developers) -->
+        <StackPanel
+            x:Name="AgentHubHostPanel"
+            Spacing="4">
+            <StackPanel Style="{StaticResource SettingsSubsectionHeaderStyle}">
+                <TextBlock
+                    Style="{StaticResource SettingsSubsectionTitleTextStyle}"
+                    AutomationProperties.HeadingLevel="Level2"
+                    svc:Localized.Key="Settings.AiSettings.Group.ExternalAgents" />
+            </StackPanel>
+
+            <toolkit:SettingsExpander
+                x:Name="DeveloperAgentExpander"
+                IsExpanded="False">
+                <toolkit:SettingsExpander.HeaderIcon>
+                    <FontIcon Glyph="&#xE943;" />
+                </toolkit:SettingsExpander.HeaderIcon>
+                <Border
+                    CornerRadius="11"
+                    Padding="10,3"
+                    VerticalAlignment="Center"
+                    Background="{ThemeResource SubtleFillColorSecondaryBrush}">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <Border
+                            x:Name="DeveloperBridgeStatusDot"
+                            Width="8"
+                            Height="8"
+                            CornerRadius="4"
+                            VerticalAlignment="Center"
+                            Background="{ThemeResource SystemFillColorSuccessBrush}" />
+                        <TextBlock
+                            x:Name="DeveloperBridgeStatusText"
+                            FontSize="11.5"
+                            VerticalAlignment="Center" />
+                    </StackPanel>
+                </Border>
+                <toolkit:SettingsExpander.Items>
+                    <toolkit:SettingsCard
+                        ContentAlignment="Vertical"
+                        HorizontalContentAlignment="Stretch">
+                        <StackPanel
+                            x:Name="AgentHubDynamicContentPanel"
+                            Spacing="12" />
+                    </toolkit:SettingsCard>
+                </toolkit:SettingsExpander.Items>
+            </toolkit:SettingsExpander>
+        </StackPanel>
+    </StackPanel>
+</UserControl>

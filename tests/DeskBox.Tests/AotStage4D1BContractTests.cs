@@ -1,4 +1,4 @@
-﻿using System.Text.RegularExpressions;
+using System.Text.RegularExpressions;
 
 namespace DeskBox.Tests;
 
@@ -53,21 +53,16 @@ public sealed class AotStage4D1BContractTests
         Assert.DoesNotContain("SetObjectProperty", source, StringComparison.Ordinal);
         Assert.DoesNotContain("GetType().GetProperty", source, StringComparison.Ordinal);
 
-        // Combos such as Grid|HeaderKey or StackPanel|HeaderKey are intentional
-        // search-catalog markers (indexed by update-settings-search-catalog.ps1);
-        // Localized.cs deliberately ignores them at runtime because those
-        // containers have no Header/Description property. InfoBar carries the
-        // native notice Title/Message properties for the notice cards.
         IReadOnlyDictionary<string, int> usages = ReadLocalizedXamlUsages();
         Assert.Equal(7, usages.Count);
-        Assert.Equal(219, usages["toolkit:SettingsCard|HeaderKey"]);
-        Assert.Equal(187, usages["toolkit:SettingsCard|DescriptionKey"]);
-        Assert.Equal(36, usages["toolkit:SettingsExpander|HeaderKey"]);
+        Assert.Equal(242, usages["toolkit:SettingsCard|HeaderKey"]);
+        Assert.Equal(217, usages["toolkit:SettingsCard|DescriptionKey"]);
+        Assert.Equal(37, usages["toolkit:SettingsExpander|HeaderKey"]);
         Assert.Equal(22, usages["toolkit:SettingsExpander|DescriptionKey"]);
         Assert.Equal(2, usages["TextBox|HeaderKey"]);
-        Assert.Equal(6, usages["InfoBar|HeaderKey"]);
-        Assert.Equal(6, usages["InfoBar|DescriptionKey"]);
-        Assert.Equal(478, usages.Values.Sum());
+        Assert.Equal(7, usages["InfoBar|HeaderKey"]);
+        Assert.Equal(7, usages["InfoBar|DescriptionKey"]);
+        Assert.Equal(534, usages.Values.Sum());
     }
 
     [Fact]

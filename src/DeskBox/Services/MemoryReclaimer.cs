@@ -50,7 +50,8 @@ internal static class MemoryReclaimer
 
     internal static MemoryReclaimResult TryCollect(
         string reason,
-        bool bypassCooldown = false)
+        bool bypassCooldown = false,
+        bool updateCooldown = true)
     {
         reason = string.IsNullOrWhiteSpace(reason)
             ? "unspecified"
@@ -95,16 +96,23 @@ internal static class MemoryReclaimer
             GC.WaitForPendingFinalizers();
 
             // A second pass reclaims objects that became unreachable when their
-            // finalizers released the native references.
+            // finalizers released the native references, compacts both LOH and
+            // SOH, and allows the runtime (with ConserveMemory=9 + DATAS) to
+            // decommit empty GC segment pages back to the OS.
+            System.Runtime.GCSettings.LargeObjectHeapCompactionMode =
+                System.Runtime.GCLargeObjectHeapCompactionMode.CompactOnce;
             GC.Collect(
                 GC.MaxGeneration,
-                GCCollectionMode.Forced,
+                GCCollectionMode.Aggressive,
                 blocking: true,
-                compacting: false);
+                compacting: true);
 
-            Volatile.Write(
-                ref s_lastCompletedTimestamp,
-                Stopwatch.GetTimestamp());
+            if (updateCooldown)
+            {
+                Volatile.Write(
+                    ref s_lastCompletedTimestamp,
+                    Stopwatch.GetTimestamp());
+            }
             int collectionsAfter = GC.CollectionCount(GC.MaxGeneration);
             long heapAfterBytes = GetHeapSizeBytes();
             long privateAfterBytes = GetPrivateBytes();

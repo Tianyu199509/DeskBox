@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using DeskBox.Contracts;
@@ -84,6 +84,11 @@ public static class SettingsIpcMethods
     public const string DataQuickCaptureClearRecent = "data.qc-clear-recent";
     public const string DataQuickCaptureCacheCleanup = "data.qc-cache-cleanup";
     public const string DataQuickCaptureCacheInfo = "data.qc-cache-info";
+    public const string DataQuickCaptureMirrorFolderGet = "data.qc-mirror-get";
+    public const string DataQuickCaptureMirrorFolderSet = "data.qc-mirror-set";
+    public const string DataClipboardStats = "data.clipboard-stats";
+    public const string DataClipboardClearUnpinned = "data.clipboard-clear-unpinned";
+    public const string DataClipboardObservedApps = "data.clipboard-observed-apps";
 
     // ── Restore facade (batch 3c-2) ─────────────────────────────────
     public const string RestorePrepare = "restore.prepare";
@@ -127,9 +132,16 @@ public static class SettingsIpcMethods
     /// it directly.
     /// </summary>
     public const string WidgetGlanceApplyData = "widget.glance-apply-data";
+    public const string WidgetCustomList = "widget.custom-list";
+    public const string WidgetCustomCreate = "widget.custom-create";
+    public const string WidgetCustomSetEnabled = "widget.custom-set-enabled";
+    public const string WidgetCustomLocate = "widget.custom-locate";
+    public const string WidgetCustomOpenStudio = "widget.custom-open-studio";
+    public const string WidgetCustomRemove = "widget.custom-remove";
     public const string WidgetMoveAll = "widget.move-all";
     public const string WidgetMoveAllUndo = "widget.move-all-undo";
     public const string WidgetApplyScreenBinding = "widget.apply-screen-binding";
+    public const string WidgetRecalibrateDisplayLayout = "widget.recalibrate-display-layout";
     // (widget.folder-watcher-health removed in deep review R18, A-#27: the
     // host never sent it — runtime-health diagnostics ride the app facade,
     // which reads watcher snapshots directly on the main process.)
@@ -330,7 +342,11 @@ public sealed record SettingsIpcGlanceRename(string WidgetId, string NewName);
 
 public sealed record SettingsIpcGlanceCreate(string? SourceWidgetId);
 
-public sealed record SettingsIpcMoveAllResult(int MovedCount, long Handle);
+public sealed record SettingsIpcMoveAllResult(
+    int MovedCount,
+    long Handle,
+    bool Persisted = true,
+    string? LayoutSliceJson = null);
 
 public sealed record SettingsIpcMigrationRequest(string NewRootPath, bool RestartIfCopiesRemoved);
 
@@ -455,4 +471,7 @@ public static class SettingsIpcPayload
 [JsonSerializable(typeof(DeskBox.Contracts.EverythingConnectionSnapshot))]
 [JsonSerializable(typeof(SettingsIpcEverythingRefresh))]
 [JsonSerializable(typeof(SettingsIpcEverythingPath))]
+[JsonSerializable(typeof(ClipboardStorageStats))]
+[JsonSerializable(typeof(ClipboardObservedApp))]
+[JsonSerializable(typeof(List<ClipboardObservedApp>))]
 internal sealed partial class SettingsIpcJsonContext : JsonSerializerContext;

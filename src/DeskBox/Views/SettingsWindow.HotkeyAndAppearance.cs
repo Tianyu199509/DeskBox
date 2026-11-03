@@ -309,6 +309,15 @@ public sealed partial class SettingsWindow
 
     private void SettingsRoot_PointerPressedHandled(object sender, PointerRoutedEventArgs e)
     {
+        if (!e.Handled &&
+            e.GetCurrentPoint(SettingsRoot).Properties.PointerUpdateKind == Microsoft.UI.Input.PointerUpdateKind.XButton1Pressed &&
+            !HasOpenOverlayPopup() &&
+            TryNavigateBack())
+        {
+            e.Handled = true;
+            return;
+        }
+
         if (TryFindAncestor<Slider>(e.OriginalSource as DependencyObject, out var slider))
         {
             BeginAppearanceSliderDrag();
@@ -498,6 +507,72 @@ public sealed partial class SettingsWindow
 
     private void ClearPerWidgetBackgroundsButton_Click(object sender, RoutedEventArgs e)
     {
-        _appearanceSettingsViewModel.ClearPerWidgetBackgrounds();
+        if (sender is not FrameworkElement anchor)
+        {
+            _appearanceSettingsViewModel.ClearPerWidgetBackgrounds();
+            return;
+        }
+
+        var flyout = new Flyout
+        {
+            Placement = FlyoutPlacementMode.BottomEdgeAlignedRight
+        };
+
+        var promptText = new TextBlock
+        {
+            MaxWidth = 280,
+            Text = _localizationService.T("Settings.WidgetBackground.PerWidget.ConfirmPrompt"),
+            TextWrapping = TextWrapping.Wrap
+        };
+
+        var cancelButton = new Button
+        {
+            MinHeight = 32,
+            Content = _localizationService.T("Common.Cancel")
+        };
+        if (SettingsRoot.Resources.TryGetValue("ActionButtonStyle", out object? actionStyleObj) &&
+            actionStyleObj is Style actionStyle)
+        {
+            cancelButton.Style = actionStyle;
+        }
+        cancelButton.Click += (_, _) => flyout.Hide();
+
+        var confirmButton = new Button
+        {
+            MinHeight = 32,
+            Content = _localizationService.T("Settings.WidgetBackground.PerWidget.Clear")
+        };
+        if (SettingsRoot.Resources.TryGetValue("DangerActionButtonStyle", out object? dangerStyleObj) &&
+            dangerStyleObj is Style dangerStyle)
+        {
+            confirmButton.Style = dangerStyle;
+        }
+        confirmButton.Click += (_, _) =>
+        {
+            flyout.Hide();
+            _appearanceSettingsViewModel.ClearPerWidgetBackgrounds();
+        };
+
+        var buttonRow = new StackPanel
+        {
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Orientation = Orientation.Horizontal,
+            Spacing = 8
+        };
+        buttonRow.Children.Add(cancelButton);
+        buttonRow.Children.Add(confirmButton);
+
+        var contentPanel = new StackPanel
+        {
+            MinWidth = 220,
+            MaxWidth = 300,
+            Spacing = 12,
+            RequestedTheme = anchor.ActualTheme
+        };
+        contentPanel.Children.Add(promptText);
+        contentPanel.Children.Add(buttonRow);
+
+        flyout.Content = contentPanel;
+        flyout.ShowAt(anchor);
     }
 }

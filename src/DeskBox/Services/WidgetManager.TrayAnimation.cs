@@ -1,5 +1,6 @@
-﻿﻿// Copyright (c) DeskBox. All rights reserved.
+// Copyright (c) DeskBox. All rights reserved.
 
+using DeskBox.Contracts;
 using DeskBox.Models;
 using DeskBox.Helpers;
 using DeskBox.Controls.WidgetContents;
@@ -174,8 +175,8 @@ public sealed partial class WidgetManager
                 ActivateIdleHighestWindow(shownWindows);
                 QueueTrayRaiseTopMostConfirmation(shownWindows);
             }
-            SaveBatchVisibilityState();
             await _trayBatchAnimationDriver.WaitForIdleAsync();
+            SaveBatchVisibilityState();
             if (!WidgetLayerService.UsesQuickRevealMode() &&
                 shownWindows.Count > 0)
             {
@@ -231,11 +232,6 @@ public sealed partial class WidgetManager
                 {
                     App.LogVerbose($"[TrayBatch] Prepare useLoaded content widget={FormatWidget(config)} {FormatHostWindow(existingContent)}");
                     existingContent.RestoreBoundsForCurrentTopology();
-                    if (!existingContent.Visible)
-                    {
-                        existingContent.PrepareTrayShowAnimation();
-                    }
-
                     return existingContent;
                 }
 
@@ -254,10 +250,6 @@ public sealed partial class WidgetManager
         {
             App.LogVerbose($"[TrayBatch] Prepare useLoaded widget={FormatWidget(config)} {FormatHostWindow(existing)}");
             existing.RestoreBoundsForCurrentTopology();
-            if (!existing.Visible)
-            {
-                existing.PrepareTrayShowAnimation();
-            }
             return existing;
         }
 
@@ -280,7 +272,10 @@ public sealed partial class WidgetManager
                 $"{FormatHostWindow(window)}: {ex}"));
     }
 
-    private void PlayPreparedTrayShowAnimations(IReadOnlyList<IDesktopWidgetWindow> windows)
+    private void PlayPreparedTrayShowAnimations(
+        IReadOnlyList<IDesktopWidgetWindow> windows,
+        WidgetAnimationOptions? optionsOverride = null,
+        bool? staggerOverride = null)
     {
         if (windows.Count == 0)
         {
@@ -288,42 +283,46 @@ public sealed partial class WidgetManager
         }
 
         App.LogVerbose($"[TrayBatch] Starting batch show for {windows.Count} widgets...");
-        
+
         // ⭐ 统一驱动：同一时钟 + DeferWindowPos 原子批量提交，所有窗口锁步滑动
         try
         {
-            // Step 1: 在同一帧内完成所有偏移量设置
-                ApplyTrayAnimationGroupOffset(windows);
+            ApplyTrayAnimationGroupOffset(windows);
 
-                // Step 2: 收集所有窗口的共享动画条目（窗口自身的 Opacity/Scale
-                // 仍由各自的 Composition 动画驱动）
-                var entries = new List<WidgetTrayBatchAnimationEntry>(windows.Count);
-                foreach (var window in windows)
+            var options = optionsOverride ?? WidgetAnimationSettings.From(_settingsService.Settings);
+            bool staggerEnabled = staggerOverride ??
+                _settingsService.Settings.WidgetShell.WidgetAnimationStaggerEnabled;
+            int[] delays = ComputeBatchStaggerDelaysMs(
+                windows,
+                isShowing: true,
+                options,
+                staggerEnabled);
+
+            var entries = new List<WidgetTrayBatchAnimationEntry>(windows.Count);
+            for (int index = 0; index < windows.Count; index++)
+            {
+                var window = windows[index];
+                try
                 {
-                    try
+                    var entry = window.BeginSharedTrayShowAnimation(delays[index]);
+                    if (entry is not null)
                     {
-                        var entry = window.BeginSharedTrayShowAnimation();
-                        if (entry is not null)
-                        {
-                            entries.Add(entry);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        App.Log($"[WidgetManager] Failed to play widget show animation {window}: {ex}");
+                        entries.Add(entry);
                     }
                 }
+                catch (Exception ex)
+                {
+                    App.Log($"[WidgetManager] Failed to play widget show animation {window}: {ex}");
+                }
+            }
 
-                // Step 3: 单批启动；等待 1 帧让新显示的窗口先提交首帧表面
-                var options = WidgetAnimationSettings.From(_settingsService.Settings);
-                _trayBatchAnimationDriver.Start(
-                    entries,
-                    options.DurationMs,
-                    _settingsService.Settings.WidgetAnimationEasingIntensity,
-                    isShowing: true,
-                    startDelayFrames: 1,
-                    staggerIntervalMs: GetTrayStaggerIntervalMs(windows));
-                _ = RestoreInteractionBackdropsWhenIdleAsync(windows);
+            _trayBatchAnimationDriver.Start(
+                entries,
+                options.ShowDurationMs,
+                options.EasingIntensity,
+                isShowing: true,
+                startDelayFrames: 1);
+            _ = RestoreInteractionBackdropsWhenIdleAsync(windows);
         }
         catch (Exception ex)
         {
@@ -348,7 +347,10 @@ public sealed partial class WidgetManager
         }
     }
 
-    private void PlayPreparedTrayHideAnimations(IReadOnlyList<IDesktopWidgetWindow> windows)
+    private void PlayPreparedTrayHideAnimations(
+        IReadOnlyList<IDesktopWidgetWindow> windows,
+        WidgetAnimationOptions? optionsOverride = null,
+        bool? staggerOverride = null)
     {
         if (windows.Count == 0)
         {
@@ -356,41 +358,46 @@ public sealed partial class WidgetManager
         }
 
         App.LogVerbose($"[TrayBatch] Starting batch hide for {windows.Count} widgets...");
-        
+
         // ⭐ 与批量显示相同：统一驱动 + DeferWindowPos 原子批量提交
         try
         {
-            // Step 1: 在同一帧内完成所有偏移量设置
-                ApplyTrayAnimationGroupOffset(windows);
+            ApplyTrayAnimationGroupOffset(windows);
 
-                // Step 2: 收集所有窗口的共享隐藏动画条目
-                var entries = new List<WidgetTrayBatchAnimationEntry>(windows.Count);
-                foreach (var window in windows)
+            var options = optionsOverride ?? WidgetAnimationSettings.From(_settingsService.Settings);
+            bool staggerEnabled = staggerOverride ??
+                _settingsService.Settings.WidgetShell.WidgetAnimationStaggerEnabled;
+            int[] delays = ComputeBatchStaggerDelaysMs(
+                windows,
+                isShowing: false,
+                options,
+                staggerEnabled);
+
+            var entries = new List<WidgetTrayBatchAnimationEntry>(windows.Count);
+            for (int index = 0; index < windows.Count; index++)
+            {
+                var window = windows[index];
+                try
                 {
-                    try
+                    var entry = window.BeginSharedTrayHideAnimation(delays[index]);
+                    if (entry is not null)
                     {
-                        var entry = window.BeginSharedTrayHideAnimation();
-                        if (entry is not null)
-                        {
-                            entries.Add(entry);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        App.Log($"[WidgetManager] Failed to play widget hide animation {FormatHostWindow(window)}: {ex}");
+                        entries.Add(entry);
                     }
                 }
+                catch (Exception ex)
+                {
+                    App.Log($"[WidgetManager] Failed to play widget hide animation {FormatHostWindow(window)}: {ex}");
+                }
+            }
 
-                // Step 3: 单批启动，内容已渲染无需等待
-                var options = WidgetAnimationSettings.From(_settingsService.Settings);
-                _trayBatchAnimationDriver.Start(
-                    entries,
-                    options.DurationMs,
-                    _settingsService.Settings.WidgetAnimationEasingIntensity,
-                    isShowing: false,
-                    startDelayFrames: 0,
-                    staggerIntervalMs: GetTrayStaggerIntervalMs(windows));
-                _ = RestoreInteractionBackdropsWhenIdleAsync(windows);
+            _trayBatchAnimationDriver.Start(
+                entries,
+                options.HideDurationMs,
+                options.EasingIntensity,
+                isShowing: false,
+                startDelayFrames: 0);
+            _ = RestoreInteractionBackdropsWhenIdleAsync(windows);
         }
         catch (Exception ex)
         {
@@ -398,19 +405,30 @@ public sealed partial class WidgetManager
         }
     }
 
-    /// <summary>
-    /// Per-window stagger delay for batch animations. Zero keeps the default
-    /// lockstep; when enabled the interval shrinks as the group grows so the
-    /// whole batch stays within roughly one extra quarter-second.
-    /// </summary>
-    private int GetTrayStaggerIntervalMs(IReadOnlyList<IDesktopWidgetWindow> windows)
+    private static int[] ComputeBatchStaggerDelaysMs(
+        IReadOnlyList<IDesktopWidgetWindow> windows,
+        bool isShowing,
+        WidgetAnimationOptions options,
+        bool staggerEnabled)
     {
-        if (!_settingsService.Settings.WidgetAnimationStaggerEnabled || windows.Count < 2)
+        if (!staggerEnabled ||
+            windows.Count <= 1 ||
+            WidgetAnimationSettings.NormalizeEffect(options.Effect) == SettingsService.WidgetAnimationEffectNone)
         {
-            return 0;
+            return new int[windows.Count];
+        }
+        var items = new List<(double BaseX, double BaseY, double MotionX, double MotionY)>(windows.Count);
+        for (int index = 0; index < windows.Count; index++)
+        {
+            IDesktopWidgetWindow window = windows[index];
+            var rest = window.RestingAnimationBounds;
+            var profile = window.GetPlannedTrayAnimationProfile(isShowing);
+            double motionX = isShowing ? -profile.ShowOffsetX : profile.HideOffsetX;
+            double motionY = isShowing ? -profile.ShowOffsetY : profile.HideOffsetY;
+            items.Add((rest.X, rest.Y, motionX, motionY));
         }
 
-        return Math.Clamp(240 / (windows.Count - 1), 8, 48);
+        return WidgetAnimationSettings.ComputeStaggerDelaysMs(items, staggerEnabled, options.Effect);
     }
 
     /// <summary>
@@ -532,8 +550,8 @@ public sealed partial class WidgetManager
     private static DisplayArea GetAnimationDisplayArea(IDesktopWidgetWindow window)
     {
         var point = new Windows.Graphics.PointInt32(
-            (int)Math.Round(window.RestingAnimationBounds.Left),
-            (int)Math.Round(window.RestingAnimationBounds.Top));
+            (int)Math.Round(window.RestingAnimationBounds.Left + Math.Max(1.0, window.RestingAnimationBounds.Width) * 0.5),
+            (int)Math.Round(window.RestingAnimationBounds.Top + Math.Max(1.0, window.RestingAnimationBounds.Height) * 0.5));
         return DisplayArea.GetFromPoint(point, DisplayAreaFallback.Primary);
     }
 

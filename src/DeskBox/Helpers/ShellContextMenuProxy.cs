@@ -76,6 +76,7 @@ internal static class ShellContextMenuProxy
     private static readonly TimeSpan BuildTimeout = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan InteractionTimeout = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan TerminationTimeout = TimeSpan.FromSeconds(5);
+    internal static readonly TimeSpan ServerIdleTimeout = TimeSpan.FromSeconds(90);
     // Encoding.UTF8 emits a byte order mark on the first write to a child's
     // stdin; the native parser then discards that command as handler noise.
     private static readonly Encoding ProtocolEncoding =
@@ -87,6 +88,8 @@ internal static class ShellContextMenuProxy
     private static int s_menuInFlight;
     private static int s_serverGeneration;
     private static ProxyServer? s_server;
+    private static readonly object s_idleTimerGate = new();
+    private static Timer? s_idleTimer;
 
     static ShellContextMenuProxy()
     {
@@ -153,6 +156,7 @@ internal static class ShellContextMenuProxy
 
         try
         {
+            CancelIdleShutdownTimer();
             var current = new PendingRequest(normalizedPath, screenX, screenY, normalizedLabel);
             while (true)
             {
@@ -175,6 +179,10 @@ internal static class ShellContextMenuProxy
         finally
         {
             Interlocked.Exchange(ref s_menuInFlight, 0);
+            if (s_server is { HasExited: false })
+            {
+                ArmIdleShutdownTimer();
+            }
             lock (s_pendingGate)
             {
                 s_pendingRequest = null;
@@ -241,11 +249,32 @@ internal static class ShellContextMenuProxy
         return fallback.Result;
     }
 
-    /// <summary>
-    /// Starts the native server (if needed) and builds one throwaway menu so
-    /// third-party handler DLLs are warm before the user's first right-click.
-    /// Failures are silent: the first real menu pays the cold cost instead.
-    /// </summary>
+    internal static void ShutdownIdleServerIfInactive()
+    {
+        if (IsMenuRoundInFlight || s_server is null)
+        {
+            return;
+        }
+
+        if (!s_serverGate.Wait(0))
+        {
+            return;
+        }
+
+        try
+        {
+            if (!IsMenuRoundInFlight && s_server is not null)
+            {
+                App.LogVerbose("[ShellContextMenuProxy] Shutting down idle server during hidden cleanup");
+                DisposeServer();
+            }
+        }
+        finally
+        {
+            s_serverGate.Release();
+        }
+    }
+
     public static void Prewarm()
     {
         _ = Task.Run(async () =>
@@ -255,6 +284,7 @@ internal static class ShellContextMenuProxy
                 await s_serverGate.WaitAsync();
                 try
                 {
+                    CancelIdleShutdownTimer();
                     ProxyServer server = await EnsureServerAsync();
                     await server.SendCommandAsync("warmup", StartupTimeout);
                     ProtocolLine reply = await server.ReadProtocolLineAsync(StartupTimeout);
@@ -262,17 +292,27 @@ internal static class ShellContextMenuProxy
                         $"[ShellContextMenuProxy] Prewarm reply={reply.Kind} " +
                         $"generation={server.Generation}");
                 }
+                catch (Exception ex)
+                {
+                    // A warmup that never answered may have left the server stuck
+                    // inside a third-party handler; never reuse it. Dispose inside
+                    // s_serverGate so a concurrent menu round cannot lose its server.
+                    DisposeServer();
+                    App.Log($"[ShellContextMenuProxy] Prewarm failed: {ex.Message}");
+                }
                 finally
                 {
+                    if (!IsMenuRoundInFlight && s_server is { HasExited: false })
+                    {
+                        ArmIdleShutdownTimer();
+                    }
+
                     s_serverGate.Release();
                 }
             }
             catch (Exception ex)
             {
-                // A warmup that never answered may have left the server stuck
-                // inside a third-party handler; never reuse it.
-                DisposeServer();
-                App.Log($"[ShellContextMenuProxy] Prewarm failed: {ex.Message}");
+                App.Log($"[ShellContextMenuProxy] Prewarm gate wait failed: {ex.Message}");
             }
         });
     }
@@ -698,8 +738,71 @@ internal static class ShellContextMenuProxy
             $"native={detail} path={path}");
     }
 
+    private static void ArmIdleShutdownTimer()
+    {
+        lock (s_idleTimerGate)
+        {
+            if (s_idleTimer is null)
+            {
+                s_idleTimer = new Timer(
+                    OnIdleShutdownTimerTick,
+                    null,
+                    ServerIdleTimeout,
+                    Timeout.InfiniteTimeSpan);
+            }
+            else
+            {
+                s_idleTimer.Change(ServerIdleTimeout, Timeout.InfiniteTimeSpan);
+            }
+        }
+    }
+
+    private static void CancelIdleShutdownTimer()
+    {
+        lock (s_idleTimerGate)
+        {
+            s_idleTimer?.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+        }
+    }
+
+    private static void OnIdleShutdownTimerTick(object? state)
+    {
+        if (IsMenuRoundInFlight)
+        {
+            ArmIdleShutdownTimer();
+            return;
+        }
+
+        if (!s_serverGate.Wait(0))
+        {
+            ArmIdleShutdownTimer();
+            return;
+        }
+
+        try
+        {
+            if (IsMenuRoundInFlight)
+            {
+                ArmIdleShutdownTimer();
+                return;
+            }
+
+            if (s_server is not null)
+            {
+                App.LogVerbose(
+                    $"[ShellContextMenuProxy] Releasing idle context-menu server generation={s_server.Generation}");
+                DisposeServer();
+            }
+        }
+        finally
+        {
+            s_serverGate.Release();
+        }
+    }
+
     private static void DisposeServer()
     {
+        CancelIdleShutdownTimer();
         s_server?.Dispose();
         s_server = null;
     }

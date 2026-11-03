@@ -416,7 +416,9 @@ public sealed class PerformanceSettingsEditorTests : IDisposable
         Assert.DoesNotContain("nameof(SelectedAttachmentStorageMode)", bindable, StringComparison.Ordinal);
         Assert.Equal(39, CountOccurrences(bindable, "nameof("));
         Assert.Contains("nameof(SelectedPerformanceMode)", editorBridge, StringComparison.Ordinal);
-        Assert.Equal(14, CountOccurrences(editorBridge, "nameof("));
+        Assert.DoesNotContain("nameof(ImmediateHiddenWorkingSetTrimEnabled)", editorBridge, StringComparison.Ordinal);
+        Assert.DoesNotContain("nameof(QuiescenceWorkingSetTrimEnabled)", editorBridge, StringComparison.Ordinal);
+        Assert.Equal(12, CountOccurrences(editorBridge, "nameof("));
     }
 
     [Fact]

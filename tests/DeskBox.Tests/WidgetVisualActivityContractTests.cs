@@ -360,8 +360,8 @@ public sealed class WidgetVisualActivityContractTests
             "private void OnPopupHideCompleted(",
             "public void TogglePopup()");
         Assert.Contains("_appWindow?.Hide();", searchHide, StringComparison.Ordinal);
-        Assert.DoesNotContain("DisposeAcrylicController", searchHide, StringComparison.Ordinal);
-        Assert.DoesNotContain("DisposeMicaController", searchHide, StringComparison.Ordinal);
+        Assert.Contains("DisposeAcrylicController", searchHide, StringComparison.Ordinal);
+        Assert.Contains("DisposeMicaController", searchHide, StringComparison.Ordinal);
         Assert.DoesNotContain("DisableAccentPolicy", searchHide, StringComparison.Ordinal);
 
         Assert.DoesNotContain("ScheduleTransientWindowRelease", app, StringComparison.Ordinal);
@@ -435,7 +435,7 @@ public sealed class WidgetVisualActivityContractTests
         string edgeGlow = ExtractSection(
             source,
             "private ScalarKeyFrameAnimation? _edgeGlowPulseAnimation;",
-            "// ── Particles (rain / snow)");
+            "private static void InsertSineKeyFrames(");
 
         Assert.Contains("isFullBleed ? 0.22 : 0.30", compactLive, StringComparison.Ordinal);
         Assert.Contains("midpoint: 0.6f, amplitude: 0.2f", compactLive, StringComparison.Ordinal);
@@ -463,21 +463,15 @@ public sealed class WidgetVisualActivityContractTests
     }
 
     [Fact]
-    public void WeatherParticles_UseScopedCompositionBatchesInsteadOfUiTicks()
+    public void WeatherParticles_AreRetiredFromCompactShellVisualTreeAndCodeBehind()
     {
+        string xaml = Read("src/DeskBox/Controls/WidgetShell.xaml");
         string source = Read("src/DeskBox/Controls/WidgetShell.xaml.cs");
-        string particles = ExtractSection(
-            source,
-            "// ── Particles (rain / snow)",
-            "// ── Bottom glow (music playback)");
 
-        Assert.Contains("for (int i = 0; i < 10; i++)", particles, StringComparison.Ordinal);
-        Assert.Contains("CreateVector3KeyFrameAnimation()", particles, StringComparison.Ordinal);
-        Assert.Contains("CreateScopedBatch(CompositionBatchTypes.Animation)", particles, StringComparison.Ordinal);
-        Assert.Contains("ParticleAnimationBatch_Completed", particles, StringComparison.Ordinal);
-        Assert.Contains("!SystemAnimationsEnabled()", particles, StringComparison.Ordinal);
-        Assert.DoesNotContain("CreateTimer()", particles, StringComparison.Ordinal);
-        Assert.DoesNotContain("ParticleTimer_Tick", particles, StringComparison.Ordinal);
+        Assert.DoesNotContain("CompactParticleCanvas", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("CompactBottomGlow", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("CompactParticleCanvas", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("ParticleTimer_Tick", source, StringComparison.Ordinal);
     }
 
     [Fact]

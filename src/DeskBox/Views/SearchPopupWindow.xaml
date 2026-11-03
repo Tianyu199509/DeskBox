@@ -116,6 +116,82 @@
                 </Setter>
             </Style>
 
+            <!-- Compact Win11 subtle icon action inside edit-mode recommendation tiles. -->
+            <Style x:Key="EditCardQuickActionButtonStyle" TargetType="Button">
+                <Setter Property="Background" Value="{ThemeResource SubtleFillColorSecondaryBrush}"/>
+                <Setter Property="BorderBrush" Value="Transparent"/>
+                <Setter Property="BorderThickness" Value="1"/>
+                <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}"/>
+                <Setter Property="CornerRadius" Value="5"/>
+                <Setter Property="Width" Value="22"/>
+                <Setter Property="Height" Value="22"/>
+                <Setter Property="MinWidth" Value="0"/>
+                <Setter Property="MinHeight" Value="0"/>
+                <Setter Property="Padding" Value="0"/>
+                <Setter Property="IsTabStop" Value="False"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="ActionSurface"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="{TemplateBinding CornerRadius}">
+                                <VisualStateManager.VisualStateGroups>
+                                    <VisualStateGroup x:Name="CommonStates">
+                                        <VisualState x:Name="Normal"/>
+                                        <VisualState x:Name="PointerOver">
+                                            <Storyboard>
+                                                <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ActionSurface"
+                                                                               Storyboard.TargetProperty="Background">
+                                                    <DiscreteObjectKeyFrame KeyTime="0"
+                                                                            Value="{ThemeResource ControlFillColorSecondaryBrush}"/>
+                                                </ObjectAnimationUsingKeyFrames>
+                                                <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ActionSurface"
+                                                                               Storyboard.TargetProperty="BorderBrush">
+                                                    <DiscreteObjectKeyFrame KeyTime="0"
+                                                                            Value="{ThemeResource CardStrokeColorDefaultBrush}"/>
+                                                </ObjectAnimationUsingKeyFrames>
+                                                <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ActionContent"
+                                                                               Storyboard.TargetProperty="Foreground">
+                                                    <DiscreteObjectKeyFrame KeyTime="0"
+                                                                            Value="{ThemeResource TextFillColorPrimaryBrush}"/>
+                                                </ObjectAnimationUsingKeyFrames>
+                                            </Storyboard>
+                                        </VisualState>
+                                        <VisualState x:Name="Pressed">
+                                            <Storyboard>
+                                                <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ActionSurface"
+                                                                               Storyboard.TargetProperty="Background">
+                                                    <DiscreteObjectKeyFrame KeyTime="0"
+                                                                            Value="{ThemeResource ControlFillColorTertiaryBrush}"/>
+                                                </ObjectAnimationUsingKeyFrames>
+                                                <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ActionSurface"
+                                                                               Storyboard.TargetProperty="BorderBrush">
+                                                    <DiscreteObjectKeyFrame KeyTime="0"
+                                                                            Value="{ThemeResource CardStrokeColorDefaultBrush}"/>
+                                                </ObjectAnimationUsingKeyFrames>
+                                                <ObjectAnimationUsingKeyFrames Storyboard.TargetName="ActionContent"
+                                                                               Storyboard.TargetProperty="Foreground">
+                                                    <DiscreteObjectKeyFrame KeyTime="0"
+                                                                            Value="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                                </ObjectAnimationUsingKeyFrames>
+                                            </Storyboard>
+                                        </VisualState>
+                                    </VisualStateGroup>
+                                </VisualStateManager.VisualStateGroups>
+                                <ContentPresenter x:Name="ActionContent"
+                                                  Content="{TemplateBinding Content}"
+                                                  ContentTemplate="{TemplateBinding ContentTemplate}"
+                                                  Foreground="{TemplateBinding Foreground}"
+                                                  HorizontalAlignment="Center"
+                                                  VerticalAlignment="Center"/>
+                            </Border>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
             <!-- Explicit rounded selection surface keeps every tab state inside the pill. -->
             <Style x:Key="TabPillItemStyle" TargetType="ListViewItem">
                 <Setter Property="HorizontalAlignment" Value="Left"/>
@@ -389,8 +465,54 @@
             <ProgressBar x:Name="SearchProgressBar" Height="2"
                          Grid.Column="0"
                          Margin="18,0,18,-5" VerticalAlignment="Bottom"
-                         IsIndeterminate="True" Visibility="Collapsed"/>
+                         IsIndeterminate="False" Visibility="Collapsed"/>
         </Grid>
+
+        <!-- ── Row 1: Everything connection guidance banner ── -->
+        <Border x:Name="EverythingPromptBanner" Grid.Row="1" Visibility="Collapsed"
+                Margin="12,0,12,6" Padding="12,7" CornerRadius="8"
+                Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1">
+            <Grid ColumnSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <FontIcon x:Name="EverythingPromptIcon" Grid.Column="0"
+                          Glyph="&#xE946;" FontSize="14"
+                          Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                          VerticalAlignment="Center"/>
+                <TextBlock x:Name="EverythingPromptTextBlock" Grid.Column="1"
+                           FontSize="12"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                           VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis" MaxLines="1"/>
+                <Button svc:Localized.AutomationNameKey="Search.EverythingBanner.ConnectAction"
+                        x:Name="EverythingConnectButton" Grid.Column="2"
+                        AllowFocusOnInteraction="False" IsTabStop="False"
+                        Padding="10,3" MinHeight="26" CornerRadius="6"
+                        Background="{ThemeResource ControlFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        VerticalAlignment="Center"
+                        Click="EverythingConnectButton_Click">
+                    <TextBlock x:Name="EverythingConnectButtonText" FontSize="12" FontWeight="SemiBold"/>
+                </Button>
+                <Button svc:Localized.AutomationNameKey="Search.EverythingBanner.DontRemind"
+                        x:Name="EverythingDismissButton" Grid.Column="3"
+                        AllowFocusOnInteraction="False" IsTabStop="False"
+                        Width="26" Height="26" Padding="0" CornerRadius="6"
+                        Background="Transparent" BorderThickness="0"
+                        VerticalAlignment="Center"
+                        Click="EverythingDismissButton_Click">
+                    <FontIcon Glyph="&#xE711;" FontSize="11"
+                              Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
+                </Button>
+            </Grid>
+        </Border>
 
         <!-- ── Row 2: tab bar + filter combo on the right ── -->
         <Grid Grid.Row="2" Margin="12,0,12,0">
@@ -612,7 +734,7 @@
                     </TransitionCollection>
                 </StackPanel.ChildrenTransitions>
                 <StackPanel Orientation="Horizontal" Spacing="9">
-                    <ProgressRing x:Name="LoadingRing" Width="18" Height="18" IsActive="True"
+                    <ProgressRing x:Name="LoadingRing" Width="18" Height="18" IsActive="False"
                                   Foreground="{ThemeResource AccentFillColorDefaultBrush}"/>
                     <TextBlock x:Name="LoadingStatusText" FontSize="12.5" FontWeight="SemiBold"
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
@@ -626,16 +748,17 @@
 
             <!-- Skeleton placeholder shown while app icons are loading -->
             <ScrollViewer x:Name="AppsSkeletonPanel" Grid.Row="2" Visibility="Collapsed"
-                          VerticalScrollBarVisibility="Disabled" Padding="12,2,12,12">
+                          VerticalScrollBarVisibility="Disabled" Padding="12,4,12,12">
                 <ItemsRepeater x:Name="AppsSkeletonRepeater">
                     <ItemsRepeater.Layout>
-                        <UniformGridLayout MinItemHeight="92"
+                        <UniformGridLayout MinItemWidth="98" MinItemHeight="92"
                                            MinColumnSpacing="6" MinRowSpacing="6"
+                                           ItemsStretch="Fill"
                                            ItemsJustification="Start"/>
                     </ItemsRepeater.Layout>
                     <ItemsRepeater.ItemTemplate>
                         <DataTemplate>
-                            <Grid Width="104" Height="92" Padding="8,7" CornerRadius="8">
+                            <Grid HorizontalAlignment="Stretch" MinWidth="98" Height="92" Padding="6,7" CornerRadius="8">
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="*"/>
                                     <RowDefinition Height="Auto"/>
@@ -652,44 +775,213 @@
                 </ItemsRepeater>
             </ScrollViewer>
 
-            <!-- Empty-query application launcher. It intentionally does not reuse file rows. -->
-            <ScrollViewer x:Name="RecommendedAppsPanel" Grid.Row="2" Visibility="Collapsed"
-                          VerticalScrollBarVisibility="Auto" Padding="12,0,12,12"
-                          RightTapped="RecommendedAppsPanel_RightTapped">
-                <ItemsRepeater x:Name="RecommendedAppsRepeater">
+            <!-- Empty-query application launcher (Win11 Start Menu style: single-click launch, drag reorder/folder merge, batch edit mode). -->
+            <Grid x:Name="RecommendedAppsPanel" Grid.Row="2" Visibility="Collapsed">
+                <ScrollViewer x:Name="RecommendedAppsScrollViewer"
+                              VerticalScrollBarVisibility="Auto" Padding="12,4,12,12"
+                              Background="Transparent"
+                              SizeChanged="RecommendedAppsScrollViewer_SizeChanged"
+                              RightTapped="RecommendedAppsPanel_RightTapped">
+                    <Grid x:Name="RecommendedAppsSurface" Background="Transparent"
+                          PointerPressed="RecommendedAppsSurface_PointerPressed"
+                          PointerMoved="RecommendedAppsSurface_PointerMoved"
+                          PointerReleased="RecommendedAppsSurface_PointerReleased"
+                          PointerCaptureLost="RecommendedAppsSurface_PointerCaptureLost">
+                        <ItemsRepeater x:Name="RecommendedAppsRepeater">
+                            <ItemsRepeater.Layout>
+                                <UniformGridLayout MinItemWidth="98" MinItemHeight="92"
+                                                   MinColumnSpacing="6" MinRowSpacing="6"
+                                                   ItemsStretch="Fill"
+                                                   ItemsJustification="Start"/>
+                            </ItemsRepeater.Layout>
+                            <ItemsRepeater.ItemTemplate>
+                                <DataTemplate x:DataType="models:RecommendedGridEntry">
+                                    <Grid HorizontalAlignment="Stretch" MinWidth="98" Height="92" Padding="0" Margin="0"
+                                          Background="Transparent" CornerRadius="8"
+                                          PointerPressed="RecommendedApp_PointerPressed"
+                                          PointerMoved="RecommendedApp_PointerMoved"
+                                          PointerReleased="RecommendedApp_PointerReleased"
+                                          PointerCaptureLost="RecommendedApp_PointerCaptureLost"
+                                          PointerEntered="RecommendedApp_PointerEntered"
+                                          PointerExited="RecommendedApp_PointerExited">
+                                        <Grid x:Name="CardContentHost">
+                                            <Border x:Name="CardEditSlotPlate" Visibility="Collapsed"
+                                                    IsHitTestVisible="False"
+                                                    CornerRadius="8"
+                                                    Background="Transparent"
+                                                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                                    BorderThickness="1"/>
 
-                    <ItemsRepeater.Layout>
-                        <UniformGridLayout MinItemHeight="92"
-                                           MinColumnSpacing="6" MinRowSpacing="6"
-                                           ItemsJustification="Start"/>
-                    </ItemsRepeater.Layout>
-                    <ItemsRepeater.ItemTemplate>
-                        <DataTemplate x:DataType="models:SearchResultItem">
-                            <Grid Width="104" Height="92" Padding="8,7" Margin="0"
-                                  Background="Transparent" CornerRadius="8"
-                                  PointerPressed="RecommendedApp_PointerPressed"
-                                  PointerEntered="RecommendedApp_PointerEntered"
-                                  PointerExited="RecommendedApp_PointerExited"
-                                  DoubleTapped="RecommendedApp_DoubleTapped">
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="*"/>
-                                    <RowDefinition Height="Auto"/>
-                                </Grid.RowDefinitions>
-                                <Grid Grid.Row="0" Width="40" Height="40" HorizontalAlignment="Center">
-                                    <Image Source="{x:Bind Icon, Mode=OneTime}" Width="36" Height="36"
-                                           Stretch="Uniform"
-                                           ImageOpened="OnAppIcon_ImageOpened"
-                                           ImageFailed="OnAppIcon_ImageFailed"/>
-                                </Grid>
-                                <TextBlock Grid.Row="1" Text="{x:Bind AppDisplayName, Mode=OneTime}" FontSize="12"
-                                           Foreground="{ThemeResource TextFillColorPrimaryBrush}"
-                                           TextAlignment="Center" TextTrimming="CharacterEllipsis"
-                                           MaxLines="1" TextWrapping="NoWrap"/>
-                            </Grid>
-                        </DataTemplate>
-                    </ItemsRepeater.ItemTemplate>
-                </ItemsRepeater>
-            </ScrollViewer>
+                                            <Border x:Name="CardSelectionPlate" Visibility="Collapsed"
+                                                    IsHitTestVisible="False"
+                                                    CornerRadius="8"
+                                                    Background="{ThemeResource ControlFillColorSecondaryBrush}"
+                                                    BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                                                    BorderThickness="1"/>
+
+                                            <Grid Padding="6,8,6,6">
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="*"/>
+                                                    <RowDefinition Height="Auto"/>
+                                                </Grid.RowDefinitions>
+                                                <Grid Grid.Row="0" Width="44" Height="44" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                                    <Grid x:Name="SingleIconHost"
+                                                          Visibility="{x:Bind SingleIconVisibility, Mode=OneTime}"
+                                                          Width="40" Height="40" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                                        <Image x:Name="SingleAppIcon" Width="36" Height="36"
+                                                               Stretch="Uniform"
+                                                               ImageOpened="OnAppIcon_ImageOpened"
+                                                               ImageFailed="OnAppIcon_ImageFailed"/>
+                                                    </Grid>
+                                                    <Border x:Name="FolderPreviewPlate"
+                                                            Visibility="{x:Bind FolderPreviewVisibility, Mode=OneTime}"
+                                                            Width="44" Height="44" CornerRadius="8" Padding="5"
+                                                            HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                            Background="{ThemeResource ControlFillColorSecondaryBrush}"
+                                                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                                            BorderThickness="1">
+                                                        <Grid RowSpacing="3" ColumnSpacing="3">
+                                                            <Grid.RowDefinitions>
+                                                                <RowDefinition Height="*"/>
+                                                                <RowDefinition Height="*"/>
+                                                            </Grid.RowDefinitions>
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="*"/>
+                                                                <ColumnDefinition Width="*"/>
+                                                            </Grid.ColumnDefinitions>
+                                                            <Image x:Name="FolderMiniIcon0" Grid.Row="0" Grid.Column="0" Width="15" Height="15" Stretch="Uniform"/>
+                                                            <Image x:Name="FolderMiniIcon1" Grid.Row="0" Grid.Column="1" Width="15" Height="15" Stretch="Uniform"/>
+                                                            <Image x:Name="FolderMiniIcon2" Grid.Row="1" Grid.Column="0" Width="15" Height="15" Stretch="Uniform"/>
+                                                            <Image x:Name="FolderMiniIcon3" Grid.Row="1" Grid.Column="1" Width="15" Height="15" Stretch="Uniform"/>
+                                                        </Grid>
+                                                    </Border>
+                                                </Grid>
+                                                <TextBlock x:Name="CardLabelTextBlock" Grid.Row="1" Text="{x:Bind Label, Mode=OneTime}" FontSize="12"
+                                                           Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                                           TextAlignment="Center" TextTrimming="CharacterEllipsis"
+                                                           MaxLines="1" TextWrapping="NoWrap"/>
+                                            </Grid>
+
+                                            <Grid x:Name="CardSelectionCheckBox" Visibility="Collapsed"
+                                                  IsHitTestVisible="False"
+                                                  Width="16" Height="16"
+                                                  HorizontalAlignment="Left" VerticalAlignment="Top"
+                                                  Margin="6,6,0,0">
+                                                <Border x:Name="CardSelectionUncheckedBox"
+                                                        CornerRadius="4"
+                                                        Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                                                        BorderBrush="{ThemeResource ControlStrongStrokeColorDisabledBrush}"
+                                                        BorderThickness="1"/>
+                                                <Border x:Name="CardSelectionCheckedBox" Visibility="Collapsed"
+                                                        CornerRadius="4"
+                                                        Background="{ThemeResource ControlStrongStrokeColorDefaultBrush}">
+                                                    <FontIcon Glyph="&#xE73E;" FontSize="9.5"
+                                                              Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}"
+                                                              HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                                </Border>
+                                            </Grid>
+
+                                            <Button svc:Localized.AutomationNameKey="Search.Recommend.Hide"
+                                                    svc:Localized.ToolTipKey="Search.Recommend.Hide"
+                                                    x:Name="CardQuickHideButton"
+                                                    Style="{StaticResource EditCardQuickActionButtonStyle}"
+                                                    Visibility="Collapsed"
+                                                    AllowFocusOnInteraction="False"
+                                                    HorizontalAlignment="Right" VerticalAlignment="Top"
+                                                    Margin="0,4,4,0"
+                                                    Click="CardQuickHideButton_Click">
+                                                <FontIcon Glyph="&#xED1A;" FontSize="10.5"/>
+                                            </Button>
+                                        </Grid>
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsRepeater.ItemTemplate>
+                        </ItemsRepeater>
+
+                        <Border x:Name="RecMergeTargetHighlight" Visibility="Collapsed" IsHitTestVisible="False"
+                                HorizontalAlignment="Left" VerticalAlignment="Top"
+                                Width="104" Height="92" CornerRadius="10"
+                                Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                                BorderBrush="{ThemeResource ControlStrongStrokeColorDefaultBrush}"
+                                BorderThickness="1.5">
+                            <Border.RenderTransform>
+                                <TranslateTransform x:Name="RecMergeTargetTransform"/>
+                            </Border.RenderTransform>
+                        </Border>
+
+                        <Border x:Name="RecDropInsertIndicator" Visibility="Collapsed" IsHitTestVisible="False"
+                                HorizontalAlignment="Left" VerticalAlignment="Top"
+                                Width="3" Height="68" CornerRadius="1.5"
+                                Background="{ThemeResource ControlStrongStrokeColorDefaultBrush}">
+                            <Border.RenderTransform>
+                                <TranslateTransform x:Name="RecDropInsertTransform"/>
+                            </Border.RenderTransform>
+                        </Border>
+
+                        <Border x:Name="RecRubberBandRect" Visibility="Collapsed" IsHitTestVisible="False"
+                                HorizontalAlignment="Left" VerticalAlignment="Top" CornerRadius="4"
+                                Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                                BorderBrush="{ThemeResource ControlStrongStrokeColorDefaultBrush}"
+                                BorderThickness="1">
+                            <Border.RenderTransform>
+                                <TranslateTransform x:Name="RecRubberBandTransform"/>
+                            </Border.RenderTransform>
+                        </Border>
+                    </Grid>
+                </ScrollViewer>
+
+                <StackPanel x:Name="AllRecommendedHiddenHintPanel" Visibility="Collapsed"
+                            HorizontalAlignment="Center" VerticalAlignment="Center"
+                            Spacing="8" Padding="24">
+                    <FontIcon Glyph="&#xED1A;" FontSize="26"
+                              Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                              HorizontalAlignment="Center"/>
+                    <TextBlock x:Name="AllRecommendedHiddenHintText" FontSize="12.5"
+                               Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                               TextAlignment="Center" TextWrapping="Wrap" MaxWidth="320"
+                               HorizontalAlignment="Center"/>
+                </StackPanel>
+
+                <Border x:Name="RecDragGhostBorder" Visibility="Collapsed"
+                        IsHitTestVisible="False" Canvas.ZIndex="15"
+                        HorizontalAlignment="Left" VerticalAlignment="Top"
+                        Width="104" Height="92" Padding="8,7" CornerRadius="10" Opacity="0.92"
+                        Background="{ThemeResource ControlFillColorSecondaryBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1">
+                    <Border.RenderTransform>
+                        <TranslateTransform x:Name="RecDragGhostTransform"/>
+                    </Border.RenderTransform>
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <Grid Grid.Row="0" Width="40" Height="40" HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <Image x:Name="RecDragGhostImage" Width="36" Height="36" Stretch="Uniform"/>
+                            <FontIcon x:Name="RecDragGhostFolderGlyph" Glyph="&#xE8B7;" FontSize="26"
+                                      Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                      Visibility="Collapsed"
+                                      HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Grid>
+                        <TextBlock x:Name="RecDragGhostTitle" Grid.Row="1" FontSize="12"
+                                   Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                   TextAlignment="Center" TextTrimming="CharacterEllipsis"
+                                   MaxLines="1" TextWrapping="NoWrap"/>
+                        <Border x:Name="RecDragGhostCountBadge" Grid.Row="0" Visibility="Collapsed"
+                                MinWidth="20" Height="20" Padding="5,0" CornerRadius="10"
+                                HorizontalAlignment="Right" VerticalAlignment="Top"
+                                Margin="0,-3,-2,0"
+                                Background="{ThemeResource ControlFillColorTertiaryBrush}"
+                                BorderBrush="{ThemeResource ControlStrongStrokeColorDefaultBrush}"
+                                BorderThickness="1">
+                            <TextBlock x:Name="RecDragGhostCountText" FontSize="11" FontWeight="SemiBold"
+                                       Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                    </Grid>
+                </Border>
+            </Grid>
         </Grid>
 
         <!-- Persistent footer: contextual result actions on the left, settings on the right. -->
@@ -762,21 +1054,275 @@
             </toolkit:WrapPanel>
 
             <Grid x:Name="StatusBar" Grid.Column="0" Visibility="Collapsed"
-                  VerticalAlignment="Center">
-                <TextBlock x:Name="StatusTextBlock" FontSize="11"
-                           Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
-            </Grid>
-
-                <Button svc:Localized.AutomationNameKey="Search.Action.OpenSettings" x:Name="OpenSettingsButton" Grid.Column="1"
+                  VerticalAlignment="Center" ColumnSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <Button svc:Localized.AutomationNameKey="Search.Recommend.Hide"
+                        x:Name="BatchHideSelectedButton"
+                        Grid.Column="0"
                         Style="{StaticResource QuickButtonStyle}"
+                        Visibility="Collapsed"
+                        AllowFocusOnInteraction="False" IsTabStop="False"
+                        HorizontalAlignment="Left"
                         MinHeight="30" Padding="9,0"
-                        HorizontalAlignment="Right"
-                        Click="OpenSettingsButton_Click">
+                        Click="BatchHideSelectedButton_Click">
                     <StackPanel Orientation="Horizontal" Spacing="6">
-                        <FontIcon Glyph="&#xE713;" FontSize="16"/>
-                        <TextBlock x:Name="OpenSettingsLabel"/>
+                        <FontIcon Glyph="&#xED1A;" FontSize="13.5"/>
+                        <TextBlock x:Name="BatchHideSelectedLabel"/>
                     </StackPanel>
                 </Button>
+                <TextBlock x:Name="StatusTextBlock" Grid.Column="1" FontSize="11.5"
+                           VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis" MaxLines="1"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+            </Grid>
+
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6"
+                            HorizontalAlignment="Right" VerticalAlignment="Center">
+                    <Button svc:Localized.AutomationNameKey="Search.Recommend.HiddenTitle"
+                            x:Name="HiddenAppsEntryButton"
+                            Style="{StaticResource QuickButtonStyle}"
+                            Visibility="Collapsed"
+                            AllowFocusOnInteraction="False" IsTabStop="False"
+                            MinHeight="30" Padding="9,0"
+                            Click="HiddenAppsEntryButton_Click">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon Glyph="&#xED1A;" FontSize="14"/>
+                            <TextBlock x:Name="HiddenAppsEntryLabel"/>
+                        </StackPanel>
+                    </Button>
+                    <Button svc:Localized.AutomationNameKey="Search.Recommend.Edit"
+                            x:Name="EditRecommendationsButton"
+                            Style="{StaticResource QuickButtonStyle}"
+                            Visibility="Collapsed"
+                            AllowFocusOnInteraction="False" IsTabStop="False"
+                            MinHeight="30" Padding="9,0"
+                            Click="EditRecommendationsButton_Click">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon x:Name="EditRecommendationsIcon" Glyph="&#xE70F;" FontSize="14"/>
+                            <TextBlock x:Name="EditRecommendationsLabel"/>
+                        </StackPanel>
+                    </Button>
+                    <Button svc:Localized.AutomationNameKey="Search.Action.OpenSettings" x:Name="OpenSettingsButton"
+                            Style="{StaticResource QuickButtonStyle}"
+                            MinHeight="30" Padding="9,0"
+                            HorizontalAlignment="Right"
+                            Click="OpenSettingsButton_Click">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon Glyph="&#xE713;" FontSize="16"/>
+                            <TextBlock x:Name="OpenSettingsLabel"/>
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+            </Grid>
+        </Grid>
+
+        <!-- Centered frosted overlays for Win11-style recommendation folders and hidden items. -->
+        <Grid x:Name="RecommendationOverlaysLayer" Grid.Row="1" Grid.RowSpan="4"
+              Canvas.ZIndex="18" Visibility="Collapsed"
+              SizeChanged="RecommendationOverlaysLayer_SizeChanged">
+            <Grid.Resources>
+                <DataTemplate x:Key="OverlayAppTileTemplate" x:DataType="models:SearchResultItem">
+                    <Grid HorizontalAlignment="Stretch" MinWidth="80" Height="84" Padding="6,6" Margin="0"
+                          Background="Transparent" CornerRadius="8"
+                          PointerPressed="OverlayAppCard_PointerPressed"
+                          PointerMoved="OverlayAppCard_PointerMoved"
+                          PointerReleased="OverlayAppCard_PointerReleased"
+                          PointerCaptureLost="OverlayAppCard_PointerCaptureLost"
+                          PointerEntered="OverlayAppCard_PointerEntered"
+                          PointerExited="OverlayAppCard_PointerExited">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <Grid Grid.Row="0" Width="40" Height="40" HorizontalAlignment="Center">
+                            <Image Source="{x:Bind Icon, Mode=OneTime}" Width="36" Height="36"
+                                   Stretch="Uniform"
+                                   ImageOpened="OnAppIcon_ImageOpened"
+                                   ImageFailed="OnAppIcon_ImageFailed"/>
+                        </Grid>
+                        <TextBlock Grid.Row="1" Text="{x:Bind AppDisplayName, Mode=OneTime}" FontSize="12"
+                                   Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                   TextAlignment="Center" TextTrimming="CharacterEllipsis"
+                                   MaxLines="1" TextWrapping="NoWrap"/>
+                    </Grid>
+                </DataTemplate>
+            </Grid.Resources>
+
+            <!-- Win11 Start Menu centered frosted folder overlay -->
+            <Grid x:Name="FolderOverlayHost" Visibility="Collapsed">
+                <Border x:Name="FolderOverlayScrim" Background="#48000000"
+                        PointerPressed="FolderOverlayScrim_PointerPressed"/>
+
+                <Border x:Name="FolderOverlayCard"
+                        MinHeight="208" MaxHeight="356"
+                        Margin="16,8,16,14" Padding="18,16,18,18"
+                        CornerRadius="12"
+                        HorizontalAlignment="Center" VerticalAlignment="Center"
+                        Background="{ThemeResource AcrylicInAppFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource SurfaceStrokeColorFlyoutBrush}"
+                        BorderThickness="1">
+                    <Grid RowSpacing="10">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+
+                        <Grid Grid.Row="0" HorizontalAlignment="Center" MinHeight="34">
+                            <Button svc:Localized.AutomationNameKey="Search.Recommend.RenameFolder"
+                                    x:Name="FolderOverlayTitleButton"
+                                    AllowFocusOnInteraction="False" IsTabStop="False"
+                                    Padding="12,4" CornerRadius="6"
+                                    Background="Transparent" BorderThickness="0"
+                                    HorizontalAlignment="Center" VerticalAlignment="Center"
+                                    Click="FolderOverlayTitleButton_Click">
+                                <TextBlock x:Name="FolderOverlayTitleText"
+                                           FontSize="20" FontWeight="SemiBold"
+                                           Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                           TextAlignment="Center" TextTrimming="CharacterEllipsis"
+                                           MaxWidth="340" MaxLines="1"/>
+                            </Button>
+                            <TextBox svc:Localized.AutomationNameKey="Search.Recommend.RenameFolder"
+                                     x:Name="FolderOverlayTitleEditor"
+                                     Visibility="Collapsed"
+                                     MinWidth="160" MaxWidth="340"
+                                     FontSize="18" FontWeight="SemiBold"
+                                     TextAlignment="Center"
+                                     HorizontalAlignment="Center" VerticalAlignment="Center"
+                                     KeyDown="FolderOverlayTitleEditor_KeyDown"
+                                     LostFocus="FolderOverlayTitleEditor_LostFocus"/>
+                        </Grid>
+
+                        <ScrollViewer x:Name="FolderOverlayScrollViewer" Grid.Row="1"
+                                      VerticalScrollBarVisibility="Auto"
+                                      Background="Transparent"
+                                      RightTapped="FolderOverlayScrollViewer_RightTapped">
+                            <Grid x:Name="FolderOverlaySurface" Background="Transparent">
+                                <ItemsRepeater x:Name="FolderAppsRepeater"
+                                               ItemTemplate="{StaticResource OverlayAppTileTemplate}">
+                                    <ItemsRepeater.Layout>
+                                        <UniformGridLayout MinItemWidth="84" MinItemHeight="84"
+                                                           MinColumnSpacing="6" MinRowSpacing="6"
+                                                           MaximumRowsOrColumns="4"
+                                                           ItemsStretch="Fill"
+                                                           ItemsJustification="Start"/>
+                                    </ItemsRepeater.Layout>
+                                </ItemsRepeater>
+
+                                <Border x:Name="FolderDropInsertIndicator" Visibility="Collapsed" IsHitTestVisible="False"
+                                        HorizontalAlignment="Left" VerticalAlignment="Top"
+                                        Width="3" Height="64" CornerRadius="1.5"
+                                        Background="{ThemeResource ControlStrongStrokeColorDefaultBrush}">
+                                    <Border.RenderTransform>
+                                        <TranslateTransform x:Name="FolderDropInsertTransform"/>
+                                    </Border.RenderTransform>
+                                </Border>
+                            </Grid>
+                        </ScrollViewer>
+                    </Grid>
+                </Border>
+
+                <Border x:Name="FolderDragGhostBorder" Visibility="Collapsed" IsHitTestVisible="False"
+                        HorizontalAlignment="Left" VerticalAlignment="Top"
+                        Width="92" Height="84" Padding="6,6" CornerRadius="10" Opacity="0.92"
+                        Background="{ThemeResource ControlFillColorSecondaryBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1">
+                    <Border.RenderTransform>
+                        <TranslateTransform x:Name="FolderDragGhostTransform"/>
+                    </Border.RenderTransform>
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <Image x:Name="FolderDragGhostImage" Grid.Row="0" Width="36" Height="36"
+                               Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <TextBlock x:Name="FolderDragGhostTitle" Grid.Row="1" FontSize="12"
+                                   Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                   TextAlignment="Center" TextTrimming="CharacterEllipsis"
+                                   MaxLines="1" TextWrapping="NoWrap"/>
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <!-- Centered frosted hidden-items overlay -->
+            <Grid x:Name="HiddenAppsOverlayHost" Visibility="Collapsed">
+                <Border x:Name="HiddenAppsOverlayScrim" Background="#48000000"
+                        PointerPressed="HiddenAppsOverlayScrim_PointerPressed"/>
+
+                <Border x:Name="HiddenAppsOverlayCard"
+                        MinHeight="208" MaxHeight="356"
+                        Margin="16,8,16,14" Padding="18,16,18,18"
+                        CornerRadius="12"
+                        HorizontalAlignment="Center" VerticalAlignment="Center"
+                        Background="{ThemeResource AcrylicInAppFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource SurfaceStrokeColorFlyoutBrush}"
+                        BorderThickness="1">
+                    <Grid RowSpacing="10">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+
+                        <Grid Grid.Row="0" ColumnSpacing="8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
+                                <TextBlock x:Name="HiddenOverlayTitleText"
+                                           FontSize="16" FontWeight="SemiBold"
+                                           Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                           TextTrimming="CharacterEllipsis" MaxLines="1"/>
+                                <TextBlock x:Name="HiddenOverlaySubtitleText"
+                                           FontSize="11.5"
+                                           Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                           TextTrimming="CharacterEllipsis" MaxLines="1"/>
+                            </StackPanel>
+                            <Button svc:Localized.AutomationNameKey="Search.Recommend.UnhideAll"
+                                    x:Name="UnhideAllButton" Grid.Column="1"
+                                    AllowFocusOnInteraction="False" IsTabStop="False"
+                                    Padding="10,4" MinHeight="28" CornerRadius="6"
+                                    Background="{ThemeResource ControlFillColorDefaultBrush}"
+                                    BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                                    BorderThickness="1"
+                                    VerticalAlignment="Center"
+                                    Click="UnhideAllButton_Click">
+                                <TextBlock x:Name="UnhideAllButtonText" FontSize="12"/>
+                            </Button>
+                            <Button svc:Localized.AutomationNameKey="Common.Close"
+                                    x:Name="CloseHiddenOverlayButton" Grid.Column="2"
+                                    AllowFocusOnInteraction="False" IsTabStop="False"
+                                    Width="28" Height="28" Padding="0" CornerRadius="6"
+                                    Background="Transparent" BorderThickness="0"
+                                    VerticalAlignment="Center"
+                                    Click="CloseHiddenOverlayButton_Click">
+                                <FontIcon Glyph="&#xE711;" FontSize="12"
+                                          Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                            </Button>
+                        </Grid>
+
+                        <ScrollViewer x:Name="HiddenOverlayScrollViewer" Grid.Row="1"
+                                      VerticalScrollBarVisibility="Auto"
+                                      Background="Transparent"
+                                      RightTapped="HiddenOverlayScrollViewer_RightTapped">
+                            <ItemsRepeater x:Name="HiddenAppsRepeater"
+                                           ItemTemplate="{StaticResource OverlayAppTileTemplate}">
+                                <ItemsRepeater.Layout>
+                                    <UniformGridLayout MinItemWidth="84" MinItemHeight="84"
+                                                       MinColumnSpacing="6" MinRowSpacing="6"
+                                                       MaximumRowsOrColumns="4"
+                                                       ItemsStretch="Fill"
+                                                       ItemsJustification="Start"/>
+                                </ItemsRepeater.Layout>
+                            </ItemsRepeater>
+                        </ScrollViewer>
+                    </Grid>
+                </Border>
             </Grid>
         </Grid>
 

@@ -23,6 +23,7 @@ public sealed class Windows10InstallerCompatibilityContractTests
         foreach (string projectPath in new[]
                  {
                      "src/DeskBox/DeskBox.csproj",
+                     "src/DeskBox.Settings/DeskBox.Settings.csproj",
                      "src/DeskBox.Updater/DeskBox.Updater.csproj",
                      "tests/DeskBox.Tests/DeskBox.Tests.csproj",
                      "tests/DeskBox.NotificationActivationProbe/DeskBox.NotificationActivationProbe.csproj"

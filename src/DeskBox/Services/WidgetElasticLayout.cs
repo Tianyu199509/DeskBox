@@ -51,11 +51,13 @@ internal static class WidgetElasticLayout
     internal static ElasticAxisPlan PlanAxis(
         double referenceLength,
         double targetLength,
-        IEnumerable<(double Start, double End)> intervals)
+        IEnumerable<(double Start, double End)> intervals,
+        bool allowGrow = true)
     {
         double reference = Math.Max(1, double.IsFinite(referenceLength) ? referenceLength : 1);
         double target = Math.Max(1, double.IsFinite(targetLength) ? targetLength : 1);
-        if (Math.Abs(target - reference) <= IdentityToleranceDips)
+        if (Math.Abs(target - reference) <= IdentityToleranceDips ||
+            (!allowGrow && target > reference))
         {
             return ElasticAxisPlan.Identity(reference, target);
         }
@@ -395,12 +397,13 @@ internal sealed class ElasticDisplayPlan
         double targetWidth,
         double targetHeight,
         IReadOnlyCollection<ElasticRect> items,
-        double preferredMinimumLength = 50)
+        double preferredMinimumLength = 50,
+        bool allowGrow = true)
     {
         ElasticAxisPlan x = WidgetElasticLayout.PlanAxis(
-            frameWidth, targetWidth, items.Select(item => (item.Left, item.Right)));
+            frameWidth, targetWidth, items.Select(item => (item.Left, item.Right)), allowGrow);
         ElasticAxisPlan y = WidgetElasticLayout.PlanAxis(
-            frameHeight, targetHeight, items.Select(item => (item.Top, item.Bottom)));
+            frameHeight, targetHeight, items.Select(item => (item.Top, item.Bottom)), allowGrow);
         double minAuthoredWidth = items.Count == 0
             ? double.PositiveInfinity
             : items.Min(item => item.Right - item.Left);

@@ -54,7 +54,7 @@ public sealed class BackupSettingsCoordinator : IBackupSettings, IDisposable
             CloudBackupSettingsPolicy.NormalizeRetentionCount(cloud.CloudBackupRetentionCount),
             cloud.CloudBackupLastSuccessUtcTicks, cloud.CloudBackupLastFailureUtcTicks,
             cloud.CloudBackupLastUnverifiedUtcTicks,
-            options.Endpoint, options.HasEndpoint);
+            options.Endpoint, options.HasEndpoint, cloud.CloudBackupCustomWidgetsEnabled);
     }
 
     public void Update(BackupSettingsChange change)
@@ -111,6 +111,7 @@ public sealed class BackupSettingsCoordinator : IBackupSettings, IDisposable
                 if (cloud.CloudBackupTodoDataEnabled) { cloud.CloudBackupTodoDataEnabled = false; changed = true; }
                 if (cloud.CloudBackupQuickCaptureDataEnabled) { cloud.CloudBackupQuickCaptureDataEnabled = false; changed = true; }
                 if (cloud.CloudBackupWidgetStyleEnabled) { cloud.CloudBackupWidgetStyleEnabled = false; changed = true; }
+                if (cloud.CloudBackupCustomWidgetsEnabled) { cloud.CloudBackupCustomWidgetsEnabled = false; changed = true; }
             }
         }
         if (change.CloudServerUrl is { } url && cloud.CloudBackupServerUrl != url)
@@ -125,6 +126,8 @@ public sealed class BackupSettingsCoordinator : IBackupSettings, IDisposable
             { cloud.CloudBackupQuickCaptureDataEnabled = quick; changed = true; }
         if (change.CloudWidgetStyleEnabled is { } style && cloud.CloudBackupWidgetStyleEnabled != style)
             { cloud.CloudBackupWidgetStyleEnabled = style; changed = true; }
+        if (change.CloudCustomWidgetsEnabled is { } custom && cloud.CloudBackupCustomWidgetsEnabled != custom)
+            { cloud.CloudBackupCustomWidgetsEnabled = custom; changed = true; }
         if (change.CloudIntervalMinutes is { } interval)
         {
             int value = CloudBackupSettingsPolicy.NormalizeIntervalMinutes(interval);

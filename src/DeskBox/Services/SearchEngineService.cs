@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using DeskBox.Models;
 
@@ -12,7 +12,11 @@ public sealed class SearchEngineService : IDisposable
 {
     public const int InitialFileResultPageSize = 200;
     public const int FileResultPageSize = 200;
+    internal const int MaxIndexedBodyCharacters = 2048;
     private const int DeskBoxContentRefreshIntervalMilliseconds = 1000;
+
+    private static readonly object s_activeInstancesLock = new();
+    private static readonly List<WeakReference<SearchEngineService>> s_activeInstances = [];
 
     private readonly SettingsService _settingsService;
     private readonly LocalizationService _localizationService;
@@ -24,6 +28,8 @@ public sealed class SearchEngineService : IDisposable
     private Task? _deskBoxContentRefreshTask;
     private long _deskBoxContentLastRefreshMs = long.MinValue;
     private int _deskBoxContentInitialized;
+    private int _deskBoxContentDirty = 1;
+    private int _deskBoxContentCacheGeneration;
     private bool _isDisposed;
 
     public SearchEngineService(
@@ -37,21 +43,18 @@ public sealed class SearchEngineService : IDisposable
         _everythingSearchService = everythingSearchService;
         _quickCaptureService = quickCaptureService;
         _quickCaptureService.Changed += OnQuickCaptureChanged;
+        TodoWidgetStore.StoreChanged += OnTodoStoreChanged;
+        RegisterActiveInstance(this);
     }
 
     public EverythingSearchService EverythingProvider => _everythingSearchService;
 
     public event Action? ResultsChanged;
 
-    private void OnQuickCaptureChanged()
-    {
-        if (!_isDisposed && _settingsService.Settings.SearchIncludeDeskBoxContent)
-        {
-            _ = EnsureDeskBoxContentSnapshotAsync(
-                forceRefresh: true,
-                _deskBoxContentLifetimeCts.Token);
-        }
-    }
+    private void OnQuickCaptureChanged() => Interlocked.Exchange(ref _deskBoxContentDirty, 1);
+
+    private void OnTodoStoreChanged(string storePath, string widgetId) =>
+        Interlocked.Exchange(ref _deskBoxContentDirty, 1);
 
     public void SetDeskBoxContentSearchEnabled(bool enabled)
     {
@@ -62,15 +65,88 @@ public sealed class SearchEngineService : IDisposable
 
         if (enabled)
         {
-            _ = EnsureDeskBoxContentSnapshotAsync(
-                forceRefresh: true,
-                _deskBoxContentLifetimeCts.Token);
+            Interlocked.Exchange(ref _deskBoxContentDirty, 1);
             return;
         }
 
+        ReleaseColdHiddenCaches();
+    }
+
+    public void ReleaseColdHiddenCaches()
+    {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        Interlocked.Increment(ref _deskBoxContentCacheGeneration);
         Volatile.Write(ref _deskBoxContentSnapshot, []);
         Volatile.Write(ref _deskBoxContentInitialized, 0);
+        Volatile.Write(ref _deskBoxContentDirty, 1);
         Interlocked.Exchange(ref _deskBoxContentLastRefreshMs, long.MinValue);
+    }
+
+    internal static void ReleaseActiveColdHiddenCaches()
+    {
+        List<SearchEngineService>? targets = null;
+        lock (s_activeInstancesLock)
+        {
+            for (int i = s_activeInstances.Count - 1; i >= 0; i--)
+            {
+                if (s_activeInstances[i].TryGetTarget(out SearchEngineService? instance) &&
+                    !instance._isDisposed)
+                {
+                    (targets ??= []).Add(instance);
+                }
+                else
+                {
+                    s_activeInstances.RemoveAt(i);
+                }
+            }
+        }
+
+        if (targets is null)
+        {
+            return;
+        }
+
+        foreach (SearchEngineService instance in targets)
+        {
+            instance.ReleaseColdHiddenCaches();
+        }
+    }
+
+    private static void RegisterActiveInstance(SearchEngineService instance)
+    {
+        lock (s_activeInstancesLock)
+        {
+            for (int i = s_activeInstances.Count - 1; i >= 0; i--)
+            {
+                if (!s_activeInstances[i].TryGetTarget(out SearchEngineService? existing) ||
+                    existing._isDisposed)
+                {
+                    s_activeInstances.RemoveAt(i);
+                }
+            }
+
+            s_activeInstances.Add(new WeakReference<SearchEngineService>(instance));
+        }
+    }
+
+    private static void UnregisterActiveInstance(SearchEngineService instance)
+    {
+        lock (s_activeInstancesLock)
+        {
+            for (int i = s_activeInstances.Count - 1; i >= 0; i--)
+            {
+                if (!s_activeInstances[i].TryGetTarget(out SearchEngineService? existing) ||
+                    ReferenceEquals(existing, instance) ||
+                    existing._isDisposed)
+                {
+                    s_activeInstances.RemoveAt(i);
+                }
+            }
+        }
     }
 
     /// <summary>
@@ -236,32 +312,58 @@ public sealed class SearchEngineService : IDisposable
             cancellationToken);
     }
 
+    private const long StartMenuShortcutCacheTtlMilliseconds = 180_000;
+    private static readonly object s_startMenuShortcutCacheLock = new();
+    private static long s_startMenuShortcutCacheTickMs = long.MinValue;
+    private static (string FullPath, Helpers.AppRecommendationIdentity.Keys Keys)[] s_startMenuShortcutCache = [];
+
     private IReadOnlyList<SearchRecommendationItem> BuildApplicationRecommendations(
         CancellationToken cancellationToken)
     {
         var recommendations = new List<SearchRecommendationItem>();
-        var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var deduplicator = new Helpers.AppRecommendationDeduplicator();
 
-        void AddShortcut(string path, string subtitle)
+        void AddShortcut(
+            string path,
+            string subtitle,
+            Helpers.AppRecommendationIdentity.Keys? precomputedKeys = null,
+            bool skipExistsCheck = false)
         {
             if (cancellationToken.IsCancellationRequested ||
-                !path.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase) ||
-                !File.Exists(path))
+                !path.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            if (!skipExistsCheck && !File.Exists(path))
             {
                 return;
             }
 
             string fullPath;
-            try
+            if (skipExistsCheck)
             {
-                fullPath = Path.GetFullPath(path);
+                fullPath = path;
             }
-            catch
+            else
             {
-                return;
+                try
+                {
+                    fullPath = Path.GetFullPath(path);
+                }
+                catch
+                {
+                    return;
+                }
             }
 
-            if (!seenPaths.Add(fullPath))
+            string fileName = Path.GetFileName(fullPath);
+            if (!deduplicator.TryAcceptWithKeys(
+                    fullPath,
+                    fileName,
+                    precomputedKeys,
+                    out Helpers.AppRecommendationIdentity.Keys resolvedKeys,
+                    out _))
             {
                 return;
             }
@@ -269,9 +371,10 @@ public sealed class SearchEngineService : IDisposable
             recommendations.Add(new SearchRecommendationItem
             {
                 Kind = SearchResultKind.File,
-                Title = Path.GetFileName(fullPath),
+                Title = fileName,
                 Subtitle = subtitle,
-                DetailPath = fullPath
+                DetailPath = fullPath,
+                ResolvedIdentityKeys = resolvedKeys
             });
         }
 
@@ -298,6 +401,38 @@ public sealed class SearchEngineService : IDisposable
         }
 
         string startMenuLabel = _localizationService.T("Search.Recommend.StartMenu");
+        const int MaxStartMenuApps = 40;
+        int startMenuCount = 0;
+        foreach (var entry in GetOrScanStartMenuShortcuts(cancellationToken))
+        {
+            int before = recommendations.Count;
+            AddShortcut(
+                entry.FullPath,
+                startMenuLabel,
+                precomputedKeys: entry.Keys,
+                skipExistsCheck: true);
+            if (recommendations.Count > before && ++startMenuCount >= MaxStartMenuApps)
+            {
+                return recommendations;
+            }
+        }
+
+        return recommendations;
+    }
+
+    private static (string FullPath, Helpers.AppRecommendationIdentity.Keys Keys)[] GetOrScanStartMenuShortcuts(
+        CancellationToken cancellationToken)
+    {
+        long nowTick = Environment.TickCount64;
+        lock (s_startMenuShortcutCacheLock)
+        {
+            if (s_startMenuShortcutCache.Length > 0 &&
+                nowTick - s_startMenuShortcutCacheTickMs < StartMenuShortcutCacheTtlMilliseconds)
+            {
+                return s_startMenuShortcutCache;
+            }
+        }
+
         string[] startMenuRoots =
         [
             Environment.GetFolderPath(Environment.SpecialFolder.Programs),
@@ -306,32 +441,79 @@ public sealed class SearchEngineService : IDisposable
             Environment.GetFolderPath(Environment.SpecialFolder.CommonStartMenu)
         ];
 
-        const int MaxStartMenuApps = 40;
-        int startMenuCount = 0;
+        var visitedDirectories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var deduplicator = new Helpers.AppRecommendationDeduplicator();
+        var scanned = new List<(string FullPath, Helpers.AppRecommendationIdentity.Keys Keys)>(64);
+        const int MaxCachedStartMenuCandidates = 72;
+
         foreach (string root in startMenuRoots
                      .Where(path => !string.IsNullOrWhiteSpace(path))
                      .Distinct(StringComparer.OrdinalIgnoreCase))
         {
             foreach (string shortcut in EnumerateShortcutFilesSafely(
-                         root, recursive: true, cancellationToken)
+                         root,
+                         recursive: true,
+                         cancellationToken,
+                         visitedDirectories)
                      .OrderBy(Path.GetFileName, StringComparer.CurrentCultureIgnoreCase))
             {
-                int before = recommendations.Count;
-                AddShortcut(shortcut, startMenuLabel);
-                if (recommendations.Count > before && ++startMenuCount >= MaxStartMenuApps)
+                if (cancellationToken.IsCancellationRequested)
                 {
-                    return recommendations;
+                    return scanned.ToArray();
                 }
+
+                string fullPath;
+                try
+                {
+                    fullPath = Path.GetFullPath(shortcut);
+                }
+                catch
+                {
+                    continue;
+                }
+
+                string fileName = Path.GetFileName(fullPath);
+                if (!deduplicator.TryAcceptWithKeys(
+                        fullPath,
+                        fileName,
+                        precomputedKeys: null,
+                        out Helpers.AppRecommendationIdentity.Keys keys,
+                        out _))
+                {
+                    continue;
+                }
+
+                scanned.Add((fullPath, keys));
+                if (scanned.Count >= MaxCachedStartMenuCandidates)
+                {
+                    break;
+                }
+            }
+
+            if (scanned.Count >= MaxCachedStartMenuCandidates)
+            {
+                break;
             }
         }
 
-        return recommendations;
+        var snapshot = scanned.ToArray();
+        if (!cancellationToken.IsCancellationRequested && snapshot.Length > 0)
+        {
+            lock (s_startMenuShortcutCacheLock)
+            {
+                s_startMenuShortcutCache = snapshot;
+                s_startMenuShortcutCacheTickMs = Environment.TickCount64;
+            }
+        }
+
+        return snapshot;
     }
 
     private static IEnumerable<string> EnumerateShortcutFilesSafely(
         string root,
         bool recursive,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        HashSet<string>? sharedVisitedDirectories = null)
     {
         if (!FileService.TryResolveExistingPathForTraversal(
                 root,
@@ -342,7 +524,7 @@ public sealed class SearchEngineService : IDisposable
 
         var pending = new Stack<string>();
         pending.Push(resolvedRoot);
-        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var visited = sharedVisitedDirectories ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         while (pending.Count > 0 && !cancellationToken.IsCancellationRequested)
         {
@@ -400,23 +582,12 @@ public sealed class SearchEngineService : IDisposable
         CancellationToken cancellationToken)
     {
         bool initialized = Volatile.Read(ref _deskBoxContentInitialized) != 0;
-        if (!initialized)
+        if (!initialized || Volatile.Read(ref _deskBoxContentDirty) != 0)
         {
             await EnsureDeskBoxContentSnapshotAsync(
                     forceRefresh: true,
                     cancellationToken)
                 .ConfigureAwait(false);
-        }
-        else if (Environment.TickCount64 -
-                 Interlocked.Read(ref _deskBoxContentLastRefreshMs) >=
-                 DeskBoxContentRefreshIntervalMilliseconds)
-        {
-            // Return the current immutable snapshot immediately. The refresh runs
-            // outside the query hot path and raises ResultsChanged only if content
-            // actually changed, which refreshes an already-visible query in place.
-            _ = EnsureDeskBoxContentSnapshotAsync(
-                forceRefresh: false,
-                _deskBoxContentLifetimeCts.Token);
         }
 
         DeskBoxSearchDocument[] snapshot = Volatile.Read(ref _deskBoxContentSnapshot);
@@ -469,6 +640,7 @@ public sealed class SearchEngineService : IDisposable
     private async Task RefreshDeskBoxContentSnapshotAsync(
         CancellationToken cancellationToken)
     {
+        int generation = Volatile.Read(ref _deskBoxContentCacheGeneration);
         try
         {
             DeskBoxSearchDocument[] next = await BuildDeskBoxContentSnapshotAsync(
@@ -476,7 +648,8 @@ public sealed class SearchEngineService : IDisposable
                 .ConfigureAwait(false);
             if (_isDisposed ||
                 cancellationToken.IsCancellationRequested ||
-                !_settingsService.Settings.SearchIncludeDeskBoxContent)
+                !_settingsService.Settings.SearchIncludeDeskBoxContent ||
+                Volatile.Read(ref _deskBoxContentCacheGeneration) != generation)
             {
                 return;
             }
@@ -486,6 +659,7 @@ public sealed class SearchEngineService : IDisposable
             bool changed = !previous.SequenceEqual(next);
             Volatile.Write(ref _deskBoxContentSnapshot, next);
             Volatile.Write(ref _deskBoxContentInitialized, 1);
+            Volatile.Write(ref _deskBoxContentDirty, 0);
             Interlocked.Exchange(
                 ref _deskBoxContentLastRefreshMs,
                 Environment.TickCount64);
@@ -519,25 +693,19 @@ public sealed class SearchEngineService : IDisposable
         CancellationToken cancellationToken)
     {
         var documents = new List<DeskBoxSearchDocument>();
-        QuickCaptureStoreData quickCapture = await _quickCaptureService
-            .GetDataAsync()
-            .WaitAsync(cancellationToken)
+        IReadOnlyList<QuickCaptureSearchProjection> quickCaptureProjections = await _quickCaptureService
+            .GetSearchIndexProjectionsAsync(MaxIndexedBodyCharacters, cancellationToken)
             .ConfigureAwait(false);
-        foreach (QuickCaptureItem item in quickCapture.Items)
+        foreach (QuickCaptureSearchProjection item in quickCaptureProjections)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (item.IsDeleted)
-            {
-                continue;
-            }
-
             string displayTitle = !string.IsNullOrWhiteSpace(item.Title)
                 ? item.Title
-                : TruncateText(item.Body, 60);
+                : TruncateText(item.Text, 60);
             documents.Add(new DeskBoxSearchDocument(
                 SearchResultKind.QuickCapture,
                 displayTitle,
-                item.Body,
+                TruncateIndexedBody(item.Text),
                 item.Url,
                 item.Type.ToString(),
                 TodoWidgetId: null,
@@ -548,7 +716,7 @@ public sealed class SearchEngineService : IDisposable
                 item.UpdatedAt));
         }
 
-        List<WidgetConfig> todoWidgets = _settingsService.Settings.Widgets
+        List<WidgetConfig> todoWidgets = _settingsService.Settings.WidgetLayout.Widgets
             .Where(widget => widget.WidgetKind == WidgetKind.Todo && !widget.IsDisabled)
             .ToList();
         Task<(WidgetConfig Widget, TodoWidgetData? Data)>[] todoLoads = todoWidgets
@@ -557,7 +725,7 @@ public sealed class SearchEngineService : IDisposable
                 try
                 {
                     TodoWidgetData data = await new TodoWidgetStore(widget.Id)
-                        .LoadAsync()
+                        .LoadReadOnlySnapshotAsync()
                         .WaitAsync(cancellationToken)
                         .ConfigureAwait(false);
                     return (Widget: widget, Data: (TodoWidgetData?)data);
@@ -586,10 +754,15 @@ public sealed class SearchEngineService : IDisposable
             foreach (TodoItem item in data.Items)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                if (item.IsDeleted)
+                {
+                    continue;
+                }
+
                 documents.Add(new DeskBoxSearchDocument(
                     SearchResultKind.Todo,
                     item.Text,
-                    item.Notes,
+                    TruncateIndexedBody(item.Notes),
                     AuxiliaryText: null,
                     item.DueDate.HasValue
                         ? $"{_localizationService.T("Search.Todo.Due")}: {item.DueDate.Value:yyyy-MM-dd}"
@@ -664,18 +837,72 @@ public sealed class SearchEngineService : IDisposable
         return results;
     }
 
+    internal static bool TryParseQuickNoteCommand(string? query, out string noteText)
+    {
+        noteText = string.Empty;
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return false;
+        }
+
+        ReadOnlySpan<char> span = query.AsSpan().Trim();
+        ReadOnlySpan<string> prefixes = ["note", "jot", "n", "随记", "速记", "记"];
+        foreach (string prefix in prefixes)
+        {
+            if (!span.StartsWith(prefix.AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+                span.Length <= prefix.Length)
+            {
+                continue;
+            }
+
+            char delimiter = span[prefix.Length];
+            if (!char.IsWhiteSpace(delimiter) && delimiter is not (':' or '：'))
+            {
+                continue;
+            }
+
+            ReadOnlySpan<char> body = span[(prefix.Length + 1)..].Trim();
+            if (!body.IsEmpty)
+            {
+                noteText = body.ToString();
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private IReadOnlyList<SearchResultItem> SearchActions(string query)
     {
         var actions = new (string Id, string NameKey, string Glyph)[]
         {
             ("new-todo", "Search.Action.NewTodo", "\uE9D5"),
             ("new-note", "Search.Action.NewNote", "\uE70F"),
+            ("quick-jot", "QuickCapture.QuickJotTitle", "\uE70F"),
             ("open-settings", "Search.Action.OpenSettings", "\uE713"),
             ("toggle-widgets", "Search.Action.ToggleWidgets", "\uE8A5"),
             ("toggle-theme", "Search.Action.ToggleTheme", "\uE793")
         };
 
         var results = new List<SearchResultItem>();
+        if (TryParseQuickNoteCommand(query, out string quickNoteText))
+        {
+            string template = _localizationService.T("QuickCapture.SearchQuickSaveFormat");
+            string title = string.IsNullOrWhiteSpace(template) ||
+                           string.Equals(template, "QuickCapture.SearchQuickSaveFormat", StringComparison.Ordinal)
+                ? $"Save to Quick Capture: {quickNoteText}"
+                : string.Format(template, quickNoteText);
+            results.Add(new SearchResultItem
+            {
+                Kind = SearchResultKind.Action,
+                Title = title,
+                Subtitle = _localizationService.T("QuickCapture.Name"),
+                ActionId = $"quick-note:{quickNoteText}",
+                Glyph = "\uE70F",
+                RelevanceScore = 10000
+            });
+        }
+
         foreach (var (id, nameKey, glyph) in actions)
         {
             string name = _localizationService.T(nameKey);
@@ -750,6 +977,22 @@ public sealed class SearchEngineService : IDisposable
         return 30;
     }
 
+    internal static string? TruncateIndexedBody(string? text)
+    {
+        if (string.IsNullOrEmpty(text) || text.Length <= MaxIndexedBodyCharacters)
+        {
+            return text;
+        }
+
+        int length = MaxIndexedBodyCharacters;
+        if (char.IsHighSurrogate(text[length - 1]))
+        {
+            length--;
+        }
+
+        return text[..length];
+    }
+
     private static string TruncateText(string text, int maxLength)
     {
         if (string.IsNullOrWhiteSpace(text))
@@ -784,7 +1027,10 @@ public sealed class SearchEngineService : IDisposable
         }
 
         _isDisposed = true;
+        UnregisterActiveInstance(this);
+        Interlocked.Increment(ref _deskBoxContentCacheGeneration);
         _quickCaptureService.Changed -= OnQuickCaptureChanged;
+        TodoWidgetStore.StoreChanged -= OnTodoStoreChanged;
         _deskBoxContentLifetimeCts.Cancel();
         _deskBoxContentLifetimeCts.Dispose();
         Volatile.Write(ref _deskBoxContentSnapshot, []);

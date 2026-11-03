@@ -3,7 +3,9 @@ namespace DeskBox.Contracts;
 public readonly record struct TodoReminderSettings(
     bool Enabled,
     bool RemindersEnabled,
-    int DefaultOffsetMinutes)
+    int DefaultOffsetMinutes,
+    bool AllDayRemindersEnabled = true,
+    int AllDayReminderTimeMinutes = TodoOptionKinds.DefaultAllDayReminderTimeMinutes)
 {
     public bool ShouldRunReminders => Enabled && RemindersEnabled;
 }
@@ -21,7 +23,8 @@ public readonly record struct TodoTabSettings(
     bool ShowThisWeekTab,
     bool ShowThisMonthTab,
     bool ShowImportantTab,
-    bool ShowCompletedTab);
+    bool ShowCompletedTab,
+    bool ShowOverdueTab = true);
 
 /// <summary>
 /// Effective Todo presentation values. A stored text-size override of zero
@@ -49,6 +52,8 @@ public interface ITodoSettings
     Task SetEnabledAsync(bool enabled, CancellationToken cancellationToken = default);
     void SetRemindersEnabled(bool enabled);
     void SetDefaultReminderOffset(int minutes);
+    void SetAllDayRemindersEnabled(bool enabled);
+    void SetAllDayReminderTimeMinutes(int minutes);
     void ResetReminderPreferences(bool scheduleSave = true);
     TodoLayoutSettings ReadLayout();
     void SetLayoutMode(string? mode);

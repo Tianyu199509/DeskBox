@@ -10,7 +10,7 @@ public sealed record BackupSettingsSnapshot(
     bool CloudTodoEnabled, bool CloudQuickCaptureEnabled, bool CloudWidgetStyleEnabled,
     int CloudIntervalMinutes, int CloudRetentionCount,
     long CloudLastSuccessUtcTicks, long CloudLastFailureUtcTicks, long CloudLastUnverifiedUtcTicks,
-    BackupEndpoint Endpoint, bool HasEndpoint);
+    BackupEndpoint Endpoint, bool HasEndpoint, bool CloudCustomWidgetsEnabled = false);
 
 /// <summary>Only non-null members are written, so independent controls never overwrite each other.</summary>
 public sealed record BackupSettingsChange(
@@ -19,7 +19,7 @@ public sealed record BackupSettingsChange(
     string? CloudRemotePath = null, string? CloudUsername = null,
     bool? CloudTodoEnabled = null, bool? CloudQuickCaptureEnabled = null,
     bool? CloudWidgetStyleEnabled = null, int? CloudIntervalMinutes = null,
-    int? CloudRetentionCount = null);
+    int? CloudRetentionCount = null, bool? CloudCustomWidgetsEnabled = null);
 
 public sealed record BackupRemoteSnapshot(string Name, long? Length, DateTimeOffset? CreatedAtUtc);
 public sealed record BackupUploadNotification(BackupEndpoint Endpoint, bool Uploaded, string? RemoteFilePath);

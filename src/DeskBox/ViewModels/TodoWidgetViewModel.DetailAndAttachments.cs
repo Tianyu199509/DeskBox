@@ -15,23 +15,8 @@ public sealed partial class TodoWidgetViewModel
 
     public void SetDraftDueDatePreset(TodoDuePreset preset)
     {
-        DateTimeOffset today = new(DateTime.Now.Date);
-        int daysUntilSunday = ((int)DayOfWeek.Sunday - (int)today.DayOfWeek + 7) % 7;
-        int daysUntilMonday = ((int)DayOfWeek.Monday - (int)today.DayOfWeek + 7) % 7;
-        if (daysUntilMonday == 0)
-        {
-            daysUntilMonday = 7;
-        }
-
-        DraftDueDate = preset switch
-        {
-            TodoDuePreset.Today => WithEndOfDay(today),
-            TodoDuePreset.Tomorrow => WithEndOfDay(today.AddDays(1)),
-            TodoDuePreset.ThisWeek => WithEndOfDay(today.AddDays(daysUntilSunday)),
-            TodoDuePreset.NextMonday => WithEndOfDay(today.AddDays(daysUntilMonday)),
-            TodoDuePreset.Clear => null,
-            _ => null
-        };
+        DateTimeOffset? dueDate = ResolvePresetDueDate(preset);
+        SetDraftDueDate(dueDate, hasDueTime: false);
     }
 
     public void SetColorFilter(TodoColorFilter filter)
@@ -57,6 +42,79 @@ public sealed partial class TodoWidgetViewModel
         return item;
     }
 
+    private void ResolveDraftContextMetadata(
+        out bool isImportant,
+        out DateTimeOffset? dueDate,
+        out bool hasDueTime,
+        out string? colorMarker)
+    {
+        isImportant = _draftImportant || SelectedFilter == TodoFilter.Important;
+        if (_draftDueDate is not null)
+        {
+            dueDate = _draftDueDate;
+            hasDueTime = DraftHasDueTime;
+        }
+        else if (SelectedFilter == TodoFilter.Today)
+        {
+            dueDate = TodoWidgetStore.NormalizeAllDayDueDate(DateTimeOffset.Now);
+            hasDueTime = false;
+        }
+        else
+        {
+            dueDate = null;
+            hasDueTime = false;
+        }
+
+        colorMarker = MapColorFilterToMarker(SelectedColorFilter);
+    }
+
+    public TodoItemViewModel OpenNewDetailFromDraft()
+    {
+        ResolveDraftContextMetadata(
+            out bool isImportant,
+            out DateTimeOffset? dueDate,
+            out bool hasDueTime,
+            out string? colorMarker);
+        string initialTitle = InputText ?? string.Empty;
+
+        InputText = string.Empty;
+        DraftImportant = false;
+        SetDraftDueDate(null, hasDueTime: false);
+
+        CloseDetail();
+        foreach (TodoItemViewModel entry in Items)
+        {
+            entry.CancelEdit();
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        DateTimeOffset? normalizedDueDate = NormalizeDueDate(dueDate, hasDueTime);
+        var item = new TodoItem
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Text = string.Empty,
+            IsImportant = isImportant,
+            DueDate = normalizedDueDate,
+            HasDueTime = normalizedDueDate is not null && hasDueTime,
+            ColorMarker = TodoItem.NormalizeColorMarker(colorMarker),
+            CreatedAt = now,
+            UpdatedAt = now,
+            SortOrder = NewTaskPosition == SettingsService.TodoNewTaskPositionBottom
+                ? Items.Count
+                : 0
+        };
+        var viewModel = new TodoItemViewModel(item, _localizationService, PreviewCacheScope);
+        viewModel.BeginEdit();
+        if (!string.IsNullOrEmpty(initialTitle))
+        {
+            viewModel.EditText = initialTitle;
+        }
+
+        IsCreatingDetailItem = true;
+        SelectedDetailItem = viewModel;
+        return viewModel;
+    }
+
     public TodoItemViewModel OpenNewDetail()
     {
         CloseDetail();
@@ -70,13 +128,14 @@ public sealed partial class TodoWidgetViewModel
         {
             Id = Guid.NewGuid().ToString("N"),
             Text = string.Empty,
+            HasDueTime = false,
             CreatedAt = now,
             UpdatedAt = now,
             SortOrder = NewTaskPosition == SettingsService.TodoNewTaskPositionBottom
                 ? Items.Count
                 : 0
         };
-        var viewModel = new TodoItemViewModel(item, _localizationService);
+        var viewModel = new TodoItemViewModel(item, _localizationService, PreviewCacheScope);
         viewModel.BeginEdit();
         IsCreatingDetailItem = true;
         SelectedDetailItem = viewModel;
@@ -99,10 +158,14 @@ public sealed partial class TodoWidgetViewModel
                 await UpdateItemTextAsync(item.Id, normalizedTitle);
             }
 
-            item.CancelEdit();
             if (closeDetail)
             {
+                item.CancelEdit();
                 SelectedDetailItem = null;
+            }
+            else
+            {
+                item.IsEditing = false;
             }
 
             return item;
@@ -122,7 +185,19 @@ public sealed partial class TodoWidgetViewModel
 
         item.Text = normalizedTitle;
         item.UpdatedAt = DateTimeOffset.UtcNow;
-        item.CancelEdit();
+        if (closeDetail)
+        {
+            item.CancelEdit();
+        }
+        else
+        {
+            item.IsEditing = false;
+            if (string.IsNullOrWhiteSpace(item.EditText))
+            {
+                item.EditText = normalizedTitle;
+            }
+        }
+
         if (NewTaskPosition == SettingsService.TodoNewTaskPositionBottom)
         {
             Items.Add(item);
@@ -344,7 +419,7 @@ public sealed partial class TodoWidgetViewModel
                 string.Equals(existing.FilePath, attachment.FilePath, StringComparison.OrdinalIgnoreCase));
         }
 
-        var attachmentViewModel = new TodoAttachmentViewModel(attachment);
+        var attachmentViewModel = new TodoAttachmentViewModel(attachment, PreviewCacheScope);
         item.Item.Attachments.Add(attachment);
         item.Attachments.Add(attachmentViewModel);
         item.UpdatedAt = DateTimeOffset.UtcNow;
@@ -378,7 +453,7 @@ public sealed partial class TodoWidgetViewModel
             await AttachmentStorageService.TryDeleteManagedCopyAsync(
                 attachment.FilePath,
                 _store.AttachmentDirectory,
-                recycleFileAsync);
+                recycleFileAsync ?? _recycleAttachmentFileAsync);
         }
         return true;
     }

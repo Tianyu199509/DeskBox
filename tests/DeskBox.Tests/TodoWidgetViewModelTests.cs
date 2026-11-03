@@ -382,7 +382,7 @@ public sealed class TodoWidgetViewModelTests : IDisposable
         var viewModel = CreateViewModel("todo-widget");
         await viewModel.InitializeAsync();
 
-        Assert.Equal(Visibility.Visible, viewModel.ColorFilterVisibility);
+        Assert.Equal(Visibility.Collapsed, viewModel.ColorFilterVisibility);
         Assert.Equal(Visibility.Visible, viewModel.RedColorFilterVisibility);
         Assert.Equal(Visibility.Visible, viewModel.OrangeColorFilterVisibility);
         Assert.Equal(Visibility.Visible, viewModel.YellowColorFilterVisibility);
@@ -392,6 +392,11 @@ public sealed class TodoWidgetViewModelTests : IDisposable
         Assert.Equal(TodoColorFilter.All, viewModel.SelectedColorFilter);
         Assert.False(viewModel.IsRedColorFilterSelected);
         Assert.False(viewModel.IsBlueColorFilterSelected);
+
+        var coloredTask = await viewModel.AddItemAsync("colored");
+        Assert.NotNull(coloredTask);
+        await viewModel.SetColorMarkerAsync(coloredTask.Id, TodoItem.TealColorMarker);
+        Assert.Equal(Visibility.Visible, viewModel.ColorFilterVisibility);
 
         viewModel.SetColorFilter(TodoColorFilter.Red);
 
@@ -947,6 +952,65 @@ public sealed class TodoWidgetViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task AddInputAsync_InheritsActiveFilterAndColorContext()
+    {
+        var viewModel = CreateViewModel("todo-widget");
+        await viewModel.InitializeAsync();
+
+        viewModel.SelectedFilter = TodoFilter.Today;
+        viewModel.SelectedColorFilter = TodoColorFilter.Teal;
+        viewModel.InputText = "today teal task";
+
+        TodoItemViewModel? todayItem = await viewModel.AddInputAsync();
+
+        Assert.NotNull(todayItem);
+        Assert.Equal(DateTimeOffset.Now.Date, todayItem.DueDate?.ToLocalTime().Date);
+        Assert.Equal(TodoItem.TealColorMarker, todayItem.ColorMarker);
+        Assert.Contains(todayItem, viewModel.VisibleItems);
+
+        viewModel.SelectedFilter = TodoFilter.Important;
+        viewModel.SelectedColorFilter = TodoColorFilter.All;
+        viewModel.InputText = "important task";
+
+        TodoItemViewModel? importantItem = await viewModel.AddInputAsync();
+
+        Assert.NotNull(importantItem);
+        Assert.True(importantItem.IsImportant);
+        Assert.Contains(importantItem, viewModel.VisibleItems);
+    }
+
+    [Fact]
+    public async Task OpenNewDetailFromDraft_CarriesDraftAndContextMetadataAndClearsInlineInput()
+    {
+        var viewModel = CreateViewModel("todo-widget");
+        await viewModel.InitializeAsync();
+
+        viewModel.SelectedFilter = TodoFilter.Important;
+        viewModel.SelectedColorFilter = TodoColorFilter.Blue;
+        viewModel.SetDraftDueDatePreset(TodoDuePreset.Tomorrow);
+        viewModel.InputText = "draft title ";
+
+        TodoItemViewModel draft = viewModel.OpenNewDetailFromDraft();
+
+        Assert.True(viewModel.IsCreatingDetailItem);
+        Assert.Same(draft, viewModel.SelectedDetailItem);
+        Assert.Equal("draft title ", draft.EditText);
+        Assert.True(draft.IsImportant);
+        Assert.Equal(TodoItem.BlueColorMarker, draft.ColorMarker);
+        Assert.Equal(DateTimeOffset.Now.Date.AddDays(1), draft.DueDate?.ToLocalTime().Date);
+        Assert.Empty(viewModel.InputText);
+        Assert.False(viewModel.DraftImportant);
+        Assert.Null(viewModel.DraftDueDate);
+
+        TodoItemViewModel? finalized = await viewModel.FinalizeDetailAsync(draft.EditText, closeDetail: false);
+        Assert.Same(draft, finalized);
+        Assert.Equal("draft title", draft.Text);
+        Assert.Equal("draft title ", draft.EditText);
+        Assert.False(viewModel.IsCreatingDetailItem);
+        Assert.Same(draft, viewModel.SelectedDetailItem);
+    }
+
+    [Fact]
     public async Task ToggleExpanded_KeepsOnlyOneExpandedItemAndCancelsPreviousEdit()
     {
         var viewModel = CreateViewModel("todo-widget");
@@ -1278,6 +1342,129 @@ public sealed class TodoWidgetViewModelTests : IDisposable
         Assert.Null(item.Item.ReminderDismissedForDueDate);
         var reloaded = await CreateStore("todo-widget").LoadAsync();
         Assert.Null(Assert.Single(reloaded.Items).SnoozedUntil);
+    }
+
+    [Fact]
+    public async Task SetDueDatePresetAsync_CreatesAllDayTaskWithoutEndOfDayTimestamp()
+    {
+        var viewModel = CreateViewModel("todo-all-day-preset");
+        await viewModel.InitializeAsync();
+        var item = await viewModel.AddItemAsync("review PR");
+        Assert.NotNull(item);
+
+        Assert.True(await viewModel.SetDueDatePresetAsync(item.Id, TodoDuePreset.Today));
+
+        Assert.False(item.HasDueTime);
+        Assert.False(item.IsOverdue);
+        Assert.DoesNotContain("23:59", item.DueStatusText, StringComparison.Ordinal);
+        Assert.DoesNotContain("00:00", item.DueStatusText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task TodayFilter_IncludesOverdueSupportsCollapseAndBulkRescheduleWithSingleUndo()
+    {
+        var viewModel = CreateViewModel("todo-today-overdue");
+        await viewModel.InitializeAsync();
+
+        var overdueAllDay = await viewModel.AddItemAsync("overdue all-day");
+        var overdueTimed = await viewModel.AddItemAsync("overdue timed");
+        var dueToday = await viewModel.AddItemAsync("due today");
+        Assert.NotNull(overdueAllDay);
+        Assert.NotNull(overdueTimed);
+        Assert.NotNull(dueToday);
+
+        DateTime twoDaysAgo = DateTime.Today.AddDays(-2);
+        DateTime yesterdayAt1430 = DateTime.Today.AddDays(-1).AddHours(14).AddMinutes(30);
+        var originalAllDayDue = new DateTimeOffset(twoDaysAgo, TimeZoneInfo.Local.GetUtcOffset(twoDaysAgo));
+        var originalTimedDue = new DateTimeOffset(yesterdayAt1430, TimeZoneInfo.Local.GetUtcOffset(yesterdayAt1430));
+
+        await viewModel.SetDueDateAsync(overdueAllDay.Id, originalAllDayDue, hasDueTime: false);
+        await viewModel.SetDueDateAsync(overdueTimed.Id, originalTimedDue, hasDueTime: true);
+        await viewModel.SetDueDatePresetAsync(dueToday.Id, TodoDuePreset.Today);
+
+        viewModel.SelectedFilter = TodoFilter.Today;
+
+        Assert.Equal(3, viewModel.TodayFilterCount);
+        Assert.Equal(1, viewModel.TodayDueOnlyCount);
+        Assert.Equal(2, viewModel.TodayOverdueCount);
+        Assert.Equal(Visibility.Visible, viewModel.TodayOverdueBarVisibility);
+        Assert.Equal(3, viewModel.VisibleItems.Count);
+        Assert.True(dueToday.IsFirstTodayGroupItem);
+        Assert.False(overdueAllDay.IsFirstTodayGroupItem);
+
+        viewModel.ToggleTodayOverdueExpanded();
+        Assert.False(viewModel.IsTodayOverdueExpanded);
+        Assert.Single(viewModel.VisibleItems);
+        Assert.Equal(dueToday.Id, viewModel.VisibleItems[0].Id);
+
+        viewModel.ToggleTodayOverdueExpanded();
+        Assert.Equal(3, viewModel.VisibleItems.Count);
+
+        int moved = await viewModel.RescheduleOverdueToTodayAsync();
+        Assert.Equal(2, moved);
+        Assert.Equal(0, viewModel.TodayOverdueCount);
+        Assert.Equal(Visibility.Collapsed, viewModel.TodayOverdueBarVisibility);
+        Assert.False(overdueAllDay.HasDueTime);
+        Assert.Equal(DateTime.Today, overdueAllDay.DueDate!.Value.ToLocalTime().Date);
+        Assert.True(overdueTimed.HasDueTime);
+        Assert.Equal(DateTime.Today, overdueTimed.DueDate!.Value.ToLocalTime().Date);
+        Assert.Equal(new TimeSpan(14, 30, 0), overdueTimed.DueDate!.Value.ToLocalTime().TimeOfDay);
+        Assert.True(viewModel.CanUndoLastAction);
+
+        Assert.True(await viewModel.UndoLastActionAsync());
+        Assert.Equal(2, viewModel.TodayOverdueCount);
+        Assert.False(overdueAllDay.HasDueTime);
+        Assert.Equal(twoDaysAgo.Date, overdueAllDay.DueDate!.Value.ToLocalTime().Date);
+        Assert.True(overdueTimed.HasDueTime);
+        Assert.Equal(originalTimedDue, overdueTimed.DueDate);
+    }
+
+    [Fact]
+    public async Task OverdueFilter_ShowsOnlyOverdueIncompleteItemsAndSupportsBulkReschedule()
+    {
+        var viewModel = CreateViewModel("todo-widget-overdue-filter");
+        await viewModel.InitializeAsync();
+
+        var overdueYesterday = await viewModel.AddItemAsync("yesterday all-day");
+        var dueTodayAllDay = await viewModel.AddItemAsync("today all-day");
+        var completedOverdue = await viewModel.AddItemAsync("completed overdue");
+        Assert.NotNull(overdueYesterday);
+        Assert.NotNull(dueTodayAllDay);
+        Assert.NotNull(completedOverdue);
+
+        var yesterdayLocal = DateTime.Today.AddDays(-1);
+        await viewModel.SetDueDateAsync(
+            overdueYesterday.Id,
+            new DateTimeOffset(yesterdayLocal, TimeZoneInfo.Local.GetUtcOffset(yesterdayLocal)),
+            hasDueTime: false);
+        await viewModel.SetDueDatePresetAsync(dueTodayAllDay.Id, TodoDuePreset.Today);
+        await viewModel.SetDueDateAsync(
+            completedOverdue.Id,
+            new DateTimeOffset(yesterdayLocal, TimeZoneInfo.Local.GetUtcOffset(yesterdayLocal)),
+            hasDueTime: false);
+        await viewModel.SetCompletedAsync(completedOverdue.Id, true);
+
+        Assert.Equal(1, viewModel.OverdueFilterCount);
+        Assert.Equal(Visibility.Visible, viewModel.OverdueTabVisibility);
+
+        viewModel.SelectedFilter = TodoFilter.Overdue;
+        Assert.True(viewModel.IsOverdueFilterSelected);
+        Assert.False(viewModel.IsOverdueSectionToggleable);
+        Assert.Equal(Visibility.Collapsed, viewModel.OverdueSectionChevronVisibility);
+        Assert.Equal(Visibility.Visible, viewModel.TodayOverdueBarVisibility);
+        Assert.Single(viewModel.VisibleItems);
+        Assert.Equal(overdueYesterday.Id, viewModel.VisibleItems[0].Id);
+
+        viewModel.InputText = "第一行标题\r\n第二行补充说明";
+        var created = await viewModel.AddInputAsync();
+        Assert.NotNull(created);
+        Assert.Contains("第一行标题", created.Text, StringComparison.Ordinal);
+        Assert.Contains("第二行补充说明", created.Text, StringComparison.Ordinal);
+        Assert.Equal(TodoFilter.All, viewModel.SelectedFilter);
+        Assert.Contains(viewModel.VisibleItems, candidate => candidate.Id == created.Id);
+
+        Assert.Equal(3, DeskBox.Controls.Todo.TodoFilterBarController.GetSegmentIndex(TodoFilter.Overdue));
+        Assert.Equal(TodoFilter.Overdue, DeskBox.Controls.Todo.TodoFilterBarController.GetFilterFromSegmentIndex(3));
     }
 
     public void Dispose()

@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
 using DeskBox.Contracts;
 using DeskBox.Models;
@@ -90,24 +90,22 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
     ];
     private static readonly string[] AnimationEffects =
     [
-        WidgetAnimationKinds.EffectSlideFade,
-        WidgetAnimationKinds.EffectFade,
         WidgetAnimationKinds.EffectScaleFade,
-        WidgetAnimationKinds.EffectZoom,
-        WidgetAnimationKinds.EffectEdgeScale,
-        WidgetAnimationKinds.EffectTilt,
-        WidgetAnimationKinds.EffectWipe
+        WidgetAnimationKinds.EffectSlideFade,
+        WidgetAnimationKinds.EffectScreenEdgeSlide,
+        WidgetAnimationKinds.EffectWipe,
+        WidgetAnimationKinds.EffectFade,
+        WidgetAnimationKinds.EffectNone
     ];
     private static readonly string[] AnimationSpeeds =
     [
-        WidgetAnimationKinds.SpeedVeryFast,
         WidgetAnimationKinds.SpeedFast,
         WidgetAnimationKinds.SpeedStandard,
-        WidgetAnimationKinds.SpeedRelaxed,
-        WidgetAnimationKinds.SpeedSlow
+        WidgetAnimationKinds.SpeedRelaxed
     ];
     private static readonly string[] AnimationSlideDirections =
     [
+        WidgetAnimationKinds.DirectionAuto,
         WidgetAnimationKinds.DirectionLeft,
         WidgetAnimationKinds.DirectionRight,
         WidgetAnimationKinds.DirectionUp,
@@ -115,10 +113,7 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
     ];
     private static readonly string[] AnimationEasingIntensities =
     [
-        WidgetAnimationKinds.EasingNone,
-        WidgetAnimationKinds.EasingLight,
         WidgetAnimationKinds.EasingStandard,
-        WidgetAnimationKinds.EasingStrong,
         WidgetAnimationKinds.EasingSpring
     ];
     private static readonly string[] TitleIconModes =
@@ -212,9 +207,9 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
     private string _interactiveChromeMode = WidgetChromeKinds.Standard;
 
     // Animation state.
-    private string _animationEffect = WidgetAnimationKinds.EffectSlideFade;
+    private string _animationEffect = WidgetAnimationKinds.EffectScaleFade;
     private string _animationSpeed = WidgetAnimationKinds.SpeedStandard;
-    private string _animationSlideDirection = WidgetAnimationKinds.DirectionRight;
+    private string _animationSlideDirection = WidgetAnimationKinds.DirectionNone;
     private bool _animationStaggerEnabled;
     private string _animationEasingIntensity = WidgetAnimationKinds.EasingStandard;
     private string _animationPreset = WidgetAnimationKinds.PresetStandard;
@@ -1495,9 +1490,22 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
         get => _animationEffect;
         set
         {
-            if (!SetProperty(ref _animationEffect, value))
+            string normalized = WidgetAnimationKinds.NormalizeEffect(value);
+            if (!SetProperty(ref _animationEffect, normalized))
             {
                 return;
+            }
+
+            string normalizedDirection = WidgetAnimationKinds.NormalizeSlideDirectionForEffect(
+                _animationEffect,
+                _animationSlideDirection);
+            bool directionChanged = !string.Equals(
+                _animationSlideDirection,
+                normalizedDirection,
+                StringComparison.Ordinal);
+            if (directionChanged)
+            {
+                _animationSlideDirection = normalizedDirection;
             }
 
             if (!_isSyncingPresentation)
@@ -1507,16 +1515,19 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
                     scheduleSave: !_isApplyingAnimationPreset);
             }
 
-            if (_animationEffect == WidgetAnimationKinds.EffectSlideFade &&
-                _animationSlideDirection == WidgetAnimationKinds.DirectionNone)
+            if (directionChanged)
             {
-                AnimationSlideDirection = WidgetAnimationKinds.DirectionRight;
+                OnPropertyChanged(nameof(AnimationSlideDirection));
             }
 
+            OnPropertyChanged(nameof(AvailableAnimationSlideDirectionOptions));
+            OnPropertyChanged(nameof(IsAnimationEnabled));
+            OnPropertyChanged(nameof(ShowAnimationDirection));
             OnPropertyChanged(nameof(IsDirectionEnabled));
             OnPropertyChanged(nameof(IsEasingEnabled));
             OnPropertyChanged(nameof(IsSpeedEnabled));
             OnPropertyChanged(nameof(IsStaggerEnabled));
+            OnPropertyChanged(nameof(AnimationSummaryText));
             SyncAnimationPresetSelection();
         }
     }
@@ -1527,13 +1538,12 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
         {
             string[] keys =
             [
-                "Settings.Animation.Effect.SlideFade",
-                "Settings.Animation.Effect.Fade",
                 "Settings.Animation.Effect.ScaleFade",
-                "Settings.Animation.Effect.Zoom",
-                "Settings.Animation.Effect.EdgeScale",
-                "Settings.Animation.Effect.Tilt",
-                "Settings.Animation.Effect.Wipe"
+                "Settings.Animation.Effect.SlideFade",
+                "Settings.Animation.Effect.ScreenEdgeSlide",
+                "Settings.Animation.Effect.Wipe",
+                "Settings.Animation.Effect.Fade",
+                "Settings.Animation.Effect.None"
             ];
             _cachedAnimationEffectNames ??= keys.Select(key => _localize(key)).ToArray();
             var options = new SettingsOption[AnimationEffects.Length];
@@ -1546,28 +1556,52 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
         }
     }
 
-    public bool IsSpeedEnabled => AnimationEffect != WidgetAnimationKinds.EffectNone;
+    public bool IsAnimationEnabled => AnimationEffect != WidgetAnimationKinds.EffectNone;
 
-    public bool IsDirectionEnabled =>
+    public bool ShowAnimationDirection =>
         WidgetAnimationKinds.UsesSlideDirection(AnimationEffect);
 
-    /// <summary>
-    /// Staggering delays each window's HWND travel inside the batch driver;
-    /// stationary effects (fade/scale/tilt/wipe family) never move windows,
-    /// so the toggle does nothing for them and must not present as usable.
-    /// </summary>
-    public bool IsStaggerEnabled => AnimationEffect is
-        WidgetAnimationKinds.EffectSlideFade or
-        WidgetAnimationKinds.EffectScaleSlide;
+    public bool IsSpeedEnabled => IsAnimationEnabled;
 
-    public bool IsEasingEnabled => AnimationEffect != WidgetAnimationKinds.EffectNone;
+    public bool IsDirectionEnabled => ShowAnimationDirection;
+
+    public bool IsStaggerEnabled => IsAnimationEnabled;
+
+    public bool IsEasingEnabled => IsAnimationEnabled;
+
+    public string AnimationSummaryText
+    {
+        get
+        {
+            if (!IsAnimationEnabled)
+            {
+                return _localize("Settings.Animation.Summary.Disabled");
+            }
+
+            var parts = new List<string>(4);
+            if (ShowAnimationDirection)
+            {
+                parts.Add(GetAnimationDirectionSummaryName(AnimationSlideDirection));
+            }
+
+            parts.Add(GetAnimationSpeedDisplayName(AnimationSpeed));
+            parts.Add(GetAnimationEasingDisplayName(AnimationEasingIntensity));
+            if (AnimationStaggerEnabled)
+            {
+                parts.Add(_localize("Settings.Animation.Stagger.Title"));
+            }
+
+            return string.Join(" · ", parts);
+        }
+    }
 
     public string AnimationSpeed
     {
         get => _animationSpeed;
         set
         {
-            if (!SetProperty(ref _animationSpeed, value))
+            string normalized = WidgetAnimationKinds.NormalizeSpeed(value);
+            if (!SetProperty(ref _animationSpeed, normalized))
             {
                 return;
             }
@@ -1579,6 +1613,7 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
                     scheduleSave: !_isApplyingAnimationPreset);
             }
 
+            OnPropertyChanged(nameof(AnimationSummaryText));
             SyncAnimationPresetSelection();
         }
     }
@@ -1589,28 +1624,11 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
         {
             string[] keys =
             [
-                "Settings.Animation.Speed.VeryFast",
                 "Settings.Animation.Speed.Fast",
-                "Settings.Animation.Speed.Relaxed",
-                "Settings.Animation.Speed.Slow",
-                "Settings.Animation.Speed.Standard"
+                "Settings.Animation.Speed.Standard",
+                "Settings.Animation.Speed.Relaxed"
             ];
-            var names = new Dictionary<string, string>(StringComparer.Ordinal);
-            foreach (string key in keys)
-            {
-                names[key] = _localize(key);
-            }
-
-            _cachedAnimationSpeedNames = AnimationSpeeds
-                .Select(speed => speed switch
-                {
-                    WidgetAnimationKinds.SpeedVeryFast => names["Settings.Animation.Speed.VeryFast"],
-                    WidgetAnimationKinds.SpeedFast => names["Settings.Animation.Speed.Fast"],
-                    WidgetAnimationKinds.SpeedRelaxed => names["Settings.Animation.Speed.Relaxed"],
-                    WidgetAnimationKinds.SpeedSlow => names["Settings.Animation.Speed.Slow"],
-                    _ => names["Settings.Animation.Speed.Standard"]
-                })
-                .ToArray();
+            _cachedAnimationSpeedNames ??= keys.Select(key => _localize(key)).ToArray();
             var options = new SettingsOption[AnimationSpeeds.Length];
             for (int index = 0; index < AnimationSpeeds.Length; index++)
             {
@@ -1626,7 +1644,10 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
         get => _animationSlideDirection;
         set
         {
-            if (!SetProperty(ref _animationSlideDirection, value))
+            string normalized = WidgetAnimationKinds.NormalizeSlideDirectionForEffect(
+                _animationEffect,
+                value);
+            if (!SetProperty(ref _animationSlideDirection, normalized))
             {
                 return;
             }
@@ -1638,6 +1659,7 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
                     scheduleSave: !_isApplyingAnimationPreset);
             }
 
+            OnPropertyChanged(nameof(AnimationSummaryText));
             SyncAnimationPresetSelection();
         }
     }
@@ -1648,18 +1670,22 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
         {
             string[] keys =
             [
+                "Settings.Animation.Direction.Auto",
                 "Settings.Animation.Direction.Left",
                 "Settings.Animation.Direction.Right",
                 "Settings.Animation.Direction.Up",
                 "Settings.Animation.Direction.Down"
             ];
             _cachedAnimationSlideDirectionNames ??= keys.Select(key => _localize(key)).ToArray();
-            var options = new SettingsOption[AnimationSlideDirections.Length];
-            for (int index = 0; index < AnimationSlideDirections.Length; index++)
+            bool includeAuto = AnimationEffect == WidgetAnimationKinds.EffectScreenEdgeSlide;
+            int startIndex = includeAuto ? 0 : 1;
+            int count = AnimationSlideDirections.Length - startIndex;
+            var options = new SettingsOption[count];
+            for (int index = 0; index < count; index++)
             {
                 options[index] = new SettingsOption(
-                    AnimationSlideDirections[index],
-                    _cachedAnimationSlideDirectionNames[index]);
+                    AnimationSlideDirections[startIndex + index],
+                    _cachedAnimationSlideDirectionNames[startIndex + index]);
             }
 
             return options;
@@ -1671,7 +1697,8 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
         get => _animationEasingIntensity;
         set
         {
-            if (!SetProperty(ref _animationEasingIntensity, value))
+            string normalized = WidgetAnimationKinds.NormalizeEasingIntensity(value);
+            if (!SetProperty(ref _animationEasingIntensity, normalized))
             {
                 return;
             }
@@ -1683,6 +1710,7 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
                     scheduleSave: !_isApplyingAnimationPreset);
             }
 
+            OnPropertyChanged(nameof(AnimationSummaryText));
             SyncAnimationPresetSelection();
         }
     }
@@ -1701,6 +1729,8 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
             {
                 _settings.SetAnimationStaggerEnabled(value);
             }
+
+            OnPropertyChanged(nameof(AnimationSummaryText));
         }
     }
 
@@ -1710,28 +1740,10 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
         {
             string[] keys =
             [
-                "Settings.Animation.Easing.None",
-                "Settings.Animation.Easing.Light",
-                "Settings.Animation.Easing.Strong",
                 "Settings.Animation.Easing.Standard",
                 "Settings.Animation.Easing.Spring"
             ];
-            var names = new Dictionary<string, string>(StringComparer.Ordinal);
-            foreach (string key in keys)
-            {
-                names[key] = _localize(key);
-            }
-
-            _cachedAnimationEasingIntensityNames = AnimationEasingIntensities
-                .Select(intensity => intensity switch
-                {
-                    WidgetAnimationKinds.EasingNone => names["Settings.Animation.Easing.None"],
-                    WidgetAnimationKinds.EasingLight => names["Settings.Animation.Easing.Light"],
-                    WidgetAnimationKinds.EasingStrong => names["Settings.Animation.Easing.Strong"],
-                    WidgetAnimationKinds.EasingSpring => names["Settings.Animation.Easing.Spring"],
-                    _ => names["Settings.Animation.Easing.Standard"]
-                })
-                .ToArray();
+            _cachedAnimationEasingIntensityNames ??= keys.Select(key => _localize(key)).ToArray();
             var options = new SettingsOption[AnimationEasingIntensities.Length];
             for (int index = 0; index < AnimationEasingIntensities.Length; index++)
             {
@@ -1797,16 +1809,16 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
                 WidgetAnimationKinds.EffectFade,
                 WidgetAnimationKinds.SpeedRelaxed,
                 WidgetAnimationKinds.DirectionNone,
-                WidgetAnimationKinds.EasingLight),
+                WidgetAnimationKinds.EasingStandard),
             WidgetAnimationKinds.PresetEmphasized => (
                 WidgetAnimationKinds.EffectScaleFade,
                 WidgetAnimationKinds.SpeedRelaxed,
                 WidgetAnimationKinds.DirectionNone,
-                WidgetAnimationKinds.EasingStrong),
+                WidgetAnimationKinds.EasingSpring),
             _ => (
-                WidgetAnimationKinds.EffectSlideFade,
+                WidgetAnimationKinds.EffectScaleFade,
                 WidgetAnimationKinds.SpeedStandard,
-                WidgetAnimationKinds.DirectionRight,
+                WidgetAnimationKinds.DirectionNone,
                 WidgetAnimationKinds.EasingStandard)
         };
 
@@ -1912,6 +1924,37 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
             WidgetAnimationKinds.PresetEmphasized => _localize("Settings.Animation.Preset.Emphasized"),
             WidgetAnimationKinds.PresetCustom => _localize("Settings.Animation.Preset.Custom"),
             _ => _localize("Settings.Animation.Preset.Standard")
+        };
+    }
+
+    private string GetAnimationDirectionSummaryName(string direction)
+    {
+        return direction switch
+        {
+            WidgetAnimationKinds.DirectionAuto => _localize("Settings.Animation.Direction.AutoShort"),
+            WidgetAnimationKinds.DirectionLeft => _localize("Settings.Animation.Direction.Left"),
+            WidgetAnimationKinds.DirectionRight => _localize("Settings.Animation.Direction.Right"),
+            WidgetAnimationKinds.DirectionUp => _localize("Settings.Animation.Direction.Up"),
+            _ => _localize("Settings.Animation.Direction.Down")
+        };
+    }
+
+    private string GetAnimationSpeedDisplayName(string speed)
+    {
+        return speed switch
+        {
+            WidgetAnimationKinds.SpeedFast => _localize("Settings.Animation.Speed.Fast"),
+            WidgetAnimationKinds.SpeedRelaxed => _localize("Settings.Animation.Speed.Relaxed"),
+            _ => _localize("Settings.Animation.Speed.Standard")
+        };
+    }
+
+    private string GetAnimationEasingDisplayName(string intensity)
+    {
+        return intensity switch
+        {
+            WidgetAnimationKinds.EasingSpring => _localize("Settings.Animation.Easing.Spring"),
+            _ => _localize("Settings.Animation.Easing.Standard")
         };
     }
 
@@ -2113,6 +2156,7 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
         OnPropertyChanged(nameof(AccentColorDescription));
         OnPropertyChanged(nameof(LayoutDensityText));
         OnPropertyChanged(nameof(AnimationPresetText));
+        OnPropertyChanged(nameof(AnimationSummaryText));
         OnPropertyChanged(nameof(TitleIconModeText));
     }
 

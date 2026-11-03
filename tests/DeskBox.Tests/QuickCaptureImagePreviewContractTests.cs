@@ -61,7 +61,7 @@ public sealed class QuickCaptureImagePreviewContractTests
         Assert.Contains("x:Name=\"DetailPrimaryImageLoadingRing\"", xaml, StringComparison.Ordinal);
         Assert.Contains("RefreshDetailPrimaryImageAsync(primaryImagePath)", code, StringComparison.Ordinal);
         Assert.Contains(
-            "_detailItem.SourceKind == QuickCaptureSourceKind.Clipboard",
+            "_detailItem.SourceKind is QuickCaptureSourceKind.Clipboard or QuickCaptureSourceKind.Image",
             code,
             StringComparison.Ordinal);
         Assert.Contains("DecodePixelWidth = DetailImageDecodePixelWidth", code, StringComparison.Ordinal);
@@ -91,13 +91,13 @@ public sealed class QuickCaptureImagePreviewContractTests
             attachmentViewModel,
             StringComparison.Ordinal);
 
-        string addRecentImageMethod = SliceMethod(
+        string addImageFileMethod = SliceMethod(
             service,
-            "public async Task<QuickCaptureItem?> AddRecentClipboardImageAsync",
-            "public async Task<QuickCaptureItem?> AddImageFileItemAsync");
+            "public async Task<QuickCaptureItem?> AddImageFileItemAsync",
+            "public async Task<string?> CreateImageExportFileAsync");
         Assert.True(
-            addRecentImageMethod.IndexOf("await _gate.WaitAsync()", StringComparison.Ordinal) <
-            addRecentImageMethod.IndexOf("await SaveImageAsync", StringComparison.Ordinal));
+            addImageFileMethod.IndexOf("await _gate.WaitAsync()", StringComparison.Ordinal) <
+            addImageFileMethod.IndexOf("await SaveImageFileAsync", StringComparison.Ordinal));
         Assert.Contains("await CreateImageThumbnailAsync(imagePath)", service, StringComparison.Ordinal);
     }
 

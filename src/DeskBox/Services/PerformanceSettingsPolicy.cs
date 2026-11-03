@@ -30,9 +30,6 @@ public readonly record struct EffectivePerformanceSettings(
 /// </summary>
 public static class PerformanceSettingsPolicy
 {
-    // Canonical option values live in Contracts (batch 50) so the
-    // performance editor can build its binding surface without referencing
-    // this adapter-side policy; these historical constants stay as aliases.
     public const string ModeBestVisual = "BestVisual";
     public const string ModeBalanced = PerformanceOptionKinds.ModeBalanced;
     public const string ModeResourceSaver = PerformanceOptionKinds.ModeResourceSaver;
@@ -83,11 +80,32 @@ public static class PerformanceSettingsPolicy
     public const bool DefaultGlanceImageAutoRotationEnabled = true;
     public const bool DefaultCompactAmbientAnimationsEnabled = true;
 
-    // The string option normalizers live in Contracts (single source) so the
-    // performance editor compares canonical values exactly like the legacy
-    // shell setters did; the numeric delay normalizers stay here because
-    // they encode the hidden CleanupNever sentinel and the settings-load
-    // migration path.
+    private static readonly EffectivePerformanceSettings s_resourceSaverPreset = new(
+        ModeResourceSaver,
+        CleanupAfter30Seconds,
+        CleanupAfter1Minute,
+        DefaultTextMarqueeAnimationsEnabled,
+        DefaultVinylRotationAnimationsEnabled,
+        DefaultGlanceImageAutoRotationEnabled,
+        DefaultCompactAmbientAnimationsEnabled,
+        CleanupAfter5Minutes,
+        CleanupAfter2Minutes,
+        CacheBudgetSmall,
+        HiddenCacheCleanupScopeAllRecreatable);
+
+    private static readonly EffectivePerformanceSettings s_balancedPreset = new(
+        ModeBalanced,
+        CleanupAfter30Seconds,
+        CleanupAfter5Minutes,
+        DefaultTextMarqueeAnimationsEnabled,
+        DefaultVinylRotationAnimationsEnabled,
+        DefaultGlanceImageAutoRotationEnabled,
+        DefaultCompactAmbientAnimationsEnabled,
+        CleanupAfter10Minutes,
+        CleanupAfter10Minutes,
+        CacheBudgetBalanced,
+        HiddenCacheCleanupScopeAllRecreatable);
+
     public static string NormalizeMode(string? mode) =>
         PerformanceOptionKinds.NormalizeMode(mode);
 
@@ -150,31 +168,21 @@ public static class PerformanceSettingsPolicy
         string mode = NormalizeMode(settings.PerformanceMode);
         return mode switch
         {
-            ModeResourceSaver => new(
-                mode,
-                CleanupAfter30Seconds,
-                CleanupAfter1Minute,
-                settings.EnableTextMarqueeAnimations,
-                settings.EnableVinylRotationAnimations,
-                settings.EnableGlanceImageAutoRotation,
-                settings.EnableCompactAmbientAnimations,
-                CleanupAfter5Minutes,
-                CleanupAfter2Minutes,
-                CacheBudgetSmall,
-                HiddenCacheCleanupScopeAllRecreatable),
+            ModeResourceSaver => s_resourceSaverPreset with
+            {
+                AllowTextMarqueeAnimations = settings.EnableTextMarqueeAnimations,
+                AllowVinylRotationAnimations = settings.EnableVinylRotationAnimations,
+                AllowGlanceImageAutoRotation = settings.EnableGlanceImageAutoRotation,
+                AllowCompactAmbientAnimations = settings.EnableCompactAmbientAnimations
+            },
             ModeCustom => ResolveCustom(settings),
-            _ => new(
-                ModeBalanced,
-                CleanupAfter30Seconds,
-                CleanupAfter5Minutes,
-                settings.EnableTextMarqueeAnimations,
-                settings.EnableVinylRotationAnimations,
-                settings.EnableGlanceImageAutoRotation,
-                settings.EnableCompactAmbientAnimations,
-                CleanupAfter10Minutes,
-                CleanupAfter10Minutes,
-                CacheBudgetBalanced,
-                HiddenCacheCleanupScopeAllRecreatable)
+            _ => s_balancedPreset with
+            {
+                AllowTextMarqueeAnimations = settings.EnableTextMarqueeAnimations,
+                AllowVinylRotationAnimations = settings.EnableVinylRotationAnimations,
+                AllowGlanceImageAutoRotation = settings.EnableGlanceImageAutoRotation,
+                AllowCompactAmbientAnimations = settings.EnableCompactAmbientAnimations
+            }
         };
     }
 
@@ -311,14 +319,10 @@ public static class PerformanceSettingsPolicy
             settings.EnableCompactAmbientAnimations;
     }
 
-    private static EffectivePerformanceSettings ResolvePreset(string mode)
-    {
-        var settings = new AppSettings
-        {
-            PerformanceMode = mode
-        };
-        return Resolve(settings);
-    }
+    private static EffectivePerformanceSettings ResolvePreset(string mode) =>
+        string.Equals(NormalizeMode(mode), ModeResourceSaver, StringComparison.Ordinal)
+            ? s_resourceSaverPreset
+            : s_balancedPreset;
 
     private static EffectivePerformanceSettings ResolveCustom(
         AppSettings settings)

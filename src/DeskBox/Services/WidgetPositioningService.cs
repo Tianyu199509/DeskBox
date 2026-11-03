@@ -40,8 +40,27 @@ public static class WidgetPositioningService
         return ResolveBoundsCore(
             config,
             fallbackWorkArea,
-            availableWorkAreas.Select(workArea => new AvailableMonitorWorkArea(
-                workArea, null, null, false, workArea, 1.0)).ToList());
+            MapToAvailableMonitorWorkAreas(availableWorkAreas));
+    }
+
+    private static IReadOnlyList<AvailableMonitorWorkArea> MapToAvailableMonitorWorkAreas(
+        IReadOnlyList<RectInt32> availableWorkAreas)
+    {
+        if (availableWorkAreas.Count == 0)
+        {
+            return [];
+        }
+
+        IReadOnlyList<AvailableMonitorWorkArea> liveAreas = GetAvailableMonitorWorkAreas();
+        var mapped = new List<AvailableMonitorWorkArea>(availableWorkAreas.Count);
+        foreach (RectInt32 workArea in availableWorkAreas)
+        {
+            mapped.Add(
+                FindMonitorForWorkArea(workArea, liveAreas) ??
+                new AvailableMonitorWorkArea(workArea, null, null, false, workArea, 1.0));
+        }
+
+        return mapped;
     }
 
     internal static RectInt32 ResolveBoundsForTest(
@@ -131,14 +150,29 @@ public static class WidgetPositioningService
     {
         int x = (int)Math.Round(double.IsFinite(config.X) ? config.X : 100);
         int y = (int)Math.Round(double.IsFinite(config.Y) ? config.Y : 100);
-        var fallbackWorkArea = DisplayArea.GetFromPoint(
-            new PointInt32(x, y),
-            DisplayAreaFallback.Nearest).WorkArea;
+        int width = (int)Math.Round(double.IsFinite(config.Width) && config.Width > 0 ? config.Width : SettingsService.DefaultWidgetWidth);
+        int height = (int)Math.Round(double.IsFinite(config.Height) && config.Height > 0 ? config.Height : SettingsService.DefaultWidgetHeight);
+        var center = new PointInt32(
+            x + Math.Max(1, width) / 2,
+            y + Math.Max(1, height) / 2);
+        IReadOnlyList<AvailableMonitorWorkArea> availableWorkAreas = GetAvailableMonitorWorkAreas();
+        RectInt32? resolvedFallback = DisplayArea.GetFromPoint(
+            center,
+            DisplayAreaFallback.Nearest)?.WorkArea;
+        if (resolvedFallback is null && availableWorkAreas.Count == 0)
+        {
+            fellBack = true;
+            return new RectInt32(x, y, Math.Max(1, width), Math.Max(1, height));
+        }
+
+        var fallbackWorkArea = resolvedFallback ?? availableWorkAreas[0].WorkArea;
+
+
 
         return ResolveBoundsCore(
             config,
             fallbackWorkArea,
-            GetAvailableMonitorWorkAreas(),
+            availableWorkAreas,
             out fellBack);
     }
 
@@ -500,7 +534,7 @@ public static class WidgetPositioningService
     private static int ResolvePhysicalWidth(WidgetConfig config, double scale)
     {
         double width = double.IsFinite(config.Width)
-            ? Math.Max(SettingsService.MinWidgetWidth, config.Width)
+            ? Math.Max(WidgetElasticLayout.AbsoluteMinWidgetSizeDips, config.Width)
             : SettingsService.DefaultWidgetWidth;
         return UsesLogicalBounds(config)
             ? ToPhysicalPixels(width, scale)
@@ -510,7 +544,7 @@ public static class WidgetPositioningService
     private static int ResolvePhysicalHeight(WidgetConfig config, double scale)
     {
         double height = double.IsFinite(config.Height)
-            ? Math.Max(SettingsService.MinWidgetHeight, config.Height)
+            ? Math.Max(WidgetElasticLayout.AbsoluteMinWidgetSizeDips, config.Height)
             : SettingsService.DefaultWidgetHeight;
         return UsesLogicalBounds(config)
             ? ToPhysicalPixels(height, scale)

@@ -298,7 +298,6 @@ _ = PopulateWeatherNearbyCitiesAsync();
 _ = RefreshQuickAccessStateAsync();
         _settingsService.SettingsChanged += OnSettingsChanged;
         _quickCaptureSettings.Changed += OnQuickCaptureSettingsChanged;
-        _quickCaptureSettings.DiagnosticsChanged += OnQuickCaptureClipboardDiagnosticsChanged;
         _searchFeatureSettings.FeatureChanged += OnSearchFeatureChanged;
         _themeService.AppearanceChanged += OnAppearanceChanged;
         _localizationService.LanguageChanged += OnLanguageChanged;
@@ -381,7 +380,6 @@ _ = RefreshQuickAccessStateAsync();
         _updateOperationCts?.Cancel();
         _updateOperationCts?.Dispose();
         _quickCaptureSettings.Changed -= OnQuickCaptureSettingsChanged;
-        _quickCaptureSettings.DiagnosticsChanged -= OnQuickCaptureClipboardDiagnosticsChanged;
         _searchFeatureSettings.FeatureChanged -= OnSearchFeatureChanged;
 
         _settingsService.SettingsChanged -= OnSettingsChanged;

@@ -14,29 +14,62 @@ public sealed partial class FileSurfaceContent
         Interval = ScrollBarAutoHideDelay
     };
 
+    private PointerEventHandler? _scrollBarActivityPointerHandler;
+    private PointerEventHandler? _iconSizeWheelPointerHandler;
+
     private void RegisterScrollBarActivityTracking(ListViewBase itemsView)
     {
+        _scrollBarActivityPointerHandler ??= new PointerEventHandler(ItemsView_ScrollBarActivity);
+        _iconSizeWheelPointerHandler ??= new PointerEventHandler(ItemsView_IconSizePointerWheel);
         itemsView.AddHandler(
             UIElement.PointerMovedEvent,
-            new PointerEventHandler(ItemsView_ScrollBarActivity),
+            _scrollBarActivityPointerHandler,
             handledEventsToo: true);
         itemsView.AddHandler(
             UIElement.PointerPressedEvent,
-            new PointerEventHandler(ItemsView_ScrollBarActivity),
+            _scrollBarActivityPointerHandler,
             handledEventsToo: true);
         itemsView.AddHandler(
             UIElement.PointerWheelChangedEvent,
-            new PointerEventHandler(ItemsView_ScrollBarActivity),
+            _scrollBarActivityPointerHandler,
             handledEventsToo: true);
         itemsView.AddHandler(
             UIElement.PointerWheelChangedEvent,
-            new PointerEventHandler(ItemsView_IconSizePointerWheel),
+            _iconSizeWheelPointerHandler,
             handledEventsToo: true);
 
         if (!_scrollBarHideTimer.IsEnabled)
         {
             _scrollBarHideTimer.Tick -= ScrollBarHideTimer_Tick;
             _scrollBarHideTimer.Tick += ScrollBarHideTimer_Tick;
+        }
+    }
+
+    private void UnregisterScrollBarActivityTracking(ListViewBase? itemsView)
+    {
+        if (itemsView is null)
+        {
+            return;
+        }
+
+        if (_scrollBarActivityPointerHandler is not null)
+        {
+            itemsView.RemoveHandler(
+                UIElement.PointerMovedEvent,
+                _scrollBarActivityPointerHandler);
+            itemsView.RemoveHandler(
+                UIElement.PointerPressedEvent,
+                _scrollBarActivityPointerHandler);
+            itemsView.RemoveHandler(
+                UIElement.PointerWheelChangedEvent,
+                _scrollBarActivityPointerHandler);
+        }
+
+        if (_iconSizeWheelPointerHandler is not null)
+        {
+            itemsView.RemoveHandler(
+                UIElement.PointerWheelChangedEvent,
+                _iconSizeWheelPointerHandler);
         }
     }
 
@@ -88,6 +121,11 @@ public sealed partial class FileSurfaceContent
     {
         StopScrollBarHideTimer();
         _scrollBarHideTimer.Tick -= ScrollBarHideTimer_Tick;
+        UnregisterScrollBarActivityTracking(ItemsGrid);
+        UnregisterScrollBarActivityTracking(ItemsList);
+        UnregisterScrollBarActivityTracking(_stackPopoverItemsView);
+        _scrollBarActivityPointerHandler = null;
+        _iconSizeWheelPointerHandler = null;
     }
 
     private static void SetVerticalScrollBarVisibility(

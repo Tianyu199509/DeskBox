@@ -121,6 +121,30 @@ public sealed class InteractionSettingsCoordinatorTests : IDisposable
     }
 
     [Fact]
+    public void DynamicClickRaiseScopeWrite_NormalizesInvalidValues_SkipsUnchangedSaves()
+    {
+        var settings = new SettingsService(_root);
+        var coordinator = new InteractionSettingsCoordinator(settings);
+        int notified = 0;
+        settings.SettingsChanged += () => notified++;
+
+        coordinator.SetDynamicClickRaiseScope("InvalidScope");
+        Assert.Equal(
+            SettingsService.DynamicClickRaiseScopeSingle,
+            settings.Settings.DynamicClickRaiseScope);
+        Assert.Equal(0, notified);
+
+        coordinator.SetDynamicClickRaiseScope(SettingsService.DynamicClickRaiseScopeGroup);
+        Assert.Equal(
+            SettingsService.DynamicClickRaiseScopeGroup,
+            settings.Settings.DynamicClickRaiseScope);
+        Assert.Equal(1, notified);
+
+        coordinator.SetDynamicClickRaiseScope(SettingsService.DynamicClickRaiseScopeGroup);
+        Assert.Equal(1, notified);
+    }
+
+    [Fact]
     public async Task HoverActionSelection_StoresWithoutSchedulingItsOwnSave()
     {
         var settings = new SettingsService(_root);
@@ -156,6 +180,7 @@ public sealed class InteractionSettingsCoordinatorTests : IDisposable
         coordinator.SetWidgetSnapSpacing(14d);
         coordinator.SetKeepWidgetsVisibleOnShowDesktop(false);
         coordinator.SetWidgetLayerMode(SettingsService.WidgetLayerModeDesktopPinned);
+        coordinator.SetDynamicClickRaiseScope(SettingsService.DynamicClickRaiseScopeGroup);
         coordinator.SetShowHoverButtons(false);
         coordinator.SetWidgetHoverButtonActions("LockSize,Delete");
         coordinator.SetIdleWorkingSetTrimEnabled(false);
@@ -174,6 +199,7 @@ public sealed class InteractionSettingsCoordinatorTests : IDisposable
         Assert.Equal(14d, snapshot.WidgetSnapSpacing);
         Assert.False(snapshot.KeepWidgetsVisibleOnShowDesktop);
         Assert.Equal(SettingsService.WidgetLayerModeDesktopPinned, snapshot.WidgetLayerMode);
+        Assert.Equal(SettingsService.DynamicClickRaiseScopeGroup, snapshot.DynamicClickRaiseScope);
         Assert.False(snapshot.ShowHoverButtons);
         Assert.Equal("LockSize,Delete", snapshot.WidgetHoverButtonActions);
         Assert.False(snapshot.IdleWorkingSetTrimEnabled);
@@ -191,6 +217,8 @@ public sealed class InteractionSettingsCoordinatorTests : IDisposable
         Assert.Throws<ObjectDisposedException>(() => coordinator.SetWidgetSnapSpacing(12d));
         Assert.Throws<ObjectDisposedException>(() => coordinator.SetWidgetLayerMode(
             SettingsService.WidgetLayerModeQuickReveal));
+        Assert.Throws<ObjectDisposedException>(() => coordinator.SetDynamicClickRaiseScope(
+            SettingsService.DynamicClickRaiseScopeGroup));
         Assert.Throws<ObjectDisposedException>(
             () => coordinator.SetWidgetHoverButtonActions("Add"));
         Assert.True(coordinator.IsStopped);
@@ -200,5 +228,8 @@ public sealed class InteractionSettingsCoordinatorTests : IDisposable
         Assert.Equal(
             SettingsService.WidgetLayerModeDynamic,
             settings.Settings.WidgetLayerMode);
+        Assert.Equal(
+            SettingsService.DynamicClickRaiseScopeSingle,
+            settings.Settings.DynamicClickRaiseScope);
     }
 }

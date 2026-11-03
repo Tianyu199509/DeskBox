@@ -1,4 +1,4 @@
-﻿using System.Text.RegularExpressions;
+using System.Text.RegularExpressions;
 using DeskBox.Contracts;
 using DeskBox.Features.FeatureWidgets;
 using DeskBox.Features.FileStack;
@@ -511,23 +511,27 @@ public sealed class FileStackSettingsEditorTests : IDisposable
             windowXaml,
             StringComparison.Ordinal);
         Assert.Contains(
-            "controls:SettingsComboBox.Value=\"{x:Bind OpenMode, Mode=TwoWay}\"",
-            windowXaml,
-            StringComparison.Ordinal);
-        Assert.Contains(
             "IsOn=\"{Binding AutoStacking, Mode=TwoWay}\"",
-            windowXaml,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "IsEnabled=\"{Binding IsPopoverOpenMode}\"",
             windowXaml,
             StringComparison.Ordinal);
         Assert.Contains(
             "Visibility=\"{Binding ShowCustomRules, Converter={StaticResource SettingsBoolToVisibilityConverter}}\"",
             windowXaml,
             StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "controls:SettingsComboBox.Value=\"{x:Bind OpenMode, Mode=TwoWay}\"",
+            windowXaml,
+            StringComparison.Ordinal);
 
-        // The overview page's three typed editor dependency properties.
+        // The overview page's three typed editor dependency properties (single owner of OpenMode/Popover*).
+        Assert.Contains(
+            "IsEnabled=\"{x:Bind FileStack.IsPopoverOpenMode, Mode=OneWay}\"",
+            overviewXaml,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "AutoStacking",
+            overviewXaml,
+            StringComparison.Ordinal);
         Assert.Contains(
             "ItemsSource=\"{x:Bind FileStack.AvailableOpenModeOptions, Mode=OneWay}\"",
             overviewXaml,

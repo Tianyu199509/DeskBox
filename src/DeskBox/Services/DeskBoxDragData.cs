@@ -1,4 +1,5 @@
 using DeskBox.Helpers;
+using DeskBox.Platform;
 using System.Net.Http;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Storage;
@@ -193,6 +194,7 @@ public static class DeskBoxDragData
             try
             {
                 IReadOnlyList<IStorageItem> storageItems = await dataView.GetStorageItemsAsync();
+                long remainingBudgetBytes = MaxMaterializedBytes;
                 foreach (IStorageItem storageItem in storageItems)
                 {
                     if (storageItem is StorageFolder storageFolder &&
@@ -222,7 +224,22 @@ public static class DeskBoxDragData
                     }
 
                     temporaryDirectory ??= CreateTemporaryDropDirectory();
-                    string? materializedPath = await MaterializeStorageFileAsync(storageFile, temporaryDirectory);
+                    (string? materializedPath, remainingBudgetBytes, bool budgetExceeded) =
+                        await MaterializeStorageFileWithBudgetAsync(
+                            storageFile,
+                            temporaryDirectory,
+                            remainingBudgetBytes);
+                    if (budgetExceeded)
+                    {
+                        App.Log(
+                            $"[DragDrop] Aborted virtual drop batch: payload exceeded {MaxMaterializedBytes}-byte budget.");
+                        files.Clear();
+                        DropStagingFileOps.CleanupVirtualDropBatchDirectory(temporaryDirectory);
+                        temporaryDirectory = null;
+                        skippedCount = Math.Max(1, storageItems.Count);
+                        return new DroppedFileBatch(files, temporaryDirectory: null, skippedCount);
+                    }
+
                     if (materializedPath is null)
                     {
                         skippedCount++;
@@ -517,6 +534,19 @@ public static class DeskBoxDragData
         StorageFile storageFile,
         string temporaryDirectory)
     {
+        (string? path, _, _) = await MaterializeStorageFileWithBudgetAsync(
+            storageFile,
+            temporaryDirectory,
+            MaxMaterializedBytes);
+        return path;
+    }
+
+    private static async Task<(string? Path, long RemainingBudgetBytes, bool BudgetExceeded)>
+        MaterializeStorageFileWithBudgetAsync(
+            StorageFile storageFile,
+            string temporaryDirectory,
+            long remainingBudgetBytes)
+    {
         string fileName = FileService.SanitizeFileSystemName(Path.GetFileName(storageFile.Name));
         if (string.IsNullOrWhiteSpace(fileName))
         {
@@ -526,12 +556,22 @@ public static class DeskBoxDragData
         try
         {
             using IRandomAccessStreamWithContentType source = await storageFile.OpenReadAsync();
-            return await SaveRandomAccessStreamAsync(source, fileName, temporaryDirectory);
+            (string path, long updatedRemaining) = await SaveRandomAccessStreamWithBudgetAsync(
+                source,
+                fileName,
+                temporaryDirectory,
+                remainingBudgetBytes);
+            return (path, updatedRemaining, false);
+        }
+        catch (VirtualDropBudgetExceededException ex)
+        {
+            App.Log($"[DragDrop] Virtual file '{storageFile.Name}' exceeded budget: {ex.Message}");
+            return (null, 0, true);
         }
         catch (Exception ex)
         {
             App.Log($"[DragDrop] Failed to materialize virtual file '{storageFile.Name}': {ex.Message}");
-            return null;
+            return (null, remainingBudgetBytes, false);
         }
     }
 
@@ -540,18 +580,33 @@ public static class DeskBoxDragData
         string fileName,
         string temporaryDirectory)
     {
+        (string path, _) = await SaveRandomAccessStreamWithBudgetAsync(
+            source,
+            fileName,
+            temporaryDirectory,
+            MaxMaterializedBytes);
+        return path;
+    }
+
+    private static async Task<(string Path, long RemainingBudgetBytes)> SaveRandomAccessStreamWithBudgetAsync(
+        IRandomAccessStream source,
+        string fileName,
+        string temporaryDirectory,
+        long remainingBudgetBytes)
+    {
         Directory.CreateDirectory(temporaryDirectory);
         string destinationPath = FileService.GetAvailablePath(
             Path.Combine(temporaryDirectory, fileName));
-        if (source.Size > MaxMaterializedBytes)
+        if (source.Size > (ulong)Math.Max(0, remainingBudgetBytes))
         {
-            throw new IOException(
+            throw new VirtualDropBudgetExceededException(
                 $"The dropped stream of {source.Size} bytes exceeds the " +
-                $"{MaxMaterializedBytes}-byte materialization budget.");
+                $"remaining {remainingBudgetBytes}-byte materialization budget.");
         }
 
         source.Seek(0);
         using Stream sourceStream = source.AsStreamForRead();
+        long totalBytes = 0;
         await using (var destination = new FileStream(
                          destinationPath,
                          FileMode.CreateNew,
@@ -561,16 +616,15 @@ public static class DeskBoxDragData
                          useAsync: true))
         {
             var buffer = new byte[81920];
-            long totalBytes = 0;
             int read;
             while ((read = await sourceStream.ReadAsync(buffer)) > 0)
             {
                 totalBytes += read;
-                if (totalBytes > MaxMaterializedBytes)
+                if (totalBytes > remainingBudgetBytes)
                 {
-                    throw new IOException(
-                        "The dropped stream exceeded the materialization " +
-                        $"budget of {MaxMaterializedBytes} bytes mid-copy.");
+                    throw new VirtualDropBudgetExceededException(
+                        "The dropped stream exceeded the remaining materialization " +
+                        $"budget of {remainingBudgetBytes} bytes mid-copy.");
                 }
 
                 await destination.WriteAsync(buffer.AsMemory(0, read));
@@ -582,8 +636,10 @@ public static class DeskBoxDragData
         ZoneIdentifierWriter.TryMarkFile(
             resolvedPath,
             ZoneIdentifierWriter.VirtualDropSource);
-        return resolvedPath;
+        return (resolvedPath, Math.Max(0, remainingBudgetBytes - totalBytes));
     }
+
+    private sealed class VirtualDropBudgetExceededException(string message) : IOException(message);
 
     private static string CreateTemporaryDropDirectory()
     {

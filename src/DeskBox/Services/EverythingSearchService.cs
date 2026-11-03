@@ -381,21 +381,7 @@ public sealed class EverythingSearchService : IDisposable, ISearchConnectionClie
 
     private static (bool Connected, string? Version, uint Error) ProbeNativeConnection()
     {
-        EverythingNativeMethods.Reset();
-        int loaded = EverythingNativeMethods.IsDatabaseLoaded();
-        uint error = EverythingNativeMethods.GetLastError();
-        if (loaded == 0)
-        {
-            return (false, null, error);
-        }
-
-        string version = string.Join(
-            '.',
-            EverythingNativeMethods.GetMajorVersion(),
-            EverythingNativeMethods.GetMinorVersion(),
-            EverythingNativeMethods.GetRevision(),
-            EverythingNativeMethods.GetBuildNumber());
-        return (true, version, EverythingNativeMethods.ErrorOk);
+        return EverythingNativeMethods.ProbeConnection();
     }
 
     private static SearchFileQueryPage QueryNative(
@@ -405,109 +391,62 @@ public sealed class EverythingSearchService : IDisposable, ISearchConnectionClie
         int resultCount,
         CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!EverythingNativeMethods.TryQuery(
+                providerQuery,
+                offset: checked((uint)resultOffset),
+                maxResults: checked((uint)resultCount),
+                cancellationToken,
+                out EverythingIpcQueryReply reply,
+                out uint errorCode))
+        {
+            throw new EverythingIpcException(errorCode);
+        }
+
         var results = new List<SearchResultItem>(Math.Min(
-            resultCount,
+            Math.Max(reply.Items.Count, 1),
             MaximumInitialListCapacity));
         var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        int totalMatches = 0;
-        uint nativeCount = 0;
+        int totalMatches = ClampToInt(reply.TotalResults);
+        uint nativeCount = (uint)reply.Items.Count;
 
-        try
+        foreach (EverythingIpcResultEntry entry in reply.Items)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            EverythingNativeMethods.Reset();
-            EverythingNativeMethods.SetSearch(providerQuery);
-            EverythingNativeMethods.SetMatchPath(0);
-            EverythingNativeMethods.SetMatchCase(0);
-            EverythingNativeMethods.SetMatchWholeWord(0);
-            EverythingNativeMethods.SetRegex(0);
-            EverythingNativeMethods.SetOffset(checked((uint)resultOffset));
-            EverythingNativeMethods.SetMax(checked((uint)resultCount));
-            EverythingNativeMethods.SetSort(EverythingNativeMethods.SortNameAscending);
-            EverythingNativeMethods.SetRequestFlags(
-                EverythingNativeMethods.RequestFileName |
-                EverythingNativeMethods.RequestPath |
-                EverythingNativeMethods.RequestSize |
-                EverythingNativeMethods.RequestDateModified);
-
-            // Deep review R15 (F6 audit): Query(1) blocks on the IPC reply
-            // with no timeout; an alive-but-hung Everything pinned the gate
-            // forever. Non-blocking submit + bounded poll instead — on
-            // timeout or cancel the query is stopped and the failure routes
-            // through the same EverythingIpcException path as an IPC error.
-            if (EverythingNativeMethods.Query(0) == 0)
+            if (entry.FileName.Length == 0)
             {
-                throw new EverythingIpcException(EverythingNativeMethods.GetLastError());
+                continue;
             }
 
-            const int QueryWatchdogMs = 10_000;
-            var watchdog = Stopwatch.StartNew();
-            while (!EverythingNativeMethods.IsQueryAvailable())
+            string fullPath = BuildFullPath(entry.DirectoryPath, entry.FileName);
+            if (!seenPaths.Add(fullPath))
             {
-                if (watchdog.ElapsedMilliseconds >= QueryWatchdogMs)
-                {
-                    EverythingNativeMethods.StopQuery();
-                    throw new EverythingIpcException(EverythingNativeMethods.GetLastError());
-                }
-
-                cancellationToken.ThrowIfCancellationRequested();
-                Thread.Sleep(50);
+                continue;
             }
 
-            nativeCount = EverythingNativeMethods.GetNumResults();
-            totalMatches = ClampToInt(EverythingNativeMethods.GetTotalResults());
-            for (uint index = 0; index < nativeCount; index++)
+            DateTimeOffset? modified = null;
+            if (entry.DateModifiedFileTime is > 0 and var fileTime)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                string fileName = Marshal.PtrToStringUni(
-                    EverythingNativeMethods.GetResultFileName(index)) ?? string.Empty;
-                string directory = Marshal.PtrToStringUni(
-                    EverythingNativeMethods.GetResultPath(index)) ?? string.Empty;
-                if (fileName.Length == 0)
+                try
                 {
-                    continue;
+                    modified = DateTimeOffset.FromFileTime(fileTime);
                 }
-
-                string fullPath = BuildFullPath(directory, fileName);
-                if (!seenPaths.Add(fullPath))
+                catch (ArgumentOutOfRangeException)
                 {
-                    continue;
+                    // Keep the result even if an unusual filesystem timestamp is invalid.
                 }
-
-                bool isFolder = EverythingNativeMethods.IsFolderResult(index) != 0;
-                long? size = !isFolder &&
-                             EverythingNativeMethods.GetResultSize(index, out long nativeSize) != 0
-                    ? nativeSize
-                    : null;
-                DateTimeOffset? modified = null;
-                if (EverythingNativeMethods.GetResultDateModified(index, out long fileTime) != 0 &&
-                    fileTime > 0)
-                {
-                    try
-                    {
-                        modified = DateTimeOffset.FromFileTime(fileTime);
-                    }
-                    catch (ArgumentOutOfRangeException)
-                    {
-                        // Keep the result even if an unusual filesystem timestamp is invalid.
-                    }
-                }
-
-                results.Add(new SearchResultItem
-                {
-                    Kind = isFolder ? SearchResultKind.Folder : SearchResultKind.File,
-                    Title = fileName,
-                    Subtitle = directory,
-                    DetailPath = fullPath,
-                    FileSize = size,
-                    ModifiedAt = modified,
-                    RelevanceScore = ComputeRelevance(fileName, rankingQuery)
-                });
             }
-        }
-        finally
-        {
-            EverythingNativeMethods.Reset();
+
+            results.Add(new SearchResultItem
+            {
+                Kind = entry.IsFolder ? SearchResultKind.Folder : SearchResultKind.File,
+                Title = entry.FileName,
+                Subtitle = entry.DirectoryPath,
+                DetailPath = fullPath,
+                FileSize = entry.IsFolder ? null : entry.FileSize,
+                ModifiedAt = modified,
+                RelevanceScore = ComputeRelevance(entry.FileName, rankingQuery)
+            });
         }
 
         int nextOffset = nativeCount == 0
@@ -592,23 +531,7 @@ public sealed class EverythingSearchService : IDisposable, ISearchConnectionClie
         bool acquired = _nativeGate.Wait(TimeSpan.FromSeconds(1));
         if (acquired)
         {
-            try
-            {
-                try
-                {
-                    EverythingNativeMethods.CleanUp();
-                }
-                catch (Exception ex) when (
-                    ex is DllNotFoundException or BadImageFormatException or EntryPointNotFoundException)
-                {
-                    // The provider may never have loaded in this process.
-                }
-            }
-            finally
-            {
-                _nativeGate.Release();
-            }
-
+            _nativeGate.Release();
             _nativeGate.Dispose();
         }
     }

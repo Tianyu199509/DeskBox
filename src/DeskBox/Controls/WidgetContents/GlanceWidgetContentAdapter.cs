@@ -16,6 +16,34 @@ public sealed class GlanceWidgetContentAdapter :
     private int _compactBackgroundDecodeWidth;
     private ImageSource? _compactBackground;
     private long _compactBackgroundEstimatedBytes;
+    private bool _isWindowVisible = true;
+    private bool _isCompactCollapsed;
+    private bool _shellCustomBackgroundActive;
+
+    protected override void OnViewMaterialized(FrameworkElement view)
+    {
+        base.OnViewMaterialized(view);
+        if (view is GlanceWidgetContent glanceView)
+        {
+            glanceView.SetShellCustomBackgroundActive(_shellCustomBackgroundActive);
+            glanceView.OnWindowVisibilityChanged(_isWindowVisible);
+            glanceView.OnCompactStateChanged(_isCompactCollapsed);
+        }
+    }
+
+    internal void SetShellCustomBackgroundActive(bool active)
+    {
+        _shellCustomBackgroundActive = active;
+        (MaterializedView as GlanceWidgetContent)?.SetShellCustomBackgroundActive(active);
+    }
+
+    private void ClearCompactBackgroundCache()
+    {
+        _compactBackground = null;
+        _compactBackgroundPath = null;
+        _compactBackgroundDecodeWidth = 0;
+        SetCompactBackgroundEstimatedBytes(0);
+    }
 
     public GlanceWidgetContentAdapter(
         WidgetConfig config,
@@ -47,6 +75,7 @@ public sealed class GlanceWidgetContentAdapter :
             () => (viewFactory ?? (vm => new GlanceWidgetContent(vm)))(viewModel))
     {
         ViewModel = viewModel;
+        _shellCustomBackgroundActive = WidgetBackgroundCustomization.HasCustomBackground(config);
     }
 
     public GlanceWidgetViewModel ViewModel { get; }
@@ -61,11 +90,29 @@ public sealed class GlanceWidgetContentAdapter :
 
     public override void OnDeactivated() => ViewModel.OnDeactivated();
 
-    public override void OnWindowVisibilityChanged(bool visible) => ViewModel.OnWindowVisibilityChanged(visible);
+    public override void OnWindowVisibilityChanged(bool visible)
+    {
+        _isWindowVisible = visible;
+        ViewModel.OnWindowVisibilityChanged(visible);
+        (MaterializedView as GlanceWidgetContent)?.OnWindowVisibilityChanged(visible);
+        if (!visible)
+        {
+            ClearCompactBackgroundCache();
+        }
+    }
 
     public override void OnWindowRevealCompleted() => ViewModel.OnWindowRevealCompleted();
 
-    public override void OnCompactStateChanged(bool collapsed) => ViewModel.OnCompactStateChanged(collapsed);
+    public override void OnCompactStateChanged(bool collapsed)
+    {
+        _isCompactCollapsed = collapsed;
+        ViewModel.OnCompactStateChanged(collapsed);
+        (MaterializedView as GlanceWidgetContent)?.OnCompactStateChanged(collapsed);
+        if (!collapsed)
+        {
+            ClearCompactBackgroundCache();
+        }
+    }
 
     public void BeginResponsiveLayoutTransition(double targetContentWidth, double targetContentHeight, bool isCollapsing)
         => ViewModel.UpdateAvailableSize(targetContentWidth, targetContentHeight);
@@ -79,6 +126,12 @@ public sealed class GlanceWidgetContentAdapter :
 
     public ImageSource? GetCompactBackgroundImage(int decodePixelWidth)
     {
+        if (!_isCompactCollapsed || !_isWindowVisible)
+        {
+            ClearCompactBackgroundCache();
+            return null;
+        }
+
         string? path = ViewModel.CurrentImagePath;
         if (string.Equals(path, _compactBackgroundPath, StringComparison.OrdinalIgnoreCase) &&
             _compactBackgroundDecodeWidth == decodePixelWidth)
@@ -131,11 +184,17 @@ public sealed class GlanceWidgetContentAdapter :
         }
     }
 
+    protected override void OnHibernatingView(FrameworkElement view)
+    {
+        (view as GlanceWidgetContent)?.Dispose();
+    }
+
     protected override void Dispose(bool disposing)
     {
         _compactBackground = null;
         _compactBackgroundPath = null;
         SetCompactBackgroundEstimatedBytes(0);
+        (MaterializedView as GlanceWidgetContent)?.Dispose();
         ViewModel.Dispose();
     }
 }

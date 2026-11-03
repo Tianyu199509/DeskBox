@@ -145,21 +145,7 @@ internal sealed record HookWatchdogPolicy
 }
 
 /// <summary>
-/// Periodic health check for the low-level input hooks. Windows can silently
-/// unhook a callback whose owning process is memory-trimmed or throttled for
-/// too long, and nothing in the process notices until input is missed
-/// permanently. Detection is two-staged so the check itself has no side
-/// effects during idle: divergence (user input is flowing per
-/// GetLastInputInfo while the hook's callback stays silent) is free to
-/// observe; only a divergent target gets a single tagged canary injection as
-/// confirmation, and only a failed echo triggers re-registration. A target
-/// whose canary just echoed is left alone for a success cooldown: input
-/// flowing while a keyboard hook stays silent is the normal state of a
-/// mouse-only session, and re-probing it every cycle would feed synthetic
-/// keystrokes into the focused app once per silence window.
-/// RegisterHotKey chords have no hook to probe, so they are kept alive by a
-/// separate heartbeat: a periodic unregister+register round-trip with
-/// exponential backoff on failure to prevent registration storms.
+/// Periodic health check for the low-level input hooks.
 /// </summary>
 internal sealed class HookHealthWatchdog : IDisposable
 {
@@ -201,8 +187,6 @@ internal sealed class HookHealthWatchdog : IDisposable
         _policy = policy ?? HookWatchdogPolicy.Default;
         _dispatcherQueue = dispatcherQueue;
         _log = log ?? (_ => { });
-        // Routine per-round lines (the registration heartbeat) go to the
-        // routine channel; repairs and failures always use _log.
         _logRoutine = logRoutine ?? _log;
         _loop = Task.Run(LoopAsync);
     }
@@ -223,12 +207,6 @@ internal sealed class HookHealthWatchdog : IDisposable
         }
     }
 
-    /// <summary>
-    /// Input is flowing (per GetLastInputInfo) but the hook callback has been
-    /// silent long enough that real input must have crossed it. The tick
-    /// counts are 32/64-bit GetTickCount-domain values; the subtraction is
-    /// intentionally unchecked so a 49.7-day wraparound stays correct.
-    /// </summary>
     internal static bool IsDivergent(
         uint lastInputTick,
         long lastCallbackTicks,
@@ -242,8 +220,54 @@ internal sealed class HookHealthWatchdog : IDisposable
                callbackSilentMs >= callbackSilentThresholdMs;
     }
 
+    private bool HasAnyActiveWatchOrMaintenanceTarget()
+    {
+        lock (_slotsLock)
+        {
+            for (int i = 0; i < _slots.Count; i++)
+            {
+                try
+                {
+                    if (_slots[i].Resolve()?.HookProbeWanted == true)
+                    {
+                        return true;
+                    }
+                }
+                catch
+                {
+                    return true;
+                }
+            }
+
+            for (int i = 0; i < _maintenanceSlots.Count; i++)
+            {
+                MaintenanceSlot slot = _maintenanceSlots[i];
+                try
+                {
+                    if (slot.Resolve()?.RegistrationMaintenanceWanted == true)
+                    {
+                        return true;
+                    }
+
+                    slot.AttemptInFlight = false;
+                }
+                catch
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
     internal Task RunCycleOnceAsync()
     {
+        if (!HasAnyActiveWatchOrMaintenanceTarget())
+        {
+            return Task.CompletedTask;
+        }
+
         bool inputKnown = Win32Helper.TryGetLastInputTickCount(out uint lastInputTick);
         return RunCycleOnceAsync(inputKnown, lastInputTick, Environment.TickCount64);
     }
@@ -311,11 +335,6 @@ internal sealed class HookHealthWatchdog : IDisposable
             return;
         }
 
-        // While the process is still starved a freshly re-registered hook just
-        // accumulates new timeouts; bound the churn with a per-slot cooldown
-        // that escalates only when recoveries keep dying within the rapid
-        // re-death window (starved process) rather than an aggressive
-        // environment (feedback 445: removals every 15-45 minutes).
         if (slot.HasRecovered &&
             nowTicks - slot.LastRecoveryTicks < CurrentRecoveryCooldownMs(slot))
         {
@@ -346,9 +365,6 @@ internal sealed class HookHealthWatchdog : IDisposable
         }
         else
         {
-            // Canary side effects (one synthetic keystroke/mouse nudge) are
-            // user-visible in principle — always log them so field logs show
-            // the probe cadence without flipping verbose flags.
             _log($"[HookWatchdog] {target.ProbeName} silent while input flows; issuing tagged canary");
             dead = !await target.ProbeHookAliveAsync(_policy.CanaryEchoWaitMs).ConfigureAwait(false);
         }
@@ -384,8 +400,6 @@ internal sealed class HookHealthWatchdog : IDisposable
             return;
         }
 
-        // Without a dispatcher (unit tests, or a degenerate shutdown window)
-        // run the recovery inline on the watchdog thread.
         if (_dispatcherQueue is null)
         {
             InvokeRecovery(target);
@@ -449,16 +463,12 @@ internal sealed class HookHealthWatchdog : IDisposable
     {
         if (!target.RegistrationMaintenanceWanted)
         {
-            // Suspended (recording) or disabled: there is no pending heartbeat
-            // whose outcome to evaluate, but past failures stay remembered.
             slot.AttemptInFlight = false;
             return;
         }
 
         if (slot.AttemptInFlight)
         {
-            // The round-trip runs asynchronously on the UI dispatcher; judge
-            // it by the target's health only after the grace window.
             if (nowTicks - slot.LastAttemptTicks < _policy.MaintenanceEvaluationGraceMs)
             {
                 return;
@@ -503,8 +513,6 @@ internal sealed class HookHealthWatchdog : IDisposable
             return;
         }
 
-        // Without a dispatcher (unit tests, or a degenerate shutdown window)
-        // run the heartbeat inline on the watchdog thread.
         if (_dispatcherQueue is null)
         {
             InvokeHeartbeat(target);
@@ -606,8 +614,6 @@ internal sealed class HookHealthWatchdog : IDisposable
         }
 
         _disposed = true;
-        // Cancel only — the loop may still be inside WaitForNextTickAsync and
-        // touching the token; the CTS carries no OS resource to release early.
         _cts.Cancel();
     }
 }

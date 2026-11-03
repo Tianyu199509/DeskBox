@@ -86,6 +86,13 @@ public sealed class PerformanceSettingsContractTests
             "x:Key=\"PerformanceSettingsSectionTemplate\"",
             xaml,
             StringComparison.Ordinal);
+        int perfTemplateStart = xaml.IndexOf("x:Key=\"PerformanceSettingsSectionTemplate\"", StringComparison.Ordinal);
+        int perfTemplateEnd = xaml.IndexOf("</DataTemplate>", perfTemplateStart, StringComparison.Ordinal);
+        string perfSubPageSlice = xaml[perfTemplateStart..perfTemplateEnd];
+        Assert.DoesNotContain("SelectedPerformanceMode", perfSubPageSlice, StringComparison.Ordinal);
+        Assert.DoesNotContain("SelectedVisibleIdleCacheCleanupDelaySeconds", perfSubPageSlice, StringComparison.Ordinal);
+        Assert.DoesNotContain("SelectedHiddenCacheCleanupDelaySeconds", perfSubPageSlice, StringComparison.Ordinal);
+        Assert.DoesNotContain("SelectedPerformanceCacheBudget", perfSubPageSlice, StringComparison.Ordinal);
         Assert.Contains(
             "EnsureSettingsSectionCreated(visibleSectionTag)",
             navigation,

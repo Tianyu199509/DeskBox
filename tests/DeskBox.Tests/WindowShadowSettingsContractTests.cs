@@ -17,7 +17,7 @@ public sealed class WindowShadowSettingsContractTests
         string material = Slice(
             slice,
             "x:Key=\"AppearanceMaterialSettingsSectionTemplate\"",
-            "x:Key=\"AppearanceDensitySettingsSectionTemplate\"");
+            "x:Key=\"WidgetGroupsSectionTemplate\"");
 
         // Transparency card: status projection + ms-settings deep link.
         Assert.Contains("HeaderKey=\"Settings.SystemTransparency.Title\"", material, StringComparison.Ordinal);

@@ -356,7 +356,7 @@ public sealed partial class TodoWidgetContent
             .ToList();
     }
 
-        private Task PickCustomDueDateAsync(TodoItemViewModel? item)
+    private Task PickCustomDueDateAsync(TodoItemViewModel? item)
     {
         if (ViewModel is null)
         {
@@ -364,16 +364,28 @@ public sealed partial class TodoWidgetContent
         }
 
         CloseTodoEdit();
+        if (!EnsureCustomDueDateOverlayRealized())
+        {
+            return Task.CompletedTask;
+        }
+
         _customDueDateItem = item;
         _customDueDateItemIds = null;
         DateTimeOffset dueDate = item?.DueDate ?? ViewModel.DraftDueDate ?? GetDefaultCustomDueDate();
-        CustomDueDatePicker.MinDate = DateTimeOffset.Now.Date;
-        CustomDueDatePicker.Date = dueDate;
-        SetCustomDueTime(dueDate);
+        bool includeTime = item is not null
+            ? item.HasDueTime
+            : ViewModel.DraftHasDueTime;
+        if (CustomDueDatePicker is not null)
+        {
+            CustomDueDatePicker.MinDate = DateTimeOffset.Now.Date;
+            CustomDueDatePicker.Date = dueDate;
+        }
+
+        ConfigureCustomDueTimeState(dueDate, includeTime);
         ApplyLocalizedText();
         ApplyEditorVisualStyle();
-        CustomDueDateOverlay.Visibility = Visibility.Visible;
-        CustomDueDatePicker.Focus(FocusState.Programmatic);
+        CustomDueDateOverlay!.Visibility = Visibility.Visible;
+        CustomDueDatePicker?.Focus(FocusState.Programmatic);
         return Task.CompletedTask;
     }
 }

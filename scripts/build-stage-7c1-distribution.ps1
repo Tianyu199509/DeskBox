@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param(
     [Parameter(Mandatory)]
     [ValidateSet("x64", "ARM64")]
@@ -166,17 +166,30 @@ $directFiles | Set-Content -LiteralPath (Join-Path $OutputDirectory "direct-publ
 
 $directRequiredFiles = @(
     "DeskBox.exe",
+    "DeskBox.Settings.exe",
     "DeskBox.Updater.exe",
     "DeskBox.ThumbnailProxy.exe",
     "deskbox_native.dll",
-    "EverythingSdk.dll",
     "Microsoft.UI.Input.dll",
     "Microsoft.ui.xaml.dll",
     "Microsoft.WindowsAppRuntime.dll",
     "Microsoft.WindowsAppRuntime.Insights.Resource.dll",
-    "ThirdParty/Everything/LICENSE.txt",
     "DeskBox.pri",
-    "DeskBox.InstallManifest.txt"
+    "DeskBox.Settings.pri",
+    "DeskBox.InstallManifest.txt",
+    "Strings/ar-SA.json",
+    "Strings/bn-BD.json",
+    "Strings/de-DE.json",
+    "Strings/en-US.json",
+    "Strings/es-ES.json",
+    "Strings/fr-FR.json",
+    "Strings/hi-IN.json",
+    "Strings/ja-JP.json",
+    "Strings/ko-KR.json",
+    "Strings/pt-BR.json",
+    "Strings/ru-RU.json",
+    "Strings/zh-CN.json",
+    "Strings/zh-TW.json"
 )
 $missingDirectFiles = @($directRequiredFiles | Where-Object { $directFiles -notcontains $_ })
 $directForbiddenPatterns = @(
@@ -184,7 +197,13 @@ $directForbiddenPatterns = @(
     '(^|/)DeskBox\.dll$',
     '(^|/)DeskBox\.deps\.json$',
     '(^|/)DeskBox\.runtimeconfig\.json$',
+    '(^|/)DeskBox\.Settings\.dll$',
+    '(^|/)DeskBox\.Settings\.deps\.json$',
+    '(^|/)DeskBox\.Settings\.runtimeconfig\.json$',
     '(^|/)(?:coreclr|clrjit|hostfxr|hostpolicy)\.dll$',
+    '(^|/)EverythingSdk\.dll$',
+    '(^|/)H\.NotifyIcon(?:\.WinUI)?\.dll$',
+    '(^|/)deskbox_search_core(?:\.|$)',
     '(^|/)Assets/Store/',
     'store-assets-html'
 )
@@ -208,17 +227,15 @@ if ($forbiddenDirectFiles.Count -gt 0) {
 }
 
 $deskBoxMachine = Get-PeMachine -Path (Join-Path $directPublishDirectory "DeskBox.exe")
+$settingsMachine = Get-PeMachine -Path (Join-Path $directPublishDirectory "DeskBox.Settings.exe")
 $updaterMachine = Get-PeMachine -Path (Join-Path $directPublishDirectory "DeskBox.Updater.exe")
 $thumbnailProxyMachine = Get-PeMachine -Path (
     Join-Path $directPublishDirectory "DeskBox.ThumbnailProxy.exe")
-$everythingSdkMachine = Get-PeMachine -Path (
-    Join-Path $directPublishDirectory "EverythingSdk.dll")
 $windowsAppRuntimeInsightsMachine = Get-PeMachine -Path (
     Join-Path $directPublishDirectory "Microsoft.WindowsAppRuntime.Insights.Resource.dll")
-if ($deskBoxMachine -ne $expectedMachine -or
+if ($deskBoxMachine -ne $expectedMachine -or $settingsMachine -ne $expectedMachine -or
     $updaterMachine -ne $expectedMachine -or
     $thumbnailProxyMachine -ne $expectedMachine -or
-    $everythingSdkMachine -ne $expectedMachine -or
     $windowsAppRuntimeInsightsMachine -ne $expectedMachine) {
     throw "The Direct AOT executable architecture does not match $Platform."
 }
@@ -247,6 +264,15 @@ $vcImports = @(
 )
 if ($vcImports.Count -gt 0) {
     throw "Static Rust modules unexpectedly import VC runtime DLLs: $($vcImports -join ', ')."
+}
+
+$osArch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
+$canRunDirectSmoke =
+    ($Platform -eq "x64" -and $osArch -eq [System.Runtime.InteropServices.Architecture]::X64) -or
+    ($Platform -eq "ARM64" -and $osArch -eq [System.Runtime.InteropServices.Architecture]::Arm64)
+if ($canRunDirectSmoke) {
+    Write-Host "Running Direct Native AOT --mcp & companion smoke against '$directPublishDirectory'..." -ForegroundColor Cyan
+    & (Join-Path $PSScriptRoot "run-aot-agent-clipboard-companion-smoke.ps1") -PublishDir $directPublishDirectory | Out-Host
 }
 
 $installerOutputDirectory = Join-Path $OutputDirectory "direct-installer"

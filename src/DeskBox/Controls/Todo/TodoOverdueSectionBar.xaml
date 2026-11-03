@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="DeskBox.Controls.Todo.TodoOverdueSectionBar"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:helpers="using:DeskBox.Helpers"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    Visibility="{x:Bind BarVisibility, Mode=OneWay}"
+    mc:Ignorable="d">
+
+    <Grid
+        Margin="2,0,6,4"
+        MinHeight="28"
+        ColumnSpacing="8">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+
+        <Button
+            Grid.Column="0"
+            MinHeight="26"
+            Padding="6,3"
+            HorizontalAlignment="Left"
+            VerticalAlignment="Center"
+            AutomationProperties.Name="{x:Bind ToggleTooltipText, Mode=OneWay}"
+            Click="ToggleExpandButton_Click"
+            CornerRadius="4"
+            Style="{StaticResource SubtleButtonStyle}"
+            ToolTipService.ToolTip="{x:Bind ToggleTooltipText, Mode=OneWay}"
+            Visibility="{x:Bind ToggleButtonVisibility, Mode=OneWay}">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+                <FontIcon
+                    VerticalAlignment="Center"
+                    FontSize="10"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Glyph="{x:Bind ExpandGlyph, Mode=OneWay}" />
+                <Ellipse
+                    Width="6"
+                    Height="6"
+                    VerticalAlignment="Center"
+                    Fill="#F59E0B"
+                    helpers:WidgetTextShadow.Cast="False" />
+                <TextBlock
+                    VerticalAlignment="Center"
+                    FontSize="{x:Bind SecondaryFontSize, Mode=OneWay}"
+                    FontWeight="SemiBold"
+                    Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                    MaxLines="1"
+                    Text="{x:Bind HeaderText, Mode=OneWay}"
+                    TextTrimming="CharacterEllipsis" />
+            </StackPanel>
+        </Button>
+
+        <StackPanel
+            Grid.Column="0"
+            Padding="6,0"
+            VerticalAlignment="Center"
+            Orientation="Horizontal"
+            Spacing="6"
+            Visibility="{x:Bind TabSummaryVisibility, Mode=OneWay}">
+            <Ellipse
+                Width="6"
+                Height="6"
+                VerticalAlignment="Center"
+                Fill="#F59E0B"
+                helpers:WidgetTextShadow.Cast="False" />
+            <TextBlock
+                VerticalAlignment="Center"
+                FontSize="{x:Bind SecondaryFontSize, Mode=OneWay}"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                MaxLines="1"
+                Text="{x:Bind TabSummaryText, Mode=OneWay}"
+                TextTrimming="CharacterEllipsis" />
+        </StackPanel>
+
+        <Button
+            Grid.Column="1"
+            MinHeight="26"
+            Padding="10,3"
+            VerticalAlignment="Center"
+            AutomationProperties.Name="{x:Bind RescheduleText, Mode=OneWay}"
+            Background="{ThemeResource WidgetLayerFillSecondaryBrush}"
+            BorderBrush="{ThemeResource WidgetLayerStrokeBrush}"
+            BorderThickness="1"
+            Click="RescheduleButton_Click"
+            CornerRadius="6"
+            Style="{StaticResource DefaultButtonStyle}"
+            ToolTipService.ToolTip="{x:Bind RescheduleText, Mode=OneWay}">
+            <StackPanel Orientation="Horizontal" Spacing="5">
+                <FontIcon
+                    VerticalAlignment="Center"
+                    FontSize="{x:Bind IconFontSize, Mode=OneWay}"
+                    Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                    Glyph="&#xE787;" />
+                <TextBlock
+                    VerticalAlignment="Center"
+                    FontSize="{x:Bind SecondaryFontSize, Mode=OneWay}"
+                    Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                    MaxLines="1"
+                    Text="{x:Bind RescheduleText, Mode=OneWay}" />
+            </StackPanel>
+        </Button>
+    </Grid>
+</UserControl>

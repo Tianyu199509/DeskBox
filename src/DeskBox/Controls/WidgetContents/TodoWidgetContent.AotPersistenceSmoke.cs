@@ -14,7 +14,21 @@ public sealed partial class TodoWidgetContent
         TodoItemViewModel? detailItem = ViewModel?.SelectedDetailItem;
         AotTodoStepUiSnapshot stepUi = CaptureAotTodoStepUiSnapshot();
         AotAttachmentTileSnapshot attachmentUi =
-            DetailAttachmentStrip.CaptureAotAttachmentTileSnapshot();
+            DetailAttachmentStrip is not null
+                ? DetailAttachmentStrip.CaptureAotAttachmentTileSnapshot()
+                : new AotAttachmentTileSnapshot(
+                    ItemCount: 0,
+                    ContainerRealized: false,
+                    DataContextId: null,
+                    DisplayName: string.Empty,
+                    Type: string.Empty,
+                    StorageMode: string.Empty,
+                    Exists: false,
+                    DisplayNameProjected: false,
+                    Glyph: string.Empty,
+                    GlyphProjected: false,
+                    RemoveButtonFound: false,
+                    OpenAutomationName: string.Empty);
         return new AotTodoSurfaceSnapshot(
             ViewModel?.IsInitialized == true,
             IsLoaded,
@@ -85,7 +99,11 @@ public sealed partial class TodoWidgetContent
         }
 
         await BeginNotesEditingAsync();
-        DetailNotesEditor.Text = autoSaveNotes;
+        _ = EnsureDetailNotesEditorRealized();
+        if (DetailNotesEditor is not null)
+        {
+            DetailNotesEditor.Text = autoSaveNotes;
+        }
         // The public editor property is the control's data contract. Pair it
         // with the same scheduling entry point as the real EditorTextChanged
         // handler, then let the real 600 ms DispatcherTimer and product save
@@ -101,7 +119,7 @@ public sealed partial class TodoWidgetContent
                 $"TimerEnabled={_notesAutosaveTimer.IsEnabled}; " +
                 $"SaveGateCount={_notesSaveGate.CurrentCount}; " +
                 $"EditingItemId={_notesEditingItemId ?? "<null>"}; " +
-                $"EditorMatches={string.Equals(DetailNotesEditor.Text, autoSaveNotes, StringComparison.Ordinal)}; " +
+                $"EditorMatches={string.Equals(DetailNotesEditor?.Text, autoSaveNotes, StringComparison.Ordinal)}; " +
                 $"OriginalMatches={string.Equals(_notesOriginalText, autoSaveNotes, StringComparison.Ordinal)}; " +
                 $"ItemMatches={string.Equals(item.Notes, autoSaveNotes, StringComparison.Ordinal)}.");
         }
@@ -137,11 +155,11 @@ public sealed partial class TodoWidgetContent
         bool wasCompleted = item.IsCompleted && item.CompletedAt is not null;
 
         await BeginNotesEditingAsync();
-        DetailNotesEditor.Text = explicitNotes;
+        EnsureDetailNotesEditorRealized().Text = explicitNotes;
         bool explicitNotesSaved =
             await SaveActiveNotesAsync(keepEditing: false) &&
             string.Equals(item.Notes, explicitNotes, StringComparison.Ordinal) &&
-            string.Equals(DetailNotesEditor.Text, explicitNotes, StringComparison.Ordinal) &&
+            string.Equals(DetailNotesEditor?.Text, explicitNotes, StringComparison.Ordinal) &&
             !_notesAutosaveTimer.IsEnabled &&
             _notesEditingItemId is null &&
             _notesSaveGate.CurrentCount == 1;
@@ -224,7 +242,7 @@ public sealed partial class TodoWidgetContent
                 _notesSaveGate.CurrentCount == 1 &&
                 string.Equals(_notesEditingItemId, item.Id, StringComparison.Ordinal) &&
                 string.Equals(_notesOriginalText, expectedNotes, StringComparison.Ordinal) &&
-                string.Equals(DetailNotesEditor.Text, expectedNotes, StringComparison.Ordinal) &&
+                string.Equals(DetailNotesEditor?.Text, expectedNotes, StringComparison.Ordinal) &&
                 string.Equals(item.Notes, expectedNotes, StringComparison.Ordinal))
             {
                 return true;

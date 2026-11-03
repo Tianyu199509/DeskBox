@@ -321,11 +321,12 @@ public sealed partial class FileService
         public IReadOnlyList<FileTransferResult> CompletedResults { get; }
     }
 
-    private const uint FoDelete = 0x0003;
-    private const ushort FofAllowUndo = 0x0040;
-    private const ushort FofNoConfirmation = 0x0010;
-    private const ushort FofNoErrorUi = 0x0400;
-    private const ushort FofSilent = 0x0004;
+    private const uint ShellDeleteRecycleOnDelete = 0x00080000;
+    private const uint ShellDeleteWantNukeWarning = 0x4000;
+    private const uint ShellDeleteShowElevationPrompt = 0x00040000;
+    private const uint ShellDeleteNoConfirmation = 0x0010;
+    private const uint ShellDeleteNoErrorUi = 0x0400;
+    private const uint ShellDeleteSilent = 0x0004;
 
     public FileService(LocalizationService? localizationService = null)
     {
@@ -1634,7 +1635,8 @@ public sealed partial class FileService
                     progress,
                     cancellationToken,
                     onItemError,
-                    skippedItems),
+                    skippedItems,
+                    itemCompleted),
                 CancellationToken.None);
         }
 
@@ -1780,15 +1782,16 @@ public sealed partial class FileService
 
         return await Task.Run(() =>
         {
-            if (ownerHandle == IntPtr.Zero && IsNetworkVolumePath(normalizedPath))
+            if (ownerHandle == IntPtr.Zero &&
+                (IsNetworkVolumePath(normalizedPath) ||
+                 !FileOperationNativeMethods.CanHeadlessRecyclePath(normalizedPath)))
             {
-                // FOF_ALLOWUNDO degrades to a silent permanent delete on
-                // volumes without a client-side Recycle Bin. A headless
-                // caller cannot consent to that, so refuse instead: callers
-                // treat false as "not deleted" and may retry with an owner
-                // window for the interactive Shell confirmation.
+                // Headless callers cannot consent to a permanent delete on
+                // volumes without an active Recycle Bin (network shares,
+                // removable USB/SD media, RAM disks, SUBST drives, or
+                // NukeOnDelete=1). Refuse so callers may retry interactively.
                 App.Log(
-                    $"[FileService] Refused headless recycle on a network volume: '{normalizedPath}'");
+                    $"[FileService] Refused headless recycle on an unrecyclable volume: '{normalizedPath}'");
                 return false;
             }
 
@@ -1842,6 +1845,32 @@ public sealed partial class FileService
         bool recycle,
         IntPtr ownerHandle)
     {
+        return await DeleteEntriesWithShellCoreAsync(
+            paths,
+            recycle,
+            ownerHandle,
+            onOutcome: null);
+    }
+
+    internal async Task<IReadOnlySet<string>> DeleteEntriesWithShellAsync(
+        IEnumerable<string> paths,
+        bool recycle,
+        IntPtr ownerHandle,
+        Action<ShellDeleteOutcome>? onOutcome)
+    {
+        return await DeleteEntriesWithShellCoreAsync(
+            paths,
+            recycle,
+            ownerHandle,
+            onOutcome);
+    }
+
+    private async Task<IReadOnlySet<string>> DeleteEntriesWithShellCoreAsync(
+        IEnumerable<string> paths,
+        bool recycle,
+        IntPtr ownerHandle,
+        Action<ShellDeleteOutcome>? onOutcome)
+    {
         ArgumentNullException.ThrowIfNull(paths);
         if (ownerHandle == IntPtr.Zero)
         {
@@ -1861,7 +1890,11 @@ public sealed partial class FileService
         }
 
         return await Task.Run(() =>
-            DeleteEntriesWithShell(normalizedPaths, ownerHandle, allowUndo: recycle));
+            DeleteEntriesWithShell(
+                normalizedPaths,
+                ownerHandle,
+                allowUndo: recycle,
+                onOutcome));
     }
 
     private static bool DeleteEntryWithShell(
@@ -1879,7 +1912,8 @@ public sealed partial class FileService
     private static IReadOnlySet<string> DeleteEntriesWithShell(
         IReadOnlyList<string> paths,
         IntPtr ownerHandle,
-        bool allowUndo)
+        bool allowUndo,
+        Action<ShellDeleteOutcome>? onOutcome = null)
     {
         var completedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         string[] existingPaths = paths
@@ -1897,63 +1931,61 @@ public sealed partial class FileService
 
         if (existingPaths.Length == 0)
         {
+            onOutcome?.Invoke(new ShellDeleteOutcome(
+                completedPaths,
+                new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+                new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+                [],
+                Canceled: false,
+                PerformHResult: 0));
             return completedPaths;
         }
 
-        // The confirmation dialog is a Shell feature governed by
-        // FofNoConfirmation: interactive callers omit that flag so the native
-        // dialog (recycle or permanent, per the user's Explorer settings)
-        // appears; headless callers keep it suppressed.
+        // Interactive callers omit confirmation/error suppression so Explorer's
+        // native Recycle Bin, permanent-delete, nuke-warning, UAC, and
+        // File-In-Use dialogs own user consent; headless callers suppress UI
+        // while PreDeleteItem blocks any silent permanent-delete fallback.
         bool interactive = ownerHandle != IntPtr.Zero;
-        ushort flags = FofNoErrorUi | FofSilent;
-        if (allowUndo)
+        uint flags = allowUndo
+            ? ShellDeleteRecycleOnDelete | ShellDeleteWantNukeWarning
+            : 0u;
+        if (interactive)
         {
-            flags |= FofAllowUndo;
+            flags |= ShellDeleteShowElevationPrompt;
+        }
+        else
+        {
+            flags |= ShellDeleteNoConfirmation | ShellDeleteNoErrorUi | ShellDeleteSilent;
         }
 
-        if (!interactive)
+        ShellDeleteOutcome outcome = ExecuteShellDeleteOnStaThread(
+            existingPaths,
+            ownerHandle,
+            flags,
+            allowUndo);
+        foreach (string deleted in outcome.DeletedPaths)
         {
-            flags |= FofNoConfirmation;
+            completedPaths.Add(deleted);
         }
 
-        string from = string.Join('\0', existingPaths) + "\0\0";
-        unsafe
+        onOutcome?.Invoke(outcome);
+
+        if (outcome.Failures.Count > 0 && onOutcome is null)
         {
-            fixed (char* fromPointer = from)
-            {
-                var operation = new FileTransferNativeMethods.ShFileOperation
-                {
-                    WindowHandle = ownerHandle,
-                    Function = FoDelete,
-                    From = fromPointer,
-                    To = null,
-                    Flags = flags
-                };
-
-                int result = FileTransferNativeMethods.SHFileOperation(ref operation);
-                foreach (string existingPath in existingPaths)
-                {
-                    if (!File.Exists(existingPath) &&
-                        !Directory.Exists(existingPath))
-                    {
-                        completedPaths.Add(existingPath);
-                    }
-                }
-
-                if (result == 1223 || operation.AnyOperationsAborted != 0)
-                {
-                    // The user answered "No" (or cancelled) the confirmation.
-                    return completedPaths;
-                }
-
-                if (result != 0 && result is not 2 and not 3)
-                {
-                    throw new Win32Exception(result);
-                }
-
-                return completedPaths;
-            }
+            Exception? error = Marshal.GetExceptionForHR(outcome.Failures[0].HResult);
+            throw error ?? new IOException(
+                $"Shell delete failed (hr=0x{outcome.Failures[0].HResult:X8}).");
         }
+
+        if (outcome.PerformHResult < 0 &&
+            !outcome.Canceled &&
+            outcome.DeletedPaths.Count == 0 &&
+            onOutcome is null)
+        {
+            Marshal.ThrowExceptionForHR(outcome.PerformHResult);
+        }
+
+        return completedPaths;
     }
 
     /// <summary>
@@ -2342,6 +2374,57 @@ public sealed partial class FileService
         return false;
     }
 
+    /// <summary>
+    /// Pure lexical overlap guard for UI-thread drag-hover paths where touching
+    /// disk or SMB shares (<c>Directory.Exists</c> / symlink handle resolution)
+    /// would stall pointer input. Full junction-aware <see cref="IsUnsafeDirectoryTransfer"/>
+    /// still runs off-UI-thread before any drop transfer commits.
+    /// </summary>
+    internal static bool IsLexicallyUnsafeDirectoryTransfer(
+        IEnumerable<string> sourcePaths,
+        string? destinationPath)
+    {
+        if (string.IsNullOrWhiteSpace(destinationPath))
+        {
+            return false;
+        }
+
+        string normalizedDestination;
+        try
+        {
+            normalizedDestination = Path.GetFullPath(destinationPath);
+        }
+        catch
+        {
+            return false;
+        }
+
+        foreach (string sourcePath in sourcePaths)
+        {
+            if (string.IsNullOrWhiteSpace(sourcePath))
+            {
+                continue;
+            }
+
+            string normalizedSource;
+            try
+            {
+                normalizedSource = Path.GetFullPath(sourcePath);
+            }
+            catch
+            {
+                continue;
+            }
+
+            if (IsPathUnderDirectory(normalizedDestination, normalizedSource))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public static bool IsPathUnderDirectoryResolved(string candidatePath, string directoryPath)
     {
         if (!TryResolvePathIdentity(candidatePath, out string candidate) ||
@@ -2379,7 +2462,7 @@ public sealed partial class FileService
     /// overlap checks. The final destination may not exist yet, so only the
     /// existing prefix is resolved and the missing suffix is preserved.
     /// </summary>
-    private static bool TryResolvePathIdentity(string path, out string resolvedPath)
+    internal static bool TryResolvePathIdentity(string path, out string resolvedPath)
     {
         if (!TryResolvePathWithMissingSuffix(path, out resolvedPath))
         {

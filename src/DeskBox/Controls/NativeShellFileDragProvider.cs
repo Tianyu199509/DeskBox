@@ -153,10 +153,18 @@ internal static partial class NativeShellFileDragProvider
         // Attribute checks are not a safe preflight here. A normal-looking
         // .lnk can still be rejected by the WinRT StorageFile broker (for
         // example when its target is unavailable or permission-sensitive),
-        // and TryPrepare runs on the UI STA. Route every existing shell link
-        // through the native Shell data object so the drag never has to wait
-        // synchronously for that broker.
-        return AreExistingShortcuts(sourcePaths, fileExists);
+        // and TryPrepare runs on the UI STA. Route any selection containing at
+        // least one existing shell link through the native Shell data object
+        // so mixed (.lnk + file) drags never stall or fail on that broker.
+        fileExists ??= File.Exists;
+        return sourcePaths.Count > 0 &&
+               sourcePaths.Any(path =>
+                   !string.IsNullOrWhiteSpace(path) &&
+                   string.Equals(
+                       Path.GetExtension(path),
+                       ".lnk",
+                       StringComparison.OrdinalIgnoreCase) &&
+                   fileExists(path));
     }
 
     internal static unsafe nint CreateShellDataObject(

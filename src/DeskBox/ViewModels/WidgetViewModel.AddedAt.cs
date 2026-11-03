@@ -84,6 +84,30 @@ public partial class WidgetViewModel
             : DateTimeOffset.Now;
         Config.FileAddedAtByPath.Remove(oldPath);
         Config.FileAddedAtByPath[newPath] = addedAt;
+
+        try
+        {
+            string normalizedOldDir = Path.GetFullPath(oldPath)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            string normalizedNewDir = Path.GetFullPath(newPath)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            string oldPrefix = normalizedOldDir + Path.DirectorySeparatorChar;
+            List<KeyValuePair<string, DateTimeOffset>> descendants = Config.FileAddedAtByPath
+                .Where(entry => entry.Key.StartsWith(oldPrefix, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            foreach ((string descendantOldPath, DateTimeOffset descendantAddedAt) in descendants)
+            {
+                Config.FileAddedAtByPath.Remove(descendantOldPath);
+                string rebasedDescendant = Path.Combine(
+                    normalizedNewDir,
+                    descendantOldPath[oldPrefix.Length..]);
+                Config.FileAddedAtByPath[rebasedDescendant] = descendantAddedAt;
+            }
+        }
+        catch
+        {
+        }
+
         PersistAddedAtTrackingIfNeeded();
     }
 

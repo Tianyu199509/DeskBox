@@ -1,4 +1,4 @@
-﻿using DeskBox.Models;
+using DeskBox.Models;
 
 namespace DeskBox.Services;
 
@@ -417,6 +417,10 @@ public sealed partial class DesktopOrganizationTransaction
                         .Concat(plans.Select(plan => plan.DestinationPath)));
             }
         }
+
+        await RebaseCompletedShortcutsAndSaveJournalAsync(
+            journal,
+            isRestore: true);
     }
 
     private static void ApplyUndoReceipts(OrganizationHistoryEntry history, DesktopOrganizationRecoveryJournal journal)
