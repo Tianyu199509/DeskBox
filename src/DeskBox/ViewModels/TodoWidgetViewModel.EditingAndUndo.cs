@@ -27,48 +27,14 @@ public sealed partial class TodoWidgetViewModel
 
     public async Task<bool> SetDueDatePresetAsync(string itemId, TodoDuePreset preset)
     {
-        DateTimeOffset today = new(DateTime.Now.Date);
-        int daysUntilSunday = ((int)DayOfWeek.Sunday - (int)today.DayOfWeek + 7) % 7;
-        int daysUntilMonday = ((int)DayOfWeek.Monday - (int)today.DayOfWeek + 7) % 7;
-        if (daysUntilMonday == 0)
-        {
-            daysUntilMonday = 7;
-        }
-
-        DateTimeOffset? dueDate = preset switch
-        {
-            TodoDuePreset.Today => WithEndOfDay(today),
-            TodoDuePreset.Tomorrow => WithEndOfDay(today.AddDays(1)),
-            TodoDuePreset.ThisWeek => WithEndOfDay(today.AddDays(daysUntilSunday)),
-            TodoDuePreset.NextMonday => WithEndOfDay(today.AddDays(daysUntilMonday)),
-            TodoDuePreset.Clear => null,
-            _ => null
-        };
-
-        return await SetDueDateAsync(itemId, dueDate);
+        DateTimeOffset? dueDate = ResolvePresetDueDate(preset);
+        return await SetDueDateAsync(itemId, dueDate, hasDueTime: false);
     }
 
     public Task<int> SetDueDatePresetAsync(IEnumerable<string> itemIds, TodoDuePreset preset)
     {
-        DateTimeOffset today = new(DateTime.Now.Date);
-        int daysUntilSunday = ((int)DayOfWeek.Sunday - (int)today.DayOfWeek + 7) % 7;
-        int daysUntilMonday = ((int)DayOfWeek.Monday - (int)today.DayOfWeek + 7) % 7;
-        if (daysUntilMonday == 0)
-        {
-            daysUntilMonday = 7;
-        }
-
-        DateTimeOffset? dueDate = preset switch
-        {
-            TodoDuePreset.Today => WithEndOfDay(today),
-            TodoDuePreset.Tomorrow => WithEndOfDay(today.AddDays(1)),
-            TodoDuePreset.ThisWeek => WithEndOfDay(today.AddDays(daysUntilSunday)),
-            TodoDuePreset.NextMonday => WithEndOfDay(today.AddDays(daysUntilMonday)),
-            TodoDuePreset.Clear => null,
-            _ => null
-        };
-
-        return SetDueDateAsync(itemIds, dueDate);
+        DateTimeOffset? dueDate = ResolvePresetDueDate(preset);
+        return SetDueDateAsync(itemIds, dueDate, hasDueTime: false);
     }
 
     public void BeginEdit(string itemId)
@@ -126,7 +92,7 @@ public sealed partial class TodoWidgetViewModel
             return true;
         }
 
-        CaptureUndoSnapshot(_localizationService.T("Todo.Undo.Deleted"));
+        CaptureDeleteUndoSnapshot([item], _localizationService.T("Todo.Undo.Deleted"));
         if (string.Equals(SelectedDetailItem?.Id, itemId, StringComparison.Ordinal))
         {
             SelectedDetailItem = null;
@@ -136,6 +102,7 @@ public sealed partial class TodoWidgetViewModel
         RefreshVisibleItems();
         RefreshCountProperties();
         await SaveAsync();
+        await ReclaimUnreferencedAttachmentsAsync();
         return true;
     }
 
@@ -152,7 +119,7 @@ public sealed partial class TodoWidgetViewModel
             return 0;
         }
 
-        CaptureUndoSnapshot(_localizationService.Format("Todo.Undo.DeletedSelected", itemsToDelete.Count));
+        CaptureDeleteUndoSnapshot(itemsToDelete, _localizationService.Format("Todo.Undo.DeletedSelected", itemsToDelete.Count));
         if (SelectedDetailItem is not null && selectedIds.Contains(SelectedDetailItem.Id))
         {
             SelectedDetailItem = null;
@@ -167,6 +134,7 @@ public sealed partial class TodoWidgetViewModel
         RefreshVisibleItems();
         RefreshCountProperties();
         await SaveAsync();
+        await ReclaimUnreferencedAttachmentsAsync();
         return itemsToDelete.Count;
     }
 
@@ -178,7 +146,7 @@ public sealed partial class TodoWidgetViewModel
             return 0;
         }
 
-        CaptureUndoSnapshot(_localizationService.Format("Todo.Undo.ClearedCompleted", completedItems.Count));
+        CaptureDeleteUndoSnapshot(completedItems, _localizationService.Format("Todo.Undo.ClearedCompleted", completedItems.Count));
         foreach (var item in completedItems)
         {
             TombstoneItem(item);
@@ -188,6 +156,7 @@ public sealed partial class TodoWidgetViewModel
         RefreshVisibleItems();
         RefreshCountProperties();
         await SaveAsync();
+        await ReclaimUnreferencedAttachmentsAsync();
         return completedItems.Count;
     }
 
@@ -199,12 +168,14 @@ public sealed partial class TodoWidgetViewModel
         }
 
         int removedCount = Items.Count;
-        CaptureUndoSnapshot(_localizationService.Format("Todo.Undo.ClearedAll", removedCount));
+        CaptureDeleteUndoSnapshot(Items, _localizationService.Format("Todo.Undo.ClearedAll", removedCount));
         var clearedAt = DateTimeOffset.UtcNow;
         foreach (var item in Items)
         {
+            item.ReleaseAttachmentThumbnails();
             item.Item.IsDeleted = true;
             item.Item.UpdatedAt = clearedAt;
+            TodoWidgetStore.StripTombstonePayload(item.Item);
             _tombstones.Add(item.Item);
         }
 
@@ -212,6 +183,7 @@ public sealed partial class TodoWidgetViewModel
         RefreshVisibleItems();
         RefreshCountProperties();
         await SaveAsync();
+        await ReclaimUnreferencedAttachmentsAsync();
         return removedCount;
     }
 
@@ -249,6 +221,93 @@ public sealed partial class TodoWidgetViewModel
         return true;
     }
 
+    public void ToggleTodayOverdueExpanded()
+    {
+        _isTodayOverdueExpanded = !_isTodayOverdueExpanded;
+        OnPropertyChanged(nameof(IsTodayOverdueExpanded));
+        OnPropertyChanged(nameof(TodayOverdueExpandGlyph));
+        RefreshVisibleItems();
+    }
+
+    public async Task<int> RescheduleOverdueToTodayAsync()
+    {
+        var targets = Items
+            .Where(item => IsOverdueFromPreviousDays(item) && MatchesActiveColorFilter(item))
+            .ToList();
+        if (targets.Count == 0)
+        {
+            return 0;
+        }
+
+        DateTimeOffset now = DateTimeOffset.Now;
+        DateTime todayDate = now.Date;
+        DateTimeOffset todayAllDay = TodoWidgetStore.NormalizeAllDayDueDate(now);
+        DateTimeOffset utcNow = now.ToUniversalTime();
+        var modifiedEntries = new List<TodoUndoModifiedEntry>(targets.Count);
+
+        foreach (TodoItemViewModel item in targets)
+        {
+            modifiedEntries.Add(new TodoUndoModifiedEntry(
+                item.Id,
+                item.DueDate,
+                item.HasDueTime,
+                item.Item.ReminderDismissedForDueDate,
+                item.SnoozedUntil,
+                item.Recurrence?.Clone()));
+
+            bool keepExplicitTime = item.HasDueTime && item.DueDate is not null;
+            DateTimeOffset nextDueDate;
+            if (keepExplicitTime)
+            {
+                DateTimeOffset localOld = item.DueDate!.Value.ToLocalTime();
+                TimeZoneInfo localZone = TimeZoneInfo.Local;
+                DateTime unspecifiedToday = new(
+                    todayDate.Year,
+                    todayDate.Month,
+                    todayDate.Day,
+                    localOld.Hour,
+                    localOld.Minute,
+                    localOld.Second,
+                    DateTimeKind.Unspecified);
+                if (localZone.IsInvalidTime(unspecifiedToday))
+                {
+                    unspecifiedToday = unspecifiedToday.AddHours(1);
+                }
+
+                nextDueDate = new DateTimeOffset(unspecifiedToday, localZone.GetUtcOffset(unspecifiedToday));
+            }
+            else
+            {
+                nextDueDate = todayAllDay;
+            }
+
+            item.Item.ReminderDismissedForDueDate = null;
+            item.SnoozedUntil = null;
+            item.DueDate = nextDueDate;
+            item.HasDueTime = keepExplicitTime;
+            if (item.Recurrence is not null)
+            {
+                item.Recurrence = new TodoRecurrence
+                {
+                    Mode = item.Recurrence.Mode,
+                    AnchorDueDate = nextDueDate
+                };
+            }
+
+            item.UpdatedAt = utcNow;
+        }
+
+        _undoSnapshot = new TodoUndoSnapshot(
+            [],
+            _localizationService.Format("Todo.Overdue.Rescheduled", modifiedEntries.Count),
+            modifiedEntries);
+        RefreshVisibleItems();
+        RefreshCountProperties();
+        RefreshUndoProperties();
+        await SaveAsync();
+        return modifiedEntries.Count;
+    }
+
     public async Task<bool> UndoLastActionAsync()
     {
         if (_undoSnapshot is null)
@@ -256,10 +315,42 @@ public sealed partial class TodoWidgetViewModel
             return false;
         }
 
-        Items.Clear();
-        foreach (var item in _undoSnapshot.Items.Select(CloneTodoItem))
+        if (_undoSnapshot.ModifiedEntries is { Count: > 0 } modifiedEntries)
         {
-            Items.Add(new TodoItemViewModel(item, _localizationService));
+            DateTimeOffset utcNow = DateTimeOffset.UtcNow;
+            foreach (TodoUndoModifiedEntry mod in modifiedEntries)
+            {
+                TodoItemViewModel? item = FindItem(mod.ItemId);
+                if (item is null)
+                {
+                    continue;
+                }
+
+                item.DueDate = mod.PreviousDueDate;
+                item.HasDueTime = mod.PreviousHasDueTime;
+                item.Item.ReminderDismissedForDueDate = mod.PreviousReminderDismissedForDueDate;
+                item.SnoozedUntil = mod.PreviousSnoozedUntil;
+                item.Recurrence = mod.PreviousRecurrence?.Clone();
+                item.UpdatedAt = utcNow;
+            }
+        }
+
+        var existingLiveIds = Items
+            .Select(item => item.Id)
+            .ToHashSet(StringComparer.Ordinal);
+        foreach (TodoUndoDeletedEntry entry in _undoSnapshot.DeletedEntries.OrderBy(entry => entry.OriginalIndex))
+        {
+            TodoItem restored = TodoWidgetStore.CloneItem(entry.ItemSnapshot);
+            restored.IsDeleted = false;
+            restored.UpdatedAt = DateTimeOffset.UtcNow;
+            _tombstones.RemoveAll(stub => string.Equals(stub.Id, restored.Id, StringComparison.Ordinal));
+            if (!existingLiveIds.Add(restored.Id))
+            {
+                continue;
+            }
+
+            int insertIndex = Math.Clamp(entry.OriginalIndex, 0, Items.Count);
+            Items.Insert(insertIndex, new TodoItemViewModel(restored, _localizationService, PreviewCacheScope));
         }
 
         _undoSnapshot = null;
@@ -273,6 +364,11 @@ public sealed partial class TodoWidgetViewModel
 
     public void DismissUndo()
     {
+        _ = DismissUndoAsync();
+    }
+
+    public async Task DismissUndoAsync()
+    {
         if (_undoSnapshot is null)
         {
             return;
@@ -280,14 +376,81 @@ public sealed partial class TodoWidgetViewModel
 
         _undoSnapshot = null;
         RefreshUndoProperties();
+        await ReclaimUnreferencedAttachmentsAsync();
+    }
+
+    internal async Task<int> ReclaimUnreferencedAttachmentsAsync(bool startupSweep = false)
+    {
+        if (_recycleAttachmentFileAsync is null)
+        {
+            return 0;
+        }
+
+        var referencedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        void AddAttachmentPaths(IEnumerable<TodoAttachment>? attachments)
+        {
+            if (attachments is null)
+            {
+                return;
+            }
+
+            foreach (TodoAttachment attachment in attachments)
+            {
+                if (attachment is null || string.IsNullOrWhiteSpace(attachment.FilePath))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    referencedPaths.Add(Path.GetFullPath(attachment.FilePath));
+                }
+                catch
+                {
+                    referencedPaths.Add(attachment.FilePath);
+                }
+            }
+        }
+
+        foreach (TodoItemViewModel liveItem in Items)
+        {
+            AddAttachmentPaths(liveItem.Item.Attachments);
+        }
+
+        if (IsCreatingDetailItem && SelectedDetailItem is not null)
+        {
+            AddAttachmentPaths(SelectedDetailItem.Item.Attachments);
+        }
+
+        if (_undoSnapshot is not null)
+        {
+            foreach (TodoUndoDeletedEntry undoEntry in _undoSnapshot.DeletedEntries)
+            {
+                AddAttachmentPaths(undoEntry.ItemSnapshot.Attachments);
+            }
+        }
+
+        var knownTombstoneIds = _tombstones
+            .Select(stub => stub.Id)
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return await AttachmentStorageService.RecycleUnreferencedManagedCopiesAsync(
+            _store.AttachmentDirectory,
+            referencedPaths,
+            _recycleAttachmentFileAsync,
+            knownTombstoneIds,
+            startupSweep ? TimeSpan.Zero : TimeSpan.FromMinutes(2));
     }
 
     // Soft-delete: the record stays in the store file as a tombstone (via
     // SaveAsync) so a merge restore cannot resurrect it as "unknown".
     private void TombstoneItem(TodoItemViewModel item)
     {
+        item.ReleaseAttachmentThumbnails();
         item.Item.IsDeleted = true;
         item.Item.UpdatedAt = DateTimeOffset.UtcNow;
+        TodoWidgetStore.StripTombstonePayload(item.Item);
         Items.Remove(item);
         _tombstones.Add(item.Item);
     }

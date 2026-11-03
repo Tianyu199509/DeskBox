@@ -1,4 +1,4 @@
-﻿using DeskBox.Contracts;
+using DeskBox.Contracts;
 using DeskBox.Features.Appearance;
 using DeskBox.Models;
 using DeskBox.Services;
@@ -193,22 +193,22 @@ public sealed class AppearanceSettingsCoordinatorTests : IDisposable
         int notified = 0;
         settings.SettingsChanged += () => notified++;
 
-        coordinator.SetAnimationEffect(SettingsService.WidgetAnimationEffectZoom, scheduleSave: false);
+        coordinator.SetAnimationEffect(SettingsService.WidgetAnimationEffectWipe, scheduleSave: false);
         coordinator.SetAnimationSpeed(SettingsService.WidgetAnimationSpeedFast, scheduleSave: false);
         coordinator.SetAnimationSlideDirection(
             SettingsService.WidgetAnimationSlideDirectionLeft, scheduleSave: false);
         coordinator.SetAnimationEasingIntensity(
-            SettingsService.WidgetAnimationEasingStrong, scheduleSave: false);
+            SettingsService.WidgetAnimationEasingSpring, scheduleSave: false);
         Assert.Equal(0, notified);
 
-        coordinator.SetAnimationEasingIntensity(SettingsService.WidgetAnimationEasingLight);
+        coordinator.SetAnimationEasingIntensity(SettingsService.WidgetAnimationEasingStandard);
         Assert.Equal(1, notified);
 
         AppearanceAnimationSettings snapshot = coordinator.ReadAnimation();
-        Assert.Equal(SettingsService.WidgetAnimationEffectZoom, snapshot.Effect);
+        Assert.Equal(SettingsService.WidgetAnimationEffectWipe, snapshot.Effect);
         Assert.Equal(SettingsService.WidgetAnimationSpeedFast, snapshot.Speed);
         Assert.Equal(SettingsService.WidgetAnimationSlideDirectionLeft, snapshot.SlideDirection);
-        Assert.Equal(SettingsService.WidgetAnimationEasingLight, snapshot.EasingIntensity);
+        Assert.Equal(SettingsService.WidgetAnimationEasingStandard, snapshot.EasingIntensity);
     }
 
     [Fact]

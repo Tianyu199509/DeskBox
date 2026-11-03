@@ -1,4 +1,4 @@
-﻿using DeskBox.Models;
+using DeskBox.Models;
 using DeskBox.ViewModels;
 using DeskBox.Contracts;
 using Microsoft.UI.Dispatching;
@@ -15,7 +15,8 @@ public sealed record TodoReminderNotification(
 
 public sealed class TodoReminderService : IDisposable, ITodoReminderSession
 {
-    private static readonly TimeSpan ScanInterval = TimeSpan.FromSeconds(30);
+    internal static readonly TimeSpan MinimumWakeupDelay = TimeSpan.FromSeconds(1);
+    internal static readonly TimeSpan MaximumWakeupDelay = TimeSpan.FromMinutes(15);
     private static readonly TimeSpan StartupDelay = TimeSpan.FromSeconds(8);
     private static readonly TimeSpan MissedReminderGrace = TimeSpan.FromMinutes(1);
 
@@ -34,11 +35,7 @@ public sealed class TodoReminderService : IDisposable, ITodoReminderSession
     private readonly Func<string, TodoWidgetViewModel?>? _tryGetLiveViewModel;
     private readonly HashSet<string> _sessionNotifiedKeys = new(StringComparer.Ordinal);
 
-    // The 30s scan used to read and deserialize every todo store on every
-    // tick. The files only change when the user edits a widget, so a
-    // last-write probe answers "unchanged" cheaply while the cached snapshot
-    // still lets time-based due transitions fire on schedule.
-    private readonly Dictionary<string, (DateTime WrittenAtUtc, TodoWidgetData Data)> _storeSnapshots = new(StringComparer.Ordinal);
+    private int _wakeupSchedulePending;
 
     private DispatcherQueueTimer? _timer;
     private bool _isChecking;
@@ -86,6 +83,7 @@ public sealed class TodoReminderService : IDisposable, ITodoReminderSession
         _storeFactory = storeFactory;
         _clock = clock;
         _tryGetLiveViewModel = tryGetLiveViewModel;
+        TodoWidgetStore.StoreChanged += OnTodoStoreChanged;
     }
 
     public void Start()
@@ -105,9 +103,8 @@ public sealed class TodoReminderService : IDisposable, ITodoReminderSession
         _sessionNotifiedKeys.Clear();
 
         _timer = _dispatcherQueue.CreateTimer();
-        _timer.Interval = ScanInterval;
+        _timer.IsRepeating = false;
         _timer.Tick += Timer_Tick;
-        _timer.Start();
 
         _initialCheck = RunDelayedInitialCheckAsync(_lifetime.Token);
     }
@@ -132,10 +129,11 @@ public sealed class TodoReminderService : IDisposable, ITodoReminderSession
                 // period are no longer relevant.
                 _sessionNotifiedKeys.Clear();
                 _timer = _dispatcherQueue.CreateTimer();
-                _timer.Interval = ScanInterval;
+                _timer.IsRepeating = false;
                 _timer.Tick += Timer_Tick;
-                _timer.Start();
             }
+
+            RequestWakeupReschedule();
         }
         else if (_timer is not null)
         {
@@ -179,6 +177,9 @@ public sealed class TodoReminderService : IDisposable, ITodoReminderSession
 
             int defaultOffsetMinutes = SettingsService.NormalizeTodoReminderOffsetMinutes(
                 settings.TodoDefaultReminderOffsetMinutes);
+            bool allDayRemindersEnabled = settings.Todo.TodoAllDayReminderEnabled;
+            int allDayReminderTimeMinutes = SettingsService.NormalizeTodoAllDayReminderTimeMinutes(
+                settings.Todo.TodoAllDayReminderTimeMinutes);
             var widgets = settings.Widgets
                 .Where(widget =>
                     widget.WidgetKind == WidgetKind.Todo &&
@@ -186,32 +187,34 @@ public sealed class TodoReminderService : IDisposable, ITodoReminderSession
                     !settings.DeletedWidgetIds.Contains(widget.Id))
                 .ToList();
 
-            // A deleted todo widget's snapshot would otherwise live as long
-            // as the reminder service does; the scan sees the authoritative
-            // widget set, so prune everything it did not just enumerate.
-            if (_storeSnapshots.Count > 0)
-            {
-                var liveWidgetIds = widgets
-                    .Select(widget => widget.Id)
-                    .ToHashSet(StringComparer.Ordinal);
-                foreach (string staleId in _storeSnapshots.Keys
-                             .Where(id => !liveWidgetIds.Contains(id))
-                             .ToArray())
-                {
-                    _storeSnapshots.Remove(staleId);
-                }
-            }
-
             if (widgets.Count == 0)
             {
+                StopWakeupTimerOnUiThread();
                 return 0;
             }
 
             List<TodoReminderCandidate> candidates = [];
+            DateTimeOffset? earliestNextWakeup = null;
             foreach (var widget in widgets)
             {
                 if (_disposed || !ShouldBeRunning()) return 0;
-                await CollectWidgetCandidatesAsync(widget, now, defaultOffsetMinutes, candidates);
+                DateTimeOffset? widgetNextWakeup = await CollectWidgetCandidatesAsync(
+                    widget,
+                    now,
+                    defaultOffsetMinutes,
+                    allDayRemindersEnabled,
+                    allDayReminderTimeMinutes,
+                    candidates);
+                if (widgetNextWakeup is { } wakeupAt &&
+                    (earliestNextWakeup is null || wakeupAt < earliestNextWakeup.Value))
+                {
+                    earliestNextWakeup = wakeupAt;
+                }
+            }
+
+            if (!_disposed && ShouldBeRunning())
+            {
+                ApplyNextWakeupSchedule(now, earliestNextWakeup);
             }
 
             if (candidates.Count == 0 || _disposed || !ShouldBeRunning())
@@ -237,6 +240,7 @@ public sealed class TodoReminderService : IDisposable, ITodoReminderSession
     {
         if (_disposed) return;
         _disposed = true;
+        TodoWidgetStore.StoreChanged -= OnTodoStoreChanged;
         _lifetime.Cancel();
         _lifetime.Dispose();
         if (_timer is not null)
@@ -258,9 +262,21 @@ public sealed class TodoReminderService : IDisposable, ITodoReminderSession
         return ShouldNotifyDue(item, now, reminderOffset);
     }
 
-    internal static bool ShouldNotify(TodoItem item, DateTimeOffset now, int defaultOffsetMinutes)
+    internal static bool ShouldNotify(
+        TodoItem item,
+        DateTimeOffset now,
+        int defaultOffsetMinutes,
+        bool allDayRemindersEnabled = true,
+        int allDayReminderTimeMinutes = TodoOptionKinds.DefaultAllDayReminderTimeMinutes)
     {
-        return TryGetReminderTrigger(item, now, defaultOffsetMinutes, out _, out _);
+        return TryGetReminderTrigger(
+            item,
+            now,
+            defaultOffsetMinutes,
+            allDayRemindersEnabled,
+            allDayReminderTimeMinutes,
+            out _,
+            out _);
     }
 
     public async Task<bool> SnoozeAsync(string? widgetId, string? itemId, TimeSpan snoozeFor)
@@ -294,15 +310,19 @@ public sealed class TodoReminderService : IDisposable, ITodoReminderSession
             }
 
             // Single-writer routing (see CompleteAsync).
-            if (_tryGetLiveViewModel?.Invoke(widget.Id) is { } liveViewModel &&
-                liveViewModel.FindItem(itemId) is { } liveItem)
+            if (_tryGetLiveViewModel?.Invoke(widget.Id) is { } liveViewModel)
             {
-                liveItem.Item.SnoozedUntil = snoozedUntil;
-                liveItem.Item.SnoozeLastNotifiedAt = null;
-                liveItem.Item.UpdatedAt = DateTimeOffset.UtcNow;
-                await liveViewModel.SaveAsync();
-                App.Log($"[TodoReminder] Snoozed via live VM widget={widgetId} item={itemId}");
-                return true;
+                bool routed = await liveViewModel.SnoozeReminderUntilAsync(
+                    itemId,
+                    snoozedUntil,
+                    _clock(),
+                    rejectReminderOff: true);
+                if (routed)
+                {
+                    App.Log($"[TodoReminder] Snoozed via live VM widget={widgetId} item={itemId} until={snoozedUntil:O}");
+                }
+
+                return routed;
             }
 
             var store = _storeFactory(widget.Id);
@@ -457,52 +477,445 @@ public sealed class TodoReminderService : IDisposable, ITodoReminderSession
         await CheckNowAsync(_clock());
     }
 
-    private async Task<TodoWidgetData> LoadStoreSnapshotAsync(
-        string widgetId,
-        TodoWidgetStore store)
+    private void OnTodoStoreChanged(string storePath, string widgetId)
     {
-        DateTime writtenAtUtc = File.GetLastWriteTimeUtc(store.StorePath);
-        if (_storeSnapshots.TryGetValue(widgetId, out (DateTime WrittenAtUtc, TodoWidgetData Data) cached) &&
-            cached.WrittenAtUtc == writtenAtUtc)
-        {
-            return cached.Data;
-        }
-
-        TodoWidgetData data = await store.LoadAsync();
-        // Stamp after the load: a write racing the read shows up as a newer
-        // timestamp and forces one more reload on the next tick.
-        _storeSnapshots[widgetId] =
-            (File.GetLastWriteTimeUtc(store.StorePath), data);
-        return data;
-    }
-
-    private async Task CollectWidgetCandidatesAsync(
-        WidgetConfig widget,
-        DateTimeOffset now,
-        int defaultOffsetMinutes,
-        List<TodoReminderCandidate> candidates)
-    {
-        var store = _storeFactory(widget.Id);
-        var data = await LoadStoreSnapshotAsync(widget.Id, store);
-        if (_disposed || !ShouldBeRunning())
+        if (_disposed || _dispatcherQueue is null)
         {
             return;
         }
-        bool changed = false;
 
-        foreach (var item in data.Items)
+        RequestWakeupReschedule();
+    }
+
+    private void RequestWakeupReschedule()
+    {
+        if (_disposed || _dispatcherQueue is null)
         {
-            if (!TryGetReminderTrigger(item, now, defaultOffsetMinutes, out ReminderTriggerKind triggerKind, out int? effectiveOffsetMinutes))
+            return;
+        }
+
+        if (Interlocked.Exchange(ref _wakeupSchedulePending, 1) != 0)
+        {
+            return;
+        }
+
+        if (!_dispatcherQueue.TryEnqueue(async () =>
+        {
+            Interlocked.Exchange(ref _wakeupSchedulePending, 0);
+            if (_disposed || !ShouldBeRunning())
+            {
+                StopWakeupTimerOnUiThread();
+                return;
+            }
+
+            await RefreshWakeupScheduleOnlyAsync(_clock());
+        }))
+        {
+            Interlocked.Exchange(ref _wakeupSchedulePending, 0);
+        }
+    }
+
+    private async Task RefreshWakeupScheduleOnlyAsync(DateTimeOffset now)
+    {
+        if (_disposed || _isChecking || !ShouldBeRunning())
+        {
+            return;
+        }
+
+        try
+        {
+            var settings = _settingsService.Settings;
+            int defaultOffsetMinutes = SettingsService.NormalizeTodoReminderOffsetMinutes(
+                settings.Todo.TodoDefaultReminderOffsetMinutes);
+            bool allDayRemindersEnabled = settings.Todo.TodoAllDayReminderEnabled;
+            int allDayReminderTimeMinutes = SettingsService.NormalizeTodoAllDayReminderTimeMinutes(
+                settings.Todo.TodoAllDayReminderTimeMinutes);
+            var widgets = settings.WidgetLayout.Widgets
+                .Where(widget =>
+                    widget.WidgetKind == WidgetKind.Todo &&
+                    !widget.IsDisabled &&
+                    !settings.WidgetLayout.DeletedWidgetIds.Contains(widget.Id))
+                .ToList();
+
+            DateTimeOffset? earliestNextWakeup = null;
+            foreach (WidgetConfig widget in widgets)
+            {
+                if (_disposed || !ShouldBeRunning())
+                {
+                    return;
+                }
+
+                IEnumerable<TodoItem> items;
+                if (_tryGetLiveViewModel?.Invoke(widget.Id) is { IsInitialized: true, IsDisposed: false } liveViewModel)
+                {
+                    items = liveViewModel.Items.Select(vm => vm.Item);
+                }
+                else
+                {
+                    TodoWidgetData snapshot = await _storeFactory(widget.Id).LoadReadOnlySnapshotAsync();
+                    items = snapshot.Items;
+                }
+
+                DateTimeOffset? widgetWakeup = FindEarliestNextWakeup(
+                    widget.Id,
+                    items,
+                    now,
+                    defaultOffsetMinutes,
+                    _sessionNotifiedKeys,
+                    allDayRemindersEnabled,
+                    allDayReminderTimeMinutes);
+                if (widgetWakeup is { } wakeupAt &&
+                    (earliestNextWakeup is null || wakeupAt < earliestNextWakeup.Value))
+                {
+                    earliestNextWakeup = wakeupAt;
+                }
+            }
+
+            if (!_disposed && ShouldBeRunning())
+            {
+                ApplyNextWakeupSchedule(now, earliestNextWakeup);
+            }
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[TodoReminder] Wakeup schedule refresh failed: {ex.Message}");
+        }
+    }
+
+    private void ApplyNextWakeupSchedule(DateTimeOffset now, DateTimeOffset? nextWakeupAt)
+    {
+        if (_dispatcherQueue is null || _timer is null)
+        {
+            return;
+        }
+
+        void UpdateTimer()
+        {
+            if (_disposed || _timer is null || !ShouldBeRunning())
+            {
+                _timer?.Stop();
+                return;
+            }
+
+            TimeSpan? delay = ComputeClampedWakeupDelay(now, nextWakeupAt);
+            if (delay is null)
+            {
+                _timer.Stop();
+                return;
+            }
+
+            _timer.Stop();
+            _timer.Interval = delay.Value;
+            _timer.Start();
+        }
+
+        if (_dispatcherQueue.HasThreadAccess)
+        {
+            UpdateTimer();
+        }
+        else
+        {
+            _dispatcherQueue.TryEnqueue(UpdateTimer);
+        }
+    }
+
+    private void StopWakeupTimerOnUiThread()
+    {
+        if (_dispatcherQueue is null || _timer is null)
+        {
+            return;
+        }
+
+        if (_dispatcherQueue.HasThreadAccess)
+        {
+            _timer.Stop();
+        }
+        else
+        {
+            _dispatcherQueue.TryEnqueue(() => _timer?.Stop());
+        }
+    }
+
+    internal static TimeSpan? ComputeClampedWakeupDelay(DateTimeOffset now, DateTimeOffset? nextWakeupAt)
+    {
+        if (nextWakeupAt is not { } target)
+        {
+            return null;
+        }
+
+        TimeSpan rawDelay = target - now;
+        if (rawDelay <= MinimumWakeupDelay)
+        {
+            return MinimumWakeupDelay;
+        }
+
+        return rawDelay > MaximumWakeupDelay
+            ? MaximumWakeupDelay
+            : rawDelay;
+    }
+
+    internal static DateTimeOffset? FindEarliestNextWakeup(
+        string widgetId,
+        IEnumerable<TodoItem> items,
+        DateTimeOffset now,
+        int defaultOffsetMinutes,
+        IReadOnlySet<string>? notifiedKeys = null,
+        bool allDayRemindersEnabled = true,
+        int allDayReminderTimeMinutes = TodoOptionKinds.DefaultAllDayReminderTimeMinutes)
+    {
+        int normalizedDefaultOffset = SettingsService.NormalizeTodoReminderOffsetMinutes(defaultOffsetMinutes);
+        int normalizedAllDayMinutes = SettingsService.NormalizeTodoAllDayReminderTimeMinutes(allDayReminderTimeMinutes);
+        DateTimeOffset? earliest = null;
+        foreach (TodoItem item in items)
+        {
+            if (!TryGetItemNextWakeup(
+                    widgetId,
+                    item,
+                    now,
+                    normalizedDefaultOffset,
+                    allDayRemindersEnabled,
+                    normalizedAllDayMinutes,
+                    notifiedKeys,
+                    out DateTimeOffset wakeupAt))
+            {
+                continue;
+            }
+
+            if (earliest is null || wakeupAt < earliest.Value)
+            {
+                earliest = wakeupAt;
+            }
+        }
+
+        return earliest;
+    }
+
+    private static bool TryGetItemNextWakeup(
+        string widgetId,
+        TodoItem item,
+        DateTimeOffset now,
+        int normalizedDefaultOffsetMinutes,
+        bool allDayRemindersEnabled,
+        int normalizedAllDayReminderTimeMinutes,
+        IReadOnlySet<string>? notifiedKeys,
+        out DateTimeOffset wakeupAt)
+    {
+        wakeupAt = default;
+        if (item.IsDeleted || item.IsCompleted || item.DueDate is not { } dueDate)
+        {
+            return false;
+        }
+
+        if (TodoReminderOptions.IsReminderOff(item.ReminderOffsetMinutes))
+        {
+            return false;
+        }
+
+        if (item.SnoozedUntil is { } snoozedUntil)
+        {
+            if (snoozedUntil > now)
+            {
+                wakeupAt = snoozedUntil;
+                return true;
+            }
+
+            string snoozeKey = GetReminderKey(widgetId, item, ReminderTriggerKind.Snooze, effectiveOffsetMinutes: null);
+            if (notifiedKeys is null || !notifiedKeys.Contains(snoozeKey))
+            {
+                wakeupAt = now;
+                return true;
+            }
+
+            return false;
+        }
+
+        if (item.ReminderDismissedForDueDate is { } dismissedForDueDate &&
+            DateTimeOffset.Equals(dismissedForDueDate, dueDate))
+        {
+            return false;
+        }
+
+        if (!item.HasDueTime)
+        {
+            if (!allDayRemindersEnabled)
+            {
+                return false;
+            }
+
+            DateTimeOffset allDayReminderAt = ComputeAllDayReminderAt(
+                dueDate,
+                normalizedAllDayReminderTimeMinutes,
+                item.ReminderOffsetMinutes,
+                out int allDayKeyMinutes);
+            if (allDayReminderAt > now)
+            {
+                wakeupAt = allDayReminderAt;
+                return true;
+            }
+
+            if (CanTriggerAllDayReminderNow(item, dueDate, allDayReminderAt, now))
+            {
+                string dueKey = GetReminderKey(widgetId, item, ReminderTriggerKind.Due, allDayKeyMinutes);
+                if (notifiedKeys is null || !notifiedKeys.Contains(dueKey))
+                {
+                    wakeupAt = now;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        int? effectiveOffsetMinutes = TodoReminderOptions.NormalizeOffsetMinutes(item.ReminderOffsetMinutes) ??
+                                      normalizedDefaultOffsetMinutes;
+        if (TodoReminderOptions.IsReminderOff(effectiveOffsetMinutes))
+        {
+            return false;
+        }
+
+        DateTimeOffset reminderAt = dueDate - TimeSpan.FromMinutes(Math.Max(0, effectiveOffsetMinutes.Value));
+        if (reminderAt > now)
+        {
+            wakeupAt = reminderAt;
+            return true;
+        }
+
+        if (now <= dueDate + MissedReminderGrace)
+        {
+            string dueKey = GetReminderKey(widgetId, item, ReminderTriggerKind.Due, effectiveOffsetMinutes);
+            if (notifiedKeys is null || !notifiedKeys.Contains(dueKey))
+            {
+                wakeupAt = now;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private async Task<DateTimeOffset?> CollectWidgetCandidatesAsync(
+        WidgetConfig widget,
+        DateTimeOffset now,
+        int defaultOffsetMinutes,
+        bool allDayRemindersEnabled,
+        int allDayReminderTimeMinutes,
+        List<TodoReminderCandidate> candidates)
+    {
+        var store = _storeFactory(widget.Id);
+        if (_tryGetLiveViewModel?.Invoke(widget.Id) is { IsInitialized: true, IsDisposed: false } liveViewModel)
+        {
+            if (_disposed || !ShouldBeRunning())
+            {
+                return null;
+            }
+
+            bool liveChanged = false;
+            foreach (TodoItemViewModel itemVm in liveViewModel.Items)
+            {
+                TodoItem item = itemVm.Item;
+                if (!TryGetReminderTrigger(
+                        item,
+                        now,
+                        defaultOffsetMinutes,
+                        allDayRemindersEnabled,
+                        allDayReminderTimeMinutes,
+                        out ReminderTriggerKind triggerKind,
+                        out int? effectiveOffsetMinutes))
+                {
+                    continue;
+                }
+
+                string reminderKey = GetReminderKey(widget.Id, item, triggerKind, effectiveOffsetMinutes);
+                if (!_sessionNotifiedKeys.Add(reminderKey))
+                {
+                    continue;
+                }
+
+                if (triggerKind == ReminderTriggerKind.Snooze)
+                {
+                    item.SnoozeLastNotifiedAt = now;
+                    itemVm.SnoozedUntil = null;
+                }
+                else
+                {
+                    item.ReminderLastNotifiedAt = now;
+                    item.ReminderDismissedForDueDate = item.DueDate;
+                }
+
+                itemVm.UpdatedAt = now.ToUniversalTime();
+                liveChanged = true;
+                candidates.Add(new TodoReminderCandidate(widget.Id, widget.Name, item));
+            }
+
+            if (liveChanged)
+            {
+                await liveViewModel.SaveAsync();
+            }
+
+            return FindEarliestNextWakeup(
+                widget.Id,
+                liveViewModel.Items.Select(vm => vm.Item),
+                now,
+                defaultOffsetMinutes,
+                _sessionNotifiedKeys,
+                allDayRemindersEnabled,
+                allDayReminderTimeMinutes);
+        }
+
+        TodoWidgetData snapshot = await store.LoadReadOnlySnapshotAsync();
+        if (_disposed || !ShouldBeRunning())
+        {
+            return null;
+        }
+
+        List<(int Index, ReminderTriggerKind TriggerKind, int? EffectiveOffsetMinutes, string ReminderKey)>? triggered = null;
+        for (int index = 0; index < snapshot.Items.Count; index++)
+        {
+            TodoItem item = snapshot.Items[index];
+            if (item.IsDeleted ||
+                !TryGetReminderTrigger(
+                    item,
+                    now,
+                    defaultOffsetMinutes,
+                    allDayRemindersEnabled,
+                    allDayReminderTimeMinutes,
+                    out ReminderTriggerKind triggerKind,
+                    out int? effectiveOffsetMinutes))
             {
                 continue;
             }
 
             string reminderKey = GetReminderKey(widget.Id, item, triggerKind, effectiveOffsetMinutes);
+            if (_sessionNotifiedKeys.Contains(reminderKey))
+            {
+                continue;
+            }
+
+            triggered ??= [];
+            triggered.Add((index, triggerKind, effectiveOffsetMinutes, reminderKey));
+        }
+
+        if (triggered is null || triggered.Count == 0)
+        {
+            return FindEarliestNextWakeup(
+                widget.Id,
+                snapshot.Items,
+                now,
+                defaultOffsetMinutes,
+                _sessionNotifiedKeys,
+                allDayRemindersEnabled,
+                allDayReminderTimeMinutes);
+        }
+
+        TodoWidgetData mutableData = TodoWidgetStore.CloneData(snapshot);
+        foreach ((int index, ReminderTriggerKind triggerKind, _, string reminderKey) in triggered)
+        {
             if (!_sessionNotifiedKeys.Add(reminderKey))
             {
                 continue;
             }
 
+            TodoItem item = mutableData.Items[index];
             if (triggerKind == ReminderTriggerKind.Snooze)
             {
                 item.SnoozeLastNotifiedAt = now;
@@ -514,14 +927,18 @@ public sealed class TodoReminderService : IDisposable, ITodoReminderSession
                 item.ReminderDismissedForDueDate = item.DueDate;
             }
 
-            changed = true;
             candidates.Add(new TodoReminderCandidate(widget.Id, widget.Name, item));
         }
 
-        if (changed)
-        {
-            await store.SaveAsync(data);
-        }
+        await store.SaveAsync(mutableData);
+        return FindEarliestNextWakeup(
+            widget.Id,
+            mutableData.Items,
+            now,
+            defaultOffsetMinutes,
+            _sessionNotifiedKeys,
+            allDayRemindersEnabled,
+            allDayReminderTimeMinutes);
     }
 
     private TodoReminderNotification BuildNotification(IReadOnlyList<TodoReminderCandidate> candidates)
@@ -530,7 +947,7 @@ public sealed class TodoReminderService : IDisposable, ITodoReminderSession
             .OrderBy(candidate => candidate.Item.DueDate)
             .First();
         string title = _localizationService.T("Todo.Reminder.NotificationTitle");
-        string dueText = FormatDueDate(first.Item.DueDate!.Value);
+        string dueText = FormatDueDate(first.Item.DueDate!.Value, first.Item.HasDueTime);
         string itemText = NormalizeNotificationText(first.Item.Text);
         string message = candidates.Count == 1
             ? _localizationService.Format("Todo.Reminder.NotificationSingle", itemText, dueText)
@@ -549,10 +966,26 @@ public sealed class TodoReminderService : IDisposable, ITodoReminderSession
             hasTodayDueItem);
     }
 
-    private string FormatDueDate(DateTimeOffset dueDate)
+    private string FormatDueDate(DateTimeOffset dueDate, bool hasDueTime)
     {
         DateTimeOffset localDueDate = dueDate.ToLocalTime();
         var today = _clock().Date;
+
+        if (!hasDueTime)
+        {
+            if (localDueDate.Date == today)
+            {
+                return _localizationService.T("Todo.Due.Today");
+            }
+
+            if (localDueDate.Date == today.AddDays(1))
+            {
+                return _localizationService.T("Todo.Due.Tomorrow");
+            }
+
+            return localDueDate.ToString("yyyy/M/d");
+        }
+
         string time = localDueDate.Second == 0
             ? localDueDate.ToString("HH:mm")
             : localDueDate.ToString("HH:mm:ss");
@@ -596,13 +1029,15 @@ public sealed class TodoReminderService : IDisposable, ITodoReminderSession
         TodoItem item,
         DateTimeOffset now,
         int defaultOffsetMinutes,
+        bool allDayRemindersEnabled,
+        int allDayReminderTimeMinutes,
         out ReminderTriggerKind triggerKind,
         out int? effectiveOffsetMinutes)
     {
         triggerKind = ReminderTriggerKind.Due;
         effectiveOffsetMinutes = null;
 
-        if (item.IsCompleted || item.DueDate is null)
+        if (item.IsCompleted || item.DueDate is not { } dueDate)
         {
             return false;
         }
@@ -618,6 +1053,23 @@ public sealed class TodoReminderService : IDisposable, ITodoReminderSession
             return now >= snoozedUntil;
         }
 
+        if (!item.HasDueTime)
+        {
+            if (!allDayRemindersEnabled)
+            {
+                return false;
+            }
+
+            int normalizedAllDayMinutes = SettingsService.NormalizeTodoAllDayReminderTimeMinutes(allDayReminderTimeMinutes);
+            DateTimeOffset allDayReminderAt = ComputeAllDayReminderAt(
+                dueDate,
+                normalizedAllDayMinutes,
+                item.ReminderOffsetMinutes,
+                out int allDayKeyMinutes);
+            effectiveOffsetMinutes = allDayKeyMinutes;
+            return CanTriggerAllDayReminderNow(item, dueDate, allDayReminderAt, now);
+        }
+
         int normalizedDefaultOffsetMinutes = SettingsService.NormalizeTodoReminderOffsetMinutes(defaultOffsetMinutes);
         effectiveOffsetMinutes = TodoReminderOptions.NormalizeOffsetMinutes(item.ReminderOffsetMinutes) ??
                                  normalizedDefaultOffsetMinutes;
@@ -630,6 +1082,55 @@ public sealed class TodoReminderService : IDisposable, ITodoReminderSession
             item,
             now,
             TimeSpan.FromMinutes(Math.Max(0, effectiveOffsetMinutes.Value)));
+    }
+
+    private static DateTimeOffset ComputeAllDayReminderAt(
+        DateTimeOffset dueDate,
+        int normalizedAllDayReminderTimeMinutes,
+        int? itemReminderOffsetMinutes,
+        out int effectiveKeyMinutes)
+    {
+        int explicitOffset = Math.Max(0, TodoReminderOptions.NormalizeOffsetMinutes(itemReminderOffsetMinutes) ?? 0);
+        effectiveKeyMinutes = normalizedAllDayReminderTimeMinutes - explicitOffset;
+
+        TimeZoneInfo localZone = TimeZoneInfo.Local;
+        DateTime unspecifiedLocal = DateTime.SpecifyKind(
+            dueDate.ToLocalTime().Date.AddMinutes(normalizedAllDayReminderTimeMinutes),
+            DateTimeKind.Unspecified);
+        if (localZone.IsInvalidTime(unspecifiedLocal))
+        {
+            unspecifiedLocal = unspecifiedLocal.AddHours(1);
+        }
+
+        TimeSpan offset = localZone.GetUtcOffset(unspecifiedLocal);
+        DateTimeOffset baseTrigger = new DateTimeOffset(unspecifiedLocal, offset);
+        return baseTrigger - TimeSpan.FromMinutes(explicitOffset);
+    }
+
+    private static bool CanTriggerAllDayReminderNow(
+        TodoItem item,
+        DateTimeOffset dueDate,
+        DateTimeOffset reminderAt,
+        DateTimeOffset now)
+    {
+        if (item.ReminderDismissedForDueDate is { } dismissedForDueDate &&
+            DateTimeOffset.Equals(dismissedForDueDate, dueDate))
+        {
+            return false;
+        }
+
+        if (now < reminderAt)
+        {
+            return false;
+        }
+
+        if (now <= reminderAt + MissedReminderGrace)
+        {
+            return true;
+        }
+
+        return now.ToLocalTime().Date == reminderAt.ToLocalTime().Date &&
+               item.CreatedAt <= reminderAt;
     }
 
     private static bool ShouldNotifyDue(TodoItem item, DateTimeOffset now, TimeSpan reminderOffset)

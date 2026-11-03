@@ -43,13 +43,25 @@ public sealed class PowerToysPeekPreviewService
     internal const int ToggleGracePeriodMs = 300;
 
     private const string WinUi3AppsFolder = "WinUI3Apps";
+    private const long NegativeProbeCacheTtlMs = 10_000;
+    private const long NegativeProcessProbeTtlMs = 1_500;
 
     // Positive resolution cache (executable path that passed the version
-    // gate), per process lifetime. Negative results stay uncached: a
-    // PowerToys upgrade mid-session should turn an old "no" into a "yes"
-    // without restarting DeskBox, and a positive result can only get
-    // stale in the safe direction (an upgrade keeps version >= 0.96).
+    // gate), per process lifetime. Negative results use a short 10-second
+    // TTL so repeated Space presses without PowerToys do not re-scan all
+    // Uninstall registry hives synchronously on the UI thread, while an
+    // in-session PowerToys install or upgrade still becomes active shortly.
     private static string? s_cachedExecutablePath;
+    private static long s_lastNegativeProbeTicks;
+    private static bool s_hasNegativeProbeCache;
+
+    // Cached running PID + elevation state + short negative-lookup TTL so
+    // Spacebar presses probe liveness via OpenProcess instead of taking
+    // multiple full OS process-table LOH snapshots on the UI thread.
+    private static int s_cachedRunningPid;
+    private static int s_cachedPidElevationState; // 0 = unknown, 1 = standard, 2 = elevated
+    private static long s_lastNegativeProcessProbeTicks;
+    private static bool s_hasNegativeProcessProbeCache;
 
     private static bool s_integrityHintLogged;
 
@@ -129,11 +141,6 @@ public sealed class PowerToysPeekPreviewService
             : peekWindowVisible;
 
     /// <summary>
-    /// Single activation argument: the preview target path, quoted. File
-    /// paths validated by IsPreviewablePath cannot contain quote
-    /// characters, so quoting is the complete escaping.
-    /// </summary>
-    /// <summary>
     /// Quoted single argument for the shell-integrity launcher, which
     /// builds its own command line from a string. Paths validated by
     /// IsPreviewablePath cannot contain quote characters, so quoting is
@@ -144,8 +151,13 @@ public sealed class PowerToysPeekPreviewService
 
     // ── Availability: running module process + version gate + integrity ──
 
-    internal bool IsAvailable() =>
-        ResolveExecutablePath() is not null && !HasBlockingIntegrityMismatch();
+    internal bool IsAvailable()
+    {
+        bool hadCachedExecutable = s_cachedExecutablePath is not null;
+        return ResolveExecutablePath() is not null &&
+               (!hadCachedExecutable || IsPeekProcessRunning()) &&
+               !HasBlockingIntegrityMismatch();
+    }
 
     private static string? ResolveExecutablePath()
     {
@@ -154,38 +166,30 @@ public sealed class PowerToysPeekPreviewService
             return cached;
         }
 
-        string? processPath = null;
-        try
+        long nowTicks = Environment.TickCount64;
+        if (s_hasNegativeProbeCache &&
+            nowTicks - Volatile.Read(ref s_lastNegativeProbeTicks) < NegativeProbeCacheTtlMs)
         {
-            foreach (Process process in Process.GetProcessesByName(PeekProcessName))
-            {
-                using (process)
-                {
-                    if (process.HasExited)
-                    {
-                        continue;
-                    }
-
-                    processPath ??= TryGetProcessPath(process);
-                }
-            }
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or
-                                   System.ComponentModel.Win32Exception or
-                                   NotSupportedException)
-        {
-            // A process can exit while the snapshot is being inspected.
+            return null;
         }
 
-        string? executablePath = FirstExistingExecutable(
-            processPath,
-            TryFindRegistryExecutablePath(),
-            BuildKnownLocationExecutablePath(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData)),
-            BuildKnownLocationExecutablePath(
-                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles)));
+        if (!TryGetRunningPeekPid(out _, out string? processPath, capturePath: true))
+        {
+            RecordNegativeProbe(nowTicks);
+            return null;
+        }
+
+        string? executablePath =
+            FirstExistingExecutable(
+                processPath,
+                BuildKnownLocationExecutablePath(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData)),
+                BuildKnownLocationExecutablePath(
+                    Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles))) ??
+            FirstExistingExecutable(TryFindRegistryExecutablePath());
         if (executablePath is null)
         {
+            RecordNegativeProbe(nowTicks);
             return null;
         }
 
@@ -193,11 +197,19 @@ public sealed class PowerToysPeekPreviewService
         // install must never receive arguments, whatever path resolved.
         if (!IsVersionSufficient(TryResolveVersion(executablePath)))
         {
+            RecordNegativeProbe(nowTicks);
             return null;
         }
 
+        s_hasNegativeProbeCache = false;
         s_cachedExecutablePath = executablePath;
         return executablePath;
+    }
+
+    private static void RecordNegativeProbe(long nowTicks)
+    {
+        Volatile.Write(ref s_lastNegativeProbeTicks, nowTicks);
+        s_hasNegativeProbeCache = true;
     }
 
     internal static bool IsVersionSufficient(string? versionText) =>
@@ -269,6 +281,7 @@ public sealed class PowerToysPeekPreviewService
             message => App.Log($"[Peek] {message}"));
         if (!started)
         {
+            InvalidateCachedRunningPid();
             App.Log($"[Peek] Shell-integrity activation failed for '{path}'.");
         }
 
@@ -277,19 +290,92 @@ public sealed class PowerToysPeekPreviewService
 
     // ── Process probes ──
 
-    private static bool IsPeekProcessRunning()
+    private static bool IsProcessIdAlive(int processId)
     {
+        if (processId <= 0)
+        {
+            return false;
+        }
+
+        nint processHandle = Kernel32NativeMethods.OpenProcess(
+            ProcessQueryLimitedInformation,
+            false,
+            processId);
+        if (processHandle == 0)
+        {
+            return false;
+        }
+
+        _ = Kernel32NativeMethods.CloseHandle(processHandle);
+        return true;
+    }
+
+    private static void InvalidateCachedRunningPid()
+    {
+        Volatile.Write(ref s_cachedRunningPid, 0);
+        Volatile.Write(ref s_cachedPidElevationState, 0);
+    }
+
+    private static bool TryGetRunningPeekPid(
+        out int processId,
+        out string? processPath,
+        bool capturePath)
+    {
+        int cachedPid = Volatile.Read(ref s_cachedRunningPid);
+        if (!capturePath && cachedPid > 0)
+        {
+            if (IsProcessIdAlive(cachedPid))
+            {
+                processId = cachedPid;
+                processPath = null;
+                return true;
+            }
+
+            InvalidateCachedRunningPid();
+        }
+
+        long nowTicks = Environment.TickCount64;
+        if (Volatile.Read(ref s_hasNegativeProcessProbeCache) &&
+            nowTicks - Volatile.Read(ref s_lastNegativeProcessProbeTicks) < NegativeProcessProbeTtlMs)
+        {
+            processId = 0;
+            processPath = null;
+            return false;
+        }
+
+        int foundPid = 0;
+        string? foundPath = null;
+        int elevationState = 0;
         try
         {
-            foreach (Process process in Process.GetProcessesByName(PeekProcessName))
+            Process[] processes = Process.GetProcessesByName(PeekProcessName);
+            try
             {
-                using (process)
+                foreach (Process process in processes)
                 {
-                    if (!process.HasExited)
+                    if (process.HasExited)
                     {
-                        return true;
+                        continue;
+                    }
+
+                    if (foundPid == 0)
+                    {
+                        foundPid = process.Id;
+                        if (TryGetProcessElevation(foundPid, out bool elevated))
+                        {
+                            elevationState = elevated ? 2 : 1;
+                        }
+                    }
+
+                    if (capturePath && foundPath is null)
+                    {
+                        foundPath = TryGetProcessPath(process);
                     }
                 }
+            }
+            finally
+            {
+                DisposeProcesses(processes);
             }
         }
         catch (Exception ex) when (ex is InvalidOperationException or
@@ -299,8 +385,26 @@ public sealed class PowerToysPeekPreviewService
             // A process can exit while the snapshot is being inspected.
         }
 
+        if (foundPid > 0)
+        {
+            Volatile.Write(ref s_hasNegativeProcessProbeCache, false);
+            Volatile.Write(ref s_cachedPidElevationState, elevationState);
+            Volatile.Write(ref s_cachedRunningPid, foundPid);
+            processId = foundPid;
+            processPath = foundPath;
+            return true;
+        }
+
+        InvalidateCachedRunningPid();
+        Volatile.Write(ref s_lastNegativeProcessProbeTicks, nowTicks);
+        Volatile.Write(ref s_hasNegativeProcessProbeCache, true);
+        processId = 0;
+        processPath = null;
         return false;
     }
+
+    private static bool IsPeekProcessRunning() =>
+        TryGetRunningPeekPid(out _, out _, capturePath: false);
 
     /// <summary>
     /// True when any Peek process owns a visible top-level window. Peek
@@ -310,18 +414,17 @@ public sealed class PowerToysPeekPreviewService
     /// </summary>
     internal static bool IsPeekWindowVisible()
     {
-        uint[] processIds = CollectPeekProcessIds();
-        if (processIds.Length == 0)
+        if (!TryGetRunningPeekPid(out int runningPid, out _, capturePath: false))
         {
             return false;
         }
 
-        var processIdSet = new HashSet<uint>(processIds);
+        uint targetPid = (uint)runningPid;
         bool visible = false;
         _ = Win32Helper.EnumWindows((hWnd, lParam) =>
         {
             _ = Win32Helper.GetWindowThreadProcessId(hWnd, out uint processId);
-            if (processIdSet.Contains(processId) &&
+            if (processId == targetPid &&
                 Win32Helper.IsWindowVisible(hWnd))
             {
                 visible = true;
@@ -331,32 +434,6 @@ public sealed class PowerToysPeekPreviewService
             return true;
         }, IntPtr.Zero);
         return visible;
-    }
-
-    private static uint[] CollectPeekProcessIds()
-    {
-        List<uint> processIds = [];
-        try
-        {
-            foreach (Process process in Process.GetProcessesByName(PeekProcessName))
-            {
-                using (process)
-                {
-                    if (!process.HasExited)
-                    {
-                        processIds.Add((uint)process.Id);
-                    }
-                }
-            }
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or
-                                   System.ComponentModel.Win32Exception or
-                                   NotSupportedException)
-        {
-            // A process can exit while the snapshot is being inspected.
-        }
-
-        return [.. processIds];
     }
 
     // ── Integrity mismatch detection & one-time hint ──
@@ -383,29 +460,32 @@ public sealed class PowerToysPeekPreviewService
 
     private static bool IsAnyPeekProcessElevated()
     {
-        try
+        if (!TryGetRunningPeekPid(out int runningPid, out _, capturePath: false))
         {
-            foreach (Process process in Process.GetProcessesByName(PeekProcessName))
-            {
-                using (process)
-                {
-                    if (!process.HasExited &&
-                        TryGetProcessElevation(process.Id, out bool elevated) &&
-                        elevated)
-                    {
-                        return true;
-                    }
-                }
-            }
+            return false;
         }
-        catch (Exception ex) when (ex is InvalidOperationException or
-                                   System.ComponentModel.Win32Exception or
-                                   NotSupportedException)
+
+        int cachedState = Volatile.Read(ref s_cachedPidElevationState);
+        if (cachedState != 0)
         {
-            // Best-effort check — ignore failures.
+            return cachedState == 2;
+        }
+
+        if (TryGetProcessElevation(runningPid, out bool elevated))
+        {
+            Volatile.Write(ref s_cachedPidElevationState, elevated ? 2 : 1);
+            return elevated;
         }
 
         return false;
+    }
+
+    private static void DisposeProcesses(Process[] processes)
+    {
+        foreach (Process process in processes)
+        {
+            process.Dispose();
+        }
     }
 
     // ── Path resolution helpers ──
@@ -503,7 +583,7 @@ public sealed class PowerToysPeekPreviewService
     private static string? TryFindRegistryDisplayVersion() =>
         TryFindPowerToysUninstallEntry()?.DisplayVersion;
 
-    // ── Win32 interop (elevation probe only) ──
+    // ── Win32 interop (elevation & liveness probe only) ──
 
     private const uint ProcessQueryLimitedInformation = 0x1000;
     private const uint TokenQuery = 0x0008;

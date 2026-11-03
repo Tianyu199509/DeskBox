@@ -14,7 +14,7 @@ public sealed class SettingsEntryRowHitAreaContractTests
 {
     [Theory]
     [InlineData("src/DeskBox/Views/SettingsWindow.xaml", 6)]
-    [InlineData("src/DeskBox/Views/SettingsSections/AppearanceSettingsSection.xaml", 5)]
+    [InlineData("src/DeskBox/Views/SettingsSections/AppearanceSettingsSection.xaml", 2)]
     [InlineData("src/DeskBox/Views/SettingsSections/CapsuleModeSettingsSection.xaml", 1)]
     [InlineData("src/DeskBox/Views/SettingsSections/FileWidgetSettingsSection.xaml", 3)]
     public void EntryRows_AreClickableNativeSettingsCards(string path, int expectedCount)

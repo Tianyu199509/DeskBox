@@ -29,10 +29,58 @@ public abstract partial class WidgetWindowBase
         Windows.UI.Color TintColor,
         double MaterialIntensity);
 
+    private readonly record struct SharedMicaKey(
+        bool IsDark,
+        bool UseAlt,
+        Windows.UI.Color TintColor,
+        int RoundedTintOpacity,
+        int RoundedLuminosityOpacity);
+
+    private readonly record struct SharedAcrylicKey(
+        bool IsDark,
+        bool UseBase,
+        Windows.UI.Color TintColor,
+        int RoundedTintOpacity,
+        int RoundedLuminosityOpacity);
+
+    private sealed class SharedMicaSlot(MicaController controller, SystemBackdropConfiguration configuration)
+    {
+        public MicaController Controller { get; } = controller;
+        public SystemBackdropConfiguration Configuration { get; } = configuration;
+        public SharedMicaKey Key { get; set; }
+        public HashSet<ICompositionSupportsSystemBackdrop> Targets { get; } = [];
+    }
+
+    private sealed class SharedAcrylicSlot(DesktopAcrylicController controller, SystemBackdropConfiguration configuration)
+    {
+        public DesktopAcrylicController Controller { get; } = controller;
+        public SystemBackdropConfiguration Configuration { get; } = configuration;
+        public SharedAcrylicKey Key { get; set; }
+        public HashSet<ICompositionSupportsSystemBackdrop> Targets { get; } = [];
+    }
+
+    private const int MaxSharedBackdropSlotsPerFamily = 2;
+
+    [ThreadStatic]
+    private static List<SharedMicaSlot>? s_sharedMicaSlots;
+
+    [ThreadStatic]
+    private static List<SharedAcrylicSlot>? s_sharedAcrylicSlots;
+
+    private SharedMicaSlot? _attachedMicaSlot;
+    private SharedAcrylicSlot? _attachedAcrylicSlot;
+
     protected void ApplyBackdropPreference()
     {
         if (HWnd == IntPtr.Zero || IsClosing)
         {
+            return;
+        }
+
+        if (!IsWindowVisibleForBackdrop)
+        {
+            SuspendBackdropTargetsForHiddenWindow();
+            ApplySurfaceStyle();
             return;
         }
 
@@ -158,7 +206,6 @@ public abstract partial class WidgetWindowBase
             }
 
             _lastAppliedBackdropSignature = signature;
-            ScheduleInactiveBackdropControllerCleanup(materialType);
         }
         catch (Exception ex)
         {
@@ -270,7 +317,8 @@ public abstract partial class WidgetWindowBase
     }
 
     private bool CanReuseAppliedBackdrop(BackdropSignature signature)
-    {        if (_lastAppliedBackdropSignature != signature)
+    {
+        if (_lastAppliedBackdropSignature != signature)
         {
             return false;
         }
@@ -305,7 +353,7 @@ public abstract partial class WidgetWindowBase
 
         if (_solidColorBackdrop is null)
         {
-            _solidColorBackdrop = new WinUIEx.TransparentTintBackdrop(tintColor);
+            _solidColorBackdrop = new SolidTintSystemBackdrop(tintColor);
             SystemBackdrop = _solidColorBackdrop;
         }
         else
@@ -334,6 +382,7 @@ public abstract partial class WidgetWindowBase
             SystemBackdrop = null;
         }
 
+        _solidColorBackdrop.Dispose();
         _solidColorBackdrop = null;
     }
 
@@ -416,59 +465,6 @@ public abstract partial class WidgetWindowBase
         surface.BorderBrush = GetOrUpdateSolidColorBrush(surface.BorderBrush, borderColor);
     }
 
-    protected void ScheduleInactiveBackdropControllerCleanup(string materialType)
-    {
-        bool hasInactiveController = materialType switch
-        {
-            SettingsService.WidgetMaterialTypeMica or SettingsService.WidgetMaterialTypeMicaAlt =>
-                AcrylicController is not null,
-            SettingsService.WidgetMaterialTypeAcrylic or SettingsService.WidgetMaterialTypeAcrylicBase =>
-                MicaController is not null,
-            _ => AcrylicController is not null || MicaController is not null
-        };
-
-        if (!hasInactiveController)
-        {
-            _inactiveBackdropCleanupTimer?.Stop();
-            return;
-        }
-
-        if (_inactiveBackdropCleanupTimer is null)
-        {
-            _inactiveBackdropCleanupTimer = DispatcherQueue.CreateTimer();
-            _inactiveBackdropCleanupTimer.IsRepeating = false;
-            _inactiveBackdropCleanupTimer.Tick += InactiveBackdropCleanupTimer_Tick;
-            PerformanceLogger.RecordTransientUiTimerCreated();
-        }
-
-        _inactiveBackdropCleanupTimer.Stop();
-        _inactiveBackdropCleanupTimer.Interval = InactiveBackdropControllerRetention;
-        _inactiveBackdropCleanupTimer.Start();
-    }
-
-    protected void StopInactiveBackdropCleanupTimer()
-    {
-        DispatcherQueueTimer? timer = _inactiveBackdropCleanupTimer;
-        if (timer is null)
-        {
-            return;
-        }
-
-        _inactiveBackdropCleanupTimer = null;
-        timer.Stop();
-        timer.Tick -= InactiveBackdropCleanupTimer_Tick;
-        PerformanceLogger.RecordTransientUiTimerReleased();
-    }
-
-    private void InactiveBackdropCleanupTimer_Tick(DispatcherQueueTimer sender, object args)
-    {
-        // Controllers of the inactive material family stay alive but detached.
-        // Disposing them here used to force a full controller recreation on the
-        // next material switch, which leaks native composition memory and DWM
-        // handles per switch; CleanupBase releases both on window teardown.
-        sender.Stop();
-    }
-
     protected bool ApplyMicaController(
         bool isDark,
         Windows.UI.Color tintColor,
@@ -481,90 +477,228 @@ public abstract partial class WidgetWindowBase
         }
 
         BackdropTarget ??= this.As<ICompositionSupportsSystemBackdrop>();
-        BackdropConfiguration ??= new SystemBackdropConfiguration();
-        BackdropConfiguration.IsInputActive = true;
-        BackdropConfiguration.Theme = isDark ? SystemBackdropTheme.Dark : SystemBackdropTheme.Light;
-
-        // Kind is a mutable property: switching Mica/BaseAlt must reuse the
-        // controller. Recreating system backdrop controllers on every material
-        // change leaks native composition memory and DWM handles that no GC or
-        // working-set trim reclaims; detached controllers stay idle instead.
-        if (MicaController is null)
-        {
-            DetachAcrylicControllerTarget();
-            MicaController = new MicaController
-            {
-                Kind = useAlt ? MicaKind.BaseAlt : MicaKind.Base
-            };
-        }
-
         DetachAcrylicControllerTarget();
-        if (!MicaControllerAttached)
-        {
-            if (!MicaController.AddSystemBackdropTarget(BackdropTarget))
-            {
-                DisposeMicaController();
-                return false;
-            }
-
-            MicaControllerAttached = true;
-            MicaController.SetSystemBackdropConfiguration(BackdropConfiguration);
-        }
-
-        MicaController.Kind = useAlt ? MicaKind.BaseAlt : MicaKind.Base;
-        MicaController.TintColor = tintColor;
-        MicaController.FallbackColor = WidgetMaterialVisualCalculator.BuildMicaFallbackColor(
-            isDark,
-            useAlt);
 
         WidgetMaterialOpacityProfile profile = WidgetMaterialVisualCalculator.CalculateMica(
             isDark,
             useAlt,
             SettingsService.Settings.WidgetMaterialIntensity);
-        MicaController.TintOpacity = (float)profile.TintOpacity;
-        MicaController.LuminosityOpacity = (float)profile.LuminosityOpacity;
+        var desiredKey = new SharedMicaKey(
+            isDark,
+            useAlt,
+            tintColor,
+            (int)Math.Round(profile.TintOpacity * 1000.0),
+            (int)Math.Round(profile.LuminosityOpacity * 1000.0));
+
+        if (MicaControllerAttached &&
+            _attachedMicaSlot is { } existingSlot &&
+            existingSlot.Key == desiredKey &&
+            ReferenceEquals(MicaController, existingSlot.Controller))
+        {
+            return true;
+        }
+
+        DetachMicaControllerTarget();
+        SharedMicaSlot slot = AcquireOrConfigureSharedMicaSlot(
+            desiredKey,
+            isDark,
+            tintColor,
+            useAlt,
+            profile);
+        if (!slot.Targets.Contains(BackdropTarget))
+        {
+            if (!slot.Controller.AddSystemBackdropTarget(BackdropTarget))
+            {
+                return false;
+            }
+
+            slot.Targets.Add(BackdropTarget);
+        }
+
+        _attachedMicaSlot = slot;
+        MicaController = slot.Controller;
+        BackdropConfiguration = slot.Configuration;
+        MicaControllerAttached = true;
         return true;
+    }
+
+    private static SharedMicaSlot AcquireOrConfigureSharedMicaSlot(
+        SharedMicaKey desiredKey,
+        bool isDark,
+        Windows.UI.Color tintColor,
+        bool useAlt,
+        WidgetMaterialOpacityProfile profile)
+    {
+        List<SharedMicaSlot> slots = s_sharedMicaSlots ??= [];
+        SharedMicaSlot? matching = null;
+        SharedMicaSlot? reusableIdle = null;
+        foreach (SharedMicaSlot candidate in slots)
+        {
+            if (candidate.Key == desiredKey)
+            {
+                matching = candidate;
+                break;
+            }
+
+            if (reusableIdle is null && candidate.Targets.Count == 0)
+            {
+                reusableIdle = candidate;
+            }
+        }
+
+        SharedMicaSlot slot = matching ?? reusableIdle ?? CreateSharedMicaSlot(slots, useAlt);
+        ConfigureSharedMicaSlot(slot, desiredKey, isDark, tintColor, useAlt, profile);
+        TrimIdleSharedMicaSlots(slots, preserve: slot);
+        return slot;
+    }
+
+    private static SharedMicaSlot CreateSharedMicaSlot(List<SharedMicaSlot> slots, bool useAlt)
+    {
+        var configuration = new SystemBackdropConfiguration { IsInputActive = true };
+        var controller = new MicaController
+        {
+            Kind = useAlt ? MicaKind.BaseAlt : MicaKind.Base
+        };
+        controller.SetSystemBackdropConfiguration(configuration);
+        var created = new SharedMicaSlot(controller, configuration);
+        slots.Add(created);
+        return created;
+    }
+
+    private static void ConfigureSharedMicaSlot(
+        SharedMicaSlot slot,
+        SharedMicaKey key,
+        bool isDark,
+        Windows.UI.Color tintColor,
+        bool useAlt,
+        WidgetMaterialOpacityProfile profile)
+    {
+        slot.Configuration.IsInputActive = true;
+        slot.Configuration.Theme = isDark ? SystemBackdropTheme.Dark : SystemBackdropTheme.Light;
+        slot.Controller.Kind = useAlt ? MicaKind.BaseAlt : MicaKind.Base;
+        slot.Controller.TintColor = tintColor;
+        slot.Controller.FallbackColor = WidgetMaterialVisualCalculator.BuildMicaFallbackColor(
+            isDark,
+            useAlt);
+        slot.Controller.TintOpacity = (float)profile.TintOpacity;
+        slot.Controller.LuminosityOpacity = (float)profile.LuminosityOpacity;
+        slot.Key = key;
+    }
+
+    private static void TrimIdleSharedMicaSlots(List<SharedMicaSlot> slots, SharedMicaSlot preserve)
+    {
+        for (int i = slots.Count - 1; i >= 0 && slots.Count > MaxSharedBackdropSlotsPerFamily; i--)
+        {
+            SharedMicaSlot candidate = slots[i];
+            if (ReferenceEquals(candidate, preserve) || candidate.Targets.Count > 0)
+            {
+                continue;
+            }
+
+            slots.RemoveAt(i);
+            try
+            {
+                candidate.Controller.RemoveAllSystemBackdropTargets();
+                candidate.Controller.Dispose();
+            }
+            catch
+            {
+            }
+        }
     }
 
     protected void DisposeMicaController()
     {
         _lastAppliedBackdropSignature = null;
-        if (MicaController is null)
+        DetachMicaControllerTarget();
+        MicaController = null;
+    }
+
+    internal static void TrimAllIdleSharedBackdropControllers()
+    {
+        if (s_sharedMicaSlots is { Count: > 0 } micaSlots)
+        {
+            for (int i = micaSlots.Count - 1; i >= 0; i--)
+            {
+                SharedMicaSlot candidate = micaSlots[i];
+                if (candidate.Targets.Count > 0)
+                {
+                    continue;
+                }
+
+                micaSlots.RemoveAt(i);
+                try
+                {
+                    candidate.Controller.RemoveAllSystemBackdropTargets();
+                    candidate.Controller.Dispose();
+                }
+                catch
+                {
+                }
+            }
+        }
+
+        if (s_sharedAcrylicSlots is { Count: > 0 } acrylicSlots)
+        {
+            for (int i = acrylicSlots.Count - 1; i >= 0; i--)
+            {
+                SharedAcrylicSlot candidate = acrylicSlots[i];
+                if (candidate.Targets.Count > 0)
+                {
+                    continue;
+                }
+
+                acrylicSlots.RemoveAt(i);
+                try
+                {
+                    candidate.Controller.RemoveAllSystemBackdropTargets();
+                    candidate.Controller.Dispose();
+                }
+                catch
+                {
+                }
+            }
+        }
+    }
+
+    protected void SuspendBackdropTargetsForHiddenWindow()
+    {
+        if (IsClosing)
         {
             return;
         }
 
-        try
-        {
-            MicaController.RemoveAllSystemBackdropTargets();
-            MicaController.Dispose();
-        }
-        catch
-        {
-        }
-        finally
-        {
-            MicaController = null;
-            MicaControllerAttached = false;
-        }
+        ClearSolidColorBackdrop();
+        DetachAcrylicControllerTarget();
+        DetachMicaControllerTarget();
     }
 
     protected void DetachMicaControllerTarget()
     {
-        if (MicaController is null || !MicaControllerAttached)
+        if (!MicaControllerAttached)
         {
+            _attachedMicaSlot = null;
             return;
         }
 
         try
         {
-            MicaController.RemoveAllSystemBackdropTargets();
+            if (BackdropTarget is not null && _attachedMicaSlot is { } slot)
+            {
+                slot.Targets.Remove(BackdropTarget);
+                slot.Controller.RemoveSystemBackdropTarget(BackdropTarget);
+            }
+            else if (BackdropTarget is not null && MicaController is not null)
+            {
+                MicaController.RemoveSystemBackdropTarget(BackdropTarget);
+            }
         }
         catch
         {
         }
         finally
         {
+            _attachedMicaSlot = null;
             MicaControllerAttached = false;
         }
     }
@@ -582,88 +716,176 @@ public abstract partial class WidgetWindowBase
         }
 
         BackdropTarget ??= this.As<ICompositionSupportsSystemBackdrop>();
-        BackdropConfiguration ??= new SystemBackdropConfiguration();
-        BackdropConfiguration.IsInputActive = true;
-        BackdropConfiguration.Theme = isDark ? SystemBackdropTheme.Dark : SystemBackdropTheme.Light;
-        BackdropConfiguration.HighContrastBackgroundColor = isDark
-            ? ColorHelper.FromArgb(0xFF, 0x20, 0x20, 0x20)
-            : ColorHelper.FromArgb(0xFF, 0xF3, 0xF3, 0xF3);
-
-        if (AcrylicController is null || AcrylicController.IsClosed)
-        {
-            DetachMicaControllerTarget();
-            AcrylicController = new DesktopAcrylicController
-            {
-                Kind = useBase ? DesktopAcrylicKind.Base : DesktopAcrylicKind.Thin
-            };
-        }
-
         DetachMicaControllerTarget();
-        if (!AcrylicControllerAttached)
-        {
-            if (!AcrylicController.AddSystemBackdropTarget(BackdropTarget))
-            {
-                DisposeAcrylicController();
-                return false;
-            }
-
-            AcrylicControllerAttached = true;
-            AcrylicController.SetSystemBackdropConfiguration(BackdropConfiguration);
-        }
-
-        AcrylicController.Kind = useBase ? DesktopAcrylicKind.Base : DesktopAcrylicKind.Thin;
-        AcrylicController.TintColor = tintColor;
-        AcrylicController.FallbackColor = tintColor;
 
         WidgetMaterialOpacityProfile profile = WidgetMaterialVisualCalculator.CalculateAcrylic(
             isDark,
             useBase,
             surfaceOpacity,
             SettingsService.Settings.WidgetMaterialIntensity);
-        AcrylicController.TintOpacity = (float)profile.TintOpacity;
-        AcrylicController.LuminosityOpacity = (float)profile.LuminosityOpacity;
+        var desiredKey = new SharedAcrylicKey(
+            isDark,
+            useBase,
+            tintColor,
+            (int)Math.Round(profile.TintOpacity * 1000.0),
+            (int)Math.Round(profile.LuminosityOpacity * 1000.0));
+
+        if (AcrylicControllerAttached &&
+            _attachedAcrylicSlot is { Controller.IsClosed: false } existingSlot &&
+            existingSlot.Key == desiredKey &&
+            ReferenceEquals(AcrylicController, existingSlot.Controller))
+        {
+            return true;
+        }
+
+        DetachAcrylicControllerTarget();
+        SharedAcrylicSlot slot = AcquireOrConfigureSharedAcrylicSlot(
+            desiredKey,
+            isDark,
+            tintColor,
+            useBase,
+            profile);
+        if (!slot.Targets.Contains(BackdropTarget))
+        {
+            if (!slot.Controller.AddSystemBackdropTarget(BackdropTarget))
+            {
+                return false;
+            }
+
+            slot.Targets.Add(BackdropTarget);
+        }
+
+        _attachedAcrylicSlot = slot;
+        AcrylicController = slot.Controller;
+        BackdropConfiguration = slot.Configuration;
+        AcrylicControllerAttached = true;
         return true;
+    }
+
+    private static SharedAcrylicSlot AcquireOrConfigureSharedAcrylicSlot(
+        SharedAcrylicKey desiredKey,
+        bool isDark,
+        Windows.UI.Color tintColor,
+        bool useBase,
+        WidgetMaterialOpacityProfile profile)
+    {
+        List<SharedAcrylicSlot> slots = s_sharedAcrylicSlots ??= [];
+        slots.RemoveAll(static s => s.Controller.IsClosed);
+
+        SharedAcrylicSlot? matching = null;
+        SharedAcrylicSlot? reusableIdle = null;
+        foreach (SharedAcrylicSlot candidate in slots)
+        {
+            if (candidate.Key == desiredKey)
+            {
+                matching = candidate;
+                break;
+            }
+
+            if (reusableIdle is null && candidate.Targets.Count == 0)
+            {
+                reusableIdle = candidate;
+            }
+        }
+
+        SharedAcrylicSlot slot = matching ?? reusableIdle ?? CreateSharedAcrylicSlot(slots, useBase);
+        ConfigureSharedAcrylicSlot(slot, desiredKey, isDark, tintColor, useBase, profile);
+        TrimIdleSharedAcrylicSlots(slots, preserve: slot);
+        return slot;
+    }
+
+    private static SharedAcrylicSlot CreateSharedAcrylicSlot(List<SharedAcrylicSlot> slots, bool useBase)
+    {
+        var configuration = new SystemBackdropConfiguration { IsInputActive = true };
+        var controller = new DesktopAcrylicController
+        {
+            Kind = useBase ? DesktopAcrylicKind.Base : DesktopAcrylicKind.Thin
+        };
+        controller.SetSystemBackdropConfiguration(configuration);
+        var created = new SharedAcrylicSlot(controller, configuration);
+        slots.Add(created);
+        return created;
+    }
+
+    private static void ConfigureSharedAcrylicSlot(
+        SharedAcrylicSlot slot,
+        SharedAcrylicKey key,
+        bool isDark,
+        Windows.UI.Color tintColor,
+        bool useBase,
+        WidgetMaterialOpacityProfile profile)
+    {
+        slot.Configuration.IsInputActive = true;
+        slot.Configuration.Theme = isDark ? SystemBackdropTheme.Dark : SystemBackdropTheme.Light;
+        slot.Configuration.HighContrastBackgroundColor = isDark
+            ? ColorHelper.FromArgb(0xFF, 0x20, 0x20, 0x20)
+            : ColorHelper.FromArgb(0xFF, 0xF3, 0xF3, 0xF3);
+        slot.Controller.Kind = useBase ? DesktopAcrylicKind.Base : DesktopAcrylicKind.Thin;
+        slot.Controller.TintColor = tintColor;
+        slot.Controller.FallbackColor = tintColor;
+        slot.Controller.TintOpacity = (float)profile.TintOpacity;
+        slot.Controller.LuminosityOpacity = (float)profile.LuminosityOpacity;
+        slot.Key = key;
+    }
+
+    private static void TrimIdleSharedAcrylicSlots(List<SharedAcrylicSlot> slots, SharedAcrylicSlot preserve)
+    {
+        for (int i = slots.Count - 1; i >= 0 && slots.Count > MaxSharedBackdropSlotsPerFamily; i--)
+        {
+            SharedAcrylicSlot candidate = slots[i];
+            if (ReferenceEquals(candidate, preserve) || candidate.Targets.Count > 0)
+            {
+                continue;
+            }
+
+            slots.RemoveAt(i);
+            try
+            {
+                candidate.Controller.RemoveAllSystemBackdropTargets();
+                candidate.Controller.Dispose();
+            }
+            catch
+            {
+            }
+        }
     }
 
     protected void DisposeAcrylicController()
     {
         _lastAppliedBackdropSignature = null;
-        if (AcrylicController is null)
-        {
-            return;
-        }
-
-        try
-        {
-            AcrylicController.RemoveAllSystemBackdropTargets();
-            AcrylicController.Dispose();
-        }
-        catch
-        {
-        }
-        finally
-        {
-            AcrylicController = null;
-            AcrylicControllerAttached = false;
-        }
+        DetachAcrylicControllerTarget();
+        AcrylicController = null;
     }
 
     protected void DetachAcrylicControllerTarget()
     {
-        if (AcrylicController is null || !AcrylicControllerAttached)
+        if (!AcrylicControllerAttached)
         {
+            _attachedAcrylicSlot = null;
             return;
         }
 
         try
         {
-            AcrylicController.RemoveAllSystemBackdropTargets();
+            if (BackdropTarget is not null && _attachedAcrylicSlot is { } slot)
+            {
+                slot.Targets.Remove(BackdropTarget);
+                if (!slot.Controller.IsClosed)
+                {
+                    slot.Controller.RemoveSystemBackdropTarget(BackdropTarget);
+                }
+            }
+            else if (BackdropTarget is not null && AcrylicController is { IsClosed: false })
+            {
+                AcrylicController.RemoveSystemBackdropTarget(BackdropTarget);
+            }
         }
         catch
         {
         }
         finally
         {
+            _attachedAcrylicSlot = null;
             AcrylicControllerAttached = false;
         }
     }

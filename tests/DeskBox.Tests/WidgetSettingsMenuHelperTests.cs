@@ -14,6 +14,8 @@ public sealed class WidgetSettingsMenuHelperTests
     [InlineData(WidgetKind.Music, "MusicSettings")]
     [InlineData(WidgetKind.Weather, "WeatherSettings")]
     [InlineData(WidgetKind.Glance, "GlanceSettings")]
+    [InlineData(WidgetKind.Custom, "CustomWidgetSettings")]
+    [InlineData(WidgetKind.Clipboard, "ClipboardSettings")]
     [InlineData(WidgetKind.Search, "SearchSettings")]
     public void GetSettingsSectionTag_Returns_Expected_Tag(WidgetKind kind, string expectedTag)
     {
@@ -38,7 +40,9 @@ public sealed class WidgetSettingsMenuHelperTests
         Assert.Equal("Widget.Settings.Music", WidgetSettingsMenuHelper.GetLocalizationKey(WidgetKind.Music));
         Assert.Equal("Widget.Settings.Weather", WidgetSettingsMenuHelper.GetLocalizationKey(WidgetKind.Weather));
         Assert.Equal("Widget.Settings.Glance", WidgetSettingsMenuHelper.GetLocalizationKey(WidgetKind.Glance));
+        Assert.Equal("Widget.Settings.CustomWidget", WidgetSettingsMenuHelper.GetLocalizationKey(WidgetKind.Custom));
         Assert.Equal("Widget.Settings.Search", WidgetSettingsMenuHelper.GetLocalizationKey(WidgetKind.Search));
+        Assert.Equal("Widget.Settings.Clipboard", WidgetSettingsMenuHelper.GetLocalizationKey(WidgetKind.Clipboard));
     }
 
     [Fact]

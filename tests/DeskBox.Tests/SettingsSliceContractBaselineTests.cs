@@ -69,6 +69,7 @@ public sealed class SettingsSliceContractBaselineTests
         Assert.True(s.TodoShowAllTab);
         Assert.False(s.TodoShowActiveTab);
         Assert.True(s.TodoShowTodayTab);
+        Assert.True(s.TodoShowOverdueTab);
         Assert.False(s.TodoShowThisWeekTab);
         Assert.False(s.TodoShowThisMonthTab);
         Assert.True(s.TodoShowImportantTab);
@@ -83,6 +84,8 @@ public sealed class SettingsSliceContractBaselineTests
         Assert.True(s.TodoShowClearCompletedButton);
         Assert.True(s.TodoReminderEnabled);
         Assert.Equal(5, s.TodoDefaultReminderOffsetMinutes);
+        Assert.True(s.TodoAllDayReminderEnabled);
+        Assert.Equal(9 * 60, s.TodoAllDayReminderTimeMinutes);
         Assert.True(s.TodoUseWideDetailPane);
         Assert.Equal(string.Empty, s.TodoLayoutMode);
         Assert.True(s.TodoAutoSelectFirstInWideLayout);
@@ -90,6 +93,9 @@ public sealed class SettingsSliceContractBaselineTests
         Assert.True(s.MusicEnableCoverHoverMotion);
         Assert.Equal("Auto", s.MusicDisplayMode);
         Assert.True(s.MusicHideTimelineWhenUnavailable);
+        Assert.True(s.MusicShowLyrics);
+        Assert.True(s.MusicShowCapsuleLyrics);
+        Assert.Equal(string.Empty, s.MusicLocalLyricsFolder);
         Assert.Equal(string.Empty, s.LastQuickCaptureFileWidgetId);
         Assert.True(s.GlobalHotkeyEnabled);
         Assert.Equal(HotkeyActivationKind.Chord, s.GlobalHotkeyActivationKind);
@@ -110,11 +116,12 @@ public sealed class SettingsSliceContractBaselineTests
         Assert.Equal("Neutral", s.WidgetBorderColorMode);
         Assert.Equal("Thin", s.WidgetBorderStyle);
         Assert.Equal("Round", s.WidgetCornerPreference);
-        Assert.Equal("SlideFade", s.WidgetAnimationEffect);
+        Assert.Equal("ScaleFade", s.WidgetAnimationEffect);
         Assert.Equal("Standard", s.WidgetAnimationSpeed);
-        Assert.Equal("Right", s.WidgetAnimationSlideDirection);
+        Assert.Equal("None", s.WidgetAnimationSlideDirection);
         Assert.Equal("Standard", s.WidgetAnimationEasingIntensity);
         Assert.Equal("Dynamic", s.WidgetLayerMode);
+        Assert.Equal("Single", s.DynamicClickRaiseScope);
         Assert.True(s.KeepWidgetsVisibleOnShowDesktop);
         Assert.Equal("Overlay", s.DisplayWidgetChromeMode);
         Assert.Equal("Standard", s.InteractiveWidgetChromeMode);
@@ -186,6 +193,7 @@ public sealed class SettingsSliceContractBaselineTests
         Assert.False(s.ShowFileExtensions);
         Assert.True(s.HideShortcutExtensionWhenShowingFileExtensions);
         Assert.Empty(s.Widgets);
+        Assert.Equal("FixedSize", s.WidgetDisplayScalingMode);
         Assert.Empty(s.WidgetGroups);
         Assert.Empty(s.WidgetTopologyLayouts);
         Assert.Null(s.ActiveWidgetTopologyKey);
@@ -239,10 +247,26 @@ public sealed class SettingsSliceContractBaselineTests
         Assert.False(s.CloudBackupTodoDataEnabled);
         Assert.False(s.CloudBackupQuickCaptureDataEnabled);
         Assert.False(s.CloudBackupWidgetStyleEnabled);
+        Assert.False(s.CloudBackupCustomWidgetsEnabled);
         Assert.Equal(5, s.CloudBackupRetentionCount);
         Assert.Equal(24 * 60, s.CloudBackupIntervalMinutes);
         Assert.Equal(0L, s.CloudBackupLastSuccessUtcTicks);
         Assert.Equal(0L, s.CloudBackupLastFailureUtcTicks);
+        Assert.True(s.ClipboardCaptureText);
+        Assert.True(s.ClipboardCaptureImages);
+        Assert.True(s.ClipboardCaptureFiles);
+        Assert.Equal(32, s.ClipboardMaxImageSizeMb);
+        Assert.Equal(4, s.ClipboardMaxTextSizeMb);
+        Assert.Equal("CopyOnSinglePasteOnDouble", s.ClipboardClickBehavior);
+        Assert.False(s.ClipboardDefaultPastePlainText);
+        Assert.True(s.ClipboardMoveToTopOnReuse);
+        Assert.Equal("Standard", s.ClipboardCardDensity);
+        Assert.True(s.ClipboardShowSourceApp);
+        Assert.True(s.ClipboardIgnoreSystemPrivacyFormats);
+        Assert.Equal("Mask", s.ClipboardSensitiveProtectionMode);
+        Assert.Empty(s.ClipboardExcludedApps);
+        Assert.Equal(500, s.ClipboardMaxItems);
+        Assert.Equal(30, s.ClipboardRetentionDays);
     }
 
     [Fact]
@@ -318,6 +342,7 @@ public sealed class SettingsSliceContractBaselineTests
         "todoShowAllTab",
         "todoShowActiveTab",
         "todoShowTodayTab",
+        "todoShowOverdueTab",
         "todoShowThisWeekTab",
         "todoShowThisMonthTab",
         "todoShowImportantTab",
@@ -332,6 +357,8 @@ public sealed class SettingsSliceContractBaselineTests
         "todoShowClearCompletedButton",
         "todoReminderEnabled",
         "todoDefaultReminderOffsetMinutes",
+        "todoAllDayReminderEnabled",
+        "todoAllDayReminderTimeMinutes",
         "todoUseWideDetailPane",
         "todoLayoutMode",
         "todoAutoSelectFirstInWideLayout",
@@ -339,6 +366,9 @@ public sealed class SettingsSliceContractBaselineTests
         "musicEnableCoverHoverMotion",
         "musicDisplayMode",
         "musicHideTimelineWhenUnavailable",
+        "musicShowLyrics",
+        "musicShowCapsuleLyrics",
+        "musicLocalLyricsFolder",
         "lastQuickCaptureFileWidgetId",
         "globalHotkeyEnabled",
         "globalHotkeyActivationKind",
@@ -367,6 +397,7 @@ public sealed class SettingsSliceContractBaselineTests
         "widgetAnimationEasingIntensity",
         "widgetAnimationStaggerEnabled",
         "widgetLayerMode",
+        "dynamicClickRaiseScope",
         "keepWidgetsVisibleOnShowDesktop",
         "displayWidgetChromeMode",
         "interactiveWidgetChromeMode",
@@ -441,6 +472,7 @@ public sealed class SettingsSliceContractBaselineTests
         "widgetDefaultBoundScreenId",
         "widgetNewPlacementTarget",
         "widgetDisplayDisconnectBehavior",
+        "widgetDisplayScalingMode",
         "widgetGroups",
         "widgetTopologyLayouts",
         "activeWidgetTopologyKey",
@@ -494,10 +526,26 @@ public sealed class SettingsSliceContractBaselineTests
         "cloudBackupTodoDataEnabled",
         "cloudBackupQuickCaptureDataEnabled",
         "cloudBackupWidgetStyleEnabled",
+        "cloudBackupCustomWidgetsEnabled",
         "cloudBackupRetentionCount",
         "cloudBackupIntervalMinutes",
         "cloudBackupLastSuccessUtcTicks",
         "cloudBackupLastFailureUtcTicks",
         "cloudBackupLastUnverifiedUtcTicks",
+        "clipboardCaptureText",
+        "clipboardCaptureImages",
+        "clipboardCaptureFiles",
+        "clipboardMaxImageSizeMb",
+        "clipboardMaxTextSizeMb",
+        "clipboardClickBehavior",
+        "clipboardDefaultPastePlainText",
+        "clipboardMoveToTopOnReuse",
+        "clipboardCardDensity",
+        "clipboardShowSourceApp",
+        "clipboardIgnoreSystemPrivacyFormats",
+        "clipboardSensitiveProtectionMode",
+        "clipboardExcludedApps",
+        "clipboardMaxItems",
+        "clipboardRetentionDays",
     ];
 }

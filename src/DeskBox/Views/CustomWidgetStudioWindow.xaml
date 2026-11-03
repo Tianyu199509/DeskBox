@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="DeskBox.Views.CustomWidgetStudioWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:toolkit="using:CommunityToolkit.WinUI.Controls">
+
+    <Grid
+        x:Name="RootGrid"
+        Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+        KeyDown="RootGrid_KeyDown">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="38" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Grid
+            x:Name="AppTitleBar"
+            Padding="14,0,148,0">
+            <StackPanel
+                Orientation="Horizontal"
+                Spacing="8"
+                IsHitTestVisible="False"
+                VerticalAlignment="Center">
+                <Image Width="16" Height="16" Source="ms-appx:///Assets/deskbox.svg" />
+                <TextBlock
+                    x:Name="TitleTextBlock"
+                    FontSize="12"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    VerticalAlignment="Center" />
+                <Border
+                    x:Name="TitleBarContextBadge"
+                    CornerRadius="6"
+                    Padding="8,2,8,2"
+                    Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                    Visibility="Collapsed"
+                    VerticalAlignment="Center">
+                    <TextBlock
+                        x:Name="TitleBarContextText"
+                        FontSize="11.5"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        MaxLines="1"
+                        TextTrimming="CharacterEllipsis"
+                        MaxWidth="260" />
+                </Border>
+            </StackPanel>
+        </Grid>
+
+        <Border
+            x:Name="ContentLayer"
+            Grid.Row="1"
+            Background="{ThemeResource LayerOnMicaBaseAltFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="0,1,0,0">
+            <Grid
+                x:Name="WorkspaceShellGrid"
+                SizeChanged="WorkspaceShellGrid_SizeChanged">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition x:Name="MainWorkspaceColumn" Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition x:Name="ApiDrawerColumn" Width="0" />
+                </Grid.ColumnDefinitions>
+
+                <Grid x:Name="PageHost" Grid.Column="0" />
+
+                <toolkit:GridSplitter
+                    x:Name="ApiDrawerSplitter"
+                    Grid.Column="1"
+                    Width="8"
+                    Margin="-3,0"
+                    Canvas.ZIndex="6"
+                    Visibility="Collapsed"
+                    Style="{StaticResource WidgetMasterDetailSplitterStyle}" />
+
+                <Border
+                    x:Name="ApiDrawerBorder"
+                    Grid.Column="2"
+                    Canvas.ZIndex="10"
+                    Visibility="Collapsed"
+                    Background="{ThemeResource SolidBackgroundFillColorTertiaryBrush}"
+                    BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+                    BorderThickness="1,0,0,0" />
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

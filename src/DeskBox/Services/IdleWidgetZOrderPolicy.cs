@@ -50,4 +50,44 @@ internal static class IdleWidgetZOrderPolicy
         return peersObservedAboveHighest.Count == 0 &&
                peersObservedFromHighestDown.SequenceEqual(requestedHighestToLowest);
     }
+
+    /// <summary>
+    /// Default physical-pixel reach used to decide whether two idle widgets'
+    /// DWM drop shadows can visually overlap a neighbor's body (generous up to
+    /// 225% DPI so real overlaps are never skipped while separated widgets
+    /// avoid redundant SetWindowPos peer reorders).
+    /// </summary>
+    public const double DefaultShadowOverlapReachPixels = 88.0;
+
+    public static bool HasAnyShadowOverlapRisk(
+        IEnumerable<Windows.Foundation.Rect> bounds,
+        double shadowReachPixels = DefaultShadowOverlapReachPixels)
+    {
+        List<Windows.Foundation.Rect> list = bounds
+            .Where(static rect => rect.Width > 0 && rect.Height > 0)
+            .ToList();
+        if (list.Count < 2)
+        {
+            return false;
+        }
+
+        double reach = Math.Max(0.0, shadowReachPixels);
+        for (int i = 0; i < list.Count; i++)
+        {
+            Windows.Foundation.Rect first = list[i];
+            for (int j = i + 1; j < list.Count; j++)
+            {
+                Windows.Foundation.Rect second = list[j];
+                if (first.Left - reach < second.Right &&
+                    second.Left - reach < first.Right &&
+                    first.Top - reach < second.Bottom &&
+                    second.Top - reach < first.Bottom)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
 }

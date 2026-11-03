@@ -66,10 +66,14 @@ public sealed partial class TodoWidgetContent
             }
 
             ViewModel.BeginEdit(item.Id);
+            _ = EnsureDetailPageRealized();
             DispatcherQueue.TryEnqueue(() =>
             {
-                DetailTitleTextBox.Focus(FocusState.Programmatic);
-                DetailTitleTextBox.Select(DetailTitleTextBox.Text?.Length ?? 0, 0);
+                if (DetailTitleTextBox is not null)
+                {
+                    DetailTitleTextBox.Focus(FocusState.Programmatic);
+                    DetailTitleTextBox.Select(DetailTitleTextBox.Text?.Length ?? 0, 0);
+                }
             });
         };
         flyout.Items.Add(editItem);
@@ -214,6 +218,18 @@ public sealed partial class TodoWidgetContent
         };
         flyout.Items.Add(copyItem);
 
+        var exportSelectedItem = new MenuFlyoutItem
+        {
+            Text = localization.Format("Todo.Export.SelectedMenuItem", selectedItems.Count),
+            Icon = new FontIcon { Glyph = "\uEDE1" }
+        };
+        exportSelectedItem.Click += async (_, _) =>
+        {
+            flyout.Hide();
+            await ExportSelectedItemsAsync(selectedItems, anchor);
+        };
+        flyout.Items.Add(exportSelectedItem);
+
         var deleteItem = CreateTodoContextCommand("Common.Delete", "\uE74D");
         deleteItem.Click += async (_, _) =>
         {
@@ -251,9 +267,11 @@ public sealed partial class TodoWidgetContent
         customDueDateItem.Click += async (_, _) =>
         {
             flyout.Hide();
+            TodoItemViewModel? initialItem = selectedItems.FirstOrDefault(item => item.DueDate is not null);
             await PickBatchCustomDueDateAsync(
                 selectedIds,
-                selectedItems.FirstOrDefault(item => item.DueDate is not null)?.DueDate);
+                initialItem?.DueDate,
+                initialItem?.HasDueTime == true);
         };
         dueDateMenu.Items.Add(customDueDateItem);
         if (hasDueDate)

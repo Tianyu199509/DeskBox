@@ -19,6 +19,7 @@ public abstract partial class WidgetWindowBase
     private bool _groupDetachCommitInProgress;
     private volatile bool _groupDetachDragCanceled;
     private bool _groupDetachPreviewWarmupQueued;
+    private Microsoft.UI.Xaml.Input.PointerEventHandler? _groupDetachPreviewPointerHandler;
     private Win32Helper.SubclassProc? _groupWheelSubclassProc;
     private bool _isGroupWheelSubclassInstalled;
     private bool _nativeGroupWheelEnabled;
@@ -41,6 +42,11 @@ public abstract partial class WidgetWindowBase
         WidgetShellControl.GroupDissolveRequested += WidgetShellControl_GroupDissolveRequested;
         WidgetShellControl.GroupPickerOpened += WidgetShellControl_GroupPickerOpened;
         WidgetShellControl.GroupPickerClosed += WidgetShellControl_GroupPickerClosed;
+        _groupDetachPreviewPointerHandler = WidgetShellControl_GroupTitlePointerPressed;
+        WidgetShellControl.AddHandler(
+            Microsoft.UI.Xaml.UIElement.PointerPressedEvent,
+            _groupDetachPreviewPointerHandler,
+            handledEventsToo: true);
 
         if (App.Current.WidgetManager is { } manager)
         {
@@ -121,6 +127,13 @@ public abstract partial class WidgetWindowBase
         WidgetShellControl.GroupDissolveRequested -= WidgetShellControl_GroupDissolveRequested;
         WidgetShellControl.GroupPickerOpened -= WidgetShellControl_GroupPickerOpened;
         WidgetShellControl.GroupPickerClosed -= WidgetShellControl_GroupPickerClosed;
+        if (_groupDetachPreviewPointerHandler is not null)
+        {
+            WidgetShellControl.RemoveHandler(
+                Microsoft.UI.Xaml.UIElement.PointerPressedEvent,
+                _groupDetachPreviewPointerHandler);
+            _groupDetachPreviewPointerHandler = null;
+        }
 
         if (App.Current?.WidgetManager is { } manager)
         {
@@ -283,7 +296,6 @@ public abstract partial class WidgetWindowBase
             animateIdentity,
             origin,
             forward);
-        QueueGroupDetachPreviewWarmup(presentation);
         OnWidgetGroupPresentationChanged(presentation);
     }
 
@@ -588,32 +600,50 @@ public abstract partial class WidgetWindowBase
         preview?.Hide();
     }
 
-    private void QueueGroupDetachPreviewWarmup(
-        WidgetGroupPresentation? presentation)
+    private void WidgetShellControl_GroupTitlePointerPressed(
+        object sender,
+        Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
     {
-        if (presentation is null || _groupDetachPreviewWarmupQueued)
+        if (!_groupingInitialized ||
+            !WidgetShellControl.HasWidgetGroup ||
+            !e.GetCurrentPoint(WidgetShellControl).Properties.IsLeftButtonPressed)
+        {
+            return;
+        }
+
+        QueueGroupDetachPreviewWarmup();
+    }
+
+    private void QueueGroupDetachPreviewWarmup()
+    {
+        App? app = App.Current;
+        WidgetManager? manager = app?.WidgetManager;
+        if (_groupDetachPreviewWarmupQueued ||
+            manager is null ||
+            manager.HasWidgetDetachPlacementPreview)
         {
             return;
         }
 
         _groupDetachPreviewWarmupQueued = true;
         DispatcherQueue.TryEnqueue(
-            Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
+            Microsoft.UI.Dispatching.DispatcherQueuePriority.Normal,
             () =>
             {
-                App? app = App.Current;
-                WidgetManager? manager = app?.WidgetManager;
+                _groupDetachPreviewWarmupQueued = false;
+                App? currentApp = App.Current;
+                WidgetManager? currentManager = currentApp?.WidgetManager;
                 if (!_groupingInitialized ||
-                    WidgetShellControl.HasWidgetGroup == false ||
-                    app is null ||
-                    manager is null)
+                    !WidgetShellControl.HasWidgetGroup ||
+                    currentApp is null ||
+                    currentManager is null)
                 {
                     return;
                 }
 
-                string caption = app.LocalizationService.T(
+                string caption = currentApp.LocalizationService.T(
                     "Widget.Group.DetachDragCaption");
-                manager.PrewarmWidgetDetachPlacementPreview(
+                currentManager.PrewarmWidgetDetachPlacementPreview(
                     caption,
                     GetCurrentSurfaceCornerRadius());
             });

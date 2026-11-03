@@ -46,7 +46,34 @@ public sealed class InProcessSettingsAppActions : ISettingsAppActions
         AppRelaunchService.ScheduleAfterCurrentProcessExit();
 
     public bool TryRelaunchAsExplorerUser(string arguments) =>
-        DragDropPermissionService.TryRelaunchAsExplorerUser(arguments);
+        DragDropPermissionService.TryRelaunchAsExplorerUser(
+            NormalizeAwaitParentExitArguments(arguments, Environment.ProcessId));
+
+    internal static string NormalizeAwaitParentExitArguments(string? arguments, int currentProcessId)
+    {
+        if (string.IsNullOrWhiteSpace(arguments))
+        {
+            return string.Empty;
+        }
+
+        const string flag = "--await-parent-exit ";
+        string trimmed = arguments.Trim();
+        if (!trimmed.StartsWith(flag, StringComparison.Ordinal))
+        {
+            return trimmed;
+        }
+
+        string rest = trimmed[flag.Length..].TrimStart();
+        int spaceIndex = rest.IndexOf(' ');
+        string pidToken = spaceIndex >= 0 ? rest[..spaceIndex] : rest;
+        if (!int.TryParse(pidToken, out _))
+        {
+            return trimmed;
+        }
+
+        string suffix = spaceIndex >= 0 ? rest[spaceIndex..] : string.Empty;
+        return $"{flag}{currentProcessId}{suffix}";
+    }
 
     public void ShowOnboarding(bool resumeProgress = false) =>
         _app.ShowOnboarding(resumeProgress);

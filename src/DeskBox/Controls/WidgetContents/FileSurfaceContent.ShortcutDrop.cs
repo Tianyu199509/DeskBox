@@ -125,20 +125,25 @@ public sealed partial class FileSurfaceContent
         };
     }
 
-    private static string GetShortcutDisplayName(string sourcePath)
+    internal static string GetShortcutDisplayName(string sourcePath, bool isDirectory = false)
     {
         string trimmed = sourcePath.TrimEnd(
             Path.DirectorySeparatorChar,
             Path.AltDirectorySeparatorChar);
-        string name = Path.GetFileNameWithoutExtension(trimmed);
+        string extension = !isDirectory && ShortcutHelper.IsInternetShortcutPath(trimmed)
+            ? ".url"
+            : ".lnk";
+        string name = isDirectory
+            ? Path.GetFileName(trimmed)
+            : Path.GetFileNameWithoutExtension(trimmed);
         if (string.IsNullOrWhiteSpace(name))
         {
             name = Path.GetFileName(trimmed);
         }
 
         return string.IsNullOrWhiteSpace(name)
-            ? "Shortcut.lnk"
-            : name + " - Shortcut.lnk";
+            ? "Shortcut" + extension
+            : name + " - Shortcut" + extension;
     }
 
     /// <summary>
@@ -182,10 +187,19 @@ public sealed partial class FileSurfaceContent
                 reserved);
             try
             {
-                ShortcutHelper.CreateShellNamespaceShortcut(
-                    linkPath,
-                    item.ParsingName,
-                    T("Widget.CreateShortcut"));
+                bool createdFromRawPidl = item.RawPidl is { Length: >= 4 } rawPidl &&
+                    ShortcutHelper.TryCreateShortcutFromRawPidl(
+                        linkPath,
+                        rawPidl,
+                        T("Widget.CreateShortcut"));
+                if (!createdFromRawPidl)
+                {
+                    ShortcutHelper.CreateShellNamespaceShortcut(
+                        linkPath,
+                        item.ParsingName,
+                        T("Widget.CreateShortcut"));
+                }
+
                 reserved.Add(linkPath);
                 created++;
             }
@@ -236,34 +250,51 @@ public sealed partial class FileSurfaceContent
             }
 
             string source = Path.GetFullPath(droppedFile.Path);
-            if (!File.Exists(source) && !Directory.Exists(source))
+            bool isDirectory = Directory.Exists(source);
+            if (!isDirectory && !File.Exists(source))
             {
                 continue;
             }
 
             string linkPath = FileService.GetAvailablePath(
-                Path.Combine(destination, GetShortcutDisplayName(source)),
+                Path.Combine(destination, GetShortcutDisplayName(source, isDirectory)),
                 reserved);
-            if (Directory.Exists(source))
+            reserved.Add(linkPath);
+            try
             {
-                ShortcutHelper.CreateOrUpdateFolderShortcut(
-                    linkPath,
-                    source,
-                    T("Widget.CreateShortcut"));
-            }
-            else
-            {
-                // No icon override: the system renders the target file's own
-                // icon with the shortcut overlay, matching Explorer's native
-                // Alt-drag shortcut.
-                DragDropPermissionService.CreateOrUpdateShortcut(
-                    linkPath,
-                    source,
-                    string.Empty,
-                    iconPath: null);
-            }
+                if (isDirectory)
+                {
+                    ShortcutHelper.CreateOrUpdateFolderShortcut(
+                        linkPath,
+                        source,
+                        T("Widget.CreateShortcut"));
+                }
+                else if (ShortcutHelper.IsShortcutPath(source))
+                {
+                    DropStagingFileOps.CopyShortcutFilePreservingStreams(
+                        source,
+                        linkPath);
+                    ShortcutHelper.InvalidateStoredMetadataCache(linkPath);
+                }
+                else
+                {
+                    // No icon override: the system renders the target file's own
+                    // icon with the shortcut overlay, matching Explorer's native
+                    // Alt-drag shortcut.
+                    DragDropPermissionService.CreateOrUpdateShortcut(
+                        linkPath,
+                        source,
+                        string.Empty,
+                        iconPath: null);
+                }
 
-            created.Add(linkPath);
+                created.Add(linkPath);
+            }
+            catch (Exception ex)
+            {
+                App.Log(
+                    $"[ShortcutDrop] Shortcut creation failed source='{source}': {ex.Message}");
+            }
             // Keep long multi-file drops responsive without moving COM work to
             // an MTA thread (the C# shortcut backend is apartment-sensitive).
             await Task.Yield();

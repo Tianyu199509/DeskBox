@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 
 namespace DeskBox.Tests;
 
@@ -138,14 +138,18 @@ public sealed class SettingsCopyAndHierarchyTests
         Assert.DoesNotContain("IsOn=\"{Binding KeepWidgetsVisibleOnShowDesktop", windowXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("IsOn=\"{Binding WeatherAutoLocation", windowXaml, StringComparison.Ordinal);
 
-        // File stacking is redesigned around the auto-stacking switch as the
-        // section's first-level expander; the master switch is retired.
+        // File stacking splits cleanly: OpenMode/Popover* live inline on FileWidgetSettingsSection,
+        // while AutoStacking + rules live on FileStackSettingsSectionTemplate; the master switch is retired.
         Assert.Contains("controls:SettingsComboBox.Value=\"{x:Bind FileStack.OpenMode, Mode=TwoWay}\"", fileWidgetXaml, StringComparison.Ordinal);
+        Assert.Contains(
+            "HeaderKey=\"Settings.FileStacks.Title\"",
+            fileWidgetXaml,
+            StringComparison.Ordinal);
         Assert.Contains(
             "HeaderKey=\"Settings.FileStacks.Auto.Title\"",
             windowXaml,
             StringComparison.Ordinal);
-        Assert.Contains(
+        Assert.DoesNotContain(
             "HeaderKey=\"Settings.FileStacks.OpenMode.Title\"",
             windowXaml,
             StringComparison.Ordinal);
@@ -557,10 +561,10 @@ public sealed class SettingsCopyAndHierarchyTests
             "src/DeskBox/Views/ContentWidgetWindow.Commands.cs"));
 
         int trayMapEntry = traySource.IndexOf(
-            "contextMenu.Items.Add(mapFolderItem)",
+            "TrayCommandMapFolder,",
             StringComparison.Ordinal);
         int trayFeatureEntry = traySource.IndexOf(
-            "contextMenu.Items.Add(addFeatureWidgetItem)",
+            "TrayCommandAddFeatureWidget,",
             StringComparison.Ordinal);
 
         Assert.True(trayMapEntry >= 0);
@@ -646,27 +650,42 @@ public sealed class SettingsCopyAndHierarchyTests
 
         Assert.Contains("IsOn=\"{Binding Enabled, Mode=TwoWay}\"", quickCapture, StringComparison.Ordinal);
         Assert.Contains("IsOn=\"{Binding Enabled, Mode=TwoWay}\"", todo, StringComparison.Ordinal);
-        Assert.Equal(5, CountOccurrences(quickCapture, "Loaded=\"FeatureSettingsExpander_Loaded\""));
-        Assert.Equal(4, CountOccurrences(todo, "Loaded=\"FeatureSettingsExpander_Loaded\""));
+        Assert.Equal(0, CountOccurrences(quickCapture, "Loaded=\"FeatureSettingsExpander_Loaded\""));
+        Assert.Equal(0, CountOccurrences(todo, "Loaded=\"FeatureSettingsExpander_Loaded\""));
 
         AssertInOrder(
             quickCapture,
+            "Settings.QuickCapture.Group.Layout",
             "Settings.QuickCapture.WideLayout.Title",
+            "Settings.QuickCapture.WideOpen.Title",
+            "Settings.QuickCapture.DefaultView.Title",
             "Settings.QuickCapture.Tabs.Title",
+            "Settings.QuickCapture.Group.Display",
             "Settings.ContentEditor.Group.Title",
-            "Settings.QuickCapture.ClipboardTitle",
-            "Settings.QuickCapture.Group.Data.Title");
+            "Settings.QuickCapture.Group.Data.Title",
+            "Settings.QuickCapture.MirrorFolder.Title");
         AssertInOrder(
             todo,
+            "Settings.QuickCapture.Group.Layout",
             "Settings.QuickCapture.WideLayout.Title",
+            "Settings.Todo.AutoSelectFirst.Title",
+            "Settings.Todo.DefaultFilter.Title",
             "Settings.Todo.Tabs.Title",
-            "Settings.ContentEditor.Group.Title",
+            "Settings.Todo.Group.Display",
             "Settings.Todo.FooterDisplay.Title",
+            "Settings.ContentEditor.Group.Title",
+            "Settings.Todo.NewTaskPosition.Title",
+            "Settings.Todo.Group.Reminders",
             "Settings.Todo.ReminderEnabled.Title");
 
-        Assert.Contains("Click=\"QuickCaptureTabsDropDown_Click\"", quickCapture, StringComparison.Ordinal);
-        Assert.Contains("Click=\"TodoTabsDropDown_Click\"", todo, StringComparison.Ordinal);
-        Assert.Contains("Click=\"TodoFooterDisplayDropDown_Click\"", todo, StringComparison.Ordinal);
+        Assert.DoesNotContain("Click=\"QuickCaptureTabsDropDown_Click\"", quickCapture, StringComparison.Ordinal);
+        Assert.Contains("IsChecked=\"{x:Bind ShowRecordsTab, Mode=TwoWay}\"", quickCapture, StringComparison.Ordinal);
+        Assert.Contains("IsChecked=\"{x:Bind ShowPinnedTab, Mode=TwoWay}\"", quickCapture, StringComparison.Ordinal);
+        Assert.DoesNotContain("Click=\"TodoTabsDropDown_Click\"", todo, StringComparison.Ordinal);
+        Assert.DoesNotContain("Click=\"TodoFooterDisplayDropDown_Click\"", todo, StringComparison.Ordinal);
+        Assert.Contains("IsChecked=\"{x:Bind ShowAllTab, Mode=TwoWay}\"", todo, StringComparison.Ordinal);
+        Assert.Contains("IsChecked=\"{x:Bind ShowFooterStats, Mode=TwoWay}\"", todo, StringComparison.Ordinal);
+        Assert.Contains("SelectedIndex=\"{x:Bind NewTaskPositionIndex, Mode=TwoWay}\"", todo, StringComparison.Ordinal);
         Assert.Contains("ItemsSource=\"{Binding VisibleDefaultViewOptions}\"", quickCapture, StringComparison.Ordinal);
         Assert.Contains("ItemsSource=\"{Binding VisibleDefaultFilterOptions}\"", todo, StringComparison.Ordinal);
 
@@ -675,7 +694,11 @@ public sealed class SettingsCopyAndHierarchyTests
         Assert.DoesNotContain("{Binding TodoShowTabBar", todo, StringComparison.Ordinal);
         Assert.DoesNotContain("{Binding SelectedTodo", todo, StringComparison.Ordinal);
         Assert.Contains(
-            "controls:SettingsComboBox.Value=\"{Binding EditorFormat, Mode=TwoWay}\"",
+            "SelectedIndex=\"{x:Bind WideOpenModeIndex, Mode=TwoWay}\"",
+            quickCapture,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "SelectedIndex=\"{x:Bind EditorFormatIndex, Mode=TwoWay}\"",
             quickCapture,
             StringComparison.Ordinal);
         Assert.DoesNotContain("QuickCaptureDefaultFormat", quickCapture, StringComparison.Ordinal);

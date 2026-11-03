@@ -81,27 +81,80 @@ public sealed partial class WidgetGroupTitleSwitcher
         }
     }
 
+    private PointerEventHandler? _tabsPointerPressedHandler;
+    private PointerEventHandler? _tabsPointerReleasedHandler;
+    private PointerEventHandler? _tabsPointerCanceledHandler;
+    private KeyEventHandler? _tabsKeyDownHandler;
+    private DragEventHandler? _tabsDragEnterHandler;
+    private DragEventHandler? _tabsDragOverHandler;
+    private DragEventHandler? _tabsDragLeaveHandler;
+    private DragEventHandler? _tabsDropHandler;
+
     private void RegisterTabPointerHandlers()
     {
-        TabsView.AddHandler(UIElement.PointerPressedEvent,
-            new PointerEventHandler(TabsView_PointerPressed), handledEventsToo: true);
-        TabsView.AddHandler(UIElement.PointerReleasedEvent,
-            new PointerEventHandler(TabsView_PointerReleased), handledEventsToo: true);
-        TabsView.AddHandler(UIElement.PointerCanceledEvent,
-            new PointerEventHandler(TabsView_PointerCanceled), handledEventsToo: true);
-        TabsView.AddHandler(UIElement.KeyDownEvent,
-            new KeyEventHandler(TabsView_KeyDown), handledEventsToo: true);
+        _tabsPointerPressedHandler = TabsView_PointerPressed;
+        _tabsPointerReleasedHandler = TabsView_PointerReleased;
+        _tabsPointerCanceledHandler = TabsView_PointerCanceled;
+        _tabsKeyDownHandler = TabsView_KeyDown;
+        _tabsDragEnterHandler = TabsView_DragEnter;
+        _tabsDragOverHandler = TabsView_DragOver;
+        _tabsDragLeaveHandler = TabsView_DragLeave;
+        _tabsDropHandler = TabsView_Drop;
+        TabsView.AddHandler(UIElement.PointerPressedEvent, _tabsPointerPressedHandler, handledEventsToo: true);
+        TabsView.AddHandler(UIElement.PointerReleasedEvent, _tabsPointerReleasedHandler, handledEventsToo: true);
+        TabsView.AddHandler(UIElement.PointerCanceledEvent, _tabsPointerCanceledHandler, handledEventsToo: true);
+        TabsView.AddHandler(UIElement.KeyDownEvent, _tabsKeyDownHandler, handledEventsToo: true);
         // Drag events must be observed with handledEventsToo: TabView's own
         // external-tab-drop feature marks DragOver handled, which hides
         // drags from attribute-wired handlers on this element.
-        TabsView.AddHandler(UIElement.DragEnterEvent,
-            new DragEventHandler(TabsView_DragEnter), handledEventsToo: true);
-        TabsView.AddHandler(UIElement.DragOverEvent,
-            new DragEventHandler(TabsView_DragOver), handledEventsToo: true);
-        TabsView.AddHandler(UIElement.DragLeaveEvent,
-            new DragEventHandler(TabsView_DragLeave), handledEventsToo: true);
-        TabsView.AddHandler(UIElement.DropEvent,
-            new DragEventHandler(TabsView_Drop), handledEventsToo: true);
+        TabsView.AddHandler(UIElement.DragEnterEvent, _tabsDragEnterHandler, handledEventsToo: true);
+        TabsView.AddHandler(UIElement.DragOverEvent, _tabsDragOverHandler, handledEventsToo: true);
+        TabsView.AddHandler(UIElement.DragLeaveEvent, _tabsDragLeaveHandler, handledEventsToo: true);
+        TabsView.AddHandler(UIElement.DropEvent, _tabsDropHandler, handledEventsToo: true);
+    }
+
+    private void UnregisterTabPointerHandlers()
+    {
+        if (_tabsPointerPressedHandler is not null)
+        {
+            TabsView.RemoveHandler(UIElement.PointerPressedEvent, _tabsPointerPressedHandler);
+            _tabsPointerPressedHandler = null;
+        }
+        if (_tabsPointerReleasedHandler is not null)
+        {
+            TabsView.RemoveHandler(UIElement.PointerReleasedEvent, _tabsPointerReleasedHandler);
+            _tabsPointerReleasedHandler = null;
+        }
+        if (_tabsPointerCanceledHandler is not null)
+        {
+            TabsView.RemoveHandler(UIElement.PointerCanceledEvent, _tabsPointerCanceledHandler);
+            _tabsPointerCanceledHandler = null;
+        }
+        if (_tabsKeyDownHandler is not null)
+        {
+            TabsView.RemoveHandler(UIElement.KeyDownEvent, _tabsKeyDownHandler);
+            _tabsKeyDownHandler = null;
+        }
+        if (_tabsDragEnterHandler is not null)
+        {
+            TabsView.RemoveHandler(UIElement.DragEnterEvent, _tabsDragEnterHandler);
+            _tabsDragEnterHandler = null;
+        }
+        if (_tabsDragOverHandler is not null)
+        {
+            TabsView.RemoveHandler(UIElement.DragOverEvent, _tabsDragOverHandler);
+            _tabsDragOverHandler = null;
+        }
+        if (_tabsDragLeaveHandler is not null)
+        {
+            TabsView.RemoveHandler(UIElement.DragLeaveEvent, _tabsDragLeaveHandler);
+            _tabsDragLeaveHandler = null;
+        }
+        if (_tabsDropHandler is not null)
+        {
+            TabsView.RemoveHandler(UIElement.DropEvent, _tabsDropHandler);
+            _tabsDropHandler = null;
+        }
     }
 
     private void SynchronizeTabs()
@@ -616,7 +669,7 @@ public sealed partial class WidgetGroupTitleSwitcher
         DispatcherQueueTimer timer = DispatcherQueue.CreateTimer();
         timer.Interval = TimeSpan.FromMilliseconds(DragHoverSwitchDelayMilliseconds);
         timer.IsRepeating = false;
-        timer.Tick += (_, _) => CommitDragHoverSwitch();
+        timer.Tick += DragHoverSwitchTimer_Tick;
         _dragHoverSwitchTimer = timer;
         timer.Start();
         App.Log(
@@ -719,10 +772,17 @@ public sealed partial class WidgetGroupTitleSwitcher
         return null;
     }
 
+    private void DragHoverSwitchTimer_Tick(DispatcherQueueTimer sender, object args) =>
+        CommitDragHoverSwitch();
+
     internal void CancelDragHoverSwitch()
     {
-        _dragHoverSwitchTimer?.Stop();
-        _dragHoverSwitchTimer = null;
+        if (_dragHoverSwitchTimer is not null)
+        {
+            _dragHoverSwitchTimer.Stop();
+            _dragHoverSwitchTimer.Tick -= DragHoverSwitchTimer_Tick;
+            _dragHoverSwitchTimer = null;
+        }
         _dragHoverSwitchTargetId = null;
     }
 

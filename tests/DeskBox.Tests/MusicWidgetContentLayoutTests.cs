@@ -215,6 +215,8 @@ public sealed class MusicWidgetContentLayoutTests
     {
         string musicXaml = File.ReadAllText(TestPaths.FromRepository(
             "src/DeskBox/Controls/WidgetContents/MusicWidgetContent.xaml"));
+        string musicCode = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Controls/WidgetContents/MusicWidgetContent.xaml.cs"));
         string shellXaml = File.ReadAllText(TestPaths.FromRepository(
             "src/DeskBox/Controls/WidgetShell.xaml"));
         string shellCode = File.ReadAllText(TestPaths.FromRepository(
@@ -234,7 +236,9 @@ public sealed class MusicWidgetContentLayoutTests
         Assert.DoesNotContain("Glyph=\"&#xE893;\"", musicXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("x:Name=\"MinimalPreviousButton\"", musicXaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"MinimalControlPanel\"", musicXaml, StringComparison.Ordinal);
-        Assert.Contains("Background=\"{ThemeResource SystemControlAcrylicElementBrush}\"", musicXaml, StringComparison.Ordinal);
+        Assert.Contains("Background=\"{ThemeResource MusicFrostedBarScrimBrush}\"", musicXaml, StringComparison.Ordinal);
+        Assert.Contains("Background=\"{ThemeResource MusicLyricsCoverContrastBrush}\"", musicXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("SystemControlAcrylicElementBrush", musicXaml, StringComparison.Ordinal);
         Assert.Contains("MinHeight=\"40\"", musicXaml, StringComparison.Ordinal);
         Assert.Contains("Padding=\"6,5\"", musicXaml, StringComparison.Ordinal);
         Assert.Contains("TextAlignment=\"Left\"", musicXaml, StringComparison.Ordinal);
@@ -242,7 +246,10 @@ public sealed class MusicWidgetContentLayoutTests
         Assert.Contains("<Setter Property=\"FontSize\" Value=\"14\" />", musicXaml, StringComparison.Ordinal);
         Assert.Contains("Background=\"{ThemeResource SubtleFillColorSecondaryBrush}\"", musicXaml, StringComparison.Ordinal);
         Assert.Contains("Background=\"{ThemeResource SubtleFillColorTertiaryBrush}\"", musicXaml, StringComparison.Ordinal);
-        Assert.Contains("<Setter Property=\"CornerRadius\" Value=\"4\" />", musicXaml, StringComparison.Ordinal);
+        Assert.Contains("<Setter Property=\"CornerRadius\" Value=\"6\" />", musicXaml, StringComparison.Ordinal);
+        Assert.Contains("<Setter Property=\"CornerRadius\" Value=\"8\" />", musicXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("<Setter Property=\"CornerRadius\" Value=\"18\" />", musicXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("size / 2.0", musicCode, StringComparison.Ordinal);
         Assert.DoesNotContain("MusicPlayVectorIconStyle", musicXaml, StringComparison.Ordinal);
 
         Assert.Equal(3, CountOccurrences(shellXaml, "<widgetContents:MusicTransportIcon"));
@@ -314,6 +321,72 @@ public sealed class MusicWidgetContentLayoutTests
         Assert.Contains("nameof(TitleTextSize)", contentWindow, StringComparison.Ordinal);
         Assert.Contains("ContentWidgetShell.DataContext = _titleViewModel", contentWindow, StringComparison.Ordinal);
         Assert.Contains("_titleViewModel.RefreshDisplayName()", commands, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LyricsPresentation_ExistsAcrossAllStylesAndRespectsMasterToggle()
+    {
+        string musicXaml = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Controls/WidgetContents/MusicWidgetContent.xaml"));
+        string musicCode = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Controls/WidgetContents/MusicWidgetContent.xaml.cs"));
+        string contentWindow = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Views/ContentWidgetWindow.xaml.cs"));
+        string settingsXaml = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Views/SettingsWindow.xaml"));
+
+        // Redundant lyrics icon buttons are removed from all four layouts;
+        // entering the frosted lyrics overlay happens directly by tapping the
+        // inline lyric row or album/vinyl artwork.
+        Assert.DoesNotContain("MinimalLyricsButton", musicXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("LyricsToggleButton", musicXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("RecordLyricsButton", musicXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("RecordHorizontalLyricsButton", musicXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("LyricsToggleButton_Click", musicXaml, StringComparison.Ordinal);
+
+        // Cover / MinimalLayout: left-aligned lyric floats over the cover scrim outside MinimalControlPanel
+        int lyricRowIndex = musicXaml.IndexOf("x:Name=\"MinimalLyricRow\"", StringComparison.Ordinal);
+        int controlPanelIndex = musicXaml.IndexOf("x:Name=\"MinimalControlPanel\"", StringComparison.Ordinal);
+        Assert.True(lyricRowIndex > 0 && lyricRowIndex < controlPanelIndex);
+        Assert.Contains("x:Name=\"MinimalCoverLyricScrim\"", musicXaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"MinimalLyricMarqueeHost\"", musicXaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"MinimalLyricText\"", musicXaml, StringComparison.Ordinal);
+
+        // Controls / Standard ContentGrid
+        Assert.Contains("x:Name=\"ControlsLyricRow\"", musicXaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"ControlsLyricMarqueeHost\"", musicXaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"SubtitleTextBlock\"", musicXaml, StringComparison.Ordinal);
+
+        // RecordVertical / RecordLayout
+        Assert.Contains("x:Name=\"RecordLyricRow\"", musicXaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"RecordLyricMarqueeHost\"", musicXaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"RecordLyricText\"", musicXaml, StringComparison.Ordinal);
+
+        // RecordHorizontal / RecordHorizontalLayout
+        Assert.Contains("x:Name=\"RecordHorizontalLyricRow\"", musicXaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"RecordHorizontalLyricMarqueeHost\"", musicXaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"RecordHorizontalLyricText\"", musicXaml, StringComparison.Ordinal);
+
+        // Compositor marquee for overflowing single-line lyrics + pure native-material poster lyrics mode
+        Assert.Contains("UpdateLyricMarquee", musicCode, StringComparison.Ordinal);
+        Assert.Contains("ApplyActivePlayerLayoutVisibility", musicCode, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"LyricsOverlayPanel\"", musicXaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"LyricsOverlayClipHost\"", musicXaml, StringComparison.Ordinal);
+        Assert.Contains("Tapped=\"LyricsOverlayPanel_Tapped\"", musicXaml, StringComparison.Ordinal);
+        Assert.Contains("DoubleTapped=\"LyricLineItem_DoubleTapped\"", musicXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("BlurredThumbnailImage", musicXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("LyricsOffsetPill", musicXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("LyricsCloseButton_Click", musicXaml, StringComparison.Ordinal);
+        Assert.Equal(8, CountOccurrences(musicXaml, "Tapped=\"ArtworkLyricsTrigger_Tapped\""));
+        Assert.Equal(4, CountOccurrences(musicXaml, "Visibility=\"{x:Bind ViewModel.InlineLyricVisibility, Mode=OneWay}\""));
+
+        // Capsule compact mode gates on ShowLyrics && ShowCapsuleLyrics
+        Assert.Contains("music.ViewModel.ShowLyrics &&", contentWindow, StringComparison.Ordinal);
+        Assert.Contains("music.ViewModel.ShowCapsuleLyrics &&", contentWindow, StringComparison.Ordinal);
+
+        // Settings master switch is prominently placed in MusicSettingsSection
+        Assert.Contains("svc:Localized.HeaderKey=\"Settings.Music.ShowLyrics.Title\"", settingsXaml, StringComparison.Ordinal);
+        Assert.Contains("IsOn=\"{x:Bind ShowLyrics, Mode=TwoWay}\"", settingsXaml, StringComparison.Ordinal);
     }
 
     private static int CountOccurrences(string source, string value) =>

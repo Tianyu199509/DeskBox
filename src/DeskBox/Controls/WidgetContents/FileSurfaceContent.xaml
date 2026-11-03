@@ -313,7 +313,7 @@
                                 Background="{ThemeResource AccentFillColorDefaultBrush}"
                                 CornerRadius="8">
                                 <TextBlock
-                                    helpers:WidgetTextShadow.Cast="True"
+                                    helpers:WidgetTextShadow.Cast="False"
                                     Tag="StackPreviewCountText"
                                     HorizontalAlignment="Center"
                                     VerticalAlignment="Center"
@@ -338,7 +338,7 @@
                         </Button>
                     </Grid>
                     <TextBlock
-                        helpers:WidgetTextShadow.Cast="True"
+                        helpers:WidgetTextShadow.Cast="False"
                         MaxWidth="{Binding LabelMaxWidth}"
                         Margin="2,0"
                         HorizontalAlignment="Center"
@@ -479,7 +479,7 @@
                                 Background="{ThemeResource AccentFillColorDefaultBrush}"
                                 CornerRadius="7">
                                 <TextBlock
-                                    helpers:WidgetTextShadow.Cast="True"
+                                    helpers:WidgetTextShadow.Cast="False"
                                     Tag="StackPreviewCountText"
                                     HorizontalAlignment="Center"
                                     VerticalAlignment="Center"
@@ -500,8 +500,8 @@
                         </Button>
                     </Grid>
                     <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
-                        <TextBlock helpers:WidgetTextShadow.Cast="True" FontSize="{Binding LabelFontSize}" Tag="StackName" Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
-                        <TextBlock helpers:WidgetTextShadow.Cast="True" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{Binding Summary}" TextTrimming="CharacterEllipsis" />
+                        <TextBlock helpers:WidgetTextShadow.Cast="False" FontSize="{Binding LabelFontSize}" Tag="StackName" Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                        <TextBlock helpers:WidgetTextShadow.Cast="False" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{Binding Summary}" TextTrimming="CharacterEllipsis" />
                     </StackPanel>
                     <Button AutomationProperties.Name="{Binding AutomationState}"
                         Grid.Column="2"
@@ -671,7 +671,7 @@
                 ItemClick="Items_ItemClick"
                 ContainerContentChanging="ItemsView_ContainerContentChanging"
                 Loaded="ItemsGrid_UniformPanelLoaded"
-                ItemsSource="{Binding RenderedItems}"
+
                 DoubleTapped="Items_DoubleTapped"
                 KeyDown="Root_KeyDown"
                 PointerPressed="Items_PointerPressed"
@@ -705,7 +705,7 @@
                 IsItemClickEnabled="True"
                 ItemClick="Items_ItemClick"
                 ContainerContentChanging="ItemsView_ContainerContentChanging"
-                ItemsSource="{Binding RenderedItems}"
+
                 DoubleTapped="Items_DoubleTapped"
                 KeyDown="Root_KeyDown"
                 PointerPressed="Items_PointerPressed"
@@ -817,7 +817,7 @@
             </Border>
 
             <TextBox
-                x:Name="ItemRenameTextBox"
+                x:Name="ItemRenameTextBox" x:Load="False"
                 Canvas.ZIndex="30"
                 Width="220"
                 MaxWidth="280"
@@ -834,7 +834,7 @@
                 VerticalAlignment="Center"
                 Spacing="8"
                 Visibility="Collapsed"
-                x:Name="EmptyState">
+                x:Name="EmptyState" x:Load="False">
                 <FontIcon
                     HorizontalAlignment="Center"
                     FontSize="24"
@@ -948,7 +948,7 @@
             <!-- Hallmark · component: file import progress card · genre: modern-minimal · theme: DeskBox native -->
             <!-- Hallmark · pre-emit critique: P5 H5 E5 S5 R5 V4 -->
             <Border
-                x:Name="ImportProgressCard"
+                x:Name="ImportProgressCard" x:Load="False"
                 Grid.Row="0"
                 Canvas.ZIndex="1000"
                 Margin="0,4,0,0"
@@ -1030,7 +1030,7 @@
                         Grid.Column="0"
                         Grid.ColumnSpan="3"
                         Height="3"
-                        IsIndeterminate="True"
+                        IsIndeterminate="False"
                         Maximum="100"
                         Minimum="0" />
                     <TextBlock
@@ -1046,7 +1046,7 @@
             </Border>
 
         <CommandBar
-            x:Name="SelectionCommandBar"
+            x:Name="SelectionCommandBar" x:Load="False"
             Grid.Row="1"
             Margin="0,6,0,0"
             Padding="2,0"

@@ -288,7 +288,13 @@ public enum WidgetKind
     Productivity,
 
     /// <summary>At-a-glance background, time and date widget.</summary>
-    Glance
+    Glance,
+
+    /// <summary>Declarative native WinUI 3 custom widget.</summary>
+    Custom,
+
+    /// <summary>First-party clipboard history and snippet shelf widget.</summary>
+    Clipboard
 }
 
 /// <summary>

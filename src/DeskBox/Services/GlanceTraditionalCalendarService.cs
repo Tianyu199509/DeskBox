@@ -152,22 +152,23 @@ internal sealed class GlanceTraditionalCalendarService
         return useTraditional ? ChineseTextConverter.ToTraditional(text) : text;
     }
 
+    private static readonly ChineseLunisolarCalendar s_chineseCalendar = new();
+
     private static ChineseDate GetChineseDate(DateOnly date)
     {
-        var calendar = new ChineseLunisolarCalendar();
         DateTime value = date.ToDateTime(TimeOnly.MinValue);
-        int year = calendar.GetYear(value);
-        int calendarMonth = calendar.GetMonth(value);
-        int leapMonth = calendar.GetLeapMonth(year);
+        int year = s_chineseCalendar.GetYear(value);
+        int calendarMonth = s_chineseCalendar.GetMonth(value);
+        int leapMonth = s_chineseCalendar.GetLeapMonth(year);
         bool isLeapMonth = leapMonth > 0 && calendarMonth == leapMonth;
         int month = leapMonth > 0 && calendarMonth >= leapMonth
             ? calendarMonth - 1
             : calendarMonth;
         return new ChineseDate(
             month,
-            calendar.GetDayOfMonth(value),
+            s_chineseCalendar.GetDayOfMonth(value),
             isLeapMonth,
-            calendar.GetSexagenaryYear(value));
+            s_chineseCalendar.GetSexagenaryYear(value));
     }
 
     private static string FormatIndianDay(DateOnly date)

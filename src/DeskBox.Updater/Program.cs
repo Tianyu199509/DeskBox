@@ -82,14 +82,16 @@ internal static class Program
                 return 2;
             }
 
-            int exitCode = RunInstaller(options);
+            int exitCode = RunInstaller(options, out bool elevationRequired, out bool installerLogWritten);
             if (exitCode == 0 && !string.IsNullOrWhiteSpace(options.AppPath) && File.Exists(options.AppPath))
             {
                 _ = RestartApp(options.AppPath);
             }
             else if (exitCode != 0)
             {
-                RestartAfterIncompleteUpdate(options, GetIncompleteUpdateOutcome(exitCode));
+                RestartAfterIncompleteUpdate(
+                    options,
+                    GetIncompleteUpdateOutcome(exitCode, elevationRequired, installerLogWritten));
             }
 
             return exitCode;
@@ -128,8 +130,13 @@ internal static class Program
         }
     }
 
-    private static int RunInstaller(UpdateOptions options)
+    private static int RunInstaller(
+        UpdateOptions options,
+        out bool elevationRequired,
+        out bool installerLogWritten)
     {
+        elevationRequired = false;
+        installerLogWritten = false;
         if (!TryGetInstallDirectory(options, out string installDirectory))
         {
             Log("Current installation directory is missing or invalid; refusing to run a silent update without /DIR.");
@@ -137,6 +144,9 @@ internal static class Program
         }
 
         DirectInstallScope installScope = ResolveInstallScope(installDirectory);
+        elevationRequired =
+            installScope == DirectInstallScope.AllUsers &&
+            !DeskBox.UpdaterPlatform.ShellUnelevatedLaunch.IsCurrentProcessElevated();
         string installerLanguage = ResolveInstallerLanguage(options.InstallerLanguage);
         if (!string.IsNullOrWhiteSpace(options.InstallerLanguage) && installerLanguage.Length == 0)
         {
@@ -166,47 +176,71 @@ internal static class Program
         // itself; keep one per version under the updates root.
         string? installerDirectory = Path.GetDirectoryName(options.InstallerPath);
         string? updatesRoot = Path.GetDirectoryName(installerDirectory);
-        if (options.Silent &&
-            !string.IsNullOrWhiteSpace(updatesRoot) &&
-            !string.IsNullOrWhiteSpace(installerDirectory))
+        string? installerLogPath =
+            !string.IsNullOrWhiteSpace(updatesRoot) && !string.IsNullOrWhiteSpace(installerDirectory)
+                ? Path.Combine(updatesRoot, $"installer-{Path.GetFileName(installerDirectory)}.log")
+                : null;
+        DateTime? previousLogWriteUtc =
+            installerLogPath is not null && File.Exists(installerLogPath)
+                ? File.GetLastWriteTimeUtc(installerLogPath)
+                : null;
+        if (installerLogPath is not null)
         {
-            startInfo.ArgumentList.Add(
-                $"/LOG={Path.Combine(updatesRoot, $"installer-{Path.GetFileName(installerDirectory)}.log")}");
+            startInfo.ArgumentList.Add($"/LOG={installerLogPath}");
         }
 
         Log(
             $"Starting installer: {options.InstallerPath}; " +
             $"target directory: {installDirectory}; scope: {installScope}; " +
             $"language: {(installerLanguage.Length == 0 ? "<installer default>" : installerLanguage)}");
-        using var process = Process.Start(startInfo);
-        if (process is null)
+        Process? process;
+        try
         {
-            Log("Installer process did not start.");
-            return 3;
+            process = Process.Start(startInfo);
+        }
+        catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
+        {
+            Log("Installer launch was cancelled at the elevation prompt.");
+            return 2;
         }
 
-        // A wedged installer (stuck custom setup code, full disk) must not
-        // strand the updater forever: the app is already gone, so past the
-        // generous ceiling restart with the failure outcome instead.
-        const int InstallerTimeoutMilliseconds = 30 * 60 * 1000;
-        if (!process.WaitForExit(InstallerTimeoutMilliseconds))
+        using (process)
         {
-            try
+            if (process is null)
             {
-                process.Kill();
-            }
-            catch (Exception killException)
-            {
-                Log($"Failed to kill the timed-out installer: {killException.Message}");
+                Log("Installer process did not start.");
+                return 3;
             }
 
-            Log($"Installer timed out after {InstallerTimeoutMilliseconds / 60_000} minutes.");
-            return 5;
-        }
-        Log($"Installer exited with code {process.ExitCode}.");
-        if (process.ExitCode != 0)
-        {
-            return process.ExitCode;
+            // A wedged installer (stuck custom setup code, full disk) must not
+            // strand the updater forever: the app is already gone, so past the
+            // generous ceiling restart with the failure outcome instead.
+            const int InstallerTimeoutMilliseconds = 30 * 60 * 1000;
+            if (!process.WaitForExit(InstallerTimeoutMilliseconds))
+            {
+                try
+                {
+                    process.Kill();
+                }
+                catch (Exception killException)
+                {
+                    Log($"Failed to kill the timed-out installer: {killException.Message}");
+                }
+
+                Log($"Installer timed out after {InstallerTimeoutMilliseconds / 60_000} minutes.");
+                return 5;
+            }
+
+            installerLogWritten =
+                installerLogPath is not null &&
+                File.Exists(installerLogPath) &&
+                (previousLogWriteUtc is null ||
+                 File.GetLastWriteTimeUtc(installerLogPath) > previousLogWriteUtc.Value);
+            Log($"Installer exited with code {process.ExitCode} (elevationRequired={elevationRequired}, logWritten={installerLogWritten}).");
+            if (process.ExitCode != 0)
+            {
+                return process.ExitCode;
+            }
         }
 
         if (!IsInstallRegistrationConsistent(installDirectory, installScope))
@@ -427,9 +461,21 @@ internal static class Program
         _ = RestartApp(options.AppPath, outcome);
     }
 
-    internal static string GetIncompleteUpdateOutcome(int exitCode)
+    internal static string GetIncompleteUpdateOutcome(
+        int exitCode,
+        bool elevationRequired = false,
+        bool installerLogWritten = true)
     {
         if (exitCode is 2 or 5)
+        {
+            return "cancelled";
+        }
+
+        // Inno Setup's asInvoker bootstrapper (SetupLdr) elevates the inner
+        // Setup.tmp via ShellExecuteEx("runas") when /ALLUSERS is requested
+        // from an unelevated updater. Declining UAC makes SetupLdr exit with
+        // code 1 before the elevated process ever opens its /LOG file.
+        if (exitCode == 1 && elevationRequired && !installerLogWritten)
         {
             return "cancelled";
         }

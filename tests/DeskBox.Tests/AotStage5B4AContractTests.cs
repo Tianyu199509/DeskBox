@@ -25,7 +25,7 @@ public sealed class AotStage5B4AContractTests
 
         Assert.Contains("aot-5b4a-file", source, StringComparison.Ordinal);
         Assert.Contains("aot-5b4a-search", source, StringComparison.Ordinal);
-        Assert.Contains("_trayIcon.TrayIcon.WindowHandle", source, StringComparison.Ordinal);
+        Assert.Contains("_trayHost.WindowHandle", source, StringComparison.Ordinal);
         Assert.Contains("WidgetManager.CreateDiagnosticsSnapshot()", source, StringComparison.Ordinal);
         Assert.Contains("WidgetKind.File", source, StringComparison.Ordinal);
         Assert.Contains("WidgetKind.Search", source, StringComparison.Ordinal);

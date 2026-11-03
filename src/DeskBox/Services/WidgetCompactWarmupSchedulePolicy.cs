@@ -29,6 +29,7 @@ internal static class WidgetCompactWarmupSchedulePolicy
     public static int GetInitialDelayMilliseconds(WidgetKind kind) => kind switch
     {
         WidgetKind.QuickCapture => 220,
+        WidgetKind.Clipboard => 240,
         WidgetKind.Weather => 260,
         WidgetKind.Search => 300,
         WidgetKind.Music => 340,

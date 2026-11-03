@@ -186,6 +186,10 @@ public sealed class DesktopOrganizationScanner
             else
             {
                 lastWriteTimeUtc = Directory.GetLastWriteTimeUtc(fullPath);
+                if (reason is DesktopOrganizationExclusionReason.Folder or DesktopOrganizationExclusionReason.None)
+                {
+                    size = CalculateDirectoryBytesSafe(fullPath);
+                }
             }
         }
         catch
@@ -203,6 +207,56 @@ public sealed class DesktopOrganizationScanner
             classification.SubtypeId,
             reason,
             isDirectory);
+    }
+
+    private static long CalculateDirectoryBytesSafe(string rootDirectoryPath)
+    {
+        long totalBytes = 0;
+        var pendingDirectories = new Stack<string>();
+        pendingDirectories.Push(rootDirectoryPath);
+        while (pendingDirectories.Count > 0)
+        {
+            string currentDir = pendingDirectories.Pop();
+            IEnumerable<string> entries;
+            try
+            {
+                entries = Directory.EnumerateFileSystemEntries(currentDir);
+            }
+            catch
+            {
+                continue;
+            }
+
+            foreach (string entry in entries)
+            {
+                try
+                {
+                    FileAttributes attrs = File.GetAttributes(entry);
+                    if ((attrs & FileAttributes.ReparsePoint) != 0)
+                    {
+                        continue;
+                    }
+
+                    if ((attrs & FileAttributes.Directory) != 0)
+                    {
+                        pendingDirectories.Push(entry);
+                    }
+                    else
+                    {
+                        totalBytes = checked(totalBytes + new FileInfo(entry).Length);
+                    }
+                }
+                catch (OverflowException)
+                {
+                    return long.MaxValue;
+                }
+                catch
+                {
+                }
+            }
+        }
+
+        return totalBytes;
     }
 
     private static bool HasTemporarySuffix(string name) =>

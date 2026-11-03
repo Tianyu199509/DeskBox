@@ -1,4 +1,4 @@
-﻿using DeskBox.Contracts;
+using DeskBox.Contracts;
 using DeskBox.Models;
 using DeskBox.Services;
 
@@ -139,6 +139,25 @@ public sealed class SettingsIpcFacadeTests : IDisposable
 
         public Task<QuickCaptureImageCacheInfo?> GetQuickCaptureImageCacheInfoAsync() =>
             Task.FromResult(InfoToReturn);
+
+        public string? MirrorFolderPath;
+
+        public Task<string?> GetQuickCaptureMirrorFolderAsync() =>
+            Task.FromResult(MirrorFolderPath);
+
+        public Task SetQuickCaptureMirrorFolderAsync(string? folderPath)
+        {
+            MirrorFolderPath = string.IsNullOrWhiteSpace(folderPath) ? null : folderPath;
+            return Task.CompletedTask;
+        }
+
+        public Task<DeskBox.Models.ClipboardStorageStats?> GetClipboardStorageStatsAsync() =>
+            Task.FromResult<DeskBox.Models.ClipboardStorageStats?>(new DeskBox.Models.ClipboardStorageStats(5, 2, 1, 2048, []));
+
+        public Task<int> ClearClipboardUnpinnedAsync() => Task.FromResult(3);
+
+        public Task<IReadOnlyList<DeskBox.Models.ClipboardObservedApp>> GetClipboardObservedAppsAsync() =>
+            Task.FromResult<IReadOnlyList<DeskBox.Models.ClipboardObservedApp>>([]);
     }
 
     private sealed record Loopback(
@@ -392,6 +411,13 @@ public sealed class SettingsIpcFacadeTests : IDisposable
             QuickCaptureImageCacheInfo? info = await remote.GetQuickCaptureImageCacheInfoAsync();
             Assert.NotNull(info);
             Assert.Equal(4, info!.TotalFileCount);
+
+            Assert.Null(await remote.GetQuickCaptureMirrorFolderAsync());
+            await remote.SetQuickCaptureMirrorFolderAsync(@"C:\Notes\QuickCapture");
+            Assert.Equal(@"C:\Notes\QuickCapture", data.MirrorFolderPath);
+            Assert.Equal(@"C:\Notes\QuickCapture", await remote.GetQuickCaptureMirrorFolderAsync());
+            await remote.SetQuickCaptureMirrorFolderAsync(null);
+            Assert.Null(await remote.GetQuickCaptureMirrorFolderAsync());
         }
         finally
         {
@@ -568,6 +594,7 @@ public sealed class SettingsIpcFacadeTests : IDisposable
 
         public void NotifyWidgetGroupPresentationSettingsChanged() => NotifiedGroup = true;
 
+
         public Task<bool> ReorderWidgetGroupMemberAsync(string sourceWidgetId, string targetWidgetId) =>
             Task.FromResult(true);
 
@@ -628,22 +655,46 @@ public sealed class SettingsIpcFacadeTests : IDisposable
 
         public Task RemoveGlanceWidgetAsync(string widgetId) => Task.CompletedTask;
 
+        public Task<IReadOnlyList<GlanceWidgetInstanceInfo>> GetCustomWidgetInstancesAsync() => Task.FromResult<IReadOnlyList<GlanceWidgetInstanceInfo>>(Glance);
+
+        public Task<GlanceWidgetInstanceInfo> CreateCustomWidgetAsync(string? templateOrPackageSpec) =>
+            Task.FromResult(new GlanceWidgetInstanceInfo("c1", templateOrPackageSpec ?? "work-logger", true));
+
+        public Task SetCustomWidgetInstanceEnabledAsync(string widgetId, bool enabled) => Task.CompletedTask;
+
+        public Task<bool> LocateCustomWidgetAsync(string widgetId) => Task.FromResult(true);
+        public Task OpenCustomWidgetStudioAsync(string? widgetId, string? initialIdea) => Task.CompletedTask;
+
+        public Task RemoveCustomWidgetAsync(string widgetId) => Task.CompletedTask;
+
         public Task RenameWidgetAsync(string widgetId, string newName)
         {
             RenamedGlance = widgetId + ":" + newName;
             return Task.CompletedTask;
         }
 
+        public bool MoveAllPersisted { get; set; } = true;
+
         public async Task<(int MovedCount, WidgetMoveAllUndoToken Token)> MoveAllWidgetSurfacesToDisplayAsync(
             string displayStableId)
         {
             await Task.Yield();
-            _lastMoveAllToken = new WidgetMoveAllUndoToken();
+            _lastMoveAllToken = new WidgetMoveAllUndoToken
+            {
+                Persisted = MoveAllPersisted
+            };
             return (4, _lastMoveAllToken);
         }
 
         public Task<bool> UndoMoveAllWidgetSurfacesAsync(WidgetMoveAllUndoToken token) =>
             Task.FromResult(ReferenceEquals(token, _lastMoveAllToken));
+
+        public int RecalibrateCalls { get; set; }
+        public Task<int> RecalibrateDisplayLayoutAsync()
+        {
+            RecalibrateCalls++;
+            return Task.FromResult(5);
+        }
 
         public Task ApplyScreenBindingAsync(
             string widgetId,
@@ -897,11 +948,21 @@ public sealed class SettingsIpcFacadeTests : IDisposable
             await remote.RenameWidgetAsync("g2", "Renamed");
             Assert.Equal("g2:Renamed", loop.Widget.RenamedGlance);
 
-            // Move-all + undo across the handle registry.
+            // Move-all + undo across the handle registry (preserving Persisted flag).
             (int moved, WidgetMoveAllUndoToken token) = await remote.MoveAllWidgetSurfacesToDisplayAsync("screen-1");
             Assert.Equal(4, moved);
             Assert.NotNull(token.IpcHandleId);
+            Assert.True(token.Persisted);
             Assert.True(await remote.UndoMoveAllWidgetSurfacesAsync(token));
+
+            loop.Widget.MoveAllPersisted = false;
+            (_, WidgetMoveAllUndoToken unpersistedToken) = await remote.MoveAllWidgetSurfacesToDisplayAsync("screen-1");
+            Assert.False(unpersistedToken.Persisted);
+            loop.Widget.MoveAllPersisted = true;
+
+            int recalibrated = await remote.RecalibrateDisplayLayoutAsync();
+            Assert.Equal(5, recalibrated);
+            Assert.Equal(1, loop.Widget.RecalibrateCalls);
 
             await remote.ApplyScreenBindingAsync("w1", WidgetScreenBindingMode.Pinned, "screen-2");
             Assert.Equal(("w1", WidgetScreenBindingMode.Pinned, "screen-2"), loop.Widget.Binding);

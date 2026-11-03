@@ -16,6 +16,8 @@ public abstract class WidgetContentAdapterBase : IWidgetContent, IDisposable
 {
     private readonly Func<FrameworkElement> _viewFactory;
     private FrameworkElement? _view;
+    private object? _hibernatedTransientState;
+    private bool _hasHibernatedTransientState;
     private bool _isDisposed;
 
     protected WidgetContentAdapterBase(
@@ -55,13 +57,30 @@ public abstract class WidgetContentAdapterBase : IWidgetContent, IDisposable
             if (_view is null)
             {
                 ObjectDisposedException.ThrowIf(_isDisposed, this);
-                _view = _viewFactory();
-                OnViewMaterialized(_view);
+                FrameworkElement createdView = _viewFactory();
+                _view = createdView;
+                bool restoreTransientState = _hasHibernatedTransientState;
+                object? savedState = _hibernatedTransientState;
+                _hasHibernatedTransientState = false;
+                _hibernatedTransientState = null;
+                if (restoreTransientState &&
+                    this is IWidgetTransientStateContent transientContent)
+                {
+                    transientContent.RestoreTransientState(savedState);
+                }
+
+                OnViewMaterialized(createdView);
             }
 
             return _view;
         }
     }
+
+    /// <summary>
+    /// True when the leaf view is currently materialized in memory. Reading
+    /// this never constructs the view.
+    /// </summary>
+    internal bool HasMaterializedView => _view is not null;
 
     /// <summary>
     /// The materialized leaf, or null when it was never attached. Reading
@@ -70,6 +89,17 @@ public abstract class WidgetContentAdapterBase : IWidgetContent, IDisposable
     protected FrameworkElement? MaterializedView => _view;
 
     protected bool IsDisposed => _isDisposed;
+
+    protected bool HasHibernatedTransientState => _hasHibernatedTransientState;
+
+    protected object? HibernatedTransientState =>
+        _hasHibernatedTransientState ? _hibernatedTransientState : null;
+
+    protected void SaveHibernatedTransientState(object? state)
+    {
+        _hibernatedTransientState = state;
+        _hasHibernatedTransientState = true;
+    }
 
     /// <summary>
     /// Drops the materialized view without disposing the adapter or the
@@ -89,10 +119,45 @@ public abstract class WidgetContentAdapterBase : IWidgetContent, IDisposable
     }
 
     /// <summary>
+    /// Captures transient leaf state, detaches leaf event subscriptions,
+    /// disposes the leaf view only (keeping the adapter and its view model
+    /// alive), and clears the materialized view reference so the next View
+    /// access rematerializes and restores transient state seamlessly.
+    /// </summary>
+    internal bool HibernateCollapsedView()
+    {
+        if (_isDisposed || _view is null)
+        {
+            return false;
+        }
+
+        if (this is IWidgetTransientStateContent transientContent)
+        {
+            _hibernatedTransientState = transientContent.CaptureTransientState();
+            _hasHibernatedTransientState = true;
+        }
+
+        FrameworkElement view = _view;
+        ReleaseView();
+        OnHibernatingView(view);
+        return true;
+    }
+
+    /// <summary>
     /// Raised once when the leaf is first materialized; adapters subscribe
     /// leaf events and replay host callbacks (like the window handle) here.
     /// </summary>
     protected virtual void OnViewMaterialized(FrameworkElement view)
+    {
+    }
+
+    /// <summary>
+    /// Raised during collapsed hibernation after transient state has been
+    /// captured and the materialized view reference has been cleared;
+    /// subclasses detach leaf subscriptions and dispose the leaf view without
+    /// disposing the resident view model.
+    /// </summary>
+    protected virtual void OnHibernatingView(FrameworkElement view)
     {
     }
 
@@ -140,6 +205,8 @@ public abstract class WidgetContentAdapterBase : IWidgetContent, IDisposable
         }
 
         _isDisposed = true;
+        _hibernatedTransientState = null;
+        _hasHibernatedTransientState = false;
         Dispose(disposing: true);
     }
 

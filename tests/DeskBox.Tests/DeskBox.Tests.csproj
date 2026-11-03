@@ -40,7 +40,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\DeskBox\DeskBox.csproj" />
+    <ProjectReference Include="..\..\src\DeskBox\DeskBox.csproj">
+      <AdditionalProperties>DeskBoxBuildSettingsCompanion=false</AdditionalProperties>
+    </ProjectReference>
+    <ProjectReference Include="..\..\src\DeskBox.Settings\DeskBox.Settings.csproj" />
     <ProjectReference Include="..\..\src\DeskBox.Updater\DeskBox.Updater.csproj" />
   </ItemGroup>
 

@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param(
     [Parameter(Mandatory)]
     [string]$MsixPath,
@@ -114,6 +114,65 @@ function Get-PeFacts {
     $clrDirectoryOffset = $dataDirectoryOffset + (14 * 8)
     $clrRva = [System.BitConverter]::ToUInt32($bytes, $clrDirectoryOffset)
     $clrSize = [System.BitConverter]::ToUInt32($bytes, $clrDirectoryOffset + 4)
+
+    $numberOfSections = [System.BitConverter]::ToUInt16($bytes, $peOffset + 6)
+    $sizeOfOptionalHeader = [System.BitConverter]::ToUInt16($bytes, $peOffset + 20)
+    $sizeOfHeaders = [System.BitConverter]::ToUInt32($bytes, $optionalOffset + 60)
+    $sectionsOffset = $optionalOffset + $sizeOfOptionalHeader
+    $sections = @(
+        for ($i = 0; $i -lt $numberOfSections; $i++) {
+            $sec = $sectionsOffset + ($i * 40)
+            if ($sec + 40 -le $bytes.Length) {
+                [pscustomobject]@{
+                    VirtualSize = [System.BitConverter]::ToUInt32($bytes, $sec + 8)
+                    VirtualAddress = [System.BitConverter]::ToUInt32($bytes, $sec + 12)
+                    SizeOfRawData = [System.BitConverter]::ToUInt32($bytes, $sec + 16)
+                    PointerToRawData = [System.BitConverter]::ToUInt32($bytes, $sec + 20)
+                }
+            }
+        }
+    )
+    $resolveRva = {
+        param([uint32]$Rva)
+        if ($Rva -lt $sizeOfHeaders -and $Rva -lt $bytes.Length) { return [int]$Rva }
+        foreach ($s in $sections) {
+            [uint64]$span = [Math]::Max([uint64]$s.VirtualSize, [uint64]$s.SizeOfRawData)
+            if ([uint64]$Rva -ge [uint64]$s.VirtualAddress -and [uint64]$Rva -lt ([uint64]$s.VirtualAddress + $span)) {
+                [uint64]$off = [uint64]$s.PointerToRawData + ([uint64]$Rva - [uint64]$s.VirtualAddress)
+                if ($off -lt [uint64]$bytes.Length) { return [int]$off }
+            }
+        }
+        return -1
+    }
+    $importedModules = @()
+    $importRva = [System.BitConverter]::ToUInt32($bytes, $dataDirectoryOffset + 8)
+    $importSize = [System.BitConverter]::ToUInt32($bytes, $dataDirectoryOffset + 12)
+    if ($importRva -ne 0 -and $importSize -ge 20) {
+        $importOffset = & $resolveRva $importRva
+        if ($importOffset -ge 0) {
+            $importedModules = @(
+                for ($idx = 0; $idx -lt 4096; $idx++) {
+                    $desc = $importOffset + ($idx * 20)
+                    if ($desc + 20 -gt $bytes.Length) { break }
+                    $oft = [System.BitConverter]::ToUInt32($bytes, $desc)
+                    $tds = [System.BitConverter]::ToUInt32($bytes, $desc + 4)
+                    $fwd = [System.BitConverter]::ToUInt32($bytes, $desc + 8)
+                    $nameRva = [System.BitConverter]::ToUInt32($bytes, $desc + 12)
+                    $ft = [System.BitConverter]::ToUInt32($bytes, $desc + 16)
+                    if ($oft -eq 0 -and $tds -eq 0 -and $fwd -eq 0 -and $nameRva -eq 0 -and $ft -eq 0) { break }
+                    if ($nameRva -ne 0) {
+                        $nameOff = & $resolveRva $nameRva
+                        if ($nameOff -ge 0) {
+                            $end = $nameOff
+                            while ($end -lt $bytes.Length -and $bytes[$end] -ne 0) { $end++ }
+                            [System.Text.Encoding]::ASCII.GetString($bytes, $nameOff, $end - $nameOff)
+                        }
+                    }
+                }
+            ) | Sort-Object -Unique
+        }
+    }
+
     [pscustomobject]@{
         Path = [System.IO.Path]::GetFullPath($Path)
         Length = $bytes.LongLength
@@ -122,6 +181,7 @@ function Get-PeFacts {
         HasClrHeader = $clrRva -ne 0 -or $clrSize -ne 0
         ClrRva = $clrRva
         ClrSize = $clrSize
+        ImportedModules = $importedModules
     }
 }
 
@@ -219,14 +279,25 @@ $requiredFiles = @(
     "DeskBox.exe",
     "DeskBox.ThumbnailProxy.exe",
     "deskbox_native.dll",
-    "EverythingSdk.dll",
-    "ThirdParty/Everything/LICENSE.txt",
     "resources.pri",
     "Assets/Store/StoreLogo.png",
     "Assets/Store/Square44x44Logo.png",
     "Assets/Store/Square150x150Logo.png",
     "Assets/Store/Wide310x150Logo.png",
-    "Assets/Store/SplashScreen.png"
+    "Assets/Store/SplashScreen.png",
+    "Strings/ar-SA.json",
+    "Strings/bn-BD.json",
+    "Strings/de-DE.json",
+    "Strings/en-US.json",
+    "Strings/es-ES.json",
+    "Strings/fr-FR.json",
+    "Strings/hi-IN.json",
+    "Strings/ja-JP.json",
+    "Strings/ko-KR.json",
+    "Strings/pt-BR.json",
+    "Strings/ru-RU.json",
+    "Strings/zh-CN.json",
+    "Strings/zh-TW.json"
 )
 $missingRequiredFiles = @($requiredFiles | Where-Object { $fileEntries -notcontains $_ })
 foreach ($missingFile in $missingRequiredFiles) {
@@ -238,7 +309,10 @@ $forbiddenPatterns = @(
     '(^|/)DeskBox\.deps\.json$',
     '(^|/)DeskBox\.runtimeconfig\.json$',
     '(^|/)DeskBox\.Updater(?:\.|/|$)',
+    '(^|/)DeskBox\.Settings(?:\.|/|$)',
     '(^|/)deskbox_search_core(?:\.|$)',
+    '(^|/)EverythingSdk\.dll$',
+    '(^|/)H\.NotifyIcon(?:\.WinUI)?\.dll$',
     '\.pdb$',
     '(^|/)(?:coreclr|clrjit|hostfxr|hostpolicy)\.dll$',
     'donation-wechat',
@@ -265,7 +339,6 @@ foreach ($forbiddenFile in $forbiddenFiles) {
 $deskBoxExePath = Join-Path $layoutDirectory "DeskBox.exe"
 $thumbnailProxyPath = Join-Path $layoutDirectory "DeskBox.ThumbnailProxy.exe"
 $nativeDllPath = Join-Path $layoutDirectory "deskbox_native.dll"
-$everythingSdkPath = Join-Path $layoutDirectory "EverythingSdk.dll"
 $deskBoxPe = $null
 $thumbnailProxyPe = $null
 $nativeContract = $null
@@ -292,14 +365,23 @@ if (Test-Path -LiteralPath $thumbnailProxyPath -PathType Leaf) {
     }
 }
 
-if (Test-Path -LiteralPath $everythingSdkPath -PathType Leaf) {
-    $everythingSdkPe = Get-PeFacts -Path $everythingSdkPath
-    if ($everythingSdkPe.Machine -ne $expectedMachine) {
-        Add-AuditFailure "EverythingSdk.dll machine '$($everythingSdkPe.MachineHex)' does not match $ExpectedPlatform."
+$packagedPeFiles = @(
+    Get-ChildItem -LiteralPath $layoutDirectory -Recurse -File |
+        Where-Object { $_.Extension -in @(".exe", ".dll") }
+)
+foreach ($peFile in $packagedPeFiles) {
+    $relativePePath = $peFile.FullName.Substring($layoutDirectory.Length + 1).Replace('\', '/')
+    $peFacts = Get-PeFacts -Path $peFile.FullName
+    if ($peFacts.Machine -ne $expectedMachine) {
+        Add-AuditFailure "Packaged PE binary '$relativePePath' machine '$($peFacts.MachineHex)' does not match $ExpectedPlatform."
     }
-}
-else {
-    Add-AuditFailure "EverythingSdk.dll is missing from the Store layout."
+    $dynamicVcImports = @(
+        $peFacts.ImportedModules |
+            Where-Object { $_ -match '^(?:VCRUNTIME|MSVCP|VCCORLIB|CONCRT)' }
+    )
+    if ($dynamicVcImports.Count -gt 0) {
+        Add-AuditFailure "Packaged PE binary '$relativePePath' imports non-inbox VC++ runtime DLLs: $($dynamicVcImports -join ', ')."
+    }
 }
 
 $nativeExports = @(

@@ -1,4 +1,4 @@
-﻿#if DESKBOX_NATIVE_AOT
+#if DESKBOX_NATIVE_AOT
 using DeskBox.Models;
 using DeskBox.Services;
 using DeskBox.ViewModels;
@@ -906,15 +906,15 @@ public partial class App
     {
         await Task.Delay(250);
 
-        if (_trayIcon is null || _trayWindow is null)
+        if (_trayHost is null)
         {
             throw new InvalidOperationException("The product tray surface is unavailable.");
         }
 
-        result.TrayIconCreated = _trayIcon.IsCreated;
-        result.TrayIconWindowHandle = _trayIcon.TrayIcon.WindowHandle.ToInt64();
+        result.TrayIconCreated = _trayHost.IsCreated;
+        result.TrayIconWindowHandle = _trayHost.WindowHandle.ToInt64();
         result.TrayOwnerWindowHandle =
-            WinRT.Interop.WindowNative.GetWindowHandle(_trayWindow).ToInt64();
+            TrayHostWindowHandle.ToInt64();
         RequireAotManagedUi(
             result,
             result.TrayIconCreated &&
@@ -1173,13 +1173,13 @@ public partial class App
                 result.DeepSettings.SearchActivatedSection,
                 "BackupRestoreSettings",
                 StringComparison.Ordinal) &&
-            // Deep review R13-5: 22 = SettingsWindow.AotDeepSmoke's
+            // Deep review R13-5: 21 = SettingsWindow.AotDeepSmoke's active deepSettingsRoutes length.
             // deepSettingsRoutes length. The route table was trimmed from 25
             // to 22 sections in an earlier batch without this pin — every
             // deep-settings run since then failed on a healthy traversal
             // (both the pre-R13 worktree and HEAD reproduced 22/22 pages
             // with all other conditions green; instrumented DIAG run).
-            result.DeepSettings.PageTransitions.Count == 22 &&
+            result.DeepSettings.PageTransitions.Count == 21 &&
             result.DeepSettings.BreadcrumbParentReturned &&
             result.DeepSettings.FileStackRuleCount == 1 &&
             result.DeepSettings.BackupSnapshotCount > 0,

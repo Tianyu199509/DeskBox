@@ -1,5 +1,5 @@
 using System.Collections.Concurrent;
-using System.Drawing;
+
 using System.IO;
 using System.Runtime.InteropServices;
 using DeskBox.Helpers;
@@ -101,6 +101,151 @@ public sealed class FileMetaService : IDisposable
         }
     }
 
+    /// <summary>
+    /// Enriches application recommendation icons progressively in viewport-first waves
+    /// without performing synchronous file-size/timestamp disk stats, invoking
+    /// <paramref name="onProgress"/> as icons become ready so fast/cached icons paint
+    /// immediately instead of blocking behind slow shortcuts.
+    /// </summary>
+    public async Task EnrichRecommendationIconsAsync(
+        IReadOnlyList<SearchResultItem> items,
+        Action? onProgress,
+        CancellationToken token = default,
+        bool hideShortcutArrowOverlay = true)
+    {
+        ObjectDisposedException.ThrowIf(_isDisposed, this);
+
+        var targets = new List<SearchResultItem>(items.Count);
+        var seen = new HashSet<SearchResultItem>(ReferenceEqualityComparer.Instance);
+        foreach (SearchResultItem item in items)
+        {
+            if ((item.Kind == SearchResultKind.File || item.Kind == SearchResultKind.Folder) &&
+                !string.IsNullOrWhiteSpace(item.DetailPath) &&
+                !item.IconResolved &&
+                seen.Add(item))
+            {
+                targets.Add(item);
+            }
+        }
+
+        if (targets.Count == 0)
+        {
+            return;
+        }
+
+        const int FirstWaveSize = 12;
+        const int SubsequentWaveSize = 16;
+        const long CoalesceIntervalMs = 24;
+        long lastProgressTickMs = 0;
+        int dirtyIconCount = 0;
+
+        void FlushProgress(bool force)
+        {
+            if (onProgress is null || Volatile.Read(ref dirtyIconCount) == 0)
+            {
+                return;
+            }
+
+            long nowMs = Environment.TickCount64;
+            long prevMs = Interlocked.Read(ref lastProgressTickMs);
+            if (!force && nowMs - prevMs < CoalesceIntervalMs)
+            {
+                return;
+            }
+
+            if (!force && Interlocked.CompareExchange(ref lastProgressTickMs, nowMs, prevMs) != prevMs)
+            {
+                return;
+            }
+
+            if (force)
+            {
+                Interlocked.Exchange(ref lastProgressTickMs, nowMs);
+            }
+
+            if (Interlocked.Exchange(ref dirtyIconCount, 0) > 0)
+            {
+                onProgress();
+            }
+        }
+
+        int offset = 0;
+        int waveIndex = 0;
+        while (offset < targets.Count && !token.IsCancellationRequested)
+        {
+            int batchSize = Math.Min(
+                waveIndex == 0 ? FirstWaveSize : SubsequentWaveSize,
+                targets.Count - offset);
+            var waveTasks = new List<Task>(batchSize);
+            for (int i = 0; i < batchSize; i++)
+            {
+                SearchResultItem target = targets[offset + i];
+                waveTasks.Add(ResolveRecommendationIconAsync(
+                    target,
+                    token,
+                    hideShortcutArrowOverlay,
+                    () =>
+                    {
+                        Interlocked.Increment(ref dirtyIconCount);
+                        FlushProgress(force: false);
+                    }));
+            }
+
+            try
+            {
+                await Task.WhenAll(waveTasks).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                FlushProgress(force: true);
+                return;
+            }
+
+            FlushProgress(force: true);
+            offset += batchSize;
+            waveIndex++;
+        }
+    }
+
+    private async Task ResolveRecommendationIconAsync(
+        SearchResultItem item,
+        CancellationToken token,
+        bool hideShortcutArrowOverlay,
+        Action onIconAssigned)
+    {
+        if (token.IsCancellationRequested || _isDisposed)
+        {
+            return;
+        }
+
+        try
+        {
+            string path = item.DetailPath!;
+            if (ShortcutHelper.IsShortcutPath(path) ||
+                path.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+            {
+                item.Icon = await IconHelper.GetIconAsync(
+                    path,
+                    hideShortcutArrowOverlay,
+                    showImageFilesAsIcons: true,
+                    decodePixelWidth: 48,
+                    cacheScope: SearchIconCacheScope).ConfigureAwait(false);
+            }
+            else
+            {
+                item.Icon = await GetIconAsync(item, hideShortcutArrowOverlay).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            item.IconResolved = true;
+            if (item.Icon is not null && !token.IsCancellationRequested)
+            {
+                onIconAssigned();
+            }
+        }
+    }
+
     private async Task ResolveIconAsync(
         SearchResultItem item,
         CancellationToken token,
@@ -165,11 +310,38 @@ public sealed class FileMetaService : IDisposable
         TouchIconCacheEntry(key);
         try
         {
-            return await iconTask;
+            ImageSource? resolved = await iconTask;
+            if (resolved is null)
+            {
+                EvictIconCacheEntryIfMatch(key, iconTask);
+            }
+
+            return resolved;
+        }
+        catch
+        {
+            EvictIconCacheEntryIfMatch(key, iconTask);
+            throw;
         }
         finally
         {
             TrimIconCacheIfNeeded();
+        }
+    }
+
+    private void EvictIconCacheEntryIfMatch(string cacheKey, Task<ImageSource?> expectedTask)
+    {
+        lock (_iconCacheLock)
+        {
+            if (_iconCache.TryGetValue(cacheKey, out Task<ImageSource?>? current) &&
+                ReferenceEquals(current, expectedTask))
+            {
+                _iconCache.TryRemove(cacheKey, out _);
+                if (_iconCacheLruNodes.Remove(cacheKey, out LinkedListNode<string>? node))
+                {
+                    _iconCacheLru.Remove(node);
+                }
+            }
         }
     }
 
@@ -279,7 +451,11 @@ public sealed class FileMetaService : IDisposable
 
     private static async Task<ImageSource?> CreateBitmapImageAsync(byte[] bytes)
     {
-        var bmp = new BitmapImage { DecodePixelWidth = 32 };
+        var bmp = new BitmapImage
+        {
+            DecodePixelType = DecodePixelType.Logical,
+            DecodePixelWidth = 32
+        };
         using var winrtStream = new Windows.Storage.Streams.InMemoryRandomAccessStream();
         using var writer = new Windows.Storage.Streams.DataWriter(winrtStream);
         writer.WriteBytes(bytes);
@@ -316,11 +492,11 @@ public sealed class FileMetaService : IDisposable
 
         try
         {
-            using var icon = Icon.FromHandle(shinfo.hIcon);
-            using var bitmap = icon.ToBitmap();
-            using var ms = new MemoryStream();
-            bitmap.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
-            return ms.ToArray();
+            return IconPngEncoder.EncodeHIconAsPng(shinfo.hIcon);
+
+
+
+
         }
         catch (Exception ex)
         {

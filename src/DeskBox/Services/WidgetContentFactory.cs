@@ -134,7 +134,35 @@ public sealed class WidgetContentFactory
             IsFeatureWidget: true,
             SettingsSectionTag: "GlanceSettings",
             ChromeCategory: WidgetChromeCategory.Display,
-            DefaultChromeMode: WidgetChromeMode.Overlay)
+            DefaultChromeMode: WidgetChromeMode.Overlay),
+        new(
+            WidgetKind.Custom,
+            "Custom",
+            "\uE71D",
+            WidgetContentStage.Implemented,
+            CanShowInCreateEntry: false,
+            WidgetContentAvailability.Available,
+            "WidgetContent.Custom.StatusLabel",
+            "WidgetContent.Custom.StatusDescription",
+            HasSettingsPage: true,
+            IsFeatureWidget: true,
+            SettingsSectionTag: "CustomWidgetSettings",
+            ChromeCategory: WidgetChromeCategory.Interactive,
+            DefaultChromeMode: WidgetChromeMode.Standard),
+        new(
+            WidgetKind.Clipboard,
+            "Clipboard",
+            "\uE77F",
+            WidgetContentStage.Implemented,
+            CanShowInCreateEntry: false,
+            WidgetContentAvailability.Available,
+            "WidgetContent.Clipboard.StatusLabel",
+            "WidgetContent.Clipboard.StatusDescription",
+            HasSettingsPage: true,
+            IsFeatureWidget: true,
+            SettingsSectionTag: "ClipboardSettings",
+            ChromeCategory: WidgetChromeCategory.Interactive,
+            DefaultChromeMode: WidgetChromeMode.Standard)
     ];
 
     private static readonly IReadOnlyDictionary<WidgetKind, WidgetContentDescriptor> Descriptors =
@@ -276,6 +304,8 @@ public sealed class WidgetContentFactory
             new MusicWidgetContentProvider(),
             new WeatherWidgetContentProvider(),
             new GlanceWidgetContentProvider(),
+            new CustomWidgetContentProvider(),
+            new ClipboardWidgetContentProvider(),
             new SearchWidgetContentProvider(),
             new PlaceholderWidgetContentProvider(WidgetKind.Tags),
             new PlaceholderWidgetContentProvider(WidgetKind.SystemMonitor)

@@ -20,9 +20,11 @@ public sealed class TodoDetailHeaderLayoutContractTests
         Assert.DoesNotContain("x:Name=\"DetailCompletionCheckBox\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("x:Name=\"DetailCompletionButton\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("DetailCompletionButton_Click", code, StringComparison.Ordinal);
-        Assert.Contains("x:Name=\"DetailSaveButton\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Click=\"DetailSaveButton_Click\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("IsEnabled=\"{Binding CanSaveEdit}\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("x:Name=\"DetailSaveButton\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("DetailSaveButton_Click", code, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"QuickAddBar\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("_titleAutosaveTimer", code, StringComparison.Ordinal);
+        Assert.Contains("FlushDetailTitleAsync", code, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"DetailImportantButton\"", xaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"DetailDeleteButton\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Click=\"DetailDeleteButton_Click\"", xaml, StringComparison.Ordinal);
@@ -31,20 +33,10 @@ public sealed class TodoDetailHeaderLayoutContractTests
         Assert.DoesNotContain("DetailDeleteMenuItem_Click", code, StringComparison.Ordinal);
         Assert.Contains("ViewModel.FinalizeDetailAsync(", code, StringComparison.Ordinal);
         Assert.Contains("ShowTodoStatus(\"Todo.Status.Saved\")", code, StringComparison.Ordinal);
-        Assert.True(
-            xaml.IndexOf("x:Name=\"DetailSaveButton\"", StringComparison.Ordinal) <
-            xaml.IndexOf("x:Name=\"DetailHeaderActions\"", StringComparison.Ordinal));
-        Assert.Contains("Grid.Column=\"1\"", xaml[xaml.IndexOf(
-            "x:Name=\"DetailSaveButton\"", StringComparison.Ordinal)..], StringComparison.Ordinal);
-        Assert.Contains(
-            "bool showSave = ViewModel?.SelectedDetailItem is not null",
-            masterDetailCode,
-            StringComparison.Ordinal);
         Assert.Contains(
             "if (e.PropertyName == nameof(TodoWidgetViewModel.SelectedDetailItem))",
             code,
             StringComparison.Ordinal);
-        Assert.Contains("ApplyDetailSaveButtonVisibility();", code, StringComparison.Ordinal);
         Assert.Contains(
             "if (ViewModel.IsCreatingDetailItem)",
             code,

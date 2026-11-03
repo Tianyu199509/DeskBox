@@ -14,12 +14,14 @@ public sealed partial class WidgetShell
         try
         {
             SuspendVisualActivity();
+            ReleaseTitleBarClickCollapseTimer();
+            GroupTitleSwitcher?.ReleaseVisualHandlers();
             StopCompactCompositionTransitionAnimations(force: true);
             StopGroupDropPreviewBreathing();
         }
         finally
         {
-            try { StopParticles(); }
+            try { StopCompactMarquee(); }
             finally { _compositionResources.Dispose(); }
         }
     }
@@ -40,39 +42,13 @@ public sealed partial class WidgetShell
                 compositor, WidgetAnimationTemplate.CompactScale);
             _ = _compositionResources.GetVector3(
                 compositor, WidgetAnimationTemplate.CompactTranslation);
+            _ = _compositionResources.GetVector2(
+                compositor, WidgetAnimationTemplate.CompactClipCornerRadius);
+            _ = _compositionResources.GetCompactClip(compositor);
         }
         catch (Exception ex)
         {
             App.LogVerbose($"[Composition] Compact transition prewarm failed: {ex.Message}");
-        }
-    }
-
-    private void ReleaseParticleAnimation(CompactParticleAnimationState particle)
-    {
-        CompositionScopedBatch? batch = particle.Batch;
-        Vector3KeyFrameAnimation? animation = particle.Animation;
-        particle.Batch = null;
-        particle.Animation = null;
-        try
-        {
-            if (batch is not null)
-            {
-                batch.Completed -= ParticleAnimationBatch_Completed;
-            }
-            if (animation is not null)
-            {
-                ElementCompositionPreview.GetElementVisual(particle.Shape)
-                    .StopAnimation("Translation");
-            }
-        }
-        catch (Exception ex)
-        {
-            App.LogVerbose($"[Composition] Particle detach failed during cleanup: {ex.Message}");
-        }
-        finally
-        {
-            WidgetCompositionResources.Release(batch);
-            WidgetCompositionResources.Release(animation);
         }
     }
 }

@@ -21,6 +21,7 @@ public sealed class DesktopDoubleClickActivationService : IDisposable, IHookHeal
     private readonly object _stateMachineSync = new();
     private readonly SettingsService _settingsService;
     private readonly Func<DesktopDoubleClickSequence, Task> _invokeAsync;
+    private readonly Action<Win32Helper.POINT>? _onBlankDesktopMouseDown;
     private readonly Win32Helper.LowLevelMouseProc _mouseHookProc;
     private readonly DesktopDoubleClickStateMachine _stateMachine;
     private readonly ConcurrentQueue<QueuedMouseDown> _queuedMouseDowns = new();
@@ -45,10 +46,12 @@ public sealed class DesktopDoubleClickActivationService : IDisposable, IHookHeal
 
     internal DesktopDoubleClickActivationService(
         SettingsService settingsService,
-        Func<DesktopDoubleClickSequence, Task> invokeAsync)
+        Func<DesktopDoubleClickSequence, Task> invokeAsync,
+        Action<Win32Helper.POINT>? onBlankDesktopMouseDown = null)
     {
         _settingsService = settingsService;
         _invokeAsync = invokeAsync;
+        _onBlankDesktopMouseDown = onBlankDesktopMouseDown;
         _mouseHookProc = MouseHookProc;
         _diagnosticsEnabled = string.Equals(
             Environment.GetEnvironmentVariable("DESKBOX_DESKTOP_DOUBLE_CLICK_DIAGNOSTICS"),
@@ -501,6 +504,10 @@ public sealed class DesktopDoubleClickActivationService : IDisposable, IHookHeal
         if (isDesktopBlank)
         {
             Interlocked.Increment(ref _blankMouseDownCount);
+            if (!sample.IsInjected)
+            {
+                _onBlankDesktopMouseDown?.Invoke(sample.Data.pt);
+            }
         }
 
         bool matched;

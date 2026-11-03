@@ -12,6 +12,7 @@ public enum TodoFilter
     All,
     Active,
     Today,
+    Overdue,
     ThisWeek,
     ThisMonth,
     Important,
@@ -40,9 +41,22 @@ public enum TodoDuePreset
     Clear
 }
 
+internal sealed record TodoUndoDeletedEntry(
+    int OriginalIndex,
+    TodoItem ItemSnapshot);
+
+internal sealed record TodoUndoModifiedEntry(
+    string ItemId,
+    DateTimeOffset? PreviousDueDate,
+    bool PreviousHasDueTime,
+    DateTimeOffset? PreviousReminderDismissedForDueDate,
+    DateTimeOffset? PreviousSnoozedUntil,
+    TodoRecurrence? PreviousRecurrence);
+
 internal sealed record TodoUndoSnapshot(
-    IReadOnlyList<TodoItem> Items,
-    string Message);
+    IReadOnlyList<TodoUndoDeletedEntry> DeletedEntries,
+    string Message,
+    IReadOnlyList<TodoUndoModifiedEntry>? ModifiedEntries = null);
 
 public sealed partial class TodoWidgetViewModel : ObservableObject, IDisposable
 {
@@ -50,6 +64,7 @@ public sealed partial class TodoWidgetViewModel : ObservableObject, IDisposable
     private readonly LocalizationService _localizationService;
     private readonly WidgetConfig _config;
     private readonly SettingsService? _settingsService;
+    private readonly Func<string, Task<bool>>? _recycleAttachmentFileAsync;
     private TodoFilter _selectedFilter = TodoFilter.All;
     private TodoColorFilter _selectedColorFilter = TodoColorFilter.All;
     private string _inputText = string.Empty;
@@ -62,6 +77,7 @@ public sealed partial class TodoWidgetViewModel : ObservableObject, IDisposable
     private bool _showAllTab = true;
     private bool _showActiveTab;
     private bool _showTodayTab = true;
+    private bool _showOverdueTab = true;
     private bool _showThisWeekTab;
     private bool _showThisMonthTab;
     private bool _showImportantTab = true;
@@ -71,8 +87,10 @@ public sealed partial class TodoWidgetViewModel : ObservableObject, IDisposable
     private bool _showClearCompletedButton = true;
     private bool _draftImportant;
     private DateTimeOffset? _draftDueDate;
+    private bool _draftHasDueTime;
     private TodoItemViewModel? _selectedDetailItem;
     private bool _isCreatingDetailItem;
+    private bool _isTodayOverdueExpanded = true;
     private TodoUndoSnapshot? _undoSnapshot;
     // Soft-deleted items kept out of Items but persisted on save: a merge
     // restore treats an absent id as "unknown to this device" and would
@@ -81,18 +99,22 @@ public sealed partial class TodoWidgetViewModel : ObservableObject, IDisposable
     private const int MaxRetainedTombstones = 500;
     private bool _isInitialized;
     private bool _isDisposed;
+    internal bool IsDisposed => _isDisposed;
+    internal string PreviewCacheScope => TodoAttachmentViewModel.GetTodoPreviewCacheScope(_config.Id);
     private readonly HashSet<string> _expandedRecurringHistoryGroupKeys = new(StringComparer.Ordinal);
 
     public TodoWidgetViewModel(
         TodoWidgetStore store,
         LocalizationService localizationService,
         WidgetConfig config,
-        SettingsService? settingsService = null)
+        SettingsService? settingsService = null,
+        Func<string, Task<bool>>? recycleAttachmentFileAsync = null)
     {
         _store = store;
         _localizationService = localizationService;
         _config = config;
         _settingsService = settingsService;
+        _recycleAttachmentFileAsync = recycleAttachmentFileAsync;
         if (_settingsService is not null)
         {
             _textSize = SettingsService.NormalizeTextSize(
@@ -114,10 +136,12 @@ public sealed partial class TodoWidgetViewModel : ObservableObject, IDisposable
 
     public ObservableCollection<TodoItemViewModel> VisibleItems { get; } = [];
 
+    private object[]? _cachedVisibleItemsSource;
+
     // ListView.ItemsSource is object-valued at the WinRT ABI boundary.
     // Keep the typed collection for filtering and project a concrete object
     // array so populated task rows remain available in Native AOT builds.
-    public object[] VisibleItemsSource => VisibleItems.Cast<object>().ToArray();
+    public object[] VisibleItemsSource => _cachedVisibleItemsSource ??= VisibleItems.Cast<object>().ToArray();
 
     public string InputText
     {
@@ -141,20 +165,46 @@ public sealed partial class TodoWidgetViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _draftImportant, value))
             {
                 OnPropertyChanged(nameof(DraftImportantGlyph));
+                OnPropertyChanged(nameof(DraftImportantTooltipText));
             }
         }
     }
 
+    public string DraftImportantTooltipText => _localizationService.T(
+        _draftImportant ? "Todo.Menu.UnmarkImportant" : "Todo.Menu.MarkImportant");
+
     public DateTimeOffset? DraftDueDate
     {
         get => _draftDueDate;
-        set
+        set => SetDraftDueDate(value, hasDueTime: value is not null);
+    }
+
+    public bool DraftHasDueTime
+    {
+        get => _draftDueDate is not null && _draftHasDueTime;
+        set => SetDraftDueDate(_draftDueDate, hasDueTime: value);
+    }
+
+    public void SetDraftDueDate(DateTimeOffset? dueDate, bool hasDueTime)
+    {
+        bool effectiveHasTime = dueDate is not null && hasDueTime;
+        DateTimeOffset? normalized = dueDate is null
+            ? null
+            : effectiveHasTime
+                ? NormalizeDueDate(dueDate, hasDueTime: true)
+                : TodoWidgetStore.NormalizeAllDayDueDate(dueDate.Value);
+        bool timeFlagChanged = _draftHasDueTime != effectiveHasTime;
+        _draftHasDueTime = effectiveHasTime;
+        bool dateChanged = SetProperty(ref _draftDueDate, normalized, nameof(DraftDueDate));
+        if (timeFlagChanged)
         {
-            if (SetProperty(ref _draftDueDate, value))
-            {
-                OnPropertyChanged(nameof(DraftDueDateText));
-                OnPropertyChanged(nameof(DraftDueDateActive));
-            }
+            OnPropertyChanged(nameof(DraftHasDueTime));
+        }
+
+        if (dateChanged || timeFlagChanged)
+        {
+            OnPropertyChanged(nameof(DraftDueDateText));
+            OnPropertyChanged(nameof(DraftDueDateActive));
         }
     }
 
@@ -173,18 +223,26 @@ public sealed partial class TodoWidgetViewModel : ObservableObject, IDisposable
             var today = DateTimeOffset.Now.Date;
             if (local.Date == today)
             {
-                return _localizationService.T("Todo.Due.Today");
+                return DraftHasDueTime
+                    ? _localizationService.Format("Todo.Due.TodayAt", local.ToString("HH:mm"))
+                    : _localizationService.T("Todo.Due.Today");
             }
 
             if (local.Date == today.AddDays(1))
             {
-                return _localizationService.T("Todo.Due.Tomorrow");
+                return DraftHasDueTime
+                    ? _localizationService.Format("Todo.Due.TomorrowAt", local.ToString("HH:mm"))
+                    : _localizationService.T("Todo.Due.Tomorrow");
             }
 
-            bool isEndOfDay = local.Hour == 23 && local.Minute == 59;
-            return isEndOfDay
-                ? $"{local.Month}/{local.Day}"
-                : $"{local.Month}/{local.Day} {local:HH:mm}";
+            if (!DraftHasDueTime)
+            {
+                return local.Date.Year == today.Year
+                    ? $"{local.Month}/{local.Day}"
+                    : $"{local.Year}/{local.Month}/{local.Day}";
+            }
+
+            return $"{local.Month}/{local.Day} {local:HH:mm}";
         }
     }
 
@@ -241,10 +299,17 @@ public sealed partial class TodoWidgetViewModel : ObservableObject, IDisposable
                 OnPropertyChanged(nameof(IsAllFilterSelected));
                 OnPropertyChanged(nameof(IsActiveFilterSelected));
                 OnPropertyChanged(nameof(IsTodayFilterSelected));
+                OnPropertyChanged(nameof(IsOverdueFilterSelected));
+                OnPropertyChanged(nameof(OverdueSectionChevronVisibility));
+                OnPropertyChanged(nameof(IsOverdueSectionToggleable));
+                OnPropertyChanged(nameof(OverdueSectionToggleVisibility));
+                OnPropertyChanged(nameof(OverdueSectionSummaryVisibility));
                 OnPropertyChanged(nameof(IsThisWeekFilterSelected));
                 OnPropertyChanged(nameof(IsThisMonthFilterSelected));
                 OnPropertyChanged(nameof(IsImportantFilterSelected));
                 OnPropertyChanged(nameof(IsCompletedFilterSelected));
+                OnPropertyChanged(nameof(TodayOverdueBarVisibility));
+                OnPropertyChanged(nameof(EmptyStateVisibility));
             }
         }
     }
@@ -269,6 +334,11 @@ public sealed partial class TodoWidgetViewModel : ObservableObject, IDisposable
                 OnPropertyChanged(nameof(IsTealColorFilterSelected));
                 OnPropertyChanged(nameof(IsPinkColorFilterSelected));
                 OnPropertyChanged(nameof(ColorFilterVisibility));
+                OnPropertyChanged(nameof(TodayOverdueCount));
+                OnPropertyChanged(nameof(TodayOverdueBarVisibility));
+                OnPropertyChanged(nameof(TodayOverdueHeaderText));
+                OnPropertyChanged(nameof(OverdueTabSummaryText));
+                OnPropertyChanged(nameof(EmptyStateVisibility));
                 RefreshColorFilterVisibilityProperties();
             }
         }
@@ -282,7 +352,43 @@ public sealed partial class TodoWidgetViewModel : ObservableObject, IDisposable
 
     public int AllFilterCount => ShowCompletedTasks ? TotalCount : ActiveCount;
 
-    public int TodayFilterCount => Items.Count(item => IsDueToday(item) && ShouldCountInNonCompletedFilter(item));
+    public int TodayDueOnlyCount => Items.Count(item => IsDueToday(item) && ShouldCountInNonCompletedFilter(item));
+
+    public int TodayFilterCount => Items.Count(item => IsInTodayView(item) && ShouldCountInNonCompletedFilter(item));
+
+    public int TodayOverdueCount => Items.Count(item => IsOverdueFromPreviousDays(item) && MatchesActiveColorFilter(item));
+
+    public bool IsTodayOverdueExpanded => _isTodayOverdueExpanded;
+
+    public Visibility TodayOverdueBarVisibility =>
+        (SelectedFilter == TodoFilter.Today || SelectedFilter == TodoFilter.Overdue) && TodayOverdueCount > 0
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+
+    public bool IsOverdueSectionToggleable => SelectedFilter == TodoFilter.Today;
+
+    public Visibility OverdueSectionChevronVisibility =>
+        SelectedFilter == TodoFilter.Today ? Visibility.Visible : Visibility.Collapsed;
+
+    public Visibility OverdueSectionToggleVisibility =>
+        SelectedFilter == TodoFilter.Today ? Visibility.Visible : Visibility.Collapsed;
+
+    public Visibility OverdueSectionSummaryVisibility =>
+        SelectedFilter == TodoFilter.Overdue ? Visibility.Visible : Visibility.Collapsed;
+
+    public int OverdueFilterCount => Items.Count(item => item.IsOverdue);
+
+    public string TodayOverdueHeaderText =>
+        _localizationService.Format("Todo.Overdue.SectionCount", TodayOverdueCount);
+
+    public string OverdueTabSummaryText =>
+        _localizationService.Format("Todo.Overdue.TabSummary", TodayOverdueCount);
+
+    public string TodayOverdueExpandGlyph => _isTodayOverdueExpanded ? "\uE70D" : "\uE70E";
+
+    public string TodayOverdueToggleTooltipText => _localizationService.T("Todo.Overdue.ToggleSection");
+
+    public string RescheduleOverdueText => _localizationService.T("Todo.Overdue.RescheduleToday");
 
     public int ThisWeekFilterCount => Items.Count(item => IsDueThisWeek(item) && ShouldCountInNonCompletedFilter(item));
 
@@ -316,7 +422,10 @@ public sealed partial class TodoWidgetViewModel : ObservableObject, IDisposable
 
     public Visibility ListVisibility => HasVisibleItems ? Visibility.Visible : Visibility.Collapsed;
 
-    public Visibility EmptyStateVisibility => HasVisibleItems ? Visibility.Collapsed : Visibility.Visible;
+    public Visibility EmptyStateVisibility =>
+        HasVisibleItems || (SelectedFilter == TodoFilter.Today && TodayOverdueCount > 0)
+            ? Visibility.Collapsed
+            : Visibility.Visible;
 
     public Visibility FooterStatsVisibility => ShowFooterStats ? Visibility.Visible : Visibility.Collapsed;
 
@@ -326,7 +435,10 @@ public sealed partial class TodoWidgetViewModel : ObservableObject, IDisposable
 
     public Visibility UndoBarVisibility => CanUndoLastAction ? Visibility.Visible : Visibility.Collapsed;
 
-    public Visibility ColorFilterVisibility => Visibility.Visible;
+    public Visibility ColorFilterVisibility =>
+        AnyColorFilterCount == 0 && SelectedColorFilter == TodoColorFilter.All
+            ? Visibility.Collapsed
+            : Visibility.Visible;
 
     public Visibility RedColorFilterVisibility => Visibility.Visible;
 
@@ -348,11 +460,20 @@ public sealed partial class TodoWidgetViewModel : ObservableObject, IDisposable
 
     public string ExpandInputTooltipText => _localizationService.T("QuickCapture.ExpandInput");
 
+    public string CancelText => _localizationService.T("Common.Cancel");
+
+    public string QuickComposerHintText =>
+        EditorEnterBehavior == SettingsService.EditorEnterBehaviorEnterSaves
+            ? _localizationService.T("Settings.ContentEditor.EnterBehavior.EnterSaves")
+            : _localizationService.T("Settings.ContentEditor.EnterBehavior.CtrlEnterSaves");
+
     public string AllFilterText => FormatFilterText("Todo.Filter.All", AllFilterCount);
 
     public string ActiveFilterText => FormatFilterText("Todo.Filter.Active", ActiveCount);
 
     public string TodayFilterText => FormatFilterText("Todo.Filter.Today", TodayFilterCount);
+
+    public string OverdueFilterText => FormatFilterText("Todo.Filter.Overdue", OverdueFilterCount);
 
     public string ThisWeekFilterText => FormatFilterText("Todo.Filter.ThisWeek", ThisWeekFilterCount);
 
@@ -485,6 +606,7 @@ public sealed partial class TodoWidgetViewModel : ObservableObject, IDisposable
         _ when SelectedColorFilter != TodoColorFilter.All => _localizationService.T("Todo.Empty.Color"),
         TodoFilter.Active => _localizationService.T("Todo.Empty.Active"),
         TodoFilter.Today => _localizationService.T("Todo.Empty.Today"),
+        TodoFilter.Overdue => _localizationService.T("Todo.Empty.Overdue"),
         TodoFilter.ThisWeek => _localizationService.T("Todo.Empty.ThisWeek"),
         TodoFilter.ThisMonth => _localizationService.T("Todo.Empty.ThisMonth"),
         TodoFilter.Important => _localizationService.T("Todo.Empty.Important"),
@@ -507,6 +629,8 @@ public sealed partial class TodoWidgetViewModel : ObservableObject, IDisposable
     public bool IsActiveFilterSelected => SelectedFilter == TodoFilter.Active;
 
     public bool IsTodayFilterSelected => SelectedFilter == TodoFilter.Today;
+
+    public bool IsOverdueFilterSelected => SelectedFilter == TodoFilter.Overdue;
 
     public bool IsThisWeekFilterSelected => SelectedFilter == TodoFilter.ThisWeek;
 
@@ -542,6 +666,7 @@ public sealed partial class TodoWidgetViewModel : ObservableObject, IDisposable
     public Visibility AllTabVisibility => _showAllTab ? Visibility.Visible : Visibility.Collapsed;
     public Visibility ActiveTabVisibility => _showActiveTab ? Visibility.Visible : Visibility.Collapsed;
     public Visibility TodayTabVisibility => _showTodayTab ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility OverdueTabVisibility => _showOverdueTab ? Visibility.Visible : Visibility.Collapsed;
     public Visibility ThisWeekTabVisibility => _showThisWeekTab ? Visibility.Visible : Visibility.Collapsed;
     public Visibility ThisMonthTabVisibility => _showThisMonthTab ? Visibility.Visible : Visibility.Collapsed;
     public Visibility ImportantTabVisibility => _showImportantTab ? Visibility.Visible : Visibility.Collapsed;
@@ -551,6 +676,7 @@ public sealed partial class TodoWidgetViewModel : ObservableObject, IDisposable
         (_showAllTab ? 1 : 0) +
         (_showActiveTab ? 1 : 0) +
         (_showTodayTab ? 1 : 0) +
+        (_showOverdueTab ? 1 : 0) +
         (_showThisWeekTab ? 1 : 0) +
         (_showThisMonthTab ? 1 : 0) +
         (_showImportantTab ? 1 : 0) +
@@ -755,6 +881,38 @@ public sealed partial class TodoWidgetViewModel : ObservableObject, IDisposable
         private set => SetProperty(ref _isInitialized, value);
     }
 
+    internal void ReleaseAttachmentThumbnails(bool includeSelectedDetail = true)
+    {
+        TodoItemViewModel? activeDetail = includeSelectedDetail ? null : SelectedDetailItem;
+        foreach (TodoItemViewModel item in Items)
+        {
+            if (ReferenceEquals(item, activeDetail))
+            {
+                continue;
+            }
+
+            item.ReleaseAttachmentThumbnails();
+        }
+
+        if (includeSelectedDetail)
+        {
+            SelectedDetailItem?.ReleaseAttachmentThumbnails();
+        }
+    }
+
+    internal void EnsureSelectedDetailThumbnailsLoaded()
+    {
+        if (SelectedDetailItem is not { } detail)
+        {
+            return;
+        }
+
+        foreach (TodoAttachmentViewModel attachment in detail.Attachments)
+        {
+            _ = attachment.EnsureThumbnailAsync();
+        }
+    }
+
     public void Dispose()
     {
         if (_isDisposed)
@@ -763,6 +921,7 @@ public sealed partial class TodoWidgetViewModel : ObservableObject, IDisposable
         }
 
         _isDisposed = true;
+        ReleaseAttachmentThumbnails();
         _localizationService.LanguageChanged -= OnLanguageChanged;
     }
 

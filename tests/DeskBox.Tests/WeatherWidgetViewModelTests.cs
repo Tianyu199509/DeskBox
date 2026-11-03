@@ -34,17 +34,27 @@ public sealed class WeatherWidgetViewModelTests
             "src/DeskBox/Controls/WidgetContents/WeatherWidgetContent.xaml"));
         XNamespace x = "http://schemas.microsoft.com/winfx/2006/xaml";
 
-        XElement template = document.Descendants()
+        XElement hourlyItems = document.Descendants()
             .Single(element =>
-                (string?)element.Attribute(x + "DataType") ==
-                "viewModels:WeatherHourViewModel");
+                element.Name.LocalName == "ItemsControl" &&
+                (string?)element.Attribute(x + "Name") == "ExpandedHourlyItems");
 
+        // When outer layout grids use x:Load, WinUI's XAML compiler emits a zero-initialized
+        // FontSizeDeferredValue in DataTemplate x:Bind Connect() before DataContextChanged runs,
+        // throwing E_INVALIDARG on TextBlock.FontSize = 0.0. Using {Binding ForecastHourTextSize}
+        // backed by WeatherHourViewModel's GeneratedBindableCustomProperty avoids Connect(0.0)
+        // while staying AOT-safe.
         Assert.Equal(
             2,
-            template.Descendants()
+            hourlyItems.Descendants()
                 .Count(element =>
                     (string?)element.Attribute("FontSize") ==
-                    "{x:Bind ForecastHourTextSize, Mode=OneWay}"));
+                    "{Binding ForecastHourTextSize}"));
+
+        string aotBindableSource = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/ViewModels/WeatherViewModels.AotBindableProperties.cs"));
+        Assert.Contains("nameof(ForecastHourTextSize)", aotBindableSource, StringComparison.Ordinal);
+        Assert.Contains("public sealed partial class WeatherHourViewModel", aotBindableSource, StringComparison.Ordinal);
     }
 
     [Theory]

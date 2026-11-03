@@ -1,5 +1,4 @@
 using DeskBox.Helpers;
-using System.Drawing;
 using System.Reflection;
 
 namespace DeskBox.Tests;
@@ -264,10 +263,8 @@ public class IconHelperTests
             byte[] iconBytes = Assert.IsType<byte[]>(
                 loadMethod.Invoke(null, [iconSource, false]));
 
-            using var stream = new MemoryStream(iconBytes);
-            using var bitmap = new Bitmap(stream);
             Assert.True(
-                HasVisiblePixels(bitmap),
+                IconPngEncoder.TryDecodePngHasVisiblePixels(iconBytes),
                 $"The {extension} shortcut icon decoded as transparent.");
         }
         finally
@@ -409,16 +406,182 @@ public class IconHelperTests
                 CreateExplicitIconSource(iconPath, 0));
             Assert.NotNull(iconBytes);
 
-            using var stream = new MemoryStream(iconBytes);
-            using var bitmap = new Bitmap(stream);
             Assert.True(
-                HasVisiblePixels(bitmap),
+                IconPngEncoder.TryDecodePngHasVisiblePixels(iconBytes!),
                 "A standalone .ico icon location must decode into visible pixels.");
         }
         finally
         {
             Directory.Delete(temporaryDirectory, recursive: true);
         }
+    }
+
+    [Theory]
+    [InlineData(0, 256)]
+    [InlineData(-1, 256)]
+    [InlineData(24, 48)]
+    [InlineData(48, 48)]
+    [InlineData(49, 96)]
+    [InlineData(72, 96)]
+    [InlineData(96, 96)]
+    [InlineData(97, 256)]
+    [InlineData(256, 256)]
+    public void QuantizeShellIconRequestSize_MapsDecodeWidthToNonLohBucketsForStandardTiles(
+        int decodePixelWidth,
+        int expectedBucket)
+    {
+        Assert.Equal(
+            expectedBucket,
+            IconHelper.QuantizeShellIconRequestSize(decodePixelWidth));
+    }
+
+    [Fact]
+    public void StoreCachedIconBytes_Compresses256BmpV5PayloadToCompactPng()
+    {
+        string cacheKey = $"ext:.deskbox-bmpv5-{Guid.NewGuid():N}:size=256";
+        byte[] bmpV5Bytes = CreateBmpV5IconPayload(width: 256, height: 256);
+        Assert.Equal(14 + 124 + (256 * 256 * 4), bmpV5Bytes.Length);
+
+        try
+        {
+            IconHelper.StoreCachedIconBytes(cacheKey, bmpV5Bytes);
+            byte[]? cached = IconHelper.GetCachedIconBytesForTest(cacheKey);
+            Assert.NotNull(cached);
+            Assert.True(
+                cached!.Length < 16_384,
+                $"Expected compact PNG (<16 KB), got {cached.Length} bytes.");
+            Assert.Equal((byte)0x89, cached[0]);
+            Assert.Equal((byte)'P', cached[1]);
+            Assert.Equal((byte)'N', cached[2]);
+            Assert.Equal((byte)'G', cached[3]);
+            Assert.True(
+                IconPngEncoder.TryDecodePngHasVisiblePixels(cached),
+                "Transcoded PNG payload must decode with visible pixels.");
+        }
+        finally
+        {
+            IconHelper.RemoveCachedIconBytesForTest(cacheKey);
+        }
+    }
+
+    [Fact]
+    public void ClearCacheScope_EvictsTransientNonSharedIconBytesWhilePreservingShared()
+    {
+        string scope = $"transient-{Guid.NewGuid():N}";
+        string exclusiveKey = $"source:C:\\temp\\{Guid.NewGuid():N}.exe|path:exe:size=48";
+        string sharedAlsoKey = $"source:C:\\temp\\{Guid.NewGuid():N}.exe|path:exe:size=48";
+        string extKey = $"ext:.deskbox-scope-{Guid.NewGuid():N}:size=48";
+        byte[] payload = CreateOpaqueIconFileBytes();
+
+        try
+        {
+            IconHelper.StoreCachedIconBytes(exclusiveKey, payload);
+            IconHelper.IndexIconBytesScopeKey(scope, exclusiveKey);
+
+            IconHelper.StoreCachedIconBytes(sharedAlsoKey, payload);
+            IconHelper.IndexIconBytesScopeKey("shared", sharedAlsoKey);
+            IconHelper.IndexIconBytesScopeKey(scope, sharedAlsoKey);
+
+            IconHelper.StoreCachedIconBytes(extKey, payload);
+            IconHelper.IndexIconBytesScopeKey(scope, extKey);
+
+            IconHelper.ClearCacheScope(scope);
+
+            Assert.False(IconHelper.HasCachedIconBytesForTest(exclusiveKey));
+            Assert.True(IconHelper.HasCachedIconBytesForTest(sharedAlsoKey));
+            Assert.True(IconHelper.HasCachedIconBytesForTest(extKey));
+        }
+        finally
+        {
+            IconHelper.RemoveCachedIconBytesForTest(exclusiveKey);
+            IconHelper.RemoveCachedIconBytesForTest(sharedAlsoKey);
+            IconHelper.RemoveCachedIconBytesForTest(extKey);
+        }
+    }
+
+    [Fact]
+    public void CreateMediaThumbnailFallback_UsesPinnedWicThumbnailDecoderInsteadOfRawFileStream()
+    {
+        string source = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Helpers/IconHelper.cs"));
+        int start = source.IndexOf(
+            "private static async Task<BitmapImage?> CreateMediaThumbnailAsync(",
+            StringComparison.Ordinal);
+        int end = source.IndexOf(
+            "private static async Task<BitmapImage?> CreateShellThumbnailAsync(",
+            start,
+            StringComparison.Ordinal);
+        Assert.True(start >= 0);
+        Assert.True(end > start);
+
+        string method = source[start..end];
+        Assert.Contains(
+            "WicBuiltInThumbnailDecoder.DecodeAsync(",
+            method,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "AsRandomAccessStream()",
+            method,
+            StringComparison.Ordinal);
+    }
+
+    private static byte[] CreateBmpV5IconPayload(int width, int height)
+    {
+        const int fileHeaderSize = 14;
+        const int dibHeaderSize = 124;
+        int pixelBytes = width * height * 4;
+        byte[] buffer = new byte[fileHeaderSize + dibHeaderSize + pixelBytes];
+        Span<byte> span = buffer;
+
+        span[0] = (byte)'B';
+        span[1] = (byte)'M';
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(
+            span.Slice(2, 4),
+            buffer.Length);
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(
+            span.Slice(10, 4),
+            fileHeaderSize + dibHeaderSize);
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(
+            span.Slice(14, 4),
+            dibHeaderSize);
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(
+            span.Slice(18, 4),
+            width);
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(
+            span.Slice(22, 4),
+            -height); // top-down BMPv5
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt16LittleEndian(
+            span.Slice(26, 2),
+            1);
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt16LittleEndian(
+            span.Slice(28, 2),
+            32);
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(
+            span.Slice(30, 4),
+            3u); // BI_BITFIELDS
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(
+            span.Slice(54, 4),
+            0x00FF0000u);
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(
+            span.Slice(58, 4),
+            0x0000FF00u);
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(
+            span.Slice(62, 4),
+            0x000000FFu);
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(
+            span.Slice(66, 4),
+            0xFF000000u);
+
+        Span<byte> pixels = span[(fileHeaderSize + dibHeaderSize)..];
+        for (int i = 0; i < pixels.Length; i += 4)
+        {
+            pixels[i] = 0xE2;     // B
+            pixels[i + 1] = 0xD8; // G
+            pixels[i + 2] = 0x80; // R
+            pixels[i + 3] = 0xFF; // A
+        }
+
+        return buffer;
     }
 
     private static object CreateExplicitIconSource(string path, int iconIndex)
@@ -494,21 +657,5 @@ public class IconHelperTests
         writer.Write(new byte[andSize]);
         writer.Flush();
         return stream.ToArray();
-    }
-
-    private static bool HasVisiblePixels(Bitmap bitmap)
-    {
-        for (int y = 0; y < bitmap.Height; y++)
-        {
-            for (int x = 0; x < bitmap.Width; x++)
-            {
-                if (bitmap.GetPixel(x, y).A != 0)
-                {
-                    return true;
-                }
-            }
-        }
-
-        return false;
     }
 }

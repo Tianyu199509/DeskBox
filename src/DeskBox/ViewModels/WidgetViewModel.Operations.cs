@@ -32,6 +32,18 @@ public partial class WidgetViewModel
             cancellationToken.ThrowIfCancellationRequested();
             MappedFolderPath = Config.MappedFolderPath;
             _mappedFolderTraversalPath = ResolveMappedFolderTraversalPath();
+            if (!string.IsNullOrWhiteSpace(MappedFolderPath) &&
+                !string.IsNullOrWhiteSpace(_mappedFolderTraversalPath) &&
+                !PathsEqual(MappedFolderPath, _mappedFolderTraversalPath) &&
+                WidgetPathRebaseHelper.RebaseFolderTree(
+                    Config,
+                    MappedFolderPath,
+                    _mappedFolderTraversalPath,
+                    rebaseMappedFolderPath: false))
+            {
+                ApplyStackSettings();
+                _settingsService.UpdateWidget(Config, notifySubscribers: false);
+            }
             SetCurrentFolderPath(_mappedFolderTraversalPath);
             await ConfigureFolderWatchersAsync(CurrentFolderPath, cancellationToken);
             await ReloadFolderContentsAsync(
@@ -199,8 +211,7 @@ public partial class WidgetViewModel
             .Select(group => group.Last())
             .ToArray();
 
-        WidgetSortMode? originalSortMode = null;
-        bool originalSortDescending = Config.SortDescending;
+        FolderSortStateSnapshot? originalSortState = null;
         bool insertedAny = false;
         var importedDestinationPaths = new List<string>();
         int nextManualIndex = preferredManualIndex ?? -1;
@@ -232,13 +243,9 @@ public partial class WidgetViewModel
             if (activateManualSortOnSuccess &&
                 (preferredManualIndex.HasValue ||
                  preferredStackAnchor.HasValue) &&
-                Config.SortMode != WidgetSortMode.Manual)
+                EffectiveSortMode != WidgetSortMode.Manual)
             {
-                originalSortMode = Config.SortMode;
-                Config.SortMode = WidgetSortMode.Manual;
-                Config.SortDescending = false;
-                NormalizeSortOrder();
-                OnPropertyChanged(nameof(SortModeLabel));
+                originalSortState = CaptureCurrentFolderSortStateAndActivateManual();
             }
 
             foreach (string destinationPath in materialized.Select(
@@ -293,7 +300,7 @@ public partial class WidgetViewModel
                 stackAnchor);
         }
 
-        if (originalSortMode.HasValue)
+        if (originalSortState is { } capturedSortState)
         {
             if (insertedAny)
             {
@@ -305,10 +312,7 @@ public partial class WidgetViewModel
             }
             else
             {
-                Config.SortMode = originalSortMode.Value;
-                Config.SortDescending = originalSortDescending;
-                SortItems();
-                OnPropertyChanged(nameof(SortModeLabel));
+                RestoreCurrentFolderSortState(capturedSortState);
             }
         }
     }
@@ -335,16 +339,11 @@ public partial class WidgetViewModel
             return 0;
         }
 
-        WidgetSortMode? originalSortMode = null;
-        bool originalSortDescending = Config.SortDescending;
+        FolderSortStateSnapshot? originalSortState = null;
         if (activateManualSortOnSuccess &&
-            Config.SortMode != WidgetSortMode.Manual)
+            EffectiveSortMode != WidgetSortMode.Manual)
         {
-            originalSortMode = Config.SortMode;
-            Config.SortMode = WidgetSortMode.Manual;
-            Config.SortDescending = false;
-            NormalizeSortOrder();
-            OnPropertyChanged(nameof(SortModeLabel));
+            originalSortState = CaptureCurrentFolderSortStateAndActivateManual();
         }
 
         int insertedCount = 0;
@@ -377,7 +376,7 @@ public partial class WidgetViewModel
                 stackAnchor);
         }
 
-        if (originalSortMode.HasValue)
+        if (originalSortState is { } capturedSortState)
         {
             if (insertedCount > 0)
             {
@@ -385,10 +384,7 @@ public partial class WidgetViewModel
             }
             else
             {
-                Config.SortMode = originalSortMode.Value;
-                Config.SortDescending = originalSortDescending;
-                SortItems();
-                OnPropertyChanged(nameof(SortModeLabel));
+                RestoreCurrentFolderSortState(capturedSortState);
             }
         }
 
@@ -768,8 +764,8 @@ public partial class WidgetViewModel
             {
                 await _folderRefreshGate.WaitAsync();
                 refreshGateHeld = true;
-                _folderWatcher.Stop();
-                _publicFolderWatcher.Stop();
+                _folderWatcher?.Stop();
+                _publicFolderWatcher?.Stop();
                 restartWatchers = true;
             }
 
@@ -793,7 +789,7 @@ public partial class WidgetViewModel
             int originalIndex = Items.IndexOf(item);
             if (originalIndex >= 0)
             {
-                if (Config.SortMode != WidgetSortMode.Manual)
+                if (EffectiveSortMode != WidgetSortMode.Manual)
                 {
                     Items.RemoveAt(originalIndex);
                     Items.Insert(GetSortedInsertIndex(item), item);
@@ -845,26 +841,46 @@ public partial class WidgetViewModel
 
         if (ownerHandle != IntPtr.Zero)
         {
+            int permanentlyDeletedCount = 0;
             try
             {
+                FileService.ShellDeleteOutcome? shellOutcome = null;
                 IReadOnlySet<string> deletedPaths =
                     await _fileService.DeleteEntriesWithShellAsync(
                         targets.Select(item => item.Path),
                         recycle,
-                        ownerHandle);
+                        ownerHandle,
+                        outcome => shellOutcome = outcome);
 
+                var failedByPath = shellOutcome?.Failures
+                    .ToDictionary(f => f.Path, f => f.HResult, StringComparer.OrdinalIgnoreCase);
                 foreach (WidgetItem item in targets)
                 {
                     string normalizedPath = Path.GetFullPath(item.Path);
-                    if (!deletedPaths.Contains(normalizedPath))
+                    if (deletedPaths.Contains(normalizedPath))
                     {
+                        Items.Remove(item);
+                        RemoveFileAddedAt(item.Path);
+                        successfulPaths.Add(normalizedPath);
+                        deletedCount++;
+                        if (shellOutcome?.PermanentlyDeletedPaths.Contains(normalizedPath) == true)
+                        {
+                            permanentlyDeletedCount++;
+                        }
+
                         continue;
                     }
 
-                    Items.Remove(item);
-                    RemoveFileAddedAt(item.Path);
-                    successfulPaths.Add(normalizedPath);
-                    deletedCount++;
+                    if (failedByPath is not null &&
+                        failedByPath.TryGetValue(normalizedPath, out int hr))
+                    {
+                        string errorMessage = System.Runtime.InteropServices.Marshal.GetExceptionForHR(hr)?.Message
+                            ?? $"0x{hr:X8}";
+                        failures.Add(new FileDeleteFailure(
+                            item.Path,
+                            item.Name,
+                            errorMessage));
+                    }
                 }
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -897,7 +913,7 @@ public partial class WidgetViewModel
                 targets
                     .Where(item => successfulPaths.Contains(Path.GetFullPath(item.Path)))
                     .Select(item => item.Path));
-            return new FileDeleteBatchResult(deletedCount, failures);
+            return new FileDeleteBatchResult(deletedCount, failures, permanentlyDeletedCount);
         }
 
         foreach (var item in targets)
@@ -987,14 +1003,30 @@ public partial class WidgetViewModel
             return new FileDeleteBatchResult(0, failures);
         }
 
+        int permanentlyDeletedCount = 0;
         try
         {
+            FileService.ShellDeleteOutcome? shellOutcome = null;
             IReadOnlySet<string> deletedPaths =
                 await _fileService.DeleteEntriesWithShellAsync(
                     targets,
                     recycle: true,
-                    ownerHandle);
+                    ownerHandle,
+                    outcome => shellOutcome = outcome);
             deletedCount = deletedPaths.Count;
+            permanentlyDeletedCount = shellOutcome?.PermanentlyDeletedPaths.Count ?? 0;
+            if (shellOutcome is { Failures.Count: > 0 })
+            {
+                foreach (FileService.ShellDeleteItemFailure failure in shellOutcome.Failures)
+                {
+                    string message = System.Runtime.InteropServices.Marshal.GetExceptionForHR(failure.HResult)?.Message
+                        ?? $"0x{failure.HResult:X8}";
+                    failures.Add(new FileDeleteFailure(
+                        failure.Path,
+                        Path.GetFileName(failure.Path),
+                        message));
+                }
+            }
 
             // Keep the model in sync: same-widget drops arrive as paths, and
             // the watcher refresh alone would leave a stale tile visible
@@ -1020,7 +1052,7 @@ public partial class WidgetViewModel
                 ex.Message));
         }
 
-        return new FileDeleteBatchResult(deletedCount, failures);
+        return new FileDeleteBatchResult(deletedCount, failures, permanentlyDeletedCount);
     }
 
     public void UpdateBounds(double x, double y, double width, double height, bool persist)

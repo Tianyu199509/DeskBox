@@ -86,6 +86,11 @@ public sealed partial class FileSurfaceContent
             CancelItemRename();
         }
 
+        if (_stackPopoverTitleEditing)
+        {
+            CommitStackPopoverTitleRename();
+        }
+
         WidgetItem? renameItem = FindDisplayedItem(item);
         if (renameItem is null || !IsItemInStackPopover(renameItem))
         {
@@ -164,6 +169,7 @@ public sealed partial class FileSurfaceContent
         SetItemsViewScrollingSuspended(true);
         App.Current?.WidgetManager?.BeginWidgetInteraction(
             "surface-stack-popover-item-rename-opened");
+        ActivateStackPopoverInput();
         SelectItemNameForRename(editor, renameItem.IsFolder);
     }
 

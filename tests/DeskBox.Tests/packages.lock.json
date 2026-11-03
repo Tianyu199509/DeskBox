@@ -140,31 +140,6 @@
           "Microsoft.WindowsAppSDK": "1.6.250108002"
         }
       },
-      "H.GeneratedIcons.System.Drawing": {
-        "type": "Transitive",
-        "resolved": "2.5.0-beta.1",
-        "contentHash": "5dhriKZ0py8IuTA9YJHBe70NnjJrOPvESo18RqiE7YEv/wB3PPfpNLQsRhwZMNtrEdZ2nRa85rkWe4i4aTVY+Q==",
-        "dependencies": {
-          "System.Drawing.Common": "10.0.0"
-        }
-      },
-      "H.NotifyIcon": {
-        "type": "Transitive",
-        "resolved": "2.5.0-beta.1",
-        "contentHash": "BNbrSnRw2G8AjoXt4qciTaRQHnZAH1k9bwTKZBVsfrNdQU/vYxbd2GPj19d0U8TLTstksYhkh93L1ouTi+Ci2w==",
-        "dependencies": {
-          "H.GeneratedIcons.System.Drawing": "2.5.0-beta.1"
-        }
-      },
-      "H.NotifyIcon.WinUI": {
-        "type": "Transitive",
-        "resolved": "2.5.0-beta.1",
-        "contentHash": "cHznbv3PjYVyEzKqPA+Av0dkPC5yJEiGxFdLR8+QlOuj2yqIPNfsrdAa2HFC6YCjI9/RVHpj4sTe510Lyesuyw==",
-        "dependencies": {
-          "H.NotifyIcon": "2.5.0-beta.1",
-          "Microsoft.WindowsAppSDK.WinUI": "1.8.251105000"
-        }
-      },
       "Markdig": {
         "type": "Transitive",
         "resolved": "1.3.2",
@@ -214,11 +189,6 @@
         "type": "Transitive",
         "resolved": "1.0.3719.77",
         "contentHash": "t+ucyKw5NTwMjsUrDF6R9Lk40lpcKQD1/HgyGFxl49tdA4h9dKlsj6FYGEmDRpFNfnTpENuTypMcdbrlkqBdDA=="
-      },
-      "Microsoft.Win32.SystemEvents": {
-        "type": "Transitive",
-        "resolved": "10.0.0",
-        "contentHash": "bYdnhuD0XxcVTrxc8RyBjXo+AXYWJPnda3clhGz2Kakleyun1PyrzYV8RezT7ZYmR9OBSOgvpFQcvHo/K8Y90w=="
       },
       "Microsoft.Windows.AI.MachineLearning": {
         "type": "Transitive",
@@ -363,14 +333,6 @@
         "resolved": "6.5.0",
         "contentHash": "QWINE2x3MbTODsWT1Gh71GaGb5icBz4chS8VYvTgsBnsi8esgN6wtHhydd7fvToWECYGq7T4cgBBDiKD/363fg=="
       },
-      "System.Drawing.Common": {
-        "type": "Transitive",
-        "resolved": "10.0.0",
-        "contentHash": "kohT9ZZlkB5R5ifihCBnPJLdIUQGiTj1ZI6z4LKatr+F4MmIJJu7qQpBkqt9280ivtnSvlTx9qZEY+CpJ0zMkA==",
-        "dependencies": {
-          "Microsoft.Win32.SystemEvents": "10.0.0"
-        }
-      },
       "System.Numerics.Tensors": {
         "type": "Transitive",
         "resolved": "9.0.0",
@@ -438,9 +400,24 @@
           "CommunityToolkit.WinUI.Controls.Segmented": "[8.2.251219, )",
           "CommunityToolkit.WinUI.Controls.SettingsControls": "[8.2.251219, )",
           "CommunityToolkit.WinUI.Controls.Sizers": "[8.2.251219, )",
-          "H.NotifyIcon.WinUI": "[2.5.0-beta.1, )",
           "Markdig": "[1.3.2, )",
           "Microsoft.Extensions.DependencyInjection": "[8.0.1, )",
+          "Microsoft.Windows.AI.MachineLearning": "[2.1.74, )",
+          "Microsoft.Windows.SDK.BuildTools": "[10.0.28000.2270, )",
+          "Microsoft.WindowsAppSDK": "[2.5.1, )",
+          "WinUIEx": "[2.9.3, )"
+        }
+      },
+      "deskbox.settings": {
+        "type": "Project",
+        "dependencies": {
+          "CommunityToolkit.Mvvm": "[8.4.2, )",
+          "CommunityToolkit.WinUI.Animations": "[8.2.251219, )",
+          "CommunityToolkit.WinUI.Controls.ColorPicker": "[8.2.251219, )",
+          "CommunityToolkit.WinUI.Controls.Segmented": "[8.2.251219, )",
+          "CommunityToolkit.WinUI.Controls.SettingsControls": "[8.2.251219, )",
+          "CommunityToolkit.WinUI.Controls.Sizers": "[8.2.251219, )",
+          "DeskBox": "[1.6.0, )",
           "Microsoft.Windows.AI.MachineLearning": "[2.1.74, )",
           "Microsoft.Windows.SDK.BuildTools": "[10.0.28000.2270, )",
           "Microsoft.WindowsAppSDK": "[2.5.1, )",
@@ -456,11 +433,6 @@
         "type": "Transitive",
         "resolved": "1.0.3719.77",
         "contentHash": "t+ucyKw5NTwMjsUrDF6R9Lk40lpcKQD1/HgyGFxl49tdA4h9dKlsj6FYGEmDRpFNfnTpENuTypMcdbrlkqBdDA=="
-      },
-      "Microsoft.Win32.SystemEvents": {
-        "type": "Transitive",
-        "resolved": "10.0.0",
-        "contentHash": "bYdnhuD0XxcVTrxc8RyBjXo+AXYWJPnda3clhGz2Kakleyun1PyrzYV8RezT7ZYmR9OBSOgvpFQcvHo/K8Y90w=="
       },
       "Microsoft.Windows.AI.MachineLearning": {
         "type": "Transitive",
@@ -485,11 +457,6 @@
         "type": "Transitive",
         "resolved": "1.0.3719.77",
         "contentHash": "t+ucyKw5NTwMjsUrDF6R9Lk40lpcKQD1/HgyGFxl49tdA4h9dKlsj6FYGEmDRpFNfnTpENuTypMcdbrlkqBdDA=="
-      },
-      "Microsoft.Win32.SystemEvents": {
-        "type": "Transitive",
-        "resolved": "10.0.0",
-        "contentHash": "bYdnhuD0XxcVTrxc8RyBjXo+AXYWJPnda3clhGz2Kakleyun1PyrzYV8RezT7ZYmR9OBSOgvpFQcvHo/K8Y90w=="
       },
       "Microsoft.Windows.AI.MachineLearning": {
         "type": "Transitive",

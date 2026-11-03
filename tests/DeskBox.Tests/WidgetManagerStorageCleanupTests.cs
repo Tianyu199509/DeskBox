@@ -884,6 +884,100 @@ public sealed class WidgetManagerStorageCleanupTests : IDisposable
     }
 
     [Fact]
+    public async Task TryGetFileWidgetPathConflict_UnresolvableExternalWidgetDoesNotBlockUnrelatedFolder()
+    {
+        string loopA = Path.Combine(_tempRoot, "junction-loop-a");
+        string loopB = Directory.CreateDirectory(Path.Combine(_tempRoot, "junction-loop-b")).FullName;
+        Assert.True(TestJunction.TryCreate(loopA, loopB));
+        Directory.Delete(loopB);
+        // Pointing loopB back to loopA forms a 2-hop reparse cycle so
+        // TryResolvePathIdentity deterministically fails on loopA, matching an
+        // offline SMB/NAS share or locked external drive without network waits.
+        _ = TestJunction.TryCreate(loopB, loopA);
+
+        try
+        {
+            Assert.False(FileService.TryResolvePathIdentity(loopA, out _));
+
+            var offlineLikeWidget = new WidgetConfig
+            {
+                Id = "offline-widget",
+                Name = "OfflineDrive",
+                WidgetKind = WidgetKind.File,
+                MappedFolderPath = loopA,
+                FollowsDefaultStoragePath = false,
+            };
+            _settingsService.Settings.Widgets.Add(offlineLikeWidget);
+
+            string unrelatedLocalFolder = Directory.CreateDirectory(
+                Path.Combine(_tempRoot, "local-folder")).FullName;
+
+            Assert.False(_widgetManager.TryGetFileWidgetPathConflict(
+                unrelatedLocalFolder,
+                out FileWidgetPathConflict? unrelatedConflict));
+            Assert.Null(unrelatedConflict);
+
+            (FileWidgetPathConflict? asyncConflict, _, _) =
+                await _widgetManager.EvaluateExternalMappingConflictAsync(unrelatedLocalFolder);
+            Assert.Null(asyncConflict);
+
+            Assert.True(_widgetManager.TryGetFileWidgetPathConflict(
+                loopA,
+                out FileWidgetPathConflict? exactSameConflict));
+            Assert.Equal("offline-widget", exactSameConflict!.ConflictingWidget!.Id);
+        }
+        finally
+        {
+            TryDeleteJunctionDirectory(loopB);
+            TryDeleteJunctionDirectory(loopA);
+        }
+    }
+
+    [Fact]
+    public void TryGetFileWidgetPathConflict_OnlineDirectoryJunctionAliasStillConflicts()
+    {
+        string realFolder = Directory.CreateDirectory(Path.Combine(_tempRoot, "real-mapped")).FullName;
+        string aliasJunction = Path.Combine(_tempRoot, "alias-mapped");
+        Assert.True(TestJunction.TryCreate(aliasJunction, realFolder));
+
+        try
+        {
+            _settingsService.Settings.Widgets.Add(new WidgetConfig
+            {
+                Id = "real-widget",
+                Name = "RealMapped",
+                WidgetKind = WidgetKind.File,
+                MappedFolderPath = realFolder,
+                FollowsDefaultStoragePath = false,
+            });
+
+            Assert.True(_widgetManager.TryGetFileWidgetPathConflict(
+                aliasJunction,
+                out FileWidgetPathConflict? conflict));
+            Assert.Equal(FileWidgetPathConflictKind.ExistingWidget, conflict!.Kind);
+            Assert.Equal("real-widget", conflict.ConflictingWidget!.Id);
+        }
+        finally
+        {
+            TryDeleteJunctionDirectory(aliasJunction);
+        }
+    }
+
+    private static void TryDeleteJunctionDirectory(string path)
+    {
+        try
+        {
+            if ((File.GetAttributes(path) & FileAttributes.Directory) != 0)
+            {
+                Directory.Delete(path, recursive: false);
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    [Fact]
     public void DescribeFileWidgetPathRelation_DistinguishesSameInsideAndContains()
     {
         string root = Directory.CreateDirectory(Path.Combine(_tempRoot, "relation")).FullName;

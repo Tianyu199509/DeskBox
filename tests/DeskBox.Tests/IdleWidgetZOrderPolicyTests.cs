@@ -1,4 +1,5 @@
 using DeskBox.Services;
+using Windows.Foundation;
 
 namespace DeskBox.Tests;
 
@@ -119,6 +120,31 @@ public sealed class IdleWidgetZOrderPolicyTests
             requested,
             peersObservedAboveHighest: Array.Empty<IntPtr>(),
             peersObservedFromHighestDown: Handles(10, 20)));
+    }
+
+    [Fact]
+    public void HasAnyShadowOverlapRisk_DetectsNearbyWidgetsAndSkipsWidelySeparatedOnes()
+    {
+        Assert.False(IdleWidgetZOrderPolicy.HasAnyShadowOverlapRisk(
+        [
+            new Rect(20, 20, 300, 220),
+            new Rect(500, 420, 300, 220)
+        ]));
+
+        // Separated by 24px vertically (< 88px shadow reach): upper shadow can
+        // touch the lower widget's top edge, so peer normalization is needed.
+        Assert.True(IdleWidgetZOrderPolicy.HasAnyShadowOverlapRisk(
+        [
+            new Rect(20, 20, 300, 220),
+            new Rect(20, 264, 300, 220)
+        ]));
+
+        // Separated by exactly the reach (88px): non-overlapping shadow reach.
+        Assert.False(IdleWidgetZOrderPolicy.HasAnyShadowOverlapRisk(
+        [
+            new Rect(20, 20, 300, 220),
+            new Rect(20, 240 + IdleWidgetZOrderPolicy.DefaultShadowOverlapReachPixels, 300, 220)
+        ]));
     }
 
     private static IntPtr[] Handles(params long[] handles) =>

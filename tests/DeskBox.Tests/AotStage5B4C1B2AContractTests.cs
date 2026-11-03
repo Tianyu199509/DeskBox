@@ -70,7 +70,7 @@ public sealed class AotStage5B4C1B2AContractTests
             "fileOperation.SetOwnerWindow(ownerWindowHandle)",
             shellTransfer,
             StringComparison.Ordinal);
-        Assert.Contains("SHFileOperation(ref operation)", fileService, StringComparison.Ordinal);
+        Assert.Contains("ExecuteShellDeleteOnStaThread(", fileService, StringComparison.Ordinal);
     }
 
     [Fact]

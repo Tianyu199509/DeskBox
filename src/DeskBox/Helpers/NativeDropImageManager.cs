@@ -1,5 +1,4 @@
 using DeskBox.Platform;
-using System.Runtime.InteropServices;
 
 namespace DeskBox.Helpers;
 
@@ -7,6 +6,8 @@ namespace DeskBox.Helpers;
 /// Thin raw-COM wrapper around the Shell drag-image manager. Forwarding the
 /// IDropTarget callbacks keeps Explorer's source-provided drag image intact
 /// instead of asking XAML to synthesize a differently sized preview.
+/// Shared across <see cref="NativeDropTarget"/> instances on the UI STA and
+/// released as soon as no drag visual session remains active.
 /// </summary>
 internal sealed unsafe partial class NativeDropImageManager : IDisposable
 {
@@ -23,6 +24,11 @@ internal sealed unsafe partial class NativeDropImageManager : IDisposable
     private static readonly Guid s_dropTargetHelperInterfaceId =
         new("4657278B-411B-11D2-839A-00C04FD918D0");
 
+    private static readonly object s_gate = new();
+    private static readonly HashSet<NativeDropTarget> s_leasedTargets = [];
+    private static NativeDropImageManager? s_shared;
+    private static NativeDropTarget? s_activeOwner;
+
     private nint _pointer;
     private bool _isDragActive;
 
@@ -31,22 +37,152 @@ internal sealed unsafe partial class NativeDropImageManager : IDisposable
         _pointer = pointer;
     }
 
-    internal bool IsDragActive => _isDragActive;
+    internal static bool HasSharedInstance => s_shared is not null;
 
-    internal static NativeDropImageManager? TryCreate()
+    internal static bool TryDragEnter(
+        NativeDropTarget owner,
+        nint targetWindow,
+        nint dataObject,
+        NativeDropTarget.POINT point,
+        uint effect)
     {
-        int result = Ole32NativeMethods.CoCreateInstance(
-            in s_dragDropHelperClassId,
-            0,
-            ClsctxInprocServer,
-            in s_dropTargetHelperInterfaceId,
-            out nint pointer);
-        return result >= 0 && pointer != 0
-            ? new NativeDropImageManager(pointer)
-            : null;
+        if (dataObject == 0)
+        {
+            return false;
+        }
+
+        lock (s_gate)
+        {
+            NativeDropImageManager? shared = s_shared ??= TryCreateCore();
+            if (shared is null)
+            {
+                return false;
+            }
+
+            if (s_activeOwner is not null &&
+                !ReferenceEquals(s_activeOwner, owner) &&
+                shared._isDragActive)
+            {
+                shared.DragLeaveCore();
+            }
+
+            bool entered = shared.DragEnterCore(
+                targetWindow,
+                dataObject,
+                point,
+                effect);
+            if (!entered)
+            {
+                s_leasedTargets.Remove(owner);
+                if (ReferenceEquals(s_activeOwner, owner))
+                {
+                    s_activeOwner = null;
+                }
+
+                ReleaseSharedIfIdleLocked();
+                return false;
+            }
+
+            s_leasedTargets.Add(owner);
+            s_activeOwner = owner;
+            return true;
+        }
     }
 
-    internal void DragEnter(
+    internal static void DragOver(
+        NativeDropTarget owner,
+        NativeDropTarget.POINT point,
+        uint effect)
+    {
+        lock (s_gate)
+        {
+            if (ReferenceEquals(s_activeOwner, owner))
+            {
+                s_shared?.DragOverCore(point, effect);
+            }
+        }
+    }
+
+    internal static void Show(
+        NativeDropTarget owner,
+        bool visible)
+    {
+        lock (s_gate)
+        {
+            if (ReferenceEquals(s_activeOwner, owner))
+            {
+                s_shared?.ShowCore(visible);
+            }
+        }
+    }
+
+    internal static void DragLeave(NativeDropTarget owner)
+    {
+        lock (s_gate)
+        {
+            s_leasedTargets.Remove(owner);
+            if (ReferenceEquals(s_activeOwner, owner))
+            {
+                s_shared?.DragLeaveCore();
+                s_activeOwner = null;
+            }
+
+            ReleaseSharedIfIdleLocked();
+        }
+    }
+
+    internal static void Drop(
+        NativeDropTarget owner,
+        nint dataObject,
+        NativeDropTarget.POINT point,
+        uint effect)
+    {
+        lock (s_gate)
+        {
+            s_leasedTargets.Remove(owner);
+            if (ReferenceEquals(s_activeOwner, owner))
+            {
+                s_shared?.DropCore(dataObject, point, effect);
+                s_activeOwner = null;
+            }
+
+            ReleaseSharedIfIdleLocked();
+        }
+    }
+
+    private static NativeDropImageManager? TryCreateCore()
+    {
+        try
+        {
+            int result = Ole32NativeMethods.CoCreateInstance(
+                in s_dragDropHelperClassId,
+                0,
+                ClsctxInprocServer,
+                in s_dropTargetHelperInterfaceId,
+                out nint pointer);
+            return result >= 0 && pointer != 0
+                ? new NativeDropImageManager(pointer)
+                : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static void ReleaseSharedIfIdleLocked()
+    {
+        if (s_leasedTargets.Count > 0 || s_shared is not { } shared)
+        {
+            return;
+        }
+
+        s_shared = null;
+        s_activeOwner = null;
+        shared.Dispose();
+    }
+
+    private bool DragEnterCore(
         nint targetWindow,
         nint dataObject,
         NativeDropTarget.POINT point,
@@ -54,12 +190,12 @@ internal sealed unsafe partial class NativeDropImageManager : IDisposable
     {
         if (_pointer == 0 || dataObject == 0)
         {
-            return;
+            return false;
         }
 
         if (_isDragActive)
         {
-            DragLeave();
+            DragLeaveCore();
         }
 
         var callback = (delegate* unmanaged[Stdcall]<
@@ -76,9 +212,10 @@ internal sealed unsafe partial class NativeDropImageManager : IDisposable
             dataObject,
             &localPoint,
             effect) >= 0;
+        return _isDragActive;
     }
 
-    internal void DragOver(
+    private void DragOverCore(
         NativeDropTarget.POINT point,
         uint effect)
     {
@@ -96,7 +233,7 @@ internal sealed unsafe partial class NativeDropImageManager : IDisposable
         _ = callback(_pointer, &localPoint, effect);
     }
 
-    internal void Show(bool visible)
+    private void ShowCore(bool visible)
     {
         if (_pointer == 0 || !_isDragActive)
         {
@@ -108,7 +245,7 @@ internal sealed unsafe partial class NativeDropImageManager : IDisposable
         _ = callback(_pointer, visible ? 1 : 0);
     }
 
-    internal void DragLeave()
+    private void DragLeaveCore()
     {
         if (_pointer == 0 || !_isDragActive)
         {
@@ -121,7 +258,7 @@ internal sealed unsafe partial class NativeDropImageManager : IDisposable
         _isDragActive = false;
     }
 
-    internal void Drop(
+    private void DropCore(
         nint dataObject,
         NativeDropTarget.POINT point,
         uint effect)
@@ -153,7 +290,7 @@ internal sealed unsafe partial class NativeDropImageManager : IDisposable
             return;
         }
 
-        DragLeave();
+        DragLeaveCore();
         var release = (delegate* unmanaged[Stdcall]<nint, uint>)
             GetVtableEntry(ReleaseVtableSlot);
         _ = release(_pointer);

@@ -25,6 +25,15 @@
                                     BorderThickness="1"
                                     CornerRadius="9"
                                     Opacity="0.62" />
+                                <Path
+                                    Data="M 11,8 L 20,8 L 25,13 L 25,28 L 11,28 Z M 20,8 L 20,13 L 25,13 M 14,18 L 22,18 M 14,22 L 20,22"
+                                    Stroke="{ThemeResource TextFillColorSecondaryBrush}"
+                                    StrokeThickness="1.4"
+                                    StrokeLineJoin="Round"
+                                    StrokeStartLineCap="Round"
+                                    StrokeEndLineCap="Round"
+                                    Opacity="0.55"
+                                    IsHitTestVisible="False" />
                             </Grid>
                         </Viewbox>
                     </ControlTemplate>
@@ -62,6 +71,8 @@
                         IsHitTestVisible="False"
                         Visibility="{x:Bind ActivityBadgeVisibility, Mode=OneWay}">
                         <ProgressRing
+                            x:Name="IconActivityRing"
+                            x:Load="{x:Bind IsActivityActive, Mode=OneWay}"
                             Width="13"
                             Height="13"
                             IsActive="{x:Bind IsActivityActive, Mode=OneWay}"
@@ -71,7 +82,7 @@
                 </Grid>
                 <Grid>
                     <TextBlock
-                        helpers:WidgetTextShadow.Cast="True"
+                        helpers:WidgetTextShadow.Cast="False"
                         x:Name="IconItemNameText"
                         MaxWidth="{x:Bind LayoutContext.IconLabelMaxWidth, Mode=OneWay}"
                         Margin="2,0"
@@ -122,6 +133,8 @@
                         IsHitTestVisible="False"
                         Visibility="{x:Bind ActivityBadgeVisibility, Mode=OneWay}">
                         <ProgressRing
+                            x:Name="ListActivityRing"
+                            x:Load="{x:Bind IsActivityActive, Mode=OneWay}"
                             Width="12"
                             Height="12"
                             IsActive="{x:Bind IsActivityActive, Mode=OneWay}"
@@ -138,7 +151,7 @@
                     Spacing="1">
                     <Grid>
                         <TextBlock
-                            helpers:WidgetTextShadow.Cast="True"
+                            helpers:WidgetTextShadow.Cast="False"
                             x:Name="ListItemNameText"
                             FontSize="{x:Bind LayoutContext.ListLabelFontSize, Mode=OneWay}"
                             HorizontalAlignment="Left"
@@ -148,7 +161,7 @@
                             TextWrapping="NoWrap" />
                     </Grid>
                     <TextBlock
-                        helpers:WidgetTextShadow.Cast="True"
+                        helpers:WidgetTextShadow.Cast="False"
                         FontSize="{x:Bind LayoutContext.ListItemDetailFontSize, Mode=OneWay}"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                         HorizontalAlignment="Left"
@@ -166,10 +179,7 @@
         x:Name="SurfaceBorder"
         Tag="InteractiveSurface"
         Background="Transparent"
-        HorizontalAlignment="{Binding SurfaceHorizontalAlignment, ElementName=SurfaceRoot}"
-        MaxWidth="{Binding SurfaceMaxWidth, ElementName=SurfaceRoot}"
-        Margin="{Binding SurfaceMargin, ElementName=SurfaceRoot}"
-        Padding="{Binding SurfacePadding, ElementName=SurfaceRoot}"
+        HorizontalAlignment="Stretch"
         CornerRadius="2"
         Loaded="SurfaceBorder_Loaded"
         Unloaded="SurfaceBorder_Unloaded"
@@ -178,25 +188,6 @@
         PointerPressed="SurfaceBorder_PointerPressed"
         PointerReleased="SurfaceBorder_PointerReleased"
         PointerCaptureLost="SurfaceBorder_PointerCaptureLost">
-        <ToolTipService.ToolTip>
-            <!-- PathTooltipVisibility is derived from LayoutContext.ShowFileItemPathTooltips. -->
-            <ToolTip
-                IsEnabled="{x:Bind ToolTipEnabled, Mode=OneWay}">
-                <StackPanel Spacing="2">
-                    <TextBlock
-                        FontWeight="SemiBold"
-                        Text="{x:Bind ActivityStatusText, Mode=OneWay}"
-                        Visibility="{x:Bind ActivityStatusVisibility, Mode=OneWay}" />
-                    <TextBlock
-                        MaxWidth="360"
-                        MaxLines="2"
-                        Text="{Binding FullPath}"
-                        TextTrimming="CharacterEllipsis"
-                        TextWrapping="Wrap"
-                        Visibility="{x:Bind PathTooltipVisibility, Mode=OneWay}" />
-                </StackPanel>
-            </ToolTip>
-        </ToolTipService.ToolTip>
         <Grid x:Name="LayoutHost" />
     </Border>
 </UserControl>

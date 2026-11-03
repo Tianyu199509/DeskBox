@@ -15,6 +15,9 @@ public sealed partial class ContentWidgetWindow
     internal IEnumerable<WidgetKind> CachedGroupContentKinds =>
         _cachedGroupContents.Values.Select(content => content.WidgetKind);
 
+    internal IEnumerable<IWidgetContent> CachedGroupContents =>
+        _cachedGroupContents.Values;
+
     internal bool HasPresentableContentFrame =>
         ContentWidgetShell.HasPresentableContentFrame;
 
@@ -85,9 +88,9 @@ public sealed partial class ContentWidgetWindow
         // Paint the Glance yield gate from the incoming member's config
         // before the view's Loaded pass — a cached Glance view carries the
         // previous member's flag and would draw one stale frame otherwise.
-        if (content.View is DeskBox.Controls.WidgetContents.GlanceWidgetContent glanceView)
+        if (content is GlanceWidgetContentAdapter glanceAdapter)
         {
-            glanceView.SetShellCustomBackgroundActive(
+            glanceAdapter.SetShellCustomBackgroundActive(
                 WidgetBackgroundCustomization.HasCustomBackground(config));
         }
         AttachCompactPresentationSource(content);
@@ -119,9 +122,16 @@ public sealed partial class ContentWidgetWindow
             return;
         }
 
+        if (content is CustomWidgetContentAdapter customSurface)
+        {
+            ContentWidgetShell.TitleGlyph = customSurface.ViewModel.TitleGlyph;
+            ContentWidgetShell.TitleIconKind = customSurface.ViewModel.TitleIconKind;
+            return;
+        }
+
         ContentWidgetShell.TitleGlyph = descriptor.DefaultGlyph;
         ContentWidgetShell.TitleIconKind =
-            WidgetTitleIconKindNames.FromWidgetKind(config.WidgetKind);
+            WidgetTitleIconKindNames.FromWidgetConfig(config);
     }
 
     internal IWidgetContent? TakeCachedGroupContent(string widgetId)
@@ -196,7 +206,13 @@ public sealed partial class ContentWidgetWindow
         // Keep both the current and bounded inactive-member views warm. Disposing
         // either here turns the next reveal or group switch into a full XAML/data
         // reconstruction, which is more disruptive than the retained memory.
+        if (!Visible)
+        {
+            SuspendBackdropTargetsForHiddenWindow();
+        }
+
         _contentHost.CurrentContent?.OnWindowLongHidden();
+        ContentWidgetShell.ClearCompactBitmaps();
         // Custom backgrounds follow the same hidden-widget discipline: no
         // decoded bitmaps stay alive while the window is long-hidden.
         ReleaseCustomBackgroundSurface();
@@ -214,9 +230,15 @@ public sealed partial class ContentWidgetWindow
             return 0;
         }
 
+        SuspendBackdropTargetsForHiddenWindow();
         _contentHost.CurrentContent?.OnWindowLongHidden();
+        ContentWidgetShell.ClearCompactBitmaps();
         ReleaseCustomBackgroundSurface();
         int releasedCachedContents = _cachedGroupContents.Count;
+        if (IsTargetCollapsed)
+        {
+            _contentHost.TryHibernateCurrentContentView();
+        }
         DisposeCachedGroupContents();
         return releasedCachedContents;
     }

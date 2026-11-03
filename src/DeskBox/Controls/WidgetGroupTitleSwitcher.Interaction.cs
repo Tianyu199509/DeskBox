@@ -31,6 +31,8 @@ public sealed partial class WidgetGroupTitleSwitcher
     private DispatcherTimer? _wheelFeedbackFallbackTimer;
     private double _pendingIdentityWidth;
 
+    private KeyboardAccelerator? _openPickerAccelerator;
+
     private void RegisterKeyboardAccelerators()
     {
         var openPicker = new KeyboardAccelerator
@@ -38,17 +40,37 @@ public sealed partial class WidgetGroupTitleSwitcher
             Key = VirtualKey.Down,
             Modifiers = VirtualKeyModifiers.Menu
         };
-        openPicker.Invoked += (_, args) =>
-        {
-            if (_presentation is null || _pickerOpen)
-            {
-                return;
-            }
-
-            OpenPicker();
-            args.Handled = true;
-        };
+        openPicker.Invoked += OpenPickerAccelerator_Invoked;
+        _openPickerAccelerator = openPicker;
         KeyboardAccelerators.Add(openPicker);
+    }
+
+    private void OpenPickerAccelerator_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
+    {
+        if (_presentation is null || _pickerOpen)
+        {
+            return;
+        }
+
+        OpenPicker();
+        args.Handled = true;
+    }
+
+    private void ReleaseInteractionTimersAndAccelerators()
+    {
+        if (_openPickerAccelerator is not null)
+        {
+            _openPickerAccelerator.Invoked -= OpenPickerAccelerator_Invoked;
+            KeyboardAccelerators.Remove(_openPickerAccelerator);
+            _openPickerAccelerator = null;
+        }
+
+        if (_wheelFeedbackFallbackTimer is not null)
+        {
+            _wheelFeedbackFallbackTimer.Stop();
+            _wheelFeedbackFallbackTimer.Tick -= WheelFeedbackFallbackTimer_Tick;
+            _wheelFeedbackFallbackTimer = null;
+        }
     }
 
     private void SelectorButton_KeyDown(
@@ -403,13 +425,15 @@ public sealed partial class WidgetGroupTitleSwitcher
         {
             Interval = TimeSpan.FromMilliseconds(220)
         };
-        timer.Tick += (_, _) =>
-        {
-            timer.Stop();
-            UpWheelFeedback.Opacity = 0;
-            DownWheelFeedback.Opacity = 0;
-        };
+        timer.Tick += WheelFeedbackFallbackTimer_Tick;
         return timer;
+    }
+
+    private void WheelFeedbackFallbackTimer_Tick(object? sender, object e)
+    {
+        _wheelFeedbackFallbackTimer?.Stop();
+        UpWheelFeedback.Opacity = 0;
+        DownWheelFeedback.Opacity = 0;
     }
 
     private void AnimateScrollSurfaceFeedback()

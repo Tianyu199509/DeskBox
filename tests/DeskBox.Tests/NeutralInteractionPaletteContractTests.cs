@@ -39,11 +39,11 @@ public sealed class NeutralInteractionPaletteContractTests
     {
         string visuals = Read("src/DeskBox/Controls/WidgetContents/FileSurfaceContent.ItemVisuals.cs");
         string surface = Read("src/DeskBox/Controls/WidgetContents/FileSurfaceContent.xaml.cs");
-        string todo = Read("src/DeskBox/Controls/WidgetContents/TodoWidgetContent.DragDrop.cs");
+        string todoRowVisuals = Read("src/DeskBox/Controls/Todo/TodoRowVisualController.cs");
         string quickCapture = Read("src/DeskBox/Controls/WidgetContents/QuickCaptureSurfaceContent.xaml.cs");
         string stackPopover = Read("src/DeskBox/Controls/WidgetContents/FileSurfaceContent.StackPopover.cs");
 
-        string reorderDrop = MethodBody(todo, "void ApplyTodoReorderDropState(");
+        string reorderDrop = MethodBody(todoRowVisuals, "void ApplyReorderDropState(");
         Assert.Contains("NeutralInteractionBrush.Line(", reorderDrop, StringComparison.Ordinal);
         Assert.DoesNotContain("GetEffectiveAccentColor", reorderDrop, StringComparison.Ordinal);
 

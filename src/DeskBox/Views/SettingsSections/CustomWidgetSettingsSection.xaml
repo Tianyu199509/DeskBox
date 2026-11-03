@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="DeskBox.Views.SettingsSections.CustomWidgetSettingsSection"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:svc="using:DeskBox.Services"
+    xmlns:toolkit="using:CommunityToolkit.WinUI.Controls">
+
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="ms-appx:///Styles/SettingsOverviewResources.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </UserControl.Resources>
+
+    <StackPanel Style="{StaticResource SectionPanelStyle}" Spacing="12">
+        <InfoBar
+            x:Name="StudioStatusInfoBar"
+            IsClosable="True"
+            IsOpen="False" />
+
+        <StackPanel x:Name="StudioViewPanel" Spacing="12">
+            <!-- Subsection 1: My Widgets (2-Column Native Horizontal Cards or Compact Empty Card) -->
+            <StackPanel Spacing="6">
+                <StackPanel Margin="4,4,4,2" Spacing="2">
+                    <TextBlock
+                        x:Name="MyWidgetsSectionHeaderText"
+                        Style="{StaticResource SettingsSubsectionTitleTextStyle}"
+                        AutomationProperties.HeadingLevel="Level2" />
+                </StackPanel>
+
+                <toolkit:SettingsCard
+                    x:Name="EmptyMyWidgetsCard"
+                    HorizontalContentAlignment="Right"
+                    Visibility="Collapsed"
+                    svc:Localized.DescriptionKey="CustomWidget.Native.MyWidgets.Empty.Description"
+                    svc:Localized.HeaderKey="CustomWidget.Native.MyWidgets.Empty.Header">
+                    <toolkit:SettingsCard.HeaderIcon>
+                        <FontIcon Glyph="&#xE71D;" />
+                    </toolkit:SettingsCard.HeaderIcon>
+                    <Button
+                        Click="AiCreateTile_Click"
+                        Style="{StaticResource AccentActionButtonStyle}"
+                        svc:Localized.Key="CustomWidget.Native.Ai.Button" />
+                </toolkit:SettingsCard>
+
+                <Grid
+                    x:Name="MyWidgetsCardsGrid"
+                    ColumnSpacing="8"
+                    RowSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                </Grid>
+            </StackPanel>
+
+            <!-- Subsection 2: Curated Official Templates (2-Column Native Horizontal Cards) -->
+            <StackPanel Spacing="6">
+                <StackPanel Style="{StaticResource SettingsSubsectionHeaderStyle}">
+                    <TextBlock
+                        x:Name="TemplatesSectionHeaderText"
+                        Style="{StaticResource SettingsSubsectionTitleTextStyle}"
+                        AutomationProperties.HeadingLevel="Level2" />
+                </StackPanel>
+
+                <Grid
+                    x:Name="TemplatesCardsGrid"
+                    ColumnSpacing="8"
+                    RowSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                </Grid>
+            </StackPanel>
+
+            <!-- Subsection 3: Clean Navigation Link to Dedicated AI & Agents Settings -->
+            <StackPanel Spacing="4">
+                <StackPanel Style="{StaticResource SettingsSubsectionHeaderStyle}">
+                    <TextBlock
+                        Style="{StaticResource SettingsSubsectionTitleTextStyle}"
+                        AutomationProperties.HeadingLevel="Level2"
+                        svc:Localized.Key="CustomWidget.Settings.AiSectionHeader" />
+                </StackPanel>
+
+                <toolkit:SettingsCard
+                    x:Name="AiSettingsEntryCard"
+                    HorizontalContentAlignment="Right"
+                    IsClickEnabled="True"
+                    Click="AiSettingsEntryCard_Click"
+                    svc:Localized.DescriptionKey="Settings.AiSettings.Subtitle"
+                    svc:Localized.HeaderKey="Settings.AiSettings.EntryCard.Header">
+                    <toolkit:SettingsCard.HeaderIcon>
+                        <FontIcon Glyph="&#xE945;" />
+                    </toolkit:SettingsCard.HeaderIcon>
+                </toolkit:SettingsCard>
+            </StackPanel>
+        </StackPanel>
+
+        <!-- Drill-in Subview for Per-Widget Native Settings -->
+        <StackPanel
+            x:Name="DetailViewPanel"
+            Spacing="4"
+            Visibility="Collapsed" />
+    </StackPanel>
+</UserControl>

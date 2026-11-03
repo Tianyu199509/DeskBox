@@ -49,22 +49,52 @@
                 </toolkit:SettingsCard.HeaderIcon>
             </toolkit:SettingsCard>
 
-            <toolkit:SettingsCard
-                Click="NestedSettingsButton_Click"
+            <toolkit:SettingsExpander
+                HorizontalContentAlignment="Stretch"
+                IsExpanded="False"
                 Description="{x:Bind FileStack.SettingsSummaryText, Mode=OneWay}"
-                HorizontalContentAlignment="Right"
-                IsClickEnabled="True"
-                Tag="FileStackSettings"
                 svc:Localized.HeaderKey="Settings.FileStacks.Title">
-                <toolkit:SettingsCard.HeaderIcon>
+                <toolkit:SettingsExpander.HeaderIcon>
                     <FontIcon Glyph="&#xE81E;" />
-                </toolkit:SettingsCard.HeaderIcon>
+                </toolkit:SettingsExpander.HeaderIcon>
                 <ComboBox svc:Localized.AutomationNameKey="Settings.FileStacks.OpenMode.Title"
                     MinWidth="{StaticResource SettingsControlMinWidth}"
                     VerticalAlignment="Center"
                     ItemsSource="{x:Bind FileStack.AvailableOpenModeOptions, Mode=OneWay}"
                     controls:SettingsComboBox.Value="{x:Bind FileStack.OpenMode, Mode=TwoWay}" />
-            </toolkit:SettingsCard>
+                <toolkit:SettingsExpander.Items>
+                    <toolkit:SettingsCard
+                        HorizontalContentAlignment="Right"
+                        IsEnabled="{x:Bind FileStack.IsPopoverOpenMode, Mode=OneWay}"
+                        svc:Localized.DescriptionKey="Settings.FileStacks.PopoverLayout.Description"
+                        svc:Localized.HeaderKey="Settings.FileStacks.PopoverLayout.Title">
+                        <ComboBox svc:Localized.AutomationNameKey="Settings.FileStacks.PopoverLayout.Title"
+                            MinWidth="{StaticResource SettingsControlMinWidth}"
+                            ItemsSource="{x:Bind FileStack.AvailablePopoverLayoutOptions, Mode=OneWay}"
+                            controls:SettingsComboBox.Value="{x:Bind FileStack.PopoverLayout, Mode=TwoWay}" />
+                    </toolkit:SettingsCard>
+
+                    <toolkit:SettingsCard
+                        HorizontalContentAlignment="Right"
+                        IsEnabled="{x:Bind FileStack.IsPopoverOpenMode, Mode=OneWay}"
+                        svc:Localized.DescriptionKey="Settings.FileStacks.PopoverStyle.Description"
+                        svc:Localized.HeaderKey="Settings.FileStacks.PopoverStyle.Title"
+                        svc:InfoTip.TitleKey="Settings.FileStacks.PopoverStyle.InfoTip.Title"
+                        svc:InfoTip.BodyKey="Settings.FileStacks.PopoverStyle.InfoTip.Description">
+                        <ComboBox svc:Localized.AutomationNameKey="Settings.FileStacks.PopoverStyle.Title"
+                            MinWidth="{StaticResource SettingsControlMinWidth}"
+                            ItemsSource="{x:Bind FileStack.AvailablePopoverStyleOptions, Mode=OneWay}"
+                            controls:SettingsComboBox.Value="{x:Bind FileStack.PopoverStyle, Mode=TwoWay}" />
+                    </toolkit:SettingsCard>
+
+                    <toolkit:SettingsCard
+                        Click="NestedSettingsButton_Click"
+                        IsClickEnabled="True"
+                        Tag="FileStackSettings"
+                        svc:Localized.DescriptionKey="Settings.FileStacks.MoreSettings.Description"
+                        svc:Localized.HeaderKey="Settings.FileStacks.MoreSettings" />
+                </toolkit:SettingsExpander.Items>
+            </toolkit:SettingsExpander>
 
             <toolkit:SettingsCard
                 HorizontalContentAlignment="Right"

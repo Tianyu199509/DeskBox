@@ -4,16 +4,10 @@ namespace DeskBox.ViewModels;
 
 public partial class SettingsViewModel
 {
-    /// <summary>
-    /// Forwarder for the code-behind paths that refresh the clipboard
-    /// diagnostics line; the line itself lives on the Quick Capture editor.
-    /// </summary>
-    public void RefreshQuickCaptureClipboardDiagnostics() =>
-        _quickCaptureSettingsEditor.RefreshClipboardDiagnostics();
-
     public async Task RefreshQuickCaptureImageCacheInfoAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken = cancellationToken.CanBeCanceled ? cancellationToken : _lifetimeCts.Token;
+        await RefreshQuickCaptureMirrorFolderAsync(cancellationToken);
         if (await _dataActions.GetQuickCaptureImageCacheInfoAsync() is not { } info)
         {
             _quickCaptureSettingsEditor.UpdateImageCachePresentation(
@@ -54,15 +48,21 @@ public partial class SettingsViewModel
         }
     }
 
-    private void OnQuickCaptureClipboardDiagnosticsChanged()
+    public async Task RefreshQuickCaptureMirrorFolderAsync(CancellationToken cancellationToken = default)
     {
-        if (_isDisposed) return;
-        if (App.UiDispatcherQueue is { } dispatcherQueue)
+        try
         {
-            dispatcherQueue.TryEnqueue(RefreshQuickCaptureClipboardDiagnostics);
-            return;
+            cancellationToken.ThrowIfCancellationRequested();
+            string? mirrorPath = await _dataActions.GetQuickCaptureMirrorFolderAsync();
+            _quickCaptureSettingsEditor.UpdateMirrorFolderPresentation(mirrorPath);
         }
-
-        RefreshQuickCaptureClipboardDiagnostics();
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[QuickCapture] Failed to refresh mirror folder path: {ex}");
+            _quickCaptureSettingsEditor.UpdateMirrorFolderPresentation(null);
+        }
     }
 }

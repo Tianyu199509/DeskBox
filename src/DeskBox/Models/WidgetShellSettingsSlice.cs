@@ -57,7 +57,7 @@ public sealed class WidgetShellSettingsSlice
     /// <summary>
     /// Animation effect used when desktop widgets show or hide.
     /// </summary>
-    public string WidgetAnimationEffect { get; set; } = "SlideFade";
+    public string WidgetAnimationEffect { get; set; } = "ScaleFade";
 
     /// <summary>
     /// Animation speed preset used when desktop widgets show or hide.
@@ -68,7 +68,7 @@ public sealed class WidgetShellSettingsSlice
     /// Slide direction for Slide animation effect.
     /// Valid values: <c>"None"</c>, <c>"Left"</c>, <c>"Right"</c>, <c>"Up"</c>, <c>"Down"</c>.
     /// </summary>
-    public string WidgetAnimationSlideDirection { get; set; } = "Right";
+    public string WidgetAnimationSlideDirection { get; set; } = "None";
 
     /// <summary>
     /// Easing intensity for animations.
@@ -89,6 +89,13 @@ public sealed class WidgetShellSettingsSlice
     /// <c>"QuickReveal"</c>.
     /// </summary>
     public string WidgetLayerMode { get; set; } = "Dynamic";
+
+    /// <summary>
+    /// Click-raise scope in Dynamic layer mode: <c>"Single"</c> raises only the
+    /// clicked widget; <c>"Group"</c> raises all visible widgets together when
+    /// any area of a widget is clicked.
+    /// </summary>
+    public string DynamicClickRaiseScope { get; set; } = "Single";
 
     /// <summary>
     /// Whether dynamically layered widgets stay visible when Windows shows the desktop.

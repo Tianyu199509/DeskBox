@@ -238,12 +238,12 @@ public partial class App
         AotShortcutSmokeResult result,
         string resultPath)
     {
-        if (_trayWindow is null)
+        if (_trayHost is null)
         {
             throw new InvalidOperationException("The tray owner window is unavailable.");
         }
 
-        nint ownerHwnd = WindowNative.GetWindowHandle(_trayWindow);
+        nint ownerHwnd = TrayHostWindowHandle;
         if (ownerHwnd == IntPtr.Zero)
         {
             throw new InvalidOperationException("The tray owner HWND is zero.");

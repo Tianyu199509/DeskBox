@@ -1,4 +1,4 @@
-﻿using DeskBox.Controls;
+using DeskBox.Controls;
 using DeskBox.Controls.WidgetContents;
 using DeskBox.Contracts;
 using DeskBox.Helpers;
@@ -70,6 +70,20 @@ public sealed partial class WidgetManager
                 "The widget detach placement preview could not be created.");
         preview.BeginTracking(caption, cornerRadius);
         return preview;
+    }
+
+    internal bool HasWidgetDetachPlacementPreview =>
+        _widgetDetachPlacementPreview is not null;
+
+    internal bool ReleaseIdleWidgetDetachPlacementPreview()
+    {
+        if (_widgetDetachPlacementPreview is not { IsVisible: false })
+        {
+            return false;
+        }
+
+        DisposeWidgetDetachPlacementPreview();
+        return true;
     }
 
     private void DisposeWidgetDetachPlacementPreview()
@@ -221,11 +235,7 @@ public sealed partial class WidgetManager
                 ResolveGroupMemberDisplayName(config),
                 config.WidgetKind,
                 glyph,
-                config.WidgetKind == WidgetKind.File
-                    ? WidgetTitleIconKindNames.FromFileWidget(
-                        config.FollowsDefaultStoragePath)
-                    : WidgetTitleIconKindNames.FromWidgetKind(
-                        config.WidgetKind),
+                WidgetTitleIconKindNames.FromWidgetConfig(config),
                 string.Equals(group.ActiveMemberId, config.Id, StringComparison.Ordinal),
                 customEmoji,
                 customImagePath));
@@ -699,6 +709,8 @@ public sealed partial class WidgetManager
             WidgetKind.Music => "Music.Title",
             WidgetKind.Search => "Search.Title",
             WidgetKind.Glance => "Glance.Title",
+            WidgetKind.Custom => "CustomWidget.Title",
+            WidgetKind.Clipboard => "Clipboard.Title",
             WidgetKind.Tags => "Tags.Title",
             WidgetKind.SystemMonitor => "SystemMonitor.Title",
             _ => null

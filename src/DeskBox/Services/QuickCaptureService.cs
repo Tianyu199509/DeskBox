@@ -1,4 +1,8 @@
+using System.Buffers;
 using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using DeskBox.Helpers;
 using DeskBox.Models;
 using Windows.Graphics.Imaging;
 using Windows.Storage;
@@ -25,21 +29,45 @@ public sealed record QuickCaptureWriteResult(
     bool WasTruncated,
     QuickCaptureItem? Item);
 
-public sealed class QuickCaptureService
+public sealed record QuickCaptureSearchProjection(
+    string Id,
+    string? Title,
+    string Text,
+    string? Url,
+    QuickCaptureItemType Type,
+    bool IsPinned,
+    DateTimeOffset UpdatedAt,
+    IReadOnlyList<TodoAttachment> Attachments);
+
+public sealed partial class QuickCaptureService
 {
     public const int DefaultRecentLimit = 30;
     public const int MinRecentLimit = 10;
     public const int MaxRecentLimit = 100;
+    public const int MaxTombstones = 500;
     public const int MaxItemBodyCharacters = MarkdownDocumentService.MaxCharacters;
+    private const int DefaultSearchProjectionMaxChars = 2048;
+    private const int MaxColdStreamFileBytes = 32 * 1024 * 1024;
+    private const int MaxPendingPrunedTombstoneIds = 4096;
     private const uint ThumbnailMaxPixelSize = 180;
     private static readonly TimeSpan ExportCleanupAge = TimeSpan.FromDays(1);
+    private static readonly TimeSpan UndoAttachmentRetentionWindow = TimeSpan.FromSeconds(30);
+
+    private sealed record UndoAttachmentLease(
+        IReadOnlyList<string> ManagedPaths,
+        DateTimeOffset ExpiresAtUtc);
 
     private readonly QuickCaptureStore _store;
     private readonly Func<string, Task<bool>>? _recycleAttachmentFileAsync;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly object _thumbnailTaskLock = new();
     private readonly Dictionary<string, Task<string?>> _thumbnailTasks = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, UndoAttachmentLease> _undoProtectedAttachmentsByItemId =
+        new(StringComparer.Ordinal);
+    private readonly HashSet<string> _pendingPrunedTombstoneIds =
+        new(StringComparer.OrdinalIgnoreCase);
     private QuickCaptureStoreData? _data;
+    private bool _pendingStartupAttachmentSweep;
 
     public event Action? Changed;
 
@@ -55,6 +83,81 @@ public sealed class QuickCaptureService
     {
         await EnsureLoadedAsync();
         return Clone(_data!);
+    }
+
+    public async Task<(int ActiveCount, int RecentCount)> GetCountsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_data is not null)
+            {
+                return (
+                    _data.Items.Count(item => !item.IsDeleted),
+                    _data.RecentItems.Count(item => !item.IsDeleted));
+            }
+
+            if (TryResolveColdStoreJsonPath() is { } coldJsonPath)
+            {
+                (int ActiveCount, int RecentCount)? streamedCounts =
+                    await TryStreamCountsFromFileAsync(coldJsonPath, cancellationToken).ConfigureAwait(false);
+                if (streamedCounts.HasValue)
+                {
+                    return streamedCounts.Value;
+                }
+            }
+
+            QuickCaptureStoreData coldSnapshot = await _store
+                .LoadAsync()
+                .WaitAsync(cancellationToken)
+                .ConfigureAwait(false);
+            return (
+                coldSnapshot.Items.Count(item => !item.IsDeleted),
+                coldSnapshot.RecentItems.Count(item => !item.IsDeleted));
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<IReadOnlyList<QuickCaptureSearchProjection>> GetSearchIndexProjectionsAsync(
+        int maxBodyChars = DefaultSearchProjectionMaxChars,
+        CancellationToken cancellationToken = default)
+    {
+        int effectiveMaxChars = maxBodyChars > 0 ? maxBodyChars : DefaultSearchProjectionMaxChars;
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_data is not null)
+            {
+                return ProjectSearchItems(_data.Items, effectiveMaxChars, cancellationToken);
+            }
+
+            if (TryResolveColdStoreJsonPath() is { } coldJsonPath)
+            {
+                IReadOnlyList<QuickCaptureSearchProjection>? streamed =
+                    await TryStreamSearchProjectionsFromFileAsync(
+                        coldJsonPath,
+                        effectiveMaxChars,
+                        cancellationToken).ConfigureAwait(false);
+                if (streamed is not null)
+                {
+                    return streamed;
+                }
+            }
+
+            QuickCaptureStoreData coldSnapshot = await _store
+                .LoadAsync()
+                .WaitAsync(cancellationToken)
+                .ConfigureAwait(false);
+            return ProjectSearchItems(coldSnapshot.Items, effectiveMaxChars, cancellationToken);
+        }
+        finally
+        {
+            _gate.Release();
+        }
     }
 
     public async Task<QuickCaptureItem> AddItemAsync(string body)
@@ -118,6 +221,7 @@ public sealed class QuickCaptureService
                 Attachments = attachments,
                 AppearancePreset = NormalizeAppearancePreset(appearancePreset),
                 SourceKind = QuickCaptureSourceKind.Manual,
+                Tags = QuickCaptureTagParser.MergeInlineTags(null, null, null, normalizedTitle, normalizedBody),
                 IsPinned = pin,
                 IsRecent = false,
                 SortOrder = 0,
@@ -169,6 +273,7 @@ public sealed class QuickCaptureService
                 return new QuickCaptureWriteResult(false, false, null);
             }
 
+            string previousBody = item.Body;
             string normalizedBody = NormalizeBody(body, item.ContentFormat);
             if (string.IsNullOrWhiteSpace(normalizedBody))
             {
@@ -182,6 +287,7 @@ public sealed class QuickCaptureService
                 item.Attachments);
             normalizedBody = TruncateBody(normalizedBody, out bool wasTruncated);
             item.Body = normalizedBody;
+            item.Tags = QuickCaptureTagParser.MergeInlineTags(item.Tags, item.Title, previousBody, item.Title, normalizedBody);
             item.Type = TryDetectUrl(normalizedBody, out string? url) ? QuickCaptureItemType.Link : QuickCaptureItemType.Text;
             item.Url = url;
             item.UpdatedAt = DateTimeOffset.UtcNow;
@@ -194,109 +300,7 @@ public sealed class QuickCaptureService
         }
     }
 
-    public async Task<QuickCaptureItem?> AddRecentClipboardItemAsync(string body, int maxRecentItems)
-    {
-        string normalizedBody = NormalizeBody(body);
-        if (string.IsNullOrWhiteSpace(normalizedBody) || ShouldIgnoreClipboardText(normalizedBody))
-        {
-            return null;
-        }
 
-        await _gate.WaitAsync();
-        try
-        {
-            await EnsureLoadedCoreAsync();
-            if (_data!.RecentItems.FirstOrDefault(item => !item.IsDeleted) is { } latest &&
-                string.Equals(latest.Body, normalizedBody, StringComparison.Ordinal))
-            {
-                return null;
-            }
-
-            _data.RecentItems.RemoveAll(item => string.Equals(item.Body, normalizedBody, StringComparison.Ordinal));
-            var now = DateTimeOffset.UtcNow;
-            var item = new QuickCaptureItem
-            {
-                Body = normalizedBody,
-                ContentFormat = TextContentFormat.PlainText,
-                Type = TryDetectUrl(normalizedBody, out string? url) ? QuickCaptureItemType.Link : QuickCaptureItemType.Text,
-                Url = url,
-                SourceKind = QuickCaptureSourceKind.Clipboard,
-                IsRecent = true,
-                SortOrder = 0,
-                CreatedAt = now,
-                UpdatedAt = now
-            };
-
-            foreach (var existing in _data.RecentItems)
-            {
-                existing.SortOrder++;
-            }
-
-            _data.RecentItems.Insert(0, item);
-            TrimRecentItemsCore(NormalizeRecentLimit(maxRecentItems));
-            await SaveCoreAsync();
-            CleanupUnusedImageCacheCore();
-            return Clone(item);
-        }
-        finally
-        {
-            _gate.Release();
-        }
-    }
-
-    public async Task<QuickCaptureItem?> AddRecentClipboardImageAsync(byte[] imagePngBytes, int maxRecentItems)
-    {
-        if (imagePngBytes.Length == 0)
-        {
-            return null;
-        }
-
-        string contentHash = ComputeContentHash(imagePngBytes);
-
-        await _gate.WaitAsync();
-        try
-        {
-            await EnsureLoadedCoreAsync();
-            if (_data!.RecentItems.FirstOrDefault(item => !item.IsDeleted) is { } latest &&
-                string.Equals(latest.ContentHash, contentHash, StringComparison.Ordinal))
-            {
-                return null;
-            }
-
-            string imagePath = await SaveImageAsync(imagePngBytes, contentHash);
-            _data.RecentItems.RemoveAll(item => string.Equals(item.ContentHash, contentHash, StringComparison.Ordinal));
-            var now = DateTimeOffset.UtcNow;
-            var item = new QuickCaptureItem
-            {
-                Body = "Image",
-                ContentFormat = TextContentFormat.PlainText,
-                Type = QuickCaptureItemType.Image,
-                ImagePath = imagePath,
-                ContentHash = contentHash,
-                Attachments = [CreateImageAttachment(imagePath, now)],
-                SourceKind = QuickCaptureSourceKind.Clipboard,
-                IsRecent = true,
-                SortOrder = 0,
-                CreatedAt = now,
-                UpdatedAt = now
-            };
-
-            foreach (var existing in _data.RecentItems)
-            {
-                existing.SortOrder++;
-            }
-
-            _data.RecentItems.Insert(0, item);
-            TrimRecentItemsCore(NormalizeRecentLimit(maxRecentItems));
-            await SaveCoreAsync();
-            CleanupUnusedImageCacheCore();
-            return Clone(item);
-        }
-        finally
-        {
-            _gate.Release();
-        }
-    }
 
     public async Task<QuickCaptureItem?> AddImageFileItemAsync(
         string imagePath,
@@ -373,66 +377,7 @@ public sealed class QuickCaptureService
         return exportPath;
     }
 
-    public async Task<QuickCaptureItem?> SaveRecentItemToRecordsAsync(string recentItemId, bool pin)
-    {
-        if (string.IsNullOrWhiteSpace(recentItemId))
-        {
-            return null;
-        }
 
-        await _gate.WaitAsync();
-        try
-        {
-            await EnsureLoadedCoreAsync();
-            var recentItem = _data!.RecentItems.FirstOrDefault(entry =>
-                string.Equals(entry.Id, recentItemId, StringComparison.Ordinal) &&
-                !entry.IsDeleted);
-            if (recentItem is null ||
-                (string.IsNullOrWhiteSpace(recentItem.Body) &&
-                 string.IsNullOrWhiteSpace(recentItem.ImagePath)))
-            {
-                return null;
-            }
-
-            var now = DateTimeOffset.UtcNow;
-            var item = new QuickCaptureItem
-            {
-                Body = recentItem.Body,
-                ContentFormat = TextContentFormat.PlainText,
-                Title = recentItem.Title,
-                Type = recentItem.Type,
-                Url = recentItem.Url,
-                ImagePath = recentItem.ImagePath,
-                ContentHash = recentItem.ContentHash,
-                Attachments = recentItem.Attachments.Select(attachment => attachment.Clone()).ToList(),
-                SourceKind = QuickCaptureSourceKind.Clipboard,
-                IsPinned = pin,
-                IsRecent = false,
-                SortOrder = 0,
-                PinnedSortOrder = pin ? 0 : -1,
-                CreatedAt = now,
-                UpdatedAt = now
-            };
-
-            foreach (var existing in _data.Items)
-            {
-                existing.SortOrder++;
-                if (pin && existing.IsPinned)
-                {
-                    existing.PinnedSortOrder++;
-                }
-            }
-
-            _data.Items.Insert(0, item);
-            NormalizePinnedSortOrders(_data.Items);
-            await SaveCoreAsync();
-            return Clone(item);
-        }
-        finally
-        {
-            _gate.Release();
-        }
-    }
 
     public async Task<bool> SetPinnedAsync(string itemId, bool isPinned)
     {
@@ -807,6 +752,7 @@ public sealed class QuickCaptureService
             }
 
             var deletedItem = Clone(item);
+            RegisterUndoAttachmentProtectionCore(deletedItem);
             // Tombstone, not physical removal: a merge restore treats an
             // absent id as "unknown to this device" and would resurrect the
             // item. The stub keeps the delete winning by LWW while stripping
@@ -853,6 +799,11 @@ public sealed class QuickCaptureService
             var snapshots = itemsToDelete
                 .Select(item => new QuickCaptureDeletedItemSnapshot(Clone(item), isRecent))
                 .ToList();
+            foreach (QuickCaptureDeletedItemSnapshot snapshot in snapshots)
+            {
+                RegisterUndoAttachmentProtectionCore(snapshot.Item);
+            }
+
             var deletedAt = DateTimeOffset.UtcNow;
             foreach (var item in itemsToDelete)
             {
@@ -882,36 +833,7 @@ public sealed class QuickCaptureService
         }
     }
 
-    public async Task<QuickCaptureDeletedItemSnapshot?> DeleteRecentItemAsync(string itemId)
-    {
-        if (string.IsNullOrWhiteSpace(itemId))
-        {
-            return null;
-        }
 
-        await _gate.WaitAsync();
-        try
-        {
-            await EnsureLoadedCoreAsync();
-            var item = _data!.RecentItems.FirstOrDefault(entry => string.Equals(entry.Id, itemId, StringComparison.Ordinal));
-            if (item is null)
-            {
-                return null;
-            }
-
-            var deletedItem = Clone(item);
-            // Content-stripped tombstone (see DeleteItemAsync).
-            int recentIndex = _data.RecentItems.IndexOf(item);
-            _data.RecentItems[recentIndex] = CreateTombstoneStub(item, DateTimeOffset.UtcNow, isRecent: true);
-            NormalizeSortOrders(_data.RecentItems);
-            await SaveCoreAsync();
-            return new QuickCaptureDeletedItemSnapshot(deletedItem, IsRecent: true);
-        }
-        finally
-        {
-            _gate.Release();
-        }
-    }
 
     public async Task<bool> RestoreDeletedItemAsync(QuickCaptureDeletedItemSnapshot? snapshot)
     {
@@ -947,6 +869,7 @@ public sealed class QuickCaptureService
                     NormalizePinnedSortOrders(_data.Items);
                 }
 
+                _undoProtectedAttachmentsByItemId.Remove(resurrected.Id);
                 await SaveCoreAsync();
                 return true;
             }
@@ -961,6 +884,7 @@ public sealed class QuickCaptureService
                 NormalizePinnedSortOrders(_data.Items);
             }
 
+            _undoProtectedAttachmentsByItemId.Remove(item.Id);
             await SaveCoreAsync();
             return true;
         }
@@ -970,12 +894,55 @@ public sealed class QuickCaptureService
         }
     }
 
-    public async Task ClearAsync()
+    public async Task ReleaseDeletedItemSnapshotsAsync(
+        IEnumerable<QuickCaptureDeletedItemSnapshot>? snapshots)
     {
+        if (snapshots is null)
+        {
+            return;
+        }
+
+        HashSet<string>? referencedPaths = null;
+        HashSet<string>? tombstoneIds = null;
         await _gate.WaitAsync();
         try
         {
             await EnsureLoadedCoreAsync();
+            foreach (QuickCaptureDeletedItemSnapshot snapshot in snapshots)
+            {
+                if (snapshot?.Item?.Id is { Length: > 0 } id)
+                {
+                    _undoProtectedAttachmentsByItemId.Remove(id);
+                }
+            }
+
+            (referencedPaths, tombstoneIds) = SnapshotAttachmentSweepInputsCore();
+        }
+        finally
+        {
+            _gate.Release();
+        }
+
+        if (referencedPaths is not null && tombstoneIds is not null)
+        {
+            await AttachmentStorageService.RecycleUnreferencedManagedCopiesAsync(
+                _store.AttachmentDirectory,
+                referencedPaths,
+                _recycleAttachmentFileAsync,
+                tombstoneIds,
+                TimeSpan.FromMinutes(2));
+        }
+    }
+
+    public async Task ClearAsync()
+    {
+        HashSet<string>? referencedPaths = null;
+        HashSet<string>? tombstoneIds = null;
+        await _gate.WaitAsync();
+        try
+        {
+            await EnsureLoadedCoreAsync();
+            _undoProtectedAttachmentsByItemId.Clear();
             // Stub tombstones keep the wipe winning merge restores without
             // retaining cleared content in the store file.
             var clearedAt = DateTimeOffset.UtcNow;
@@ -987,11 +954,21 @@ public sealed class QuickCaptureService
                 .ToList();
             await SaveCoreAsync();
             CleanupUnusedImageCacheCore();
-            TryDeleteDirectory(_store.AttachmentDirectory);
+            (referencedPaths, tombstoneIds) = SnapshotAttachmentSweepInputsCore();
         }
         finally
         {
             _gate.Release();
+        }
+
+        if (referencedPaths is not null && tombstoneIds is not null)
+        {
+            await AttachmentStorageService.RecycleUnreferencedManagedCopiesAsync(
+                _store.AttachmentDirectory,
+                referencedPaths,
+                _recycleAttachmentFileAsync,
+                tombstoneIds,
+                TimeSpan.Zero);
         }
     }
 
@@ -1014,27 +991,7 @@ public sealed class QuickCaptureService
         }
     }
 
-    public async Task TrimRecentItemsAsync(int maxRecentItems,
-        CancellationToken cancellationToken = default)
-    {
-        await _gate.WaitAsync(cancellationToken);
-        try
-        {
-            await EnsureLoadedCoreAsync();
-            cancellationToken.ThrowIfCancellationRequested();
-            int before = _data!.RecentItems.Count;
-            TrimRecentItemsCore(NormalizeRecentLimit(maxRecentItems));
-            if (_data.RecentItems.Count != before)
-            {
-                await SaveCoreAsync();
-                CleanupUnusedImageCacheCore();
-            }
-        }
-        finally
-        {
-            _gate.Release();
-        }
-    }
+
 
     public async Task SetCurrentViewAsync(QuickCaptureViewMode viewMode)
     {
@@ -1072,16 +1029,32 @@ public sealed class QuickCaptureService
 
     public async Task<QuickCaptureImageCacheCleanupResult> CleanupUnusedImageCacheAsync()
     {
+        QuickCaptureImageCacheCleanupResult result;
+        HashSet<string>? referencedPaths = null;
+        HashSet<string>? tombstoneIds = null;
         await _gate.WaitAsync();
         try
         {
             await EnsureLoadedCoreAsync();
-            return CleanupUnusedImageCacheCore();
+            result = CleanupUnusedImageCacheCore();
+            (referencedPaths, tombstoneIds) = SnapshotAttachmentSweepInputsCore();
         }
         finally
         {
             _gate.Release();
         }
+
+        if (referencedPaths is not null && tombstoneIds is not null)
+        {
+            await AttachmentStorageService.RecycleUnreferencedManagedCopiesAsync(
+                _store.AttachmentDirectory,
+                referencedPaths,
+                _recycleAttachmentFileAsync,
+                tombstoneIds,
+                TimeSpan.FromMinutes(2));
+        }
+
+        return result;
     }
 
     public Task<string?> GetOrCreateImageThumbnailPathAsync(string? imagePath)
@@ -1304,6 +1277,7 @@ public sealed class QuickCaptureService
                 effectiveFormat,
                 item.Attachments);
             normalizedBody = TruncateBody(normalizedBody, out bool wasTruncated);
+            item.Tags = QuickCaptureTagParser.MergeInlineTags(item.Tags, item.Title, item.Body, normalizedTitle, normalizedBody);
             item.Title = normalizedTitle;
             item.Body = normalizedBody;
             item.ContentFormat = effectiveFormat;
@@ -1386,14 +1360,31 @@ public sealed class QuickCaptureService
 
     private async Task EnsureLoadedAsync()
     {
+        HashSet<string>? startupReferencedPaths = null;
+        HashSet<string>? startupTombstoneIds = null;
         await _gate.WaitAsync();
         try
         {
             await EnsureLoadedCoreAsync();
+            if (_pendingStartupAttachmentSweep)
+            {
+                _pendingStartupAttachmentSweep = false;
+                (startupReferencedPaths, startupTombstoneIds) = SnapshotAttachmentSweepInputsCore();
+            }
         }
         finally
         {
             _gate.Release();
+        }
+
+        if (startupReferencedPaths is not null && startupTombstoneIds is not null)
+        {
+            await AttachmentStorageService.RecycleUnreferencedManagedCopiesAsync(
+                _store.AttachmentDirectory,
+                startupReferencedPaths,
+                _recycleAttachmentFileAsync,
+                startupTombstoneIds,
+                TimeSpan.Zero);
         }
     }
 
@@ -1405,6 +1396,7 @@ public sealed class QuickCaptureService
         }
 
         _data = await _store.LoadAsync();
+        _pendingStartupAttachmentSweep = _recycleAttachmentFileAsync is not null;
         bool migrated = false;
         foreach (QuickCaptureItem item in _data.Items.Where(item => !item.IsDeleted))
         {
@@ -1419,6 +1411,21 @@ public sealed class QuickCaptureService
                 item.Body = body;
                 migrated = true;
             }
+        }
+
+        foreach (QuickCaptureItem item in _data.Items.Where(item => !item.IsDeleted && !item.IsRecent))
+        {
+            List<string> syncedTags = QuickCaptureTagParser.MergeInlineTags(item.Tags, null, null, item.Title, item.Body);
+            if (!syncedTags.SequenceEqual(item.Tags ?? [], StringComparer.Ordinal))
+            {
+                item.Tags = syncedTags;
+                migrated = true;
+            }
+        }
+
+        if (PruneExcessTombstonesCore(_data))
+        {
+            migrated = true;
         }
 
         if (migrated)
@@ -1455,11 +1462,80 @@ public sealed class QuickCaptureService
 
     private async Task SaveCoreAsync(bool notify = true)
     {
+        PruneExcessTombstonesCore(_data!);
         await _store.SaveAsync(_data!);
         if (notify)
         {
             Changed?.Invoke();
         }
+    }
+
+    private bool PruneExcessTombstonesCore(QuickCaptureStoreData data)
+    {
+        PruneExpiredUndoAttachmentProtectionCore();
+        int itemsTombstones = data.Items.Count(item => item is not null && item.IsDeleted);
+        int recentTombstones = data.RecentItems.Count(item => item is not null && item.IsDeleted);
+        if (itemsTombstones + recentTombstones <= MaxTombstones)
+        {
+            return false;
+        }
+
+        var allTombstones = new List<(QuickCaptureItem Item, bool ProtectedByUndo, DateTimeOffset Timestamp, int Order)>(
+            itemsTombstones + recentTombstones);
+        int order = 0;
+        foreach (QuickCaptureItem item in data.Items)
+        {
+            if (item is { IsDeleted: true })
+            {
+                bool undoProtected = !string.IsNullOrWhiteSpace(item.Id) &&
+                                     _undoProtectedAttachmentsByItemId.ContainsKey(item.Id);
+                DateTimeOffset ts = item.UpdatedAt != default ? item.UpdatedAt : item.CreatedAt;
+                allTombstones.Add((item, undoProtected, ts, order++));
+            }
+        }
+
+        foreach (QuickCaptureItem item in data.RecentItems)
+        {
+            if (item is { IsDeleted: true })
+            {
+                bool undoProtected = !string.IsNullOrWhiteSpace(item.Id) &&
+                                     _undoProtectedAttachmentsByItemId.ContainsKey(item.Id);
+                DateTimeOffset ts = item.UpdatedAt != default ? item.UpdatedAt : item.CreatedAt;
+                allTombstones.Add((item, undoProtected, ts, order++));
+            }
+        }
+
+        var kept = new HashSet<QuickCaptureItem>(ReferenceEqualityComparer.Instance);
+        foreach (var entry in allTombstones
+                     .OrderByDescending(entry => entry.ProtectedByUndo)
+                     .ThenByDescending(entry => entry.Timestamp)
+                     .ThenBy(entry => entry.Order))
+        {
+            if (kept.Count < MaxTombstones || entry.ProtectedByUndo)
+            {
+                kept.Add(entry.Item);
+            }
+            else if (!string.IsNullOrWhiteSpace(entry.Item.Id) &&
+                     _pendingPrunedTombstoneIds.Count < MaxPendingPrunedTombstoneIds)
+            {
+                _pendingPrunedTombstoneIds.Add(entry.Item.Id);
+            }
+        }
+
+        int removedFromItems = data.Items.RemoveAll(item => item is not null && item.IsDeleted && !kept.Contains(item));
+        int removedFromRecent = data.RecentItems.RemoveAll(item => item is not null && item.IsDeleted && !kept.Contains(item));
+        if (removedFromItems > 0)
+        {
+            NormalizeSortOrders(data.Items);
+            NormalizePinnedSortOrders(data.Items);
+        }
+
+        if (removedFromRecent > 0)
+        {
+            NormalizeSortOrders(data.RecentItems);
+        }
+
+        return removedFromItems > 0 || removedFromRecent > 0;
     }
 
     private QuickCaptureImageCacheInfo GetImageCacheInfoCore()
@@ -1530,10 +1606,7 @@ public sealed class QuickCaptureService
         return Math.Clamp(value, MinRecentLimit, MaxRecentLimit);
     }
 
-    private bool ShouldIgnoreClipboardText(string body)
-    {
-        return DeskBoxClipboardWriteScope.ShouldIgnoreText(body);
-    }
+
 
     private static bool TryDetectUrl(string body, out string? url)
     {
@@ -1667,6 +1740,7 @@ public sealed class QuickCaptureService
         {
             Version = data.Version,
             CurrentView = data.CurrentView,
+            MirrorFolderPath = data.MirrorFolderPath,
             Items = data.Items.Select(Clone).ToList(),
             RecentItems = data.RecentItems.Select(Clone).ToList()
         };
@@ -1719,41 +1793,7 @@ public sealed class QuickCaptureService
             UpdatedAt = deletedAt
         };
 
-    private void TrimRecentItemsCore(int maxRecentItems)
-    {
-        // Only live entries compete for the recent window; tombstones are
-        // kept outside it so a trim can never drop delete protection.
-        var liveItems = _data!.RecentItems
-            .Where(item => !item.IsDeleted &&
-                           (!string.IsNullOrWhiteSpace(item.Body) ||
-                            (item.Type == QuickCaptureItemType.Image && !string.IsNullOrWhiteSpace(item.ImagePath))))
-            .OrderBy(item => item.SortOrder)
-            .ThenByDescending(item => item.UpdatedAt)
-            .Take(maxRecentItems)
-            .ToList();
-        var tombstoneItems = _data.RecentItems
-            .Where(item => item is not null && item.IsDeleted)
-            .GroupBy(item => item.Id, StringComparer.Ordinal)
-            .Select(group => group.OrderByDescending(item => item.UpdatedAt).First())
-            .ToList();
 
-        _data.RecentItems = liveItems.Concat(tombstoneItems).ToList();
-
-        NormalizeSortOrders(_data.RecentItems);
-    }
-
-    private async Task<string> SaveImageAsync(byte[] imagePngBytes, string contentHash)
-    {
-        Directory.CreateDirectory(_store.ImageDirectory);
-        string imagePath = Path.Combine(_store.ImageDirectory, $"{contentHash}.png");
-        if (!File.Exists(imagePath))
-        {
-            await File.WriteAllBytesAsync(imagePath, imagePngBytes);
-        }
-
-        await CreateImageThumbnailAsync(imagePath);
-        return imagePath;
-    }
 
     private static TodoAttachment CreateImageAttachment(string imagePath, DateTimeOffset addedAt)
     {
@@ -1775,19 +1815,113 @@ public sealed class QuickCaptureService
         return normalizedPath.StartsWith(normalizedDirectory, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static void TryDeleteDirectory(string directory)
+    private void RegisterUndoAttachmentProtectionCore(QuickCaptureItem item)
     {
-        try
+        PruneExpiredUndoAttachmentProtectionCore();
+        if (item.Attachments is not { Count: > 0 })
         {
-            if (Directory.Exists(directory))
+            return;
+        }
+
+        var managedPaths = new List<string>();
+        foreach (TodoAttachment attachment in item.Attachments)
+        {
+            if (attachment is not { IsManagedCopy: true } ||
+                string.IsNullOrWhiteSpace(attachment.FilePath) ||
+                IsPathInsideDirectory(attachment.FilePath, _store.ImageDirectory))
             {
-                Directory.Delete(directory, recursive: true);
+                continue;
+            }
+
+            try
+            {
+                if (IsPathInsideDirectory(attachment.FilePath, _store.AttachmentDirectory))
+                {
+                    managedPaths.Add(Path.GetFullPath(attachment.FilePath));
+                }
+            }
+            catch
+            {
+                // Ignore malformed paths.
             }
         }
-        catch (Exception ex)
+
+        if (managedPaths.Count > 0)
         {
-            App.Log($"[QuickCaptureService] Failed to clear attachment directory: {ex.Message}");
+            _undoProtectedAttachmentsByItemId[item.Id] = new UndoAttachmentLease(
+                managedPaths,
+                DateTimeOffset.UtcNow + UndoAttachmentRetentionWindow);
         }
+    }
+
+    private void PruneExpiredUndoAttachmentProtectionCore()
+    {
+        if (_undoProtectedAttachmentsByItemId.Count == 0)
+        {
+            return;
+        }
+
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        var expiredIds = _undoProtectedAttachmentsByItemId
+            .Where(pair => pair.Value.ExpiresAtUtc <= now)
+            .Select(pair => pair.Key)
+            .ToList();
+        foreach (string id in expiredIds)
+        {
+            _undoProtectedAttachmentsByItemId.Remove(id);
+        }
+    }
+
+    private (HashSet<string> ReferencedPaths, HashSet<string> TombstoneIds) SnapshotAttachmentSweepInputsCore()
+    {
+        PruneExpiredUndoAttachmentProtectionCore();
+        var referencedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (_data is not null)
+        {
+            foreach (TodoAttachment attachment in _data.Items
+                         .Concat(_data.RecentItems)
+                         .Where(item => item is not null && !item.IsDeleted)
+                         .SelectMany(item => item.Attachments ?? []))
+            {
+                if (attachment is null || string.IsNullOrWhiteSpace(attachment.FilePath))
+                {
+                    continue;
+                }
+
+                referencedPaths.Add(NormalizePath(attachment.FilePath));
+            }
+        }
+
+        foreach (UndoAttachmentLease lease in _undoProtectedAttachmentsByItemId.Values)
+        {
+            foreach (string path in lease.ManagedPaths)
+            {
+                referencedPaths.Add(path);
+            }
+        }
+
+        var tombstoneIds = (_data?.Items ?? [])
+            .Concat(_data?.RecentItems ?? [])
+            .Where(item => item is not null &&
+                           item.IsDeleted &&
+                           !string.IsNullOrWhiteSpace(item.Id) &&
+                           !_undoProtectedAttachmentsByItemId.ContainsKey(item.Id))
+            .Select(item => item.Id)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (_pendingPrunedTombstoneIds.Count > 0)
+        {
+            foreach (string prunedId in _pendingPrunedTombstoneIds)
+            {
+                if (!_undoProtectedAttachmentsByItemId.ContainsKey(prunedId))
+                {
+                    tombstoneIds.Add(prunedId);
+                }
+            }
+
+            _pendingPrunedTombstoneIds.Clear();
+        }
+
+        return (referencedPaths, tombstoneIds);
     }
 
     private async Task<string> SaveImageFileAsync(string sourceImagePath)
@@ -1988,5 +2122,977 @@ public sealed class QuickCaptureService
         {
             item.PinnedSortOrder = -1;
         }
+    }
+
+    private string? TryResolveColdStoreJsonPath()
+    {
+        try
+        {
+            string? storeRoot = Path.GetDirectoryName(_store.ImageDirectory);
+            if (!string.IsNullOrWhiteSpace(storeRoot))
+            {
+                string directCandidate = Path.Combine(storeRoot, "quick-capture.json");
+                if (File.Exists(directCandidate))
+                {
+                    return directCandidate;
+                }
+
+                string folderName = Path.GetFileName(
+                    storeRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+                if (string.Equals(folderName, "quick-capture", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(folderName, "QuickCapture", StringComparison.OrdinalIgnoreCase))
+                {
+                    string? parentDir = Path.GetDirectoryName(storeRoot);
+                    if (!string.IsNullOrWhiteSpace(parentDir))
+                    {
+                        string parentCandidate = Path.Combine(parentDir, "quick-capture.json");
+                        if (File.Exists(parentCandidate))
+                        {
+                            return parentCandidate;
+                        }
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // Fall back to _store.LoadAsync() if path probing fails.
+        }
+
+        return null;
+    }
+
+    private static IReadOnlyList<QuickCaptureSearchProjection> ProjectSearchItems(
+        IReadOnlyList<QuickCaptureItem> items,
+        int maxBodyChars,
+        CancellationToken cancellationToken)
+    {
+        var projections = new List<QuickCaptureSearchProjection>(items.Count);
+        foreach (QuickCaptureItem item in items)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (item is null || item.IsDeleted || string.IsNullOrWhiteSpace(item.Id))
+            {
+                continue;
+            }
+
+            string? title = item.Title is { Length: > 0 } rawTitle
+                ? TruncateForProjection(rawTitle, maxBodyChars)
+                : null;
+            string text = TruncateForProjection(item.Body, maxBodyChars);
+            string? url = item.Url is { Length: > 0 } rawUrl
+                ? TruncateForProjection(rawUrl, maxBodyChars)
+                : null;
+            IReadOnlyList<TodoAttachment> attachments = item.Attachments is { Count: > 0 }
+                ? item.Attachments.Select(attachment => attachment.Clone()).ToList()
+                : [];
+            DateTimeOffset updatedAt = item.UpdatedAt != default ? item.UpdatedAt : item.CreatedAt;
+
+            projections.Add(new QuickCaptureSearchProjection(
+                item.Id,
+                title,
+                text,
+                url,
+                item.Type,
+                item.IsPinned,
+                updatedAt,
+                attachments));
+        }
+
+        return projections;
+    }
+
+    private static async Task<IReadOnlyList<QuickCaptureSearchProjection>?> TryStreamSearchProjectionsFromFileAsync(
+        string filePath,
+        int maxBodyChars,
+        CancellationToken cancellationToken)
+    {
+        byte[]? rented = null;
+        try
+        {
+            await using var stream = new FileStream(
+                filePath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete,
+                bufferSize: 16 * 1024,
+                FileOptions.Asynchronous | FileOptions.SequentialScan);
+            long length = stream.Length;
+            if (length <= 0 || length > MaxColdStreamFileBytes)
+            {
+                return null;
+            }
+
+            int byteLength = (int)length;
+            rented = ArrayPool<byte>.Shared.Rent(byteLength);
+            int totalRead = 0;
+            while (totalRead < byteLength)
+            {
+                int read = await stream
+                    .ReadAsync(rented.AsMemory(totalRead, byteLength - totalRead), cancellationToken)
+                    .ConfigureAwait(false);
+                if (read == 0)
+                {
+                    break;
+                }
+
+                totalRead += read;
+            }
+
+            return ParseSearchProjectionsFromUtf8(
+                rented.AsSpan(0, totalRead),
+                maxBodyChars,
+                cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return null;
+        }
+        finally
+        {
+            if (rented is not null)
+            {
+                ArrayPool<byte>.Shared.Return(rented);
+            }
+        }
+    }
+
+    private static async Task<(int ActiveCount, int RecentCount)?> TryStreamCountsFromFileAsync(
+        string filePath,
+        CancellationToken cancellationToken)
+    {
+        byte[]? rented = null;
+        try
+        {
+            await using var stream = new FileStream(
+                filePath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete,
+                bufferSize: 16 * 1024,
+                FileOptions.Asynchronous | FileOptions.SequentialScan);
+            long length = stream.Length;
+            if (length <= 0 || length > MaxColdStreamFileBytes)
+            {
+                return null;
+            }
+
+            int byteLength = (int)length;
+            rented = ArrayPool<byte>.Shared.Rent(byteLength);
+            int totalRead = 0;
+            while (totalRead < byteLength)
+            {
+                int read = await stream
+                    .ReadAsync(rented.AsMemory(totalRead, byteLength - totalRead), cancellationToken)
+                    .ConfigureAwait(false);
+                if (read == 0)
+                {
+                    break;
+                }
+
+                totalRead += read;
+            }
+
+            return ParseCountsFromUtf8(rented.AsSpan(0, totalRead), cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return null;
+        }
+        finally
+        {
+            if (rented is not null)
+            {
+                ArrayPool<byte>.Shared.Return(rented);
+            }
+        }
+    }
+
+    private static IReadOnlyList<QuickCaptureSearchProjection> ParseSearchProjectionsFromUtf8(
+        ReadOnlySpan<byte> utf8Json,
+        int maxBodyChars,
+        CancellationToken cancellationToken)
+    {
+        if (utf8Json.StartsWith((ReadOnlySpan<byte>)[0xEF, 0xBB, 0xBF]))
+        {
+            utf8Json = utf8Json[3..];
+        }
+
+        var reader = new Utf8JsonReader(
+            utf8Json,
+            new JsonReaderOptions
+            {
+                AllowTrailingCommas = true,
+                CommentHandling = JsonCommentHandling.Skip
+            });
+        if (!reader.Read() || reader.TokenType != JsonTokenType.StartObject)
+        {
+            throw new JsonException("Expected QuickCaptureStoreData JSON object.");
+        }
+
+        var results = new List<QuickCaptureSearchProjection>();
+        while (reader.Read() && reader.TokenType != JsonTokenType.EndObject)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (reader.TokenType != JsonTokenType.PropertyName)
+            {
+                continue;
+            }
+
+            bool isItems = PropertyEqualsIgnoreCase(ref reader, "items"u8, "items");
+            if (!reader.Read())
+            {
+                break;
+            }
+
+            if (isItems && reader.TokenType == JsonTokenType.StartArray)
+            {
+                while (reader.Read() && reader.TokenType != JsonTokenType.EndArray)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (reader.TokenType == JsonTokenType.StartObject)
+                    {
+                        if (ReadProjectedItem(ref reader, maxBodyChars) is { } projection)
+                        {
+                            results.Add(projection);
+                        }
+                    }
+                    else
+                    {
+                        reader.Skip();
+                    }
+                }
+            }
+            else
+            {
+                reader.Skip();
+            }
+        }
+
+        return results;
+    }
+
+    private static (int ActiveCount, int RecentCount) ParseCountsFromUtf8(
+        ReadOnlySpan<byte> utf8Json,
+        CancellationToken cancellationToken)
+    {
+        if (utf8Json.StartsWith((ReadOnlySpan<byte>)[0xEF, 0xBB, 0xBF]))
+        {
+            utf8Json = utf8Json[3..];
+        }
+
+        var reader = new Utf8JsonReader(
+            utf8Json,
+            new JsonReaderOptions
+            {
+                AllowTrailingCommas = true,
+                CommentHandling = JsonCommentHandling.Skip
+            });
+        if (!reader.Read() || reader.TokenType != JsonTokenType.StartObject)
+        {
+            throw new JsonException("Expected QuickCaptureStoreData JSON object.");
+        }
+
+        int activeCount = 0;
+        int recentCount = 0;
+        while (reader.Read() && reader.TokenType != JsonTokenType.EndObject)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (reader.TokenType != JsonTokenType.PropertyName)
+            {
+                continue;
+            }
+
+            bool isItems = PropertyEqualsIgnoreCase(ref reader, "items"u8, "items");
+            bool isRecentItems = !isItems &&
+                                 PropertyEqualsIgnoreCase(ref reader, "recentItems"u8, "recentItems");
+            if (!reader.Read())
+            {
+                break;
+            }
+
+            if ((isItems || isRecentItems) && reader.TokenType == JsonTokenType.StartArray)
+            {
+                int count = CountNonDeletedArrayItems(ref reader, cancellationToken);
+                if (isItems)
+                {
+                    activeCount = count;
+                }
+                else
+                {
+                    recentCount = count;
+                }
+            }
+            else
+            {
+                reader.Skip();
+            }
+        }
+
+        return (activeCount, recentCount);
+    }
+
+    private static int CountNonDeletedArrayItems(
+        ref Utf8JsonReader reader,
+        CancellationToken cancellationToken)
+    {
+        int count = 0;
+        while (reader.Read() && reader.TokenType != JsonTokenType.EndArray)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (reader.TokenType != JsonTokenType.StartObject)
+            {
+                reader.Skip();
+                continue;
+            }
+
+            bool isDeleted = false;
+            while (reader.Read() && reader.TokenType != JsonTokenType.EndObject)
+            {
+                if (reader.TokenType != JsonTokenType.PropertyName)
+                {
+                    continue;
+                }
+
+                bool isDeletedProp = PropertyEqualsIgnoreCase(ref reader, "isDeleted"u8, "isDeleted");
+                if (!reader.Read())
+                {
+                    break;
+                }
+
+                if (isDeletedProp && reader.TokenType is JsonTokenType.True or JsonTokenType.False)
+                {
+                    isDeleted = reader.GetBoolean();
+                }
+                else
+                {
+                    reader.Skip();
+                }
+            }
+
+            if (!isDeleted)
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    private enum ProjectedItemProperty
+    {
+        Other,
+        Id,
+        IsDeleted,
+        Title,
+        Body,
+        Url,
+        Type,
+        IsPinned,
+        UpdatedAt,
+        CreatedAt,
+        Attachments
+    }
+
+    private static ProjectedItemProperty ClassifyProjectedItemProperty(ref Utf8JsonReader reader)
+    {
+        if (PropertyEqualsIgnoreCase(ref reader, "id"u8, "id"))
+        {
+            return ProjectedItemProperty.Id;
+        }
+
+        if (PropertyEqualsIgnoreCase(ref reader, "isDeleted"u8, "isDeleted"))
+        {
+            return ProjectedItemProperty.IsDeleted;
+        }
+
+        if (PropertyEqualsIgnoreCase(ref reader, "title"u8, "title"))
+        {
+            return ProjectedItemProperty.Title;
+        }
+
+        if (PropertyEqualsIgnoreCase(ref reader, "body"u8, "body"))
+        {
+            return ProjectedItemProperty.Body;
+        }
+
+        if (PropertyEqualsIgnoreCase(ref reader, "url"u8, "url"))
+        {
+            return ProjectedItemProperty.Url;
+        }
+
+        if (PropertyEqualsIgnoreCase(ref reader, "type"u8, "type"))
+        {
+            return ProjectedItemProperty.Type;
+        }
+
+        if (PropertyEqualsIgnoreCase(ref reader, "isPinned"u8, "isPinned"))
+        {
+            return ProjectedItemProperty.IsPinned;
+        }
+
+        if (PropertyEqualsIgnoreCase(ref reader, "updatedAt"u8, "updatedAt"))
+        {
+            return ProjectedItemProperty.UpdatedAt;
+        }
+
+        if (PropertyEqualsIgnoreCase(ref reader, "createdAt"u8, "createdAt"))
+        {
+            return ProjectedItemProperty.CreatedAt;
+        }
+
+        if (PropertyEqualsIgnoreCase(ref reader, "attachments"u8, "attachments"))
+        {
+            return ProjectedItemProperty.Attachments;
+        }
+
+        return ProjectedItemProperty.Other;
+    }
+
+    private static QuickCaptureSearchProjection? ReadProjectedItem(
+        ref Utf8JsonReader reader,
+        int maxBodyChars)
+    {
+        string? id = null;
+        bool isDeleted = false;
+        string? title = null;
+        string body = string.Empty;
+        string? url = null;
+        QuickCaptureItemType type = QuickCaptureItemType.Text;
+        bool hasExplicitType = false;
+        bool isPinned = false;
+        DateTimeOffset updatedAt = default;
+        DateTimeOffset createdAt = default;
+        List<TodoAttachment>? attachments = null;
+
+        while (reader.Read() && reader.TokenType != JsonTokenType.EndObject)
+        {
+            if (reader.TokenType != JsonTokenType.PropertyName)
+            {
+                continue;
+            }
+
+            ProjectedItemProperty prop = ClassifyProjectedItemProperty(ref reader);
+            if (!reader.Read())
+            {
+                break;
+            }
+
+            switch (prop)
+            {
+                case ProjectedItemProperty.Id:
+                    if (reader.TokenType == JsonTokenType.String)
+                    {
+                        id = reader.GetString();
+                    }
+                    else
+                    {
+                        reader.Skip();
+                    }
+                    break;
+
+                case ProjectedItemProperty.IsDeleted:
+                    if (reader.TokenType is JsonTokenType.True or JsonTokenType.False)
+                    {
+                        isDeleted = reader.GetBoolean();
+                    }
+                    else
+                    {
+                        reader.Skip();
+                    }
+                    break;
+
+                case ProjectedItemProperty.Title:
+                    if (!isDeleted && reader.TokenType == JsonTokenType.String)
+                    {
+                        title = NormalizeOptionalText(ReadTruncatedJsonString(ref reader, maxBodyChars));
+                    }
+                    else
+                    {
+                        reader.Skip();
+                    }
+                    break;
+
+                case ProjectedItemProperty.Body:
+                    if (!isDeleted && reader.TokenType == JsonTokenType.String)
+                    {
+                        body = ReadTruncatedJsonString(ref reader, maxBodyChars);
+                    }
+                    else
+                    {
+                        reader.Skip();
+                    }
+                    break;
+
+                case ProjectedItemProperty.Url:
+                    if (!isDeleted && reader.TokenType == JsonTokenType.String)
+                    {
+                        url = NormalizeOptionalText(ReadTruncatedJsonString(ref reader, maxBodyChars));
+                    }
+                    else
+                    {
+                        reader.Skip();
+                    }
+                    break;
+
+                case ProjectedItemProperty.Type:
+                    if (reader.TokenType == JsonTokenType.Number &&
+                        reader.TryGetInt32(out int numericType) &&
+                        Enum.IsDefined((QuickCaptureItemType)numericType))
+                    {
+                        type = (QuickCaptureItemType)numericType;
+                        hasExplicitType = true;
+                    }
+                    else if (reader.TokenType == JsonTokenType.String &&
+                             Enum.TryParse<QuickCaptureItemType>(reader.GetString(), ignoreCase: true, out var parsedType))
+                    {
+                        type = parsedType;
+                        hasExplicitType = true;
+                    }
+                    else
+                    {
+                        reader.Skip();
+                    }
+                    break;
+
+                case ProjectedItemProperty.IsPinned:
+                    if (reader.TokenType is JsonTokenType.True or JsonTokenType.False)
+                    {
+                        isPinned = reader.GetBoolean();
+                    }
+                    else
+                    {
+                        reader.Skip();
+                    }
+                    break;
+
+                case ProjectedItemProperty.UpdatedAt:
+                    if (reader.TokenType == JsonTokenType.String)
+                    {
+                        TryReadDateTimeOffset(ref reader, out updatedAt);
+                    }
+                    else
+                    {
+                        reader.Skip();
+                    }
+                    break;
+
+                case ProjectedItemProperty.CreatedAt:
+                    if (reader.TokenType == JsonTokenType.String)
+                    {
+                        TryReadDateTimeOffset(ref reader, out createdAt);
+                    }
+                    else
+                    {
+                        reader.Skip();
+                    }
+                    break;
+
+                case ProjectedItemProperty.Attachments:
+                    if (!isDeleted && reader.TokenType == JsonTokenType.StartArray)
+                    {
+                        attachments = ReadProjectedAttachments(ref reader);
+                    }
+                    else
+                    {
+                        reader.Skip();
+                    }
+                    break;
+
+                default:
+                    reader.Skip();
+                    break;
+            }
+        }
+
+        if (isDeleted || string.IsNullOrWhiteSpace(id))
+        {
+            return null;
+        }
+
+        if (!hasExplicitType && TryDetectUrl(body, out string? detectedUrl))
+        {
+            type = QuickCaptureItemType.Link;
+            url ??= detectedUrl;
+        }
+
+        DateTimeOffset effectiveUpdatedAt = updatedAt != default ? updatedAt : createdAt;
+        return new QuickCaptureSearchProjection(
+            id,
+            title,
+            body,
+            url,
+            type,
+            isPinned,
+            effectiveUpdatedAt,
+            attachments ?? (IReadOnlyList<TodoAttachment>)[]);
+    }
+
+    private static List<TodoAttachment> ReadProjectedAttachments(ref Utf8JsonReader reader)
+    {
+        var list = new List<TodoAttachment>();
+        while (reader.Read() && reader.TokenType != JsonTokenType.EndArray)
+        {
+            if (reader.TokenType != JsonTokenType.StartObject)
+            {
+                reader.Skip();
+                continue;
+            }
+
+            var attachment = new TodoAttachment();
+            bool hasAnyField = false;
+            while (reader.Read() && reader.TokenType != JsonTokenType.EndObject)
+            {
+                if (reader.TokenType != JsonTokenType.PropertyName)
+                {
+                    continue;
+                }
+
+                bool isId = PropertyEqualsIgnoreCase(ref reader, "id"u8, "id");
+                bool isFilePath = !isId && PropertyEqualsIgnoreCase(ref reader, "filePath"u8, "filePath");
+                bool isDisplayName = !isId && !isFilePath &&
+                                     PropertyEqualsIgnoreCase(ref reader, "displayName"u8, "displayName");
+                bool isType = !isId && !isFilePath && !isDisplayName &&
+                              PropertyEqualsIgnoreCase(ref reader, "type"u8, "type");
+                bool isStorageMode = !isId && !isFilePath && !isDisplayName && !isType &&
+                                     PropertyEqualsIgnoreCase(ref reader, "storageMode"u8, "storageMode");
+                bool isAddedAt = !isId && !isFilePath && !isDisplayName && !isType && !isStorageMode &&
+                                 PropertyEqualsIgnoreCase(ref reader, "addedAt"u8, "addedAt");
+                if (!reader.Read())
+                {
+                    break;
+                }
+
+                if (isId && reader.TokenType == JsonTokenType.String)
+                {
+                    if (reader.GetString() is { Length: > 0 } value)
+                    {
+                        attachment.Id = value;
+                    }
+                }
+                else if (isFilePath && reader.TokenType == JsonTokenType.String)
+                {
+                    if (reader.GetString() is { } value)
+                    {
+                        attachment.FilePath = value;
+                        hasAnyField = true;
+                    }
+                }
+                else if (isDisplayName && reader.TokenType == JsonTokenType.String)
+                {
+                    if (reader.GetString() is { } value)
+                    {
+                        attachment.DisplayName = value;
+                        hasAnyField = true;
+                    }
+                }
+                else if (isType && reader.TokenType == JsonTokenType.String)
+                {
+                    if (reader.GetString() is { Length: > 0 } value)
+                    {
+                        attachment.Type = value;
+                    }
+                }
+                else if (isStorageMode && reader.TokenType == JsonTokenType.String)
+                {
+                    if (reader.GetString() is { Length: > 0 } value)
+                    {
+                        attachment.StorageMode = value;
+                    }
+                }
+                else if (isAddedAt && reader.TokenType == JsonTokenType.String)
+                {
+                    if (TryReadDateTimeOffset(ref reader, out DateTimeOffset addedAt))
+                    {
+                        attachment.AddedAt = addedAt;
+                    }
+                }
+                else
+                {
+                    reader.Skip();
+                }
+            }
+
+            if (hasAnyField)
+            {
+                list.Add(attachment);
+            }
+        }
+
+        return list;
+    }
+
+    private static bool TryReadDateTimeOffset(ref Utf8JsonReader reader, out DateTimeOffset value)
+    {
+        if (reader.TryGetDateTimeOffset(out value))
+        {
+            return true;
+        }
+
+        string? raw = reader.GetString();
+        return DateTimeOffset.TryParse(raw, out value);
+    }
+
+    private static bool PropertyEqualsIgnoreCase(
+        ref Utf8JsonReader reader,
+        ReadOnlySpan<byte> expectedAscii,
+        string expectedText)
+    {
+        if (!reader.HasValueSequence)
+        {
+            ReadOnlySpan<byte> span = reader.ValueSpan;
+            if (span.IndexOf((byte)'\\') < 0)
+            {
+                if (span.Length != expectedAscii.Length)
+                {
+                    return false;
+                }
+
+                for (int i = 0; i < span.Length; i++)
+                {
+                    byte a = span[i];
+                    byte b = expectedAscii[i];
+                    if (a == b)
+                    {
+                        continue;
+                    }
+
+                    if ((uint)(a - 'A') <= ('Z' - 'A'))
+                    {
+                        a = (byte)(a + 32);
+                    }
+
+                    if ((uint)(b - 'A') <= ('Z' - 'A'))
+                    {
+                        b = (byte)(b + 32);
+                    }
+
+                    if (a != b)
+                    {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+        }
+
+        return string.Equals(reader.GetString(), expectedText, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string ReadTruncatedJsonString(ref Utf8JsonReader reader, int maxChars)
+    {
+        if (maxChars <= 0)
+        {
+            return string.Empty;
+        }
+
+        if (!reader.HasValueSequence)
+        {
+            ReadOnlySpan<byte> span = reader.ValueSpan;
+            if (span.Length <= maxChars * 2)
+            {
+                return TruncateForProjection(reader.GetString(), maxChars);
+            }
+
+            int byteBudget = Math.Min(span.Length, (maxChars * 6) + 16);
+            return DecodeJsonStringPrefix(span[..byteBudget], maxChars);
+        }
+
+        ReadOnlySequence<byte> seq = reader.ValueSequence;
+        if (seq.Length <= maxChars * 2)
+        {
+            return TruncateForProjection(reader.GetString(), maxChars);
+        }
+
+        int seqByteBudget = (int)Math.Min(seq.Length, (long)(maxChars * 6) + 16);
+        byte[] rented = ArrayPool<byte>.Shared.Rent(seqByteBudget);
+        try
+        {
+            seq.Slice(0, seqByteBudget).CopyTo(rented);
+            return DecodeJsonStringPrefix(rented.AsSpan(0, seqByteBudget), maxChars);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(rented);
+        }
+    }
+
+    private static string DecodeJsonStringPrefix(ReadOnlySpan<byte> rawUtf8, int maxChars)
+    {
+        if (rawUtf8.IsEmpty || maxChars <= 0)
+        {
+            return string.Empty;
+        }
+
+        char[] charBuffer = ArrayPool<char>.Shared.Rent(maxChars + 2);
+        try
+        {
+            int charCount = 0;
+            int i = 0;
+            while (i < rawUtf8.Length && charCount < maxChars)
+            {
+                byte b = rawUtf8[i];
+                if (b == (byte)'\\')
+                {
+                    if (i + 1 >= rawUtf8.Length)
+                    {
+                        break;
+                    }
+
+                    byte esc = rawUtf8[i + 1];
+                    i += 2;
+                    switch (esc)
+                    {
+                        case (byte)'"':
+                            charBuffer[charCount++] = '"';
+                            break;
+                        case (byte)'\\':
+                            charBuffer[charCount++] = '\\';
+                            break;
+                        case (byte)'/':
+                            charBuffer[charCount++] = '/';
+                            break;
+                        case (byte)'b':
+                            charBuffer[charCount++] = '\b';
+                            break;
+                        case (byte)'f':
+                            charBuffer[charCount++] = '\f';
+                            break;
+                        case (byte)'n':
+                            charBuffer[charCount++] = '\n';
+                            break;
+                        case (byte)'r':
+                            charBuffer[charCount++] = '\r';
+                            break;
+                        case (byte)'t':
+                            charBuffer[charCount++] = '\t';
+                            break;
+                        case (byte)'u':
+                            if (i + 4 > rawUtf8.Length || !TryParseHex4(rawUtf8.Slice(i, 4), out ushort codeUnit))
+                            {
+                                goto Done;
+                            }
+
+                            i += 4;
+                            char ch = (char)codeUnit;
+                            if (char.IsHighSurrogate(ch))
+                            {
+                                if (charCount + 1 >= maxChars)
+                                {
+                                    goto Done;
+                                }
+
+                                if (i + 6 <= rawUtf8.Length &&
+                                    rawUtf8[i] == (byte)'\\' &&
+                                    rawUtf8[i + 1] == (byte)'u' &&
+                                    TryParseHex4(rawUtf8.Slice(i + 2, 4), out ushort lowUnit) &&
+                                    char.IsLowSurrogate((char)lowUnit))
+                                {
+                                    charBuffer[charCount++] = ch;
+                                    charBuffer[charCount++] = (char)lowUnit;
+                                    i += 6;
+                                }
+                            }
+                            else
+                            {
+                                charBuffer[charCount++] = ch;
+                            }
+                            break;
+                        default:
+                            charBuffer[charCount++] = (char)esc;
+                            break;
+                    }
+                }
+                else if (b < 0x80)
+                {
+                    charBuffer[charCount++] = (char)b;
+                    i++;
+                }
+                else
+                {
+                    OperationStatus status = Rune.DecodeFromUtf8(rawUtf8[i..], out Rune rune, out int consumed);
+                    if (status != OperationStatus.Done || consumed <= 0)
+                    {
+                        break;
+                    }
+
+                    if (charCount + rune.Utf16SequenceLength > maxChars)
+                    {
+                        break;
+                    }
+
+                    charCount += rune.EncodeToUtf16(charBuffer.AsSpan(charCount));
+                    i += consumed;
+                }
+            }
+
+        Done:
+            return new string(charBuffer, 0, charCount);
+        }
+        finally
+        {
+            ArrayPool<char>.Shared.Return(charBuffer);
+        }
+    }
+
+    private static bool TryParseHex4(ReadOnlySpan<byte> hex, out ushort value)
+    {
+        value = 0;
+        if (hex.Length < 4)
+        {
+            return false;
+        }
+
+        int acc = 0;
+        for (int i = 0; i < 4; i++)
+        {
+            byte c = hex[i];
+            int nibble = c switch
+            {
+                >= (byte)'0' and <= (byte)'9' => c - '0',
+                >= (byte)'a' and <= (byte)'f' => c - 'a' + 10,
+                >= (byte)'A' and <= (byte)'F' => c - 'A' + 10,
+                _ => -1
+            };
+            if (nibble < 0)
+            {
+                return false;
+            }
+
+            acc = (acc << 4) | nibble;
+        }
+
+        value = (ushort)acc;
+        return true;
+    }
+
+    private static string TruncateForProjection(string? text, int maxChars)
+    {
+        if (string.IsNullOrEmpty(text) || maxChars <= 0)
+        {
+            return string.Empty;
+        }
+
+        if (text.Length <= maxChars)
+        {
+            return text;
+        }
+
+        int length = maxChars;
+        if (char.IsHighSurrogate(text[length - 1]))
+        {
+            length--;
+        }
+
+        return length <= 0 ? string.Empty : text[..length];
     }
 }

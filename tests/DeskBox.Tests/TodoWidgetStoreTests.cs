@@ -22,7 +22,7 @@ public sealed class TodoWidgetStoreTests : IDisposable
 
         var data = await store.LoadAsync();
 
-        Assert.Equal(3, data.Version);
+        Assert.Equal(4, data.Version);
         Assert.Empty(data.Items);
         Assert.EndsWith(Path.Combine("todo-widget", "todo.json"), store.StorePath);
     }
@@ -133,7 +133,7 @@ public sealed class TodoWidgetStoreTests : IDisposable
 
         var data = await store.LoadAsync();
 
-        Assert.Equal(3, data.Version);
+        Assert.Equal(4, data.Version);
         Assert.Empty(data.Items);
         Assert.False(File.Exists(store.StorePath));
         Assert.Single(Directory.EnumerateFiles(
@@ -218,7 +218,7 @@ public sealed class TodoWidgetStoreTests : IDisposable
 
         var data = await store.LoadAsync();
 
-        Assert.Equal(3, data.Version);
+        Assert.Equal(4, data.Version);
         Assert.Equal(2, data.Items.Count);
         Assert.Equal("duplicate", data.Items[0].Id);
         Assert.Equal("keep", data.Items[0].Text);
@@ -435,7 +435,7 @@ public sealed class TodoWidgetStoreTests : IDisposable
         TodoWidgetData data = await store.LoadAsync();
         TodoItem item = Assert.Single(data.Items);
 
-        Assert.Equal(3, data.Version);
+        Assert.Equal(4, data.Version);
         Assert.Equal("  useful note  ", item.Notes);
         TodoStep step = Assert.Single(item.Steps);
         Assert.False(string.IsNullOrWhiteSpace(step.Id));
@@ -445,6 +445,53 @@ public sealed class TodoWidgetStoreTests : IDisposable
         Assert.False(string.IsNullOrWhiteSpace(attachment.Id));
         Assert.Equal("spec.pdf", attachment.DisplayName);
         Assert.Equal("pdf", attachment.Type);
+    }
+
+    [Fact]
+    public async Task LoadAsync_MigratesV3EndOfDayDueDatesToAllDayAndPreservesExplicitTimes()
+    {
+        var store = CreateStore("todo-v3-migration");
+        Directory.CreateDirectory(Path.GetDirectoryName(store.StorePath)!);
+
+        var legacyEndOfDay = new DateTimeOffset(new DateTime(2026, 7, 15, 23, 59, 0, DateTimeKind.Local));
+        var explicitEvening = new DateTimeOffset(new DateTime(2026, 7, 15, 18, 30, 0, DateTimeKind.Local));
+        string v3Json = JsonSerializer.Serialize(new
+        {
+            version = 3,
+            items = new object[]
+            {
+                new
+                {
+                    id = "legacy-preset",
+                    text = "Preset task",
+                    isCompleted = false,
+                    dueDate = legacyEndOfDay,
+                    sortOrder = 0
+                },
+                new
+                {
+                    id = "explicit-time",
+                    text = "Meeting",
+                    isCompleted = false,
+                    dueDate = explicitEvening,
+                    sortOrder = 1
+                }
+            }
+        });
+        await File.WriteAllTextAsync(store.StorePath, v3Json);
+
+        TodoWidgetData loaded = await store.LoadAsync();
+
+        Assert.Equal(4, loaded.Version);
+        TodoItem allDayItem = loaded.Items.Single(entry => entry.Id == "legacy-preset");
+        Assert.False(allDayItem.HasDueTime);
+        Assert.NotNull(allDayItem.DueDate);
+        DateTimeOffset localAllDay = allDayItem.DueDate!.Value.ToLocalTime();
+        Assert.Equal(new DateTime(2026, 7, 15, 0, 0, 0), localAllDay.DateTime);
+
+        TodoItem timedItem = loaded.Items.Single(entry => entry.Id == "explicit-time");
+        Assert.True(timedItem.HasDueTime);
+        Assert.Equal(explicitEvening, timedItem.DueDate);
     }
 
     public void Dispose()

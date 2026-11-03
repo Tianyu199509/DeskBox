@@ -45,6 +45,7 @@ public sealed class InteractionSettingsCoordinator : IInteractionSettings
             shell.WidgetSnapSpacing,
             shell.KeepWidgetsVisibleOnShowDesktop,
             shell.WidgetLayerMode,
+            shell.DynamicClickRaiseScope,
             shell.ShowHoverButtons,
             shell.WidgetHoverButtonActions,
             performance.IdleWorkingSetTrimEnabled,
@@ -56,6 +57,7 @@ public sealed class InteractionSettingsCoordinator : IInteractionSettings
         WidgetShellSettingsSlice shell = _settings.Settings.WidgetShell;
         return new(
             SettingsService.NormalizeWidgetLayerModeSetting(shell.WidgetLayerMode),
+            SettingsService.NormalizeDynamicClickRaiseScopeSetting(shell.DynamicClickRaiseScope),
             shell.ResizeSnapEnabled,
             SettingsService.NormalizeWidgetSnapSpacing(shell.WidgetSnapSpacing),
             _settings.Settings.FileWidget.DoubleClickToOpen,
@@ -170,6 +172,16 @@ public sealed class InteractionSettingsCoordinator : IInteractionSettings
         WidgetShellSettingsSlice shell = _settings.Settings.WidgetShell;
         if (shell.WidgetLayerMode == normalized) return;
         shell.WidgetLayerMode = normalized;
+        _settings.SaveDebounced();
+    }
+
+    public void SetDynamicClickRaiseScope(string? scope)
+    {
+        ThrowIfStopped();
+        string normalized = SettingsService.NormalizeDynamicClickRaiseScopeSetting(scope);
+        WidgetShellSettingsSlice shell = _settings.Settings.WidgetShell;
+        if (shell.DynamicClickRaiseScope == normalized) return;
+        shell.DynamicClickRaiseScope = normalized;
         _settings.SaveDebounced();
     }
 

@@ -1,179 +1,132 @@
 using DeskBox;
+using DeskBox.Models;
+using DeskBox.Platform;
+using DeskBox.Services;
+using DeskBox.Views;
+using Windows.Graphics;
+using DrawingPoint = System.Drawing.Point;
 
 namespace DeskBox.Tests;
 
 /// <summary>
-/// Pins the tray context menu resilience contract for the SecondWindow
-/// prewarm failure: one failed open rebuilds the hidden host once, two
-/// consecutive failures degrade the session permanently to the native
-/// PopupMenu mode, and every menu item carries a Command so the native menu
-/// stays clickable (it only executes Command, never Click).
+/// Pins the pure Win32 tray icon &amp; native popup menu host contracts that
+/// replaced H.NotifyIcon.WinUI and its two permanent hidden XAML windows.
 /// </summary>
 public sealed class TrayContextMenuResilienceTests
 {
     [Fact]
-    public void ModePolicy_FirstFailure_RequestsHostRebuildInsteadOfDegradation()
+    public void DeterministicIconGuid_IsCaseInsensitivePerExecutableAndDistinctAcrossPaths()
     {
-        var policy = new TrayContextMenuModePolicy();
+        Guid installedLower = NativeTrayIconHost.ComputeDeterministicIconGuid(
+            @"c:\program files\deskbox\deskbox.exe");
+        Guid installedUpper = NativeTrayIconHost.ComputeDeterministicIconGuid(
+            @"C:\Program Files\DeskBox\DeskBox.exe");
+        Guid debugRepo = NativeTrayIconHost.ComputeDeterministicIconGuid(
+            @"D:\project\wingezi\src\DeskBox\bin\Debug\net10.0-windows10.0.22621.0\DeskBox.exe");
 
-        bool degraded = policy.RecordFailure();
-
-        Assert.False(degraded);
-        Assert.False(policy.IsDegradedToPopupMenu);
-        Assert.Equal(1, policy.ConsecutiveSecondWindowFailures);
+        Assert.NotEqual(Guid.Empty, installedLower);
+        Assert.Equal(installedLower, installedUpper);
+        Assert.NotEqual(installedLower, debugRepo);
     }
 
     [Fact]
-    public void ModePolicy_TwoConsecutiveFailures_DegradeTheSession()
+    public void MenuGlyphBitmapRenderer_ProducesValidBitmapAcrossThemesAndStates()
     {
-        var policy = new TrayContextMenuModePolicy();
-        policy.RecordFailure();
+        IntPtr darkEnabled = NativeTrayIconHost.CreateMenuGlyphBitmapForTesting(
+            '\uE713',
+            dpi: 120,
+            isDarkTheme: true,
+            isEnabled: true);
+        IntPtr lightDisabled = NativeTrayIconHost.CreateMenuGlyphBitmapForTesting(
+            '\uE74C',
+            dpi: 96,
+            isDarkTheme: false,
+            isEnabled: false);
 
-        bool degraded = policy.RecordFailure();
-
-        Assert.True(degraded);
-        Assert.True(policy.IsDegradedToPopupMenu);
+        try
+        {
+            Assert.NotEqual(IntPtr.Zero, darkEnabled);
+            Assert.NotEqual(IntPtr.Zero, lightDisabled);
+        }
+        finally
+        {
+            NativeTrayIconHost.DeleteBitmapForTesting(darkEnabled);
+            NativeTrayIconHost.DeleteBitmapForTesting(lightDisabled);
+        }
     }
 
     [Fact]
-    public void ModePolicy_SuccessBetweenFailures_ResetsTheCount()
+    public void BuildTrayMenuEntriesCore_IncludesAllFixedActionsWidgetDescriptorsAndConditionalUpdate()
     {
-        var policy = new TrayContextMenuModePolicy();
-        policy.RecordFailure();
+        string tempDir = Path.Combine(Path.GetTempPath(), $"deskbox-tray-test-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var settingsService = new SettingsService(Path.Combine(tempDir, "settings.json"));
+            var localization = new LocalizationService(settingsService);
+            var expectedCreateKinds = new WidgetContentFactory(localization)
+                .GetCreateEntryDescriptors()
+                .Select(descriptor => descriptor.WidgetKind)
+                .ToArray();
 
-        policy.RecordSuccess();
-        bool degraded = policy.RecordFailure();
+            WidgetKind? invokedKind = null;
+            IReadOnlyList<NativeTrayMenuEntry> withoutUpdate = App.BuildTrayMenuEntriesCore(
+                localization,
+                canCreateWidget: true,
+                hasUpdateAvailable: false,
+                availableUpdateVersion: null,
+                () => Task.CompletedTask,
+                kind =>
+                {
+                    invokedKind = kind;
+                    return Task.CompletedTask;
+                },
+                () => Task.CompletedTask,
+                () => Task.CompletedTask,
+                () => Task.CompletedTask,
+                () => Task.CompletedTask,
+                () => Task.CompletedTask,
+                () => Task.CompletedTask);
 
-        Assert.False(degraded);
-        Assert.Equal(1, policy.ConsecutiveSecondWindowFailures);
+            IReadOnlyList<NativeTrayMenuEntry> withUpdate = App.BuildTrayMenuEntriesCore(
+                localization,
+                canCreateWidget: false,
+                hasUpdateAvailable: true,
+                availableUpdateVersion: "2.0.0",
+                () => Task.CompletedTask,
+                _ => Task.CompletedTask,
+                () => Task.CompletedTask,
+                () => Task.CompletedTask,
+                () => Task.CompletedTask,
+                () => Task.CompletedTask,
+                () => Task.CompletedTask,
+                () => Task.CompletedTask);
+
+            Assert.Contains(expectedCreateKinds, kind => kind == WidgetKind.File);
+            Assert.Equal(withUpdate.Count - 1, withoutUpdate.Count);
+
+            var nonSeparatorItems = withoutUpdate.Where(entry => !entry.IsSeparator).ToList();
+            Assert.Equal(6 + expectedCreateKinds.Length, nonSeparatorItems.Count);
+
+            NativeTrayMenuEntry fileCreateEntry = nonSeparatorItems.First(
+                entry => entry.CommandId >= 100 && entry.Text == localization.T("Common.NewWidget"));
+            fileCreateEntry.Action!().GetAwaiter().GetResult();
+            Assert.Equal(WidgetKind.File, invokedKind);
+
+            // When WidgetManager is unavailable, widget-mutating items disable cleanly
+            // while Settings and Exit remain clickable.
+            var disabledItems = withUpdate.Where(entry => !entry.IsSeparator && !entry.IsEnabled).ToList();
+            Assert.Equal(2 + expectedCreateKinds.Length, disabledItems.Count);
+            Assert.Contains(withUpdate, entry => !entry.IsSeparator && entry.Text.Contains("2.0.0", StringComparison.Ordinal));
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, recursive: true); } catch { }
+        }
     }
 
     [Fact]
-    public void ModePolicy_Degradation_IsIrreversibleForTheSession()
-    {
-        var policy = new TrayContextMenuModePolicy();
-        policy.RecordFailure();
-        policy.RecordFailure();
-
-        // A later success may reset the count, but the session must stay on
-        // the native menu: the second-window host already proved broken here.
-        policy.RecordSuccess();
-        bool degradedAgain = policy.RecordFailure();
-
-        Assert.True(policy.IsDegradedToPopupMenu);
-        Assert.False(degradedAgain);
-    }
-
-    [Fact]
-    public void InteractionGate_AllowsOnlyTheFirstCallerUntilTheScheduledReset()
-    {
-        var resets = new List<Action>();
-        var gate = new TrayMenuInteractionGate(reset => resets.Add(reset));
-
-        // The XAML Click path and the command path fire back-to-back; only
-        // the first may run the interaction.
-        Assert.True(gate.TryEnter());
-        Assert.False(gate.TryEnter());
-        Assert.Single(resets);
-
-        resets[0].Invoke();
-
-        // After the reset lands, the next interaction is runnable again.
-        Assert.True(gate.TryEnter());
-    }
-
-    [Fact]
-    public void ShowTrayContextMenuFromTray_UsesThreeTierRecovery()
-    {
-        string tray = Read("src/DeskBox/App.Tray.cs");
-
-        // Only the XamlRoot ArgumentException participates in the fallback;
-        // other failures keep the historical log-only behavior.
-        string filter = Slice(
-            tray,
-            "private static bool IsSecondWindowHostFailure",
-            "private void ShowTrayContextMenuInNativeMode");
-        Assert.Contains("ArgumentException", filter, StringComparison.Ordinal);
-        Assert.Contains("\"XamlRoot\"", filter, StringComparison.Ordinal);
-
-        string show = Slice(
-            tray,
-            "private void ShowTrayContextMenuFromTray()",
-            "private static bool IsSecondWindowHostFailure");
-        // Tier 3 entry: once degraded, opens never touch the second-window host.
-        Assert.Contains("IsDegradedToPopupMenu", show, StringComparison.Ordinal);
-        Assert.Contains("ShowTrayContextMenuInNativeMode(point);", show, StringComparison.Ordinal);
-        // A successful open clears the failure count.
-        Assert.Contains("_trayContextMenuModePolicy.RecordSuccess();", show, StringComparison.Ordinal);
-        Assert.Contains(
-            "[Tray] Failed to show tray context menu: {ex}",
-            show,
-            StringComparison.Ordinal);
-
-        string recovery = Slice(
-            tray,
-            "private void RecoverTrayContextMenuAfterSecondWindowFailure",
-            "private void DegradeTrayContextMenuToNativeMode");
-        // Tier 2: re-assigning the flyout makes the library recreate the host.
-        Assert.Contains("ContextFlyout = null;", recovery, StringComparison.Ordinal);
-        Assert.Contains("ContextFlyout = _trayContextMenu;", recovery, StringComparison.Ordinal);
-
-        string degrade = Slice(
-            tray,
-            "private void DegradeTrayContextMenuToNativeMode",
-            "internal void ShowTrayContextMenuForOnboarding");
-        Assert.Contains("ContextMenuMode = ContextMenuMode.PopupMenu;", degrade, StringComparison.Ordinal);
-        Assert.Contains(
-            "[Tray] Tray context menu degraded to native PopupMenu mode (SecondWindow host failed to initialize)",
-            degrade,
-            StringComparison.Ordinal);
-        // Degrading shows the native menu within the deferred open turn for
-        // the same right-click (the whole open was moved one dispatcher turn
-        // off the tray WndProc frame by the callback-isolation batch; the
-        // degrade path itself stays inside that turn).
-        Assert.Contains("ShowTrayContextMenuInNativeMode(point);", degrade, StringComparison.Ordinal);
-
-        // The degrade path must switch the mode property so the library's own
-        // DynamicDependency-annotated native path stays trim-safe; DeskBox
-        // never constructs the native popup itself.
-        Assert.DoesNotContain("new PopupMenu", tray, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void TrayMenuItems_AreAllCommandBackedForTheNativeFallback()
-    {
-        string tray = Read("src/DeskBox/App.Tray.cs");
-
-        string create = Slice(
-            tray,
-            "private void CreateTrayIcon()",
-            "/// <summary>Attempts per tray creation pass");
-        Assert.DoesNotContain(".Click +=", create, StringComparison.Ordinal);
-        // Seven fixed items: organize, map folder, feature widgets, settings,
-        // managed storage, update, exit.
-        Assert.Equal(7, CountOccurrences(create, "AttachTrayMenuItemInteraction("));
-
-        string createWidget = Slice(
-            tray,
-            "private MenuFlyoutItem CreateTrayCreateWidgetItem",
-            "private static void AttachTrayMenuItemInteraction");
-        Assert.DoesNotContain(".Click +=", createWidget, StringComparison.Ordinal);
-        Assert.Equal(1, CountOccurrences(createWidget, "AttachTrayMenuItemInteraction("));
-
-        // The attach helper is the only place items get wired: Click for the
-        // XAML second-window flyout, Command for the native PopupMenu
-        // fallback, and the gate keeping one interaction single-shot.
-        string attach = Slice(
-            tray,
-            "private static void AttachTrayMenuItemInteraction",
-            "private void PrepareTrayContextMenu(");
-        Assert.Contains("item.Click +=", attach, StringComparison.Ordinal);
-        Assert.Contains("item.Command = new RelayCommand(", attach, StringComparison.Ordinal);
-        Assert.Contains("gate.TryEnter()", attach, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void RunTraySettingsActionAsync_SkipsTheFlyoutSettleWaitWhenDegraded()
+    public void RunTraySettingsActionAsync_HasNoSecondWindowSettleDelay()
     {
         string tray = Read("src/DeskBox/App.Tray.cs");
         string settings = Slice(
@@ -181,25 +134,72 @@ public sealed class TrayContextMenuResilienceTests
             "private async Task RunTraySettingsActionAsync",
             "internal async Task CreateFolderWidgetFromPickerAsync");
 
-        int guard = settings.IndexOf("IsDegradedToPopupMenu", StringComparison.Ordinal);
-        int delay = settings.IndexOf("await Task.Delay(300);", StringComparison.Ordinal);
-        Assert.True(guard >= 0, "The settings action must branch on the degraded mode.");
-        Assert.True(
-            delay > guard,
-            "The 300ms helper-window settle delay must sit behind the degraded guard.");
+        Assert.Contains("BeginWidgetInteraction(\"tray-settings-opening\")", settings, StringComparison.Ordinal);
+        Assert.Contains("EndWidgetInteraction(\"tray-settings-opened\")", settings, StringComparison.Ordinal);
+        Assert.DoesNotContain("Task.Delay(300)", settings, StringComparison.Ordinal);
+        Assert.DoesNotContain("SecondWindowContextMenuOpened", tray, StringComparison.Ordinal);
     }
 
-    private static int CountOccurrences(string source, string value)
+    [Fact]
+    public void TrayContextMenuWindow_ComputeWindowBounds_AlignsToTaskbarEdgesAndClampsInsideWorkArea()
     {
-        int count = 0;
-        int index = 0;
-        while ((index = source.IndexOf(value, index, StringComparison.Ordinal)) >= 0)
+        var workArea = new Win32Helper.RECT
         {
-            count++;
-            index += value.Length;
-        }
+            Left = 0,
+            Top = 0,
+            Right = 1920,
+            Bottom = 1032,
+        };
 
-        return count;
+        // Bottom taskbar centered above tray icon, clamped inside right screen edge margin (6 * 1.5 = 9px).
+        RectInt32 bottomRight = TrayContextMenuWindow.ComputeWindowBounds(
+            new DrawingPoint(1880, 1031),
+            TrayMenuHorizontalAlignment.Center,
+            TrayMenuVerticalAlignment.Bottom,
+            desiredWidthPx: 300,
+            desiredHeightPx: 540,
+            dpiScale: 1.5,
+            workArea);
+        Assert.Equal(1920 - 9 - 300, bottomRight.X);
+        Assert.Equal(1031 - 540 - 9, bottomRight.Y);
+        Assert.Equal(300, bottomRight.Width);
+        Assert.Equal(540, bottomRight.Height);
+
+        // Top taskbar drops downward with scaled gap; oversized menu height clamps cleanly to workArea.
+        RectInt32 topOversized = TrayContextMenuWindow.ComputeWindowBounds(
+            new DrawingPoint(960, 48),
+            TrayMenuHorizontalAlignment.Center,
+            TrayMenuVerticalAlignment.Top,
+            desiredWidthPx: 260,
+            desiredHeightPx: 1400,
+            dpiScale: 1.0,
+            new Win32Helper.RECT { Left = 0, Top = 48, Right = 1920, Bottom = 1080 });
+        Assert.Equal(960 - 130, topOversized.X);
+        Assert.Equal(48 + 6, topOversized.Y);
+        Assert.Equal((1080 - 48) - 12, topOversized.Height);
+    }
+
+    [Fact]
+    public void EphemeralFluentTrayMenu_KeepsColdBootWin32OnlyAndTearsDownBackdropOnDismiss()
+    {
+        string tray = Read("src/DeskBox/App.Tray.cs");
+        string createTray = Slice(
+            tray,
+            "private void CreateTrayIcon()",
+            "private void OnTrayLeftClickRequested()");
+        string menuWindow = Read("src/DeskBox/Views/TrayContextMenuWindow.cs");
+
+        // Cold-boot CreateTrayIcon stays 100% pure Win32 with zero XAML Window allocations.
+        Assert.DoesNotContain("TrayContextMenuWindow", createTray, StringComparison.Ordinal);
+        Assert.DoesNotContain("new Window", createTray, StringComparison.Ordinal);
+
+        // Right-click opens TrayContextMenuWindow on demand, avoids unconstrained Popup islands,
+        // and explicitly clears SystemBackdrop + calls Close() on dismissal.
+        Assert.Contains("TrayContextMenuWindow.TryShow(", tray, StringComparison.Ordinal);
+        Assert.DoesNotContain("ShouldConstrainToRootBounds", menuWindow, StringComparison.Ordinal);
+        Assert.Contains("SystemBackdrop = null;", menuWindow, StringComparison.Ordinal);
+        Assert.Contains("Close();", menuWindow, StringComparison.Ordinal);
+        Assert.Contains("_ensureLifelineBeforeClose();", menuWindow, StringComparison.Ordinal);
     }
 
     private static string Slice(string source, string startMarker, string endMarker)

@@ -437,9 +437,20 @@ public partial class WidgetViewModel
             return CurrentFolderPath;
         }
 
+        string previousTraversalPath = CurrentFolderPath;
         _mappedFolderTraversalPath = refreshedRoot;
-        if (!PathsEqual(CurrentFolderPath, refreshedRoot))
+        if (!PathsEqual(previousTraversalPath, refreshedRoot))
         {
+            if (WidgetPathRebaseHelper.RebaseFolderTree(
+                    Config,
+                    previousTraversalPath,
+                    refreshedRoot,
+                    rebaseMappedFolderPath: false))
+            {
+                ApplyStackSettings();
+                _settingsService.UpdateWidget(Config, notifySubscribers: false);
+                _settingsService.SaveDebounced(notifySubscribers: false);
+            }
             SetCurrentFolderPath(refreshedRoot);
             await ConfigureFolderWatchersAsync(
                 refreshedRoot,
@@ -480,6 +491,9 @@ public partial class WidgetViewModel
         OnPropertyChanged(nameof(FolderNavigationVisibility));
         OnPropertyChanged(nameof(CurrentFolderDisplayName));
         OnPropertyChanged(nameof(CurrentFolderRelativePath));
+        OnPropertyChanged(nameof(EffectiveSortMode));
+        OnPropertyChanged(nameof(EffectiveSortDescending));
+        OnPropertyChanged(nameof(SortModeLabel));
     }
 
     private string GetFolderDisplayName(string? folderPath)

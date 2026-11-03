@@ -6,8 +6,8 @@
 ; ISCC /DDeskBoxNativeAot=1 /DDeskBoxBundledRuntime=1 /DMyAppReleaseDir=<publish 目录> DeskBox.iss
 
 #define MyAppName "DeskBox"
-#define MyAppVersion "1.5.9"
-#define MyAppVersionInfo "1.5.9.0"
+#define MyAppVersion "1.6.0"
+#define MyAppVersionInfo "1.6.0.0"
 #define MyAppPublisher "朱天雨"
 #define MyAppExeName "DeskBox.exe"
 #define MyAppOutputBaseName "DeskBox_Setup"
@@ -69,8 +69,10 @@ UsePreviousPrivileges=yes
 CloseApplications=force
 ; The short-lived thumbnail proxy batches can outlive a killed host when a
 ; shell handler hangs, so Restart Manager must cover it as well.
-CloseApplicationsFilter={#MyAppExeName},DeskBox.ThumbnailProxy.exe
+CloseApplicationsFilter={#MyAppExeName},DeskBox.Settings.exe,DeskBox.ThumbnailProxy.exe
 RestartApplications=no
+SetupLogging=yes
+UninstallLogging=yes
 OutputDir=..\Output
 #if DeskBoxBundledRuntime
 OutputBaseFilename={#MyAppOutputBaseName}_{#MyAppVersion}_x64
@@ -139,6 +141,11 @@ english.ArchitectureMismatchBody=The existing DeskBox installation at %1 is the 
 japanese.ArchitectureMismatchBody=%1 の既存の DeskBox はネイティブ ARM64 版です。この x64 インストーラーはそれをエミュレーションで実行される x64 版に置き換え、今後の更新も x64 チャネルのままになります。ネイティブ ARM64 版を残すには、代わりに DeskBox_Setup_arm64.exe を実行してください。
 german.ArchitectureMismatchBody=Die vorhandene DeskBox-Installation unter %1 ist die native ARM64-Version. Dieses x64-Installationsprogramm würde sie durch eine emulierte x64-Version ersetzen, und alle künftigen Updates blieben auf dem x64-Kanal. Um die native ARM64-Version zu behalten, verwenden Sie stattdessen DeskBox_Setup_arm64.exe.
 brazilianportuguese.ArchitectureMismatchBody=A instalação existente do DeskBox em %1 é a versão ARM64 nativa. Este instalador x64 a substituiria por uma versão x64 emulada, e todas as atualizações futuras permaneceriam no canal x64. Para manter a versão ARM64 nativa, execute o DeskBox_Setup_arm64.exe.
+chinesesimplified.PerUserUpgradeScopeMismatch=检测到当前账户下已有个人模式的 DeskBox 安装：%n%n%1%n%n“为所有用户安装”不能直接覆盖个人账户目录（否则会将个人路径写入系统级注册表）。请取消后重新运行安装程序并选择“仅为我安装”（或使用 /CURRENTUSER 参数），或先移除旧目录后再为所有用户安装。
+english.PerUserUpgradeScopeMismatch=An existing per-user DeskBox installation was found in the current profile:%n%n%1%n%nAll-users mode cannot upgrade a private user-profile folder in place without registering it machine-wide. Cancel Setup and run it again choosing "Install for me only" (or pass /CURRENTUSER), or remove the old per-user copy before installing for all users.
+japanese.PerUserUpgradeScopeMismatch=現在のアカウントに個人用モードの DeskBox インストールが見つかりました：%n%n%1%n%n「すべてのユーザー用にインストール」では個人のプロファイル フォルダーをそのまま上書きできません（個人用パスがシステム全体のレジストリに登録されてしまいます）。セットアップをキャンセルして再実行し、「自分用にのみインストール」（または /CURRENTUSER）を選択するか、既存の個人用フォルダーを削除してから再度インストールしてください。
+german.PerUserUpgradeScopeMismatch=Im aktuellen Benutzerprofil wurde eine benutzerspezifische DeskBox-Installation gefunden:%n%n%1%n%nDer Modus „Für alle Benutzer installieren“ kann keinen privaten Profilordner direkt aktualisieren, ohne ihn systemweit zu registrieren. Brechen Sie Setup ab und wählen Sie beim erneuten Start „Nur für mich installieren“ (oder /CURRENTUSER) oder entfernen Sie zuerst die alte benutzerspezifische Kopie.
+brazilianportuguese.PerUserUpgradeScopeMismatch=Foi encontrada uma instalação por usuário do DeskBox no perfil atual:%n%n%1%n%nO modo "Instalar para todos os usuários" não pode atualizar uma pasta privada do perfil sem registrá-la para todo o sistema. Cancele e execute o instalador novamente escolhendo "Instalar somente para mim" (ou /CURRENTUSER), ou remova a cópia antiga antes de instalar para todos os usuários.
 chinesesimplified.ConfirmStorageTitle=检测到 DeskBox 收纳目录中仍有内容
 chinesesimplified.ConfirmStorageBody=当前包含 %1 个文件夹、%2 个文件。
 chinesesimplified.ConfirmStorageFooter=卸载 DeskBox 不会删除这个目录，也不会删除里面的用户文件。%n请确认你已经知道这些文件的位置。是否继续卸载？
@@ -275,8 +282,8 @@ Source: "{#MyAppReleaseDir}\DeskBox.Updater.*"; DestDir: "{app}"; Flags: ignorev
 #endif
 
 [Icons]
-Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\Assets\deskbox.ico"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\Assets\deskbox.ico"; Tasks: desktopicon
+Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\Assets\deskbox.ico"; AppUserModelID: "DeskBox.DeskBox"
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\Assets\deskbox.ico"; AppUserModelID: "DeskBox.DeskBox"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent runasoriginaluser
@@ -292,6 +299,11 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChang
 Root: HKA; Subkey: "Software\DeskBox\DirectInstall"; ValueType: string; ValueName: "InstallLocation"; ValueData: "{app}"; Flags: uninsdeletevalue uninsdeletekeyifempty
 Root: HKA; Subkey: "Software\DeskBox\DirectInstall"; ValueType: string; ValueName: "InstallVersion"; ValueData: "{#MyAppVersion}"; Flags: uninsdeletevalue uninsdeletekeyifempty
 Root: HKA; Subkey: "Software\DeskBox\DirectInstall"; ValueType: string; ValueName: "InstallScope"; ValueData: "{code:GetInstallScopeName}"; Flags: uninsdeletevalue uninsdeletekeyifempty
+Root: HKA; Subkey: "Software\DeskBox\DirectInstall"; ValueType: string; ValueName: "InstallLanguage"; ValueData: "{code:InstallLanguageCode}"; Flags: uninsdeletevalue uninsdeletekeyifempty
+Root: HKA; Subkey: "Software\Classes\deskbox"; ValueType: string; ValueName: ""; ValueData: "URL:DeskBox Protocol"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\deskbox"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\deskbox\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"",0"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\deskbox\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"" ""%1"""; Flags: uninsdeletekey
 
 [Code]
 function InstallLanguageCode(Value: string): string;

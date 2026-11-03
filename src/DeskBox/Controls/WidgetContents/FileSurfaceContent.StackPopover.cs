@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Numerics;
 using DeskBox.Controls;
@@ -22,7 +22,12 @@ namespace DeskBox.Controls.WidgetContents;
 public sealed partial class FileSurfaceContent
 {
 
+    internal static readonly TimeSpan StackPopoverIdleReleaseDelay =
+        TimeSpan.FromSeconds(45);
+    private static WeakReference<FileSurfaceContent>? s_leasedStackPopoverOwner;
+
     private StackPopoverHostWindow? _stackPopoverHostWindow;
+    private DispatcherQueueTimer? _stackPopoverIdleReleaseTimer;
     private Windows.Graphics.RectInt32 _stackPopoverScreenBounds =
         new(0, 0, 0, 0);
     private ListViewBase? _stackPopoverItemsView;
@@ -35,7 +40,6 @@ public sealed partial class FileSurfaceContent
     private Grid? _stackPopoverTitleHost;
     private TextBlock? _stackPopoverTitleText;
     private TextBox? _stackPopoverTitleEditor;
-    private StackPopoverInlineRenameWindow? _stackPopoverTitleEditorWindow;
     private TextBlock? _stackPopoverEmptyText;
     private Canvas? _stackPopoverReorderOverlay;
     private Border? _stackPopoverReorderIndicator;
@@ -61,8 +65,11 @@ public sealed partial class FileSurfaceContent
     private long _stackPopoverShowGeneration;
     private string? _pendingStackPopoverKey;
     private EventHandler<object>? _stackPopoverRevealRenderingHandler;
+    private DispatcherQueueTimer? _stackPopoverRevealFallbackTimer;
     private int _stackPopoverRevealFrameCount;
+    private long _stackPopoverOpenedAtTick;
     private KeyEventHandler? _stackPopoverPreviewKeyHandler;
+    private PointerEventHandler? _stackPopoverExpansionWheelHandler;
     private PointerEventHandler? _stackPopoverSelectionPointerPressedHandler;
     private PointerEventHandler? _stackPopoverSelectionPointerMovedHandler;
     private PointerEventHandler? _stackPopoverSelectionPointerReleasedHandler;
@@ -70,6 +77,7 @@ public sealed partial class FileSurfaceContent
     private PointerEventHandler? _stackPopoverSurfacePointerPressedHandler;
     private bool _stackPopoverTitleEditing;
     private bool _stackPopoverTitleCommitInProgress;
+    private bool _stackPopoverTitleCancelling;
     private string? _stackPopoverTitleOriginalName;
     private long _stackPopoverTitleOpenedAtTick;
     private bool _stackPopoverLayoutRefreshQueued;
@@ -175,16 +183,13 @@ public sealed partial class FileSurfaceContent
         }
     }
 
+    internal static readonly TimeSpan StackPopoverRevealFallbackDelay =
+        TimeSpan.FromMilliseconds(48);
+
     private void UpdateStackFolderPreviewModes()
     {
-        foreach (Border surface in _stackSurfaces.ToArray())
+        foreach (Border surface in EnumerateRealizedStackSurfaces())
         {
-            if (surface.XamlRoot is null)
-            {
-                _stackSurfaces.Remove(surface);
-                continue;
-            }
-
             ApplyStackFolderPreviewMode(surface);
         }
     }
@@ -427,6 +432,19 @@ public sealed partial class FileSurfaceContent
                 _stackPopoverKey,
                 stackKey,
                 StringComparison.Ordinal);
+            if (sameStack &&
+                _stackPopoverPopupOpen &&
+                !_stackPopoverPopupClosing &&
+                _settingsService.Settings.FileWidget.DoubleClickToOpen)
+            {
+                long sinceOpened = Environment.TickCount64 - _stackPopoverOpenedAtTick;
+                if (sinceOpened >= 0 &&
+                    sinceOpened < Win32Helper.GetDoubleClickTime())
+                {
+                    return;
+                }
+            }
+
             CloseStackPopover();
             if (sameStack)
             {
@@ -448,6 +466,21 @@ public sealed partial class FileSurfaceContent
         // A normally dismissed popover keeps its control tree as a bounded
         // per-surface cache. Reopening it only rebinds the current members.
         QueueStackPopoverShow(stackKey);
+    }
+
+    private FrameworkElement? ResolveStackPopoverAnchorHint(string stackKey)
+    {
+        if (_lastStackInputAnchor is null ||
+            !_lastStackInputAnchor.TryGetTarget(out FrameworkElement? candidate) ||
+            candidate is null ||
+            candidate.XamlRoot is null ||
+            candidate.DataContext is not WidgetStackItem candidateStack ||
+            !string.Equals(candidateStack.StackKey, stackKey, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        return candidate;
     }
 
     private void QueueStackPopoverShow(string stackKey)
@@ -520,8 +553,7 @@ public sealed partial class FileSurfaceContent
             !ViewModel.UsesStackPopover ||
             _stackPopoverPopupOpen ||
             _stackPopoverPopupClosing ||
-            XamlRoot is null ||
-            FindStackSurface(stack.StackKey) is not { } anchor)
+            XamlRoot is null)
         {
             ClearPendingStackPopoverShow(generation, stack.StackKey);
             return;
@@ -535,8 +567,20 @@ public sealed partial class FileSurfaceContent
             return;
         }
 
+        FrameworkElement? anchor = FindStackSurface(currentStack.StackKey) ??
+            ResolveStackPopoverAnchorHint(currentStack.StackKey);
+        if (anchor is null)
+        {
+            App.LogVerbose(
+                $"[FileStack] Popover anchor unresolved; falling back to cursor/host placement " +
+                $"widget={WidgetId} stack={currentStack.StackKey}");
+        }
+
         try
         {
+            CancelStackPopoverIdleReleaseTimer();
+            ClaimSingletonStackPopoverLease();
+
             StackPopoverLayout layout = CalculateStackPopoverLayout(
                 currentStack.Members.Count);
 
@@ -584,6 +628,7 @@ public sealed partial class FileSurfaceContent
 
             _stackPopoverKey = currentStack.StackKey;
             _stackPopoverMembers = currentStack.Members.ToArray();
+            ViewModel.SetOpenPopoverStackKey(currentStack.StackKey);
             // The popover is the only surface that displays every folded
             // member at once; acquiring their icons here keeps the
             // release/acquire pairing intact when a release ran while the
@@ -597,19 +642,26 @@ public sealed partial class FileSurfaceContent
             // selection must not keep an expanded label under the popover.
             CollapseMainSurfaceNameExpansion();
             bool switchingStacks =
-                _stackPopoverItems.Count > 0 &&
+                !string.IsNullOrEmpty(_stackPopoverItemsStackKey) &&
                 !string.Equals(
                     _stackPopoverItemsStackKey,
                     currentStack.StackKey,
                     StringComparison.Ordinal);
-            // Switching to a different stack must not go through the in-place
-            // reconcile: container recycling keeps the previous stack's tiles
-            // visible mid-flight (realized containers enter a null DataContext
-            // intermediate state that preserves the old visuals). Clearing and
-            // refilling reuses the exact first-open path, which has no flash.
+            // Switching to a different stack replaces the inner XAML view inside
+            // the persistent host window so no recycled ItemsWrapGrid containers
+            // from the previous stack survive, while keeping the host HWND/island.
             if (switchingStacks)
             {
-                _stackPopoverItems.Clear();
+                RebuildStackPopoverContentForHost(
+                    host,
+                    currentStack,
+                    layout);
+            }
+
+            if (_stackPopoverItemsView is null || _stackPopoverSurface is null)
+            {
+                ReleaseStackPopover();
+                return;
             }
 
             ReconcileStackPopoverItems(_stackPopoverMembers);
@@ -661,47 +713,94 @@ public sealed partial class FileSurfaceContent
 
     private void ShowStackPopoverHost(
         StackPopoverHostWindow host,
-        FrameworkElement anchor,
+        FrameworkElement? anchor,
         StackPopoverLayout layout,
         long generation,
         string stackKey,
         bool waitForContentCommit)
     {
-        StackPopoverPosition position = ResolveStackPopoverPosition(
-            anchor,
-            layout.Width,
-            layout.Height);
-        double scale = Math.Max(
+        double hostScale = Math.Max(
             0.5,
             Win32Helper.GetDpiScaleForWindow(
                 _hostWindowHandle,
                 XamlRoot));
-        int width = StackPopoverPixelCalculator.ToCoveringPhysicalPixels(
-            layout.Width,
-            scale);
-        int height = StackPopoverPixelCalculator.ToCoveringPhysicalPixels(
-            layout.Height,
-            scale);
         int left;
         int top;
-        if (_hostWindowHandle != IntPtr.Zero &&
+        double targetScale = hostScale;
+        if (anchor is not null &&
+            _hostWindowHandle != IntPtr.Zero &&
             Win32Helper.GetWindowRect(
                 _hostWindowHandle,
                 out Win32Helper.RECT hostBounds))
         {
-            left = hostBounds.Left + (int)Math.Round(position.Left * scale);
-            top = hostBounds.Top + (int)Math.Round(position.Top * scale);
+            StackPopoverPosition position = ResolveStackPopoverPosition(
+                anchor,
+                layout.Width,
+                layout.Height);
+            left = hostBounds.Left + (int)Math.Round(position.Left * hostScale);
+            top = hostBounds.Top + (int)Math.Round(position.Top * hostScale);
+            int probeX = left + (int)Math.Round((layout.Width * hostScale) / 2);
+            int probeY = top + (int)Math.Round((layout.Height * hostScale) / 2);
+            targetScale = Math.Max(0.5, Win32Helper.GetDpiScaleForPoint(probeX, probeY));
         }
         else if (Win32Helper.GetCursorPos(out Win32Helper.POINT cursor))
         {
-            left = cursor.X - (width / 2);
-            top = cursor.Y - (height / 2);
+            targetScale = Math.Max(0.5, Win32Helper.GetDpiScaleForPoint(cursor.X, cursor.Y));
+            int cursorWidth = StackPopoverPixelCalculator.ToCoveringPhysicalPixels(
+                layout.Width,
+                targetScale);
+            int cursorHeight = StackPopoverPixelCalculator.ToCoveringPhysicalPixels(
+                layout.Height,
+                targetScale);
+            left = cursor.X - (cursorWidth / 2);
+            top = cursor.Y - (cursorHeight / 2);
+            if (Win32Helper.TryGetMonitorWorkArea(
+                    cursor.X,
+                    cursor.Y,
+                    out _,
+                    out Win32Helper.RECT workArea))
+            {
+                left = Math.Clamp(
+                    left,
+                    workArea.Left,
+                    Math.Max(workArea.Left, workArea.Right - cursorWidth));
+                top = Math.Clamp(
+                    top,
+                    workArea.Top,
+                    Math.Max(workArea.Top, workArea.Bottom - cursorHeight));
+            }
+        }
+        else if (_hostWindowHandle != IntPtr.Zero &&
+                 Win32Helper.GetWindowRect(
+                     _hostWindowHandle,
+                     out Win32Helper.RECT fallbackHostBounds))
+        {
+            int hostCenterX = fallbackHostBounds.Left +
+                (fallbackHostBounds.Right - fallbackHostBounds.Left) / 2;
+            int hostCenterY = fallbackHostBounds.Top +
+                (fallbackHostBounds.Bottom - fallbackHostBounds.Top) / 2;
+            targetScale = Math.Max(0.5, Win32Helper.GetDpiScaleForPoint(hostCenterX, hostCenterY));
+            int fallbackWidth = StackPopoverPixelCalculator.ToCoveringPhysicalPixels(
+                layout.Width,
+                targetScale);
+            int fallbackHeight = StackPopoverPixelCalculator.ToCoveringPhysicalPixels(
+                layout.Height,
+                targetScale);
+            left = hostCenterX - (fallbackWidth / 2);
+            top = hostCenterY - (fallbackHeight / 2);
         }
         else
         {
             left = 0;
             top = 0;
         }
+
+        int width = StackPopoverPixelCalculator.ToCoveringPhysicalPixels(
+            layout.Width,
+            targetScale);
+        int height = StackPopoverPixelCalculator.ToCoveringPhysicalPixels(
+            layout.Height,
+            targetScale);
 
         _stackPopoverScreenBounds = new Windows.Graphics.RectInt32(
             left,
@@ -723,7 +822,7 @@ public sealed partial class FileSurfaceContent
             $"cell={layout.CellWidth:0.#}x{layout.CellHeight:0.#} " +
             $"items={layout.ItemsWidth:0.#}x{layout.ItemsHeight:0.#} " +
             $"win={layout.Width:0.#}x{layout.Height:0.#} " +
-            $"scale={scale:0.###} phys={width}x{height} at={left},{top}");
+            $"scale={targetScale:0.###} phys={width}x{height} at={left},{top}");
         if (waitForContentCommit)
         {
             QueueStackPopoverRevealAfterContentCommit(
@@ -756,6 +855,10 @@ public sealed partial class FileSurfaceContent
             // has to reuse the previously opened stack's presented texture.
             if (++_stackPopoverRevealFrameCount < 2)
             {
+                // Nudge the cloaked XAML tree so the render loop schedules
+                // frame two on the very next VSync instead of going idle when
+                // no uncloaked element is animating.
+                _stackPopoverSurface?.InvalidateArrange();
                 return;
             }
 
@@ -765,6 +868,7 @@ public sealed partial class FileSurfaceContent
             CompleteStackPopoverReveal(host, generation, stackKey);
         };
         CompositionTarget.Rendering += _stackPopoverRevealRenderingHandler;
+        ArmStackPopoverRevealFallbackTimer(host, generation, stackKey);
     }
 
     private bool CanCompleteStackPopoverReveal(
@@ -797,6 +901,7 @@ public sealed partial class FileSurfaceContent
         // the owner window's Deactivated synchronously, and the selection-clear
         // guard must already see the popover as open.
         _stackPopoverPopupOpen = true;
+        _stackPopoverOpenedAtTick = Environment.TickCount64;
         try
         {
             host.RevealPrepared(_stackPopoverScreenBounds);
@@ -822,6 +927,7 @@ public sealed partial class FileSurfaceContent
 
     private void CancelStackPopoverReveal()
     {
+        _stackPopoverRevealFallbackTimer?.Stop();
         if (_stackPopoverRevealRenderingHandler is not null)
         {
             CompositionTarget.Rendering -= _stackPopoverRevealRenderingHandler;
@@ -938,11 +1044,6 @@ public sealed partial class FileSurfaceContent
             return;
         }
 
-        if (_stackPopoverTitleEditing)
-        {
-            return;
-        }
-
         CommitStackPopoverTitleRename();
         HideStackPopoverForReuse();
     }
@@ -951,6 +1052,12 @@ public sealed partial class FileSurfaceContent
     {
         if (_isDisposed || !_stackPopoverPopupOpen)
         {
+            return;
+        }
+
+        if (_stackPopoverTitleEditing)
+        {
+            CancelStackPopoverTitleRename();
             return;
         }
 
@@ -1060,9 +1167,11 @@ public sealed partial class FileSurfaceContent
         view.RightTapped += Items_RightTapped;
         view.SelectionChanged += Items_SelectionChanged;
         view.CharacterReceived += Root_CharacterReceived;
+        _stackPopoverExpansionWheelHandler =
+            new PointerEventHandler(StackPopoverItems_PointerWheelDuringExpansion);
         view.AddHandler(
             UIElement.PointerWheelChangedEvent,
-            new PointerEventHandler(StackPopoverItems_PointerWheelDuringExpansion),
+            _stackPopoverExpansionWheelHandler,
             handledEventsToo: true);
         _stackPopoverPreviewKeyHandler =
             new KeyEventHandler(ItemsView_PreviewKeyDown);
@@ -1225,6 +1334,34 @@ public sealed partial class FileSurfaceContent
         AutomationProperties.SetName(title, stack.Name);
         _stackPopoverTitleHost = titleHost;
         _stackPopoverTitleText = title;
+        var titleEditor = new TextBox
+        {
+            MaxWidth = titleMaximumWidth,
+            Height = StackPopoverLayoutCalculator.TitleEditorHeight,
+            MaxLength = 128,
+            FontSize = 13,
+            TextAlignment = TextAlignment.Center,
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            IsHitTestVisible = false,
+            Visibility = Visibility.Collapsed,
+            Style = Application.Current.Resources.TryGetValue(
+                "WidgetInlineRenameTextBoxStyle",
+                out object? inlineRenameStyleValue)
+                ? inlineRenameStyleValue as Style
+                : null
+        };
+        if (ResolveBrush("TextFillColorPrimaryBrush") is { } titleEditorForeground)
+        {
+            titleEditor.Foreground = titleEditorForeground;
+        }
+        titleEditor.Loaded += StackPopoverTitleEditor_Loaded;
+        titleEditor.KeyDown += StackPopoverTitleEditor_KeyDown;
+        titleEditor.LostFocus += StackPopoverTitleEditor_LostFocus;
+        AutomationProperties.SetName(titleEditor, T("Common.Rename"));
+        _stackPopoverTitleEditor = titleEditor;
         var closeButton = new Button
         {
             Style = Application.Current.Resources.TryGetValue(
@@ -1245,6 +1382,7 @@ public sealed partial class FileSurfaceContent
             closeButton,
             T("Widget.Stack.Popover.Close"));
         titleHost.Children.Add(title);
+        titleHost.Children.Add(titleEditor);
         titleHost.Children.Add(closeButton);
         _stackPopoverCloseButton = closeButton;
         content.Children.Add(titleHost);
@@ -1367,9 +1505,14 @@ public sealed partial class FileSurfaceContent
         object sender,
         DoubleTappedRoutedEventArgs e)
     {
-        App.Log(
-            "[DiagRename] Title double-tapped fired " +
-            $"titleText={_stackPopoverTitleText is not null}");
+        if (_stackPopoverTitleEditing ||
+            IsVisualDescendantOf(
+                e.OriginalSource as DependencyObject,
+                _stackPopoverCloseButton))
+        {
+            return;
+        }
+
         if (_stackPopoverTitleText is { } title)
         {
             BeginStackPopoverTitleRename(title);
@@ -1386,128 +1529,69 @@ public sealed partial class FileSurfaceContent
         CloseStackPopover();
     }
 
+    private void ActivateStackPopoverInput(UIElement? focusTarget = null)
+    {
+        if (_stackPopoverHostWindow is not { } host)
+        {
+            return;
+        }
+
+        host.ActivateInput(focusTarget);
+    }
+
     private void BeginStackPopoverTitleRename(TextBlock title)
     {
         if (_stackPopoverTitleEditing ||
             !ReferenceEquals(_stackPopoverTitleText, title) ||
+            _stackPopoverTitleEditor is not { } editor ||
             _stackPopoverKey is not { } stackKey ||
             ViewModel.FindStackByKey(stackKey) is not { } stack)
         {
-            App.Log(
-                "[DiagRename] Title rename guard rejected " +
-                $"editing={_stackPopoverTitleEditing} " +
-                $"sameText={ReferenceEquals(_stackPopoverTitleText, title)} " +
-                $"key={_stackPopoverKey ?? "<null>"} " +
-                $"stackFound={_stackPopoverKey is not null && ViewModel.FindStackByKey(_stackPopoverKey) is not null}");
             return;
         }
 
-        App.Log("[DiagRename] Title rename proceeding");
+        if (IsStackPopoverItemRenameEditing)
+        {
+            CancelStackPopoverItemRename(finishPendingClose: false);
+        }
 
         const double editorHeight =
             StackPopoverLayoutCalculator.TitleEditorHeight;
         double maximumWidth = Math.Max(
             StackPopoverLayoutCalculator.TitleMinimumWidth,
             (_stackPopoverSurface?.ActualWidth ?? 0) -
-                (StackPopoverLayoutCalculator.SurfacePadding * 2));
+                (StackPopoverLayoutCalculator.SurfacePadding * 2) -
+                StackPopoverLayoutCalculator.TitleTrailingButtonWidth);
         double editorWidth = Math.Clamp(
-            Math.Max(title.ActualWidth, title.DesiredSize.Width) + 6,
+            Math.Max(title.ActualWidth, title.DesiredSize.Width) + 12,
             StackPopoverLayoutCalculator.TitleMinimumWidth,
             maximumWidth);
-        Style? inlineRenameStyle =
-            Application.Current.Resources.TryGetValue(
-                "WidgetInlineRenameTextBoxStyle",
-                out object? inlineRenameStyleValue)
-                ? inlineRenameStyleValue as Style
-                : null;
-        bool followMaterial = UsesStackPopoverMaterialStyle();
-        WidgetMaterialBackdropAppearance materialAppearance =
-            ResolveStackPopoverMaterialAppearance();
-        Brush editorBackground = followMaterial
-            ? CreateStackPopoverSurfaceBrush(materialAppearance)
-            : CreateStackPopoverNeutralBrush(materialAppearance.IsDark);
-        WidgetMaterialBackdropAppearance editorMaterialAppearance =
-            followMaterial
-                ? materialAppearance
-                : materialAppearance with
-                {
-                    MaterialType = SettingsService.WidgetMaterialTypeSolid
-                };
-        var editorWindow = new StackPopoverInlineRenameWindow(
-            stack.Name,
-            inlineRenameStyle,
-            editorBackground,
-            ResolveBrush("TextFillColorPrimaryBrush"),
-            editorMaterialAppearance,
-            _stackPopoverHostWindow?.WindowHandle ?? _hostWindowHandle);
-        TextBox editor = editorWindow.Editor;
-        editor.Loaded += StackPopoverTitleEditor_Loaded;
-        editor.KeyDown += StackPopoverTitleEditor_KeyDown;
-        editor.LostFocus += StackPopoverTitleEditor_LostFocus;
-        editorWindow.Closed += StackPopoverTitleEditorWindow_Closed;
-        AutomationProperties.SetName(editor, T("Common.Rename"));
+
+        editor.MaxWidth = maximumWidth;
+        editor.Width = editorWidth;
+        editor.Height = editorHeight;
+        editor.Text = stack.Name;
+        if (ResolveBrush("TextFillColorPrimaryBrush") is { } foreground)
+        {
+            editor.Foreground = foreground;
+        }
 
         _stackPopoverTitleEditing = true;
+        _stackPopoverTitleCancelling = false;
         _stackPopoverTitleOriginalName = stack.Name;
-        _stackPopoverTitleEditor = editor;
-        _stackPopoverTitleEditorWindow = editorWindow;
         _stackPopoverTitleOpenedAtTick = Environment.TickCount64;
         title.Visibility = Visibility.Collapsed;
+        editor.Visibility = Visibility.Visible;
+        editor.IsHitTestVisible = true;
+        HideStackPopoverTitleDeleteButton(editor);
         App.Current?.WidgetManager?.BeginWidgetInteraction(
             "surface-stack-popover-title-rename-opened");
-        editorWindow.ShowAndFocus(ResolveStackPopoverTitleEditorBounds(
-            editorWidth,
-            editorHeight));
-    }
-
-    private Windows.Graphics.RectInt32 ResolveStackPopoverTitleEditorBounds(
-        double editorWidth,
-        double editorHeight)
-    {
-        double scale = Math.Max(
-            0.5,
-            Win32Helper.GetDpiScaleForWindow(
-                _hostWindowHandle,
-                XamlRoot));
-        int width = Math.Max(1, (int)Math.Round(editorWidth * scale));
-        int height = Math.Max(1, (int)Math.Round(editorHeight * scale));
-        if (_stackPopoverScreenBounds.Width > 0 &&
-            _stackPopoverScreenBounds.Height > 0 &&
-            _stackPopoverSurface is { } surface)
-        {
-            double left = ((surface.ActualWidth - editorWidth) / 2);
-            double top = surface.Padding.Top +
-                ((StackPopoverLayoutCalculator.TitleHeight -
-                    editorHeight) / 2);
-            return new Windows.Graphics.RectInt32(
-                _stackPopoverScreenBounds.X + (int)Math.Round(left * scale),
-                _stackPopoverScreenBounds.Y + (int)Math.Round(top * scale),
-                width,
-                height);
-        }
-
-        if (Win32Helper.GetCursorPos(out Win32Helper.POINT cursor))
-        {
-            return new Windows.Graphics.RectInt32(
-                cursor.X - (width / 2),
-                cursor.Y - (height / 2),
-                width,
-                height);
-        }
-
-        return new Windows.Graphics.RectInt32(0, 0, width, height);
-    }
-
-    private void StackPopoverTitleEditorWindow_Closed(
-        object sender,
-        WindowEventArgs args)
-    {
-        if (_stackPopoverTitleEditing &&
-            ReferenceEquals(sender, _stackPopoverTitleEditorWindow))
-        {
-            App.Log("[DiagRename] Closed by window Closed event");
-            CommitStackPopoverTitleRename();
-        }
+        ActivateStackPopoverInput();
+        InlineEditorFocus.FocusWhenLoaded(
+            editor,
+            static editor => editor.SelectAll(),
+            DispatcherQueue,
+            "StackPopoverTitleRename");
     }
 
     private void StackPopoverTitleEditor_KeyDown(
@@ -1517,13 +1601,11 @@ public sealed partial class FileSurfaceContent
         if (e.Key == Windows.System.VirtualKey.Enter)
         {
             e.Handled = true;
-            App.Log("[DiagRename] KeyDown Enter");
             CommitStackPopoverTitleRename();
         }
         else if (e.Key == Windows.System.VirtualKey.Escape)
         {
             e.Handled = true;
-            App.Log("[DiagRename] KeyDown Escape");
             CancelStackPopoverTitleRename();
         }
     }
@@ -1561,23 +1643,45 @@ public sealed partial class FileSurfaceContent
         }
     }
 
+    private static bool IsVisualDescendantOf(
+        DependencyObject? source,
+        DependencyObject? ancestor)
+    {
+        if (source is null || ancestor is null)
+        {
+            return false;
+        }
+
+        for (DependencyObject? current = source;
+             current is not null;
+             current = VisualTreeHelper.GetParent(current))
+        {
+            if (ReferenceEquals(current, ancestor))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private void StackPopoverTitleEditor_LostFocus(
         object sender,
         RoutedEventArgs e)
     {
-        // The editor window and the popover host exchange Win32 activation
-        // while the editor is still coming up, which raises one spurious
-        // LostFocus. The item editor swallows that via the same grace period;
-        // committing on it closed the title editor ~30ms after it opened.
+        if (_stackPopoverTitleCancelling)
+        {
+            _stackPopoverTitleCancelling = false;
+            return;
+        }
+
         if (InlineEditorFocus.TryRecoverFocusWithinGrace(
                 _stackPopoverTitleOpenedAtTick,
                 sender as TextBox))
         {
-            App.Log("[DiagRename] LostFocus recovered within grace");
             return;
         }
 
-        App.Log("[DiagRename] Editor LostFocus committing");
         CommitStackPopoverTitleRename();
     }
 
@@ -1585,9 +1689,11 @@ public sealed partial class FileSurfaceContent
         object sender,
         PointerRoutedEventArgs e)
     {
-        if (_stackPopoverTitleEditing)
+        if (_stackPopoverTitleEditing &&
+            !IsVisualDescendantOf(
+                e.OriginalSource as DependencyObject,
+                _stackPopoverTitleEditor))
         {
-            App.Log("[DiagRename] Surface pointer press while editing");
             CommitStackPopoverTitleRename();
         }
     }
@@ -1645,8 +1751,7 @@ public sealed partial class FileSurfaceContent
                 T("Widget.RenameFailed"),
                 WidgetFeedbackSeverity.Error,
                 "stack-popover-title-rename-error"));
-            editor.Focus(FocusState.Programmatic);
-            editor.SelectAll();
+            CompleteStackPopoverTitleRename();
         }
         finally
         {
@@ -1661,6 +1766,7 @@ public sealed partial class FileSurfaceContent
             return;
         }
 
+        _stackPopoverTitleCancelling = true;
         if (_stackPopoverTitleText is { } title &&
             _stackPopoverTitleOriginalName is { } originalName)
         {
@@ -1679,20 +1785,11 @@ public sealed partial class FileSurfaceContent
 
         _stackPopoverTitleEditing = false;
         _stackPopoverTitleOriginalName = null;
-        TextBox? editor = _stackPopoverTitleEditor;
-        StackPopoverInlineRenameWindow? editorWindow =
-            _stackPopoverTitleEditorWindow;
-        _stackPopoverTitleEditor = null;
-        _stackPopoverTitleEditorWindow = null;
-        if (editor is not null)
+        if (_stackPopoverTitleEditor is { } editor)
         {
-            editor.Loaded -= StackPopoverTitleEditor_Loaded;
-            editor.KeyDown -= StackPopoverTitleEditor_KeyDown;
-            editor.LostFocus -= StackPopoverTitleEditor_LostFocus;
-        }
-        if (editorWindow is not null)
-        {
-            editorWindow.Closed -= StackPopoverTitleEditorWindow_Closed;
+            editor.Visibility = Visibility.Collapsed;
+            editor.IsHitTestVisible = false;
+            editor.Text = string.Empty;
         }
         if (_stackPopoverTitleText is { } title)
         {
@@ -1700,16 +1797,11 @@ public sealed partial class FileSurfaceContent
         }
         App.Current?.WidgetManager?.EndWidgetInteraction(
             "surface-stack-popover-title-rename-closed");
-        editorWindow?.CloseEditorWindow();
-        // The rename editor is a separate top-level window; closing it leaves
-        // the popover host in a deactivated state, and the outside-click
-        // dismiss depends on a fresh Activated->Deactivated transition. Hand
-        // activation back so the popover can be dismissed by clicking away.
-        if (_stackPopoverPopupOpen &&
-            _stackPopoverHostWindow is { } host)
+        if (_stackPopoverPopupOpen && !_stackPopoverCleanupPending)
         {
-            host.Activate();
+            _stackPopoverItemsView?.Focus(FocusState.Programmatic);
         }
+        TryFinishStackPopoverCleanup();
     }
 
     private void ApplyStackPopoverForegroundResources(FrameworkElement scope)
@@ -1921,6 +2013,14 @@ public sealed partial class FileSurfaceContent
         {
             _stackPopoverTitleText.Foreground = primary;
         }
+        if (_stackPopoverTitleEditor is not null)
+        {
+            _stackPopoverTitleEditor.Foreground = primary;
+        }
+        if (_stackPopoverItemRenameEditor is not null)
+        {
+            _stackPopoverItemRenameEditor.Foreground = primary;
+        }
         if (_stackPopoverEmptyText is not null)
         {
             _stackPopoverEmptyText.Foreground = secondary;
@@ -1932,16 +2032,6 @@ public sealed partial class FileSurfaceContent
         }
 
         _stackPopoverHostWindow?.UpdateAppearance(materialAppearance, followMaterial);
-
-        _stackPopoverTitleEditorWindow?.UpdateAppearance(
-            background,
-            primary,
-            followMaterial
-                ? materialAppearance
-                : materialAppearance with
-                {
-                    MaterialType = SettingsService.WidgetMaterialTypeSolid
-                });
     }
 
     private bool UsesStackPopoverMaterialStyle() =>
@@ -2066,8 +2156,10 @@ public sealed partial class FileSurfaceContent
         HideStackPopoverReorderIndicator();
         _stackPopoverMembers = [];
         _stackPopoverKey = null;
+        ViewModel.SetOpenPopoverStackKey(null);
         _stackPopoverLayout = null;
         _stackPopoverScreenBounds = new Windows.Graphics.RectInt32(0, 0, 0, 0);
+        ArmStackPopoverIdleReleaseTimer();
         _stackPopoverPopupOpen = false;
         _stackPopoverPopupClosing = false;
         _stackPopoverCleanupPending = false;
@@ -2153,6 +2245,7 @@ public sealed partial class FileSurfaceContent
 
     private void DetachStackPopoverItemSurfaces(ListViewBase view)
     {
+        DetachStackPopoverItemSurfaces((DependencyObject)view);
         foreach (object item in view.Items)
         {
             if (view.ContainerFromItem(item) is DependencyObject container)
@@ -2164,16 +2257,27 @@ public sealed partial class FileSurfaceContent
 
     private void DetachStackPopoverItemSurfaces(DependencyObject root)
     {
+        if (root is SelectorItem selectorItem)
+        {
+            selectorItem.DragStarting -= Items_DragStarting;
+            selectorItem.DropCompleted -= Items_DropCompleted;
+        }
+
         if (root is FileItemSurface surface)
         {
             surface.VisualStateChanged -= ItemSurface_VisualStateChanged;
             surface.DataContextChanged -= ItemSurface_DataContextChanged;
             surface.LayoutContext = null;
+            surface.PrepareForContainerDetach();
             _itemSurfaces.Remove(surface.InteractiveBorder);
             if (ReferenceEquals(surface.InteractiveBorder, _folderDropTarget))
             {
                 _folderDropTarget = null;
                 _folderDropVisualActive = false;
+            }
+            if (ReferenceEquals(surface.InteractiveBorder, _launchDropTarget))
+            {
+                _launchDropTarget = null;
             }
         }
 
@@ -2185,22 +2289,181 @@ public sealed partial class FileSurfaceContent
         }
     }
 
-    private void ReleaseStackPopover()
+    private void ClaimSingletonStackPopoverLease()
     {
-        // A popover member drag can outlive the popover: once the events are
-        // detached below, DropCompleted can never arrive and the drag-session
-        // fields would stay armed until the next gesture. Complete the
-        // session first so the in-flight drop's observation, suppression and
-        // reorder cleanup still run.
-        if (_sourceDragSession.ReleaseRecoveryPending || _stackPopoverDragActive)
+        if (s_leasedStackPopoverOwner?.TryGetTarget(out FileSurfaceContent? previous) == true &&
+            !ReferenceEquals(previous, this))
         {
-            CompleteDragItemsSession(
-                DataPackageOperation.None,
-                _stackPopoverDragActive,
-                eventItems: []);
+            previous.EvictParkedStackPopoverFromSingletonLease();
         }
 
-        CancelStackPopoverReveal();
+        s_leasedStackPopoverOwner = new WeakReference<FileSurfaceContent>(this);
+    }
+
+    private void EvictParkedStackPopoverFromSingletonLease()
+    {
+        if (_isDisposed ||
+            _stackPopoverHostWindow is null ||
+            IsStackPopoverBlockingSurfaceOpen)
+        {
+            return;
+        }
+
+        ReleaseStackPopover();
+    }
+
+    private void ArmStackPopoverIdleReleaseTimer()
+    {
+        if (_isDisposed || _stackPopoverHostWindow is null)
+        {
+            return;
+        }
+
+        DispatcherQueue? queue = DispatcherQueue;
+        if (queue is null)
+        {
+            return;
+        }
+
+        if (_stackPopoverIdleReleaseTimer is null)
+        {
+            DispatcherQueueTimer timer = queue.CreateTimer();
+            timer.IsRepeating = false;
+            timer.Interval = StackPopoverIdleReleaseDelay;
+            timer.Tick += StackPopoverIdleReleaseTimer_Tick;
+            _stackPopoverIdleReleaseTimer = timer;
+            PerformanceLogger.RecordTransientUiTimerCreated();
+        }
+        else
+        {
+            _stackPopoverIdleReleaseTimer.Stop();
+            _stackPopoverIdleReleaseTimer.Interval = StackPopoverIdleReleaseDelay;
+        }
+
+        _stackPopoverIdleReleaseTimer.Start();
+    }
+
+    private void CancelStackPopoverIdleReleaseTimer()
+    {
+        _stackPopoverIdleReleaseTimer?.Stop();
+    }
+
+    private void DisposeStackPopoverIdleReleaseTimer()
+    {
+        if (_stackPopoverIdleReleaseTimer is not { } timer)
+        {
+            return;
+        }
+
+        _stackPopoverIdleReleaseTimer = null;
+        timer.Stop();
+        timer.Tick -= StackPopoverIdleReleaseTimer_Tick;
+        PerformanceLogger.RecordTransientUiTimerReleased();
+    }
+
+    private void StackPopoverIdleReleaseTimer_Tick(
+        DispatcherQueueTimer sender,
+        object args)
+    {
+        sender.Stop();
+        if (_isDisposed ||
+            _stackPopoverHostWindow is null ||
+            IsStackPopoverBlockingSurfaceOpen)
+        {
+            return;
+        }
+
+        App.LogVerbose(
+            $"[FileStack] Releasing idle parked popover widget={WidgetId}");
+        ReleaseStackPopover();
+    }
+
+    private void ArmStackPopoverRevealFallbackTimer(
+        StackPopoverHostWindow host,
+        long generation,
+        string stackKey)
+    {
+        if (_isDisposed || DispatcherQueue is not { } queue)
+        {
+            return;
+        }
+
+        if (_stackPopoverRevealFallbackTimer is null)
+        {
+            DispatcherQueueTimer timer = queue.CreateTimer();
+            timer.IsRepeating = false;
+            timer.Interval = StackPopoverRevealFallbackDelay;
+            timer.Tick += StackPopoverRevealFallbackTimer_Tick;
+            _stackPopoverRevealFallbackTimer = timer;
+            PerformanceLogger.RecordTransientUiTimerCreated();
+        }
+        else
+        {
+            _stackPopoverRevealFallbackTimer.Stop();
+            _stackPopoverRevealFallbackTimer.Interval = StackPopoverRevealFallbackDelay;
+        }
+
+        _stackPopoverRevealFallbackTimer.Start();
+    }
+
+    private void DisposeStackPopoverRevealFallbackTimer()
+    {
+        if (_stackPopoverRevealFallbackTimer is not { } timer)
+        {
+            return;
+        }
+
+        _stackPopoverRevealFallbackTimer = null;
+        timer.Stop();
+        timer.Tick -= StackPopoverRevealFallbackTimer_Tick;
+        PerformanceLogger.RecordTransientUiTimerReleased();
+    }
+
+    private void StackPopoverRevealFallbackTimer_Tick(
+        DispatcherQueueTimer sender,
+        object args)
+    {
+        sender.Stop();
+        if (_stackPopoverHostWindow is not { } host ||
+            _pendingStackPopoverKey is not { } stackKey)
+        {
+            CancelStackPopoverReveal();
+            return;
+        }
+
+        long generation = _stackPopoverShowGeneration;
+        if (!CanCompleteStackPopoverReveal(host, generation, stackKey))
+        {
+            CancelStackPopoverReveal();
+            return;
+        }
+
+        App.LogVerbose(
+            $"[FileStack] Popover content commit fallback fired widget={WidgetId} " +
+            $"stack={stackKey} frames={_stackPopoverRevealFrameCount}");
+        CompleteStackPopoverReveal(host, generation, stackKey);
+    }
+
+    private void RebuildStackPopoverContentForHost(
+        StackPopoverHostWindow host,
+        WidgetStackItem currentStack,
+        StackPopoverLayout layout)
+    {
+        DetachStackPopoverContentTree();
+        _stackPopoverItems.Clear();
+        ListViewBase itemsView = CreateStackPopoverItemsView(layout);
+        Border surface = CreateStackPopoverSurface(
+            currentStack,
+            itemsView,
+            layout);
+        host.SetContent(surface);
+        _stackPopoverItemsView = itemsView;
+        _stackPopoverSurface = surface;
+        _stackPopoverIsListMode = ViewModel.IsListMode;
+    }
+
+    private void DetachStackPopoverContentTree()
+    {
         ReleaseStackPopoverItemRenameEditor();
         if (_stackPopoverTitleHost is not null)
         {
@@ -2216,11 +2479,14 @@ public sealed partial class FileSurfaceContent
             _stackPopoverTitleEditor.LostFocus -=
                 StackPopoverTitleEditor_LostFocus;
         }
-        if (_stackPopoverTitleEditorWindow is not null)
+        if (_stackPopoverSurface is { } surface)
         {
-            _stackPopoverTitleEditorWindow.Closed -=
-                StackPopoverTitleEditorWindow_Closed;
+            surface.DragOver -= StackSurface_DragOver;
+            surface.DragLeave -= StackSurface_DragLeave;
+            surface.Drop -= StackSurface_Drop;
+            surface.DataContext = null;
         }
+
         if (_stackPopoverItemsView is { } view)
         {
             DetachStackPopoverItemSurfaces(view);
@@ -2237,26 +2503,20 @@ public sealed partial class FileSurfaceContent
             view.RightTapped -= Items_RightTapped;
             view.SelectionChanged -= Items_SelectionChanged;
             view.CharacterReceived -= Root_CharacterReceived;
+            if (_stackPopoverExpansionWheelHandler is not null)
+            {
+                view.RemoveHandler(
+                    UIElement.PointerWheelChangedEvent,
+                    _stackPopoverExpansionWheelHandler);
+            }
             if (_stackPopoverPreviewKeyHandler is not null)
             {
                 view.RemoveHandler(
                     UIElement.PreviewKeyDownEvent,
                     _stackPopoverPreviewKeyHandler);
             }
+            UnregisterScrollBarActivityTracking(view);
             view.ItemsSource = null;
-        }
-
-        // The collection is intentionally retained during ordinary light
-        // dismisses, but a lifecycle release must drop every member reference
-        // before the cached native tree is detached.
-        _stackPopoverItems.Clear();
-
-        if (_stackPopoverSurface is { } surface)
-        {
-            surface.DragOver -= StackSurface_DragOver;
-            surface.DragLeave -= StackSurface_DragLeave;
-            surface.Drop -= StackSurface_Drop;
-            surface.DataContext = null;
         }
 
         if (_stackPopoverSelectionHost is { } selectionHost)
@@ -2295,21 +2555,12 @@ public sealed partial class FileSurfaceContent
                 _stackPopoverSurfacePointerPressedHandler);
         }
 
-        StackPopoverInlineRenameWindow? titleEditorWindow =
-            _stackPopoverTitleEditorWindow;
         if (_stackPopoverCloseButton is not null)
         {
             _stackPopoverCloseButton.Click -= StackPopoverCloseButton_Click;
         }
-        ResetBoxSelectionState();        if (_stackPopoverHostWindow is { } releasingHost)
-        {
-            releasingHost.DeactivatedByOutsideClick -=
-                StackPopoverHost_DeactivatedByOutsideClick;
-            releasingHost.EscapeRequested -=
-                StackPopoverHost_EscapeRequested;
-            releasingHost.Destroy();
-        }
-        _stackPopoverHostWindow = null;
+
+        ResetBoxSelectionState();
         _stackPopoverAppearanceSignature = 0;
         _stackPopoverItemsView = null;
         _stackPopoverSurface = null;
@@ -2317,7 +2568,6 @@ public sealed partial class FileSurfaceContent
         _stackPopoverTitleText = null;
         _stackPopoverCloseButton = null;
         _stackPopoverTitleEditor = null;
-        _stackPopoverTitleEditorWindow = null;
         _stackPopoverItemRenameEditor = null;
         _stackPopoverEmptyText = null;
         _stackPopoverReorderOverlay = null;
@@ -2326,9 +2576,9 @@ public sealed partial class FileSurfaceContent
         _stackPopoverSelectionRectangle = null;
         ReleaseStackPopoverNameExpansionOverlay();
         _stackPopoverSelectionHost = null;
-        _stackPopoverLayout = null;
         _stackPopoverReorderInsertionIndex = -1;
         _stackPopoverPreviewKeyHandler = null;
+        _stackPopoverExpansionWheelHandler = null;
         _stackPopoverSelectionPointerPressedHandler = null;
         _stackPopoverSelectionPointerMovedHandler = null;
         _stackPopoverSelectionPointerReleasedHandler = null;
@@ -2336,10 +2586,56 @@ public sealed partial class FileSurfaceContent
         _stackPopoverSurfacePointerPressedHandler = null;
         _stackPopoverTitleEditing = false;
         _stackPopoverTitleCommitInProgress = false;
+        _stackPopoverTitleCancelling = false;
         _stackPopoverTitleOriginalName = null;
-        titleEditorWindow?.CloseEditorWindow();
+        _stackPopoverIconContainerStyleSignature = 0;
+    }
+
+    private void ReleaseStackPopover()
+    {
+        // A popover member drag can outlive the popover: once the events are
+        // detached below, DropCompleted can never arrive and the drag-session
+        // fields would stay armed until the next gesture. Complete the
+        // session first so the in-flight drop's observation, suppression and
+        // reorder cleanup still run.
+        DisposeStackPopoverIdleReleaseTimer();
+        DisposeStackPopoverRevealFallbackTimer();
+        if (s_leasedStackPopoverOwner?.TryGetTarget(out FileSurfaceContent? owner) == true &&
+            ReferenceEquals(owner, this))
+        {
+            s_leasedStackPopoverOwner = null;
+        }
+
+        if (_sourceDragSession.ReleaseRecoveryPending || _stackPopoverDragActive)
+        {
+            CompleteDragItemsSession(
+                DataPackageOperation.None,
+                _stackPopoverDragActive,
+                eventItems: []);
+        }
+
+        CancelStackPopoverReveal();
+        DetachStackPopoverContentTree();
+
+        // The collection is intentionally retained during ordinary light
+        // dismisses, but a lifecycle release must drop every member reference
+        // before the cached native tree is detached.
+        _stackPopoverItems.Clear();
+        _stackPopoverItemsStackKey = null;
+
+        if (_stackPopoverHostWindow is { } releasingHost)
+        {
+            releasingHost.DeactivatedByOutsideClick -=
+                StackPopoverHost_DeactivatedByOutsideClick;
+            releasingHost.EscapeRequested -=
+                StackPopoverHost_EscapeRequested;
+            releasingHost.Destroy();
+        }
+        _stackPopoverHostWindow = null;
+        _stackPopoverLayout = null;
         _stackPopoverMembers = [];
         _stackPopoverKey = null;
+        ViewModel.SetOpenPopoverStackKey(null);
         _stackPopoverPopupOpen = false;
         _stackPopoverPopupClosing = false;
         _stackPopoverContextMenuOpen = false;
@@ -2348,7 +2644,6 @@ public sealed partial class FileSurfaceContent
         _stackPopoverCleanupPending = false;
         _pendingStackPopoverKey = null;
         _stackPopoverLayoutRefreshQueued = false;
-        _stackPopoverIconContainerStyleSignature = 0;
         UpdateSelectionCommandBar();
         UpdateItemSurfaceVisuals();
     }
@@ -2390,6 +2685,7 @@ public sealed partial class FileSurfaceContent
         object sender,
         PointerRoutedEventArgs e)
     {
+        HandleElevatedPointerCaptureLost(e.Pointer.PointerId);
         if (_stackPopoverItemsView is { } listView)
         {
             HandleItemsPointerCaptureLost(listView);
@@ -2995,9 +3291,24 @@ public sealed partial class FileSurfaceContent
 
     private void ReconcileStackPopover()
     {
-        if (_stackPopoverHostWindow is null ||
-            _stackPopoverKey is not { } stackKey)
+        if (_stackPopoverHostWindow is null)
         {
+            return;
+        }
+
+        if (_stackPopoverKey is not { } stackKey)
+        {
+            if (!string.IsNullOrEmpty(_stackPopoverItemsStackKey) &&
+                ViewModel.FindStackByKey(_stackPopoverItemsStackKey) is null &&
+                _stackPopoverItems.Count > 0)
+            {
+                // A parked stack was dissolved while the popover was closed.
+                // Drop stale member references immediately while retaining
+                // _stackPopoverItemsStackKey so the next open treats the host
+                // as switchingStacks and rebuilds its inner view cleanly.
+                _stackPopoverItems.Clear();
+            }
+
             return;
         }
 
@@ -3065,6 +3376,17 @@ public sealed partial class FileSurfaceContent
                 titleMaxWidth);
             title.MaxWidth = titleMaxWidth;
         }
+        if (_stackPopoverTitleEditor is { } titleEditor)
+        {
+            titleEditor.MaxWidth = titleMaxWidth;
+            if (_stackPopoverTitleEditing)
+            {
+                titleEditor.Width = Math.Clamp(
+                    titleEditor.Width,
+                    StackPopoverLayoutCalculator.TitleMinimumWidth,
+                    titleMaxWidth);
+            }
+        }
         UpdateStackPopoverScrollPolicy(itemsView.Items.Count);
 
         if (FindStackSurface(stack.StackKey) is not { } anchor)
@@ -3087,15 +3409,20 @@ public sealed partial class FileSurfaceContent
                 out Win32Helper.RECT hostBounds) &&
             _stackPopoverHostWindow.IsVisible)
         {
+            int left = hostBounds.Left + (int)Math.Round(position.Left * scale);
+            int top = hostBounds.Top + (int)Math.Round(position.Top * scale);
+            int probeX = left + (int)Math.Round((layout.Width * scale) / 2);
+            int probeY = top + (int)Math.Round((layout.Height * scale) / 2);
+            double targetScale = Math.Max(0.5, Win32Helper.GetDpiScaleForPoint(probeX, probeY));
             var bounds = new Windows.Graphics.RectInt32(
-                hostBounds.Left + (int)Math.Round(position.Left * scale),
-                hostBounds.Top + (int)Math.Round(position.Top * scale),
+                left,
+                top,
                 StackPopoverPixelCalculator.ToCoveringPhysicalPixels(
                     layout.Width,
-                    scale),
+                    targetScale),
                 StackPopoverPixelCalculator.ToCoveringPhysicalPixels(
                     layout.Height,
-                    scale));
+                    targetScale));
             _stackPopoverScreenBounds = bounds;
             _stackPopoverHostWindow.UpdateBounds(bounds);
         }

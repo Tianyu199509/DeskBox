@@ -11,18 +11,6 @@
     Foreground="{ThemeResource TextFillColorPrimaryBrush}"
     mc:Ignorable="d">
 
-    <UserControl.Resources>
-        <ResourceDictionary>
-            <ResourceDictionary.ThemeDictionaries>
-                <ResourceDictionary x:Key="Default">
-                    <SolidColorBrush x:Key="WidgetGroupTabStripBorderBrush" Color="{ThemeResource TextFillColorPrimary}" Opacity="0.10" />
-                </ResourceDictionary>
-                <ResourceDictionary x:Key="HighContrast">
-                    <SolidColorBrush x:Key="WidgetGroupTabStripBorderBrush" Color="{ThemeResource SystemColorHighlightColor}" />
-                </ResourceDictionary>
-            </ResourceDictionary.ThemeDictionaries>
-        </ResourceDictionary>
-    </UserControl.Resources>
 
     <Grid
         x:Name="ShellRoot"
@@ -51,7 +39,10 @@
                 <Border
                     x:Name="CustomBackgroundColorLayer"
                     Visibility="Collapsed" />
-                <Grid x:Name="CustomBackgroundPanoramaHost" Visibility="Collapsed">
+                <Grid
+                    x:Name="CustomBackgroundPanoramaHost"
+                    x:Load="False"
+                    Visibility="Collapsed">
                     <Image
                         x:Name="CustomBackgroundPanoramaImage"
                         HorizontalAlignment="Left"
@@ -128,6 +119,7 @@
 
                 <controls:WidgetGroupTitleSwitcher
                     x:Name="GroupTitleSwitcher"
+                    x:Load="False"
                     Grid.Column="0"
                     MinWidth="0"
                     Margin="-6,0,6,0"
@@ -237,6 +229,7 @@
 
         <controls:WidgetFeedbackPresenter
             x:Name="FeedbackPresenter"
+            x:Load="False"
             Grid.RowSpan="2"
             Margin="12,0,12,12"
             Canvas.ZIndex="90"
@@ -244,6 +237,7 @@
 
         <Grid
             x:Name="CollapsedChromeLayer"
+            x:Load="False"
             Grid.RowSpan="2"
             Canvas.ZIndex="45"
             Padding="8,0,6,0"
@@ -318,36 +312,6 @@
                 </Border.Background>
             </Border>
 
-            <!-- Shimmer gradient (search capsule) -->
-            <Border x:Name="CompactShimmer"
-                    Grid.ColumnSpan="4"
-                    Margin="-8,0,-6,0"
-                    IsHitTestVisible="False"
-                    Opacity="0">
-                <Border.Background>
-                    <LinearGradientBrush x:Name="CompactShimmerBrush" StartPoint="0,0" EndPoint="1,0">
-                        <GradientStop Color="#0063B1" Offset="0" />
-                        <GradientStop Color="#8B5CF6" Offset="0.5" />
-                        <GradientStop Color="#0063B1" Offset="1" />
-                    </LinearGradientBrush>
-                </Border.Background>
-            </Border>
-
-            <!-- Particle canvas (rain, snow) -->
-            <Canvas x:Name="CompactParticleCanvas"
-                    Grid.ColumnSpan="4"
-                    Margin="-8,0,-6,0"
-                    IsHitTestVisible="False" />
-
-            <!-- Bottom glow bar (music playback) -->
-            <Border x:Name="CompactBottomGlow"
-                    Grid.ColumnSpan="4"
-                    Height="2"
-                    VerticalAlignment="Bottom"
-                    Margin="6,0,6,1"
-                    CornerRadius="1"
-                    IsHitTestVisible="False"
-                    Visibility="Collapsed" />
 
             <!-- Edge glow border -->
             <Border x:Name="CompactEdgeGlow"
@@ -437,22 +401,19 @@
                     <!-- Rotating vinyl disc (music capsule only). Sits before the title text. -->
                     <Grid
                         x:Name="CompactVinylHost"
+                        x:Load="False"
                         Width="26"
                         Height="26"
                         HorizontalAlignment="Center"
                         VerticalAlignment="Center"
-                        RenderTransformOrigin="0.5,0.5"
                         Visibility="Collapsed">
-                        <Grid.RenderTransform>
-                            <RotateTransform x:Name="CompactVinylRotateTransform" Angle="0" />
-                        </Grid.RenderTransform>
                         <!-- black disc body -->
-                        <Ellipse Fill="#0B0B0B" />
+                        <Ellipse Fill="#0B0B0D" />
                         <!-- concentric groove rings -->
-                        <Ellipse Stroke="#222222" StrokeThickness="0.6" Margin="1.5" />
-                        <Ellipse Stroke="#2B2B2B" StrokeThickness="0.5" Margin="3" />
-                        <Ellipse Stroke="#1E1E1E" StrokeThickness="0.5" Margin="4.5" />
-                        <!-- directional sheen -->
+                        <Ellipse Stroke="#222226" StrokeThickness="0.6" Margin="1.5" />
+                        <Ellipse Stroke="#2B2B30" StrokeThickness="0.5" Margin="3" />
+                        <Ellipse Stroke="#1E1E22" StrokeThickness="0.5" Margin="4.5" />
+                        <!-- stationary directional sheen -->
                         <Ellipse>
                             <Ellipse.Fill>
                                 <RadialGradientBrush GradientOrigin="0.32,0.26" Center="0.5,0.5" RadiusX="0.62" RadiusY="0.62">
@@ -463,13 +424,20 @@
                             </Ellipse.Fill>
                         </Ellipse>
                         <!-- center label backing -->
-                        <Ellipse Margin="6.5" Fill="#000000" />
-                        <!-- center label = album cover -->
-                        <Ellipse x:Name="CompactVinylLabel" Margin="6.5">
-                            <Ellipse.Fill>
-                                <ImageBrush x:Name="CompactVinylLabelBrush" Stretch="UniformToFill" />
-                            </Ellipse.Fill>
-                        </Ellipse>
+                        <Ellipse Margin="6.5" Fill="#121216" />
+                        <!-- rotating center label = album cover (13x13 inside 26x26) -->
+                        <Grid
+                            x:Name="CompactVinylLabelHost"
+                            Width="13"
+                            Height="13"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center">
+                            <Ellipse x:Name="CompactVinylLabel">
+                                <Ellipse.Fill>
+                                    <ImageBrush x:Name="CompactVinylLabelBrush" Stretch="UniformToFill" />
+                                </Ellipse.Fill>
+                            </Ellipse>
+                        </Grid>
                         <!-- spindle hole -->
                         <Ellipse Width="1.6" Height="1.6" HorizontalAlignment="Center" VerticalAlignment="Center" Fill="#000000" />
                     </Grid>
@@ -561,6 +529,7 @@
                                 TextTrimming="CharacterEllipsis" />
                             <TextBlock
                                 x:Name="CompactTitleMarqueeClone"
+                                x:Load="False"
                                 HorizontalAlignment="Left"
                                 VerticalAlignment="Center"
                                 FontSize="12.5"
@@ -592,6 +561,7 @@
                                 TextTrimming="CharacterEllipsis" />
                             <TextBlock
                                 x:Name="CompactSummaryMarqueeClone"
+                                x:Load="False"
                                 MinWidth="0"
                                 HorizontalAlignment="Left"
                                 VerticalAlignment="Center"
@@ -734,6 +704,7 @@
                 </Button>
                 <Button
                     x:Name="CompactPreviousButton"
+                    x:Load="False"
                     Click="CompactPreviousButton_Click"
                     Style="{StaticResource WidgetTitleActionButtonStyle}"
                     Visibility="Collapsed">
@@ -743,6 +714,7 @@
                 </Button>
                 <Button
                     x:Name="CompactPlayPauseButton"
+                    x:Load="False"
                     Click="CompactPlayPauseButton_Click"
                     Style="{StaticResource WidgetTitleActionButtonStyle}"
                     Visibility="Collapsed">
@@ -753,6 +725,7 @@
                 </Button>
                 <Button
                     x:Name="CompactNextButton"
+                    x:Load="False"
                     Click="CompactNextButton_Click"
                     Style="{StaticResource WidgetTitleActionButtonStyle}"
                     Visibility="Collapsed">
@@ -802,6 +775,7 @@
 
         <Grid
             x:Name="OverlayChromeLayer"
+            x:Load="False"
             Grid.RowSpan="2"
             Canvas.ZIndex="30"
             Visibility="Collapsed">
@@ -905,6 +879,7 @@
 
         <Border
             x:Name="GroupDropPreview"
+            x:Load="False"
             Grid.RowSpan="2"
             HorizontalAlignment="Left"
             VerticalAlignment="Top"

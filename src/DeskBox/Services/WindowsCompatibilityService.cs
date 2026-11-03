@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Microsoft.UI.Composition.SystemBackdrops;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Windows.UI.ViewManagement;
 
@@ -187,7 +188,53 @@ public static class WindowsCompatibilityService
         }
 
         window.SystemBackdrop = null;
+        ApplySolidRootSurfaceFallback(window);
         return "Solid";
+    }
+
+    private static void ApplySolidRootSurfaceFallback(Window window)
+    {
+        try
+        {
+            if (window.Content is not Panel rootPanel)
+            {
+                return;
+            }
+
+            bool needsFallback = rootPanel.Background is null ||
+                (rootPanel.Background is SolidColorBrush solid && solid.Color.A == 0);
+            if (!needsFallback)
+            {
+                return;
+            }
+
+            ApplySolidThemeBackground(rootPanel);
+            rootPanel.ActualThemeChanged += static (sender, _) =>
+            {
+                if (sender is Panel panel)
+                {
+                    ApplySolidThemeBackground(panel);
+                }
+            };
+        }
+        catch (Exception ex)
+        {
+            App.LogVerbose($"[Backdrop] Solid fallback brush apply skipped: {ex.Message}");
+        }
+    }
+
+    private static void ApplySolidThemeBackground(Panel rootPanel)
+    {
+        bool isDark = rootPanel.ActualTheme switch
+        {
+            ElementTheme.Dark => true,
+            ElementTheme.Light => false,
+            _ => Application.Current?.RequestedTheme == ApplicationTheme.Dark
+        };
+        Windows.UI.Color fallbackColor = isDark
+            ? Windows.UI.Color.FromArgb(255, 32, 32, 32)
+            : Windows.UI.Color.FromArgb(255, 243, 243, 243);
+        rootPanel.Background = new SolidColorBrush(fallbackColor);
     }
 
     /// <summary>

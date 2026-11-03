@@ -199,7 +199,7 @@ internal static class NativeDropMaterializationWorker
             }
             else
             {
-                extractedPaths = NativeDropTarget.ExtractVirtualFiles(
+                extractedPaths = NativeDropTarget.ExtractDeferredWorkerFiles(
                     new NativeOleDataObject(dataObject));
                 if (extractedPaths.Count > 0)
                 {

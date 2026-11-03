@@ -212,8 +212,18 @@ public sealed partial class ContentWidgetWindow
                     return;
                 }
 
-                App.Current.WidgetManager?.ActivateAllVisibleWidgetsFromTitle(
-                    windowHandle);
+                if (WidgetLayerService.UsesDynamicGroupClickRaiseMode())
+                {
+                    App.Current.WidgetManager?.ActivateAllVisibleWidgetsFromTitle(
+                        windowHandle);
+                }
+                else if (!WidgetLayerService.UsesDesktopPinnedMode() &&
+                         !WidgetLayerService.UsesQuickRevealMode())
+                {
+                    App.Current.WidgetManager?.RebedDynamicPassiveSiblingsAfterSingleActivation(
+                        windowHandle,
+                        "title-single-press");
+                }
             });
         }
         if (_config.IsPositionLocked || IsCompactTransitionActive) return;
@@ -238,7 +248,8 @@ public sealed partial class ContentWidgetWindow
 
     private bool IsGroupNavigationInput(object? source) =>
         source is DependencyObject element &&
-        IsWithin(element, ContentWidgetShell.GroupNavigationElement) &&
+        ContentWidgetShell.GroupNavigationElement is { } groupNav &&
+        IsWithin(element, groupNav) &&
         (HasAncestorOfType<TabViewItem>(element) || HasAncestorOfType<ButtonBase>(element));
 
     private static bool IsWithin(DependencyObject source, DependencyObject target)
@@ -275,8 +286,12 @@ public sealed partial class ContentWidgetWindow
     private void TitleBarGrid_PointerReleased(object sender, PointerRoutedEventArgs e)
     {
         EndWindowDragCore(e);
-        App.Current.WidgetManager?.RestoreTemporarilyRaisedWidgetsToDesktopLayer(
-            "content-title-released");
+        IntPtr foreground = Win32Helper.GetForegroundWindow();
+        if (foreground != IntPtr.Zero && !App.Current.IsDeskBoxWindow(foreground))
+        {
+            App.Current.WidgetManager?.RestoreTemporarilyRaisedWidgetsToDesktopLayer(
+                "content-title-released");
+        }
     }
 
     private void DragHandle_PointerPressed(object sender, PointerRoutedEventArgs e)
@@ -396,6 +411,10 @@ public sealed partial class ContentWidgetWindow
         // window then floats above foreign apps with no owner for its
         // restore. Every explicit raise path has already flipped the flag
         // by now; the desktop-pinned band keeps its own activation funnels.
+        bool activatedFromRestingDynamicLayer =
+            IsAtDesktopLayer &&
+            !WidgetLayerService.UsesDesktopPinnedMode() &&
+            !WidgetLayerService.UsesQuickRevealMode();
         if (IsAtDesktopLayer && !WidgetLayerService.UsesDesktopPinnedMode())
         {
             IsAtDesktopLayer = false;
@@ -413,6 +432,11 @@ public sealed partial class ContentWidgetWindow
         App.Current.WidgetManager?.ReassertRaisedWidgetGroupAfterDeskBoxActivation(
             HWnd,
             "content-window-activated");
+        if (activatedFromRestingDynamicLayer &&
+            App.Current.WidgetManager is not { WidgetsRaisedFromTray: true })
+        {
+            DeferDynamicRestingClickRaiseScope();
+        }
     }
 
     private void QueueRestoreDesktopLayerIfForegroundLeavesDeskBox()
@@ -445,6 +469,12 @@ public sealed partial class ContentWidgetWindow
             // window restores itself.
             if (App.Current.WidgetManager is not { WidgetsRaisedFromTray: true })
             {
+                if (App.Current.WidgetManager is { HasActiveTemporaryRaiseLease: true } manager &&
+                    manager.RestoreTemporarilyRaisedWidgetsToDesktopLayer("deskbox-leave"))
+                {
+                    return;
+                }
+
                 RestoreDesktopLayer(force: true);
             }
         });
@@ -530,6 +560,39 @@ public sealed partial class ContentWidgetWindow
         {
             SettingsService.SaveDebounced();
         }
+    }
+
+    private void DeferDynamicRestingClickRaiseScope()
+    {
+        IntPtr activatedHandle = HWnd;
+        UiDispatch.PostAfterCallback(() =>
+        {
+            if (!Win32Helper.IsWindowInCurrentProcess(activatedHandle) ||
+                (IsDragging && HasMovedTitleBarDrag) ||
+                App.Current.WidgetManager is { WidgetsRaisedFromTray: true })
+            {
+                return;
+            }
+
+            IntPtr foregroundNow = Win32Helper.GetForegroundWindow();
+            if (foregroundNow != activatedHandle &&
+                Win32Helper.GetAncestor(foregroundNow, Win32Helper.GA_ROOTOWNER) != activatedHandle)
+            {
+                return;
+            }
+
+            if (WidgetLayerService.UsesDynamicGroupClickRaiseMode())
+            {
+                App.Current.WidgetManager?.PromotePeerWidgetsAfterDynamicBodyActivation(
+                    activatedHandle);
+            }
+            else
+            {
+                App.Current.WidgetManager?.RebedDynamicPassiveSiblingsAfterSingleActivation(
+                    activatedHandle,
+                    "content-body-single-activated");
+            }
+        });
     }
 
     private void PushToBottom(bool showWindow = true)

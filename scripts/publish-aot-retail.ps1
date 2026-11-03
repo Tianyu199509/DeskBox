@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param(
     [ValidateSet("x64", "ARM64")]
     [string]$Platform = "x64",
@@ -23,6 +23,7 @@ $logPath = Join-Path $runRoot "publish.log"
 $summaryPath = Join-Path $runRoot "summary.json"
 $project = Join-Path $repoRoot "src\DeskBox\DeskBox.csproj"
 $updaterProject = Join-Path $repoRoot "src\DeskBox.Updater\DeskBox.Updater.csproj"
+$settingsProject = Join-Path $repoRoot "src\DeskBox.Settings\DeskBox.Settings.csproj"
 $toolchainScript = Join-Path $PSScriptRoot "rust-arm64-msvc-environment.ps1"
 $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 
@@ -278,7 +279,7 @@ try {
     [Environment]::SetEnvironmentVariable("DOTNET_CLI_UI_LANGUAGE", "en-US", "Process")
     [Environment]::SetEnvironmentVariable("DOTNET_NOLOGO", "1", "Process")
 
-    foreach ($restoreProject in @($project, $updaterProject)) {
+    foreach ($restoreProject in @($project, $updaterProject, $settingsProject)) {
         $restoreArguments = @(
             "restore",
             $restoreProject,
@@ -372,17 +373,30 @@ $installManifestEntries = @($installManifestEntries | Sort-Object -Unique)
 
 $requiredFiles = @(
     "DeskBox.exe",
+    "DeskBox.Settings.exe",
     "DeskBox.Updater.exe",
     "DeskBox.ThumbnailProxy.exe",
     "DeskBox.pri",
+    "DeskBox.Settings.pri",
     "deskbox_native.dll",
-    "EverythingSdk.dll",
     "Microsoft.UI.Input.dll",
     "Microsoft.ui.xaml.dll",
     "Microsoft.WindowsAppRuntime.dll",
     "Microsoft.WindowsAppRuntime.Insights.Resource.dll",
-    $installManifestName,
-    "ThirdParty/Everything/LICENSE.txt"
+    "Strings\ar-SA.json",
+    "Strings\bn-BD.json",
+    "Strings\de-DE.json",
+    "Strings\en-US.json",
+    "Strings\es-ES.json",
+    "Strings\fr-FR.json",
+    "Strings\hi-IN.json",
+    "Strings\ja-JP.json",
+    "Strings\ko-KR.json",
+    "Strings\pt-BR.json",
+    "Strings\ru-RU.json",
+    "Strings\zh-CN.json",
+    "Strings\zh-TW.json",
+    $installManifestName
 )
 foreach ($requiredFile in $requiredFiles) {
     if (-not (Test-Path -LiteralPath (Join-Path $publishDir $requiredFile) -PathType Leaf)) {
@@ -393,6 +407,7 @@ foreach ($requiredFile in $requiredFiles) {
 $symbolFiles = @(Get-ChildItem -LiteralPath $symbolsDir -File -Recurse)
 foreach ($requiredSymbolFile in @(
         "DeskBox.pdb",
+        "DeskBox.Settings.pdb",
         "DeskBox.Updater.pdb",
         "DeskBox.ThumbnailProxy.pdb",
         "deskbox_native.pdb")) {
@@ -411,11 +426,26 @@ $forbiddenNames = @(
     "DeskBox.dll",
     "DeskBox.deps.json",
     "DeskBox.runtimeconfig.json",
+    "DeskBox.Settings.dll",
+    "DeskBox.Settings.deps.json",
+    "DeskBox.Settings.runtimeconfig.json",
     "DeskBox.Updater.dll",
     "DeskBox.Updater.deps.json",
     "DeskBox.Updater.runtimeconfig.json"
 )
-$forbiddenFiles = @($publishedFiles | Where-Object { $_.Name -in $forbiddenNames -or $_.Extension -eq ".pdb" })
+$forbiddenNamePatterns = @(
+    '^EverythingSdk\.dll$',
+    '^H\.NotifyIcon(?:\.WinUI)?\.dll$',
+    '^deskbox_search_core(?:\.|$)'
+)
+$forbiddenNameRegex = $forbiddenNamePatterns -join '|'
+$forbiddenFiles = @(
+    $publishedFiles | Where-Object {
+        $_.Name -in $forbiddenNames -or
+        $_.Extension -eq ".pdb" -or
+        $_.Name -match $forbiddenNameRegex
+    }
+)
 if ($forbiddenFiles.Count -gt 0) {
     throw "AOT retail output contains forbidden managed/JIT/symbol files: $($forbiddenFiles.Name -join ', ')."
 }
@@ -423,10 +453,10 @@ if ($forbiddenFiles.Count -gt 0) {
 $peResults = @(
     foreach ($fileName in @(
             "DeskBox.exe",
+            "DeskBox.Settings.exe",
             "DeskBox.Updater.exe",
             "DeskBox.ThumbnailProxy.exe",
             "deskbox_native.dll",
-            "EverythingSdk.dll",
             "Microsoft.WindowsAppRuntime.Insights.Resource.dll")) {
         $path = Join-Path $publishDir $fileName
         $machine = Get-PeMachine -Path $path

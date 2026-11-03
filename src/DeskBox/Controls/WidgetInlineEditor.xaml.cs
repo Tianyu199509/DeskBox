@@ -61,13 +61,32 @@ public sealed partial class WidgetInlineEditor : UserControl
 
     public event EventHandler<KeyRoutedEventArgs>? EditorKeyDown;
 
+    private readonly KeyEventHandler _editorPreviewKeyDownHandler;
+    private bool _visualHandlersReleased;
+
     public WidgetInlineEditor()
     {
         InitializeComponent();
+        _editorPreviewKeyDownHandler = new KeyEventHandler(EditorTextBox_KeyDown);
         EditorTextBoxElement.AddHandler(
             UIElement.PreviewKeyDownEvent,
-            new KeyEventHandler(EditorTextBox_KeyDown),
+            _editorPreviewKeyDownHandler,
             handledEventsToo: true);
+    }
+
+    internal void ReleaseVisualHandlers()
+    {
+        if (_visualHandlersReleased)
+        {
+            return;
+        }
+
+        _visualHandlersReleased = true;
+        EditorTextBoxElement.RemoveHandler(
+            UIElement.PreviewKeyDownEvent,
+            _editorPreviewKeyDownHandler);
+        Bindings?.StopTracking();
+        Content = null;
     }
 
     public string Title

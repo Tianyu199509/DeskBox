@@ -119,6 +119,11 @@ public sealed partial class SearchWidgetContent : UserControl, IDisposable
 
     public void UpdateContent()
     {
+        if (_isDisposed)
+        {
+            return;
+        }
+
         PlaceholderText.Text = _localizationService.T("Search.Placeholder");
         HistorySectionTitle.Text = _localizationService.T("Search.Section.RecentSearches");
         ClearHistoryLabel.Text = _localizationService.T("Widget.Search.Clear");
@@ -233,7 +238,13 @@ public sealed partial class SearchWidgetContent : UserControl, IDisposable
 
     public void ApplyAppearance()
     {
+        if (_isDisposed)
+        {
+            return;
+        }
+
         UpdateSearchIcon();
+        UpdateHotkeyBadge();
     }
 
     private void UpdateSearchIcon()
@@ -373,5 +384,10 @@ public sealed partial class SearchWidgetContent : UserControl, IDisposable
         HistoryList.ItemsSource = null;
         _recentQueries.Clear();
         SearchRequested = null;
+        // SearchWidgetContent.xaml only uses {x:Bind} inside DataTemplates, so
+        // the generated root Bindings field stays null unless root {x:Bind} is added.
+        Bindings?.StopTracking();
+        DataContext = null;
+        Content = null;
     }
 }

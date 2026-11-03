@@ -1,15 +1,5 @@
-using System.Collections.ObjectModel;
-using CommunityToolkit.Mvvm.ComponentModel;
-using DeskBox.Helpers;
-using DeskBox.Models;
 using DeskBox.Services;
-using Microsoft.UI.Xaml;
-using Microsoft.UI.Xaml.Media;
-using Microsoft.UI.Xaml.Media.Imaging;
-using Windows.Foundation;
-using Windows.Graphics.Imaging;
-using Windows.Storage.Streams;
-using Windows.UI;
+using DeskBox.Services.Lyrics;
 
 namespace DeskBox.ViewModels;
 
@@ -29,6 +19,7 @@ public sealed partial class MusicWidgetViewModel
         }
 
         UpdateProgressTimerState();
+        UpdateLyricActiveLineAndScheduleTimer();
     }
 
     public async Task RefreshAsync(int? mediaPropertiesGeneration = null)
@@ -62,7 +53,7 @@ public sealed partial class MusicWidgetViewModel
                     }
 
                     RefreshSessionList();
-                    var info = await _musicSessionService.GetCurrentSessionInfoAsync(_preferredSessionId);
+                    MusicSessionInfo? info = await _musicSessionService.GetCurrentSessionInfoAsync(_preferredSessionId);
                     if (_isDisposed)
                     {
                         return;
@@ -72,7 +63,7 @@ public sealed partial class MusicWidgetViewModel
                         expectedGeneration != Volatile.Read(ref _mediaPropertiesPendingGeneration);
                     if (!isStaleMediaRefresh)
                     {
-                        await ApplyInfoAsync(info, refreshGeneration);
+                        await ApplyInfoAsync(info);
                         refreshCompleted = true;
                     }
                 }
@@ -103,6 +94,7 @@ public sealed partial class MusicWidgetViewModel
                     ref _lastFullRefreshCompletedUtcTicks,
                     DateTime.UtcNow.Ticks);
             }
+
             _isRefreshing = false;
         }
     }
@@ -193,9 +185,14 @@ public sealed partial class MusicWidgetViewModel
             await _musicSessionService.TryPlayAsync(_preferredSessionId);
         }
 
-        await RefreshAsync();
+        await RefreshPlaybackAsync();
+        await RefreshTimelineAsync();
         await Task.Delay(180);
-        await RefreshAsync();
+        if (!_isDisposed)
+        {
+            await RefreshPlaybackAsync();
+            await RefreshTimelineAsync();
+        }
     }
 
     public async Task PreviousAsync()
@@ -237,9 +234,12 @@ public sealed partial class MusicWidgetViewModel
                 App.Log($"[MusicWidget] Playback mode request was rejected. requested={requestedMode}");
             }
 
-            await RefreshAsync();
+            await RefreshPlaybackAsync();
             await Task.Delay(180);
-            await RefreshAsync();
+            if (!_isDisposed)
+            {
+                await RefreshPlaybackAsync();
+            }
         }
         finally
         {
@@ -247,7 +247,9 @@ public sealed partial class MusicWidgetViewModel
         }
     }
 
-    public async Task RefreshSystemVolumeAsync()
+    public Task RefreshSystemVolumeAsync() => RefreshVolumeAsync();
+
+    public async Task RefreshVolumeAsync()
     {
         if (_isDisposed || _isRefreshingVolume)
         {
@@ -257,15 +259,25 @@ public sealed partial class MusicWidgetViewModel
         _isRefreshingVolume = true;
         try
         {
-            double systemVolume = await _musicVolumeService.GetSystemMasterVolumeAsync();
-            if (!_isDisposed)
+            MusicVolumeSnapshot snapshot = await _musicVolumeService.GetVolumeAsync(
+                _sourceAppUserModelId,
+                _sourceDisplayName);
+
+            if (_isDisposed)
             {
-                SystemVolume = systemVolume;
+                return;
+            }
+
+            SystemVolume = snapshot.SystemVolume;
+            HasSessionVolume = snapshot.HasSessionVolume;
+            if (snapshot.HasSessionVolume)
+            {
+                SessionVolume = snapshot.SessionVolume;
             }
         }
         catch (Exception ex)
         {
-            App.Log($"[MusicWidget] Refresh system volume failed: {ex.Message}");
+            App.Log($"[MusicWidget] Refresh volume failed: {ex.Message}");
         }
         finally
         {
@@ -312,6 +324,105 @@ public sealed partial class MusicWidgetViewModel
         }
     }
 
+    public async Task SetSessionVolumeAsync(double volume)
+    {
+        if (_isDisposed || !HasSessionVolume)
+        {
+            return;
+        }
+
+        SessionVolume = volume;
+        _pendingSessionVolume = SessionVolume;
+        if (_isChangingSessionVolume)
+        {
+            return;
+        }
+
+        _isChangingSessionVolume = true;
+        try
+        {
+            while (_pendingSessionVolume.HasValue)
+            {
+                double requestedVolume = _pendingSessionVolume.Value;
+                _pendingSessionVolume = null;
+
+                bool didChange = await _musicVolumeService.TrySetSessionVolumeAsync(
+                    _sourceAppUserModelId,
+                    _sourceDisplayName,
+                    requestedVolume);
+                if (!didChange)
+                {
+                    App.Log("[MusicWidget] Session volume request was rejected.");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[MusicWidget] Set session volume failed: {ex.Message}");
+        }
+        finally
+        {
+            _isChangingSessionVolume = false;
+        }
+    }
+
+    public void ToggleLyricsView()
+    {
+        if (!ShowLyrics || !HasSession)
+        {
+            return;
+        }
+
+        IsLyricsViewOpen = !IsLyricsViewOpen;
+    }
+
+    public void CloseLyricsView()
+    {
+        IsLyricsViewOpen = false;
+    }
+
+    public async Task SeekToLyricLineAsync(LrcLine? line)
+    {
+        if (_isDisposed || line is null || !CanInteractWithProgress)
+        {
+            return;
+        }
+
+        double shiftedMs = line.Timestamp.TotalMilliseconds + _currentLyrics.TotalOffsetMs;
+        TimeSpan target = TimeSpan.FromMilliseconds(Math.Clamp(shiftedMs, 0, Duration.TotalMilliseconds));
+
+        bool didSeek = await _musicSessionService.TrySeekAsync(_preferredSessionId, target);
+        if (!didSeek)
+        {
+            return;
+        }
+
+        DateTimeOffset nowUtc = DateTimeOffset.UtcNow;
+        _timelineExtrapolator.ApplyManualSeek(target, nowUtc);
+        Position = target;
+        UpdateLyricActiveLineAndScheduleTimer();
+    }
+
+    public async Task AdjustLyricsOffsetAsync(int deltaMs, bool reset = false)
+    {
+        if (_isDisposed || !_hasCurrentMediaInfo || string.IsNullOrWhiteSpace(_title))
+        {
+            return;
+        }
+
+        var query = new LyricsQuery(_title, _artist, _album, Duration);
+        int updatedOffsetMs = await _lyricsService.AdjustUserOffsetAsync(query, deltaMs, reset);
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        _currentLyrics = _currentLyrics.WithUserOffset(updatedOffsetMs);
+        OnPropertyChanged(nameof(LyricsOffsetText));
+        OnPropertyChanged(nameof(HasNonZeroLyricsOffset));
+        UpdateLyricActiveLineAndScheduleTimer();
+    }
+
     public void BeginSeek()
     {
         _isSeeking = true;
@@ -336,14 +447,18 @@ public sealed partial class MusicWidgetViewModel
         if (!didSeek)
         {
             App.Log("[MusicWidget] Seek request was rejected by the active media session.");
-            await RefreshAsync();
+            await RefreshTimelineAsync();
             return;
         }
 
+        DateTimeOffset nowUtc = DateTimeOffset.UtcNow;
+        _timelineExtrapolator.ApplyManualSeek(targetPosition, nowUtc);
         Position = targetPosition;
-        _lastSyncedPosition = targetPosition;
-        _lastPositionSyncAt = DateTimeOffset.UtcNow;
-        await Task.Delay(260);
-        await RefreshAsync();
+        UpdateLyricActiveLineAndScheduleTimer();
+        await Task.Delay(240);
+        if (!_isDisposed)
+        {
+            await RefreshTimelineAsync();
+        }
     }
 }

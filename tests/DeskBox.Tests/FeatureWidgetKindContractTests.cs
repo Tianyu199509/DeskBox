@@ -23,7 +23,9 @@ public sealed class FeatureWidgetKindContractTests
                 WidgetKind.Music,
                 WidgetKind.Weather,
                 WidgetKind.Search,
-                WidgetKind.Glance
+                WidgetKind.Glance,
+                WidgetKind.Custom,
+                WidgetKind.Clipboard
             },
             FeatureWidgetSettings.FeatureKinds);
     }

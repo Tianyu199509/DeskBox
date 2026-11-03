@@ -401,4 +401,173 @@ public sealed class WidgetFileStackSettingsTests
         Assert.Equal("design", rule.Id);
         Assert.Equal([".psd", ".fig"], rule.Extensions);
     }
+
+    [Fact]
+    public void NormalizeOverrides_PrunesOrphanedManualStackAndSplicesSurvivingMemberInManualOrder()
+    {
+        var config = new WidgetConfig
+        {
+            SortMode = WidgetSortMode.Manual
+        };
+        WidgetFileStackSettings.SetStackMemberOverrides(
+            config,
+            new Dictionary<string, List<string>>
+            {
+                ["Manual:active"] = [@"C:\Work\one.txt", @"C:\Work\two.txt"],
+                ["Manual:orphan"] = [@"C:\Work\survivor.txt"]
+            });
+        WidgetFileStackSettings.SetStackOrder(
+            config,
+            [
+                @"Item:C:\WORK\FIRST.TXT",
+                "Manual:orphan",
+                "Manual:active",
+                @"Item:C:\WORK\LAST.TXT"
+            ]);
+
+        Assert.True(WidgetFileStackSettings.NormalizeOverrides(config));
+
+        Assert.Equal(
+            ["Manual:active"],
+            WidgetFileStackSettings.GetStackMemberOverrides(config).Keys);
+        Assert.Equal(
+            [
+                @"Item:C:\WORK\FIRST.TXT",
+                @"Item:C:\WORK\SURVIVOR.TXT",
+                "Manual:active",
+                @"Item:C:\WORK\LAST.TXT"
+            ],
+            WidgetFileStackSettings.GetStackOrder(config));
+    }
+
+    [Fact]
+    public void SubfolderSortAndOrderMetadata_RoundTripsAndRebasesManagedPaths()
+    {
+        const string oldRoot = @"C:\OldManaged\WidgetA";
+        const string newRoot = @"D:\NewManaged\WidgetA";
+        string oldSubA = Path.Combine(oldRoot, "SubA");
+        string oldSubB = Path.Combine(oldRoot, "SubB", "Nested");
+        string newSubAKey = WidgetFileStackSettings.NormalizeFolderScopeKey(
+            Path.Combine(newRoot, "SubA"));
+        string newSubBKey = WidgetFileStackSettings.NormalizeFolderScopeKey(
+            Path.Combine(newRoot, "SubB", "Nested"));
+
+        var config = new WidgetConfig();
+        WidgetFileStackSettings.SetSubfolderSortOverrides(
+            config,
+            new Dictionary<string, WidgetFolderSortOverride>
+            {
+                [oldSubA] = new WidgetFolderSortOverride(WidgetSortMode.Manual, false),
+                [oldSubB] = new WidgetFolderSortOverride(WidgetSortMode.DateModified, true)
+            });
+        WidgetFileStackSettings.SetSubfolderDisplayOrders(
+            config,
+            new Dictionary<string, List<string>>
+            {
+                [oldSubA] =
+                [
+                    "Item:" + Path.Combine(oldSubA, "b.lnk").ToUpperInvariant(),
+                    "Documents",
+                    "Item:" + Path.Combine(oldSubA, "a.lnk").ToUpperInvariant()
+                ]
+            });
+        WidgetFileStackSettings.SetSubfolderManualItemOrders(
+            config,
+            new Dictionary<string, List<string>>
+            {
+                [oldSubA] =
+                [
+                    Path.Combine(oldSubA, "b.lnk"),
+                    Path.Combine(oldSubA, "a.lnk")
+                ]
+            });
+
+        Assert.True(WidgetFileStackSettings.RebaseManagedFolderPaths(
+            config,
+            oldRoot,
+            newRoot));
+
+        Dictionary<string, WidgetFolderSortOverride> sortOverrides =
+            WidgetFileStackSettings.GetSubfolderSortOverrides(config);
+        Assert.Equal(
+            new WidgetFolderSortOverride(WidgetSortMode.Manual, false),
+            sortOverrides[newSubAKey]);
+        Assert.Equal(
+            new WidgetFolderSortOverride(WidgetSortMode.DateModified, true),
+            sortOverrides[newSubBKey]);
+
+        Dictionary<string, List<string>> displayOrders =
+            WidgetFileStackSettings.GetSubfolderDisplayOrders(config);
+        Assert.Equal(
+            [
+                "Item:" + Path.Combine(newRoot, "SubA", "b.lnk").ToUpperInvariant(),
+                "Documents",
+                "Item:" + Path.Combine(newRoot, "SubA", "a.lnk").ToUpperInvariant()
+            ],
+            displayOrders[newSubAKey]);
+
+        Dictionary<string, List<string>> manualOrders =
+            WidgetFileStackSettings.GetSubfolderManualItemOrders(config);
+        Assert.Equal(
+            [
+                Path.Combine(newRoot, "SubA", "b.lnk"),
+                Path.Combine(newRoot, "SubA", "a.lnk")
+            ],
+            manualOrders[newSubAKey]);
+    }
+
+    [Fact]
+    public void NormalizeOverrides_PrunesOrphanedManualStackInSubfolderDisplayOrders()
+    {
+        const string subPath = @"C:\Work\Root\Sub";
+        string subKey = WidgetFileStackSettings.NormalizeFolderScopeKey(subPath);
+        var config = new WidgetConfig
+        {
+            SortMode = WidgetSortMode.Name
+        };
+        WidgetFileStackSettings.SetSubfolderSortOverrides(
+            config,
+            new Dictionary<string, WidgetFolderSortOverride>
+            {
+                [subKey] = new WidgetFolderSortOverride(WidgetSortMode.Manual, false)
+            });
+        WidgetFileStackSettings.SetStackMemberOverrides(
+            config,
+            new Dictionary<string, List<string>>
+            {
+                ["Manual:sub-active"] =
+                [
+                    Path.Combine(subPath, "one.txt"),
+                    Path.Combine(subPath, "two.txt")
+                ],
+                ["Manual:sub-orphan"] =
+                [
+                    Path.Combine(subPath, "survivor.txt")
+                ]
+            });
+        WidgetFileStackSettings.SetSubfolderDisplayOrders(
+            config,
+            new Dictionary<string, List<string>>
+            {
+                [subKey] =
+                [
+                    @"Item:C:\WORK\ROOT\SUB\FIRST.TXT",
+                    "Manual:sub-orphan",
+                    "Manual:sub-active"
+                ]
+            });
+
+        Assert.True(WidgetFileStackSettings.NormalizeOverrides(config));
+
+        Assert.Equal(
+            ["Manual:sub-active"],
+            WidgetFileStackSettings.GetStackMemberOverrides(config).Keys);
+        Assert.Equal(
+            [
+                @"Item:C:\WORK\ROOT\SUB\FIRST.TXT",
+                @"Item:C:\WORK\ROOT\SUB\SURVIVOR.TXT",
+                "Manual:sub-active"
+            ],
+            WidgetFileStackSettings.GetSubfolderDisplayOrders(config)[subKey]);
+    }
 }

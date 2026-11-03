@@ -13,6 +13,12 @@ public interface IDesktopOrganizationTransfer
 
 internal sealed class DesktopOrganizationTransfer(FileService files) : IDesktopOrganizationTransfer
 {
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, Exception> _lastItemErrors =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    internal Exception? TryGetLastItemError(string sourcePath) =>
+        _lastItemErrors.TryGetValue(sourcePath, out Exception? error) ? error : null;
+
     public async Task<IReadOnlyList<FileService.FileTransferResult>> MoveAsync(
         IReadOnlyList<FileService.FileTransferPlan> plans,
         bool publicDesktop,
@@ -20,11 +26,22 @@ internal sealed class DesktopOrganizationTransfer(FileService files) : IDesktopO
         Action<FileService.FileTransferResult> itemCompleted,
         CancellationToken cancellationToken)
     {
+        _lastItemErrors.Clear();
         var results = await files.ExecuteTransferPlanAsync(
-            plans, move: true, useShellProgress: publicDesktop,
-            ownerWindowHandle: ownerWindowHandle, cancellationToken: cancellationToken,
+            plans,
+            move: true,
+            useShellProgress: publicDesktop,
+            ownerWindowHandle: ownerWindowHandle,
+            cancellationToken: cancellationToken,
             allowShellElevation: publicDesktop,
-            itemCompleted: publicDesktop ? itemCompleted : null);
+            itemCompleted: itemCompleted,
+            onItemError: publicDesktop
+                ? null
+                : error =>
+                {
+                    _lastItemErrors[error.SourcePath] = error.Exception;
+                    return Task.FromResult(FileService.FileTransferItemAction.Skip);
+                });
         if (!publicDesktop)
             foreach (var result in results) itemCompleted(result);
         return results;

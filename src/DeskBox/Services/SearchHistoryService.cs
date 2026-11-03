@@ -16,6 +16,9 @@ public sealed partial class SearchHistoryService
 
     private readonly string _storePath;
     private readonly object _gate = new();
+    private readonly SemaphoreSlim _writeGate = new(1, 1);
+    private long _saveVersion;
+    private long _flushedVersion;
     private PersistedData _data = new();
 
     public SearchHistoryService()
@@ -238,9 +241,13 @@ public sealed partial class SearchHistoryService
                 return;
             }
 
-            string json = File.ReadAllText(_storePath);
+            using var stream = new FileStream(
+                _storePath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete);
             PersistedData? data = JsonSerializer.Deserialize(
-                json,
+                stream,
                 SearchHistoryJsonContext.Default.PersistedData);
             if (data is not null)
             {
@@ -258,33 +265,123 @@ public sealed partial class SearchHistoryService
 
     private void Save()
     {
+        long version = Interlocked.Increment(ref _saveVersion);
+        if (TryShouldOffloadSaveFromUiThread())
+        {
+            _ = Task.Run(() => FlushPendingSaveAsync(version));
+            return;
+        }
+
+        _writeGate.Wait();
         try
         {
-            PersistedData snapshot;
-            lock (_gate)
+            if (version < Volatile.Read(ref _flushedVersion))
             {
-                snapshot = new PersistedData
-                {
-                    Recent = [.. _data.Recent],
-                    Favorites = [.. _data.Favorites],
-                    RecentResults = [.. _data.RecentResults]
-                };
+                return;
             }
 
-            string? directory = Path.GetDirectoryName(_storePath);
-            if (!string.IsNullOrWhiteSpace(directory))
-            {
-                Directory.CreateDirectory(directory);
-            }
-
-            string json = JsonSerializer.Serialize(
-                snapshot,
-                SearchHistoryJsonContext.Default.PersistedData);
-            File.WriteAllText(_storePath, json);
+            long latestVersion = Volatile.Read(ref _saveVersion);
+            PersistHistoryToDisk(CaptureSnapshot());
+            Volatile.Write(ref _flushedVersion, latestVersion);
         }
         catch (Exception ex)
         {
             App.Log($"[SearchHistory] Failed to save history: {ex.Message}");
+        }
+        finally
+        {
+            _writeGate.Release();
+        }
+    }
+
+    private static bool TryShouldOffloadSaveFromUiThread()
+    {
+        try
+        {
+            return Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread() is not null;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private async Task FlushPendingSaveAsync(long requestedVersion)
+    {
+        await _writeGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            if (requestedVersion <= Volatile.Read(ref _flushedVersion))
+            {
+                return;
+            }
+
+            long latestVersion = Volatile.Read(ref _saveVersion);
+            PersistHistoryToDisk(CaptureSnapshot());
+            Volatile.Write(ref _flushedVersion, latestVersion);
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[SearchHistory] Failed to save history: {ex.Message}");
+        }
+        finally
+        {
+            _writeGate.Release();
+        }
+    }
+
+    private PersistedData CaptureSnapshot()
+    {
+        lock (_gate)
+        {
+            return new PersistedData
+            {
+                Recent = [.. _data.Recent],
+                Favorites = [.. _data.Favorites],
+                RecentResults = [.. _data.RecentResults]
+            };
+        }
+    }
+
+    private void PersistHistoryToDisk(PersistedData snapshot)
+    {
+        string? directory = Path.GetDirectoryName(_storePath);
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        string tempPath = $"{_storePath}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            using (var stream = new FileStream(
+                       tempPath,
+                       FileMode.Create,
+                       FileAccess.Write,
+                       FileShare.None,
+                       bufferSize: 4096,
+                       FileOptions.SequentialScan))
+            {
+                JsonSerializer.Serialize(
+                    stream,
+                    snapshot,
+                    SearchHistoryJsonContext.Default.PersistedData);
+            }
+
+            DeskBox.Platform.SearchHistoryFileOps.ReplaceStoreFileAtomically(tempPath, _storePath);
+        }
+        finally
+        {
+            try
+            {
+                if (File.Exists(tempPath))
+                {
+                    DeskBox.Platform.SearchHistoryFileOps.TryDeleteTempFile(tempPath);
+                }
+            }
+            catch
+            {
+            }
         }
     }
 

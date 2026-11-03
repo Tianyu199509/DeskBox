@@ -35,7 +35,6 @@ public abstract partial class WidgetWindowBase : Window
     private static readonly UIntPtr DesktopPinnedActivationSubclassId = new(0xDDB5);
 
     private static readonly int[] BackdropRefreshDelays = [80, 240, 580];
-    private static readonly TimeSpan InactiveBackdropControllerRetention = TimeSpan.FromSeconds(3);
     private static readonly ConditionalWeakTable<SolidColorBrush, object> MutableBrushes = new();
     private static readonly object MutableBrushMarker = new();
 
@@ -59,7 +58,7 @@ public abstract partial class WidgetWindowBase : Window
     private Windows.UI.Color _lastLegacyAccentTintColor;
     private double _lastLegacyAccentOpacity;
     private BackdropSignature? _lastAppliedBackdropSignature;
-    private WinUIEx.TransparentTintBackdrop? _solidColorBackdrop;
+    private SolidTintSystemBackdrop? _solidColorBackdrop;
     protected SystemBackdropConfiguration? BackdropConfiguration;
     protected ICompositionSupportsSystemBackdrop? BackdropTarget;
     protected bool IsSolidColorBackdropActive { get; private set; }
@@ -67,7 +66,6 @@ public abstract partial class WidgetWindowBase : Window
     // ── Protected state: backdrop refresh ──────────────────────
     protected long BackdropRefreshGeneration;
     private DispatcherQueueTimer? _backdropRefreshTimer;
-    private DispatcherQueueTimer? _inactiveBackdropCleanupTimer;
     private int _backdropRefreshStage;
     private bool _isTrackedForDiagnostics;
 
@@ -113,7 +111,7 @@ public abstract partial class WidgetWindowBase : Window
     private PointerEventHandler? _desktopPinnedPointerPressedHandler;
 
     // ── Protected state: closing ───────────────────────────────
-    protected bool IsClosing;
+    protected internal bool IsClosing;
 
     /// <summary>
     /// Parameterless constructor required by the WinUI 3 XAML compiler.
@@ -146,6 +144,8 @@ public abstract partial class WidgetWindowBase : Window
 
     /// <summary>The opacity value (0–1) used for backdrop tinting.</summary>
     protected abstract double WidgetOpacity { get; }
+
+    protected virtual bool IsWindowVisibleForBackdrop => true;
 
     /// <summary>The root XAML element (typically RootGrid).</summary>
     protected abstract FrameworkElement RootElement { get; }
@@ -325,7 +325,6 @@ public abstract partial class WidgetWindowBase : Window
         try { WidgetShellControl.ReleaseOwnedCompositionResources(); }
         catch (Exception ex) { App.LogVerbose($"[Composition] Shell cleanup failed: {ex.Message}"); }
         StopBackdropRefreshTimer();
-        StopInactiveBackdropCleanupTimer();
         ReleaseTopMostSafetyTimer();
         DetachXamlRootScaleWatcher();
         CleanupWidgetForegroundAppearance();

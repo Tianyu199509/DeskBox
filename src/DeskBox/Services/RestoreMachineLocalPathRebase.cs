@@ -48,7 +48,18 @@ internal static class RestoreMachineLocalPathRebase
         }
 
         string trimmed = sourceDataPath.Trim();
-        int segmentIndex = trimmed.IndexOf("\\AppData\\", StringComparison.OrdinalIgnoreCase);
+        int segmentIndex = trimmed.LastIndexOf("\\DeskBox\\.appdata\\", StringComparison.OrdinalIgnoreCase);
+        if (segmentIndex <= 0 &&
+            trimmed.EndsWith("\\DeskBox\\.appdata", StringComparison.OrdinalIgnoreCase))
+        {
+            segmentIndex = trimmed.Length - "\\DeskBox\\.appdata".Length;
+        }
+
+        if (segmentIndex <= 0)
+        {
+            segmentIndex = trimmed.IndexOf("\\AppData\\", StringComparison.OrdinalIgnoreCase);
+        }
+
         if (segmentIndex <= 0)
         {
             return null;
@@ -136,6 +147,7 @@ internal static class RestoreMachineLocalPathRebase
 
             if (TryRebaseProfilePath(widget.MappedFolderPath, sourceProfile, targetProfile, out string newMappedPath))
             {
+                WidgetPathRebaseHelper.RebaseFolderTree(widget, widget.MappedFolderPath, newMappedPath);
                 widget.MappedFolderPath = newMappedPath;
                 widgetCount++;
             }

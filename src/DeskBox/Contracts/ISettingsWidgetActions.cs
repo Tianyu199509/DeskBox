@@ -1,4 +1,4 @@
-﻿namespace DeskBox.Contracts;
+namespace DeskBox.Contracts;
 
 using System.Threading;
 using DeskBox.Models;
@@ -95,6 +95,7 @@ public interface ISettingsWidgetActions
 
     void NotifyWidgetGroupPresentationSettingsChanged();
 
+
     // ── Widget groups ───────────────────────────────────────────────
 
     Task<bool> ReorderWidgetGroupMemberAsync(string sourceWidgetId, string targetWidgetId);
@@ -143,12 +144,33 @@ public interface ISettingsWidgetActions
 
     Task RenameWidgetAsync(string widgetId, string newName);
 
+    // ── Custom widget instances ─────────────────────────────────────
+
+    Task<IReadOnlyList<GlanceWidgetInstanceInfo>> GetCustomWidgetInstancesAsync();
+
+    Task<GlanceWidgetInstanceInfo> CreateCustomWidgetAsync(string? templateOrPackageSpec);
+
+    Task SetCustomWidgetInstanceEnabledAsync(string widgetId, bool enabled);
+
+    Task<bool> LocateCustomWidgetAsync(string widgetId);
+
+    /// <summary>
+    /// Opens the standalone Widget Workshop window in the main process, either
+    /// to create a widget (optionally starting from <paramref name="initialIdea"/>)
+    /// or to modify <paramref name="widgetId"/> with AI.
+    /// </summary>
+    Task OpenCustomWidgetStudioAsync(string? widgetId, string? initialIdea);
+
+    Task RemoveCustomWidgetAsync(string widgetId);
+
     // ── Displays ────────────────────────────────────────────────────
 
     Task<(int MovedCount, WidgetMoveAllUndoToken Token)> MoveAllWidgetSurfacesToDisplayAsync(
         string displayStableId);
 
     Task<bool> UndoMoveAllWidgetSurfacesAsync(WidgetMoveAllUndoToken token);
+
+    Task<int> RecalibrateDisplayLayoutAsync();
 
     Task ApplyScreenBindingAsync(
         string widgetId,

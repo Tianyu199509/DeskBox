@@ -27,7 +27,7 @@ public sealed class ItemHoverActionContractTests
         Assert.Contains("Opacity=\"0\"", xaml, StringComparison.Ordinal);
         Assert.Contains("SetQuickCaptureItemActionButtonsVisible(sender as DependencyObject, true)", code, StringComparison.Ordinal);
         Assert.Contains("actionButtons.IsHitTestVisible = isVisible", code, StringComparison.Ordinal);
-        Assert.Contains("ViewModel.PinRecentItemAsync(item)", code, StringComparison.Ordinal);
+        Assert.Contains("ViewModel.TogglePinnedAsync(item)", code, StringComparison.Ordinal);
         Assert.Contains("CopyItemWithFeedbackAsync(item)", code, StringComparison.Ordinal);
     }
 

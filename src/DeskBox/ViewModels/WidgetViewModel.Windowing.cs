@@ -32,6 +32,9 @@ public partial class WidgetViewModel
     private int _renderWindowBudget = RenderWindowInitialSize;
     private bool _renderWindowReconcileQueued;
     private bool _pendingPostBatchHydration;
+    private string? _openPopoverStackKey;
+    private bool _isIconHydrationDormant;
+    private bool _activeHydrationSkippedIconsWhileDormant;
 
     /// <summary>
     /// Fired (coalesced per dispatcher pass, and deferred to the batch
@@ -80,6 +83,110 @@ public partial class WidgetViewModel
         ? Items
         : RenderedItems;
 
+    internal void SetOpenPopoverStackKey(string? stackKey)
+    {
+        if (string.Equals(_openPopoverStackKey, stackKey, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _openPopoverStackKey = stackKey;
+        if (!string.IsNullOrWhiteSpace(stackKey) &&
+            FindStackByKey(stackKey) is { } stack &&
+            stack.Members.Any(member =>
+                member.Icon is null ||
+                (member.IsFolder && !member.IsFolderItemCountLoaded) ||
+                (member.IsShortcut && !member.IsShortcutTargetLoaded)) &&
+            IsItemHydrationActive)
+        {
+            StartItemHydration();
+        }
+    }
+
+    internal void ResumeIconHydrationFromDormancy() =>
+        _isIconHydrationDormant = false;
+
+    internal IEnumerable<WidgetItem> ResolveIconHydrationItems(
+        IEnumerable<WidgetItem> fallbackUniverse)
+    {
+        if (_isIconHydrationDormant)
+        {
+            return [];
+        }
+
+        if (!UsesStackProjection)
+        {
+            return fallbackUniverse;
+        }
+
+        HashSet<WidgetItem> displayed = ComputeDisplayedIconKeepSet(RenderedItems);
+        if (!string.IsNullOrWhiteSpace(_openPopoverStackKey) &&
+            FindStackByKey(_openPopoverStackKey) is { } popoverStack)
+        {
+            foreach (WidgetItem member in popoverStack.Members)
+            {
+                displayed.Add(member);
+            }
+        }
+
+        return Items.Where(displayed.Contains);
+    }
+
+    internal bool HasMissingTargetIcons() =>
+        ResolveIconHydrationItems(HydrationUniverseItems)
+            .Any(item => item.Icon is null);
+
+    internal IEnumerable<WidgetItem> ResolveDisplayedMetadataHydrationItems(
+        IEnumerable<WidgetItem> fallbackUniverse)
+    {
+        if (!UsesStackProjection)
+        {
+            return fallbackUniverse;
+        }
+
+        HashSet<WidgetItem> displayed = ComputeDisplayedIconKeepSet(RenderedItems);
+        if (!string.IsNullOrWhiteSpace(_openPopoverStackKey) &&
+            FindStackByKey(_openPopoverStackKey) is { } popoverStack)
+        {
+            foreach (WidgetItem member in popoverStack.Members)
+            {
+                displayed.Add(member);
+            }
+        }
+
+        return Items.Where(displayed.Contains);
+    }
+
+    internal IEnumerable<WidgetItem> ResolveFolderCountHydrationItems(
+        IEnumerable<WidgetItem> fallbackUniverse) =>
+        ResolveDisplayedMetadataHydrationItems(fallbackUniverse);
+
+    internal IEnumerable<WidgetItem> ResolveShortcutHydrationItems(
+        IEnumerable<WidgetItem> fallbackUniverse) =>
+        ResolveDisplayedMetadataHydrationItems(fallbackUniverse);
+
+    internal IEnumerable<WidgetItem> ResolveShellKindHydrationItems(
+        IEnumerable<WidgetItem> fallbackUniverse)
+    {
+        if (UsesStackProjection &&
+            _settingsService.Settings.FileWidget.FileStackAutoStacking &&
+            string.Equals(
+                FileStackGroupBy,
+                Services.SettingsService.FileStackGroupByKind,
+                StringComparison.Ordinal))
+        {
+            return fallbackUniverse.Where(item => !item.IsFolder);
+        }
+
+        return ResolveDisplayedMetadataHydrationItems(fallbackUniverse);
+    }
+
+    internal bool HasMissingDisplayedItemMetadata() =>
+        ResolveDisplayedMetadataHydrationItems(HydrationUniverseItems)
+            .Any(item =>
+                (item.IsFolder && !item.IsFolderItemCountLoaded) ||
+                (item.IsShortcut && !item.IsShortcutTargetLoaded));
+
     private void AttachRenderWindowTracking()
     {
         Items.CollectionChanged += OnItemsChangedForRenderWindow;
@@ -124,7 +231,7 @@ public partial class WidgetViewModel
         }
 
         _renderWindowReconcileQueued = true;
-        if (!_dispatcherQueue.TryEnqueue(() =>
+        void ApplyRenderWindowReconcile()
         {
             _renderWindowReconcileQueued = false;
             if (_isDisposed)
@@ -143,7 +250,7 @@ public partial class WidgetViewModel
                 _pendingPostBatchHydration = false;
                 StartItemHydration();
             }
-            else
+            else if (!_isIconHydrationDormant)
             {
                 // Acquisition half of the release/acquire pairing: icons
                 // released while nothing displayed them come back as their
@@ -152,7 +259,15 @@ public partial class WidgetViewModel
                 // equivalent of a recycled container being realized again.
                 HealReleasedItemIconsIfIdle();
             }
-        }))
+        }
+
+        if (_dispatcherQueue is null)
+        {
+            ApplyRenderWindowReconcile();
+            return;
+        }
+
+        if (!_dispatcherQueue.TryEnqueue(() => ApplyRenderWindowReconcile()))
         {
             // The queued flag (and a deferred hydration start with it) must
             // not survive a failed enqueue, or the widget would never

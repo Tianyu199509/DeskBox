@@ -16,8 +16,8 @@
             <!-- Slider metric styles copied from SettingsWindow.xaml so the
                  in-expander slider cards resolve the same page-level look. -->
             <Style x:Key="InlineMetricSliderStyle" TargetType="Slider" BasedOn="{StaticResource DefaultSliderStyle}">
-                <Setter Property="Width" Value="300" />
-                <Setter Property="MinWidth" Value="220" />
+                <Setter Property="Width" Value="200" />
+                <Setter Property="MinWidth" Value="160" />
                 <Setter Property="VerticalAlignment" Value="Center" />
                 <Setter Property="IsThumbToolTipEnabled" Value="False" />
             </Style>

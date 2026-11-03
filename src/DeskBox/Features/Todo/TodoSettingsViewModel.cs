@@ -38,6 +38,7 @@ public sealed partial class TodoSettingsViewModel : ObservableObject, IDisposabl
         TodoOptionKinds.DefaultFilterAll,
         TodoOptionKinds.DefaultFilterActive,
         TodoOptionKinds.DefaultFilterToday,
+        TodoOptionKinds.DefaultFilterOverdue,
         TodoOptionKinds.DefaultFilterThisWeek,
         TodoOptionKinds.DefaultFilterThisMonth,
         TodoOptionKinds.DefaultFilterImportant,
@@ -80,12 +81,15 @@ public sealed partial class TodoSettingsViewModel : ObservableObject, IDisposabl
     private bool _enabled;
     private bool _remindersEnabled = true;
     private int _defaultOffsetMinutes = TodoOptionKinds.DefaultReminderOffsetMinutes;
+    private bool _allDayRemindersEnabled = true;
+    private int _allDayReminderTimeMinutes = TodoOptionKinds.DefaultAllDayReminderTimeMinutes;
     private string _layoutMode = TodoOptionKinds.LayoutModeAuto;
     private bool _autoSelectFirstInWideLayout = true;
     private bool _showTabBar = true;
     private bool _showAllTab = true;
     private bool _showActiveTab;
     private bool _showTodayTab = true;
+    private bool _showOverdueTab = true;
     private bool _showThisWeekTab;
     private bool _showThisMonthTab;
     private bool _showImportantTab = true;
@@ -150,6 +154,7 @@ public sealed partial class TodoSettingsViewModel : ObservableObject, IDisposabl
                 return;
             }
 
+            OnPropertyChanged(nameof(CanConfigureWideAutoSelect));
             if (_isSyncingPresentation)
             {
                 return;
@@ -190,6 +195,7 @@ public sealed partial class TodoSettingsViewModel : ObservableObject, IDisposabl
             }
 
             OnPropertyChanged(nameof(ReminderSummaryText));
+            OnPropertyChanged(nameof(CanEditAllDayReminderTime));
             if (_isSyncingPresentation)
             {
                 return;
@@ -219,6 +225,55 @@ public sealed partial class TodoSettingsViewModel : ObservableObject, IDisposabl
         }
     }
 
+    public bool AllDayRemindersEnabled
+    {
+        get => _allDayRemindersEnabled;
+        set
+        {
+            if (!SetProperty(ref _allDayRemindersEnabled, value))
+            {
+                return;
+            }
+
+            OnPropertyChanged(nameof(CanEditAllDayReminderTime));
+            OnPropertyChanged(nameof(ReminderSummaryText));
+            if (_isSyncingPresentation)
+            {
+                return;
+            }
+
+            RunWrite(() => _settings.SetAllDayRemindersEnabled(value));
+        }
+    }
+
+    public int AllDayReminderTimeMinutes
+    {
+        get => _allDayReminderTimeMinutes;
+        set
+        {
+            int normalized = TodoOptionKinds.NormalizeAllDayReminderTimeMinutes(value);
+            if (!SetProperty(ref _allDayReminderTimeMinutes, normalized))
+            {
+                return;
+            }
+
+            OnPropertyChanged(nameof(AllDayReminderTimeText));
+            OnPropertyChanged(nameof(ReminderSummaryText));
+            if (_isSyncingPresentation)
+            {
+                return;
+            }
+
+            RunWrite(() => _settings.SetAllDayReminderTimeMinutes(normalized));
+        }
+    }
+
+    public string AllDayReminderTimeText =>
+        $"{_allDayReminderTimeMinutes / 60:00}:{_allDayReminderTimeMinutes % 60:00}";
+
+    public bool CanEditAllDayReminderTime =>
+        RemindersEnabled && AllDayRemindersEnabled;
+
     public string LayoutMode
     {
         get => _layoutMode;
@@ -231,6 +286,7 @@ public sealed partial class TodoSettingsViewModel : ObservableObject, IDisposabl
 
             OnPropertyChanged(nameof(LayoutSummaryText));
             OnPropertyChanged(nameof(ShowWideOptions));
+            OnPropertyChanged(nameof(CanConfigureWideAutoSelect));
             if (_isSyncingPresentation)
             {
                 return;
@@ -278,6 +334,70 @@ public sealed partial class TodoSettingsViewModel : ObservableObject, IDisposabl
             RunWrite(() => _settings.SetTabBarVisible(value));
         }
     }
+
+    public bool ShowAllTab
+    {
+        get => _showAllTab;
+        set => SetTabVisible(TodoOptionKinds.DefaultFilterAll, value);
+    }
+
+    public bool ShowActiveTab
+    {
+        get => _showActiveTab;
+        set => SetTabVisible(TodoOptionKinds.DefaultFilterActive, value);
+    }
+
+    public bool ShowTodayTab
+    {
+        get => _showTodayTab;
+        set => SetTabVisible(TodoOptionKinds.DefaultFilterToday, value);
+    }
+
+    public bool ShowOverdueTab
+    {
+        get => _showOverdueTab;
+        set => SetTabVisible(TodoOptionKinds.DefaultFilterOverdue, value);
+    }
+
+    public bool ShowThisWeekTab
+    {
+        get => _showThisWeekTab;
+        set => SetTabVisible(TodoOptionKinds.DefaultFilterThisWeek, value);
+    }
+
+    public bool ShowThisMonthTab
+    {
+        get => _showThisMonthTab;
+        set => SetTabVisible(TodoOptionKinds.DefaultFilterThisMonth, value);
+    }
+
+    public bool ShowImportantTab
+    {
+        get => _showImportantTab;
+        set => SetTabVisible(TodoOptionKinds.DefaultFilterImportant, value);
+    }
+
+    public bool ShowCompletedTab
+    {
+        get => _showCompletedTab;
+        set => SetTabVisible(TodoOptionKinds.DefaultFilterCompleted, value);
+    }
+
+    public bool CanEditAllTab => CanToggleTab(TodoOptionKinds.DefaultFilterAll);
+
+    public bool CanEditActiveTab => CanToggleTab(TodoOptionKinds.DefaultFilterActive);
+
+    public bool CanEditTodayTab => CanToggleTab(TodoOptionKinds.DefaultFilterToday);
+
+    public bool CanEditOverdueTab => CanToggleTab(TodoOptionKinds.DefaultFilterOverdue);
+
+    public bool CanEditThisWeekTab => CanToggleTab(TodoOptionKinds.DefaultFilterThisWeek);
+
+    public bool CanEditThisMonthTab => CanToggleTab(TodoOptionKinds.DefaultFilterThisMonth);
+
+    public bool CanEditImportantTab => CanToggleTab(TodoOptionKinds.DefaultFilterImportant);
+
+    public bool CanEditCompletedTab => CanToggleTab(TodoOptionKinds.DefaultFilterCompleted);
 
     public string DefaultFilter
     {
@@ -340,7 +460,8 @@ public sealed partial class TodoSettingsViewModel : ObservableObject, IDisposabl
         _showThisWeekTab,
         _showThisMonthTab,
         _showImportantTab,
-        _showCompletedTab);
+        _showCompletedTab,
+        _showOverdueTab);
 
     public int TabStyleIndex
     {
@@ -457,6 +578,7 @@ public sealed partial class TodoSettingsViewModel : ObservableObject, IDisposabl
             }
 
             OnPropertyChanged(nameof(ContentSummaryText));
+            OnPropertyChanged(nameof(NewTaskPositionIndex));
             if (_isSyncingPresentation)
             {
                 return;
@@ -464,6 +586,16 @@ public sealed partial class TodoSettingsViewModel : ObservableObject, IDisposabl
 
             RunWrite(() => _settings.SetNewTaskPosition(value));
         }
+    }
+
+    public int NewTaskPositionIndex
+    {
+        get => TodoOptionKinds.NormalizeNewTaskPosition(_newTaskPosition) == TodoOptionKinds.NewTaskPositionBottom
+            ? 1
+            : 0;
+        set => NewTaskPosition = value == 1
+            ? TodoOptionKinds.NewTaskPositionBottom
+            : TodoOptionKinds.NewTaskPositionTop;
     }
 
     public string EditorEnterBehavior
@@ -575,6 +707,9 @@ public sealed partial class TodoSettingsViewModel : ObservableObject, IDisposabl
     public bool ShowWideOptions =>
         LayoutMode != TodoOptionKinds.LayoutModeSinglePane;
 
+    public bool CanConfigureWideAutoSelect =>
+        Enabled && ShowWideOptions;
+
     public string LayoutSummaryText => GetLayoutModeDisplayName(LayoutMode);
 
     public string TabsSummaryText => ShowTabBar
@@ -591,9 +726,11 @@ public sealed partial class TodoSettingsViewModel : ObservableObject, IDisposabl
         GetNewTaskPositionDisplayName(NewTaskPosition),
         GetEnterBehaviorDisplayName(EditorEnterBehavior));
 
-    public string ReminderSummaryText => RemindersEnabled
-        ? GetReminderOffsetDisplayName(DefaultOffsetMinutes)
-        : _localize("Settings.Toggle.Off");
+    public string ReminderSummaryText => !RemindersEnabled
+        ? _localize("Settings.Toggle.Off")
+        : AllDayRemindersEnabled
+            ? $"{GetReminderOffsetDisplayName(DefaultOffsetMinutes)} · {_localize("Todo.Due.AllDay")} {AllDayReminderTimeText}"
+            : GetReminderOffsetDisplayName(DefaultOffsetMinutes);
 
     public string FooterDisplaySummaryText
     {
@@ -705,6 +842,8 @@ public sealed partial class TodoSettingsViewModel : ObservableObject, IDisposabl
                 _localize("Settings.Todo.DefaultFilter.Active"),
             TodoOptionKinds.DefaultFilterToday =>
                 _localize("Settings.Todo.DefaultFilter.Today"),
+            TodoOptionKinds.DefaultFilterOverdue =>
+                _localize("Settings.Todo.DefaultFilter.Overdue"),
             TodoOptionKinds.DefaultFilterThisWeek =>
                 _localize("Settings.Todo.DefaultFilter.ThisWeek"),
             TodoOptionKinds.DefaultFilterThisMonth =>
@@ -778,6 +917,7 @@ public sealed partial class TodoSettingsViewModel : ObservableObject, IDisposabl
         {
             TodoOptionKinds.DefaultFilterActive => _showActiveTab,
             TodoOptionKinds.DefaultFilterToday => _showTodayTab,
+            TodoOptionKinds.DefaultFilterOverdue => _showOverdueTab,
             TodoOptionKinds.DefaultFilterThisWeek => _showThisWeekTab,
             TodoOptionKinds.DefaultFilterThisMonth => _showThisMonthTab,
             TodoOptionKinds.DefaultFilterImportant => _showImportantTab,
@@ -802,10 +942,17 @@ public sealed partial class TodoSettingsViewModel : ObservableObject, IDisposabl
     private void SetTabVisibleCore(string filter, bool visible)
     {
         string normalized = TodoOptionKinds.NormalizeDefaultFilter(filter);
+        if (!visible && IsTabSelected(normalized) && !CanToggleTab(normalized))
+        {
+            RefreshTabDerivedProperties();
+            return;
+        }
+
         bool changed = normalized switch
         {
             TodoOptionKinds.DefaultFilterActive => SetProperty(ref _showActiveTab, visible),
             TodoOptionKinds.DefaultFilterToday => SetProperty(ref _showTodayTab, visible),
+            TodoOptionKinds.DefaultFilterOverdue => SetProperty(ref _showOverdueTab, visible),
             TodoOptionKinds.DefaultFilterThisWeek => SetProperty(ref _showThisWeekTab, visible),
             TodoOptionKinds.DefaultFilterThisMonth => SetProperty(ref _showThisMonthTab, visible),
             TodoOptionKinds.DefaultFilterImportant => SetProperty(ref _showImportantTab, visible),
@@ -823,9 +970,10 @@ public sealed partial class TodoSettingsViewModel : ObservableObject, IDisposabl
             return;
         }
 
-        // The coordinator protects the last visible tab and falls the
-        // default filter back; the write path's re-projection renders the
-        // linkage (batch 14).
+        // CanToggleTab blocks hiding the last visible tab in the editor above;
+        // the coordinator still falls the default filter back (and re-enables
+        // All on direct storage/coordinator mutations), with re-projection
+        // rendering the linkage (batch 14).
         RunWrite(() => _settings.SetTabVisible(normalized, visible));
     }
 
@@ -878,12 +1026,15 @@ public sealed partial class TodoSettingsViewModel : ObservableObject, IDisposabl
             Enabled = _enablePending ? Enabled : reminder.Enabled;
             RemindersEnabled = reminder.RemindersEnabled;
             DefaultOffsetMinutes = reminder.DefaultOffsetMinutes;
+            AllDayRemindersEnabled = reminder.AllDayRemindersEnabled;
+            AllDayReminderTimeMinutes = reminder.AllDayReminderTimeMinutes;
             LayoutMode = layout.LayoutMode;
             AutoSelectFirstInWideLayout = layout.AutoSelectFirstInWideLayout;
             ShowTabBar = tabs.ShowTabBar;
             _showAllTab = tabs.ShowAllTab;
             _showActiveTab = tabs.ShowActiveTab;
             _showTodayTab = tabs.ShowTodayTab;
+            _showOverdueTab = tabs.ShowOverdueTab;
             _showThisWeekTab = tabs.ShowThisWeekTab;
             _showThisMonthTab = tabs.ShowThisMonthTab;
             _showImportantTab = tabs.ShowImportantTab;
@@ -909,11 +1060,15 @@ public sealed partial class TodoSettingsViewModel : ObservableObject, IDisposabl
 
         OnPropertyChanged(nameof(TabStyleIndex));
         OnPropertyChanged(nameof(TabStyle));
+        OnPropertyChanged(nameof(NewTaskPositionIndex));
         OnPropertyChanged(nameof(Tabs));
         OnPropertyChanged(nameof(ShowWideOptions));
+        OnPropertyChanged(nameof(CanConfigureWideAutoSelect));
         OnPropertyChanged(nameof(LayoutSummaryText));
         OnPropertyChanged(nameof(TabsSummaryText));
         OnPropertyChanged(nameof(ReminderSummaryText));
+        OnPropertyChanged(nameof(AllDayReminderTimeText));
+        OnPropertyChanged(nameof(CanEditAllDayReminderTime));
         OnPropertyChanged(nameof(ContentSummaryText));
         OnPropertyChanged(nameof(FooterDisplaySummaryText));
         RefreshTabDerivedProperties();
@@ -950,6 +1105,8 @@ public sealed partial class TodoSettingsViewModel : ObservableObject, IDisposabl
         OnPropertyChanged(nameof(TabsSummaryText));
         OnPropertyChanged(nameof(ContentSummaryText));
         OnPropertyChanged(nameof(ReminderSummaryText));
+        OnPropertyChanged(nameof(AllDayReminderTimeText));
+        OnPropertyChanged(nameof(CanEditAllDayReminderTime));
         OnPropertyChanged(nameof(FooterDisplaySummaryText));
         OnPropertyChanged(nameof(ListTextSizeValueText));
         OnPropertyChanged(nameof(ContentTextSizeValueText));
@@ -988,6 +1145,22 @@ public sealed partial class TodoSettingsViewModel : ObservableObject, IDisposabl
 
     private void RefreshTabDerivedProperties()
     {
+        OnPropertyChanged(nameof(ShowAllTab));
+        OnPropertyChanged(nameof(ShowActiveTab));
+        OnPropertyChanged(nameof(ShowTodayTab));
+        OnPropertyChanged(nameof(ShowOverdueTab));
+        OnPropertyChanged(nameof(ShowThisWeekTab));
+        OnPropertyChanged(nameof(ShowThisMonthTab));
+        OnPropertyChanged(nameof(ShowImportantTab));
+        OnPropertyChanged(nameof(ShowCompletedTab));
+        OnPropertyChanged(nameof(CanEditAllTab));
+        OnPropertyChanged(nameof(CanEditActiveTab));
+        OnPropertyChanged(nameof(CanEditTodayTab));
+        OnPropertyChanged(nameof(CanEditOverdueTab));
+        OnPropertyChanged(nameof(CanEditThisWeekTab));
+        OnPropertyChanged(nameof(CanEditThisMonthTab));
+        OnPropertyChanged(nameof(CanEditImportantTab));
+        OnPropertyChanged(nameof(CanEditCompletedTab));
         OnPropertyChanged(nameof(VisibleTabsText));
         OnPropertyChanged(nameof(TabsSummaryText));
         OnPropertyChanged(nameof(VisibleDefaultFilterOptions));

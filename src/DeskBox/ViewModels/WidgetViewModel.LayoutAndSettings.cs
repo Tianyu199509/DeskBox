@@ -246,7 +246,7 @@ public partial class WidgetViewModel
     {
         bool appearanceOnly =
             _settingsService.LastNotifiedChangeKind == SettingsChangeKind.Appearance;
-        if (_dispatcherQueue.HasThreadAccess)
+        if (_dispatcherQueue is null || _dispatcherQueue.HasThreadAccess)
         {
             ApplySettingsChanges(appearanceOnly);
             return;
@@ -273,7 +273,7 @@ public partial class WidgetViewModel
 
     private void OnLanguageChanged()
     {
-        if (_dispatcherQueue.HasThreadAccess)
+        if (_dispatcherQueue is null || _dispatcherQueue.HasThreadAccess)
         {
             UpdateDependentProperties();
             RebuildStackDisplayItems();

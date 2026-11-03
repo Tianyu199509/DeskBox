@@ -60,7 +60,7 @@ public sealed class SearchPopupVisualContractTests
         Assert.Contains("LoadMoreResultsAsync", viewModel, StringComparison.Ordinal);
         Assert.Contains("LoadMoreAndAdvanceSelectionAsync", viewModel, StringComparison.Ordinal);
         Assert.Contains("_nextFileResultOffset", viewModel, StringComparison.Ordinal);
-        Assert.Contains("SetOffset", everything, StringComparison.Ordinal);
+        Assert.Contains("offset: checked((uint)resultOffset)", everything, StringComparison.Ordinal);
         Assert.DoesNotContain("MaxMaterializedFileResults", everything, StringComparison.Ordinal);
         Assert.DoesNotContain("x:Bind Count", popupXaml, StringComparison.Ordinal);
     }

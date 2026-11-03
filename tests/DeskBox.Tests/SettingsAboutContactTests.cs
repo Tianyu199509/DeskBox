@@ -101,7 +101,8 @@ public sealed class SettingsAboutContactTests
         Assert.Equal(1, CountOccurrences(xaml, "ms-appx:///Assets/wechat-qrcode.jpg"));
         Assert.Contains("StoreSupportCardVisibility", xaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"SupportDeskBoxDialog\"", xaml, StringComparison.Ordinal);
-        Assert.Equal("480", supportDialogContent.Attribute("Width")?.Value);
+        Assert.Null(supportDialogContent.Attribute("Width"));
+        Assert.Equal("Stretch", supportDialogContent.Attribute("HorizontalAlignment")?.Value);
         Assert.Equal("480", supportDialogContent.Attribute("MaxWidth")?.Value);
         Assert.Equal(2, supportQrContainers.Length);
         Assert.All(supportQrContainers, container =>

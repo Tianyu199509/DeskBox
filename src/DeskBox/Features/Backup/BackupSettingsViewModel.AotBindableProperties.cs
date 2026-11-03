@@ -52,7 +52,8 @@ namespace DeskBox.Features.Backup;
     nameof(StatusText),
     nameof(IncludeTodoData),
     nameof(Username),
-    nameof(IncludeWidgetStyle)
+    nameof(IncludeWidgetStyle),
+    nameof(IncludeCustomWidgets)
 ], [])]
 public sealed partial class BackupSettingsViewModel
 {

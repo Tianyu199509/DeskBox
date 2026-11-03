@@ -1,4 +1,4 @@
-﻿using DeskBox.Controls;
+using DeskBox.Controls;
 using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Platform;
@@ -53,6 +53,9 @@ public sealed partial class SearchPopupWindow : Window
     // virtualized elements. The flag carries the configured style index.
     private int? _pendingEntranceStyle;
     private DispatcherTimer? _entranceGuardTimer;
+    private DispatcherQueueTimer? _coldHiddenCleanupTimer;
+    private DispatcherQueueTimer? _unfocusedAutoHideTimer;
+    private bool _isPopupInputActive;
     private AppWindow? _appWindow;
     private IntPtr _hwnd;
 
@@ -76,8 +79,10 @@ public sealed partial class SearchPopupWindow : Window
     private const uint WmClose = 0x0010;
     private const uint WmDestroy = 0x0002;
     private static readonly UIntPtr PopupCloseWatcherSubclassId = new(0x5E4C);
+    private static readonly SolidColorBrush s_transparentCardBrush = new(Colors.Transparent);
     private readonly Win32Helper.SubclassProc _popupCloseWatcherProc;
     private bool _isPopupCloseWatcherInstalled;
+    private bool _isWindowClosed;
 
     // The popup uses the same pointer-capture interaction model as widget windows,
     // avoiding the visible native WS_THICKFRAME border.
@@ -97,6 +102,37 @@ public sealed partial class SearchPopupWindow : Window
     // Recommended-apps selection: tracks the currently highlighted app card.
     private int _selectedAppIndex = -1;
     private Grid? _selectedAppCard;
+
+    // Recommendation grid drag/merge, batch edit mode, and centered overlay state.
+    private Grid? _recPointerCard;
+    private RecommendedGridEntry? _recPressedEntry;
+    private Point _recPointerStartInPanel;
+    private bool _recIsDragging;
+    private bool _recWasCtrlPressedOnDown;
+    private bool _recAutoEnteredEditModeOnDown;
+    private bool _isRecommendationEditMode;
+    private readonly HashSet<string> _recMultiSelectedKeys = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _recRubberBandBaseKeys = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, Rect> _recRubberBandKnownTileRects = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<string> _recDraggedAppKeys = [];
+    private readonly HashSet<string> _recDraggedEntryKeys = new(StringComparer.OrdinalIgnoreCase);
+    private bool _isRecRubberBanding;
+    private Point _recRubberBandStart;
+    private Point _recRubberBandCurrent;
+    private Point _recRubberBandPointerInViewport;
+    private DispatcherTimer? _recRubberBandAutoScrollTimer;
+    private FrameworkElement? _recMergeHoveredCard;
+    private int _overlayAnimationGeneration;
+    private bool _isOverlayClosing;
+    private Grid? _overlayPointerCard;
+    private SearchResultItem? _overlayPressedItem;
+    private Point _overlayPointerStartInHost;
+    private bool _overlayIsDragging;
+    private bool _overlayPressedInFolder;
+    private string? _openFolderId;
+    private bool _isEditingFolderTitle;
+    private bool _suppressFolderTitleBlurCommit;
+    private readonly System.Collections.ObjectModel.ObservableCollection<SearchResultItem> _folderOverlayItems = [];
 
     // True after the user presses Up/Down in the search box to navigate results.
     // While navigating, plain Space triggers QuickLook preview instead of typing.
@@ -168,8 +204,15 @@ public sealed partial class SearchPopupWindow : Window
         _viewModel.ContentRequested += OnViewModelContentRequested;
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
         ResultsRepeater.ElementPrepared += OnResultsElementPrepared;
+        ResultsRepeater.ElementClearing += OnResultsElementClearing;
         RecommendedAppsRepeater.ElementPrepared += OnRecommendedAppsElementPrepared;
+        RecommendedAppsRepeater.ElementClearing += OnRecommendedAppsElementClearing;
+        FolderAppsRepeater.ElementPrepared += OnOverlayAppsElementPrepared;
+        FolderAppsRepeater.ElementClearing += OnOverlayAppsElementClearing;
+        HiddenAppsRepeater.ElementPrepared += OnOverlayAppsElementPrepared;
+        HiddenAppsRepeater.ElementClearing += OnOverlayAppsElementClearing;
         _viewModel.RecommendationIconsResolved += OnRecommendationIconsResolved;
+        _viewModel.RecommendationLayoutUpdated += OnRecommendationLayoutUpdated;
         _settingsService.SettingsChanged += OnAppearanceSettingsChanged;
         _settingsService.AppearancePreviewChanged += OnAppearanceSettingsChanged;
         _localizationService.LanguageChanged += OnLanguageChanged;
@@ -205,13 +248,45 @@ public sealed partial class SearchPopupWindow : Window
         else if (message == WmDestroy)
         {
             App.Log($"[Search] Popup WM_DESTROY hwnd=0x{hWnd.ToInt64():X}");
+            IntPtr destroyResult = Win32Helper.DefSubclassProc(hWnd, message, wParam, lParam);
+            RemovePopupCloseWatcherSubclass();
+            return destroyResult;
         }
 
         return Win32Helper.DefSubclassProc(hWnd, message, wParam, lParam);
     }
 
+    private void RemovePopupCloseWatcherSubclass()
+    {
+        if (!_isPopupCloseWatcherInstalled || _hwnd == IntPtr.Zero)
+        {
+            return;
+        }
+
+        _isPopupCloseWatcherInstalled = false;
+        try
+        {
+            Win32Helper.RemoveWindowSubclass(
+                _hwnd,
+                _popupCloseWatcherProc,
+                PopupCloseWatcherSubclassId);
+        }
+        catch
+        {
+        }
+    }
+
     public IntPtr WindowHandle => _hwnd;
     public bool IsPopupVisible { get; private set; }
+
+    /// <summary>
+    /// True only while the popup is actively focused, hovered, or mid-gesture.
+    /// When the user clicks another window and leaves the popup covered underneath,
+    /// it stops blocking background/idle memory compression immediately.
+    /// </summary>
+    internal bool IsBlockingMemoryCleanup =>
+        IsPopupVisible &&
+        (_isPopupInputActive || HasActivePopupInteraction() || IsPointerOverPopupWindow());
 
     /// <summary>
     /// Raised when an action needs to be handled by the app (e.g., open settings).
@@ -223,6 +298,8 @@ public sealed partial class SearchPopupWindow : Window
     public event EventHandler? PopupShown;
 
     public event EventHandler? PopupHidden;
+
+    public event EventHandler? PopupDeactivated;
 
     /// <summary>
     /// Shows the popup at the correct position and focuses the search box.
@@ -242,6 +319,13 @@ public sealed partial class SearchPopupWindow : Window
 
     private async Task ShowPopupCoreAsync(string? initialQuery)
     {
+        if (_isWindowClosed)
+        {
+            return;
+        }
+
+        CancelColdHiddenCleanupTimer();
+        CancelUnfocusedAutoHideTimer();
         if (IsPopupVisible)
         {
             ActivateSearchInput();
@@ -277,6 +361,7 @@ public sealed partial class SearchPopupWindow : Window
         PopupTranslateTransform.Y = AreSystemAnimationsEnabled() ? 4 : 0;
         _appWindow?.Show();
         IsPopupVisible = true;
+        _isPopupInputActive = true;
         PopupShown?.Invoke(this, EventArgs.Empty);
 
         // Bring the popup above all windows (including desktop-level widgets) at the
@@ -323,6 +408,9 @@ public sealed partial class SearchPopupWindow : Window
         {
             // When opened with a pre-filled query, skip the empty-state recommendations
             // and directly trigger the search.
+            _viewModel.UpdateEverythingPromptState();
+            _ = _viewModel.EnsureEverythingConnectionProbedAsync();
+            UpdateEverythingPromptBanner();
             _viewModel.Query = initialQuery;
             UpdatePanelVisibility();
         }
@@ -387,6 +475,9 @@ public sealed partial class SearchPopupWindow : Window
     /// </summary>
     public void ActivateSearchInput()
     {
+        CancelColdHiddenCleanupTimer();
+        CancelUnfocusedAutoHideTimer();
+        _isPopupInputActive = true;
         PopupHideStoryboard.Stop();
         PopupHideStoryboard.Completed -= OnPopupHideCompleted;
         _appWindow?.Show();
@@ -409,15 +500,25 @@ public sealed partial class SearchPopupWindow : Window
         }
 
         App.Log("[Search] Popup hidden");
+        CancelUnfocusedAutoHideTimer();
+        _isPopupInputActive = false;
         IsPopupVisible = false;
+        CancelRecommendedDrag();
+        SetRecommendationEditMode(false);
+        CloseRecommendationOverlays(immediate: true);
+        ClearSelectedResultRow();
+        ClearRecommendedAppSelection();
+        ClearMultiSelection();
         _viewModel.OnPopupHidden();
         _searchDebounceTimer?.Stop();
         _skeletonDelayCancellation?.Cancel();
         _skeletonDelayCancellation?.Dispose();
         _skeletonDelayCancellation = null;
         HideAppsSkeleton();
+        SearchProgressBar.IsIndeterminate = false;
+        LoadingRing.IsActive = false;
         SearchFeedbackPresenter.Clear();
-        _entranceGuardTimer?.Stop();
+        StopAndClearEntranceGuardTimer();
         PopupHidden?.Invoke(this, EventArgs.Empty);
 
         // Fluent exit: fast shrink + fade, then remove the window from view once the
@@ -444,6 +545,8 @@ public sealed partial class SearchPopupWindow : Window
         // already stopped and this completion is stale; never hide a visible popup.
         if (!IsPopupVisible)
         {
+            SearchProgressBar.IsIndeterminate = false;
+            LoadingRing.IsActive = false;
             _appWindow?.Hide();
             // Leave the quick-reveal raised band at the actual hide moment, not at
             // the hide request: releasing earlier would sink the fading window
@@ -451,10 +554,215 @@ public sealed partial class SearchPopupWindow : Window
             App.Current.WidgetManager?.ReleaseRaisedBandGuest(
                 _hwnd,
                 "search-popup-hidden");
-            // Keep the initialized XAML shell and its material controllers warm.
-            // Recreating these resources on the next hotkey press shifts memory
-            // savings into a visible input delay and a transient material flash.
+            // Dispose DWM backdrop controllers immediately while hidden, then close
+            // the cold-hidden popup window after the retention delay to reclaim its
+            // DXGI SwapChain.
+            DisposeMicaController();
+            DisposeAcrylicController();
+            ArmColdHiddenCleanupTimer();
         }
+    }
+
+    private void ArmColdHiddenCleanupTimer()
+    {
+        int delaySeconds = PerformanceSettingsPolicy
+            .Resolve(_settingsService.Settings)
+            .TransientWindowReleaseDelaySeconds;
+        if (delaySeconds <= 0)
+        {
+            CancelColdHiddenCleanupTimer();
+            return;
+        }
+
+        DispatcherQueue? queue = DispatcherQueue;
+        if (queue is null)
+        {
+            return;
+        }
+
+        TimeSpan interval = TimeSpan.FromSeconds(delaySeconds);
+        if (_coldHiddenCleanupTimer is null)
+        {
+            DispatcherQueueTimer timer = queue.CreateTimer();
+            timer.IsRepeating = false;
+            timer.Interval = interval;
+            timer.Tick += ColdHiddenCleanupTimer_Tick;
+            _coldHiddenCleanupTimer = timer;
+            PerformanceLogger.RecordTransientUiTimerCreated();
+        }
+        else
+        {
+            _coldHiddenCleanupTimer.Stop();
+            _coldHiddenCleanupTimer.Interval = interval;
+        }
+
+        _coldHiddenCleanupTimer.Start();
+    }
+
+    private void CancelColdHiddenCleanupTimer()
+    {
+        _coldHiddenCleanupTimer?.Stop();
+    }
+
+    private void DisposeColdHiddenCleanupTimer()
+    {
+        if (_coldHiddenCleanupTimer is not { } timer)
+        {
+            return;
+        }
+
+        _coldHiddenCleanupTimer = null;
+        timer.Tick -= ColdHiddenCleanupTimer_Tick;
+        try
+        {
+            timer.Stop();
+        }
+        catch
+        {
+        }
+        PerformanceLogger.RecordTransientUiTimerReleased();
+    }
+
+    private bool HasActivePopupInteraction() =>
+        _isWindowDragging ||
+        _isWindowResizing ||
+        _recIsDragging ||
+        _overlayIsDragging ||
+        _isRubberBanding ||
+        _isRecRubberBanding ||
+        _isEditingFolderTitle ||
+        _dragCandidate is not null ||
+        (RootGrid.XamlRoot is { } xamlRoot &&
+         VisualTreeHelper.GetOpenPopupsForXamlRoot(xamlRoot).Count > 0);
+
+    private bool IsPointerOverPopupWindow()
+    {
+        if (_hwnd == IntPtr.Zero ||
+            !Win32Helper.GetCursorPos(out var cursor) ||
+            !Win32Helper.GetWindowRect(_hwnd, out var rect))
+        {
+            return false;
+        }
+
+        if (cursor.X < rect.Left || cursor.X >= rect.Right ||
+            cursor.Y < rect.Top || cursor.Y >= rect.Bottom)
+        {
+            return false;
+        }
+
+        IntPtr hit = Win32Helper.WindowFromPoint(cursor);
+        if (hit == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        IntPtr root = Win32Helper.GetAncestor(hit, Win32Helper.GA_ROOT);
+        return (root != IntPtr.Zero ? root : hit) == _hwnd;
+    }
+
+    private void ArmUnfocusedAutoHideTimer()
+    {
+        if (!IsPopupVisible || _isWindowClosed)
+        {
+            CancelUnfocusedAutoHideTimer();
+            return;
+        }
+
+        int releaseDelaySeconds = PerformanceSettingsPolicy
+            .Resolve(_settingsService.Settings)
+            .TransientWindowReleaseDelaySeconds;
+        int autoHideSeconds = releaseDelaySeconds <= 0
+            ? 60
+            : Math.Clamp(releaseDelaySeconds, 60, 180);
+
+        DispatcherQueue? queue = DispatcherQueue;
+        if (queue is null)
+        {
+            return;
+        }
+
+        TimeSpan interval = TimeSpan.FromSeconds(autoHideSeconds);
+        if (_unfocusedAutoHideTimer is null)
+        {
+            DispatcherQueueTimer timer = queue.CreateTimer();
+            timer.IsRepeating = false;
+            timer.Interval = interval;
+            timer.Tick += UnfocusedAutoHideTimer_Tick;
+            _unfocusedAutoHideTimer = timer;
+            PerformanceLogger.RecordTransientUiTimerCreated();
+        }
+        else
+        {
+            _unfocusedAutoHideTimer.Stop();
+            _unfocusedAutoHideTimer.Interval = interval;
+        }
+
+        _unfocusedAutoHideTimer.Start();
+    }
+
+    private void CancelUnfocusedAutoHideTimer()
+    {
+        _unfocusedAutoHideTimer?.Stop();
+    }
+
+    private void DisposeUnfocusedAutoHideTimer()
+    {
+        if (_unfocusedAutoHideTimer is not { } timer)
+        {
+            return;
+        }
+
+        _unfocusedAutoHideTimer = null;
+        timer.Tick -= UnfocusedAutoHideTimer_Tick;
+        try
+        {
+            timer.Stop();
+        }
+        catch
+        {
+        }
+        PerformanceLogger.RecordTransientUiTimerReleased();
+    }
+
+    private void UnfocusedAutoHideTimer_Tick(DispatcherQueueTimer sender, object args)
+    {
+        sender.Stop();
+        if (!IsPopupVisible || _isWindowClosed)
+        {
+            return;
+        }
+
+        if (_isPopupInputActive ||
+            Win32Helper.GetForegroundWindow() == _hwnd ||
+            HasActivePopupInteraction() ||
+            IsPointerOverPopupWindow())
+        {
+            ArmUnfocusedAutoHideTimer();
+            return;
+        }
+
+        App.Log("[Search] Unfocused popup auto-hiding after idle timeout");
+        HidePopup();
+    }
+
+    private void ColdHiddenCleanupTimer_Tick(DispatcherQueueTimer sender, object args)
+    {
+        sender.Stop();
+        if (IsPopupVisible || _isWindowClosed)
+        {
+            return;
+        }
+
+        SetRecommendationEditMode(false);
+        ClearSelectedResultRow();
+        ClearRecommendedAppSelection();
+        ClearMultiSelection();
+        ClearRealizedRepeaterVisuals();
+        int releasedIcons = _viewModel.ReleaseColdHiddenCaches();
+        SearchEngineService.ReleaseActiveColdHiddenCaches();
+        App.Log(
+            $"[Search] Cold-hidden popup closing to reclaim swapchain icons={releasedIcons}");
+        Close();
     }
 
     /// <summary>
@@ -469,6 +777,129 @@ public sealed partial class SearchPopupWindow : Window
         else
         {
             ShowPopup();
+        }
+    }
+
+    private void ClearSelectedResultRow()
+    {
+        if (_selectedRow is not null)
+        {
+            _selectedRow.IsSelected = false;
+            _selectedRow.IsTabStop = false;
+            _selectedRow = null;
+        }
+    }
+
+    private void ClearRealizedRepeaterVisuals()
+    {
+        int resultChildCount = VisualTreeHelper.GetChildrenCount(ResultsRepeater);
+        for (int i = 0; i < resultChildCount; i++)
+        {
+            if (VisualTreeHelper.GetChild(ResultsRepeater, i) is SearchResultRowControl row)
+            {
+                row.IsSelected = false;
+                row.IsMultiSelected = false;
+                row.IsTabStop = false;
+                row.PrepareItem(null);
+                row.RefreshIconVisuals();
+                row.DataContext = null;
+            }
+        }
+
+        int appChildCount = VisualTreeHelper.GetChildrenCount(RecommendedAppsRepeater);
+        for (int i = 0; i < appChildCount; i++)
+        {
+            if (VisualTreeHelper.GetChild(RecommendedAppsRepeater, i) is FrameworkElement card)
+            {
+                ClearRecommendedCardVisuals(card);
+            }
+        }
+
+        ClearOverlayRepeaterVisuals(FolderAppsRepeater);
+        ClearOverlayRepeaterVisuals(HiddenAppsRepeater);
+    }
+
+    private static void ClearRecommendedCardVisuals(FrameworkElement card)
+    {
+        DetachImplicitOffsetAnimation(card);
+        if (card is Grid grid)
+        {
+            grid.Background = s_transparentCardBrush;
+        }
+
+        card.Opacity = 1;
+        if (FindVisualChild<FrameworkElement>(card, "CardContentHost") is { } contentHost)
+        {
+            ResetCardContentHostVisual(contentHost);
+        }
+
+        if (FindVisualChild<Border>(card, "CardEditSlotPlate") is { } editSlotPlate)
+        {
+            editSlotPlate.Visibility = Visibility.Collapsed;
+        }
+
+        if (FindVisualChild<Border>(card, "CardSelectionPlate") is { } selectionPlate)
+        {
+            selectionPlate.Visibility = Visibility.Collapsed;
+        }
+
+        if (FindVisualChild<FrameworkElement>(card, "CardSelectionCheckBox") is { } selectionCheckBox)
+        {
+            selectionCheckBox.Visibility = Visibility.Collapsed;
+            if (FindVisualChild<Border>(selectionCheckBox, "CardSelectionCheckedBox") is { } checkedBox)
+            {
+                checkedBox.Visibility = Visibility.Collapsed;
+            }
+            if (FindVisualChild<Border>(selectionCheckBox, "CardSelectionUncheckedBox") is { } uncheckedBox)
+            {
+                uncheckedBox.Visibility = Visibility.Visible;
+                uncheckedBox.Opacity = 1;
+            }
+        }
+
+        if (FindVisualChild<Button>(card, "CardQuickHideButton") is { } quickHideButton)
+        {
+            quickHideButton.Visibility = Visibility.Collapsed;
+            quickHideButton.Opacity = 1;
+        }
+
+        if (FindVisualChild<Image>(card, "SingleAppIcon") is { } singleImage)
+        {
+            singleImage.Source = null;
+        }
+
+        for (int slot = 0; slot < 4; slot++)
+        {
+            if (FindVisualChild<Image>(card, $"FolderMiniIcon{slot}") is { } miniImage)
+            {
+                miniImage.Source = null;
+            }
+        }
+
+        card.DataContext = null;
+    }
+
+    private static void ClearOverlayRepeaterVisuals(ItemsRepeater repeater)
+    {
+        int childCount = VisualTreeHelper.GetChildrenCount(repeater);
+        for (int i = 0; i < childCount; i++)
+        {
+            if (VisualTreeHelper.GetChild(repeater, i) is FrameworkElement card)
+            {
+                DetachImplicitOffsetAnimation(card);
+                if (card is Grid grid)
+                {
+                    grid.Background = s_transparentCardBrush;
+                }
+
+                card.Opacity = 1;
+                if (FindDescendant<Image>(card) is { } iconImage)
+                {
+                    iconImage.Source = null;
+                }
+
+                card.DataContext = null;
+            }
         }
     }
 
@@ -555,6 +986,11 @@ public sealed partial class SearchPopupWindow : Window
             theme = Win32Helper.IsSystemDarkMode() ? ElementTheme.Dark : ElementTheme.Light;
 
         RootGrid.RequestedTheme = theme;
+        SyncEditRecommendationsButtonVisuals();
+        if (_isRecommendationEditMode)
+        {
+            RefreshAllRecommendedCardEditVisuals();
+        }
 
         // A pre-warmed hidden shell intentionally owns no backdrop controller.
         // The current material is applied immediately before the next native show.
@@ -566,15 +1002,22 @@ public sealed partial class SearchPopupWindow : Window
 
     private void OnWindowActivated(object sender, WindowActivatedEventArgs args)
     {
+        bool isActive = args.WindowActivationState != WindowActivationState.Deactivated;
+        _isPopupInputActive = isActive;
         if (_backdropConfiguration is not null)
         {
-            _backdropConfiguration.IsInputActive =
-                args.WindowActivationState != WindowActivationState.Deactivated;
+            _backdropConfiguration.IsInputActive = isActive;
         }
 
-        if (args.WindowActivationState != WindowActivationState.Deactivated)
+        if (isActive)
         {
+            CancelUnfocusedAutoHideTimer();
             UpdateSelectionActions();
+        }
+        else if (IsPopupVisible && !_isWindowClosed)
+        {
+            ArmUnfocusedAutoHideTimer();
+            PopupDeactivated?.Invoke(this, EventArgs.Empty);
         }
     }
 
@@ -1326,10 +1769,33 @@ public sealed partial class SearchPopupWindow : Window
         AttachSelectedLabel.Text = _localizationService.T("Search.Menu.AttachToTodo");
         SaveSelectedLabel.Text = _localizationService.T("Search.Menu.SaveToNote");
 
+        AllRecommendedHiddenHintText.Text = _localizationService.T("Search.Recommend.AllHiddenHint");
+        HiddenOverlayTitleText.Text = _localizationService.T("Search.Recommend.HiddenTitle");
+        HiddenOverlaySubtitleText.Text = _localizationService.T("Search.Recommend.HiddenHint");
+        UnhideAllButtonText.Text = _localizationService.T("Search.Recommend.UnhideAll");
+        ToolTipService.SetToolTip(
+            HiddenAppsEntryButton,
+            _localizationService.T("Search.Recommend.HiddenTitle"));
+        ToolTipService.SetToolTip(
+            EverythingDismissButton,
+            _localizationService.T("Search.EverythingBanner.DontRemind"));
+        ToolTipService.SetToolTip(
+            FolderOverlayTitleButton,
+            _localizationService.T("Search.Recommend.RenameFolder"));
+        ToolTipService.SetToolTip(
+            CloseHiddenOverlayButton,
+            _localizationService.T("Common.Close"));
+        SyncEditRecommendationsButtonVisuals();
+        UpdateRecommendationOverlayResponsiveBounds();
+
         TabsList.ItemsSource = _viewModel.Tabs;
         ResultsRepeater.ItemsSource = _viewModel.CurrentResults;
-        RecommendedAppsRepeater.ItemsSource = _viewModel.CurrentResults;
+        RecommendedAppsRepeater.ItemsSource = _viewModel.RecommendedEntries;
+        FolderAppsRepeater.ItemsSource = _folderOverlayItems;
+        HiddenAppsRepeater.ItemsSource = _viewModel.HiddenRecommendations;
 
+        UpdateEverythingPromptBanner();
+        UpdateRecommendationHeaderState();
         UpdatePanelVisibility();
         UpdateSortHeaders();
     }
@@ -1367,6 +1833,11 @@ public sealed partial class SearchPopupWindow : Window
             return;
         }
 
+        if (IsAnyRecommendationOverlayOpen())
+        {
+            return;
+        }
+
         if (RecommendedAppsPanel.Visibility == Visibility.Visible)
         {
             if (HandleRecommendedAppsKey(e))
@@ -1385,13 +1856,35 @@ public sealed partial class SearchPopupWindow : Window
     private void RootGrid_KeyDown(object sender, KeyRoutedEventArgs e)
     {
         // ── Recommended apps panel takes priority when visible ──
-        bool recommendedVisible = RecommendedAppsPanel.Visibility == Visibility.Visible;
+        bool recommendedVisible =
+            RecommendedAppsPanel.Visibility == Visibility.Visible &&
+            !IsAnyRecommendationOverlayOpen();
 
-        // Escape: clear recommended app selection first, then hand focus back
-        // from a sort header to the search box (same tier as the results
-        // panel's Escape), then hide popup.
+        // Escape: close active folder/hidden overlays first, then clear recommended
+        // app selection, then hand focus back from a sort header to the search box,
+        // then hide popup.
         if (e.Key == Windows.System.VirtualKey.Escape)
         {
+            if (_isEditingFolderTitle)
+            {
+                CancelFolderTitleEdit();
+                e.Handled = true;
+                return;
+            }
+            if (IsAnyRecommendationOverlayOpen())
+            {
+                CloseRecommendationOverlays();
+                SearchTextBox.Focus(FocusState.Programmatic);
+                e.Handled = true;
+                return;
+            }
+            if (_isRecommendationEditMode)
+            {
+                SetRecommendationEditMode(false);
+                SearchTextBox.Focus(FocusState.Programmatic);
+                e.Handled = true;
+                return;
+            }
             if (_selectedAppIndex >= 0)
             {
                 ClearRecommendedAppSelection();
@@ -1585,29 +2078,17 @@ public sealed partial class SearchPopupWindow : Window
     /// </summary>
     private void OnRecommendedAppsElementPrepared(ItemsRepeater sender, ItemsRepeaterElementPreparedEventArgs args)
     {
-        // The card template binds through x:Bind, which ItemsRepeater wires
-        // without assigning an inherited DataContext, so every DataContext-
-        // based card handler (select, double-tap open, keyboard selection,
-        // icon patch) silently no-ops unless the item is assigned explicitly
-        // from the repeater index — the same resolution the result rows use.
-        if (args.Element is FrameworkElement card &&
-            RecommendedAppsRepeater.ItemsSource is System.Collections.IList items &&
-            args.Index >= 0 &&
-            args.Index < items.Count)
+        if (args.Element is FrameworkElement card)
         {
-            card.DataContext = items[args.Index];
-        }
-
-        if (args.Element is FrameworkElement { DataContext: SearchResultItem item } preparedCard &&
-            item.Icon is not null)
-        {
-            // The card template binds Icon one-time, so a container realized
-            // before enrichment finished needs its Image patched explicitly.
-            var image = FindDescendant<Image>(preparedCard);
-            if (image is not null && image.Source != item.Icon)
-            {
-                image.Source = item.Icon;
-            }
+            DetachImplicitOffsetAnimation(card);
+            RecommendedGridEntry? resolvedEntry =
+                RecommendedAppsRepeater.ItemsSource is System.Collections.IList items &&
+                args.Index >= 0 &&
+                args.Index < items.Count
+                    ? items[args.Index] as RecommendedGridEntry
+                    : card.DataContext as RecommendedGridEntry;
+            SyncRecommendedCardContent(card, resolvedEntry);
+            ArmImplicitOffsetAnimationAfterLayout(card);
         }
 
         // If an entrance animation is pending, animate this freshly realized card
@@ -1616,17 +2097,152 @@ public sealed partial class SearchPopupWindow : Window
         if (_pendingEntranceStyle is int style && args.Element is FrameworkElement element)
         {
             AnimateSingleAppCard(element, args.Index, style);
-            // Once every element in the source has been prepared, the entrance is
-            // complete; drop the flag so later re-realizations (scroll/recycle) are
-            // not re-animated.
             if (RecommendedAppsRepeater.ItemsSource is System.Collections.ICollection coll &&
                 args.Index >= coll.Count - 1)
             {
                 _pendingEntranceStyle = null;
-                _entranceGuardTimer?.Stop();
-                _entranceGuardTimer = null;
+                StopAndClearEntranceGuardTimer();
             }
         }
+    }
+
+    private void SyncRecommendedCardContent(FrameworkElement card, RecommendedGridEntry? entry)
+    {
+        card.DataContext = entry;
+        card.Opacity = _recIsDragging &&
+                       entry is not null &&
+                       _recDraggedEntryKeys.Contains(entry.EntryKey)
+            ? 0.36
+            : 1;
+
+        if (card is Grid grid && !ReferenceEquals(grid, _selectedAppCard))
+        {
+            grid.Background = s_transparentCardBrush;
+        }
+
+        if (FindVisualChild<TextBlock>(card, "CardLabelTextBlock") is { } labelBlock)
+        {
+            labelBlock.Text = entry?.Label ?? string.Empty;
+        }
+
+        if (FindVisualChild<FrameworkElement>(card, "SingleIconHost") is { } singleIconHost)
+        {
+            singleIconHost.Visibility = entry?.SingleIconVisibility ?? Visibility.Collapsed;
+        }
+
+        if (FindVisualChild<FrameworkElement>(card, "FolderPreviewPlate") is { } folderPreviewPlate)
+        {
+            folderPreviewPlate.Visibility = entry?.FolderPreviewVisibility ?? Visibility.Collapsed;
+        }
+
+        // Always assign image.Source (even when Icon is null) so recycled
+        // containers never flash a previous app's icon while async icons load.
+        if (FindVisualChild<Image>(card, "SingleAppIcon") is { } image)
+        {
+            if (entry is { IsFolder: false, AppItem: { } item })
+            {
+                image.Source = item.Icon;
+            }
+            else
+            {
+                image.Source = null;
+            }
+        }
+
+        PopulateFolderPreviewIcons(card, entry);
+        ApplyRecommendedCardEditVisuals(card, entry);
+    }
+
+    private void OnRecommendedAppsElementClearing(ItemsRepeater sender, ItemsRepeaterElementClearingEventArgs args)
+    {
+        if (args.Element is not FrameworkElement card)
+        {
+            return;
+        }
+
+        if (ReferenceEquals(_selectedAppCard, card))
+        {
+            _selectedAppCard = null;
+            _selectedAppIndex = -1;
+        }
+
+        ClearRecommendedCardVisuals(card);
+    }
+
+    private static void PopulateFolderPreviewIcons(FrameworkElement card, RecommendedGridEntry? entry)
+    {
+        for (int slot = 0; slot < 4; slot++)
+        {
+            if (FindVisualChild<Image>(card, $"FolderMiniIcon{slot}") is not { } miniImage)
+            {
+                continue;
+            }
+
+            if (entry is { IsFolder: true } && slot < entry.FolderItems.Count)
+            {
+                ImageSource? memberIcon = entry.FolderItems[slot].Icon;
+                miniImage.Source = memberIcon;
+                miniImage.Visibility = memberIcon is not null ? Visibility.Visible : Visibility.Collapsed;
+            }
+            else
+            {
+                miniImage.Source = null;
+                miniImage.Visibility = Visibility.Collapsed;
+            }
+        }
+    }
+
+    private void OnOverlayAppsElementPrepared(ItemsRepeater sender, ItemsRepeaterElementPreparedEventArgs args)
+    {
+        if (args.Element is not FrameworkElement card)
+        {
+            return;
+        }
+
+        DetachImplicitOffsetAnimation(card);
+        SearchResultItem? resolvedItem =
+            sender.ItemsSource is System.Collections.IList items &&
+            args.Index >= 0 &&
+            args.Index < items.Count
+                ? items[args.Index] as SearchResultItem
+                : card.DataContext as SearchResultItem;
+        card.DataContext = resolvedItem;
+        card.Opacity = 1;
+
+        if (card is Grid grid)
+        {
+            grid.Background = s_transparentCardBrush;
+        }
+
+        if (FindDescendant<Image>(card) is { } overlayImage)
+        {
+            ImageSource? resolvedIcon = resolvedItem?.Icon;
+            overlayImage.Source = resolvedIcon;
+        }
+
+        ArmImplicitOffsetAnimationAfterLayout(card);
+    }
+
+    private void OnOverlayAppsElementClearing(ItemsRepeater sender, ItemsRepeaterElementClearingEventArgs args)
+    {
+        if (args.Element is not FrameworkElement card)
+        {
+            return;
+        }
+
+        DetachImplicitOffsetAnimation(card);
+        if (card is Grid grid)
+        {
+            grid.Background = s_transparentCardBrush;
+        }
+
+        card.Opacity = 1;
+        if (FindDescendant<Image>(card) is { } overlayImage)
+        {
+            overlayImage.Source = null;
+        }
+
+        card.DataContext = null;
     }
 
     /// <summary>
@@ -1659,33 +2275,147 @@ public sealed partial class SearchPopupWindow : Window
     /// </summary>
     private void RefreshRecommendedAppIcons()
     {
-        int index = 0;
-        var itemsSource = RecommendedAppsRepeater.ItemsSource as System.Collections.IEnumerable
-            ?? Array.Empty<object>();
-        foreach (var dataItem in itemsSource)
+        int childCount = VisualTreeHelper.GetChildrenCount(RecommendedAppsRepeater);
+        for (int i = 0; i < childCount; i++)
         {
-            if (dataItem is SearchResultItem item && item.Icon is not null &&
-                RecommendedAppsRepeater.TryGetElement(index) is FrameworkElement card)
+            if (VisualTreeHelper.GetChild(RecommendedAppsRepeater, i) is not FrameworkElement card ||
+                card.DataContext is not RecommendedGridEntry entry)
             {
-                var image = FindDescendant<Image>(card);
-                if (image is not null && image.Source != item.Icon)
+                continue;
+            }
+
+            if (!entry.IsFolder && entry.AppItem is { } item)
+            {
+                var image = FindVisualChild<Image>(card, "SingleAppIcon");
+                if (image is not null && !ReferenceEquals(image.Source, item.Icon))
                 {
                     image.Source = item.Icon;
                 }
             }
-            index++;
+            else if (entry.IsFolder)
+            {
+                PopulateFolderPreviewIcons(card, entry);
+            }
+        }
+
+        RefreshOverlayRepeaterIcons(FolderAppsRepeater);
+        RefreshOverlayRepeaterIcons(HiddenAppsRepeater);
+    }
+
+    private static void RefreshOverlayRepeaterIcons(ItemsRepeater repeater)
+    {
+        int childCount = VisualTreeHelper.GetChildrenCount(repeater);
+        for (int i = 0; i < childCount; i++)
+        {
+            if (VisualTreeHelper.GetChild(repeater, i) is FrameworkElement card &&
+                card.DataContext is SearchResultItem entryItem &&
+                FindDescendant<Image>(card) is { } overlayImage)
+            {
+                ImageSource? resolvedIcon = entryItem.Icon;
+                if (!ReferenceEquals(overlayImage.Source, resolvedIcon))
+                {
+                    overlayImage.Source = resolvedIcon;
+                }
+            }
         }
     }
 
     private void OnRecommendationIconsResolved()
     {
-        if (!IsPopupVisible ||
-            RecommendedAppsPanel.Visibility != Visibility.Visible)
+        if (!IsPopupVisible)
         {
             return;
         }
 
         RefreshRecommendedAppIcons();
+    }
+
+    private void OnRecommendationLayoutUpdated()
+    {
+        if (!IsPopupVisible)
+        {
+            return;
+        }
+
+        PruneStaleMultiSelectedRecommendationKeys();
+        UpdateRecommendationHeaderState();
+        SyncOpenFolderOverlayWithViewModel();
+        RefreshAllRecommendedCardEditVisuals();
+        UpdateRecommendationEditStatusHint();
+        RefreshRecommendedAppIcons();
+
+        DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
+        {
+            if (_isWindowClosed || !IsPopupVisible)
+            {
+                return;
+            }
+
+            RefreshAllRecommendedCardEditVisuals();
+            RefreshRecommendedAppIcons();
+        });
+    }
+
+    private void UpdateEverythingPromptBanner()
+    {
+        EverythingPromptBanner.Visibility = _viewModel.IsEverythingPromptVisible
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        EverythingPromptTextBlock.Text = _viewModel.EverythingPromptText;
+        EverythingConnectButtonText.Text = _viewModel.EverythingPromptActionText;
+        EverythingPromptIcon.Glyph = _viewModel.IsEverythingPromptWarning
+            ? "\uE7BA"
+            : "\uE946";
+    }
+
+    private void EverythingConnectButton_Click(object sender, RoutedEventArgs e)
+    {
+        _viewModel.InvokeAction("open-settings");
+    }
+
+    private void EverythingDismissButton_Click(object sender, RoutedEventArgs e)
+    {
+        _viewModel.DismissEverythingPrompt();
+        UpdateEverythingPromptBanner();
+    }
+
+    private void UpdateRecommendationHeaderState()
+    {
+        bool homeVisible = string.IsNullOrWhiteSpace(SearchTextBox.Text) &&
+                           RecommendedAppsPanel.Visibility == Visibility.Visible;
+        bool hasHidden = _viewModel.HasHiddenRecommendations;
+        bool hasEntries = _viewModel.HasRecommendedEntries;
+
+        HiddenAppsEntryButton.Visibility = homeVisible && hasHidden
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        if (hasHidden)
+        {
+            HiddenAppsEntryLabel.Text = string.Format(
+                _localizationService.T("Search.Recommend.HiddenEntryFormat"),
+                _viewModel.HiddenRecommendationCount);
+        }
+
+        EditRecommendationsButton.Visibility = homeVisible && hasEntries
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        if (!hasEntries && _isRecommendationEditMode)
+        {
+            SetRecommendationEditMode(false);
+        }
+
+        RecommendedAppsScrollViewer.Visibility = hasEntries
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        AllRecommendedHiddenHintPanel.Visibility =
+            !hasEntries && hasHidden
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+
+        if (!hasHidden && HiddenAppsOverlayHost.Visibility == Visibility.Visible)
+        {
+            CloseRecommendationOverlays();
+        }
     }
 
     private void UpdatePanelVisibility()
@@ -1699,7 +2429,9 @@ public sealed partial class SearchPopupWindow : Window
         // A ready resident index answers normal keystrokes directly. Avoid flashing a
         // progress animation for the short cancellable query window; indexing state
         // remains available in Settings for first-build and rebuild diagnostics.
+        SearchProgressBar.IsIndeterminate = false;
         SearchProgressBar.Visibility = Visibility.Collapsed;
+        LoadingRing.IsActive = false;
         LoadingStatusText.Text = _localizationService.T("Search.Status.Searching");
         LoadingPanel.Visibility = Visibility.Collapsed;
         TabsList.Visibility = hasQuery ? Visibility.Visible : Visibility.Collapsed;
@@ -1722,11 +2454,13 @@ public sealed partial class SearchPopupWindow : Window
         ResultsPanel.Visibility = showResults ? Visibility.Visible : Visibility.Collapsed;
         bool showResultChrome = hasQuery && hasResults && tabSelected;
 
-        bool showRecommendedApps = !hasQuery && tabHasItems;
+        bool showRecommendedApps = !hasQuery &&
+            (tabHasItems || _viewModel.HasRecommendedEntries || _viewModel.HasHiddenRecommendations);
         if (showRecommendedApps)
         {
             bool wasHidden = RecommendedAppsPanel.Visibility != Visibility.Visible;
             RecommendedAppsPanel.Visibility = Visibility.Visible;
+            UpdateRecommendationHeaderState();
             RefreshRecommendedAppIcons();
 
             // When the home tab re-appears after a query, replay the configured
@@ -1740,8 +2474,14 @@ public sealed partial class SearchPopupWindow : Window
         else
         {
             RecommendedAppsPanel.Visibility = Visibility.Collapsed;
+            SetRecommendationEditMode(false);
+            UpdateRecommendationHeaderState();
+            CancelRecommendedDrag();
+            CloseRecommendationOverlays(immediate: true);
             ClearRecommendedAppSelection();
         }
+
+        UpdateRecommendationEditStatusHint();
 
         // Sortable header only for file-style tabs (All / extension tabs / File / Folder).
         bool fileSortTab = _viewModel.SelectedTab?.SupportsFileSort == true;
@@ -1768,6 +2508,12 @@ public sealed partial class SearchPopupWindow : Window
         _isNavigatingResults = false;
         ClearMultiSelection();
         bool hasText = !string.IsNullOrEmpty(SearchTextBox.Text);
+        if (hasText)
+        {
+            SetRecommendationEditMode(false);
+            CancelRecommendedDrag();
+            CloseRecommendationOverlays(immediate: true);
+        }
         HotkeyHintBadge.Visibility = hasText
             ? Visibility.Collapsed
             : Visibility.Visible;
@@ -1810,7 +2556,19 @@ public sealed partial class SearchPopupWindow : Window
         switch (e.Key)
         {
             case Windows.System.VirtualKey.Escape:
-                if (!string.IsNullOrEmpty(SearchTextBox.Text))
+                if (_isEditingFolderTitle)
+                {
+                    CancelFolderTitleEdit();
+                }
+                else if (IsAnyRecommendationOverlayOpen())
+                {
+                    CloseRecommendationOverlays();
+                }
+                else if (_isRecommendationEditMode)
+                {
+                    SetRecommendationEditMode(false);
+                }
+                else if (!string.IsNullOrEmpty(SearchTextBox.Text))
                 {
                     SearchTextBox.Text = string.Empty;
                     _viewModel.ClearSearch();
@@ -1831,7 +2589,63 @@ public sealed partial class SearchPopupWindow : Window
                 break;
 
             case Windows.System.VirtualKey.Enter:
+                if (IsAnyRecommendationOverlayOpen())
+                {
+                    e.Handled = true;
+                    break;
+                }
+
                 bool controlPressed = Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control);
+                if (_isRecommendationEditMode &&
+                    string.IsNullOrWhiteSpace(SearchTextBox.Text) &&
+                    RecommendedAppsPanel.Visibility == Visibility.Visible)
+                {
+                    if (_selectedAppIndex >= 0 &&
+                        RecommendedAppsRepeater.ItemsSource is System.Collections.IList editRecEntries &&
+                        _selectedAppIndex < editRecEntries.Count &&
+                        editRecEntries[_selectedAppIndex] is RecommendedGridEntry editSelectedEntry)
+                    {
+                        if (!_recMultiSelectedKeys.Add(editSelectedEntry.EntryKey))
+                        {
+                            _recMultiSelectedKeys.Remove(editSelectedEntry.EntryKey);
+                        }
+
+                        RefreshAllRecommendedCardEditVisuals();
+                        UpdateRecommendationEditStatusHint();
+                    }
+
+                    e.Handled = true;
+                    break;
+                }
+
+                if (string.IsNullOrWhiteSpace(SearchTextBox.Text) &&
+                    RecommendedAppsPanel.Visibility == Visibility.Visible &&
+                    _selectedAppIndex >= 0 &&
+                    RecommendedAppsRepeater.ItemsSource is System.Collections.IList recEntries &&
+                    _selectedAppIndex < recEntries.Count &&
+                    recEntries[_selectedAppIndex] is RecommendedGridEntry selectedEntry)
+                {
+                    if (selectedEntry.IsFolder)
+                    {
+                        OpenFolderOverlay(selectedEntry);
+                    }
+                    else if (selectedEntry.AppItem is { } recApp)
+                    {
+                        if (controlPressed && !string.IsNullOrWhiteSpace(recApp.DetailPath))
+                        {
+                            Win32Helper.ShowInExplorer(recApp.DetailPath);
+                            HidePopup();
+                        }
+                        else if (_viewModel.ExecuteItem(recApp))
+                        {
+                            HidePopup();
+                        }
+                    }
+
+                    e.Handled = true;
+                    break;
+                }
+
                 bool executed = controlPressed
                     ? _viewModel.OpenSelectedLocation()
                     : _viewModel.ExecuteSelectedItem();
@@ -1993,21 +2807,825 @@ public sealed partial class SearchPopupWindow : Window
         _viewModel.InvokeAction("open-settings");
     }
 
-    // ── Recommended apps: single-click select, double-click open, keyboard nav ──
+    // ── Recommended apps: Win11 Start Menu single-click open, drag reorder, folder grouping & batch edit mode ──
+
+    private const double RecommendationDragThreshold = 6.0;
+
+    private readonly record struct RecommendedDropDecision(
+        bool IsMerge,
+        RecommendedGridEntry? MergeTarget,
+        FrameworkElement? MergeTargetElement,
+        int ReorderTargetIndex,
+        Rect HighlightRect,
+        Point InsertBarPosition);
+
+    private void EditRecommendationsButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (IsAnyRecommendationOverlayOpen())
+        {
+            CloseRecommendationOverlays();
+        }
+
+        SetRecommendationEditMode(!_isRecommendationEditMode);
+    }
+
+    private void SetRecommendationEditMode(bool enabled)
+    {
+        if (enabled && !_viewModel.HasRecommendedEntries)
+        {
+            enabled = false;
+        }
+
+        if (_isRecommendationEditMode == enabled &&
+            (enabled || (_recMultiSelectedKeys.Count == 0 && !_isRecRubberBanding)))
+        {
+            SyncEditRecommendationsButtonVisuals();
+            UpdateRecommendationEditStatusHint();
+            return;
+        }
+
+        _isRecommendationEditMode = enabled;
+        if (!enabled)
+        {
+            _recMultiSelectedKeys.Clear();
+            _recRubberBandBaseKeys.Clear();
+            _recRubberBandKnownTileRects.Clear();
+            EndRecommendationRubberBand();
+        }
+
+        ClearRecommendedAppSelection();
+        SyncEditRecommendationsButtonVisuals();
+        RefreshAllRecommendedCardEditVisuals();
+        UpdateRecommendationEditStatusHint();
+    }
+
+    private void SyncEditRecommendationsButtonVisuals()
+    {
+        EditRecommendationsIcon.Glyph = _isRecommendationEditMode ? "\uE73E" : "\uE70F";
+        string label = _localizationService.T(
+            _isRecommendationEditMode
+                ? "Search.Recommend.EditDone"
+                : "Search.Recommend.Edit");
+        EditRecommendationsLabel.Text = label;
+        ToolTipService.SetToolTip(EditRecommendationsButton, label);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(EditRecommendationsButton, label);
+        EditRecommendationsButton.Background = ResolveThemeBrush(
+            _isRecommendationEditMode
+                ? "ControlFillColorSecondaryBrush"
+                : "ControlFillColorDefaultBrush");
+        EditRecommendationsButton.BorderBrush = ResolveThemeBrush(
+            _isRecommendationEditMode
+                ? "ControlStrokeColorDefaultBrush"
+                : "CardStrokeColorDefaultBrush");
+    }
+
+    private void UpdateRecommendationEditStatusHint()
+    {
+        bool showHint = string.IsNullOrWhiteSpace(SearchTextBox.Text) &&
+                        RecommendedAppsPanel.Visibility == Visibility.Visible &&
+                        _isRecommendationEditMode &&
+                        _recMultiSelectedKeys.Count > 0;
+        if (showHint)
+        {
+            string batchHideLabel = string.Format(
+                _localizationService.T("Search.Recommend.BatchHideFormat"),
+                _recMultiSelectedKeys.Count);
+            BatchHideSelectedLabel.Text = batchHideLabel;
+            ToolTipService.SetToolTip(BatchHideSelectedButton, batchHideLabel);
+            BatchHideSelectedButton.Visibility = Visibility.Visible;
+
+            StatusTextBlock.Text = string.Format(
+                _localizationService.T("Search.Recommend.EditSelectionHint"),
+                _recMultiSelectedKeys.Count);
+            StatusBar.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            BatchHideSelectedButton.Visibility = Visibility.Collapsed;
+            StatusBar.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private void BatchHideSelectedButton_Click(object sender, RoutedEventArgs e)
+    {
+        HideSelectedRecommendations();
+    }
+
+    private void HideSelectedRecommendations()
+    {
+        if (_recMultiSelectedKeys.Count == 0)
+        {
+            return;
+        }
+
+        var selectedItems = new List<SearchResultItem>();
+        foreach (RecommendedGridEntry entry in _viewModel.RecommendedEntries)
+        {
+            if (!_recMultiSelectedKeys.Contains(entry.EntryKey))
+            {
+                continue;
+            }
+
+            if (entry.IsFolder)
+            {
+                selectedItems.AddRange(entry.FolderItems);
+            }
+            else if (entry.AppItem is { } appItem)
+            {
+                selectedItems.Add(appItem);
+            }
+        }
+
+        _recMultiSelectedKeys.Clear();
+        if (selectedItems.Count > 0)
+        {
+            _viewModel.HideRecommendations(selectedItems);
+        }
+
+        RefreshAllRecommendedCardEditVisuals();
+        UpdateRecommendationEditStatusHint();
+    }
+
+    private void PruneStaleMultiSelectedRecommendationKeys()
+    {
+        if (_recMultiSelectedKeys.Count == 0)
+        {
+            return;
+        }
+
+        var validEntryKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (RecommendedGridEntry entry in _viewModel.RecommendedEntries)
+        {
+            validEntryKeys.Add(entry.EntryKey);
+        }
+
+        _recMultiSelectedKeys.RemoveWhere(key => !validEntryKeys.Contains(key));
+    }
+
+    private void RefreshAllRecommendedCardEditVisuals()
+    {
+        int childCount = VisualTreeHelper.GetChildrenCount(RecommendedAppsRepeater);
+        for (int i = 0; i < childCount; i++)
+        {
+            if (VisualTreeHelper.GetChild(RecommendedAppsRepeater, i) is FrameworkElement card)
+            {
+                if (!_isRecommendationEditMode &&
+                    card is Grid grid &&
+                    !ReferenceEquals(grid, _selectedAppCard))
+                {
+                    grid.Background = s_transparentCardBrush;
+                }
+
+                ApplyRecommendedCardEditVisuals(card, card.DataContext as RecommendedGridEntry);
+            }
+        }
+    }
+
+    private void ApplyRecommendedCardEditVisuals(
+        FrameworkElement card,
+        RecommendedGridEntry? entry,
+        bool isPointerOver = false)
+    {
+        bool isEditActive = _isRecommendationEditMode && entry is not null;
+        bool isQuickHideEligible = isEditActive && !entry!.IsFolder;
+        bool isSelected = isEditActive && _recMultiSelectedKeys.Contains(entry!.EntryKey);
+
+        if (FindVisualChild<Border>(card, "CardEditSlotPlate") is { } editSlotPlate)
+        {
+            editSlotPlate.Visibility = isEditActive && !isSelected
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        }
+
+        if (FindVisualChild<Border>(card, "CardSelectionPlate") is { } selectionPlate)
+        {
+            selectionPlate.Visibility = isSelected
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+            if (isSelected)
+            {
+                selectionPlate.Background = ResolveThemeBrush(
+                    isPointerOver
+                        ? "ControlFillColorTertiaryBrush"
+                        : "ControlFillColorSecondaryBrush");
+            }
+        }
+
+        if (FindVisualChild<FrameworkElement>(card, "CardSelectionCheckBox") is { } selectionCheckBox)
+        {
+            selectionCheckBox.Visibility = isEditActive
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+
+            if (FindVisualChild<Border>(selectionCheckBox, "CardSelectionCheckedBox") is { } checkedBox)
+            {
+                checkedBox.Visibility = isSelected
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+            }
+
+            if (FindVisualChild<Border>(selectionCheckBox, "CardSelectionUncheckedBox") is { } uncheckedBox)
+            {
+                uncheckedBox.Visibility = isEditActive && !isSelected
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+                if (isEditActive && !isSelected)
+                {
+                    uncheckedBox.Opacity = isPointerOver ? 1.0 : 0.68;
+                    uncheckedBox.BorderBrush = ResolveThemeBrush(
+                        isPointerOver
+                            ? "ControlStrongStrokeColorDefaultBrush"
+                            : "ControlStrongStrokeColorDisabledBrush");
+                }
+            }
+        }
+
+        if (FindVisualChild<Button>(card, "CardQuickHideButton") is { } quickHideButton)
+        {
+            quickHideButton.Visibility = isQuickHideEligible
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+            quickHideButton.Opacity = (isPointerOver || isSelected) ? 0.96 : 0.62;
+        }
+    }
+
+    private static void ResetCardContentHostVisual(FrameworkElement contentHost)
+    {
+        var visual = ElementCompositionPreview.GetElementVisual(contentHost);
+        if (visual is null)
+        {
+            return;
+        }
+
+        visual.StopAnimation("Scale.X");
+        visual.StopAnimation("Scale.Y");
+        visual.Scale = System.Numerics.Vector3.One;
+    }
+
+    private void ArmImplicitOffsetAnimationAfterLayout(FrameworkElement card)
+    {
+        if (!AreSystemAnimationsEnabled())
+        {
+            return;
+        }
+
+        DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
+        {
+            if (_isWindowClosed || !IsPopupVisible || card.DataContext is null || !AreSystemAnimationsEnabled())
+            {
+                return;
+            }
+
+            var visual = ElementCompositionPreview.GetElementVisual(card);
+            if (visual is null || visual.ImplicitAnimations is not null)
+            {
+                return;
+            }
+
+            var compositor = visual.Compositor;
+            var decel = compositor.CreateCubicBezierEasingFunction(
+                new System.Numerics.Vector2(0.0f, 0.0f),
+                new System.Numerics.Vector2(0.1f, 1.0f));
+            var offsetAnim = compositor.CreateVector3KeyFrameAnimation();
+            offsetAnim.Target = "Offset";
+            offsetAnim.InsertExpressionKeyFrame(1.0f, "this.FinalValue", decel);
+            offsetAnim.Duration = TimeSpan.FromMilliseconds(190);
+
+            var implicitCollection = compositor.CreateImplicitAnimationCollection();
+            implicitCollection["Offset"] = offsetAnim;
+            visual.ImplicitAnimations = implicitCollection;
+        });
+    }
+
+    private static void DetachImplicitOffsetAnimation(FrameworkElement card)
+    {
+        var visual = ElementCompositionPreview.GetElementVisual(card);
+        if (visual is not null)
+        {
+            visual.ImplicitAnimations = null;
+        }
+    }
+
+    private void CardQuickHideButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (FindDataContext<RecommendedGridEntry>(sender as DependencyObject) is
+            { IsFolder: false, AppItem: { } appItem } entry)
+        {
+            _recMultiSelectedKeys.Remove(entry.EntryKey);
+            _viewModel.HideRecommendation(appItem);
+            UpdateRecommendationEditStatusHint();
+        }
+    }
+
+    private void RecommendedAppsScrollViewer_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        RecommendedAppsSurface.MinHeight = Math.Max(
+            0,
+            e.NewSize.Height - RecommendedAppsScrollViewer.Padding.Top - RecommendedAppsScrollViewer.Padding.Bottom);
+    }
+
+    private void RecommendedAppsSurface_PointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        if (_recIsDragging || IsAnyRecommendationOverlayOpen())
+        {
+            return;
+        }
+
+        var point = e.GetCurrentPoint(RecommendedAppsSurface);
+        if (!point.Properties.IsLeftButtonPressed)
+        {
+            return;
+        }
+
+        bool isCtrlPressed = Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control);
+        if (!_isRecommendationEditMode)
+        {
+            if (!isCtrlPressed)
+            {
+                return;
+            }
+
+            SetRecommendationEditMode(true);
+        }
+
+        StartRecommendationRubberBand(e, isAdditive: isCtrlPressed);
+        e.Handled = true;
+    }
+
+    private void RecommendedAppsSurface_PointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_isRecRubberBanding)
+        {
+            return;
+        }
+
+        _recRubberBandPointerInViewport = e.GetCurrentPoint(RecommendedAppsScrollViewer).Position;
+        UpdateRecommendationRubberBand(e.GetCurrentPoint(RecommendedAppsSurface).Position);
+        e.Handled = true;
+    }
+
+    private void RecommendedAppsSurface_PointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_isRecRubberBanding)
+        {
+            return;
+        }
+
+        EndRecommendationRubberBand();
+        e.Handled = true;
+    }
+
+    private void RecommendedAppsSurface_PointerCaptureLost(object sender, PointerRoutedEventArgs e)
+    {
+        if (_isRecRubberBanding)
+        {
+            EndRecommendationRubberBand();
+        }
+    }
+
+    private void StartRecommendationRubberBand(PointerRoutedEventArgs e, bool isAdditive)
+    {
+        _isRecRubberBanding = true;
+        _recRubberBandBaseKeys.Clear();
+        _recRubberBandKnownTileRects.Clear();
+        if (isAdditive)
+        {
+            _recRubberBandBaseKeys.UnionWith(_recMultiSelectedKeys);
+        }
+        else if (_recMultiSelectedKeys.Count > 0)
+        {
+            _recMultiSelectedKeys.Clear();
+            RefreshAllRecommendedCardEditVisuals();
+            UpdateRecommendationEditStatusHint();
+        }
+
+        Point pos = e.GetCurrentPoint(RecommendedAppsSurface).Position;
+        _recRubberBandStart = pos;
+        _recRubberBandCurrent = pos;
+        _recRubberBandPointerInViewport = e.GetCurrentPoint(RecommendedAppsScrollViewer).Position;
+        UpdateRecommendationRubberBandRect(pos, pos);
+        RecRubberBandRect.Visibility = Visibility.Visible;
+        RecommendedAppsSurface.CapturePointer(e.Pointer);
+        EnsureRecommendationRubberBandAutoScrollTimer();
+        _recRubberBandAutoScrollTimer!.Start();
+    }
+
+    private void UpdateRecommendationRubberBand(Point currentInSurface)
+    {
+        _recRubberBandCurrent = currentInSurface;
+        UpdateRecommendationRubberBandRect(_recRubberBandStart, currentInSurface);
+
+        var rubberRect = new Rect(
+            Math.Min(_recRubberBandStart.X, currentInSurface.X),
+            Math.Min(_recRubberBandStart.Y, currentInSurface.Y),
+            Math.Abs(currentInSurface.X - _recRubberBandStart.X),
+            Math.Abs(currentInSurface.Y - _recRubberBandStart.Y));
+
+        if (rubberRect.Width < 3 && rubberRect.Height < 3)
+        {
+            return;
+        }
+
+        int childCount = VisualTreeHelper.GetChildrenCount(RecommendedAppsRepeater);
+        for (int i = 0; i < childCount; i++)
+        {
+            if (VisualTreeHelper.GetChild(RecommendedAppsRepeater, i) is not FrameworkElement tile ||
+                tile.Visibility != Visibility.Visible ||
+                tile.ActualWidth <= 0 ||
+                tile.ActualHeight <= 0 ||
+                tile.DataContext is not RecommendedGridEntry entry)
+            {
+                continue;
+            }
+
+            var tileRect = new Rect(
+                tile.TransformToVisual(RecommendedAppsSurface).TransformPoint(new Point(0, 0)),
+                new Size(tile.ActualWidth, tile.ActualHeight));
+            _recRubberBandKnownTileRects[entry.EntryKey] = tileRect;
+        }
+
+        _recMultiSelectedKeys.Clear();
+        _recMultiSelectedKeys.UnionWith(_recRubberBandBaseKeys);
+
+        foreach (RecommendedGridEntry entry in _viewModel.RecommendedEntries)
+        {
+            if (_recRubberBandKnownTileRects.TryGetValue(entry.EntryKey, out Rect tileRect) &&
+                Intersects(rubberRect, tileRect))
+            {
+                _recMultiSelectedKeys.Add(entry.EntryKey);
+            }
+        }
+
+        RefreshAllRecommendedCardEditVisuals();
+        UpdateRecommendationEditStatusHint();
+    }
+
+    private void UpdateRecommendationRubberBandRect(Point start, Point end)
+    {
+        double x = Math.Min(start.X, end.X);
+        double y = Math.Min(start.Y, end.Y);
+        RecRubberBandRect.Width = Math.Abs(end.X - start.X);
+        RecRubberBandRect.Height = Math.Abs(end.Y - start.Y);
+        RecRubberBandTransform.X = x;
+        RecRubberBandTransform.Y = y;
+    }
+
+    private void EndRecommendationRubberBand()
+    {
+        if (!_isRecRubberBanding && RecRubberBandRect.Visibility != Visibility.Visible)
+        {
+            return;
+        }
+
+        _isRecRubberBanding = false;
+        _recRubberBandAutoScrollTimer?.Stop();
+        _recRubberBandBaseKeys.Clear();
+        _recRubberBandKnownTileRects.Clear();
+        RecRubberBandRect.Visibility = Visibility.Collapsed;
+        RecommendedAppsSurface.ReleasePointerCaptures();
+    }
+
+    private void EnsureRecommendationRubberBandAutoScrollTimer()
+    {
+        if (_recRubberBandAutoScrollTimer is not null)
+        {
+            return;
+        }
+
+        _recRubberBandAutoScrollTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(32)
+        };
+        _recRubberBandAutoScrollTimer.Tick += OnRecommendationRubberBandAutoScrollTick;
+    }
+
+    private void OnRecommendationRubberBandAutoScrollTick(object? sender, object e)
+    {
+        if (!_isRecRubberBanding)
+        {
+            _recRubberBandAutoScrollTimer?.Stop();
+            return;
+        }
+
+        double delta = SearchResultSelectionPolicy.GetAutoScrollDelta(
+            _recRubberBandPointerInViewport.Y,
+            RecommendedAppsScrollViewer.ViewportHeight);
+        if (Math.Abs(delta) < 0.1)
+        {
+            return;
+        }
+
+        double previousOffset = RecommendedAppsScrollViewer.VerticalOffset;
+        double targetOffset = Math.Clamp(
+            previousOffset + delta,
+            0,
+            RecommendedAppsScrollViewer.ScrollableHeight);
+        if (Math.Abs(targetOffset - previousOffset) < 0.1)
+        {
+            return;
+        }
+
+        RecommendedAppsScrollViewer.ChangeView(null, targetOffset, null, disableAnimation: true);
+        _recRubberBandCurrent = new Point(
+            _recRubberBandCurrent.X,
+            _recRubberBandCurrent.Y + targetOffset - previousOffset);
+        UpdateRecommendationRubberBand(_recRubberBandCurrent);
+    }
 
     private void RecommendedApp_PointerPressed(object sender, PointerRoutedEventArgs e)
     {
-        // Marking the press handled here would suppress the DoubleTapped
-        // gesture, so the card could never be opened with the mouse.
-        if (sender is Grid card && card.DataContext is SearchResultItem item)
+        if (sender is not Grid card || card.DataContext is not RecommendedGridEntry entry)
         {
-            SelectRecommendedApp(card, item);
+            return;
+        }
+
+        if (FindVisualAncestor<Button>(e.OriginalSource as DependencyObject) is
+            { Name: "CardQuickHideButton" })
+        {
+            return;
+        }
+
+        var pointInPanel = e.GetCurrentPoint(RecommendedAppsPanel);
+        if (!pointInPanel.Properties.IsLeftButtonPressed)
+        {
+            return;
+        }
+
+        _recWasCtrlPressedOnDown = Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control);
+        _recAutoEnteredEditModeOnDown = false;
+
+        if (!_isRecommendationEditMode && _recWasCtrlPressedOnDown)
+        {
+            _recAutoEnteredEditModeOnDown = true;
+            SetRecommendationEditMode(true);
+            _recMultiSelectedKeys.Add(entry.EntryKey);
+            RefreshAllRecommendedCardEditVisuals();
+            UpdateRecommendationEditStatusHint();
+        }
+        else if (!_isRecommendationEditMode)
+        {
+            SelectRecommendedEntry(card, entry);
+        }
+
+        _recPointerCard = card;
+        _recPressedEntry = entry;
+        _recPointerStartInPanel = pointInPanel.Position;
+        _recIsDragging = false;
+        card.CapturePointer(e.Pointer);
+        e.Handled = true;
+    }
+
+    private void RecommendedApp_PointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if (_recPressedEntry is null ||
+            _recPointerCard is null ||
+            !ReferenceEquals(sender, _recPointerCard))
+        {
+            return;
+        }
+
+        var pointInPanel = e.GetCurrentPoint(RecommendedAppsPanel);
+        if (!pointInPanel.Properties.IsLeftButtonPressed)
+        {
+            CancelRecommendedDrag();
+            return;
+        }
+
+        double dx = pointInPanel.Position.X - _recPointerStartInPanel.X;
+        double dy = pointInPanel.Position.Y - _recPointerStartInPanel.Y;
+        if (!_recIsDragging)
+        {
+            if ((dx * dx) + (dy * dy) < RecommendationDragThreshold * RecommendationDragThreshold)
+            {
+                return;
+            }
+
+            _recIsDragging = true;
+            PrepareRecommendedDragPayload(_recPressedEntry);
+            SetDraggedRecommendedTilesOpacity(0.36);
+
+            RecDragGhostTitle.Text = _recPressedEntry.Label;
+            if (_recPressedEntry.IsFolder)
+            {
+                RecDragGhostImage.Source = null;
+                RecDragGhostImage.Visibility = Visibility.Collapsed;
+                RecDragGhostFolderGlyph.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                ImageSource? ghostIcon = _recPressedEntry.AppItem?.Icon;
+                RecDragGhostImage.Source = ghostIcon;
+                RecDragGhostImage.Visibility = ghostIcon is not null
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+                RecDragGhostFolderGlyph.Visibility = ghostIcon is null
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+            }
+
+            if (_recDraggedEntryKeys.Count > 1)
+            {
+                RecDragGhostCountText.Text = _recDraggedEntryKeys.Count.ToString();
+                RecDragGhostCountBadge.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                RecDragGhostCountBadge.Visibility = Visibility.Collapsed;
+            }
+
+            RecDragGhostBorder.Visibility = Visibility.Visible;
+            AnimateDragGhostPickup(RecDragGhostBorder);
+        }
+
+        RecDragGhostTransform.X = pointInPanel.Position.X - (RecDragGhostBorder.Width / 2);
+        RecDragGhostTransform.Y = pointInPanel.Position.Y - (RecDragGhostBorder.Height / 2);
+
+        AutoScrollScrollViewerOnDrag(
+            RecommendedAppsScrollViewer,
+            e.GetCurrentPoint(RecommendedAppsScrollViewer).Position);
+
+        Point pointInSurface = e.GetCurrentPoint(RecommendedAppsSurface).Position;
+        RecommendedDropDecision decision = EvaluateRecommendedDropTarget(
+            pointInSurface,
+            _recPressedEntry);
+        ApplyRecommendedDropVisuals(decision);
+        e.Handled = true;
+    }
+
+    private void PrepareRecommendedDragPayload(RecommendedGridEntry pressedEntry)
+    {
+        _recDraggedAppKeys.Clear();
+        _recDraggedEntryKeys.Clear();
+
+        if (_isRecommendationEditMode)
+        {
+            if (!_recMultiSelectedKeys.Contains(pressedEntry.EntryKey))
+            {
+                if (!_recWasCtrlPressedOnDown)
+                {
+                    _recMultiSelectedKeys.Clear();
+                }
+
+                _recMultiSelectedKeys.Add(pressedEntry.EntryKey);
+                RefreshAllRecommendedCardEditVisuals();
+                UpdateRecommendationEditStatusHint();
+            }
+
+            if (_recMultiSelectedKeys.Count > 1)
+            {
+                foreach (RecommendedGridEntry entry in _viewModel.RecommendedEntries)
+                {
+                    if (!_recMultiSelectedKeys.Contains(entry.EntryKey))
+                    {
+                        continue;
+                    }
+
+                    _recDraggedEntryKeys.Add(entry.EntryKey);
+                    if (!entry.IsFolder && entry.AppItem is { } selectedApp)
+                    {
+                        _recDraggedAppKeys.Add(Helpers.AppRecommendationIdentity.GetCanonicalKey(selectedApp));
+                    }
+                }
+
+                if (_recDraggedEntryKeys.Count > 0)
+                {
+                    return;
+                }
+            }
+        }
+
+        if (!pressedEntry.IsFolder && pressedEntry.AppItem is { } singleApp)
+        {
+            _recDraggedAppKeys.Add(Helpers.AppRecommendationIdentity.GetCanonicalKey(singleApp));
+        }
+
+        _recDraggedEntryKeys.Add(pressedEntry.EntryKey);
+    }
+
+    private void SetDraggedRecommendedTilesOpacity(double opacity)
+    {
+        int childCount = VisualTreeHelper.GetChildrenCount(RecommendedAppsRepeater);
+        for (int i = 0; i < childCount; i++)
+        {
+            if (VisualTreeHelper.GetChild(RecommendedAppsRepeater, i) is FrameworkElement tile &&
+                tile.DataContext is RecommendedGridEntry entry &&
+                _recDraggedEntryKeys.Contains(entry.EntryKey))
+            {
+                tile.Opacity = opacity;
+            }
+        }
+    }
+
+    private void RecommendedApp_PointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        if (_recPressedEntry is not { } pressedEntry ||
+            _recPointerCard is not { } pressedCard ||
+            !ReferenceEquals(sender, pressedCard))
+        {
+            return;
+        }
+
+        bool wasDragging = _recIsDragging;
+        bool autoEnteredOnDown = _recAutoEnteredEditModeOnDown;
+        Point pointInSurface = e.GetCurrentPoint(RecommendedAppsSurface).Position;
+        Point pointInCard = e.GetCurrentPoint(pressedCard).Position;
+        var cardBounds = new Rect(0, 0, pressedCard.ActualWidth, pressedCard.ActualHeight);
+        pressedCard.ReleasePointerCapture(e.Pointer);
+
+        if (wasDragging)
+        {
+            RecommendedDropDecision decision = EvaluateRecommendedDropTarget(
+                pointInSurface,
+                pressedEntry);
+            var draggedApps = _recDraggedAppKeys.ToList();
+            var draggedEntries = _recDraggedEntryKeys.ToList();
+            CancelRecommendedDrag();
+
+            if (decision.IsMerge &&
+                decision.MergeTarget is { } mergeTarget &&
+                draggedApps.Count > 0)
+            {
+                _recMultiSelectedKeys.Clear();
+                _viewModel.MergeRecommendationsIntoFolder(draggedApps, mergeTarget.EntryKey);
+                RefreshAllRecommendedCardEditVisuals();
+                UpdateRecommendationEditStatusHint();
+            }
+            else if (decision.ReorderTargetIndex >= 0)
+            {
+                if (draggedEntries.Count > 1)
+                {
+                    _viewModel.MoveRecommendationEntries(draggedEntries, decision.ReorderTargetIndex);
+                }
+                else
+                {
+                    _viewModel.MoveRecommendationEntry(pressedEntry.EntryKey, decision.ReorderTargetIndex);
+                }
+
+                RefreshAllRecommendedCardEditVisuals();
+                UpdateRecommendationEditStatusHint();
+            }
+
+            e.Handled = true;
+            return;
+        }
+
+        CancelRecommendedDrag();
+        if (cardBounds.Contains(pointInCard))
+        {
+            if (_isRecommendationEditMode)
+            {
+                if (!autoEnteredOnDown)
+                {
+                    if (!_recMultiSelectedKeys.Add(pressedEntry.EntryKey))
+                    {
+                        _recMultiSelectedKeys.Remove(pressedEntry.EntryKey);
+                    }
+
+                    RefreshAllRecommendedCardEditVisuals();
+                    UpdateRecommendationEditStatusHint();
+                }
+            }
+            else if (pressedEntry.IsFolder)
+            {
+                OpenFolderOverlay(pressedEntry);
+            }
+            else if (pressedEntry.AppItem is { } appItem)
+            {
+                _viewModel.ExecuteItem(appItem);
+            }
+        }
+
+        e.Handled = true;
+    }
+
+    private void RecommendedApp_PointerCaptureLost(object sender, PointerRoutedEventArgs e)
+    {
+        if (_recPointerCard is not null && ReferenceEquals(sender, _recPointerCard))
+        {
+            CancelRecommendedDrag();
         }
     }
 
     private void RecommendedApp_PointerEntered(object sender, PointerRoutedEventArgs e)
     {
-        if (sender is Grid card && !ReferenceEquals(card, _selectedAppCard))
+        if (_recIsDragging || sender is not Grid card)
+        {
+            return;
+        }
+
+        if (_isRecommendationEditMode && card.DataContext is RecommendedGridEntry editEntry)
+        {
+            if (!_recMultiSelectedKeys.Contains(editEntry.EntryKey) &&
+                !ReferenceEquals(card, _selectedAppCard))
+            {
+                card.Background = ResolveThemeBrush("SubtleFillColorSecondaryBrush");
+            }
+
+            ApplyRecommendedCardEditVisuals(card, editEntry, isPointerOver: true);
+            return;
+        }
+
+        if (!ReferenceEquals(card, _selectedAppCard))
         {
             card.Background = ResolveThemeBrush("SubtleFillColorSecondaryBrush");
         }
@@ -2015,19 +3633,1104 @@ public sealed partial class SearchPopupWindow : Window
 
     private void RecommendedApp_PointerExited(object sender, PointerRoutedEventArgs e)
     {
-        if (sender is Grid card && !ReferenceEquals(card, _selectedAppCard))
+        if (sender is not Grid card)
         {
-            card.Background = null;
+            return;
+        }
+
+        if (!ReferenceEquals(card, _selectedAppCard))
+        {
+            card.Background = s_transparentCardBrush;
+        }
+
+        if (_isRecommendationEditMode)
+        {
+            ApplyRecommendedCardEditVisuals(
+                card,
+                card.DataContext as RecommendedGridEntry,
+                isPointerOver: false);
         }
     }
 
-    private void RecommendedApp_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
+    private void CancelRecommendedDrag()
     {
-        if (sender is Grid { DataContext: SearchResultItem item })
+        SetDraggedRecommendedTilesOpacity(1.0);
+        if (_recPointerCard is not null)
         {
-            _viewModel.ExecuteItem(item);
+            _recPointerCard.Opacity = 1;
+            _recPointerCard.ReleasePointerCaptures();
+            _recPointerCard = null;
         }
+
+        _recPressedEntry = null;
+        _recIsDragging = false;
+        _recWasCtrlPressedOnDown = false;
+        _recAutoEnteredEditModeOnDown = false;
+        _recDraggedAppKeys.Clear();
+        _recDraggedEntryKeys.Clear();
+        RecDragGhostBorder.Visibility = Visibility.Collapsed;
+        RecDragGhostCountBadge.Visibility = Visibility.Collapsed;
+        RecDragGhostImage.Source = null;
+        HideRecommendedDropVisuals();
+        CancelOverlayDrag();
+    }
+
+    private void HideRecommendedDropVisuals()
+    {
+        SetHoveredMergeTargetCard(null);
+        RecMergeTargetHighlight.Visibility = Visibility.Collapsed;
+        RecDropInsertIndicator.Visibility = Visibility.Collapsed;
+    }
+
+    private void ApplyRecommendedDropVisuals(RecommendedDropDecision decision)
+    {
+        if (decision.IsMerge && decision.MergeTarget is not null)
+        {
+            SetHoveredMergeTargetCard(decision.MergeTargetElement);
+            RecDropInsertIndicator.Visibility = Visibility.Collapsed;
+            RecMergeTargetHighlight.Width = decision.HighlightRect.Width;
+            RecMergeTargetHighlight.Height = decision.HighlightRect.Height;
+            RecMergeTargetTransform.X = decision.HighlightRect.X;
+            RecMergeTargetTransform.Y = decision.HighlightRect.Y;
+            RecMergeTargetHighlight.Visibility = Visibility.Visible;
+            return;
+        }
+
+        SetHoveredMergeTargetCard(null);
+        RecMergeTargetHighlight.Visibility = Visibility.Collapsed;
+        if (decision.ReorderTargetIndex >= 0)
+        {
+            RecDropInsertTransform.X = decision.InsertBarPosition.X;
+            RecDropInsertTransform.Y = decision.InsertBarPosition.Y;
+            RecDropInsertIndicator.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            RecDropInsertIndicator.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private void SetHoveredMergeTargetCard(FrameworkElement? targetCard)
+    {
+        if (ReferenceEquals(_recMergeHoveredCard, targetCard))
+        {
+            return;
+        }
+
+        if (_recMergeHoveredCard is { } previousCard &&
+            FindVisualChild<FrameworkElement>(previousCard, "CardContentHost") is { } prevHost)
+        {
+            AnimateMergeTargetScale(prevHost, 1.0f, 120);
+        }
+
+        _recMergeHoveredCard = targetCard;
+        if (targetCard is not null &&
+            FindVisualChild<FrameworkElement>(targetCard, "CardContentHost") is { } nextHost)
+        {
+            AnimateMergeTargetScale(nextHost, 1.07f, 140);
+        }
+    }
+
+    private static void AnimateMergeTargetScale(FrameworkElement host, float targetScale, int durationMs)
+    {
+        var visual = ElementCompositionPreview.GetElementVisual(host);
+        if (visual is null)
+        {
+            return;
+        }
+
+        if (!AreSystemAnimationsEnabled())
+        {
+            visual.Scale = new System.Numerics.Vector3(targetScale, targetScale, 1f);
+            return;
+        }
+
+        float cx = visual.Size.X > 0
+            ? visual.Size.X / 2f
+            : (float)(host.ActualWidth > 0 ? host.ActualWidth : 86) / 2f;
+        float cy = visual.Size.Y > 0
+            ? visual.Size.Y / 2f
+            : (float)(host.ActualHeight > 0 ? host.ActualHeight : 78) / 2f;
+        visual.CenterPoint = new System.Numerics.Vector3(cx, cy, 0f);
+
+        var compositor = visual.Compositor;
+        var decel = compositor.CreateCubicBezierEasingFunction(
+            new System.Numerics.Vector2(0.0f, 0.0f),
+            new System.Numerics.Vector2(0.1f, 1.0f));
+        var scaleAnim = compositor.CreateScalarKeyFrameAnimation();
+        scaleAnim.InsertKeyFrame(1.0f, targetScale, decel);
+        scaleAnim.Duration = TimeSpan.FromMilliseconds(durationMs);
+        visual.StartAnimation("Scale.X", scaleAnim);
+        visual.StartAnimation("Scale.Y", scaleAnim);
+    }
+
+    private static void AnimateDragGhostPickup(FrameworkElement ghostElement)
+    {
+        var visual = ElementCompositionPreview.GetElementVisual(ghostElement);
+        if (visual is null)
+        {
+            return;
+        }
+
+        if (!AreSystemAnimationsEnabled())
+        {
+            visual.Scale = System.Numerics.Vector3.One;
+            return;
+        }
+
+        float cx = (float)(ghostElement.Width > 0 && !double.IsNaN(ghostElement.Width)
+            ? ghostElement.Width
+            : 100) / 2f;
+        float cy = (float)(ghostElement.Height > 0 && !double.IsNaN(ghostElement.Height)
+            ? ghostElement.Height
+            : 88) / 2f;
+        visual.CenterPoint = new System.Numerics.Vector3(cx, cy, 0f);
+
+        var compositor = visual.Compositor;
+        var decel = compositor.CreateCubicBezierEasingFunction(
+            new System.Numerics.Vector2(0.0f, 0.0f),
+            new System.Numerics.Vector2(0.1f, 1.0f));
+        var anim = compositor.CreateScalarKeyFrameAnimation();
+        anim.InsertKeyFrame(0.0f, 0.91f);
+        anim.InsertKeyFrame(1.0f, 1.04f, decel);
+        anim.Duration = TimeSpan.FromMilliseconds(140);
+        visual.StartAnimation("Scale.X", anim);
+        visual.StartAnimation("Scale.Y", anim);
+    }
+
+    private RecommendedDropDecision EvaluateRecommendedDropTarget(
+        Point pointInSurface,
+        RecommendedGridEntry draggedEntry)
+    {
+        var entries = _viewModel.RecommendedEntries;
+        int count = entries.Count;
+        if (count <= 1)
+        {
+            return new RecommendedDropDecision(false, null, null, -1, default, default);
+        }
+
+        var indexByKey = new Dictionary<string, int>(count, StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < count; i++)
+        {
+            indexByKey[entries[i].EntryKey] = i;
+        }
+
+        if (!indexByKey.TryGetValue(draggedEntry.EntryKey, out int sourceIndex))
+        {
+            return new RecommendedDropDecision(false, null, null, -1, default, default);
+        }
+
+        bool isBatchDrag = _recDraggedEntryKeys.Count > 1;
+        bool anyDraggedIsFolder = draggedEntry.IsFolder;
+        if (!anyDraggedIsFolder && isBatchDrag)
+        {
+            foreach (string key in _recDraggedEntryKeys)
+            {
+                if (key.StartsWith("folder:", StringComparison.OrdinalIgnoreCase))
+                {
+                    anyDraggedIsFolder = true;
+                    break;
+                }
+            }
+        }
+
+        var realizedTiles = new List<(int EntryIndex, RecommendedGridEntry Entry, FrameworkElement Tile, Rect Rect)>();
+        int childCount = VisualTreeHelper.GetChildrenCount(RecommendedAppsRepeater);
+        for (int c = 0; c < childCount; c++)
+        {
+            if (VisualTreeHelper.GetChild(RecommendedAppsRepeater, c) is not FrameworkElement tile ||
+                tile.Visibility != Visibility.Visible ||
+                tile.ActualWidth <= 0 ||
+                tile.ActualHeight <= 0 ||
+                tile.DataContext is not RecommendedGridEntry tileEntry ||
+                !indexByKey.TryGetValue(tileEntry.EntryKey, out int entryIndex))
+            {
+                continue;
+            }
+
+            var rect = new Rect(
+                tile.TransformToVisual(RecommendedAppsSurface).TransformPoint(new Point(0, 0)),
+                new Size(tile.ActualWidth, tile.ActualHeight));
+            realizedTiles.Add((entryIndex, entries[entryIndex], tile, rect));
+        }
+
+        if (realizedTiles.Count == 0)
+        {
+            return new RecommendedDropDecision(false, null, null, -1, default, default);
+        }
+
+        realizedTiles.Sort(static (left, right) => left.EntryIndex.CompareTo(right.EntryIndex));
+
+        int matchedTileIdx = -1;
+        double bestCenterDistanceSq = double.MaxValue;
+        for (int t = 0; t < realizedTiles.Count; t++)
+        {
+            Rect rect = realizedTiles[t].Rect;
+            // Expand by half the UniformGridLayout 6px spacing (+2px overlap) so inter-tile gaps never become dead zones.
+            var hitRect = new Rect(rect.X - 5, rect.Y - 5, rect.Width + 10, rect.Height + 10);
+            if (!hitRect.Contains(pointInSurface))
+            {
+                continue;
+            }
+
+            double cx = rect.X + (rect.Width * 0.5);
+            double cy = rect.Y + (rect.Height * 0.5);
+            double distSq = ((pointInSurface.X - cx) * (pointInSurface.X - cx)) +
+                            ((pointInSurface.Y - cy) * (pointInSurface.Y - cy));
+            if (distSq < bestCenterDistanceSq)
+            {
+                bestCenterDistanceSq = distSq;
+                matchedTileIdx = t;
+            }
+        }
+
+        if (matchedTileIdx >= 0)
+        {
+            var (i, targetEntry, tile, rect) = realizedTiles[matchedTileIdx];
+            if (!isBatchDrag && i == sourceIndex)
+            {
+                return new RecommendedDropDecision(false, null, null, -1, default, default);
+            }
+
+            double relX = Math.Clamp((pointInSurface.X - rect.X) / Math.Max(1.0, rect.Width), 0.0, 1.0);
+            double relY = Math.Clamp((pointInSurface.Y - rect.Y) / Math.Max(1.0, rect.Height), 0.0, 1.0);
+
+            // Deliberate center zone merges dragged apps into a folder:
+            // - Disabled whenever any dragged item is itself a folder.
+            // - In batch drag, only merge onto an existing folder so multi-select drag onto app slots reliably reorders.
+            bool canMergeOntoTarget =
+                !anyDraggedIsFolder &&
+                !_recDraggedEntryKeys.Contains(targetEntry.EntryKey) &&
+                (!isBatchDrag || targetEntry.IsFolder);
+            if (canMergeOntoTarget &&
+                relX >= 0.34 &&
+                relX <= 0.66 &&
+                relY >= 0.20 &&
+                relY <= 0.80)
+            {
+                return new RecommendedDropDecision(
+                    IsMerge: true,
+                    MergeTarget: targetEntry,
+                    MergeTargetElement: tile,
+                    ReorderTargetIndex: -1,
+                    HighlightRect: rect,
+                    InsertBarPosition: default);
+            }
+
+            bool beforeTile = relX < 0.5;
+            int slotIndex = beforeTile ? i : i + 1;
+            if (!isBatchDrag)
+            {
+                if (slotIndex == sourceIndex || slotIndex == sourceIndex + 1)
+                {
+                    return new RecommendedDropDecision(false, null, null, -1, default, default);
+                }
+            }
+            else if (!WouldBatchReorderChangeOrder(entries, _recDraggedEntryKeys, slotIndex))
+            {
+                return new RecommendedDropDecision(false, null, null, -1, default, default);
+            }
+
+            int targetIndex = isBatchDrag
+                ? slotIndex
+                : (slotIndex > sourceIndex ? slotIndex - 1 : slotIndex);
+            double barX = beforeTile ? Math.Max(1, rect.X - 4) : rect.Right + 2;
+            double barY = rect.Y + ((rect.Height - RecDropInsertIndicator.Height) / 2);
+            return new RecommendedDropDecision(
+                IsMerge: false,
+                MergeTarget: null,
+                MergeTargetElement: null,
+                ReorderTargetIndex: targetIndex,
+                HighlightRect: default,
+                InsertBarPosition: new Point(barX, barY));
+        }
+
+        // Trailing blank space after the last realized tile appends to the end.
+        var lastTileInfo = realizedTiles[^1];
+        Rect lastRect = lastTileInfo.Rect;
+        if ((pointInSurface.Y > lastRect.Bottom - 8 ||
+             (pointInSurface.Y >= lastRect.Y - 5 && pointInSurface.X >= lastRect.Right)) &&
+            (isBatchDrag
+                ? WouldBatchReorderChangeOrder(entries, _recDraggedEntryKeys, count)
+                : sourceIndex < count - 1))
+        {
+            double barX = lastRect.Right + 2;
+            double barY = lastRect.Y + ((lastRect.Height - RecDropInsertIndicator.Height) / 2);
+            return new RecommendedDropDecision(
+                IsMerge: false,
+                MergeTarget: null,
+                MergeTargetElement: null,
+                ReorderTargetIndex: isBatchDrag ? count : count - 1,
+                HighlightRect: default,
+                InsertBarPosition: new Point(barX, barY));
+        }
+
+        return new RecommendedDropDecision(false, null, null, -1, default, default);
+    }
+
+    internal static bool WouldBatchReorderChangeOrder(
+        IReadOnlyList<RecommendedGridEntry> entries,
+        IReadOnlySet<string> draggedEntryKeys,
+        int targetVisibleIndex)
+    {
+        int count = entries.Count;
+        if (count <= 1 || draggedEntryKeys.Count == 0)
+        {
+            return false;
+        }
+
+        int clampedSlot = Math.Clamp(targetVisibleIndex, 0, count);
+        int adjustedInsertIndex = clampedSlot;
+        var movingKeys = new List<string>(draggedEntryKeys.Count);
+        var remainingKeys = new List<string>(count);
+
+        for (int i = 0; i < count; i++)
+        {
+            string entryKey = entries[i].EntryKey;
+            if (draggedEntryKeys.Contains(entryKey))
+            {
+                movingKeys.Add(entryKey);
+                if (i < clampedSlot)
+                {
+                    adjustedInsertIndex--;
+                }
+            }
+            else
+            {
+                remainingKeys.Add(entryKey);
+            }
+        }
+
+        if (movingKeys.Count == 0)
+        {
+            return false;
+        }
+
+        adjustedInsertIndex = Math.Clamp(adjustedInsertIndex, 0, remainingKeys.Count);
+        remainingKeys.InsertRange(adjustedInsertIndex, movingKeys);
+        for (int i = 0; i < count; i++)
+        {
+            if (!string.Equals(remainingKeys[i], entries[i].EntryKey, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static void AutoScrollScrollViewerOnDrag(ScrollViewer viewer, Point pointInViewer)
+    {
+        if (viewer.ScrollableHeight <= 0 || viewer.ActualHeight <= 0)
+        {
+            return;
+        }
+
+        const double edgeZone = 26.0;
+        const double step = 12.0;
+        if (pointInViewer.Y < edgeZone && viewer.VerticalOffset > 0)
+        {
+            viewer.ChangeView(null, Math.Max(0, viewer.VerticalOffset - step), null, disableAnimation: true);
+        }
+        else if (pointInViewer.Y > viewer.ActualHeight - edgeZone &&
+                 viewer.VerticalOffset < viewer.ScrollableHeight)
+        {
+            viewer.ChangeView(
+                null,
+                Math.Min(viewer.ScrollableHeight, viewer.VerticalOffset + step),
+                null,
+                disableAnimation: true);
+        }
+    }
+
+    // ── Centered frosted overlays (Win11 folder & hidden items) ──────────────
+
+    private void RecommendationOverlaysLayer_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        UpdateRecommendationOverlayResponsiveBounds();
+    }
+
+    private void UpdateRecommendationOverlayResponsiveBounds()
+    {
+        double hostWidth = RootGrid.ActualWidth > 0
+            ? RootGrid.ActualWidth
+            : (RecommendationOverlaysLayer.ActualWidth > 0
+                ? RecommendationOverlaysLayer.ActualWidth
+                : PopupWidth);
+        double searchRowHeight = SearchBoxRow.ActualHeight > 0 ? SearchBoxRow.ActualHeight : 60;
+        double hostHeight = RecommendationOverlaysLayer.ActualHeight > 0
+            ? RecommendationOverlaysLayer.ActualHeight
+            : Math.Max(
+                220,
+                (RootGrid.ActualHeight > 0 ? RootGrid.ActualHeight : PopupHeight) - searchRowHeight);
+
+        double cardWidth = Math.Min(448, Math.Max(200, hostWidth - 28));
+        double cardMaxHeight = Math.Clamp(hostHeight - 20, 180, 368);
+        double cardMinHeight = Math.Min(196, cardMaxHeight);
+        double maxTitleWidth = Math.Max(120, cardWidth - 68);
+
+        FolderOverlayCard.Width = cardWidth;
+        FolderOverlayCard.MinHeight = cardMinHeight;
+        FolderOverlayCard.MaxHeight = cardMaxHeight;
+        FolderOverlayTitleText.MaxWidth = maxTitleWidth;
+        FolderOverlayTitleEditor.MaxWidth = maxTitleWidth;
+        FolderOverlayTitleEditor.MinWidth = Math.Min(160, maxTitleWidth);
+
+        HiddenAppsOverlayCard.Width = cardWidth;
+        HiddenAppsOverlayCard.MinHeight = cardMinHeight;
+        HiddenAppsOverlayCard.MaxHeight = cardMaxHeight;
+    }
+
+    private bool IsAnyRecommendationOverlayOpen() =>
+        !_isOverlayClosing &&
+        RecommendationOverlaysLayer.Visibility == Visibility.Visible &&
+        (FolderOverlayHost.Visibility == Visibility.Visible ||
+         HiddenAppsOverlayHost.Visibility == Visibility.Visible);
+
+    private void OpenFolderOverlay(RecommendedGridEntry folderEntry, bool startRename = false)
+    {
+        if (!folderEntry.IsFolder || string.IsNullOrWhiteSpace(folderEntry.FolderId))
+        {
+            return;
+        }
+
+        CancelRecommendedDrag();
+        CancelFolderTitleEdit();
+        EndRecommendationRubberBand();
+        UpdateRecommendationOverlayResponsiveBounds();
+        _openFolderId = folderEntry.FolderId;
+        FolderOverlayTitleText.Text = folderEntry.Label;
+
+        _folderOverlayItems.Clear();
+        foreach (SearchResultItem member in folderEntry.FolderItems)
+        {
+            _folderOverlayItems.Add(member);
+        }
+
+        HiddenAppsOverlayHost.Visibility = Visibility.Collapsed;
+        FolderOverlayHost.Visibility = Visibility.Visible;
+        RecommendationOverlaysLayer.Visibility = Visibility.Visible;
+        FolderOverlayScrollViewer.ChangeView(null, 0, null, disableAnimation: true);
+        RefreshOverlayRepeaterIcons(FolderAppsRepeater);
+        AnimateRecommendationOverlayOpen(FolderOverlayScrim, FolderOverlayCard);
+
+        if (startRename)
+        {
+            DispatcherQueue.TryEnqueue(BeginFolderTitleEdit);
+        }
+    }
+
+    private void OpenHiddenAppsOverlay()
+    {
+        if (!_viewModel.HasHiddenRecommendations)
+        {
+            return;
+        }
+
+        CancelRecommendedDrag();
+        CancelFolderTitleEdit();
+        EndRecommendationRubberBand();
+        UpdateRecommendationOverlayResponsiveBounds();
+        _openFolderId = null;
+
+        FolderOverlayHost.Visibility = Visibility.Collapsed;
+        HiddenAppsOverlayHost.Visibility = Visibility.Visible;
+        RecommendationOverlaysLayer.Visibility = Visibility.Visible;
+        HiddenOverlayScrollViewer.ChangeView(null, 0, null, disableAnimation: true);
+        RefreshOverlayRepeaterIcons(HiddenAppsRepeater);
+        AnimateRecommendationOverlayOpen(HiddenAppsOverlayScrim, HiddenAppsOverlayCard);
+    }
+
+    private void CloseRecommendationOverlays(bool immediate = false)
+    {
+        CancelOverlayDrag();
+        CancelFolderTitleEdit();
+        _openFolderId = null;
+
+        bool anyVisible = RecommendationOverlaysLayer.Visibility == Visibility.Visible &&
+                          (FolderOverlayHost.Visibility == Visibility.Visible ||
+                           HiddenAppsOverlayHost.Visibility == Visibility.Visible);
+        if (!anyVisible)
+        {
+            _isOverlayClosing = false;
+            FolderOverlayHost.Visibility = Visibility.Collapsed;
+            HiddenAppsOverlayHost.Visibility = Visibility.Collapsed;
+            RecommendationOverlaysLayer.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        if (immediate || !AreSystemAnimationsEnabled())
+        {
+            ++_overlayAnimationGeneration;
+            _isOverlayClosing = false;
+            ResetRecommendationOverlayVisuals();
+            FolderOverlayHost.Visibility = Visibility.Collapsed;
+            HiddenAppsOverlayHost.Visibility = Visibility.Collapsed;
+            RecommendationOverlaysLayer.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        if (_isOverlayClosing)
+        {
+            return;
+        }
+
+        _isOverlayClosing = true;
+        int generation = ++_overlayAnimationGeneration;
+        bool closingFolder = FolderOverlayHost.Visibility == Visibility.Visible;
+        Border scrim = closingFolder ? FolderOverlayScrim : HiddenAppsOverlayScrim;
+        Border card = closingFolder ? FolderOverlayCard : HiddenAppsOverlayCard;
+
+        ElementCompositionPreview.SetIsTranslationEnabled(card, true);
+        var scrimVisual = ElementCompositionPreview.GetElementVisual(scrim);
+        var cardVisual = ElementCompositionPreview.GetElementVisual(card);
+        var compositor = cardVisual.Compositor;
+
+        float cx = (float)(card.ActualWidth > 0
+            ? card.ActualWidth
+            : (!double.IsNaN(card.Width) && card.Width > 0 ? card.Width : 380)) / 2f;
+        float cy = (float)(card.ActualHeight > 0 ? card.ActualHeight : 250) / 2f;
+        cardVisual.CenterPoint = new System.Numerics.Vector3(cx, cy, 0f);
+
+        var easeIn = compositor.CreateCubicBezierEasingFunction(
+            new System.Numerics.Vector2(0.4f, 0.0f),
+            new System.Numerics.Vector2(1.0f, 1.0f));
+
+        var batch = compositor.CreateScopedBatch(CompositionBatchTypes.Animation);
+
+        StartScalarAnim(compositor, scrimVisual, "Opacity", TimeSpan.Zero, 125, easeIn, scrimVisual.Opacity, 0f);
+        StartScalarAnim(compositor, cardVisual, "Opacity", TimeSpan.Zero, 125, easeIn, cardVisual.Opacity, 0f);
+        StartScalarAnim(compositor, cardVisual, "Scale.X", TimeSpan.Zero, 135, easeIn, 1.0f, 0.94f);
+        StartScalarAnim(compositor, cardVisual, "Scale.Y", TimeSpan.Zero, 135, easeIn, 1.0f, 0.94f);
+        StartScalarAnim(compositor, cardVisual, "Translation.Y", TimeSpan.Zero, 135, easeIn, 0f, 6f);
+
+        batch.Completed += (_, _) =>
+        {
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (generation != _overlayAnimationGeneration)
+                {
+                    return;
+                }
+
+                _isOverlayClosing = false;
+                FolderOverlayHost.Visibility = Visibility.Collapsed;
+                HiddenAppsOverlayHost.Visibility = Visibility.Collapsed;
+                RecommendationOverlaysLayer.Visibility = Visibility.Collapsed;
+                ResetRecommendationOverlayVisuals();
+            });
+        };
+        batch.End();
+    }
+
+    private void AnimateRecommendationOverlayOpen(Border scrim, Border card)
+    {
+        ++_overlayAnimationGeneration;
+        _isOverlayClosing = false;
+        ElementCompositionPreview.SetIsTranslationEnabled(card, true);
+        var scrimVisual = ElementCompositionPreview.GetElementVisual(scrim);
+        var cardVisual = ElementCompositionPreview.GetElementVisual(card);
+
+        scrimVisual.StopAnimation("Opacity");
+        cardVisual.StopAnimation("Opacity");
+        cardVisual.StopAnimation("Scale.X");
+        cardVisual.StopAnimation("Scale.Y");
+        cardVisual.StopAnimation("Translation.Y");
+
+        if (!AreSystemAnimationsEnabled())
+        {
+            scrimVisual.Opacity = 1f;
+            cardVisual.Opacity = 1f;
+            cardVisual.Scale = System.Numerics.Vector3.One;
+            return;
+        }
+
+        float cx = (float)(!double.IsNaN(card.Width) && card.Width > 0
+            ? card.Width
+            : (card.ActualWidth > 0 ? card.ActualWidth : 380)) / 2f;
+        float cy = (float)(card.ActualHeight > 0 ? card.ActualHeight : 250) / 2f;
+        cardVisual.CenterPoint = new System.Numerics.Vector3(cx, cy, 0f);
+
+        var compositor = cardVisual.Compositor;
+        var decel = compositor.CreateCubicBezierEasingFunction(
+            new System.Numerics.Vector2(0.0f, 0.0f),
+            new System.Numerics.Vector2(0.1f, 1.0f));
+
+        scrimVisual.Opacity = 0f;
+        cardVisual.Opacity = 0f;
+        StartScalarAnim(compositor, scrimVisual, "Opacity", TimeSpan.Zero, 150, decel, 0f, 1f);
+        StartScalarAnim(compositor, cardVisual, "Opacity", TimeSpan.Zero, 155, decel, 0f, 1f);
+        StartScalarAnim(compositor, cardVisual, "Scale.X", TimeSpan.Zero, 200, decel, 0.93f, 1.0f);
+        StartScalarAnim(compositor, cardVisual, "Scale.Y", TimeSpan.Zero, 200, decel, 0.93f, 1.0f);
+        StartScalarAnim(compositor, cardVisual, "Translation.Y", TimeSpan.Zero, 200, decel, 10f, 0f);
+    }
+
+    private void ResetRecommendationOverlayVisuals()
+    {
+        ResetSingleOverlayVisualPair(FolderOverlayScrim, FolderOverlayCard);
+        ResetSingleOverlayVisualPair(HiddenAppsOverlayScrim, HiddenAppsOverlayCard);
+    }
+
+    private static void ResetSingleOverlayVisualPair(Border scrim, Border card)
+    {
+        var scrimVisual = ElementCompositionPreview.GetElementVisual(scrim);
+        if (scrimVisual is not null)
+        {
+            scrimVisual.StopAnimation("Opacity");
+            scrimVisual.Opacity = 1f;
+        }
+
+        ElementCompositionPreview.SetIsTranslationEnabled(card, true);
+        var cardVisual = ElementCompositionPreview.GetElementVisual(card);
+        if (cardVisual is not null)
+        {
+            cardVisual.StopAnimation("Opacity");
+            cardVisual.StopAnimation("Scale.X");
+            cardVisual.StopAnimation("Scale.Y");
+            cardVisual.StopAnimation("Translation.Y");
+            cardVisual.Opacity = 1f;
+            cardVisual.Scale = System.Numerics.Vector3.One;
+        }
+    }
+
+    private void SyncOpenFolderOverlayWithViewModel()
+    {
+        if (FolderOverlayHost.Visibility != Visibility.Visible ||
+            string.IsNullOrWhiteSpace(_openFolderId))
+        {
+            return;
+        }
+
+        RecommendedGridEntry? refreshedFolder = _viewModel.FindRecommendedFolder(_openFolderId);
+        if (refreshedFolder is null || refreshedFolder.FolderItems.Count == 0)
+        {
+            CloseRecommendationOverlays();
+            return;
+        }
+
+        if (!_isEditingFolderTitle)
+        {
+            FolderOverlayTitleText.Text = refreshedFolder.Label;
+        }
+
+        _folderOverlayItems.Clear();
+        foreach (SearchResultItem member in refreshedFolder.FolderItems)
+        {
+            _folderOverlayItems.Add(member);
+        }
+
+        RefreshOverlayRepeaterIcons(FolderAppsRepeater);
+    }
+
+    private void BeginFolderTitleEdit()
+    {
+        if (FolderOverlayHost.Visibility != Visibility.Visible ||
+            string.IsNullOrWhiteSpace(_openFolderId))
+        {
+            return;
+        }
+
+        _isEditingFolderTitle = true;
+        _suppressFolderTitleBlurCommit = false;
+        FolderOverlayTitleEditor.Text = FolderOverlayTitleText.Text;
+        FolderOverlayTitleButton.Visibility = Visibility.Collapsed;
+        FolderOverlayTitleEditor.Visibility = Visibility.Visible;
+        FolderOverlayTitleEditor.Focus(FocusState.Programmatic);
+        FolderOverlayTitleEditor.SelectAll();
+    }
+
+    private void CommitFolderTitleEdit()
+    {
+        if (!_isEditingFolderTitle)
+        {
+            return;
+        }
+
+        string? folderId = _openFolderId;
+        string updatedTitle = FolderOverlayTitleEditor.Text;
+        _isEditingFolderTitle = false;
+        _suppressFolderTitleBlurCommit = true;
+        FolderOverlayTitleEditor.Visibility = Visibility.Collapsed;
+        FolderOverlayTitleButton.Visibility = Visibility.Visible;
+        _suppressFolderTitleBlurCommit = false;
+
+        if (!string.IsNullOrWhiteSpace(folderId))
+        {
+            _viewModel.RenameRecommendationFolder(folderId, updatedTitle);
+            if (_viewModel.FindRecommendedFolder(folderId) is { } folder)
+            {
+                FolderOverlayTitleText.Text = folder.Label;
+            }
+        }
+    }
+
+    private void CancelFolderTitleEdit()
+    {
+        if (!_isEditingFolderTitle)
+        {
+            return;
+        }
+
+        _isEditingFolderTitle = false;
+        _suppressFolderTitleBlurCommit = true;
+        FolderOverlayTitleEditor.Visibility = Visibility.Collapsed;
+        FolderOverlayTitleButton.Visibility = Visibility.Visible;
+        _suppressFolderTitleBlurCommit = false;
+    }
+
+    private void HiddenAppsEntryButton_Click(object sender, RoutedEventArgs e)
+    {
+        OpenHiddenAppsOverlay();
+    }
+
+    private void FolderOverlayScrim_PointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        if (_isEditingFolderTitle)
+        {
+            CommitFolderTitleEdit();
+        }
+
+        CloseRecommendationOverlays();
         e.Handled = true;
+    }
+
+    private void FolderOverlayTitleButton_Click(object sender, RoutedEventArgs e)
+    {
+        BeginFolderTitleEdit();
+    }
+
+    private void FolderOverlayTitleEditor_KeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key == Windows.System.VirtualKey.Enter)
+        {
+            CommitFolderTitleEdit();
+            SearchTextBox.Focus(FocusState.Programmatic);
+            e.Handled = true;
+        }
+        else if (e.Key == Windows.System.VirtualKey.Escape)
+        {
+            CancelFolderTitleEdit();
+            SearchTextBox.Focus(FocusState.Programmatic);
+            e.Handled = true;
+        }
+    }
+
+    private void FolderOverlayTitleEditor_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (!_suppressFolderTitleBlurCommit && _isEditingFolderTitle)
+        {
+            CommitFolderTitleEdit();
+        }
+    }
+
+    private void HiddenAppsOverlayScrim_PointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        CloseRecommendationOverlays();
+        e.Handled = true;
+    }
+
+    private void UnhideAllButton_Click(object sender, RoutedEventArgs e)
+    {
+        _viewModel.UnhideAllRecommendations();
+        CloseRecommendationOverlays();
+    }
+
+    private void CloseHiddenOverlayButton_Click(object sender, RoutedEventArgs e)
+    {
+        CloseRecommendationOverlays();
+    }
+
+    // ── Overlay tile interactions (folder app launch/drag & hidden app unhide) ──
+
+    private void OverlayAppCard_PointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        if (sender is not Grid card || card.DataContext is not SearchResultItem item)
+        {
+            return;
+        }
+
+        bool inFolderOverlay = FolderOverlayHost.Visibility == Visibility.Visible &&
+                               IsVisualDescendantOf(card, FolderOverlayHost);
+        UIElement hostElement = inFolderOverlay ? FolderOverlayHost : HiddenAppsOverlayHost;
+        var pointInHost = e.GetCurrentPoint(hostElement);
+        if (!pointInHost.Properties.IsLeftButtonPressed)
+        {
+            return;
+        }
+
+        if (_isEditingFolderTitle)
+        {
+            CommitFolderTitleEdit();
+        }
+
+        _overlayPointerCard = card;
+        _overlayPressedItem = item;
+        _overlayPointerStartInHost = pointInHost.Position;
+        _overlayIsDragging = false;
+        _overlayPressedInFolder = inFolderOverlay;
+        card.CapturePointer(e.Pointer);
+        e.Handled = true;
+    }
+
+    private void OverlayAppCard_PointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if (_overlayPressedItem is null ||
+            _overlayPointerCard is null ||
+            !ReferenceEquals(sender, _overlayPointerCard) ||
+            !_overlayPressedInFolder)
+        {
+            return;
+        }
+
+        var pointInHost = e.GetCurrentPoint(FolderOverlayHost);
+        if (!pointInHost.Properties.IsLeftButtonPressed)
+        {
+            CancelOverlayDrag();
+            return;
+        }
+
+        double dx = pointInHost.Position.X - _overlayPointerStartInHost.X;
+        double dy = pointInHost.Position.Y - _overlayPointerStartInHost.Y;
+        if (!_overlayIsDragging)
+        {
+            if ((dx * dx) + (dy * dy) < RecommendationDragThreshold * RecommendationDragThreshold)
+            {
+                return;
+            }
+
+            _overlayIsDragging = true;
+            _overlayPointerCard.Opacity = 0.36;
+            FolderDragGhostTitle.Text = _overlayPressedItem.AppDisplayName;
+            FolderDragGhostImage.Source = _overlayPressedItem.Icon;
+            FolderDragGhostBorder.Visibility = Visibility.Visible;
+            AnimateDragGhostPickup(FolderDragGhostBorder);
+        }
+
+        FolderDragGhostTransform.X = pointInHost.Position.X - (FolderDragGhostBorder.Width / 2);
+        FolderDragGhostTransform.Y = pointInHost.Position.Y - (FolderDragGhostBorder.Height / 2);
+
+        Point pointInCard = e.GetCurrentPoint(FolderOverlayCard).Position;
+        var folderCardBounds = new Rect(0, 0, FolderOverlayCard.ActualWidth, FolderOverlayCard.ActualHeight);
+        if (!folderCardBounds.Contains(pointInCard))
+        {
+            // Dragging outside the folder card extracts the app back to the main grid on release.
+            FolderDropInsertIndicator.Visibility = Visibility.Collapsed;
+            e.Handled = true;
+            return;
+        }
+
+        AutoScrollScrollViewerOnDrag(
+            FolderOverlayScrollViewer,
+            e.GetCurrentPoint(FolderOverlayScrollViewer).Position);
+
+        (int reorderIndex, Point barPos) = EvaluateOverlayFolderReorderIndex(
+            e.GetCurrentPoint(FolderOverlaySurface).Position,
+            _overlayPressedItem);
+        if (reorderIndex >= 0)
+        {
+            FolderDropInsertTransform.X = barPos.X;
+            FolderDropInsertTransform.Y = barPos.Y;
+            FolderDropInsertIndicator.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            FolderDropInsertIndicator.Visibility = Visibility.Collapsed;
+        }
+
+        e.Handled = true;
+    }
+
+    private void OverlayAppCard_PointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        if (_overlayPressedItem is not { } pressedItem ||
+            _overlayPointerCard is not { } pressedCard ||
+            !ReferenceEquals(sender, pressedCard))
+        {
+            return;
+        }
+
+        bool wasDragging = _overlayIsDragging;
+        bool inFolder = _overlayPressedInFolder;
+        Point pointInTile = e.GetCurrentPoint(pressedCard).Position;
+        var tileBounds = new Rect(0, 0, pressedCard.ActualWidth, pressedCard.ActualHeight);
+        Point pointInFolderCard = inFolder
+            ? e.GetCurrentPoint(FolderOverlayCard).Position
+            : default;
+        Point pointInFolderSurface = inFolder
+            ? e.GetCurrentPoint(FolderOverlaySurface).Position
+            : default;
+        pressedCard.ReleasePointerCapture(e.Pointer);
+
+        if (wasDragging && inFolder && !string.IsNullOrWhiteSpace(_openFolderId))
+        {
+            string folderId = _openFolderId;
+            var folderBounds = new Rect(0, 0, FolderOverlayCard.ActualWidth, FolderOverlayCard.ActualHeight);
+            (int reorderIndex, _) = EvaluateOverlayFolderReorderIndex(pointInFolderSurface, pressedItem);
+            CancelOverlayDrag();
+
+            if (!folderBounds.Contains(pointInFolderCard))
+            {
+                _viewModel.RemoveRecommendationFromFolder(
+                    folderId,
+                    pressedItem,
+                    out bool folderStillExists);
+                if (!folderStillExists)
+                {
+                    CloseRecommendationOverlays();
+                }
+            }
+            else if (reorderIndex >= 0)
+            {
+                string draggedKey = Helpers.AppRecommendationIdentity.GetCanonicalKey(pressedItem);
+                _viewModel.ReorderFolderRecommendation(folderId, draggedKey, reorderIndex);
+            }
+
+            e.Handled = true;
+            return;
+        }
+
+        CancelOverlayDrag();
+        if (tileBounds.Contains(pointInTile))
+        {
+            if (inFolder)
+            {
+                _viewModel.ExecuteItem(pressedItem);
+            }
+            else
+            {
+                _viewModel.UnhideRecommendation(pressedItem);
+                if (!_viewModel.HasHiddenRecommendations)
+                {
+                    CloseRecommendationOverlays();
+                }
+            }
+        }
+
+        e.Handled = true;
+    }
+
+    private void OverlayAppCard_PointerCaptureLost(object sender, PointerRoutedEventArgs e)
+    {
+        if (_overlayPointerCard is not null && ReferenceEquals(sender, _overlayPointerCard))
+        {
+            CancelOverlayDrag();
+        }
+    }
+
+    private void OverlayAppCard_PointerEntered(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_overlayIsDragging && sender is Grid card)
+        {
+            card.Background = ResolveThemeBrush("SubtleFillColorSecondaryBrush");
+        }
+    }
+
+    private void OverlayAppCard_PointerExited(object sender, PointerRoutedEventArgs e)
+    {
+        if (sender is Grid card)
+        {
+            card.Background = s_transparentCardBrush;
+        }
+    }
+
+    private void CancelOverlayDrag()
+    {
+        if (_overlayPointerCard is not null)
+        {
+            _overlayPointerCard.Opacity = 1;
+            _overlayPointerCard.ReleasePointerCaptures();
+            _overlayPointerCard = null;
+        }
+
+        _overlayPressedItem = null;
+        _overlayIsDragging = false;
+        _overlayPressedInFolder = false;
+        FolderDragGhostBorder.Visibility = Visibility.Collapsed;
+        FolderDragGhostImage.Source = null;
+        FolderDropInsertIndicator.Visibility = Visibility.Collapsed;
+    }
+
+    private (int TargetIndex, Point BarPosition) EvaluateOverlayFolderReorderIndex(
+        Point pointInSurface,
+        SearchResultItem draggedItem)
+    {
+        int count = _folderOverlayItems.Count;
+        if (count <= 1)
+        {
+            return (-1, default);
+        }
+
+        string draggedKey = Helpers.AppRecommendationIdentity.GetCanonicalKey(draggedItem);
+        int sourceIndex = -1;
+        for (int i = 0; i < count; i++)
+        {
+            if (string.Equals(
+                    Helpers.AppRecommendationIdentity.GetCanonicalKey(_folderOverlayItems[i]),
+                    draggedKey,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                sourceIndex = i;
+                break;
+            }
+        }
+
+        if (sourceIndex < 0)
+        {
+            return (-1, default);
+        }
+
+        FrameworkElement? lastTile = null;
+        Rect lastRect = default;
+        for (int i = 0; i < count; i++)
+        {
+            if (FolderAppsRepeater.TryGetElement(i) is not FrameworkElement tile ||
+                tile.ActualWidth <= 0 ||
+                tile.ActualHeight <= 0)
+            {
+                continue;
+            }
+
+            var rect = new Rect(
+                tile.TransformToVisual(FolderOverlaySurface).TransformPoint(new Point(0, 0)),
+                new Size(tile.ActualWidth, tile.ActualHeight));
+            lastTile = tile;
+            lastRect = rect;
+
+            var hitRect = new Rect(rect.X - 3, rect.Y - 3, rect.Width + 6, rect.Height + 6);
+            if (!hitRect.Contains(pointInSurface))
+            {
+                continue;
+            }
+
+            if (i == sourceIndex)
+            {
+                return (-1, default);
+            }
+
+            bool beforeTile = (pointInSurface.X - rect.X) < (rect.Width * 0.5);
+            int slotIndex = beforeTile ? i : i + 1;
+            if (slotIndex == sourceIndex || slotIndex == sourceIndex + 1)
+            {
+                return (-1, default);
+            }
+
+            int targetIndex = slotIndex > sourceIndex ? slotIndex - 1 : slotIndex;
+            double barX = beforeTile ? Math.Max(1, rect.X - 4) : rect.Right + 1;
+            double barY = rect.Y + ((rect.Height - FolderDropInsertIndicator.Height) / 2);
+            return (targetIndex, new Point(barX, barY));
+        }
+
+        if (lastTile is not null &&
+            sourceIndex < count - 1 &&
+            (pointInSurface.Y > lastRect.Bottom - 8 ||
+             (pointInSurface.Y >= lastRect.Y - 4 && pointInSurface.X >= lastRect.Right)))
+        {
+            double barX = lastRect.Right + 2;
+            double barY = lastRect.Y + ((lastRect.Height - FolderDropInsertIndicator.Height) / 2);
+            return (count - 1, new Point(barX, barY));
+        }
+
+        return (-1, default);
     }
 
     /// <summary>
@@ -2054,8 +4757,7 @@ public sealed partial class SearchPopupWindow : Window
                 }
                 else
                 {
-                    int columns = Math.Max(1,
-                        (int)Math.Floor((double)RecommendedAppsPanel.ActualWidth / 110));
+                    int columns = ComputeRecommendedAppsColumnCount();
                     int newIndex = e.Key switch
                     {
                         Windows.System.VirtualKey.Left => Math.Max(0, _selectedAppIndex - 1),
@@ -2072,51 +4774,133 @@ public sealed partial class SearchPopupWindow : Window
                 return true;
 
             case Windows.System.VirtualKey.Enter:
-                if (_selectedAppIndex >= 0 && _selectedAppIndex < count &&
-                    itemsSource[_selectedAppIndex] is SearchResultItem selected)
+                if (_isRecommendationEditMode)
                 {
-                    _viewModel.ExecuteItem(selected);
+                    if (_selectedAppIndex >= 0 && _selectedAppIndex < count &&
+                        itemsSource[_selectedAppIndex] is RecommendedGridEntry editSelected)
+                    {
+                        if (!_recMultiSelectedKeys.Add(editSelected.EntryKey))
+                        {
+                            _recMultiSelectedKeys.Remove(editSelected.EntryKey);
+                        }
+
+                        RefreshAllRecommendedCardEditVisuals();
+                        UpdateRecommendationEditStatusHint();
+                    }
+
                     return true;
                 }
-                return false; // No selection → let Enter fall through to execute first result.
+
+                if (_selectedAppIndex >= 0 && _selectedAppIndex < count &&
+                    itemsSource[_selectedAppIndex] is RecommendedGridEntry selected)
+                {
+                    if (selected.IsFolder)
+                    {
+                        OpenFolderOverlay(selected);
+                        return true;
+                    }
+
+                    if (selected.AppItem is { } appItem)
+                    {
+                        _viewModel.ExecuteItem(appItem);
+                        return true;
+                    }
+                }
+                return false; // No selection -> let Enter fall through to execute first result.
 
             case Windows.System.VirtualKey.Space:
-                if (_selectedAppIndex >= 0)
+                if (_isRecommendationEditMode &&
+                    _selectedAppIndex >= 0 &&
+                    _selectedAppIndex < count &&
+                    itemsSource[_selectedAppIndex] is RecommendedGridEntry editSpaceEntry)
                 {
-                    TryPreviewSelectedItem();
+                    if (!_recMultiSelectedKeys.Add(editSpaceEntry.EntryKey))
+                    {
+                        _recMultiSelectedKeys.Remove(editSpaceEntry.EntryKey);
+                    }
+
+                    RefreshAllRecommendedCardEditVisuals();
+                    UpdateRecommendationEditStatusHint();
+                    return true;
+                }
+
+                if (_selectedAppIndex >= 0 && _selectedAppIndex < count &&
+                    itemsSource[_selectedAppIndex] is RecommendedGridEntry spaceEntry)
+                {
+                    if (spaceEntry.IsFolder)
+                    {
+                        OpenFolderOverlay(spaceEntry);
+                    }
+                    else
+                    {
+                        TryPreviewSelectedItem();
+                    }
                 }
                 return true; // Always consume Space when panel is visible.
+
+            case Windows.System.VirtualKey.Delete when _isRecommendationEditMode && _recMultiSelectedKeys.Count > 0:
+                HideSelectedRecommendations();
+                return true;
+
+            case Windows.System.VirtualKey.A when _isRecommendationEditMode &&
+                                                  Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control):
+                _recMultiSelectedKeys.Clear();
+                foreach (RecommendedGridEntry entry in _viewModel.RecommendedEntries)
+                {
+                    _recMultiSelectedKeys.Add(entry.EntryKey);
+                }
+                RefreshAllRecommendedCardEditVisuals();
+                UpdateRecommendationEditStatusHint();
+                return true;
         }
         return false;
     }
 
-    private void SelectRecommendedApp(Grid card, SearchResultItem item)
+    private void SelectRecommendedEntry(Grid card, RecommendedGridEntry entry)
     {
         ClearRecommendedAppSelection();
         _selectedAppCard = card;
         card.Background = ResolveThemeBrush("ControlFillColorSecondaryBrush");
 
-        // Sync ViewModel selection for preview/action bar.
-        _viewModel.SelectedItem = item;
+        // Sync ViewModel selection for preview/action bar when an app tile is active.
+        _viewModel.SelectedItem = entry.IsFolder
+            ? entry.FolderItems.FirstOrDefault()
+            : entry.AppItem;
 
-        // Find the index for keyboard navigation.
         var itemsSource = RecommendedAppsRepeater.ItemsSource as System.Collections.IList;
         if (itemsSource is not null)
         {
-            _selectedAppIndex = itemsSource.IndexOf(item);
+            _selectedAppIndex = itemsSource.IndexOf(entry);
         }
     }
 
     private void SelectRecommendedAppByIndex(int index)
     {
         var itemsSource = RecommendedAppsRepeater.ItemsSource as System.Collections.IList;
-        if (itemsSource is null || index < 0 || index >= itemsSource.Count) return;
-
-        if (RecommendedAppsRepeater.TryGetElement(index) is Grid card &&
-            card.DataContext is SearchResultItem item)
+        if (itemsSource is null || index < 0 || index >= itemsSource.Count ||
+            itemsSource[index] is not RecommendedGridEntry targetEntry)
         {
-            SelectRecommendedApp(card, item);
-            card.StartBringIntoView();
+            return;
+        }
+
+        Grid? matchedCard = null;
+        int childCount = VisualTreeHelper.GetChildrenCount(RecommendedAppsRepeater);
+        for (int i = 0; i < childCount; i++)
+        {
+            if (VisualTreeHelper.GetChild(RecommendedAppsRepeater, i) is Grid candidate &&
+                candidate.DataContext is RecommendedGridEntry candidateEntry &&
+                string.Equals(candidateEntry.EntryKey, targetEntry.EntryKey, StringComparison.OrdinalIgnoreCase))
+            {
+                matchedCard = candidate;
+                break;
+            }
+        }
+
+        matchedCard ??= RecommendedAppsRepeater.GetOrCreateElement(index) as Grid;
+        if (matchedCard is not null)
+        {
+            SelectRecommendedEntry(matchedCard, targetEntry);
+            matchedCard.StartBringIntoView();
         }
     }
 
@@ -2124,7 +4908,7 @@ public sealed partial class SearchPopupWindow : Window
     {
         if (_selectedAppCard is not null)
         {
-            _selectedAppCard.Background = null;
+            _selectedAppCard.Background = s_transparentCardBrush;
             _selectedAppCard = null;
         }
         _selectedAppIndex = -1;
@@ -2182,6 +4966,7 @@ public sealed partial class SearchPopupWindow : Window
         ElementCompositionPreview
             .GetElementVisual(AppsSkeletonPanel)
             .StopAnimation("Opacity");
+        AppsSkeletonRepeater.ItemsSource = null;
         AppsSkeletonPanel.Visibility = Visibility.Collapsed;
         AppsSkeletonPanel.Opacity = 1;
     }
@@ -2221,7 +5006,7 @@ public sealed partial class SearchPopupWindow : Window
         // Safety net: clear the pending flag shortly after the longest possible
         // entrance window so a late/aborted realization can never leave a card
         // stuck at opacity 0. Covers the worst-case stagger + duration.
-        _entranceGuardTimer?.Stop();
+        StopAndClearEntranceGuardTimer();
         _entranceGuardTimer = new DispatcherTimer
         {
             Interval = TimeSpan.FromMilliseconds(1200)
@@ -2245,10 +5030,27 @@ public sealed partial class SearchPopupWindow : Window
         }
     }
 
+    private void StopAndClearEntranceGuardTimer()
+    {
+        if (_entranceGuardTimer is not { } timer)
+        {
+            return;
+        }
+
+        _entranceGuardTimer = null;
+        timer.Tick -= OnEntranceGuardTick;
+        try
+        {
+            timer.Stop();
+        }
+        catch
+        {
+        }
+    }
+
     private void OnEntranceGuardTick(object? sender, object e)
     {
-        _entranceGuardTimer?.Stop();
-        _entranceGuardTimer = null;
+        StopAndClearEntranceGuardTimer();
         _pendingEntranceStyle = null;
     }
 
@@ -2276,26 +5078,24 @@ public sealed partial class SearchPopupWindow : Window
             new System.Numerics.Vector2(0.34f, 1.56f),
             new System.Numerics.Vector2(0.64f, 1.0f));
 
-        int staggerMs = style switch
-        {
-            0 => 30,
-            1 => 30,
-            2 => 0,
-            3 => 30,
-            _ => 30
-        };
-        var delay = TimeSpan.FromMilliseconds(index * staggerMs);
+        int columnsForStagger = Math.Max(1, ComputeRecommendedAppsColumnCount());
+        int staggerRow = index / columnsForStagger;
+        int staggerCol = index % columnsForStagger;
+        int delayMs = style == 2
+            ? 0
+            : Math.Min(160, (staggerRow * 20) + (staggerCol * 12));
+        var delay = TimeSpan.FromMilliseconds(delayMs);
 
         var opacityAnim = compositor.CreateScalarKeyFrameAnimation();
         opacityAnim.InsertKeyFrame(0f, 0f);
         opacityAnim.InsertKeyFrame(1f, 1f, decel);
         opacityAnim.Duration = TimeSpan.FromMilliseconds(style switch
         {
-            0 => 280,
-            1 => 320,
-            2 => 360,
-            3 => 260,
-            _ => 280
+            0 => 200,
+            1 => 220,
+            2 => 260,
+            3 => 200,
+            _ => 200
         });
         opacityAnim.DelayTime = delay;
         visual.Opacity = 0f;
@@ -2441,12 +5241,16 @@ public sealed partial class SearchPopupWindow : Window
 
     private int ComputeRecommendedAppsColumnCount()
     {
-        double width = RecommendedAppsPanel.ActualWidth;
+        double width = RecommendedAppsScrollViewer.ActualWidth > 0
+            ? RecommendedAppsScrollViewer.ActualWidth
+                - RecommendedAppsScrollViewer.Padding.Left
+                - RecommendedAppsScrollViewer.Padding.Right
+            : RecommendedAppsPanel.ActualWidth;
         if (width <= 0)
         {
             return 1;
         }
-        return Math.Max(1, (int)Math.Floor(width / 110));
+        return Math.Max(1, (int)Math.Floor((width + 6) / 104));
     }
 
     private Microsoft.UI.Xaml.Media.Brush? ResolveThemeBrush(string key) =>
@@ -2454,15 +5258,399 @@ public sealed partial class SearchPopupWindow : Window
 
     private void RecommendedAppsPanel_RightTapped(object sender, RightTappedRoutedEventArgs e)
     {
-        var item = FindDataContext<SearchResultItem>(e.OriginalSource as DependencyObject);
+        CancelRecommendedDrag();
+        var source = e.OriginalSource as DependencyObject;
+        var entry = FindDataContext<RecommendedGridEntry>(source);
+        bool showBatchMenu =
+            _isRecommendationEditMode &&
+            _recMultiSelectedKeys.Count > 1 &&
+            (entry is null || _recMultiSelectedKeys.Contains(entry.EntryKey));
+        if (showBatchMenu)
+        {
+            UIElement batchAnchor = (UIElement?)FindVisualAncestor<Grid>(source) ?? RecommendedAppsScrollViewer;
+            MenuFlyout batchFlyout = BuildBatchRecommendedAppsContextMenu();
+            if (batchFlyout.Items.Count > 0)
+            {
+                batchFlyout.ShowAt(batchAnchor, e.GetPosition(batchAnchor));
+                e.Handled = true;
+            }
+
+            return;
+        }
+
+        if (entry is null)
+        {
+            return;
+        }
+
+        UIElement anchor = (UIElement?)FindVisualAncestor<Grid>(source) ?? RecommendedAppsScrollViewer;
+        MenuFlyout flyout = entry.IsFolder
+            ? BuildRecommendedFolderContextMenu(entry)
+            : BuildRecommendedAppContextMenu(entry);
+        if (flyout.Items.Count > 0)
+        {
+            flyout.ShowAt(anchor, e.GetPosition(anchor));
+            e.Handled = true;
+        }
+    }
+
+    private MenuFlyout BuildBatchRecommendedAppsContextMenu()
+    {
+        var flyout = new MenuFlyout();
+        var selectedEntries = _viewModel.RecommendedEntries
+            .Where(entry => _recMultiSelectedKeys.Contains(entry.EntryKey))
+            .ToList();
+        if (selectedEntries.Count < 2)
+        {
+            return flyout;
+        }
+
+        bool hasSelectedFolder = selectedEntries.Any(entry => entry.IsFolder);
+        var selectedApps = selectedEntries
+            .Where(entry => !entry.IsFolder && entry.AppItem is not null)
+            .Select(entry => entry.AppItem!)
+            .ToList();
+        var allHideableItems = new List<SearchResultItem>();
+        foreach (RecommendedGridEntry entry in selectedEntries)
+        {
+            if (entry.IsFolder)
+            {
+                allHideableItems.AddRange(entry.FolderItems);
+            }
+            else if (entry.AppItem is { } appItem)
+            {
+                allHideableItems.Add(appItem);
+            }
+        }
+
+        if (!hasSelectedFolder && selectedApps.Count >= 2)
+        {
+            var moveSubItem = new MenuFlyoutSubItem
+            {
+                Text = _localizationService.T("Search.Recommend.MoveToFolder"),
+                Icon = new FontIcon { Glyph = "\uE8F4" }
+            };
+
+            var newFolderItem = new MenuFlyoutItem
+            {
+                Text = _localizationService.T("Search.Recommend.NewFolder"),
+                Icon = new FontIcon { Glyph = "\uE8F4" }
+            };
+            newFolderItem.Click += (_, _) =>
+            {
+                string targetEntryKey = $"app:{Helpers.AppRecommendationIdentity.GetCanonicalKey(selectedApps[0])}";
+                var remainingKeys = selectedApps
+                    .Skip(1)
+                    .Select(Helpers.AppRecommendationIdentity.GetCanonicalKey)
+                    .ToList();
+                _recMultiSelectedKeys.Clear();
+                string? createdFolderId = _viewModel.MergeRecommendationsIntoFolder(remainingKeys, targetEntryKey);
+                RefreshAllRecommendedCardEditVisuals();
+                UpdateRecommendationEditStatusHint();
+                if (_viewModel.FindRecommendedFolder(createdFolderId) is { } createdFolder)
+                {
+                    OpenFolderOverlay(createdFolder, startRename: true);
+                }
+            };
+            moveSubItem.Items.Add(newFolderItem);
+
+            IReadOnlyList<RecommendationFolderSummary> existingFolders = _viewModel.GetRecommendationFolders();
+            if (existingFolders.Count > 0)
+            {
+                moveSubItem.Items.Add(new MenuFlyoutSeparator());
+                var selectedKeys = selectedApps
+                    .Select(Helpers.AppRecommendationIdentity.GetCanonicalKey)
+                    .ToList();
+                foreach (RecommendationFolderSummary folder in existingFolders)
+                {
+                    string targetFolderId = folder.FolderId;
+                    var targetItem = new MenuFlyoutItem
+                    {
+                        Text = folder.Name,
+                        Icon = new FontIcon { Glyph = "\uE8B7" }
+                    };
+                    targetItem.Click += (_, _) =>
+                    {
+                        _recMultiSelectedKeys.Clear();
+                        _viewModel.MergeRecommendationsIntoFolder(selectedKeys, $"folder:{targetFolderId}");
+                        RefreshAllRecommendedCardEditVisuals();
+                        UpdateRecommendationEditStatusHint();
+                    };
+                    moveSubItem.Items.Add(targetItem);
+                }
+            }
+
+            flyout.Items.Add(moveSubItem);
+        }
+
+        if (allHideableItems.Count > 0)
+        {
+            var hideItem = new MenuFlyoutItem
+            {
+                Text = _localizationService.T("Search.Recommend.Hide"),
+                Icon = new FontIcon { Glyph = "\uED1A" }
+            };
+            hideItem.Click += (_, _) =>
+            {
+                _recMultiSelectedKeys.Clear();
+                _viewModel.HideRecommendations(allHideableItems);
+                RefreshAllRecommendedCardEditVisuals();
+                UpdateRecommendationEditStatusHint();
+            };
+            flyout.Items.Add(hideItem);
+        }
+
+        return flyout;
+    }
+
+    private void FolderOverlayScrollViewer_RightTapped(object sender, RightTappedRoutedEventArgs e)
+    {
+        CancelOverlayDrag();
+        var source = e.OriginalSource as DependencyObject;
+        var item = FindDataContext<SearchResultItem>(source);
+        if (item is null || string.IsNullOrWhiteSpace(_openFolderId))
+        {
+            return;
+        }
+
+        string folderId = _openFolderId;
+        UIElement anchor = (UIElement?)FindVisualAncestor<Grid>(source) ?? FolderOverlayScrollViewer;
+        MenuFlyout flyout = BuildFolderOverlayItemContextMenu(folderId, item);
+        if (flyout.Items.Count > 0)
+        {
+            flyout.ShowAt(anchor, e.GetPosition(anchor));
+            e.Handled = true;
+        }
+    }
+
+    private void HiddenOverlayScrollViewer_RightTapped(object sender, RightTappedRoutedEventArgs e)
+    {
+        var source = e.OriginalSource as DependencyObject;
+        var item = FindDataContext<SearchResultItem>(source);
         if (item is null)
         {
             return;
         }
 
-        var anchor = (UIElement?)FindItemRow(e.OriginalSource as DependencyObject) ?? RecommendedAppsPanel;
-        ShowResultFlyout(item, anchor, e.GetPosition(anchor));
-        e.Handled = true;
+        UIElement anchor = (UIElement?)FindVisualAncestor<Grid>(source) ?? HiddenOverlayScrollViewer;
+        MenuFlyout flyout = BuildHiddenOverlayItemContextMenu(item);
+        if (flyout.Items.Count > 0)
+        {
+            flyout.ShowAt(anchor, e.GetPosition(anchor));
+            e.Handled = true;
+        }
+    }
+
+    private MenuFlyout BuildRecommendedFolderContextMenu(RecommendedGridEntry folderEntry)
+    {
+        var flyout = new MenuFlyout();
+        if (!folderEntry.IsFolder || string.IsNullOrWhiteSpace(folderEntry.FolderId))
+        {
+            return flyout;
+        }
+
+        string folderId = folderEntry.FolderId;
+
+        var openFolderItem = new MenuFlyoutItem
+        {
+            Text = _localizationService.T("Search.Menu.Open"),
+            Icon = new FontIcon { Glyph = "\uE8B7" }
+        };
+        openFolderItem.Click += (_, _) => OpenFolderOverlay(folderEntry);
+        flyout.Items.Add(openFolderItem);
+
+        var renameFolderItem = new MenuFlyoutItem
+        {
+            Text = _localizationService.T("Search.Recommend.RenameFolder"),
+            Icon = new FontIcon { Glyph = "\uE8AC" }
+        };
+        renameFolderItem.Click += (_, _) => OpenFolderOverlay(folderEntry, startRename: true);
+        flyout.Items.Add(renameFolderItem);
+
+        flyout.Items.Add(new MenuFlyoutSeparator());
+
+        var dissolveItem = new MenuFlyoutItem
+        {
+            Text = _localizationService.T("Search.Recommend.DissolveFolder"),
+            Icon = new FontIcon { Glyph = "\uE8F1" }
+        };
+        dissolveItem.Click += (_, _) => _viewModel.DissolveRecommendationFolder(folderId);
+        flyout.Items.Add(dissolveItem);
+
+        return flyout;
+    }
+
+    private MenuFlyout BuildRecommendedAppContextMenu(RecommendedGridEntry appEntry)
+    {
+        var flyout = new MenuFlyout();
+        if (appEntry.AppItem is not { } item)
+        {
+            return flyout;
+        }
+
+        AppendCommonRecommendedAppActions(flyout, item);
+        flyout.Items.Add(new MenuFlyoutSeparator());
+
+        var moveSubItem = new MenuFlyoutSubItem
+        {
+            Text = _localizationService.T("Search.Recommend.MoveToFolder"),
+            Icon = new FontIcon { Glyph = "\uE8F4" }
+        };
+
+        var newFolderItem = new MenuFlyoutItem
+        {
+            Text = _localizationService.T("Search.Recommend.NewFolder"),
+            Icon = new FontIcon { Glyph = "\uE8F4" }
+        };
+        newFolderItem.Click += (_, _) =>
+        {
+            string? createdFolderId = _viewModel.CreateFolderFromRecommendation(item);
+            if (_viewModel.FindRecommendedFolder(createdFolderId) is { } createdFolder)
+            {
+                OpenFolderOverlay(createdFolder, startRename: true);
+            }
+        };
+        moveSubItem.Items.Add(newFolderItem);
+
+        IReadOnlyList<RecommendationFolderSummary> existingFolders = _viewModel.GetRecommendationFolders();
+        if (existingFolders.Count > 0)
+        {
+            moveSubItem.Items.Add(new MenuFlyoutSeparator());
+            string appKey = Helpers.AppRecommendationIdentity.GetCanonicalKey(item);
+            foreach (RecommendationFolderSummary folder in existingFolders)
+            {
+                string targetFolderId = folder.FolderId;
+                var targetItem = new MenuFlyoutItem
+                {
+                    Text = folder.Name,
+                    Icon = new FontIcon { Glyph = "\uE8B7" }
+                };
+                targetItem.Click += (_, _) =>
+                    _viewModel.MergeRecommendationIntoFolder(appKey, $"folder:{targetFolderId}");
+                moveSubItem.Items.Add(targetItem);
+            }
+        }
+
+        flyout.Items.Add(moveSubItem);
+
+        var hideItem = new MenuFlyoutItem
+        {
+            Text = _localizationService.T("Search.Recommend.Hide"),
+            Icon = new FontIcon { Glyph = "\uED1A" }
+        };
+        hideItem.Click += (_, _) => _viewModel.HideRecommendation(item);
+        flyout.Items.Add(hideItem);
+
+        return flyout;
+    }
+
+    private MenuFlyout BuildFolderOverlayItemContextMenu(string folderId, SearchResultItem item)
+    {
+        var flyout = new MenuFlyout();
+        AppendCommonRecommendedAppActions(flyout, item);
+        flyout.Items.Add(new MenuFlyoutSeparator());
+
+        var removeFromFolderItem = new MenuFlyoutItem
+        {
+            Text = _localizationService.T("Search.Recommend.RemoveFromFolder"),
+            Icon = new FontIcon { Glyph = "\uE8F1" }
+        };
+        removeFromFolderItem.Click += (_, _) =>
+        {
+            _viewModel.RemoveRecommendationFromFolder(folderId, item, out bool stillExists);
+            if (!stillExists)
+            {
+                CloseRecommendationOverlays();
+            }
+        };
+        flyout.Items.Add(removeFromFolderItem);
+
+        var hideItem = new MenuFlyoutItem
+        {
+            Text = _localizationService.T("Search.Recommend.Hide"),
+            Icon = new FontIcon { Glyph = "\uED1A" }
+        };
+        hideItem.Click += (_, _) => _viewModel.HideRecommendation(item);
+        flyout.Items.Add(hideItem);
+
+        return flyout;
+    }
+
+    private MenuFlyout BuildHiddenOverlayItemContextMenu(SearchResultItem item)
+    {
+        var flyout = new MenuFlyout();
+
+        var unhideItem = new MenuFlyoutItem
+        {
+            Text = _localizationService.T("Search.Recommend.Unhide"),
+            Icon = new FontIcon { Glyph = "\uE7B3" }
+        };
+        unhideItem.Click += (_, _) =>
+        {
+            _viewModel.UnhideRecommendation(item);
+            if (!_viewModel.HasHiddenRecommendations)
+            {
+                CloseRecommendationOverlays();
+            }
+        };
+        flyout.Items.Add(unhideItem);
+
+        flyout.Items.Add(new MenuFlyoutSeparator());
+        AppendCommonRecommendedAppActions(flyout, item);
+        return flyout;
+    }
+
+    private void AppendCommonRecommendedAppActions(MenuFlyout flyout, SearchResultItem item)
+    {
+        var openItem = new MenuFlyoutItem
+        {
+            Text = _localizationService.T("Search.Menu.Open"),
+            Icon = new FontIcon { Glyph = "\uE8E5" }
+        };
+        openItem.Click += (_, _) => _viewModel.ExecuteItem(item);
+        flyout.Items.Add(openItem);
+
+        bool hasExistingPath = !string.IsNullOrWhiteSpace(item.DetailPath) &&
+                               (File.Exists(item.DetailPath) || Directory.Exists(item.DetailPath));
+        if (!hasExistingPath)
+        {
+            return;
+        }
+
+        if (ElevatedFileLauncher.CanRunAsAdministrator(item.DetailPath!))
+        {
+            var runAsAdminItem = new MenuFlyoutItem
+            {
+                Text = _localizationService.T("Widget.RunAsAdministrator"),
+                Icon = new FontIcon { Glyph = "\uE7EF" }
+            };
+            runAsAdminItem.Click += (_, _) =>
+            {
+                ElevatedFileLaunchResult result =
+                    ElevatedFileLauncher.RunAsAdministrator(_hwnd, item.DetailPath!);
+                if (result.Status is not (ElevatedFileLaunchStatus.Launched
+                    or ElevatedFileLaunchStatus.Cancelled))
+                {
+                    ShowTransientStatus(_localizationService.T(
+                        result.Status == ElevatedFileLaunchStatus.AlreadyRunningUnelevated
+                            ? "Widget.RunAsAdministrator.AlreadyRunning"
+                            : "Widget.Error.OperationIncomplete"));
+                }
+            };
+            flyout.Items.Add(runAsAdminItem);
+        }
+
+        var openLocationItem = new MenuFlyoutItem
+        {
+            Text = _localizationService.T("Search.Menu.OpenLocation"),
+            Icon = new FontIcon { Glyph = "\uE838" }
+        };
+        openLocationItem.Click += (_, _) =>
+        {
+            Win32Helper.ShowInExplorer(item.DetailPath!);
+            HidePopup();
+        };
+        flyout.Items.Add(openLocationItem);
     }
 
     private void OnAppIcon_ImageOpened(object sender, RoutedEventArgs e)
@@ -2922,6 +6110,20 @@ public sealed partial class SearchPopupWindow : Window
                 UpdateSortHeaders();
                 break;
 
+            case nameof(SearchPopupViewModel.HasRecommendedEntries):
+            case nameof(SearchPopupViewModel.HasHiddenRecommendations):
+            case nameof(SearchPopupViewModel.HiddenRecommendationCount):
+                UpdateRecommendationHeaderState();
+                UpdatePanelVisibility();
+                break;
+
+            case nameof(SearchPopupViewModel.IsEverythingPromptVisible):
+            case nameof(SearchPopupViewModel.EverythingPromptText):
+            case nameof(SearchPopupViewModel.EverythingPromptActionText):
+            case nameof(SearchPopupViewModel.IsEverythingPromptWarning):
+                UpdateEverythingPromptBanner();
+                break;
+
             case nameof(SearchPopupViewModel.StatusText):
                 // Result counts and timing remain diagnostic data, not persistent UI.
                 break;
@@ -3119,6 +6321,7 @@ public sealed partial class SearchPopupWindow : Window
                                          args.Index < _viewModel.CurrentResults.Count
             ? _viewModel.CurrentResults[args.Index]
             : row.DataContext as SearchResultItem;
+        row.DataContext = preparedItem;
         row.PrepareItem(preparedItem);
 
         // Lazy shell icon: show the real icon once resolved, otherwise the glyph block.
@@ -3153,6 +6356,31 @@ public sealed partial class SearchPopupWindow : Window
 
         // Sync multi-selection state on recycled elements.
         row.IsMultiSelected = row.Item is { } rowItem && _multiSelectedItems.Contains(rowItem);
+    }
+
+    private void OnResultsElementClearing(ItemsRepeater sender, ItemsRepeaterElementClearingEventArgs args)
+    {
+        if (args.Element is not SearchResultRowControl row)
+        {
+            return;
+        }
+
+        if (ReferenceEquals(_selectedRow, row))
+        {
+            _selectedRow = null;
+        }
+
+        if (ReferenceEquals(_dragSourceRow, row))
+        {
+            _dragSourceRow = null;
+        }
+
+        row.IsSelected = false;
+        row.IsMultiSelected = false;
+        row.IsTabStop = false;
+        row.PrepareItem(null);
+        row.RefreshIconVisuals();
+        row.DataContext = null;
     }
 
     private async Task EnrichPreparedResultRowAsync(
@@ -4349,34 +7577,117 @@ public sealed partial class SearchPopupWindow : Window
 
     private void OnWindowClosed(object sender, WindowEventArgs args)
     {
+        if (_isWindowClosed)
+        {
+            return;
+        }
+
+        _isWindowClosed = true;
+        IsPopupVisible = false;
         App.Log(
             $"[Search] Popup window closed visible={IsPopupVisible} " +
             $"hwnd=0x{_hwnd.ToInt64():X}");
+        RemovePopupCloseWatcherSubclass();
+        Closed -= OnWindowClosed;
         _viewModel.ActionRequested -= OnViewModelActionRequested;
         _viewModel.ContentRequested -= OnViewModelContentRequested;
         _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
         ResultsRepeater.ElementPrepared -= OnResultsElementPrepared;
+        ResultsRepeater.ElementClearing -= OnResultsElementClearing;
         RecommendedAppsRepeater.ElementPrepared -= OnRecommendedAppsElementPrepared;
+        RecommendedAppsRepeater.ElementClearing -= OnRecommendedAppsElementClearing;
+        FolderAppsRepeater.ElementPrepared -= OnOverlayAppsElementPrepared;
+        FolderAppsRepeater.ElementClearing -= OnOverlayAppsElementClearing;
+        HiddenAppsRepeater.ElementPrepared -= OnOverlayAppsElementPrepared;
+        HiddenAppsRepeater.ElementClearing -= OnOverlayAppsElementClearing;
         _viewModel.RecommendationIconsResolved -= OnRecommendationIconsResolved;
+        _viewModel.RecommendationLayoutUpdated -= OnRecommendationLayoutUpdated;
         _settingsService.SettingsChanged -= OnAppearanceSettingsChanged;
         _settingsService.AppearancePreviewChanged -= OnAppearanceSettingsChanged;
         _localizationService.LanguageChanged -= OnLanguageChanged;
         if (_themeService is not null)
             _themeService.AppearanceChanged -= OnThemeServiceAppearanceChanged;
         Activated -= OnWindowActivated;
-        PopupHideStoryboard.Stop();
+        try
+        {
+            PopupShowStoryboard.Stop();
+            PopupHideStoryboard.Stop();
+        }
+        catch
+        {
+        }
         PopupHideStoryboard.Completed -= OnPopupHideCompleted;
-        _searchDebounceTimer?.Stop();
+        if (_searchDebounceTimer is { } debounceTimer)
+        {
+            _searchDebounceTimer = null;
+            debounceTimer.Tick -= OnSearchDebounceTick;
+            try
+            {
+                debounceTimer.Stop();
+            }
+            catch
+            {
+            }
+        }
+
         _skeletonDelayCancellation?.Cancel();
         _skeletonDelayCancellation?.Dispose();
+        _skeletonDelayCancellation = null;
         SearchFeedbackPresenter.Clear();
-        _entranceGuardTimer?.Stop();
-        _rubberBandAutoScrollTimer?.Stop();
+        StopAndClearEntranceGuardTimer();
+        if (_rubberBandAutoScrollTimer is { } autoScrollTimer)
+        {
+            _rubberBandAutoScrollTimer = null;
+            autoScrollTimer.Tick -= OnRubberBandAutoScrollTick;
+            try
+            {
+                autoScrollTimer.Stop();
+            }
+            catch
+            {
+            }
+        }
+
+        if (_recRubberBandAutoScrollTimer is { } recAutoScrollTimer)
+        {
+            _recRubberBandAutoScrollTimer = null;
+            recAutoScrollTimer.Tick -= OnRecommendationRubberBandAutoScrollTick;
+            try
+            {
+                recAutoScrollTimer.Stop();
+            }
+            catch
+            {
+            }
+        }
+
+        DisposeUnfocusedAutoHideTimer();
+        DisposeColdHiddenCleanupTimer();
+        CancelRecommendedDrag();
+        EndRecommendationRubberBand();
+        _isRecommendationEditMode = false;
+        _recMultiSelectedKeys.Clear();
+        _recRubberBandBaseKeys.Clear();
+        CloseRecommendationOverlays(immediate: true);
+        ClearSelectedResultRow();
+        ClearRecommendedAppSelection();
+        _multiSelectedItems.Clear();
+        _rubberBandBaseSelection.Clear();
+        ClearRealizedRepeaterVisuals();
         ResultsRepeater.ItemsSource = null;
         RecommendedAppsRepeater.ItemsSource = null;
+        FolderAppsRepeater.ItemsSource = null;
+        HiddenAppsRepeater.ItemsSource = null;
+        _folderOverlayItems.Clear();
+        AppsSkeletonRepeater.ItemsSource = null;
         TabsList.ItemsSource = null;
         DisposeAcrylicController();
         DisposeMicaController();
+        ActionRequested = null;
+        ContentRequested = null;
+        PopupShown = null;
+        PopupHidden = null;
+        SearchEngineService.ReleaseActiveColdHiddenCaches();
         _viewModel.Dispose();
     }
 

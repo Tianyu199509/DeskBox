@@ -1,5 +1,7 @@
-﻿using System.Globalization;
+using System.Buffers;
+using System.Globalization;
 using System.Reflection;
+using System.Text;
 using Microsoft.Win32;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -87,6 +89,23 @@ public sealed class LocalizationService
         _ => "en"
     };
 
+    public static IReadOnlyList<string> SupportedLanguageCodes { get; } =
+    [
+        LanguageChinese,
+        LanguageChineseTraditional,
+        LanguageEnglish,
+        LanguageJapanese,
+        LanguageGerman,
+        LanguagePortuguese,
+        LanguageHindi,
+        LanguageSpanish,
+        LanguageFrench,
+        LanguageArabic,
+        LanguageBengali,
+        LanguageRussian,
+        LanguageKorean
+    ];
+
     public IReadOnlyList<string> AvailableLanguageSettings { get; } =
     [
         LanguageSystem,
@@ -147,6 +166,7 @@ public sealed class LocalizationService
         // failed, so that the UI updates to the new language immediately.
         _cachedCultureName = null;
         RaiseLanguageChanged();
+        TrimInactiveLocaleDictionaries();
     }
 
     /// <summary>
@@ -159,6 +179,7 @@ public sealed class LocalizationService
     {
         _cachedCultureName = null;
         RaiseLanguageChanged();
+        TrimInactiveLocaleDictionaries();
     }
 
     /// <summary>
@@ -187,9 +208,16 @@ public sealed class LocalizationService
         }
     }
 
-    public string T(string key)
+    public string T(string key) => TranslateForCulture(CurrentCultureName, key);
+
+    public static string ResolveAmbientCultureName() => ResolveDefaultLanguage();
+
+    public static string TranslateForCulture(string? cultureName, string key)
     {
-        var table = CurrentCultureName switch
+        string culture = string.IsNullOrWhiteSpace(cultureName)
+            ? ResolveDefaultLanguage()
+            : NormalizeCultureCode(cultureName);
+        var table = culture switch
         {
             LanguageChineseTraditional => ZhTw,
             LanguageJapanese => JaJp,
@@ -202,22 +230,58 @@ public sealed class LocalizationService
             LanguageBengali => BnBd,
             LanguageRussian => RuRu,
             LanguageKorean => KoKr,
-            _ => IsEnglish ? EnUs : ZhCn
+            _ => string.Equals(culture, LanguageEnglish, StringComparison.OrdinalIgnoreCase) ? EnUs : ZhCn
         };
-        
+
         if (table.TryGetValue(key, out string? value))
         {
             return value;
         }
 
         // All shipped locale files are expected to be complete. Keep English
-        // as a defensive fallback for unknown keys in future app versions.
-        if (EnUs.TryGetValue(key, out value))
+        // and Simplified Chinese as defensive fallbacks for unknown keys without
+        // materializing full fallback locale dictionaries in memory.
+        if (!string.Equals(culture, LanguageEnglish, StringComparison.OrdinalIgnoreCase) &&
+            TryResolveFallbackKey(LanguageEnglish, _enUs, key, out value))
         {
-            return value;
+            return value!;
         }
 
-        return ZhCn.TryGetValue(key, out value) ? value : key;
+        if (!string.Equals(culture, LanguageChinese, StringComparison.OrdinalIgnoreCase) &&
+            TryResolveFallbackKey(LanguageChinese, _zhCn, key, out value))
+        {
+            return value!;
+        }
+
+        return key;
+    }
+
+    public static string FormatForCulture(string? cultureName, string key, params object[] args) =>
+        string.Format(CultureInfo.CurrentCulture, TranslateForCulture(cultureName, key), args);
+
+    public static string NormalizeCultureCode(string? cultureName)
+    {
+        if (string.IsNullOrWhiteSpace(cultureName))
+        {
+            return LanguageEnglish;
+        }
+
+        string trimmed = cultureName.Trim().Replace('_', '-');
+        if (trimmed.StartsWith("zh", StringComparison.OrdinalIgnoreCase))
+        {
+            return IsTraditionalChineseCulture(trimmed) ? LanguageChineseTraditional : LanguageChinese;
+        }
+        if (trimmed.StartsWith("ja", StringComparison.OrdinalIgnoreCase)) return LanguageJapanese;
+        if (trimmed.StartsWith("de", StringComparison.OrdinalIgnoreCase)) return LanguageGerman;
+        if (trimmed.StartsWith("pt", StringComparison.OrdinalIgnoreCase)) return LanguagePortuguese;
+        if (trimmed.StartsWith("hi", StringComparison.OrdinalIgnoreCase)) return LanguageHindi;
+        if (trimmed.StartsWith("es", StringComparison.OrdinalIgnoreCase)) return LanguageSpanish;
+        if (trimmed.StartsWith("fr", StringComparison.OrdinalIgnoreCase)) return LanguageFrench;
+        if (trimmed.StartsWith("ar", StringComparison.OrdinalIgnoreCase)) return LanguageArabic;
+        if (trimmed.StartsWith("bn", StringComparison.OrdinalIgnoreCase)) return LanguageBengali;
+        if (trimmed.StartsWith("ru", StringComparison.OrdinalIgnoreCase)) return LanguageRussian;
+        if (trimmed.StartsWith("ko", StringComparison.OrdinalIgnoreCase)) return LanguageKorean;
+        return LanguageEnglish;
     }
 
     public string Format(string key, params object[] args)
@@ -227,7 +291,14 @@ public sealed class LocalizationService
 
     public static string DefaultText(string key)
     {
-        return ZhCn.TryGetValue(key, out string? value) ? value : key;
+        if (_zhCn is { } loadedZhCn)
+        {
+            return loadedZhCn.TryGetValue(key, out string? loadedValue) ? loadedValue : key;
+        }
+
+        return TryResolveFallbackKey(LanguageChinese, null, key, out string? fallbackValue)
+            ? fallbackValue!
+            : key;
     }
 
     public static string DefaultFormat(string key, params object[] args)
@@ -292,44 +363,71 @@ public sealed class LocalizationService
     /// <summary>
     /// Resolves the default language used when the user has not explicitly
     /// picked one in the app. Honors the language chosen at install time
-    /// (the Inno Setup installer writes it to
-    /// HKCU\Software\DeskBox\InstallLanguage), falling back to the OS UI
-    /// culture when that value is absent or unrecognized.
+    /// (per-user HKCU\Software\DeskBox\InstallLanguage first, then the direct
+    /// installer's HKA\Software\DeskBox\DirectInstall\InstallLanguage across
+    /// HKCU and HKLM), falling back to the OS UI culture when absent or
+    /// unrecognized.
     /// </summary>
     private static string ResolveDefaultLanguage()
     {
-        try
+#if !DESKBOX_STORE
+        string? installLanguage = TryResolveSupportedInstallLanguage(
+            static (keyName, valueName) =>
+                Registry.GetValue(keyName, valueName, null) as string);
+        if (installLanguage is not null)
         {
-            var value = Registry.GetValue(
-                @"HKEY_CURRENT_USER\Software\DeskBox",
-                "InstallLanguage",
-                null) as string;
-            if (!string.IsNullOrWhiteSpace(value)
-                && (value == LanguageChinese
-                    || value == LanguageChineseTraditional
-                    || value == LanguageEnglish
-                    || value == LanguageJapanese
-                    || value == LanguageGerman
-                    || value == LanguagePortuguese
-                    || value == LanguageHindi
-                    || value == LanguageSpanish
-                    || value == LanguageFrench
-                    || value == LanguageArabic
-                    || value == LanguageBengali
-                    || value == LanguageRussian
-                    || value == LanguageKorean))
-            {
-                return value;
-            }
+            return installLanguage;
         }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine(
-                $"[LocalizationService] Failed reading InstallLanguage registry key: {ex.Message}");
-        }
+#endif
 
         return ResolveSystemLanguage();
     }
+
+    internal static string? TryResolveSupportedInstallLanguage(
+        Func<string, string, string?> registryReader)
+    {
+        ReadOnlySpan<string> candidateKeys =
+        [
+            @"HKEY_CURRENT_USER\Software\DeskBox",
+            @"HKEY_CURRENT_USER\Software\DeskBox\DirectInstall",
+            @"HKEY_LOCAL_MACHINE\Software\DeskBox\DirectInstall"
+        ];
+
+        foreach (string keyPath in candidateKeys)
+        {
+            try
+            {
+                string? value = registryReader(keyPath, "InstallLanguage")?.Trim();
+                if (IsSupportedExplicitLanguage(value))
+                {
+                    return value;
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine(
+                    $"[LocalizationService] Failed reading InstallLanguage from {keyPath}: {ex.Message}");
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsSupportedExplicitLanguage(string? value) =>
+        !string.IsNullOrWhiteSpace(value)
+        && (value == LanguageChinese
+            || value == LanguageChineseTraditional
+            || value == LanguageEnglish
+            || value == LanguageJapanese
+            || value == LanguageGerman
+            || value == LanguagePortuguese
+            || value == LanguageHindi
+            || value == LanguageSpanish
+            || value == LanguageFrench
+            || value == LanguageArabic
+            || value == LanguageBengali
+            || value == LanguageRussian
+            || value == LanguageKorean);
 
     private static Dictionary<string, string>? _zhCn;
     private static Dictionary<string, string>? _zhTw;
@@ -345,6 +443,144 @@ public sealed class LocalizationService
     private static Dictionary<string, string>? _ruRu;
     private static Dictionary<string, string>? _koKr;
     private static readonly object s_loadLock = new();
+    private static volatile bool s_residentHostKeyFilterEnabled;
+
+    private static readonly string[] s_residentHostAllowedSettingsSubtrees =
+    [
+        "AutoStart",
+        "Capsule",
+        "CloudBackup",
+        "DataBackup",
+        "Dialog",
+        "DragDropPermission",
+        "DropAction",
+        "FileStacks",
+        "FileWidget",
+        "GlobalHotkey",
+        "Hotkey",
+        "HotkeyRecorder",
+        "HoverButtonActions",
+        "IconSize",
+        "ManagedPath",
+        "Persistence",
+        "Recovery",
+        "ReleaseNotes",
+        "Search",
+        "Update",
+        "WidgetForeground",
+        "WidgetGroups",
+        "Windows10VisualCompatibility",
+        "WindowTitle",
+    ];
+
+    private static readonly byte[][] s_residentHostAllowedSettingsSubtreesUtf8 =
+        Array.ConvertAll(s_residentHostAllowedSettingsSubtrees, static s => Encoding.UTF8.GetBytes(s));
+
+    private static readonly JsonReaderOptions s_localeJsonReaderOptions = new()
+    {
+        CommentHandling = JsonCommentHandling.Skip,
+        AllowTrailingCommas = true,
+    };
+
+    private const int MaxMissingKeyFallbackCacheEntries = 128;
+    private static Dictionary<(string Locale, string Key), string?>? s_missingKeyFallbackCache;
+
+    internal static void EnableResidentHostKeyFilter()
+    {
+        lock (s_loadLock)
+        {
+            if (s_residentHostKeyFilterEnabled)
+            {
+                return;
+            }
+
+            s_residentHostKeyFilterEnabled = true;
+            s_missingKeyFallbackCache = null;
+            FilterDictionaryInPlace(_zhCn);
+            FilterDictionaryInPlace(_zhTw);
+            FilterDictionaryInPlace(_enUs);
+            FilterDictionaryInPlace(_jaJp);
+            FilterDictionaryInPlace(_deDe);
+            FilterDictionaryInPlace(_ptBr);
+            FilterDictionaryInPlace(_hiIn);
+            FilterDictionaryInPlace(_esEs);
+            FilterDictionaryInPlace(_frFr);
+            FilterDictionaryInPlace(_arSa);
+            FilterDictionaryInPlace(_bnBd);
+            FilterDictionaryInPlace(_ruRu);
+            FilterDictionaryInPlace(_koKr);
+        }
+    }
+
+    internal static bool IsPureSettingsUiKey(string key)
+    {
+        if (!key.StartsWith("Settings.", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        ReadOnlySpan<char> rest = key.AsSpan("Settings.".Length);
+        foreach (string subtree in s_residentHostAllowedSettingsSubtrees)
+        {
+            if (rest.StartsWith(subtree, StringComparison.Ordinal) &&
+                (rest.Length == subtree.Length || rest[subtree.Length] == '.'))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool IsPureSettingsUiKeyUtf8(ReadOnlySpan<byte> utf8Key)
+    {
+        ReadOnlySpan<byte> settingsPrefix = "Settings."u8;
+        if (!utf8Key.StartsWith(settingsPrefix))
+        {
+            return false;
+        }
+
+        ReadOnlySpan<byte> rest = utf8Key[settingsPrefix.Length..];
+        foreach (byte[] subtree in s_residentHostAllowedSettingsSubtreesUtf8)
+        {
+            if (rest.StartsWith(subtree) &&
+                (rest.Length == subtree.Length || rest[subtree.Length] == (byte)'.'))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    internal static void FilterDictionaryInPlace(Dictionary<string, string>? dictionary)
+    {
+        if (dictionary is null || dictionary.Count == 0)
+        {
+            return;
+        }
+
+        List<string>? toRemove = null;
+        foreach (string key in dictionary.Keys)
+        {
+            if (IsPureSettingsUiKey(key))
+            {
+                (toRemove ??= []).Add(key);
+            }
+        }
+
+        if (toRemove is null)
+        {
+            return;
+        }
+
+        foreach (string key in toRemove)
+        {
+            dictionary.Remove(key);
+        }
+
+        dictionary.TrimExcess();
+    }
 
     private static Dictionary<string, string> ZhCn
     {
@@ -353,7 +589,7 @@ public sealed class LocalizationService
             if (_zhCn is not null) return _zhCn;
             lock (s_loadLock)
             {
-                _zhCn ??= LoadStringResource("DeskBox.Strings.zh-CN.json");
+                _zhCn ??= LoadLocaleStrings("zh-CN");
             }
             return _zhCn;
         }
@@ -366,7 +602,7 @@ public sealed class LocalizationService
             if (_zhTw is not null) return _zhTw;
             lock (s_loadLock)
             {
-                _zhTw ??= LoadStringResource("DeskBox.Strings.zh-TW.json");
+                _zhTw ??= LoadLocaleStrings("zh-TW");
             }
             return _zhTw;
         }
@@ -379,7 +615,7 @@ public sealed class LocalizationService
             if (_enUs is not null) return _enUs;
             lock (s_loadLock)
             {
-                _enUs ??= LoadStringResource("DeskBox.Strings.en-US.json");
+                _enUs ??= LoadLocaleStrings("en-US");
             }
             return _enUs;
         }
@@ -392,7 +628,7 @@ public sealed class LocalizationService
             if (_jaJp is not null) return _jaJp;
             lock (s_loadLock)
             {
-                _jaJp ??= LoadStringResource("DeskBox.Strings.ja-JP.json");
+                _jaJp ??= LoadLocaleStrings("ja-JP");
             }
             return _jaJp;
         }
@@ -405,7 +641,7 @@ public sealed class LocalizationService
             if (_deDe is not null) return _deDe;
             lock (s_loadLock)
             {
-                _deDe ??= LoadStringResource("DeskBox.Strings.de-DE.json");
+                _deDe ??= LoadLocaleStrings("de-DE");
             }
             return _deDe;
         }
@@ -418,7 +654,7 @@ public sealed class LocalizationService
             if (_ptBr is not null) return _ptBr;
             lock (s_loadLock)
             {
-                _ptBr ??= LoadStringResource("DeskBox.Strings.pt-BR.json");
+                _ptBr ??= LoadLocaleStrings("pt-BR");
             }
             return _ptBr;
         }
@@ -431,7 +667,7 @@ public sealed class LocalizationService
             if (_hiIn is not null) return _hiIn;
             lock (s_loadLock)
             {
-                _hiIn ??= LoadStringResource("DeskBox.Strings.hi-IN.json");
+                _hiIn ??= LoadLocaleStrings("hi-IN");
             }
             return _hiIn;
         }
@@ -444,7 +680,7 @@ public sealed class LocalizationService
             if (_esEs is not null) return _esEs;
             lock (s_loadLock)
             {
-                _esEs ??= LoadStringResource("DeskBox.Strings.es-ES.json");
+                _esEs ??= LoadLocaleStrings("es-ES");
             }
             return _esEs;
         }
@@ -457,7 +693,7 @@ public sealed class LocalizationService
             if (_frFr is not null) return _frFr;
             lock (s_loadLock)
             {
-                _frFr ??= LoadStringResource("DeskBox.Strings.fr-FR.json");
+                _frFr ??= LoadLocaleStrings("fr-FR");
             }
             return _frFr;
         }
@@ -470,7 +706,7 @@ public sealed class LocalizationService
             if (_arSa is not null) return _arSa;
             lock (s_loadLock)
             {
-                _arSa ??= LoadStringResource("DeskBox.Strings.ar-SA.json");
+                _arSa ??= LoadLocaleStrings("ar-SA");
             }
             return _arSa;
         }
@@ -483,7 +719,7 @@ public sealed class LocalizationService
             if (_bnBd is not null) return _bnBd;
             lock (s_loadLock)
             {
-                _bnBd ??= LoadStringResource("DeskBox.Strings.bn-BD.json");
+                _bnBd ??= LoadLocaleStrings("bn-BD");
             }
             return _bnBd;
         }
@@ -496,7 +732,7 @@ public sealed class LocalizationService
             if (_ruRu is not null) return _ruRu;
             lock (s_loadLock)
             {
-                _ruRu ??= LoadStringResource("DeskBox.Strings.ru-RU.json");
+                _ruRu ??= LoadLocaleStrings("ru-RU");
             }
             return _ruRu;
         }
@@ -509,26 +745,372 @@ public sealed class LocalizationService
             if (_koKr is not null) return _koKr;
             lock (s_loadLock)
             {
-                _koKr ??= LoadStringResource("DeskBox.Strings.ko-KR.json");
+                _koKr ??= LoadLocaleStrings("ko-KR");
             }
             return _koKr;
         }
     }
 
-    private static Dictionary<string, string> LoadStringResource(string resourceName)
+    public void TrimInactiveLocaleDictionaries()
     {
-        var assembly = Assembly.GetExecutingAssembly();
-        using var stream = assembly.GetManifestResourceStream(resourceName);
+        string active = CurrentCultureName;
+        lock (s_loadLock)
+        {
+            if (active != LanguageChinese) _zhCn = null;
+            if (active != LanguageEnglish) _enUs = null;
+            if (active != LanguageChineseTraditional) _zhTw = null;
+            if (active != LanguageJapanese) _jaJp = null;
+            if (active != LanguageGerman) _deDe = null;
+            if (active != LanguagePortuguese) _ptBr = null;
+            if (active != LanguageHindi) _hiIn = null;
+            if (active != LanguageSpanish) _esEs = null;
+            if (active != LanguageFrench) _frFr = null;
+            if (active != LanguageArabic) _arSa = null;
+            if (active != LanguageBengali) _bnBd = null;
+            if (active != LanguageRussian) _ruRu = null;
+            if (active != LanguageKorean) _koKr = null;
+            s_missingKeyFallbackCache = null;
+        }
+    }
+
+    private static Stream? OpenLocaleStream(string locale)
+    {
+        string fileName = $"{locale}.json";
+        string primaryPath = Path.Combine(AppContext.BaseDirectory, "Strings", fileName);
+        if (File.Exists(primaryPath))
+        {
+            return new FileStream(primaryPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        }
+
+        string? directory = AppContext.BaseDirectory;
+        for (int depth = 0; depth < 6 && !string.IsNullOrEmpty(directory); depth++)
+        {
+            string candidate = Path.Combine(directory, "Strings", fileName);
+            if (File.Exists(candidate))
+            {
+                return new FileStream(candidate, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            }
+
+            string repoCandidate = Path.Combine(directory, "src", "DeskBox", "Strings", fileName);
+            if (File.Exists(repoCandidate))
+            {
+                return new FileStream(repoCandidate, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            }
+
+            directory = Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(directory));
+        }
+
+        return Assembly.GetExecutingAssembly().GetManifestResourceStream($"DeskBox.Strings.{locale}.json");
+    }
+
+    private static int ReadIntoBuffer(Stream stream, Span<byte> destination)
+    {
+        int totalRead = 0;
+        while (!destination.IsEmpty)
+        {
+            int read = stream.Read(destination);
+            if (read <= 0)
+            {
+                break;
+            }
+
+            totalRead += read;
+            destination = destination[read..];
+        }
+
+        return totalRead;
+    }
+
+    private static Dictionary<string, string> LoadLocaleStrings(string locale)
+    {
+        using Stream? stream = OpenLocaleStream(locale);
         if (stream is null)
         {
-            System.Diagnostics.Debug.WriteLine($"[LocalizationService] Resource not found: {resourceName}");
+            System.Diagnostics.Debug.WriteLine($"[LocalizationService] Locale resource not found: {locale}");
             return [];
         }
-        using var reader = new StreamReader(stream);
-        var json = reader.ReadToEnd();
-        return JsonSerializer.Deserialize(
-            json,
-            LocalizationJsonContext.Default.LocalizedStrings) ?? [];
+
+        bool filterSettingsKeys = s_residentHostKeyFilterEnabled;
+        var loaded = new Dictionary<string, string>(filterSettingsKeys ? 640 : 2300, StringComparer.Ordinal);
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(16 * 1024);
+        try
+        {
+            int bytesInBuffer = 0;
+            bool firstChunk = true;
+            bool isFinalBlock = false;
+            JsonReaderState state = new(s_localeJsonReaderOptions);
+            int containerDepth = 0;
+            string? pendingKey = null;
+            bool skipPendingValue = false;
+
+            while (!isFinalBlock)
+            {
+                int bytesRead = ReadIntoBuffer(stream, buffer.AsSpan(bytesInBuffer));
+                bytesInBuffer += bytesRead;
+                isFinalBlock = bytesRead == 0;
+
+                ReadOnlySpan<byte> span = buffer.AsSpan(0, bytesInBuffer);
+                int bomOffset = 0;
+                if (firstChunk)
+                {
+                    firstChunk = false;
+                    if (span.Length >= 3 && span[0] == 0xEF && span[1] == 0xBB && span[2] == 0xBF)
+                    {
+                        bomOffset = 3;
+                        span = span[3..];
+                    }
+                }
+
+                var reader = new Utf8JsonReader(span, isFinalBlock, state);
+                while (reader.Read())
+                {
+                    switch (reader.TokenType)
+                    {
+                        case JsonTokenType.StartObject:
+                        case JsonTokenType.StartArray:
+                            containerDepth++;
+                            break;
+
+                        case JsonTokenType.EndObject:
+                        case JsonTokenType.EndArray:
+                            containerDepth--;
+                            if (containerDepth <= 1)
+                            {
+                                pendingKey = null;
+                                skipPendingValue = false;
+                            }
+                            break;
+
+                        case JsonTokenType.PropertyName when containerDepth == 1:
+                            if (filterSettingsKeys)
+                            {
+                                if (!reader.ValueIsEscaped)
+                                {
+                                    if (IsPureSettingsUiKeyUtf8(reader.ValueSpan))
+                                    {
+                                        pendingKey = null;
+                                        skipPendingValue = true;
+                                        break;
+                                    }
+                                }
+                                else
+                                {
+                                    string escapedKey = reader.GetString() ?? string.Empty;
+                                    if (IsPureSettingsUiKey(escapedKey))
+                                    {
+                                        pendingKey = null;
+                                        skipPendingValue = true;
+                                        break;
+                                    }
+
+                                    pendingKey = escapedKey;
+                                    skipPendingValue = false;
+                                    break;
+                                }
+                            }
+
+                            pendingKey = reader.GetString() ?? string.Empty;
+                            skipPendingValue = false;
+                            break;
+
+                        case JsonTokenType.String when containerDepth == 1:
+                            if (!skipPendingValue && pendingKey is not null)
+                            {
+                                loaded[pendingKey] = reader.GetString() ?? string.Empty;
+                            }
+
+                            pendingKey = null;
+                            skipPendingValue = false;
+                            break;
+
+                        case JsonTokenType.Null or JsonTokenType.True or JsonTokenType.False or JsonTokenType.Number when containerDepth == 1:
+                            pendingKey = null;
+                            skipPendingValue = false;
+                            break;
+                    }
+                }
+
+                state = reader.CurrentState;
+                int consumed = bomOffset + (int)reader.BytesConsumed;
+                int leftover = bytesInBuffer - consumed;
+                if (leftover > 0)
+                {
+                    if (leftover == buffer.Length)
+                    {
+                        byte[] larger = ArrayPool<byte>.Shared.Rent(buffer.Length * 2);
+                        buffer.AsSpan(0, leftover).CopyTo(larger);
+                        ArrayPool<byte>.Shared.Return(buffer);
+                        buffer = larger;
+                    }
+                    else if (consumed > 0)
+                    {
+                        buffer.AsSpan(consumed, leftover).CopyTo(buffer);
+                    }
+                }
+
+                bytesInBuffer = leftover;
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[LocalizationService] Failed to parse locale '{locale}': {ex.Message}");
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+
+        loaded.TrimExcess();
+        return loaded;
+    }
+
+    private static bool TryResolveFallbackKey(
+        string locale,
+        Dictionary<string, string>? alreadyLoadedLocale,
+        string key,
+        out string? value)
+    {
+        if (alreadyLoadedLocale is not null)
+        {
+            return alreadyLoadedLocale.TryGetValue(key, out value);
+        }
+
+        if (s_residentHostKeyFilterEnabled && IsPureSettingsUiKey(key))
+        {
+            value = null;
+            return false;
+        }
+
+        lock (s_loadLock)
+        {
+            if (s_missingKeyFallbackCache is not null &&
+                s_missingKeyFallbackCache.TryGetValue((locale, key), out string? cached))
+            {
+                value = cached;
+                return cached is not null;
+            }
+        }
+
+        string? lookedUp = TryScanSingleKeyFromLocaleStream(locale, key);
+
+        lock (s_loadLock)
+        {
+            s_missingKeyFallbackCache ??= new Dictionary<(string Locale, string Key), string?>(16);
+            if (s_missingKeyFallbackCache.Count >= MaxMissingKeyFallbackCacheEntries)
+            {
+                s_missingKeyFallbackCache.Clear();
+            }
+
+            s_missingKeyFallbackCache[(locale, key)] = lookedUp;
+        }
+
+        value = lookedUp;
+        return lookedUp is not null;
+    }
+
+    private static string? TryScanSingleKeyFromLocaleStream(string locale, string targetKey)
+    {
+        using Stream? stream = OpenLocaleStream(locale);
+        if (stream is null)
+        {
+            return null;
+        }
+
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(16 * 1024);
+        try
+        {
+            int bytesInBuffer = 0;
+            bool firstChunk = true;
+            bool isFinalBlock = false;
+            JsonReaderState state = new(s_localeJsonReaderOptions);
+            int containerDepth = 0;
+            bool matchedProperty = false;
+
+            while (!isFinalBlock)
+            {
+                int bytesRead = ReadIntoBuffer(stream, buffer.AsSpan(bytesInBuffer));
+                bytesInBuffer += bytesRead;
+                isFinalBlock = bytesRead == 0;
+
+                ReadOnlySpan<byte> span = buffer.AsSpan(0, bytesInBuffer);
+                int bomOffset = 0;
+                if (firstChunk)
+                {
+                    firstChunk = false;
+                    if (span.Length >= 3 && span[0] == 0xEF && span[1] == 0xBB && span[2] == 0xBF)
+                    {
+                        bomOffset = 3;
+                        span = span[3..];
+                    }
+                }
+
+                var reader = new Utf8JsonReader(span, isFinalBlock, state);
+                while (reader.Read())
+                {
+                    switch (reader.TokenType)
+                    {
+                        case JsonTokenType.StartObject:
+                        case JsonTokenType.StartArray:
+                            containerDepth++;
+                            break;
+
+                        case JsonTokenType.EndObject:
+                        case JsonTokenType.EndArray:
+                            containerDepth--;
+                            if (containerDepth <= 1)
+                            {
+                                matchedProperty = false;
+                            }
+                            break;
+
+                        case JsonTokenType.PropertyName when containerDepth == 1:
+                            matchedProperty = reader.ValueTextEquals(targetKey.AsSpan());
+                            break;
+
+                        case JsonTokenType.String when containerDepth == 1:
+                            if (matchedProperty)
+                            {
+                                return reader.GetString();
+                            }
+                            break;
+
+                        case JsonTokenType.Null or JsonTokenType.True or JsonTokenType.False or JsonTokenType.Number when containerDepth == 1:
+                            matchedProperty = false;
+                            break;
+                    }
+                }
+
+                state = reader.CurrentState;
+                int consumed = bomOffset + (int)reader.BytesConsumed;
+                int leftover = bytesInBuffer - consumed;
+                if (leftover > 0)
+                {
+                    if (leftover == buffer.Length)
+                    {
+                        byte[] larger = ArrayPool<byte>.Shared.Rent(buffer.Length * 2);
+                        buffer.AsSpan(0, leftover).CopyTo(larger);
+                        ArrayPool<byte>.Shared.Return(buffer);
+                        buffer = larger;
+                    }
+                    else if (consumed > 0)
+                    {
+                        buffer.AsSpan(consumed, leftover).CopyTo(buffer);
+                    }
+                }
+
+                bytesInBuffer = leftover;
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[LocalizationService] Fallback scan failed for '{locale}': {ex.Message}");
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+
+        return null;
     }
 
 #if DESKBOX_NATIVE_AOT && DESKBOX_AOT_SMOKE_HARNESS
@@ -567,6 +1149,9 @@ public sealed class LocalizationService
             resources.TryGetValue("Search.Action.OpenSettings", out string? openSettings) &&
                 !string.IsNullOrWhiteSpace(openSettings));
     }
+
+    internal static Dictionary<string, string>? DeserializeAotSmokeLocaleDictionary(ReadOnlySpan<byte> utf8Json) =>
+        JsonSerializer.Deserialize(utf8Json, LocalizationJsonContext.Default.LocalizedStrings);
 #endif
 }
 

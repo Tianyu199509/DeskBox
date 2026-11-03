@@ -1,4 +1,5 @@
 using DeskBox.Models;
+using DeskBox.Platform;
 
 namespace DeskBox.Services;
 
@@ -24,11 +25,18 @@ public sealed partial class WidgetManager
                 return new(0, oldRoot, newRoot, 0, 0, false);
             var widgets = GetStorageMigrationWidgets();
             folders = BuildStorageMigrationFolders(oldRoot, newRoot, widgets);
+            string[] preExistingDestinationFolders = ManagedStorageOwnershipFileOps.CaptureExistingChildNames(
+                newRoot,
+                ManagedStorageMigrationService.TemporaryFolderName);
             SetManagedStorageMigrationBusy(folders.Select(f => f.WidgetId), true);
             using var transfer = _fileService.TransferSessions.Begin(folders.Select(f =>
                 new FileTransferRegistration(f.SourceFolder, f.DestinationFolder, SourceIsDirectory: true)), isMove: true);
             App.Log($"[ManagedStorageMigration] Copy transaction requested widgets={folders.Count} source='{oldRoot}' target='{newRoot}'");
             var (journal, resumed) = await StorageMigration.CopyAsync(oldRoot, newRoot, folders, options);
+            ManagedStorageOwnershipFileOps.CommitMigrationDestinationOwnership(
+                newRoot,
+                folders.Select(static f => f.ManagedFolderName),
+                preExistingDestinationFolders);
             options.CancellationToken.ThrowIfCancellationRequested();
             // A component created/removed/repointed during copying invalidates the
             // whole batch. Never silently commit a stale widget snapshot.
@@ -50,6 +58,10 @@ public sealed partial class WidgetManager
                 foreach (var widget in widgets)
                 {
                     var folder = folders.Single(f => f.WidgetId == widget.Id);
+                    WidgetPathRebaseHelper.RebaseFolderTree(
+                        widget,
+                        folder.OriginalMappedFolderPath,
+                        folder.DestinationFolder);
                     widget.ManagedFolderName = folder.ManagedFolderName;
                     widget.MappedFolderPath = folder.DestinationFolder;
                 }
@@ -62,6 +74,10 @@ public sealed partial class WidgetManager
                 foreach (var widget in widgets)
                 {
                     var folder = folders.Single(f => f.WidgetId == widget.Id);
+                    WidgetPathRebaseHelper.RebaseFolderTree(
+                        widget,
+                        folder.DestinationFolder,
+                        folder.OriginalMappedFolderPath);
                     widget.ManagedFolderName = folder.OriginalManagedFolderName;
                     widget.MappedFolderPath = folder.OriginalMappedFolderPath;
                 }
@@ -75,6 +91,7 @@ public sealed partial class WidgetManager
             journal.Entries.Clear();
             try { await StorageMigration.SaveAsync(journal); }
             catch (Exception ex) { App.Log($"[ManagedStorageMigration] Commit receipt will reconcile on startup: {ex}"); }
+            StorageMigrationNativeMethods.TryPruneEmptyMigrationWorkspace(journal.TemporaryDirectory);
             foreach (var folder in folders)
             {
                 try { await RefreshFileWidgetAsync(folder.WidgetId); }
@@ -142,6 +159,10 @@ public sealed partial class WidgetManager
                     _settingsService.Settings.FileWidget.DefaultManagedStorageRootPath = journal.OldRootPath;
                     for (int i = 0; i < widgets.Count; i++)
                     {
+                        WidgetPathRebaseHelper.RebaseFolderTree(
+                            widgets[i]!,
+                            journal.Folders[i].DestinationFolder,
+                            journal.Folders[i].OriginalMappedFolderPath);
                         widgets[i]!.MappedFolderPath = journal.Folders[i].OriginalMappedFolderPath;
                         widgets[i]!.ManagedFolderName = journal.Folders[i].OriginalManagedFolderName;
                     }
@@ -170,6 +191,20 @@ public sealed partial class WidgetManager
     private List<ManagedStorageMigrationFolder> BuildStorageMigrationFolders(
         string oldRoot, string newRoot, IReadOnlyList<WidgetConfig> widgets)
     {
+        ManagedStorageRootValidationResult validation =
+            ManagedStoragePathService.ValidateStorageRootCandidate(
+                newRoot,
+                AppDistributionService.Current.IsMicrosoftStore);
+        if (!validation.IsValid)
+        {
+            StorageMigrationProblem problem = validation.Problem == ManagedStorageRootValidationProblem.DesktopOverlap
+                ? StorageMigrationProblem.RootsOverlap
+                : StorageMigrationProblem.Unsupported;
+            throw new StorageMigrationException(
+                problem,
+                $"The selected storage root '{newRoot}' is not supported ({validation.Problem}).");
+        }
+
         if (ManagedStoragePathService.IsSameOrDescendant(newRoot, oldRoot) ||
             ManagedStoragePathService.IsSameOrDescendant(oldRoot, newRoot))
             throw new StorageMigrationException(StorageMigrationProblem.RootsOverlap,

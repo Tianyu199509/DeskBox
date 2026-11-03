@@ -42,15 +42,19 @@ public sealed partial class SettingsWindow
                 return;
             }
 
-            string normalizedPath = SettingsService.NormalizeManagedStorageRootPath(folderPath);
+            string scopedPath = ManagedStoragePathService.ResolvePickedStorageRootPath(
+                folderPath,
+                ManagedStorageMigrationService.TemporaryFolderName);
+            string normalizedPath = SettingsService.NormalizeManagedStorageRootPath(scopedPath);
             if (string.Equals(normalizedPath, ViewModel.ManagedStorageRootPath, StringComparison.OrdinalIgnoreCase))
             {
                 return;
             }
 
             // The desktop organizer sweeps the desktop on every run; a
-            // storage root there would re-ingest its own managed folders,
-            // so the choice is rejected before any migration is offered.
+            // storage root there (or containing Desktop) would re-ingest its
+            // own managed folders, so the choice is rejected before any
+            // migration is offered.
             if (ManagedStoragePathService.OverlapsDesktop(normalizedPath))
             {
                 await ShowManagedStorageDesktopOverlapDialogAsync();

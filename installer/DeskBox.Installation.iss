@@ -5,6 +5,9 @@ const
   DeskBoxUninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{5E052824-3456-427E-9759-3BCAE078A1D3}_is1';
   DeskBoxWowUninstallKey = 'Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\{5E052824-3456-427E-9759-3BCAE078A1D3}_is1';
   DeskBoxInstallStateKey = 'Software\DeskBox\DirectInstall';
+  DeskBoxInstallStartupRunKey = 'Software\Microsoft\Windows\CurrentVersion\Run';
+  DeskBoxInstallWowStartupRunKey = 'Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run';
+  DeskBoxInstallStartupTaskPrefix = 'DeskBox User Startup';
 
 var
   DirectInstallUpgrade: Boolean;
@@ -13,13 +16,55 @@ var
   ExistingInstallCandidates: string;
 
 function NormalizeDirPath(Path: string): string;
+var
+  TrimmedPath: string;
 begin
-  Result := RemoveBackslashUnlessRoot(ExpandConstant(Trim(Path)));
+  TrimmedPath := Trim(Path);
+  if TrimmedPath = '' then
+  begin
+    Result := '';
+    Exit;
+  end;
+
+  if Pos('{', TrimmedPath) > 0 then
+  begin
+    try
+      TrimmedPath := ExpandConstant(TrimmedPath);
+    except
+      Log('DeskBox preserved literal brace path without constant expansion: ' + TrimmedPath);
+    end;
+  end;
+
+  Result := RemoveBackslashUnlessRoot(TrimmedPath);
 end;
 
 function SameInstallPath(LeftPath: string; RightPath: string): Boolean;
 begin
   Result := CompareText(NormalizeDirPath(LeftPath), NormalizeDirPath(RightPath)) = 0;
+end;
+
+function IsDirectoryWithinRoot(Path: string; RootPath: string): Boolean;
+var
+  NormalizedPath: string;
+  NormalizedRoot: string;
+  RootPrefix: string;
+begin
+  Result := False;
+  NormalizedPath := NormalizeDirPath(Path);
+  NormalizedRoot := NormalizeDirPath(RootPath);
+  if (NormalizedPath = '') or (NormalizedRoot = '') then
+    Exit;
+
+  if CompareText(NormalizedPath, NormalizedRoot) = 0 then
+  begin
+    Result := True;
+    Exit;
+  end;
+
+  RootPrefix := AddBackslash(NormalizedRoot);
+  Result :=
+    (Length(NormalizedPath) > Length(RootPrefix)) and
+    (CompareText(Copy(NormalizedPath, 1, Length(RootPrefix)), RootPrefix) = 0);
 end;
 
 function ExtractExecutablePath(CommandLine: string): string;
@@ -41,11 +86,35 @@ begin
     Exit;
   end;
 
+  if FileExists(CommandLine) then
+  begin
+    Result := CommandLine;
+    Exit;
+  end;
+
   EndPosition := Pos(' ', CommandLine);
   if EndPosition > 0 then
     Result := Copy(CommandLine, 1, EndPosition - 1)
   else
     Result := CommandLine;
+end;
+
+function UnquoteExecutablePath(RawPath: string): string;
+begin
+  Result := Trim(RawPath);
+  if (Length(Result) >= 2) and
+     (Copy(Result, 1, 1) = '"') and
+     (Copy(Result, Length(Result), 1) = '"') then
+    Result := Trim(Copy(Result, 2, Length(Result) - 2))
+  else if Copy(Result, 1, 1) = '"' then
+    Result := ExtractExecutablePath(Result);
+end;
+
+function EscapePowerShellString(Value: string): string;
+begin
+  Result := Value;
+  StringChangeEx(Result, '"', '', True);
+  StringChangeEx(Result, '''', '''''', True);
 end;
 
 function IsDeskBoxInstallPath(Path: string): Boolean;
@@ -70,6 +139,193 @@ begin
     (IsDeskBoxInstallPath(NormalizedPath) or
      FileExists(AddBackslash(NormalizedPath) + 'DeskBox.Updater.exe') or
      FileExists(AddBackslash(NormalizedPath) + 'DeskBox.runtimeconfig.json'));
+end;
+
+function GetUsersRootPath: string;
+var
+  PublicProfilePath: string;
+  CurrentProfilePath: string;
+  CandidateRoot: string;
+begin
+  Result := '';
+  CandidateRoot := '';
+  PublicProfilePath := NormalizeDirPath(ExpandConstant('{%PUBLIC}'));
+  if PublicProfilePath <> '' then
+    CandidateRoot := NormalizeDirPath(ExtractFileDir(PublicProfilePath));
+
+  if (CandidateRoot = '') or
+     (CompareText(RemoveBackslashUnlessRoot(ExtractFileDrive(CandidateRoot)), CandidateRoot) = 0) then
+  begin
+    CurrentProfilePath := NormalizeDirPath(ExpandConstant('{%USERPROFILE}'));
+    if CurrentProfilePath <> '' then
+      CandidateRoot := NormalizeDirPath(ExtractFileDir(CurrentProfilePath));
+  end;
+
+  if (CandidateRoot <> '') and
+     (CompareText(RemoveBackslashUnlessRoot(ExtractFileDrive(CandidateRoot)), CandidateRoot) <> 0) and
+     (not IsDirectoryWithinRoot(CandidateRoot, ExpandConstant('{win}'))) and
+     (not SameInstallPath(CandidateRoot, ExpandConstant('{commonpf}'))) and
+     (not SameInstallPath(CandidateRoot, ExpandConstant('{commonpf32}'))) and
+     (not SameInstallPath(CandidateRoot, ExpandConstant('{commonappdata}'))) then
+    Result := CandidateRoot;
+end;
+
+function IsSharedOrTemplateProfileDirName(FolderName: string): Boolean;
+begin
+  Result :=
+    (FolderName = '') or
+    (FolderName = '.') or
+    (FolderName = '..') or
+    (CompareText(FolderName, 'Public') = 0) or
+    (CompareText(FolderName, 'Default') = 0) or
+    (CompareText(FolderName, 'Default User') = 0) or
+    (CompareText(FolderName, 'All Users') = 0);
+end;
+
+function TryGetUserProfileRootForPath(CandidatePath: string; var ProfileRoot: string): Boolean;
+var
+  NormalizedPath: string;
+  UsersRoot: string;
+  PublicRoot: string;
+  RelativePath: string;
+  AccountFolder: string;
+  SlashPosition: Integer;
+begin
+  Result := False;
+  ProfileRoot := '';
+  NormalizedPath := NormalizeDirPath(CandidatePath);
+  UsersRoot := GetUsersRootPath;
+  if (NormalizedPath = '') or (UsersRoot = '') then
+    Exit;
+
+  PublicRoot := NormalizeDirPath(ExpandConstant('{%PUBLIC}'));
+  if (PublicRoot <> '') and IsDirectoryWithinRoot(NormalizedPath, PublicRoot) then
+    Exit;
+
+  if SameInstallPath(NormalizedPath, UsersRoot) or
+     (not IsDirectoryWithinRoot(NormalizedPath, UsersRoot)) then
+    Exit;
+
+  RelativePath := Copy(NormalizedPath, Length(AddBackslash(UsersRoot)) + 1, MaxInt);
+  SlashPosition := Pos('\', RelativePath);
+  if SlashPosition > 0 then
+    AccountFolder := Copy(RelativePath, 1, SlashPosition - 1)
+  else
+    AccountFolder := RelativePath;
+
+  if IsSharedOrTemplateProfileDirName(AccountFolder) then
+    Exit;
+
+  ProfileRoot := AddBackslash(UsersRoot) + AccountFolder;
+  Result := True;
+end;
+
+function IsPerUserProfileInstallPath(CandidatePath: string): Boolean;
+var
+  ProfileRoot: string;
+  CurrentProfilePath: string;
+begin
+  CurrentProfilePath := NormalizeDirPath(ExpandConstant('{%USERPROFILE}'));
+  Result :=
+    IsDirectoryWithinRoot(CandidatePath, ExpandConstant('{localappdata}')) or
+    IsDirectoryWithinRoot(CandidatePath, ExpandConstant('{userappdata}')) or
+    ((CurrentProfilePath <> '') and
+     (not IsDirectoryWithinRoot(CurrentProfilePath, ExpandConstant('{win}'))) and
+     IsDirectoryWithinRoot(CandidatePath, CurrentProfilePath)) or
+    TryGetUserProfileRootForPath(CandidatePath, ProfileRoot);
+end;
+
+function IsOtherUserProfileInstallPath(CandidatePath: string): Boolean;
+var
+  ProfileRoot: string;
+  CurrentProfilePath: string;
+begin
+  Result := False;
+  CurrentProfilePath := NormalizeDirPath(ExpandConstant('{%USERPROFILE}'));
+  if (CurrentProfilePath = '') or IsDirectoryWithinRoot(CurrentProfilePath, ExpandConstant('{win}')) then
+    Exit;
+
+  if TryGetUserProfileRootForPath(CandidatePath, ProfileRoot) then
+    Result := not SameInstallPath(ProfileRoot, CurrentProfilePath);
+end;
+
+function PathContainsSegment(UpperBoundedPath: string; Segment: string): Boolean;
+begin
+  Result := Pos(Uppercase(Segment), UpperBoundedPath) > 0;
+end;
+
+function IsExcludedHeuristicInstallPath(Path: string): Boolean;
+var
+  NormalizedPath: string;
+  UpperBoundedPath: string;
+  TempRoot: string;
+  SetupTempRoot: string;
+begin
+  Result := False;
+  NormalizedPath := NormalizeDirPath(Path);
+  if NormalizedPath = '' then
+  begin
+    Result := True;
+    Exit;
+  end;
+
+  if (not IsAdminInstallMode) and IsOtherUserProfileInstallPath(NormalizedPath) then
+  begin
+    Result := True;
+    Exit;
+  end;
+
+  UpperBoundedPath := Uppercase(AddBackslash(NormalizedPath));
+
+  // Exclude Microsoft Store / MSIX package and execution alias directories.
+  if IsDirectoryWithinRoot(NormalizedPath, ExpandConstant('{commonpf}\WindowsApps')) or
+     IsDirectoryWithinRoot(NormalizedPath, ExpandConstant('{localappdata}\Microsoft\WindowsApps')) or
+     PathContainsSegment(UpperBoundedPath, '\WINDOWSAPPS\') then
+  begin
+    Result := True;
+    Exit;
+  end;
+
+  // Exclude temporary directories and DeskBox self-update staging folders.
+  TempRoot := NormalizeDirPath(ExpandConstant('{%TEMP}'));
+  if (TempRoot <> '') and IsDirectoryWithinRoot(NormalizedPath, TempRoot) then
+  begin
+    Result := True;
+    Exit;
+  end;
+
+  SetupTempRoot := '';
+  if not IsUninstaller then
+  begin
+    try
+      SetupTempRoot := NormalizeDirPath(ExpandConstant('{tmp}'));
+    except
+      SetupTempRoot := '';
+    end;
+  end;
+  if (SetupTempRoot <> '') and IsDirectoryWithinRoot(NormalizedPath, SetupTempRoot) then
+  begin
+    Result := True;
+    Exit;
+  end;
+
+  if PathContainsSegment(UpperBoundedPath, '\APPDATA\LOCAL\TEMP\') or
+     PathContainsSegment(UpperBoundedPath, '\APPDATA\LOCAL\DESKBOX\UPDATES\') then
+  begin
+    Result := True;
+    Exit;
+  end;
+
+  // Exclude repository build and packaging output directories.
+  if PathContainsSegment(UpperBoundedPath, '\BIN\DEBUG\') or
+     PathContainsSegment(UpperBoundedPath, '\BIN\RELEASE\') or
+     PathContainsSegment(UpperBoundedPath, '\.ARTIFACTS\') or
+     PathContainsSegment(UpperBoundedPath, '\ARTIFACTS\') or
+     PathContainsSegment(UpperBoundedPath, '\APPPACKAGES\') then
+  begin
+    Result := True;
+    Exit;
+  end;
 end;
 
 function InstallCandidateListContains(Path: string): Boolean;
@@ -110,6 +366,23 @@ begin
   Log('DeskBox install candidate detected from ' + Source + ': ' + NormalizedPath);
 end;
 
+procedure AddHeuristicInstallCandidate(Path: string; Source: string; RequireExecutable: Boolean);
+var
+  NormalizedPath: string;
+begin
+  NormalizedPath := NormalizeDirPath(Path);
+  if NormalizedPath = '' then
+    Exit;
+
+  if IsExcludedHeuristicInstallPath(NormalizedPath) then
+  begin
+    Log('DeskBox ignored excluded heuristic install candidate from ' + Source + ': ' + NormalizedPath);
+    Exit;
+  end;
+
+  AddInstallCandidate(NormalizedPath, Source, RequireExecutable);
+end;
+
 procedure AddRegistryInstallCandidate(RootKey: Integer; KeyName: string; Source: string);
 var
   InstallPath: string;
@@ -117,6 +390,103 @@ begin
   InstallPath := '';
   if RegQueryStringValue(RootKey, KeyName, 'InstallLocation', InstallPath) then
     AddInstallCandidate(InstallPath, Source, False);
+end;
+
+procedure AddStartupRunInstallCandidate(RootKey: Integer; KeyName: string; Source: string);
+var
+  CommandValue: string;
+  ExecutablePath: string;
+begin
+  CommandValue := '';
+  if not RegQueryStringValue(RootKey, KeyName, 'DeskBox', CommandValue) then
+    Exit;
+
+  ExecutablePath := ExtractExecutablePath(CommandValue);
+  if (ExecutablePath = '') or
+     (CompareText(ExtractFileName(ExecutablePath), DeskBoxLegacyExeName) <> 0) then
+    Exit;
+
+  AddHeuristicInstallCandidate(ExtractFileDir(ExecutablePath), Source, True);
+end;
+
+function IsLoadedUserAccountSid(SubkeyName: string): Boolean;
+var
+  UpperName: string;
+  ClassesSuffix: string;
+begin
+  Result := False;
+  UpperName := Uppercase(Trim(SubkeyName));
+  if (UpperName = '') or
+     (UpperName = '.DEFAULT') or
+     (UpperName = 'S-1-5-18') or
+     (UpperName = 'S-1-5-19') or
+     (UpperName = 'S-1-5-20') then
+    Exit;
+
+  if Pos('S-1-', UpperName) <> 1 then
+    Exit;
+
+  ClassesSuffix := '_CLASSES';
+  if (Length(UpperName) > Length(ClassesSuffix)) and
+     (Copy(UpperName, Length(UpperName) - Length(ClassesSuffix) + 1, Length(ClassesSuffix)) = ClassesSuffix) then
+    Exit;
+
+  Result := True;
+end;
+
+function RegistryKeyMatchesInstallPath(
+  RootKey: Integer;
+  KeyName: string;
+  CandidatePath: string): Boolean;
+var
+  RegisteredPath: string;
+begin
+  Result := False;
+  RegisteredPath := '';
+  if RegQueryStringValue(RootKey, KeyName, 'InstallLocation', RegisteredPath) then
+    Result := SameInstallPath(RegisteredPath, CandidatePath);
+end;
+
+function HasMachineRegistrationForPath(CandidatePath: string): Boolean;
+begin
+  Result :=
+    RegistryKeyMatchesInstallPath(HKEY_LOCAL_MACHINE, DeskBoxInstallStateKey, CandidatePath) or
+    RegistryKeyMatchesInstallPath(HKEY_LOCAL_MACHINE, DeskBoxUninstallKey, CandidatePath) or
+    RegistryKeyMatchesInstallPath(HKEY_LOCAL_MACHINE, DeskBoxWowUninstallKey, CandidatePath);
+end;
+
+function HasCurrentUserRegistrationForPath(CandidatePath: string): Boolean;
+begin
+  Result :=
+    RegistryKeyMatchesInstallPath(HKEY_CURRENT_USER, DeskBoxInstallStateKey, CandidatePath) or
+    RegistryKeyMatchesInstallPath(HKEY_CURRENT_USER, DeskBoxUninstallKey, CandidatePath) or
+    RegistryKeyMatchesInstallPath(HKEY_CURRENT_USER, DeskBoxWowUninstallKey, CandidatePath);
+end;
+
+function HasLoadedUserHiveRegistrationForPath(CandidatePath: string): Boolean;
+var
+  UserSids: TArrayOfString;
+  Index: Integer;
+  Sid: string;
+begin
+  Result := False;
+  if not RegGetSubkeyNames(HKEY_USERS, '', UserSids) then
+    Exit;
+
+  for Index := 0 to GetArrayLength(UserSids) - 1 do
+  begin
+    Sid := UserSids[Index];
+    if IsLoadedUserAccountSid(Sid) then
+    begin
+      if RegistryKeyMatchesInstallPath(HKEY_USERS, Sid + '\' + DeskBoxInstallStateKey, CandidatePath) or
+         RegistryKeyMatchesInstallPath(HKEY_USERS, Sid + '\' + DeskBoxUninstallKey, CandidatePath) or
+         RegistryKeyMatchesInstallPath(HKEY_USERS, Sid + '\' + DeskBoxWowUninstallKey, CandidatePath) then
+      begin
+        Result := True;
+        Exit;
+      end;
+    end;
+  end;
 end;
 
 function TryReadShortcutTarget(ShortcutPath: string; var TargetPath: string): Boolean;
@@ -164,6 +534,243 @@ begin
   AddInstallCandidate(TargetDirectory, 'shortcut ' + ShortcutPath, True);
 end;
 
+procedure AddHeuristicShortcutInstallCandidate(ShortcutPath: string);
+var
+  TargetPath: string;
+begin
+  if not TryReadShortcutTarget(ShortcutPath, TargetPath) then
+    Exit;
+
+  if CompareText(ExtractFileName(TargetPath), DeskBoxLegacyExeName) <> 0 then
+    Exit;
+
+  AddHeuristicInstallCandidate(ExtractFileDir(TargetPath), 'profile shortcut ' + ShortcutPath, True);
+end;
+
+procedure AddLoadedUserHivesCandidates;
+var
+  UserSids: TArrayOfString;
+  Index: Integer;
+  Sid: string;
+begin
+  if not IsAdminInstallMode then
+    Exit;
+
+  if not RegGetSubkeyNames(HKEY_USERS, '', UserSids) then
+    Exit;
+
+  for Index := 0 to GetArrayLength(UserSids) - 1 do
+  begin
+    Sid := UserSids[Index];
+    if IsLoadedUserAccountSid(Sid) then
+    begin
+      AddRegistryInstallCandidate(HKEY_USERS, Sid + '\' + DeskBoxUninstallKey, 'HKU ' + Sid + ' uninstall');
+      AddRegistryInstallCandidate(HKEY_USERS, Sid + '\' + DeskBoxWowUninstallKey, 'HKU ' + Sid + ' 32-bit uninstall');
+      AddRegistryInstallCandidate(HKEY_USERS, Sid + '\' + DeskBoxInstallStateKey, 'HKU ' + Sid + ' DeskBox install state');
+      AddStartupRunInstallCandidate(HKEY_USERS, Sid + '\' + DeskBoxInstallStartupRunKey, 'HKU ' + Sid + ' Run startup');
+    end;
+  end;
+end;
+
+function IsInstallStartupTaskName(TaskName: string): Boolean;
+begin
+  Result :=
+    (CompareText(TaskName, DeskBoxInstallStartupTaskPrefix) = 0) or
+    (Pos(Uppercase(DeskBoxInstallStartupTaskPrefix + '-'), Uppercase(TaskName)) = 1);
+end;
+
+procedure AddStartupScheduledTaskCandidates;
+var
+  ScheduleService: Variant;
+  RootFolder: Variant;
+  RegisteredTasks: Variant;
+  RegisteredTask: Variant;
+  TaskDefinition: Variant;
+  Actions: Variant;
+  Action: Variant;
+  ActionPath: string;
+  ExecutablePath: string;
+  TaskName: string;
+  TaskIndex: Integer;
+  ActionIndex: Integer;
+begin
+  try
+    ScheduleService := CreateOleObject('Schedule.Service');
+    ScheduleService.Connect;
+    RootFolder := ScheduleService.GetFolder('\');
+    RegisteredTasks := RootFolder.GetTasks(1);
+
+    for TaskIndex := 1 to RegisteredTasks.Count do
+    begin
+      RegisteredTask := RegisteredTasks.Item(TaskIndex);
+      TaskName := RegisteredTask.Name;
+      if IsInstallStartupTaskName(TaskName) then
+      begin
+        TaskDefinition := RegisteredTask.Definition;
+        Actions := TaskDefinition.Actions;
+        for ActionIndex := 1 to Actions.Count do
+        begin
+          ActionPath := '';
+          try
+            Action := Actions.Item(ActionIndex);
+            ActionPath := Action.Path;
+          except
+            ActionPath := '';
+          end;
+
+          ExecutablePath := UnquoteExecutablePath(ActionPath);
+          if (ExecutablePath <> '') and
+             (CompareText(ExtractFileName(ExecutablePath), DeskBoxLegacyExeName) = 0) then
+            AddHeuristicInstallCandidate(
+              ExtractFileDir(ExecutablePath),
+              'startup scheduled task ' + TaskName,
+              True);
+        end;
+      end;
+    end;
+  except
+    Log('DeskBox startup scheduled tasks could not be inspected during install discovery.');
+  end;
+end;
+
+procedure AddAllUserProfileInstallCandidates;
+var
+  UsersRoot: string;
+  ProfileRoot: string;
+  FindRec: TFindRec;
+begin
+  if not IsAdminInstallMode then
+    Exit;
+
+  UsersRoot := GetUsersRootPath;
+  if (UsersRoot = '') or (not DirExists(UsersRoot)) then
+    Exit;
+
+  if FindFirst(AddBackslash(UsersRoot) + '*', FindRec) then
+  begin
+    try
+      repeat
+        if ((FindRec.Attributes and FILE_ATTRIBUTE_DIRECTORY) <> 0) and
+           (not IsSharedOrTemplateProfileDirName(FindRec.Name)) then
+        begin
+          ProfileRoot := AddBackslash(UsersRoot) + FindRec.Name;
+          AddHeuristicInstallCandidate(
+            ProfileRoot + '\AppData\Local\Programs\DeskBox',
+            'user profile default path (' + FindRec.Name + ')',
+            True);
+          AddHeuristicInstallCandidate(
+            ProfileRoot + '\AppData\Local\DeskBox',
+            'user profile legacy path (' + FindRec.Name + ')',
+            True);
+          AddHeuristicShortcutInstallCandidate(ProfileRoot + '\Desktop\DeskBox.lnk');
+          AddHeuristicShortcutInstallCandidate(
+            ProfileRoot + '\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\DeskBox.lnk');
+          AddHeuristicShortcutInstallCandidate(
+            ProfileRoot + '\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup\DeskBox.lnk');
+        end;
+      until not FindNext(FindRec);
+    finally
+      FindClose(FindRec);
+    end;
+  end;
+end;
+
+procedure AddRunningExecutableCandidate(RawExecutablePath: string; Source: string);
+var
+  ExecutablePath: string;
+begin
+  ExecutablePath := UnquoteExecutablePath(RawExecutablePath);
+  if (ExecutablePath = '') or
+     (CompareText(ExtractFileName(ExecutablePath), DeskBoxLegacyExeName) <> 0) then
+    Exit;
+
+  AddHeuristicInstallCandidate(ExtractFileDir(ExecutablePath), Source, True);
+end;
+
+procedure AddRunningProcessCandidatesViaPowerShell;
+var
+  PowerShellPath: string;
+  TempOutputFile: string;
+  CommandLine: string;
+  Parameters: string;
+  ResultCode: Integer;
+  Lines: TArrayOfString;
+  Index: Integer;
+begin
+  if IsUninstaller then
+    Exit;
+
+  PowerShellPath := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
+  if not FileExists(PowerShellPath) then
+    Exit;
+
+  try
+    TempOutputFile := ExpandConstant('{tmp}\deskbox-running-paths.txt');
+  except
+    Exit;
+  end;
+
+  DeleteFile(TempOutputFile);
+  CommandLine :=
+    '$out = ''' + EscapePowerShellString(TempOutputFile) + '''; ' +
+    '$paths = New-Object System.Collections.Generic.List[string]; ' +
+    'Get-Process -Name ''DeskBox'' -ErrorAction SilentlyContinue | ForEach-Object { ' +
+      'try { if ($_.Path) { [void]$paths.Add([string]$_.Path) } } catch {} ' +
+    '}; ' +
+    '[System.IO.File]::WriteAllLines($out, $paths, [System.Text.Encoding]::UTF8); ' +
+    'exit 0';
+  Parameters := '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "' + CommandLine + '"';
+
+  if Exec(PowerShellPath, Parameters, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and
+     (ResultCode = 0) and
+     LoadStringsFromFile(TempOutputFile, Lines) then
+  begin
+    for Index := 0 to GetArrayLength(Lines) - 1 do
+      AddRunningExecutableCandidate(Lines[Index], 'running DeskBox.exe process (PowerShell fallback)');
+  end;
+
+  DeleteFile(TempOutputFile);
+end;
+
+procedure AddRunningProcessInstallCandidates;
+var
+  Locator: Variant;
+  Service: Variant;
+  Processes: Variant;
+  ProcessItem: Variant;
+  ExecutablePathValue: Variant;
+  ExecutablePath: string;
+  Count: Integer;
+  Index: Integer;
+  HadUnreadableProcessPath: Boolean;
+begin
+  HadUnreadableProcessPath := False;
+  try
+    Locator := CreateOleObject('WbemScripting.SWbemLocator');
+    Service := Locator.ConnectServer('.', 'root\cimv2');
+    Processes := Service.ExecQuery('SELECT ExecutablePath FROM Win32_Process WHERE Name = ''DeskBox.exe''');
+    Count := Processes.Count;
+    for Index := 0 to Count - 1 do
+    begin
+      ProcessItem := Processes.ItemIndex(Index);
+      ExecutablePathValue := ProcessItem.ExecutablePath;
+      if (not VarIsNull(ExecutablePathValue)) and (not VarIsEmpty(ExecutablePathValue)) then
+      begin
+        ExecutablePath := ExecutablePathValue;
+        AddRunningExecutableCandidate(ExecutablePath, 'running DeskBox.exe process');
+      end
+      else
+        HadUnreadableProcessPath := True;
+    end;
+
+    if HadUnreadableProcessPath then
+      AddRunningProcessCandidatesViaPowerShell;
+  except
+    Log('DeskBox WMI running-process probe failed (' + GetExceptionMessage + '); trying PowerShell fallback.');
+    AddRunningProcessCandidatesViaPowerShell;
+  end;
+end;
+
 procedure CollectDirectInstallCandidates;
 begin
   ExistingInstallPath := '';
@@ -189,6 +796,14 @@ begin
   AddShortcutInstallCandidate(ExpandConstant('{userstartup}\DeskBox.lnk'));
   AddShortcutInstallCandidate(ExpandConstant('{commonstartup}\DeskBox.lnk'));
   AddShortcutInstallCandidate(ExpandConstant('{userappdata}\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar\DeskBox.lnk'));
+
+  AddStartupRunInstallCandidate(HKEY_CURRENT_USER, DeskBoxInstallStartupRunKey, 'HKCU Run startup');
+  AddStartupRunInstallCandidate(HKEY_LOCAL_MACHINE, DeskBoxInstallStartupRunKey, 'HKLM Run startup');
+  AddStartupRunInstallCandidate(HKEY_LOCAL_MACHINE, DeskBoxInstallWowStartupRunKey, 'HKLM 32-bit Run startup');
+  AddLoadedUserHivesCandidates;
+  AddStartupScheduledTaskCandidates;
+  AddAllUserProfileInstallCandidates;
+  AddRunningProcessInstallCandidates;
 end;
 
 function TryReadExplicitDirectory(var DirectoryPath: string): Boolean;
@@ -357,6 +972,20 @@ begin
       Exit;
     end;
 
+    if IsAdminInstallMode and
+       (not HasMachineRegistrationForPath(ExistingInstallPath)) and
+       (HasCurrentUserRegistrationForPath(ExistingInstallPath) or
+        HasLoadedUserHiveRegistrationForPath(ExistingInstallPath) or
+        IsPerUserProfileInstallPath(ExistingInstallPath)) then
+    begin
+      MessageText := FmtMessage(ExpandConstant('{cm:PerUserUpgradeScopeMismatch}'), [ExistingInstallPath]);
+      Log('DeskBox installation blocked: existing per-user installation cannot be upgraded in all-users mode: ' + ExistingInstallPath);
+      if not ShouldSuppressDirectInstallMessages then
+        MsgBox(MessageText, mbError, MB_OK);
+      DirectInstallUpgrade := False;
+      Exit;
+    end;
+
     // Architecture guard: silently replacing a native ARM64 install with
     // the emulated x64 build strands every future update on the x64 channel
     // (the running x64 process always selects x64 assets). The deliberate
@@ -382,12 +1011,6 @@ begin
   Result := True;
 end;
 
-function EscapePowerShellString(Value: string): string;
-begin
-  Result := Value;
-  StringChangeEx(Result, '''', '''''', True);
-end;
-
 function StopDeskBoxProcessesAtPath(InstallPath: string): Boolean;
 var
   PowerShellPath: string;
@@ -409,11 +1032,35 @@ begin
   end;
 
   CommandLine :=
+    '$names = @(''DeskBox.exe'', ''DeskBox.Settings.exe'', ''DeskBox.ThumbnailProxy.exe''); ' +
+    '$stemNames = @(''DeskBox'', ''DeskBox.Settings'', ''DeskBox.ThumbnailProxy''); ' +
     '$target = [System.IO.Path]::GetFullPath(''' + EscapePowerShellString(InstallPath) + ''').TrimEnd(''\''); ' +
-    'Get-CimInstance Win32_Process | ' +
-    'Where-Object { (@(''DeskBox.exe'', ''DeskBox.ThumbnailProxy.exe'') -icontains $_.Name) -and $_.ExecutablePath -and ' +
-    '([System.IO.Path]::GetDirectoryName($_.ExecutablePath)).TrimEnd(''\'') -ieq $target } | ' +
-    'ForEach-Object { Stop-Process -Id $_.ProcessId -Force }';
+    '$ids = New-Object System.Collections.Generic.List[int]; ' +
+    'try { ' +
+      'Get-CimInstance Win32_Process -ErrorAction Stop | ' +
+      'Where-Object { ($names -icontains $_.Name) -and $_.ExecutablePath -and ' +
+        '([System.IO.Path]::GetDirectoryName($_.ExecutablePath)).TrimEnd(''\'') -ieq $target } | ' +
+      'ForEach-Object { [void]$ids.Add([int]$_.ProcessId) } ' +
+    '} catch { ' +
+      'Get-Process -Name $stemNames -ErrorAction SilentlyContinue | ' +
+      'ForEach-Object { ' +
+        'try { ' +
+          '$p = $_.Path; ' +
+          'if ($p -and ([System.IO.Path]::GetDirectoryName($p)).TrimEnd(''\'') -ieq $target) { [void]$ids.Add([int]$_.Id) } ' +
+        '} catch {} ' +
+      '} ' +
+    '}; ' +
+    '$failed = $false; ' +
+    'foreach ($id in ($ids | Select-Object -Unique)) { ' +
+      'try { ' +
+        'Stop-Process -Id $id -Force -ErrorAction Stop; ' +
+        'Wait-Process -Id $id -Timeout 5 -ErrorAction SilentlyContinue ' +
+      '} catch { ' +
+        'if (Get-Process -Id $id -ErrorAction SilentlyContinue) { $failed = $true } ' +
+      '} ' +
+    '}; ' +
+    'if ($failed) { exit 1 }; ' +
+    'exit 0';
   Parameters := '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "' + CommandLine + '"';
 
   Log('DeskBox stopping processes under: ' + InstallPath);

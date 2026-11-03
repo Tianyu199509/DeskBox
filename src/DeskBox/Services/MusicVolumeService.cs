@@ -53,12 +53,7 @@ public sealed class MusicVolumeService
 #if !DESKBOX_NATIVE_AOT
         if (_backendMode == MusicVolumeBackendMode.CSharp)
         {
-            double systemVolume = GetSystemMasterVolume();
-            double? sessionVolume = TryGetSessionVolume(sourceAppUserModelId, sourceDisplayName);
-            return new MusicVolumeSnapshot(
-                systemVolume,
-                sessionVolume ?? 0.0,
-                sessionVolume.HasValue);
+            return GetVolumeSnapshotFromSharedDevice(sourceAppUserModelId, sourceDisplayName);
         }
 #endif
 
@@ -148,7 +143,48 @@ public sealed class MusicVolumeService
 #if !DESKBOX_NATIVE_AOT
     private static double GetSystemMasterVolume()
     {
-        if (TryGetEndpointVolume(out var endpointVolume))
+        if (!TryGetDefaultRenderDevice(out var device))
+        {
+            return 0.0;
+        }
+
+        try
+        {
+            return GetSystemMasterVolumeFromDevice(device);
+        }
+        finally
+        {
+            ReleaseComObject(device);
+        }
+    }
+
+    private static MusicVolumeSnapshot GetVolumeSnapshotFromSharedDevice(
+        string sourceAppUserModelId,
+        string sourceDisplayName)
+    {
+        if (!TryGetDefaultRenderDevice(out var device))
+        {
+            return new MusicVolumeSnapshot(0.0, 0.0, false);
+        }
+
+        try
+        {
+            double systemVolume = GetSystemMasterVolumeFromDevice(device);
+            double? sessionVolume = TryGetSessionVolumeFromDevice(device, sourceAppUserModelId, sourceDisplayName);
+            return new MusicVolumeSnapshot(
+                systemVolume,
+                sessionVolume ?? 0.0,
+                sessionVolume.HasValue);
+        }
+        finally
+        {
+            ReleaseComObject(device);
+        }
+    }
+
+    private static double GetSystemMasterVolumeFromDevice(IMMDevice device)
+    {
+        if (TryGetEndpointVolume(device, out var endpointVolume))
         {
             try
             {
@@ -186,9 +222,12 @@ public sealed class MusicVolumeService
         }
     }
 
-    private static double? TryGetSessionVolume(string sourceAppUserModelId, string sourceDisplayName)
+    private static double? TryGetSessionVolumeFromDevice(
+        IMMDevice device,
+        string sourceAppUserModelId,
+        string sourceDisplayName)
     {
-        var session = TryFindSession(sourceAppUserModelId, sourceDisplayName);
+        var session = TryFindSession(device, sourceAppUserModelId, sourceDisplayName);
         if (session?.Volume is null)
         {
             return null;
@@ -227,7 +266,27 @@ public sealed class MusicVolumeService
 
     private static AudioSessionHandle? TryFindSession(string sourceAppUserModelId, string sourceDisplayName)
     {
-        if (!TryGetSessionEnumerator(out var sessionEnumerator))
+        if (!TryGetDefaultRenderDevice(out var device))
+        {
+            return null;
+        }
+
+        try
+        {
+            return TryFindSession(device, sourceAppUserModelId, sourceDisplayName);
+        }
+        finally
+        {
+            ReleaseComObject(device);
+        }
+    }
+
+    private static AudioSessionHandle? TryFindSession(
+        IMMDevice device,
+        string sourceAppUserModelId,
+        string sourceDisplayName)
+    {
+        if (!TryGetSessionEnumerator(device, out var sessionEnumerator))
         {
             return null;
         }
@@ -327,6 +386,19 @@ public sealed class MusicVolumeService
 
         try
         {
+            return TryGetEndpointVolume(device, out endpointVolume);
+        }
+        finally
+        {
+            ReleaseComObject(device);
+        }
+    }
+
+    private static bool TryGetEndpointVolume(IMMDevice device, out IAudioEndpointVolume endpointVolume)
+    {
+        endpointVolume = null!;
+        try
+        {
             Guid iid = typeof(IAudioEndpointVolume).GUID;
             if (device.Activate(ref iid, ClsctxAll, IntPtr.Zero, out object endpointVolumeObject) < 0)
             {
@@ -341,20 +413,11 @@ public sealed class MusicVolumeService
             App.Log($"[MusicVolume] Failed to activate endpoint volume: {ex.Message}");
             return false;
         }
-        finally
-        {
-            ReleaseComObject(device);
-        }
     }
 
-    private static bool TryGetSessionEnumerator(out IAudioSessionEnumerator sessionEnumerator)
+    private static bool TryGetSessionEnumerator(IMMDevice device, out IAudioSessionEnumerator sessionEnumerator)
     {
         sessionEnumerator = null!;
-        if (!TryGetDefaultRenderDevice(out var device))
-        {
-            return false;
-        }
-
         IAudioSessionManager2? sessionManager = null;
         try
         {
@@ -375,7 +438,6 @@ public sealed class MusicVolumeService
         finally
         {
             ReleaseComObject(sessionManager);
-            ReleaseComObject(device);
         }
     }
 
@@ -441,23 +503,8 @@ public sealed class MusicVolumeService
             .ToArray());
     }
 
-    private static string GetProcessName(uint processId)
-    {
-        if (processId == 0)
-        {
-            return string.Empty;
-        }
-
-        try
-        {
-            using var process = Process.GetProcessById((int)processId);
-            return process.ProcessName;
-        }
-        catch
-        {
-            return string.Empty;
-        }
-    }
+    internal static string GetProcessName(uint processId) =>
+        DeskBox.Platform.ProcessImageNameResolver.GetProcessName(processId);
 
     private static double NormalizeVolume(double value)
     {

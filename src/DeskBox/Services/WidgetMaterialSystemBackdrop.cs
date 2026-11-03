@@ -1,3 +1,7 @@
+using System.Runtime.InteropServices;
+using DeskBox.Platform;
+using static DeskBox.Platform.MonitorAndBackdropInterop;
+using Microsoft.UI;
 using Microsoft.UI.Composition;
 using Microsoft.UI.Composition.SystemBackdrops;
 using Microsoft.UI.Xaml;
@@ -17,6 +21,207 @@ internal readonly record struct WidgetMaterialBackdropAppearance(
     Windows.UI.Color AccentColor,
     double SurfaceOpacity,
     double MaterialIntensity);
+
+/// <summary>
+/// AOT-safe native solid/transparent tint <see cref="SystemBackdrop"/> backed by a
+/// <see cref="Windows.UI.Composition.CompositionColorBrush"/> on the window target.
+/// </summary>
+internal sealed partial class SolidTintSystemBackdrop : SystemBackdrop, IDisposable
+{
+    private const int DqTypeThreadCurrent = 2;
+    private const int DqtatComSta = 2;
+    private const uint DwmBbEnable = 0x00000001;
+    private const uint DwmBbBlurRegion = 0x00000002;
+
+    [ThreadStatic]
+    private static IntPtr t_dispatcherQueueController;
+
+    [ThreadStatic]
+    private static Windows.UI.Composition.Compositor? t_compositor;
+
+    private Windows.UI.Color _tintColor;
+    private ICompositionSupportsSystemBackdrop? _target;
+    private Windows.UI.Composition.CompositionColorBrush? _brush;
+    private IntPtr _hwnd;
+    private bool _isDisposed;
+
+    internal SolidTintSystemBackdrop(Windows.UI.Color tintColor)
+    {
+        _tintColor = tintColor;
+    }
+
+    internal Windows.UI.Color TintColor
+    {
+        get => _tintColor;
+        set
+        {
+            _tintColor = value;
+            if (_brush is not null && !_isDisposed)
+            {
+                _brush.Color = value;
+            }
+        }
+    }
+
+    protected override void OnTargetConnected(
+        ICompositionSupportsSystemBackdrop connectedTarget,
+        XamlRoot xamlRoot)
+    {
+        base.OnTargetConnected(connectedTarget, xamlRoot);
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        DetachBrushAndWindowState(connectedTarget);
+        _target = connectedTarget;
+
+        EnsureWindowsSystemDispatcherQueue();
+        Windows.UI.Composition.Compositor compositor =
+            t_compositor ??= new Windows.UI.Composition.Compositor();
+        _brush = compositor.CreateColorBrush(_tintColor);
+        connectedTarget.SystemBackdrop = _brush;
+
+        try
+        {
+            if (xamlRoot?.ContentIslandEnvironment is { } islandEnvironment)
+            {
+                _hwnd = Win32Interop.GetWindowFromWindowId(islandEnvironment.AppWindowId);
+                if (_hwnd != IntPtr.Zero)
+                {
+                    Win32Helper.ApplyFullWindowFrame(_hwnd);
+                    ConfigureAlphaComposition(_hwnd, enable: true);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            App.LogVerbose($"[SolidTintBackdrop] Window frame alpha setup failed: {ex.Message}");
+        }
+    }
+
+    protected override void OnTargetDisconnected(
+        ICompositionSupportsSystemBackdrop disconnectedTarget)
+    {
+        try
+        {
+            base.OnTargetDisconnected(disconnectedTarget);
+        }
+        finally
+        {
+            DetachBrushAndWindowState(disconnectedTarget);
+            if (ReferenceEquals(_target, disconnectedTarget))
+            {
+                _target = null;
+            }
+        }
+    }
+
+    public void Dispose()
+    {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        _isDisposed = true;
+        DetachBrushAndWindowState(_target);
+        _target = null;
+    }
+
+    private void DetachBrushAndWindowState(ICompositionSupportsSystemBackdrop? target)
+    {
+        if (target is not null)
+        {
+            try
+            {
+                if (_brush is null || ReferenceEquals(target.SystemBackdrop, _brush))
+                {
+                    target.SystemBackdrop = null;
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        if (_brush is not null)
+        {
+            try
+            {
+                _brush.Dispose();
+            }
+            catch
+            {
+            }
+            finally
+            {
+                _brush = null;
+            }
+        }
+
+        if (_hwnd != IntPtr.Zero)
+        {
+            ConfigureAlphaComposition(_hwnd, enable: false);
+            _hwnd = IntPtr.Zero;
+        }
+    }
+
+    private static void EnsureWindowsSystemDispatcherQueue()
+    {
+        if (Windows.System.DispatcherQueue.GetForCurrentThread() is not null ||
+            t_dispatcherQueueController != IntPtr.Zero)
+        {
+            return;
+        }
+
+        var options = new DispatcherQueueOptions
+        {
+            dwSize = Marshal.SizeOf<DispatcherQueueOptions>(),
+            threadType = DqTypeThreadCurrent,
+            apartmentType = DqtatComSta
+        };
+        _ = CreateDispatcherQueueController(options, out t_dispatcherQueueController);
+    }
+
+    private static void ConfigureAlphaComposition(IntPtr hwnd, bool enable)
+    {
+        if (enable)
+        {
+            IntPtr region = CreateRectRgn(-2, -2, -1, -1);
+            try
+            {
+                var blurBehind = new DwmBlurBehind
+                {
+                    dwFlags = DwmBbEnable | DwmBbBlurRegion,
+                    fEnable = 1,
+                    hRgnBlur = region,
+                    fTransitionOnMaximized = 0
+                };
+                _ = DwmEnableBlurBehindWindow(hwnd, ref blurBehind);
+            }
+            finally
+            {
+                if (region != IntPtr.Zero)
+                {
+                    _ = DeleteObject(region);
+                }
+            }
+        }
+        else
+        {
+            var blurBehind = new DwmBlurBehind
+            {
+                dwFlags = DwmBbEnable,
+                fEnable = 0,
+                hRgnBlur = IntPtr.Zero,
+                fTransitionOnMaximized = 0
+            };
+            _ = DwmEnableBlurBehindWindow(hwnd, ref blurBehind);
+        }
+    }
+
+}
 
 /// <summary>
 /// A configurable system backdrop for transient widget surfaces. The built-in

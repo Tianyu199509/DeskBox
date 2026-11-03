@@ -31,7 +31,7 @@ jobs:
       - name: Setup pinned .NET SDK
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 10.0.402
+          dotnet-version: 10.0.403
 
       - name: Verify native ARM64 host and pinned Rust
         shell: pwsh

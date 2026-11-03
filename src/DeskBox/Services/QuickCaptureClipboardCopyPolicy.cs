@@ -6,5 +6,5 @@ namespace DeskBox.Services;
 internal static class QuickCaptureClipboardCopyPolicy
 {
     public static bool ShouldCopyBitmap(QuickCaptureItemViewModel item) =>
-        item.IsRecent && item.Type == QuickCaptureItemType.Image;
+        item.Type == QuickCaptureItemType.Image;
 }

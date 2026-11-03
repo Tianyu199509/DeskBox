@@ -40,7 +40,7 @@
         </Style>
     </ContentDialog.Resources>
 
-    <StackPanel MinWidth="460" MaxWidth="560" Spacing="14">
+    <StackPanel HorizontalAlignment="Stretch" MaxWidth="560" Spacing="14">
         <TextBlock
             x:Name="RuleHintTextBlock"
             Style="{StaticResource CaptionTextBlockStyle}"

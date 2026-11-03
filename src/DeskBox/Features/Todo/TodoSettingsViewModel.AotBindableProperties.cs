@@ -6,12 +6,15 @@ namespace DeskBox.Features.Todo;
 // used by that XAML surface in NativeAOT builds, mirroring the
 // Glance/Music/FileStack/QuickCapture editor bridge pattern.
 [WinRT.GeneratedBindableCustomProperty([
+    nameof(AllDayReminderTimeText),
+    nameof(AllDayRemindersEnabled),
     nameof(AvailableEnterBehaviorOptions),
     nameof(AvailableLayoutOptions),
     nameof(AvailableNewTaskPositionOptions),
     nameof(AvailablePreviewLineOptions),
     nameof(AvailableReminderOffsetOptions),
     nameof(AutoSelectFirstInWideLayout),
+    nameof(CanEditAllDayReminderTime),
     nameof(ContentSummaryText),
     nameof(ContentTextSize),
     nameof(ContentTextSizeValueText),

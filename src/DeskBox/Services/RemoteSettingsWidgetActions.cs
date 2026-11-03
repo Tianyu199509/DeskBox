@@ -1,4 +1,4 @@
-﻿namespace DeskBox.Services;
+namespace DeskBox.Services;
 
 using DeskBox.Contracts;
 using DeskBox.Models;
@@ -173,6 +173,7 @@ public sealed class RemoteSettingsWidgetActions : ISettingsWidgetActions
             SettingsIpcMethods.WidgetNotifyGroupPresentation,
             payload: null,
             nameof(NotifyWidgetGroupPresentationSettingsChanged));
+
 
     private Task NotifyWithoutBlockingAsync(string method, string? payload, string caller) =>
         SettingsIpcShell.NotifyWithoutBlockingAsync(_client, method, payload, caller);
@@ -370,6 +371,69 @@ public sealed class RemoteSettingsWidgetActions : ISettingsWidgetActions
                 new SettingsIpcGlanceRename(widgetId, newName),
                 SettingsIpcJsonContext.Default.SettingsIpcGlanceRename));
 
+    public async Task<IReadOnlyList<GlanceWidgetInstanceInfo>> GetCustomWidgetInstancesAsync()
+    {
+        (bool ok, string? payload, _) = await _client.RequestAsync(SettingsIpcMethods.WidgetCustomList);
+        return ok
+            ? SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.ListGlanceWidgetInstanceInfo) ?? []
+            : [];
+    }
+
+    public async Task<GlanceWidgetInstanceInfo> CreateCustomWidgetAsync(string? templateOrPackageSpec)
+    {
+        (bool ok, string? payload, string? error) = await _client.RequestAsync(
+            SettingsIpcMethods.WidgetCustomCreate,
+            templateOrPackageSpec);
+        if (!ok ||
+            SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.GlanceWidgetInstanceInfo)
+                is not { } created)
+        {
+            throw new InvalidOperationException(error ?? "custom widget create failed");
+        }
+
+        return created;
+    }
+
+    public Task SetCustomWidgetInstanceEnabledAsync(string widgetId, bool enabled) =>
+        RequestVoidAsync(
+            SettingsIpcMethods.WidgetCustomSetEnabled,
+            SettingsIpcPayload.Encode(
+                new SettingsIpcGlanceSetEnabled(widgetId, enabled),
+                SettingsIpcJsonContext.Default.SettingsIpcGlanceSetEnabled));
+
+    public async Task<bool> LocateCustomWidgetAsync(string widgetId)
+    {
+        (bool ok, _, _) = await _client.RequestAsync(SettingsIpcMethods.WidgetCustomLocate, widgetId);
+        return ok;
+    }
+
+    public Task OpenCustomWidgetStudioAsync(string? widgetId, string? initialIdea) =>
+        RequestVoidAsync(
+            SettingsIpcMethods.WidgetCustomOpenStudio,
+            EncodeStudioRequest(widgetId, initialIdea));
+
+    /// <summary>"widgetId\nidea" — either part may be empty.</summary>
+    internal static string EncodeStudioRequest(string? widgetId, string? initialIdea) =>
+        (widgetId?.Trim() ?? string.Empty) + "\n" + (initialIdea ?? string.Empty);
+
+    internal static (string? WidgetId, string? InitialIdea) DecodeStudioRequest(string? payload)
+    {
+        if (string.IsNullOrEmpty(payload))
+        {
+            return (null, null);
+        }
+
+        int separator = payload.IndexOf('\n');
+        string id = separator < 0 ? payload : payload[..separator];
+        string idea = separator < 0 ? string.Empty : payload[(separator + 1)..];
+        return (
+            string.IsNullOrWhiteSpace(id) ? null : id.Trim(),
+            string.IsNullOrWhiteSpace(idea) ? null : idea);
+    }
+
+    public Task RemoveCustomWidgetAsync(string widgetId) =>
+        RequestVoidAsync(SettingsIpcMethods.WidgetCustomRemove, widgetId);
+
     public async Task<(int MovedCount, WidgetMoveAllUndoToken Token)> MoveAllWidgetSurfacesToDisplayAsync(
         string displayStableId)
     {
@@ -383,7 +447,18 @@ public sealed class RemoteSettingsWidgetActions : ISettingsWidgetActions
             throw new InvalidOperationException(error ?? "move-all failed");
         }
 
-        return (moveAll.MovedCount, new WidgetMoveAllUndoToken { IpcHandleId = moveAll.Handle });
+        if (!string.IsNullOrEmpty(moveAll.LayoutSliceJson))
+        {
+            _ = _settingsService.ApplyExternalLayout(moveAll.LayoutSliceJson);
+        }
+
+        return (
+            moveAll.MovedCount,
+            new WidgetMoveAllUndoToken
+            {
+                IpcHandleId = moveAll.Handle,
+                Persisted = moveAll.Persisted
+            });
     }
 
     public async Task<bool> UndoMoveAllWidgetSurfacesAsync(WidgetMoveAllUndoToken token)
@@ -393,22 +468,69 @@ public sealed class RemoteSettingsWidgetActions : ISettingsWidgetActions
             return false;
         }
 
-        (bool ok, _, _) = await _client.RequestAsync(
+        (bool ok, string? payload, _) = await _client.RequestAsync(
             SettingsIpcMethods.WidgetMoveAllUndo,
             handle.ToString());
+        if (ok && !string.IsNullOrEmpty(payload))
+        {
+            _ = _settingsService.ApplyExternalLayout(payload);
+        }
+
         return ok;
     }
 
-    public Task ApplyScreenBindingAsync(
+    public async Task<int> RecalibrateDisplayLayoutAsync()
+    {
+        (bool ok, string? payload, string? error) = await _client.RequestAsync(
+            SettingsIpcMethods.WidgetRecalibrateDisplayLayout);
+        if (!ok)
+        {
+            throw new InvalidOperationException(error ?? "recalibrate display layout failed");
+        }
+
+        if (string.IsNullOrEmpty(payload))
+        {
+            return 0;
+        }
+
+        int separator = payload.IndexOf('\n');
+        string countPart = separator < 0 ? payload : payload[..separator];
+        string? sliceJson = separator < 0 ? null : payload[(separator + 1)..];
+        if (!string.IsNullOrEmpty(sliceJson))
+        {
+            _ = _settingsService.ApplyExternalLayout(sliceJson);
+        }
+
+        return int.TryParse(
+            countPart,
+            System.Globalization.NumberStyles.Integer,
+            System.Globalization.CultureInfo.InvariantCulture,
+            out int count)
+            ? count
+            : 0;
+    }
+
+    public async Task ApplyScreenBindingAsync(
         string widgetId,
         WidgetScreenBindingMode mode,
         string? boundScreenId,
-        bool persistImmediately = true) =>
-        RequestVoidAsync(
+        bool persistImmediately = true)
+    {
+        (bool ok, string? payload, string? error) = await _client.RequestAsync(
             SettingsIpcMethods.WidgetApplyScreenBinding,
             SettingsIpcPayload.Encode(
                 new SettingsIpcScreenBinding(widgetId, (int)mode, boundScreenId, persistImmediately),
                 SettingsIpcJsonContext.Default.SettingsIpcScreenBinding));
+        if (!ok)
+        {
+            throw new InvalidOperationException(error ?? "apply screen binding failed");
+        }
+
+        if (!string.IsNullOrEmpty(payload))
+        {
+            _ = _settingsService.ApplyExternalLayout(payload);
+        }
+    }
 
     public OrganizationHistoryEntry? GetLatestUndoableDesktopOrganizationEntry()
     {

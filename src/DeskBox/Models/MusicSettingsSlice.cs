@@ -21,4 +21,13 @@ public sealed class MusicSettingsSlice
     /// publishes no timeline (position and duration) through SMTC.
     /// </summary>
     public bool MusicHideTimelineWhenUnavailable { get; set; } = true;
+
+    /// <summary>Whether synchronized lyrics are matched and displayed in the Music widget.</summary>
+    public bool MusicShowLyrics { get; set; } = true;
+
+    /// <summary>Whether the active lyric line is shown as the subtitle when collapsed into a capsule.</summary>
+    public bool MusicShowCapsuleLyrics { get; set; } = true;
+
+    /// <summary>Optional user-selected folder containing local <c>.lrc</c> files.</summary>
+    public string MusicLocalLyricsFolder { get; set; } = string.Empty;
 }

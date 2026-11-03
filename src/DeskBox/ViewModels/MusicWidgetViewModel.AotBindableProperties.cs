@@ -29,7 +29,7 @@ namespace DeskBox.ViewModels;
     nameof(PositionText),
     nameof(PreviousTooltip),
     nameof(SecondaryTextSize),
-    nameof(StatusText),
+    nameof(SubtitleText),
     nameof(SystemVolume),
     nameof(SystemVolumeLabel),
     nameof(SystemVolumeText),

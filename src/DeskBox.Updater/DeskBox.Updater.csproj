@@ -11,6 +11,7 @@
     <Platforms>x64;ARM64</Platforms>
     <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
     <PublishSingleFile>false</PublishSingleFile>
+    <ApplicationManifest>..\DeskBox\app.manifest</ApplicationManifest>
     <IsAotCompatible>true</IsAotCompatible>
     <DeskBoxAotAudit Condition="'$(DeskBoxAotAudit)' == ''">false</DeskBoxAotAudit>
     <!-- Switches the shared ShellUnelevatedLaunch source into this

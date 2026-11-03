@@ -1,4 +1,5 @@
-﻿using System.IO.Compression;
+using System.Collections.Concurrent;
+using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -7,6 +8,7 @@ using System.Text.Json.Serialization.Metadata;
 using DeskBox.Core.Persistence;
 using DeskBox.FileSafety;
 using DeskBox.Models;
+using DeskBox.Platform;
 
 using DeskBox.Contracts;
 
@@ -48,6 +50,12 @@ public sealed partial class DeskBoxDataBackupService
     private readonly string _recoveryRootPath;
     private volatile AutomaticBackupOptions _automaticBackupOptions = AutomaticBackupOptions.Default;
     private volatile string? _lastAutomaticSnapshotFallbackMessage;
+    private readonly ConcurrentDictionary<string, string> _cachedLatestAutoSnapshotPathByDir =
+        new(StringComparer.OrdinalIgnoreCase);
+    private int _automaticSnapshotDirectoryScanCount;
+
+    internal int AutomaticSnapshotDirectoryScanCountForTesting =>
+        Volatile.Read(ref _automaticSnapshotDirectoryScanCount);
 
     /// <summary>
     /// Current automatic-backup schedule and folder policy. Updated from live
@@ -291,6 +299,16 @@ public sealed partial class DeskBoxDataBackupService
                 return new(BackupOutcome.Skipped);
             }
 
+            TimeSpan minInterval = TimeSpan.FromMinutes(Math.Max(1, options.IntervalMinutes));
+            if (!force)
+            {
+                AutomaticSnapshotTarget candidateTarget = ResolveAutomaticSnapshotTarget(probeWriteAccess: false);
+                if (HasRecentAutomaticSnapshot(candidateTarget.Directory, minInterval))
+                {
+                    return new(BackupOutcome.Skipped);
+                }
+            }
+
             if (!HasBackupSourceData())
             {
                 return new(BackupOutcome.Skipped);
@@ -298,13 +316,7 @@ public sealed partial class DeskBoxDataBackupService
 
             AutomaticSnapshotTarget target = ResolveAutomaticSnapshotTarget(probeWriteAccess: true);
             Directory.CreateDirectory(target.Directory);
-            string? latestSnapshot = Directory
-                .EnumerateFiles(target.Directory, "DeskBox-Auto-*.zip")
-                .OrderByDescending(File.GetLastWriteTimeUtc)
-                .FirstOrDefault();
-            if (!force && latestSnapshot is not null &&
-                DateTime.UtcNow - File.GetLastWriteTimeUtc(latestSnapshot) <
-                    TimeSpan.FromMinutes(Math.Max(1, options.IntervalMinutes)))
+            if (!force && HasRecentAutomaticSnapshot(target.Directory, minInterval))
             {
                 return new(BackupOutcome.Skipped);
             }
@@ -313,6 +325,7 @@ public sealed partial class DeskBoxDataBackupService
                 target.Directory,
                 $"DeskBox-Auto-{DateTime.Now:yyyyMMdd-HHmmss}.zip");
             await CreateArchiveCoreAsync(snapshotPath, "automatic", cancellationToken);
+            _cachedLatestAutoSnapshotPathByDir[target.Directory] = snapshotPath;
             // Deep review R15 (F7 audit): the archive is durable at this
             // point — a retention-prune or directory enumeration throwing
             // (custom directory on a slow network share) used to report the
@@ -510,6 +523,18 @@ public sealed partial class DeskBoxDataBackupService
             }
         }
 
+        HashSet<string>? liveCustomIds = null;
+        if (scope.HasFlag(CloudBackupDomain.CustomWidgets))
+        {
+            HashSet<string> live = await ReadLiveWidgetIdsByKindAsync(
+                nameof(WidgetKind.Custom),
+                cancellationToken);
+            if (live.Count > 0)
+            {
+                liveCustomIds = live;
+            }
+        }
+
         foreach (string sourcePath in Directory
                      .EnumerateFiles(DataDirectory, "*", SearchOption.AllDirectories)
                      .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
@@ -525,6 +550,13 @@ public sealed partial class DeskBoxDataBackupService
             if (liveTodoIds is not null &&
                 CloudBackupDomains.TryGetTodoWidgetId(relativePath) is string todoWidgetId &&
                 !liveTodoIds.Contains(todoWidgetId))
+            {
+                continue;
+            }
+
+            if (liveCustomIds is not null &&
+                CloudBackupDomains.TryGetCustomWidgetId(relativePath) is string customWidgetId &&
+                !liveCustomIds.Contains(customWidgetId))
             {
                 continue;
             }
@@ -817,6 +849,13 @@ public sealed partial class DeskBoxDataBackupService
                     s_todoDataJsonContext.StoreData);
             }
         }
+
+        string customWidgetsDirectory = Path.Combine(stagedDataDirectory, CustomWidgetDataStore.SubdirectoryName);
+        if (appliedScope.HasFlag(CloudBackupDomain.CustomWidgets) &&
+            Directory.Exists(customWidgetsDirectory))
+        {
+            ValidateCustomWidgetsDirectory(customWidgetsDirectory);
+        }
     }
 
     /// <summary>
@@ -865,6 +904,33 @@ public sealed partial class DeskBoxDataBackupService
                     (data.RecentItems?.Count(item => item is { IsDeleted: false }) ?? 0));
             counts.Add(new DeskBoxDomainItemCount(
                 CloudBackupDomains.ToManifestName(CloudBackupDomain.QuickCaptureData), items));
+        }
+
+        if (appliedScope.HasFlag(CloudBackupDomain.CustomWidgets))
+        {
+            int widgetCount = 0;
+            string customWidgetsDirectory = Path.Combine(stagedDataDirectory, CustomWidgetDataStore.SubdirectoryName);
+            if (Directory.Exists(customWidgetsDirectory))
+            {
+                foreach (string widgetDir in Directory.EnumerateDirectories(customWidgetsDirectory))
+                {
+                    string widgetId = Path.GetFileName(widgetDir);
+                    if (widgetId.Equals("_studio-draft", StringComparison.OrdinalIgnoreCase) ||
+                        widgetId.StartsWith("__studio_template_", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    if (File.Exists(Path.Combine(widgetDir, "manifest.json")) ||
+                        File.Exists(Path.Combine(widgetDir, "store.json")))
+                    {
+                        widgetCount++;
+                    }
+                }
+            }
+
+            counts.Add(new DeskBoxDomainItemCount(
+                CloudBackupDomains.ToManifestName(CloudBackupDomain.CustomWidgets), widgetCount));
         }
 
         return counts;
@@ -930,6 +996,24 @@ public sealed partial class DeskBoxDataBackupService
                 s_quickCaptureDataJsonContext.StoreData,
                 data => (data.Items ?? []).Concat(data.RecentItems ?? []).Sum(item =>
                     item is null ? 0 : CountAttachmentPaths(item.Attachments, item.ImagePath)));
+        }
+
+        if (appliedScope.HasFlag(CloudBackupDomain.CustomWidgets))
+        {
+            string customWidgetsDirectory = Path.Combine(stagedDataDirectory, CustomWidgetDataStore.SubdirectoryName);
+            if (Directory.Exists(customWidgetsDirectory))
+            {
+                foreach (string storePath in Directory.EnumerateFiles(
+                             customWidgetsDirectory,
+                             "store.json",
+                             SearchOption.AllDirectories))
+                {
+                    references += CountLiveItems<CustomWidgetStorePayload>(
+                        storePath,
+                        CustomWidgetStoreJsonContext.Default.CustomWidgetStorePayload,
+                        CountCustomWidgetAttachmentPaths);
+                }
+            }
         }
 
         return references;
@@ -1210,7 +1294,12 @@ public sealed partial class DeskBoxDataBackupService
     /// empty set just leaves every orphan unmapped, which is the honest
     /// answer.
     /// </summary>
-    private async Task<HashSet<string>> ReadLiveTodoWidgetIdsAsync(CancellationToken cancellationToken)
+    private Task<HashSet<string>> ReadLiveTodoWidgetIdsAsync(CancellationToken cancellationToken) =>
+        ReadLiveWidgetIdsByKindAsync(nameof(WidgetKind.Todo), cancellationToken);
+
+    private async Task<HashSet<string>> ReadLiveWidgetIdsByKindAsync(
+        string expectedKind,
+        CancellationToken cancellationToken)
     {
         var ids = new HashSet<string>(StringComparer.Ordinal);
         string layoutPath = Path.Combine(DataDirectory, "widget-layout.json");
@@ -1247,7 +1336,7 @@ public sealed partial class DeskBoxDataBackupService
                     string.IsNullOrEmpty(id) ||
                     element["widgetKind"] is not JsonValue kindValue ||
                     !kindValue.TryGetValue(out string? kind) ||
-                    !string.Equals(kind, nameof(WidgetKind.Todo), StringComparison.OrdinalIgnoreCase))
+                    !string.Equals(kind, expectedKind, StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }
@@ -1257,7 +1346,7 @@ public sealed partial class DeskBoxDataBackupService
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            App.Log($"[DataBackup] Could not enumerate live todo widgets for scoped remap: {ex.Message}");
+            App.Log($"[DataBackup] Could not enumerate live '{expectedKind}' widgets: {ex.Message}");
         }
 
         return ids;
@@ -1443,6 +1532,11 @@ public sealed partial class DeskBoxDataBackupService
                             await MergeStagedQuickCaptureStoreAsync(
                                 stagedDataDirectory, cancellationToken);
                         }
+                        else if (domain == CloudBackupDomain.CustomWidgets)
+                        {
+                            await MergeStagedCustomWidgetsAsync(
+                                stagedDataDirectory, cancellationToken);
+                        }
                     }
 
                     continue;
@@ -1510,6 +1604,13 @@ public sealed partial class DeskBoxDataBackupService
                         $"shell={styleResult.ShellFieldsPatched}, widgets={styleResult.WidgetsPatched}" +
                         (styleResult.SkippedReason is null ? "." : $", skipped={styleResult.SkippedReason}."));
                 }
+            }
+
+            if (scope.HasFlag(CloudBackupDomain.CustomWidgets))
+            {
+                await EnsureRestoredCustomWidgetsRegisteredInLayoutAsync(
+                    stagedDataDirectory,
+                    cancellationToken);
             }
 
             TryDeleteFile(PendingRestoreMarkerPath);
@@ -1785,6 +1886,417 @@ public sealed partial class DeskBoxDataBackupService
         DateTimeOffset localUpdatedAt)
     {
         return !(remoteIsDeleted && !localIsDeleted) && remoteUpdatedAt > localUpdatedAt;
+    }
+
+    private async Task MergeStagedCustomWidgetsAsync(
+        string stagedDataDirectory,
+        CancellationToken cancellationToken)
+    {
+        string stagedWidgetsDirectory = Path.Combine(stagedDataDirectory, CustomWidgetDataStore.SubdirectoryName);
+        if (!Directory.Exists(stagedWidgetsDirectory))
+        {
+            return;
+        }
+
+        string liveWidgetsDirectory = Path.Combine(DataDirectory, CustomWidgetDataStore.SubdirectoryName);
+        foreach (string stagedWidgetDir in Directory.EnumerateDirectories(stagedWidgetsDirectory))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            string widgetId = Path.GetFileName(stagedWidgetDir);
+            if (widgetId.Equals("_studio-draft", StringComparison.OrdinalIgnoreCase) ||
+                widgetId.StartsWith("__studio_template_", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            string liveWidgetDir = Path.Combine(liveWidgetsDirectory, widgetId);
+            string stagedManifestPath = Path.Combine(stagedWidgetDir, "manifest.json");
+            string liveManifestPath = Path.Combine(liveWidgetDir, "manifest.json");
+            bool stagedManifestWon = false;
+
+            if (File.Exists(stagedManifestPath))
+            {
+                Directory.CreateDirectory(liveWidgetDir);
+                if (!File.Exists(liveManifestPath))
+                {
+                    CustomWidgetStorageFileOps.CopyFileOverwrite(stagedManifestPath, liveManifestPath);
+                    stagedManifestWon = true;
+                }
+                else
+                {
+                    string stagedManifestJson = await File.ReadAllTextAsync(stagedManifestPath, cancellationToken);
+                    string liveManifestJson = await File.ReadAllTextAsync(liveManifestPath, cancellationToken);
+                    if (ShouldRemoteCustomManifestWin(stagedManifestJson, liveManifestJson))
+                    {
+                        CustomWidgetStorageFileOps.ReplaceTextFileAtomically(liveManifestPath, stagedManifestJson);
+                        stagedManifestWon = true;
+                    }
+                }
+            }
+
+            string stagedBriefPath = Path.Combine(stagedWidgetDir, CustomWidgetStudioSessionStore.BriefFileName);
+            string liveBriefPath = Path.Combine(liveWidgetDir, CustomWidgetStudioSessionStore.BriefFileName);
+            if (File.Exists(stagedBriefPath) && (stagedManifestWon || !File.Exists(liveBriefPath)))
+            {
+                Directory.CreateDirectory(liveWidgetDir);
+                CustomWidgetStorageFileOps.CopyFileOverwrite(stagedBriefPath, liveBriefPath);
+            }
+
+            string stagedRevisionsPath = Path.Combine(stagedWidgetDir, CustomWidgetStudioSessionStore.RevisionsFileName);
+            string liveRevisionsPath = Path.Combine(liveWidgetDir, CustomWidgetStudioSessionStore.RevisionsFileName);
+            if (File.Exists(stagedRevisionsPath) && (stagedManifestWon || !File.Exists(liveRevisionsPath)))
+            {
+                Directory.CreateDirectory(liveWidgetDir);
+                CustomWidgetStorageFileOps.CopyFileOverwrite(stagedRevisionsPath, liveRevisionsPath);
+            }
+
+            string stagedStorePath = Path.Combine(stagedWidgetDir, "store.json");
+            string liveStorePath = Path.Combine(liveWidgetDir, "store.json");
+            if (!File.Exists(stagedStorePath))
+            {
+                continue;
+            }
+
+            Directory.CreateDirectory(liveWidgetDir);
+            if (!File.Exists(liveStorePath))
+            {
+                CustomWidgetStorageFileOps.CopyFileOverwrite(stagedStorePath, liveStorePath);
+                continue;
+            }
+
+            CustomWidgetStorePayload stagedStore = JsonSerializer.Deserialize(
+                await File.ReadAllTextAsync(stagedStorePath, cancellationToken),
+                CustomWidgetStoreJsonContext.Default.CustomWidgetStorePayload) ?? new CustomWidgetStorePayload();
+            CustomWidgetStorePayload liveStore = JsonSerializer.Deserialize(
+                await File.ReadAllTextAsync(liveStorePath, cancellationToken),
+                CustomWidgetStoreJsonContext.Default.CustomWidgetStorePayload) ?? new CustomWidgetStorePayload();
+
+            foreach ((string key, string value) in stagedStore.Settings)
+            {
+                if (stagedManifestWon || !liveStore.Settings.ContainsKey(key))
+                {
+                    liveStore.Settings[key] = value;
+                }
+            }
+
+            foreach ((string key, string value) in stagedStore.State)
+            {
+                if (stagedManifestWon || !liveStore.State.ContainsKey(key))
+                {
+                    liveStore.State[key] = value;
+                }
+            }
+
+            int added = 0;
+            int updated = 0;
+            foreach ((string collectionName, List<CustomWidgetRecord>? stagedRecords) in stagedStore.Collections)
+            {
+                if (stagedRecords is null)
+                {
+                    continue;
+                }
+
+                if (!liveStore.Collections.TryGetValue(collectionName, out List<CustomWidgetRecord>? liveRecords) ||
+                    liveRecords is null)
+                {
+                    liveRecords = [];
+                    liveStore.Collections[collectionName] = liveRecords;
+                }
+
+                var liveIndexById = new Dictionary<string, int>(StringComparer.Ordinal);
+                for (int index = 0; index < liveRecords.Count; index++)
+                {
+                    if (liveRecords[index] is { } existing && !string.IsNullOrEmpty(existing.Id))
+                    {
+                        liveIndexById.TryAdd(existing.Id, index);
+                    }
+                }
+
+                foreach (CustomWidgetRecord record in stagedRecords)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (record is null || string.IsNullOrEmpty(record.Id))
+                    {
+                        continue;
+                    }
+
+                    if (!liveIndexById.TryGetValue(record.Id, out int index))
+                    {
+                        liveIndexById[record.Id] = liveRecords.Count;
+                        liveRecords.Add(record);
+                        added++;
+                    }
+                    else if (liveRecords[index] is { } local &&
+                             ShouldRemoteItemWin(
+                                 record.IsDeleted,
+                                 UtcOffsetFromTicks(record.EffectiveUpdatedAtUtcTicks),
+                                 local.IsDeleted,
+                                 UtcOffsetFromTicks(local.EffectiveUpdatedAtUtcTicks)))
+                    {
+                        liveRecords[index] = record;
+                        updated++;
+                    }
+                }
+            }
+
+            CustomWidgetStorageFileOps.ReplaceTextFileAtomically(
+                liveStorePath,
+                JsonSerializer.Serialize(liveStore, CustomWidgetStoreJsonContext.Default.CustomWidgetStorePayload));
+            App.Log($"[DataBackup] Merged staged custom widget '{widgetId}': +{added} record(s), {updated} updated.");
+        }
+    }
+
+    private static DateTimeOffset UtcOffsetFromTicks(long ticks)
+    {
+        long clamped = Math.Clamp(ticks, DateTimeOffset.MinValue.UtcTicks, DateTimeOffset.MaxValue.UtcTicks);
+        return new DateTimeOffset(clamped, TimeSpan.Zero);
+    }
+
+    private static bool ShouldRemoteCustomManifestWin(string remoteManifestJson, string localManifestJson)
+    {
+        CustomWidgetParseResult remoteParsed = CustomWidgetManifestParser.Parse(remoteManifestJson);
+        CustomWidgetParseResult localParsed = CustomWidgetManifestParser.Parse(localManifestJson);
+        if (remoteParsed.Manifest is null)
+        {
+            return false;
+        }
+
+        if (localParsed.Manifest is null)
+        {
+            return true;
+        }
+
+        if (localParsed.Manifest.IsCustomized && !remoteParsed.Manifest.IsCustomized)
+        {
+            return false;
+        }
+
+        if (remoteParsed.Manifest.IsCustomized && !localParsed.Manifest.IsCustomized)
+        {
+            return true;
+        }
+
+        bool hasRemoteTime = DateTimeOffset.TryParse(remoteParsed.Manifest.UpdatedAtUtc, out DateTimeOffset remoteTime);
+        bool hasLocalTime = DateTimeOffset.TryParse(localParsed.Manifest.UpdatedAtUtc, out DateTimeOffset localTime);
+        if (hasRemoteTime && hasLocalTime)
+        {
+            return remoteTime > localTime;
+        }
+
+        return hasRemoteTime && !hasLocalTime;
+    }
+
+    private async Task EnsureRestoredCustomWidgetsRegisteredInLayoutAsync(
+        string stagedDataDirectory,
+        CancellationToken cancellationToken)
+    {
+        string stagedWidgetsDirectory = Path.Combine(stagedDataDirectory, CustomWidgetDataStore.SubdirectoryName);
+        if (!Directory.Exists(stagedWidgetsDirectory))
+        {
+            return;
+        }
+
+        var restoredIds = new List<string>();
+        foreach (string stagedWidgetDir in Directory.EnumerateDirectories(stagedWidgetsDirectory))
+        {
+            string widgetId = Path.GetFileName(stagedWidgetDir);
+            if (widgetId.Equals("_studio-draft", StringComparison.OrdinalIgnoreCase) ||
+                widgetId.StartsWith("__studio_template_", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            string liveManifestPath = Path.Combine(DataDirectory, CustomWidgetDataStore.SubdirectoryName, widgetId, "manifest.json");
+            string liveStorePath = Path.Combine(DataDirectory, CustomWidgetDataStore.SubdirectoryName, widgetId, "store.json");
+            if (File.Exists(liveManifestPath) || File.Exists(liveStorePath))
+            {
+                restoredIds.Add(widgetId);
+            }
+        }
+
+        if (restoredIds.Count == 0)
+        {
+            return;
+        }
+
+        string layoutPath = Path.Combine(DataDirectory, "widget-layout.json");
+        string settingsPath = Path.Combine(DataDirectory, "settings.json");
+
+        if (File.Exists(layoutPath) || !File.Exists(settingsPath))
+        {
+            WidgetLayoutDocument doc;
+            if (File.Exists(layoutPath))
+            {
+                ResilientJsonLoadResult<WidgetLayoutDocument> loaded =
+                    await ResilientJsonStore.LoadWithResultAsync(
+                        layoutPath,
+                        static json => WidgetLayoutStore.ParseLayoutDocument(json),
+                        static () => new WidgetLayoutDocument { Layout = new WidgetLayoutSettingsSlice() },
+                        "CustomWidgetsRestore");
+                doc = loaded.Value;
+                if (doc.SchemaVersion > WidgetLayoutStore.CurrentSchemaVersion)
+                {
+                    App.Log($"[DataBackup] Skipped custom widget layout registration: schema {doc.SchemaVersion} is newer.");
+                    return;
+                }
+            }
+            else
+            {
+                doc = new WidgetLayoutDocument { Layout = new WidgetLayoutSettingsSlice() };
+            }
+
+            bool changed = RegisterRestoredCustomWidgetsInSlice(doc.Layout, restoredIds);
+            if (changed)
+            {
+                await ResilientJsonStore.SaveAsync(
+                    layoutPath,
+                    JsonSerializer.Serialize(doc, WidgetLayoutJsonContext.Default.WidgetLayoutDocument));
+            }
+
+            return;
+        }
+
+        string originalSettingsJson = await File.ReadAllTextAsync(settingsPath, cancellationToken);
+        if (JsonNode.Parse(originalSettingsJson) is not JsonObject settingsDom)
+        {
+            return;
+        }
+
+        var existingIds = new HashSet<string>(StringComparer.Ordinal);
+        if (settingsDom["widgets"] is not JsonArray widgetsArray)
+        {
+            widgetsArray = [];
+            settingsDom["widgets"] = widgetsArray;
+        }
+
+        foreach (JsonNode? node in widgetsArray)
+        {
+            if (node is JsonObject obj &&
+                obj["id"] is JsonValue idVal &&
+                idVal.TryGetValue(out string? existingId) &&
+                !string.IsNullOrEmpty(existingId))
+            {
+                existingIds.Add(existingId);
+            }
+        }
+
+        bool settingsChanged = false;
+        int cascadeIndex = existingIds.Count;
+        foreach (string widgetId in restoredIds)
+        {
+            if (!existingIds.Add(widgetId))
+            {
+                continue;
+            }
+
+            WidgetConfig config = BuildRestoredCustomWidgetConfig(widgetId, cascadeIndex++);
+            var tempSlice = new WidgetLayoutSettingsSlice { Widgets = [config] };
+            JsonNode? configNode = JsonSerializer.SerializeToNode(
+                tempSlice,
+                WidgetLayoutJsonContext.Default.WidgetLayoutSettingsSlice)?["widgets"]?.AsArray().FirstOrDefault();
+            if (configNode is not null)
+            {
+                widgetsArray.Add(configNode.DeepClone());
+                settingsChanged = true;
+            }
+        }
+
+        if (settingsChanged)
+        {
+            if (settingsDom["featureWidgetEnabledStates"] is not JsonObject statesObj)
+            {
+                statesObj = new JsonObject();
+                settingsDom["featureWidgetEnabledStates"] = statesObj;
+            }
+
+            statesObj[nameof(WidgetKind.Custom)] = true;
+            await ResilientJsonStore.SaveAsync(
+                settingsPath,
+                settingsDom.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+        }
+    }
+
+    private bool RegisterRestoredCustomWidgetsInSlice(
+        WidgetLayoutSettingsSlice layout,
+        IReadOnlyList<string> restoredIds)
+    {
+        layout.Widgets ??= [];
+        layout.DeletedWidgetIds ??= [];
+        layout.FeatureWidgetEnabledStates ??= new Dictionary<string, bool>(StringComparer.Ordinal);
+
+        var existingIds = new HashSet<string>(
+            layout.Widgets.Where(w => w is not null && !string.IsNullOrEmpty(w.Id)).Select(w => w.Id),
+            StringComparer.Ordinal);
+
+        bool changed = false;
+        int cascadeIndex = existingIds.Count;
+        foreach (string widgetId in restoredIds)
+        {
+            if (layout.DeletedWidgetIds.RemoveAll(id => string.Equals(id, widgetId, StringComparison.Ordinal)) > 0)
+            {
+                changed = true;
+            }
+
+            if (existingIds.Add(widgetId))
+            {
+                layout.Widgets.Add(BuildRestoredCustomWidgetConfig(widgetId, cascadeIndex++));
+                changed = true;
+            }
+        }
+
+        if (restoredIds.Count > 0 &&
+            (!layout.FeatureWidgetEnabledStates.TryGetValue(nameof(WidgetKind.Custom), out bool enabled) || !enabled))
+        {
+            layout.FeatureWidgetEnabledStates[nameof(WidgetKind.Custom)] = true;
+            changed = true;
+        }
+
+        return changed;
+    }
+
+    private WidgetConfig BuildRestoredCustomWidgetConfig(string widgetId, int cascadeIndex)
+    {
+        CustomWidgetManifest? manifest = null;
+        string manifestPath = Path.Combine(DataDirectory, CustomWidgetDataStore.SubdirectoryName, widgetId, "manifest.json");
+        if (File.Exists(manifestPath))
+        {
+            try
+            {
+                manifest = CustomWidgetManifestParser.Parse(File.ReadAllText(manifestPath)).Manifest;
+            }
+            catch
+            {
+                manifest = null;
+            }
+        }
+
+        string templateId = !string.IsNullOrWhiteSpace(manifest?.Id) ? manifest!.Id : widgetId;
+        var config = new WidgetConfig
+        {
+            Id = widgetId,
+            Name = !string.IsNullOrWhiteSpace(manifest?.Name) ? manifest!.Name : widgetId,
+            IsDefaultTitle = false,
+            WidgetKind = WidgetKind.Custom,
+            BoundsCoordinateVersion = WidgetConfig.CurrentBoundsCoordinateVersion,
+            X = 120 + ((cascadeIndex % 6) * 28),
+            Y = 120 + ((cascadeIndex % 6) * 28),
+            Width = manifest?.DefaultSize.Width ?? 360,
+            Height = manifest?.DefaultSize.Height ?? 460,
+            ViewMode = ViewMode.Icon,
+            IsVisible = true,
+            IsDisabled = false,
+            Metadata = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [ViewModels.CustomWidgetViewModel.TemplateMetadataKey] = templateId
+            }
+        };
+
+        if (CustomWidgetTemplates.IsEmojiIcon(manifest?.Icon))
+        {
+            WidgetTitleIconCustomization.SetEmojiOverride(config, manifest!.Icon.Trim());
+        }
+
+        return config;
     }
 
     private async Task<RestoreArchiveInfo> ExtractAndValidateRestoreArchiveAsync(
@@ -2108,6 +2620,68 @@ public sealed partial class DeskBoxDataBackupService
                     todoPath,
                     s_todoDataJsonContext.StoreData);
             }
+
+        }
+
+        string customWidgetsDirectory = Path.Combine(dataDirectory, CustomWidgetDataStore.SubdirectoryName);
+        if (Directory.Exists(customWidgetsDirectory))
+        {
+            ValidateCustomWidgetsDirectory(customWidgetsDirectory);
+        }
+    }
+
+    private static void ValidateCustomWidgetsDirectory(string widgetsDirectory)
+    {
+        foreach (string widgetDir in Directory.EnumerateDirectories(widgetsDirectory))
+        {
+            string widgetId = Path.GetFileName(widgetDir);
+            if (widgetId.Equals("_studio-draft", StringComparison.OrdinalIgnoreCase) ||
+                widgetId.StartsWith("__studio_template_", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            string manifestPath = Path.Combine(widgetDir, "manifest.json");
+            if (File.Exists(manifestPath))
+            {
+                try
+                {
+                    using var doc = JsonDocument.Parse(File.ReadAllText(manifestPath));
+                    if (doc.RootElement.ValueKind != JsonValueKind.Object)
+                    {
+                        throw new InvalidDataException("Backup custom widget manifest.json must be a JSON object.");
+                    }
+                }
+                catch (JsonException ex)
+                {
+                    throw new InvalidDataException("Backup data file 'manifest.json' is invalid.", ex);
+                }
+            }
+
+            string storePath = Path.Combine(widgetDir, "store.json");
+            if (File.Exists(storePath))
+            {
+                ValidateJsonFileIfPresent<CustomWidgetStorePayload>(
+                    storePath,
+                    CustomWidgetStoreJsonContext.Default.CustomWidgetStorePayload);
+            }
+
+            string revisionsPath = Path.Combine(widgetDir, CustomWidgetStudioSessionStore.RevisionsFileName);
+            if (File.Exists(revisionsPath))
+            {
+                try
+                {
+                    using var doc = JsonDocument.Parse(File.ReadAllText(revisionsPath));
+                    if (doc.RootElement.ValueKind is not (JsonValueKind.Object or JsonValueKind.Array))
+                    {
+                        throw new InvalidDataException("Backup custom widget revisions.json must be a JSON object or array.");
+                    }
+                }
+                catch (JsonException ex)
+                {
+                    throw new InvalidDataException("Backup data file 'revisions.json' is invalid.", ex);
+                }
+            }
         }
     }
 
@@ -2172,40 +2746,214 @@ public sealed partial class DeskBoxDataBackupService
         }
 
         string widgetsDirectory = Path.Combine(stagedDataDirectory, "widgets");
-        if (!Directory.Exists(widgetsDirectory))
+        if (Directory.Exists(widgetsDirectory))
         {
-            return;
-        }
-
-        foreach (string todoPath in Directory.EnumerateFiles(
-                     widgetsDirectory,
-                     "todo.json",
-                     SearchOption.AllDirectories))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            await RebaseTodoFileAsync(
-                todoPath,
-                stagedDataDirectory,
-                sourceDataPath,
-                todoWidgetIdRemaps,
-                cancellationToken);
-            string backupPath = ResilientJsonStore.GetBackupPath(todoPath);
-            if (File.Exists(backupPath))
+            foreach (string todoPath in Directory.EnumerateFiles(
+                         widgetsDirectory,
+                         "todo.json",
+                         SearchOption.AllDirectories))
             {
-                try
+                cancellationToken.ThrowIfCancellationRequested();
+                await RebaseTodoFileAsync(
+                    todoPath,
+                    stagedDataDirectory,
+                    sourceDataPath,
+                    todoWidgetIdRemaps,
+                    cancellationToken);
+                string backupPath = ResilientJsonStore.GetBackupPath(todoPath);
+                if (File.Exists(backupPath))
                 {
-                    await RebaseTodoFileAsync(
-                        backupPath,
-                        stagedDataDirectory,
-                        sourceDataPath,
-                        todoWidgetIdRemaps,
-                        cancellationToken);
-                }
-                catch (Exception ex) when (ex is JsonException or InvalidDataException)
-                {
-                    App.Log($"[DataBackup] Skipped invalid Todo backup store: {ex.Message}");
+                    try
+                    {
+                        await RebaseTodoFileAsync(
+                            backupPath,
+                            stagedDataDirectory,
+                            sourceDataPath,
+                            todoWidgetIdRemaps,
+                            cancellationToken);
+                    }
+                    catch (Exception ex) when (ex is JsonException or InvalidDataException)
+                    {
+                        App.Log($"[DataBackup] Skipped invalid Todo backup store: {ex.Message}");
+                    }
                 }
             }
+        }
+
+        string customWidgetsDirectory = Path.Combine(stagedDataDirectory, CustomWidgetDataStore.SubdirectoryName);
+        if (Directory.Exists(customWidgetsDirectory))
+        {
+            foreach (string storePath in Directory.EnumerateFiles(
+                         customWidgetsDirectory,
+                         "store.json",
+                         SearchOption.AllDirectories))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                await RebaseCustomWidgetStoreFileAsync(
+                    storePath,
+                    stagedDataDirectory,
+                    sourceDataPath,
+                    cancellationToken);
+                string backupPath = ResilientJsonStore.GetBackupPath(storePath);
+                if (File.Exists(backupPath))
+                {
+                    try
+                    {
+                        await RebaseCustomWidgetStoreFileAsync(
+                            backupPath,
+                            stagedDataDirectory,
+                            sourceDataPath,
+                            cancellationToken);
+                    }
+                    catch (Exception ex) when (ex is JsonException or InvalidDataException)
+                    {
+                        App.Log($"[DataBackup] Skipped invalid CustomWidget backup store: {ex.Message}");
+                    }
+                }
+            }
+        }
+    }
+
+    private static int CountCustomWidgetAttachmentPaths(CustomWidgetStorePayload data)
+    {
+        var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (List<CustomWidgetRecord>? records in data.Collections.Values)
+        {
+            foreach (CustomWidgetRecord record in records ?? [])
+            {
+                if (record is null || record.IsDeleted)
+                {
+                    continue;
+                }
+
+                foreach (string value in record.Fields.Values)
+                {
+                    if (string.IsNullOrWhiteSpace(value))
+                    {
+                        continue;
+                    }
+
+                    string normalized = value.Trim().Replace('\\', '/');
+                    if (normalized.StartsWith("attachments/", StringComparison.OrdinalIgnoreCase) ||
+                        normalized.Contains("/attachments/", StringComparison.OrdinalIgnoreCase))
+                    {
+                        paths.Add(normalized);
+                    }
+                }
+            }
+        }
+
+        return paths.Count;
+    }
+
+    private async Task RebaseCustomWidgetStoreFileAsync(
+        string path,
+        string stagedDataDirectory,
+        string? sourceDataPath,
+        CancellationToken cancellationToken)
+    {
+        CustomWidgetStorePayload data = JsonSerializer.Deserialize(
+                                            await File.ReadAllTextAsync(path, cancellationToken),
+                                            CustomWidgetStoreJsonContext.Default.CustomWidgetStorePayload) ??
+                                        throw new InvalidDataException("Custom widget backup data is invalid.");
+        string widgetDir = Path.GetDirectoryName(path)!;
+        string widgetId = Path.GetFileName(widgetDir);
+        string storeRelative = Path.GetRelativePath(stagedDataDirectory, widgetDir)
+            .Replace(Path.DirectorySeparatorChar, '/');
+        bool changed = false;
+
+        string? TryConvertToPortableOrRebased(string? rawValue)
+        {
+            if (string.IsNullOrWhiteSpace(rawValue))
+            {
+                return null;
+            }
+
+            string normalized = rawValue.Replace('\\', '/');
+            if (normalized.StartsWith("attachments/", StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            string marker = $"/{CustomWidgetDataStore.SubdirectoryName}/{widgetId}/attachments/";
+            int markerIdx = normalized.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (markerIdx >= 0)
+            {
+                string tail = normalized[(markerIdx + marker.Length)..].TrimStart('/');
+                if (tail.Length > 0 && !tail.Split('/').Any(seg => seg is "." or ".."))
+                {
+                    return $"attachments/{tail}";
+                }
+            }
+
+            string? rebased = TryRebaseManagedPath(
+                rawValue,
+                sourceDataPath,
+                stagedDataDirectory,
+                [storeRelative]);
+            if (rebased is not null)
+            {
+                string liveAttachmentsRoot = EnsureTrailingDirectorySeparator(
+                    Path.GetFullPath(Path.Combine(DataDirectory, CustomWidgetDataStore.SubdirectoryName, widgetId, "attachments")));
+                if (rebased.StartsWith(liveAttachmentsRoot, StringComparison.OrdinalIgnoreCase))
+                {
+                    string relInsideAttachments = rebased[liveAttachmentsRoot.Length..].Replace('\\', '/').TrimStart('/');
+                    if (relInsideAttachments.Length > 0)
+                    {
+                        return $"attachments/{relInsideAttachments}";
+                    }
+                }
+
+                return rebased;
+            }
+
+            return null;
+        }
+
+        foreach (List<CustomWidgetRecord>? records in data.Collections.Values)
+        {
+            foreach (CustomWidgetRecord record in records ?? [])
+            {
+                if (record is null)
+                {
+                    continue;
+                }
+
+                foreach (string fieldKey in record.Fields.Keys.ToArray())
+                {
+                    if (TryConvertToPortableOrRebased(record.Fields[fieldKey]) is string updated)
+                    {
+                        record.Fields[fieldKey] = updated;
+                        changed = true;
+                    }
+                }
+            }
+        }
+
+        foreach (string key in data.State.Keys.ToArray())
+        {
+            if (TryConvertToPortableOrRebased(data.State[key]) is string updated)
+            {
+                data.State[key] = updated;
+                changed = true;
+            }
+        }
+
+        foreach (string key in data.Settings.Keys.ToArray())
+        {
+            if (TryConvertToPortableOrRebased(data.Settings[key]) is string updated)
+            {
+                data.Settings[key] = updated;
+                changed = true;
+            }
+        }
+
+        if (changed)
+        {
+            await File.WriteAllTextAsync(
+                path,
+                JsonSerializer.Serialize(data, CustomWidgetStoreJsonContext.Default.CustomWidgetStorePayload),
+                cancellationToken);
         }
     }
 
@@ -2481,6 +3229,53 @@ public sealed partial class DeskBoxDataBackupService
         }
     }
 
+    private bool HasRecentAutomaticSnapshot(string directory, TimeSpan minInterval)
+    {
+        if (_cachedLatestAutoSnapshotPathByDir.TryGetValue(directory, out string? cachedPath) &&
+            !string.IsNullOrEmpty(cachedPath))
+        {
+            if (File.Exists(cachedPath))
+            {
+                DateTime cachedWriteUtc = File.GetLastWriteTimeUtc(cachedPath);
+                if (DateTime.UtcNow - cachedWriteUtc < minInterval)
+                {
+                    return true;
+                }
+            }
+            else
+            {
+                _cachedLatestAutoSnapshotPathByDir.TryRemove(directory, out _);
+            }
+        }
+
+        if (!Directory.Exists(directory))
+        {
+            return false;
+        }
+
+        Interlocked.Increment(ref _automaticSnapshotDirectoryScanCount);
+        string? newestPath = null;
+        DateTime newestWriteUtc = DateTime.MinValue;
+        foreach (string candidatePath in Directory.EnumerateFiles(directory, "DeskBox-Auto-*.zip"))
+        {
+            DateTime candidateWriteUtc = File.GetLastWriteTimeUtc(candidatePath);
+            if (newestPath is null || candidateWriteUtc > newestWriteUtc)
+            {
+                newestPath = candidatePath;
+                newestWriteUtc = candidateWriteUtc;
+            }
+        }
+
+        if (newestPath is null)
+        {
+            _cachedLatestAutoSnapshotPathByDir.TryRemove(directory, out _);
+            return false;
+        }
+
+        _cachedLatestAutoSnapshotPathByDir[directory] = newestPath;
+        return DateTime.UtcNow - newestWriteUtc < minInterval;
+    }
+
     private bool HasBackupSourceData()
     {
         // "Source data" means data the archive filter would actually keep:
@@ -2747,6 +3542,11 @@ public sealed partial class DeskBoxDataBackupService
             }
 
             File.Delete(snapshotPath);
+            string? deletedSnapshotDirectory = Path.GetDirectoryName(snapshotPath);
+            if (!string.IsNullOrEmpty(deletedSnapshotDirectory))
+            {
+                _cachedLatestAutoSnapshotPathByDir.TryRemove(deletedSnapshotDirectory, out _);
+            }
             App.Log($"[DataBackup] Deleted snapshot '{snapshotPath}'.");
             return true;
         }
@@ -3270,8 +4070,15 @@ public sealed partial class DeskBoxDataBackupService
         // contract assigns it no backup semantics at all.
         if (relativePath.StartsWith("quick-capture/thumbnails/", StringComparison.OrdinalIgnoreCase) ||
             relativePath.StartsWith("quick-capture/exports/", StringComparison.OrdinalIgnoreCase) ||
+            relativePath.StartsWith("clipboard/thumbnails/", StringComparison.OrdinalIgnoreCase) ||
+            relativePath.StartsWith("clipboard/exports/", StringComparison.OrdinalIgnoreCase) ||
             relativePath.StartsWith("cache/", StringComparison.OrdinalIgnoreCase) ||
             relativePath.StartsWith("sync/", StringComparison.OrdinalIgnoreCase) ||
+            relativePath.StartsWith("custom-widgets/_studio-draft/", StringComparison.OrdinalIgnoreCase) ||
+            relativePath.StartsWith("custom-widgets/__studio_template_", StringComparison.OrdinalIgnoreCase) ||
+            (relativePath.StartsWith("custom-widgets/", StringComparison.OrdinalIgnoreCase) &&
+             (relativePath.EndsWith("/studio-chat.json", StringComparison.OrdinalIgnoreCase) ||
+              relativePath.EndsWith("/studio-draft.json", StringComparison.OrdinalIgnoreCase))) ||
             string.Equals(relativePath, "weather-cache.json", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(relativePath, "device.id", StringComparison.OrdinalIgnoreCase))
         {

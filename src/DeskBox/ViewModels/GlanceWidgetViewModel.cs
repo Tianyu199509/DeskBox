@@ -399,6 +399,10 @@ public sealed partial class GlanceWidgetViewModel : ObservableObject, IDisposabl
         {
             OnPropertyChanged(nameof(ShowCalendar));
             OnPropertyChanged(nameof(IsForegroundVisible));
+            if (ShowCalendar && CalendarDays.Count == 0)
+            {
+                _ = UpdateCalendarAsync();
+            }
         }
         if (oldShowCalendar != ShowCalendar || oldCompactCalendar != IsCompactCalendarPresentation)
         {
@@ -419,6 +423,13 @@ public sealed partial class GlanceWidgetViewModel : ObservableObject, IDisposabl
         _displayedCalendarMonth = normalized;
         OnPropertyChanged(nameof(DisplayedCalendarMonth));
         await UpdateCalendarAsync();
+    }
+
+    internal string FormatDisplayedCalendarMonthHeader()
+    {
+        CultureInfo culture = GetCulture();
+        DateTime monthStart = new(_displayedCalendarMonth.Year, _displayedCalendarMonth.Month, 1);
+        return monthStart.ToString(culture.DateTimeFormat.YearMonthPattern, culture);
     }
 
     internal GlanceCalendarDay? FindCalendarDay(DateOnly date) =>
@@ -873,9 +884,25 @@ public sealed partial class GlanceWidgetViewModel : ObservableObject, IDisposabl
         return date.ToString(pattern, culture);
     }
 
-    private async Task UpdateCalendarAsync()
+    private Task UpdateCalendarAsync() => RebuildCalendarDays();
+
+    private async Task RebuildCalendarDays()
     {
         int loadVersion = Interlocked.Increment(ref _calendarLoadVersion);
+        if (!ShowCalendar && TraditionalCalendarMode == GlanceTraditionalCalendarMode.None)
+        {
+            TraditionalCalendarTitle = string.Empty;
+            if (WeekdayHeaders.Count > 0 || CalendarDays.Count > 0)
+            {
+                WeekdayHeaders.Clear();
+                CalendarDays.Clear();
+                OnPropertyChanged(nameof(WeekdayHeaders));
+            OnPropertyChanged(nameof(CalendarDays));
+            }
+
+            return;
+        }
+
         CultureInfo culture = GetCulture();
         DateOnly today = DateOnly.FromDateTime(DateTime.Today);
         DateOnly requestedMonth = _displayedCalendarMonth;
@@ -917,6 +944,7 @@ public sealed partial class GlanceWidgetViewModel : ObservableObject, IDisposabl
                 CalendarDays.Add(day);
             }
 
+            OnPropertyChanged(nameof(WeekdayHeaders));
             OnPropertyChanged(nameof(CalendarDays));
         }
         catch (OperationCanceledException) when (_lifetimeCts.IsCancellationRequested)

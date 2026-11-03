@@ -1,16 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20">
+<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20" fill="none">
+  <path fill="url(#ic_fluent_clipboard_task_20_color__a)" d="M4 4.5C4 3.69 4.67 3 5.5 3h9c.83 0 1.5.68 1.5 1.5v12c0 .83-.67 1.5-1.5 1.5h-9A1.5 1.5 0 0 1 4 16.5z" />
+  <path fill="url(#ic_fluent_clipboard_task_20_color__b)" fill-opacity=".7" d="M4 4.5C4 3.69 4.67 3 5.5 3h9c.83 0 1.5.68 1.5 1.5v12c0 .83-.67 1.5-1.5 1.5h-9A1.5 1.5 0 0 1 4 16.5z" />
+  <path fill="url(#ic_fluent_clipboard_task_20_color__c)" fill-opacity=".4" d="M4 4.5C4 3.69 4.67 3 5.5 3h9c.83 0 1.5.68 1.5 1.5v12c0 .83-.67 1.5-1.5 1.5h-9A1.5 1.5 0 0 1 4 16.5z" />
+  <path fill="url(#ic_fluent_clipboard_task_20_color__d)" d="M7 3.5C7 4.33 7.67 5 8.5 5h3a1.5 1.5 0 0 0 0-3h-3C7.67 2 7 2.67 7 3.5" />
+  <path fill="url(#ic_fluent_clipboard_task_20_color__e)" fill-opacity=".9" d="M12.85 9.85a.5.5 0 0 0-.7-.7L9 12.29l-1.15-1.14a.5.5 0 0 0-.7.7l1.5 1.5c.2.2.5.2.7 0z" />
   <defs>
-    <linearGradient id="surface" x1="3" y1="3" x2="17" y2="17" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#38BDF8" />
-      <stop offset="1" stop-color="#2563EB" />
+    <linearGradient id="ic_fluent_clipboard_task_20_color__a" x1="4" x2="16" y1="4.51" y2="18.01" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#36dff1" />
+      <stop offset="1" stop-color="#0094f0" />
     </linearGradient>
-    <linearGradient id="accent" x1="4" y1="4" x2="8" y2="16" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#60A5FA" />
-      <stop offset="1" stop-color="#1D4ED8" />
+    <linearGradient id="ic_fluent_clipboard_task_20_color__d" x1="10" x2="10" y1="2" y2="5" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffe06b" />
+      <stop offset="1" stop-color="#fab500" />
     </linearGradient>
+    <linearGradient id="ic_fluent_clipboard_task_20_color__e" x1="15" x2="7.55" y1="16.5" y2="5.91" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#9deaff" />
+      <stop offset="1" stop-color="#fff" />
+    </linearGradient>
+    <radialGradient id="ic_fluent_clipboard_task_20_color__b" cx="0" cy="0" r="1" gradientTransform="matrix(0 5.14077 -4.64062 0 10 2.17)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0a1852" />
+      <stop offset=".97" stop-color="#0a1852" stop-opacity="0" />
+    </radialGradient>
+    <radialGradient id="ic_fluent_clipboard_task_20_color__c" cx="0" cy="0" r="1" gradientTransform="matrix(0 2.30574 -3.67969 0 10 3.74)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0a1852" />
+      <stop offset="1" stop-color="#0a1852" stop-opacity="0" />
+    </radialGradient>
   </defs>
-  <rect x="2.5" y="2.5" width="15" height="15" rx="3.5" fill="url(#surface)" />
-  <path d="m4.85 6.25.9.9 1.65-1.8m-2.55 5.4.9.9 1.65-1.8m-2.55 5.4.9.9 1.65-1.8" fill="none" stroke="url(#accent)" stroke-width="1.45" stroke-linecap="round" stroke-linejoin="round" />
-  <path d="M9.25 6.25h5.5m-5.5 4.5h5.5m-5.5 4.5h5.5" fill="none" stroke="#FFFFFF" stroke-opacity=".92" stroke-width="1.5" stroke-linecap="round" />
 </svg>

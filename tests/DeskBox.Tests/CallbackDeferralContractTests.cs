@@ -131,9 +131,9 @@ public sealed class CallbackDeferralContractTests : IDisposable
         string landing = SliceMethod(
             tray,
             "private void ShowTrayContextMenuAt",
-            "private static bool IsSecondWindowHostFailure");
-        Assert.Contains("IsDegradedToPopupMenu", landing, StringComparison.Ordinal);
-        Assert.Contains("_trayContextMenuModePolicy.RecordSuccess();", landing, StringComparison.Ordinal);
+            "internal void ShowTrayContextMenuForOnboarding");
+        Assert.Contains("trayHost.ShowContextMenu(", landing, StringComparison.Ordinal);
+        Assert.DoesNotContain("_trayHost.ShowContextMenu(", landing, StringComparison.Ordinal);
 
         string toggle = SliceMethod(
             tray,
@@ -465,6 +465,7 @@ public sealed class CallbackDeferralContractTests : IDisposable
         _ = Win32Helper.SetWindowLongPtr(IntPtr.Zero, -20, IntPtr.Zero);
         Assert.False(Win32Helper.IsWindowInCurrentProcess(IntPtr.Zero));
         _ = Win32Helper.GetForegroundWindow();
+        Assert.False(Win32Helper.TrySetProcessMemoryPriorityCore(IntPtr.Zero, lowPriority: false));
     }
 
     [Fact]

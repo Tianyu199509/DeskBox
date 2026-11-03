@@ -44,6 +44,7 @@ internal static class ShellThumbnailProxy
     private const int MaximumPayloadBytes = 2 * 1024 * 1024;
     private const int MaximumFailureEntries = 256;
     private const long FailureRetryDelayMilliseconds = 30_000;
+    private const long IconFailureRetryDelayMilliseconds = 800;
     private static readonly TimeSpan ExtractionTimeout =
         TimeSpan.FromMilliseconds(2500);
     private const uint BatchProtocolMagic = 0x4458_4231;
@@ -56,12 +57,14 @@ internal static class ShellThumbnailProxy
     private const int MaximumBatchRequests = 8;
     private static readonly TimeSpan BatchCoalesceWindow =
         TimeSpan.FromMilliseconds(25);
+    private static readonly TimeSpan BatchFrameTimeout =
+        TimeSpan.FromMilliseconds(3000);
     private static readonly TimeSpan BatchExtractionTimeout =
-        TimeSpan.FromMilliseconds(2500);
+        TimeSpan.FromMilliseconds(15000);
     // Safety net so a caller can never hang on a lost or crashed dispatcher;
     // every batch normally resolves within BatchExtractionTimeout.
     private static readonly TimeSpan BatchWaiterSafetyTimeout =
-        TimeSpan.FromMilliseconds(6000);
+        TimeSpan.FromMilliseconds(16500);
     private static readonly bool s_batchExtractionDisabled =
         Environment.GetEnvironmentVariable("DESKBOX_DISABLE_ICON_BATCH") == "1";
     private static readonly ConcurrentQueue<ProxyBatchRequest> s_batchQueue = new();
@@ -70,6 +73,8 @@ internal static class ShellThumbnailProxy
         s_registeredProviderByExtension = new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, long>
         s_recentFailures = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, byte>
+        s_transientTimeoutFailures = new(StringComparer.OrdinalIgnoreCase);
     private static int s_missingExecutableLogged;
 
     internal sealed record ProxyBatchRequest(
@@ -144,7 +149,7 @@ internal static class ShellThumbnailProxy
     {
         string normalizedPath = NormalizePath(path);
         string failureKey = BuildFailureKey(normalizedPath, mode);
-        if (IsRecentFailure(failureKey))
+        if (IsRecentFailure(failureKey, mode))
         {
             return null;
         }
@@ -166,6 +171,7 @@ internal static class ShellThumbnailProxy
         }
 
         int normalizedSize = Math.Clamp(requestedSize, 24, 512);
+        s_transientTimeoutFailures.TryRemove(failureKey, out _);
         byte[]? output = s_batchExtractionDisabled
             ? await ExtractViaSingleProcessAsync(
                 executablePath,
@@ -180,7 +186,11 @@ internal static class ShellThumbnailProxy
 
         if (output is null || !IsVisibleBitmapPayload(output))
         {
-            RecordFailure(failureKey);
+            if (!s_transientTimeoutFailures.TryRemove(failureKey, out _))
+            {
+                RecordFailure(failureKey);
+            }
+
             App.LogVerbose(
                 $"[ShellThumbnailProxy] No usable image mode={mode} " +
                 $"path={normalizedPath}");
@@ -275,6 +285,7 @@ internal static class ShellThumbnailProxy
         }
         catch (OperationCanceledException)
         {
+            s_transientTimeoutFailures[BuildFailureKey(normalizedPath, mode)] = 1;
             TryKill(process);
             await ObserveExitAsync(process);
             await ObserveOutputAsync(outputTask, errorTask);
@@ -335,6 +346,7 @@ internal static class ShellThumbnailProxy
         }
         catch (TimeoutException)
         {
+            s_transientTimeoutFailures[BuildFailureKey(normalizedPath, mode)] = 1;
             return null;
         }
     }
@@ -419,7 +431,8 @@ internal static class ShellThumbnailProxy
                 process.StandardOutput.BaseStream,
                 batch,
                 fulfilled,
-                timeoutSource.Token);
+                timeoutSource.Token,
+                BatchFrameTimeout);
             await process.WaitForExitAsync(timeoutSource.Token);
             if (failedCount > 0)
             {
@@ -455,6 +468,9 @@ internal static class ShellThumbnailProxy
             {
                 if (!fulfilled[index])
                 {
+                    s_transientTimeoutFailures[BuildFailureKey(
+                        batch[index].Path,
+                        batch[index].Mode)] = 1;
                     batch[index].Completion.TrySetResult(null);
                 }
             }
@@ -509,18 +525,26 @@ internal static class ShellThumbnailProxy
         Stream stream,
         IReadOnlyList<ProxyBatchRequest> batch,
         bool[] fulfilled,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        TimeSpan? perFrameTimeout = null)
     {
         byte[] header = new byte[12];
         int remaining = batch.Count;
         int failedCount = 0;
         while (remaining > 0)
         {
+            using CancellationTokenSource? frameTimeoutSource =
+                perFrameTimeout is { } frameTimeout
+                    ? CancellationTokenSource.CreateLinkedTokenSource(cancellationToken)
+                    : null;
+            frameTimeoutSource?.CancelAfter(perFrameTimeout!.Value);
+            CancellationToken readToken = frameTimeoutSource?.Token ?? cancellationToken;
+
             int headerBytes = await stream.ReadAtLeastAsync(
                 header,
                 header.Length,
                 throwOnEndOfStream: false,
-                cancellationToken).ConfigureAwait(false);
+                readToken).ConfigureAwait(false);
             if (headerBytes == 0)
             {
                 // The proxy exited before writing every frame; the dispatcher
@@ -552,7 +576,7 @@ internal static class ShellThumbnailProxy
             byte[] payload = new byte[length];
             if (length > 0)
             {
-                await stream.ReadExactlyAsync(payload, cancellationToken)
+                await stream.ReadExactlyAsync(payload, readToken)
                     .ConfigureAwait(false);
             }
 
@@ -575,20 +599,23 @@ internal static class ShellThumbnailProxy
     public static void Invalidate(string path)
     {
         string normalizedPath = NormalizePath(path);
-        s_recentFailures.TryRemove(
-            BuildFailureKey(normalizedPath, ShellImageMode.Thumbnail),
-            out _);
-        s_recentFailures.TryRemove(
-            BuildFailureKey(normalizedPath, ShellImageMode.Icon),
-            out _);
-        s_recentFailures.TryRemove(
-            BuildFailureKey(normalizedPath, ShellImageMode.IconWithOverlays),
-            out _);
+        foreach (ShellImageMode mode in new[]
+                 {
+                     ShellImageMode.Thumbnail,
+                     ShellImageMode.Icon,
+                     ShellImageMode.IconWithOverlays
+                 })
+        {
+            string key = BuildFailureKey(normalizedPath, mode);
+            s_recentFailures.TryRemove(key, out _);
+            s_transientTimeoutFailures.TryRemove(key, out _);
+        }
     }
 
     public static void ClearTransientFailures()
     {
         s_recentFailures.Clear();
+        s_transientTimeoutFailures.Clear();
     }
 
     private static bool QueryRegisteredThumbnailProvider(string extension)
@@ -913,14 +940,25 @@ internal static class ShellThumbnailProxy
         string normalizedPath,
         ShellImageMode mode) => $"{mode}:{normalizedPath}";
 
-    private static bool IsRecentFailure(string path)
+    internal static long GetFailureRetryDelayMilliseconds(ShellImageMode mode) =>
+        mode == ShellImageMode.Thumbnail
+            ? FailureRetryDelayMilliseconds
+            : IconFailureRetryDelayMilliseconds;
+
+    internal static void RecordFailureForTesting(string path, ShellImageMode mode) =>
+        RecordFailure(BuildFailureKey(NormalizePath(path), mode));
+
+    internal static bool IsRecentFailureForTesting(string path, ShellImageMode mode) =>
+        IsRecentFailure(BuildFailureKey(NormalizePath(path), mode), mode);
+
+    private static bool IsRecentFailure(string path, ShellImageMode mode)
     {
         if (!s_recentFailures.TryGetValue(path, out long failedAt))
         {
             return false;
         }
 
-        if (Environment.TickCount64 - failedAt < FailureRetryDelayMilliseconds)
+        if (Environment.TickCount64 - failedAt < GetFailureRetryDelayMilliseconds(mode))
         {
             return true;
         }

@@ -70,8 +70,8 @@ public sealed class AotStage5B4C1B1ContractTests
         Assert.Contains("_fileService.DeleteEntriesWithShellAsync(", viewModel, StringComparison.Ordinal);
         Assert.Contains("_fileService.DeleteEntryAsync(", viewModel, StringComparison.Ordinal);
         Assert.Contains("DeleteEntryWithShell(normalizedPath, ownerHandle, allowUndo: true)", fileService, StringComparison.Ordinal);
-        Assert.Contains("SHFileOperation(ref operation)", fileService, StringComparison.Ordinal);
-        Assert.Contains("FofAllowUndo", fileService, StringComparison.Ordinal);
+        Assert.Contains("ExecuteShellDeleteOnStaThread(", fileService, StringComparison.Ordinal);
+        Assert.Contains("ShellDeleteRecycleOnDelete", fileService, StringComparison.Ordinal);
     }
 
     [Fact]

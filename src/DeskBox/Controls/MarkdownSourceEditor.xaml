@@ -213,7 +213,7 @@
             Background="Transparent"
             BorderBrush="Transparent"
             BorderThickness="0"
-            FontFamily="Cascadia Mono, Microsoft YaHei UI"
+            FontFamily="Segoe UI Variable Text, Microsoft YaHei UI"
             FontSize="{x:Bind EditorFontSize, Mode=OneWay}"
             IsReadOnly="{x:Bind IsReadOnly, Mode=OneWay}"
             IsSpellCheckEnabled="True"

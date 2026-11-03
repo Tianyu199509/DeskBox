@@ -71,6 +71,9 @@ public class AppSettings
     [JsonIgnore]
     public SearchSettingsSlice Search { get; } = new();
 
+    [JsonIgnore]
+    public ClipboardSettingsSlice Clipboard { get; } = new();
+
     // ─── Serialization facade (wire contract, order-significant) ──
 
     /// <inheritdoc cref="CoreSettingsSlice.Theme"/>
@@ -244,6 +247,9 @@ public class AppSettings
     /// <inheritdoc cref="TodoSettingsSlice.TodoShowTodayTab"/>
     public bool TodoShowTodayTab { get => Todo.TodoShowTodayTab; set => Todo.TodoShowTodayTab = value; }
 
+    /// <inheritdoc cref="TodoSettingsSlice.TodoShowOverdueTab"/>
+    public bool TodoShowOverdueTab { get => Todo.TodoShowOverdueTab; set => Todo.TodoShowOverdueTab = value; }
+
     /// <inheritdoc cref="TodoSettingsSlice.TodoShowThisWeekTab"/>
     public bool TodoShowThisWeekTab { get => Todo.TodoShowThisWeekTab; set => Todo.TodoShowThisWeekTab = value; }
 
@@ -286,6 +292,12 @@ public class AppSettings
     /// <inheritdoc cref="TodoSettingsSlice.TodoDefaultReminderOffsetMinutes"/>
     public int TodoDefaultReminderOffsetMinutes { get => Todo.TodoDefaultReminderOffsetMinutes; set => Todo.TodoDefaultReminderOffsetMinutes = value; }
 
+    /// <inheritdoc cref="TodoSettingsSlice.TodoAllDayReminderEnabled"/>
+    public bool TodoAllDayReminderEnabled { get => Todo.TodoAllDayReminderEnabled; set => Todo.TodoAllDayReminderEnabled = value; }
+
+    /// <inheritdoc cref="TodoSettingsSlice.TodoAllDayReminderTimeMinutes"/>
+    public int TodoAllDayReminderTimeMinutes { get => Todo.TodoAllDayReminderTimeMinutes; set => Todo.TodoAllDayReminderTimeMinutes = value; }
+
     /// <inheritdoc cref="TodoSettingsSlice.TodoUseWideDetailPane"/>
     public bool TodoUseWideDetailPane { get => Todo.TodoUseWideDetailPane; set => Todo.TodoUseWideDetailPane = value; }
 
@@ -306,6 +318,15 @@ public class AppSettings
 
     /// <inheritdoc cref="MusicSettingsSlice.MusicHideTimelineWhenUnavailable"/>
     public bool MusicHideTimelineWhenUnavailable { get => Music.MusicHideTimelineWhenUnavailable; set => Music.MusicHideTimelineWhenUnavailable = value; }
+
+    /// <inheritdoc cref="MusicSettingsSlice.MusicShowLyrics"/>
+    public bool MusicShowLyrics { get => Music.MusicShowLyrics; set => Music.MusicShowLyrics = value; }
+
+    /// <inheritdoc cref="MusicSettingsSlice.MusicShowCapsuleLyrics"/>
+    public bool MusicShowCapsuleLyrics { get => Music.MusicShowCapsuleLyrics; set => Music.MusicShowCapsuleLyrics = value; }
+
+    /// <inheritdoc cref="MusicSettingsSlice.MusicLocalLyricsFolder"/>
+    public string MusicLocalLyricsFolder { get => Music.MusicLocalLyricsFolder; set => Music.MusicLocalLyricsFolder = value; }
 
     /// <inheritdoc cref="QuickCaptureSettingsSlice.LastQuickCaptureFileWidgetId"/>
     public string LastQuickCaptureFileWidgetId { get => QuickCapture.LastQuickCaptureFileWidgetId; set => QuickCapture.LastQuickCaptureFileWidgetId = value; }
@@ -410,6 +431,9 @@ public class AppSettings
 
     /// <inheritdoc cref="WidgetShellSettingsSlice.WidgetLayerMode"/>
     public string WidgetLayerMode { get => WidgetShell.WidgetLayerMode; set => WidgetShell.WidgetLayerMode = value; }
+
+    /// <inheritdoc cref="WidgetShellSettingsSlice.DynamicClickRaiseScope"/>
+    public string DynamicClickRaiseScope { get => WidgetShell.DynamicClickRaiseScope; set => WidgetShell.DynamicClickRaiseScope = value; }
 
     /// <inheritdoc cref="WidgetShellSettingsSlice.KeepWidgetsVisibleOnShowDesktop"/>
     public bool KeepWidgetsVisibleOnShowDesktop { get => WidgetShell.KeepWidgetsVisibleOnShowDesktop; set => WidgetShell.KeepWidgetsVisibleOnShowDesktop = value; }
@@ -647,6 +671,13 @@ public class AppSettings
         set => WidgetLayout.WidgetDisplayDisconnectBehavior = value;
     }
 
+    /// <inheritdoc cref="WidgetLayoutSettingsSlice.WidgetDisplayScalingMode"/>
+    public string WidgetDisplayScalingMode
+    {
+        get => WidgetLayout.WidgetDisplayScalingMode;
+        set => WidgetLayout.WidgetDisplayScalingMode = value;
+    }
+
     /// <inheritdoc cref="WidgetLayoutSettingsSlice.WidgetGroups"/>
     public List<WidgetGroupConfig> WidgetGroups { get => WidgetLayout.WidgetGroups; set => WidgetLayout.WidgetGroups = value; }
 
@@ -810,6 +841,9 @@ public class AppSettings
     /// <inheritdoc cref="CloudBackupSettingsSlice.CloudBackupWidgetStyleEnabled"/>
     public bool CloudBackupWidgetStyleEnabled { get => CloudBackup.CloudBackupWidgetStyleEnabled; set => CloudBackup.CloudBackupWidgetStyleEnabled = value; }
 
+    /// <inheritdoc cref="CloudBackupSettingsSlice.CloudBackupCustomWidgetsEnabled"/>
+    public bool CloudBackupCustomWidgetsEnabled { get => CloudBackup.CloudBackupCustomWidgetsEnabled; set => CloudBackup.CloudBackupCustomWidgetsEnabled = value; }
+
     /// <inheritdoc cref="CloudBackupSettingsSlice.CloudBackupRetentionCount"/>
     public int CloudBackupRetentionCount { get => CloudBackup.CloudBackupRetentionCount; set => CloudBackup.CloudBackupRetentionCount = value; }
 
@@ -824,4 +858,51 @@ public class AppSettings
 
     /// <inheritdoc cref="CloudBackupSettingsSlice.CloudBackupLastUnverifiedUtcTicks"/>
     public long CloudBackupLastUnverifiedUtcTicks { get => CloudBackup.CloudBackupLastUnverifiedUtcTicks; set => CloudBackup.CloudBackupLastUnverifiedUtcTicks = value; }
+
+    // ─── Clipboard Feature Widget ───────────────────────────────────
+
+    /// <inheritdoc cref="ClipboardSettingsSlice.ClipboardCaptureText"/>
+    public bool ClipboardCaptureText { get => Clipboard.ClipboardCaptureText; set => Clipboard.ClipboardCaptureText = value; }
+
+    /// <inheritdoc cref="ClipboardSettingsSlice.ClipboardCaptureImages"/>
+    public bool ClipboardCaptureImages { get => Clipboard.ClipboardCaptureImages; set => Clipboard.ClipboardCaptureImages = value; }
+
+    /// <inheritdoc cref="ClipboardSettingsSlice.ClipboardCaptureFiles"/>
+    public bool ClipboardCaptureFiles { get => Clipboard.ClipboardCaptureFiles; set => Clipboard.ClipboardCaptureFiles = value; }
+
+    /// <inheritdoc cref="ClipboardSettingsSlice.ClipboardMaxImageSizeMb"/>
+    public int ClipboardMaxImageSizeMb { get => Clipboard.ClipboardMaxImageSizeMb; set => Clipboard.ClipboardMaxImageSizeMb = value; }
+
+    /// <inheritdoc cref="ClipboardSettingsSlice.ClipboardMaxTextSizeMb"/>
+    public int ClipboardMaxTextSizeMb { get => Clipboard.ClipboardMaxTextSizeMb; set => Clipboard.ClipboardMaxTextSizeMb = value; }
+
+    /// <inheritdoc cref="ClipboardSettingsSlice.ClipboardClickBehavior"/>
+    public string ClipboardClickBehavior { get => Clipboard.ClipboardClickBehavior; set => Clipboard.ClipboardClickBehavior = value; }
+
+    /// <inheritdoc cref="ClipboardSettingsSlice.ClipboardDefaultPastePlainText"/>
+    public bool ClipboardDefaultPastePlainText { get => Clipboard.ClipboardDefaultPastePlainText; set => Clipboard.ClipboardDefaultPastePlainText = value; }
+
+    /// <inheritdoc cref="ClipboardSettingsSlice.ClipboardMoveToTopOnReuse"/>
+    public bool ClipboardMoveToTopOnReuse { get => Clipboard.ClipboardMoveToTopOnReuse; set => Clipboard.ClipboardMoveToTopOnReuse = value; }
+
+    /// <inheritdoc cref="ClipboardSettingsSlice.ClipboardCardDensity"/>
+    public string ClipboardCardDensity { get => Clipboard.ClipboardCardDensity; set => Clipboard.ClipboardCardDensity = value; }
+
+    /// <inheritdoc cref="ClipboardSettingsSlice.ClipboardShowSourceApp"/>
+    public bool ClipboardShowSourceApp { get => Clipboard.ClipboardShowSourceApp; set => Clipboard.ClipboardShowSourceApp = value; }
+
+    /// <inheritdoc cref="ClipboardSettingsSlice.ClipboardIgnoreSystemPrivacyFormats"/>
+    public bool ClipboardIgnoreSystemPrivacyFormats { get => Clipboard.ClipboardIgnoreSystemPrivacyFormats; set => Clipboard.ClipboardIgnoreSystemPrivacyFormats = value; }
+
+    /// <inheritdoc cref="ClipboardSettingsSlice.ClipboardSensitiveProtectionMode"/>
+    public string ClipboardSensitiveProtectionMode { get => Clipboard.ClipboardSensitiveProtectionMode; set => Clipboard.ClipboardSensitiveProtectionMode = value; }
+
+    /// <inheritdoc cref="ClipboardSettingsSlice.ClipboardExcludedApps"/>
+    public List<string> ClipboardExcludedApps { get => Clipboard.ClipboardExcludedApps; set => Clipboard.ClipboardExcludedApps = value; }
+
+    /// <inheritdoc cref="ClipboardSettingsSlice.ClipboardMaxItems"/>
+    public int ClipboardMaxItems { get => Clipboard.ClipboardMaxItems; set => Clipboard.ClipboardMaxItems = value; }
+
+    /// <inheritdoc cref="ClipboardSettingsSlice.ClipboardRetentionDays"/>
+    public int ClipboardRetentionDays { get => Clipboard.ClipboardRetentionDays; set => Clipboard.ClipboardRetentionDays = value; }
 }

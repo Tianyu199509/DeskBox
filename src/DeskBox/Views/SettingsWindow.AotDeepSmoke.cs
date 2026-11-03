@@ -25,14 +25,14 @@ public sealed partial class SettingsWindow
             "GlanceSettings",
             "SearchSettings",
             "AppearanceMaterialSettings",
-            "AppearanceDensitySettings",
-            "AppearanceWindowSettings",
-            "AppearanceAnimationSettings",
             "CapsuleOverridesSettings",
             "BackupRestoreSettings",
             "DataHealthSettings",
             "CompatibilityDiagnosticsSettings",
-            "PerformanceSettings"
+            "PerformanceSettings",
+            "CustomWidgetSettings",
+            "ClipboardSettings",
+            "AiSettings"
         ];
 
         string searchQuery = _localizationService.T("Settings.DataBackup.Title");
@@ -59,7 +59,7 @@ public sealed partial class SettingsWindow
             match.IsPage &&
             string.Equals(
                 match.SectionTag,
-                deepSettingsRoutes[18],
+                deepSettingsRoutes[15],
                 StringComparison.Ordinal));
         if (exactNestedPage is null ||
             !SettingsSearchBox.IsSuggestionListOpen ||
@@ -71,7 +71,7 @@ public sealed partial class SettingsWindow
 
         ActivateSettingsSearchResult(exactNestedPage, SettingsSearchBox);
         AotDeepSettingsPageSnapshot activatedPage =
-            await WaitForAotDeepSettingsPageAsync(deepSettingsRoutes[18]);
+            await WaitForAotDeepSettingsPageAsync(deepSettingsRoutes[15]);
 
         var pageTransitions = new List<AotDeepSettingsPageSnapshot>(deepSettingsRoutes.Length);
         bool breadcrumbParentReturned = false;
@@ -90,12 +90,12 @@ public sealed partial class SettingsWindow
                 fileStackRuleCount = await WaitForAotFileStackRuleProjectionAsync();
             }
 
-            if (string.Equals(sectionTag, deepSettingsRoutes[18], StringComparison.Ordinal))
+            if (string.Equals(sectionTag, deepSettingsRoutes[15], StringComparison.Ordinal))
             {
                 backupSnapshotCount = await WaitForAotBackupSnapshotProjectionAsync();
             }
 
-            if (string.Equals(sectionTag, deepSettingsRoutes[17], StringComparison.Ordinal))
+            if (string.Equals(sectionTag, deepSettingsRoutes[14], StringComparison.Ordinal))
             {
                 List<SettingsBreadcrumbItem> breadcrumbItems =
                     GetAotSettingsBreadcrumbItems();

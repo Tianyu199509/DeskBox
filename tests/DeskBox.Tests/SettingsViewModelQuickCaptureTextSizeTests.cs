@@ -51,9 +51,7 @@ public sealed class SettingsViewModelQuickCaptureTextSizeTests
         {
             var settings = new SettingsService(root);
             settings.Settings.WidgetShell.TextSize = 12.5;
-            var clipboard = new QuickCaptureClipboardRuntime(
-                () => false, () => throw new InvalidOperationException(), _ => { });
-            var quickCapture = new QuickCaptureSettingsCoordinator(settings, clipboard,
+            var quickCapture = new QuickCaptureSettingsCoordinator(settings,
                 (_, _) => Task.CompletedTask, action => { action(); return true; }, _ => { });
             using var todo = new TodoSettingsViewModel(
                 new TodoSettingsCoordinator(settings),
@@ -126,9 +124,7 @@ public sealed class SettingsViewModelQuickCaptureTextSizeTests
         {
             var settings = new SettingsService(root);
             settings.Settings.WidgetShell.TextSize = 12.5;
-            var clipboard = new QuickCaptureClipboardRuntime(
-                () => false, () => throw new InvalidOperationException(), _ => { });
-            var coordinator = new QuickCaptureSettingsCoordinator(settings, clipboard,
+            var coordinator = new QuickCaptureSettingsCoordinator(settings,
                 (_, _) => Task.CompletedTask, action => { action(); return true; }, _ => { });
             var quickCaptureEditor = CreateEditor(coordinator);
             // Mirror the production wiring: the editor commits text-size

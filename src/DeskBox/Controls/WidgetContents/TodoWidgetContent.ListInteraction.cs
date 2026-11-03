@@ -79,7 +79,7 @@ public sealed partial class TodoWidgetContent
             return;
         }
 
-        if (CustomDueDateOverlay.Visibility == Visibility.Visible)
+        if (CustomDueDateOverlay is { Visibility: Visibility.Visible })
         {
             CloseCustomDueDateOverlay();
             e.Handled = true;
@@ -223,10 +223,18 @@ public sealed partial class TodoWidgetContent
             if (ReferenceEquals(visibleItem, item) &&
                 TodoListView.ContainerFromItem(visibleItem) is FrameworkElement container)
             {
-                if (e.PropertyName == nameof(TodoItemViewModel.IsCompleted) &&
-                    FindVisualChild<CheckBox>(container, "TodoCompletionCheckBox") is { } checkBox)
+                if (e.PropertyName == nameof(TodoItemViewModel.IsCompleted))
                 {
-                    checkBox.IsChecked = item.IsCompleted;
+                    var parts = _rowVisuals.GetOrResolveParts(
+                        container,
+                        static root => new DeskBox.Controls.Todo.TodoRowVisualController.RowVisualParts(
+                            FindVisualChild<Border>(root, "TodoItemHoverBackground"),
+                            FindVisualChild<Border>(root, "TodoItemActionHost"),
+                            FindVisualChild<CheckBox>(root, "TodoCompletionCheckBox")));
+                    if ((parts.CompletionCheckBox ?? FindVisualChild<CheckBox>(container, "TodoCompletionCheckBox")) is { } checkBox)
+                    {
+                        checkBox.IsChecked = item.IsCompleted;
+                    }
                 }
 
                 SetTodoItemHoverState(container, false);
@@ -237,10 +245,18 @@ public sealed partial class TodoWidgetContent
 
     private void SynchronizeTodoCompletionCheckBox(TodoItemViewModel item)
     {
-        if (TodoListView.ContainerFromItem(item) is DependencyObject container &&
-            FindVisualChild<CheckBox>(container, "TodoCompletionCheckBox") is { } checkBox)
+        if (TodoListView.ContainerFromItem(item) is DependencyObject container)
         {
-            checkBox.IsChecked = item.IsCompleted;
+            var parts = _rowVisuals.GetOrResolveParts(
+                container,
+                static root => new DeskBox.Controls.Todo.TodoRowVisualController.RowVisualParts(
+                    FindVisualChild<Border>(root, "TodoItemHoverBackground"),
+                    FindVisualChild<Border>(root, "TodoItemActionHost"),
+                    FindVisualChild<CheckBox>(root, "TodoCompletionCheckBox")));
+            if ((parts.CompletionCheckBox ?? FindVisualChild<CheckBox>(container, "TodoCompletionCheckBox")) is { } checkBox)
+            {
+                checkBox.IsChecked = item.IsCompleted;
+            }
         }
     }
 

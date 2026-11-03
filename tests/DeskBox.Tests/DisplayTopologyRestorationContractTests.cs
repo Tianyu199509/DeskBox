@@ -37,6 +37,18 @@ public sealed class DisplayTopologyRestorationContractTests
         Assert.DoesNotContain("GetDpiScaleForWindow", method, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void WindowInitialConstruction_PreservesMonitorIdentityAndReconcilesAfterLoaded()
+    {
+        string source = File.ReadAllText(GetRepoFile(
+            "src/DeskBox/Views/WidgetWindowBase.Bounds.cs"));
+        string method = ExtractMethod(source, "protected void ConfigureWindowCore()");
+
+        Assert.Contains("WidgetPositioningService.ResolveBoundsForCurrentTopology", method, StringComparison.Ordinal);
+        Assert.DoesNotContain("WidgetPositioningService.GetAvailableWorkAreas()", method, StringComparison.Ordinal);
+        Assert.Contains("TryRestoreBoundsForCurrentTopology(allowHidden: true, updateConfig: false)", method, StringComparison.Ordinal);
+    }
+
     private static string ExtractMethod(string source, string signature)
     {
         int start = source.IndexOf(signature, StringComparison.Ordinal);

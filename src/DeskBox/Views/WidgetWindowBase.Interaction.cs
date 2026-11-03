@@ -1,4 +1,4 @@
-﻿// Copyright (c) DeskBox. All rights reserved.
+// Copyright (c) DeskBox. All rights reserved.
 
 using DeskBox.Helpers;
 using DeskBox.Models;
@@ -277,11 +277,16 @@ public abstract partial class WidgetWindowBase
         if (disposition != RelativeLayerRestoreDisposition.PreservePeerOrder)
         {
             IsAtDesktopLayer = true;
+            App.Current.WidgetManager?.ApplyImmediateRestingPeerOrderAfterRestore(
+                $"{LogPrefix}-desktop-layer-restored");
+        }
+        else
+        {
+            App.Current.WidgetManager?.QueueIdleWidgetZOrderNormalization(
+                $"{LogPrefix}-desktop-layer-restored");
         }
 
         App.LogVerbose($"[ZOrder] {LogPrefix} ClearTopMostOnly hwnd=0x{HWnd.ToInt64():X} fg=0x{foreground.ToInt64():X} disposition={disposition}");
-        App.Current.WidgetManager?.QueueIdleWidgetZOrderNormalization(
-            $"{LogPrefix}-desktop-layer-restored");
     }
 
     // ── Drag logic ─────────────────────────────────────────────
@@ -893,9 +898,30 @@ public abstract partial class WidgetWindowBase
 
     // ── Tray animation helpers ─────────────────────────────────
 
-    protected WidgetTrayAnimationProfile GetTrayAnimationProfile()
+    private WidgetAnimationOptions? _trayAnimationOptionsOverride;
+
+    protected WidgetAnimationOptions GetEffectiveTrayAnimationOptions() =>
+        _trayAnimationOptionsOverride ?? WidgetAnimationSettings.From(SettingsService.Settings);
+
+    protected void SetTrayAnimationOptionsOverrideCore(WidgetAnimationOptions? optionsOverride)
     {
-        return TrayAnimation.CreateProfile(WidgetAnimationSettings.From(SettingsService.Settings));
+        _trayAnimationOptionsOverride = optionsOverride;
+    }
+
+    protected WidgetTrayAnimationProfile GetTrayAnimationProfile(bool isShowing = true)
+    {
+        return TrayAnimation.CreateProfile(
+            GetEffectiveTrayAnimationOptions(),
+            isShowing,
+            WindowsCompatibilityService.AreAnimationsEnabled);
+    }
+
+    protected WidgetTrayAnimationProfile GetSingleWidgetAnimationProfile(bool isShowing)
+    {
+        return TrayAnimation.CreateSingleWidgetLifecycleProfile(
+            GetEffectiveTrayAnimationOptions(),
+            isShowing,
+            WindowsCompatibilityService.AreAnimationsEnabled);
     }
 
     protected void LogTrayWindow(string message)

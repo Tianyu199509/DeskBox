@@ -39,7 +39,10 @@ public sealed class FeatureWidgetsSettingsCoordinator : IFeatureWidgetsSettings
             music.MusicUseArtworkBackdrop,
             music.MusicEnableCoverHoverMotion,
             SettingsService.NormalizeMusicDisplayMode(music.MusicDisplayMode),
-            music.MusicHideTimelineWhenUnavailable);
+            music.MusicHideTimelineWhenUnavailable,
+            music.MusicShowLyrics,
+            music.MusicShowCapsuleLyrics,
+            music.MusicLocalLyricsFolder ?? string.Empty);
     }
 
     public WeatherPresentationSettings ReadWeatherPresentation()
@@ -129,6 +132,51 @@ public sealed class FeatureWidgetsSettingsCoordinator : IFeatureWidgetsSettings
         return true;
     }
 
+    public bool SetMusicShowLyrics(bool value)
+    {
+        ThrowIfStopped();
+        MusicSettingsSlice music = _settings.Settings.Music;
+        if (music.MusicShowLyrics == value)
+        {
+            return false;
+        }
+
+        music.MusicShowLyrics = value;
+        _settings.SaveDebounced();
+        return true;
+    }
+
+    public bool SetMusicShowCapsuleLyrics(bool value)
+    {
+        ThrowIfStopped();
+        MusicSettingsSlice music = _settings.Settings.Music;
+        if (music.MusicShowCapsuleLyrics == value)
+        {
+            return false;
+        }
+
+        music.MusicShowCapsuleLyrics = value;
+        _settings.SaveDebounced();
+        return true;
+    }
+
+    public bool SetMusicLocalLyricsFolder(string? folderPath)
+    {
+        ThrowIfStopped();
+        string normalized = string.IsNullOrWhiteSpace(folderPath)
+            ? string.Empty
+            : folderPath.Trim();
+        MusicSettingsSlice music = _settings.Settings.Music;
+        if (string.Equals(music.MusicLocalLyricsFolder ?? string.Empty, normalized, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        music.MusicLocalLyricsFolder = normalized;
+        _settings.SaveDebounced();
+        return true;
+    }
+
     public void ResetMusicPresentationPreferences(bool scheduleSave = true)
     {
         ThrowIfStopped();
@@ -137,6 +185,9 @@ public sealed class FeatureWidgetsSettingsCoordinator : IFeatureWidgetsSettings
             music.MusicUseArtworkBackdrop != true ||
             music.MusicEnableCoverHoverMotion != true ||
             music.MusicHideTimelineWhenUnavailable != true ||
+            music.MusicShowLyrics != true ||
+            music.MusicShowCapsuleLyrics != true ||
+            !string.IsNullOrEmpty(music.MusicLocalLyricsFolder) ||
             !string.Equals(
                 music.MusicDisplayMode,
                 SettingsService.MusicDisplayModeAuto,
@@ -144,6 +195,9 @@ public sealed class FeatureWidgetsSettingsCoordinator : IFeatureWidgetsSettings
         music.MusicUseArtworkBackdrop = true;
         music.MusicEnableCoverHoverMotion = true;
         music.MusicHideTimelineWhenUnavailable = true;
+        music.MusicShowLyrics = true;
+        music.MusicShowCapsuleLyrics = true;
+        music.MusicLocalLyricsFolder = string.Empty;
         music.MusicDisplayMode = SettingsService.MusicDisplayModeAuto;
         if (scheduleSave && changed)
         {

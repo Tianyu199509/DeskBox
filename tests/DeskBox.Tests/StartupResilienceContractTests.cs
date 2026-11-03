@@ -70,7 +70,6 @@ public sealed class StartupResilienceContractTests
         Assert.Contains("\"initial-file-widget-setup\"", launch, StringComparison.Ordinal);
         Assert.Contains("\"onboarding\"", launch, StringComparison.Ordinal);
         Assert.Contains("\"theme-refresh\"", launch, StringComparison.Ordinal);
-        Assert.Contains("\"quick-capture-clipboard\"", launch, StringComparison.Ordinal);
         Assert.Contains("\"desktop-auto-organization-watcher\"", launch, StringComparison.Ordinal);
         Assert.Contains("\"display-area-watcher\"", launch, StringComparison.Ordinal);
         Assert.Contains("\"apply-pending-restore\"", launch, StringComparison.Ordinal);
@@ -112,8 +111,8 @@ public sealed class StartupResilienceContractTests
         string tray = Read("src/DeskBox/App.Tray.cs");
         Assert.Contains("private bool IsTraySurfaceUsable()", tray, StringComparison.Ordinal);
         Assert.Contains("IsCreated: true", tray, StringComparison.Ordinal);
-        Assert.Contains("trayIcon.TrayIcon.WindowHandle != IntPtr.Zero", tray, StringComparison.Ordinal);
-        Assert.Contains("WindowNative.GetWindowHandle(_trayWindow) != IntPtr.Zero", tray, StringComparison.Ordinal);
+        Assert.Contains("trayHost.WindowHandle != IntPtr.Zero", tray, StringComparison.Ordinal);
+        Assert.Contains("Win32Helper.IsWindow(trayHost.WindowHandle)", tray, StringComparison.Ordinal);
         Assert.Contains("MarkStartupLifelineEstablished();", tray, StringComparison.Ordinal);
 
         // Widgets are legitimately hidden (quick-reveal, tray toggle), so the
@@ -181,7 +180,7 @@ public sealed class StartupResilienceContractTests
             tray,
             "private void CreateTrayIcon()",
             "/// <summary>Attempts per tray creation pass");
-        Assert.DoesNotContain("ForceCreate", createTrayIcon, StringComparison.Ordinal);
+        Assert.DoesNotContain("TryCreateIcon", createTrayIcon, StringComparison.Ordinal);
         Assert.Contains("StartTrayIconCreationWithRetry();", createTrayIcon, StringComparison.Ordinal);
 
         string retry = Slice(
@@ -194,7 +193,7 @@ public sealed class StartupResilienceContractTests
         Assert.Contains("TrayCreationMaxAttempts", retry, StringComparison.Ordinal);
         Assert.Contains("await Task.Delay(TrayCreationRetryDelay);", retry, StringComparison.Ordinal);
         Assert.Contains("MarkStartupLifelineEstablished();", retry, StringComparison.Ordinal);
-        Assert.Contains("_trayIcon.ForceCreate(enablesEfficiencyMode: false);", retry, StringComparison.Ordinal);
+        Assert.Contains("_trayHost.TryCreateIcon()", retry, StringComparison.Ordinal);
     }
 
     [Fact]

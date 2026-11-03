@@ -79,7 +79,6 @@
             PositionLockRequested="PositionLockButton_Click"
             SizeLockRequested="SizeLockButton_Click"
             OverlayTitle="{Binding DisplayName}"
-            TitleDoubleTapped="ContentWidgetShell_TitleDoubleTapped"
             TitlePointerMoved="TitleBarGrid_PointerMoved"
             TitlePointerPressed="TitleBarGrid_PointerPressed"
             TitlePointerReleased="TitleBarGrid_PointerReleased"

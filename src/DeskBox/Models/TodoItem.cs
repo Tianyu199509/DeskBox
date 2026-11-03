@@ -35,6 +35,8 @@ public sealed class TodoItem
 
     public DateTimeOffset? DueDate { get; set; }
 
+    public bool HasDueTime { get; set; } = true;
+
     public TodoRecurrence? Recurrence { get; set; }
 
     public List<TodoStep> Steps { get; set; } = [];

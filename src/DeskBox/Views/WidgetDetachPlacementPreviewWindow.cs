@@ -228,6 +228,17 @@ internal sealed class WidgetDetachPlacementPreviewWindow : IDisposable
         }
     }
 
+    internal bool IsVisible
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return !_closed && _visible;
+            }
+        }
+    }
+
     public void Hide()
     {
         lock (_gate)

@@ -47,6 +47,7 @@ public sealed partial class BackupSettingsViewModel
     private bool _todoDataEnabled;
     private bool _quickCaptureDataEnabled;
     private bool _widgetStyleEnabled;
+    private bool _customWidgetsEnabled;
     private int _selectedIntervalMinutes = BackupOptionKinds.DefaultCloudIntervalMinutes;
     private int _selectedRetentionCount = BackupOptionKinds.DefaultCloudRetentionCount;
     private string _dragDropSummaryText = string.Empty;
@@ -134,6 +135,7 @@ public sealed partial class BackupSettingsViewModel
             IncludeTodoData = state.CloudTodoEnabled;
             IncludeQuickCaptureData = state.CloudQuickCaptureEnabled;
             IncludeWidgetStyle = state.CloudWidgetStyleEnabled;
+            IncludeCustomWidgets = state.CloudCustomWidgetsEnabled;
             SelectedIntervalMinutes = state.CloudIntervalMinutes;
             SelectedRetentionCount = state.CloudRetentionCount;
         }
@@ -331,6 +333,7 @@ public sealed partial class BackupSettingsViewModel
                 IncludeTodoData = false;
                 IncludeQuickCaptureData = false;
                 IncludeWidgetStyle = false;
+                IncludeCustomWidgets = false;
             }
         }
     }
@@ -476,6 +479,25 @@ public sealed partial class BackupSettingsViewModel
             }
 
             Update(new(CloudWidgetStyleEnabled: value));
+        }
+    }
+
+    public bool IncludeCustomWidgets
+    {
+        get => _customWidgetsEnabled;
+        set
+        {
+            if (!SetProperty(ref _customWidgetsEnabled, value))
+            {
+                return;
+            }
+
+            if (_isSyncingPresentation)
+            {
+                return;
+            }
+
+            Update(new(CloudCustomWidgetsEnabled: value));
         }
     }
 

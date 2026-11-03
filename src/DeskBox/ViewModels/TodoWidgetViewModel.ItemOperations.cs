@@ -14,6 +14,7 @@ public sealed partial class TodoWidgetViewModel
 
         SelectedDetailItem = null;
         IsCreatingDetailItem = false;
+        _undoSnapshot = null;
         Items.Clear();
         _tombstones.Clear();
         foreach (var item in data.Items.OrderBy(item => item.SortOrder).ThenByDescending(item => item.UpdatedAt))
@@ -24,30 +25,52 @@ public sealed partial class TodoWidgetViewModel
                 continue;
             }
 
-            Items.Add(new TodoItemViewModel(item, _localizationService));
+            Items.Add(new TodoItemViewModel(item, _localizationService, PreviewCacheScope));
         }
 
         NormalizeSortOrders();
         ApplySettings(updateFilter: true);
         RefreshVisibleItems();
         RefreshCountProperties();
+        RefreshUndoProperties();
         IsInitialized = true;
+        await ReclaimUnreferencedAttachmentsAsync(startupSweep: true);
     }
 
     public async Task<TodoItemViewModel?> AddInputAsync()
     {
-        var item = await AddItemAsync(InputText, _draftImportant, _draftDueDate);
+        ResolveDraftContextMetadata(
+            out bool isImportant,
+            out DateTimeOffset? dueDate,
+            out bool hasDueTime,
+            out string? colorMarker);
+        var item = await AddItemAsync(InputText, isImportant, dueDate, colorMarker, hasDueTime);
         if (item is not null)
         {
             InputText = string.Empty;
             DraftImportant = false;
-            DraftDueDate = null;
+            SetDraftDueDate(null, hasDueTime: false);
+            if (SelectedFilter == TodoFilter.Overdue && !item.IsOverdue)
+            {
+                SelectedFilter = _showAllTab
+                    ? TodoFilter.All
+                    : _showActiveTab
+                        ? TodoFilter.Active
+                        : _showTodayTab && IsInTodayView(item)
+                            ? TodoFilter.Today
+                            : SelectedFilter;
+            }
         }
 
         return item;
     }
 
-    public async Task<TodoItemViewModel?> AddItemAsync(string? text, bool isImportant = false, DateTimeOffset? dueDate = null)
+    public async Task<TodoItemViewModel?> AddItemAsync(
+        string? text,
+        bool isImportant = false,
+        DateTimeOffset? dueDate = null,
+        string? colorMarker = null,
+        bool hasDueTime = true)
     {
         string normalizedText = NormalizeText(text);
         if (string.IsNullOrWhiteSpace(normalizedText))
@@ -56,17 +79,20 @@ public sealed partial class TodoWidgetViewModel
         }
 
         var now = DateTimeOffset.UtcNow;
+        DateTimeOffset? normalizedDueDate = NormalizeDueDate(dueDate, hasDueTime);
         var item = new TodoItem
         {
             Id = Guid.NewGuid().ToString("N"),
             Text = normalizedText,
             IsImportant = isImportant,
-            DueDate = NormalizeDueDate(dueDate),
+            DueDate = normalizedDueDate,
+            HasDueTime = normalizedDueDate is not null && hasDueTime,
+            ColorMarker = TodoItem.NormalizeColorMarker(colorMarker),
             CreatedAt = now,
             UpdatedAt = now,
             SortOrder = 0
         };
-        var viewModel = new TodoItemViewModel(item, _localizationService);
+        var viewModel = new TodoItemViewModel(item, _localizationService, PreviewCacheScope);
 
         if (NewTaskPosition == SettingsService.TodoNewTaskPositionBottom)
         {
@@ -142,7 +168,7 @@ public sealed partial class TodoWidgetViewModel
             {
                 item.Item.GeneratedNextItemId = nextItem.Id;
                 int currentIndex = Items.IndexOf(item);
-                var nextViewModel = new TodoItemViewModel(nextItem, _localizationService);
+                var nextViewModel = new TodoItemViewModel(nextItem, _localizationService, PreviewCacheScope);
                 Items.Insert(Math.Clamp(currentIndex + 1, 0, Items.Count), nextViewModel);
             }
         }
@@ -322,7 +348,7 @@ public sealed partial class TodoWidgetViewModel
         return updatedCount;
     }
 
-    public async Task<bool> SetDueDateAsync(string itemId, DateTimeOffset? dueDate)
+    public async Task<bool> SetDueDateAsync(string itemId, DateTimeOffset? dueDate, bool? hasDueTime = null)
     {
         var item = FindItem(itemId);
         if (item is null)
@@ -330,7 +356,8 @@ public sealed partial class TodoWidgetViewModel
             return false;
         }
 
-        DateTimeOffset? normalizedDueDate = NormalizeDueDate(dueDate);
+        bool resolvedHasDueTime = dueDate is not null && (hasDueTime ?? true);
+        DateTimeOffset? normalizedDueDate = NormalizeDueDate(dueDate, resolvedHasDueTime);
         TodoRecurrence? updatedRecurrence = normalizedDueDate is null
             ? null
             : item.Recurrence?.Clone();
@@ -340,6 +367,7 @@ public sealed partial class TodoWidgetViewModel
         }
 
         if (Nullable.Equals(item.DueDate, normalizedDueDate) &&
+            item.HasDueTime == resolvedHasDueTime &&
             AreRecurrenceEqual(item.Recurrence, updatedRecurrence) &&
             (normalizedDueDate is not null || item.ReminderOffsetMinutes is null))
         {
@@ -347,6 +375,7 @@ public sealed partial class TodoWidgetViewModel
         }
 
         item.DueDate = normalizedDueDate;
+        item.HasDueTime = resolvedHasDueTime;
         item.Recurrence = updatedRecurrence;
         if (normalizedDueDate is null)
         {
@@ -368,7 +397,7 @@ public sealed partial class TodoWidgetViewModel
         return true;
     }
 
-    public async Task<int> SetDueDateAsync(IEnumerable<string> itemIds, DateTimeOffset? dueDate)
+    public async Task<int> SetDueDateAsync(IEnumerable<string> itemIds, DateTimeOffset? dueDate, bool? hasDueTime = null)
     {
         var selectedIds = itemIds
             .Where(id => !string.IsNullOrWhiteSpace(id))
@@ -378,7 +407,8 @@ public sealed partial class TodoWidgetViewModel
             return 0;
         }
 
-        DateTimeOffset? normalizedDueDate = NormalizeDueDate(dueDate);
+        bool resolvedHasDueTime = dueDate is not null && (hasDueTime ?? true);
+        DateTimeOffset? normalizedDueDate = NormalizeDueDate(dueDate, resolvedHasDueTime);
         var now = DateTimeOffset.UtcNow;
         int updatedCount = 0;
         foreach (var item in Items.Where(item => selectedIds.Contains(item.Id)))
@@ -392,6 +422,7 @@ public sealed partial class TodoWidgetViewModel
             }
 
             if (Nullable.Equals(item.DueDate, normalizedDueDate) &&
+                item.HasDueTime == resolvedHasDueTime &&
                 AreRecurrenceEqual(item.Recurrence, updatedRecurrence) &&
                 (normalizedDueDate is not null || item.ReminderOffsetMinutes is null))
             {
@@ -399,6 +430,7 @@ public sealed partial class TodoWidgetViewModel
             }
 
             item.DueDate = normalizedDueDate;
+            item.HasDueTime = resolvedHasDueTime;
             item.Recurrence = updatedRecurrence;
             if (normalizedDueDate is null)
             {
@@ -607,13 +639,21 @@ public sealed partial class TodoWidgetViewModel
         return true;
     }
 
-    public async Task<bool> SnoozeReminderUntilAsync(string itemId, DateTimeOffset snoozedUntil)
+    public Task<bool> SnoozeReminderUntilAsync(string itemId, DateTimeOffset snoozedUntil) =>
+        SnoozeReminderUntilAsync(itemId, snoozedUntil, DateTimeOffset.Now, rejectReminderOff: false);
+
+    internal async Task<bool> SnoozeReminderUntilAsync(
+        string itemId,
+        DateTimeOffset snoozedUntil,
+        DateTimeOffset now,
+        bool rejectReminderOff)
     {
         var item = FindItem(itemId);
         if (item is null ||
             item.IsCompleted ||
             item.DueDate is null ||
-            snoozedUntil <= DateTimeOffset.Now)
+            (rejectReminderOff && TodoReminderOptions.IsReminderOff(item.ReminderOffsetMinutes)) ||
+            snoozedUntil <= now)
         {
             return false;
         }
@@ -621,7 +661,7 @@ public sealed partial class TodoWidgetViewModel
         item.SnoozedUntil = snoozedUntil;
         item.Item.SnoozeLastNotifiedAt = null;
         item.Item.ReminderDismissedForDueDate = item.DueDate;
-        item.UpdatedAt = DateTimeOffset.UtcNow;
+        item.UpdatedAt = now.ToUniversalTime();
         RefreshVisibleItems();
         RefreshCountProperties();
         await SaveAsync();

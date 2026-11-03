@@ -16,6 +16,7 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
     private readonly Services.LocalizationService _localizationService;
     private readonly Services.SearchHistoryService _historyService;
     private readonly Services.FileMetaService _fileMetaService;
+    private readonly Services.SearchRecommendationLayoutService _recommendationLayoutService;
     private readonly SynchronizationContext? _uiContext;
     private CancellationTokenSource? _searchCts;
     private CancellationTokenSource? _resultRefreshCts;
@@ -28,6 +29,7 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
     private bool _isDisposed;
     private int _nextFileResultOffset;
     private int _loadMoreRunning;
+    private int _everythingProbeRunning;
     private const int MaxEnrichedSearchResults = 40;
     private static readonly TimeSpan ProviderRefreshDebounceDelay = TimeSpan.FromSeconds(1);
 
@@ -62,15 +64,22 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
         Services.SettingsService settingsService,
         Services.LocalizationService localizationService,
         Services.SearchHistoryService historyService,
-        Services.FileMetaService fileMetaService)
+        Services.FileMetaService fileMetaService,
+        Services.SearchRecommendationLayoutService? recommendationLayoutService = null)
     {
         _searchEngine = searchEngine;
         _settingsService = settingsService;
         _localizationService = localizationService;
         _historyService = historyService;
         _fileMetaService = fileMetaService;
+        _recommendationLayoutService = recommendationLayoutService
+            ?? new Services.SearchRecommendationLayoutService();
         _uiContext = SynchronizationContext.Current;
         _searchEngine.ResultsChanged += OnResultsChanged;
+        _searchEngine.EverythingProvider.ConnectionChanged += OnEverythingConnectionChanged;
+        _settingsService.SettingsChanged += OnSettingsChanged;
+
+        UpdateEverythingPromptState();
 
         // Callback to close popup when item is opened.
         HidePopupCallback = () => { };
@@ -141,6 +150,61 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
 
     /// <summary>Filtered + sorted view of the active pool for <see cref="SelectedTab"/>.</summary>
     public ObservableCollection<SearchResultItem> CurrentResults { get; } = [];
+
+    /// <summary>Zero-input application grid entries (standalone apps + Win11-style folders).</summary>
+    public ObservableCollection<RecommendedGridEntry> RecommendedEntries { get; } = [];
+
+    /// <summary>Zero-input application recommendations hidden by the user.</summary>
+    public ObservableCollection<SearchResultItem> HiddenRecommendations { get; } = [];
+
+    private bool _hasRecommendedEntries;
+    public bool HasRecommendedEntries
+    {
+        get => _hasRecommendedEntries;
+        set => SetProperty(ref _hasRecommendedEntries, value);
+    }
+
+    private bool _hasHiddenRecommendations;
+    public bool HasHiddenRecommendations
+    {
+        get => _hasHiddenRecommendations;
+        set => SetProperty(ref _hasHiddenRecommendations, value);
+    }
+
+    private int _hiddenRecommendationCount;
+    public int HiddenRecommendationCount
+    {
+        get => _hiddenRecommendationCount;
+        set => SetProperty(ref _hiddenRecommendationCount, value);
+    }
+
+    private bool _isEverythingPromptVisible;
+    public bool IsEverythingPromptVisible
+    {
+        get => _isEverythingPromptVisible;
+        set => SetProperty(ref _isEverythingPromptVisible, value);
+    }
+
+    private string _everythingPromptText = string.Empty;
+    public string EverythingPromptText
+    {
+        get => _everythingPromptText;
+        set => SetProperty(ref _everythingPromptText, value);
+    }
+
+    private string _everythingPromptActionText = string.Empty;
+    public string EverythingPromptActionText
+    {
+        get => _everythingPromptActionText;
+        set => SetProperty(ref _everythingPromptActionText, value);
+    }
+
+    private bool _isEverythingPromptWarning;
+    public bool IsEverythingPromptWarning
+    {
+        get => _isEverythingPromptWarning;
+        set => SetProperty(ref _isEverythingPromptWarning, value);
+    }
 
     public string DisplayMode => _settingsService.Settings.SearchDisplayMode;
     public string HotkeyHint => GetHotkeyHint();
@@ -285,14 +349,31 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
         {
             try
             {
-                var identities = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var previousByPath = _recentContentItems
+                    .Where(existing => existing.IconResolved && !string.IsNullOrWhiteSpace(existing.DetailPath))
+                    .GroupBy(existing => existing.DetailPath!, StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+
+                var deduplicator = new Helpers.AppRecommendationDeduplicator();
                 var engineItems = await _searchEngine.GetRecommendationsAsync(token);
                 foreach (var recommendation in engineItems.Where(IsApplicationRecommendation))
                 {
                     token.ThrowIfCancellationRequested();
-                    var item = ToResultItem(recommendation);
-                    if (identities.Add(Services.SearchResultRanker.GetIdentityKey(item)))
+                    if (deduplicator.TryAccept(
+                            recommendation.DetailPath,
+                            recommendation.Title,
+                            recommendation.ResolvedIdentityKeys,
+                            out string canonicalKey))
                     {
+                        var item = ToResultItem(recommendation);
+                        item.RecommendationKey = canonicalKey;
+                        if (!string.IsNullOrWhiteSpace(item.DetailPath) &&
+                            previousByPath.TryGetValue(item.DetailPath, out SearchResultItem? cached))
+                        {
+                            item.Icon = cached.Icon;
+                            item.IconResolved = cached.IconResolved;
+                        }
+
                         loadedItems.Add(item);
                     }
                 }
@@ -302,9 +383,20 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
                 foreach (var recent in _historyService.RecentResults.Where(IsApplicationRecommendation))
                 {
                     token.ThrowIfCancellationRequested();
-                    var item = ToResultItem(recent);
-                    if (identities.Add(Services.SearchResultRanker.GetIdentityKey(item)))
+                    if (deduplicator.TryAccept(
+                            recent.DetailPath,
+                            recent.Title,
+                            out string canonicalKey))
                     {
+                        var item = ToResultItem(recent);
+                        item.RecommendationKey = canonicalKey;
+                        if (!string.IsNullOrWhiteSpace(item.DetailPath) &&
+                            previousByPath.TryGetValue(item.DetailPath, out SearchResultItem? cached))
+                        {
+                            item.Icon = cached.Icon;
+                            item.IconResolved = cached.IconResolved;
+                        }
+
                         loadedItems.Add(item);
                     }
                 }
@@ -356,11 +448,11 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
         }
 
         // Shortcut and executable recommendations use their real app icons.
-        // Enrich the replacement list off-screen so an expired cache stays visible
-        // until the refreshed icons are ready.
-        await EnrichResultsAsync(
+        // Enrich the replacement list off-screen without blocking on file stats.
+        await _fileMetaService.EnrichRecommendationIconsAsync(
             loadedItems,
-            token,
+            onProgress: null,
+            token: token,
             hideShortcutArrowOverlay: true);
 
         if (token.IsCancellationRequested ||
@@ -381,17 +473,126 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
         long generation,
         CancellationToken token)
     {
-        await EnrichResultsAsync(
-            publishedItems,
-            token,
-            hideShortcutArrowOverlay: true);
-
-        if (!token.IsCancellationRequested &&
-            generation == Volatile.Read(ref _recommendationGeneration))
+        _isRecommendationEnrichmentInFlight = true;
+        try
         {
-            _lastRecommendationLoadUtc = DateTime.UtcNow;
-            RecommendationIconsResolved?.Invoke();
+            IReadOnlyList<SearchResultItem> prioritizedItems =
+                BuildPrioritizedRecommendationEnrichmentList(publishedItems);
+
+            int uiNotificationQueued = 0;
+            void NotifyIconsProgress()
+            {
+                if (_isDisposed ||
+                    token.IsCancellationRequested ||
+                    generation != Volatile.Read(ref _recommendationGeneration))
+                {
+                    return;
+                }
+
+                if (Interlocked.Exchange(ref uiNotificationQueued, 1) != 0)
+                {
+                    return;
+                }
+
+                void DispatchOnUi()
+                {
+                    Interlocked.Exchange(ref uiNotificationQueued, 0);
+                    if (!_isDisposed &&
+                        !token.IsCancellationRequested &&
+                        generation == Volatile.Read(ref _recommendationGeneration))
+                    {
+                        RecommendationIconsResolved?.Invoke();
+                    }
+                }
+
+                if (_uiContext is not null)
+                {
+                    _uiContext.Post(_ => DispatchOnUi(), null);
+                }
+                else
+                {
+                    DispatchOnUi();
+                }
+            }
+
+            await _fileMetaService.EnrichRecommendationIconsAsync(
+                prioritizedItems,
+                NotifyIconsProgress,
+                token,
+                hideShortcutArrowOverlay: true);
+
+            if (!token.IsCancellationRequested &&
+                generation == Volatile.Read(ref _recommendationGeneration))
+            {
+                _lastRecommendationLoadUtc = DateTime.UtcNow;
+                RecommendationIconsResolved?.Invoke();
+            }
         }
+        finally
+        {
+            if (generation == Volatile.Read(ref _recommendationGeneration))
+            {
+                _isRecommendationEnrichmentInFlight = false;
+            }
+        }
+    }
+
+    private List<SearchResultItem> BuildPrioritizedRecommendationEnrichmentList(
+        List<SearchResultItem> allItems)
+    {
+        var result = new List<SearchResultItem>(allItems.Count);
+        var seen = new HashSet<SearchResultItem>(ReferenceEqualityComparer.Instance);
+
+        // Wave 1 priority: top-level visible app tiles and the 2x2 preview icons of visible folders.
+        foreach (RecommendedGridEntry entry in RecommendedEntries)
+        {
+            if (!entry.IsFolder)
+            {
+                if (entry.AppItem is { } app && seen.Add(app))
+                {
+                    result.Add(app);
+                }
+            }
+            else
+            {
+                int previewCount = Math.Min(4, entry.FolderItems.Count);
+                for (int i = 0; i < previewCount; i++)
+                {
+                    if (seen.Add(entry.FolderItems[i]))
+                    {
+                        result.Add(entry.FolderItems[i]);
+                    }
+                }
+            }
+        }
+
+        // Wave 2 priority: remaining items inside folders.
+        foreach (RecommendedGridEntry entry in RecommendedEntries)
+        {
+            if (!entry.IsFolder)
+            {
+                continue;
+            }
+
+            for (int i = 4; i < entry.FolderItems.Count; i++)
+            {
+                if (seen.Add(entry.FolderItems[i]))
+                {
+                    result.Add(entry.FolderItems[i]);
+                }
+            }
+        }
+
+        // Wave 3 priority: hidden items and any remaining items.
+        foreach (SearchResultItem item in allItems)
+        {
+            if (seen.Add(item))
+            {
+                result.Add(item);
+            }
+        }
+
+        return result;
     }
 
     private void ReplaceRecommendationItems(
@@ -408,14 +609,462 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
     /// </summary>
     private void RebuildEmptyStateItems()
     {
-        _emptyStateItems.Clear();
+        var projection = _recommendationLayoutService.BuildProjection(
+            _recentContentItems,
+            DefaultFolderName);
 
-        _emptyStateItems.AddRange(_recentContentItems);
+        _emptyStateItems.Clear();
+        _emptyStateItems.AddRange(projection.VisibleFlatItems);
+
+        ReconcileRecommendedEntries(RecommendedEntries, projection.VisibleEntries);
+        Services.SearchResultCollectionReconciler.Reconcile(
+            HiddenRecommendations,
+            projection.HiddenItems);
+
+        HasRecommendedEntries = RecommendedEntries.Count > 0;
+        HiddenRecommendationCount = HiddenRecommendations.Count;
+        HasHiddenRecommendations = HiddenRecommendationCount > 0;
 
         if (!IsQueryActive)
         {
             RebuildTabs();
         }
+
+        RecommendationLayoutUpdated?.Invoke();
+    }
+
+    private string DefaultFolderName =>
+        _localizationService.T("Search.Recommend.DefaultFolderName");
+
+    internal static void ReconcileRecommendedEntries(
+        ObservableCollection<RecommendedGridEntry> current,
+        IReadOnlyList<RecommendedGridEntry> incoming)
+    {
+        var existingByKey = new Dictionary<string, RecommendedGridEntry>(
+            StringComparer.OrdinalIgnoreCase);
+        foreach (RecommendedGridEntry entry in current)
+        {
+            existingByKey[entry.EntryKey] = entry;
+        }
+
+        var seenTargetKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var target = new List<RecommendedGridEntry>(incoming.Count);
+        foreach (RecommendedGridEntry entry in incoming)
+        {
+            if (!seenTargetKeys.Add(entry.EntryKey))
+            {
+                continue;
+            }
+
+            if (existingByKey.TryGetValue(entry.EntryKey, out RecommendedGridEntry? existing) &&
+                existing.IsFolder == entry.IsFolder &&
+                string.Equals(existing.Label, entry.Label, StringComparison.Ordinal) &&
+                (!entry.IsFolder
+                    ? ReferenceEquals(existing.AppItem, entry.AppItem)
+                    : HasSameItemReferences(existing.FolderItems, entry.FolderItems)))
+            {
+                target.Add(existing);
+            }
+            else
+            {
+                target.Add(entry);
+            }
+        }
+
+        for (int index = 0; index < target.Count; index++)
+        {
+            RecommendedGridEntry desired = target[index];
+            if (index < current.Count && ReferenceEquals(current[index], desired))
+            {
+                continue;
+            }
+
+            int existingIndex = -1;
+            for (int searchIndex = index + 1; searchIndex < current.Count; searchIndex++)
+            {
+                if (ReferenceEquals(current[searchIndex], desired))
+                {
+                    existingIndex = searchIndex;
+                    break;
+                }
+            }
+
+            if (existingIndex >= 0)
+            {
+                // Avoid ObservableCollection.Move: WinUI 3 ItemsRepeater + UniformGridLayout
+                // can desynchronize virtualized container indices on NotifyCollectionChangedAction.Move.
+                current.RemoveAt(existingIndex);
+                current.Insert(index, desired);
+                continue;
+            }
+
+            if (index < current.Count &&
+                string.Equals(current[index].EntryKey, desired.EntryKey, StringComparison.OrdinalIgnoreCase))
+            {
+                current[index] = desired;
+            }
+            else
+            {
+                current.Insert(index, desired);
+            }
+        }
+
+        while (current.Count > target.Count)
+        {
+            current.RemoveAt(current.Count - 1);
+        }
+    }
+
+    private static bool HasSameItemReferences(
+        IReadOnlyList<SearchResultItem> left,
+        IReadOnlyList<SearchResultItem> right)
+    {
+        if (left.Count != right.Count)
+        {
+            return false;
+        }
+
+        for (int index = 0; index < left.Count; index++)
+        {
+            if (!ReferenceEquals(left[index], right[index]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private List<string> GetCurrentVisibleAppKeys() =>
+        _emptyStateItems
+            .Select(Helpers.AppRecommendationIdentity.GetCanonicalKey)
+            .ToList();
+
+    private bool _isRecommendationEnrichmentInFlight;
+
+    public void HideRecommendation(SearchResultItem item)
+    {
+        string appKey = Helpers.AppRecommendationIdentity.GetCanonicalKey(item);
+        if (_recommendationLayoutService.HideApp(appKey, GetCurrentVisibleAppKeys()))
+        {
+            RebuildEmptyStateItems();
+        }
+    }
+
+    public int HideRecommendations(IEnumerable<SearchResultItem> items)
+    {
+        var keys = items
+            .Select(Helpers.AppRecommendationIdentity.GetCanonicalKey)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        int hidden = _recommendationLayoutService.HideApps(keys, GetCurrentVisibleAppKeys());
+        if (hidden > 0)
+        {
+            RebuildEmptyStateItems();
+        }
+
+        return hidden;
+    }
+
+    public void UnhideRecommendation(SearchResultItem item)
+    {
+        string appKey = Helpers.AppRecommendationIdentity.GetCanonicalKey(item);
+        if (_recommendationLayoutService.UnhideApp(appKey))
+        {
+            RebuildEmptyStateItems();
+        }
+    }
+
+    public void UnhideAllRecommendations()
+    {
+        if (_recommendationLayoutService.UnhideAllApps() > 0)
+        {
+            RebuildEmptyStateItems();
+        }
+    }
+
+    public bool MoveRecommendationEntry(string sourceEntryKey, int targetIndex)
+    {
+        bool moved = _recommendationLayoutService.MoveTopLevelEntry(
+            sourceEntryKey,
+            targetIndex,
+            GetCurrentVisibleAppKeys());
+        if (moved)
+        {
+            RebuildEmptyStateItems();
+        }
+
+        return moved;
+    }
+
+    public bool MoveRecommendationEntries(IReadOnlyList<string> sourceEntryKeys, int targetIndex)
+    {
+        bool moved = _recommendationLayoutService.MoveTopLevelEntries(
+            sourceEntryKeys,
+            targetIndex,
+            GetCurrentVisibleAppKeys());
+        if (moved)
+        {
+            RebuildEmptyStateItems();
+        }
+
+        return moved;
+    }
+
+    public string? MergeRecommendationIntoFolder(string draggedAppKey, string targetEntryKey)
+    {
+        string? folderId = _recommendationLayoutService.MergeIntoFolder(
+            draggedAppKey,
+            targetEntryKey,
+            DefaultFolderName,
+            GetCurrentVisibleAppKeys());
+        if (folderId is not null)
+        {
+            RebuildEmptyStateItems();
+        }
+
+        return folderId;
+    }
+
+    public string? MergeRecommendationsIntoFolder(
+        IReadOnlyList<string> draggedAppKeys,
+        string targetEntryKey)
+    {
+        string? folderId = _recommendationLayoutService.MergeAppsIntoFolder(
+            draggedAppKeys,
+            targetEntryKey,
+            DefaultFolderName,
+            GetCurrentVisibleAppKeys());
+        if (folderId is not null)
+        {
+            RebuildEmptyStateItems();
+        }
+
+        return folderId;
+    }
+
+    public string? CreateFolderFromRecommendation(SearchResultItem item)
+    {
+        string appKey = Helpers.AppRecommendationIdentity.GetCanonicalKey(item);
+        string? folderId = _recommendationLayoutService.CreateFolderFromApp(
+            appKey,
+            DefaultFolderName,
+            GetCurrentVisibleAppKeys());
+        if (folderId is not null)
+        {
+            RebuildEmptyStateItems();
+        }
+
+        return folderId;
+    }
+
+    public bool ReorderFolderRecommendation(string folderId, string draggedAppKey, int targetIndex)
+    {
+        bool reordered = _recommendationLayoutService.ReorderInsideFolder(
+            folderId,
+            draggedAppKey,
+            targetIndex);
+        if (reordered)
+        {
+            RebuildEmptyStateItems();
+        }
+
+        return reordered;
+    }
+
+    public bool RemoveRecommendationFromFolder(
+        string folderId,
+        SearchResultItem item,
+        out bool folderStillExists)
+    {
+        string appKey = Helpers.AppRecommendationIdentity.GetCanonicalKey(item);
+        bool removed = _recommendationLayoutService.RemoveFromFolder(
+            folderId,
+            appKey,
+            GetCurrentVisibleAppKeys(),
+            out folderStillExists);
+        if (removed)
+        {
+            RebuildEmptyStateItems();
+        }
+
+        return removed;
+    }
+
+    public bool DissolveRecommendationFolder(string folderId)
+    {
+        bool dissolved = _recommendationLayoutService.DissolveFolder(
+            folderId,
+            GetCurrentVisibleAppKeys());
+        if (dissolved)
+        {
+            RebuildEmptyStateItems();
+        }
+
+        return dissolved;
+    }
+
+    public bool RenameRecommendationFolder(string folderId, string? newName)
+    {
+        bool renamed = _recommendationLayoutService.RenameFolder(
+            folderId,
+            newName,
+            DefaultFolderName);
+        if (renamed)
+        {
+            RebuildEmptyStateItems();
+        }
+
+        return renamed;
+    }
+
+    public IReadOnlyList<RecommendationFolderSummary> GetRecommendationFolders() =>
+        _recommendationLayoutService.GetFolders(DefaultFolderName);
+
+    public RecommendedGridEntry? FindRecommendedFolder(string? folderId)
+    {
+        if (string.IsNullOrWhiteSpace(folderId))
+        {
+            return null;
+        }
+
+        return RecommendedEntries.FirstOrDefault(entry =>
+            entry.IsFolder &&
+            string.Equals(entry.FolderId, folderId, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private void OnEverythingConnectionChanged(Contracts.EverythingConnectionSnapshot _)
+    {
+        PostToUi(UpdateEverythingPromptState);
+    }
+
+    private void OnSettingsChanged()
+    {
+        PostToUi(() =>
+        {
+            UpdateEverythingPromptState();
+            _ = EnsureEverythingConnectionProbedAsync();
+        });
+    }
+
+    private void PostToUi(Action action)
+    {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        if (_uiContext is not null && SynchronizationContext.Current != _uiContext)
+        {
+            _uiContext.Post(_ =>
+            {
+                if (!_isDisposed)
+                {
+                    action();
+                }
+            }, null);
+        }
+        else
+        {
+            action();
+        }
+    }
+
+    public async Task EnsureEverythingConnectionProbedAsync()
+    {
+        if (_isDisposed || Interlocked.Exchange(ref _everythingProbeRunning, 1) != 0)
+        {
+            return;
+        }
+
+        try
+        {
+            await _searchEngine.EverythingProvider.RefreshConnectionAsync(
+                allowIpcProbe: _settingsService.Settings.Search.SearchEverythingEnabled);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[SearchPopup] Everything connection probe failed: {ex.Message}");
+        }
+        finally
+        {
+            Volatile.Write(ref _everythingProbeRunning, 0);
+        }
+    }
+
+    public void UpdateEverythingPromptState()
+    {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        EverythingConnectionState state = _searchEngine.EverythingProvider.CurrentSnapshot.State;
+        if (state == EverythingConnectionState.Connected)
+        {
+            _recommendationLayoutService.ResetEverythingPromptDismissal();
+            IsEverythingPromptVisible = false;
+            return;
+        }
+
+        if (state == EverythingConnectionState.Unknown)
+        {
+            IsEverythingPromptVisible = false;
+            return;
+        }
+
+        if (state == EverythingConnectionState.Checking)
+        {
+            // Preserve the current banner state while a background probe is in flight
+            // so reopening the popup never blinks an already-visible prompt off and on.
+            return;
+        }
+
+        bool everythingEnabled = _settingsService.Settings.Search.SearchEverythingEnabled;
+        if (_recommendationLayoutService.IsEverythingPromptDismissed(everythingEnabled))
+        {
+            IsEverythingPromptVisible = false;
+            return;
+        }
+
+        (string textKey, string actionKey, bool isWarning) = state switch
+        {
+            EverythingConnectionState.NotInstalled => (
+                "Search.EverythingBanner.NotInstalled",
+                "Search.EverythingBanner.ConnectAction",
+                false),
+            EverythingConnectionState.NotConfirmed => (
+                "Search.EverythingBanner.NotConfirmed",
+                "Search.EverythingBanner.ConnectAction",
+                false),
+            EverythingConnectionState.NotRunning => (
+                "Search.EverythingBanner.NotRunning",
+                "Search.EverythingBanner.ConfigureAction",
+                true),
+            _ => (
+                "Search.EverythingBanner.Unavailable",
+                "Search.EverythingBanner.ConfigureAction",
+                true)
+        };
+
+        EverythingPromptText = _localizationService.T(textKey);
+        EverythingPromptActionText = _localizationService.T(actionKey);
+        IsEverythingPromptWarning = isWarning;
+        IsEverythingPromptVisible = true;
+        OnPropertyChanged(nameof(IsFileSearchProviderUnavailable));
+    }
+
+    public void DismissEverythingPrompt()
+    {
+        _recommendationLayoutService.DismissEverythingPrompt(
+            _settingsService.Settings.Search.SearchEverythingEnabled);
+        IsEverythingPromptVisible = false;
     }
 
     private static SearchResultItem ToResultItem(SearchRecommendationItem rec) => new()
@@ -890,7 +1539,12 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>Public entry point for language-change refresh.</summary>
-    public void RebuildTabsPublic() => RebuildTabs();
+    public void RebuildTabsPublic()
+    {
+        RebuildEmptyStateItems();
+        RebuildTabs();
+        UpdateEverythingPromptState();
+    }
 
     /// <summary>Cycles the selected tab forward (or backward when <paramref name="backward"/> is true).</summary>
     public void CycleTab(bool backward)
@@ -1313,6 +1967,10 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
         HasMoreResults = false;
         TotalResultCount = 0;
         StatusText = string.Empty;
+        lock (_metadataTaskGate)
+        {
+            _metadataTasks.Clear();
+        }
         RebuildEmptyStateItems();
     }
 
@@ -1324,7 +1982,10 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
     {
         CancelCurrentSearch();
         _resultRefreshCts?.Cancel();
-        _recommendationCts?.Cancel();
+        if (!_isRecommendationEnrichmentInFlight)
+        {
+            _recommendationCts?.Cancel();
+        }
         Query = string.Empty;
         _allResults = [];
         _nextFileResultOffset = 0;
@@ -1335,7 +1996,58 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
         HasMoreResults = false;
         TotalResultCount = 0;
         StatusText = string.Empty;
+        lock (_metadataTaskGate)
+        {
+            _metadataTasks.Clear();
+        }
         RebuildEmptyStateItems();
+    }
+
+    public int ReleaseColdHiddenCaches()
+    {
+        if (_isDisposed)
+        {
+            return 0;
+        }
+
+        CancelCurrentSearch();
+        _resultRefreshCts?.Cancel();
+        _recommendationCts?.Cancel();
+        _isRecommendationEnrichmentInFlight = false;
+        ClearItemIcons(_allResults);
+        ClearItemIcons(_emptyStateItems);
+        ClearItemIcons(_recentContentItems);
+        ClearItemIcons(CurrentResults);
+        ClearItemIcons(HiddenRecommendations);
+        _allResults = [];
+        _emptyStateItems.Clear();
+        _recentContentItems.Clear();
+        _lastRecommendationLoadUtc = DateTime.MinValue;
+        RecommendedEntries.Clear();
+        HiddenRecommendations.Clear();
+        HasRecommendedEntries = false;
+        HasHiddenRecommendations = false;
+        HiddenRecommendationCount = 0;
+        Services.SearchResultCollectionReconciler.Reconcile(CurrentResults, []);
+        Tabs.Clear();
+        SelectedTab = null;
+        HasCurrentResults = false;
+        SelectedIndex = -1;
+        SelectedItem = null;
+        lock (_metadataTaskGate)
+        {
+            _metadataTasks.Clear();
+        }
+        return _fileMetaService.ReleaseHiddenCaches();
+    }
+
+    private static void ClearItemIcons(IEnumerable<SearchResultItem> items)
+    {
+        foreach (var item in items)
+        {
+            item.Icon = null;
+            item.IconResolved = false;
+        }
     }
 
     public Task RefreshSearchAsync()
@@ -1354,10 +2066,14 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
         // filter from an earlier session would silently empty that tab.
         ResultFilter = SearchResultFilter.All;
         ClearSearch();
-        // If the recommendations were loaded recently (within the cache TTL),
-        // reuse them so the popup shows icons immediately without a skeleton.
-        // Otherwise reload in the background.
-        if (HasFreshRecommendationCache)
+        UpdateEverythingPromptState();
+        _ = EnsureEverythingConnectionProbedAsync();
+
+        // If the recommendations were loaded recently (within the cache TTL) or an
+        // initial progressive icon warmup is already streaming in the background,
+        // reuse them so the popup shows icons immediately without restarting.
+        if (HasFreshRecommendationCache ||
+            (HasRecommendationCache && _isRecommendationEnrichmentInFlight))
         {
             RebuildEmptyStateItems();
             return;
@@ -1412,6 +2128,16 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
                 break;
             case "open-quickcapture":
                 ActionRequested?.Invoke(this, "open-quickcapture");
+                break;
+            case "quick-jot":
+                ActionRequested?.Invoke(this, "quick-jot");
+                break;
+            default:
+                if (!string.IsNullOrWhiteSpace(actionId) &&
+                    actionId.StartsWith("quick-note:", StringComparison.Ordinal))
+                {
+                    ActionRequested?.Invoke(this, actionId);
+                }
                 break;
         }
     }
@@ -1488,6 +2214,11 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
     /// </summary>
     public event Action? RecommendationIconsResolved;
 
+    /// <summary>
+    /// Raised whenever the recommendation layout projection (entries, folders, or hidden list) updates.
+    /// </summary>
+    public event Action? RecommendationLayoutUpdated;
+
     public void Dispose()
     {
         if (_isDisposed)
@@ -1497,14 +2228,25 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
 
         _isDisposed = true;
         _searchEngine.ResultsChanged -= OnResultsChanged;
+        _searchEngine.EverythingProvider.ConnectionChanged -= OnEverythingConnectionChanged;
+        _settingsService.SettingsChanged -= OnSettingsChanged;
         _resultRefreshCts?.Cancel();
         _resultRefreshCts?.Dispose();
         _recommendationCts?.Cancel();
         _recommendationCts?.Dispose();
         CancelCurrentSearch();
+        ClearItemIcons(_allResults);
+        ClearItemIcons(_emptyStateItems);
+        ClearItemIcons(_recentContentItems);
+        ClearItemIcons(CurrentResults);
+        ClearItemIcons(HiddenRecommendations);
+        SelectedItem = null;
+        SelectedTab = null;
         _allResults = [];
         _emptyStateItems.Clear();
         _recentContentItems.Clear();
+        RecommendedEntries.Clear();
+        HiddenRecommendations.Clear();
         CurrentResults.Clear();
         Tabs.Clear();
         lock (_metadataTaskGate)

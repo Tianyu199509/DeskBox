@@ -1,3 +1,4 @@
+using DeskBox.Controls;
 using DeskBox.Services;
 using DeskBox.ViewModels;
 using Microsoft.UI.Xaml;
@@ -16,19 +17,50 @@ public sealed partial class TodoWidgetContent
     private readonly MarkdownDocumentService _markdownDocumentService = new();
     private readonly SemaphoreSlim _notesSaveGate = new(1, 1);
     private string? _notesEditingItemId;
+    private string? _inFlightNotesSaveItemId;
+    private string? _inFlightNotesSaveSource;
     private string _notesOriginalText = string.Empty;
     private bool _notesExitRequested;
+    private DoubleTappedEventHandler? _detailNotesReaderDoubleTappedHandler;
 
     private void InitializeDetailNotesAndSteps()
     {
-        _notesAutosaveTimer.Tick += NotesAutosaveTimer_Tick;
+        if (DetailPage is null)
+        {
+            return;
+        }
+
         DetailNotesView.AttachmentResolver = ResolveSelectedTodoAttachment;
         DetailNotesView.AttachmentOpenRequested += DetailNotesView_AttachmentOpenRequested;
+        _detailNotesReaderDoubleTappedHandler = new DoubleTappedEventHandler(DetailNotesReaderHost_DoubleTapped);
         DetailNotesReaderHost.AddHandler(
             UIElement.DoubleTappedEvent,
-            new DoubleTappedEventHandler(DetailNotesReaderHost_DoubleTapped),
+            _detailNotesReaderDoubleTappedHandler,
             handledEventsToo: true);
         ApplyNotesEditingVisualState(isEditing: false);
+    }
+
+    private void ReleaseDetailNotesAndStepsVisualHandlers()
+    {
+        if (DetailPage is null)
+        {
+            return;
+        }
+
+        if (_detailNotesReaderDoubleTappedHandler is not null)
+        {
+            DetailNotesReaderHost.RemoveHandler(
+                UIElement.DoubleTappedEvent,
+                _detailNotesReaderDoubleTappedHandler);
+            _detailNotesReaderDoubleTappedHandler = null;
+        }
+
+        DetailNotesView.AttachmentOpenRequested -= DetailNotesView_AttachmentOpenRequested;
+        DetailNotesView.AttachmentResolver = null;
+        DetailNotesView.ReleaseVisualHandlers();
+        DetailNotesEditor?.ReleaseVisualHandlers();
+        DetailAttachmentStrip.ReleaseVisualHandlers();
+        DetailStepsItemsControl.ItemsSource = null;
     }
 
     private async Task<TodoItemViewModel?> EnsureDetailItemPersistedAsync()
@@ -195,6 +227,20 @@ public sealed partial class TodoWidgetContent
         e.Handled = true;
     }
 
+    private MarkdownSourceEditor EnsureDetailNotesEditorRealized()
+    {
+        if (DetailNotesEditor is null)
+        {
+            _ = FindName(nameof(DetailNotesEditor));
+            if (DetailNotesEditor is not null)
+            {
+                DetailNotesEditor.TextResolver = App.Current.LocalizationService.T;
+            }
+        }
+
+        return DetailNotesEditor!;
+    }
+
     private async Task BeginNotesEditingAsync()
     {
         TodoItemViewModel? item = await EnsureDetailItemPersistedAsync();
@@ -203,13 +249,14 @@ public sealed partial class TodoWidgetContent
             return;
         }
 
+        MarkdownSourceEditor notesEditor = EnsureDetailNotesEditorRealized();
         _notesEditingItemId = item.Id;
         _notesOriginalText = item.Notes;
         _notesExitRequested = false;
-        DetailNotesEditor.Text = item.Notes;
+        notesEditor.Text = item.Notes;
         DetailNotesSaveFailure.Visibility = Visibility.Collapsed;
         ApplyNotesEditingVisualState(isEditing: true);
-        DetailNotesEditor.FocusEditor(moveCaretToEnd: true);
+        notesEditor.FocusEditor(moveCaretToEnd: true);
     }
 
     private void DetailNotesEditor_EditorTextChanged(object? sender, EventArgs e)
@@ -242,7 +289,11 @@ public sealed partial class TodoWidgetContent
     private void DetailNotesEditor_CancelRequested(object? sender, EventArgs e)
     {
         _notesAutosaveTimer.Stop();
-        DetailNotesEditor.Text = _notesOriginalText;
+        if (DetailNotesEditor is not null)
+        {
+            DetailNotesEditor.Text = _notesOriginalText;
+        }
+
         EndNotesEditing();
     }
 
@@ -264,9 +315,25 @@ public sealed partial class TodoWidgetContent
             return true;
         }
 
-        string source = DetailNotesEditor.Text;
+        string source = DetailNotesEditor?.Text ?? _notesOriginalText;
         TodoWidgetViewModel viewModel = ViewModel;
+        if (!keepEditing &&
+            (_isDisposed || _isFlushingTeardown) &&
+            string.Equals(_inFlightNotesSaveItemId, itemId, StringComparison.Ordinal) &&
+            string.Equals(_inFlightNotesSaveSource, source, StringComparison.Ordinal))
+        {
+            _notesEditingItemId = null;
+            return true;
+        }
+
+        if (_isFlushingTeardown && !keepEditing)
+        {
+            _notesEditingItemId = null;
+        }
+
         bool saved = false;
+        _inFlightNotesSaveItemId = itemId;
+        _inFlightNotesSaveSource = source;
         await _notesSaveGate.WaitAsync();
         try
         {
@@ -278,7 +345,19 @@ public sealed partial class TodoWidgetContent
         }
         finally
         {
+            if (string.Equals(_inFlightNotesSaveItemId, itemId, StringComparison.Ordinal) &&
+                string.Equals(_inFlightNotesSaveSource, source, StringComparison.Ordinal))
+            {
+                _inFlightNotesSaveItemId = null;
+                _inFlightNotesSaveSource = null;
+            }
+
             _notesSaveGate.Release();
+        }
+
+        if (_isDisposed || _isFlushingTeardown)
+        {
+            return saved;
         }
 
         if (!string.Equals(_notesEditingItemId, itemId, StringComparison.Ordinal))
@@ -288,14 +367,22 @@ public sealed partial class TodoWidgetContent
 
         if (!saved)
         {
-            DetailNotesSaveFailure.Visibility = Visibility.Visible;
+            if (DetailNotesSaveFailure is not null)
+            {
+                DetailNotesSaveFailure.Visibility = Visibility.Visible;
+            }
+
             ApplyNotesEditingVisualState(isEditing: true);
             return false;
         }
 
         _notesOriginalText = source;
-        DetailNotesSaveFailure.Visibility = Visibility.Collapsed;
-        bool sourceIsCurrent = string.Equals(
+        if (DetailNotesSaveFailure is not null)
+        {
+            DetailNotesSaveFailure.Visibility = Visibility.Collapsed;
+        }
+
+        bool sourceIsCurrent = DetailNotesEditor is null || string.Equals(
             DetailNotesEditor.Text,
             source,
             StringComparison.Ordinal);
@@ -312,27 +399,58 @@ public sealed partial class TodoWidgetContent
         _notesAutosaveTimer.Stop();
         _notesEditingItemId = null;
         _notesExitRequested = false;
-        DetailNotesSaveFailure.Visibility = Visibility.Collapsed;
+        if (DetailNotesSaveFailure is not null)
+        {
+            DetailNotesSaveFailure.Visibility = Visibility.Collapsed;
+        }
+
         ApplyNotesEditingVisualState(isEditing: false);
     }
 
     private void ApplyNotesEditingVisualState(bool isEditing)
     {
+        if (isEditing && !EnsureDetailPageRealized())
+        {
+            return;
+        }
+
+        if (DetailPage is null)
+        {
+            return;
+        }
+
         DetailNotesReaderHost.Visibility = isEditing ? Visibility.Collapsed : Visibility.Visible;
-        DetailNotesEditor.Visibility = isEditing ? Visibility.Visible : Visibility.Collapsed;
+        if (isEditing)
+        {
+            EnsureDetailNotesEditorRealized().Visibility = Visibility.Visible;
+        }
+        else if (DetailNotesEditor is not null)
+        {
+            DetailNotesEditor.Visibility = Visibility.Collapsed;
+        }
+
         DetailNotesEditButton.Visibility = isEditing ? Visibility.Collapsed : Visibility.Visible;
         DetailNotesDoneButton.Visibility = isEditing ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private async Task<bool> PrepareForDetailSelectionChangeAsync(string? nextItemId)
     {
-        if (_notesEditingItemId is null ||
-            string.Equals(_notesEditingItemId, nextItemId, StringComparison.Ordinal))
+        if (_notesEditingItemId is not null &&
+            !string.Equals(_notesEditingItemId, nextItemId, StringComparison.Ordinal) &&
+            !await SaveActiveNotesAsync(keepEditing: false))
         {
-            return true;
+            return false;
         }
 
-        return await SaveActiveNotesAsync(keepEditing: false);
+        if (ViewModel?.SelectedDetailItem is { } currentItem &&
+            !string.Equals(currentItem.Id, nextItemId, StringComparison.Ordinal))
+        {
+            await FlushDetailTitleAsync(
+                finalizeBlankDraft: true,
+                closeDetailOnFinalize: false);
+        }
+
+        return true;
     }
 
     private async Task<TodoItemViewModel?> OpenDetailItemAsync(string itemId)
@@ -342,7 +460,13 @@ public sealed partial class TodoWidgetContent
             return null;
         }
 
-        return ViewModel.OpenDetail(itemId);
+        TodoItemViewModel? opened = ViewModel.OpenDetail(itemId);
+        if (opened is not null)
+        {
+            _ = EnsureDetailPageRealized();
+        }
+
+        return opened;
     }
 
     private void SynchronizeDetailNotes()
@@ -363,6 +487,16 @@ public sealed partial class TodoWidgetContent
         _notesAutosaveTimer.Stop();
         _notesEditingItemId = null;
         _notesExitRequested = false;
+        if (item is not null)
+        {
+            _ = EnsureDetailPageRealized();
+        }
+
+        if (DetailPage is null)
+        {
+            return;
+        }
+
         DetailNotesSaveFailure.Visibility = Visibility.Collapsed;
         ApplyNotesEditingVisualState(isEditing: false);
         DetailNotesView.AttachmentResolver = ResolveSelectedTodoAttachment;
