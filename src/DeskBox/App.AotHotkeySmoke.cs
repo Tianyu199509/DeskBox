@@ -153,11 +153,11 @@ public partial class App
     {
         RequireAotHotkey(
             result,
-            _trayWindow is not null && GlobalHotkeyService is not null,
+            TrayHostWindowHandle != IntPtr.Zero && GlobalHotkeyService is not null,
             "services-ready",
             "Tray window or global hotkey service is unavailable.");
 
-        IntPtr trayWindowHandle = WindowNative.GetWindowHandle(_trayWindow!);
+        IntPtr trayWindowHandle = TrayHostWindowHandle;
         result.TrayWindowHandle = $"0x{trayWindowHandle.ToInt64():X}";
         RequireAotHotkey(
             result,
@@ -166,8 +166,7 @@ public partial class App
             "The hotkey host HWND is invalid.");
 
         var settings = SettingsService.Settings;
-        FeatureWidgetSettings.SetEnabled(settings, WidgetKind.Search, true);
-        SetSearchFeatureEnabled(true);
+        EnsureSearchFeatureShell();
         RequireAotHotkey(
             result,
             _searchHotkeyService is not null,

@@ -1848,6 +1848,57 @@ public sealed class CloudBackupScopedTests : IDisposable
         Assert.Null(archive.GetEntry("data/widgets/dead-widget/todo.json"));
     }
 
+    [Fact]
+    public async Task ScopedRestore_QuickCaptureReplaceMode_PreservesLocalMirrorFolderPath()
+    {
+        string dataDir = Directory.CreateDirectory(Path.Combine(_appDataRoot, "data")).FullName;
+        string localMirrorDir = Directory.CreateDirectory(Path.Combine(_tempRoot, "local-mirror")).FullName;
+
+        var localQcStore = new QuickCaptureStore(Path.Combine(dataDir, "quick-capture"));
+        await localQcStore.SaveAsync(new QuickCaptureStoreData
+        {
+            MirrorFolderPath = localMirrorDir,
+            Items =
+            [
+                new QuickCaptureItem { Id = "old-local-1", Body = "stale local note" }
+            ]
+        });
+
+        string sourceRoot = Path.Combine(_tempRoot, "other-machine-app-data");
+        string sourceData = Directory.CreateDirectory(Path.Combine(sourceRoot, "data")).FullName;
+        var sourceQcStore = new QuickCaptureStore(Path.Combine(sourceData, "quick-capture"));
+        await sourceQcStore.SaveAsync(new QuickCaptureStoreData
+        {
+            MirrorFolderPath = @"D:\OtherMachine\Mirror",
+            Items =
+            [
+                new QuickCaptureItem { Id = "synced-1", Body = "synced cloud note one", SortOrder = 0 },
+                new QuickCaptureItem { Id = "synced-2", Body = "synced cloud note two", SortOrder = 1 }
+            ]
+        });
+
+        string backupPath = await new DeskBoxDataBackupService(sourceRoot)
+            .ExportScopedBackupAsync(_exportRoot, CloudBackupDomain.QuickCaptureData);
+
+        var service = new DeskBoxDataBackupService(_appDataRoot);
+        DeskBoxRestorePreparation prep = await service.PrepareScopedRestoreAsync(
+            backupPath, CloudBackupDomain.QuickCaptureData);
+        Assert.Equal(["quick-capture-data"], prep.Domains);
+        Assert.True(await service.SetPendingRestoreItemReplaceModeAsync(true));
+
+        DeskBoxRestoreApplyResult result = await service.ApplyPendingRestoreAsync();
+        Assert.True(result.Succeeded, result.ErrorMessage);
+        Assert.Equal(DeskBoxRestoreApplyKind.Scoped, result.Kind);
+
+        QuickCaptureStoreData restored = await new QuickCaptureStore(
+            Path.Combine(dataDir, "quick-capture")).LoadAsync();
+        Assert.Equal(localMirrorDir, restored.MirrorFolderPath);
+        Assert.Equal(
+            ["synced cloud note one", "synced cloud note two"],
+            restored.Items.Select(item => item.Body).ToArray());
+        Assert.DoesNotContain(restored.Items, item => item.Id == "old-local-1");
+    }
+
     private static async Task<JsonObject> ReadManifestAsync(ZipArchive archive)
     {
         ZipArchiveEntry entry = Assert.IsType<ZipArchiveEntry>(

@@ -11,6 +11,7 @@ namespace DeskBox.Features.FileDisplay;
     nameof(ShowFileExtensions),
     nameof(ShowFileItemPathTooltips),
     nameof(ShowImageFilesAsIcons),
+    nameof(ShowImageThumbnails),
     nameof(ShowListItemDetails)
 ], [])]
 public sealed partial class FileDisplaySettingsViewModel

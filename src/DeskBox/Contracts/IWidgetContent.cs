@@ -77,6 +77,14 @@ public interface IWidgetGroupContentCacheable : IDisposable
 {
     bool IsReadyForReuse { get; }
 
+    bool HasActiveOutboundDrag => false;
+
+    event EventHandler? OutboundDragCompleted
+    {
+        add { }
+        remove { }
+    }
+
     void PrepareForReuse() { }
 }
 

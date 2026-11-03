@@ -9,18 +9,19 @@ internal static class GlanceWidgetContextMenuBuilder
     private static readonly GlanceDisplayElement[] DisplayElements =
     [
         GlanceDisplayElement.Time,
+        GlanceDisplayElement.Seconds,
         GlanceDisplayElement.Date,
         GlanceDisplayElement.Year,
-        GlanceDisplayElement.Weekday,
-        GlanceDisplayElement.Calendar
+        GlanceDisplayElement.Weekday
     ];
 
-    private static readonly GlanceLayoutMode[] Layouts =
+    private static readonly GlanceStyle[] Styles =
     [
-        GlanceLayoutMode.Immersive,
-        GlanceLayoutMode.Centered,
-        GlanceLayoutMode.Editorial,
-        GlanceLayoutMode.Calendar
+        GlanceStyle.PhotoClock,
+        GlanceStyle.Editorial,
+        GlanceStyle.TodayCard,
+        GlanceStyle.WeekStrip,
+        GlanceStyle.MonthCalendar
     ];
 
     public static void Append(
@@ -32,8 +33,8 @@ internal static class GlanceWidgetContextMenuBuilder
         ArgumentNullException.ThrowIfNull(viewModel);
         ArgumentNullException.ThrowIfNull(localizationService);
 
+        flyout.Items.Add(CreateStyleMenu(viewModel, localizationService));
         flyout.Items.Add(CreateDisplayMenu(viewModel, localizationService));
-        flyout.Items.Add(CreateLayoutMenu(viewModel, localizationService));
         flyout.Items.Add(new MenuFlyoutSeparator());
     }
 
@@ -66,36 +67,39 @@ internal static class GlanceWidgetContextMenuBuilder
         return menu;
     }
 
-    private static MenuFlyoutSubItem CreateLayoutMenu(
+    /// <summary>Style switcher: the quickest way to change the look without opening settings.</summary>
+    private static MenuFlyoutSubItem CreateStyleMenu(
         GlanceWidgetViewModel viewModel,
         LocalizationService localizationService)
     {
         var menu = new MenuFlyoutSubItem
         {
-            Text = localizationService.T("Glance.Layout.Title"),
+            Text = localizationService.T("Glance.Style.Title"),
             Icon = new FontIcon { Glyph = "\uE80A" }
         };
 
-        foreach (GlanceLayoutMode layout in Layouts)
+        foreach (GlanceStyle style in Styles)
         {
             var item = new RadioMenuFlyoutItem
             {
-                Text = localizationService.T(GetLayoutTextKey(layout)),
-                GroupName = "GlanceLayout",
-                IsChecked = viewModel.Settings.Layout == layout
+                Text = localizationService.T(DeskBox.Controls.GlanceStylePreviewFactory.GetTextKey(style)),
+                GroupName = "GlanceStyle",
+                IsChecked = viewModel.Settings.Style == style
             };
             item.Click += (_, _) =>
-                _ = RunAsync(() => viewModel.SetLayoutAsync(layout));
+                _ = RunAsync(() => viewModel.SetStyleAsync(style));
             menu.Items.Add(item);
         }
 
         return menu;
     }
 
+
     private static string GetDisplayTextKey(GlanceDisplayElement element) =>
         element switch
         {
             GlanceDisplayElement.Time => "Glance.Display.Time",
+            GlanceDisplayElement.Seconds => "Glance.Display.Seconds",
             GlanceDisplayElement.Date => "Glance.Display.Date",
             GlanceDisplayElement.Year => "Glance.Display.Year",
             GlanceDisplayElement.Weekday => "Glance.Display.Weekday",
@@ -103,14 +107,6 @@ internal static class GlanceWidgetContextMenuBuilder
             _ => "Glance.Display.Title"
         };
 
-    private static string GetLayoutTextKey(GlanceLayoutMode layout) =>
-        layout switch
-        {
-            GlanceLayoutMode.Centered => "Glance.Layout.Centered",
-            GlanceLayoutMode.Editorial => "Glance.Layout.Editorial",
-            GlanceLayoutMode.Calendar => "Glance.Layout.Calendar",
-            _ => "Glance.Layout.Immersive"
-        };
 
     private static async Task RunAsync(Func<Task> action)
     {

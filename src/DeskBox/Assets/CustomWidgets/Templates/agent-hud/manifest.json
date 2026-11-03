@@ -1,0 +1,291 @@
+{
+  "schemaVersion": 1,
+  "id": "deskbox.agent-hud",
+  "name": "AI 进度看板",
+  "version": "3.0.0",
+  "author": "DeskBox",
+  "description": "面向 Claude Code、Cursor、Codex 与自动化脚本的桌面常驻任务伴侣，支持 MCP / CLI 实时推送任务进度与事件流。",
+  "icon": "\uE945",
+  "minSize": {
+    "width": 292,
+    "height": 284
+  },
+  "defaultSize": {
+    "width": 344,
+    "height": 384
+  },
+  "script": {
+    "entry": "logic.js",
+    "tickIntervalMs": 0
+  },
+  "settings": [
+    {
+      "key": "defaultAgentName",
+      "type": "text",
+      "label": "${$i18n.setAgentName}",
+      "default": "Agent Bridge"
+    },
+    {
+      "key": "showProgressRow",
+      "type": "toggle",
+      "label": "${$i18n.setShowProgress}",
+      "default": "true"
+    },
+    {
+      "key": "compactStream",
+      "type": "toggle",
+      "label": "${$i18n.setCompactStream}",
+      "default": "false"
+    }
+  ],
+  "state": {
+    "agentName": "Agent Bridge",
+    "taskTitle": "",
+    "statusText": "",
+    "stepLabel": "",
+    "level": "",
+    "progress": "0",
+    "isBusy": "false",
+    "updatedAt": "",
+    "demoStage": "0"
+  },
+  "collections": {
+    "events": {
+      "maxItems": 80,
+      "sort": "newestFirst"
+    }
+  },
+  "capsule": {
+    "title": "${state.agentName != '' && state.agentName != 'Agent Bridge' ? state.agentName : $settings.defaultAgentName} · ${state.statusText != '' ? state.statusText : $i18n.defaultStatus}",
+    "summary": "${state.taskTitle != '' ? state.taskTitle : $i18n.defaultTask}",
+    "glyph": "\uE945",
+    "badge": "${state.progress != '0' ? state.progress : collections.events.count}",
+    "badgeIsWarning": "${state.level == 'error' || state.level == 'warning'}",
+    "progress": "${state.progress}",
+    "enableBounceOnUpdate": true
+  },
+  "view": {
+    "type": "Stack",
+    "spacing": 7,
+    "padding": "12,6,12,12",
+    "children": [
+      {
+        "type": "Card",
+        "tone": "${state.level == 'error' ? 'danger' : (state.level == 'warning' ? 'warning' : 'subtle')}",
+        "padding": "12,9,12,9",
+        "children": [
+          {
+            "type": "Stack",
+            "spacing": 6,
+            "children": [
+              {
+                "type": "Grid",
+                "columns": "Auto,1*,Auto",
+                "spacing": 8,
+                "children": [
+                  {
+                    "type": "ProgressRing",
+                    "column": 0,
+                    "size": 15,
+                    "indeterminate": "${state.isBusy == 'true'}",
+                    "value": "${state.progress != '0' ? state.progress : '100'}"
+                  },
+                  {
+                    "type": "Text",
+                    "column": 1,
+                    "text": "${state.agentName != '' && state.agentName != 'Agent Bridge' ? state.agentName : $settings.defaultAgentName}",
+                    "style": "bodyStrong",
+                    "verticalAlignment": "center",
+                    "maxLines": 1
+                  },
+                  {
+                    "type": "Badge",
+                    "column": 2,
+                    "text": "${state.statusText != '' ? state.statusText : $i18n.defaultStatus}",
+                    "tone": "${state.level == 'error' ? 'danger' : (state.level == 'warning' ? 'warning' : (state.progress == '100' && state.isBusy != 'true' ? 'success' : (state.isBusy == 'true' ? 'accent' : 'subtle')))}"
+                  }
+                ]
+              },
+              {
+                "type": "Text",
+                "text": "${state.taskTitle != '' ? state.taskTitle : $i18n.defaultTask}",
+                "style": "body",
+                "color": "${state.taskTitle != '' ? 'default' : 'secondary'}",
+                "maxLines": 2
+              },
+              {
+                "type": "ProgressRow",
+                "visible": "${$settings.showProgressRow != 'false' && (state.isBusy == 'true' || (state.progress != '' && state.progress != '0'))}",
+                "title": "${state.stepLabel != '' ? state.stepLabel : $i18n.progressTitle}",
+                "subtitle": "${state.updatedAt != '' ? state.updatedAt : $i18n.defaultUpdated}",
+                "value": "${state.progress}%",
+                "progress": "${state.progress}"
+              },
+              {
+                "type": "Grid",
+                "visible": "${$settings.showProgressRow == 'false' || (state.isBusy != 'true' && (state.progress == '' || state.progress == '0'))}",
+                "columns": "Auto,1*,Auto",
+                "spacing": 6,
+                "children": [
+                  {
+                    "type": "Badge",
+                    "column": 0,
+                    "tone": "cyan",
+                    "text": "MCP · CLI"
+                  },
+                  {
+                    "type": "Text",
+                    "column": 1,
+                    "text": "${$i18n.bridgeReadyHint}",
+                    "style": "caption",
+                    "color": "muted",
+                    "verticalAlignment": "center",
+                    "maxLines": 1
+                  },
+                  {
+                    "type": "Text",
+                    "column": 2,
+                    "text": "${state.updatedAt != '' ? state.updatedAt : $i18n.defaultUpdated}",
+                    "style": "caption",
+                    "color": "muted",
+                    "verticalAlignment": "center",
+                    "maxLines": 1
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "Grid",
+        "columns": "1*,Auto,Auto,Auto",
+        "spacing": 5,
+        "children": [
+          {
+            "type": "Text",
+            "column": 0,
+            "text": "${$i18n.streamHeaderPrefix}${collections.events.count})",
+            "style": "caption",
+            "color": "secondary",
+            "verticalAlignment": "center"
+          },
+          {
+            "type": "Button",
+            "column": 1,
+            "icon": "\uE945",
+            "text": "${$i18n.demoBtn}",
+            "tooltip": "${$i18n.demoTooltip}",
+            "onClick": {
+              "type": "script.run",
+              "fn": "simulateStep"
+            }
+          },
+          {
+            "type": "Button",
+            "column": 2,
+            "icon": "\uE8C8",
+            "text": "${$i18n.copyCmdBtn}",
+            "tooltip": "${$i18n.copyCmdTooltip}",
+            "onClick": [
+              {
+                "type": "clipboard.copy",
+                "text": "${$i18n.copyPromptText}"
+              },
+              {
+                "type": "toast.show",
+                "message": "${$i18n.copiedToast}"
+              }
+            ]
+          },
+          {
+            "type": "IconButton",
+            "column": 3,
+            "when": "${state.isBusy == 'true'}",
+            "icon": "\uE73E",
+            "size": 26,
+            "tooltip": "${$i18n.markDoneTooltip}",
+            "onClick": {
+              "type": "script.run",
+              "fn": "markComplete"
+            }
+          },
+          {
+            "type": "IconButton",
+            "column": 3,
+            "when": "${state.isBusy != 'true' && (collections.events.count != '0' || state.progress != '0' || state.taskTitle != '')}",
+            "icon": "\uE74D",
+            "size": 26,
+            "tooltip": "${$i18n.clearBtn}",
+            "onClick": {
+              "type": "script.run",
+              "fn": "resetHud"
+            }
+          }
+        ]
+      },
+      {
+        "type": "List",
+        "items": "events",
+        "emptyState": {
+          "icon": "\uE950",
+          "title": "${$i18n.emptyTitle}",
+          "subtitle": "${$i18n.emptySubtitle}"
+        },
+        "hoverActions": [
+          {
+            "type": "IconButton",
+            "icon": "\uE8C8",
+            "size": 22,
+            "tooltip": "${$i18n.copyEventTooltip}",
+            "onClick": {
+              "type": "clipboard.copy",
+              "text": "${$item.text != '' ? $item.text : $item.title}"
+            }
+          },
+          {
+            "type": "IconButton",
+            "icon": "\uE711",
+            "size": 22,
+            "tooltip": "${$i18n.clearBtn}",
+            "onClick": {
+              "type": "collection.remove",
+              "collection": "events",
+              "id": "${$item.id}"
+            }
+          }
+        ],
+        "itemTemplate": {
+          "type": "Grid",
+          "columns": "Auto,1*,Auto",
+          "spacing": 8,
+          "children": [
+            {
+              "type": "Badge",
+              "column": 0,
+              "text": "${$item.tag != '' ? $item.tag : ($item.badge != '' ? $item.badge : 'INFO')}",
+              "tone": "${$item.tone != '' ? $item.tone : ($item.badge == 'OK' || $item.badge == 'DONE' ? 'success' : ($item.badge == 'ERR' ? 'danger' : 'subtle'))}"
+            },
+            {
+              "type": "Text",
+              "column": 1,
+              "text": "${$item.text != '' ? $item.text : $item.title}",
+              "style": "body",
+              "verticalAlignment": "center",
+              "maxLines": 2
+            },
+            {
+              "type": "Text",
+              "column": 2,
+              "visible": "${$settings.compactStream != 'true'}",
+              "text": "${$item.timeText != '' ? $item.timeText : $item.time}",
+              "style": "caption",
+              "color": "muted",
+              "verticalAlignment": "center"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

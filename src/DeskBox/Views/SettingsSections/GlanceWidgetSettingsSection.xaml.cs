@@ -12,7 +12,7 @@ namespace DeskBox.Views.SettingsSections;
 
 public sealed partial class GlanceWidgetSettingsSection : UserControl
 {
-    private static readonly string[] DisplayOptions = ["Time", "Date", "Year", "Weekday", "Calendar"];
+    private static readonly string[] DisplayOptions = ["Time", "Seconds", "Date", "Year", "Weekday"];
     private sealed partial class SelectionItem : ComboBoxItem
     {
         public SelectionItem(string label, object value)
@@ -53,6 +53,8 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
         WidgetDangerActionStyle.Apply(DeleteInstanceMenuItem);
     }
 
+    public event EventHandler? ResetGlanceRequested;
+
     private LocalizationService Localization => App.Current.LocalizationService;
 
     public void Configure(ISettingsWidgetActions widgetActions, IntPtr ownerWindow)
@@ -86,6 +88,7 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
     {
         _isSectionLoaded = false;
         App.Current.SettingsService.SettingsChanged -= OnAppSettingsChanged;
+        _ = FlushPendingSavesAsync();
     }
 
     private void OnAppSettingsChanged()
@@ -204,11 +207,17 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
         _isLoading = true;
         try
         {
+            bool hostAvailable = _widgetActions is { IsHostAvailable: true };
+            bool masterEnabled = hostAvailable && _widgetActions!.IsGlanceFeatureEnabled;
             _selectedWidgetId = null;
             _instanceStateSignature = string.Empty;
             _store = null;
             _settings = new GlanceWidgetData();
             InstanceComboBox.Items.Clear();
+            GlanceMasterEnableToggle.IsEnabled = hostAvailable;
+            GlanceMasterEnableToggle.IsOn = masterEnabled;
+            InstanceManagerCard.IsEnabled = masterEnabled;
+            InstanceManagerCard.Opacity = masterEnabled ? 1.0 : 0.55;
             InstanceSettingsPanel.Visibility = Visibility.Collapsed;
             InstanceEnabledToggle.IsOn = false;
             InstanceEnabledToggle.IsEnabled = false;
@@ -217,9 +226,11 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
             DuplicateInstanceMenuItem.IsEnabled = false;
             RenameInstanceMenuItem.IsEnabled = false;
             DeleteInstanceMenuItem.IsEnabled = false;
+            ResetGlanceButton.IsEnabled = hostAvailable;
             InstanceManagerCard.Description = Localization.Format(
                 "Glance.Instances.Description",
                 0);
+            UpdateCacheSize();
         }
         finally
         {
@@ -238,12 +249,11 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
 
     private void PopulateOptions()
     {
+        PopulateStyleGallery();
         SetOptions(
-            LayoutComboBox,
-            (Localization.T("Glance.Layout.Immersive"), GlanceLayoutMode.Immersive),
-            (Localization.T("Glance.Layout.Centered"), GlanceLayoutMode.Centered),
-            (Localization.T("Glance.Layout.Editorial"), GlanceLayoutMode.Editorial),
-            (Localization.T("Glance.Layout.Calendar"), GlanceLayoutMode.Calendar));
+            PhotoClockAlignmentComboBox,
+            (Localization.T("Glance.Style.Alignment.Center"), GlancePhotoClockAlignment.Center),
+            (Localization.T("Glance.Style.Alignment.BottomLeft"), GlancePhotoClockAlignment.BottomLeft));
         SetOptions(
             BackgroundSourceComboBox,
             (Localization.T("Glance.Background.Files"), GlanceBackgroundSource.LocalFiles),
@@ -335,7 +345,8 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
         string localizationSignature =
             $"{Localization.CurrentCultureName}|{CultureInfo.CurrentCulture.Name}";
         bool optionsArePopulated =
-            LayoutComboBox.Items.Count > 0 &&
+            StyleGallery.Items.Count > 0 &&
+            PhotoClockAlignmentComboBox.Items.Count > 0 &&
             BackgroundSourceComboBox.Items.Count > 0 &&
             OnlineImageCategoryComboBox.Items.Count > 0 &&
             RotationComboBox.Items.Count > 0 &&
@@ -421,22 +432,45 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
         IReadOnlyCollection<GlanceWidgetInstanceInfo> instances,
         GlanceWidgetInstanceInfo? selected)
     {
+        bool masterEnabled = widgetActions.IsGlanceFeatureEnabled;
         bool hasSelection = selected is not null;
+        GlanceMasterEnableToggle.IsEnabled = widgetActions.IsHostAvailable;
+        GlanceMasterEnableToggle.IsOn = masterEnabled;
+        InstanceManagerCard.IsEnabled = masterEnabled;
+        InstanceManagerCard.Opacity = masterEnabled ? 1.0 : 0.55;
         InstanceSettingsPanel.Visibility = hasSelection ? Visibility.Visible : Visibility.Collapsed;
-        InstanceMoreButton.IsEnabled = hasSelection;
-        LocateInstanceMenuItem.IsEnabled = selected?.IsEnabled == true;
-        DuplicateInstanceMenuItem.IsEnabled = hasSelection;
-        RenameInstanceMenuItem.IsEnabled = hasSelection;
-        DeleteInstanceMenuItem.IsEnabled = hasSelection;
-        InstanceEnabledToggle.IsEnabled = hasSelection && widgetActions.IsGlanceFeatureEnabled;
+        InstanceSettingsPanel.IsHitTestVisible = masterEnabled;
+        InstanceSettingsPanel.Opacity = masterEnabled ? 1.0 : 0.55;
+        InstanceMoreButton.IsEnabled = hasSelection && masterEnabled;
+        LocateInstanceMenuItem.IsEnabled = masterEnabled && selected?.IsEnabled == true;
+        DuplicateInstanceMenuItem.IsEnabled = hasSelection && masterEnabled;
+        RenameInstanceMenuItem.IsEnabled = hasSelection && masterEnabled;
+        DeleteInstanceMenuItem.IsEnabled = hasSelection && masterEnabled;
+        InstanceEnabledToggle.IsEnabled = hasSelection && masterEnabled;
         InstanceEnabledToggle.IsOn = selected?.IsEnabled == true;
+        ResetGlanceButton.IsEnabled = widgetActions.IsHostAvailable;
         InstanceManagerCard.Description = Localization.Format(
             "Glance.Instances.Description",
             instances.Count);
-        if (!widgetActions.IsGlanceFeatureEnabled)
+    }
+
+    private async void GlanceMasterEnableToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_isLoading || _widgetActions is null || !_widgetActions.IsHostAvailable)
         {
-            InstanceManagerCard.Description =
-                $"{InstanceManagerCard.Description} {Localization.T("Glance.Instances.MasterOff")}";
+            return;
+        }
+
+        try
+        {
+            await FlushPendingSavesAsync();
+            await _widgetActions.SetFeatureWidgetEnabled(WidgetKind.Glance, GlanceMasterEnableToggle.IsOn);
+            await RefreshInstancesAsync(_selectedWidgetId);
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[GlanceSettings] Toggle glance master state failed: {ex.Message}");
+            await RefreshInstancesAsync(_selectedWidgetId);
         }
     }
 
@@ -477,7 +511,8 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
         _isLoading = true;
         try
         {
-            SelectOption(LayoutComboBox, _settings.Layout);
+            SelectStyle(_settings.Style);
+            SelectOption(PhotoClockAlignmentComboBox, _settings.PhotoClockAlignment);
             SelectOption(BackgroundSourceComboBox, _settings.BackgroundSource);
             SelectOption(OnlineImageCategoryComboBox, _settings.OnlineImageCategory);
             SelectOption(RotationComboBox, _settings.RotationIntervalMinutes);
@@ -493,10 +528,13 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
             BackgroundImageTransparencySlider.Value = _settings.BackgroundImageTransparency;
             CalendarImageTransparencySlider.Value = _settings.CalendarImageMaterialTransparency;
             ShowChineseFestivalsToggle.IsOn = _settings.ShowChineseFestivals;
+            ShowStatutoryHolidaysToggle.IsOn = _settings.ShowStatutoryHolidays;
+            ShowTodoAgendaToggle.IsOn = _settings.ShowTodoAgenda;
             ShowPhotoControlsToggle.IsOn = _settings.ShowPhotoControls;
             UpdateDisplaySelectionSummary();
             UpdateLocalSourceState();
             UpdateBackgroundImageTransparencyState();
+            UpdateTimeScaleState();
             UpdateCalendarMaterialState();
         }
         finally
@@ -793,10 +831,10 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
         GlanceDisplayElement? element = option switch
         {
             "Time" => GlanceDisplayElement.Time,
+            "Seconds" => GlanceDisplayElement.Seconds,
             "Date" => GlanceDisplayElement.Date,
             "Year" => GlanceDisplayElement.Year,
             "Weekday" => GlanceDisplayElement.Weekday,
-            "Calendar" => GlanceDisplayElement.Calendar,
             _ => null
         };
         if (element is null)
@@ -812,37 +850,59 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
             element.Value,
             !isVisible);
 
-        SynchronizeLayoutSelection();
         UpdateDisplaySelectionSummary();
-        UpdateCalendarMaterialState();
         if (_store is { } store)
         {
             await SaveSettingsToStoreAsync(store);
         }
     }
 
-    private async void LayoutComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private async void StyleGallery_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (LayoutComboBox.SelectedItem is SelectionItem { Value: GlanceLayoutMode layout })
+        if (StyleGallery.SelectedItem is GridViewItem { Tag: GlanceStyle style } &&
+            style != _settings.Style)
         {
-            await SaveAsync(settings =>
-                GlanceWidgetSettingsPolicy.SetLayout(settings, layout));
-            UpdateDisplaySelectionSummary();
+            await SaveAsync(settings => GlanceWidgetSettingsPolicy.SetStyle(settings, style));
             UpdateCalendarMaterialState();
         }
     }
 
-    private void SynchronizeLayoutSelection()
+    private async void PhotoClockAlignmentComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        bool wasLoading = _isLoading;
-        _isLoading = true;
-        try
+        if (PhotoClockAlignmentComboBox.SelectedItem is SelectionItem { Value: GlancePhotoClockAlignment alignment } &&
+            alignment != _settings.PhotoClockAlignment)
         {
-            SelectOption(LayoutComboBox, _settings.Layout);
+            await SaveAsync(settings => GlanceWidgetSettingsPolicy.SetPhotoClockAlignment(settings, alignment));
         }
-        finally
+    }
+
+    private async void ShowStatutoryHolidaysToggle_Toggled(object sender, RoutedEventArgs e)
+        => await SaveAsync(settings => settings.ShowStatutoryHolidays = ShowStatutoryHolidaysToggle.IsOn);
+
+    private async void ShowTodoAgendaToggle_Toggled(object sender, RoutedEventArgs e)
+        => await SaveAsync(settings => settings.ShowTodoAgenda = ShowTodoAgendaToggle.IsOn);
+
+    private void SelectStyle(GlanceStyle style)
+    {
+        StyleGallery.SelectedItem = StyleGallery.Items
+            .OfType<GridViewItem>()
+            .FirstOrDefault(item => item.Tag is GlanceStyle value && value == style);
+    }
+
+    private void PopulateStyleGallery()
+    {
+        StyleGallery.Items.Clear();
+        foreach (GlanceStyle style in GlanceStylePreviewFactory.Styles)
         {
-            _isLoading = wasLoading;
+            string label = Localization.T(GlanceStylePreviewFactory.GetTextKey(style));
+            var item = new GridViewItem
+            {
+                Tag = style,
+                Margin = new Thickness(0, 0, 8, 8),
+                Content = GlanceStylePreviewFactory.Create(style, label)
+            };
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(item, label);
+            StyleGallery.Items.Add(item);
         }
     }
 
@@ -897,6 +957,7 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
         if (TransitionComboBox.SelectedItem is SelectionItem { Value: GlanceTransitionMode transition })
         {
             await SaveAsync(settings => settings.Transition = transition);
+            UpdateCalendarMaterialState();
         }
     }
 
@@ -999,6 +1060,7 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
         }
 
         _settings.TimeScale = e.NewValue;
+        UpdateTimeScaleState();
         _scaleSaveTimer.Stop();
         _scaleSaveTimer.Start();
     }
@@ -1079,8 +1141,61 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
         }
     }
 
+    private async void ResetGlanceButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_widgetActions is null || !_widgetActions.IsHostAvailable || XamlRoot is null)
+        {
+            return;
+        }
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = Localization.Format(
+                "Settings.FeatureWidgets.ResetDialogTitle",
+                Localization.T("Glance.Title")),
+            Content = new TextBlock
+            {
+                Text = Localization.T("Settings.FeatureWidgets.ResetDialogBody"),
+                TextWrapping = TextWrapping.Wrap
+            },
+            PrimaryButtonText = Localization.T("Settings.FeatureWidgets.ResetConfirm"),
+            CloseButtonText = Localization.T("Common.Cancel"),
+            DefaultButton = ContentDialogButton.Close
+        };
+
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        {
+            return;
+        }
+
+        ResetGlanceButton.IsEnabled = false;
+        try
+        {
+            await FlushPendingSavesAsync();
+            await _widgetActions.ResetFeatureWidgetAsync(WidgetKind.Glance);
+            ResetGlanceRequested?.Invoke(this, EventArgs.Empty);
+            _selectedWidgetId = null;
+            await RefreshInstancesAsync(null);
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[GlanceSettings] Reset glance widgets failed: {ex}");
+        }
+        finally
+        {
+            ResetGlanceButton.IsEnabled = _widgetActions.IsHostAvailable;
+        }
+    }
+
     private void UpdateLocalSourceState()
     {
+        bool canRotate = _settings.BackgroundSource != GlanceBackgroundSource.Bing;
+        RotationCard.IsEnabled = canRotate;
+        RotationComboBox.IsEnabled = canRotate;
+        RandomOrderCard.IsEnabled = canRotate;
+        RandomOrderToggle.IsEnabled = canRotate;
+
         OnlineImageCategoryCard.Visibility = _settings.BackgroundSource == GlanceBackgroundSource.Online
             ? Visibility.Visible
             : Visibility.Collapsed;
@@ -1088,6 +1203,9 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
             GlanceBackgroundSource.LocalFiles or GlanceBackgroundSource.LocalFolder
                 ? Visibility.Visible
                 : Visibility.Collapsed;
+        LocalSourceCard.Header = _settings.BackgroundSource == GlanceBackgroundSource.LocalFolder
+            ? Localization.T("Glance.Background.Folder")
+            : Localization.T("Glance.Background.Files");
         ChooseFilesButton.Visibility = _settings.BackgroundSource == GlanceBackgroundSource.LocalFiles
             ? Visibility.Visible
             : Visibility.Collapsed;
@@ -1112,22 +1230,45 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
         };
     }
 
+    /// <summary>
+    /// Shows only the options the selected style can use: alignment for the
+    /// photo clock, panel material for styles drawn on a material surface,
+    /// festivals for the Chinese lunar calendar, holidays for zh-Hans.
+    /// </summary>
     private void UpdateCalendarMaterialState()
     {
-        bool calendarVisible = _settings.Layout == GlanceLayoutMode.Calendar && _settings.ShowCalendar;
-        TraditionalCalendarCard.Visibility = calendarVisible ? Visibility.Visible : Visibility.Collapsed;
+        PhotoClockAlignmentCard.Visibility = _settings.Style == GlanceStyle.PhotoClock
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        bool usesMaterialSurface = _settings.Style is GlanceStyle.MonthCalendar or GlanceStyle.WeekStrip;
         bool chineseLunarSelected = _traditionalCalendarService.ResolveMode(
             _settings.TraditionalCalendarMode,
             Localization.CurrentCultureName) == GlanceTraditionalCalendarMode.ChineseLunar;
-        ChineseFestivalCard.Visibility = calendarVisible && chineseLunarSelected
+        ChineseFestivalCard.Visibility = chineseLunarSelected
             ? Visibility.Visible
             : Visibility.Collapsed;
-        CalendarMaterialCard.Visibility = calendarVisible ? Visibility.Visible : Visibility.Collapsed;
-        CalendarImageTransparencyCard.Visibility = calendarVisible &&
+        StatutoryHolidaysCard.Visibility = GlanceHolidayMarkService.IsApplicable(ResolveCulture())
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        TransitionSpeedCard.IsEnabled = _settings.Transition != GlanceTransitionMode.None;
+        CalendarMaterialCard.Visibility = usesMaterialSurface ? Visibility.Visible : Visibility.Collapsed;
+        CalendarImageTransparencyCard.Visibility = usesMaterialSurface &&
             _settings.CalendarMaterialMode == GlanceCalendarMaterialMode.FollowImage
                 ? Visibility.Visible
                 : Visibility.Collapsed;
         CalendarImageTransparencyValue.Text = $"{Math.Round(_settings.CalendarImageMaterialTransparency * 100):0}%";
+    }
+
+    private CultureInfo ResolveCulture()
+    {
+        try
+        {
+            return CultureInfo.GetCultureInfo(Localization.CurrentCultureName);
+        }
+        catch
+        {
+            return CultureInfo.CurrentCulture;
+        }
     }
 
     private void UpdateBackgroundImageTransparencyState()
@@ -1136,14 +1277,20 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
             $"{Math.Round(_settings.BackgroundImageTransparency * 100):0}%";
     }
 
+    private void UpdateTimeScaleState()
+    {
+        TimeScaleValueText.Text =
+            $"{Math.Round(_settings.TimeScale * 100):0}%";
+    }
+
     private void UpdateDisplaySelectionSummary()
     {
         var selected = new List<string>(5);
         if (_settings.ShowTime) selected.Add(Localization.T("Glance.Display.Time"));
+        if (_settings.ShowTime && _settings.ShowSeconds) selected.Add(Localization.T("Glance.Display.Seconds"));
         if (_settings.ShowDate) selected.Add(Localization.T("Glance.Display.Date"));
         if (_settings.ShowYear) selected.Add(Localization.T("Glance.Display.Year"));
         if (_settings.ShowWeekday) selected.Add(Localization.T("Glance.Display.Weekday"));
-        if (_settings.ShowCalendar) selected.Add(Localization.T("Glance.Display.Calendar"));
         DisplayContentDropDownButton.Content = selected.Count == 0
             ? Localization.T("Glance.Display.PhotoOnly")
             : string.Join(Localization.T("Glance.Display.Separator"), selected);
@@ -1152,20 +1299,20 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
     private string GetDisplayOptionLabel(string option) => option switch
     {
         "Time" => Localization.T("Glance.Display.Time"),
+        "Seconds" => Localization.T("Glance.Display.Seconds"),
         "Date" => Localization.T("Glance.Display.Date"),
         "Year" => Localization.T("Glance.Display.Year"),
         "Weekday" => Localization.T("Glance.Display.Weekday"),
-        "Calendar" => Localization.T("Glance.Display.Calendar"),
         _ => option
     };
 
     private bool IsDisplayOptionSelected(string option) => option switch
     {
         "Time" => _settings.ShowTime,
+        "Seconds" => _settings.ShowTime && _settings.ShowSeconds,
         "Date" => _settings.ShowDate,
         "Year" => _settings.ShowYear,
         "Weekday" => _settings.ShowWeekday,
-        "Calendar" => _settings.ShowCalendar,
         _ => false
     };
 

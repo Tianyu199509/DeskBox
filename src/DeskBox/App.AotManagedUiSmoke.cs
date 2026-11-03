@@ -1,4 +1,4 @@
-﻿#if DESKBOX_NATIVE_AOT
+#if DESKBOX_NATIVE_AOT
 using DeskBox.Models;
 using DeskBox.Services;
 using DeskBox.ViewModels;
@@ -151,7 +151,7 @@ public partial class App
     private const string AotManagedUiNativeDropDirectoryName =
         "native-drop-persistence-restart";
     private const string AotManagedUiFileWidgetId = "aot-5b4a-file";
-    private const string AotManagedUiSearchWidgetId = "aot-5b4a-search";
+    private const string AotManagedUiMusicWidgetId = "aot-5b4a-music";
     private const string AotManagedUiQuickCaptureWidgetId =
         "aot-5b4b2b1-quick-capture";
     private const string AotManagedUiTodoWidgetId = "aot-5b4b2b2a-todo";
@@ -906,15 +906,15 @@ public partial class App
     {
         await Task.Delay(250);
 
-        if (_trayIcon is null || _trayWindow is null)
+        if (_trayHost is null)
         {
             throw new InvalidOperationException("The product tray surface is unavailable.");
         }
 
-        result.TrayIconCreated = _trayIcon.IsCreated;
-        result.TrayIconWindowHandle = _trayIcon.TrayIcon.WindowHandle.ToInt64();
+        result.TrayIconCreated = _trayHost.IsCreated;
+        result.TrayIconWindowHandle = _trayHost.WindowHandle.ToInt64();
         result.TrayOwnerWindowHandle =
-            WinRT.Interop.WindowNative.GetWindowHandle(_trayWindow).ToInt64();
+            TrayHostWindowHandle.ToInt64();
         RequireAotManagedUi(
             result,
             result.TrayIconCreated &&
@@ -992,7 +992,7 @@ public partial class App
         WidgetConfig[] seededWidgets = SettingsService.Settings.Widgets
             .Where(widget =>
                 widget.Id == ownedPrimaryWidgetId ||
-                widget.Id == AotManagedUiSearchWidgetId)
+                widget.Id == AotManagedUiMusicWidgetId)
             .OrderBy(widget => widget.Id, StringComparer.Ordinal)
             .ToArray();
         RequireAotManagedUi(
@@ -1005,8 +1005,8 @@ public partial class App
                 widget.IsVisible &&
                 !widget.IsDisabled) &&
             seededWidgets.Any(widget =>
-                widget.Id == AotManagedUiSearchWidgetId &&
-                widget.WidgetKind == WidgetKind.Search &&
+                widget.Id == AotManagedUiMusicWidgetId &&
+                widget.WidgetKind == WidgetKind.Music &&
                 widget.IsVisible &&
                 !widget.IsDisabled),
             "SeededWidgetConfiguration",
@@ -1031,21 +1031,21 @@ public partial class App
                 widgetDiagnostic.Hosts.All(host =>
                     host.WidgetKind != WidgetKind.Weather) &&
                 widgetDiagnostic.Hosts.Count(host =>
-                    host.WidgetKind == WidgetKind.Search && host.Visible) == 1
+                    host.WidgetKind == WidgetKind.Music && host.Visible) == 1
             : manager.LoadedSurfaceCount == 2 &&
                 widgetDiagnostic.LoadedSurfaceCount == 2 &&
                 widgetDiagnostic.VisibleSurfaceCount == 2 &&
                 widgetDiagnostic.Hosts.Count(host =>
                     host.WidgetKind == ownedPrimaryWidgetKind && host.Visible) == 1 &&
                 widgetDiagnostic.Hosts.Count(host =>
-                    host.WidgetKind == WidgetKind.Search && host.Visible) == 1;
+                    host.WidgetKind == WidgetKind.Music && host.Visible) == 1;
         RequireAotManagedUi(
             result,
             expectedHostsRestored,
             "SeededWidgetsRestored",
             isWeatherSettingsPersistence
                 ? "The local-only Weather settings matrix did not suppress the Weather host."
-                : "The real owned primary and Search widget HWNDs were not both restored and visible.");
+                : "The real owned primary and Music widget HWNDs were not both restored and visible.");
     }
 
     private static void CaptureAotManagedUiLocales(AotManagedUiSmokeResult result)
@@ -1080,8 +1080,10 @@ public partial class App
         [
             "General",
             "Appearance",
-            "FeatureWidgets",
             "Interaction",
+            "AppearanceDetail",
+            "FeatureWidgets",
+            "SearchSettings",
             "Maintenance",
             "About"
         ];
@@ -1171,15 +1173,9 @@ public partial class App
             result.DeepSettings.SearchSuggestions.Count > 0 &&
             string.Equals(
                 result.DeepSettings.SearchActivatedSection,
-                "BackupRestoreSettings",
+                "FileStackSettings",
                 StringComparison.Ordinal) &&
-            // Deep review R13-5: 22 = SettingsWindow.AotDeepSmoke's
-            // deepSettingsRoutes length. The route table was trimmed from 25
-            // to 22 sections in an earlier batch without this pin — every
-            // deep-settings run since then failed on a healthy traversal
-            // (both the pre-R13 worktree and HEAD reproduced 22/22 pages
-            // with all other conditions green; instrumented DIAG run).
-            result.DeepSettings.PageTransitions.Count == 22 &&
+            result.DeepSettings.PageTransitions.Count == 18 &&
             result.DeepSettings.BreadcrumbParentReturned &&
             result.DeepSettings.FileStackRuleCount == 1 &&
             result.DeepSettings.BackupSnapshotCount > 0,
@@ -1311,8 +1307,8 @@ public partial class App
             ViewModelTrayIconStyle = appearanceSettings.TrayIconStyle,
             FileWidget = MapAotManagedUiPersistenceWidget(
                 manager.CaptureAotPersistenceWidgetSnapshot(AotManagedUiFileWidgetId)),
-            SearchWidget = MapAotManagedUiPersistenceWidget(
-                manager.CaptureAotPersistenceWidgetSnapshot(AotManagedUiSearchWidgetId))
+            MusicWidget = MapAotManagedUiPersistenceWidget(
+                manager.CaptureAotPersistenceWidgetSnapshot(AotManagedUiMusicWidgetId))
         };
     }
 
@@ -1363,20 +1359,20 @@ public partial class App
         AotManagedUiPersistenceStateEvidence state)
     {
         AotManagedUiPersistenceWidgetEvidence file = state.FileWidget;
-        AotManagedUiPersistenceWidgetEvidence search = state.SearchWidget;
+        AotManagedUiPersistenceWidgetEvidence music = state.MusicWidget;
         if (!file.IsLoaded || file.WindowHandle == 0 || !file.IsHostVisible ||
             !file.HasXamlRoot || file.ActualBounds.Width <= 0 ||
             file.ActualBounds.Height <= 0 ||
-            !search.IsLoaded || search.WindowHandle == 0 ||
-            !search.IsHostVisible || !search.HasXamlRoot ||
-            search.ActualBounds.Width <= 0 || search.ActualBounds.Height <= 0 ||
+            !music.IsLoaded || music.WindowHandle == 0 ||
+            !music.IsHostVisible || !music.HasXamlRoot ||
+            music.ActualBounds.Width <= 0 || music.ActualBounds.Height <= 0 ||
             !string.Equals(file.ViewModelName, file.Name, StringComparison.Ordinal) ||
             !string.Equals(file.ViewModelViewMode, file.ViewMode, StringComparison.Ordinal) ||
             file.ViewModelPositionLocked != file.IsPositionLocked ||
             file.ViewModelSizeLocked != file.IsSizeLocked)
         {
             throw new InvalidOperationException(
-                "The fixed File/Search widget configuration is not represented by live loaded HWNDs.");
+                "The fixed File/Music widget configuration is not represented by live loaded HWNDs.");
         }
     }
 
@@ -1407,10 +1403,10 @@ public partial class App
                 sizeLocked: false,
                 hasBaselineMetadata: false) &&
             IsAotManagedUiPersistenceWidgetState(
-                state.SearchWidget,
-                AotManagedUiSearchWidgetId,
-                "AOT Search Fixture",
-                WidgetKind.Search,
+                state.MusicWidget,
+                AotManagedUiMusicWidgetId,
+                "AOT Music Fixture",
+                WidgetKind.Music,
                 ViewMode.Icon,
                 positionLocked: false,
                 sizeLocked: false,
@@ -1444,10 +1440,10 @@ public partial class App
                 sizeLocked: true,
                 hasBaselineMetadata: true) &&
             IsAotManagedUiPersistenceWidgetState(
-                state.SearchWidget,
-                AotManagedUiSearchWidgetId,
-                "AOT Search Fixture",
-                WidgetKind.Search,
+                state.MusicWidget,
+                AotManagedUiMusicWidgetId,
+                "AOT Music Fixture",
+                WidgetKind.Music,
                 ViewMode.Icon,
                 positionLocked: false,
                 sizeLocked: false,
@@ -1609,8 +1605,6 @@ public partial class App
                     lastSnapshot.HasCurrentResults &&
                     lastSnapshot.CurrentResultsCount > 0 &&
                     string.Equals(lastSnapshot.SelectedTabId, "all", StringComparison.Ordinal) &&
-                    lastSnapshot.IsResultFilterBarVisible &&
-                    lastSnapshot.IsSortHeaderRowVisible &&
                     lastSnapshot.HasOpenSettingsAction)
                 {
                     return lastSnapshot;
@@ -1828,7 +1822,7 @@ internal sealed class AotManagedUiPersistenceStateEvidence
     public double ViewModelTextSize { get; set; }
     public string ViewModelTrayIconStyle { get; set; } = string.Empty;
     public AotManagedUiPersistenceWidgetEvidence FileWidget { get; set; } = new();
-    public AotManagedUiPersistenceWidgetEvidence SearchWidget { get; set; } = new();
+    public AotManagedUiPersistenceWidgetEvidence MusicWidget { get; set; } = new();
 }
 
 internal sealed class AotManagedUiPersistenceWidgetEvidence

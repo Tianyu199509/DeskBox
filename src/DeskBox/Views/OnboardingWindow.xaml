@@ -35,39 +35,92 @@
                 <Setter Property="LineHeight" Value="19"/>
                 <Setter Property="TextWrapping" Value="Wrap"/>
             </Style>
+            <Style x:Key="CardTitleText" TargetType="TextBlock">
+                <Setter Property="FontSize" Value="13.5"/>
+                <Setter Property="FontWeight" Value="SemiBold"/>
+                <Setter Property="Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}"/>
+                <Setter Property="TextWrapping" Value="Wrap"/>
+            </Style>
             <Style x:Key="SettingCard" TargetType="Border">
                 <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}"/>
                 <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}"/>
                 <Setter Property="BorderThickness" Value="1"/>
-                <Setter Property="CornerRadius" Value="10"/>
+                <Setter Property="CornerRadius" Value="8"/>
                 <Setter Property="Padding" Value="14,12"/>
             </Style>
             <Style x:Key="FeatureChoiceCard" TargetType="Border">
                 <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}"/>
                 <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}"/>
                 <Setter Property="BorderThickness" Value="1"/>
-                <Setter Property="CornerRadius" Value="10"/>
+                <Setter Property="CornerRadius" Value="8"/>
                 <Setter Property="Padding" Value="13,11"/>
             </Style>
             <Style x:Key="StatusBadge" TargetType="Border">
                 <Setter Property="Background" Value="{ThemeResource SubtleFillColorSecondaryBrush}"/>
                 <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}"/>
                 <Setter Property="BorderThickness" Value="1"/>
-                <Setter Property="CornerRadius" Value="10"/>
+                <Setter Property="CornerRadius" Value="8"/>
                 <Setter Property="Padding" Value="12,9"/>
+            </Style>
+            <Style x:Key="KindIconPlate" TargetType="Border">
+                <Setter Property="Width" Value="38"/>
+                <Setter Property="Height" Value="38"/>
+                <Setter Property="CornerRadius" Value="8"/>
+                <Setter Property="VerticalAlignment" Value="Top"/>
+                <Setter Property="Background" Value="{ThemeResource SubtleFillColorSecondaryBrush}"/>
+            </Style>
+            <!-- Native-looking settings row (SettingsCard shape) built from a
+                 plain Button so it works in the main process without the
+                 settings host's header/description adapters. -->
+            <Style x:Key="QuickSettingRowButton" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
+                <Setter Property="HorizontalAlignment" Value="Stretch"/>
+                <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                <Setter Property="MinHeight" Value="58"/>
+                <Setter Property="Padding" Value="14,9,12,9"/>
+                <Setter Property="CornerRadius" Value="8"/>
+                <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}"/>
+                <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}"/>
             </Style>
             <Style x:Key="SceneMenuRow" TargetType="Grid">
                 <Setter Property="MinHeight" Value="34"/>
                 <Setter Property="Margin" Value="7,0"/>
             </Style>
             <Style x:Key="SceneFeatureTile" TargetType="Border">
-                <Setter Property="Width" Value="64"/>
-                <Setter Property="Height" Value="64"/>
-                <Setter Property="Margin" Value="9"/>
                 <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}"/>
                 <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}"/>
                 <Setter Property="BorderThickness" Value="1"/>
-                <Setter Property="CornerRadius" Value="16"/>
+                <Setter Property="CornerRadius" Value="14"/>
+            </Style>
+            <Style x:Key="SceneTileLabel" TargetType="TextBlock">
+                <Setter Property="FontSize" Value="10.5"/>
+                <Setter Property="HorizontalAlignment" Value="Center"/>
+                <Setter Property="MaxWidth" Value="68"/>
+                <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}"/>
+            </Style>
+            <Style x:Key="SceneTileCheck" TargetType="Border">
+                <Setter Property="Width" Value="20"/>
+                <Setter Property="Height" Value="20"/>
+                <Setter Property="CornerRadius" Value="10"/>
+                <Setter Property="Margin" Value="0,-6,-6,0"/>
+                <Setter Property="HorizontalAlignment" Value="Right"/>
+                <Setter Property="VerticalAlignment" Value="Top"/>
+                <Setter Property="Background" Value="{ThemeResource AccentFillColorDefaultBrush}"/>
+                <Setter Property="BorderBrush" Value="{ThemeResource LayerFillColorAltBrush}"/>
+                <Setter Property="BorderThickness" Value="2"/>
+            </Style>
+            <Style x:Key="SceneFileName" TargetType="TextBlock">
+                <Setter Property="FontSize" Value="11"/>
+                <Setter Property="MaxWidth" Value="64"/>
+                <Setter Property="TextAlignment" Value="Center"/>
+                <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                <Setter Property="Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}"/>
+            </Style>
+            <Style x:Key="SceneSlot" TargetType="Border">
+                <Setter Property="Width" Value="40"/>
+                <Setter Property="Height" Value="40"/>
+                <Setter Property="CornerRadius" Value="8"/>
+                <Setter Property="Background" Value="{ThemeResource SubtleFillColorSecondaryBrush}"/>
             </Style>
             <!-- Brand glow gradients for the illustration canvas. Decorative,
                  theme-fixed brand art (same blue family as Assets/deskbox.svg);
@@ -92,7 +145,9 @@
             <ColumnDefinition Width="0.58*"/>
         </Grid.ColumnDefinitions>
 
-        <!-- ═══════ Left: illustration canvas, edge-to-edge ═══════ -->
+        <!-- ═══════ Left: one persistent stage. Each step owns a single hero
+             wrapper that enters/exits with direction-aware Fluent motion; the
+             hero's children run that step's explanatory choreography. ═══════ -->
         <Border
             x:Name="ScenePanel"
             Background="{ThemeResource LayerFillColorAltBrush}"
@@ -123,16 +178,16 @@
                 VerticalAlignment="Center">
                 <Canvas x:Name="SceneStage" Width="360" Height="420">
 
-                    <!-- persistent soft glow -->
+                    <!-- persistent soft glow; glides behind each step's hero -->
                     <Ellipse x:Name="SceneHalo" Canvas.Left="40" Canvas.Top="90" Width="280" Height="280" Opacity="0.55" Fill="{StaticResource SceneGlowSkyBrush}" />
 
-                    <!-- Step 1 hero: DeskBox mark. The logo is sliced into its
+                    <!-- ── Step 1 hero: DeskBox mark. The logo is sliced into its
                          three slabs (back/mid/front — deskbox-mark-slab-*.svg,
                          paths and gradients verbatim from Assets/deskbox.svg)
                          so the assembly loop can fan, permute, and restack
                          them; zero translation = the exact logo. Group-level
-                         loop motion lives on SceneMarkGroup so Set() keeps
-                         transitioning only the outer SceneMark. -->
+                         loop motion lives on SceneMarkGroup so the hero
+                         transition keeps animating only the outer SceneMark. -->
                     <Grid
                         x:Name="SceneMark"
                         Canvas.Left="116"
@@ -146,289 +201,531 @@
                         </Grid>
                     </Grid>
 
-                    <!-- Step 2 hero: scattered desktop files get inhaled into the
-                         box, form an icon-view row inside it, and the path chip
-                         reveals where they land. The wrapper carries the group
-                         breathe while Set() transitions the wrapper as a whole;
-                         SceneDropBox/SceneMoveBadge keep their pinned names. -->
-                    <Canvas x:Name="SceneDropHero" Canvas.Left="50" Canvas.Top="100" Width="260" Height="220" Opacity="0">
+                    <!-- ── Step 2 hero: "moving changes the path". Desktop files
+                         lift off (a clone flies; in Move mode the original
+                         slot is left as a dashed hole), land in the storage
+                         widget, and the path card strikes the old location and
+                         reveals the new one. Copy mode keeps the originals. -->
+                    <Canvas x:Name="SceneDropHero" Width="360" Height="420" Opacity="0">
+                        <StackPanel x:Name="SceneDesktopLabel" Canvas.Left="30" Canvas.Top="38" Orientation="Horizontal" Spacing="6">
+                            <FontIcon FontSize="12" VerticalAlignment="Center" Glyph="&#xE7F4;" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                            <TextBlock FontSize="11.5" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" svc:Localized.Key="Onboarding.Scene.DesktopLabel"/>
+                        </StackPanel>
+
+                        <Rectangle x:Name="SceneFileGhost1" Canvas.Left="40" Canvas.Top="62" Width="56" Height="60" RadiusX="10" RadiusY="10" StrokeDashArray="3,3" StrokeThickness="1.2" Stroke="{ThemeResource TextFillColorTertiaryBrush}" Opacity="0"/>
+                        <Rectangle x:Name="SceneFileGhost2" Canvas.Left="152" Canvas.Top="62" Width="56" Height="60" RadiusX="10" RadiusY="10" StrokeDashArray="3,3" StrokeThickness="1.2" Stroke="{ThemeResource TextFillColorTertiaryBrush}" Opacity="0"/>
+                        <Rectangle x:Name="SceneFileGhost3" Canvas.Left="264" Canvas.Top="62" Width="56" Height="60" RadiusX="10" RadiusY="10" StrokeDashArray="3,3" StrokeThickness="1.2" Stroke="{ThemeResource TextFillColorTertiaryBrush}" Opacity="0"/>
+
+                        <!-- Desktop-file tokens: real shell icons + localized names. -->
+                        <StackPanel x:Name="SceneFileToken" Canvas.Left="36" Canvas.Top="68" Width="64" Spacing="3">
+                            <Image x:Name="SceneFileTokenIcon1" Width="32" Height="32" HorizontalAlignment="Center" Source="ms-appx:///Assets/OnboardingScene/file-txt.png"/>
+                            <TextBlock Style="{StaticResource SceneFileName}" svc:Localized.Key="Onboarding.Scene.FileName1"/>
+                        </StackPanel>
+                        <StackPanel x:Name="SceneFileToken2" Canvas.Left="148" Canvas.Top="68" Width="64" Spacing="3">
+                            <Image x:Name="SceneFileTokenIcon2" Width="32" Height="32" HorizontalAlignment="Center" Source="ms-appx:///Assets/OnboardingScene/file-zip.png"/>
+                            <TextBlock Style="{StaticResource SceneFileName}" svc:Localized.Key="Onboarding.Scene.FileName2"/>
+                        </StackPanel>
+                        <StackPanel x:Name="SceneFileToken3" Canvas.Left="260" Canvas.Top="68" Width="64" Spacing="3">
+                            <Image x:Name="SceneFileTokenIcon3" Width="32" Height="32" HorizontalAlignment="Center" Source="ms-appx:///Assets/OnboardingScene/file-jpg.png"/>
+                            <TextBlock Style="{StaticResource SceneFileName}" svc:Localized.Key="Onboarding.Scene.FileName3"/>
+                        </StackPanel>
+
                         <Border
                             x:Name="SceneDropBoxHalo"
-                            Canvas.Left="35"
-                            Canvas.Top="25"
-                            Width="190"
-                            Height="160"
+                            Canvas.Left="58"
+                            Canvas.Top="166"
+                            Width="244"
+                            Height="152"
                             Background="{ThemeResource AccentFillColorDefaultBrush}"
-                            CornerRadius="24"
+                            CornerRadius="18"
                             Opacity="0"/>
                         <Border
                             x:Name="SceneDropBox"
-                            Canvas.Left="55"
-                            Canvas.Top="45"
-                            Width="150"
-                            Height="120"
+                            Canvas.Left="70"
+                            Canvas.Top="178"
+                            Width="220"
+                            Height="128"
+                            Background="{ThemeResource AcrylicInAppFillColorDefaultBrush}"
+                            BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}"
+                            BorderThickness="1"
+                            CornerRadius="10">
+                            <Grid RowDefinitions="Auto,Auto,*">
+                                <StackPanel Margin="12,9,12,8" Orientation="Horizontal" Spacing="7">
+                                    <Image Width="14" Height="14" VerticalAlignment="Center" Source="ms-appx:///Assets/WidgetTitleIcons/managed-storage.svg"/>
+                                    <TextBlock FontSize="11.5" FontWeight="SemiBold" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorPrimaryBrush}" svc:Localized.Key="Widget.DefaultDesktopName"/>
+                                </StackPanel>
+                                <Rectangle Grid.Row="1" Height="1" Fill="{ThemeResource DividerStrokeColorDefaultBrush}"/>
+                                <Grid Grid.Row="2">
+                                    <Rectangle
+                                        x:Name="SceneDropZone"
+                                        Margin="14,10"
+                                        RadiusX="8"
+                                        RadiusY="8"
+                                        StrokeDashArray="3,3"
+                                        StrokeThickness="1.2"
+                                        Stroke="{ThemeResource TextFillColorTertiaryBrush}"/>
+                                    <StackPanel
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Center"
+                                        Orientation="Horizontal"
+                                        Spacing="10">
+                                        <Border x:Name="SceneDropSlot1" Style="{StaticResource SceneSlot}" Opacity="0">
+                                            <Image Width="24" Height="24" Source="ms-appx:///Assets/OnboardingScene/file-txt.png"/>
+                                        </Border>
+                                        <Border x:Name="SceneDropSlot2" Style="{StaticResource SceneSlot}" Opacity="0">
+                                            <Image Width="24" Height="24" Source="ms-appx:///Assets/OnboardingScene/file-zip.png"/>
+                                        </Border>
+                                        <Border x:Name="SceneDropSlot3" Style="{StaticResource SceneSlot}" Opacity="0">
+                                            <Image Width="24" Height="24" Source="ms-appx:///Assets/OnboardingScene/file-jpg.png"/>
+                                        </Border>
+                                    </StackPanel>
+                                </Grid>
+                            </Grid>
+                        </Border>
+
+                        <!-- Flying clones (one per desktop file). -->
+                        <Image x:Name="SceneFileClone1" Canvas.Left="52" Canvas.Top="68" Width="32" Height="32" Opacity="0" Source="ms-appx:///Assets/OnboardingScene/file-txt.png"/>
+                        <Image x:Name="SceneFileClone2" Canvas.Left="164" Canvas.Top="68" Width="32" Height="32" Opacity="0" Source="ms-appx:///Assets/OnboardingScene/file-zip.png"/>
+                        <Image x:Name="SceneFileClone3" Canvas.Left="276" Canvas.Top="68" Width="32" Height="32" Opacity="0" Source="ms-appx:///Assets/OnboardingScene/file-jpg.png"/>
+
+                        <!-- Mode badges: caution (move) / success (copy), native
+                             InfoBar severity colors. -->
+                        <Grid Canvas.Left="70" Canvas.Top="164" Width="228">
+                            <Border
+                                x:Name="SceneMoveBadge"
+                                HorizontalAlignment="Right"
+                                Padding="9,4,11,4"
+                                Background="{ThemeResource SystemFillColorCautionBackgroundBrush}"
+                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                BorderThickness="1"
+                                CornerRadius="12"
+                                Opacity="0">
+                                <StackPanel Orientation="Horizontal" Spacing="5">
+                                    <FontIcon FontSize="11" VerticalAlignment="Center" Glyph="&#xE7BA;" Foreground="{ThemeResource SystemFillColorCautionBrush}"/>
+                                    <TextBlock FontSize="11.5" FontWeight="SemiBold" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorPrimaryBrush}" svc:Localized.Key="Onboarding.Scene.MoveBadge"/>
+                                </StackPanel>
+                            </Border>
+                            <Border
+                                x:Name="SceneCopyBadge"
+                                HorizontalAlignment="Right"
+                                Padding="9,4,11,4"
+                                Background="{ThemeResource SystemFillColorSuccessBackgroundBrush}"
+                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                BorderThickness="1"
+                                CornerRadius="12"
+                                Opacity="0">
+                                <StackPanel Orientation="Horizontal" Spacing="5">
+                                    <FontIcon FontSize="11" VerticalAlignment="Center" Glyph="&#xE73E;" Foreground="{ThemeResource SystemFillColorSuccessBrush}"/>
+                                    <TextBlock FontSize="11.5" FontWeight="SemiBold" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorPrimaryBrush}" svc:Localized.Key="Settings.DropAction.Copy"/>
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+
+                        <!-- Path card: the old location is struck through as the
+                             new one slides in. -->
+                        <Border
+                            x:Name="ScenePathChip"
+                            Canvas.Left="30"
+                            Canvas.Top="326"
+                            Width="300"
+                            Padding="14,9"
                             Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                            BorderThickness="1.5"
-                            CornerRadius="18">
-                            <!-- The storage art hands its interior over to the icon
-                                 row as the files land; real shell file-type icons
-                                 (Assets/OnboardingScene, extracted once) — no
-                                 hand-drawn glyphs. -->
-                            <Grid>
-                                <Image
-                                    x:Name="SceneDropBoxArt"
-                                    Width="46"
-                                    Height="46"
-                                    HorizontalAlignment="Center"
-                                    VerticalAlignment="Center"
-                                    Source="/Assets/WidgetTitleIcons/managed-storage.svg"/>
-                                <StackPanel
-                                    HorizontalAlignment="Center"
-                                    VerticalAlignment="Center"
-                                    Orientation="Horizontal"
-                                    Spacing="8">
-                                    <Border x:Name="SceneDropSlot1" Width="36" Height="36" CornerRadius="9" Opacity="0"
-                                        Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
-                                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                                        BorderThickness="1">
-                                        <Image Width="22" Height="22" Source="ms-appx:///Assets/OnboardingScene/file-txt.png"/>
+                            BorderThickness="1"
+                            CornerRadius="8"
+                            Opacity="0">
+                            <StackPanel Spacing="5">
+                                <Grid x:Name="ScenePathOldRow" ColumnDefinitions="Auto,*" ColumnSpacing="8">
+                                    <FontIcon FontSize="12" VerticalAlignment="Center" Glyph="&#xE8B7;" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                    <Grid Grid.Column="1" HorizontalAlignment="Left">
+                                        <TextBlock
+                                            x:Name="ScenePathOldText"
+                                            FontSize="11.5"
+                                            MaxWidth="240"
+                                            VerticalAlignment="Center"
+                                            TextTrimming="CharacterEllipsis"
+                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                        <Rectangle
+                                            x:Name="ScenePathStrike"
+                                            Height="1.5"
+                                            VerticalAlignment="Center"
+                                            Fill="{ThemeResource SystemFillColorCautionBrush}"/>
+                                    </Grid>
+                                </Grid>
+                                <Grid x:Name="ScenePathNewRow" ColumnDefinitions="Auto,*" ColumnSpacing="8">
+                                    <FontIcon x:Name="ScenePathNewGlyph" FontSize="12" VerticalAlignment="Center" Glyph="&#xE72A;" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"/>
+                                    <TextBlock
+                                        x:Name="ScenePathChipText"
+                                        Grid.Column="1"
+                                        FontSize="11.5"
+                                        FontWeight="SemiBold"
+                                        MaxWidth="240"
+                                        HorizontalAlignment="Left"
+                                        VerticalAlignment="Center"
+                                        TextTrimming="CharacterEllipsis"
+                                        Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"/>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+                    </Canvas>
+
+                    <!-- ── Step 3 hero: summon over the app you are in. The key
+                         press brings the widgets above a chat window, a file is
+                         dragged straight into the conversation, the next press
+                         puts them away. Real F7/tray toggles drive the same
+                         mini widgets (mirror mode). -->
+                    <Canvas x:Name="SceneSummonHero" Width="360" Height="420" Opacity="0">
+                        <Border
+                            x:Name="SceneAppWindow"
+                            Canvas.Left="26"
+                            Canvas.Top="54"
+                            Width="252"
+                            Height="206"
+                            Background="{ThemeResource SolidBackgroundFillColorSecondaryBrush}"
+                            BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}"
+                            BorderThickness="1"
+                            CornerRadius="8">
+                            <Grid RowDefinitions="28,*,Auto">
+                                <Grid Margin="10,0,8,0" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+                                    <Border Width="11" Height="11" CornerRadius="3" VerticalAlignment="Center" Background="{ThemeResource AccentFillColorDefaultBrush}"/>
+                                    <Border Grid.Column="1" Width="54" Height="5" CornerRadius="2.5" HorizontalAlignment="Left" VerticalAlignment="Center" Background="{ThemeResource ControlStrongFillColorDisabledBrush}"/>
+                                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="11" VerticalAlignment="Center">
+                                        <FontIcon FontSize="7.5" Glyph="&#xE921;" Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
+                                        <FontIcon FontSize="7.5" Glyph="&#xE922;" Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
+                                        <FontIcon FontSize="7.5" Glyph="&#xE8BB;" Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
+                                    </StackPanel>
+                                </Grid>
+                                <StackPanel Grid.Row="1" Margin="12,6,94,0" Spacing="8">
+                                    <Border Width="104" Height="22" CornerRadius="8" HorizontalAlignment="Left" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1"/>
+                                    <Border Width="76" Height="22" CornerRadius="8" HorizontalAlignment="Right" Background="{ThemeResource AccentFillColorDefaultBrush}" Opacity="0.85"/>
+                                    <Border Width="122" Height="22" CornerRadius="8" HorizontalAlignment="Left" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1"/>
+                                    <!-- the file that arrives in the chat -->
+                                    <Border
+                                        x:Name="SceneAppSentBubble"
+                                        HorizontalAlignment="Right"
+                                        Padding="8,5,10,5"
+                                        CornerRadius="8"
+                                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                                        BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
+                                        BorderThickness="1"
+                                        Opacity="0">
+                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                            <Image Width="18" Height="18" Source="ms-appx:///Assets/OnboardingScene/file-zip.png"/>
+                                            <Border Width="38" Height="5" CornerRadius="2.5" VerticalAlignment="Center" Background="{ThemeResource ControlStrongFillColorDisabledBrush}"/>
+                                        </StackPanel>
                                     </Border>
-                                    <Border x:Name="SceneDropSlot2" Width="36" Height="36" CornerRadius="9" Opacity="0"
-                                        Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
-                                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                                        BorderThickness="1">
-                                        <Image Width="22" Height="22" Source="ms-appx:///Assets/OnboardingScene/file-zip.png"/>
-                                    </Border>
-                                    <Border x:Name="SceneDropSlot3" Width="36" Height="36" CornerRadius="9" Opacity="0"
-                                        Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
-                                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                                        BorderThickness="1">
-                                        <Image Width="22" Height="22" Source="ms-appx:///Assets/OnboardingScene/file-jpg.png"/>
-                                    </Border>
+                                </StackPanel>
+                                <Grid Grid.Row="2" Margin="10,0,10,10">
+                                    <Border
+                                        x:Name="SceneAppDropZone"
+                                        Height="28"
+                                        CornerRadius="6"
+                                        Background="{ThemeResource ControlFillColorDefaultBrush}"
+                                        BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                                        BorderThickness="1"/>
+                                    <Border
+                                        x:Name="SceneAppDropHighlight"
+                                        Height="28"
+                                        CornerRadius="6"
+                                        BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
+                                        BorderThickness="1.5"
+                                        Opacity="0"/>
+                                </Grid>
+                            </Grid>
+                        </Border>
+
+                        <Border
+                            x:Name="SceneMiniWidgetA"
+                            Canvas.Left="194"
+                            Canvas.Top="86"
+                            Width="140"
+                            Padding="10,8,10,10"
+                            Background="{ThemeResource AcrylicInAppFillColorDefaultBrush}"
+                            BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}"
+                            BorderThickness="1"
+                            CornerRadius="8"
+                            Opacity="0">
+                            <StackPanel Spacing="8">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <Image Width="12" Height="12" VerticalAlignment="Center" Source="ms-appx:///Assets/WidgetTitleIcons/managed-storage.svg"/>
+                                    <TextBlock FontSize="10.5" FontWeight="SemiBold" MaxWidth="100" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorPrimaryBrush}" svc:Localized.Key="Widget.DefaultDesktopName"/>
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" Spacing="12" HorizontalAlignment="Center">
+                                    <Image Width="24" Height="24" Source="ms-appx:///Assets/OnboardingScene/file-txt.png"/>
+                                    <Image x:Name="SceneMiniFileIcon" Width="24" Height="24" Source="ms-appx:///Assets/OnboardingScene/file-zip.png"/>
+                                    <Image Width="24" Height="24" Source="ms-appx:///Assets/OnboardingScene/file-jpg.png"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+                        <Border
+                            x:Name="SceneMiniWidgetB"
+                            Canvas.Left="194"
+                            Canvas.Top="180"
+                            Width="140"
+                            Padding="10,8,10,10"
+                            Background="{ThemeResource AcrylicInAppFillColorDefaultBrush}"
+                            BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}"
+                            BorderThickness="1"
+                            CornerRadius="8"
+                            Opacity="0">
+                            <StackPanel Spacing="7">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <controls:WidgetTitleIcon IconKind="Todo" Mode="Color" IconSize="12" VerticalAlignment="Center"/>
+                                    <TextBlock FontSize="10.5" FontWeight="SemiBold" MaxWidth="100" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorPrimaryBrush}" svc:Localized.Key="Todo.Title"/>
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" Spacing="7">
+                                    <Ellipse Width="10" Height="10" Stroke="{ThemeResource ControlStrongStrokeColorDefaultBrush}" StrokeThickness="1"/>
+                                    <Border Width="74" Height="5" CornerRadius="2.5" VerticalAlignment="Center" Background="{ThemeResource ControlStrongFillColorDisabledBrush}"/>
+                                </StackPanel>
+                                <StackPanel Orientation="Horizontal" Spacing="7">
+                                    <Ellipse Width="10" Height="10" Stroke="{ThemeResource ControlStrongStrokeColorDefaultBrush}" StrokeThickness="1"/>
+                                    <Border Width="52" Height="5" CornerRadius="2.5" VerticalAlignment="Center" Background="{ThemeResource ControlStrongFillColorDisabledBrush}"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <Image x:Name="SceneDragToken" Canvas.Left="0" Canvas.Top="0" Width="24" Height="24" Opacity="0" Source="ms-appx:///Assets/OnboardingScene/file-zip.png"/>
+
+                        <Grid x:Name="SceneKeycapHost" Canvas.Left="104" Canvas.Top="290" Width="152" Height="100">
+                            <Border
+                                x:Name="SceneKeycapHalo"
+                                Width="152"
+                                Height="96"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Background="{ThemeResource AccentFillColorDefaultBrush}"
+                                CornerRadius="22"
+                                Opacity="0"/>
+                            <Border
+                                x:Name="SceneKeycap"
+                                MinWidth="104"
+                                Height="60"
+                                Padding="18,0"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                                BorderBrush="{ThemeResource ControlElevationBorderBrush}"
+                                BorderThickness="1,1,1,3"
+                                CornerRadius="12">
+                                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="2">
+                                    <FontIcon FontSize="10" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Glyph="&#xE765;" HorizontalAlignment="Center"/>
+                                    <TextBlock x:Name="SceneKeycapText" FontSize="19" FontWeight="SemiBold" Foreground="{ThemeResource TextFillColorPrimaryBrush}" HorizontalAlignment="Center" Text="F7"/>
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+                    </Canvas>
+
+                    <!-- ── Step 4 hero: taskbar strip + tray menu. A pointer
+                         clicks the DeskBox tray icon, the menu rises with a
+                         row stagger, and the highlight walks the entries that
+                         matter on day one (new widget → map folder → settings). -->
+                    <Canvas x:Name="SceneTrayHero" Width="360" Height="420" Opacity="0">
+                        <Border
+                            x:Name="SceneTaskbar"
+                            Canvas.Left="50"
+                            Canvas.Top="336"
+                            Width="260"
+                            Height="42"
+                            Background="{ThemeResource SolidBackgroundFillColorTertiaryBrush}"
+                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                            BorderThickness="1"
+                            CornerRadius="21">
+                            <Grid Margin="13,0" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
+                                <!-- Real Windows 11 taskbar icons (Start / Search / Task View)
+                                     so the strip reads as "the taskbar" at a glance. The Start
+                                     mark is fixed Windows blue, identical in Light/Dark like the
+                                     brand art — do not theme-split without re-checking it. -->
+                                <StackPanel Orientation="Horizontal" Spacing="9" VerticalAlignment="Center">
+                                    <Path
+                                        Width="17"
+                                        Height="17"
+                                        Stretch="Uniform"
+                                        Data="M0,0 H7.7 V7.7 H0 Z M9.3,0 H17 V7.7 H9.3 Z M0,9.3 H7.7 V17 H0 Z M9.3,9.3 H17 V17 H9.3 Z">
+                                        <Path.Fill>
+                                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                                <GradientStop Offset="0" Color="#57B1F8"/>
+                                                <GradientStop Offset="1" Color="#0C6BC4"/>
+                                            </LinearGradientBrush>
+                                        </Path.Fill>
+                                    </Path>
+                                    <FontIcon FontSize="14" VerticalAlignment="Center" Glyph="&#xE721;" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                    <FontIcon FontSize="14" VerticalAlignment="Center" Glyph="&#xE7C4;" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                </StackPanel>
+                                <!-- Other pinned apps sit between the system icons and the tray corner. -->
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                    <Border Width="15" Height="15" CornerRadius="4" Background="{ThemeResource SubtleFillColorSecondaryBrush}"/>
+                                    <Border Width="15" Height="15" CornerRadius="4" Background="{ThemeResource SubtleFillColorTertiaryBrush}"/>
+                                </StackPanel>
+                                <!-- Tray corner: hidden-icons chevron, DeskBox, then the
+                                     wifi/volume/battery group, matching the real layout. -->
+                                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                    <FontIcon FontSize="10" VerticalAlignment="Center" Glyph="&#xE70E;" Opacity="0.6" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                    <Grid x:Name="SceneTrayIconHost" Width="32" Height="32">
+                                        <Border
+                                            x:Name="SceneTrayHalo"
+                                            Background="{ThemeResource AccentFillColorDefaultBrush}"
+                                            CornerRadius="16"
+                                            Opacity="0"/>
+                                        <Image Width="20" Height="20" HorizontalAlignment="Center" VerticalAlignment="Center" Source="ms-appx:///Assets/deskbox.svg"/>
+                                    </Grid>
+                                    <FontIcon FontSize="11" VerticalAlignment="Center" Glyph="&#xE701;" Opacity="0.6" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                    <FontIcon FontSize="11" VerticalAlignment="Center" Glyph="&#xE767;" Opacity="0.6" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                    <FontIcon FontSize="11" VerticalAlignment="Center" Glyph="&#xE83F;" Opacity="0.6" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
                                 </StackPanel>
                             </Grid>
                         </Border>
                         <Border
-                            x:Name="SceneMoveBadge"
-                            Canvas.Left="146"
-                            Canvas.Top="148"
-                            Padding="12,6"
-                            Background="{ThemeResource AccentFillColorDefaultBrush}"
-                            CornerRadius="10"
-                            Opacity="0">
-                            <TextBlock FontSize="12.5" FontWeight="SemiBold" Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}" svc:Localized.Key="Onboarding.Scene.MoveBadge"/>
-                        </Border>
-                        <Border
-                            x:Name="ScenePathChip"
-                            Canvas.Left="10"
-                            Canvas.Top="175"
-                            Width="240"
-                            Height="36"
-                            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                            x:Name="SceneTrayMenu"
+                            Canvas.Left="88"
+                            Canvas.Top="36"
+                            Width="256"
+                            Background="{ThemeResource AcrylicInAppFillColorDefaultBrush}"
+                            BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}"
                             BorderThickness="1"
-                            CornerRadius="10"
-                            Padding="16,0"
+                            CornerRadius="8"
+                            Padding="0,5"
                             Opacity="0">
-                            <TextBlock
-                                x:Name="ScenePathChipText"
-                                FontSize="12"
-                                FontWeight="SemiBold"
-                                Foreground="{ThemeResource TextFillColorPrimaryBrush}"
-                                HorizontalAlignment="Center"
-                                VerticalAlignment="Center"
-                                TextAlignment="Center"
-                                TextTrimming="CharacterEllipsis"/>
+                            <Grid>
+                                <Border
+                                    x:Name="SceneMenuHighlight"
+                                    Height="34"
+                                    Margin="5,0"
+                                    VerticalAlignment="Top"
+                                    CornerRadius="4"
+                                    Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                                    Opacity="0"/>
+                                <!-- Rows mirror the real tray menu (App.Tray.cs) one-to-one:
+                                     same order, same glyphs, same localization keys, so
+                                     every language shows the product's actual skin. The
+                                     conditional update entry stays hidden like the real menu. -->
+                                <StackPanel x:Name="SceneMenuRows">
+                                    <Grid Style="{StaticResource SceneMenuRow}" Margin="12,0" ColumnDefinitions="Auto,*" ColumnSpacing="10">
+                                        <FontIcon VerticalAlignment="Center" FontSize="16" Glyph="&#xE74C;"/>
+                                        <TextBlock Grid.Column="1" VerticalAlignment="Center" FontSize="12" svc:Localized.Key="Tray.OrganizeDesktop"/>
+                                    </Grid>
+                                    <Rectangle Height="1" Margin="0,4" Fill="{ThemeResource DividerStrokeColorDefaultBrush}"/>
+                                    <Grid x:Name="SceneMenuRowNewWidget" Style="{StaticResource SceneMenuRow}" Margin="12,0" ColumnDefinitions="Auto,*" ColumnSpacing="10">
+                                        <FontIcon VerticalAlignment="Center" FontSize="16" Glyph="&#xE8A5;"/>
+                                        <TextBlock Grid.Column="1" VerticalAlignment="Center" FontSize="12" svc:Localized.Key="Common.NewWidget"/>
+                                    </Grid>
+                                    <Grid x:Name="SceneMenuRowMapping" Style="{StaticResource SceneMenuRow}" Margin="12,0" ColumnDefinitions="Auto,*" ColumnSpacing="10">
+                                        <FontIcon VerticalAlignment="Center" FontSize="16" Glyph="&#xE8E5;"/>
+                                        <TextBlock Grid.Column="1" VerticalAlignment="Center" FontSize="12" svc:Localized.Key="Common.NewFolderMapping"/>
+                                    </Grid>
+                                    <Grid Style="{StaticResource SceneMenuRow}" Margin="12,0" ColumnDefinitions="Auto,*" ColumnSpacing="10">
+                                        <FontIcon VerticalAlignment="Center" FontSize="16" Glyph="&#xE710;"/>
+                                        <TextBlock Grid.Column="1" VerticalAlignment="Center" FontSize="12" svc:Localized.Key="Common.AddFeatureWidget"/>
+                                    </Grid>
+                                    <Rectangle Height="1" Margin="0,4" Fill="{ThemeResource DividerStrokeColorDefaultBrush}"/>
+                                    <Grid Style="{StaticResource SceneMenuRow}" Margin="12,0" ColumnDefinitions="Auto,*" ColumnSpacing="10">
+                                        <FontIcon VerticalAlignment="Center" FontSize="16" Glyph="&#xE8B7;"/>
+                                        <TextBlock Grid.Column="1" VerticalAlignment="Center" FontSize="12" svc:Localized.Key="Tray.OpenManagedStorage"/>
+                                    </Grid>
+                                    <Rectangle Height="1" Margin="0,4" Fill="{ThemeResource DividerStrokeColorDefaultBrush}"/>
+                                    <Grid x:Name="SceneMenuRowSettings" Style="{StaticResource SceneMenuRow}" Margin="12,0" ColumnDefinitions="Auto,*" ColumnSpacing="10">
+                                        <FontIcon VerticalAlignment="Center" FontSize="16" Glyph="&#xE713;"/>
+                                        <TextBlock Grid.Column="1" VerticalAlignment="Center" FontSize="12" svc:Localized.Key="Tray.Settings"/>
+                                    </Grid>
+                                    <Rectangle Height="1" Margin="0,4" Fill="{ThemeResource DividerStrokeColorDefaultBrush}"/>
+                                    <Grid Style="{StaticResource SceneMenuRow}" Margin="12,0" ColumnDefinitions="Auto,*" ColumnSpacing="10">
+                                        <FontIcon VerticalAlignment="Center" FontSize="16" Glyph="&#xE711;"/>
+                                        <TextBlock Grid.Column="1" VerticalAlignment="Center" FontSize="12" svc:Localized.Key="Tray.Exit"/>
+                                    </Grid>
+                                </StackPanel>
+                            </Grid>
                         </Border>
-                        <Ellipse x:Name="ScenePathParticle" Canvas.Left="125" Canvas.Top="150" Width="10" Height="10" Fill="{ThemeResource AccentFillColorDefaultBrush}" Opacity="0"/>
-                    </Canvas>
-                    <!-- Scattered desktop-file tokens: real shell icons + localized
-                         example names. Scatter reads from positions only — no
-                         rotation (Fluent motion keeps icons upright). -->
-                    <Grid x:Name="SceneFileToken" Canvas.Left="24" Canvas.Top="250" Width="64" Opacity="0">
-                        <StackPanel Spacing="2">
-                            <Image Width="32" Height="32" HorizontalAlignment="Center" Source="ms-appx:///Assets/OnboardingScene/file-txt.png"/>
-                            <TextBlock FontSize="11" Foreground="{ThemeResource TextFillColorPrimaryBrush}" MaxWidth="64" TextAlignment="Center" TextTrimming="CharacterEllipsis" svc:Localized.Key="Onboarding.Scene.FileName1"/>
-                        </StackPanel>
-                    </Grid>
-                    <Grid x:Name="SceneFileToken2" Canvas.Left="86" Canvas.Top="282" Width="64" Opacity="0">
-                        <StackPanel Spacing="2">
-                            <Image Width="32" Height="32" HorizontalAlignment="Center" Source="ms-appx:///Assets/OnboardingScene/file-zip.png"/>
-                            <TextBlock FontSize="11" Foreground="{ThemeResource TextFillColorPrimaryBrush}" MaxWidth="64" TextAlignment="Center" TextTrimming="CharacterEllipsis" svc:Localized.Key="Onboarding.Scene.FileName2"/>
-                        </StackPanel>
-                    </Grid>
-                    <Grid x:Name="SceneFileToken3" Canvas.Left="34" Canvas.Top="318" Width="64" Opacity="0">
-                        <StackPanel Spacing="2">
-                            <Image Width="32" Height="32" HorizontalAlignment="Center" Source="ms-appx:///Assets/OnboardingScene/file-jpg.png"/>
-                            <TextBlock FontSize="11" Foreground="{ThemeResource TextFillColorPrimaryBrush}" MaxWidth="64" TextAlignment="Center" TextTrimming="CharacterEllipsis" svc:Localized.Key="Onboarding.Scene.FileName3"/>
-                        </StackPanel>
-                    </Grid>
-
-                    <!-- Step 3 hero: keycap -->
-                    <Grid x:Name="SceneKeycapHost" Canvas.Left="90" Canvas.Top="150" Width="180" Height="120" Opacity="0">
-                        <Border
-                            x:Name="SceneKeycapHalo"
-                            Width="180"
-                            Height="120"
-                            HorizontalAlignment="Center"
-                            VerticalAlignment="Center"
-                            Background="{ThemeResource AccentFillColorDefaultBrush}"
-                            CornerRadius="26"
+                        <!-- Standard Windows arrow pointer (theme-fixed white with a
+                             dark rim, like the real cursor). Its tip is (0,0). -->
+                        <Path
+                            x:Name="SceneCursor"
+                            Canvas.Left="0"
+                            Canvas.Top="0"
+                            Data="M0,0 L0,15.6 L3.7,12.2 L6.2,18 L8.5,17 L6,11.3 L11,11.3 Z"
+                            Fill="White"
+                            Stroke="#E6000000"
+                            StrokeThickness="1"
+                            StrokeLineJoin="Round"
                             Opacity="0"/>
-                        <Border
-                            x:Name="SceneKeycap"
-                            Width="128"
-                            Height="72"
-                            HorizontalAlignment="Center"
-                            VerticalAlignment="Center"
-                            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                            BorderThickness="1.5"
-                            CornerRadius="14">
-                            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="3">
-                                <FontIcon FontSize="11" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Glyph="&#xE765;" HorizontalAlignment="Center"/>
-                                <TextBlock x:Name="SceneKeycapText" FontSize="21" FontWeight="Bold" Foreground="{ThemeResource TextFillColorPrimaryBrush}" HorizontalAlignment="Center" Text="F7"/>
-                            </StackPanel>
-                        </Border>
-                    </Grid>
+                    </Canvas>
 
-                    <!-- Step 4 hero: taskbar strip + tray menu -->
-                    <Border
-                        x:Name="SceneTaskbar"
-                        Canvas.Left="50"
-                        Canvas.Top="336"
-                        Width="260"
-                        Height="42"
-                        Background="{ThemeResource SolidBackgroundFillColorTertiaryBrush}"
-                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                        BorderThickness="1"
-                        CornerRadius="21"
-                        Opacity="0">
-                        <Grid Margin="13,0" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="10">
-                            <!-- Real Windows 11 taskbar icons (Start / Search / Task View)
-                                 so the strip reads as "the taskbar" at a glance. The Start
-                                 mark is fixed Windows blue, identical in Light/Dark like the
-                                 brand art — do not theme-split without re-checking it. -->
-                            <StackPanel Orientation="Horizontal" Spacing="9" VerticalAlignment="Center">
-                                <Path
-                                    Width="17"
-                                    Height="17"
-                                    Stretch="Uniform"
-                                    Data="M0,0 H7.7 V7.7 H0 Z M9.3,0 H17 V7.7 H9.3 Z M0,9.3 H7.7 V17 H0 Z M9.3,9.3 H17 V17 H9.3 Z">
-                                    <Path.Fill>
-                                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                                            <GradientStop Offset="0" Color="#57B1F8"/>
-                                            <GradientStop Offset="1" Color="#0C6BC4"/>
-                                        </LinearGradientBrush>
-                                    </Path.Fill>
-                                </Path>
-                                <FontIcon FontSize="14" VerticalAlignment="Center" Glyph="&#xE721;" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                                <FontIcon FontSize="14" VerticalAlignment="Center" Glyph="&#xE7C4;" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                            </StackPanel>
-                            <!-- Other pinned apps sit between the system icons and the tray corner. -->
-                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center" VerticalAlignment="Center">
-                                <Border Width="15" Height="15" CornerRadius="4" Background="{ThemeResource SubtleFillColorSecondaryBrush}"/>
-                                <Border Width="15" Height="15" CornerRadius="4" Background="{ThemeResource SubtleFillColorTertiaryBrush}"/>
-                            </StackPanel>
-                            <!-- Tray corner: hidden-icons chevron, DeskBox, then the
-                                 wifi/volume/battery group, matching the real layout. -->
-                            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                                <FontIcon FontSize="10" VerticalAlignment="Center" Glyph="&#xE70E;" Opacity="0.6" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                                <Grid Width="32" Height="32">
-                                    <Border
-                                        x:Name="SceneTrayHalo"
-                                        Background="{ThemeResource AccentFillColorDefaultBrush}"
-                                        CornerRadius="16"
-                                        Opacity="0"/>
-                                    <Image Width="20" Height="20" HorizontalAlignment="Center" VerticalAlignment="Center" Source="ms-appx:///Assets/deskbox.svg"/>
-                                </Grid>
-                                <FontIcon FontSize="11" VerticalAlignment="Center" Glyph="&#xE701;" Opacity="0.6" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                                <FontIcon FontSize="11" VerticalAlignment="Center" Glyph="&#xE767;" Opacity="0.6" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                                <FontIcon FontSize="11" VerticalAlignment="Center" Glyph="&#xE83F;" Opacity="0.6" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                            </StackPanel>
-                        </Grid>
-                    </Border>
-                    <Border
-                        x:Name="SceneTrayMenu"
-                        Canvas.Left="88"
-                        Canvas.Top="44"
-                        Width="256"
-                        Background="{ThemeResource AcrylicInAppFillColorDefaultBrush}"
-                        BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}"
-                        BorderThickness="1"
-                        CornerRadius="8"
-                        Padding="7,5"
-                        Opacity="0"
-                        RenderTransformOrigin="0.9,1">
-                        <StackPanel>
-                            <!-- Rows mirror the real tray menu (App.Tray.cs) one-to-one:
-                                 same order, same glyphs, same localization keys, so
-                                 every language shows the product's actual skin. The
-                                 conditional update entry stays hidden like the real menu. -->
-                            <Grid Style="{StaticResource SceneMenuRow}" ColumnDefinitions="Auto,*" ColumnSpacing="10">
-                                <FontIcon VerticalAlignment="Center" FontSize="16" Glyph="&#xE74C;"/>
-                                <TextBlock Grid.Column="1" VerticalAlignment="Center" FontSize="12" svc:Localized.Key="Tray.OrganizeDesktop"/>
-                            </Grid>
-                            <Rectangle Height="1" Margin="7,4" Fill="{ThemeResource DividerStrokeColorDefaultBrush}"/>
-                            <Grid Style="{StaticResource SceneMenuRow}" ColumnDefinitions="Auto,*" ColumnSpacing="10">
-                                <FontIcon VerticalAlignment="Center" FontSize="16" Glyph="&#xE8A5;"/>
-                                <TextBlock Grid.Column="1" VerticalAlignment="Center" FontSize="12" svc:Localized.Key="Common.NewWidget"/>
-                            </Grid>
-                            <Grid Style="{StaticResource SceneMenuRow}" ColumnDefinitions="Auto,*" ColumnSpacing="10">
-                                <FontIcon VerticalAlignment="Center" FontSize="16" Glyph="&#xE8E5;"/>
-                                <TextBlock Grid.Column="1" VerticalAlignment="Center" FontSize="12" svc:Localized.Key="Common.NewFolderMapping"/>
-                            </Grid>
-                            <Grid Style="{StaticResource SceneMenuRow}" ColumnDefinitions="Auto,*" ColumnSpacing="10">
-                                <FontIcon VerticalAlignment="Center" FontSize="16" Glyph="&#xE710;"/>
-                                <TextBlock Grid.Column="1" VerticalAlignment="Center" FontSize="12" svc:Localized.Key="Common.AddFeatureWidget"/>
-                            </Grid>
-                            <Rectangle Height="1" Margin="7,4" Fill="{ThemeResource DividerStrokeColorDefaultBrush}"/>
-                            <Grid Style="{StaticResource SceneMenuRow}" ColumnDefinitions="Auto,*" ColumnSpacing="10">
-                                <FontIcon VerticalAlignment="Center" FontSize="16" Glyph="&#xE8B7;"/>
-                                <TextBlock Grid.Column="1" VerticalAlignment="Center" FontSize="12" svc:Localized.Key="Tray.OpenManagedStorage"/>
-                            </Grid>
-                            <Rectangle Height="1" Margin="7,4" Fill="{ThemeResource DividerStrokeColorDefaultBrush}"/>
-                            <Grid Style="{StaticResource SceneMenuRow}" ColumnDefinitions="Auto,*" ColumnSpacing="10">
-                                <FontIcon VerticalAlignment="Center" FontSize="16" Glyph="&#xE713;"/>
-                                <TextBlock Grid.Column="1" VerticalAlignment="Center" FontSize="12" svc:Localized.Key="Tray.Settings"/>
-                            </Grid>
-                            <Rectangle Height="1" Margin="7,4" Fill="{ThemeResource DividerStrokeColorDefaultBrush}"/>
-                            <Grid Style="{StaticResource SceneMenuRow}" ColumnDefinitions="Auto,*" ColumnSpacing="10">
-                                <FontIcon VerticalAlignment="Center" FontSize="16" Glyph="&#xE711;"/>
-                                <TextBlock Grid.Column="1" VerticalAlignment="Center" FontSize="12" svc:Localized.Key="Tray.Exit"/>
-                            </Grid>
-                        </StackPanel>
-                    </Border>
-
-                    <!-- Step 5 hero: feature icon tiles -->
+                    <!-- ── Step 5 hero: feature tiles mirror the switches on the
+                         right one-to-one — a tile pops in with a check when its
+                         widget is enabled and recedes when it is turned off. -->
                     <Grid
                         x:Name="SceneFeatureTiles"
-                        Canvas.Left="63"
-                        Canvas.Top="130"
-                        Width="246"
-                        Height="164"
-                        ColumnDefinitions="Auto,Auto,Auto"
-                        RowDefinitions="Auto,Auto"
+                        Canvas.Left="48"
+                        Canvas.Top="112"
+                        Width="264"
+                        Height="192"
+                        ColumnDefinitions="*,*,*"
+                        RowDefinitions="*,*"
                         Opacity="0">
-                        <Border Style="{StaticResource SceneFeatureTile}">
-                            <controls:WidgetTitleIcon IconKind="Todo" Mode="Color" IconSize="24" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
-                        <Border Grid.Column="1" Style="{StaticResource SceneFeatureTile}">
-                            <controls:WidgetTitleIcon IconKind="QuickCapture" Mode="Color" IconSize="24" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
-                        <Border Grid.Column="2" Style="{StaticResource SceneFeatureTile}">
-                            <controls:WidgetTitleIcon IconKind="Search" Mode="Color" IconSize="24" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
-                        <Border Grid.Row="1" Style="{StaticResource SceneFeatureTile}">
-                            <controls:WidgetTitleIcon IconKind="Weather" Mode="Color" IconSize="24" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
-                        <Border Grid.Row="1" Grid.Column="1" Style="{StaticResource SceneFeatureTile}">
-                            <controls:WidgetTitleIcon IconKind="Music" Mode="Color" IconSize="24" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
-                        <Border Grid.Row="1" Grid.Column="2" Style="{StaticResource SceneFeatureTile}">
-                            <controls:WidgetTitleIcon IconKind="Glance" Mode="Color" IconSize="24" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
+                        <Grid x:Name="SceneTileTodo" Margin="6">
+                            <Border Style="{StaticResource SceneFeatureTile}">
+                                <StackPanel VerticalAlignment="Center" Spacing="7">
+                                    <controls:WidgetTitleIcon IconKind="Todo" Mode="Color" IconSize="24" HorizontalAlignment="Center"/>
+                                    <TextBlock Style="{StaticResource SceneTileLabel}" svc:Localized.Key="Todo.Title"/>
+                                </StackPanel>
+                            </Border>
+                            <Border x:Name="SceneTileTodoCheck" Style="{StaticResource SceneTileCheck}">
+                                <FontIcon FontSize="9" Glyph="&#xE73E;" Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}"/>
+                            </Border>
+                        </Grid>
+                        <Grid x:Name="SceneTileQuickCapture" Grid.Column="1" Margin="6">
+                            <Border Style="{StaticResource SceneFeatureTile}">
+                                <StackPanel VerticalAlignment="Center" Spacing="7">
+                                    <controls:WidgetTitleIcon IconKind="QuickCapture" Mode="Color" IconSize="24" HorizontalAlignment="Center"/>
+                                    <TextBlock Style="{StaticResource SceneTileLabel}" svc:Localized.Key="QuickCapture.Name"/>
+                                </StackPanel>
+                            </Border>
+                            <Border x:Name="SceneTileQuickCaptureCheck" Style="{StaticResource SceneTileCheck}">
+                                <FontIcon FontSize="9" Glyph="&#xE73E;" Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}"/>
+                            </Border>
+                        </Grid>
+                        <Grid x:Name="SceneTileClipboard" Grid.Column="2" Margin="6">
+                            <Border Style="{StaticResource SceneFeatureTile}">
+                                <StackPanel VerticalAlignment="Center" Spacing="7">
+                                    <controls:WidgetTitleIcon IconKind="Clipboard" Mode="Color" IconSize="24" HorizontalAlignment="Center"/>
+                                    <TextBlock Style="{StaticResource SceneTileLabel}" svc:Localized.Key="Clipboard.Title"/>
+                                </StackPanel>
+                            </Border>
+                            <Border x:Name="SceneTileClipboardCheck" Style="{StaticResource SceneTileCheck}">
+                                <FontIcon FontSize="9" Glyph="&#xE73E;" Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}"/>
+                            </Border>
+                        </Grid>
+                        <Grid x:Name="SceneTileWeather" Grid.Row="1" Margin="6">
+                            <Border Style="{StaticResource SceneFeatureTile}">
+                                <StackPanel VerticalAlignment="Center" Spacing="7">
+                                    <controls:WidgetTitleIcon IconKind="Weather" Mode="Color" IconSize="24" HorizontalAlignment="Center"/>
+                                    <TextBlock Style="{StaticResource SceneTileLabel}" svc:Localized.Key="Weather.Title"/>
+                                </StackPanel>
+                            </Border>
+                            <Border x:Name="SceneTileWeatherCheck" Style="{StaticResource SceneTileCheck}">
+                                <FontIcon FontSize="9" Glyph="&#xE73E;" Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}"/>
+                            </Border>
+                        </Grid>
+                        <Grid x:Name="SceneTileMusic" Grid.Row="1" Grid.Column="1" Margin="6">
+                            <Border Style="{StaticResource SceneFeatureTile}">
+                                <StackPanel VerticalAlignment="Center" Spacing="7">
+                                    <controls:WidgetTitleIcon IconKind="Music" Mode="Color" IconSize="24" HorizontalAlignment="Center"/>
+                                    <TextBlock Style="{StaticResource SceneTileLabel}" svc:Localized.Key="Music.Title"/>
+                                </StackPanel>
+                            </Border>
+                            <Border x:Name="SceneTileMusicCheck" Style="{StaticResource SceneTileCheck}">
+                                <FontIcon FontSize="9" Glyph="&#xE73E;" Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}"/>
+                            </Border>
+                        </Grid>
+                        <Grid x:Name="SceneTileGlance" Grid.Row="1" Grid.Column="2" Margin="6">
+                            <Border Style="{StaticResource SceneFeatureTile}">
+                                <StackPanel VerticalAlignment="Center" Spacing="7">
+                                    <controls:WidgetTitleIcon IconKind="Glance" Mode="Color" IconSize="24" HorizontalAlignment="Center"/>
+                                    <TextBlock Style="{StaticResource SceneTileLabel}" svc:Localized.Key="Glance.Title"/>
+                                </StackPanel>
+                            </Border>
+                            <Border x:Name="SceneTileGlanceCheck" Style="{StaticResource SceneTileCheck}">
+                                <FontIcon FontSize="9" Glyph="&#xE73E;" Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}"/>
+                            </Border>
+                        </Grid>
                     </Grid>
                 </Canvas>
             </Viewbox>
@@ -464,62 +761,109 @@
                 HorizontalScrollMode="Disabled"
                 VerticalScrollBarVisibility="Auto"
                 VerticalScrollMode="Auto">
-                <Grid x:Name="TextHost" VerticalAlignment="Center">
+                <Grid x:Name="TextHost" VerticalAlignment="Center" Padding="0,0,0,12">
 
-                    <!-- Step 1 -->
+                    <!-- Step 1: what DeskBox is, and the two kinds of file widget -->
                     <StackPanel x:Name="Step1Panel" Spacing="16" Visibility="Collapsed">
                         <TextBlock Style="{StaticResource StepTitleText}" svc:Localized.Key="Onboarding.Step1.Title"/>
                         <TextBlock Style="{StaticResource StepBodyText}" svc:Localized.Key="Onboarding.Step1.Body"/>
-                        <StackPanel Orientation="Horizontal" Spacing="9" Margin="0,4,0,0">
-                            <FontIcon VerticalAlignment="Center" FontSize="16" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Glyph="&#xE73E;"/>
-                            <TextBlock Style="{StaticResource HintRow}" svc:Localized.Key="Onboarding.Step1.Hint"/>
+                        <StackPanel Spacing="8" Margin="0,2,0,0">
+                            <Border Style="{StaticResource SettingCard}">
+                                <Grid ColumnDefinitions="Auto,*" ColumnSpacing="13">
+                                    <Border Style="{StaticResource KindIconPlate}">
+                                        <Image Width="20" Height="20" Source="ms-appx:///Assets/WidgetTitleIcons/managed-storage.svg"/>
+                                    </Border>
+                                    <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                                        <TextBlock Style="{StaticResource CardTitleText}" svc:Localized.Key="Onboarding.Kind.Managed.Title"/>
+                                        <TextBlock Style="{StaticResource HintRow}" svc:Localized.Key="Onboarding.Kind.Managed.Body"/>
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                            <Border Style="{StaticResource SettingCard}">
+                                <Grid ColumnDefinitions="Auto,*" ColumnSpacing="13">
+                                    <Border Style="{StaticResource KindIconPlate}">
+                                        <Image Width="20" Height="20" Source="ms-appx:///Assets/WidgetTitleIcons/mapped-folder.svg"/>
+                                    </Border>
+                                    <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                                        <TextBlock Style="{StaticResource CardTitleText}" svc:Localized.Key="Onboarding.Kind.Mapped.Title"/>
+                                        <TextBlock Style="{StaticResource HintRow}" svc:Localized.Key="Onboarding.Kind.Mapped.Body"/>
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
                         </StackPanel>
+                        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="9">
+                            <FontIcon VerticalAlignment="Top" Margin="0,1,0,0" FontSize="15" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Glyph="&#xE946;"/>
+                            <TextBlock Grid.Column="1" Style="{StaticResource HintRow}" svc:Localized.Key="Onboarding.Step1.Hint"/>
+                        </Grid>
                     </StackPanel>
 
-                    <!-- Step 2 -->
-                    <StackPanel x:Name="Step2Panel" Spacing="16" Visibility="Collapsed">
+                    <!-- Step 2: moving changes the path (the safety step) -->
+                    <StackPanel x:Name="Step2Panel" Spacing="14" Visibility="Collapsed">
                         <TextBlock Style="{StaticResource StepTitleText}" svc:Localized.Key="Onboarding.Step2.Title"/>
                         <TextBlock Style="{StaticResource StepBodyText}" svc:Localized.Key="Onboarding.Step2.Body"/>
+                        <!-- Drop behavior, editable right here; persists through
+                             the FileWidget slice exactly like the settings page. -->
+                        <Border Style="{StaticResource SettingCard}">
+                            <StackPanel Spacing="6">
+                                <TextBlock Style="{StaticResource CardTitleText}" svc:Localized.Key="Settings.DropAction.Title"/>
+                                <StackPanel Orientation="Horizontal" Spacing="20">
+                                    <RadioButton
+                                        x:Name="Step2MoveRadio"
+                                        GroupName="OnboardingDropAction"
+                                        MinWidth="0"
+                                        Checked="Step2DropMode_Checked"
+                                        svc:Localized.Key="Settings.DropAction.Move"/>
+                                    <RadioButton
+                                        x:Name="Step2CopyRadio"
+                                        GroupName="OnboardingDropAction"
+                                        MinWidth="0"
+                                        Checked="Step2DropMode_Checked"
+                                        svc:Localized.Key="Settings.DropAction.Copy"/>
+                                </StackPanel>
+                                <TextBlock x:Name="Step2ModeExplainText" Style="{StaticResource HintRow}"/>
+                            </StackPanel>
+                        </Border>
+                        <InfoBar
+                            x:Name="Step2WarningBar"
+                            IsOpen="True"
+                            IsClosable="False"
+                            Severity="Warning"
+                            svc:Localized.HeaderKey="Onboarding.Step2.WarningTitle"
+                            svc:Localized.DescriptionKey="Onboarding.Step2.WarningBody"/>
                         <!-- Destination card: shows the real managed root plus a
                              localized example subfolder. Path changes live in
-                             Settings → 文件格子 (AppearanceDetail hosts the
-                             managed-storage cards), so the button only jumps
-                             there — no inline path editing. -->
-                        <Border Style="{StaticResource SettingCard}" Margin="0,6,0,0">
+                             Settings → 文件格子 (the verified copy-migration flow),
+                             so that button only jumps there. -->
+                        <Border Style="{StaticResource SettingCard}">
                             <Grid ColumnDefinitions="*,Auto" ColumnSpacing="11">
-                                <StackPanel Spacing="3">
-                                    <TextBlock Style="{StaticResource HintRow}" svc:Localized.Key="Onboarding.Step2.PathLabel"/>
+                                <StackPanel Spacing="3" VerticalAlignment="Center">
+                                    <TextBlock Style="{StaticResource HintRow}" svc:Localized.Key="Settings.ManagedPath.Title"/>
                                     <TextBlock
                                         x:Name="Step2PathValue"
                                         FontSize="13.5"
                                         FontWeight="SemiBold"
                                         Foreground="{ThemeResource TextFillColorPrimaryBrush}"
                                         TextTrimming="CharacterEllipsis"/>
-                                    <TextBlock Style="{StaticResource HintRow}" svc:Localized.Key="Onboarding.Step2.PathSub"/>
                                 </StackPanel>
-                                <Button
-                                    x:Name="Step2PathChangeButton"
-                                    Grid.Column="1"
-                                    MinHeight="32"
-                                    Padding="16,6"
-                                    VerticalAlignment="Center"
-                                    Click="Step2PathChange_Click"
-                                    Style="{ThemeResource AccentButtonStyle}"
-                                    svc:Localized.AutomationNameKey="Onboarding.Step2.ChangeInSettings"
-                                    svc:Localized.Key="Onboarding.Step2.ChangeInSettings"/>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                    <Button
+                                        x:Name="Step2OpenFolderButton"
+                                        MinHeight="32"
+                                        Click="Step2OpenFolder_Click"
+                                        svc:Localized.AutomationNameKey="Common.Open"
+                                        svc:Localized.Key="Common.Open"/>
+                                    <Button
+                                        x:Name="Step2PathChangeButton"
+                                        MinHeight="32"
+                                        Click="Step2PathChange_Click"
+                                        svc:Localized.AutomationNameKey="Onboarding.Step2.ChangeInSettings"
+                                        svc:Localized.Key="Onboarding.Step2.ChangeInSettings"/>
+                                </StackPanel>
                             </Grid>
                         </Border>
-                        <StackPanel Orientation="Horizontal" Spacing="9">
-                            <FontIcon VerticalAlignment="Center" FontSize="16" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Glyph="&#xE73E;"/>
-                            <TextBlock Style="{StaticResource HintRow}" TextWrapping="Wrap" svc:Localized.Key="Onboarding.Step2.Hint1"/>
-                        </StackPanel>
-                        <StackPanel Orientation="Horizontal" Spacing="9">
-                            <FontIcon VerticalAlignment="Center" FontSize="16" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Glyph="&#xE73E;"/>
-                            <TextBlock Style="{StaticResource HintRow}" TextWrapping="Wrap" svc:Localized.Key="Onboarding.Step2.Hint2"/>
-                        </StackPanel>
                     </StackPanel>
 
-                    <!-- Step 3 -->
+                    <!-- Step 3: summon / dismiss -->
                     <StackPanel x:Name="Step3Panel" Spacing="16" Visibility="Collapsed">
                         <TextBlock Style="{StaticResource StepTitleText}" svc:Localized.Key="Onboarding.Step3.Title"/>
                         <TextBlock x:Name="Step3BodyText" Style="{StaticResource StepBodyText}"/>
@@ -546,27 +890,94 @@
                                 </Grid>
                             </Border>
                         </StackPanel>
-                        <StackPanel Orientation="Horizontal" Spacing="9">
-                            <FontIcon VerticalAlignment="Center" FontSize="16" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Glyph="&#xE73E;"/>
-                            <TextBlock Style="{StaticResource HintRow}" svc:Localized.Key="Onboarding.Step3.Hint"/>
-                        </StackPanel>
+                        <Border Style="{StaticResource SettingCard}">
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                <StackPanel Spacing="2" VerticalAlignment="Center">
+                                    <TextBlock Style="{StaticResource CardTitleText}" svc:Localized.Key="Onboarding.Step3.DoubleClickTitle"/>
+                                    <TextBlock Style="{StaticResource HintRow}" svc:Localized.Key="Onboarding.Step3.DoubleClickBody"/>
+                                </StackPanel>
+                                <ToggleSwitch svc:Localized.AutomationNameKey="Onboarding.Step3.DoubleClickTitle"
+                                    x:Name="Step3DoubleClickToggle"
+                                    Grid.Column="1"
+                                    MinWidth="0"
+                                    VerticalAlignment="Center"
+                                    OnContent=""
+                                    OffContent=""
+                                    Toggled="Step3DoubleClickToggle_Toggled"/>
+                            </Grid>
+                        </Border>
+                        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="9">
+                            <FontIcon VerticalAlignment="Top" Margin="0,8,0,0" FontSize="15" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Glyph="&#xE946;"/>
+                            <StackPanel Grid.Column="1" Spacing="0">
+                                <TextBlock Margin="0,6,0,0" Style="{StaticResource HintRow}" svc:Localized.Key="Onboarding.Step3.Hint"/>
+                                <HyperlinkButton
+                                    x:Name="Step3ChangeHotkeyButton"
+                                    Margin="-11,0,0,0"
+                                    Click="Step3ChangeHotkey_Click"
+                                    svc:Localized.AutomationNameKey="Onboarding.Step3.ChangeHotkey"
+                                    svc:Localized.Key="Onboarding.Step3.ChangeHotkey"/>
+                            </StackPanel>
+                        </Grid>
                     </StackPanel>
 
-                    <!-- Step 4 -->
-                    <StackPanel x:Name="Step4Panel" Spacing="16" Visibility="Collapsed">
+                    <!-- Step 4: tray menu + the settings people reach for first -->
+                    <StackPanel x:Name="Step4Panel" Spacing="14" Visibility="Collapsed">
                         <TextBlock Style="{StaticResource StepTitleText}" svc:Localized.Key="Onboarding.Step4.Title"/>
                         <TextBlock Style="{StaticResource StepBodyText}" svc:Localized.Key="Onboarding.Step4.Body"/>
-                        <Button svc:Localized.AutomationNameKey="Onboarding.Step4.OpenMenu"
-                            x:Name="Step4OpenMenuButton"
-                            MinHeight="38"
-                            HorizontalAlignment="Left"
-                            Margin="0,2,0,0"
-                            Click="Step4OpenMenu_Click"
-                            Style="{ThemeResource AccentButtonStyle}"
-                            svc:Localized.Key="Onboarding.Step4.OpenMenu"/>
-                        <StackPanel Orientation="Horizontal" Spacing="9">
-                            <FontIcon VerticalAlignment="Center" FontSize="16" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Glyph="&#xE73E;"/>
-                            <TextBlock Style="{StaticResource HintRow}" svc:Localized.Key="Onboarding.Step4.Hint"/>
+                        <StackPanel Orientation="Horizontal" Spacing="12">
+                            <Button svc:Localized.AutomationNameKey="Onboarding.Step4.OpenMenu"
+                                x:Name="Step4OpenMenuButton"
+                                MinHeight="36"
+                                Click="Step4OpenMenu_Click"
+                                Style="{ThemeResource AccentButtonStyle}"
+                                svc:Localized.Key="Onboarding.Step4.OpenMenu"/>
+                        </StackPanel>
+                        <TextBlock Style="{StaticResource HintRow}" svc:Localized.Key="Onboarding.Step4.Hint"/>
+                        <StackPanel Spacing="4" Margin="0,4,0,0">
+                            <TextBlock Margin="1,0,0,4" Style="{StaticResource CardTitleText}" svc:Localized.Key="Onboarding.Step4.QuickSettings"/>
+                            <Button x:Name="Step4CapsuleRow" Style="{StaticResource QuickSettingRowButton}" Tag="CapsuleMode" Click="Step4QuickSetting_Click" svc:Localized.AutomationNameKey="Onboarding.Quick.Collapse.Title">
+                                <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="12">
+                                    <FontIcon FontSize="16" VerticalAlignment="Center" Glyph="&#xE73F;"/>
+                                    <StackPanel Grid.Column="1" Spacing="1" VerticalAlignment="Center">
+                                        <TextBlock FontSize="13" Foreground="{ThemeResource TextFillColorPrimaryBrush}" TextTrimming="CharacterEllipsis" svc:Localized.Key="Onboarding.Quick.Collapse.Title"/>
+                                        <TextBlock FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" svc:Localized.Key="Onboarding.Quick.Collapse.Body"/>
+                                    </StackPanel>
+                                    <TextBlock x:Name="Step4CapsuleValue" Grid.Column="2" FontSize="12" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                    <FontIcon Grid.Column="3" FontSize="12" VerticalAlignment="Center" Glyph="&#xE76C;" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                </Grid>
+                            </Button>
+                            <Button x:Name="Step4AppearanceRow" Style="{StaticResource QuickSettingRowButton}" Tag="Appearance" Click="Step4QuickSetting_Click" svc:Localized.AutomationNameKey="Onboarding.Quick.Material.Title">
+                                <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="12">
+                                    <FontIcon FontSize="16" VerticalAlignment="Center" Glyph="&#xE790;"/>
+                                    <StackPanel Grid.Column="1" Spacing="1" VerticalAlignment="Center">
+                                        <TextBlock FontSize="13" Foreground="{ThemeResource TextFillColorPrimaryBrush}" TextTrimming="CharacterEllipsis" svc:Localized.Key="Onboarding.Quick.Material.Title"/>
+                                        <TextBlock FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" svc:Localized.Key="Onboarding.Quick.Material.Body"/>
+                                    </StackPanel>
+                                    <TextBlock x:Name="Step4AppearanceValue" Grid.Column="2" FontSize="12" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                    <FontIcon Grid.Column="3" FontSize="12" VerticalAlignment="Center" Glyph="&#xE76C;" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                </Grid>
+                            </Button>
+                            <Button x:Name="Step4AutoStartRow" Style="{StaticResource QuickSettingRowButton}" Tag="General" Click="Step4QuickSetting_Click" svc:Localized.AutomationNameKey="Settings.AutoStart.Title">
+                                <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="12">
+                                    <FontIcon FontSize="16" VerticalAlignment="Center" Glyph="&#xE7E8;"/>
+                                    <StackPanel Grid.Column="1" Spacing="1" VerticalAlignment="Center">
+                                        <TextBlock FontSize="13" Foreground="{ThemeResource TextFillColorPrimaryBrush}" TextTrimming="CharacterEllipsis" svc:Localized.Key="Settings.AutoStart.Title"/>
+                                        <TextBlock FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" svc:Localized.Key="Settings.AutoStart.Description"/>
+                                    </StackPanel>
+                                    <TextBlock x:Name="Step4AutoStartValue" Grid.Column="2" FontSize="12" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                    <FontIcon Grid.Column="3" FontSize="12" VerticalAlignment="Center" Glyph="&#xE76C;" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                </Grid>
+                            </Button>
+                            <Button x:Name="Step4OrganizeRow" Style="{StaticResource QuickSettingRowButton}" Tag="DesktopOrganizationSettings" Click="Step4QuickSetting_Click" svc:Localized.AutomationNameKey="DesktopOrganization.Settings.Title">
+                                <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
+                                    <FontIcon FontSize="16" VerticalAlignment="Center" Glyph="&#xE74C;"/>
+                                    <StackPanel Grid.Column="1" Spacing="1" VerticalAlignment="Center">
+                                        <TextBlock FontSize="13" Foreground="{ThemeResource TextFillColorPrimaryBrush}" TextTrimming="CharacterEllipsis" svc:Localized.Key="DesktopOrganization.Settings.Title"/>
+                                        <TextBlock FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextTrimming="CharacterEllipsis" svc:Localized.Key="DesktopOrganization.Settings.EntryDescription"/>
+                                    </StackPanel>
+                                    <FontIcon Grid.Column="2" FontSize="12" VerticalAlignment="Center" Glyph="&#xE76C;" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                                </Grid>
+                            </Button>
                         </StackPanel>
                     </StackPanel>
 
@@ -599,16 +1010,16 @@
                                     <TextBlock Grid.Row="1" Margin="0,5,0,0" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" svc:Localized.Key="Onboarding.Feature.QuickCapture"/>
                                 </Grid>
                             </Border>
-                            <Border x:Name="Step5SearchCard" Grid.Row="1" Style="{StaticResource FeatureChoiceCard}">
+                            <Border x:Name="Step5ClipboardCard" Grid.Row="1" Style="{StaticResource FeatureChoiceCard}">
                                 <Grid RowDefinitions="Auto,Auto">
                                     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
                                         <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                                            <controls:WidgetTitleIcon IconKind="Search" Mode="Color" IconSize="15"/>
-                                            <TextBlock VerticalAlignment="Center" FontSize="12.5" FontWeight="SemiBold" svc:Localized.Key="Search.Title"/>
+                                            <controls:WidgetTitleIcon IconKind="Clipboard" Mode="Color" IconSize="15"/>
+                                            <TextBlock VerticalAlignment="Center" FontSize="12.5" FontWeight="SemiBold" svc:Localized.Key="Clipboard.Title"/>
                                         </StackPanel>
-                                        <ToggleSwitch svc:Localized.AutomationNameKey="Search.Title" x:Name="Step5SearchToggle" Grid.Column="1" MinWidth="0" HorizontalAlignment="Right" VerticalAlignment="Center" OnContent="" OffContent="" Tag="Search" Toggled="Step5FeatureToggle_Toggled"/>
+                                        <ToggleSwitch svc:Localized.AutomationNameKey="Clipboard.Title" x:Name="Step5ClipboardToggle" Grid.Column="1" MinWidth="0" HorizontalAlignment="Right" VerticalAlignment="Center" OnContent="" OffContent="" Tag="Clipboard" Toggled="Step5FeatureToggle_Toggled"/>
                                     </Grid>
-                                    <TextBlock Grid.Row="1" Margin="0,5,0,0" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" svc:Localized.Key="Onboarding.Feature.Search"/>
+                                    <TextBlock Grid.Row="1" Margin="0,5,0,0" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" svc:Localized.Key="WidgetContent.Clipboard.StatusDescription"/>
                                 </Grid>
                             </Border>
                             <Border x:Name="Step5WeatherCard" Grid.Row="1" Grid.Column="1" Style="{StaticResource FeatureChoiceCard}">
@@ -661,7 +1072,8 @@
                 x:Name="FooterNav"
                 Grid.Row="2"
                 Margin="52,0,52,24"
-                ColumnDefinitions="Auto,*,Auto">
+                ColumnDefinitions="Auto,*,Auto,Auto"
+                ColumnSpacing="8">
                 <PipsPager
                     x:Name="StepPips"
                     VerticalAlignment="Center"
@@ -670,9 +1082,19 @@
                     NumberOfPages="5"
                     PreviousButtonVisibility="Collapsed"
                     SelectedIndexChanged="StepPips_SelectionChanged"/>
+                <!-- Skip only appears after the move/path safety step. -->
+                <Button
+                    x:Name="SkipButton"
+                    Grid.Column="2"
+                    MinHeight="40"
+                    Visibility="Collapsed"
+                    Click="SkipButton_Click"
+                    Style="{StaticResource SubtleButtonStyle}"
+                    svc:Localized.AutomationNameKey="Onboarding.Skip"
+                    svc:Localized.Key="Onboarding.Skip"/>
                 <Button
                     x:Name="NextButton"
-                    Grid.Column="2"
+                    Grid.Column="3"
                     MinWidth="130"
                     MinHeight="40"
                     Click="NextButton_Click"

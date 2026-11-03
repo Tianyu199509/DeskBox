@@ -56,8 +56,8 @@ public partial class SettingsViewModel
             group.NavigationStyle,
             allowFollowDefault: true);
         group.NavigationStyle = normalized;
-        if (previous == WidgetGroupNavigationStyles.Tabs &&
-            normalized != WidgetGroupNavigationStyles.Tabs &&
+        if (WidgetGroupNavigationStyles.UsesTabStrip(previous) &&
+            !WidgetGroupNavigationStyles.UsesTabStrip(normalized) &&
             group.WheelSwitchEnabled == false)
         {
             group.WheelSwitchEnabled = null;
@@ -253,17 +253,17 @@ public partial class SettingsViewModel
         };
 
     private WidgetGroupConfig? FindWidgetGroup(string groupId) =>
-        _settingsService.Settings.WidgetGroups.FirstOrDefault(candidate =>
+        _settingsService.Settings.WidgetLayout.WidgetGroups.FirstOrDefault(candidate =>
             string.Equals(candidate.Id, groupId, StringComparison.Ordinal));
 
     private string CurrentGroupDefaultNavigationStyle() =>
         WidgetGroupNavigationStyles.Normalize(
-            _settingsService.Settings.WidgetGroupDefaultNavigationStyle,
+            _settingsService.Settings.WidgetLayout.WidgetGroupDefaultNavigationStyle,
             allowFollowDefault: false);
 
     private string CurrentGroupDefaultTitleDisplayMode() =>
         WidgetGroupTitleDisplayModes.Normalize(
-            _settingsService.Settings.WidgetGroupDefaultTitleDisplayMode,
+            _settingsService.Settings.WidgetLayout.WidgetGroupDefaultTitleDisplayMode,
             allowFollowDefault: false);
 
     private WidgetGroupSettingsItem CreateWidgetGroupSettingsItem(
@@ -274,7 +274,7 @@ public partial class SettingsViewModel
             allowFollowDefault: true);
         string effectiveNavigation = WidgetGroupNavigationStyles.Resolve(
             configuredNavigation,
-            _settingsService.Settings.WidgetGroupDefaultNavigationStyle);
+            _settingsService.Settings.WidgetLayout.WidgetGroupDefaultNavigationStyle);
         string configuredTitleMode = WidgetGroupTitleDisplayModes.Normalize(
             group.TitleDisplayMode,
             allowFollowDefault: true);
@@ -294,7 +294,7 @@ public partial class SettingsViewModel
             configuredCollapse != WidgetCollapseBehavior.System ||
             configuredChrome != WidgetChromeMode.Standard;
 
-        WidgetConfig? activeMember = _settingsService.Settings.Widgets
+        WidgetConfig? activeMember = _settingsService.Settings.WidgetLayout.Widgets
             .FirstOrDefault(widget => string.Equals(
                 widget.Id,
                 group.ActiveMemberId,
@@ -318,7 +318,7 @@ public partial class SettingsViewModel
         for (int index = 0; index < group.MemberIds.Count; index++)
         {
             string widgetId = group.MemberIds[index];
-            WidgetConfig? widget = _settingsService.Settings.Widgets
+            WidgetConfig? widget = _settingsService.Settings.WidgetLayout.Widgets
                 .FirstOrDefault(candidate => string.Equals(
                     candidate.Id,
                     widgetId,
@@ -342,14 +342,16 @@ public partial class SettingsViewModel
             configuredTitleMode,
             CreateGroupTitleOptions(),
             FormatGroupBooleanSetting(group.WheelSwitchEnabled),
-            CreateGroupBooleanOptions(_settingsService.Settings.WidgetGroupWheelSwitchEnabled),
+            CreateGroupBooleanOptions(_settingsService.Settings.WidgetLayout.WidgetGroupWheelSwitchEnabled),
             FormatGroupBooleanSetting(group.HoverSwitchEnabled),
-            CreateGroupBooleanOptions(_settingsService.Settings.WidgetGroupHoverSwitchEnabled),
+            CreateGroupBooleanOptions(_settingsService.Settings.WidgetLayout.WidgetGroupHoverSwitchEnabled),
             WidgetCollapseBehaviorNames.ToSettingValue(configuredCollapse),
             CreateGroupCollapseOptions(),
             WidgetChromeModeNames.ToSettingValue(configuredChrome),
             CreateGroupChromeOptions(),
-            members);
+            members,
+            RawName: group.Name?.Trim() ?? string.Empty,
+            IsHoverSwitchApplicable: WidgetGroupNavigationStyles.UsesTabStrip(effectiveNavigation));
     }
 
     private IReadOnlyList<SettingsOption> CreateGroupNavigationOptions() =>
@@ -360,6 +362,7 @@ public partial class SettingsViewModel
                 FormatFollowDefault(GetWidgetGroupNavigationDisplayName(
                     CurrentGroupDefaultNavigationStyle()))),
             new(WidgetGroupNavigationStyles.Tabs, T("Settings.WidgetGroupNavigation.Tabs")),
+            new(WidgetGroupNavigationStyles.EqualTabs, T("Settings.WidgetGroupNavigation.EqualTabs")),
             new(WidgetGroupNavigationStyles.Stack, T("Settings.WidgetGroupNavigation.Stack"))
         ]);
 
@@ -389,7 +392,7 @@ public partial class SettingsViewModel
     {
         string defaultBehavior = WidgetCollapseBehaviorNames.ToSettingValue(
             WidgetCollapseBehaviorNames.Normalize(
-                _settingsService.Settings.WidgetCollapseBehavior));
+                _settingsService.Settings.WidgetShell.WidgetCollapseBehavior));
         return WrapOptions(
         [
             new(
@@ -455,6 +458,8 @@ public partial class SettingsViewModel
         {
             WidgetGroupNavigationStyles.Tabs =>
                 T("Settings.WidgetGroupNavigation.Tabs"),
+            WidgetGroupNavigationStyles.EqualTabs =>
+                T("Settings.WidgetGroupNavigation.EqualTabs"),
             WidgetGroupNavigationStyles.Stack =>
                 T("Settings.WidgetGroupNavigation.Stack"),
             _ => T("Settings.WidgetGroupNavigation.Stack")
@@ -484,13 +489,30 @@ public partial class SettingsViewModel
         NotifyExistingWidgetGroupPropertiesChanged();
     }
 
+    public string WidgetGroupsEntrySummary
+    {
+        get
+        {
+            int count = _settingsService.Settings.WidgetLayout.WidgetGroups
+                .Count(group => group.MemberIds.Count >= 2);
+            string navName = GetWidgetGroupNavigationDisplayName(
+                WidgetGroupNavigationStyles.Normalize(
+                    _settingsService.Settings.WidgetLayout.WidgetGroupDefaultNavigationStyle,
+                    allowFollowDefault: false));
+            return count > 0
+                ? _localizationService.Format("Settings.WidgetGroups.Overview.ActiveSummary", count, navName)
+                : _localizationService.T("Settings.WidgetGroups.Overview.Description");
+        }
+    }
+
     private void NotifyExistingWidgetGroupPropertiesChanged()
     {
         _groupNavigationSettings.UpdateExistingGroups(
-            _settingsService.Settings.WidgetGroups
+            _settingsService.Settings.WidgetLayout.WidgetGroups
                 .Where(group => group.MemberIds.Count >= 2)
                 .Select(CreateWidgetGroupSettingsItem)
                 .ToArray());
+        OnPropertyChanged(nameof(WidgetGroupsEntrySummary));
     }
 
     private string T(string key) => _localizationService.T(key);

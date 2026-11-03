@@ -1,0 +1,21 @@
+{
+  "defaultFeedTitle": "少数派",
+  "defaultTopHeadline": "点击右上角刷新获取最新内容",
+  "emptySubtitle": "点击右上角「刷新」拉取订阅，或在设置中切换预设频道与自定义 RSS",
+  "emptyTitle": "正在等待资讯同步",
+  "feedCustom": "自定义 RSS 地址（使用下方地址）",
+  "feedIthome": "IT之家",
+  "feedSspai": "少数派 SSPai",
+  "openArticleTooltip": "打开原文",
+  "optDensityCompact": "紧凑（仅显示标题）",
+  "optDensitySummary": "标准（标题 + 摘要）",
+  "refreshBtn": "刷新",
+  "refreshTooltip": "立即拉取最新订阅",
+  "setDensity": "列表阅读密度",
+  "setFeedUrl": "自定义 RSS / Atom 地址 (https://)",
+  "setPresetFeed": "预设资讯频道",
+  "syncing": "正在同步最新资讯…",
+  "updatedPrefix": "更新于 ",
+  "widgetDescription": "自动拉取少数派、IT之家、V2EX、Hacker News 或自定义 RSS 订阅，离线缓存秒开，点击直达原文。",
+  "widgetName": "热点资讯订阅"
+}

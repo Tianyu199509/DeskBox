@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20" fill="none">
+  <rect x="3" y="3" width="6.2" height="6.2" rx="1.8" fill="url(#custom_a)" />
+  <rect x="10.8" y="3" width="6.2" height="6.2" rx="1.8" fill="url(#custom_b)" />
+  <rect x="3" y="10.8" width="6.2" height="6.2" rx="1.8" fill="url(#custom_c)" />
+  <path d="M13.9 10.2C14.1 10.2 14.28 10.33 14.34 10.52L14.92 12.35L16.75 12.93C16.94 12.99 17.07 13.17 17.07 13.37C17.07 13.57 16.94 13.75 16.75 13.81L14.92 14.39L14.34 16.22C14.28 16.41 14.1 16.54 13.9 16.54C13.7 16.54 13.52 16.41 13.46 16.22L12.88 14.39L11.05 13.81C10.86 13.75 10.73 13.57 10.73 13.37C10.73 13.17 10.86 12.99 11.05 12.93L12.88 12.35L13.46 10.52C13.52 10.33 13.7 10.2 13.9 10.2Z" fill="url(#custom_d)" />
+  <defs>
+    <linearGradient id="custom_a" x1="3" y1="3" x2="9.2" y2="9.2" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#3CCBF4" />
+      <stop offset="1" stop-color="#0078D4" />
+    </linearGradient>
+    <linearGradient id="custom_b" x1="10.8" y1="3" x2="17" y2="9.2" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#8B5CF6" />
+      <stop offset="1" stop-color="#6D28D9" />
+    </linearGradient>
+    <linearGradient id="custom_c" x1="3" y1="10.8" x2="9.2" y2="17" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0094F0" />
+      <stop offset="1" stop-color="#2764E7" />
+    </linearGradient>
+    <linearGradient id="custom_d" x1="10.7" y1="10.2" x2="17.1" y2="16.5" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FBBF24" />
+      <stop offset="1" stop-color="#F59E0B" />
+    </linearGradient>
+  </defs>
+</svg>

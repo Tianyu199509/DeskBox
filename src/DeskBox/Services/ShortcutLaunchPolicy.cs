@@ -70,11 +70,12 @@ internal static class ShortcutLaunchPolicy
         bool isDeskBoxFileDrag,
         bool isStackPopoverMemberDrag,
         IReadOnlyList<string> paths,
-        string shortcutPath)
+        string shortcutPath,
+        bool targetHostedInStackPopover = false)
     {
         ArgumentNullException.ThrowIfNull(paths);
         return isDeskBoxFileDrag &&
-            !isStackPopoverMemberDrag &&
+            !(isStackPopoverMemberDrag && targetHostedInStackPopover) &&
             paths.Count > 0 &&
             !ContainsSameFile(paths, shortcutPath)
                 ? ShortcutLaunchDecision.Launch

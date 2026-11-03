@@ -64,6 +64,7 @@ public static class TodoRecurrenceService
             IsImportant = sourceItem.IsImportant,
             ColorMarker = sourceItem.ColorMarker,
             DueDate = nextDueDate,
+            HasDueTime = sourceItem.HasDueTime,
             Recurrence = sourceItem.Recurrence?.Clone(),
             Steps = sourceItem.Steps
                 .OrderBy(step => step.SortOrder)
@@ -94,12 +95,21 @@ public static class TodoRecurrenceService
             SnoozeLastNotifiedAt = null,
             RecurrenceSeriesId = recurrenceSeriesId,
             GeneratedNextItemId = null,
+            IsGeneratedOccurrence = true,
             SortOrder = sourceItem.SortOrder + 1,
             CreatedAt = completedAt,
             UpdatedAt = completedAt
         };
 
         return true;
+    }
+
+    public static bool IsDeferredOccurrence(TodoItem item, DateTime localToday)
+    {
+        return !item.IsCompleted &&
+               item.IsGeneratedOccurrence &&
+               item.DueDate is { } dueDate &&
+               dueDate.ToLocalTime().Date > localToday.Date;
     }
 
     public static bool TryGetNextDueDate(TodoItem item, DateTimeOffset completedAt, out DateTimeOffset nextDueDate)
@@ -111,16 +121,22 @@ public static class TodoRecurrenceService
         }
 
         string mode = TodoRecurrenceMode.Normalize(item.Recurrence!.Mode);
-        DateTimeOffset anchorDueDate = item.Recurrence.AnchorDueDate?.ToLocalTime() ?? dueDate.ToLocalTime();
-        DateTimeOffset localDueDate = dueDate.ToLocalTime();
+        bool hasDueTime = item.HasDueTime;
+        DateTimeOffset localDueDate = hasDueTime
+            ? dueDate.ToLocalTime()
+            : TodoWidgetStore.NormalizeAllDayDueDate(dueDate);
+        DateTimeOffset anchorSource = item.Recurrence.AnchorDueDate ?? dueDate;
+        DateTimeOffset anchorDueDate = hasDueTime
+            ? anchorSource.ToLocalTime()
+            : TodoWidgetStore.NormalizeAllDayDueDate(anchorSource);
         DateTimeOffset localCompletedAt = completedAt.ToLocalTime();
 
         nextDueDate = mode switch
         {
-            TodoRecurrenceMode.Daily => AdvanceByFixedDays(localDueDate, localCompletedAt, 1),
-            TodoRecurrenceMode.Weekly => AdvanceByFixedDays(localDueDate, localCompletedAt, 7),
-            TodoRecurrenceMode.Monthly => AdvanceMonthly(localDueDate, anchorDueDate, localCompletedAt),
-            TodoRecurrenceMode.Weekdays => AdvanceWeekdays(localDueDate, localCompletedAt),
+            TodoRecurrenceMode.Daily => AdvanceByFixedDays(localDueDate, localCompletedAt, 1, hasDueTime),
+            TodoRecurrenceMode.Weekly => AdvanceByFixedDays(localDueDate, localCompletedAt, 7, hasDueTime),
+            TodoRecurrenceMode.Monthly => AdvanceMonthly(localDueDate, anchorDueDate, localCompletedAt, hasDueTime),
+            TodoRecurrenceMode.Weekdays => AdvanceWeekdays(localDueDate, localCompletedAt, hasDueTime),
             _ => default
         };
 
@@ -135,14 +151,33 @@ public static class TodoRecurrenceService
             return false;
         }
 
-        if (generatedItem.IsCompleted ||
-            generatedItem.CreatedAt != generatedItem.UpdatedAt)
+        if (generatedItem.IsCompleted)
         {
             return false;
         }
 
+        if (generatedItem.CreatedAt != generatedItem.UpdatedAt)
+        {
+            if (!generatedItem.IsGeneratedOccurrence ||
+                generatedItem.Steps.Any(step => step.IsCompleted) ||
+                !string.Equals(sourceItem.Notes, generatedItem.Notes, StringComparison.Ordinal) ||
+                !sourceItem.Steps.Select(step => step.Text).SequenceEqual(
+                    generatedItem.Steps.Select(step => step.Text),
+                    StringComparer.Ordinal))
+            {
+                return false;
+            }
+
+            if (TryGetNextDueDate(sourceItem, sourceItem.CompletedAt ?? generatedItem.CreatedAt, out DateTimeOffset expectedDueDate) &&
+                !Nullable.Equals(generatedItem.DueDate, expectedDueDate))
+            {
+                return false;
+            }
+        }
+
         return string.Equals(sourceItem.Text, generatedItem.Text, StringComparison.Ordinal) &&
                sourceItem.IsImportant == generatedItem.IsImportant &&
+               sourceItem.HasDueTime == generatedItem.HasDueTime &&
                string.Equals(sourceItem.ColorMarker, generatedItem.ColorMarker, StringComparison.Ordinal) &&
                Nullable.Equals(
                    TodoReminderOptions.NormalizeOffsetMinutes(sourceItem.ReminderOffsetMinutes),
@@ -184,10 +219,11 @@ public static class TodoRecurrenceService
     private static DateTimeOffset AdvanceByFixedDays(
         DateTimeOffset currentDueDate,
         DateTimeOffset completedAt,
-        int days)
+        int days,
+        bool hasDueTime)
     {
         DateTimeOffset candidate = AddLocalDays(currentDueDate, days);
-        while (candidate <= completedAt)
+        while (HasCandidatePassed(candidate, completedAt, hasDueTime))
         {
             candidate = AddLocalDays(candidate, days);
         }
@@ -197,14 +233,15 @@ public static class TodoRecurrenceService
 
     private static DateTimeOffset AdvanceWeekdays(
         DateTimeOffset currentDueDate,
-        DateTimeOffset completedAt)
+        DateTimeOffset completedAt,
+        bool hasDueTime)
     {
         DateTimeOffset candidate = currentDueDate;
         do
         {
             candidate = AddLocalDays(candidate, 1);
         }
-        while (candidate <= completedAt || IsWeekend(candidate.DayOfWeek));
+        while (HasCandidatePassed(candidate, completedAt, hasDueTime) || IsWeekend(candidate.DayOfWeek));
 
         return candidate;
     }
@@ -212,17 +249,27 @@ public static class TodoRecurrenceService
     private static DateTimeOffset AdvanceMonthly(
         DateTimeOffset currentDueDate,
         DateTimeOffset anchorDueDate,
-        DateTimeOffset completedAt)
+        DateTimeOffset completedAt,
+        bool hasDueTime)
     {
         int monthOffset = MonthsBetween(anchorDueDate, currentDueDate) + 1;
         DateTimeOffset candidate = CreateMonthlyCandidate(anchorDueDate, monthOffset);
-        while (candidate <= completedAt)
+        while (HasCandidatePassed(candidate, completedAt, hasDueTime))
         {
             monthOffset++;
             candidate = CreateMonthlyCandidate(anchorDueDate, monthOffset);
         }
 
         return candidate;
+    }
+
+    private static bool HasCandidatePassed(
+        DateTimeOffset candidate,
+        DateTimeOffset completedAt,
+        bool hasDueTime)
+    {
+        _ = hasDueTime;
+        return candidate.Date <= completedAt.Date;
     }
 
     private static int MonthsBetween(DateTimeOffset anchorDueDate, DateTimeOffset targetDueDate)

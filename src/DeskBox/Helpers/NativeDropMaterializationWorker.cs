@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using DeskBox.Platform;
+using DeskBox.Services;
 
 namespace DeskBox.Helpers;
 
@@ -39,7 +40,9 @@ internal static class NativeDropMaterializationWorker
         /// to none when it did not.</summary>
         public required uint CompletionEffect { get; init; }
 
-        public required Action<IReadOnlyList<string>> OnCompleted { get; init; }
+        public required uint LogicalEffect { get; init; }
+
+        public required Action<IReadOnlyList<string>, IReadOnlyList<DroppedItemOriginKind>> OnCompleted { get; init; }
     }
 
     private static readonly BlockingCollection<Job> PendingJobs =
@@ -62,13 +65,15 @@ internal static class NativeDropMaterializationWorker
         nint marshalStream,
         bool asyncOperationStarted,
         uint completionEffect,
-        Action<IReadOnlyList<string>> onCompleted)
+        uint logicalEffect,
+        Action<IReadOnlyList<string>, IReadOnlyList<DroppedItemOriginKind>> onCompleted)
     {
         var job = new Job
         {
             MarshalStream = marshalStream,
             AsyncOperationStarted = asyncOperationStarted,
             CompletionEffect = completionEffect,
+            LogicalEffect = logicalEffect,
             OnCompleted = onCompleted,
         };
 
@@ -169,6 +174,7 @@ internal static class NativeDropMaterializationWorker
     private static void RunJob(Job job)
     {
         IReadOnlyList<string> extractedPaths = [];
+        IReadOnlyList<DroppedItemOriginKind> itemOrigins = [];
         uint finalEffect = NativeDropEffectPolicy.None;
         int operationResult = unchecked((int)0x80004005); // E_UNEXPECTED
 
@@ -199,8 +205,9 @@ internal static class NativeDropMaterializationWorker
             }
             else
             {
-                extractedPaths = NativeDropTarget.ExtractVirtualFiles(
-                    new NativeOleDataObject(dataObject));
+                extractedPaths = NativeDropTarget.ExtractDeferredWorkerFilesWithOrigins(
+                    new NativeOleDataObject(dataObject),
+                    out itemOrigins);
                 if (extractedPaths.Count > 0)
                 {
                     finalEffect = job.CompletionEffect;
@@ -218,6 +225,11 @@ internal static class NativeDropMaterializationWorker
                 // never before OnDrop returned. Order matters: the source
                 // reads the receipt after EndOperation.
                 NativeDropTarget.WritePerformedDropEffect(dataObject, finalEffect);
+                NativeDropTarget.WriteLogicalPerformedDropEffect(
+                    dataObject,
+                    finalEffect != NativeDropEffectPolicy.None
+                        ? job.LogicalEffect
+                        : NativeDropEffectPolicy.None);
             }
         }
         catch (Exception ex)
@@ -234,6 +246,9 @@ internal static class NativeDropMaterializationWorker
                 if (dataObject != 0)
                 {
                     NativeDropTarget.WritePerformedDropEffect(
+                        dataObject,
+                        NativeDropEffectPolicy.None);
+                    NativeDropTarget.WriteLogicalPerformedDropEffect(
                         dataObject,
                         NativeDropEffectPolicy.None);
                 }
@@ -269,7 +284,7 @@ internal static class NativeDropMaterializationWorker
             }
         }
 
-        UiDispatch.PostAfterCallback(() => job.OnCompleted(extractedPaths));
+        UiDispatch.PostAfterCallback(() => job.OnCompleted(extractedPaths, itemOrigins));
     }
 
     private static unsafe uint ReleaseDataObject(nint pointer)

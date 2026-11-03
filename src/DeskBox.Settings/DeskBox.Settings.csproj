@@ -1,0 +1,175 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.22621.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
+    <RootNamespace>DeskBox</RootNamespace>
+    <AssemblyName>DeskBox.Settings</AssemblyName>
+    <Version>1.6.0</Version>
+    <AssemblyVersion>1.6.0.0</AssemblyVersion>
+    <FileVersion>1.6.0.0</FileVersion>
+    <InformationalVersion>1.6.0</InformationalVersion>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <Platforms>x64;ARM64</Platforms>
+    <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
+    <UseWinUI>true</UseWinUI>
+    <DisableEmbeddedXbf>false</DisableEmbeddedXbf>
+    <WindowsPackageType>None</WindowsPackageType>
+    <PublishSingleFile>false</PublishSingleFile>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <GarbageCollectionAdaptationMode>1</GarbageCollectionAdaptationMode>
+    <NoWarn>$(NoWarn);CS0436;CS0108</NoWarn>
+    <ApplicationManifest>..\DeskBox\app.manifest</ApplicationManifest>
+    <ApplicationIcon>..\DeskBox\Assets\deskbox.ico</ApplicationIcon>
+    <DeskBoxDistribution Condition="'$(DeskBoxDistribution)' == ''">Direct</DeskBoxDistribution>
+    <DeskBoxAotAudit Condition="'$(DeskBoxAotAudit)' == ''">false</DeskBoxAotAudit>
+    <DefineConstants>$(DefineConstants);DESKBOX_SETTINGS_HOST_BINARY</DefineConstants>
+    <DefineConstants Condition="'$(DeskBoxDistribution)' == 'Store'">$(DefineConstants);DESKBOX_STORE</DefineConstants>
+    <DefaultItemExcludes>$(DefaultItemExcludes);**\.mimosa\**</DefaultItemExcludes>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <RuntimeHostConfigurationOption Include="System.GC.ConserveMemory" Value="9" />
+  </ItemGroup>
+
+  <PropertyGroup Condition="'$(DeskBoxAotAudit)' == 'true'">
+    <PublishAot>true</PublishAot>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>false</PublishSingleFile>
+    <PublishTrimmed>true</PublishTrimmed>
+    <SuppressTrimAnalysisWarnings>false</SuppressTrimAnalysisWarnings>
+    <TrimmerSingleWarn>false</TrimmerSingleWarn>
+    <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(PublishAot)' == 'true'">
+    <DefineConstants>$(DefineConstants);DESKBOX_NATIVE_AOT</DefineConstants>
+    <OptimizationPreference>Size</OptimizationPreference>
+    <IlcOptimizationPreference>Size</IlcOptimizationPreference>
+    <IlcFoldIdenticalMethodBodies>true</IlcFoldIdenticalMethodBodies>
+    <UseSystemResourceKeys>true</UseSystemResourceKeys>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <DebuggerSupport>false</DebuggerSupport>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DeskBox\DeskBox.csproj" Condition="'$(Platform)' != '' and '$(Platform)' != 'AnyCPU'">
+      <AdditionalProperties>DeskBoxBuildSettingsCompanion=false</AdditionalProperties>
+      <GlobalPropertiesToRemove>DefineConstants</GlobalPropertiesToRemove>
+    </ProjectReference>
+    <ProjectReference Include="..\DeskBox\DeskBox.csproj" Condition="'$(Platform)' == '' or '$(Platform)' == 'AnyCPU'">
+      <AdditionalProperties>DeskBoxBuildSettingsCompanion=false;AllowNeutralPackageWithAppHost=true</AdditionalProperties>
+      <GlobalPropertiesToRemove>DefineConstants</GlobalPropertiesToRemove>
+    </ProjectReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.WinUI.Animations" Version="8.2.251219" />
+    <PackageReference Include="CommunityToolkit.WinUI.Controls.ColorPicker" Version="8.2.251219" />
+    <PackageReference Include="CommunityToolkit.WinUI.Controls.Segmented" Version="8.2.251219" />
+    <PackageReference Include="CommunityToolkit.WinUI.Controls.SettingsControls" Version="8.2.251219" />
+    <PackageReference Include="CommunityToolkit.WinUI.Controls.Sizers" Version="8.2.251219" />
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.6.5" />
+    <PackageReference Include="Microsoft.Windows.AI.MachineLearning" Version="2.4.89" ExcludeAssets="all" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2270" />
+    <PackageReference Include="WinUIEx" Version="2.9.3" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+  </ItemGroup>
+
+  <Target
+    Name="ExcludeUnusedWinUIExReferencesFromSettingsHost"
+    AfterTargets="ResolvePackageAssets"
+    BeforeTargets="ResolveAssemblyReferences">
+    <ItemGroup>
+      <Reference
+        Remove="@(Reference)"
+        Condition="'%(Reference.Filename)' == 'WinUIEx'" />
+      <ResolvedCompileFileDefinitions
+        Remove="@(ResolvedCompileFileDefinitions)"
+        Condition="'%(ResolvedCompileFileDefinitions.Filename)' == 'WinUIEx'" />
+      <ReferenceCopyLocalPaths
+        Remove="@(ReferenceCopyLocalPaths)"
+        Condition="'%(ReferenceCopyLocalPaths.Filename)' == 'WinUIEx'" />
+      <RuntimeCopyLocalItems
+        Remove="@(RuntimeCopyLocalItems)"
+        Condition="'%(RuntimeCopyLocalItems.Filename)' == 'WinUIEx'" />
+      <ReferenceRelatedPaths
+        Remove="@(ReferenceRelatedPaths)"
+        Condition="'%(ReferenceRelatedPaths.Filename)' == 'WinUIEx'" />
+    </ItemGroup>
+  </Target>
+
+  <Target
+    Name="ExcludeUnusedWinUIExReferencePathsFromSettingsHost"
+    AfterTargets="ResolveAssemblyReferences"
+    BeforeTargets="MarkupCompilePass1;CoreCompile;GenerateBuildDependencyFile;_GenerateProjectPriConfigurationFiles;GetCopyToOutputDirectoryItems">
+    <ItemGroup>
+      <ReferencePath
+        Remove="@(ReferencePath)"
+        Condition="'%(ReferencePath.Filename)' == 'WinUIEx'" />
+      <ReferenceDependencyPaths
+        Remove="@(ReferenceDependencyPaths)"
+        Condition="'%(ReferenceDependencyPaths.Filename)' == 'WinUIEx'" />
+      <ReferenceCopyLocalPaths
+        Remove="@(ReferenceCopyLocalPaths)"
+        Condition="'%(ReferenceCopyLocalPaths.Filename)' == 'WinUIEx'" />
+      <ReferenceRelatedPaths
+        Remove="@(ReferenceRelatedPaths)"
+        Condition="'%(ReferenceRelatedPaths.Filename)' == 'WinUIEx'" />
+    </ItemGroup>
+  </Target>
+
+  <Target
+    Name="ExcludeUnusedWinUIExPriFromSettingsHost"
+    AfterTargets="_ComputeInputPriFiles"
+    BeforeTargets="_GenerateProjectPriConfigurationFiles">
+    <ItemGroup>
+      <_PriFile
+        Remove="@(_PriFile)"
+        Condition="'%(_PriFile.Filename)' == 'WinUIEx'" />
+    </ItemGroup>
+  </Target>
+
+  <ItemGroup>
+    <Page Remove="SettingsHostApp.xaml" />
+    <ApplicationDefinition Include="SettingsHostApp.xaml" />
+    <Page Include="..\DeskBox\Styles\SettingsOverviewResources.xaml" Link="Styles\SettingsOverviewResources.xaml" />
+    <Page Include="..\DeskBox\Controls\UpdateStatusBadgeControl.xaml" Link="Controls\UpdateStatusBadgeControl.xaml" />
+    <Page Include="..\DeskBox\Views\SettingsWindow.xaml" Link="Views\SettingsWindow.xaml" />
+    <Page Include="..\DeskBox\Views\SettingsSections\**\*.xaml" Link="Views\SettingsSections\%(RecursiveDir)%(Filename)%(Extension)" />
+
+    <Compile Include="..\DeskBox\App.SettingsHost.cs" Link="App.SettingsHost.cs" />
+    <Compile Include="..\DeskBox\SettingsWindowFactoryInput.cs" Link="SettingsWindowFactoryInput.cs" />
+    <Compile Include="..\DeskBox\Controls\UpdateStatusBadgeControl.xaml.cs" Link="Controls\UpdateStatusBadgeControl.xaml.cs" />
+    <Compile Include="..\DeskBox\Views\SettingsWindow*.cs" Exclude="..\DeskBox\Views\*.Aot*Smoke.cs" Link="Views\%(Filename)%(Extension)" />
+    <Compile Include="..\DeskBox\Views\SettingsSections\**\*.cs" Exclude="..\DeskBox\Views\SettingsSections\**\*.Aot*Smoke.cs" Link="Views\SettingsSections\%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(DeskBoxDistribution)' != 'Store'">
+    <Content Include="..\DeskBox\Assets\deskbox.ico" Link="Assets\deskbox.ico" CopyToOutputDirectory="Never" CopyToPublishDirectory="Never" />
+    <Content Include="..\DeskBox\Assets\deskbox.svg" Link="Assets\deskbox.svg" CopyToOutputDirectory="Never" CopyToPublishDirectory="Never" />
+    <Content Include="..\DeskBox\Assets\wechat-qrcode.jpg" Link="Assets\wechat-qrcode.jpg" CopyToOutputDirectory="Never" CopyToPublishDirectory="Never" />
+    <Content Include="..\DeskBox\Assets\SettingsNavIcons\*.svg" Link="Assets\SettingsNavIcons\%(Filename)%(Extension)" CopyToOutputDirectory="Never" CopyToPublishDirectory="Never" />
+    <Content Include="..\DeskBox\Assets\Support\*.png" Link="Assets\Support\%(Filename)%(Extension)" CopyToOutputDirectory="Never" CopyToPublishDirectory="Never" />
+    <Content Include="..\DeskBox\Assets\WeatherIcons\**\*.svg" Link="Assets\WeatherIcons\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="Never" CopyToPublishDirectory="Never" />
+    <Content Include="..\DeskBox\Assets\WidgetTitleIcons\*.svg" Link="Assets\WidgetTitleIcons\%(Filename)%(Extension)" CopyToOutputDirectory="Never" CopyToPublishDirectory="Never" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="**\.mimosa\**;..\DeskBox\**\.mimosa\**" />
+    <Page Remove="**\.mimosa\**;..\DeskBox\**\.mimosa\**" />
+    <Content Remove="**\.mimosa\**;..\DeskBox\**\.mimosa\**" />
+    <None Remove="**\.mimosa\**;..\DeskBox\**\.mimosa\**" />
+    <PRIResource Remove="**\.mimosa\**;..\DeskBox\**\.mimosa\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Manifest Include="$(ApplicationManifest)" />
+  </ItemGroup>
+
+</Project>

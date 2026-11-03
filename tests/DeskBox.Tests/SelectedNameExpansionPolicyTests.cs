@@ -21,6 +21,17 @@ public sealed class SelectedNameExpansionPolicyTests
     }
 
     [Fact]
+    public void ExpansionDisabledWhenSurfaceWindowIsUnfocused()
+    {
+        Assert.False(SelectedNameExpansionPolicy.ShouldExpandSelectedItemName(
+            isDoubleClickToOpen: true,
+            selectedItemCount: 1,
+            isBoxSelecting: false,
+            isDragActive: false,
+            isWindowFocused: false));
+    }
+
+    [Fact]
     public void ExpansionRejectsMultiSelection()
     {
         Assert.False(SelectedNameExpansionPolicy.ShouldExpandSelectedItemName(
@@ -67,6 +78,17 @@ public sealed class SelectedNameExpansionPolicyTests
             hasModifierKey: false,
             wasSoleSelectedItemBeforeClick: true,
             pointerPressedOnLabel: true));
+    }
+
+    [Fact]
+    public void SlowClickRenameDisabledWhenSurfaceWindowIsUnfocused()
+    {
+        Assert.False(SelectedNameExpansionPolicy.ShouldStartRenameFromItemClick(
+            isDoubleClickToOpen: true,
+            hasModifierKey: false,
+            wasSoleSelectedItemBeforeClick: true,
+            pointerPressedOnLabel: true,
+            isWindowFocused: false));
     }
 
     [Fact]

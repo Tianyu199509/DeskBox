@@ -43,7 +43,8 @@ public sealed class PerformanceSettingsCoordinator : IPerformanceSettings
             effective.AllowCompactAmbientAnimations,
             performance.IdleWorkingSetTrimEnabled,
             performance.ImmediateHiddenWorkingSetTrimEnabled,
-            performance.QuiescenceWorkingSetTrimEnabled);
+            performance.QuiescenceWorkingSetTrimEnabled,
+            performance.KeepCapsuleContentWarm);
     }
 
     public void SetPerformanceMode(string? mode)
@@ -189,7 +190,6 @@ public sealed class PerformanceSettingsCoordinator : IPerformanceSettings
             performance.EnableVinylRotationAnimations &&
             performance.EnableGlanceImageAutoRotation &&
             performance.EnableCompactAmbientAnimations;
-        SwitchPerformanceModeToCustom(performance);
         _settings.SaveDebounced();
     }
 
@@ -203,6 +203,19 @@ public sealed class PerformanceSettingsCoordinator : IPerformanceSettings
         }
 
         performance.QuiescenceWorkingSetTrimEnabled = enabled;
+        _settings.SaveDebounced();
+    }
+
+    public void SetKeepCapsuleContentWarm(bool enabled)
+    {
+        ThrowIfStopped();
+        PerformanceSettingsSlice performance = _settings.Settings.Performance;
+        if (performance.KeepCapsuleContentWarm == enabled)
+        {
+            return;
+        }
+
+        performance.KeepCapsuleContentWarm = enabled;
         _settings.SaveDebounced();
     }
 

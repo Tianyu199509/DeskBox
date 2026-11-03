@@ -16,9 +16,20 @@ public sealed partial class DesktopOrganizationSettingsSection : UserControl
     private DesktopOrganizationRule? _selectedRule;
     private bool _selectedRuleIsDraft;
     private bool _isRefreshing;
-    private ISettingsWidgetActions _widgetActions = null!;
-    private ISettingsAppActions _appActions = null!;
+    private ISettingsWidgetActions? _widgetActions;
+    private ISettingsAppActions? _appActions;
     private nint _ownerWindow;
+
+    public event EventHandler? SubPageChanged;
+
+    public bool IsRuleListOpen => RuleListPanel.Visibility == Visibility.Visible;
+
+    public bool IsDetailSubPageOpen => IsRuleListOpen || IsRuleDetailOpen;
+
+    public bool IsRuleDetailOpen =>
+        _selectedWidget is not null && RuleDetailPanel.Visibility == Visibility.Visible;
+
+    public string? ActiveRuleDetailTitle => _selectedWidget?.Name;
 
     /// <summary>
     /// Injected by the settings window when the deferred section is created,
@@ -63,43 +74,36 @@ public sealed partial class DesktopOrganizationSettingsSection : UserControl
         }
 
         _isRefreshing = true;
-        AutoOrganizationToggle.IsOn = settingsService.Settings.DesktopAutoOrganizationEnabled;
         WidgetSearchBox.PlaceholderText = T("DesktopOrganization.Rules.SearchPlaceholder");
         ExtensionInput.PlaceholderText = T("DesktopOrganization.Rule.ExtensionPlaceholder");
         ExcludedExtensionInput.PlaceholderText = T(
             "DesktopOrganization.Rule.ExclusionPlaceholder");
-        OrganizationHistoryEntry? latest = _widgetActions.GetLatestUndoableDesktopOrganizationEntry();
-        UndoOrganizationButton.Visibility = latest is null
-            ? Visibility.Collapsed
-            : Visibility.Visible;
-        UndoOrganizationButton.IsEnabled = latest is not null;
-        UndoOrganizationButton.Tag = latest?.Id;
-        int effectiveRuleCount = settingsService.Settings.DesktopOrganizationRules.Count(
-            rule => IsEffectiveRule(rule, settingsService.Settings));
-        int effectiveWidgetCount = settingsService.Settings.DesktopOrganizationRules
-            .Where(rule => IsEffectiveRule(rule, settingsService.Settings))
+
+        var settings = settingsService.Settings;
+        var effectiveRules = settings.DesktopOrganization.DesktopOrganizationRules
+            .Where(rule => IsEffectiveRule(rule, settings))
+            .ToList();
+        int effectiveRuleCount = effectiveRules.Count;
+        int configuredWidgetCount = effectiveRules
             .Select(rule => rule.TargetWidgetId)
             .Distinct(StringComparer.Ordinal)
             .Count();
         bool hasEffectiveRules = effectiveRuleCount > 0;
-        AutoSetupCard.Visibility = hasEffectiveRules
-            ? Visibility.Collapsed
-            : Visibility.Visible;
-        AutoToggleCard.Visibility = hasEffectiveRules
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-        AutoIntervalCard.Visibility = AutoToggleCard.Visibility;
+        bool autoOrganizationEnabled =
+            hasEffectiveRules && settings.DesktopOrganization.DesktopAutoOrganizationEnabled;
+
+        AutoOrganizationToggle.IsEnabled = hasEffectiveRules;
+        AutoOrganizationToggle.IsOn = autoOrganizationEnabled;
+        AutoToggleExpander.Description = hasEffectiveRules
+            ? T("DesktopOrganization.Auto.Description")
+            : T("DesktopOrganization.Auto.NeedRulesHint");
+        AutoIntervalCard.IsEnabled = autoOrganizationEnabled;
+        OrganizationRulesEntryCard.Description = hasEffectiveRules
+            ? Format("DesktopOrganization.Status.Configured", configuredWidgetCount, effectiveRuleCount)
+            : T("DesktopOrganization.Rules.Unconfigured");
         RefreshAutoIntervalOptions(settingsService);
-        OrganizationSummaryCard.Header = settingsService.Settings.DesktopAutoOrganizationEnabled
-            ? T("DesktopOrganization.Status.Running")
-            : T("DesktopOrganization.Status.Ready");
-        OrganizationSummaryCard.Description = hasEffectiveRules
-            ? Format(
-                "DesktopOrganization.Status.Configured",
-                effectiveWidgetCount,
-                effectiveRuleCount)
-            : T("DesktopOrganization.Status.NoRules");
         _isRefreshing = false;
+
         RefreshWidgetCards();
         BuildTypeOverview();
     }
@@ -116,24 +120,36 @@ public sealed partial class DesktopOrganizationSettingsSection : UserControl
     private void RefreshWidgetCards()
     {
         WidgetRuleCards.Children.Clear();
-        var settings = global::DeskBox.App.Current.SettingsService.Settings;
-        string query = WidgetSearchBox.Text?.Trim() ?? string.Empty;
-        var widgets = settings.Widgets
+        if (global::DeskBox.App.Current?.SettingsService is not { } settingsService)
+        {
+            return;
+        }
+
+        var settings = settingsService.Settings;
+        var allFileWidgets = settings.WidgetLayout.Widgets
             .Where(widget =>
                 widget.WidgetKind == WidgetKind.File &&
                 !widget.IsDisabled &&
-                !settings.DeletedWidgetIds.Contains(widget.Id) &&
-                (query.Length == 0 ||
-                 widget.Name.Contains(query, StringComparison.CurrentCultureIgnoreCase)))
+                !settings.WidgetLayout.DeletedWidgetIds.Contains(widget.Id))
             .OrderBy(widget => widget.Name, StringComparer.CurrentCultureIgnoreCase)
             .ToList();
-        WidgetSearchBox.Visibility = widgets.Count > 6
+
+        WidgetSearchBox.Visibility = allFileWidgets.Count > 6
             ? Visibility.Visible
             : Visibility.Collapsed;
 
+        string query = WidgetSearchBox.Visibility == Visibility.Visible
+            ? (WidgetSearchBox.Text?.Trim() ?? string.Empty)
+            : string.Empty;
+        var widgets = query.Length == 0
+            ? allFileWidgets
+            : allFileWidgets
+                .Where(widget => widget.Name.Contains(query, StringComparison.CurrentCultureIgnoreCase))
+                .ToList();
+
         foreach (WidgetConfig widget in widgets)
         {
-            DesktopOrganizationRule? rule = settings.DesktopOrganizationRules.FirstOrDefault(candidate =>
+            DesktopOrganizationRule? rule = settings.DesktopOrganization.DesktopOrganizationRules.FirstOrDefault(candidate =>
                 string.Equals(candidate.TargetWidgetId, widget.Id, StringComparison.Ordinal));
             var card = new CommunityToolkit.WinUI.Controls.SettingsCard
             {
@@ -166,8 +182,8 @@ public sealed partial class DesktopOrganizationSettingsSection : UserControl
         }
 
         var service = global::DeskBox.App.Current.SettingsService;
-        service.Settings.DesktopAutoOrganizationEnabled = AutoOrganizationToggle.IsOn;
-        service.Settings.DesktopAutoOrganizationBaselineUtc = AutoOrganizationToggle.IsOn
+        service.Settings.DesktopOrganization.DesktopAutoOrganizationEnabled = AutoOrganizationToggle.IsOn;
+        service.Settings.DesktopOrganization.DesktopAutoOrganizationBaselineUtc = AutoOrganizationToggle.IsOn
             ? DateTimeOffset.UtcNow
             : null;
         await service.SaveAsync();
@@ -236,123 +252,97 @@ public sealed partial class DesktopOrganizationSettingsSection : UserControl
 
     private void OrganizeNowButton_Click(object sender, RoutedEventArgs e)
     {
-        _appActions.ShowDesktopOrganizationWindow();
+        _appActions?.ShowDesktopOrganizationWindow();
     }
 
-    private void AutoSetupButton_Click(object sender, RoutedEventArgs e)
+    private void OrganizationRulesEntryCard_Click(object sender, RoutedEventArgs e)
     {
-        RuleStatusInfo.ActionButton = null;
-        RuleStatusInfo.Severity = InfoBarSeverity.Informational;
-        RuleStatusInfo.Title = T("DesktopOrganization.Auto.SetupInfoTitle");
-        RuleStatusInfo.Message = T("DesktopOrganization.Auto.SetupInfoBody");
-        RuleStatusInfo.IsOpen = true;
-        WidgetRuleCards.StartBringIntoView(new BringIntoViewOptions
+        OpenRuleList(animate: true);
+    }
+
+    public void OpenRuleList(bool animate = true)
+    {
+        bool wasAlreadyOpen = RuleListPanel.Visibility == Visibility.Visible &&
+                              RuleDetailPanel.Visibility == Visibility.Collapsed;
+        _selectedWidget = null;
+        _selectedRule = null;
+        _selectedRuleIsDraft = false;
+        OrganizationOverviewPanel.Visibility = Visibility.Collapsed;
+        RuleDetailPanel.Visibility = Visibility.Collapsed;
+        RuleListPanel.Visibility = Visibility.Visible;
+        RuleStatusInfo.IsOpen = false;
+        ResetHostScrollToTop();
+        Refresh();
+        SubPageChanged?.Invoke(this, EventArgs.Empty);
+        if (animate && !wasAlreadyOpen && IsLoaded)
         {
-            AnimationDesired = true,
-            VerticalAlignmentRatio = 0.2
-        });
+            RuleListPanel.UpdateLayout();
+            DetailPageTransitionHelper.PlayNavigationEnter(RuleListPanel, 40f);
+        }
     }
 
-    private async void UndoOrganizationButton_Click(object sender, RoutedEventArgs e)
+    public void CloseRuleList(bool animate = true)
     {
-        if (UndoOrganizationButton.Tag is not string historyId ||
-            !_widgetActions.IsHostAvailable)
+        if (RuleListPanel.Visibility == Visibility.Collapsed &&
+            RuleDetailPanel.Visibility == Visibility.Collapsed)
         {
             return;
         }
 
-        UndoOrganizationButton.IsEnabled = false;
-        DesktopOrganizationUndoResult result =
-            await _widgetActions.UndoDesktopOrganizationAsync(historyId, _ownerWindow);
-        switch (result.Outcome)
+        _selectedWidget = null;
+        _selectedRule = null;
+        _selectedRuleIsDraft = false;
+        RuleDetailPanel.Visibility = Visibility.Collapsed;
+        RuleListPanel.Visibility = Visibility.Collapsed;
+        OrganizationOverviewPanel.Visibility = Visibility.Visible;
+        RuleStatusInfo.IsOpen = false;
+        ResetHostScrollToTop();
+        Refresh();
+        SubPageChanged?.Invoke(this, EventArgs.Empty);
+        if (animate && IsLoaded)
         {
-            case DesktopOrganizationUndoOutcome.Completed:
-                RuleStatusInfo.ActionButton = null;
-                RuleStatusInfo.Severity = InfoBarSeverity.Success;
-                RuleStatusInfo.Title = T("DesktopOrganization.Undo.Success");
-                RuleStatusInfo.Message = string.Empty;
-                RuleStatusInfo.IsOpen = true;
-                Refresh();
-                break;
-            case DesktopOrganizationUndoOutcome.Incomplete:
-                RuleStatusInfo.ActionButton = null;
-                RuleStatusInfo.Severity = InfoBarSeverity.Warning;
-                RuleStatusInfo.Title = T("DesktopOrganization.Public.UndoPendingTitle");
-                RuleStatusInfo.Message = Format(
-                    "DesktopOrganization.Public.UndoPending",
-                    result.RestoredCount,
-                    result.RemainingCount);
-                RuleStatusInfo.IsOpen = true;
-                AttachAbandonRestoreAction(historyId);
-                Refresh();
-                break;
-            default:
-                RuleStatusInfo.ActionButton = null;
-                RuleStatusInfo.Severity = InfoBarSeverity.Error;
-                RuleStatusInfo.Title = T("DesktopOrganization.Undo.Failed");
-                RuleStatusInfo.Message = T("DesktopOrganization.Undo.FailedBody");
-                RuleStatusInfo.IsOpen = true;
-                UndoOrganizationButton.IsEnabled = true;
-                break;
+            OrganizationOverviewPanel.UpdateLayout();
+            DetailPageTransitionHelper.PlayNavigationEnter(OrganizationOverviewPanel, -40f);
         }
     }
 
-    // A restore that can never finish (files moved away by hand) used to
-    // keep "开始整理" disabled forever; this action is the way out.
-    private void AttachAbandonRestoreAction(string historyId)
+    public void CloseAllSubPages(bool animate = false)
     {
-        var abandon = new Button
+        bool wasSubPageOpen = IsDetailSubPageOpen;
+        _selectedWidget = null;
+        _selectedRule = null;
+        _selectedRuleIsDraft = false;
+        RuleDetailPanel.Visibility = Visibility.Collapsed;
+        RuleListPanel.Visibility = Visibility.Collapsed;
+        OrganizationOverviewPanel.Visibility = Visibility.Visible;
+        RuleStatusInfo.IsOpen = false;
+        if (wasSubPageOpen)
         {
-            Content = T("DesktopOrganization.Public.AbandonRestore")
-        };
-        abandon.Click += async (_, _) =>
+            Refresh();
+            SubPageChanged?.Invoke(this, EventArgs.Empty);
+            if (animate && IsLoaded)
+            {
+                OrganizationOverviewPanel.UpdateLayout();
+                DetailPageTransitionHelper.PlayNavigationEnter(OrganizationOverviewPanel, -40f);
+            }
+        }
+    }
+
+    public bool TryNavigateBack()
+    {
+        if (IsRuleDetailOpen)
         {
-            abandon.IsEnabled = false;
-            try
-            {
-                var entry = _widgetActions.GetDesktopOrganizationHistoryEntry(historyId);
-                if (entry is not { CanUndo: true } || !_widgetActions.IsHostAvailable)
-                {
-                    Refresh();
-                    return;
-                }
+            CloseRuleDetail(animate: true);
+            return true;
+        }
 
-                if (!await Controls.DesktopOrganizationAbandonDialog.ConfirmAsync(
-                        XamlRoot,
-                        global::DeskBox.App.Current.LocalizationService,
-                        Controls.DesktopOrganizationAbandonDialog.BuildItemDetails(
-                            global::DeskBox.App.Current.LocalizationService,
-                            entry)))
-                {
-                    abandon.IsEnabled = true;
-                    return;
-                }
+        if (IsRuleListOpen)
+        {
+            CloseRuleList(animate: true);
+            return true;
+        }
 
-                DesktopOrganizationUndoResult result =
-                    await _widgetActions.AbandonDesktopOrganizationUndoAsync(historyId);
-                if (result.Outcome == DesktopOrganizationUndoOutcome.Completed)
-                {
-                    RuleStatusInfo.ActionButton = null;
-                    RuleStatusInfo.Severity = InfoBarSeverity.Success;
-                    RuleStatusInfo.Title = T("DesktopOrganization.Public.AbandonDone");
-                    RuleStatusInfo.Message = string.Empty;
-                    RuleStatusInfo.IsOpen = true;
-                }
-                else
-                {
-                    RuleStatusInfo.ActionButton = null;
-                    RuleStatusInfo.Severity = InfoBarSeverity.Error;
-                    RuleStatusInfo.Title = T("DesktopOrganization.Undo.Failed");
-                    RuleStatusInfo.Message = T("DesktopOrganization.Undo.FailedBody");
-                    RuleStatusInfo.IsOpen = true;
-                }
-            }
-            finally
-            {
-                Refresh();
-            }
-        };
-        RuleStatusInfo.ActionButton = abandon;
+        return false;
     }
 
     private void WidgetSearchBox_TextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
@@ -374,14 +364,14 @@ public sealed partial class DesktopOrganizationSettingsSection : UserControl
         }
 
         var settings = global::DeskBox.App.Current.SettingsService.Settings;
-        _selectedWidget = settings.Widgets.FirstOrDefault(widget =>
+        _selectedWidget = settings.WidgetLayout.Widgets.FirstOrDefault(widget =>
             string.Equals(widget.Id, widgetId, StringComparison.Ordinal));
         if (_selectedWidget is null)
         {
             return;
         }
 
-        _selectedRule = settings.DesktopOrganizationRules.FirstOrDefault(rule =>
+        _selectedRule = settings.DesktopOrganization.DesktopOrganizationRules.FirstOrDefault(rule =>
             string.Equals(rule.TargetWidgetId, widgetId, StringComparison.Ordinal));
         _selectedRuleIsDraft = _selectedRule is null;
         if (_selectedRule is null)
@@ -403,12 +393,18 @@ public sealed partial class DesktopOrganizationSettingsSection : UserControl
             return;
         }
 
+        bool wasDetailAlreadyOpen = RuleDetailPanel.Visibility == Visibility.Visible;
+        OrganizationOverviewPanel.Visibility = Visibility.Collapsed;
         RuleListPanel.Visibility = Visibility.Collapsed;
         RuleDetailPanel.Visibility = Visibility.Visible;
         RuleStatusInfo.IsOpen = false;
+        FileTypeExpander.IsExpanded = true;
         ResetHostScrollToTop();
         RuleDetailTitle.Text = _selectedWidget.Name;
         RuleDetailPath.Text = _selectedWidget.MappedFolderPath ?? string.Empty;
+        RuleDetailPath.Visibility = string.IsNullOrWhiteSpace(RuleDetailPath.Text)
+            ? Visibility.Collapsed
+            : Visibility.Visible;
         _isRefreshing = true;
         RuleEnabledToggle.IsOn = _selectedRule.IsEnabled;
         _isRefreshing = false;
@@ -417,6 +413,12 @@ public sealed partial class DesktopOrganizationSettingsSection : UserControl
         BuildExtensionChips();
         BuildExcludedExtensionChips();
         BuildRuleTokens();
+        SubPageChanged?.Invoke(this, EventArgs.Empty);
+        if (!wasDetailAlreadyOpen && IsLoaded)
+        {
+            RuleDetailPanel.UpdateLayout();
+            DetailPageTransitionHelper.PlayNavigationEnter(RuleDetailPanel, 40f);
+        }
     }
 
     /// <summary>
@@ -481,7 +483,7 @@ public sealed partial class DesktopOrganizationSettingsSection : UserControl
         var settingsService = global::DeskBox.App.Current.SettingsService;
         if (checkBox.IsChecked == true)
         {
-            DesktopOrganizationRule? owner = settingsService.Settings.DesktopOrganizationRules
+            DesktopOrganizationRule? owner = settingsService.Settings.DesktopOrganization.DesktopOrganizationRules
                 .FirstOrDefault(rule =>
                     !ReferenceEquals(rule, _selectedRule) &&
                     rule.IsEnabled &&
@@ -489,7 +491,7 @@ public sealed partial class DesktopOrganizationSettingsSection : UserControl
             if (owner is not null)
             {
                 checkBox.IsChecked = false;
-                OfferRuleTransfer(
+                await OfferRuleTransferAsync(
                     T($"DesktopOrganization.Subtype.{subtypeId}"),
                     owner,
                     async () =>
@@ -568,7 +570,7 @@ public sealed partial class DesktopOrganizationSettingsSection : UserControl
         var settingsService = global::DeskBox.App.Current.SettingsService;
         if (checkBox.IsChecked == true)
         {
-            DesktopOrganizationRule? owner = settingsService.Settings.DesktopOrganizationRules
+            DesktopOrganizationRule? owner = settingsService.Settings.DesktopOrganization.DesktopOrganizationRules
                 .FirstOrDefault(rule =>
                     !ReferenceEquals(rule, _selectedRule) &&
                     rule.IsEnabled &&
@@ -576,7 +578,7 @@ public sealed partial class DesktopOrganizationSettingsSection : UserControl
             if (owner is not null)
             {
                 checkBox.IsChecked = false;
-                OfferRuleTransfer(
+                await OfferRuleTransferAsync(
                     T($"DesktopOrganization.Category.{categoryId}"),
                     owner,
                     async () =>
@@ -675,6 +677,11 @@ public sealed partial class DesktopOrganizationSettingsSection : UserControl
 
     private void ExtensionInput_KeyDown(object sender, KeyRoutedEventArgs e)
     {
+        if (DeskBox.Helpers.ImeCompositionGuard.IsImeCompositionKeyEvent(e))
+        {
+            return;
+        }
+
         if (e.Key == VirtualKey.Enter)
         {
             e.Handled = true;
@@ -696,21 +703,21 @@ public sealed partial class DesktopOrganizationSettingsSection : UserControl
         }
 
         var settingsService = global::DeskBox.App.Current.SettingsService;
-        DesktopOrganizationRule? currentOwner = settingsService.Settings.DesktopOrganizationRules
+        DesktopOrganizationRule? currentOwner = settingsService.Settings.DesktopOrganization.DesktopOrganizationRules
             .FirstOrDefault(rule =>
                 !ReferenceEquals(rule, _selectedRule) &&
                 rule.IsEnabled &&
                 rule.Extensions.Contains(extension, StringComparer.OrdinalIgnoreCase));
         if (currentOwner is not null)
         {
-            OfferRuleTransfer(
+            await OfferRuleTransferAsync(
                 extension,
                 currentOwner,
                 async () =>
                 {
                     EnsureSelectedRuleRegistered();
                     _ruleResolver.AssignExtensionExclusively(
-                        settingsService.Settings.DesktopOrganizationRules,
+                        settingsService.Settings.DesktopOrganization.DesktopOrganizationRules,
                         _selectedWidget.Id,
                         extension);
                     _selectedRule.IsEnabled = true;
@@ -724,7 +731,7 @@ public sealed partial class DesktopOrganizationSettingsSection : UserControl
 
         EnsureSelectedRuleRegistered();
         _ruleResolver.AssignExtensionExclusively(
-            settingsService.Settings.DesktopOrganizationRules,
+            settingsService.Settings.DesktopOrganization.DesktopOrganizationRules,
             _selectedWidget.Id,
             extension);
         _selectedRule.IsEnabled = true;
@@ -762,6 +769,11 @@ public sealed partial class DesktopOrganizationSettingsSection : UserControl
 
     private void ExcludedExtensionInput_KeyDown(object sender, KeyRoutedEventArgs e)
     {
+        if (DeskBox.Helpers.ImeCompositionGuard.IsImeCompositionKeyEvent(e))
+        {
+            return;
+        }
+
         if (e.Key == VirtualKey.Enter)
         {
             e.Handled = true;
@@ -849,57 +861,122 @@ public sealed partial class DesktopOrganizationSettingsSection : UserControl
         RefreshStatusOnly();
     }
 
-    private void CloseRuleDetailButton_Click(object sender, RoutedEventArgs e)
+    public bool TryNavigateBackToRuleList()
     {
+        if (!IsRuleDetailOpen)
+        {
+            return false;
+        }
+
+        CloseRuleDetail(animate: true);
+        return true;
+    }
+
+    public void CloseRuleDetail(bool animate = true)
+    {
+        if (_selectedWidget is null && RuleDetailPanel.Visibility == Visibility.Collapsed)
+        {
+            return;
+        }
+
         _selectedWidget = null;
         _selectedRule = null;
         _selectedRuleIsDraft = false;
+        OrganizationOverviewPanel.Visibility = Visibility.Collapsed;
         RuleDetailPanel.Visibility = Visibility.Collapsed;
         RuleListPanel.Visibility = Visibility.Visible;
         RuleStatusInfo.IsOpen = false;
+        ResetHostScrollToTop();
         Refresh();
+        SubPageChanged?.Invoke(this, EventArgs.Empty);
+        if (animate && IsLoaded)
+        {
+            RuleListPanel.UpdateLayout();
+            DetailPageTransitionHelper.PlayNavigationEnter(RuleListPanel, -40f);
+        }
     }
 
     private void BuildTypeOverview()
     {
-        TypeOverviewRows.Children.Clear();
-        var settings = global::DeskBox.App.Current.SettingsService.Settings;
-        foreach (string categoryId in DesktopOrganizationCategoryIds.DefaultOrder)
+        TypeOverviewExpander.Items.Clear();
+        if (global::DeskBox.App.Current?.SettingsService is not { } settingsService)
         {
-            DesktopOrganizationRule? rule = settings.DesktopOrganizationRules
+            return;
+        }
+
+        var settings = settingsService.Settings;
+        var titleStyle = Resources.TryGetValue("SettingTitleTextStyle", out object? titleStyleObj)
+            ? titleStyleObj as Style
+            : null;
+        var descriptionStyle = Resources.TryGetValue("SettingDescriptionTextStyle", out object? styleObj)
+            ? styleObj as Style
+            : null;
+        var dividerBrush = NeutralInteractionBrush.ResolveThemedResource("CardStrokeColorDefaultBrush", this) ??
+                           new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(0x20, 0x80, 0x80, 0x80));
+
+        var rowsPanel = new StackPanel { Spacing = 8 };
+        string[] categories = DesktopOrganizationCategoryIds.DefaultOrder.ToArray();
+        for (int i = 0; i < categories.Length; i++)
+        {
+            string categoryId = categories[i];
+            DesktopOrganizationRule? rule = settings.DesktopOrganization.DesktopOrganizationRules
                 .FirstOrDefault(candidate =>
                     candidate.IsEnabled &&
                     candidate.CategoryIds.Contains(categoryId, StringComparer.Ordinal));
             WidgetConfig? widget = rule is null
                 ? null
-                : settings.Widgets.FirstOrDefault(candidate => candidate.Id == rule.TargetWidgetId);
+                : settings.WidgetLayout.Widgets.FirstOrDefault(candidate => candidate.Id == rule.TargetWidgetId);
 
-            var border = new Border
+            if (i > 0)
             {
-                Style = (Style)Resources["SettingsGroupStyle"]
-            };
-            var grid = new Grid
+                rowsPanel.Children.Add(new Border
+                {
+                    Height = 1,
+                    Background = dividerBrush
+                });
+            }
+
+            var rowGrid = new Grid
             {
-                Padding = new Thickness(16, 11, 16, 11),
-                ColumnSpacing = 12
+                ColumnSpacing = 12,
+                Padding = new Thickness(0, 2, 0, 2)
             };
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            grid.Children.Add(new TextBlock
+            rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var headerText = new TextBlock
             {
                 Text = T($"DesktopOrganization.Category.{categoryId}"),
-                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
-            });
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            if (titleStyle is not null)
+            {
+                headerText.Style = titleStyle;
+            }
+
             var target = new TextBlock
             {
                 Text = widget?.Name ?? T("DesktopOrganization.Rules.KeepOnDesktop"),
-                Foreground = SecondaryTextBrush()
+                Foreground = SecondaryTextBrush(),
+                VerticalAlignment = VerticalAlignment.Center
             };
+            if (descriptionStyle is not null)
+            {
+                target.Style = descriptionStyle;
+            }
+
             Grid.SetColumn(target, 1);
-            grid.Children.Add(target);
-            border.Child = grid;
-            TypeOverviewRows.Children.Add(border);
+            rowGrid.Children.Add(headerText);
+            rowGrid.Children.Add(target);
+            rowsPanel.Children.Add(rowGrid);
         }
+
+        TypeOverviewExpander.Items.Add(new CommunityToolkit.WinUI.Controls.SettingsCard
+        {
+            ContentAlignment = CommunityToolkit.WinUI.Controls.ContentAlignment.Vertical,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            Content = rowsPanel
+        });
     }
 
     private string BuildRuleSummary(DesktopOrganizationRule? rule)
@@ -944,56 +1021,74 @@ public sealed partial class DesktopOrganizationSettingsSection : UserControl
             ? string.Join("、", values.Take(4)) + (values.Count > 4 ? $" +{values.Count - 4}" : string.Empty)
             : T("DesktopOrganization.Rules.Unconfigured");
         RuleEnabledCard.Description = hasAssignments
-            ? null
+            ? null!
             : T("DesktopOrganization.Rule.NoTypesTitle");
         RuleEnabledToggle.IsEnabled = hasAssignments;
     }
 
-    private void OfferRuleTransfer(
+    private async Task OfferRuleTransferAsync(
         string typeName,
         DesktopOrganizationRule owner,
         Func<Task> accept)
     {
+        if (XamlRoot is null)
+        {
+            return;
+        }
+
         var settings = global::DeskBox.App.Current.SettingsService.Settings;
         WidgetConfig? selectedWidget = _selectedWidget;
-        WidgetConfig? ownerWidget = settings.Widgets.FirstOrDefault(widget =>
+        WidgetConfig? ownerWidget = settings.WidgetLayout.Widgets.FirstOrDefault(widget =>
             string.Equals(widget.Id, owner.TargetWidgetId, StringComparison.Ordinal));
-        RuleStatusInfo.Severity = InfoBarSeverity.Warning;
-        RuleStatusInfo.Title = T("DesktopOrganization.Rule.TransferTitle");
-        RuleStatusInfo.Message = Format(
-            "DesktopOrganization.Rule.TransferBody",
-            typeName,
-            ownerWidget?.Name ?? owner.TargetWidgetId,
-            selectedWidget?.Name ?? string.Empty);
-        var action = new Button
+
+        var dialog = new ContentDialog
         {
-            Content = T("DesktopOrganization.Rule.TransferAction")
-        };
-        action.Click += async (_, _) =>
-        {
-            action.IsEnabled = false;
-            try
+            XamlRoot = XamlRoot,
+            RequestedTheme = ActualTheme,
+            Title = T("DesktopOrganization.Rule.TransferTitle"),
+            Content = new TextBlock
             {
-                await accept();
-                RuleStatusInfo.Severity = InfoBarSeverity.Success;
-                RuleStatusInfo.Title = T("DesktopOrganization.Rule.TransferSuccess");
-                RuleStatusInfo.Message = Format(
-                    "DesktopOrganization.Rule.TransferSuccessBody",
+                Text = Format(
+                    "DesktopOrganization.Rule.TransferBody",
                     typeName,
-                    selectedWidget?.Name ?? string.Empty);
-                RuleStatusInfo.ActionButton = null;
-            }
-            catch (Exception ex)
-            {
-                App.Log($"[DesktopOrganization] Rule transfer failed: {ex}");
-                RuleStatusInfo.Severity = InfoBarSeverity.Error;
-                RuleStatusInfo.Title = T("DesktopOrganization.Result.FailedTitle");
-                RuleStatusInfo.Message = T("DesktopOrganization.Result.FailedBody");
-                action.IsEnabled = true;
-            }
+                    ownerWidget?.Name ?? owner.TargetWidgetId,
+                    selectedWidget?.Name ?? string.Empty),
+                TextWrapping = TextWrapping.Wrap
+            },
+            PrimaryButtonText = T("DesktopOrganization.Rule.TransferAction"),
+            CloseButtonText = T("Common.Cancel"),
+            DefaultButton = ContentDialogButton.Primary
         };
-        RuleStatusInfo.ActionButton = action;
-        RuleStatusInfo.IsOpen = true;
+
+        ContentDialogResult result;
+        try
+        {
+            result = await dialog.ShowAsync();
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[DesktopOrganization] Rule transfer dialog failed: {ex}");
+            return;
+        }
+
+        if (result != ContentDialogResult.Primary)
+        {
+            return;
+        }
+
+        try
+        {
+            await accept();
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[DesktopOrganization] Rule transfer failed: {ex}");
+            RuleStatusInfo.ActionButton = null;
+            RuleStatusInfo.Severity = InfoBarSeverity.Error;
+            RuleStatusInfo.Title = T("DesktopOrganization.Result.FailedTitle");
+            RuleStatusInfo.Message = T("DesktopOrganization.Result.FailedBody");
+            RuleStatusInfo.IsOpen = true;
+        }
     }
 
     private void EnsureSelectedRuleRegistered()
@@ -1003,7 +1098,7 @@ public sealed partial class DesktopOrganizationSettingsSection : UserControl
             return;
         }
 
-        global::DeskBox.App.Current.SettingsService.Settings.DesktopOrganizationRules.Add(
+        global::DeskBox.App.Current.SettingsService.Settings.DesktopOrganization.DesktopOrganizationRules.Add(
             _selectedRule);
         _selectedRuleIsDraft = false;
     }
@@ -1040,11 +1135,11 @@ public sealed partial class DesktopOrganizationSettingsSection : UserControl
             return false;
         }
 
-        return settings.Widgets.Any(widget =>
+        return settings.WidgetLayout.Widgets.Any(widget =>
             string.Equals(widget.Id, rule.TargetWidgetId, StringComparison.Ordinal) &&
             widget.WidgetKind == WidgetKind.File &&
             !widget.IsDisabled &&
-            !settings.DeletedWidgetIds.Contains(widget.Id) &&
+            !settings.WidgetLayout.DeletedWidgetIds.Contains(widget.Id) &&
             !string.IsNullOrWhiteSpace(widget.MappedFolderPath));
     }
 

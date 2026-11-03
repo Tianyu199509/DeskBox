@@ -6,25 +6,31 @@ using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using WidgetSurfaceRow = DeskBox.Services.WidgetSurfacePreviewItem;
 
 namespace DeskBox.Views.SettingsSections;
 
 /// <summary>
 /// The "displays & widgets" settings page, modeled on the Windows display
 /// settings page: a frameless arrangement preview of monitor cards (big
-/// centered number, the selected card fully accent-filled like Windows,
-/// with the number and badges flipped to a luminance-derived contrast
-/// color), the selected display's settings card below it, and one inline
-/// "show on" combo per widget surface. Pure code-behind on purpose —
-/// runtime state, not persisted settings (DesktopOrganization section
-/// precedent).
+/// centered number, proportional mini-widget blocks, the selected card fully
+/// accent-filled like Windows with luminance-derived contrast foreground),
+/// the selected display's settings card below it, scaling/disconnect policy,
+/// and filterable inline "show on" combos per widget surface. Pure code-behind
+/// on purpose — runtime state, not persisted settings (DesktopOrganization
+/// section precedent).
 /// </summary>
 public sealed partial class DisplaySettingsSection : UserControl
 {
     private const double PreviewPaddingPx = 16;
+    private const string FilterTagAll = "all";
+    private const string FilterTagSelected = "selected";
+    private const string FilterTagBorrowed = "borrowed";
 
     private IReadOnlyList<WidgetScreenInfo> _screens = [];
     private WidgetScreenInfo? _selectedScreen;
+    private bool _hasUserSelectedScreen;
+    private string _widgetFilterTag = FilterTagAll;
     private bool _isRefreshing;
     private ISettingsWidgetActions _widgetActions = null!;
     private ISettingsAppActions _appActions = null!;
@@ -40,6 +46,35 @@ public sealed partial class DisplaySettingsSection : UserControl
             ApplyPreviewHintForeground();
             Refresh();
         };
+    }
+
+    public static string BuildEntrySummary(
+        LocalizationService localization,
+        int connectedCount,
+        string? primaryDisplayName)
+    {
+        ArgumentNullException.ThrowIfNull(localization);
+        string? trimmedPrimary = string.IsNullOrWhiteSpace(primaryDisplayName)
+            ? null
+            : primaryDisplayName.Trim();
+        if (connectedCount >= 2)
+        {
+            return trimmedPrimary is not null
+                ? localization.Format(
+                    "Settings.Displays.EntrySummary.MultipleWithPrimary",
+                    connectedCount,
+                    trimmedPrimary)
+                : localization.Format(
+                    "Settings.Displays.EntrySummary.Multiple",
+                    connectedCount);
+        }
+
+        if (connectedCount == 1)
+        {
+            return localization.T("Settings.Displays.EntrySummary.Single");
+        }
+
+        return localization.T("Settings.Displays.EntrySummary.None");
     }
 
     /// <summary>
@@ -110,27 +145,52 @@ public sealed partial class DisplaySettingsSection : UserControl
     }
 
     /// <summary>
-    /// Preview hint keeps the secondary text color instead of raw opacity,
-    /// resolved in code-behind (SettingsWindow.Feedback precedent) because a
-    /// ThemeResource brush here can break DataTemplate.LoadContent. The
-    /// lookup must follow the section's own effective theme: an
-    /// application-scope lookup resolves against the startup system theme,
-    /// which pinned the hint to the dark dictionary's white in a Light
-    /// settings window.
+    /// Workspace card surfaces resolve themed brushes against the section's
+    /// effective theme in code-behind (SettingsWindow.Feedback precedent)
+    /// because a ThemeResource brush in late-created trees can resolve against
+    /// the startup system theme instead of the settings window's active theme.
     /// </summary>
     private void ApplyPreviewHintForeground()
     {
         if (Helpers.NeutralInteractionBrush.ResolveThemedResource(
                 "TextFillColorSecondaryBrush",
-                PreviewHintText) is Brush hintBrush)
+                this) is Brush secondaryBrush)
         {
-            PreviewHintText.Foreground = hintBrush;
+            SelectPromptText.Foreground = secondaryBrush;
+            SelectedScreenDescriptionText.Foreground = secondaryBrush;
+        }
+
+        if (Helpers.NeutralInteractionBrush.ResolveThemedResource(
+                "TextFillColorPrimaryBrush",
+                this) is Brush primaryBrush)
+        {
+            SelectedScreenTitleText.Foreground = primaryBrush;
+            SelectedScreenIcon.Foreground = primaryBrush;
+        }
+
+        if (Helpers.NeutralInteractionBrush.ResolveThemedResource(
+                "CardBackgroundFillColorDefaultBrush",
+                PreviewArea) is Brush stageBg)
+        {
+            PreviewArea.Background = stageBg;
+        }
+
+        if (Helpers.NeutralInteractionBrush.ResolveThemedResource(
+                "CardStrokeColorDefaultBrush",
+                PreviewArea) is Brush stageStroke)
+        {
+            PreviewArea.BorderBrush = stageStroke;
+            WorkspaceFooterDivider.Background =
+                Helpers.NeutralInteractionBrush.ResolveThemedResource(
+                    "DividerStrokeColorDefaultBrush",
+                    WorkspaceFooterDivider)
+                ?? stageStroke;
         }
     }
 
     public void Refresh()
     {
-        if (global::DeskBox.App.Current?.SettingsService is not { } settingsService)
+        if (global::DeskBox.App.Current?.SettingsService is null)
         {
             return;
         }
@@ -144,15 +204,29 @@ public sealed partial class DisplaySettingsSection : UserControl
         try
         {
             _screens = WidgetScreenCatalog.Capture();
-            if (_selectedScreen is { } currentScreen)
+            if (_screens.Count == 1)
             {
-                _selectedScreen = WidgetScreenCatalog.TryFindScreen(_screens, currentScreen.StableId);
+                _selectedScreen = _screens[0];
             }
-
-            // Windows opens the display page with the primary monitor selected.
-            if (_selectedScreen is null)
+            else if (_screens.Count > 1)
             {
-                _selectedScreen = _screens.FirstOrDefault(screen => screen.IsPrimary) ?? _screens.FirstOrDefault();
+                if (_hasUserSelectedScreen && _selectedScreen is { } currentScreen)
+                {
+                    _selectedScreen = WidgetScreenCatalog.TryFindScreen(_screens, currentScreen.StableId);
+                    if (_selectedScreen is null)
+                    {
+                        _hasUserSelectedScreen = false;
+                    }
+                }
+                else
+                {
+                    _selectedScreen = null;
+                }
+            }
+            else
+            {
+                _selectedScreen = null;
+                _hasUserSelectedScreen = false;
             }
 
             // Windows shows the arrangement even for a single monitor — the page
@@ -160,12 +234,19 @@ public sealed partial class DisplaySettingsSection : UserControl
             // meaningful; multi-monitor layouts get the full-size arrangement.
             bool hasScreens = _screens.Count > 0;
             PreviewArea.Visibility = hasScreens ? Visibility.Visible : Visibility.Collapsed;
-            PreviewViewbox.MaxHeight = _screens.Count > 1 ? 280 : 200;
+            PreviewViewbox.MaxHeight = _screens.Count > 1 ? 260 : 196;
+            RecalibrateLayoutButton.IsEnabled = _widgetActions is not null && _widgetActions.IsHostAvailable;
 
-            RebuildPreview();
-            UpdateScreenDetailCard();
+            List<WidgetSurfaceRow> surfaces = EnumerateSurfaces();
+            bool showMultiDisplayControls = _screens.Count >= 2 || HasOfflineDisplayBindings(surfaces);
+            NewWidgetsCard.Visibility = showMultiDisplayControls ? Visibility.Visible : Visibility.Collapsed;
+            WidgetListPanel.Visibility = showMultiDisplayControls ? Visibility.Visible : Visibility.Collapsed;
+
+            RebuildPreview(surfaces);
+            UpdateScreenDetailCard(surfaces);
             RefreshPlacementCombos();
-            RefreshWidgetCards();
+            RefreshWidgetFilterCombo(surfaces);
+            RefreshWidgetCards(surfaces);
         }
         catch (Exception ex)
         {
@@ -180,9 +261,27 @@ public sealed partial class DisplaySettingsSection : UserControl
         }
     }
 
+    private bool HasOfflineDisplayBindings(IReadOnlyList<WidgetSurfaceRow> surfaces)
+    {
+        WidgetLayoutSettingsSlice layoutSlice = global::DeskBox.App.Current.SettingsService.Settings.WidgetLayout;
+        bool hasOfflineDefaultPlacement =
+            SettingsService.NormalizeWidgetNewPlacementTarget(layoutSlice.WidgetNewPlacementTarget) ==
+                SettingsService.WidgetNewPlacementSpecificDisplay &&
+            WidgetScreenCatalog.TryFindScreen(_screens, layoutSlice.WidgetDefaultBoundScreenId) is null;
+        if (hasOfflineDefaultPlacement)
+        {
+            return true;
+        }
+
+        return surfaces.Any(surface =>
+            surface.IsBorrowedFallback ||
+            (surface.Mode == WidgetScreenBindingMode.Pinned &&
+             WidgetScreenCatalog.TryFindScreen(_screens, surface.BoundScreenId) is null));
+    }
+
     // ── Arrangement preview ────────────────────────────────────
 
-    private void RebuildPreview()
+    private void RebuildPreview(IReadOnlyList<WidgetSurfaceRow> surfaces)
     {
         Canvas canvas = DisplayPreviewCanvas;
         canvas.Children.Clear();
@@ -194,21 +293,37 @@ public sealed partial class DisplaySettingsSection : UserControl
         }
 
         // Design-size canvas in physical pixels; the wrapping Viewbox scales
-        // the whole arrangement uniformly, so card and label sizes stay
-        // proportional without any manual scale math. Label sizes key off the
-        // union height so their rendered size stays stable whether the
-        // arrangement is shown compact (single monitor) or full-size.
+        // the whole arrangement uniformly. Typography keys off scaleRef so
+        // numbers and badges stay at native Windows 11 proportions across
+        // single, dual, and triple-monitor arrangements.
         int unionLeft = _screens.Min(screen => screen.Monitor.X);
         int unionTop = _screens.Min(screen => screen.Monitor.Y);
         int unionRight = _screens.Max(screen => screen.Monitor.X + screen.Monitor.Width);
         int unionBottom = _screens.Max(screen => screen.Monitor.Y + screen.Monitor.Height);
-        int unionHeight = unionBottom - unionTop;
-        canvas.Width = unionRight - unionLeft + PreviewPaddingPx * 2;
+        int unionWidth = Math.Max(1, unionRight - unionLeft);
+        int unionHeight = Math.Max(1, unionBottom - unionTop);
+        double scaleRef = Math.Clamp(
+            Math.Max(unionHeight, unionWidth * 0.28),
+            unionHeight,
+            unionHeight * 1.45);
+        canvas.Width = unionWidth + PreviewPaddingPx * 2;
         canvas.Height = unionHeight + PreviewPaddingPx * 2;
+
+        // When the user hides all widgets globally via tray / shortcut (F7),
+        // every surface reports IsVisible=false in persisted state; keep
+        // normal region visibility in that global-hide state.
+        bool allHidden = surfaces.Count > 0 && surfaces.All(surface => !surface.IsVisible);
 
         foreach (WidgetScreenInfo screen in _screens)
         {
-            canvas.Children.Add(CreateScreenCard(screen, unionLeft, unionTop, unionHeight));
+            canvas.Children.Add(CreateScreenCard(
+                screen,
+                unionLeft,
+                unionTop,
+                unionHeight,
+                scaleRef,
+                surfaces,
+                allHidden));
         }
     }
 
@@ -216,73 +331,118 @@ public sealed partial class DisplaySettingsSection : UserControl
         WidgetScreenInfo screen,
         int unionLeft,
         int unionTop,
-        int unionHeight)
+        int unionHeight,
+        double scaleRef,
+        IReadOnlyList<WidgetSurfaceRow> surfaces,
+        bool allHidden)
     {
         bool isSelected = _selectedScreen is not null &&
             string.Equals(_selectedScreen.StableId, screen.StableId, StringComparison.OrdinalIgnoreCase);
-        bool isDefault = global::DeskBox.App.Current.SettingsService.Settings.WidgetDefaultBoundScreenId
-            is { } defaultId &&
-            string.Equals(defaultId.Trim(), screen.StableId.Trim(), StringComparison.OrdinalIgnoreCase);
 
-        double pillFontSize = Math.Clamp(unionHeight * 0.075, 18, 72);
+        WidgetLayoutSettingsSlice layoutSlice = global::DeskBox.App.Current.SettingsService.Settings.WidgetLayout;
+        string placementTarget = SettingsService.NormalizeWidgetNewPlacementTarget(
+            layoutSlice.WidgetNewPlacementTarget);
+        bool isDefault = placementTarget switch
+        {
+            SettingsService.WidgetNewPlacementMainDisplay => screen.IsPrimary,
+            SettingsService.WidgetNewPlacementSpecificDisplay =>
+                layoutSlice.WidgetDefaultBoundScreenId is { } defaultId &&
+                string.Equals(defaultId.Trim(), screen.StableId.Trim(), StringComparison.OrdinalIgnoreCase),
+            _ => false
+        };
 
-        var content = new Grid();
-        content.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-        content.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        bool isDarkTheme = Helpers.NeutralInteractionBrush.IsDarkTheme(this);
+        double bezelInset = _screens.Count > 1
+            ? Math.Round(Math.Clamp(unionHeight * 0.012, 8, 28))
+            : 0;
+        double cardW = Math.Max(48, screen.Monitor.Width - (bezelInset * 2));
+        double cardH = Math.Max(48, screen.Monitor.Height - (bezelInset * 2));
+        double monitorRadius = Math.Clamp(unionHeight * 0.028, 16, 64);
+        double borderPx = Math.Clamp(unionHeight * 0.005, 4, 12);
 
-        // Foreground stays unset on purpose: the number inherits the button's
-        // ContentPresenter foreground, which flips to the luminance-derived
-        // contrast color on the accent-filled (selected) card and keeps the
-        // theme default everywhere else.
-        var number = new TextBlock
+        Windows.UI.Color accentFill = ResolveAccentFillColor(isDarkTheme);
+        Windows.UI.Color foregroundColor = isSelected
+            ? ResolveOnAccentForegroundColor(accentFill)
+            : (ResolveThemeColor("TextFillColorPrimaryBrush")
+                ?? (isDarkTheme ? Colors.White : Windows.UI.Color.FromArgb(0xE4, 0x00, 0x00, 0x00)));
+
+        List<WidgetSurfaceRow> onScreen = surfaces
+            .Where(surface =>
+                surface.ActualScreen is { } actual &&
+                string.Equals(actual.StableId, screen.StableId, StringComparison.OrdinalIgnoreCase) &&
+                surface.PreviewBounds is { Width: > 0, Height: > 0 })
+            .ToList();
+
+        var root = new Grid
+        {
+            Width = cardW,
+            Height = cardH,
+            CornerRadius = new CornerRadius(monitorRadius)
+        };
+
+        // 1. Pure borderless 1:1 widget & capsule regions (no borders, no text,
+        //    no inner chrome — calm geometric silhouette behind the number).
+        root.Children.Add(CreateMiniWidgetOverlay(
+            screen,
+            cardW,
+            cardH,
+            unionHeight,
+            isSelected,
+            isDarkTheme,
+            accentFill,
+            foregroundColor,
+            onScreen,
+            allHidden));
+
+        // 2. Native Windows 11 centered monitor number ("1", "2").
+        root.Children.Add(new TextBlock
         {
             Text = screen.Number.ToString(),
-            FontSize = Math.Clamp(unionHeight * 0.26, 48, 320),
+            FontSize = Math.Clamp(scaleRef * 0.25, 60, 340),
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            Foreground = Brush(foregroundColor),
             HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center
-        };
-        Grid.SetRow(number, 0);
-        content.Children.Add(number);
+            VerticalAlignment = VerticalAlignment.Center,
+            IsHitTestVisible = false
+        });
 
-        // Selection fill has to be resolved before the badges so they can
-        // repaint against the actual background they sit on.
-        Windows.UI.Color? selectionFill = isSelected ? ResolveSelectionFillColor() : null;
-
-        // Win10/11 mark the primary monitor with a small filled badge inside
-        // the rectangle; the widget-default badge stays an outline pill so the
-        // two attributes read at a glance without competing. On the selected
-        // (accent-filled) card both switch to contrast-derived colors so they
-        // never drown in the theme color.
+        // 3. Clean Windows 11 bottom attribute pills (主显示器 / 新格子).
         if (screen.IsPrimary || isDefault)
         {
+            double pillFontSize = Math.Clamp(scaleRef * 0.068, 30, 148);
             var badges = new StackPanel
             {
                 Orientation = Orientation.Horizontal,
-                Spacing = pillFontSize * 0.35,
+                Spacing = pillFontSize * 0.36,
                 HorizontalAlignment = HorizontalAlignment.Center,
-                Margin = new Thickness(0, 0, 0, unionHeight * 0.035)
+                VerticalAlignment = VerticalAlignment.Bottom,
+                Margin = new Thickness(0, 0, 0, cardH * 0.058),
+                IsHitTestVisible = false
             };
+
             if (screen.IsPrimary)
             {
-                badges.Children.Add(CreateBadge(
+                badges.Children.Add(CreateMonitorBadge(
                     T("Settings.Displays.PrimaryBadge"),
                     pillFontSize,
                     filled: true,
-                    selectionFill));
+                    isSelected,
+                    isDarkTheme,
+                    foregroundColor));
             }
 
             if (isDefault)
             {
-                badges.Children.Add(CreateBadge(
+                badges.Children.Add(CreateMonitorBadge(
                     T("Settings.Displays.DefaultBadge"),
                     pillFontSize,
                     filled: false,
-                    selectionFill));
+                    isSelected,
+                    isDarkTheme,
+                    foregroundColor));
             }
 
-            Grid.SetRow(badges, 1);
-            content.Children.Add(badges);
+            root.Children.Add(badges);
         }
 
         var card = new Button
@@ -290,118 +450,303 @@ public sealed partial class DisplaySettingsSection : UserControl
             MinWidth = 0,
             MinHeight = 0,
             Padding = new Thickness(0),
-            Width = screen.Monitor.Width,
-            Height = screen.Monitor.Height,
-            CornerRadius = new CornerRadius(8),
-            Content = content,
+            BorderThickness = new Thickness(isSelected ? 0 : borderPx),
+            Width = cardW,
+            Height = cardH,
+            CornerRadius = new CornerRadius(monitorRadius),
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            VerticalContentAlignment = VerticalAlignment.Stretch,
+            Content = root,
             Tag = screen
         };
-        if (isSelected && selectionFill is { } fill)
-        {
-            ApplySelectionFill(card, fill);
-        }
+        ApplyMonitorCardStyle(card, isSelected, isDarkTheme, accentFill, foregroundColor);
         card.Click += ScreenCard_Click;
 
-        Canvas.SetLeft(card, PreviewPaddingPx + screen.Monitor.X - unionLeft);
-        Canvas.SetTop(card, PreviewPaddingPx + screen.Monitor.Y - unionTop);
+        Canvas.SetLeft(card, PreviewPaddingPx + screen.Monitor.X - unionLeft + bezelInset);
+        Canvas.SetTop(card, PreviewPaddingPx + screen.Monitor.Y - unionTop + bezelInset);
         return card;
     }
 
-    /// <summary>
-    /// Native display-settings selection: the whole rectangle fills with the
-    /// accent color instead of just a ring. The default Fluent template's
-    /// resting/hover/pressed brushes are overridden in the card's own
-    /// resources so those states stay inside the accent family (a touch
-    /// lighter/darker) instead of flashing to the neutral gray, and the
-    /// foreground flips to a luminance-derived contrast color so the number
-    /// and badges stay readable on any accent.
-    /// </summary>
-    private void ApplySelectionFill(Button card, Windows.UI.Color fill)
+    private static Canvas CreateMiniWidgetOverlay(
+        WidgetScreenInfo screen,
+        double cardW,
+        double cardH,
+        int unionHeight,
+        bool isSelected,
+        bool isDarkTheme,
+        Windows.UI.Color accentFill,
+        Windows.UI.Color foregroundColor,
+        IReadOnlyList<WidgetSurfaceRow> onScreenSurfaces,
+        bool allHidden)
     {
-        Windows.UI.Color contrast = ContrastForegroundColor(fill);
-        bool isDarkTheme = ActualTheme == ElementTheme.Dark;
-        Windows.UI.Color overlay = isDarkTheme ? Colors.White : Colors.Black;
-        double hoverAmount = isDarkTheme ? 0.10 : 0.08;
-        double pressAmount = isDarkTheme ? 0.18 : 0.16;
-        Windows.UI.Color hover = Blend(fill, overlay, hoverAmount);
-        Windows.UI.Color pressed = Blend(fill, overlay, pressAmount);
-
-        card.Background = Brush(fill);
-        card.Foreground = Brush(contrast);
-        card.BorderBrush = Brush(fill);
-        card.Resources["ButtonBackground"] = Brush(fill);
-        card.Resources["ButtonBackgroundPointerOver"] = Brush(hover);
-        card.Resources["ButtonBackgroundPressed"] = Brush(pressed);
-        card.Resources["ButtonBorderBrush"] = Brush(fill);
-        card.Resources["ButtonBorderBrushPointerOver"] = Brush(hover);
-        card.Resources["ButtonBorderBrushPressed"] = Brush(pressed);
-        card.Resources["ButtonForeground"] = Brush(contrast);
-        card.Resources["ButtonForegroundPointerOver"] = Brush(contrast);
-        card.Resources["ButtonForegroundPressed"] = Brush(contrast);
-
-        // L1: a fill whose luminance sits in the ambiguous band around the
-        // 0.45 black/white threshold (0.35–0.55) gives the number weak
-        // contrast against the fill; a 1px inner contrast stroke keeps the
-        // selection edge readable on those mid-luminance accents.
-        if (RelativeLuminance(fill) is >= 0.35 and <= 0.55 &&
-            card.Content is Grid content)
+        var miniCanvas = new Canvas
         {
-            card.Content = new Border
-            {
-                BorderBrush = Brush(contrast),
-                BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(7),
-                Margin = new Thickness(1),
-                Child = content
-            };
+            Width = cardW,
+            Height = cardH,
+            IsHitTestVisible = false
+        };
+
+        if (screen.Monitor.Width <= 0 || screen.Monitor.Height <= 0 || onScreenSurfaces.Count == 0)
+        {
+            return miniCanvas;
         }
-    }
 
-    private Border CreateBadge(
-        string text,
-        double pillFontSize,
-        bool filled,
-        Windows.UI.Color? selectionFill)
-    {
-        // Subtle rounding, not a stadium pill — the badge should read as a
-        // compact label, not a capsule. Filled badges always pair a solid
-        // background with a luminance-derived contrast text so the label
-        // never vanishes into its own pill (the accent family can be a pale
-        // tint, e.g. salmon on a red accent): the unselected card paints the
-        // theme accent with contrast text, the accent-filled selected card
-        // inverts to a contrast chip carrying the fill color. Outline badges
-        // stay single-color lines over the card.
-        double cornerRadius = Math.Clamp(pillFontSize * 0.25, 4, 18);
-        Windows.UI.Color fillColor;
-        Windows.UI.Color textColor;
-        Windows.UI.Color outlineColor;
-        if (selectionFill is { } fill)
+        double scaleX = cardW / screen.Monitor.Width;
+        double scaleY = cardH / screen.Monitor.Height;
+        double edgePad = Math.Clamp(unionHeight * 0.006, 4, 14);
+        double cardCorner = Math.Clamp(unionHeight * 0.015, 6, 22);
+
+        // Selected monitor fills with the Windows accent color: lift regions
+        // gently with white frost on mid/dark accents (keeping dark text high-
+        // contrast in Dark mode), and step to a soft dark tonal shade only on
+        // very high-luminance accents so blocks never clip to white.
+        Windows.UI.Color normalToneBase;
+        byte visibleAlpha;
+        byte hiddenAlpha;
+        if (isSelected)
         {
-            Windows.UI.Color onFill = ContrastForegroundColor(fill);
-            fillColor = onFill;
-            textColor = fill;
-            outlineColor = onFill;
+            bool useLightFrost = RelativeLuminance(accentFill) < 0.72;
+            normalToneBase = useLightFrost ? Colors.White : Colors.Black;
+            visibleAlpha = useLightFrost
+                ? (RelativeLuminance(foregroundColor) < 0.25 ? (byte)0x38 : (byte)0x26)
+                : (byte)0x1E;
+            hiddenAlpha = (byte)0x12;
         }
         else
         {
-            fillColor = ResolveSelectionFillColor();
-            textColor = ContrastForegroundColor(fillColor);
-            outlineColor = ResolveAccentColor();
+            normalToneBase = isDarkTheme ? Colors.White : Colors.Black;
+            visibleAlpha = isDarkTheme ? (byte)0x18 : (byte)0x11;
+            hiddenAlpha = isDarkTheme ? (byte)0x0B : (byte)0x08;
         }
+
+        foreach (WidgetSurfaceRow surface in onScreenSurfaces.OrderBy(item => item.IsCompact ? 1 : 0))
+        {
+            if (surface.PreviewBounds is not { Width: > 0, Height: > 0 } rect)
+            {
+                continue;
+            }
+
+            double w = Math.Min(rect.Width * scaleX, Math.Max(16, cardW - (edgePad * 2)));
+            double h = Math.Min(rect.Height * scaleY, Math.Max(12, cardH - (edgePad * 2)));
+            double left = Math.Clamp(
+                (rect.X - screen.Monitor.X) * scaleX,
+                edgePad,
+                Math.Max(edgePad, cardW - w - edgePad));
+            double top = Math.Clamp(
+                (rect.Y - screen.Monitor.Y) * scaleY,
+                edgePad,
+                Math.Max(edgePad, cardH - h - edgePad));
+
+            bool individuallyHidden = !surface.IsVisible && !allHidden;
+            double radius = surface.IsCompact
+                ? Math.Min(h * 0.5, cardCorner * 1.4)
+                : cardCorner;
+
+            Windows.UI.Color regionColor = surface.IsBorrowedFallback
+                ? Windows.UI.Color.FromArgb(
+                    individuallyHidden ? (byte)0x1A : (byte)0x36,
+                    0xF5,
+                    0x9E,
+                    0x0B)
+                : Windows.UI.Color.FromArgb(
+                    individuallyHidden ? hiddenAlpha : visibleAlpha,
+                    normalToneBase.R,
+                    normalToneBase.G,
+                    normalToneBase.B);
+
+            var block = new Border
+            {
+                Width = w,
+                Height = h,
+                CornerRadius = new CornerRadius(radius),
+                Background = Brush(regionColor)
+            };
+            Canvas.SetLeft(block, left);
+            Canvas.SetTop(block, top);
+            miniCanvas.Children.Add(block);
+        }
+
+        return miniCanvas;
+    }
+
+    private static Border CreateMonitorBadge(
+        string text,
+        double pillFontSize,
+        bool filled,
+        bool isSelected,
+        bool isDarkTheme,
+        Windows.UI.Color foregroundColor)
+    {
+        double cornerRadius = Math.Clamp(pillFontSize * 0.30, 8, 26);
+        double strokeThickness = Math.Clamp(pillFontSize * 0.085, 2.2, 5.5);
+
+        Windows.UI.Color bgColor;
+        Windows.UI.Color borderColor;
+        if (isSelected)
+        {
+            bgColor = Windows.UI.Color.FromArgb(
+                filled ? (byte)0x24 : (byte)0x0E,
+                foregroundColor.R,
+                foregroundColor.G,
+                foregroundColor.B);
+            borderColor = Windows.UI.Color.FromArgb(
+                0x68,
+                foregroundColor.R,
+                foregroundColor.G,
+                foregroundColor.B);
+        }
+        else
+        {
+            Windows.UI.Color neutral = isDarkTheme ? Colors.White : Colors.Black;
+            bgColor = Windows.UI.Color.FromArgb(
+                filled ? (isDarkTheme ? (byte)0x1E : (byte)0x14) : (byte)0x06,
+                neutral.R,
+                neutral.G,
+                neutral.B);
+            borderColor = Windows.UI.Color.FromArgb(
+                isDarkTheme ? (byte)0x42 : (byte)0x34,
+                neutral.R,
+                neutral.G,
+                neutral.B);
+        }
+
         return new Border
         {
-            Background = filled ? Brush(fillColor) : null,
-            BorderBrush = filled ? null : Brush(outlineColor),
-            BorderThickness = new Thickness(filled ? 0 : Math.Clamp(pillFontSize * 0.08, 1, 3)),
+            Background = Brush(bgColor),
+            BorderBrush = filled ? null : Brush(borderColor),
+            BorderThickness = new Thickness(filled ? 0 : strokeThickness),
             CornerRadius = new CornerRadius(cornerRadius),
-            Padding = new Thickness(pillFontSize * 0.6, pillFontSize * 0.18, pillFontSize * 0.6, pillFontSize * 0.26),
+            Padding = new Thickness(
+                pillFontSize * 0.56,
+                pillFontSize * 0.16,
+                pillFontSize * 0.56,
+                pillFontSize * 0.22),
             Child = new TextBlock
             {
                 Text = text,
                 FontSize = pillFontSize,
-                Foreground = Brush(filled ? textColor : outlineColor)
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = Brush(foregroundColor)
             }
         };
+    }
+
+    private void ApplyMonitorCardStyle(
+        Button card,
+        bool isSelected,
+        bool isDarkTheme,
+        Windows.UI.Color accentFill,
+        Windows.UI.Color foregroundColor)
+    {
+        Brush fgBrush = Brush(foregroundColor);
+        if (isSelected)
+        {
+            Brush normalBrush = Helpers.NeutralInteractionBrush.ResolveThemedResource(
+                    "AccentFillColorDefaultBrush",
+                    this)
+                ?? Brush(accentFill);
+            Brush hoverBrush = Helpers.NeutralInteractionBrush.ResolveThemedResource(
+                    "AccentFillColorSecondaryBrush",
+                    this)
+                ?? Brush(Blend(accentFill, isDarkTheme ? Colors.White : Colors.Black, 0.08));
+            Brush pressedBrush = Helpers.NeutralInteractionBrush.ResolveThemedResource(
+                    "AccentFillColorTertiaryBrush",
+                    this)
+                ?? Brush(Blend(accentFill, Colors.Black, 0.14));
+            Brush transparent = Brush(Colors.Transparent);
+
+            card.Background = normalBrush;
+            card.Foreground = fgBrush;
+            card.BorderBrush = transparent;
+            card.Resources["ButtonBackground"] = normalBrush;
+            card.Resources["ButtonBackgroundPointerOver"] = hoverBrush;
+            card.Resources["ButtonBackgroundPressed"] = pressedBrush;
+            card.Resources["ButtonBorderBrush"] = transparent;
+            card.Resources["ButtonBorderBrushPointerOver"] = transparent;
+            card.Resources["ButtonBorderBrushPressed"] = transparent;
+            card.Resources["ButtonForeground"] = fgBrush;
+            card.Resources["ButtonForegroundPointerOver"] = fgBrush;
+            card.Resources["ButtonForegroundPressed"] = fgBrush;
+            return;
+        }
+
+        Brush restBg = Helpers.NeutralInteractionBrush.ResolveThemedResource(
+                "ControlFillColorDefaultBrush",
+                this)
+            ?? Brush(isDarkTheme
+                ? Windows.UI.Color.FromArgb(0x14, 0xFF, 0xFF, 0xFF)
+                : Colors.White);
+        Brush hoverBg = Helpers.NeutralInteractionBrush.ResolveThemedResource(
+                "ControlFillColorSecondaryBrush",
+                this)
+            ?? Brush(isDarkTheme
+                ? Windows.UI.Color.FromArgb(0x1F, 0xFF, 0xFF, 0xFF)
+                : Windows.UI.Color.FromArgb(0xFF, 0xF6, 0xF6, 0xF6));
+        Brush pressBg = Helpers.NeutralInteractionBrush.ResolveThemedResource(
+                "ControlFillColorTertiaryBrush",
+                this)
+            ?? Brush(isDarkTheme
+                ? Windows.UI.Color.FromArgb(0x0D, 0xFF, 0xFF, 0xFF)
+                : Windows.UI.Color.FromArgb(0xFF, 0xEE, 0xEE, 0xEE));
+        Brush borderBrush = Helpers.NeutralInteractionBrush.ResolveThemedResource(
+                "ControlStrokeColorDefaultBrush",
+                this)
+            ?? Brush(isDarkTheme
+                ? Windows.UI.Color.FromArgb(0x22, 0xFF, 0xFF, 0xFF)
+                : Windows.UI.Color.FromArgb(0x22, 0x00, 0x00, 0x00));
+
+        card.Background = restBg;
+        card.Foreground = fgBrush;
+        card.BorderBrush = borderBrush;
+        card.Resources["ButtonBackground"] = restBg;
+        card.Resources["ButtonBackgroundPointerOver"] = hoverBg;
+        card.Resources["ButtonBackgroundPressed"] = pressBg;
+        card.Resources["ButtonBorderBrush"] = borderBrush;
+        card.Resources["ButtonBorderBrushPointerOver"] = borderBrush;
+        card.Resources["ButtonBorderBrushPressed"] = borderBrush;
+        card.Resources["ButtonForeground"] = fgBrush;
+        card.Resources["ButtonForegroundPointerOver"] = fgBrush;
+        card.Resources["ButtonForegroundPressed"] = fgBrush;
+    }
+
+    private Windows.UI.Color? ResolveThemeColor(string key) =>
+        Helpers.NeutralInteractionBrush.ResolveThemedResource(key, this) is SolidColorBrush brush
+            ? brush.Color
+            : null;
+
+    private Windows.UI.Color ResolveAccentFillColor(bool isDarkTheme)
+    {
+        if (ResolveThemeColor("AccentFillColorDefaultBrush") is { A: > 0 } themed)
+        {
+            return themed;
+        }
+
+        try
+        {
+            var ui = new Windows.UI.ViewManagement.UISettings();
+            return isDarkTheme
+                ? ui.GetColorValue(Windows.UI.ViewManagement.UIColorType.AccentLight2)
+                : ui.GetColorValue(Windows.UI.ViewManagement.UIColorType.Accent);
+        }
+        catch
+        {
+            return Windows.UI.Color.FromArgb(0xFF, 0x00, 0x67, 0xC0);
+        }
+    }
+
+    private Windows.UI.Color ResolveOnAccentForegroundColor(Windows.UI.Color accentFill)
+    {
+        if (ResolveThemeColor("TextOnAccentFillColorPrimaryBrush") is { A: > 0 } themed)
+        {
+            return themed;
+        }
+
+        // WCAG crossover (~0.18 relative luminance) matches WinUI's dark text
+        // on light-pastel Dark-theme accents and white text on rich Light-theme
+        // accents.
+        return RelativeLuminance(accentFill) > 0.24
+            ? Windows.UI.Color.FromArgb(0xE4, 0x00, 0x00, 0x00)
+            : Colors.White;
     }
 
     private static Brush Brush(Windows.UI.Color color) => new SolidColorBrush(color);
@@ -424,92 +769,126 @@ public sealed partial class DisplaySettingsSection : UserControl
             + (0.0722 * Channel(color.B / 255.0));
     }
 
-    private static Windows.UI.Color ContrastForegroundColor(Windows.UI.Color background) =>
-        RelativeLuminance(background) > 0.45 ? Colors.Black : Colors.White;
-
-    private Windows.UI.Color ResolveSelectionFillColor()
-    {
-        try
-        {
-            // Light theme fills with the raw accent like the native display
-            // page; dark theme steps to Light1 so the fill keeps white text
-            // readable instead of dropping to the washed-out Light2 shade.
-            var ui = new Windows.UI.ViewManagement.UISettings();
-            return ActualTheme == ElementTheme.Dark
-                ? ui.GetColorValue(Windows.UI.ViewManagement.UIColorType.AccentLight1)
-                : ui.GetColorValue(Windows.UI.ViewManagement.UIColorType.Accent);
-        }
-        catch
-        {
-            return Windows.UI.Color.FromArgb(0xFF, 0x00, 0x5C, 0xE6);
-        }
-    }
-
-    private static Windows.UI.Color ResolveAccentColor()
-    {
-        try
-        {
-            // Match the accent shade the theme's controls actually paint
-            // with (toggle/button fills), not the raw saturated accent: the
-            // raw color reads harshly next to them (e.g. deep red vs the
-            // lighter red the switches use).
-            var ui = new Windows.UI.ViewManagement.UISettings();
-            return ui.GetColorValue(
-                Windows.UI.ViewManagement.UIColorType.AccentLight2);
-        }
-        catch
-        {
-            return Windows.UI.Color.FromArgb(0xFF, 0x00, 0x5C, 0xE6);
-        }
-    }
-
     // ── Selected screen card ───────────────────────────────────
 
     private void ScreenCard_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is Button { Tag: WidgetScreenInfo screen })
+        if (sender is not Button { Tag: WidgetScreenInfo screen })
         {
-            _selectedScreen = screen;
-            RebuildPreview();
-            UpdateScreenDetailCard();
-        }
-    }
-
-    private void UpdateScreenDetailCard()
-    {
-        if (_selectedScreen is not { } screen)
-        {
-            ScreenDetailCard.Visibility = Visibility.Collapsed;
             return;
         }
 
-        ScreenDetailCard.Visibility = _screens.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
+        _hasUserSelectedScreen = true;
+        _selectedScreen = screen;
+        _isRefreshing = true;
+        try
+        {
+            List<WidgetSurfaceRow> surfaces = EnumerateSurfaces();
+            RebuildPreview(surfaces);
+            UpdateScreenDetailCard(surfaces);
+            RefreshWidgetFilterCombo(surfaces);
+            if (string.Equals(_widgetFilterTag, FilterTagSelected, StringComparison.Ordinal))
+            {
+                RefreshWidgetCards(surfaces);
+            }
+        }
+        finally
+        {
+            _isRefreshing = false;
+        }
+    }
+
+    private void UpdateScreenDetailCard(IReadOnlyList<WidgetSurfaceRow> surfaces)
+    {
+        RecalibrateLayoutButton.IsEnabled = _widgetActions is not null && _widgetActions.IsHostAvailable;
+        if (_selectedScreen is not { } screen)
+        {
+            SelectedScreenInfoPanel.Visibility = Visibility.Collapsed;
+            MoveAllWidgetsButton.Visibility = Visibility.Collapsed;
+            SelectPromptText.Visibility = _screens.Count > 1
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+            return;
+        }
+
+        SelectPromptText.Visibility = Visibility.Collapsed;
+        SelectedScreenInfoPanel.Visibility = Visibility.Visible;
+        MoveAllWidgetsButton.Visibility = _screens.Count > 1
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+
         string title = Format(
             "Widget.ScreenBinding.MonitorFormat",
             screen.Number,
             screen.DisplayName);
-        ScreenDetailCard.Header = screen.IsPrimary
+        SelectedScreenTitleText.Text = screen.IsPrimary
             ? title + T("Widget.ScreenBinding.PrimarySuffix")
             : title;
 
-        int boundCount = 0;
-        foreach (WidgetSurfaceRow surface in EnumerateSurfaces())
+        int hereCount = 0;
+        int borrowedCount = 0;
+        foreach (WidgetSurfaceRow surface in surfaces)
         {
-            if (surface.Mode == WidgetScreenBindingMode.Pinned &&
+            if (surface.ActualScreen is { } actual &&
                 string.Equals(
-                    surface.BoundScreenId?.Trim(),
+                    actual.StableId.Trim(),
                     screen.StableId.Trim(),
                     StringComparison.OrdinalIgnoreCase))
             {
-                boundCount++;
+                hereCount++;
+                if (surface.IsBorrowedFallback)
+                {
+                    borrowedCount++;
+                }
             }
         }
 
-        ScreenDetailCard.Description = Format(
-            "Settings.Displays.ScreenSummary",
-            screen.DisplayName,
-            Math.Round(screen.EffectiveDpiScale * 100),
-            boundCount);
+        const string nameToken = "\uE000";
+        string rawSummary = borrowedCount > 0
+            ? Format(
+                "Settings.Displays.ScreenSummaryWithBorrowed",
+                nameToken,
+                Math.Round(screen.EffectiveDpiScale * 100),
+                hereCount,
+                borrowedCount)
+            : Format(
+                "Settings.Displays.ScreenSummary",
+                nameToken,
+                Math.Round(screen.EffectiveDpiScale * 100),
+                hereCount);
+        SelectedScreenDescriptionText.Text = NormalizeParentheticalToMiddleDot(rawSummary)
+            .Replace(nameToken, screen.DisplayName, StringComparison.Ordinal);
+    }
+
+    private async void RecalibrateLayoutButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_widgetActions.IsHostAvailable)
+        {
+            return;
+        }
+
+        RecalibrateLayoutButton.IsEnabled = false;
+        try
+        {
+            int recalibrated = await _widgetActions.RecalibrateDisplayLayoutAsync();
+            ShowStatus(
+                InfoBarSeverity.Success,
+                Format("Settings.Displays.Recalibrate.Done", recalibrated),
+                string.Empty);
+        }
+        catch (Exception ex)
+        {
+            global::DeskBox.App.Log($"[Displays] Recalibrate layout failed: {ex}");
+            ShowStatus(
+                InfoBarSeverity.Error,
+                T("Settings.Displays.Recalibrate.Failed"),
+                string.Empty);
+        }
+        finally
+        {
+            RecalibrateLayoutButton.IsEnabled = _widgetActions.IsHostAvailable;
+            Refresh();
+        }
     }
 
     private WidgetMoveAllUndoToken? _lastMoveAllToken;
@@ -524,13 +903,18 @@ public sealed partial class DisplaySettingsSection : UserControl
 
         // Confirm dialog (spec 6.3/6.4): counts how many widgets sit on other
         // displays right now.
-        var surfaces = EnumerateSurfaces().ToList();
+        List<WidgetSurfaceRow> surfaces = EnumerateSurfaces();
         int elsewhere = surfaces.Count(surface =>
-            surface.Mode == WidgetScreenBindingMode.Pinned &&
-            !string.Equals(
-                surface.BoundScreenId?.Trim(),
-                screen.StableId.Trim(),
-                StringComparison.OrdinalIgnoreCase));
+            surface.ActualScreen is { } actual
+                ? !string.Equals(
+                    actual.StableId.Trim(),
+                    screen.StableId.Trim(),
+                    StringComparison.OrdinalIgnoreCase)
+                : surface.Mode == WidgetScreenBindingMode.Pinned &&
+                  !string.Equals(
+                      surface.BoundScreenId?.Trim(),
+                      screen.StableId.Trim(),
+                      StringComparison.OrdinalIgnoreCase));
         var dialog = new ContentDialog
         {
             Title = Format("Settings.Displays.MoveAll.ConfirmTitle", screen.Number),
@@ -573,17 +957,17 @@ public sealed partial class DisplaySettingsSection : UserControl
     private void ShowMoveAllDone(int moved, int displayNumber, WidgetMoveAllUndoToken token)
     {
         var undoButton = new Button { Content = T("Settings.Displays.MoveAll.Undo") };
-            undoButton.Click += async (_, _) =>
+        undoButton.Click += async (_, _) =>
+        {
+            undoButton.IsEnabled = false;
+            try
             {
-                undoButton.IsEnabled = false;
-                try
+                if (_widgetActions.IsHostAvailable)
                 {
-                    if (_widgetActions.IsHostAvailable)
-                    {
-                        // New signature: false means the snapshot went stale
-                        // (widgets moved again after the move-all) and nothing
-                        // was restored.
-                        bool undone = await _widgetActions.UndoMoveAllWidgetSurfacesAsync(token);
+                    // New signature: false means the snapshot went stale
+                    // (widgets moved again after the move-all) and nothing
+                    // was restored.
+                    bool undone = await _widgetActions.UndoMoveAllWidgetSurfacesAsync(token);
                     _lastMoveAllToken = null;
                     ShowStatus(
                         undone ? InfoBarSeverity.Informational : InfoBarSeverity.Warning,
@@ -620,7 +1004,7 @@ public sealed partial class DisplaySettingsSection : UserControl
         DisplayIdentifyOverlayWindow.IdentifyAll(_screens);
     }
 
-    // ── 新格子出现在 / 显示器断开时 (spec 6.3) ────────────────
+    // ── 新格子出现在 / 屏幕缩放 / 显示器断开时 (spec 6.3) ────────
 
     private void RefreshPlacementCombos()
     {
@@ -641,7 +1025,7 @@ public sealed partial class DisplaySettingsSection : UserControl
             Tag = SettingsService.WidgetNewPlacementMainDisplay
         });
         string currentTarget = SettingsService.NormalizeWidgetNewPlacementTarget(
-            settings.WidgetNewPlacementTarget);
+            settings.WidgetLayout.WidgetNewPlacementTarget);
         int selectedIndex = currentTarget switch
         {
             SettingsService.WidgetNewPlacementMainDisplay => 1,
@@ -652,7 +1036,7 @@ public sealed partial class DisplaySettingsSection : UserControl
         {
             bool isSpecific = currentTarget == SettingsService.WidgetNewPlacementSpecificDisplay &&
                 string.Equals(
-                    settings.WidgetDefaultBoundScreenId?.Trim(),
+                    settings.WidgetLayout.WidgetDefaultBoundScreenId?.Trim(),
                     screen.StableId.Trim(),
                     StringComparison.OrdinalIgnoreCase);
             var item = new ComboBoxItem
@@ -677,7 +1061,7 @@ public sealed partial class DisplaySettingsSection : UserControl
             // name fills {0} in the NewWidgets.Offline wording.
             var offline = new ComboBoxItem
             {
-                Content = Format(
+                Content = FormatWithMiddleDots(
                     "Settings.Displays.NewWidgets.Offline",
                     T("Widget.ScreenBinding.HomeOfflineFallbackName")),
                 IsEnabled = false,
@@ -688,6 +1072,26 @@ public sealed partial class DisplaySettingsSection : UserControl
         }
 
         NewPlacementCombo.SelectedIndex = selectedIndex;
+
+        // 屏幕尺寸或缩放变化时: fixed size / proportional elastic scale.
+        ScalingModeCombo.Items.Clear();
+        ScalingModeCombo.Items.Add(new ComboBoxItem
+        {
+            Content = T("Settings.Displays.ScalingMode.FixedSize"),
+            Tag = SettingsService.WidgetDisplayScalingFixedSize
+        });
+        ScalingModeCombo.Items.Add(new ComboBoxItem
+        {
+            Content = T("Settings.Displays.ScalingMode.ElasticScale"),
+            Tag = SettingsService.WidgetDisplayScalingElasticScale
+        });
+        ScalingModeCombo.SelectedIndex = string.Equals(
+            SettingsService.NormalizeWidgetDisplayScalingMode(
+                settings.WidgetLayout.WidgetDisplayScalingMode),
+            SettingsService.WidgetDisplayScalingElasticScale,
+            StringComparison.Ordinal)
+            ? 1
+            : 0;
 
         // 显示器断开时: move / collapse.
         DisconnectBehaviorCombo.Items.Clear();
@@ -702,8 +1106,12 @@ public sealed partial class DisplaySettingsSection : UserControl
             Tag = SettingsService.WidgetDisplayDisconnectCollapseToCapsule
         });
         DisconnectBehaviorCombo.SelectedIndex = string.Equals(
-            SettingsService.NormalizeWidgetDisplayDisconnectBehavior(settings.WidgetDisplayDisconnectBehavior),
-            SettingsService.WidgetDisplayDisconnectCollapseToCapsule) ? 1 : 0;
+            SettingsService.NormalizeWidgetDisplayDisconnectBehavior(
+                settings.WidgetLayout.WidgetDisplayDisconnectBehavior),
+            SettingsService.WidgetDisplayDisconnectCollapseToCapsule,
+            StringComparison.Ordinal)
+            ? 1
+            : 0;
         // _isRefreshing stays held: only the outer Refresh() releases it, so
         // deferred SelectionChanged events from these rebuilds cannot trigger
         // re-entrant page rebuilds during layout.
@@ -736,14 +1144,14 @@ public sealed partial class DisplaySettingsSection : UserControl
             setDefaultBoundScreenId = true;
         }
 
-        service.Settings.WidgetNewPlacementTarget = newPlacementTarget;
+        service.Settings.WidgetLayout.WidgetNewPlacementTarget = newPlacementTarget;
         // Mirror the pre-split behavior exactly: the bound screen id only
         // changes when the specific-display mode is chosen; cursor/main
         // leave the previous value (the payload's null = untouched matches
         // this on the main-process side).
         if (setDefaultBoundScreenId)
         {
-            service.Settings.WidgetDefaultBoundScreenId = defaultBoundScreenId;
+            service.Settings.WidgetLayout.WidgetDefaultBoundScreenId = defaultBoundScreenId;
         }
 
         // The layout domain never rides snapshots: the preference write
@@ -760,6 +1168,41 @@ public sealed partial class DisplaySettingsSection : UserControl
         ScheduleRefresh();
     }
 
+    private void ScalingModeCombo_SelectionChanged(
+        object sender,
+        SelectionChangedEventArgs e)
+    {
+        if (_isRefreshing ||
+            ScalingModeCombo.SelectedItem is not ComboBoxItem { Tag: string tag })
+        {
+            return;
+        }
+
+        var service = global::DeskBox.App.Current.SettingsService;
+        string normalizedScaling = SettingsService.NormalizeWidgetDisplayScalingMode(tag);
+        service.Settings.WidgetLayout.WidgetDisplayScalingMode = normalizedScaling;
+        _ = ApplyScalingModeAndRefreshAsync(normalizedScaling);
+    }
+
+    private async Task ApplyScalingModeAndRefreshAsync(string normalizedScaling)
+    {
+        try
+        {
+            await _widgetActions.ApplyLayoutPreferences(new LayoutPreferencesChange(
+                DisplayScalingMode: normalizedScaling));
+            if (_widgetActions.IsHostAvailable)
+            {
+                _ = await _widgetActions.RecalibrateDisplayLayoutAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            global::DeskBox.App.Log($"[Displays] Apply scaling mode failed: {ex}");
+        }
+
+        ScheduleRefresh();
+    }
+
     private void DisconnectBehaviorCombo_SelectionChanged(
         object sender,
         SelectionChangedEventArgs e)
@@ -773,37 +1216,142 @@ public sealed partial class DisplaySettingsSection : UserControl
         var service = global::DeskBox.App.Current.SettingsService;
         string normalizedDisconnect =
             SettingsService.NormalizeWidgetDisplayDisconnectBehavior(tag);
-        service.Settings.WidgetDisplayDisconnectBehavior = normalizedDisconnect;
+        service.Settings.WidgetLayout.WidgetDisplayDisconnectBehavior = normalizedDisconnect;
         _ = _widgetActions.ApplyLayoutPreferences(new LayoutPreferencesChange(
             DisconnectBehavior: normalizedDisconnect));
     }
 
-    // ── Widget rows with inline "show on" combos ───────────────
+    // ── Widget rows with filter & inline "show on" combos ──────
 
-    private void RefreshWidgetCards()
+    private void RefreshWidgetFilterCombo(IReadOnlyList<WidgetSurfaceRow> surfaces)
+    {
+        _isRefreshing = true;
+        WidgetFilterCombo.Items.Clear();
+
+        WidgetFilterCombo.Items.Add(new ComboBoxItem
+        {
+            Content = FormatWithMiddleDots("Settings.Displays.Filter.All", surfaces.Count),
+            Tag = FilterTagAll
+        });
+
+        if (_selectedScreen is { } selected && _screens.Count > 1)
+        {
+            int onSelected = surfaces.Count(surface =>
+                surface.ActualScreen is { } actual &&
+                string.Equals(actual.StableId, selected.StableId, StringComparison.OrdinalIgnoreCase));
+            WidgetFilterCombo.Items.Add(new ComboBoxItem
+            {
+                Content = FormatWithMiddleDots("Settings.Displays.Filter.SelectedScreen", selected.Number, onSelected),
+                Tag = FilterTagSelected
+            });
+        }
+
+        int borrowedCount = surfaces.Count(surface => surface.IsBorrowedFallback);
+        if (borrowedCount > 0)
+        {
+            WidgetFilterCombo.Items.Add(new ComboBoxItem
+            {
+                Content = FormatWithMiddleDots("Settings.Displays.Filter.Borrowed", borrowedCount),
+                Tag = FilterTagBorrowed
+            });
+        }
+
+        int selectedFilterIndex = 0;
+        for (int i = 0; i < WidgetFilterCombo.Items.Count; i++)
+        {
+            if (WidgetFilterCombo.Items[i] is ComboBoxItem { Tag: string itemTag } &&
+                string.Equals(itemTag, _widgetFilterTag, StringComparison.Ordinal))
+            {
+                selectedFilterIndex = i;
+                break;
+            }
+        }
+
+        if (selectedFilterIndex == 0)
+        {
+            _widgetFilterTag = FilterTagAll;
+        }
+
+        WidgetFilterCombo.SelectedIndex = selectedFilterIndex;
+        WidgetFilterCombo.Visibility = WidgetFilterCombo.Items.Count > 1
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+    }
+
+    private void WidgetFilterCombo_SelectionChanged(
+        object sender,
+        SelectionChangedEventArgs e)
+    {
+        if (_isRefreshing ||
+            WidgetFilterCombo.SelectedItem is not ComboBoxItem { Tag: string tag })
+        {
+            return;
+        }
+
+        _widgetFilterTag = tag;
+        ScheduleRefresh();
+    }
+
+    private void RefreshWidgetCards(IReadOnlyList<WidgetSurfaceRow> surfaces)
     {
         WidgetBindingCards.Children.Clear();
-        foreach (WidgetSurfaceRow surface in EnumerateSurfaces())
+        foreach (WidgetSurfaceRow surface in FilterSurfaces(surfaces))
         {
             WidgetBindingCards.Children.Add(CreateWidgetRow(surface));
         }
 
         if (WidgetBindingCards.Children.Count == 0)
         {
-            WidgetBindingCards.Children.Add(new TextBlock
+            var emptyText = new TextBlock
             {
                 Text = T("Settings.Displays.Widgets.Empty"),
-                Margin = new Thickness(8, 12, 8, 4),
-                Opacity = 0.6
-            });
+                Margin = new Thickness(8, 12, 8, 4)
+            };
+            if (Resources.TryGetValue("SettingDescriptionTextStyle", out object? styleObj) &&
+                styleObj is Style descriptionStyle)
+            {
+                emptyText.Style = descriptionStyle;
+            }
+
+            if (Helpers.NeutralInteractionBrush.ResolveThemedResource(
+                    "TextFillColorSecondaryBrush",
+                    this) is Brush secondaryBrush)
+            {
+                emptyText.Foreground = secondaryBrush;
+            }
+
+            WidgetBindingCards.Children.Add(emptyText);
         }
     }
+
+    private IEnumerable<WidgetSurfaceRow> FilterSurfaces(IReadOnlyList<WidgetSurfaceRow> surfaces)
+    {
+        if (string.Equals(_widgetFilterTag, FilterTagBorrowed, StringComparison.Ordinal))
+        {
+            return surfaces.Where(surface => surface.IsBorrowedFallback);
+        }
+
+        if (string.Equals(_widgetFilterTag, FilterTagSelected, StringComparison.Ordinal) &&
+            _selectedScreen is { } selected)
+        {
+            return surfaces.Where(surface =>
+                surface.ActualScreen is { } actual &&
+                string.Equals(actual.StableId, selected.StableId, StringComparison.OrdinalIgnoreCase));
+        }
+
+        return surfaces;
+    }
+
+    private double ResolveControlMinWidth() =>
+        Resources.TryGetValue("SettingsControlMinWidth", out object? rawWidth) && rawWidth is double minWidth
+            ? minWidth
+            : 176d;
 
     private FrameworkElement CreateWidgetRow(WidgetSurfaceRow surface)
     {
         var combo = new ComboBox
         {
-            MinWidth = 240,
+            MinWidth = ResolveControlMinWidth(),
             Tag = surface.ApplyWidgetId
         };
         _isRefreshing = true;
@@ -838,14 +1386,16 @@ public sealed partial class DisplaySettingsSection : UserControl
         if (selectedIndex < 0)
         {
             // Pinned to a monitor that is not attached right now: the combo
-            // item stays compact ("DELL U2720Q（未连接）"); the explanatory
+            // item stays compact ("DELL U2720Q · 未连接"); the explanatory
             // "returns when reconnected" sentence lives in the row
             // description instead of bloating the dropdown.
+            string homeLabel = OfflineHomeDisplayName(surface.BoundScreenLabel);
+            const string labelToken = "\uE000";
             var offline = new ComboBoxItem
             {
-                Content = Format(
-                    "Widget.ScreenBinding.HomeOfflineCompact",
-                    OfflineHomeDisplayName(surface.BoundScreenLabel)),
+                Content = NormalizeParentheticalToMiddleDot(
+                    Format("Widget.ScreenBinding.HomeOfflineCompact", labelToken))
+                    .Replace(labelToken, homeLabel, StringComparison.Ordinal),
                 IsEnabled = false,
                 Tag = "offline"
             };
@@ -859,11 +1409,12 @@ public sealed partial class DisplaySettingsSection : UserControl
         // combos: the outer Refresh() is the single release point.
         combo.SelectionChanged += WidgetBindingCombo_SelectionChanged;
 
+        string description = BuildRowDescription(surface);
         return new SettingsCard
         {
-            HeaderIcon = new FontIcon { Glyph = "\uE8A9" },
+            HeaderIcon = new FontIcon { Glyph = "\uE71D" },
             Header = surface.DisplayName,
-            Description = surface.MembersText ?? BuildBindingSummary(surface),
+            Description = string.IsNullOrWhiteSpace(description) ? null! : description,
             HorizontalContentAlignment = HorizontalAlignment.Right,
             Content = combo
         };
@@ -905,23 +1456,53 @@ public sealed partial class DisplaySettingsSection : UserControl
         Refresh();
     }
 
+    private string BuildRowDescription(WidgetSurfaceRow surface)
+    {
+        var parts = new List<string>(4);
+        string bindingSummary = BuildBindingSummary(surface);
+        if (!string.IsNullOrWhiteSpace(bindingSummary))
+        {
+            parts.Add(bindingSummary);
+        }
+
+        if (surface.IsBorrowedFallback && surface.ActualScreen is { } borrowedOn)
+        {
+            parts.Add(Format("Settings.Displays.Widgets.BorrowedOnFormat", borrowedOn.Number));
+        }
+
+        if (surface.IsSizeLocked)
+        {
+            parts.Add(T("Settings.Displays.Widgets.SizeLockedSuffix"));
+        }
+
+        if (!string.IsNullOrWhiteSpace(surface.MembersText))
+        {
+            parts.Add(surface.MembersText);
+        }
+
+        return string.Join(" · ", parts);
+    }
+
     private string BuildBindingSummary(WidgetSurfaceRow surface)
     {
-        return surface.Mode switch
+        // Connected FollowPrimary / Pinned monitor bindings are already shown
+        // directly in the row's right-hand ComboBox; only surface offline home
+        // status notes here so the left description never repeats the combo.
+        if (surface.Mode != WidgetScreenBindingMode.Pinned ||
+            WidgetScreenCatalog.TryFindScreen(_screens, surface.BoundScreenId) is not null)
         {
-            WidgetScreenBindingMode.FollowPrimary => T("Widget.ScreenBinding.FollowPrimary"),
-            WidgetScreenBindingMode.Pinned when WidgetScreenCatalog.TryFindScreen(
-                _screens, surface.BoundScreenId) is { } screen =>
-                Format("Widget.ScreenBinding.MonitorFormat", screen.Number, screen.DisplayName),
-            // Row description carries the full explanatory sentence; without
-            // a stored label the pre-composed unnamed wording is used
-            // directly (never nested through Format).
-            WidgetScreenBindingMode.Pinned when !string.IsNullOrWhiteSpace(surface.BoundScreenLabel) =>
-                Format("Widget.ScreenBinding.HomeOffline", surface.BoundScreenLabel),
-            WidgetScreenBindingMode.Pinned =>
-                T("Widget.ScreenBinding.HomeOfflineUnnamed"),
-            _ => string.Empty
-        };
+            return string.Empty;
+        }
+
+        if (!string.IsNullOrWhiteSpace(surface.BoundScreenLabel))
+        {
+            const string labelToken = "\uE000";
+            return NormalizeParentheticalToMiddleDot(
+                Format("Widget.ScreenBinding.HomeOffline", labelToken))
+                .Replace(labelToken, surface.BoundScreenLabel, StringComparison.Ordinal);
+        }
+
+        return NormalizeParentheticalToMiddleDot(T("Widget.ScreenBinding.HomeOfflineUnnamed"));
     }
 
     /// <summary>
@@ -934,75 +1515,45 @@ public sealed partial class DisplaySettingsSection : UserControl
             ? T("Widget.ScreenBinding.HomeOfflineFallbackName")
             : storedLabel;
 
+    private static string FormatWithMiddleDots(string key, params object[] values) =>
+        NormalizeParentheticalToMiddleDot(Format(key, values));
+
+    private static string NormalizeParentheticalToMiddleDot(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return string.Empty;
+        }
+
+        string normalized = text
+            .Replace("（", " · ", StringComparison.Ordinal)
+            .Replace(" (", " · ", StringComparison.Ordinal)
+            .Replace("(", " · ", StringComparison.Ordinal)
+            .Replace("），", "，", StringComparison.Ordinal)
+            .Replace(")，", "，", StringComparison.Ordinal)
+            .Replace("）", string.Empty, StringComparison.Ordinal)
+            .Replace(")", string.Empty, StringComparison.Ordinal);
+        while (normalized.Contains("  ", StringComparison.Ordinal))
+        {
+            normalized = normalized.Replace("  ", " ", StringComparison.Ordinal);
+        }
+
+        return normalized.Replace(" · · ", " · ", StringComparison.Ordinal).Trim();
+    }
+
     // ── Shared helpers ─────────────────────────────────────────
 
-    private readonly record struct WidgetSurfaceRow(
-        string DisplayName,
-        string ApplyWidgetId,
-        WidgetScreenBindingMode Mode,
-        string? BoundScreenId,
-        string? MembersText = null,
-        string? BoundScreenLabel = null);
-
     /// <summary>
-    /// Every placeable surface: standalone widgets plus one row per group.
-    /// Group rows expose the group's binding for display but apply through
-    /// the representative member, whose ApplyScreenBindingAsync syncs the
-    /// group surface and every member.
+    /// Every placeable surface: standalone widgets plus one row per group,
+    /// filtered by session availability and resolved with exact expanded vs
+    /// capsule geometry via <see cref="WidgetPlacementPreviewResolver"/>.
     /// </summary>
-    private List<WidgetSurfaceRow> EnumerateSurfaces()
-    {
-        var settings = global::DeskBox.App.Current.SettingsService.Settings;
-        var grouped = new HashSet<string>(
-            settings.WidgetGroups.SelectMany(group => group.MemberIds),
-            StringComparer.Ordinal);
-
-        var surfaces = new List<WidgetSurfaceRow>();
-        foreach (WidgetConfig widget in settings.Widgets)
-        {
-            if (widget.IsDisabled ||
-                settings.DeletedWidgetIds.Contains(widget.Id) ||
-                grouped.Contains(widget.Id))
-            {
-                continue;
-            }
-
-            surfaces.Add(new WidgetSurfaceRow(
-                widget.Name,
-                widget.Id,
-                widget.ScreenBindingMode,
-                widget.BoundScreenId,
-                BoundScreenLabel: widget.BoundScreenLabel));
-        }
-
-        foreach (WidgetGroupConfig group in settings.WidgetGroups)
-        {
-            List<WidgetConfig> members = group.MemberIds
-                .Select(id => settings.Widgets.FirstOrDefault(widget =>
-                    string.Equals(widget.Id, id, StringComparison.Ordinal)))
-                .Where(member => member is not null)
-                .Cast<WidgetConfig>()
-                .ToList();
-            if (members.Count == 0)
-            {
-                continue;
-            }
-
-            // Groups get their own identity plus the member list — a bare
-            // member name does not identify a multi-widget surface.
-            surfaces.Add(new WidgetSurfaceRow(
-                Format("Settings.Displays.GroupHeader", members.Count),
-                members[0].Id,
-                group.ScreenBindingMode,
-                group.BoundScreenId,
-                BoundScreenLabel: group.BoundScreenLabel,
-                MembersText: Format(
-                    "Settings.Displays.GroupMembers",
-                    string.Join(", ", members.Select(member => member.Name)))));
-        }
-
-        return surfaces;
-    }
+    private List<WidgetSurfaceRow> EnumerateSurfaces() =>
+        WidgetPlacementPreviewResolver.ResolveSurfaces(
+            global::DeskBox.App.Current.SettingsService.Settings,
+            _screens,
+            count => FormatWithMiddleDots("Settings.Displays.GroupHeader", count),
+            names => Format("Settings.Displays.GroupMembers", names));
 
     private void ShowStatus(InfoBarSeverity severity, string title, string message)
     {

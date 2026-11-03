@@ -27,6 +27,10 @@ internal sealed class ReservedHotkeyHookService : IDisposable
     private WinSpaceHotkeyStateMachine _modifierSpaceStateMachine = new();
     private readonly WindowsTapHotkeyStateMachine _windowsTapStateMachine = new();
     private readonly DoubleControlHotkeyStateMachine _doubleControlStateMachine = new();
+    private readonly DoubleModifierHotkeyStateMachine _doubleShiftStateMachine = new(Models.HotkeyModifierKeys.Shift);
+    private readonly DoubleModifierHotkeyStateMachine _doubleAltStateMachine = new(Models.HotkeyModifierKeys.Alt);
+    private readonly DoubleModifierHotkeyStateMachine _doubleWindowsStateMachine = new(Models.HotkeyModifierKeys.Windows);
+    private readonly DoubleSpaceHotkeyStateMachine _doubleSpaceStateMachine = new();
     private Thread? _thread;
     private uint _threadId;
     private IntPtr _hookHandle;
@@ -471,6 +475,12 @@ internal sealed class ReservedHotkeyHookService : IDisposable
             {
                 ReservedHotkeyMode.DoubleControl =>
                     _doubleControlStateMachine.Process(data.vkCode, isKeyDown, data.time),
+                ReservedHotkeyMode.DoubleShift =>
+                    _doubleShiftStateMachine.Process(data.vkCode, isKeyDown, data.time),
+                ReservedHotkeyMode.DoubleAlt =>
+                    _doubleAltStateMachine.Process(data.vkCode, isKeyDown, data.time),
+                ReservedHotkeyMode.DoubleWindows =>
+                    _doubleWindowsStateMachine.Process(data.vkCode, isKeyDown, data.time),
                 ReservedHotkeyMode.WindowsTap =>
                     _windowsTapStateMachine.Process(data.vkCode, isKeyDown),
                 _ => _modifierSpaceStateMachine.Process(data.vkCode, isKeyDown)
@@ -560,6 +570,10 @@ internal sealed class ReservedHotkeyHookService : IDisposable
             {
                 _modifierSpaceStateMachine.CancelSuppression();
             }
+            else if (_mode == ReservedHotkeyMode.DoubleSpace)
+            {
+                _doubleSpaceStateMachine.CancelSuppression();
+            }
         }
     }
 
@@ -573,6 +587,10 @@ internal sealed class ReservedHotkeyHookService : IDisposable
                 : new WinSpaceHotkeyStateMachine();
             _windowsTapStateMachine.Reset();
             _doubleControlStateMachine.Reset();
+            _doubleShiftStateMachine.Reset();
+            _doubleAltStateMachine.Reset();
+            _doubleWindowsStateMachine.Reset();
+            _doubleSpaceStateMachine.Reset();
         }
     }
 
@@ -583,6 +601,10 @@ internal sealed class ReservedHotkeyHookService : IDisposable
             _modifierSpaceStateMachine.Reset();
             _windowsTapStateMachine.Reset();
             _doubleControlStateMachine.Reset();
+            _doubleShiftStateMachine.Reset();
+            _doubleAltStateMachine.Reset();
+            _doubleWindowsStateMachine.Reset();
+            _doubleSpaceStateMachine.Reset();
         }
     }
 

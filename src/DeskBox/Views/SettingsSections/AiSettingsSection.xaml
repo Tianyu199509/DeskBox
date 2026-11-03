@@ -1,0 +1,195 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="DeskBox.Views.SettingsSections.AiSettingsSection"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:svc="using:DeskBox.Services"
+    xmlns:toolkit="using:CommunityToolkit.WinUI.Controls">
+
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="ms-appx:///Styles/SettingsOverviewResources.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </UserControl.Resources>
+
+    <StackPanel Style="{StaticResource SectionPanelStyle}">
+        <InfoBar
+            x:Name="AiStatusInfoBar"
+            IsClosable="True"
+            IsOpen="False" />
+
+        <StackPanel Margin="0,8,0,0" Spacing="4">
+            <!-- 1. Default Web AI (key-free) -->
+            <toolkit:SettingsCard
+                HorizontalContentAlignment="Right"
+                svc:Localized.DescriptionKey="CustomWidget.Settings.WebAi.Description"
+                svc:Localized.HeaderKey="CustomWidget.Settings.WebAi.Header">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE774;" />
+                </toolkit:SettingsCard.HeaderIcon>
+                <ComboBox
+                    x:Name="WebAiTargetComboBox"
+                    MinWidth="{StaticResource SettingsControlMinWidth}"
+                    SelectionChanged="WebAiTargetComboBox_SelectionChanged"
+                    svc:Localized.AutomationNameKey="CustomWidget.Settings.WebAi.Header" />
+            </toolkit:SettingsCard>
+
+            <!-- 2. API Key & Model Service (inline configuration, no modal) -->
+            <toolkit:SettingsExpander
+                x:Name="AiKeyExpander"
+                IsExpanded="True"
+                svc:Localized.HeaderKey="CustomWidget.Settings.AiKey.Header">
+                <toolkit:SettingsExpander.HeaderIcon>
+                    <FontIcon Glyph="&#xE8D7;" />
+                </toolkit:SettingsExpander.HeaderIcon>
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <HyperlinkButton
+                        x:Name="AiGetKeyHeaderLink"
+                        Padding="8,4"
+                        FontSize="12"
+                        VerticalAlignment="Center"
+                        Visibility="Collapsed" />
+                    <ComboBox
+                        x:Name="AiProviderComboBox"
+                        MinWidth="{StaticResource SettingsControlMinWidth}"
+                        VerticalAlignment="Center"
+                        SelectionChanged="AiProviderComboBox_SelectionChanged"
+                        svc:Localized.AutomationNameKey="CustomWidget.Studio.Direct.ProviderTitle" />
+                </StackPanel>
+                <toolkit:SettingsExpander.Items>
+                    <toolkit:SettingsCard
+                        x:Name="AiInlineKeyCard"
+                        HorizontalContentAlignment="Right"
+                        svc:Localized.HeaderKey="CustomWidget.AiConfig.ApiKeyHeader">
+                        <toolkit:SettingsCard.HeaderIcon>
+                            <FontIcon Glyph="&#xE8D7;" />
+                        </toolkit:SettingsCard.HeaderIcon>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <PasswordBox
+                                x:Name="AiInlineApiKeyPasswordBox"
+                                Width="232"
+                                VerticalAlignment="Center"
+                                KeyDown="AiInlineApiKeyPasswordBox_KeyDown"
+                                PasswordRevealMode="Peek"
+                                svc:Localized.AutomationNameKey="CustomWidget.AiConfig.ApiKeyHeader" />
+                            <Button
+                                x:Name="AiInlineSaveAndTestButton"
+                                Click="AiInlineSaveAndTestButton_Click"
+                                Style="{StaticResource AccentActionButtonStyle}"
+                                svc:Localized.Key="Settings.AiSettings.SaveAndTestButton" />
+                            <Button
+                                x:Name="AiInlineClearKeyButton"
+                                Click="AiInlineClearKeyButton_Click"
+                                Style="{StaticResource IconActionButtonStyle}"
+                                Visibility="Collapsed"
+                                svc:Localized.AutomationNameKey="CustomWidget.AiConfig.RemoveKeyButton"
+                                svc:Localized.ToolTipKey="CustomWidget.AiConfig.RemoveKeyButton">
+                                <FontIcon FontSize="16" Glyph="&#xE74D;" />
+                            </Button>
+                        </StackPanel>
+                    </toolkit:SettingsCard>
+
+                    <toolkit:SettingsCard
+                        HorizontalContentAlignment="Right"
+                        svc:Localized.DescriptionKey="CustomWidget.AiConfig.ModelCardDesc"
+                        svc:Localized.HeaderKey="CustomWidget.AiConfig.ModelCardHeader">
+                        <toolkit:SettingsCard.HeaderIcon>
+                            <FontIcon Glyph="&#xE950;" />
+                        </toolkit:SettingsCard.HeaderIcon>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <ComboBox
+                                x:Name="AiInlineModelComboBox"
+                                IsEditable="True"
+                                MinWidth="208"
+                                VerticalAlignment="Center"
+                                LostFocus="AiInlineModelComboBox_LostFocus"
+                                SelectionChanged="AiInlineModelComboBox_SelectionChanged"
+                                svc:Localized.AutomationNameKey="CustomWidget.AiConfig.ModelCardHeader" />
+                            <Button
+                                x:Name="AiInlineFetchModelsButton"
+                                Click="AiInlineFetchModelsButton_Click"
+                                Style="{StaticResource ActionButtonStyle}"
+                                svc:Localized.Key="CustomWidget.AiConfig.FetchModels" />
+                        </StackPanel>
+                    </toolkit:SettingsCard>
+
+                    <toolkit:SettingsCard
+                        HorizontalContentAlignment="Right"
+                        svc:Localized.DescriptionKey="Settings.AiSettings.RoutingThinkingHint"
+                        svc:Localized.HeaderKey="CustomWidget.AiConfig.ThinkingHeader">
+                        <toolkit:SettingsCard.HeaderIcon>
+                            <FontIcon Glyph="&#xE945;" />
+                        </toolkit:SettingsCard.HeaderIcon>
+                        <ComboBox
+                            x:Name="AiInlineThinkingComboBox"
+                            MinWidth="{StaticResource SettingsControlMinWidth}"
+                            SelectionChanged="AiInlineThinkingComboBox_SelectionChanged"
+                            svc:Localized.AutomationNameKey="CustomWidget.AiConfig.ThinkingHeader" />
+                    </toolkit:SettingsCard>
+
+                    <toolkit:SettingsCard
+                        x:Name="AiEndpointStatusCard"
+                        HorizontalContentAlignment="Right"
+                        svc:Localized.HeaderKey="CustomWidget.AiConfig.EndpointCardHeader">
+                        <toolkit:SettingsCard.HeaderIcon>
+                            <FontIcon Glyph="&#xE774;" />
+                        </toolkit:SettingsCard.HeaderIcon>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBox
+                                x:Name="AiInlineEndpointTextBox"
+                                Width="232"
+                                VerticalAlignment="Center"
+                                LostFocus="AiInlineEndpointTextBox_LostFocus"
+                                svc:Localized.AutomationNameKey="CustomWidget.AiConfig.EndpointCardHeader" />
+                            <Button
+                                x:Name="AiInlineResetEndpointButton"
+                                Click="AiInlineResetEndpointButton_Click"
+                                Style="{StaticResource IconActionButtonStyle}"
+                                Visibility="Collapsed"
+                                svc:Localized.AutomationNameKey="Common.Reset"
+                                svc:Localized.ToolTipKey="Common.Reset">
+                                <FontIcon FontSize="16" Glyph="&#xE72C;" />
+                            </Button>
+                        </StackPanel>
+                    </toolkit:SettingsCard>
+                </toolkit:SettingsExpander.Items>
+            </toolkit:SettingsExpander>
+
+            <!-- 3. External Coding Agents (MCP / CLI) -->
+            <toolkit:SettingsExpander
+                x:Name="AgentHubHostPanel"
+                IsExpanded="True"
+                Expanded="ExternalAgentExpander_Expanded"
+                svc:Localized.DescriptionKey="CustomWidget.AgentHub.TileDescription"
+                svc:Localized.HeaderKey="Settings.AiSettings.DevExpander.Header">
+                <toolkit:SettingsExpander.HeaderIcon>
+                    <FontIcon Glyph="&#xE943;" />
+                </toolkit:SettingsExpander.HeaderIcon>
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button
+                        x:Name="CopyMcpSetupPromptButton"
+                        Click="CopyMcpSetupPromptButton_Click"
+                        Style="{StaticResource AccentActionButtonStyle}"
+                        svc:Localized.Key="CustomWidget.AgentHub.Playbook.CopyCreate" />
+                    <Button
+                        x:Name="OpenMcpSetupGuideButton"
+                        Click="OpenMcpSetupGuideButton_Click"
+                        Style="{StaticResource ActionButtonStyle}"
+                        svc:Localized.Key="CustomWidget.AgentHub.OpenSetupDocsButton" />
+                </StackPanel>
+                <toolkit:SettingsExpander.Items>
+                    <toolkit:SettingsCard
+                        x:Name="ManualMcpConfigCard"
+                        ContentAlignment="Vertical"
+                        HorizontalContentAlignment="Stretch">
+                        <StackPanel
+                            x:Name="AgentHubDynamicContentPanel"
+                            Spacing="10" />
+                    </toolkit:SettingsCard>
+                </toolkit:SettingsExpander.Items>
+            </toolkit:SettingsExpander>
+        </StackPanel>
+    </StackPanel>
+</UserControl>

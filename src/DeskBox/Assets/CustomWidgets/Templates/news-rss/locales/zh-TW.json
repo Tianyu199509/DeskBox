@@ -1,0 +1,21 @@
+{
+  "defaultFeedTitle": "科技資訊",
+  "defaultTopHeadline": "點擊右上角重新整理取得最新內容",
+  "emptySubtitle": "點擊右上角「重新整理」擷取訂閱，或在設定中切換預設頻道與自訂 RSS",
+  "emptyTitle": "正在等待資訊同步",
+  "feedCustom": "自訂 RSS 網址（使用下方網址）",
+  "feedIthome": "IT之家",
+  "feedSspai": "少數派 SSPai",
+  "openArticleTooltip": "開啟原文",
+  "optDensityCompact": "緊湊（僅顯示標題）",
+  "optDensitySummary": "標準（標題 + 摘要）",
+  "refreshBtn": "重新整理",
+  "refreshTooltip": "立即擷取最新訂閱",
+  "setDensity": "清單閱讀密度",
+  "setFeedUrl": "自訂 RSS / Atom 網址 (https://)",
+  "setPresetFeed": "預設資訊頻道",
+  "syncing": "正在同步最新資訊…",
+  "updatedPrefix": "更新於 ",
+  "widgetDescription": "自動擷取少數派、IT之家、V2EX、Hacker News 或自訂 RSS 訂閱，離線快取秒開，點擊直達原文。",
+  "widgetName": "熱點資訊訂閱"
+}

@@ -20,6 +20,26 @@ public sealed class RemoteAppUpdateService : IAppUpdateService
     {
         _client = client;
         _client.EventReceived += OnEventReceived;
+        _ = PrimeStateAsync();
+    }
+
+    private async Task PrimeStateAsync()
+    {
+        try
+        {
+            (bool ok, string? payload, _) = await _client.RequestAsync(SettingsIpcMethods.UpdateState)
+                .ConfigureAwait(false);
+            if (ok &&
+                _cachedState is null &&
+                SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.SettingsIpcUpdateState) is { } state)
+            {
+                _cachedState = state;
+            }
+        }
+        catch
+        {
+            // Best-effort warm-up; synchronous ReadState() remains the fallback.
+        }
     }
 
     /// <summary>
@@ -104,6 +124,7 @@ public sealed class RemoteAppUpdateService : IAppUpdateService
                 new SettingsIpcUpdateCheck(currentVersion),
                 SettingsIpcJsonContext.Default.SettingsIpcUpdateCheck),
             cancellationToken);
+        _cachedState = null;
         if (!ok ||
             SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.AppUpdateCheckResult)
                 is not { } result)
@@ -119,10 +140,24 @@ public sealed class RemoteAppUpdateService : IAppUpdateService
         IProgress<AppUpdateDownloadProgress>? progress = null,
         CancellationToken cancellationToken = default)
     {
+        if (AppDistributionService.Current.IsMicrosoftStore)
+        {
+            // StoreContext.RequestDownloadAndInstallStorePackageUpdatesAsync
+            // requires an in-process foreground HWND via IInitializeWithWindow;
+            // run directly inside the settings-host MSIX process so it binds to
+            // the live SettingsWindow handle and streams real progress.
+            var inProcessStoreUpdate = new StoreAppUpdateService();
+            return await inProcessStoreUpdate.DownloadUpdateAsync(
+                manifest,
+                progress,
+                cancellationToken);
+        }
+
         (bool ok, string? payload, string? error) = await _client.RequestAsync(
             SettingsIpcMethods.UpdateDownload,
             SettingsIpcPayload.Encode(manifest, SettingsIpcJsonContext.Default.AppUpdateManifest),
             cancellationToken);
+        _cachedState = null;
         if (!ok ||
             SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.AppUpdateDownloadResult)
                 is not { } result)

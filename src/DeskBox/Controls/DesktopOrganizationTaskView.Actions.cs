@@ -1,4 +1,7 @@
+using System.IO;
+using DeskBox.Helpers;
 using DeskBox.Models;
+using DeskBox.Platform;
 using DeskBox.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -21,7 +24,8 @@ public sealed partial class DesktopOrganizationTaskView
         {
             plan = Coordinator.CreateExecutionPlan(
                 previewPlan,
-                _targetSelections.Values.ToList(), _excludedSourcePaths);
+                _targetSelections.Values.ToList(),
+                _excludedSourcePaths);
             if (plan.EligibleItemCount == 0)
             {
                 ResultInfo.Severity = InfoBarSeverity.Warning;
@@ -52,13 +56,14 @@ public sealed partial class DesktopOrganizationTaskView
         _executionCts = cts;
         _isExecuting = true;
         SelectionFeedbackInfo.IsOpen = false;
-        RetainedSelectionToolbar.IsEnabled = false;
         PreviewContent.IsEnabled = false;
+        ViewModeButton.IsEnabled = false;
         MoreButton.IsEnabled = false;
         SourceSelectionHost.IsEnabled = false;
         TargetSelectionHost.IsEnabled = false;
         RetryPublicButton.IsEnabled = false;
         UndoButton.IsEnabled = false;
+        CompletedUndoButton.IsEnabled = false;
         AbandonUndoButton.IsEnabled = false;
         DoneButton.IsEnabled = false;
         ExcludedItemsButton.IsEnabled = false;
@@ -92,22 +97,29 @@ public sealed partial class DesktopOrganizationTaskView
             _lastHistoryId = result.History.CanUndo
                 ? result.History.Id
                 : null;
-            ResultInfo.Severity = retainedCount > 0
-                ? InfoBarSeverity.Warning
-                : InfoBarSeverity.Success;
-            ResultInfo.Title = retainedCount > 0
+
+            if (retainedCount > 0)
+            {
+                ResultInfo.Severity = InfoBarSeverity.Warning;
                 // ItemCount reports the transaction's cumulative total
                 // (TotalItemCount survives summary compaction), not just
                 // this run's receipts — a retry after a compacted first
                 // run must still count the whole transaction.
-                ? Format("DesktopOrganization.Layout.PartialResult", result.History.ItemCount, retainedCount)
-                : T("DesktopOrganization.Result.SuccessTitle");
-            ResultInfo.Message = string.Join("\n", new[]
+                ResultInfo.Title = Format("DesktopOrganization.Layout.PartialResult", result.History.ItemCount, retainedCount);
+                ResultInfo.Message = string.Join("\n", new[]
+                {
+                    BuildSourceResult(result.CompletedItems, DesktopOrganizationSourceScope.Personal),
+                    BuildSourceResult(result.CompletedItems, DesktopOrganizationSourceScope.Public)
+                }.Where(text => !string.IsNullOrWhiteSpace(text)));
+                ResultInfo.IsOpen = true;
+            }
+            else
             {
-                BuildSourceResult(result.CompletedItems, DesktopOrganizationSourceScope.Personal),
-                BuildSourceResult(result.CompletedItems, DesktopOrganizationSourceScope.Public)
-            }.Where(text => !string.IsNullOrWhiteSpace(text)));
-            ResultInfo.IsOpen = true;
+                // Clean full-batch completion is presented by CompletedHeroCard
+                // without stacking a redundant banner above it.
+                ResultInfo.IsOpen = false;
+            }
+
             ExecutionProgressPanel.Visibility = Visibility.Collapsed;
             _hasCompletedExecution = true;
             _optionalIncludedPaths.Clear();
@@ -118,6 +130,9 @@ public sealed partial class DesktopOrganizationTaskView
             CancelButton.Visibility = Visibility.Collapsed;
             ExecuteButton.Visibility = Visibility.Collapsed;
             UndoButton.Visibility = result.History.CanUndo
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+            CompletedUndoButton.Visibility = result.History.CanUndo
                 ? Visibility.Visible
                 : Visibility.Collapsed;
             DoneButton.Visibility = Visibility.Visible;
@@ -175,8 +190,8 @@ public sealed partial class DesktopOrganizationTaskView
         finally
         {
             _isExecuting = false;
-            RetainedSelectionToolbar.IsEnabled = true;
             PreviewContent.IsEnabled = true;
+            ViewModeButton.IsEnabled = true;
             MoreButton.IsEnabled = true;
             RefreshButton.IsEnabled = true;
             ChangePathButton.IsEnabled = !_hasCompletedExecution;
@@ -184,6 +199,7 @@ public sealed partial class DesktopOrganizationTaskView
             TargetSelectionHost.IsEnabled = !_hasCompletedExecution;
             RetryPublicButton.IsEnabled = true;
             UndoButton.IsEnabled = true;
+            CompletedUndoButton.IsEnabled = true;
             AbandonUndoButton.IsEnabled = true;
             DoneButton.IsEnabled = true;
             ExcludedItemsButton.IsEnabled = true;
@@ -207,6 +223,7 @@ public sealed partial class DesktopOrganizationTaskView
 
         _isExecuting = true;
         UndoButton.IsEnabled = false;
+        CompletedUndoButton.IsEnabled = false;
         AbandonUndoButton.IsEnabled = false;
         SourceSelectionHost.IsEnabled = false;
         TargetSelectionHost.IsEnabled = false;
@@ -227,22 +244,25 @@ public sealed partial class DesktopOrganizationTaskView
             CancelButton.Visibility = Visibility.Visible;
             ExecuteButton.Visibility = Visibility.Visible;
             UndoButton.Visibility = Visibility.Collapsed;
+            CompletedUndoButton.Visibility = Visibility.Collapsed;
             DoneButton.Visibility = Visibility.Collapsed;
             await ScanAsync();
         }
         catch (DesktopOrganizationIncompleteUndoException ex)
         {
+            var history = App.Current.SettingsService.OrganizationHistory.Entries
+                .FirstOrDefault(entry => entry.Id == _lastHistoryId);
             ResultInfo.Severity = InfoBarSeverity.Warning;
             ResultInfo.Title = T("DesktopOrganization.Public.UndoPendingTitle");
-            ResultInfo.Message = Format("DesktopOrganization.Public.UndoPending", ex.RestoredCount, ex.RemainingCount);
+            ResultInfo.Message = Format("DesktopOrganization.Public.UndoPending", ex.RestoredCount, ex.RemainingCount) +
+                (history is not null ? BuildStuckItemSummary(history) : string.Empty);
             ResultInfo.IsOpen = true;
             // An undo attempt ends forward retries. Only the remaining undo
             // items can be continued, using their persisted receipts.
             RetryPublicButton.Visibility = Visibility.Collapsed;
             UndoButton.Content = T("DesktopOrganization.Public.ContinueUndo");
+            CompletedUndoButton.Content = T("DesktopOrganization.Public.ContinueUndo");
             AbandonUndoButton.Visibility = Visibility.Visible;
-            var history = App.Current.SettingsService.OrganizationHistory.Entries
-                .FirstOrDefault(entry => entry.Id == _lastHistoryId);
             if (_hasCompletedExecution && history is not null) RenderExecutionResult(history.Items);
         }
         catch (Exception ex)
@@ -257,6 +277,7 @@ public sealed partial class DesktopOrganizationTaskView
         {
             _isExecuting = false;
             UndoButton.IsEnabled = true;
+            CompletedUndoButton.IsEnabled = true;
             AbandonUndoButton.IsEnabled = true;
             DoneButton.IsEnabled = true;
             RetryPublicButton.IsEnabled = true;
@@ -297,6 +318,7 @@ public sealed partial class DesktopOrganizationTaskView
 
         _isExecuting = true;
         UndoButton.IsEnabled = false;
+        CompletedUndoButton.IsEnabled = false;
         AbandonUndoButton.IsEnabled = false;
         try
         {
@@ -315,11 +337,14 @@ public sealed partial class DesktopOrganizationTaskView
         {
             _isExecuting = false;
             UndoButton.IsEnabled = true;
+            CompletedUndoButton.IsEnabled = true;
             AbandonUndoButton.IsEnabled = true;
         }
 
         UndoButton.Visibility = Visibility.Collapsed;
+        CompletedUndoButton.Visibility = Visibility.Collapsed;
         UndoButton.Content = T("DesktopOrganization.Layout.Undo");
+        CompletedUndoButton.Content = T("DesktopOrganization.Layout.Undo");
         AbandonUndoButton.Visibility = Visibility.Collapsed;
         _lastHistoryId = null;
         ResultInfo.Severity = InfoBarSeverity.Success;
@@ -339,10 +364,11 @@ public sealed partial class DesktopOrganizationTaskView
             return;
         }
 
+        DesktopOrganizationRecoveryJournal? journal = await Coordinator.GetPendingRecoveryJournalAsync();
         if (!await DesktopOrganizationAbandonDialog.ConfirmAsync(
                 XamlRoot,
                 App.Current.LocalizationService,
-                itemDetails: null))
+                DesktopOrganizationAbandonDialog.BuildRecoveryItemDetails(App.Current.LocalizationService, journal)))
         {
             return;
         }
@@ -376,6 +402,46 @@ public sealed partial class DesktopOrganizationTaskView
         }
     }
 
+    private void ViewModeButton_Click(object sender, RoutedEventArgs e)
+    {
+        _itemViewMode = _itemViewMode == DesktopOrganizationItemViewMode.Tiles
+            ? DesktopOrganizationItemViewMode.CompactGrid
+            : DesktopOrganizationItemViewMode.Tiles;
+        UpdateViewModeToggleVisuals();
+        foreach (var card in _targetCards) card.SetViewMode(_itemViewMode);
+        foreach (var card in _retainedCards) card.SetViewMode(_itemViewMode);
+        foreach (var card in _completedCards) card.SetViewMode(_itemViewMode);
+    }
+
+    private void OpenStorageFolder_Click(object sender, RoutedEventArgs e)
+    {
+        LocationsFlyout.Hide();
+        string configuredRoot = (_hasCompletedExecution ? _lastExecutionPlan : _plan)?.StorageRootPath
+            ?? StoragePathText.Text;
+        if (string.IsNullOrWhiteSpace(configuredRoot))
+        {
+            return;
+        }
+
+        // Keep preview 100% side-effect-free on disk: open the existing folder,
+        // or its nearest existing ancestor if the managed root hasn't been created yet.
+        string? candidate = configuredRoot;
+        while (!string.IsNullOrWhiteSpace(candidate) && !Directory.Exists(candidate))
+        {
+            candidate = Path.GetDirectoryName(candidate);
+        }
+
+        if (string.IsNullOrWhiteSpace(candidate))
+        {
+            return;
+        }
+
+        string pathToOpen = FileService.TryResolveExistingPathForTraversal(candidate, out string resolvedPath)
+            ? resolvedPath
+            : candidate;
+        Win32Helper.OpenFile(pathToOpen);
+    }
+
     private void ChangePathButton_Click(object sender, RoutedEventArgs e)
     {
         LocationsFlyout.Hide();
@@ -400,6 +466,7 @@ public sealed partial class DesktopOrganizationTaskView
             _retainedSelection.Clear();
             _targetSelections.Clear();
             _newPaths.Clear();
+            ClearBoxCustomizations();
             _plan = plan;
             RenderPlan(plan);
             ShowSelectionFeedback(T("DesktopOrganization.Layout.ResetDone"), showPendingLink: false);

@@ -1,0 +1,21 @@
+{
+  "defaultFeedTitle": "Actualités tech",
+  "defaultTopHeadline": "Cliquez sur Actualiser en haut à droite pour les dernières actualités",
+  "emptySubtitle": "Cliquez sur Actualiser ci-dessus ou changez de source dans les paramètres",
+  "emptyTitle": "En attente de synchronisation du flux",
+  "feedCustom": "URL RSS personnalisée (ci-dessous)",
+  "feedIthome": "IT之家",
+  "feedSspai": "SSPai (少数派)",
+  "openArticleTooltip": "Ouvrir l’article",
+  "optDensityCompact": "Compacte (titres uniquement)",
+  "optDensitySummary": "Standard (titre + résumé)",
+  "refreshBtn": "Actualiser",
+  "refreshTooltip": "Récupérer maintenant les derniers éléments du flux",
+  "setDensity": "Densité d’affichage",
+  "setFeedUrl": "URL RSS / Atom personnalisée (https://)",
+  "setPresetFeed": "Source prédéfinie",
+  "syncing": "Synchronisation des dernières actualités…",
+  "updatedPrefix": "Mis à jour ",
+  "widgetDescription": "Synchronisez Hacker News, GitHub Blog, V2EX ou tout flux RSS HTTPS personnalisé avec cache hors ligne.",
+  "widgetName": "Lecteur de flux RSS"
+}

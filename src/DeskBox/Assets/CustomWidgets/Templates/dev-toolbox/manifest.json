@@ -1,0 +1,719 @@
+{
+  "schemaVersion": 1,
+  "id": "deskbox.dev-toolbox",
+  "name": "开发者工具箱",
+  "version": "2.0.0",
+  "author": "DeskBox",
+  "description": "剪贴板智能嗅探 + 25 种 100% 本机离线转换（JWT 解码、Unicode/JSON 转义、Base64、时间戳、UUID），敏感报文绝不上传。",
+  "icon": "\uE756",
+  "minSize": {
+    "width": 288,
+    "height": 280
+  },
+  "defaultSize": {
+    "width": 336,
+    "height": 392
+  },
+  "settings": [
+    {
+      "key": "autoCopyResult",
+      "type": "toggle",
+      "label": "${$i18n.setAutoCopy}",
+      "default": "true"
+    },
+    {
+      "key": "enableClipboardSniffer",
+      "type": "toggle",
+      "label": "${$i18n.setSniffer}",
+      "default": "true"
+    },
+    {
+      "key": "jsonIndent",
+      "type": "choice",
+      "label": "${$i18n.setJsonIndent}",
+      "default": "2",
+      "options": [
+        {
+          "value": "2",
+          "label": "${$i18n.indent2}"
+        },
+        {
+          "value": "4",
+          "label": "${$i18n.indent4}"
+        }
+      ]
+    },
+    {
+      "key": "uuidCase",
+      "type": "choice",
+      "label": "${$i18n.setUuidCase}",
+      "default": "lower",
+      "options": [
+        {
+          "value": "lower",
+          "label": "${$i18n.uuidLower}"
+        },
+        {
+          "value": "upper",
+          "label": "${$i18n.uuidUpper}"
+        }
+      ]
+    }
+  ],
+  "state": {
+    "draft": "",
+    "output": "",
+    "transformStatus": "",
+    "transformError": "",
+    "activeTab": "json"
+  },
+  "sources": [
+    {
+      "type": "clipboard",
+      "intervalMs": 2000
+    }
+  ],
+  "capsule": {
+    "title": "${$i18n.widgetName}",
+    "summary": "${$transform.jwtState == 'expired' ? $i18n.stJwtExpired : (($clipboard.hasText == 'true' && $settings.enableClipboardSniffer == 'true') ? $i18n.capSniffed : ($transform.jwtState == 'valid' ? $i18n.stJwtOk : $i18n.capIdle))}",
+    "glyph": "\uE756",
+    "badge": "${$transform.jwtState == 'expired' ? '!' : (($clipboard.hasText == 'true' && $settings.enableClipboardSniffer == 'true') ? $clipboard.kindLabel : $clock.unixSeconds)}",
+    "badgeIsWarning": "${$transform.jwtState == 'expired'}",
+    "enableBounceOnUpdate": true
+  },
+  "view": {
+    "type": "Stack",
+    "spacing": 7,
+    "padding": "12,6,12,12",
+    "children": [
+      {
+        "type": "Card",
+        "tone": "subtle",
+        "padding": "10,7,8,7",
+        "when": "${$settings.enableClipboardSniffer == 'true'}",
+        "children": [
+          {
+            "type": "Grid",
+            "columns": "Auto,1*,Auto",
+            "spacing": 8,
+            "children": [
+              {
+                "type": "Badge",
+                "column": 0,
+                "tone": "${$clipboard.kind == 'jwt' || $clipboard.kind == 'json' || $clipboard.kind == 'timestamp' || $clipboard.kind == 'unicodeEscape' || $clipboard.kind == 'urlEncoded' || $clipboard.kind == 'base64' ? 'accent' : 'subtle'}",
+                "text": "${$clipboard.hasText == 'true' ? $clipboard.kindLabel : $i18n.radarStandby}"
+              },
+              {
+                "type": "Text",
+                "column": 1,
+                "style": "caption",
+                "color": "secondary",
+                "verticalAlignment": "center",
+                "maxLines": 1,
+                "text": "${$clipboard.hasText == 'true' ? $clipboard.preview : $i18n.previewEmpty}"
+              },
+              {
+                "type": "Button",
+                "column": 2,
+                "when": "${$clipboard.hasText == 'true'}",
+                "variant": "accent",
+                "text": "${state.draft != '' ? $i18n.actJson : ($settings.enableClipboardSniffer != 'true' ? $i18n.actGeneric : ($clipboard.kind == 'jwt' ? $i18n.actJwt : ($clipboard.kind == 'json' ? $i18n.actJson : ($clipboard.kind == 'timestamp' ? $i18n.actTs : ($clipboard.kind == 'unicodeEscape' ? $i18n.actUnicode : ($clipboard.kind == 'urlEncoded' ? $i18n.actUrlDecode : ($clipboard.kind == 'base64' ? $i18n.actBase64Decode : ($clipboard.kind == 'url' ? $i18n.actUrlDecode : $i18n.actGeneric))))))))}",
+                "onClick": [
+                  {
+                    "type": "text.transform",
+                    "format": "${state.draft != '' ? ($settings.jsonIndent == '4' ? 'jsonPretty4' : 'jsonPretty') : ($settings.enableClipboardSniffer != 'true' ? ($settings.jsonIndent == '4' ? 'jsonPretty4' : 'jsonPretty') : ($clipboard.kind == 'jwt' ? 'jwtDecode' : ($clipboard.kind == 'json' ? ($settings.jsonIndent == '4' ? 'jsonPretty4' : 'jsonPretty') : ($clipboard.kind == 'timestamp' ? 'timestampToDate' : ($clipboard.kind == 'unicodeEscape' ? 'unicodeUnescape' : ($clipboard.kind == 'urlEncoded' ? 'urlDecode' : ($clipboard.kind == 'base64' ? 'base64Decode' : ($clipboard.kind == 'url' ? 'urlDecode' : ($settings.jsonIndent == '4' ? 'jsonPretty4' : 'jsonPretty')))))))))}",
+                    "text": "${state.draft != '' ? state.draft : ($settings.enableClipboardSniffer == 'true' ? $clipboard.text : '')}",
+                    "key": "output",
+                    "then": [
+                      {
+                        "type": "clipboard.copy",
+                        "guard": "${$settings.autoCopyResult == 'true' && state.output != ''}",
+                        "text": "${state.output}"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "Button",
+                "column": 2,
+                "when": "${$clipboard.hasText != 'true'}",
+                "icon": "\uE823",
+                "text": "${$clock.unixSeconds}",
+                "tooltip": "${$i18n.copyNowTsTooltip}",
+                "onClick": [
+                  {
+                    "type": "clipboard.copy",
+                    "text": "${$clock.unixSeconds}"
+                  },
+                  {
+                    "type": "toast.show",
+                    "message": "${$i18n.tsCopiedToast}"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "Grid",
+        "columns": "1*,Auto,Auto",
+        "spacing": 6,
+        "children": [
+          {
+            "type": "Input",
+            "column": 0,
+            "placeholder": "${$i18n.inputPlaceholder}",
+            "bind": "state.draft",
+            "onSubmit": [
+              {
+                "type": "text.transform",
+                "format": "${state.draft != '' ? ($settings.jsonIndent == '4' ? 'jsonPretty4' : 'jsonPretty') : ($settings.enableClipboardSniffer != 'true' ? ($settings.jsonIndent == '4' ? 'jsonPretty4' : 'jsonPretty') : ($clipboard.kind == 'jwt' ? 'jwtDecode' : ($clipboard.kind == 'json' ? ($settings.jsonIndent == '4' ? 'jsonPretty4' : 'jsonPretty') : ($clipboard.kind == 'timestamp' ? 'timestampToDate' : ($clipboard.kind == 'unicodeEscape' ? 'unicodeUnescape' : ($clipboard.kind == 'urlEncoded' ? 'urlDecode' : ($clipboard.kind == 'base64' ? 'base64Decode' : ($clipboard.kind == 'url' ? 'urlDecode' : ($settings.jsonIndent == '4' ? 'jsonPretty4' : 'jsonPretty')))))))))}",
+                "text": "${state.draft != '' ? state.draft : ($settings.enableClipboardSniffer == 'true' ? $clipboard.text : '')}",
+                "key": "output",
+                "then": [
+                  {
+                    "type": "clipboard.copy",
+                    "guard": "${$settings.autoCopyResult == 'true' && state.output != ''}",
+                    "text": "${state.output}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "IconButton",
+            "column": 1,
+            "when": "${state.draft == '' && $clipboard.hasText == 'true'}",
+            "icon": "\uE77F",
+            "size": 28,
+            "tooltip": "${$i18n.pasteToDraftTooltip}",
+            "onClick": {
+              "type": "state.set",
+              "key": "draft",
+              "value": "${$clipboard.text}"
+            }
+          },
+          {
+            "type": "IconButton",
+            "column": 1,
+            "when": "${state.draft != ''}",
+            "icon": "\uE711",
+            "size": 28,
+            "tooltip": "${$i18n.clearInputTooltip}",
+            "onClick": {
+              "type": "state.set",
+              "key": "draft",
+              "value": ""
+            }
+          },
+          {
+            "type": "Button",
+            "column": 2,
+            "when": "${state.draft != ''}",
+            "variant": "accent",
+            "icon": "\uE768",
+            "text": "${$i18n.runBtn}",
+            "tooltip": "${$i18n.runTooltip}",
+            "onClick": [
+              {
+                "type": "text.transform",
+                "format": "${state.draft != '' ? ($settings.jsonIndent == '4' ? 'jsonPretty4' : 'jsonPretty') : ($settings.jsonIndent == '4' ? 'jsonPretty4' : 'jsonPretty')}",
+                "text": "${state.draft}",
+                "key": "output",
+                "then": [
+                  {
+                    "type": "clipboard.copy",
+                    "guard": "${$settings.autoCopyResult == 'true' && state.output != ''}",
+                    "text": "${state.output}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "type": "Button",
+            "column": 2,
+            "when": "${state.draft == ''}",
+            "icon": "\uE768",
+            "text": "${$i18n.runBtn}",
+            "tooltip": "${$i18n.runTooltip}",
+            "onClick": [
+              {
+                "type": "text.transform",
+                "format": "${$settings.enableClipboardSniffer != 'true' ? ($settings.jsonIndent == '4' ? 'jsonPretty4' : 'jsonPretty') : ($clipboard.kind == 'jwt' ? 'jwtDecode' : ($clipboard.kind == 'json' ? ($settings.jsonIndent == '4' ? 'jsonPretty4' : 'jsonPretty') : ($clipboard.kind == 'timestamp' ? 'timestampToDate' : ($clipboard.kind == 'unicodeEscape' ? 'unicodeUnescape' : ($clipboard.kind == 'urlEncoded' ? 'urlDecode' : ($clipboard.kind == 'base64' ? 'base64Decode' : ($clipboard.kind == 'url' ? 'urlDecode' : ($settings.jsonIndent == '4' ? 'jsonPretty4' : 'jsonPretty'))))))))}",
+                "text": "${$settings.enableClipboardSniffer == 'true' ? $clipboard.text : ''}",
+                "key": "output",
+                "then": [
+                  {
+                    "type": "clipboard.copy",
+                    "guard": "${$settings.autoCopyResult == 'true' && state.output != ''}",
+                    "text": "${state.output}"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "Tabs",
+        "bind": "state.activeTab",
+        "spacing": 6,
+        "children": [
+          {
+            "type": "Grid",
+            "id": "json",
+            "title": "${$i18n.tabJson}",
+            "columns": "1*,1*",
+            "spacing": 6,
+            "children": [
+              {
+                "type": "Button",
+                "horizontalAlignment": "stretch",
+                "text": "${$i18n.bJsonPretty}",
+                "onClick": {
+                  "type": "text.transform",
+                  "format": "${$settings.jsonIndent == '4' ? 'jsonPretty4' : 'jsonPretty'}",
+                  "text": "${state.draft != '' ? state.draft : ($settings.enableClipboardSniffer == 'true' ? $clipboard.text : '')}",
+                  "key": "output",
+                  "then": [
+                    {
+                      "type": "clipboard.copy",
+                      "guard": "${$settings.autoCopyResult == 'true' && state.output != ''}",
+                      "text": "${state.output}"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Button",
+                "horizontalAlignment": "stretch",
+                "text": "${$i18n.bJsonMinify}",
+                "onClick": {
+                  "type": "text.transform",
+                  "format": "jsonMinify",
+                  "text": "${state.draft != '' ? state.draft : ($settings.enableClipboardSniffer == 'true' ? $clipboard.text : '')}",
+                  "key": "output",
+                  "then": [
+                    {
+                      "type": "clipboard.copy",
+                      "guard": "${$settings.autoCopyResult == 'true' && state.output != ''}",
+                      "text": "${state.output}"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Button",
+                "horizontalAlignment": "stretch",
+                "text": "${$i18n.bUnicodeUnescape}",
+                "onClick": {
+                  "type": "text.transform",
+                  "format": "unicodeUnescape",
+                  "text": "${state.draft != '' ? state.draft : ($settings.enableClipboardSniffer == 'true' ? $clipboard.text : '')}",
+                  "key": "output",
+                  "then": [
+                    {
+                      "type": "clipboard.copy",
+                      "guard": "${$settings.autoCopyResult == 'true' && state.output != ''}",
+                      "text": "${state.output}"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Button",
+                "horizontalAlignment": "stretch",
+                "text": "${$i18n.bUnicodeEscape}",
+                "onClick": {
+                  "type": "text.transform",
+                  "format": "unicodeEscape",
+                  "text": "${state.draft != '' ? state.draft : ($settings.enableClipboardSniffer == 'true' ? $clipboard.text : '')}",
+                  "key": "output",
+                  "then": [
+                    {
+                      "type": "clipboard.copy",
+                      "guard": "${$settings.autoCopyResult == 'true' && state.output != ''}",
+                      "text": "${state.output}"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Button",
+                "horizontalAlignment": "stretch",
+                "text": "${$i18n.bJsonEscape}",
+                "onClick": {
+                  "type": "text.transform",
+                  "format": "jsonEscape",
+                  "text": "${state.draft != '' ? state.draft : ($settings.enableClipboardSniffer == 'true' ? $clipboard.text : '')}",
+                  "key": "output",
+                  "then": [
+                    {
+                      "type": "clipboard.copy",
+                      "guard": "${$settings.autoCopyResult == 'true' && state.output != ''}",
+                      "text": "${state.output}"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Button",
+                "horizontalAlignment": "stretch",
+                "text": "${$i18n.bJsonUnescape}",
+                "onClick": {
+                  "type": "text.transform",
+                  "format": "jsonUnescape",
+                  "text": "${state.draft != '' ? state.draft : ($settings.enableClipboardSniffer == 'true' ? $clipboard.text : '')}",
+                  "key": "output",
+                  "then": [
+                    {
+                      "type": "clipboard.copy",
+                      "guard": "${$settings.autoCopyResult == 'true' && state.output != ''}",
+                      "text": "${state.output}"
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "type": "Grid",
+            "id": "code",
+            "title": "${$i18n.tabCode}",
+            "columns": "1*,1*",
+            "spacing": 6,
+            "children": [
+              {
+                "type": "Button",
+                "horizontalAlignment": "stretch",
+                "text": "${$i18n.bJwtDecode}",
+                "onClick": {
+                  "type": "text.transform",
+                  "format": "jwtDecode",
+                  "text": "${state.draft != '' ? state.draft : ($settings.enableClipboardSniffer == 'true' ? $clipboard.text : '')}",
+                  "key": "output",
+                  "then": [
+                    {
+                      "type": "clipboard.copy",
+                      "guard": "${$settings.autoCopyResult == 'true' && state.output != ''}",
+                      "text": "${state.output}"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Button",
+                "horizontalAlignment": "stretch",
+                "text": "${$i18n.bSha256}",
+                "onClick": {
+                  "type": "text.transform",
+                  "format": "sha256",
+                  "text": "${state.draft != '' ? state.draft : ($settings.enableClipboardSniffer == 'true' ? $clipboard.text : '')}",
+                  "key": "output",
+                  "then": [
+                    {
+                      "type": "clipboard.copy",
+                      "guard": "${$settings.autoCopyResult == 'true' && state.output != ''}",
+                      "text": "${state.output}"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Button",
+                "horizontalAlignment": "stretch",
+                "text": "${$i18n.bBase64Encode}",
+                "onClick": {
+                  "type": "text.transform",
+                  "format": "base64Encode",
+                  "text": "${state.draft != '' ? state.draft : ($settings.enableClipboardSniffer == 'true' ? $clipboard.text : '')}",
+                  "key": "output",
+                  "then": [
+                    {
+                      "type": "clipboard.copy",
+                      "guard": "${$settings.autoCopyResult == 'true' && state.output != ''}",
+                      "text": "${state.output}"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Button",
+                "horizontalAlignment": "stretch",
+                "text": "${$i18n.bBase64Decode}",
+                "onClick": {
+                  "type": "text.transform",
+                  "format": "base64Decode",
+                  "text": "${state.draft != '' ? state.draft : ($settings.enableClipboardSniffer == 'true' ? $clipboard.text : '')}",
+                  "key": "output",
+                  "then": [
+                    {
+                      "type": "clipboard.copy",
+                      "guard": "${$settings.autoCopyResult == 'true' && state.output != ''}",
+                      "text": "${state.output}"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Button",
+                "horizontalAlignment": "stretch",
+                "text": "${$i18n.bUrlEncode}",
+                "onClick": {
+                  "type": "text.transform",
+                  "format": "urlEncode",
+                  "text": "${state.draft != '' ? state.draft : ($settings.enableClipboardSniffer == 'true' ? $clipboard.text : '')}",
+                  "key": "output",
+                  "then": [
+                    {
+                      "type": "clipboard.copy",
+                      "guard": "${$settings.autoCopyResult == 'true' && state.output != ''}",
+                      "text": "${state.output}"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Button",
+                "horizontalAlignment": "stretch",
+                "text": "${$i18n.bUrlDecode}",
+                "onClick": {
+                  "type": "text.transform",
+                  "format": "urlDecode",
+                  "text": "${state.draft != '' ? state.draft : ($settings.enableClipboardSniffer == 'true' ? $clipboard.text : '')}",
+                  "key": "output",
+                  "then": [
+                    {
+                      "type": "clipboard.copy",
+                      "guard": "${$settings.autoCopyResult == 'true' && state.output != ''}",
+                      "text": "${state.output}"
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "type": "Grid",
+            "id": "gen",
+            "title": "${$i18n.tabGen}",
+            "columns": "1*,1*",
+            "spacing": 6,
+            "children": [
+              {
+                "type": "Button",
+                "horizontalAlignment": "stretch",
+                "text": "${$i18n.bTsToDate}",
+                "onClick": {
+                  "type": "text.transform",
+                  "format": "timestampToDate",
+                  "text": "${state.draft != '' ? state.draft : ($settings.enableClipboardSniffer == 'true' ? $clipboard.text : '')}",
+                  "key": "output",
+                  "then": [
+                    {
+                      "type": "clipboard.copy",
+                      "guard": "${$settings.autoCopyResult == 'true' && state.output != ''}",
+                      "text": "${state.output}"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Button",
+                "horizontalAlignment": "stretch",
+                "text": "${$i18n.bDateToTs}",
+                "onClick": {
+                  "type": "text.transform",
+                  "format": "dateToTimestamp",
+                  "text": "${state.draft != '' ? state.draft : ($settings.enableClipboardSniffer == 'true' && $clipboard.hasText == 'true' ? $clipboard.text : 'now')}",
+                  "key": "output",
+                  "then": [
+                    {
+                      "type": "clipboard.copy",
+                      "guard": "${$settings.autoCopyResult == 'true' && state.output != ''}",
+                      "text": "${state.output}"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Button",
+                "horizontalAlignment": "stretch",
+                "text": "${$i18n.bTsNow}",
+                "onClick": {
+                  "type": "text.transform",
+                  "format": "dateToTimestamp",
+                  "text": "now",
+                  "key": "output",
+                  "then": [
+                    {
+                      "type": "clipboard.copy",
+                      "guard": "${$settings.autoCopyResult == 'true' && state.output != ''}",
+                      "text": "${state.output}"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Button",
+                "horizontalAlignment": "stretch",
+                "text": "${$i18n.bTsNowMs}",
+                "onClick": {
+                  "type": "text.transform",
+                  "format": "dateToTimestampMs",
+                  "text": "now",
+                  "key": "output",
+                  "then": [
+                    {
+                      "type": "clipboard.copy",
+                      "guard": "${$settings.autoCopyResult == 'true' && state.output != ''}",
+                      "text": "${state.output}"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Button",
+                "horizontalAlignment": "stretch",
+                "text": "${$i18n.bUuid}",
+                "onClick": {
+                  "type": "text.transform",
+                  "format": "${$settings.uuidCase == 'upper' ? 'uuidUpper' : 'uuid'}",
+                  "text": "",
+                  "key": "output",
+                  "then": [
+                    {
+                      "type": "clipboard.copy",
+                      "guard": "${$settings.autoCopyResult == 'true' && state.output != ''}",
+                      "text": "${state.output}"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "Button",
+                "horizontalAlignment": "stretch",
+                "text": "${$i18n.bUuidNoDash}",
+                "onClick": {
+                  "type": "text.transform",
+                  "format": "${$settings.uuidCase == 'upper' ? 'uuidNoDashUpper' : 'uuidNoDash'}",
+                  "text": "",
+                  "key": "output",
+                  "then": [
+                    {
+                      "type": "clipboard.copy",
+                      "guard": "${$settings.autoCopyResult == 'true' && state.output != ''}",
+                      "text": "${state.output}"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "Card",
+        "tone": "${state.transformStatus == 'error' ? 'danger' : ($transform.jwtState == 'expired' ? 'warning' : 'subtle')}",
+        "padding": "10,8,10,10",
+        "when": "${state.output != '' || state.transformStatus == 'error'}",
+        "children": [
+          {
+            "type": "Stack",
+            "spacing": 6,
+            "children": [
+              {
+                "type": "Grid",
+                "columns": "1*,Auto,Auto,Auto",
+                "spacing": 4,
+                "children": [
+                  {
+                    "type": "Text",
+                    "column": 0,
+                    "style": "caption",
+                    "verticalAlignment": "center",
+                    "text": "${state.transformStatus == 'error' ? $i18n.stFailed : ($transform.jwtState == 'expired' ? $i18n.stJwtExpired : ($transform.jwtState == 'valid' ? $i18n.stJwtOk : ($transform.jwtState == 'noexp' ? $i18n.stJwtNoExp : $i18n.stDone)))}",
+                    "color": "${state.transformStatus == 'error' ? 'danger' : ($transform.jwtState == 'expired' ? 'warning' : 'success')}"
+                  },
+                  {
+                    "type": "IconButton",
+                    "column": 1,
+                    "when": "${state.output != '' && state.transformStatus != 'error'}",
+                    "icon": "\uE74A",
+                    "size": 24,
+                    "tooltip": "${$i18n.useAsInputTooltip}",
+                    "onClick": {
+                      "type": "state.set",
+                      "key": "draft",
+                      "value": "${state.output}"
+                    }
+                  },
+                  {
+                    "type": "IconButton",
+                    "column": 2,
+                    "icon": "\uE8C8",
+                    "size": 24,
+                    "tooltip": "${$i18n.copyTooltip}",
+                    "onClick": {
+                      "type": "clipboard.copy",
+                      "guard": "${state.output != ''}",
+                      "text": "${state.output}"
+                    }
+                  },
+                  {
+                    "type": "IconButton",
+                    "column": 3,
+                    "icon": "\uE74D",
+                    "size": 24,
+                    "tooltip": "${$i18n.clearTooltip}",
+                    "onClick": [
+                      {
+                        "type": "state.set",
+                        "key": "output",
+                        "value": ""
+                      },
+                      {
+                        "type": "state.set",
+                        "key": "transformStatus",
+                        "value": ""
+                      },
+                      {
+                        "type": "state.set",
+                        "key": "transformError",
+                        "value": ""
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "Text",
+                "when": "${state.transformError != ''}",
+                "text": "${state.transformError}",
+                "style": "caption",
+                "color": "danger",
+                "maxLines": 2
+              },
+              {
+                "type": "Scroll",
+                "when": "${state.output != ''}",
+                "maxHeight": 148,
+                "children": [
+                  {
+                    "type": "Text",
+                    "text": "${state.output}",
+                    "style": "mono",
+                    "maxLines": 64
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

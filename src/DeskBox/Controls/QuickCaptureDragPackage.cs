@@ -79,6 +79,9 @@ public static class QuickCaptureDragPackage
         }
 
         dataPackage.RequestedOperation = DataPackageOperation.Copy;
+        DeskBoxDragData.SetQuickCaptureDragItems(
+            dataPackage,
+            draggedItems.Select(entry => entry.ToModel()).ToArray());
         if (draggedItems.Count > 1)
         {
             string text = QuickCaptureClipboardFormatter.FormatBatch(
@@ -104,31 +107,79 @@ public static class QuickCaptureDragPackage
             !string.IsNullOrWhiteSpace(item.ImagePath) &&
             File.Exists(item.ImagePath))
         {
-            string imagePath = item.ImagePath;
-            if (Uri.TryCreate(imagePath, UriKind.Absolute, out Uri? imageUri))
-            {
-                dataPackage.SetBitmap(
-                    Windows.Storage.Streams.RandomAccessStreamReference.CreateFromUri(
-                        imageUri));
-            }
-
-            dataPackage.SetDataProvider(StandardDataFormats.StorageItems, async request =>
+            string imagePath = Path.GetFullPath(item.ImagePath);
+            bool attachedNativeShellPayload = NativeShellFileDragProvider.TryAttach(dataPackage, [imagePath]);
+            dataPackage.SetDataProvider(StandardDataFormats.Bitmap, async request =>
             {
                 var deferral = request.GetDeferral();
                 try
                 {
-                    StorageFile file = await StorageFile.GetFileFromPathAsync(imagePath);
-                    request.SetData(new List<IStorageItem> { file });
+                    try
+                    {
+                        StorageFile file = await StorageFile.GetFileFromPathAsync(imagePath);
+                        request.SetData(
+                            Windows.Storage.Streams.RandomAccessStreamReference.CreateFromFile(file));
+                    }
+                    catch
+                    {
+                        // Store MSIX builds mark %USERPROFILE%\DeskBox\.appdata as Hidden,
+                        // causing RuntimeBroker to reject GetFileFromPathAsync (0x8007016C).
+                        // Serve an in-process memory stream instead.
+                        byte[] bytes = await File.ReadAllBytesAsync(imagePath);
+                        var memStream = new Windows.Storage.Streams.InMemoryRandomAccessStream();
+                        using (var writer = new Windows.Storage.Streams.DataWriter(memStream.GetOutputStreamAt(0)))
+                        {
+                            writer.WriteBytes(bytes);
+                            await writer.StoreAsync();
+                            await writer.FlushAsync();
+                        }
+
+                        memStream.Seek(0);
+                        request.SetData(
+                            Windows.Storage.Streams.RandomAccessStreamReference.CreateFromStream(memStream));
+                    }
                 }
                 catch (Exception ex)
                 {
-                    App.Log($"[QuickCapture] Failed to provide dragged image: {ex}");
+                    App.Log($"[QuickCapture] Failed to provide dragged bitmap: {ex}");
                 }
                 finally
                 {
                     deferral.Complete();
                 }
             });
+
+            if (!attachedNativeShellPayload)
+            {
+                dataPackage.SetDataProvider(StandardDataFormats.StorageItems, async request =>
+                {
+                    var deferral = request.GetDeferral();
+                    try
+                    {
+                        StorageFile file;
+                        try
+                        {
+                            file = await StorageFile.GetFileFromPathAsync(imagePath);
+                        }
+                        catch
+                        {
+                            string stagedPath = DeskBox.Platform.StoreUserAssetMigrationFileOps
+                                .StageTemporaryDragExportCopy(imagePath, "QuickCaptureExports");
+                            file = await StorageFile.GetFileFromPathAsync(stagedPath);
+                        }
+
+                        request.SetData(new List<IStorageItem> { file });
+                    }
+                    catch (Exception ex)
+                    {
+                        App.Log($"[QuickCapture] Failed to provide dragged image: {ex}");
+                    }
+                    finally
+                    {
+                        deferral.Complete();
+                    }
+                });
+            }
             if (!string.IsNullOrWhiteSpace(item.Body) &&
                 !string.Equals(item.Body, "Image", StringComparison.Ordinal))
             {

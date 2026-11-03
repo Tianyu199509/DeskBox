@@ -1,4 +1,4 @@
-﻿using DeskBox.Controls;
+using DeskBox.Controls;
 using DeskBox.Features.Todo;
 using DeskBox.Features.Search;
 using DeskBox.Features.Backup;
@@ -40,16 +40,18 @@ public sealed partial class SettingsWindow : Window
         bool HasReset,
         bool HasToggle);
 
-    private const int DefaultWindowWidth = 920;
-    private const int DefaultWindowHeight = 760;
-    private const int MinWindowWidth = 800;
-    private const int MinWindowHeight = 560;
+    internal const int DefaultWindowWidth = 1000;
+    internal const int DefaultWindowHeight = 760;
+    internal const int MinWindowWidth = 500;
+    internal const int MinWindowHeight = 400;
     private const int WindowWorkAreaMargin = 48;
-    private const double ContentMaxWidth = 760;
-    private const double PageSidePadding = 20;
+    internal const double ContentMaxWidth = 1000;
     private const double RowStackContentThreshold = 620;
-    private const double NarrowTitleThreshold = 560;
-    private const double NavigationCompactThreshold = 760;
+    internal const double NavigationMinimalThreshold = 640;
+    internal const double NavigationCompactThreshold = 860;
+    private const double MinimalContentTopClearance = 44;
+    private const double DefaultCaptionInsetDip = 138;
+    private const double UpdateCardBottomClearance = 196;
     private static readonly TimeSpan ResizeSettleDelay = TimeSpan.FromMilliseconds(120);
     private static readonly TimeSpan SectionLayoutSettleDelay = TimeSpan.FromMilliseconds(90);
     private const uint WmGetMinMaxInfo = 0x0024;
@@ -80,6 +82,10 @@ public sealed partial class SettingsWindow : Window
     // real close there — the process exits with the window.
     internal bool _isHostProcessWindow;
     private bool _hasShownOnce;
+    private NavigationViewPaneDisplayMode? _activeResponsivePaneMode;
+    private SettingsWindowPlacement? _lastNormalPlacement;
+    private bool _isMaximizedPlacement;
+    private bool _restoreMaximizedOnFirstShow;
     private bool _isAppearanceSliderDragging;
     private bool _isRefreshingHotkeyControls;
     private bool _isRefreshingFeatureWidgetList;
@@ -95,36 +101,24 @@ public sealed partial class SettingsWindow : Window
         new Dictionary<string, SettingsSectionRoute>(StringComparer.Ordinal)
         {
             ["General"] = new("General", "Settings.Section.General", null, "General"),
-            ["PerformanceSettings"] = new("PerformanceSettings", "Settings.Performance.Title", "General", "General"),
+            ["AiSettings"] = new("AiSettings", "Settings.Nav.AiSettings", "General", "General"),
             ["Appearance"] = new("Appearance", "Settings.Section.Appearance", null, "Appearance"),
-            ["CapsuleMode"] = new("CapsuleMode", "Settings.Section.CapsuleMode", null, "CapsuleMode"),
-            ["WidgetGroups"] = new("WidgetGroups", "Settings.Section.WidgetGroups", "Appearance", "Appearance"),
-            ["AppearanceDetail"] = new("AppearanceDetail", "Settings.Appearance.DetailTitle", null, "AppearanceDetail"),
-            ["FeatureWidgets"] = new("FeatureWidgets", "Settings.Section.FeatureWidgets", null, "FeatureWidgets"),
             ["Interaction"] = new("Interaction", "Settings.Section.Interaction", null, "Interaction"),
-            ["Displays"] = new("Displays", "Settings.Displays.Title", "General", "General"),
-            ["Advanced"] = new("Advanced", "Settings.Section.Advanced", null, "Interaction"),
-            ["Maintenance"] = new("Maintenance", "Settings.Section.Maintenance", null, "Maintenance"),
-            ["About"] = new("About", "Settings.Nav.About", null, "About"),
-            ["FileDisplaySettings"] = new("FileDisplaySettings", "Settings.Group.FileLayout.Title", "AppearanceDetail", "AppearanceDetail"),
-            ["ManagedStorage"] = new("ManagedStorage", "Settings.ManagedStorage.PageTitle", "AppearanceDetail", "AppearanceDetail"),
+            ["WidgetGroups"] = new("WidgetGroups", "Settings.Section.WidgetGroups", "Interaction", "Interaction"),
+            ["Displays"] = new("Displays", "Settings.Displays.Title", "Interaction", "Interaction"),
+            ["AppearanceDetail"] = new("AppearanceDetail", "Settings.Appearance.DetailTitle", null, "AppearanceDetail"),
             ["FileStackSettings"] = new("FileStackSettings", "Settings.FileStacks.PageTitle", "AppearanceDetail", "AppearanceDetail"),
-            ["DesktopOrganizationSettings"] = new("DesktopOrganizationSettings", "DesktopOrganization.Settings.Title", "AppearanceDetail", "AppearanceDetail"),
+            ["FeatureWidgets"] = new("FeatureWidgets", "Settings.Section.FeatureWidgets", null, "FeatureWidgets"),
+            ["CustomWidgetSettings"] = new("CustomWidgetSettings", "CustomWidget.Settings.Title", null, "FeatureWidgets"),
             ["QuickCaptureSettings"] = new("QuickCaptureSettings", "Settings.QuickCapture.Title", "FeatureWidgets", "FeatureWidgets"),
             ["TodoSettings"] = new("TodoSettings", "Settings.Todo.Title", "FeatureWidgets", "FeatureWidgets"),
             ["MusicSettings"] = new("MusicSettings", "Settings.Music.Title", "FeatureWidgets", "FeatureWidgets"),
             ["WeatherSettings"] = new("WeatherSettings", "Settings.Weather.Title", "FeatureWidgets", "FeatureWidgets"),
             ["GlanceSettings"] = new("GlanceSettings", "Glance.Settings.Title", "FeatureWidgets", "FeatureWidgets"),
-            ["SearchSettings"] = new("SearchSettings", "Settings.Search.Title", "FeatureWidgets", "FeatureWidgets"),
-            ["AppearanceMaterialSettings"] = new("AppearanceMaterialSettings", "Settings.Material.Title", "Appearance", "Appearance"),
-            ["AppearanceDensitySettings"] = new("AppearanceDensitySettings", "Settings.Density.Title", "Appearance", "Appearance"),
-            ["AppearanceWindowSettings"] = new("AppearanceWindowSettings", "Settings.Group.AppVisual.Title", "Appearance", "Appearance"),
-            ["AppearanceAnimationSettings"] = new("AppearanceAnimationSettings", "Settings.Group.Animation.Title", "Appearance", "Appearance"),
-            ["CapsuleOverridesSettings"] = new("CapsuleOverridesSettings", "Settings.Capsule.Overrides.Title", "CapsuleMode", "CapsuleMode"),
-            ["BackupRestoreSettings"] = new("BackupRestoreSettings", "Settings.DataBackup.Title", "Maintenance", "Maintenance"),
-            ["CloudBackupSettings"] = new("CloudBackupSettings", "Settings.CloudBackup.Title", "Maintenance", "Maintenance"),
-            ["DataHealthSettings"] = new("DataHealthSettings", "Settings.AttachmentHealth.Title", "Maintenance", "Maintenance"),
-            ["CompatibilityDiagnosticsSettings"] = new("CompatibilityDiagnosticsSettings", "Settings.DragDropPermission.Title", "Maintenance", "Maintenance")
+            ["ClipboardSettings"] = new("ClipboardSettings", "Clipboard.Settings.Title", "FeatureWidgets", "FeatureWidgets"),
+            ["SearchSettings"] = new("SearchSettings", "Settings.Search.Title", null, "SearchSettings"),
+            ["Maintenance"] = new("Maintenance", "Settings.Section.Maintenance", null, "Maintenance"),
+            ["About"] = new("About", "Settings.Nav.About", null, "About")
         };
 
     public SettingsViewModel ViewModel { get; }
@@ -183,7 +177,6 @@ public sealed partial class SettingsWindow : Window
         BackupSettingsViewModel backupSettings, IBackupRestoreActions backupRestoreActions,
             IQuickCaptureSettings quickCaptureSettings,
             DeskBox.Features.QuickCapture.QuickCaptureSettingsViewModel quickCaptureSettingsEditor,
-            ISearchFeatureSettings searchFeatureSettings,
         IBackupCommands backupCommands,
         DeskBox.Features.Appearance.AppearanceSettingsViewModel appearanceSettings,
         DeskBox.Features.Capsule.CapsuleSettingsViewModel capsuleSettings,
@@ -241,7 +234,7 @@ public sealed partial class SettingsWindow : Window
         _themeService = themeService;
         _localizationService = localizationService;
         ViewModel = new SettingsViewModel(settingsService, themeService, todoSettings, weatherSettings,
-            backupSettings, quickCaptureSettings, quickCaptureSettingsEditor, searchFeatureSettings, appearanceSettings,
+            backupSettings, quickCaptureSettings, quickCaptureSettingsEditor, appearanceSettings,
             capsuleSettings, interactionSettings, fileDisplaySettings, fileStackSettings,
             groupNavigationSettings, featureWidgetsSettings, musicSettings,
             managedStorageSettings, maintenanceSettings, performanceSettings, hotkeyActions,
@@ -261,14 +254,16 @@ public sealed partial class SettingsWindow : Window
 
         SettingsRoot.DataContext = ViewModel;
         // The General section stays on the shell (language and startup are
-        // host-lifeline surfaces, batch 50 adjudication), but its two
-        // cross-domain combos reach their section editors through
-        // element-level DataContexts: the inline performance preset combo
-        // and the attachment-storage combo resolve their {Binding} paths
-        // against the performance / feature-widgets editors exactly like
-        // the migrated sections do.
+        // host-lifeline surfaces, batch 50 adjudication); its inline
+        // performance preset combo resolves its {Binding} paths against the
+        // performance editor directly (the performance page heads itself
+        // with the same selector — both write the editor, in sync).
+        PerformanceInlineCard.DataContext = _performanceSettingsViewModel;
         PerformanceModeInlineComboBox.DataContext = _performanceSettingsViewModel;
-        AttachmentStorageModeComboBox.DataContext = _featureWidgetsSettingsViewModel;
+        foreach (FrameworkElement item in PerformanceInlineCard.Items.OfType<FrameworkElement>())
+        {
+            item.DataContext = _performanceSettingsViewModel;
+        }
         Bindings.Initialize();
         SettingsRoot.AddHandler(
             UIElement.PointerPressedEvent,
@@ -280,6 +275,7 @@ public sealed partial class SettingsWindow : Window
             handledEventsToo: true);
         CollectResponsiveRows(SettingsRoot);
         SettingsRoot.Loaded += SettingsRoot_Loaded;
+        SettingsRoot.KeyDown += SettingsRoot_KeyDown;
         LogConstructionCheckpoint("bindings-and-responsive-tree");
 
         WindowsCompatibilityService.ApplySafeBackdrop(this);
@@ -292,25 +288,30 @@ public sealed partial class SettingsWindow : Window
         var windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(_hWnd);
         _appWindow = AppWindow.GetFromWindowId(windowId);
         AppBranding.ApplyWindowIcon(_appWindow);
-        InstallMinimumSizeHook();
-        ApplyInitialWindowBounds(windowId);
-        LogConstructionCheckpoint("native-window");
-
         if (_appWindow.Presenter is OverlappedPresenter presenter)
         {
             presenter.IsResizable = true;
             presenter.IsMaximizable = true;
             presenter.IsMinimizable = true;
         }
+        InstallMinimumSizeHook();
+        ApplyInitialWindowBounds(windowId);
+        UpdateTitleBarInsets();
+        LogConstructionCheckpoint("native-window");
 
         _themeService.TrackWindow(this);
         _themeService.AppearanceChanged += OnAppearanceChanged;
         _localizationService.LanguageChanged += OnLanguageChanged;
         ViewModel.PropertyChanged += ViewModel_PropertyChanged;
+        _managedStorageSettingsViewModel.PropertyChanged += ManagedStorageSettingsViewModel_PropertyChanged;
+        _capsuleSettingsViewModel.PropertyChanged += CapsuleSettingsViewModel_PropertyChanged;
+        _backupSettingsViewModel.PropertyChanged += BackupSettingsViewModel_PropertyChanged;
+        _groupNavigationSettingsViewModel.PropertyChanged += GroupNavigationSettingsViewModel_PropertyChanged;
         _hotkeyActions.RegistrationChanged += OnGlobalHotkeyRegistrationChanged;
 
         ApplyTitleBarButtonColors();
         ApplyLocalizedText();
+        RefreshAiSettingsEntrySummary();
         RefreshManagedStoragePathWarning();
         LogConstructionCheckpoint("localized-content");
         SettingsNavigationView.SelectedItem = GeneralNavItem;
@@ -319,10 +320,14 @@ public sealed partial class SettingsWindow : Window
         LogConstructionCheckpoint("initial-section");
 
         SizeChanged += SettingsWindow_SizeChanged;
+        SaveFailedInfoBar.Closed += SaveFailedInfoBar_Closed;
+        SettingsNavigationView.PaneOpening += SettingsNavigationView_PaneOpening;
+        SettingsNavigationView.PaneClosing += SettingsNavigationView_PaneClosing;
 
         _resizeSettleTimer.Tick += ResizeSettleTimer_Tick;
         _sectionLayoutSettleTimer.Tick += SectionLayoutSettleTimer_Tick;
         Activated += SettingsWindow_Activated;
+        _appWindow.Changed += SettingsWindow_AppWindowChanged;
         _appWindow.Closing += SettingsWindow_AppWindowClosing;
         // Batch R12 (window-state audit, third time this debt surfaced):
         // unplug/resolution changes can leave this window pressed outside
@@ -353,7 +358,10 @@ public sealed partial class SettingsWindow : Window
         // break in the refresh chain) can never leave the window visibly
         // frozen on a stale theme.
         _themeService.ApplyToWindow(this);
+        bool wasShownOnce = _hasShownOnce;
         _appWindow.Show();
+        EnsureFirstShowPlacementApplied();
+        UpdateTitleBarInsets();
         UpdateSearchSettingsActivity();
         UpdateBackupSettingsActivity();
         // Route through the manager so a quick-reveal raised session (widget
@@ -364,13 +372,25 @@ public sealed partial class SettingsWindow : Window
             _hWnd,
             "settings-shown");
         Activate();
-        if (_hasShownOnce)
+        if (wasShownOnce)
         {
             RefreshOnReopen();
         }
-        else
+    }
+
+    private void EnsureFirstShowPlacementApplied()
+    {
+        if (_hasShownOnce)
         {
-            _hasShownOnce = true;
+            return;
+        }
+
+        _hasShownOnce = true;
+        if (_restoreMaximizedOnFirstShow &&
+            _appWindow.Presenter is OverlappedPresenter presenter)
+        {
+            _restoreMaximizedOnFirstShow = false;
+            presenter.Maximize();
         }
     }
 
@@ -395,36 +415,25 @@ public sealed partial class SettingsWindow : Window
 
         RefreshFeatureWidgetList();
         RefreshVisibleSettingsPageData();
+        UpdateTitleBarInsets();
         UpdateResponsiveLayout(GetWindowWidth());
         ApplyToggleSwitchContentVisibility();
-    }
-
-    // The file-name width/line cards migrated from the density section bind
-    // through the appearance editor (FileNameWidthScale, FileNameLineCount and
-    // their option lists live there), while the file-display section's
-    // DataContext is the file-display editor. Re-target just this panel when
-    // it loads, mirroring the element-level DataContext pattern the General
-    // section uses for its cross-domain combos.
-    private void FileNameLayoutPanel_Loaded(object sender, RoutedEventArgs e)
-    {
-        if (_isClosed || sender is not StackPanel panel)
-        {
-            return;
-        }
-
-        panel.DataContext = _appearanceSettingsViewModel;
+        ApplySegmentedNeutralStates(SettingsRoot);
     }
 
     private void SettingsRoot_Loaded(object sender, RoutedEventArgs e)
     {
         var stopwatch = Stopwatch.StartNew();
+        EnsureFirstShowPlacementApplied();
         CollectResponsiveRows(SettingsRoot);
         long responsiveTreeMilliseconds = stopwatch.ElapsedMilliseconds;
         RefreshFeatureWidgetList();
         long featureWidgetMilliseconds = stopwatch.ElapsedMilliseconds;
         RefreshVisibleSettingsPageData();
+        UpdateTitleBarInsets();
         UpdateResponsiveLayout(GetWindowWidth());
         ApplyToggleSwitchContentVisibility();
+        ApplySegmentedNeutralStates(SettingsRoot);
         stopwatch.Stop();
         App.Log(
             $"[SettingsPerf] Loaded responsiveTreeMs={responsiveTreeMilliseconds} " +
@@ -435,8 +444,34 @@ public sealed partial class SettingsWindow : Window
 
     private void SettingsWindow_SizeChanged(object sender, WindowSizeChangedEventArgs args)
     {
+        UpdateTitleBarInsets();
         UpdateResponsiveLayout(args.Size.Width, preferMeasuredContentWidth: false);
         RestartResizeSettleTimer();
+    }
+
+    private void SettingsNavigationView_PaneOpening(NavigationView sender, object args)
+    {
+        UpdateResponsiveLayout(GetWindowWidth(), preferMeasuredContentWidth: false, explicitPaneOpenOverride: true);
+        RestartResizeSettleTimer();
+    }
+
+    private void SettingsNavigationView_PaneClosing(NavigationView sender, NavigationViewPaneClosingEventArgs args)
+    {
+        UpdateResponsiveLayout(GetWindowWidth(), preferMeasuredContentWidth: false, explicitPaneOpenOverride: false);
+        RestartResizeSettleTimer();
+    }
+
+    private void SettingsWindow_AppWindowChanged(AppWindow sender, AppWindowChangedEventArgs args)
+    {
+        if (_isClosed || !_hasShownOnce)
+        {
+            return;
+        }
+
+        if (args.DidPresenterChange || args.DidPositionChange || args.DidSizeChange)
+        {
+            CaptureLiveWindowPlacement();
+        }
     }
 
     // The XAML tree of a closed window is retained by native references that
@@ -471,8 +506,16 @@ public sealed partial class SettingsWindow : Window
             return;
         }
 
+        RefreshDisplaysEntrySummary();
+
         try
         {
+            if (_appWindow.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Maximized })
+            {
+                UpdateTitleBarInsets();
+                return;
+            }
+
             if (!Win32Helper.GetWindowRect(_hWnd, out Win32Helper.RECT rect))
             {
                 return;
@@ -537,15 +580,10 @@ public sealed partial class SettingsWindow : Window
 
             if (changed)
             {
-                Win32Helper.SetWindowPos(
-                    _hWnd,
-                    IntPtr.Zero,
-                    x,
-                    y,
-                    width,
-                    height,
-                    0x0040 /* SWP_NOZORDER */ | 0x0004 /* SWP_NOACTIVATE */);
+                _appWindow.MoveAndResize(new Windows.Graphics.RectInt32(x, y, width, height));
             }
+
+            UpdateTitleBarInsets();
         }
         catch (Exception ex)
         {
@@ -557,6 +595,8 @@ public sealed partial class SettingsWindow : Window
         AppWindow sender,
         AppWindowClosingEventArgs args)
     {
+        PersistWindowPlacement();
+
         if (_allowRealClose || _isHostProcessWindow)
         {
             return;
@@ -576,8 +616,11 @@ public sealed partial class SettingsWindow : Window
         _appActions.ScheduleSettingsHiddenCleanup();
     }
 
-    private void SettingsRoot_ActualThemeChanged(FrameworkElement sender, object args) =>
+    private void SettingsRoot_ActualThemeChanged(FrameworkElement sender, object args)
+    {
         ApplyTitleBarButtonColors();
+        ApplySegmentedNeutralStates(SettingsRoot);
+    }
 
     private void SettingsWindow_Closed(object sender, WindowEventArgs args)
     {
@@ -586,6 +629,7 @@ public sealed partial class SettingsWindow : Window
             return;
         }
 
+        PersistWindowPlacement();
         _isClosed = true;
         // The app-scoped update service outlives this window; its download
         // event mirror must not keep the view model alive.
@@ -596,11 +640,16 @@ public sealed partial class SettingsWindow : Window
         _searchSettingsViewModel.Dispose();
         _backupSettingsViewModel.Deactivate();
         Activated -= SettingsWindow_Activated;
+        _appWindow.Changed -= SettingsWindow_AppWindowChanged;
         _appWindow.Closing -= SettingsWindow_AppWindowClosing;
         App.Current.DisplayTopologyChanged -= SettingsWindow_DisplayTopologyChanged;
         Closed -= SettingsWindow_Closed;
         SizeChanged -= SettingsWindow_SizeChanged;
+        SaveFailedInfoBar.Closed -= SaveFailedInfoBar_Closed;
+        SettingsNavigationView.PaneOpening -= SettingsNavigationView_PaneOpening;
+        SettingsNavigationView.PaneClosing -= SettingsNavigationView_PaneClosing;
         SettingsRoot.Loaded -= SettingsRoot_Loaded;
+        SettingsRoot.KeyDown -= SettingsRoot_KeyDown;
         SettingsRoot.ActualThemeChanged -= SettingsRoot_ActualThemeChanged;
         SettingsRoot.RemoveHandler(UIElement.PointerPressedEvent, _settingsRootPointerPressedHandler);
         SettingsRoot.RemoveHandler(UIElement.PointerReleasedEvent, _settingsRootPointerReleasedHandler);
@@ -613,9 +662,76 @@ public sealed partial class SettingsWindow : Window
         _sectionLayoutSettleTimer.Tick -= SectionLayoutSettleTimer_Tick;
         ClearSettingsSearchHighlight();
         ClearFeatureSettingsExpanderCallbacks();
+        if (AboutDiagnosticsExpander is { } aboutDiag)
+        {
+            foreach (FrameworkElement item in aboutDiag.Items.OfType<FrameworkElement>())
+            {
+                item.DataContext = null;
+            }
+            aboutDiag.DataContext = null;
+        }
+        if (WidgetGroupDetailPresenter is { } groupPresenter)
+        {
+            groupPresenter.Content = null;
+        }
+        if (CapsuleModeSection is not null)
+        {
+            CapsuleModeSection.ViewModel = null;
+            CapsuleModeSection.Performance = null;
+            CapsuleModeSection.DataContext = null;
+        }
+        if (AppearanceDetailSection is not null)
+        {
+            AppearanceDetailSection.FileStack = null;
+            AppearanceDetailSection.FeatureWidgets = null;
+            AppearanceDetailSection.Interaction = null;
+            AppearanceDetailSection.ManagedStorage = null;
+            AppearanceDetailSection.FileDisplay = null;
+            AppearanceDetailSection.Appearance = null;
+            AppearanceDetailSection.AppActions = null;
+        }
         foreach (FrameworkElement section in _settingsSectionElements.Values)
         {
             section.Loaded -= DeferredSettingsSection_Loaded;
+            if (section is CustomWidgetSettingsSection customWidgetSection)
+            {
+                customWidgetSection.SubPageChanged -= OnCustomWidgetSubPageChanged;
+                customWidgetSection.NavigateToAiSettingsRequested -= OnNavigateToAiSettingsRequested;
+            }
+            if (section is AiSettingsSection aiSettingsSection)
+            {
+                aiSettingsSection.AiConfigurationChanged -= AiSettingsSection_AiConfigurationChanged;
+            }
+            if (section is FileWidgetSettingsSection fileWidgetSection)
+            {
+                fileWidgetSection.NavigationRequested -= SettingsSection_NavigationRequested;
+                fileWidgetSection.SubPageChanged -= AppearanceDetailSection_SubPageChanged;
+                fileWidgetSection.OpenStoragePathRequested -= OpenManagedStoragePathButton_Click;
+                fileWidgetSection.ChangeStoragePathRequested -= ChangeManagedStoragePathButton_Click;
+                fileWidgetSection.QuickAccessToggled -= AppearanceDetailSection_QuickAccessToggled;
+                fileWidgetSection.DesktopShortcutToggled -= AppearanceDetailSection_DesktopShortcutToggled;
+                fileWidgetSection.ManageOrphanFoldersRequested -= ManageOrphanFoldersButton_Click;
+                fileWidgetSection.SliderDragStarted -= AppearanceSection_SliderDragStarted;
+                fileWidgetSection.SliderDragCompleted -= AppearanceSection_SliderDragCompleted;
+            }
+            if (section is AppearanceSettingsSection appearanceSection)
+            {
+                appearanceSection.NavigationRequested -= SettingsSection_NavigationRequested;
+                appearanceSection.SubPageChanged -= AppearanceSection_SubPageChanged;
+                appearanceSection.ChooseBackgroundImageRequested -= AppearanceSection_ChooseBackgroundImageRequested;
+                appearanceSection.ClearPerWidgetBackgroundsRequested -= AppearanceSection_ClearPerWidgetBackgroundsRequested;
+                appearanceSection.OpenSystemTransparencyRequested -= AppearanceSection_OpenSystemTransparencyRequested;
+                appearanceSection.SliderDragStarted -= AppearanceSection_SliderDragStarted;
+                appearanceSection.SliderDragCompleted -= AppearanceSection_SliderDragCompleted;
+            }
+            if (section is GlanceWidgetSettingsSection glanceSection)
+            {
+                glanceSection.ResetGlanceRequested -= OnFeatureSubPageWidgetReset;
+            }
+            if (section is ClipboardSettingsSection clipboardSection)
+            {
+                clipboardSection.ResetClipboardRequested -= OnFeatureSubPageWidgetReset;
+            }
             Microsoft.UI.Xaml.Markup.XamlBindingHelper.GetDataTemplateComponent(section)?.Recycle();
             section.DataContext = null;
         }
@@ -624,25 +740,24 @@ public sealed partial class SettingsWindow : Window
         _themeService.AppearanceChanged -= OnAppearanceChanged;
         _localizationService.LanguageChanged -= OnLanguageChanged;
         ViewModel.PropertyChanged -= ViewModel_PropertyChanged;
+        _managedStorageSettingsViewModel.PropertyChanged -= ManagedStorageSettingsViewModel_PropertyChanged;
+        _capsuleSettingsViewModel.PropertyChanged -= CapsuleSettingsViewModel_PropertyChanged;
+        _backupSettingsViewModel.PropertyChanged -= BackupSettingsViewModel_PropertyChanged;
+        _groupNavigationSettingsViewModel.PropertyChanged -= GroupNavigationSettingsViewModel_PropertyChanged;
         _hotkeyActions.RegistrationChanged -= OnGlobalHotkeyRegistrationChanged;
 
-        if (AppearanceDetailSection is not null)
+        foreach (FrameworkElement item in PerformanceInlineCard.Items.OfType<FrameworkElement>())
         {
-            AppearanceDetailSection.FileStack = null;
-            AppearanceDetailSection.FeatureWidgets = null;
-            AppearanceDetailSection.Interaction = null;
+            item.DataContext = null;
         }
-        if (CapsuleModeSection is not null)
-        {
-            CapsuleModeSection.ViewModel = null;
-        }
-        Bindings.StopTracking();
+        PerformanceModeInlineComboBox.DataContext = null;
+        PerformanceInlineCard.DataContext = null;
+        Bindings?.StopTracking();
         Localized.UntrackTree(SettingsRoot);
         SettingsRoot.DataContext = null;
         // The release-notes window is owned by App's single flight now; it
         // outlives this window on purpose and is closed by shutdown steps.
         ClearFeatureWidgetRows();
-        ManagedStorageFolderList?.Children.Clear();
         ViewModel.Dispose();
         _settingsSearchResults = Array.Empty<SettingsSearchResult>();
         _settingsSectionElements.Clear();
@@ -735,27 +850,81 @@ public sealed partial class SettingsWindow : Window
             : _appWindow.Size.Width / GetCurrentDpiScale();
     }
 
-    private void UpdateResponsiveLayout(double width, bool preferMeasuredContentWidth = true)
+    private void UpdateTitleBarInsets()
     {
-        bool useCompactNavigation = width < NavigationCompactThreshold;
-
-        var targetPaneDisplayMode = useCompactNavigation
-            ? NavigationViewPaneDisplayMode.LeftCompact
-            : NavigationViewPaneDisplayMode.Left;
-        if (SettingsNavigationView.PaneDisplayMode != targetPaneDisplayMode)
+        if (_isClosed || TitleBarLeftInsetColumn is null || TitleBarRightInsetColumn is null)
         {
-            SettingsNavigationView.PaneDisplayMode = targetPaneDisplayMode;
+            return;
         }
 
-        bool targetPaneOpen = !useCompactNavigation;
-        if (SettingsNavigationView.IsPaneOpen != targetPaneOpen)
+        double scale = SettingsWindowPlacementStore.NormalizeDpiScale(GetCurrentDpiScale());
+        int leftInsetPx = _appWindow.TitleBar.LeftInset;
+        int rightInsetPx = _appWindow.TitleBar.RightInset;
+        if (leftInsetPx <= 0 && rightInsetPx <= 0)
         {
-            SettingsNavigationView.IsPaneOpen = targetPaneOpen;
+            bool isRtl = SettingsRoot?.FlowDirection == FlowDirection.RightToLeft;
+            TitleBarLeftInsetColumn.Width = new GridLength(isRtl ? DefaultCaptionInsetDip : 0);
+            TitleBarRightInsetColumn.Width = new GridLength(isRtl ? 0 : DefaultCaptionInsetDip);
+            return;
         }
 
-        double expectedPaneWidth = useCompactNavigation
-            ? SettingsNavigationView.CompactPaneLength
-            : SettingsNavigationView.OpenPaneLength;
+        TitleBarLeftInsetColumn.Width = new GridLength(Math.Max(0, leftInsetPx / scale));
+        TitleBarRightInsetColumn.Width = new GridLength(Math.Max(0, rightInsetPx / scale));
+    }
+
+    internal static NavigationViewPaneDisplayMode ResolveResponsivePaneDisplayMode(double width) =>
+        width < NavigationMinimalThreshold
+            ? NavigationViewPaneDisplayMode.LeftMinimal
+            : width < NavigationCompactThreshold
+                ? NavigationViewPaneDisplayMode.LeftCompact
+                : NavigationViewPaneDisplayMode.Left;
+
+    internal static double ResolveResponsivePageSidePadding(double width) =>
+        width < NavigationMinimalThreshold
+            ? 20
+            : width < NavigationCompactThreshold
+                ? 28
+                : 36;
+
+    private void UpdateResponsiveLayout(
+        double width,
+        bool preferMeasuredContentWidth = true,
+        bool? explicitPaneOpenOverride = null)
+    {
+        NavigationViewPaneDisplayMode targetPaneDisplayMode = ResolveResponsivePaneDisplayMode(width);
+
+        // Stateful responsive transitions: only apply the tier's default
+        // IsPaneOpen when crossing a width breakpoint so a manual hamburger
+        // toggle is not undone by section switches or settle timers.
+        if (_activeResponsivePaneMode != targetPaneDisplayMode)
+        {
+            _activeResponsivePaneMode = targetPaneDisplayMode;
+            if (SettingsNavigationView.PaneDisplayMode != targetPaneDisplayMode)
+            {
+                SettingsNavigationView.PaneDisplayMode = targetPaneDisplayMode;
+            }
+
+            bool defaultPaneOpen = targetPaneDisplayMode == NavigationViewPaneDisplayMode.Left;
+            if (SettingsNavigationView.IsPaneOpen != defaultPaneOpen)
+            {
+                SettingsNavigationView.IsPaneOpen = defaultPaneOpen;
+            }
+        }
+
+        SettingsContentRoot.Margin = targetPaneDisplayMode == NavigationViewPaneDisplayMode.LeftMinimal
+            ? new Thickness(0, MinimalContentTopClearance, 0, 0)
+            : new Thickness(0);
+
+        bool effectivePaneOpen = explicitPaneOpenOverride ?? SettingsNavigationView.IsPaneOpen;
+        double expectedPaneWidth = targetPaneDisplayMode switch
+        {
+            NavigationViewPaneDisplayMode.LeftMinimal => 0,
+            NavigationViewPaneDisplayMode.LeftCompact => SettingsNavigationView.CompactPaneLength,
+            _ => effectivePaneOpen
+                ? SettingsNavigationView.OpenPaneLength
+                : SettingsNavigationView.CompactPaneLength
+        };
+
         double calculatedContentSurfaceWidth = Math.Max(0, width - expectedPaneWidth);
         double contentSurfaceWidth = calculatedContentSurfaceWidth;
         if (preferMeasuredContentWidth && SettingsContentRoot.ActualWidth > 0)
@@ -765,21 +934,15 @@ public sealed partial class SettingsWindow : Window
                 : SettingsContentRoot.ActualWidth;
         }
 
-        double availableContentWidth = Math.Max(0, contentSurfaceWidth - PageSidePadding * 2);
+        double pageSidePadding = ResolveResponsivePageSidePadding(width);
+        double availableContentWidth = Math.Max(0, contentSurfaceWidth - pageSidePadding * 2);
         bool isNarrow = availableContentWidth < RowStackContentThreshold;
+        double bottomPadding = ViewModel.UpdateActivityCardVisibility == Visibility.Visible
+            ? UpdateCardBottomClearance
+            : isNarrow ? 34 : 38;
 
-        PageScroller.Padding = isNarrow
-            ? new Thickness(PageSidePadding, 16, PageSidePadding, 34)
-            : new Thickness(PageSidePadding, 16, PageSidePadding, 38);
-        SettingsBreadcrumbHost.Padding = new Thickness(PageSidePadding, 16, PageSidePadding, 0);
-
-        // The search box has no explicit Height (a fixed 32px height corrupted
-        // the template's re-measure on width changes: corners flattened and
-        // the query icon escaped the box). Width stays responsive so the box
-        // keeps its intended size instead of collapsing to MinWidth.
-        SettingsSearchBox.Width = Math.Min(
-            520,
-            Math.Max(260, width * 0.5));
+        PageScroller.Padding = new Thickness(pageSidePadding, 16, pageSidePadding, bottomPadding);
+        SettingsBreadcrumbHost.Padding = new Thickness(pageSidePadding, 16, pageSidePadding, 0);
 
         ContentHost.Width = Math.Min(ContentMaxWidth, availableContentWidth);
         ContentHost.MaxWidth = ContentMaxWidth;
@@ -787,15 +950,6 @@ public sealed partial class SettingsWindow : Window
         // math so its leading edge stays aligned with the cards below.
         SettingsBreadcrumbBar.Width = Math.Min(ContentMaxWidth, availableContentWidth);
         SettingsBreadcrumbBar.MaxWidth = ContentMaxWidth;
-        if (PathActionsPanel is not null)
-        {
-            PathActionsPanel.HorizontalAlignment = isNarrow ? HorizontalAlignment.Stretch : HorizontalAlignment.Right;
-            PathActionsPanel.Orientation = isNarrow ? Orientation.Vertical : Orientation.Horizontal;
-            OpenPathButton.HorizontalAlignment = isNarrow ? HorizontalAlignment.Stretch : HorizontalAlignment.Left;
-            PinQuickAccessButton.HorizontalAlignment = isNarrow ? HorizontalAlignment.Stretch : HorizontalAlignment.Left;
-            ChangePathButton.HorizontalAlignment = isNarrow ? HorizontalAlignment.Stretch : HorizontalAlignment.Left;
-            CleanupStorageButton.HorizontalAlignment = isNarrow ? HorizontalAlignment.Stretch : HorizontalAlignment.Left;
-        }
         if (AboutRightPanel is not null)
         {
             Grid.SetRow(AboutRightPanel, isNarrow ? 1 : 0);
@@ -820,7 +974,6 @@ public sealed partial class SettingsWindow : Window
         {
             GlobalHotkeyActionsPanel.HorizontalAlignment = isNarrow ? HorizontalAlignment.Stretch : HorizontalAlignment.Right;
             GlobalHotkeyCaptureButton.HorizontalAlignment = isNarrow ? HorizontalAlignment.Stretch : HorizontalAlignment.Left;
-            ResetGlobalHotkeyButton.HorizontalAlignment = isNarrow ? HorizontalAlignment.Stretch : HorizontalAlignment.Left;
         }
 
         foreach (var row in _settingRows)
@@ -832,8 +985,6 @@ public sealed partial class SettingsWindow : Window
         {
             ApplyResponsiveRowLayout(row, isNarrow);
         }
-
-        TitleTextHost.Visibility = width < NarrowTitleThreshold ? Visibility.Collapsed : Visibility.Visible;
     }
 
     private void RestartResizeSettleTimer()
@@ -943,27 +1094,117 @@ public sealed partial class SettingsWindow : Window
 
     private void ApplyInitialWindowBounds(Microsoft.UI.WindowId windowId)
     {
-        var workArea = DisplayArea.GetFromWindowId(windowId, DisplayAreaFallback.Primary).WorkArea;
-        double scale = GetCurrentDpiScale();
-        int desiredWidth = ToPhysicalPixels(DefaultWindowWidth, scale);
-        int desiredHeight = ToPhysicalPixels(DefaultWindowHeight, scale);
-        int minWidth = ToPhysicalPixels(MinWindowWidth, scale);
-        int minHeight = ToPhysicalPixels(MinWindowHeight, scale);
-        int workAreaMargin = ToPhysicalPixels(WindowWorkAreaMargin, scale);
+        SettingsWindowPlacement? savedPlacement =
+            SettingsWindowPlacementStore.Shared.TryLoad(out SettingsWindowPlacement loaded)
+                ? loaded
+                : null;
 
-        int width = Math.Clamp(
-            desiredWidth,
-            minWidth,
-            Math.Max(minWidth, workArea.Width - workAreaMargin));
-        int height = Math.Clamp(
-            desiredHeight,
-            minHeight,
-            Math.Max(minHeight, workArea.Height - workAreaMargin));
+        Windows.Graphics.RectInt32 workAreaRect = savedPlacement is { } saved
+            ? DisplayArea.GetFromRect(
+                new Windows.Graphics.RectInt32(
+                    saved.X,
+                    saved.Y,
+                    Math.Max(100, saved.WidthDip),
+                    Math.Max(100, saved.HeightDip)),
+                DisplayAreaFallback.Nearest).WorkArea
+            : DisplayArea.GetFromWindowId(windowId, DisplayAreaFallback.Primary).WorkArea;
 
-        _appWindow.Resize(new Windows.Graphics.SizeInt32(width, height));
-        _appWindow.Move(new Windows.Graphics.PointInt32(
-            workArea.X + Math.Max(0, (workArea.Width - width) / 2),
-            workArea.Y + Math.Max(0, (workArea.Height - height) / 2)));
+        var workArea = new SettingsWindowWorkArea(
+            workAreaRect.X,
+            workAreaRect.Y,
+            workAreaRect.Width,
+            workAreaRect.Height);
+
+        double initialScale = GetCurrentDpiScale();
+        SettingsWindowResolvedBounds resolved = SettingsWindowPlacementStore.ResolveInitialBounds(
+            savedPlacement,
+            workArea,
+            initialScale,
+            DefaultWindowWidth,
+            DefaultWindowHeight,
+            MinWindowWidth,
+            MinWindowHeight,
+            WindowWorkAreaMargin);
+
+        _appWindow.Move(new Windows.Graphics.PointInt32(resolved.X, resolved.Y));
+        _appWindow.Resize(new Windows.Graphics.SizeInt32(resolved.WidthPx, resolved.HeightPx));
+
+        // If the saved placement landed on a secondary monitor with a different
+        // DPI scale, re-evaluate once now that _hWnd lives on that monitor.
+        double targetMonitorScale = GetCurrentDpiScale();
+        if (Math.Abs(targetMonitorScale - initialScale) > 0.01)
+        {
+            resolved = SettingsWindowPlacementStore.ResolveInitialBounds(
+                savedPlacement,
+                workArea,
+                targetMonitorScale,
+                DefaultWindowWidth,
+                DefaultWindowHeight,
+                MinWindowWidth,
+                MinWindowHeight,
+                WindowWorkAreaMargin);
+            _appWindow.Move(new Windows.Graphics.PointInt32(resolved.X, resolved.Y));
+            _appWindow.Resize(new Windows.Graphics.SizeInt32(resolved.WidthPx, resolved.HeightPx));
+        }
+
+        double effectiveScale = SettingsWindowPlacementStore.NormalizeDpiScale(targetMonitorScale);
+        _lastNormalPlacement = new SettingsWindowPlacement(
+            resolved.X,
+            resolved.Y,
+            Math.Max(MinWindowWidth, (int)Math.Round(resolved.WidthPx / effectiveScale, MidpointRounding.AwayFromZero)),
+            Math.Max(MinWindowHeight, (int)Math.Round(resolved.HeightPx / effectiveScale, MidpointRounding.AwayFromZero)),
+            false);
+        _isMaximizedPlacement = resolved.IsMaximized;
+        _restoreMaximizedOnFirstShow = resolved.IsMaximized;
+    }
+
+    private void CaptureLiveWindowPlacement()
+    {
+        if (_isClosed)
+        {
+            return;
+        }
+
+        if (_appWindow.Presenter is OverlappedPresenter presenter)
+        {
+            if (presenter.State == OverlappedPresenterState.Minimized)
+            {
+                return;
+            }
+
+            if (presenter.State == OverlappedPresenterState.Maximized)
+            {
+                _isMaximizedPlacement = true;
+                return;
+            }
+        }
+
+        Windows.Graphics.PointInt32 pos = _appWindow.Position;
+        Windows.Graphics.SizeInt32 size = _appWindow.Size;
+        if (pos.X <= -30000 || pos.Y <= -30000 || size.Width <= 0 || size.Height <= 0)
+        {
+            return;
+        }
+
+        double scale = SettingsWindowPlacementStore.NormalizeDpiScale(GetCurrentDpiScale());
+        int widthDip = Math.Max(MinWindowWidth, (int)Math.Round(size.Width / scale, MidpointRounding.AwayFromZero));
+        int heightDip = Math.Max(MinWindowHeight, (int)Math.Round(size.Height / scale, MidpointRounding.AwayFromZero));
+        _isMaximizedPlacement = false;
+        _lastNormalPlacement = new SettingsWindowPlacement(pos.X, pos.Y, widthDip, heightDip, false);
+    }
+
+    private void PersistWindowPlacement()
+    {
+        if (!_hasShownOnce)
+        {
+            return;
+        }
+
+        CaptureLiveWindowPlacement();
+        if (_lastNormalPlacement is { WidthDip: > 0, HeightDip: > 0 } normal)
+        {
+            SettingsWindowPlacementStore.Shared.Save(normal with { IsMaximized = _isMaximizedPlacement });
+        }
     }
 
     private double GetCurrentDpiScale()
@@ -971,11 +1212,8 @@ public sealed partial class SettingsWindow : Window
         return Win32Helper.GetDpiScaleForWindow(_hWnd, SettingsRoot.XamlRoot);
     }
 
-    private static int ToPhysicalPixels(int logicalPixels, double scale)
-    {
-        double normalizedScale = double.IsFinite(scale) && scale > 0 ? scale : 1.0;
-        return Math.Max(1, (int)Math.Round(logicalPixels * normalizedScale, MidpointRounding.AwayFromZero));
-    }
+    private static int ToPhysicalPixels(int logicalPixels, double scale) =>
+        SettingsWindowPlacementStore.ToPhysicalPixels(logicalPixels, scale);
 
     private void InstallMinimumSizeHook()
     {
@@ -1027,6 +1265,7 @@ public sealed partial class SettingsWindow : Window
             // REFUSE the sign-off system-wide. Flushing already on QUERY
             // (not only ENDSESSION) covers a death mid-broadcast; a second
             // call from ENDSESSION is an idempotent no-op.
+            PersistWindowPlacement();
             App.Current.ExitSettingsHost();
             return new IntPtr(1);
         }
@@ -1060,6 +1299,10 @@ public sealed partial class SettingsWindow : Window
     [WinRT.GeneratedBindableCustomProperty]
     private sealed partial record SettingsBreadcrumbItem(string SectionTag, string Title, double Opacity)
     {
+        public bool IsCurrent => Opacity >= 0.99;
+
+        public bool IsAncestor => Opacity < 0.99;
+
         public override string ToString()
         {
             return Title;

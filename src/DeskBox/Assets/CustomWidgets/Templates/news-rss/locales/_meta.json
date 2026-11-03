@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "baseLocale": "zh-CN",
+  "hashes": {
+    "defaultFeedTitle": "4e46b434",
+    "defaultTopHeadline": "48f48be3",
+    "emptySubtitle": "3e1a108d",
+    "emptyTitle": "d54f0905",
+    "feedCustom": "767ae5e7",
+    "feedIthome": "7dd91dd2",
+    "feedSspai": "33f53ce1",
+    "openArticleTooltip": "2d588d64",
+    "optDensityCompact": "ee8775f0",
+    "optDensitySummary": "803c78ea",
+    "refreshBtn": "aee88743",
+    "refreshTooltip": "2acc2d14",
+    "setDensity": "95a0f541",
+    "setFeedUrl": "7afd3524",
+    "setPresetFeed": "90528bf8",
+    "syncing": "229c33cd",
+    "updatedPrefix": "0b65c79c",
+    "widgetDescription": "b81175f8",
+    "widgetName": "402758ee"
+  }
+}

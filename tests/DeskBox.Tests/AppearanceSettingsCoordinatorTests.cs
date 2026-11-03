@@ -1,4 +1,4 @@
-﻿using DeskBox.Contracts;
+using DeskBox.Contracts;
 using DeskBox.Features.Appearance;
 using DeskBox.Models;
 using DeskBox.Services;
@@ -139,6 +139,11 @@ public sealed class AppearanceSettingsCoordinatorTests : IDisposable
         coordinator.SetWidgetCornerPreference(
             SettingsService.WidgetCornerPreferenceSquare);
         Assert.Equal(notifiedAfterCorner, notified);
+
+        coordinator.SetWidgetCornerPreference("Unknown");
+        Assert.Equal(
+            SettingsService.WidgetCornerPreferenceRound,
+            settings.Settings.WidgetShell.WidgetCornerPreference);
     }
 
     [Fact]
@@ -193,22 +198,22 @@ public sealed class AppearanceSettingsCoordinatorTests : IDisposable
         int notified = 0;
         settings.SettingsChanged += () => notified++;
 
-        coordinator.SetAnimationEffect(SettingsService.WidgetAnimationEffectZoom, scheduleSave: false);
+        coordinator.SetAnimationEffect(SettingsService.WidgetAnimationEffectWipe, scheduleSave: false);
         coordinator.SetAnimationSpeed(SettingsService.WidgetAnimationSpeedFast, scheduleSave: false);
         coordinator.SetAnimationSlideDirection(
             SettingsService.WidgetAnimationSlideDirectionLeft, scheduleSave: false);
         coordinator.SetAnimationEasingIntensity(
-            SettingsService.WidgetAnimationEasingStrong, scheduleSave: false);
+            SettingsService.WidgetAnimationEasingSpring, scheduleSave: false);
         Assert.Equal(0, notified);
 
-        coordinator.SetAnimationEasingIntensity(SettingsService.WidgetAnimationEasingLight);
+        coordinator.SetAnimationEasingIntensity(SettingsService.WidgetAnimationEasingStandard);
         Assert.Equal(1, notified);
 
         AppearanceAnimationSettings snapshot = coordinator.ReadAnimation();
-        Assert.Equal(SettingsService.WidgetAnimationEffectZoom, snapshot.Effect);
+        Assert.Equal(SettingsService.WidgetAnimationEffectWipe, snapshot.Effect);
         Assert.Equal(SettingsService.WidgetAnimationSpeedFast, snapshot.Speed);
         Assert.Equal(SettingsService.WidgetAnimationSlideDirectionLeft, snapshot.SlideDirection);
-        Assert.Equal(SettingsService.WidgetAnimationEasingLight, snapshot.EasingIntensity);
+        Assert.Equal(SettingsService.WidgetAnimationEasingStandard, snapshot.EasingIntensity);
     }
 
     [Fact]
@@ -306,5 +311,38 @@ public sealed class AppearanceSettingsCoordinatorTests : IDisposable
 
         Assert.Equal(1, cleared);
         Assert.Null(WidgetBackgroundCustomization.GetColorOverride(widget));
+    }
+
+    [Fact]
+    public async Task CornerAndBorderSetters_RequestImmediateAppearancePreviewBeforeDebouncedSave()
+    {
+        var settings = new SettingsService(_root);
+        var coordinator = new AppearanceSettingsCoordinator(settings);
+        int previews = 0;
+        var previewSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        settings.AppearancePreviewChanged += () =>
+        {
+            Interlocked.Increment(ref previews);
+            previewSignal.TrySetResult();
+        };
+
+        coordinator.SetWidgetCornerPreference(SettingsService.WidgetCornerPreferenceSmall);
+        await previewSignal.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Equal(1, Volatile.Read(ref previews));
+
+        previewSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        coordinator.SetWidgetBorderColorMode(SettingsService.WidgetBorderColorModeAccent);
+        await previewSignal.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Equal(2, Volatile.Read(ref previews));
+
+        previewSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        coordinator.SetWidgetBorderStyle(SettingsService.WidgetBorderStyleMedium);
+        await previewSignal.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        Assert.Equal(3, Volatile.Read(ref previews));
+
+        // No-op repeats must not spam preview IPC frames.
+        coordinator.SetWidgetBorderStyle(SettingsService.WidgetBorderStyleMedium);
+        await Task.Delay(120);
+        Assert.Equal(3, Volatile.Read(ref previews));
     }
 }

@@ -1,0 +1,842 @@
+{
+  "schemaVersion": 1,
+  "id": "deskbox.world-clock",
+  "name": "世界时钟",
+  "version": "1.0.0",
+  "author": "DeskBox",
+  "description": "跨国协作世界时钟：多城市昼夜与工作窗口状态灯、时差跨日标签、会议时间推演尺与开发者时间戳底栏。",
+  "icon": "\uE774",
+  "minSize": {
+    "width": 276,
+    "height": 220
+  },
+  "defaultSize": {
+    "width": 332,
+    "height": 368
+  },
+  "settings": [
+    {
+      "key": "modules",
+      "type": "moduleList",
+      "label": "${$i18n.setModules}",
+      "default": "cities:1,scrubber:1",
+      "options": [
+        {
+          "value": "cities",
+          "label": "${$i18n.modCities}"
+        },
+        {
+          "value": "scrubber",
+          "label": "${$i18n.modScrubber}"
+        }
+      ]
+    },
+    {
+      "key": "city1",
+      "type": "choice",
+      "label": "${$i18n.setCity1}",
+      "default": "America/Los_Angeles",
+      "options": [
+        {
+          "value": "America/Los_Angeles",
+          "label": "${tzCity('America/Los_Angeles')}"
+        },
+        {
+          "value": "America/New_York",
+          "label": "${tzCity('America/New_York')}"
+        },
+        {
+          "value": "America/Chicago",
+          "label": "${tzCity('America/Chicago')}"
+        },
+        {
+          "value": "America/Toronto",
+          "label": "${tzCity('America/Toronto')}"
+        },
+        {
+          "value": "America/Mexico_City",
+          "label": "${tzCity('America/Mexico_City')}"
+        },
+        {
+          "value": "America/Sao_Paulo",
+          "label": "${tzCity('America/Sao_Paulo')}"
+        },
+        {
+          "value": "Europe/London",
+          "label": "${tzCity('Europe/London')}"
+        },
+        {
+          "value": "Europe/Paris",
+          "label": "${tzCity('Europe/Paris')}"
+        },
+        {
+          "value": "Europe/Berlin",
+          "label": "${tzCity('Europe/Berlin')}"
+        },
+        {
+          "value": "Europe/Moscow",
+          "label": "${tzCity('Europe/Moscow')}"
+        },
+        {
+          "value": "Europe/Istanbul",
+          "label": "${tzCity('Europe/Istanbul')}"
+        },
+        {
+          "value": "Asia/Dubai",
+          "label": "${tzCity('Asia/Dubai')}"
+        },
+        {
+          "value": "Asia/Riyadh",
+          "label": "${tzCity('Asia/Riyadh')}"
+        },
+        {
+          "value": "Asia/Kolkata",
+          "label": "${tzCity('Asia/Kolkata')}"
+        },
+        {
+          "value": "Asia/Bangkok",
+          "label": "${tzCity('Asia/Bangkok')}"
+        },
+        {
+          "value": "Asia/Singapore",
+          "label": "${tzCity('Asia/Singapore')}"
+        },
+        {
+          "value": "Asia/Hong_Kong",
+          "label": "${tzCity('Asia/Hong_Kong')}"
+        },
+        {
+          "value": "Asia/Shanghai",
+          "label": "${tzCity('Asia/Shanghai')}"
+        },
+        {
+          "value": "Asia/Taipei",
+          "label": "${tzCity('Asia/Taipei')}"
+        },
+        {
+          "value": "Asia/Tokyo",
+          "label": "${tzCity('Asia/Tokyo')}"
+        },
+        {
+          "value": "Asia/Seoul",
+          "label": "${tzCity('Asia/Seoul')}"
+        },
+        {
+          "value": "Australia/Sydney",
+          "label": "${tzCity('Australia/Sydney')}"
+        },
+        {
+          "value": "Australia/Perth",
+          "label": "${tzCity('Australia/Perth')}"
+        },
+        {
+          "value": "Pacific/Auckland",
+          "label": "${tzCity('Pacific/Auckland')}"
+        }
+      ]
+    },
+    {
+      "key": "city2",
+      "type": "choice",
+      "label": "${$i18n.setCity2}",
+      "default": "Europe/London",
+      "options": [
+        {
+          "value": "America/Los_Angeles",
+          "label": "${tzCity('America/Los_Angeles')}"
+        },
+        {
+          "value": "America/New_York",
+          "label": "${tzCity('America/New_York')}"
+        },
+        {
+          "value": "America/Chicago",
+          "label": "${tzCity('America/Chicago')}"
+        },
+        {
+          "value": "America/Toronto",
+          "label": "${tzCity('America/Toronto')}"
+        },
+        {
+          "value": "America/Mexico_City",
+          "label": "${tzCity('America/Mexico_City')}"
+        },
+        {
+          "value": "America/Sao_Paulo",
+          "label": "${tzCity('America/Sao_Paulo')}"
+        },
+        {
+          "value": "Europe/London",
+          "label": "${tzCity('Europe/London')}"
+        },
+        {
+          "value": "Europe/Paris",
+          "label": "${tzCity('Europe/Paris')}"
+        },
+        {
+          "value": "Europe/Berlin",
+          "label": "${tzCity('Europe/Berlin')}"
+        },
+        {
+          "value": "Europe/Moscow",
+          "label": "${tzCity('Europe/Moscow')}"
+        },
+        {
+          "value": "Europe/Istanbul",
+          "label": "${tzCity('Europe/Istanbul')}"
+        },
+        {
+          "value": "Asia/Dubai",
+          "label": "${tzCity('Asia/Dubai')}"
+        },
+        {
+          "value": "Asia/Riyadh",
+          "label": "${tzCity('Asia/Riyadh')}"
+        },
+        {
+          "value": "Asia/Kolkata",
+          "label": "${tzCity('Asia/Kolkata')}"
+        },
+        {
+          "value": "Asia/Bangkok",
+          "label": "${tzCity('Asia/Bangkok')}"
+        },
+        {
+          "value": "Asia/Singapore",
+          "label": "${tzCity('Asia/Singapore')}"
+        },
+        {
+          "value": "Asia/Hong_Kong",
+          "label": "${tzCity('Asia/Hong_Kong')}"
+        },
+        {
+          "value": "Asia/Shanghai",
+          "label": "${tzCity('Asia/Shanghai')}"
+        },
+        {
+          "value": "Asia/Taipei",
+          "label": "${tzCity('Asia/Taipei')}"
+        },
+        {
+          "value": "Asia/Tokyo",
+          "label": "${tzCity('Asia/Tokyo')}"
+        },
+        {
+          "value": "Asia/Seoul",
+          "label": "${tzCity('Asia/Seoul')}"
+        },
+        {
+          "value": "Australia/Sydney",
+          "label": "${tzCity('Australia/Sydney')}"
+        },
+        {
+          "value": "Australia/Perth",
+          "label": "${tzCity('Australia/Perth')}"
+        },
+        {
+          "value": "Pacific/Auckland",
+          "label": "${tzCity('Pacific/Auckland')}"
+        }
+      ]
+    },
+    {
+      "key": "city3",
+      "type": "choice",
+      "label": "${$i18n.setCity3}",
+      "default": "Asia/Tokyo",
+      "options": [
+        {
+          "value": "America/Los_Angeles",
+          "label": "${tzCity('America/Los_Angeles')}"
+        },
+        {
+          "value": "America/New_York",
+          "label": "${tzCity('America/New_York')}"
+        },
+        {
+          "value": "America/Chicago",
+          "label": "${tzCity('America/Chicago')}"
+        },
+        {
+          "value": "America/Toronto",
+          "label": "${tzCity('America/Toronto')}"
+        },
+        {
+          "value": "America/Mexico_City",
+          "label": "${tzCity('America/Mexico_City')}"
+        },
+        {
+          "value": "America/Sao_Paulo",
+          "label": "${tzCity('America/Sao_Paulo')}"
+        },
+        {
+          "value": "Europe/London",
+          "label": "${tzCity('Europe/London')}"
+        },
+        {
+          "value": "Europe/Paris",
+          "label": "${tzCity('Europe/Paris')}"
+        },
+        {
+          "value": "Europe/Berlin",
+          "label": "${tzCity('Europe/Berlin')}"
+        },
+        {
+          "value": "Europe/Moscow",
+          "label": "${tzCity('Europe/Moscow')}"
+        },
+        {
+          "value": "Europe/Istanbul",
+          "label": "${tzCity('Europe/Istanbul')}"
+        },
+        {
+          "value": "Asia/Dubai",
+          "label": "${tzCity('Asia/Dubai')}"
+        },
+        {
+          "value": "Asia/Riyadh",
+          "label": "${tzCity('Asia/Riyadh')}"
+        },
+        {
+          "value": "Asia/Kolkata",
+          "label": "${tzCity('Asia/Kolkata')}"
+        },
+        {
+          "value": "Asia/Bangkok",
+          "label": "${tzCity('Asia/Bangkok')}"
+        },
+        {
+          "value": "Asia/Singapore",
+          "label": "${tzCity('Asia/Singapore')}"
+        },
+        {
+          "value": "Asia/Hong_Kong",
+          "label": "${tzCity('Asia/Hong_Kong')}"
+        },
+        {
+          "value": "Asia/Shanghai",
+          "label": "${tzCity('Asia/Shanghai')}"
+        },
+        {
+          "value": "Asia/Taipei",
+          "label": "${tzCity('Asia/Taipei')}"
+        },
+        {
+          "value": "Asia/Tokyo",
+          "label": "${tzCity('Asia/Tokyo')}"
+        },
+        {
+          "value": "Asia/Seoul",
+          "label": "${tzCity('Asia/Seoul')}"
+        },
+        {
+          "value": "Australia/Sydney",
+          "label": "${tzCity('Australia/Sydney')}"
+        },
+        {
+          "value": "Australia/Perth",
+          "label": "${tzCity('Australia/Perth')}"
+        },
+        {
+          "value": "Pacific/Auckland",
+          "label": "${tzCity('Pacific/Auckland')}"
+        }
+      ]
+    },
+    {
+      "key": "city4",
+      "type": "choice",
+      "label": "${$i18n.setCity4}",
+      "default": "none",
+      "options": [
+        {
+          "value": "none",
+          "label": "${$i18n.cityNone}"
+        },
+        {
+          "value": "America/Los_Angeles",
+          "label": "${tzCity('America/Los_Angeles')}"
+        },
+        {
+          "value": "America/New_York",
+          "label": "${tzCity('America/New_York')}"
+        },
+        {
+          "value": "America/Chicago",
+          "label": "${tzCity('America/Chicago')}"
+        },
+        {
+          "value": "America/Toronto",
+          "label": "${tzCity('America/Toronto')}"
+        },
+        {
+          "value": "America/Mexico_City",
+          "label": "${tzCity('America/Mexico_City')}"
+        },
+        {
+          "value": "America/Sao_Paulo",
+          "label": "${tzCity('America/Sao_Paulo')}"
+        },
+        {
+          "value": "Europe/London",
+          "label": "${tzCity('Europe/London')}"
+        },
+        {
+          "value": "Europe/Paris",
+          "label": "${tzCity('Europe/Paris')}"
+        },
+        {
+          "value": "Europe/Berlin",
+          "label": "${tzCity('Europe/Berlin')}"
+        },
+        {
+          "value": "Europe/Moscow",
+          "label": "${tzCity('Europe/Moscow')}"
+        },
+        {
+          "value": "Europe/Istanbul",
+          "label": "${tzCity('Europe/Istanbul')}"
+        },
+        {
+          "value": "Asia/Dubai",
+          "label": "${tzCity('Asia/Dubai')}"
+        },
+        {
+          "value": "Asia/Riyadh",
+          "label": "${tzCity('Asia/Riyadh')}"
+        },
+        {
+          "value": "Asia/Kolkata",
+          "label": "${tzCity('Asia/Kolkata')}"
+        },
+        {
+          "value": "Asia/Bangkok",
+          "label": "${tzCity('Asia/Bangkok')}"
+        },
+        {
+          "value": "Asia/Singapore",
+          "label": "${tzCity('Asia/Singapore')}"
+        },
+        {
+          "value": "Asia/Hong_Kong",
+          "label": "${tzCity('Asia/Hong_Kong')}"
+        },
+        {
+          "value": "Asia/Shanghai",
+          "label": "${tzCity('Asia/Shanghai')}"
+        },
+        {
+          "value": "Asia/Taipei",
+          "label": "${tzCity('Asia/Taipei')}"
+        },
+        {
+          "value": "Asia/Tokyo",
+          "label": "${tzCity('Asia/Tokyo')}"
+        },
+        {
+          "value": "Asia/Seoul",
+          "label": "${tzCity('Asia/Seoul')}"
+        },
+        {
+          "value": "Australia/Sydney",
+          "label": "${tzCity('Australia/Sydney')}"
+        },
+        {
+          "value": "Australia/Perth",
+          "label": "${tzCity('Australia/Perth')}"
+        },
+        {
+          "value": "Pacific/Auckland",
+          "label": "${tzCity('Pacific/Auckland')}"
+        }
+      ]
+    },
+    {
+      "key": "workWindow",
+      "type": "choice",
+      "label": "${$i18n.setWorkWindow}",
+      "default": "09-18",
+      "options": [
+        {
+          "value": "09-18",
+          "label": "${$i18n.optWw0918}"
+        },
+        {
+          "value": "08-17",
+          "label": "${$i18n.optWw0817}"
+        },
+        {
+          "value": "10-19",
+          "label": "${$i18n.optWw1019}"
+        }
+      ]
+    },
+    {
+      "key": "hourFormat",
+      "type": "choice",
+      "label": "${$i18n.setHourFormat}",
+      "default": "24h",
+      "options": [
+        {
+          "value": "24h",
+          "label": "${$i18n.optHf24}"
+        },
+        {
+          "value": "12h",
+          "label": "${$i18n.optHf12}"
+        }
+      ]
+    },
+    {
+      "key": "showDevUnix",
+      "type": "toggle",
+      "label": "${$i18n.setDevUnix}",
+      "default": "false"
+    }
+  ],
+  "state": {
+    "scrubHours": "0"
+  },
+  "sources": [
+    {
+      "type": "clock",
+      "intervalMs": 1000
+    }
+  ],
+  "capsule": {
+    "title": "${tzCity($settings.city1)} ${tz($settings.city1, 'HH:mm', state.scrubHours)} ${tzWorkState($settings.city1, $settings.workWindow, state.scrubHours) == 'work' ? $i18n.gWork : tzWorkState($settings.city1, $settings.workWindow, state.scrubHours) == 'edge' ? $i18n.gEdge : $i18n.gSleep} · ${tzCity($settings.city2)} ${tz($settings.city2, 'HH:mm', state.scrubHours)} ${tzWorkState($settings.city2, $settings.workWindow, state.scrubHours) == 'work' ? $i18n.gWork : tzWorkState($settings.city2, $settings.workWindow, state.scrubHours) == 'edge' ? $i18n.gEdge : $i18n.gSleep}",
+    "summary": "${$i18n.localNow} ${tz('local', 'HH:mm', state.scrubHours)} ${state.scrubHours > 0 ? $i18n.capScrub : ''}",
+    "glyph": "\uE774",
+    "badge": "${tzWorkState($settings.city1, $settings.workWindow, 0) == 'sleep' ? $i18n.gSleep : $clock.localOffset}",
+    "badgeIsWarning": "${tzWorkState($settings.city1, $settings.workWindow, 0) == 'sleep'}"
+  },
+  "view": {
+    "type": "Stack",
+    "spacing": 8,
+    "padding": "10,6,10,10",
+    "children": [
+      {
+        "type": "ModuleStack",
+        "bind": "settings.modules",
+        "spacing": 8,
+        "children": [
+          {
+            "id": "cities",
+            "type": "Card",
+            "tone": "subtle",
+            "padding": "10,8,10,8",
+            "children": [
+              {
+                "type": "Grid",
+                "columns": "Auto,1*",
+                "spacing": 8,
+                "children": [
+                  {
+                    "type": "Text",
+                    "column": 0,
+                    "text": "\uD83D\uDCCD ${$i18n.localNow}",
+                    "style": "caption",
+                    "color": "secondary"
+                  },
+                  {
+                    "type": "Text",
+                    "column": 1,
+                    "text": "${tz('local', $settings.hourFormat == '12h' ? 'hh:mm tt' : 'HH:mm', state.scrubHours)} · ${$clock.localOffset}",
+                    "style": "mono",
+                    "color": "secondary",
+                    "horizontalAlignment": "Right"
+                  }
+                ]
+              },
+              {
+                "type": "Divider"
+              },
+              {
+                "type": "Grid",
+                "columns": "1*,Auto",
+                "spacing": 8,
+                "children": [
+                  {
+                    "type": "Stack",
+                    "column": 0,
+                    "spacing": 2,
+                    "children": [
+                      {
+                        "type": "Text",
+                        "text": "${tzCity($settings.city1)}",
+                        "style": "bodyStrong",
+                        "maxLines": 1
+                      },
+                      {
+                        "type": "Text",
+                        "text": "UTC${tz($settings.city1, 'zzz', state.scrubHours)} · ${tzDiffLabel($settings.city1, state.scrubHours)}",
+                        "style": "caption",
+                        "color": "secondary",
+                        "maxLines": 1
+                      }
+                    ]
+                  },
+                  {
+                    "type": "Stack",
+                    "column": 1,
+                    "spacing": 2,
+                    "children": [
+                      {
+                        "type": "Text",
+                        "text": "${tz($settings.city1, $settings.hourFormat == '12h' ? 'hh:mm tt' : 'HH:mm', state.scrubHours)}",
+                        "style": "title",
+                        "color": "${tzWorkState($settings.city1, $settings.workWindow, state.scrubHours) == 'sleep' ? 'muted' : 'default'}",
+                        "horizontalAlignment": "Right"
+                      },
+                      {
+                        "type": "Badge",
+                        "text": "${tzWorkState($settings.city1, $settings.workWindow, state.scrubHours) == 'work' ? $i18n.stWork : tzWorkState($settings.city1, $settings.workWindow, state.scrubHours) == 'edge' ? $i18n.stEdge : $i18n.stSleep}",
+                        "tone": "${tzWorkState($settings.city1, $settings.workWindow, state.scrubHours) == 'work' ? 'success' : tzWorkState($settings.city1, $settings.workWindow, state.scrubHours) == 'edge' ? 'warning' : 'subtle'}",
+                        "horizontalAlignment": "Right"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "Grid",
+                "columns": "1*,Auto",
+                "spacing": 8,
+                "children": [
+                  {
+                    "type": "Stack",
+                    "column": 0,
+                    "spacing": 2,
+                    "children": [
+                      {
+                        "type": "Text",
+                        "text": "${tzCity($settings.city2)}",
+                        "style": "bodyStrong",
+                        "maxLines": 1
+                      },
+                      {
+                        "type": "Text",
+                        "text": "UTC${tz($settings.city2, 'zzz', state.scrubHours)} · ${tzDiffLabel($settings.city2, state.scrubHours)}",
+                        "style": "caption",
+                        "color": "secondary",
+                        "maxLines": 1
+                      }
+                    ]
+                  },
+                  {
+                    "type": "Stack",
+                    "column": 1,
+                    "spacing": 2,
+                    "children": [
+                      {
+                        "type": "Text",
+                        "text": "${tz($settings.city2, $settings.hourFormat == '12h' ? 'hh:mm tt' : 'HH:mm', state.scrubHours)}",
+                        "style": "title",
+                        "color": "${tzWorkState($settings.city2, $settings.workWindow, state.scrubHours) == 'sleep' ? 'muted' : 'default'}",
+                        "horizontalAlignment": "Right"
+                      },
+                      {
+                        "type": "Badge",
+                        "text": "${tzWorkState($settings.city2, $settings.workWindow, state.scrubHours) == 'work' ? $i18n.stWork : tzWorkState($settings.city2, $settings.workWindow, state.scrubHours) == 'edge' ? $i18n.stEdge : $i18n.stSleep}",
+                        "tone": "${tzWorkState($settings.city2, $settings.workWindow, state.scrubHours) == 'work' ? 'success' : tzWorkState($settings.city2, $settings.workWindow, state.scrubHours) == 'edge' ? 'warning' : 'subtle'}",
+                        "horizontalAlignment": "Right"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "Grid",
+                "columns": "1*,Auto",
+                "spacing": 8,
+                "children": [
+                  {
+                    "type": "Stack",
+                    "column": 0,
+                    "spacing": 2,
+                    "children": [
+                      {
+                        "type": "Text",
+                        "text": "${tzCity($settings.city3)}",
+                        "style": "bodyStrong",
+                        "maxLines": 1
+                      },
+                      {
+                        "type": "Text",
+                        "text": "UTC${tz($settings.city3, 'zzz', state.scrubHours)} · ${tzDiffLabel($settings.city3, state.scrubHours)}",
+                        "style": "caption",
+                        "color": "secondary",
+                        "maxLines": 1
+                      }
+                    ]
+                  },
+                  {
+                    "type": "Stack",
+                    "column": 1,
+                    "spacing": 2,
+                    "children": [
+                      {
+                        "type": "Text",
+                        "text": "${tz($settings.city3, $settings.hourFormat == '12h' ? 'hh:mm tt' : 'HH:mm', state.scrubHours)}",
+                        "style": "title",
+                        "color": "${tzWorkState($settings.city3, $settings.workWindow, state.scrubHours) == 'sleep' ? 'muted' : 'default'}",
+                        "horizontalAlignment": "Right"
+                      },
+                      {
+                        "type": "Badge",
+                        "text": "${tzWorkState($settings.city3, $settings.workWindow, state.scrubHours) == 'work' ? $i18n.stWork : tzWorkState($settings.city3, $settings.workWindow, state.scrubHours) == 'edge' ? $i18n.stEdge : $i18n.stSleep}",
+                        "tone": "${tzWorkState($settings.city3, $settings.workWindow, state.scrubHours) == 'work' ? 'success' : tzWorkState($settings.city3, $settings.workWindow, state.scrubHours) == 'edge' ? 'warning' : 'subtle'}",
+                        "horizontalAlignment": "Right"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "Grid",
+                "columns": "1*,Auto",
+                "spacing": 8,
+                "when": "${$settings.city4 != 'none'}",
+                "children": [
+                  {
+                    "type": "Stack",
+                    "column": 0,
+                    "spacing": 2,
+                    "children": [
+                      {
+                        "type": "Text",
+                        "text": "${tzCity($settings.city4)}",
+                        "style": "bodyStrong",
+                        "maxLines": 1
+                      },
+                      {
+                        "type": "Text",
+                        "text": "UTC${tz($settings.city4, 'zzz', state.scrubHours)} · ${tzDiffLabel($settings.city4, state.scrubHours)}",
+                        "style": "caption",
+                        "color": "secondary",
+                        "maxLines": 1
+                      }
+                    ]
+                  },
+                  {
+                    "type": "Stack",
+                    "column": 1,
+                    "spacing": 2,
+                    "children": [
+                      {
+                        "type": "Text",
+                        "text": "${tz($settings.city4, $settings.hourFormat == '12h' ? 'hh:mm tt' : 'HH:mm', state.scrubHours)}",
+                        "style": "title",
+                        "color": "${tzWorkState($settings.city4, $settings.workWindow, state.scrubHours) == 'sleep' ? 'muted' : 'default'}",
+                        "horizontalAlignment": "Right"
+                      },
+                      {
+                        "type": "Badge",
+                        "text": "${tzWorkState($settings.city4, $settings.workWindow, state.scrubHours) == 'work' ? $i18n.stWork : tzWorkState($settings.city4, $settings.workWindow, state.scrubHours) == 'edge' ? $i18n.stEdge : $i18n.stSleep}",
+                        "tone": "${tzWorkState($settings.city4, $settings.workWindow, state.scrubHours) == 'work' ? 'success' : tzWorkState($settings.city4, $settings.workWindow, state.scrubHours) == 'edge' ? 'warning' : 'subtle'}",
+                        "horizontalAlignment": "Right"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "scrubber",
+            "type": "Card",
+            "tone": "subtle",
+            "padding": "10,8,10,8",
+            "children": [
+              {
+                "type": "Slider",
+                "title": "${$i18n.scrubTitle}",
+                "bind": "state.scrubHours",
+                "min": 0,
+                "max": 23,
+                "step": 0.5,
+                "unit": "h"
+              },
+              {
+                "type": "Text",
+                "when": "${state.scrubHours == 0}",
+                "text": "${$i18n.liveNow}",
+                "style": "caption",
+                "color": "muted"
+              },
+              {
+                "type": "Stack",
+                "when": "${state.scrubHours > 0}",
+                "orientation": "horizontal",
+                "spacing": 6,
+                "children": [
+                  {
+                    "type": "Button",
+                    "text": "${$i18n.backToNow}",
+                    "variant": "subtle",
+                    "onClick": {
+                      "type": "state.set",
+                      "key": "scrubHours",
+                      "value": "0"
+                    }
+                  },
+                  {
+                    "type": "Button",
+                    "text": "${$i18n.copyTimes}",
+                    "variant": "accent",
+                    "onClick": [
+                      {
+                        "type": "clipboard.copy",
+                        "guard": "${$settings.city4 != 'none'}",
+                        "text": "\uD83D\uDCC5 ${$i18n.meetingAt}: ${$i18n.localNow} ${tz('local', $settings.hourFormat == '12h' ? 'hh:mm tt' : 'HH:mm', state.scrubHours)} | ${tzCity($settings.city1)} ${tz($settings.city1, $settings.hourFormat == '12h' ? 'hh:mm tt' : 'HH:mm', state.scrubHours)} | ${tzCity($settings.city2)} ${tz($settings.city2, $settings.hourFormat == '12h' ? 'hh:mm tt' : 'HH:mm', state.scrubHours)} | ${tzCity($settings.city3)} ${tz($settings.city3, $settings.hourFormat == '12h' ? 'hh:mm tt' : 'HH:mm', state.scrubHours)} | ${tzCity($settings.city4)} ${tz($settings.city4, $settings.hourFormat == '12h' ? 'hh:mm tt' : 'HH:mm', state.scrubHours)}"
+                      },
+                      {
+                        "type": "clipboard.copy",
+                        "guard": "${$settings.city4 == 'none'}",
+                        "text": "\uD83D\uDCC5 ${$i18n.meetingAt}: ${$i18n.localNow} ${tz('local', $settings.hourFormat == '12h' ? 'hh:mm tt' : 'HH:mm', state.scrubHours)} | ${tzCity($settings.city1)} ${tz($settings.city1, $settings.hourFormat == '12h' ? 'hh:mm tt' : 'HH:mm', state.scrubHours)} | ${tzCity($settings.city2)} ${tz($settings.city2, $settings.hourFormat == '12h' ? 'hh:mm tt' : 'HH:mm', state.scrubHours)} | ${tzCity($settings.city3)} ${tz($settings.city3, $settings.hourFormat == '12h' ? 'hh:mm tt' : 'HH:mm', state.scrubHours)}"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "Card",
+        "tone": "subtle",
+        "padding": "10,6,10,6",
+        "when": "${$settings.showDevUnix == 'true'}",
+        "tooltip": "${$i18n.devCopy}",
+        "onClick": {
+          "type": "clipboard.copy",
+          "text": "UTC ${tz('UTC', 'yyyy-MM-dd HH:mm:ss', 0)} · Unix ${$clock.unixSeconds}"
+        },
+        "children": [
+          {
+            "type": "Grid",
+            "columns": "1*,Auto",
+            "spacing": 6,
+            "children": [
+              {
+                "type": "Text",
+                "column": 0,
+                "text": "UTC ${tz('UTC', 'yyyy-MM-dd HH:mm:ss', 0)}",
+                "style": "mono",
+                "color": "secondary"
+              },
+              {
+                "type": "Text",
+                "column": 1,
+                "text": "Unix ${$clock.unixSeconds}",
+                "style": "mono",
+                "color": "secondary"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

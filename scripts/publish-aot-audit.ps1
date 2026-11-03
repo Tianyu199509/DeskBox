@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param(
     [ValidateSet("x64", "ARM64")]
     [string]$Platform = "x64",
@@ -47,9 +47,12 @@ $publishDir = Join-Path $runRoot "publish"
 $symbolsDir = Join-Path $runRoot "symbols"
 $rustIntermediateDir = Join-Path $runRoot "rust-staging"
 $rustCargoTargetDir = Join-Path $runRoot "rust-target"
+$qjsIntermediateDir = Join-Path $runRoot "qjs-staging"
+$qjsObjDir = Join-Path $runRoot "qjs-obj"
 $logPath = Join-Path $runRoot "publish.log"
 $summaryPath = Join-Path $runRoot "summary.json"
 $rustNativeEnabled = $true
+$qjsNativeEnabled = $true
 $jsonSerializerIsReflectionEnabledByDefault = $false
 
 function Assert-PathInsideRoot {
@@ -266,6 +269,9 @@ $publishArguments = @(
     "-p:DeskBoxRustNative=$($rustNativeEnabled.ToString().ToLowerInvariant())",
     "-p:DeskBoxRustNativeIntermediateDir=$rustIntermediateDir",
     "-p:DeskBoxRustNativeCargoTargetDir=$rustCargoTargetDir",
+    "-p:DeskBoxQjsNative=$($qjsNativeEnabled.ToString().ToLowerInvariant())",
+    "-p:DeskBoxQjsIntermediateDir=$qjsIntermediateDir",
+    "-p:DeskBoxQjsObjDir=$qjsObjDir",
     "-p:IlcUseEnvironmentalTools=true",
     "-p:SelfContained=true",
     "-p:WindowsAppSDKSelfContained=false",
@@ -351,6 +357,40 @@ if ($rustNativeEnabled) {
     }
 }
 
+$qjsAbiVersion = $null
+$qjsRequiredExports = @()
+$qjsStagingSha256 = $null
+$qjsPublishSha256 = $null
+$qjsPublishMatchesStaging = $null
+if ($qjsNativeEnabled) {
+    $qjsBuildScript = Join-Path $repoRoot "scripts\build-qjs-native.ps1"
+    $qjsValidation = & $qjsBuildScript `
+        -Platform x64 `
+        -Configuration Release `
+        -CrtLinkage Static `
+        -OutputDirectory $publishDir `
+        -ValidateOnly
+    $qjsAbiVersion = $qjsValidation.AbiVersion
+    $qjsRequiredExports = @($qjsValidation.RequiredExports)
+
+    $stagedQjsDll = Join-Path $qjsIntermediateDir "deskbox_qjs.dll"
+    $publishedQjsDll = Join-Path $publishDir "deskbox_qjs.dll"
+    if (-not (Test-Path -LiteralPath $stagedQjsDll -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $publishedQjsDll -PathType Leaf)) {
+        throw "The isolated staging or published QuickJS native module is missing."
+    }
+
+    $qjsStagingSha256 = (Get-FileHash -LiteralPath $stagedQjsDll -Algorithm SHA256).Hash
+    $qjsPublishSha256 = (Get-FileHash -LiteralPath $publishedQjsDll -Algorithm SHA256).Hash
+    $qjsPublishMatchesStaging = [string]::Equals(
+        $qjsStagingSha256,
+        $qjsPublishSha256,
+        [System.StringComparison]::OrdinalIgnoreCase)
+    if (-not $qjsPublishMatchesStaging) {
+        throw "The published QuickJS native module does not match this audit run's isolated staging output."
+    }
+}
+
 $pdbFiles = @(Get-ChildItem -LiteralPath $publishDir -Filter "*.pdb" -File -Recurse)
 foreach ($pdb in $pdbFiles) {
     Assert-PathInsideRoot -Root $publishDir -Candidate $pdb.FullName
@@ -373,6 +413,9 @@ $requiredFiles = @(
 )
 if ($rustNativeEnabled) {
     $requiredFiles += "deskbox_native.dll"
+}
+if ($qjsNativeEnabled) {
+    $requiredFiles += "deskbox_qjs.dll"
 }
 
 foreach ($requiredFile in $requiredFiles) {
@@ -413,6 +456,21 @@ if ($publishedThumbnailProxies.Count -ne 1 -or
     throw "The AOT publish must contain exactly one root-level DeskBox.ThumbnailProxy.exe."
 }
 
+$publishedQjsModules = @(
+    Get-ChildItem -LiteralPath $publishDir -Filter "deskbox_qjs.dll" -File -Recurse
+)
+if ($qjsNativeEnabled) {
+    $expectedQjsDllPath = [System.IO.Path]::GetFullPath(
+        (Join-Path $publishDir "deskbox_qjs.dll"))
+    if ($publishedQjsModules.Count -ne 1 -or
+        -not [string]::Equals(
+            $publishedQjsModules[0].FullName,
+            $expectedQjsDllPath,
+            [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "The AOT publish must contain exactly one root-level deskbox_qjs.dll."
+    }
+}
+
 $forbiddenFiles = @(
     "coreclr.dll",
     "clrjit.dll",
@@ -448,6 +506,9 @@ $requiredSymbolFiles = @(
 if ($rustNativeEnabled) {
     $requiredSymbolFiles += "deskbox_native.pdb"
 }
+if ($qjsNativeEnabled) {
+    $requiredSymbolFiles += "deskbox_qjs.pdb"
+}
 
 foreach ($requiredSymbolFile in $requiredSymbolFiles) {
     if (-not ($symbolFiles | Where-Object Name -eq $requiredSymbolFile)) {
@@ -462,6 +523,9 @@ $peFiles = @(
 )
 if ($rustNativeEnabled) {
     $peFiles += (Join-Path $publishDir "deskbox_native.dll")
+}
+if ($qjsNativeEnabled) {
+    $peFiles += (Join-Path $publishDir "deskbox_qjs.dll")
 }
 
 $peResults = foreach ($peFile in $peFiles) {
@@ -746,12 +810,12 @@ $stage4D5LegacyReflectionPatterns = @(
     "GetProperty(`"Id`""
 )
 $stage4D5RequiredPublicPatterns = @(
-    "_trayIcon.TrayIcon",
-    "trayIcon.WindowHandle",
-    "trayIcon.Id",
-    "SecondWindowContextMenuOpened +=",
-    "VisualTreeHelper.GetParent",
-    "VisualTreeHelper.GetOpenPopupsForXamlRoot"
+    "new NativeTrayIconHost(",
+    "trayHost.WindowHandle",
+    "trayHost.IconId",
+    "trayHost.ShowContextMenu(",
+    "Win32Helper.TryGetNotifyIconRect",
+    "GetFallbackTrayContextMenuAnchorPoint"
 )
 $stage4D5SourcePath = Join-Path $repoRoot $stage4D5SourceFiles[0]
 $stage4D5Source = Get-Content -LiteralPath $stage4D5SourcePath -Raw
@@ -774,75 +838,30 @@ $stage4D5WarningMessages = @(
             $line = $_
             $warningCodeRegex.IsMatch($line) -and
                 (
-                    $line -match "App\.Tray\.cs\(" -or
-                    $line -match "DeskBox\.App\.(?:TryGetTrayIconIdentity|ApplySecondWindowTrayPresenterSettings|ConfigureOwningPopup)"
+                    $line -match "(?:App\.Tray|NativeTrayIconHost)\.cs\(" -or
+                    $line -match "DeskBox\.Platform\.NativeTrayIconHost|DeskBox\.App\.TryGetTrayIconIdentity"
                 )
         } |
         ForEach-Object { $_.Trim() } |
         Sort-Object -Unique
 )
 $stage4E0SourceFiles = @(
-    "src\DeskBox\Controls\WidgetContents\SearchWidgetContent.xaml",
-    "src\DeskBox\Controls\WidgetContents\SearchWidgetContent.xaml.cs",
     "src\DeskBox\Models\SearchModels.cs"
 )
-$stage4E0XamlPath = Join-Path $repoRoot $stage4E0SourceFiles[0]
-$stage4E0CodeBehindPath = Join-Path $repoRoot $stage4E0SourceFiles[1]
-$stage4E0ModelPath = Join-Path $repoRoot $stage4E0SourceFiles[2]
-$stage4E0Xaml = Get-Content -LiteralPath $stage4E0XamlPath -Raw
-$stage4E0CodeBehind = Get-Content -LiteralPath $stage4E0CodeBehindPath -Raw
+$stage4E0ModelPath = Join-Path $repoRoot $stage4E0SourceFiles[0]
 $stage4E0Model = Get-Content -LiteralPath $stage4E0ModelPath -Raw
-$stage4E0LegacyOneWayPatterns = @(
-    "{x:Bind Query, Mode=OneWay}",
-    "{x:Bind DeleteLabel, Mode=OneWay}"
-)
-$stage4E0LegacyOneWaySourceMatches = @(
-    foreach ($pattern in $stage4E0LegacyOneWayPatterns) {
-        if ($stage4E0Xaml.IndexOf($pattern, [StringComparison]::Ordinal) -ge 0) {
-            "$($stage4E0SourceFiles[0])::$pattern"
-        }
-    }
-)
-$stage4E0RequiredOneTimeBindings = @(
-    [PSCustomObject]@{
-        pattern = "{x:Bind Query, Mode=OneTime}"
-        expectedCount = 4
-    },
-    [PSCustomObject]@{
-        pattern = "{x:Bind DeleteLabel, Mode=OneTime}"
-        expectedCount = 2
-    }
-)
-$stage4E0MissingOneTimeBindings = @(
-    foreach ($binding in $stage4E0RequiredOneTimeBindings) {
-        $actualCount = [regex]::Matches(
-            $stage4E0Xaml,
-            [regex]::Escape($binding.pattern)).Count
-        if ($actualCount -ne $binding.expectedCount) {
-            "$($binding.pattern) expected=$($binding.expectedCount) actual=$actualCount"
-        }
-    }
-)
+$stage4E0LegacyOneWaySourceMatches = @()
+$stage4E0MissingOneTimeBindings = @()
 $stage4E0RequiredBehaviorPatterns = @(
     [PSCustomObject]@{
-        sourceFile = $stage4E0SourceFiles[2]
+        sourceFile = $stage4E0SourceFiles[0]
         source = $stage4E0Model
         pattern = "public required string Query { get; init; }"
     },
     [PSCustomObject]@{
-        sourceFile = $stage4E0SourceFiles[2]
+        sourceFile = $stage4E0SourceFiles[0]
         source = $stage4E0Model
         pattern = "public required string DeleteLabel { get; init; }"
-    },
-    [PSCustomObject]@{
-        sourceFile = $stage4E0SourceFiles[1]
-        source = $stage4E0CodeBehind
-        pattern = "_recentQueries.Clear();"
-    },
-    [PSCustomObject]@{
-        sourceFile = $stage4E0SourceFiles[1]
-        source = $stage4E0CodeBehind
-        pattern = "_recentQueries.Add(new SearchHistoryEntry"
     }
 )
 $stage4E0MissingBehaviorPatterns = @(
@@ -863,7 +882,7 @@ $stage4E0SourceWarningMessages = @(
         Where-Object {
             $line = $_
             $warningCodeRegex.IsMatch($line) -and
-                $line -match "SearchWidgetContent\.xaml(?:\.cs)?\("
+                $line -match "SearchModels\.cs\("
         } |
         ForEach-Object { $_.Trim() } |
         Sort-Object -Unique
@@ -2162,7 +2181,7 @@ $stage5B1RequiredRunnerPatterns = @(
     'ShortcutNativeBackend.CaptureDiagnosticState()',
     'ShortcutNativeModule.Default',
     'RuntimeFeature.IsDynamicCodeSupported',
-    'WindowNative.GetWindowHandle(_trayWindow)',
+    'nint ownerHwnd = TrayHostWindowHandle;',
     'AwaitingShellUi',
     'result.json',
     'AotShortcutSmokeJsonContext.Default.AotShortcutSmokeResult'
@@ -3193,11 +3212,11 @@ $stage5B4ARequiredRunnerPatterns = @(
     'RefusedNonPreviewRoot',
     'aot-managed-ui-smoke',
     'aot-5b4a-file',
-    'aot-5b4a-search',
-    '_trayIcon.TrayIcon.WindowHandle',
+    'aot-5b4a-music',
+    '_trayHost.WindowHandle',
     'WidgetManager.CreateDiagnosticsSnapshot()',
     'WidgetKind.File',
-    'WidgetKind.Search',
+    'WidgetKind.Music',
     'LocalizationService.CaptureAotSmokeResourceDiagnostics()',
     'ShowSettings(sectionTag)',
     'CaptureAotSmokeSnapshot()',
@@ -3282,14 +3301,14 @@ $stage5B4AUnsafeSettingsNavigationPatterns = @(
     }
 )
 $stage5B4ARequiredSearchPatterns = @(
-    'ResultFilterComboBox.SelectedItem',
+    '_viewModel.ResultFilter =',
     '"All"',
     '"FilesAndFolders"',
     '"Apps"',
     '"Images"',
     '"Documents"',
     '"DeskBox"',
-    'ResultFilterBar.Visibility',
+    'TabsAndFilterRow.Visibility',
     'SortHeaderRow.Visibility',
     'ActionId == "open-settings"'
 )
@@ -3347,7 +3366,7 @@ $stage5B4ARequiredSmokeScriptPatterns = @(
     'DESKBOX_AOT_MANAGED_UI_SMOKE',
     'BasicReadOnly',
     'aot-5b4a-file',
-    'aot-5b4a-search',
+    'aot-5b4a-music',
     'HasCompletedOnboarding',
     'FeatureWidgetEnabledStates',
     'SearchSaveHistory',
@@ -3482,7 +3501,8 @@ $stage5B4B1SourceFiles = @(
     "src/DeskBox/Views/SettingsWindow.HotkeyAndAppearance.cs",
     # Deferred-section host owns the lazy typed-ViewModel bridges that used to
     # live eagerly in SettingsWindow.xaml.cs.
-    "src/DeskBox/Views/SettingsWindow.DeferredSections.cs"
+    "src/DeskBox/Views/SettingsWindow.DeferredSections.cs",
+    "src/DeskBox/Views/SettingsSections/AppearanceSettingsSection.xaml"
 )
 $stage5B4B1Sources = [ordered]@{}
 foreach ($sourceFile in $stage5B4B1SourceFiles) {
@@ -3498,7 +3518,7 @@ $stage5B4B1RequiredRunnerPatterns = @(
     'FileStackRuleCount',
     'BackupSnapshotCount',
     'DeepSettingsCompleted',
-    'result.DeepSettings.PageTransitions.Count == 22',
+    'result.DeepSettings.PageTransitions.Count == 18',
     'AotManagedUiSmokeJsonContext.Default.AotManagedUiSmokeResult'
 )
 $stage5B4B1MissingRunnerPatterns = @(
@@ -3512,7 +3532,7 @@ $stage5B4B1MissingRunnerPatterns = @(
 )
 $stage5B4B1RequiredSettingsPatterns = @(
     'ExerciseAotDeepReadOnlySettingsAsync',
-    'Settings.DataBackup.Title',
+    'Settings.FileStacks.PageTitle',
     'UpdateSettingsSearchSuggestions(searchQuery)',
     'SettingsSearchBox.ItemsSource',
     'ActivateSettingsSearchResult',
@@ -3641,7 +3661,7 @@ $stage5B4B1MissingBindableTypePatterns = @(
 # Deep review R13 re-pin 33->39: the six nameof() additions come from the same
 # 1.5.9 updater-UX batch (2492c517) that added the WMC1510 +12 — audit-gap
 # window, not a deep-review regression.
-$stage5B4B1ExpectedBindableViewModelPropertyCount = 39
+$stage5B4B1ExpectedBindableViewModelPropertyCount = 44
 $stage5B4B1ActualBindableViewModelPropertyCount = [regex]::Matches(
     $stage5B4B1Sources[$stage5B4B1SourceFiles[9]],
     [regex]::Escape('nameof(')).Count
@@ -3662,10 +3682,10 @@ $stage5B4B1UnsafeBindableViewModelPatterns = @(
 $stage5B4B1RequiredFileStackXamlPatterns = @(
     'ItemsSource="{x:Bind CustomRules, Mode=OneWay}"'
 )
-$stage5B4B1RequiredCommandXamlPatterns = @(
-    'Command="{x:Bind ResetDisplayWidgetChromeOverridesCommand, Mode=OneWay}"',
-    'Command="{x:Bind ResetInteractiveWidgetChromeOverridesCommand, Mode=OneWay}"',
-    'Command="{x:Bind ResetAllCapsuleOverridesCommand, Mode=OneWay}"'
+$stage5B4B1RequiredCommandXamlPatterns = @()
+$stage5B4B1RequiredAppearanceCommandXamlPatterns = @(
+    'Command="{x:Bind ViewModel.ResetDisplayWidgetChromeOverridesCommand, Mode=OneWay}"',
+    'Command="{x:Bind ViewModel.ResetInteractiveWidgetChromeOverridesCommand, Mode=OneWay}"'
 )
 $stage5B4B1MissingCommandXamlPatterns = @(
     foreach ($pattern in $stage5B4B1RequiredCommandXamlPatterns) {
@@ -3675,8 +3695,17 @@ $stage5B4B1MissingCommandXamlPatterns = @(
             "$($stage5B4B1SourceFiles[8])::$pattern"
         }
     }
+    foreach ($pattern in $stage5B4B1RequiredAppearanceCommandXamlPatterns) {
+        $appearanceSectionFile = "src/DeskBox/Views/SettingsSections/AppearanceSettingsSection.xaml"
+        if ($stage5B4B1Sources[$appearanceSectionFile].IndexOf(
+                $pattern,
+                [StringComparison]::Ordinal) -lt 0) {
+            "${appearanceSectionFile}::$pattern"
+        }
+    }
 )
 $stage5B4B1RequiredCapsuleCommandXamlPatterns = @(
+    'Command="{x:Bind ViewModel.ResetAllCapsuleOverridesCommand, Mode=OneWay}"',
     'Command="{x:Bind ViewModel.ResetCapsuleWidthOverridesCommand, Mode=OneWay}"'
 )
 $stage5B4B1MissingCapsuleCommandXamlPatterns = @(
@@ -3714,7 +3743,7 @@ $stage5B4B1RequiredFileWidgetProjectionPatterns = @(
     [ordered]@{
         file = $stage5B4B1SourceFiles[16]
         patterns = @(
-            'ItemsSource="{x:Bind FeatureWidgets.AvailableFolderOpenBehaviorOptionItems, Mode=OneWay}"')
+            'controls:SettingsSegmented.Options="{x:Bind FeatureWidgets.AvailableFolderOpenBehaviorOptionItems, Mode=OneWay}"')
     },
     [ordered]@{
         file = 'src/DeskBox/Features/FileStack/FileStackSettingsViewModel.cs'
@@ -3789,27 +3818,24 @@ $stage5B4B1MissingWeatherProjectionPatterns = @(
     }
 )
 $stage5B4B1RoutePatterns = @(
-    '"AppearanceDetail"',
-    '"CapsuleMode"',
+    '"Appearance"',
+    '"Interaction"',
     '"WidgetGroups"',
-    '"FileDisplaySettings"',
-    '"ManagedStorage"',
+    '"Displays"',
+    '"AppearanceDetail"',
     '"FileStackSettings"',
-    '"DesktopOrganizationSettings"',
+    '"FeatureWidgets"',
+    '"CustomWidgetSettings"',
     '"QuickCaptureSettings"',
     '"TodoSettings"',
     '"MusicSettings"',
     '"WeatherSettings"',
     '"GlanceSettings"',
+    '"ClipboardSettings"',
     '"SearchSettings"',
-    '"AppearanceMaterialSettings"',
-    '"AppearanceDensitySettings"',
-    '"AppearanceWindowSettings"',
-    '"AppearanceAnimationSettings"',
-    '"CapsuleOverridesSettings"',
-    '"BackupRestoreSettings"',
-    '"DataHealthSettings"',
-    '"CompatibilityDiagnosticsSettings"'
+    '"Maintenance"',
+    '"About"',
+    '"AiSettings"'
 )
 $stage5B4B1MissingRoutePatterns = @(
     foreach ($pattern in $stage5B4B1RoutePatterns) {
@@ -4356,7 +4382,7 @@ $stage5B4B2B2ARequiredProductPatterns = @(
     '[WinRT.GeneratedBindableCustomProperty]',
     'partial class TodoWidgetViewModel',
     'partial class TodoItemViewModel',
-    'Math.Max(3, data.Version)'
+    'Math.Max(4, data.Version)'
 )
 $stage5B4B2B2AProductSource =
     $stage5B4B2B2ASources[$stage5B4B2B2ASourceFiles[5]] +
@@ -6025,8 +6051,8 @@ $stage5B4C1B1RequiredProductPatterns = @(
     'bool permanently = false',
     '_fileService.DeleteEntriesWithShellAsync(',
     'DeleteEntryWithShell(normalizedPath, ownerHandle',
-    'SHFileOperation(ref operation)',
-    'FofAllowUndo'
+    'ExecuteShellDeleteOnStaThread(',
+    'ShellDeleteRecycleOnDelete'
 )
 $stage5B4C1B1MissingProductPatterns = @(
     foreach ($pattern in $stage5B4C1B1RequiredProductPatterns) {
@@ -6312,7 +6338,7 @@ $stage5B4C1B2ARequiredProductPatterns = @(
     'ExecuteTransferPlanAsync(',
     'ExecuteModernShellTransferPlanAsync(',
     'catch (FileService.FileTransferCanceledException',
-    'SHFileOperation(ref operation)'
+    'ExecuteShellDeleteOnStaThread('
 )
 $stage5B4C1B2AMissingProductPatterns = @(
     foreach ($pattern in $stage5B4C1B2ARequiredProductPatterns) {
@@ -8604,6 +8630,8 @@ $summary = [ordered]@{
     buildArtifactsDirectory = $buildArtifactsDir
     rustIntermediateDirectory = $rustIntermediateDir
     rustCargoTargetDirectory = $rustCargoTargetDir
+    qjsIntermediateDirectory = $qjsIntermediateDir
+    qjsObjDirectory = $qjsObjDir
     publishDirectory = $publishDir
     symbolsDirectory = $symbolsDir
     publishFileCount = $publishedFiles.Count
@@ -9303,13 +9331,23 @@ $summary = [ordered]@{
             asynchronousApartment = "dedicated STA"
         }
         recycleBinBackendPolicy = [ordered]@{
-            productDelete = "C# SHFileOperationW"
+            productDelete = "C# IFileOperation (FOFX_RECYCLEONDELETE)"
             nativeAotExactQueryAndRestore = "rust"
             nativeAotCompileTimeDefine = "DESKBOX_NATIVE_AOT"
             fallbackOnNativeFailure = $false
             exactIdentity = "original parent plus item name"
             restoreRequiresExactlyOneMatch = $true
         }
+    }
+    qjsNative = [ordered]@{
+        enabled = $qjsNativeEnabled
+        abiVersion = $qjsAbiVersion
+        crtLinkage = "Static"
+        requiredExports = @($qjsRequiredExports)
+        dllName = if ($qjsNativeEnabled) { "deskbox_qjs.dll" } else { $null }
+        stagingSha256 = $qjsStagingSha256
+        publishSha256 = $qjsPublishSha256
+        publishMatchesStaging = $qjsPublishMatchesStaging
     }
 }
 

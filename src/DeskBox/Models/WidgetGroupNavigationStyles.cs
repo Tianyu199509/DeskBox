@@ -4,8 +4,15 @@ public static class WidgetGroupNavigationStyles
 {
     public const string FollowDefault = "FollowDefault";
     public const string Tabs = "Tabs";
+    public const string EqualTabs = "EqualTabs";
     public const string Stack = "Stack";
     private const string LegacyAuto = "Auto";
+
+    public static bool UsesTabStrip(string? value) =>
+        value is Tabs or EqualTabs;
+
+    public static bool UsesEqualWidthTabs(string? value) =>
+        value == EqualTabs;
 
     public static string Normalize(string? value, bool allowFollowDefault)
     {
@@ -13,6 +20,7 @@ public static class WidgetGroupNavigationStyles
         {
             FollowDefault when allowFollowDefault => FollowDefault,
             Tabs => Tabs,
+            EqualTabs => EqualTabs,
             Stack => Stack,
             // "Auto" was the pre-Tabs name for the stacked look — keep its
             // meaning, it is not an invalid value.

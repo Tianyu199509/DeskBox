@@ -196,6 +196,18 @@ public sealed partial class FeatureWidgetsSettingsViewModel : ObservableObject
     public bool SetMusicHideTimelineWhenUnavailable(bool value) =>
         _settings.SetMusicHideTimelineWhenUnavailable(value);
 
+    public bool SetMusicShowLyrics(bool value) =>
+        _settings.SetMusicShowLyrics(value);
+
+    public bool SetMusicShowCapsuleLyrics(bool value) =>
+        _settings.SetMusicShowCapsuleLyrics(value);
+
+    public bool SetMusicLocalLyricsFolder(string? folderPath) =>
+        _settings.SetMusicLocalLyricsFolder(folderPath);
+
+    public bool SetMusicSpectrumStyle(string? style) =>
+        _settings.SetMusicSpectrumStyle(style);
+
     public void ResetMusicPresentationPreferences(bool scheduleSave = true) =>
         _settings.ResetMusicPresentationPreferences(scheduleSave);
 

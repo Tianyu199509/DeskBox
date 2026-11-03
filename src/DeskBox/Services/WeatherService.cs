@@ -1,6 +1,8 @@
+using System.Net;
 using System.Net.Http;
 using System.Globalization;
 using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using DeskBox.Helpers;
@@ -26,7 +28,12 @@ public sealed class WeatherService : IDisposable
 
     private static readonly TimeSpan DefaultCacheDuration = TimeSpan.FromMinutes(30);
 
-    private static readonly HttpClient s_httpClient = new()
+    private static readonly HttpClient s_httpClient = new(new SocketsHttpHandler
+    {
+        PooledConnectionLifetime = TimeSpan.FromMinutes(10),
+        PooledConnectionIdleTimeout = TimeSpan.FromSeconds(30),
+        AutomaticDecompression = DecompressionMethods.All
+    })
     {
         Timeout = TimeSpan.FromSeconds(6)
     };
@@ -80,8 +87,8 @@ public sealed class WeatherService : IDisposable
         {
             string apiLanguage = NormalizeGeocodingLanguage(language);
             string url = $"{GeocodingBaseUrl}?name={Uri.EscapeDataString(query)}&count=10&language={apiLanguage}&format=json";
-            string json = await s_httpClient.GetStringAsync(url, cancellationToken);
-            var result = DeserializeGeocodingResponse(json);
+            await using Stream stream = await s_httpClient.GetStreamAsync(url, cancellationToken).ConfigureAwait(false);
+            var result = await DeserializeGeocodingResponseAsync(stream, cancellationToken).ConfigureAwait(false);
             return result?.Results ?? [];
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -310,20 +317,55 @@ public sealed class WeatherService : IDisposable
         }
     }
 
-    internal static WeatherGeocodingResult? DeserializeGeocodingResponse(string json) =>
-        JsonSerializer.Deserialize(json, WeatherJsonContext.Default.GeocodingResult);
+    internal static ValueTask<WeatherGeocodingResult?> DeserializeGeocodingResponseAsync(
+        Stream stream,
+        CancellationToken cancellationToken = default) =>
+        JsonSerializer.DeserializeAsync(stream, WeatherJsonContext.Default.GeocodingResult, cancellationToken);
 
-    internal static WeatherData? DeserializeOpenMeteoResponse(string json) =>
-        JsonSerializer.Deserialize(json, WeatherJsonContext.Default.OpenMeteoWeather);
+    internal static WeatherGeocodingResult? DeserializeGeocodingResponse(string json)
+    {
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
+        return DeserializeGeocodingResponseAsync(stream).GetAwaiter().GetResult();
+    }
 
-    internal static MsnWeatherResponse? DeserializeMsnResponse(string json) =>
-        JsonSerializer.Deserialize(json, WeatherJsonContext.Default.MsnWeather);
+    internal static ValueTask<WeatherData?> DeserializeOpenMeteoResponseAsync(
+        Stream stream,
+        CancellationToken cancellationToken = default) =>
+        JsonSerializer.DeserializeAsync(stream, WeatherJsonContext.Default.OpenMeteoWeather, cancellationToken);
 
-    internal static WeatherCacheState? DeserializeCacheState(string json) =>
-        JsonSerializer.Deserialize(json, WeatherJsonContext.Default.CacheState);
+    internal static WeatherData? DeserializeOpenMeteoResponse(string json)
+    {
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
+        return DeserializeOpenMeteoResponseAsync(stream).GetAwaiter().GetResult();
+    }
 
-    internal static string SerializeCacheState(WeatherCacheState state) =>
-        JsonSerializer.Serialize(state, WeatherJsonContext.Default.CacheState);
+    internal static ValueTask<MsnWeatherResponse?> DeserializeMsnResponseAsync(
+        Stream stream,
+        CancellationToken cancellationToken = default) =>
+        JsonSerializer.DeserializeAsync(stream, WeatherJsonContext.Default.MsnWeather, cancellationToken);
+
+    internal static MsnWeatherResponse? DeserializeMsnResponse(string json)
+    {
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
+        return DeserializeMsnResponseAsync(stream).GetAwaiter().GetResult();
+    }
+
+    internal static ValueTask<WeatherCacheState?> DeserializeCacheStateAsync(
+        Stream stream,
+        CancellationToken cancellationToken = default) =>
+        JsonSerializer.DeserializeAsync(stream, WeatherJsonContext.Default.CacheState, cancellationToken);
+
+    internal static WeatherCacheState? DeserializeCacheState(string json)
+    {
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
+        return DeserializeCacheStateAsync(stream).GetAwaiter().GetResult();
+    }
+
+    internal static Task SerializeCacheStateAsync(
+        Stream stream,
+        WeatherCacheState state,
+        CancellationToken cancellationToken = default) =>
+        JsonSerializer.SerializeAsync(stream, state, WeatherJsonContext.Default.CacheState, cancellationToken);
 
     private static string GetCurrentDataSource()
     {
@@ -372,8 +414,8 @@ public sealed class WeatherService : IDisposable
         CancellationToken cancellationToken)
     {
         string url = BuildOpenMeteoForecastUrl(lat, lon);
-        string json = await s_httpClient.GetStringAsync(url, cancellationToken);
-        return DeserializeOpenMeteoResponse(json);
+        await using Stream stream = await s_httpClient.GetStreamAsync(url, cancellationToken).ConfigureAwait(false);
+        return await DeserializeOpenMeteoResponseAsync(stream, cancellationToken).ConfigureAwait(false);
     }
 
     private static string BuildOpenMeteoForecastUrl(double lat, double lon)
@@ -401,8 +443,8 @@ public sealed class WeatherService : IDisposable
         string url = $"{MsnWeatherUrl}?apikey={MsnApiKey}" +
                      $"&lat={lat.ToString("F4", CultureInfo.InvariantCulture)}" +
                      $"&lon={lon.ToString("F4", CultureInfo.InvariantCulture)}&units=C";
-        string json = await s_httpClient.GetStringAsync(url, cancellationToken);
-        var msnResponse = DeserializeMsnResponse(json);
+        await using Stream stream = await s_httpClient.GetStreamAsync(url, cancellationToken).ConfigureAwait(false);
+        var msnResponse = await DeserializeMsnResponseAsync(stream, cancellationToken).ConfigureAwait(false);
 
         var msnWeather = msnResponse?.Value?.FirstOrDefault()?.Responses?.FirstOrDefault()?.Weather?.FirstOrDefault();
         if (msnWeather is null)

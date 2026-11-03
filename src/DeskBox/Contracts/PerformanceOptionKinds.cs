@@ -56,9 +56,9 @@ public static class PerformanceOptionKinds
                 : CacheBudgetBalanced;
 
     public static string NormalizeHiddenCacheCleanupScope(string? scope) =>
-        string.Equals(scope, HiddenCacheCleanupScopeWarm, StringComparison.OrdinalIgnoreCase)
-            ? HiddenCacheCleanupScopeWarm
-            : HiddenCacheCleanupScopeAllRecreatable;
+        string.Equals(scope, HiddenCacheCleanupScopeAllRecreatable, StringComparison.OrdinalIgnoreCase)
+            ? HiddenCacheCleanupScopeAllRecreatable
+            : HiddenCacheCleanupScopeWarm;
 }
 
 /// <summary>
@@ -81,4 +81,5 @@ public sealed record PerformancePresentationSettings(
     bool AllowCompactAmbientAnimations,
     bool IdleWorkingSetTrimEnabled,
     bool ImmediateHiddenWorkingSetTrimEnabled,
-    bool QuiescenceWorkingSetTrimEnabled);
+    bool QuiescenceWorkingSetTrimEnabled,
+    bool KeepCapsuleContentWarm = true);

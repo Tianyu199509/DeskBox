@@ -1,6 +1,5 @@
+using DeskBox.Platform;
 using Microsoft.UI.Dispatching;
-using Windows.Storage;
-using Windows.Storage.Search;
 
 namespace DeskBox.Services;
 
@@ -33,17 +32,17 @@ public sealed record FolderWatcherHealthSnapshot(
 
 /// <summary>
 /// Watches a folder for file system changes and notifies via events.
-/// Uses <see cref="FileSystemWatcher"/> for low-latency file and directory
-/// notifications, with a shallow <see cref="StorageItemQueryResult"/> as a
-/// second invalidation source. The two mechanisms intentionally overlap:
-/// Explorer operations can overflow a native watcher buffer, while indexed
-/// queries can lag or omit folder-only changes.
+/// Uses a shallow <see cref="FileSystemWatcher"/> for low-latency file and directory
+/// notifications paired with the shared <see cref="ShellChangeNotificationService"/>
+/// (<c>SHChangeNotifyRegister</c>) for Explorer operations and child folder icon updates.
+/// Avoids storage-query broker threads and recursive subtree watchers.
 /// Implements debouncing using a DispatcherQueueTimer to avoid creating
 /// short-lived thread-pool tasks on every file-system event.
 /// </summary>
 public sealed class FolderWatcherService : IDisposable
 {
     private const int DebounceDelayMs = 250;
+    internal const int MaxDebounceWaitMs = 1500;
     // Overflow protection, and since the view model stopped escalating large
     // known batches to full reloads, the ONLY count-based escalation left:
     // exceeding the buffered-change cap means events arrive faster than
@@ -59,7 +58,6 @@ public sealed class FolderWatcherService : IDisposable
     // (an ACL fix must self-heal) without flooding the log.
     private const int ReconnectPlateauSeconds = 180;
     private const int LegacyWatcherRestartMinIntervalSeconds = 30;
-    private const int DesktopIniRestartMaxAttempts = 3;
     internal const int NativeBufferSizeBytes = 32 * 1024;
     internal const NotifyFilters NativeNotifyFilter =
         NotifyFilters.FileName |
@@ -70,8 +68,7 @@ public sealed class FolderWatcherService : IDisposable
         NotifyFilters.Attributes;
 
     private FileSystemWatcher? _legacyWatcher;
-    private FileSystemWatcher? _desktopIniWatcher;
-    private StorageItemQueryResult? _queryWatcher;
+    private IDisposable? _shellNotifySubscription;
     private readonly DispatcherQueueTimer _debounceTimer;
     private readonly DispatcherQueueTimer _iconDebounceTimer;
     private readonly DispatcherQueueTimer _reconnectTimer;
@@ -81,11 +78,12 @@ public sealed class FolderWatcherService : IDisposable
     private readonly HashSet<string> _pendingIconPaths = new(StringComparer.OrdinalIgnoreCase);
     private int _pendingGeneration;
     private bool _requiresFullReload;
+    private long _firstPendingChangeTick;
+    private int _debounceRestartQueued;
+    private int _iconDebounceStartQueued;
     private bool _legacyRestartQueued;
     private DateTimeOffset _lastLegacyRestartAtUtc = DateTimeOffset.MinValue;
     private bool _legacyErrorAnnounced;
-    private int _desktopIniRestartCount;
-    private bool _desktopIniErrorAnnounced;
     private int _watchGeneration;
     private string? _reconnectPath;
     private string? _requestedPath;
@@ -103,9 +101,9 @@ public sealed class FolderWatcherService : IDisposable
     public event Action<FolderChangeBatch>? FolderChanged;
 
     /// <summary>
-    /// Fired when a direct child folder's desktop.ini changes, which means
-    /// its shell icon may have been customized (e.g. via Folder Painter).
-    /// The argument is the child folder path.  Always raised on the UI thread.
+    /// Fired when a direct child folder's shell icon or desktop.ini changes
+    /// (e.g. via Explorer Properties or Folder Painter).
+    /// The argument is the child folder path. Always raised on the UI thread.
     /// </summary>
     public event Action<string>? FolderIconChanged;
 
@@ -114,7 +112,7 @@ public sealed class FolderWatcherService : IDisposable
     /// </summary>
     public string? WatchedPath { get; private set; }
 
-    public bool IsWatching => _legacyWatcher is not null || _queryWatcher is not null;
+    public bool IsWatching => _legacyWatcher is not null || _shellNotifySubscription is not null;
 
     public int Generation
     {
@@ -144,7 +142,7 @@ public sealed class FolderWatcherService : IDisposable
         WatchedPath,
         _health,
         _legacyWatcher is not null,
-        _queryWatcher is not null,
+        _shellNotifySubscription is not null,
         IsReconnectPending,
         ReconnectCount,
         LastEventAt,
@@ -179,10 +177,9 @@ public sealed class FolderWatcherService : IDisposable
         }
 
         string requestedPath = folderPath;
-        // Watch the physical target rather than asking FileSystemWatcher and
-        // StorageFolder to traverse a user-created mount point. The logical
-        // junction path remains in widget configuration; only this runtime
-        // watcher path is resolved.
+        // Watch the physical target rather than asking FileSystemWatcher to
+        // traverse a user-created mount point. The logical junction path
+        // remains in widget configuration; only this runtime watcher path is resolved.
         if (FileService.TryResolveExistingPathForTraversal(
                 folderPath,
                 out string traversalPath))
@@ -205,7 +202,9 @@ public sealed class FolderWatcherService : IDisposable
             startGeneration = _watchGeneration;
         }
 
-        FolderWatcherHealth availability = await ProbeFolderAccessAsync(folderPath);
+        (FolderWatcherHealth availability, ShellChangeNotificationService.PreparedTarget? rawPreparedTarget) =
+            await ProbeFolderAndPrepareShellTargetAsync(folderPath);
+        using ShellChangeNotificationService.PreparedTarget? preparedShellTarget = rawPreparedTarget;
         lock (_lock)
         {
             if (_isDisposed || startGeneration != _watchGeneration)
@@ -234,10 +233,9 @@ public sealed class FolderWatcherService : IDisposable
             generation = _watchGeneration;
         }
 
-        StartDesktopIniWatcher(folderPath);
         bool nativeStarted = TryStartLegacyWatcher(folderPath);
-        bool queryStarted = await TryStartQueryWatcherAsync(folderPath, generation);
-        if (!nativeStarted && !queryStarted)
+        bool shellStarted = TryStartShellNotificationSubscription(folderPath, generation, preparedShellTarget);
+        if (!nativeStarted && !shellStarted)
         {
             _health = ProbeFolderAccess(folderPath) == FolderWatcherHealth.AccessDenied
                 ? FolderWatcherHealth.AccessDenied
@@ -246,7 +244,7 @@ public sealed class FolderWatcherService : IDisposable
         }
         else
         {
-            _health = nativeStarted && queryStarted
+            _health = nativeStarted
                 ? FolderWatcherHealth.Watching
                 : FolderWatcherHealth.Degraded;
             lock (_lock)
@@ -255,9 +253,10 @@ public sealed class FolderWatcherService : IDisposable
                 _reconnectAttempt = 0;
             }
         }
+
         App.LogVerbose(
-            $"[FolderWatcher] Started hybrid watcher for '{folderPath}' " +
-            $"native={nativeStarted} itemQuery={queryStarted}");
+            $"[FolderWatcher] Started watcher for '{folderPath}' " +
+            $"native={nativeStarted} shellNotify={shellStarted}");
     }
 
     private static FolderWatcherHealth ProbeFolderAccess(string folderPath)
@@ -289,65 +288,109 @@ public sealed class FolderWatcherService : IDisposable
         return Task.Run(() => ProbeFolderAccess(folderPath));
     }
 
-    /// <summary>
-    /// Attempt to create a StorageFileQueryResult for the folder.
-    /// This leverages the Windows search index for better performance.
-    /// </summary>
-    private async Task<bool> TryStartQueryWatcherAsync(
-        string folderPath,
-        int generation)
+    private static Task<(FolderWatcherHealth Availability, ShellChangeNotificationService.PreparedTarget? ShellTarget)>
+        ProbeFolderAndPrepareShellTargetAsync(string folderPath)
     {
-        StorageItemQueryResult? query = null;
+        return Task.Run(() =>
+        {
+            FolderWatcherHealth availability = ProbeFolderAccess(folderPath);
+            if (availability != FolderWatcherHealth.Watching)
+            {
+                return (availability, (ShellChangeNotificationService.PreparedTarget?)null);
+            }
+
+            return (availability, ShellChangeNotificationService.Shared.PrepareTarget(folderPath));
+        });
+    }
+
+    private bool TryStartShellNotificationSubscription(
+        string folderPath,
+        int generation,
+        ShellChangeNotificationService.PreparedTarget? preparedShellTarget)
+    {
         try
         {
-            var folder = await StorageFolder.GetFolderFromPathAsync(folderPath);
-            if (folder is null)
+            IDisposable? subscription = ShellChangeNotificationService.Shared.Subscribe(
+                folderPath,
+                _dispatcherQueue,
+                notification => OnShellFolderNotification(notification, generation),
+                preparedShellTarget);
+            if (subscription is null)
             {
                 return false;
             }
 
-            var options = new QueryOptions
-            {
-                FolderDepth = FolderDepth.Shallow,
-                IndexerOption = IndexerOption.UseIndexerWhenAvailable,
-            };
-
-            query = folder.CreateItemQueryWithOptions(options);
-            query.ContentsChanged += OnQueryContentsChanged;
-            // Materialize the query once. ContentsChanged is not consistently
-            // armed by every storage provider until the first result request.
-            _ = await query.GetItemsAsync(0, 1);
-
             lock (_lock)
             {
-                if (generation != _watchGeneration ||
+                if (_isDisposed ||
+                    generation != _watchGeneration ||
                     !string.Equals(WatchedPath, folderPath, StringComparison.OrdinalIgnoreCase))
                 {
-                    ReleaseQueryWatcher(query);
+                    subscription.Dispose();
                     return false;
                 }
 
-                _queryWatcher = query;
+                _shellNotifySubscription = subscription;
             }
+
             return true;
         }
         catch (Exception ex)
         {
             _lastError = ex.Message;
-            App.LogVerbose($"[FolderWatcher] StorageItemQueryResult creation failed: {ex.Message}");
-            if (query is not null)
-            {
-                ReleaseQueryWatcher(query);
-            }
+            App.LogVerbose($"[FolderWatcher] ShellChangeNotify subscription failed: {ex.Message}");
             return false;
         }
     }
 
-    private void ReleaseQueryWatcher(StorageItemQueryResult query)
+    private void OnShellFolderNotification(ShellFolderNotification notification, int generation)
     {
-        query.ContentsChanged -= OnQueryContentsChanged;
-        try { System.Runtime.InteropServices.Marshal.ReleaseComObject(query); }
-        catch { }
+        lock (_lock)
+        {
+            if (_isDisposed ||
+                string.IsNullOrWhiteSpace(WatchedPath) ||
+                generation != _watchGeneration)
+            {
+                return;
+            }
+        }
+
+        _lastEventAt = DateTimeOffset.Now;
+        switch (notification.Kind)
+        {
+            case ShellFolderNotificationKind.Created when !string.IsNullOrWhiteSpace(notification.Path):
+                QueueChange(new FolderChange(notification.Path, WatcherChangeTypes.Created), generation);
+                break;
+
+            case ShellFolderNotificationKind.Deleted when !string.IsNullOrWhiteSpace(notification.Path):
+                QueueChange(new FolderChange(notification.Path, WatcherChangeTypes.Deleted), generation);
+                break;
+
+            case ShellFolderNotificationKind.Renamed when !string.IsNullOrWhiteSpace(notification.Path):
+                QueueChange(
+                    new FolderChange(notification.Path, WatcherChangeTypes.Renamed, notification.OldPath),
+                    generation);
+                break;
+
+            case ShellFolderNotificationKind.Updated when !string.IsNullOrWhiteSpace(notification.Path):
+                QueueChange(new FolderChange(notification.Path, WatcherChangeTypes.Changed), generation);
+                if (Directory.Exists(notification.Path))
+                {
+                    QueueIconChange(notification.Path, generation);
+                }
+                break;
+
+            case ShellFolderNotificationKind.DirectoryReload:
+                if (!HandleUnavailableRootFromCallback(generation))
+                {
+                    QueueFullReload(generation);
+                }
+                break;
+
+            case ShellFolderNotificationKind.FolderIconChanged when !string.IsNullOrWhiteSpace(notification.Path):
+                QueueIconChange(notification.Path, generation);
+                break;
+        }
     }
 
     private bool TryGetActiveGeneration(
@@ -369,134 +412,26 @@ public sealed class FolderWatcherService : IDisposable
         }
     }
 
-    private void OnQueryContentsChanged(IStorageQueryResultBase sender, object args)
+    private void QueueIconChange(string childFolderPath, int generation)
     {
-        if (!TryGetActiveGeneration(sender, _queryWatcher, out int generation))
-        {
-            return;
-        }
-
-        // StorageFileQueryResult.ContentsChanged does not provide details
-        // about what changed — it only signals that something in the folder
-        // changed.  We treat this as a full-reload signal.
-        _lastEventAt = DateTimeOffset.Now;
-        QueueFullReload(generation);
-    }
-
-    /// <summary>
-    /// Starts a recursive watcher that only reports desktop.ini changes.
-    /// A child folder's shell icon is driven by its own desktop.ini, so this
-    /// detects icon customization tools (e.g. Folder Painter) which the
-    /// shallow content watcher above cannot see.
-    /// </summary>
-    private void StartDesktopIniWatcher(string folderPath)
-    {
-        try
-        {
-            _desktopIniWatcher = new FileSystemWatcher
-            {
-                Path = folderPath,
-                Filter = "desktop.ini",
-                NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName |
-                               NotifyFilters.CreationTime,
-                IncludeSubdirectories = true,
-                EnableRaisingEvents = false
-            };
-            _desktopIniWatcher.Created += OnDesktopIniChanged;
-            _desktopIniWatcher.Changed += OnDesktopIniChanged;
-            _desktopIniWatcher.Renamed += OnDesktopIniChanged;
-            _desktopIniWatcher.Error += OnDesktopIniWatcherError;
-            _desktopIniWatcher.EnableRaisingEvents = true;
-        }
-        catch (Exception ex)
-        {
-            _lastError = ex.Message;
-            App.LogVerbose($"[FolderWatcher] desktop.ini watcher failed for '{folderPath}': {ex.Message}");
-            _desktopIniWatcher = null;
-        }
-    }
-
-    private void OnDesktopIniChanged(object sender, FileSystemEventArgs e)
-    {
-        if (!TryGetActiveGeneration(sender, _desktopIniWatcher, out int generation))
-        {
-            return;
-        }
-
-        _lastEventAt = DateTimeOffset.Now;
-        // Only direct child folders' icons are displayed — ignore deeper
-        // nesting and a desktop.ini sitting at the watched root itself.
-        string? childDir = Path.GetDirectoryName(e.FullPath);
-        if (string.IsNullOrEmpty(childDir))
-        {
-            return;
-        }
-
-        string? parent = Path.GetDirectoryName(childDir);
-        if (!string.Equals(parent, WatchedPath, StringComparison.OrdinalIgnoreCase))
+        if (string.IsNullOrWhiteSpace(childFolderPath))
         {
             return;
         }
 
         lock (_lock)
         {
-            if (string.IsNullOrWhiteSpace(WatchedPath))
+            if (string.IsNullOrWhiteSpace(WatchedPath) ||
+                generation != _watchGeneration)
             {
                 return;
             }
 
-            _pendingIconPaths.Add(childDir);
+            _pendingIconPaths.Add(childFolderPath);
             _pendingGeneration = generation;
         }
 
-        _dispatcherQueue.TryEnqueue(() => _iconDebounceTimer.Start());
-    }
-
-    private void OnDesktopIniWatcherError(object sender, ErrorEventArgs e)
-    {
-        if (!TryGetActiveGeneration(sender, _desktopIniWatcher, out _))
-        {
-            return;
-        }
-
-        _lastError = e.GetException()?.Message;
-        // The desktop.ini watcher only refreshes folder icons. Its failure
-        // must not degrade the whole folder's health: the main watcher and
-        // the item-query channel keep the listing accurate. Restart the aux
-        // watcher a bounded number of times and leave global health alone.
-        if (_desktopIniErrorAnnounced)
-        {
-            App.LogVerbose(
-                $"[FolderWatcher] desktop.ini watcher error: {e.GetException()?.Message}");
-        }
-        else
-        {
-            _desktopIniErrorAnnounced = true;
-            App.Log($"[FolderWatcher] desktop.ini watcher error: {e.GetException()}");
-        }
-
-        if (_desktopIniRestartCount >= DesktopIniRestartMaxAttempts)
-        {
-            // Persistent (typically a denied subtree). Stay stopped until the
-            // next full reconfiguration recreates it with a fresh budget.
-            return;
-        }
-
-        _desktopIniRestartCount++;
-        string? path;
-        lock (_lock)
-        {
-            path = WatchedPath;
-        }
-
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            return;
-        }
-
-        _desktopIniWatcher?.Dispose();
-        _desktopIniWatcher = null;
-        StartDesktopIniWatcher(path);
+        EnqueueIconDebounceTimerStart();
     }
 
     private bool TryStartLegacyWatcher(string folderPath)
@@ -538,6 +473,7 @@ public sealed class FolderWatcherService : IDisposable
         _iconDebounceTimer.Stop();
         _reconnectTimer.Stop();
 
+        IDisposable? shellSubscription;
         lock (_lock)
         {
             _watchGeneration++;
@@ -545,34 +481,16 @@ public sealed class FolderWatcherService : IDisposable
             _pendingIconPaths.Clear();
             _pendingGeneration = 0;
             _requiresFullReload = false;
+            _firstPendingChangeTick = 0;
             _legacyRestartQueued = false;
             _reconnectPath = null;
             _requestedPath = null;
             _reconnectAttempt = 0;
-            _desktopIniRestartCount = 0;
+            shellSubscription = _shellNotifySubscription;
+            _shellNotifySubscription = null;
         }
 
-        if (_queryWatcher is not null)
-        {
-            // StorageItemQueryResult is a WinRT COM object (not IDisposable).
-            // Explicitly release the RCW to avoid leaking the native query handle
-            // until the next GC. This is especially important when switching
-            // mapped folder paths, which calls Stop()+StartAsync() repeatedly.
-            ReleaseQueryWatcher(_queryWatcher);
-            _queryWatcher = null;
-        }
-
-        if (_desktopIniWatcher is not null)
-        {
-            _desktopIniWatcher.EnableRaisingEvents = false;
-            _desktopIniWatcher.Created -= OnDesktopIniChanged;
-            _desktopIniWatcher.Changed -= OnDesktopIniChanged;
-            _desktopIniWatcher.Renamed -= OnDesktopIniChanged;
-            _desktopIniWatcher.Error -= OnDesktopIniWatcherError;
-            _desktopIniWatcher.Dispose();
-            _desktopIniWatcher = null;
-        }
-
+        shellSubscription?.Dispose();
         StopLegacyWatcher();
         WatchedPath = null;
         _health = FolderWatcherHealth.Stopped;
@@ -609,6 +527,10 @@ public sealed class FolderWatcherService : IDisposable
         }
 
         QueueChange(new FolderChange(e.FullPath, e.ChangeType), generation);
+        if (e.ChangeType == WatcherChangeTypes.Changed && Directory.Exists(e.FullPath))
+        {
+            QueueIconChange(e.FullPath, generation);
+        }
     }
 
     private void OnRenamed(object sender, RenamedEventArgs e)
@@ -733,6 +655,7 @@ public sealed class FolderWatcherService : IDisposable
             if (availability == FolderWatcherHealth.Watching &&
                 TryStartLegacyWatcher(path))
             {
+                _health = FolderWatcherHealth.Watching;
                 App.Log($"[FolderWatcher] Native watcher restarted for '{path}'");
             }
             else
@@ -877,19 +800,52 @@ public sealed class FolderWatcherService : IDisposable
                 return;
             }
 
-            if (_pendingChanges.Count == 0)
+            if (_pendingChanges.Count == 0 && !_requiresFullReload)
             {
                 _pendingGeneration = generation;
             }
-            _pendingChanges.Add(change);
-            if (_pendingChanges.Count > MaxBufferedChangesBeforeReload)
+
+            if (_firstPendingChangeTick == 0)
             {
-                _requiresFullReload = true;
+                _firstPendingChangeTick = Environment.TickCount64;
+            }
+
+            if (!_requiresFullReload)
+            {
+                bool coalescedDuplicateChanged =
+                    change.ChangeType == WatcherChangeTypes.Changed &&
+                    HasPendingChangeForPath(change.FullPath);
+                if (!coalescedDuplicateChanged)
+                {
+                    _pendingChanges.Add(change);
+                    if (_pendingChanges.Count > MaxBufferedChangesBeforeReload)
+                    {
+                        _requiresFullReload = true;
+                    }
+                }
             }
         }
 
-        // Restart the debounce timer — each new change resets the wait period.
-        _dispatcherQueue.TryEnqueue(RestartDebounceTimer);
+        // Restart the debounce timer — each new change resets the wait period
+        // up to MaxDebounceWaitMs so sustained write storms still flush periodically.
+        EnqueueDebounceTimerRestart();
+    }
+
+    private bool HasPendingChangeForPath(string fullPath)
+    {
+        for (int index = 0; index < _pendingChanges.Count; index++)
+        {
+            FolderChange existing = _pendingChanges[index];
+            if ((existing.ChangeType is WatcherChangeTypes.Changed
+                    or WatcherChangeTypes.Created
+                    or WatcherChangeTypes.Renamed) &&
+                string.Equals(existing.FullPath, fullPath, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private void QueueFullReload(int? generation = null)
@@ -905,15 +861,75 @@ public sealed class FolderWatcherService : IDisposable
 
             _pendingGeneration = effectiveGeneration;
             _requiresFullReload = true;
+            if (_firstPendingChangeTick == 0)
+            {
+                _firstPendingChangeTick = Environment.TickCount64;
+            }
         }
 
-        _dispatcherQueue.TryEnqueue(RestartDebounceTimer);
+        EnqueueDebounceTimerRestart();
+    }
+
+    private void EnqueueDebounceTimerRestart()
+    {
+        if (_isDisposed || Interlocked.Exchange(ref _debounceRestartQueued, 1) != 0)
+        {
+            return;
+        }
+
+        if (!_dispatcherQueue.TryEnqueue(RestartDebounceTimer))
+        {
+            Interlocked.Exchange(ref _debounceRestartQueued, 0);
+        }
+    }
+
+    private void EnqueueIconDebounceTimerStart()
+    {
+        if (_isDisposed || Interlocked.Exchange(ref _iconDebounceStartQueued, 1) != 0)
+        {
+            return;
+        }
+
+        if (!_dispatcherQueue.TryEnqueue(StartIconDebounceTimer))
+        {
+            Interlocked.Exchange(ref _iconDebounceStartQueued, 0);
+        }
     }
 
     private void RestartDebounceTimer()
     {
+        Interlocked.Exchange(ref _debounceRestartQueued, 0);
+        if (_isDisposed || string.IsNullOrWhiteSpace(WatchedPath))
+        {
+            return;
+        }
+
+        long firstTick;
+        lock (_lock)
+        {
+            firstTick = _firstPendingChangeTick;
+        }
+
+        if (_debounceTimer.IsRunning &&
+            firstTick != 0 &&
+            Environment.TickCount64 - firstTick >= MaxDebounceWaitMs)
+        {
+            return;
+        }
+
         _debounceTimer.Stop();
         _debounceTimer.Start();
+    }
+
+    private void StartIconDebounceTimer()
+    {
+        Interlocked.Exchange(ref _iconDebounceStartQueued, 0);
+        if (_isDisposed || string.IsNullOrWhiteSpace(WatchedPath))
+        {
+            return;
+        }
+
+        _iconDebounceTimer.Start();
     }
 
     private void DebounceTimer_Tick(DispatcherQueueTimer sender, object args)
@@ -934,6 +950,7 @@ public sealed class FolderWatcherService : IDisposable
             _pendingChanges.Clear();
             _pendingGeneration = 0;
             _requiresFullReload = false;
+            _firstPendingChangeTick = 0;
         }
 
         if (batch.Changes.Count == 0 && !batch.RequiresFullReload)

@@ -24,6 +24,10 @@ internal enum ReservedHotkeyMode
     WinSpace,
     AltSpace,
     DoubleControl,
+    DoubleShift,
+    DoubleAlt,
+    DoubleWindows,
+    DoubleSpace,
     WindowsTap
 }
 

@@ -22,12 +22,15 @@ internal static class SettingsSearchChannelPolicy
     // instead of silently unfiltering Store search results.
     private const string SettingsKeyPrefix = "Settings.";
 
-    // Frozen order: the auto-start mode card first, then the About
-    // store-support card. New entries need the reason they are
-    // direct-installer-only spelled out above.
+    // Frozen order: the auto-start mode card first, the Direct-only update
+    // toggles, then the About store-support card. New entries need the reason
+    // they are direct-installer-only spelled out above.
     internal static HashSet<string> DirectOnlyHeaderKeys { get; } = new(StringComparer.Ordinal)
     {
         SettingsKeyPrefix + "AutoStart.Mode.Title",
+        SettingsKeyPrefix + "Update.AutoCheck",
+        SettingsKeyPrefix + "Update.AutoDownload",
+        SettingsKeyPrefix + "Update.ShowUpdateToast",
         SettingsKeyPrefix + "About.StoreSupportTitle"
     };
 

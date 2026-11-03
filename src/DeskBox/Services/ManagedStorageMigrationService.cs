@@ -210,6 +210,7 @@ internal sealed class ManagedStorageMigrationService(string journalDirectory)
             int completed = 0;
             long copied = 0;
             var verifiedHashes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var verifiedSourceUsns = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
             if (existing.Count > 0)
             {
                 journal.State = "CheckingExisting";
@@ -233,6 +234,10 @@ internal sealed class ManagedStorageMigrationService(string journalDirectory)
                             copied + read / 2, existingBytes, source);
                     }
                     string hash = FileService.HashStorageFile(source, token, Checked);
+                    if (StorageMigrationNativeMethods.TryReadFileUsn(source, out long existingUsn))
+                    {
+                        verifiedSourceUsns[source] = existingUsn;
+                    }
                     if (hash != FileService.HashStorageFile(destination, token, Checked))
                         throw new StorageMigrationException(StorageMigrationProblem.DestinationConflict,
                             $"The existing destination differs from its source: '{destination}'.");
@@ -246,7 +251,7 @@ internal sealed class ManagedStorageMigrationService(string journalDirectory)
             foreach (var entry in files.Except(existing))
             {
                 token.ThrowIfCancellationRequested();
-                RequireDestinations(journal);
+                RequireEntryDestination(journal, entry.FolderIndex);
                 string source = Source(journal, entry);
                 string destination = Destination(journal, entry);
                 RequireUnchangedFile(entry, source);
@@ -258,22 +263,24 @@ internal sealed class ManagedStorageMigrationService(string journalDirectory)
                     string temporary = Path.Combine(journal.TemporaryDirectory, Guid.NewGuid().ToString("N") + ".partial");
                     long baseBytes = copied;
                     long lastReport = Environment.TickCount64;
-                    long checkingBytes = 0;
-                    hash = FileService.CopyStorageFileVerified(source, temporary, token, bytes =>
-                    {
-                        if (Environment.TickCount64 - lastReport < 150) return;
-                        lastReport = Environment.TickCount64;
-                        Report(ManagedStorageMigrationPhase.Copying, completed, files.Count,
-                            baseBytes + bytes, journal.TotalBytes, source);
-                    }, bytes =>
-                    {
-                        checkingBytes += bytes;
-                        if (entry.Length < 64L * 1024 * 1024 || Environment.TickCount64 - lastReport < 150) return;
-                        lastReport = Environment.TickCount64;
-                        options.Progress?.Report(new(ManagedStorageMigrationPhase.Copying, completed, files.Count,
-                            baseBytes + entry.Length, journal.TotalBytes, source, CheckingCurrentFile: true));
-                    });
+                    hash = FileService.CopyStorageFileVerified(
+                        source,
+                        temporary,
+                        token,
+                        bytes =>
+                        {
+                            if (Environment.TickCount64 - lastReport < 150) return;
+                            lastReport = Environment.TickCount64;
+                            Report(ManagedStorageMigrationPhase.Copying, completed, files.Count,
+                                baseBytes + bytes, journal.TotalBytes, source);
+                        },
+                        verificationProgress: null,
+                        verifyDestinationImmediately: false);
                     RequireUnchangedFile(entry, source);
+                    if (StorageMigrationNativeMethods.TryReadFileUsn(source, out long copiedUsn))
+                    {
+                        verifiedSourceUsns[source] = copiedUsn;
+                    }
                     FileService.PublishStorageCopy(temporary, destination);
                 }
                 verifiedHashes.Add(destination, hash);
@@ -296,6 +303,10 @@ internal sealed class ManagedStorageMigrationService(string journalDirectory)
                 string destination = Destination(journal, entry);
                 RequireUnchangedFile(entry, source);
                 string expected = verifiedHashes[destination];
+                bool sourceUsnUnchanged =
+                    verifiedSourceUsns.TryGetValue(source, out long expectedUsn) &&
+                    StorageMigrationNativeMethods.TryReadFileUsn(source, out long currentUsn) &&
+                    currentUsn == expectedUsn;
                 long checkedBytes = 0;
                 long lastProgress = Environment.TickCount64;
                 void OnVerifiedBytes(long bytes)
@@ -303,12 +314,13 @@ internal sealed class ManagedStorageMigrationService(string journalDirectory)
                     checkedBytes += bytes;
                     if (Environment.TickCount64 - lastProgress < 150) return;
                     lastProgress = Environment.TickCount64;
+                    long delta = sourceUsnUnchanged ? checkedBytes : checkedBytes / 2;
                     options.Progress?.Report(new(ManagedStorageMigrationPhase.Verifying, completed, files.Count,
-                        verified + checkedBytes / 2, journal.TotalBytes, source));
+                        verified + delta, journal.TotalBytes, source));
                 }
-                // Re-read BOTH sides. A source edited after its first copy, even
-                // with the original size/mtime restored, cannot silently commit.
-                if (FileService.HashStorageFile(source, token, OnVerifiedBytes) != expected)
+                // Only re-read source bytes when MFT USN changed or USN is unavailable:
+                // any content/stream edit bumps USN even if size and mtime were restored.
+                if (!sourceUsnUnchanged && FileService.HashStorageFile(source, token, OnVerifiedBytes) != expected)
                     throw new StorageMigrationException(StorageMigrationProblem.SourceChanged,
                         $"The source changed during verification: '{source}'.");
                 if (FileService.HashStorageFile(destination, token, OnVerifiedBytes) != expected)
@@ -482,6 +494,14 @@ internal sealed class ManagedStorageMigrationService(string journalDirectory)
             RequireDestinationIdentity(journal, i);
     }
 
+    private static void RequireEntryDestination(StorageMigrationJournal journal, int folderIndex)
+    {
+        if (journal.DestinationIdentities.Count != journal.Folders.Count)
+            throw new IOException("Destination reservation was interrupted. Existing files are preserved; choose a new destination.");
+        FileService.RequireStorageDirectory(journal.TemporaryDirectory);
+        RequireDestinationIdentity(journal, folderIndex);
+    }
+
     private static void RequireDestinationIdentity(StorageMigrationJournal journal, int index)
     {
         string path = journal.Folders[index].DestinationFolder;
@@ -595,14 +615,19 @@ internal sealed class ManagedStorageMigrationService(string journalDirectory)
             var drive = new DriveInfo(Path.GetPathRoot(path)!);
             if (!drive.IsReady)
                 throw new StorageMigrationException(StorageMigrationProblem.VolumeUnavailable, "Unlock or reconnect the drive.");
-            if (!string.Equals(drive.DriveFormat, "NTFS", StringComparison.OrdinalIgnoreCase))
-                throw new StorageMigrationException(StorageMigrationProblem.Unsupported, "A local NTFS volume is required.");
+            if (!IsSupportedVolumeFormat(drive.DriveFormat))
+                throw new StorageMigrationException(StorageMigrationProblem.Unsupported, "A local NTFS or ReFS volume is required.");
+
         }
         catch (Exception ex) when (ex is not StorageMigrationException && ex is IOException or UnauthorizedAccessException)
         {
             throw new StorageMigrationException(StorageMigrationProblem.VolumeUnavailable, "Unlock or reconnect the drive.", ex);
         }
     }
+
+    internal static bool IsSupportedVolumeFormat(string? driveFormat) =>
+        string.Equals(driveFormat, "NTFS", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(driveFormat, "ReFS", StringComparison.OrdinalIgnoreCase);
 
     private static bool PathPresent(string path)
     {

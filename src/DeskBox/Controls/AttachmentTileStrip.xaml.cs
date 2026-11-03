@@ -38,6 +38,13 @@ public sealed partial class AttachmentTileStrip : UserControl
         InitializeComponent();
     }
 
+    internal void ReleaseVisualHandlers()
+    {
+        ItemsSource = null;
+        AttachmentItems.ItemsSource = null;
+        Content = null;
+    }
+
     public object? ItemsSource
     {
         get => GetValue(ItemsSourceProperty);

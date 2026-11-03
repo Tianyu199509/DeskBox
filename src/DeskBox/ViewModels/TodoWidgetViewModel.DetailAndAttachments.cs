@@ -15,23 +15,8 @@ public sealed partial class TodoWidgetViewModel
 
     public void SetDraftDueDatePreset(TodoDuePreset preset)
     {
-        DateTimeOffset today = new(DateTime.Now.Date);
-        int daysUntilSunday = ((int)DayOfWeek.Sunday - (int)today.DayOfWeek + 7) % 7;
-        int daysUntilMonday = ((int)DayOfWeek.Monday - (int)today.DayOfWeek + 7) % 7;
-        if (daysUntilMonday == 0)
-        {
-            daysUntilMonday = 7;
-        }
-
-        DraftDueDate = preset switch
-        {
-            TodoDuePreset.Today => WithEndOfDay(today),
-            TodoDuePreset.Tomorrow => WithEndOfDay(today.AddDays(1)),
-            TodoDuePreset.ThisWeek => WithEndOfDay(today.AddDays(daysUntilSunday)),
-            TodoDuePreset.NextMonday => WithEndOfDay(today.AddDays(daysUntilMonday)),
-            TodoDuePreset.Clear => null,
-            _ => null
-        };
+        DateTimeOffset? dueDate = ResolvePresetDueDate(preset);
+        SetDraftDueDate(dueDate, hasDueTime: false);
     }
 
     public void SetColorFilter(TodoColorFilter filter)
@@ -57,6 +42,96 @@ public sealed partial class TodoWidgetViewModel
         return item;
     }
 
+    private void ResolveDraftContextMetadata(
+        out bool isImportant,
+        out DateTimeOffset? dueDate,
+        out bool hasDueTime,
+        out string? colorMarker,
+        out string recurrenceMode)
+    {
+        isImportant = _draftImportant || SelectedFilter == TodoFilter.Important;
+        recurrenceMode = TodoRecurrenceMode.Normalize(_draftRecurrenceMode);
+        bool hasRecurrence = !string.Equals(recurrenceMode, TodoRecurrenceMode.None, StringComparison.Ordinal);
+        if (_draftDueDate is not null)
+        {
+            dueDate = _draftDueDate;
+            hasDueTime = DraftHasDueTime;
+        }
+        else if (SelectedFilter == TodoFilter.Today || hasRecurrence)
+        {
+            dueDate = TodoWidgetStore.NormalizeAllDayDueDate(_clock());
+            hasDueTime = false;
+        }
+        else
+        {
+            dueDate = null;
+            hasDueTime = false;
+        }
+
+        colorMarker = MapColorFilterToMarker(SelectedColorFilter);
+    }
+
+    public TodoItemViewModel OpenNewDetailFromDraft()
+    {
+        ResolveDraftContextMetadata(
+            out bool isImportant,
+            out DateTimeOffset? dueDate,
+            out bool hasDueTime,
+            out string? colorMarker,
+            out string recurrenceMode);
+        string initialTitle = InputText ?? string.Empty;
+
+        _suppressDraftManualOverrideTracking = true;
+        try
+        {
+            InputText = string.Empty;
+        }
+        finally
+        {
+            _suppressDraftManualOverrideTracking = false;
+        }
+
+        ResetDraftComposerState(clearMetadata: true);
+
+        CloseDetail();
+        foreach (TodoItemViewModel entry in Items)
+        {
+            entry.CancelEdit();
+        }
+
+        var now = CurrentUtcNow;
+        DateTimeOffset? normalizedDueDate = NormalizeDueDate(dueDate, hasDueTime);
+        TodoRecurrence? recurrence = !string.Equals(recurrenceMode, TodoRecurrenceMode.None, StringComparison.Ordinal)
+            ? TodoRecurrenceService.CreateRecurrence(recurrenceMode, normalizedDueDate)
+            : null;
+        var item = new TodoItem
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Text = string.Empty,
+            IsImportant = isImportant,
+            DueDate = normalizedDueDate,
+            HasDueTime = normalizedDueDate is not null && hasDueTime,
+            Recurrence = recurrence,
+            RecurrenceSeriesId = recurrence is null ? null : Guid.NewGuid().ToString("N"),
+            ColorMarker = TodoItem.NormalizeColorMarker(colorMarker),
+            CreatedAt = now,
+            UpdatedAt = now,
+            SortOrder = NewTaskPosition == SettingsService.TodoNewTaskPositionBottom
+                ? Items.Count
+                : 0
+        };
+        var viewModel = CreateItemViewModel(item);
+        viewModel.BeginEdit();
+        if (!string.IsNullOrEmpty(initialTitle))
+        {
+            viewModel.EditText = initialTitle;
+        }
+
+        IsCreatingDetailItem = true;
+        SelectedDetailItem = viewModel;
+        return viewModel;
+    }
+
     public TodoItemViewModel OpenNewDetail()
     {
         CloseDetail();
@@ -65,18 +140,19 @@ public sealed partial class TodoWidgetViewModel
             entry.CancelEdit();
         }
 
-        var now = DateTimeOffset.UtcNow;
+        var now = CurrentUtcNow;
         var item = new TodoItem
         {
             Id = Guid.NewGuid().ToString("N"),
             Text = string.Empty,
+            HasDueTime = false,
             CreatedAt = now,
             UpdatedAt = now,
             SortOrder = NewTaskPosition == SettingsService.TodoNewTaskPositionBottom
                 ? Items.Count
                 : 0
         };
-        var viewModel = new TodoItemViewModel(item, _localizationService);
+        var viewModel = CreateItemViewModel(item);
         viewModel.BeginEdit();
         IsCreatingDetailItem = true;
         SelectedDetailItem = viewModel;
@@ -99,10 +175,14 @@ public sealed partial class TodoWidgetViewModel
                 await UpdateItemTextAsync(item.Id, normalizedTitle);
             }
 
-            item.CancelEdit();
             if (closeDetail)
             {
+                item.CancelEdit();
                 SelectedDetailItem = null;
+            }
+            else
+            {
+                item.IsEditing = false;
             }
 
             return item;
@@ -122,7 +202,19 @@ public sealed partial class TodoWidgetViewModel
 
         item.Text = normalizedTitle;
         item.UpdatedAt = DateTimeOffset.UtcNow;
-        item.CancelEdit();
+        if (closeDetail)
+        {
+            item.CancelEdit();
+        }
+        else
+        {
+            item.IsEditing = false;
+            if (string.IsNullOrWhiteSpace(item.EditText))
+            {
+                item.EditText = normalizedTitle;
+            }
+        }
+
         if (NewTaskPosition == SettingsService.TodoNewTaskPositionBottom)
         {
             Items.Add(item);
@@ -167,13 +259,27 @@ public sealed partial class TodoWidgetViewModel
             Text = normalizedText,
             SortOrder = item.Steps.Count
         };
+        var now = CurrentUtcNow;
         var stepViewModel = new TodoStepViewModel(step);
         item.Item.Steps.Add(step);
         item.Steps.Add(stepViewModel);
-        item.UpdatedAt = DateTimeOffset.UtcNow;
+        item.UpdatedAt = now;
         item.RefreshDetailProperties();
+        SyncStepsToDeferredOccurrence(item, now);
         await SaveAsync();
         return stepViewModel;
+    }
+
+    public async Task<bool> ToggleStepCompletedAsync(string itemId, string stepId)
+    {
+        TodoItemViewModel? item = FindItem(itemId);
+        TodoStepViewModel? step = item?.Steps.FirstOrDefault(entry => string.Equals(entry.Id, stepId, StringComparison.Ordinal));
+        if (item is null || step is null)
+        {
+            return false;
+        }
+
+        return await SetStepCompletedAsync(itemId, stepId, !step.IsCompleted);
     }
 
     public async Task<bool> SetStepCompletedAsync(string itemId, string stepId, bool isCompleted)
@@ -186,7 +292,7 @@ public sealed partial class TodoWidgetViewModel
         }
 
         step.IsCompleted = isCompleted;
-        item.UpdatedAt = DateTimeOffset.UtcNow;
+        item.UpdatedAt = CurrentUtcNow;
         item.RefreshDetailProperties();
         await SaveAsync();
         return true;
@@ -202,8 +308,10 @@ public sealed partial class TodoWidgetViewModel
             return false;
         }
 
+        var now = CurrentUtcNow;
         step.Text = normalizedText;
-        item.UpdatedAt = DateTimeOffset.UtcNow;
+        item.UpdatedAt = now;
+        SyncStepsToDeferredOccurrence(item, now);
         await SaveAsync();
         return true;
     }
@@ -224,10 +332,38 @@ public sealed partial class TodoWidgetViewModel
             item.Steps[index].SortOrder = index;
         }
 
-        item.UpdatedAt = DateTimeOffset.UtcNow;
+        var now = CurrentUtcNow;
+        item.UpdatedAt = now;
         item.RefreshDetailProperties();
+        SyncStepsToDeferredOccurrence(item, now);
         await SaveAsync();
         return true;
+    }
+
+    private void SyncStepsToDeferredOccurrence(TodoItemViewModel item, DateTimeOffset now)
+    {
+        if (FindDeferredGeneratedOccurrence(item) is not { } deferred)
+        {
+            return;
+        }
+
+        deferred.Steps.Clear();
+        deferred.Item.Steps.Clear();
+        for (int index = 0; index < item.Steps.Count; index++)
+        {
+            var clonedStep = new TodoStep
+            {
+                Id = Guid.NewGuid().ToString("N"),
+                Text = item.Steps[index].Text,
+                IsCompleted = false,
+                SortOrder = index
+            };
+            deferred.Item.Steps.Add(clonedStep);
+            deferred.Steps.Add(new TodoStepViewModel(clonedStep));
+        }
+
+        deferred.UpdatedAt = now;
+        deferred.RefreshDetailProperties();
     }
 
     public async Task<bool> UpdateNotesAsync(string itemId, string? notes)
@@ -248,9 +384,19 @@ public sealed partial class TodoWidgetViewModel
 
         string? previousNotes = item.Item.Notes;
         DateTimeOffset previousUpdatedAt = item.UpdatedAt;
+        TodoItemViewModel? deferred = FindDeferredGeneratedOccurrence(item);
+        string? previousDeferredNotes = deferred?.Item.Notes;
+        DateTimeOffset previousDeferredUpdatedAt = deferred?.UpdatedAt ?? default;
+        var now = CurrentUtcNow;
         item.Item.Notes = normalizedNotes;
-        item.UpdatedAt = DateTimeOffset.UtcNow;
+        item.UpdatedAt = now;
         item.RefreshDetailProperties();
+        if (deferred is not null)
+        {
+            deferred.Item.Notes = normalizedNotes;
+            deferred.UpdatedAt = now;
+            deferred.RefreshDetailProperties();
+        }
         try
         {
             await SaveAsync();
@@ -263,6 +409,12 @@ public sealed partial class TodoWidgetViewModel
             item.Item.Notes = previousNotes;
             item.UpdatedAt = previousUpdatedAt;
             item.RefreshDetailProperties();
+            if (deferred is not null)
+            {
+                deferred.Item.Notes = previousDeferredNotes;
+                deferred.UpdatedAt = previousDeferredUpdatedAt;
+                deferred.RefreshDetailProperties();
+            }
             throw;
         }
     }
@@ -344,7 +496,7 @@ public sealed partial class TodoWidgetViewModel
                 string.Equals(existing.FilePath, attachment.FilePath, StringComparison.OrdinalIgnoreCase));
         }
 
-        var attachmentViewModel = new TodoAttachmentViewModel(attachment);
+        var attachmentViewModel = new TodoAttachmentViewModel(attachment, PreviewCacheScope);
         item.Item.Attachments.Add(attachment);
         item.Attachments.Add(attachmentViewModel);
         item.UpdatedAt = DateTimeOffset.UtcNow;
@@ -378,7 +530,7 @@ public sealed partial class TodoWidgetViewModel
             await AttachmentStorageService.TryDeleteManagedCopyAsync(
                 attachment.FilePath,
                 _store.AttachmentDirectory,
-                recycleFileAsync);
+                recycleFileAsync ?? _recycleAttachmentFileAsync);
         }
         return true;
     }

@@ -2377,7 +2377,10 @@ mod tests {
         let (status, result) = write_shortcut_file(&fixture.link_path, &values);
 
         assert_eq!(status, DESKBOX_NATIVE_STATUS_OK);
-        assert_eq!(result.succeeded_fields, ALL_SHORTCUT_FIELDS);
+        assert_eq!(
+            result.succeeded_fields,
+            ALL_SHORTCUT_FIELDS & !DESKBOX_SHORTCUT_FIELD_ICON_PATH
+        );
         let read = read_shortcut_file(
             &fixture.link_path,
             DESKBOX_SHORTCUT_READ_MODE_STORED_RAW,
@@ -2481,7 +2484,10 @@ mod tests {
 
         assert_eq!(status, DESKBOX_NATIVE_STATUS_OPERATION_FAILED);
         assert_eq!(result.attempted_phases, WRITE_PHASES);
-        assert_eq!(result.succeeded_fields, ALL_SHORTCUT_FIELDS);
+        assert_eq!(
+            result.succeeded_fields,
+            ALL_SHORTCUT_FIELDS & !DESKBOX_SHORTCUT_FIELD_ICON_PATH
+        );
         assert_ne!(result.save_hresult, DESKBOX_NATIVE_S_OK);
         assert_eq!(result.operation_hresult, result.save_hresult);
         assert!(!missing_parent_link.exists());

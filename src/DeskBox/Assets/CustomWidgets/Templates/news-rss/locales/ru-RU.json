@@ -1,0 +1,21 @@
+{
+  "defaultFeedTitle": "Технологические новости",
+  "defaultTopHeadline": "Нажмите «Обновить» в правом верхнем углу, чтобы получить свежие материалы",
+  "emptySubtitle": "Нажмите «Обновить» выше или выберите источник в параметрах виджета",
+  "emptyTitle": "Ожидание синхронизации ленты",
+  "feedCustom": "Свой RSS URL (ниже)",
+  "feedIthome": "IT之家",
+  "feedSspai": "SSPai (少数派)",
+  "openArticleTooltip": "Открыть статью",
+  "optDensityCompact": "Компактная (только заголовки)",
+  "optDensitySummary": "Стандартная (заголовок + описание)",
+  "refreshBtn": "Обновить",
+  "refreshTooltip": "Загрузить свежие элементы ленты сейчас",
+  "setDensity": "Плотность списка",
+  "setFeedUrl": "Свой URL RSS / Atom-ленты (https://)",
+  "setPresetFeed": "Готовый источник",
+  "syncing": "Синхронизация свежих материалов…",
+  "updatedPrefix": "Обновлено ",
+  "widgetDescription": "Автосинхронизация Hacker News, GitHub Blog, V2EX или любой HTTPS RSS-ленты с мгновенным офлайн-кэшем.",
+  "widgetName": "RSS-читалка новостей"
+}

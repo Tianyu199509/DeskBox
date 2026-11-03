@@ -76,9 +76,14 @@
             x:Name="SelectorButton"
             MinHeight="32"
             MinWidth="0"
+            AllowDrop="True"
             CanDrag="False"
             HorizontalAlignment="Stretch"
             Click="SelectorButton_Click"
+            DragEnter="SelectorButton_DragEnter"
+            DragOver="SelectorButton_DragOver"
+            DragLeave="SelectorButton_DragLeave"
+            Drop="SelectorButton_Drop"
             DragStarting="GroupTitle_DragStarting"
             DropCompleted="GroupTitle_DropCompleted"
             KeyDown="SelectorButton_KeyDown"
@@ -201,89 +206,117 @@
             </Border>
         </Button>
 
-        <TabView
-            x:Name="TabsView"
+        <Grid
+            x:Name="TabsRoot"
             Canvas.ZIndex="1"
             MinHeight="32"
             MinWidth="0"
             Margin="0"
-            Padding="0"
             Background="Transparent"
-            BorderThickness="0"
             HorizontalAlignment="Stretch"
-            VerticalAlignment="Bottom"
-            IsAddTabButtonVisible="False"
-            CanDragTabs="True"
-            CanReorderTabs="True"
-            AllowDrop="True"
-            AllowDropTabs="True"
-            CanTearOutTabs="False"
-            TabWidthMode="SizeToContent"
+            VerticalAlignment="Stretch"
             Visibility="Collapsed"
-            SelectionChanged="TabsView_SelectionChanged"
-            TabDragStarting="TabsView_TabDragStarting"
-            TabDragCompleted="TabsView_TabDragCompleted"
-            TabStripDragOver="TabsView_TabStripDragOver"
-            PointerEntered="TabsPanel_PointerEntered"
-            PointerExited="TabsPanel_PointerExited">
-            <TabView.Resources>
-                <ResourceDictionary>
-                    <ResourceDictionary.ThemeDictionaries>
-                        <!-- Translucent semantic fills preserve the widget's material.
-                             Keep the native template, including its joined lower corners. -->
-                        <ResourceDictionary x:Key="Default">
-                            <SolidColorBrush x:Key="TabViewItemHeaderBackground" Color="Transparent" />
-                            <SolidColorBrush x:Key="TabViewItemHeaderBackgroundSelected" Color="{ThemeResource TextFillColorPrimary}" Opacity="0.09" />
-                            <SolidColorBrush x:Key="TabViewItemHeaderBackgroundPointerOver" Color="{ThemeResource TextFillColorPrimary}" Opacity="0.045" />
-                            <SolidColorBrush x:Key="TabViewItemHeaderBackgroundPressed" Color="{ThemeResource TextFillColorPrimary}" Opacity="0.03" />
-                            <SolidColorBrush x:Key="TabViewItemHeaderBackgroundDisabled" Color="Transparent" />
-                            <SolidColorBrush x:Key="TabViewBorderBrush" Color="{ThemeResource TextFillColorPrimary}" Opacity="0.10" />
-                            <SolidColorBrush x:Key="TabViewItemSeparator" Color="{ThemeResource TextFillColorPrimary}" Opacity="0.08" />
-                            <LinearGradientBrush x:Key="TabViewSelectedItemBorderBrush" MappingMode="Absolute" StartPoint="0,0" EndPoint="0,4" Opacity="0.10">
-                                <LinearGradientBrush.RelativeTransform>
-                                    <ScaleTransform ScaleY="-1" CenterY="0.5" />
-                                </LinearGradientBrush.RelativeTransform>
-                                <GradientStop Offset="1" Color="Transparent" />
-                                <GradientStop Offset="1" Color="{ThemeResource TextFillColorPrimary}" />
-                            </LinearGradientBrush>
-                            <!-- The host updates these brushes in place for custom
-                                 widget foreground colors. High contrast stays system-owned. -->
-                            <SolidColorBrush x:Key="TabViewItemHeaderForeground" Color="{ThemeResource TextFillColorSecondary}" />
-                            <SolidColorBrush x:Key="TabViewItemHeaderForegroundSelected" Color="{ThemeResource TextFillColorPrimary}" />
-                            <SolidColorBrush x:Key="TabViewItemHeaderForegroundPointerOver" Color="{ThemeResource TextFillColorPrimary}" />
-                            <SolidColorBrush x:Key="TabViewItemHeaderForegroundPressed" Color="{ThemeResource TextFillColorSecondary}" />
-                            <SolidColorBrush x:Key="TabViewItemHeaderForegroundDisabled" Color="{ThemeResource TextFillColorDisabled}" />
-                            <SolidColorBrush x:Key="TabViewScrollButtonForeground" Color="{ThemeResource TextFillColorSecondary}" />
-                            <SolidColorBrush x:Key="TabViewScrollButtonForegroundPointerOver" Color="{ThemeResource TextFillColorPrimary}" />
-                            <SolidColorBrush x:Key="TabViewScrollButtonForegroundPressed" Color="{ThemeResource TextFillColorSecondary}" />
-                            <SolidColorBrush x:Key="TabViewScrollButtonForegroundDisabled" Color="{ThemeResource TextFillColorDisabled}" />
-                        </ResourceDictionary>
-                        <ResourceDictionary x:Key="HighContrast">
-                            <SolidColorBrush x:Key="TabViewItemHeaderBackground" Color="{ThemeResource SystemColorButtonFaceColor}" />
-                            <SolidColorBrush x:Key="TabViewItemHeaderBackgroundSelected" Color="{ThemeResource SystemColorWindowColor}" />
-                            <SolidColorBrush x:Key="TabViewItemHeaderBackgroundPointerOver" Color="{ThemeResource SystemColorHighlightColor}" />
-                            <SolidColorBrush x:Key="TabViewItemHeaderBackgroundPressed" Color="{ThemeResource SystemColorHighlightColor}" />
-                            <SolidColorBrush x:Key="TabViewItemHeaderBackgroundDisabled" Color="{ThemeResource SystemColorWindowColor}" />
-                            <SolidColorBrush x:Key="TabViewBorderBrush" Color="{ThemeResource SystemColorHighlightColor}" />
-                            <SolidColorBrush x:Key="TabViewItemSeparator" Color="{ThemeResource SystemColorWindowTextColor}" />
-                            <SolidColorBrush x:Key="TabViewSelectedItemBorderBrush" Color="{ThemeResource SystemColorHighlightColor}" />
-                            <SolidColorBrush x:Key="TabViewItemHeaderForeground" Color="{ThemeResource SystemColorWindowTextColor}" />
-                            <SolidColorBrush x:Key="TabViewItemHeaderForegroundSelected" Color="{ThemeResource SystemColorHighlightColor}" />
-                            <SolidColorBrush x:Key="TabViewItemHeaderForegroundPointerOver" Color="{ThemeResource SystemColorHighlightTextColor}" />
-                            <SolidColorBrush x:Key="TabViewItemHeaderForegroundPressed" Color="{ThemeResource SystemColorHighlightTextColor}" />
-                            <SolidColorBrush x:Key="TabViewItemHeaderForegroundDisabled" Color="{ThemeResource SystemColorGrayTextColor}" />
-                            <SolidColorBrush x:Key="TabViewScrollButtonForeground" Color="{ThemeResource SystemColorButtonTextColor}" />
-                            <SolidColorBrush x:Key="TabViewScrollButtonForegroundPointerOver" Color="{ThemeResource SystemColorHighlightTextColor}" />
-                            <SolidColorBrush x:Key="TabViewScrollButtonForegroundPressed" Color="{ThemeResource SystemColorHighlightTextColor}" />
-                            <SolidColorBrush x:Key="TabViewScrollButtonForegroundDisabled" Color="{ThemeResource SystemColorGrayTextColor}" />
-                        </ResourceDictionary>
-                    </ResourceDictionary.ThemeDictionaries>
-                    <x:Double x:Key="TabViewItemMinWidth">32</x:Double>
-                    <x:Double x:Key="TabViewItemMaxWidth">180</x:Double>
-                    <x:Double x:Key="TabViewItemMinHeight">32</x:Double>
-                </ResourceDictionary>
-            </TabView.Resources>
-        </TabView>
+            SizeChanged="TabsRoot_SizeChanged">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <Canvas
+                x:Name="ConnectedTabBackgroundCanvas"
+                Grid.ColumnSpan="3"
+                IsHitTestVisible="False">
+                <Path
+                    x:Name="ConnectedTabFillPath"
+                    IsHitTestVisible="False" />
+            </Canvas>
+
+            <RepeatButton
+                x:Name="ScrollLeftButton"
+                Grid.Column="0"
+                Width="22"
+                MinHeight="24"
+                Margin="0,2,2,2"
+                Padding="0"
+                Background="Transparent"
+                BorderThickness="0"
+                CornerRadius="4"
+                Delay="240"
+                Interval="85"
+                IsTabStop="False"
+                VerticalAlignment="Center"
+                Visibility="Collapsed"
+                Click="ScrollLeftButton_Click">
+                <FontIcon
+                    x:Name="ScrollLeftButtonIcon"
+                    FontSize="9"
+                    Glyph="&#xE76B;" />
+            </RepeatButton>
+
+            <ScrollViewer
+                x:Name="TabsScrollViewer"
+                Grid.Column="1"
+                HorizontalScrollMode="Enabled"
+                HorizontalScrollBarVisibility="Hidden"
+                VerticalScrollMode="Disabled"
+                VerticalScrollBarVisibility="Disabled"
+                ZoomMode="Disabled"
+                ViewChanged="TabsScrollViewer_ViewChanged"
+                SizeChanged="TabsScrollViewer_SizeChanged">
+                <Grid
+                    x:Name="TabsView"
+                    MinHeight="28"
+                    MinWidth="0"
+                    Margin="0"
+                    Background="Transparent"
+                    AllowDrop="True"
+                    HorizontalAlignment="Left"
+                    VerticalAlignment="Stretch"
+                    ColumnSpacing="2"
+                    PointerEntered="TabsPanel_PointerEntered"
+                    PointerExited="TabsPanel_PointerExited"
+                    SizeChanged="TabsView_SizeChanged" />
+            </ScrollViewer>
+
+            <RepeatButton
+                x:Name="ScrollRightButton"
+                Grid.Column="2"
+                Width="22"
+                MinHeight="24"
+                Margin="2,2,0,2"
+                Padding="0"
+                Background="Transparent"
+                BorderThickness="0"
+                CornerRadius="4"
+                Delay="240"
+                Interval="85"
+                IsTabStop="False"
+                VerticalAlignment="Center"
+                Visibility="Collapsed"
+                Click="ScrollRightButton_Click">
+                <FontIcon
+                    x:Name="ScrollRightButtonIcon"
+                    FontSize="9"
+                    Glyph="&#xE76C;" />
+            </RepeatButton>
+
+            <Canvas
+                x:Name="ConnectedTabOverlayCanvas"
+                Grid.ColumnSpan="3"
+                Canvas.ZIndex="5"
+                IsHitTestVisible="False">
+                <Path
+                    x:Name="ConnectedTabContourPath"
+                    StrokeThickness="1"
+                    StrokeLineJoin="Round"
+                    IsHitTestVisible="False" />
+                <Path
+                    x:Name="InactiveSeparatorsPath"
+                    StrokeThickness="1"
+                    IsHitTestVisible="False" />
+            </Canvas>
+        </Grid>
 
         <!--
             Directional wheel feedback lives above both stack and tab title
@@ -332,6 +365,46 @@
                 </Border.Background>
                 <Border.RenderTransform>
                     <ScaleTransform x:Name="DownWheelFeedbackTransform" ScaleY="1" />
+                </Border.RenderTransform>
+            </Border>
+            <Border
+                x:Name="LeftWheelFeedback"
+                Width="24"
+                Margin="0,2,0,2"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Stretch"
+                CornerRadius="6,0,0,6"
+                Opacity="0"
+                RenderTransformOrigin="0,0.5">
+                <Border.Background>
+                    <LinearGradientBrush StartPoint="0,0.5" EndPoint="1,0.5">
+                        <GradientStop x:Name="LeftWheelFeedbackAccentStart" Offset="0" />
+                        <GradientStop x:Name="LeftWheelFeedbackAccentEnd" Offset="0.28" />
+                        <GradientStop Color="Transparent" Offset="1" />
+                    </LinearGradientBrush>
+                </Border.Background>
+                <Border.RenderTransform>
+                    <ScaleTransform x:Name="LeftWheelFeedbackTransform" ScaleX="1" />
+                </Border.RenderTransform>
+            </Border>
+            <Border
+                x:Name="RightWheelFeedback"
+                Width="24"
+                Margin="0,2,0,2"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Stretch"
+                CornerRadius="0,6,6,0"
+                Opacity="0"
+                RenderTransformOrigin="1,0.5">
+                <Border.Background>
+                    <LinearGradientBrush StartPoint="1,0.5" EndPoint="0,0.5">
+                        <GradientStop x:Name="RightWheelFeedbackAccentStart" Offset="0" />
+                        <GradientStop x:Name="RightWheelFeedbackAccentEnd" Offset="0.28" />
+                        <GradientStop Color="Transparent" Offset="1" />
+                    </LinearGradientBrush>
+                </Border.Background>
+                <Border.RenderTransform>
+                    <ScaleTransform x:Name="RightWheelFeedbackTransform" ScaleX="1" />
                 </Border.RenderTransform>
             </Border>
         </Grid>

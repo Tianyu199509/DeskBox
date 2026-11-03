@@ -1,3 +1,5 @@
+using DeskBox.Services;
+
 namespace DeskBox.Models;
 
 /// <summary>
@@ -17,3 +19,12 @@ public static class QuickCaptureDetailRestorePolicy
         bool wasDetailVisibleInSinglePane) =>
         isDualPane || wasDetailVisibleInSinglePane;
 }
+
+internal sealed record QuickCaptureExtendedTransientState(
+    QuickCaptureWidgetTransientState BaseState,
+    bool WasDualPane = false,
+    bool IsCreatingDetail = false,
+    QuickCaptureAppearancePreset DetailAppearance = QuickCaptureAppearancePreset.Default,
+    TextContentFormat DetailContentFormat = TextContentFormat.Markdown,
+    DroppedFilePath[]? PendingDetailAttachments = null,
+    bool HasAppearanceOverride = false);

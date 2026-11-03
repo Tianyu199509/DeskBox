@@ -77,7 +77,7 @@ public static class WidgetGroupSwitchAnimationPolicy
                 ? WidgetGroupNavigationStyles.Stack
                 : navigationStyle,
             allowFollowDefault: false);
-        return normalized == WidgetGroupNavigationStyles.Tabs
+        return WidgetGroupNavigationStyles.UsesTabStrip(normalized)
             ? WidgetGroupSwitchAnimationEffect.Horizontal
             : WidgetGroupSwitchAnimationEffect.Vertical;
     }

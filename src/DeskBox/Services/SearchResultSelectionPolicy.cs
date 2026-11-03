@@ -13,6 +13,46 @@ internal static class SearchResultSelectionPolicy
         bool pointerIsOnDragHandle) =>
         itemIsSelected && selectedItemCount > 1 && pointerIsOnDragHandle;
 
+    internal enum DragOutMoveDecision
+    {
+        // No armed candidate for this pointer (other pointer, no gesture, or
+        // a drag already in flight): the move belongs to some other gesture.
+        Ignore,
+
+        // The candidate's button is no longer held: disarm instead of
+        // starting a phantom drag on unpressured hover.
+        Disarm,
+
+        // Candidate armed, button held, threshold crossed: start the drag.
+        Start
+    }
+
+    // Drag-out move gate for result rows. The button re-check exists because
+    // a missed PointerReleased (released out-of-band, capture stolen) would
+    // otherwise leave a stale candidate that the next unpressured hover move
+    // converts into a drag start.
+    internal static DragOutMoveDecision EvaluateDragOutMove(
+        bool candidateArmed,
+        bool samePointer,
+        bool leftButtonPressed,
+        double distanceUnits,
+        double thresholdUnits = 8)
+    {
+        if (!candidateArmed || !samePointer)
+        {
+            return DragOutMoveDecision.Ignore;
+        }
+
+        if (!leftButtonPressed)
+        {
+            return DragOutMoveDecision.Disarm;
+        }
+
+        return distanceUnits >= thresholdUnits
+            ? DragOutMoveDecision.Start
+            : DragOutMoveDecision.Ignore;
+    }
+
     internal static IReadOnlyList<T> ResolveDraggedItems<T>(
         T anchor,
         IReadOnlyList<T> selectedItems)

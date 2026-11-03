@@ -129,6 +129,78 @@ internal static class WidgetMaterialVisualCalculator
         return ApplySurfaceOpacity(tintColor, profile.TintOpacity);
     }
 
+    /// <summary>
+    /// Resolves the actual rendered backing-plate opacity for text-shadow
+    /// suppression. Translucent glass materials (<c>Acrylic</c>, <c>Mica</c>)
+    /// scale down raw <paramref name="surfaceOpacity"/> through their tint and
+    /// luminosity curves rather than painting an opaque solid fill.
+    /// </summary>
+    public static double ResolveEffectivePlateOpacity(
+        string? materialType,
+        bool isDark,
+        double surfaceOpacity,
+        double materialIntensity,
+        bool acrylicControllerAttached,
+        bool micaControllerAttached,
+        bool legacyAccentBackdropActive,
+        bool usesLegacyWindowAcrylic = false,
+        bool hasOpaqueCustomColor = false)
+    {
+        if (hasOpaqueCustomColor)
+        {
+            return 1.0;
+        }
+
+        double clampedSurface = Math.Clamp(surfaceOpacity, 0.0, 1.0);
+        if (SettingsService.IsAcrylicMaterial(materialType))
+        {
+            bool useBase = string.Equals(
+                materialType,
+                SettingsService.WidgetMaterialTypeAcrylicBase,
+                StringComparison.Ordinal);
+            if (acrylicControllerAttached)
+            {
+                WidgetMaterialOpacityProfile profile = CalculateAcrylic(
+                    isDark,
+                    useBase,
+                    clampedSurface,
+                    materialIntensity);
+                return Math.Max(profile.TintOpacity, profile.LuminosityOpacity);
+            }
+
+            if (legacyAccentBackdropActive)
+            {
+                return CalculateLegacyAcrylicOpacity(
+                    useBase,
+                    clampedSurface,
+                    materialIntensity);
+            }
+
+            return usesLegacyWindowAcrylic
+                ? Math.Clamp(Math.Max(clampedSurface, 0.72), 0.15, 0.96)
+                : 0.0;
+        }
+
+        if (SettingsService.IsMicaMaterial(materialType))
+        {
+            if (micaControllerAttached)
+            {
+                WidgetMaterialOpacityProfile profile = CalculateMica(
+                    isDark,
+                    string.Equals(
+                        materialType,
+                        SettingsService.WidgetMaterialTypeMicaAlt,
+                        StringComparison.Ordinal),
+                    materialIntensity);
+                return profile.TintOpacity;
+            }
+
+            return 1.0;
+        }
+
+        return clampedSurface;
+    }
+
     public static Windows.UI.Color BuildContentSolidSurfaceColor(
         bool isDark,
         Windows.UI.Color accentColor,

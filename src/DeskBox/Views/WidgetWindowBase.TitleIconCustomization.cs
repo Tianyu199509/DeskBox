@@ -246,7 +246,8 @@ public abstract partial class WidgetWindowBase
                     loadFailed: () => OnCustomBackgroundLoadFailed(path))
                 : WidgetBackgroundImageSourceFactory.TryCreate(
                     path,
-                    loadFailed: () => OnCustomBackgroundLoadFailed(path));
+                    loadFailed: () => OnCustomBackgroundLoadFailed(path),
+                    decodePixelWidth: ResolvePerWidgetBackgroundDecodePixels());
         }
         else if (shared &&
                  WidgetSharedImageSourceCache.TryGet(
@@ -266,6 +267,22 @@ public abstract partial class WidgetWindowBase
         }
 
         return _customBackgroundSource;
+    }
+
+    private int ResolvePerWidgetBackgroundDecodePixels()
+    {
+        double dipScale = HWnd != IntPtr.Zero
+            ? Win32Helper.GetDpiScaleForWindow(HWnd, xamlRoot: null)
+            : 1.5;
+        if (!double.IsFinite(dipScale) || dipScale <= 0)
+        {
+            dipScale = 1.5;
+        }
+
+        double logicalSpan = Math.Max(
+            Math.Max(Config.Width, Config.Height),
+            WidgetShellControl.ActualWidth);
+        return WidgetBackgroundImageSourceFactory.ResolveBoundedDecodePixels(logicalSpan * dipScale);
     }
 
     private void OnCustomBackgroundLoadFailed(string? path)

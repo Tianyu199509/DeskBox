@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "baseLocale": "zh-CN",
+  "hashes": {
+    "modFocus": "85036223",
+    "modRadar": "4c38880d",
+    "modTokens": "3452e96c",
+    "modTrend": "c42deb3b",
+    "optQuotaRem": "f99c292e",
+    "optQuotaUsed": "d0c8007e",
+    "optRef15m": "ef48458a",
+    "optRef1m": "8f2e97b8",
+    "optRef5m": "6145c633",
+    "setModules": "e3d6cb71",
+    "setQuotaMode": "a7518ed5",
+    "setRefresh": "cd99c2ed",
+    "widgetDescription": "a41d8539",
+    "widgetName": "89d8d5c4"
+  }
+}

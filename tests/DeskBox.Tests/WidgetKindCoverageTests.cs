@@ -5,7 +5,7 @@ namespace DeskBox.Tests;
 
 public sealed class WidgetKindCoverageTests
 {
-    private static readonly WidgetKind[] LegacyWidgetKinds = [WidgetKind.Productivity];
+    private static readonly WidgetKind[] LegacyWidgetKinds = [WidgetKind.Productivity, WidgetKind.Search];
 
     private static readonly WidgetKind[] ActiveWidgetKinds = Enum
         .GetValues<WidgetKind>()
@@ -36,16 +36,18 @@ public sealed class WidgetKindCoverageTests
         }
     }
 
-    [Fact]
-    public void LegacyProductivityKind_IsNotRegisteredAsActiveContent()
+    [Theory]
+    [InlineData(WidgetKind.Productivity)]
+    [InlineData(WidgetKind.Search)]
+    public void LegacyWidgetKinds_AreNotRegisteredAsActiveContent(WidgetKind legacyKind)
     {
         var registry = WidgetRegistry.Default;
         var factory = TestServices.CreateWidgetContentFactory();
 
-        Assert.False(registry.IsKnown(WidgetKind.Productivity));
-        Assert.Throws<NotSupportedException>(() => factory.GetDescriptor(WidgetKind.Productivity));
-        Assert.False(factory.HasImplementedContent(WidgetKind.Productivity));
-        Assert.False(factory.CanShowInCreateEntry(WidgetKind.Productivity));
+        Assert.False(registry.IsKnown(legacyKind));
+        Assert.Throws<NotSupportedException>(() => factory.GetDescriptor(legacyKind));
+        Assert.False(factory.HasImplementedContent(legacyKind));
+        Assert.False(factory.CanShowInCreateEntry(legacyKind));
     }
 
     [Fact]

@@ -1,0 +1,16 @@
+{
+  "modFocus": "फोकस कोटा कार्ड",
+  "modRadar": "मल्टी-प्रोवाइडर रडार",
+  "modTokens": "लोकल Token और कैश जानकारी",
+  "modTrend": "14-दिन उपयोग ट्रेंड",
+  "optQuotaRem": "शेष % दिखाएँ (जैसे 85% शेष)",
+  "optQuotaUsed": "उपयोग % दिखाएँ (जैसे 15% उपयोग)",
+  "optRef15m": "हर 15 मिनट",
+  "optRef1m": "हर 1 मिनट (अनुशंसित)",
+  "optRef5m": "हर 5 मिनट",
+  "setModules": "दृश्य मॉड्यूल और क्रम",
+  "setQuotaMode": "विंडो कोटा प्रदर्शन",
+  "setRefresh": "ऑटो-पोलिंग अंतराल",
+  "widgetDescription": "Claude Code और Codex सत्र रेट-लिमिट विंडो के साथ Zhipu GLM, DeepSeek, Kimi और OpenRouter खाता बैलेंस मॉनिटर करें।",
+  "widgetName": "AI मॉनिटर"
+}

@@ -10,10 +10,17 @@ namespace DeskBox.Services;
 public sealed class SearchResultActionService
 {
     private readonly SettingsService _settingsService;
+    private readonly QuickCaptureService? _quickCaptureService;
+    private readonly Func<string, Task>? _refreshTodoWidgetAsync;
 
-    public SearchResultActionService(SettingsService settingsService)
+    public SearchResultActionService(
+        SettingsService settingsService,
+        QuickCaptureService? quickCaptureService = null,
+        Func<string, Task>? refreshTodoWidgetAsync = null)
     {
         _settingsService = settingsService;
+        _quickCaptureService = quickCaptureService;
+        _refreshTodoWidgetAsync = refreshTodoWidgetAsync;
     }
 
     /// <summary>
@@ -22,9 +29,15 @@ public sealed class SearchResultActionService
     /// </summary>
     public async Task<bool> AttachFileToTodoAsync(string? path)
     {
+        var result = await AttachFileToTodoWithResultAsync(path);
+        return result.Succeeded;
+    }
+
+    public async Task<(bool Succeeded, string? WidgetId, string? ItemId, string FileName)> AttachFileToTodoWithResultAsync(string? path)
+    {
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
         {
-            return false;
+            return (false, null, null, string.Empty);
         }
 
         try
@@ -35,7 +48,7 @@ public sealed class SearchResultActionService
             if (todoWidget is null)
             {
                 App.Log("[SearchAction] No Todo widget available to attach to.");
-                return false;
+                return (false, null, null, string.Empty);
             }
 
             var store = new TodoWidgetStore(todoWidget.Id);
@@ -54,21 +67,25 @@ public sealed class SearchResultActionService
             {
                 FilePath = path,
                 DisplayName = fileName,
-                Type = "file",
+                Type = AttachmentStorageService.GetAttachmentType(path),
                 StorageMode = TodoAttachment.LinkedStorageMode,
                 AddedAt = DateTimeOffset.UtcNow
             });
 
             data.Items.Add(item);
             await store.SaveAsync(data);
+            if (_refreshTodoWidgetAsync is not null)
+            {
+                await _refreshTodoWidgetAsync(todoWidget.Id);
+            }
 
             App.Log($"[SearchAction] Attached '{fileName}' to todo widget '{todoWidget.Id}'.");
-            return true;
+            return (true, todoWidget.Id, item.Id, fileName);
         }
         catch (Exception ex)
         {
             App.Log($"[SearchAction] Failed to attach file to todo: {ex.Message}");
-            return false;
+            return (false, null, null, string.Empty);
         }
     }
 
@@ -77,24 +94,42 @@ public sealed class SearchResultActionService
     /// </summary>
     public async Task<bool> SaveFileToNoteAsync(string? path)
     {
+        var result = await SaveFileToNoteWithResultAsync(path);
+        return result.Succeeded;
+    }
+
+    public async Task<(bool Succeeded, string? ItemId, string FileName)> SaveFileToNoteWithResultAsync(string? path)
+    {
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
         {
-            return false;
+            return (false, null, string.Empty);
         }
 
         try
         {
+            string fileName = Path.GetFileName(path);
+            if (_quickCaptureService is not null)
+            {
+                QuickCaptureItem? created = await _quickCaptureService.AddLinkedFileNoteAsync(path);
+                if (created is null)
+                {
+                    return (false, null, string.Empty);
+                }
+
+                App.Log($"[SearchAction] Saved '{fileName}' to quick capture via live service.");
+                return (true, created.Id, fileName);
+            }
+
             var store = new QuickCaptureStore();
             var data = await store.LoadAsync();
 
-            string fileName = Path.GetFileName(path);
             var item = new QuickCaptureItem
             {
                 Type = QuickCaptureItemType.Text,
                 Title = fileName,
                 Body = path,
                 SourceKind = QuickCaptureSourceKind.DragDrop,
-                SortOrder = data.Items.Count,
+                SortOrder = 0,
                 CreatedAt = DateTimeOffset.UtcNow,
                 UpdatedAt = DateTimeOffset.UtcNow
             };
@@ -102,7 +137,7 @@ public sealed class SearchResultActionService
             {
                 FilePath = path,
                 DisplayName = fileName,
-                Type = "file",
+                Type = AttachmentStorageService.GetAttachmentType(path),
                 StorageMode = TodoAttachment.LinkedStorageMode,
                 AddedAt = DateTimeOffset.UtcNow
             });
@@ -111,12 +146,12 @@ public sealed class SearchResultActionService
             await store.SaveAsync(data);
 
             App.Log($"[SearchAction] Saved '{fileName}' to quick capture.");
-            return true;
+            return (true, item.Id, fileName);
         }
         catch (Exception ex)
         {
             App.Log($"[SearchAction] Failed to save file to note: {ex.Message}");
-            return false;
+            return (false, null, string.Empty);
         }
     }
 }

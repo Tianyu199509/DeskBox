@@ -1,0 +1,121 @@
+{
+  "schemaVersion": 1,
+  "id": "deskbox.ai-pulse",
+  "name": "AI 监控",
+  "version": "2.2.0",
+  "author": "DeskBox",
+  "description": "实时监控 Claude Code / Codex 本地会话窗口配额与智谱 GLM / DeepSeek / Kimi / OpenRouter 账户余额。",
+  "icon": "\uE950",
+  "minSize": {
+    "width": 284,
+    "height": 200
+  },
+  "defaultSize": {
+    "width": 332,
+    "height": 340
+  },
+  "settings": [
+    {
+      "key": "modules",
+      "type": "moduleList",
+      "label": "${$i18n.setModules}",
+      "default": "focus:1,radar:1,tokens:0,trend:0",
+      "options": [
+        {
+          "value": "focus",
+          "label": "${$i18n.modFocus}"
+        },
+        {
+          "value": "radar",
+          "label": "${$i18n.modRadar}"
+        },
+        {
+          "value": "tokens",
+          "label": "${$i18n.modTokens}"
+        },
+        {
+          "value": "trend",
+          "label": "${$i18n.modTrend}"
+        }
+      ]
+    },
+    {
+      "key": "quotaDisplayMode",
+      "type": "choice",
+      "label": "${$i18n.setQuotaMode}",
+      "default": "remaining",
+      "options": [
+        {
+          "value": "remaining",
+          "label": "${$i18n.optQuotaRem}"
+        },
+        {
+          "value": "used",
+          "label": "${$i18n.optQuotaUsed}"
+        }
+      ]
+    },
+    {
+      "key": "refreshIntervalMs",
+      "type": "choice",
+      "label": "${$i18n.setRefresh}",
+      "default": "60000",
+      "options": [
+        {
+          "value": "60000",
+          "label": "${$i18n.optRef1m}"
+        },
+        {
+          "value": "300000",
+          "label": "${$i18n.optRef5m}"
+        },
+        {
+          "value": "900000",
+          "label": "${$i18n.optRef15m}"
+        }
+      ]
+    }
+  ],
+  "state": {
+    "selectedProvider": "",
+    "trendMetric": "tokens"
+  },
+  "sources": [
+    {
+      "type": "aiMonitor",
+      "intervalMs": 60000
+    }
+  ],
+  "capsule": {
+    "title": "${$ai.capsuleTitle}",
+    "summary": "${$ai.capsuleSummary}",
+    "glyph": "\uE950",
+    "badge": "${$ai.capsuleBadge}",
+    "badgeIsWarning": "${$ai.capsuleIsWarning}",
+    "progress": "${$ai.capsuleProgress}"
+  },
+  "view": {
+    "type": "ModuleStack",
+    "bind": "settings.modules",
+    "spacing": 8,
+    "padding": "12,6,12,12",
+    "children": [
+      {
+        "id": "focus",
+        "type": "AiFocusCard"
+      },
+      {
+        "id": "radar",
+        "type": "AiRadarList"
+      },
+      {
+        "id": "tokens",
+        "type": "AiTokensCard"
+      },
+      {
+        "id": "trend",
+        "type": "AiTrendCard"
+      }
+    ]
+  }
+}

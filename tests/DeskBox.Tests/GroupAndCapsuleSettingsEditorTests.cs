@@ -130,7 +130,7 @@ public sealed class GroupAndCapsuleSettingsEditorTests : IDisposable
             "FollowDefault", [], "FollowDefault", [],
             WidgetCollapseBehaviorNames.System, [],
             WidgetChromeModeNames.Standard, [],
-            []);
+            [], RawName: "Group", IsHoverSwitchApplicable: true);
         editor.UpdateExistingGroups([item]);
 
         Assert.Same(item, editor.ExistingGroups[0]);
@@ -148,11 +148,18 @@ public sealed class GroupAndCapsuleSettingsEditorTests : IDisposable
             PassthroughLocalize);
 
         Assert.Equal(
-            [WidgetGroupNavigationStyles.Tabs, WidgetGroupNavigationStyles.Stack],
+            [
+                WidgetGroupNavigationStyles.Tabs,
+                WidgetGroupNavigationStyles.EqualTabs,
+                WidgetGroupNavigationStyles.Stack
+            ],
             editor.AvailableNavigationStyleOptions.Select(option => option.Value));
         Assert.Equal(
             "Settings.WidgetGroupNavigation.Tabs",
             editor.AvailableNavigationStyleOptions[0].DisplayName);
+        Assert.Equal(
+            "Settings.WidgetGroupNavigation.EqualTabs",
+            editor.AvailableNavigationStyleOptions[1].DisplayName);
         Assert.Equal(
             [
                 WidgetGroupTitleDisplayModes.IconAndText,
@@ -436,19 +443,22 @@ public sealed class GroupAndCapsuleSettingsEditorTests : IDisposable
         Assert.Contains("Value=\"{Binding BarSpacing, Mode=TwoWay}\"", capsuleSection);
         Assert.Contains("Value=\"{Binding ExpandDelayMs, Mode=TwoWay}\"", capsuleSection);
         Assert.Contains("Value=\"{Binding AnimationDurationMs, Mode=TwoWay}\"", capsuleSection);
-        Assert.Contains("ItemsSource=\"{Binding OverrideItems}\"", window);
+        Assert.Contains("ItemsSource=\"{Binding OverrideItems}\"", capsuleSection);
+        Assert.Contains("x:Name=\"CapsuleModeSection\"", window);
 
         // The appearance main section no longer hosts the recycled
         // group-navigation inline selector.
         Assert.DoesNotContain("{Binding GroupNavigationStyle", appearanceSection);
         Assert.DoesNotContain("{Binding AvailableGroupNavigationStyleOptions}", appearanceSection);
-        Assert.Contains("Tag=\"WidgetGroups\"", appearanceSection);
+        Assert.DoesNotContain("Tag=\"WidgetGroups\"", appearanceSection);
+        Assert.Contains("Tag=\"WidgetGroups\"", window);
 
         // Section-level DataContext switch covers both families.
         Assert.Contains("section.DataContext = _groupNavigationSettingsViewModel;", deferred);
-        Assert.Contains("\"CapsuleMode\" or", deferred);
-        Assert.Contains("\"CapsuleOverridesSettings\"", deferred);
-        Assert.Contains("section.DataContext = _capsuleSettingsViewModel;", deferred);
+        Assert.DoesNotContain("\"CapsuleMode\"", deferred);
+        Assert.DoesNotContain("\"CapsuleOverridesSettings\"", deferred);
+        Assert.Contains("if (CapsuleModeSection is { } capsuleSettings)", deferred);
+        Assert.Contains("capsuleSettings.DataContext = _capsuleSettingsViewModel;", deferred);
 
         // The editors expose AOT bridges and the shell bridge dropped the
         // migrated names.

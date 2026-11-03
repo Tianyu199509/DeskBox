@@ -294,6 +294,14 @@ public sealed class ShortcutNativeDifferentialTests : IDisposable
         (bool csharpStoredSuccess, ShortcutInfo? csharpStored) = TryReadStoredCSharp(link);
         ShortcutNativeCallResult rustStored = Native.ReadStoredRaw(link);
         Assert.Equal(csharpStoredSuccess, rustStored.Success);
+        if (!rustStored.Success)
+        {
+            Assert.True(rustStored.IsExpectedPidlOnlyOutcome, rustStored.Detail);
+        }
+
+        ShortcutNativeCallResult missingStored = Native.ReadStoredRaw(
+            Path.Combine(_tempRoot, "missing-nonexistent.lnk"));
+        Assert.False(missingStored.IsExpectedPidlOnlyOutcome);
         if (csharpStoredSuccess)
         {
             AssertShortcutEqual(csharpStored!, rustStored.Metadata!);

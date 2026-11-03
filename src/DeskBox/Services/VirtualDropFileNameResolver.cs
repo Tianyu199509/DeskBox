@@ -94,6 +94,18 @@ internal static class VirtualDropFileNameResolver
             return ".avif";
         }
 
+        if (header.Length >= 12 &&
+            HasAsciiAt(header, 4, "ftyp") &&
+            (HasAsciiAt(header, 8, "heic") ||
+             HasAsciiAt(header, 8, "heix") ||
+             HasAsciiAt(header, 8, "hevc") ||
+             HasAsciiAt(header, 8, "hevx") ||
+             HasAsciiAt(header, 8, "mif1") ||
+             HasAsciiAt(header, 8, "msf1")))
+        {
+            return ".heic";
+        }
+
         if (HasAsciiAt(header, 0, "%PDF-"))
         {
             return ".pdf";

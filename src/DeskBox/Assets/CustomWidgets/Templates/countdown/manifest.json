@@ -1,0 +1,198 @@
+{
+  "schemaVersion": 1,
+  "id": "deskbox.countdown",
+  "name": "倒数日",
+  "version": "3.0.0",
+  "author": "DeskBox",
+  "description": "追踪重要倒数日、发薪日与纪念日，支持公农历自动循环、正数日累计与时光点阵进度。",
+  "icon": "\uE787",
+  "minSize": {
+    "width": 260,
+    "height": 200
+  },
+  "defaultSize": {
+    "width": 308,
+    "height": 336
+  },
+  "settings": [
+    {
+      "key": "modules",
+      "type": "moduleList",
+      "label": "${$i18n.setModules}",
+      "default": "hero:1,list:1,yearProgress:1",
+      "options": [
+        {
+          "value": "hero",
+          "label": "${$i18n.modHero}"
+        },
+        {
+          "value": "list",
+          "label": "${$i18n.modList}"
+        },
+        {
+          "value": "yearProgress",
+          "label": "${$i18n.modYearProgress}"
+        }
+      ]
+    },
+    {
+      "key": "expiredMode",
+      "type": "choice",
+      "label": "${$i18n.setExpired}",
+      "default": "countup",
+      "options": [
+        {
+          "value": "countup",
+          "label": "${$i18n.optExpCountup}"
+        },
+        {
+          "value": "archive",
+          "label": "${$i18n.optExpArchive}"
+        }
+      ]
+    },
+    {
+      "key": "sortMode",
+      "type": "choice",
+      "label": "${$i18n.setSort}",
+      "default": "smart",
+      "options": [
+        {
+          "value": "smart",
+          "label": "${$i18n.optSortSmart}"
+        },
+        {
+          "value": "custom",
+          "label": "${$i18n.optSortCustom}"
+        }
+      ]
+    },
+    {
+      "key": "progressScope",
+      "type": "choice",
+      "label": "${$i18n.setProgressScope}",
+      "default": "workAndYear",
+      "options": [
+        {
+          "value": "workAndYear",
+          "label": "${$i18n.optScopeWorkYear}"
+        },
+        {
+          "value": "allFour",
+          "label": "${$i18n.optScopeAllFour}"
+        },
+        {
+          "value": "year",
+          "label": "${$i18n.optScopeYear}"
+        },
+        {
+          "value": "month",
+          "label": "${$i18n.optScopeMonth}"
+        },
+        {
+          "value": "both",
+          "label": "${$i18n.optScopeBoth}"
+        }
+      ]
+    },
+    {
+      "key": "workHours",
+      "type": "choice",
+      "label": "${$i18n.setWorkHours}",
+      "default": "09:00-18:00",
+      "options": [
+        {
+          "value": "08:30-17:30",
+          "label": "${$i18n.optWork1}"
+        },
+        {
+          "value": "09:00-18:00",
+          "label": "${$i18n.optWork2}"
+        },
+        {
+          "value": "09:30-18:30",
+          "label": "${$i18n.optWork3}"
+        },
+        {
+          "value": "10:00-19:00",
+          "label": "${$i18n.optWork4}"
+        },
+        {
+          "value": "day24h",
+          "label": "${$i18n.optWorkDay24h}"
+        }
+      ]
+    },
+    {
+      "key": "urgentDays",
+      "type": "choice",
+      "label": "${$i18n.setUrgentDays}",
+      "default": "7",
+      "options": [
+        {
+          "value": "3",
+          "label": "${$i18n.optUrgent3}"
+        },
+        {
+          "value": "7",
+          "label": "${$i18n.optUrgent7}"
+        },
+        {
+          "value": "14",
+          "label": "${$i18n.optUrgent14}"
+        },
+        {
+          "value": "30",
+          "label": "${$i18n.optUrgent30}"
+        }
+      ]
+    },
+    {
+      "key": "showNextHoliday",
+      "type": "toggle",
+      "label": "${$i18n.setShowNextHoliday}",
+      "default": "true"
+    }
+  ],
+  "state": {},
+  "collections": {
+    "events": {
+      "maxItems": 200,
+      "sort": "newestFirst"
+    }
+  },
+  "sources": [
+    {
+      "type": "countdown",
+      "intervalMs": 60000
+    }
+  ],
+  "capsule": {
+    "title": "${$countdown.capsuleTitle}",
+    "summary": "${$countdown.capsuleSummary}",
+    "glyph": "${$countdown.capsuleGlyph}",
+    "badge": "${$countdown.capsuleBadge}",
+    "badgeIsWarning": "${$countdown.capsuleIsWarning}",
+    "progress": "${$countdown.capsuleProgress}"
+  },
+  "view": {
+    "type": "ModuleStack",
+    "bind": "settings.modules",
+    "spacing": 10,
+    "padding": "12,8,12,12",
+    "children": [
+      {
+        "id": "hero",
+        "type": "CountdownHero"
+      },
+      {
+        "id": "list",
+        "type": "CountdownList"
+      },
+      {
+        "id": "yearProgress",
+        "type": "TimeProgressCard"
+      }
+    ]
+  }
+}

@@ -13,27 +13,12 @@ public sealed class AotStage4E0ContractTests
     }
 
     [Fact]
-    public void SearchHistoryRefresh_RebuildsEntriesInsteadOfMutatingThem()
+    public void LegacySearchWidgetSurface_IsRetired()
     {
-        string source = ReadRepositoryFile(
-            "src/DeskBox/Controls/WidgetContents/SearchWidgetContent.xaml.cs");
-
-        Assert.Contains("_recentQueries.Clear();", source, StringComparison.Ordinal);
-        Assert.Contains("_recentQueries.Add(new SearchHistoryEntry", source, StringComparison.Ordinal);
-        Assert.Contains("Query = query", source, StringComparison.Ordinal);
-        Assert.Contains("DeleteLabel = deleteLabel", source, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void SearchHistoryTemplate_UsesExactlySixOneTimeBindings()
-    {
-        string xaml = ReadRepositoryFile(
-            "src/DeskBox/Controls/WidgetContents/SearchWidgetContent.xaml");
-
-        Assert.Equal(4, CountOccurrences(xaml, "{x:Bind Query, Mode=OneTime}"));
-        Assert.Equal(2, CountOccurrences(xaml, "{x:Bind DeleteLabel, Mode=OneTime}"));
-        Assert.DoesNotContain("{x:Bind Query, Mode=OneWay}", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("{x:Bind DeleteLabel, Mode=OneWay}", xaml, StringComparison.Ordinal);
+        Assert.False(File.Exists(TestPaths.FromRepository(
+            "src/DeskBox/Controls/WidgetContents/SearchWidgetContent.xaml")));
+        Assert.False(File.Exists(TestPaths.FromRepository(
+            "src/DeskBox/Controls/WidgetContents/SearchWidgetContent.xaml.cs")));
     }
 
     [Fact]

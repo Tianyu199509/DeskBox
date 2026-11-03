@@ -90,6 +90,23 @@ public static class ShellClipboardHelper
         }
     }
 
+    public static bool TryClearClipboard()
+    {
+        if (!TryOpenClipboard())
+        {
+            return false;
+        }
+
+        try
+        {
+            return ClipboardNativeMethods.EmptyClipboard();
+        }
+        finally
+        {
+            ClipboardNativeMethods.CloseClipboard();
+        }
+    }
+
     public static bool HasFileDropList()
     {
         return ClipboardNativeMethods.IsClipboardFormatAvailable(CfHdrop);
@@ -276,10 +293,14 @@ public static class ShellClipboardHelper
                         displayName = parsingName;
                     }
 
+                    string fileSysPath = ReadShellIdListName(absolutePidl, SigdnFileSysPath);
                     items.Add(new ShellNamespaceClipboardItem(
                         parsingName,
                         displayName,
-                        ReadShellIdListName(absolutePidl, SigdnFileSysPath)));
+                        fileSysPath,
+                        string.IsNullOrWhiteSpace(fileSysPath)
+                            ? ShellLinkVtableInterop.CopyValidatedPidlBytes(absolutePidl)
+                            : null));
                 }
                 finally
                 {
@@ -327,7 +348,8 @@ public static class ShellClipboardHelper
     public sealed record ShellNamespaceClipboardItem(
         string ParsingName,
         string DisplayName,
-        string FileSystemPath);
+        string FileSystemPath,
+        byte[]? RawPidl = null);
 
     private static IntPtr CreateDropFilesHandle(IReadOnlyList<string> paths)
     {

@@ -408,16 +408,15 @@ $settings = [ordered]@{
     featureWidgetEnabledStates = [ordered]@{
         QuickCapture = $false
         Todo = $false
-        Music = $false
+        Music = $true
         Weather = $false
-        Search = $true
         Glance = $false
     }
     searchSaveHistory = $false
     searchShowRecommendations = $false
     widgets = @(
         [ordered]@{
-            id = "aot-5b4c2a-search"
+            id = "aot-5b4c2a-music"
             name = "AOT Hotkey Fixture"
             isDefaultTitle = $false
             x = 100
@@ -425,7 +424,7 @@ $settings = [ordered]@{
             boundsCoordinateVersion = 1
             width = 320
             height = 360
-            widgetKind = "Search"
+            widgetKind = "Music"
             viewMode = "Icon"
             isVisible = $true
             isDisabled = $false

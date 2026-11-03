@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using DeskBox.Contracts;
@@ -23,6 +23,7 @@ public sealed class SettingsIpcMethodRouter
     private readonly ISettingsAppActions? _appActions;
     private readonly IBackupCommands? _backupCommands;
     private readonly DeskBox.Contracts.ISearchConnectionClient? _everythingClient;
+    private readonly Func<DeskBox.Contracts.ISearchConnectionClient?>? _everythingClientProvider;
     private readonly IBackupRestoreActions? _backupRestore;
     private readonly IBackupSettings? _backupSettings;
     private readonly IAppUpdateService? _appUpdate;
@@ -38,6 +39,10 @@ public sealed class SettingsIpcMethodRouter
     private readonly object _moveAllTokenLock = new();
     private long _nextMoveAllHandle;
     private long _activeMigrationHandle;
+    private readonly object _migrationCancelLock = new();
+    private readonly Dictionary<string, CancellationTokenSource> _activeMigrationsById = new(StringComparer.Ordinal);
+    private readonly Queue<string> _preCanceledMigrationOrder = new();
+    private readonly HashSet<string> _preCanceledMigrationIds = new(StringComparer.Ordinal);
 
     public SettingsIpcMethodRouter(
         SettingsService? settings,
@@ -53,7 +58,8 @@ public sealed class SettingsIpcMethodRouter
         IAppUpdateService? appUpdate = null,
         DeskBox.Contracts.ISearchConnectionClient? everythingClient = null,
         Action<string?>? onHostFarewell = null,
-        Action? onHostBootReady = null)
+        Action? onHostBootReady = null,
+        Func<DeskBox.Contracts.ISearchConnectionClient?>? everythingClientProvider = null)
     {
         _settings = settings;
         _hotkey = hotkey;
@@ -63,6 +69,7 @@ public sealed class SettingsIpcMethodRouter
         _appActions = appActions;
         _backupCommands = backupCommands;
         _everythingClient = everythingClient;
+        _everythingClientProvider = everythingClientProvider;
         _backupRestore = backupRestore;
         _backupSettings = backupSettings;
         _appUpdate = appUpdate;
@@ -174,22 +181,38 @@ public sealed class SettingsIpcMethodRouter
                     return (false, null, "missing activation payload");
                 }
 
-                bool applied = _hotkey.TryApplyActivation(activation, out string? applyError);
+                (bool applied, string? applyError) = await DeskBox.Platform.UiDispatch.RunAsync(() =>
+                {
+                    bool ok = _hotkey.TryApplyActivation(activation, out string? err);
+                    return Task.FromResult((ok, err));
+                }).ConfigureAwait(false);
                 return (applied, null, applyError);
 
             case SettingsIpcMethods.HotkeyReset:
                 if (_hotkey is null) return unavailable(method);
-                bool reset = _hotkey.ResetToDefault(out string? resetError);
+                (bool reset, string? resetError) = await DeskBox.Platform.UiDispatch.RunAsync(() =>
+                {
+                    bool ok = _hotkey.ResetToDefault(out string? err);
+                    return Task.FromResult((ok, err));
+                }).ConfigureAwait(false);
                 return (reset, null, resetError);
 
             case SettingsIpcMethods.HotkeyRefreshRegistration:
                 if (_hotkey is null) return unavailable(method);
-                _hotkey.RefreshRegistration();
+                await DeskBox.Platform.UiDispatch.RunAsync(() =>
+                {
+                    _hotkey.RefreshRegistration();
+                    return Task.CompletedTask;
+                });
                 return (true, null, null);
 
             case SettingsIpcMethods.HotkeySetEnabled:
                 if (_hotkey is null) return unavailable(method);
-                _hotkey.SetEnabled(SettingsIpcPayload.DecodeBoolean(payload));
+                await DeskBox.Platform.UiDispatch.RunAsync(() =>
+                {
+                    _hotkey.SetEnabled(SettingsIpcPayload.DecodeBoolean(payload));
+                    return Task.CompletedTask;
+                });
                 return (true, null, null);
 
             case SettingsIpcMethods.SearchHotkeyState:
@@ -225,12 +248,66 @@ public sealed class SettingsIpcMethodRouter
                 }).ConfigureAwait(false);
                 return (searchApplied, null, searchError);
 
+            case SettingsIpcMethods.SearchHotkeyApplyActivation:
+                if (_hotkey is null) return unavailable(method);
+                if (SettingsIpcPayload.DecodeStruct(payload, SettingsIpcJsonContext.Default.GlobalHotkeyActivation)
+                    is not { } searchActivation)
+                {
+                    return (false, null, "missing activation payload");
+                }
+
+                (bool searchActApplied, string? searchActError) = await DeskBox.Platform.UiDispatch.RunAsync(() =>
+                {
+                    bool ok = _hotkey.TryApplySearchHotkeyActivation(searchActivation, out string? err);
+                    return Task.FromResult((ok, err));
+                }).ConfigureAwait(false);
+                return (searchActApplied, null, searchActError);
+
             case SettingsIpcMethods.SearchHotkeyRefreshRegistration:
                 if (_hotkey is null) return unavailable(method);
                 // UI thread, same subclass-install reason as set-enabled.
                 await DeskBox.Platform.UiDispatch.RunAsync(() =>
                 {
                     _hotkey.RefreshSearchHotkeyRegistration();
+                    return Task.CompletedTask;
+                });
+                return (true, null, null);
+
+            case SettingsIpcMethods.ClipboardHotkeyState:
+                if (_hotkey is null) return unavailable(method);
+                bool clipboardReg = await _hotkey.IsClipboardHotkeyRegisteredAsync().ConfigureAwait(false);
+                return (true, SettingsIpcPayload.EncodeBoolean(clipboardReg), null);
+
+            case SettingsIpcMethods.ClipboardHotkeySetEnabled:
+                if (_hotkey is null) return unavailable(method);
+                bool clipboardEnabled = SettingsIpcPayload.DecodeBoolean(payload);
+                await DeskBox.Platform.UiDispatch.RunAsync(() =>
+                {
+                    _hotkey.SetClipboardHotkeyEnabled(clipboardEnabled);
+                    return Task.CompletedTask;
+                });
+                return (true, null, null);
+
+            case SettingsIpcMethods.ClipboardHotkeyApplyActivation:
+                if (_hotkey is null) return unavailable(method);
+                if (SettingsIpcPayload.DecodeStruct(payload, SettingsIpcJsonContext.Default.GlobalHotkeyActivation)
+                    is not { } clipboardActivation)
+                {
+                    return (false, null, "missing activation payload");
+                }
+
+                (bool clipActApplied, string? clipActError) = await DeskBox.Platform.UiDispatch.RunAsync(() =>
+                {
+                    bool ok = _hotkey.TryApplyClipboardHotkeyActivation(clipboardActivation, out string? err);
+                    return Task.FromResult((ok, err));
+                }).ConfigureAwait(false);
+                return (clipActApplied, null, clipActError);
+
+            case SettingsIpcMethods.ClipboardHotkeyRefreshRegistration:
+                if (_hotkey is null) return unavailable(method);
+                await DeskBox.Platform.UiDispatch.RunAsync(() =>
+                {
+                    _hotkey.RefreshClipboardHotkeyRegistration();
                     return Task.CompletedTask;
                 });
                 return (true, null, null);
@@ -293,6 +370,35 @@ public sealed class SettingsIpcMethodRouter
                 QuickCaptureImageCacheInfo? info = await _data.GetQuickCaptureImageCacheInfoAsync();
                 return (true, SerializeNullable(info,
                     SettingsIpcJsonContext.Default.QuickCaptureImageCacheInfo), null);
+
+            case SettingsIpcMethods.DataQuickCaptureMirrorFolderGet:
+                if (_data is null) return unavailable(method);
+                string? mirrorFolder = await _data.GetQuickCaptureMirrorFolderAsync();
+                return (true, mirrorFolder ?? string.Empty, null);
+
+            case SettingsIpcMethods.DataQuickCaptureMirrorFolderSet:
+                if (_data is null) return unavailable(method);
+                await _data.SetQuickCaptureMirrorFolderAsync(
+                    string.IsNullOrWhiteSpace(payload) ? null : payload);
+                return (true, null, null);
+
+            case SettingsIpcMethods.DataClipboardStats:
+                if (_data is null) return unavailable(method);
+                ClipboardStorageStats? clipStats = await _data.GetClipboardStorageStatsAsync();
+                return (true, SerializeNullable(clipStats,
+                    SettingsIpcJsonContext.Default.ClipboardStorageStats), null);
+
+            case SettingsIpcMethods.DataClipboardClearUnpinned:
+                if (_data is null) return unavailable(method);
+                int clipCleared = await _data.ClearClipboardUnpinnedAsync();
+                return (true, clipCleared.ToString(System.Globalization.CultureInfo.InvariantCulture), null);
+
+            case SettingsIpcMethods.DataClipboardObservedApps:
+                if (_data is null) return unavailable(method);
+                List<ClipboardObservedApp> observedApps = (await _data.GetClipboardObservedAppsAsync()).ToList();
+                return (true, SettingsIpcPayload.Encode(
+                    observedApps,
+                    SettingsIpcJsonContext.Default.ListClipboardObservedApp), null);
 
             // ── Restore facade (batch 3c-2) ──────────────────────────
 
@@ -414,6 +520,7 @@ public sealed class SettingsIpcMethodRouter
                 _widget.NotifyWidgetGroupPresentationSettingsChanged();
                 return (true, null, null);
 
+
             case SettingsIpcMethods.WidgetReorderGroupMember:
                 if (_widget is null) return unavailable(method);
                 SettingsIpcStringPair? reorder = SettingsIpcPayload.Decode(
@@ -467,40 +574,15 @@ public sealed class SettingsIpcMethodRouter
 
             case SettingsIpcMethods.WidgetMigratePreview:
                 if (_widget is null) return unavailable(method);
-                ManagedStorageMigrationPreview preview = await _widget.PreviewManagedStorageMigrationAsync(
-                    payload ?? string.Empty,
-                    cancellationToken);
-                return (true, SettingsIpcPayload.Encode(
-                    preview,
-                    SettingsIpcJsonContext.Default.ManagedStorageMigrationPreview), null);
+                return await DispatchMigrationPreviewAsync(payload, cancellationToken).ConfigureAwait(false);
+
+            case SettingsIpcMethods.WidgetMigrateCancel:
+                CancelActiveMigration(payload);
+                return (true, null, null);
 
             case SettingsIpcMethods.WidgetMigrateRoot:
                 if (_widget is null) return unavailable(method);
-                if (SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.SettingsIpcMigrationRequest)
-                    is not { } migration)
-                {
-                    return (false, null, "missing payload");
-                }
-
-                // The host dialog's IProgress cannot ride the request; the
-                // main side re-reports progress as pushed events instead.
-                long migrationHandle = Interlocked.Increment(ref _activeMigrationHandle);
-                var progress = new Progress<ManagedStorageMigrationProgress>(p =>
-                {
-                    _ = PushEvent?.Invoke(
-                        SettingsIpcMethods.WidgetMigrationProgress,
-                        migrationHandle + "\n" + SettingsIpcPayload.Encode(
-                            p,
-                            SettingsIpcJsonContext.Default.ManagedStorageMigrationProgress));
-                });
-                ManagedStorageMigrationResult migrationResult = await _widget.UpdateDefaultManagedStorageRootAsync(
-                    migration.NewRootPath,
-                    new ManagedStorageMigrationOptions(
-                        Progress: progress,
-                        RestartIfCopiesRemoved: migration.RestartIfCopiesRemoved));
-                return (true, SettingsIpcPayload.Encode(
-                    migrationResult,
-                    SettingsIpcJsonContext.Default.ManagedStorageMigrationResult), null);
+                return await DispatchMigrationRootAsync(payload, cancellationToken).ConfigureAwait(false);
 
             case SettingsIpcMethods.WidgetGlanceList:
                 if (_widget is null) return unavailable(method);
@@ -558,6 +640,73 @@ public sealed class SettingsIpcMethodRouter
             case SettingsIpcMethods.WidgetGlanceApplyData:
                 return await HandleGlanceApplyDataAsync(payload);
 
+            case SettingsIpcMethods.WidgetCustomList:
+                if (_widget is null) return unavailable(method);
+                IReadOnlyList<GlanceWidgetInstanceInfo> customInstances = await _widget.GetCustomWidgetInstancesAsync();
+                return (true, SettingsIpcPayload.Encode(
+                    customInstances.ToList(),
+                    SettingsIpcJsonContext.Default.ListGlanceWidgetInstanceInfo), null);
+
+            case SettingsIpcMethods.WidgetCustomCreate:
+                if (_widget is null) return unavailable(method);
+                GlanceWidgetInstanceInfo createdCustom = await _widget.CreateCustomWidgetAsync(
+                    string.IsNullOrEmpty(payload) ? null : payload);
+                return (true, SettingsIpcPayload.Encode(
+                    createdCustom,
+                    SettingsIpcJsonContext.Default.GlanceWidgetInstanceInfo), null);
+
+            case SettingsIpcMethods.WidgetCustomCreateWithSetup:
+                if (_widget is null) return unavailable(method);
+                if (SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.CustomWidgetCreateOptions)
+                    is not { } createOptions)
+                {
+                    return (false, null, "missing payload");
+                }
+
+                GlanceWidgetInstanceInfo createdWithSetup = await _widget.CreateCustomWidgetWithSetupAsync(createOptions);
+                return (true, SettingsIpcPayload.Encode(
+                    createdWithSetup,
+                    SettingsIpcJsonContext.Default.GlanceWidgetInstanceInfo), null);
+
+            case SettingsIpcMethods.WidgetCustomApplyMutation:
+                if (_widget is null) return unavailable(method);
+                if (SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.CustomWidgetSettingsMutation)
+                    is not { } customMutation ||
+                    string.IsNullOrWhiteSpace(customMutation.WidgetId))
+                {
+                    return (false, null, "missing payload");
+                }
+
+                await _widget.ApplyCustomWidgetMutationAsync(customMutation);
+                return (true, null, null);
+
+            case SettingsIpcMethods.WidgetCustomSetEnabled:
+                if (_widget is null) return unavailable(method);
+                if (SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.SettingsIpcGlanceSetEnabled)
+                    is not { } customToggle)
+                {
+                    return (false, null, "missing payload");
+                }
+
+                await _widget.SetCustomWidgetInstanceEnabledAsync(customToggle.WidgetId, customToggle.Enabled);
+                return (true, null, null);
+
+            case SettingsIpcMethods.WidgetCustomLocate:
+                if (_widget is null) return unavailable(method);
+                return (await _widget.LocateCustomWidgetAsync(payload ?? string.Empty), null, null);
+
+            case SettingsIpcMethods.WidgetCustomOpenStudio:
+                if (_widget is null) return unavailable(method);
+                (string? studioWidgetId, string? studioIdea) =
+                    RemoteSettingsWidgetActions.DecodeStudioRequest(payload);
+                await _widget.OpenCustomWidgetStudioAsync(studioWidgetId, studioIdea);
+                return (true, null, null);
+
+            case SettingsIpcMethods.WidgetCustomRemove:
+                if (_widget is null) return unavailable(method);
+                await _widget.RemoveCustomWidgetAsync(payload ?? string.Empty);
+                return (true, null, null);
+
             case SettingsIpcMethods.WidgetMoveAll:
                 if (_widget is null) return unavailable(method);
                 (int movedCount, WidgetMoveAllUndoToken token) = await _widget
@@ -569,7 +718,11 @@ public sealed class SettingsIpcMethodRouter
                     _moveAllTokens[handle] = token;
                 }
                 return (true, SettingsIpcPayload.Encode(
-                    new SettingsIpcMoveAllResult(movedCount, handle),
+                    new SettingsIpcMoveAllResult(
+                        movedCount,
+                        handle,
+                        token.Persisted,
+                        SerializeLayout(_settings)),
                     SettingsIpcJsonContext.Default.SettingsIpcMoveAllResult), null);
 
             case SettingsIpcMethods.WidgetMoveAllUndo:
@@ -590,7 +743,16 @@ public sealed class SettingsIpcMethodRouter
                     return (false, null, "unknown undo handle");
                 }
 
-                return (await _widget.UndoMoveAllWidgetSurfacesAsync(undoToken), null, null);
+                bool undone = await _widget.UndoMoveAllWidgetSurfacesAsync(undoToken);
+                return (undone, undone ? SerializeLayout(_settings) : null, null);
+
+            case SettingsIpcMethods.WidgetRecalibrateDisplayLayout:
+                if (_widget is null) return unavailable(method);
+                int recalibrated = await _widget.RecalibrateDisplayLayoutAsync();
+                return (
+                    true,
+                    recalibrated.ToString(System.Globalization.CultureInfo.InvariantCulture) + "\n" + SerializeLayout(_settings),
+                    null);
 
             case SettingsIpcMethods.WidgetApplyScreenBinding:
                 if (_widget is null) return unavailable(method);
@@ -605,7 +767,7 @@ public sealed class SettingsIpcMethodRouter
                     (WidgetScreenBindingMode)binding.Mode,
                     binding.BoundScreenId,
                     binding.Persist);
-                return (true, null, null);
+                return (true, SerializeLayout(_settings), null);
 
             case SettingsIpcMethods.WidgetLatestUndoableOrgEntry:
                 if (_widget is null) return unavailable(method);
@@ -1075,50 +1237,86 @@ public sealed class SettingsIpcMethodRouter
             // ── Everything integration (batch 3d follow-up) ──────────
 
             case SettingsIpcMethods.SearchEverythingState:
-                if (_everythingClient is null) return unavailable(method);
+            {
+                DeskBox.Contracts.ISearchConnectionClient? client = _everythingClientProvider is not null
+                    ? await DeskBox.Platform.UiDispatch.RunAsync(() => Task.FromResult(_everythingClientProvider()))
+                    : _everythingClient;
+                if (client is null) return unavailable(method);
                 return (true, SettingsIpcPayload.Encode(
-                    _everythingClient.CurrentSnapshot,
+                    client.CurrentSnapshot,
                     SettingsIpcJsonContext.Default.EverythingConnectionSnapshot), null);
+            }
 
             case SettingsIpcMethods.SearchEverythingRefresh:
-                if (_everythingClient is null) return unavailable(method);
+            {
+                if (_everythingClient is null && _everythingClientProvider is null) return unavailable(method);
                 bool allowProbe = SettingsIpcPayload.Decode(
                     payload, SettingsIpcJsonContext.Default.SettingsIpcEverythingRefresh)
                     ?.AllowIpcProbe ?? true;
                 // The refresh touches the Everything process and file system;
                 // run it marshalled like every other settings-side chain.
-                DeskBox.Contracts.EverythingConnectionSnapshot refreshed =
-                    await DeskBox.Platform.UiDispatch.RunAsync(() =>
-                        _everythingClient.RefreshConnectionAsync(allowProbe, cancellationToken));
+                DeskBox.Contracts.EverythingConnectionSnapshot? refreshed =
+                    await DeskBox.Platform.UiDispatch.RunAsync(async () =>
+                    {
+                        DeskBox.Contracts.ISearchConnectionClient? client = _everythingClientProvider?.Invoke() ?? _everythingClient;
+                        return client is null
+                            ? null
+                            : await client.RefreshConnectionAsync(allowProbe, cancellationToken);
+                    });
+                if (refreshed is null) return unavailable(method);
                 return (true, SettingsIpcPayload.Encode(
                     refreshed,
                     SettingsIpcJsonContext.Default.EverythingConnectionSnapshot), null);
+            }
 
             case SettingsIpcMethods.SearchEverythingAuto:
-                if (_everythingClient is null) return unavailable(method);
-                await DeskBox.Platform.UiDispatch.RunAsync(
-                    () => _everythingClient.UseAutomaticDetectionAsync(cancellationToken));
+            {
+                if (_everythingClient is null && _everythingClientProvider is null) return unavailable(method);
+                DeskBox.Contracts.EverythingConnectionSnapshot? autoSnapshot =
+                    await DeskBox.Platform.UiDispatch.RunAsync(async () =>
+                    {
+                        DeskBox.Contracts.ISearchConnectionClient? client = _everythingClientProvider?.Invoke() ?? _everythingClient;
+                        if (client is null) return null;
+                        await client.UseAutomaticDetectionAsync(cancellationToken);
+                        return client.CurrentSnapshot;
+                    });
+                if (autoSnapshot is null) return unavailable(method);
                 return (true, SettingsIpcPayload.Encode(
-                    _everythingClient.CurrentSnapshot,
+                    autoSnapshot,
                     SettingsIpcJsonContext.Default.EverythingConnectionSnapshot), null);
+            }
 
             case SettingsIpcMethods.SearchEverythingSetPath:
-                if (_everythingClient is null) return unavailable(method);
+            {
+                if (_everythingClient is null && _everythingClientProvider is null) return unavailable(method);
                 if (SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.SettingsIpcEverythingPath)
                     is not { } everythingPath)
                 {
                     return (false, null, "missing payload");
                 }
 
-                bool pathApplied = await DeskBox.Platform.UiDispatch.RunAsync(() =>
-                    _everythingClient.SetExecutablePathAsync(everythingPath.Path, cancellationToken));
+                (bool hasClient, bool pathApplied) = await DeskBox.Platform.UiDispatch.RunAsync(async () =>
+                {
+                    DeskBox.Contracts.ISearchConnectionClient? client = _everythingClientProvider?.Invoke() ?? _everythingClient;
+                    if (client is null) return (false, false);
+                    return (true, await client.SetExecutablePathAsync(everythingPath.Path, cancellationToken));
+                });
+                if (!hasClient) return unavailable(method);
                 return (pathApplied, null, pathApplied ? null : "path rejected");
+            }
 
             case SettingsIpcMethods.SearchEverythingLaunch:
-                if (_everythingClient is null) return unavailable(method);
-                bool launched = await DeskBox.Platform.UiDispatch.RunAsync(() =>
-                    _everythingClient.LaunchEverythingAsync(cancellationToken));
+            {
+                if (_everythingClient is null && _everythingClientProvider is null) return unavailable(method);
+                (bool hasClient, bool launched) = await DeskBox.Platform.UiDispatch.RunAsync(async () =>
+                {
+                    DeskBox.Contracts.ISearchConnectionClient? client = _everythingClientProvider?.Invoke() ?? _everythingClient;
+                    if (client is null) return (false, false);
+                    return (true, await client.LaunchEverythingAsync(cancellationToken));
+                });
+                if (!hasClient) return unavailable(method);
                 return (launched, null, launched ? null : "launch failed");
+            }
 
             default:
                 return (false, null, $"unknown method {method}");
@@ -1180,6 +1378,249 @@ public sealed class SettingsIpcMethodRouter
         GlanceWidgetStore store = GlanceWidgetStore.ForWidget(widgetId);
         await DeskBox.Platform.UiDispatch.RunAsync(() => store.SaveAsync(data));
         return (true, null, null);
+    }
+
+    private CancellationTokenSource RegisterMigrationCancellation(
+        string operationId,
+        CancellationToken outerToken,
+        out CancellationTokenSource ownedCancelSource)
+    {
+        var cancelSource = new CancellationTokenSource();
+        bool preCanceled;
+        lock (_migrationCancelLock)
+        {
+            _activeMigrationsById[operationId] = cancelSource;
+            preCanceled = _preCanceledMigrationIds.Remove(operationId);
+        }
+
+        if (preCanceled)
+        {
+            cancelSource.Cancel();
+        }
+
+        ownedCancelSource = cancelSource;
+        return CancellationTokenSource.CreateLinkedTokenSource(outerToken, cancelSource.Token);
+    }
+
+    private void UnregisterMigrationCancellation(string operationId, CancellationTokenSource ownedCancelSource)
+    {
+        lock (_migrationCancelLock)
+        {
+            if (_activeMigrationsById.TryGetValue(operationId, out CancellationTokenSource? existing) &&
+                ReferenceEquals(existing, ownedCancelSource))
+            {
+                _activeMigrationsById.Remove(operationId);
+            }
+        }
+
+        ownedCancelSource.Dispose();
+    }
+
+    private void CancelActiveMigration(string? operationId)
+    {
+        List<CancellationTokenSource>? targets = null;
+        CancellationTokenSource? singleTarget = null;
+        lock (_migrationCancelLock)
+        {
+            if (string.IsNullOrWhiteSpace(operationId))
+            {
+                if (_activeMigrationsById.Count > 0)
+                {
+                    targets = new List<CancellationTokenSource>(_activeMigrationsById.Values);
+                }
+            }
+            else if (_activeMigrationsById.TryGetValue(operationId, out singleTarget))
+            {
+            }
+            else if (_preCanceledMigrationIds.Add(operationId))
+            {
+                _preCanceledMigrationOrder.Enqueue(operationId);
+                while (_preCanceledMigrationOrder.Count > 64)
+                {
+                    string evicted = _preCanceledMigrationOrder.Dequeue();
+                    _preCanceledMigrationIds.Remove(evicted);
+                }
+            }
+        }
+
+        if (singleTarget is not null)
+        {
+            try { singleTarget.Cancel(); }
+            catch (ObjectDisposedException) { }
+            return;
+        }
+
+        if (targets is null)
+        {
+            return;
+        }
+
+        foreach (CancellationTokenSource target in targets)
+        {
+            try { target.Cancel(); }
+            catch (ObjectDisposedException) { }
+        }
+    }
+
+    private async Task<(bool Ok, string? Payload, string? Error)> DispatchMigrationPreviewAsync(
+        string? payload,
+        CancellationToken cancellationToken)
+    {
+        string rawPath = payload ?? string.Empty;
+        string operationId;
+        if (rawPath.StartsWith('{') &&
+            SettingsIpcPayload.Decode(rawPath, SettingsIpcJsonContext.Default.SettingsIpcMigrationPreviewRequest)
+                is { } previewReq)
+        {
+            rawPath = previewReq.Path ?? string.Empty;
+            operationId = !string.IsNullOrWhiteSpace(previewReq.OperationId)
+                ? previewReq.OperationId
+                : Interlocked.Increment(ref _activeMigrationHandle).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+        else
+        {
+            operationId = Interlocked.Increment(ref _activeMigrationHandle).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        using CancellationTokenSource linkedCts = RegisterMigrationCancellation(
+            operationId,
+            cancellationToken,
+            out CancellationTokenSource ownedCancelCts);
+        try
+        {
+            ManagedStorageMigrationPreview preview = await _widget!.PreviewManagedStorageMigrationAsync(
+                rawPath,
+                linkedCts.Token).ConfigureAwait(false);
+            return (true, SettingsIpcPayload.Encode(
+                new SettingsIpcMigrationOutcome(Ok: true, Preview: preview),
+                SettingsIpcJsonContext.Default.SettingsIpcMigrationOutcome), null);
+        }
+        catch (OperationCanceledException ex)
+        {
+            return (true, SettingsIpcPayload.Encode(
+                new SettingsIpcMigrationOutcome(Ok: false, Stopped: true, ErrorMessage: ex.Message),
+                SettingsIpcJsonContext.Default.SettingsIpcMigrationOutcome), null);
+        }
+        catch (StorageMigrationException ex)
+        {
+            return (true, SettingsIpcPayload.Encode(
+                new SettingsIpcMigrationOutcome(
+                    Ok: false,
+                    ProblemKind: (int)ex.Problem,
+                    ErrorMessage: ex.Message,
+                    TemporaryBytes: ex.TemporaryBytes),
+                SettingsIpcJsonContext.Default.SettingsIpcMigrationOutcome), null);
+        }
+        catch (Exception ex)
+        {
+            StorageMigrationProblem classified = ManagedStorageMigrationPresentation.Classify(ex);
+            return (true, SettingsIpcPayload.Encode(
+                new SettingsIpcMigrationOutcome(
+                    Ok: false,
+                    ProblemKind: (int)classified,
+                    ErrorMessage: ex.Message),
+                SettingsIpcJsonContext.Default.SettingsIpcMigrationOutcome), null);
+        }
+        finally
+        {
+            UnregisterMigrationCancellation(operationId, ownedCancelCts);
+        }
+    }
+
+    private async Task<(bool Ok, string? Payload, string? Error)> DispatchMigrationRootAsync(
+        string? payload,
+        CancellationToken cancellationToken)
+    {
+        if (SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.SettingsIpcMigrationRequest)
+            is not { } migration)
+        {
+            return (false, null, "missing payload");
+        }
+
+        string operationId = !string.IsNullOrWhiteSpace(migration.OperationId)
+            ? migration.OperationId
+            : Interlocked.Increment(ref _activeMigrationHandle).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        ManagedStorageMigrationPhase? lastPushedPhase = null;
+        long lastPushedTick = 0;
+        var progress = new Progress<ManagedStorageMigrationProgress>(p =>
+        {
+            long now = Environment.TickCount64;
+            bool isBoundary = lastPushedPhase != p.Phase ||
+                              p.CompletedItems <= 0 ||
+                              (p.TotalItems > 0 && p.CompletedItems >= p.TotalItems);
+            if (!isBoundary && now - lastPushedTick < 50)
+            {
+                return;
+            }
+
+            lastPushedPhase = p.Phase;
+            lastPushedTick = now;
+            _ = PushEvent?.Invoke(
+                SettingsIpcMethods.WidgetMigrationProgress,
+                operationId + "\n" + SettingsIpcPayload.Encode(
+                    p,
+                    SettingsIpcJsonContext.Default.ManagedStorageMigrationProgress));
+        });
+
+        using CancellationTokenSource linkedCts = RegisterMigrationCancellation(
+            operationId,
+            cancellationToken,
+            out CancellationTokenSource ownedCancelCts);
+        try
+        {
+            ManagedStorageMigrationResult migrationResult = await _widget!.UpdateDefaultManagedStorageRootAsync(
+                migration.NewRootPath,
+                new ManagedStorageMigrationOptions(
+                    Progress: progress,
+                    CancellationToken: linkedCts.Token,
+                    RestartIfCopiesRemoved: migration.RestartIfCopiesRemoved)).ConfigureAwait(false);
+            return (true, SettingsIpcPayload.Encode(
+                new SettingsIpcMigrationOutcome(Ok: true, Result: migrationResult),
+                SettingsIpcJsonContext.Default.SettingsIpcMigrationOutcome), null);
+        }
+        catch (StorageMigrationStoppedException ex)
+        {
+            return (true, SettingsIpcPayload.Encode(
+                new SettingsIpcMigrationOutcome(
+                    Ok: false,
+                    Stopped: true,
+                    ErrorMessage: ex.Message,
+                    TemporaryBytes: ex.TemporaryBytes),
+                SettingsIpcJsonContext.Default.SettingsIpcMigrationOutcome), null);
+        }
+        catch (OperationCanceledException ex)
+        {
+            return (true, SettingsIpcPayload.Encode(
+                new SettingsIpcMigrationOutcome(
+                    Ok: false,
+                    Stopped: true,
+                    ErrorMessage: ex.Message),
+                SettingsIpcJsonContext.Default.SettingsIpcMigrationOutcome), null);
+        }
+        catch (StorageMigrationException ex)
+        {
+            return (true, SettingsIpcPayload.Encode(
+                new SettingsIpcMigrationOutcome(
+                    Ok: false,
+                    ProblemKind: (int)ex.Problem,
+                    ErrorMessage: ex.Message,
+                    TemporaryBytes: ex.TemporaryBytes),
+                SettingsIpcJsonContext.Default.SettingsIpcMigrationOutcome), null);
+        }
+        catch (Exception ex)
+        {
+            StorageMigrationProblem classified = ManagedStorageMigrationPresentation.Classify(ex);
+            return (true, SettingsIpcPayload.Encode(
+                new SettingsIpcMigrationOutcome(
+                    Ok: false,
+                    ProblemKind: (int)classified,
+                    ErrorMessage: ex.Message),
+                SettingsIpcJsonContext.Default.SettingsIpcMigrationOutcome), null);
+        }
+        finally
+        {
+            UnregisterMigrationCancellation(operationId, ownedCancelCts);
+        }
     }
 
     private static string? SerializeNullable<T>(T? value, JsonTypeInfo<T> typeInfo) where T : class =>

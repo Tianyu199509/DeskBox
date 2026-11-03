@@ -15,6 +15,9 @@ public sealed partial class ContentWidgetWindow
     internal IEnumerable<WidgetKind> CachedGroupContentKinds =>
         _cachedGroupContents.Values.Select(content => content.WidgetKind);
 
+    internal IEnumerable<IWidgetContent> CachedGroupContents =>
+        _cachedGroupContents.Values;
+
     internal bool HasPresentableContentFrame =>
         ContentWidgetShell.HasPresentableContentFrame;
 
@@ -76,6 +79,12 @@ public sealed partial class ContentWidgetWindow
         WidgetGroupSwitchOrigin origin = WidgetGroupSwitchOrigin.Programmatic,
         bool forward = true)
     {
+        if (animateGroupIdentity &&
+            origin is not WidgetGroupSwitchOrigin.Programmatic)
+        {
+            ContentWidgetShell.CaptureOutgoingCompactSwitchState();
+        }
+
         ContentWidgetShell.ClearFeedback();
         _config = config;
         _descriptor = descriptor;
@@ -85,10 +94,14 @@ public sealed partial class ContentWidgetWindow
         // Paint the Glance yield gate from the incoming member's config
         // before the view's Loaded pass — a cached Glance view carries the
         // previous member's flag and would draw one stale frame otherwise.
-        if (content.View is DeskBox.Controls.WidgetContents.GlanceWidgetContent glanceView)
+        if (content is GlanceWidgetContentAdapter glanceAdapter)
         {
-            glanceView.SetShellCustomBackgroundActive(
+            glanceAdapter.SetShellCustomBackgroundActive(
                 WidgetBackgroundCustomization.HasCustomBackground(config));
+        }
+        if (content is FileWidgetContentAdapter fileAdapter)
+        {
+            fileAdapter.HostHasActiveShellDragWindowProbe = () => HasActiveNativeShellDragWindow;
         }
         AttachCompactPresentationSource(content);
         AttachFeedbackSource(content);
@@ -119,9 +132,16 @@ public sealed partial class ContentWidgetWindow
             return;
         }
 
+        if (content is CustomWidgetContentAdapter customSurface)
+        {
+            ContentWidgetShell.TitleGlyph = customSurface.ViewModel.TitleGlyph;
+            ContentWidgetShell.TitleIconKind = customSurface.ViewModel.TitleIconKind;
+            return;
+        }
+
         ContentWidgetShell.TitleGlyph = descriptor.DefaultGlyph;
         ContentWidgetShell.TitleIconKind =
-            WidgetTitleIconKindNames.FromWidgetKind(config.WidgetKind);
+            WidgetTitleIconKindNames.FromWidgetConfig(config);
     }
 
     internal IWidgetContent? TakeCachedGroupContent(string widgetId)
@@ -133,6 +153,11 @@ public sealed partial class ContentWidgetWindow
             return null;
         }
 
+        if (content is IWidgetGroupContentCacheable cacheable)
+        {
+            cacheable.OutboundDragCompleted -= OnCachedGroupContentOutboundDragCompleted;
+        }
+
         RemoveCachedGroupContentOrderEntry(widgetId);
         App.LogVerbose($"[WidgetGroup] Reusing cached content member={widgetId}");
         return content;
@@ -141,8 +166,12 @@ public sealed partial class ContentWidgetWindow
     private bool TryRetainGroupContent(IWidgetContent content)
     {
         int capacity = GetCachedGroupContentCapacity();
+        bool hasActiveDrag = content is IWidgetGroupContentCacheable
+        {
+            HasActiveOutboundDrag: true
+        };
         if (IsClosing ||
-            capacity <= 0 ||
+            (capacity <= 0 && !hasActiveDrag) ||
             content is not IWidgetGroupContentCacheable ||
             string.IsNullOrWhiteSpace(content.WidgetId))
         {
@@ -152,12 +181,23 @@ public sealed partial class ContentWidgetWindow
         if (_cachedGroupContents.Remove(content.WidgetId, out IWidgetContent? replaced))
         {
             RemoveCachedGroupContentOrderEntry(content.WidgetId);
-            DisposeCachedGroupContent(replaced);
+            if (!ReferenceEquals(replaced, content))
+            {
+                DisposeCachedGroupContent(replaced);
+            }
         }
 
-        TrimCachedGroupContentsToCapacity(capacity - 1);
+        TrimCachedGroupContentsToCapacity(Math.Max(0, capacity - 1));
 
-        content.OnWindowLongHidden();
+        if (hasActiveDrag && content is IWidgetGroupContentCacheable cacheable)
+        {
+            cacheable.OutboundDragCompleted -= OnCachedGroupContentOutboundDragCompleted;
+            cacheable.OutboundDragCompleted += OnCachedGroupContentOutboundDragCompleted;
+        }
+        else if (!hasActiveDrag)
+        {
+            content.OnWindowLongHidden();
+        }
         _cachedGroupContents[content.WidgetId] = content;
         _cachedGroupContentOrder.AddLast(content.WidgetId);
         App.LogVerbose($"[WidgetGroup] Cached inactive content member={content.WidgetId}");
@@ -175,14 +215,24 @@ public sealed partial class ContentWidgetWindow
     private void TrimCachedGroupContentsToCapacity(int capacity)
     {
         capacity = Math.Max(0, capacity);
-        while (_cachedGroupContents.Count > capacity &&
-               _cachedGroupContentOrder.First is { } oldest)
+        LinkedListNode<string>? node = _cachedGroupContentOrder.First;
+        while (_cachedGroupContents.Count > capacity && node is not null)
         {
-            _cachedGroupContentOrder.RemoveFirst();
-            if (_cachedGroupContents.Remove(oldest.Value, out IWidgetContent? evicted))
+            LinkedListNode<string>? next = node.Next;
+            if (_cachedGroupContents.TryGetValue(node.Value, out IWidgetContent? candidate) &&
+                candidate is IWidgetGroupContentCacheable { HasActiveOutboundDrag: true })
+            {
+                node = next;
+                continue;
+            }
+
+            _cachedGroupContentOrder.Remove(node);
+            if (_cachedGroupContents.Remove(node.Value, out IWidgetContent? evicted))
             {
                 DisposeCachedGroupContent(evicted);
             }
+
+            node = next;
         }
     }
 
@@ -196,7 +246,13 @@ public sealed partial class ContentWidgetWindow
         // Keep both the current and bounded inactive-member views warm. Disposing
         // either here turns the next reveal or group switch into a full XAML/data
         // reconstruction, which is more disruptive than the retained memory.
+        if (!Visible)
+        {
+            SuspendBackdropTargetsForHiddenWindow();
+        }
+
         _contentHost.CurrentContent?.OnWindowLongHidden();
+        ContentWidgetShell.ClearCompactBitmaps();
         // Custom backgrounds follow the same hidden-widget discipline: no
         // decoded bitmaps stay alive while the window is long-hidden.
         ReleaseCustomBackgroundSurface();
@@ -214,9 +270,15 @@ public sealed partial class ContentWidgetWindow
             return 0;
         }
 
+        SuspendBackdropTargetsForHiddenWindow();
         _contentHost.CurrentContent?.OnWindowLongHidden();
+        ContentWidgetShell.ClearCompactBitmaps();
         ReleaseCustomBackgroundSurface();
         int releasedCachedContents = _cachedGroupContents.Count;
+        if (IsTargetCollapsed)
+        {
+            _contentHost.TryHibernateCurrentContentView();
+        }
         DisposeCachedGroupContents();
         return releasedCachedContents;
     }
@@ -248,10 +310,36 @@ public sealed partial class ContentWidgetWindow
         }
     }
 
-    private static void DisposeCachedGroupContent(IWidgetContent content)
+    private void OnCachedGroupContentOutboundDragCompleted(object? sender, EventArgs e)
+    {
+        if (IsClosing ||
+            sender is not IWidgetContent content ||
+            string.IsNullOrWhiteSpace(content.WidgetId) ||
+            !_cachedGroupContents.TryGetValue(content.WidgetId, out IWidgetContent? cached) ||
+            !ReferenceEquals(cached, content) ||
+            content is IWidgetGroupContentCacheable { HasActiveOutboundDrag: true })
+        {
+            return;
+        }
+
+        if (content is IWidgetGroupContentCacheable cacheable)
+        {
+            cacheable.OutboundDragCompleted -= OnCachedGroupContentOutboundDragCompleted;
+        }
+
+        content.OnWindowLongHidden();
+        TrimCachedGroupContentsToCapacity(GetCachedGroupContentCapacity());
+    }
+
+    private void DisposeCachedGroupContent(IWidgetContent content)
     {
         try
         {
+            if (content is IWidgetGroupContentCacheable cacheable)
+            {
+                cacheable.OutboundDragCompleted -= OnCachedGroupContentOutboundDragCompleted;
+            }
+
             (content as IDisposable)?.Dispose();
         }
         catch (Exception ex)

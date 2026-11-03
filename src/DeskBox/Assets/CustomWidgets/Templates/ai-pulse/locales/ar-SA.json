@@ -1,0 +1,16 @@
+{
+  "modFocus": "بطاقة الحصة الرئيسية",
+  "modRadar": "رادار متعدد المزودين",
+  "modTokens": "تفاصيل Token والذاكرة المؤقتة محليًا",
+  "modTrend": "اتجاه الاستخدام لـ 14 يومًا",
+  "optQuotaRem": "إظهار النسبة المتبقية (مثل: 85% متبقية)",
+  "optQuotaUsed": "إظهار النسبة المستخدمة (مثل: 15% مستخدمة)",
+  "optRef15m": "كل 15 دقيقة",
+  "optRef1m": "كل دقيقة (موصى به)",
+  "optRef5m": "كل 5 دقائق",
+  "setModules": "الوحدات المرئية وترتيبها",
+  "setQuotaMode": "عرض حصة النافذة",
+  "setRefresh": "فاصل الاستعلام التلقائي",
+  "widgetDescription": "راقب نوافذ حدود المعدل لجلسات Claude Code وCodex إلى جانب أرصدة حسابات Zhipu GLM وDeepSeek وKimi وOpenRouter.",
+  "widgetName": "مراقب الذكاء الاصطناعي"
+}

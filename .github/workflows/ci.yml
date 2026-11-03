@@ -12,6 +12,8 @@ jobs:
     runs-on: windows-latest
     env:
       RestoreLockedMode: true
+      PYTHONUTF8: "1"
+      PYTHONIOENCODING: "utf-8"
 
     steps:
       - name: Checkout
@@ -26,6 +28,23 @@ jobs:
           $messages = git log --format=%B "${{ github.event.pull_request.base.sha }}..HEAD"
           if ($messages -match '(?im)^\s*(co-authored-by|generated[ -]with|generated-by)\s*[: ]') {
             Write-Host 'Forbidden attribution trailer (Co-Authored-By / Generated with) found in commit messages.'
+            exit 1
+          }
+
+      - name: AI widget contract gates
+        shell: pwsh
+        # 契约 / 本地化 / 暂存协议门禁。脚本存在但没接 CI，等于没有门禁：
+        # 「协议改成了暂存-提交、13 语还在承诺桌面热重载」就是这样漏过去的。
+        # 放在构建之前，几秒钟就能拦住这类漂移，不用等 5 分钟测试跑完。
+        run: |
+          python -X utf8 scripts/check_ai_widget_contract.py
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error 'AI widget contract gate failed'
+            exit 1
+          }
+          python -X utf8 scripts/check_ai_widget_localization.py
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error 'AI widget localization gate failed'
             exit 1
           }
 

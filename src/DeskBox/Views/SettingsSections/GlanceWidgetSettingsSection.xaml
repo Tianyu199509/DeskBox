@@ -16,10 +16,27 @@
 
     <StackPanel Style="{StaticResource SectionPanelStyle}">
         <StackPanel Spacing="4">
+            <!-- Master Enable Card -->
+            <toolkit:SettingsCard
+                HorizontalContentAlignment="Right"
+                svc:Localized.DescriptionKey="Settings.Glance.Enable.Description"
+                svc:Localized.HeaderKey="Settings.Glance.Enable.Title">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE823;" />
+                </toolkit:SettingsCard.HeaderIcon>
+                <ToggleSwitch svc:Localized.AutomationNameKey="Settings.Glance.Enable.Title"
+                    x:Name="GlanceMasterEnableToggle"
+                    MinWidth="0"
+                    OffContent=""
+                    OnContent=""
+                    Toggled="GlanceMasterEnableToggle_Toggled" />
+            </toolkit:SettingsCard>
+
+            <!-- Current Instance Manager -->
             <toolkit:SettingsCard
                 x:Name="InstanceManagerCard"
                 HorizontalContentAlignment="Stretch"
-                svc:Localized.HeaderKey="Glance.Instances.Title">
+                svc:Localized.HeaderKey="Settings.Glance.CurrentInstance.Title">
                 <toolkit:SettingsCard.HeaderIcon>
                     <FontIcon Glyph="&#xE787;" />
                 </toolkit:SettingsCard.HeaderIcon>
@@ -30,12 +47,12 @@
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                    <ComboBox svc:Localized.AutomationNameKey="Glance.Instances.Title"
+                    <ComboBox svc:Localized.AutomationNameKey="Settings.Glance.CurrentInstance.Title"
                         x:Name="InstanceComboBox"
-                        MinWidth="210"
+                        MinWidth="{StaticResource SettingsControlMinWidth}"
                         HorizontalAlignment="Stretch"
                         SelectionChanged="InstanceComboBox_SelectionChanged" />
-                    <ToggleSwitch svc:Localized.AutomationNameKey="Glance.Instances.Title"
+                    <ToggleSwitch svc:Localized.AutomationNameKey="Glance.Instances.Enable"
                         x:Name="InstanceEnabledToggle"
                         Grid.Column="1"
                         MinWidth="0"
@@ -62,7 +79,7 @@
                             <MenuFlyout Placement="BottomEdgeAlignedRight">
                                 <MenuFlyoutItem x:Name="LocateInstanceMenuItem" Click="LocateInstanceMenuItem_Click">
                                     <MenuFlyoutItem.Icon>
-                                        <FontIcon Glyph="&#xE707;" />
+                                        <FontIcon Glyph="&#xE81D;" />
                                     </MenuFlyoutItem.Icon>
                                 </MenuFlyoutItem>
                                 <MenuFlyoutItem x:Name="DuplicateInstanceMenuItem" Click="DuplicateInstanceMenuItem_Click">
@@ -87,235 +104,360 @@
                 </Grid>
             </toolkit:SettingsCard>
 
+            <!-- Per-Instance Configuration -->
             <StackPanel x:Name="InstanceSettingsPanel" Spacing="4">
-            <toolkit:SettingsExpander
-                IsExpanded="False"
-                svc:Localized.DescriptionKey="Glance.BackgroundGroup.Description"
-                svc:Localized.HeaderKey="Glance.Background.Title">
-                <toolkit:SettingsExpander.HeaderIcon>
-                    <FontIcon Glyph="&#xE91B;" />
-                </toolkit:SettingsExpander.HeaderIcon>
-                <ComboBox svc:Localized.AutomationNameKey="Glance.Background.Title"
-                    x:Name="BackgroundSourceComboBox"
-                    Width="220"
-                    SelectionChanged="BackgroundSourceComboBox_SelectionChanged" />
-                <toolkit:SettingsExpander.Items>
-                    <toolkit:SettingsCard
-                        x:Name="OnlineImageCategoryCard"
-                        HorizontalContentAlignment="Right"
-                        svc:Localized.DescriptionKey="Glance.Background.Category.Description"
-                        svc:Localized.HeaderKey="Glance.Background.Category.Title">
-                        <ComboBox svc:Localized.AutomationNameKey="Glance.Background.Category.Title"
-                            x:Name="OnlineImageCategoryComboBox"
-                            Width="220"
-                            SelectionChanged="OnlineImageCategoryComboBox_SelectionChanged" />
-                    </toolkit:SettingsCard>
-                    <toolkit:SettingsCard x:Name="LocalSourceCard" ContentAlignment="Vertical" HorizontalContentAlignment="Stretch" svc:Localized.HeaderKey="Glance.Background.Files">
-                        <Grid ColumnSpacing="16">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <TextBlock
-                                x:Name="LocalSourceSummary"
-                                VerticalAlignment="Center"
-                                Style="{StaticResource SettingDescriptionTextStyle}"
-                                TextWrapping="Wrap" />
-                            <StackPanel
-                                Grid.Column="1"
+                <!-- Style gallery: one choice replaces layout + calendar + display toggles. -->
+                <toolkit:SettingsCard
+                    x:Name="StyleCard"
+                    ContentAlignment="Vertical"
+                    HorizontalContentAlignment="Stretch"
+                    svc:Localized.DescriptionKey="Glance.Style.Description"
+                    svc:Localized.HeaderKey="Glance.Style.Title">
+                    <toolkit:SettingsCard.HeaderIcon>
+                        <FontIcon Glyph="&#xE8A5;" />
+                    </toolkit:SettingsCard.HeaderIcon>
+                    <GridView svc:Localized.AutomationNameKey="Glance.Style.Title"
+                        x:Name="StyleGallery"
+                        Margin="-4,0,0,0"
+                        IsItemClickEnabled="False"
+                        SelectionChanged="StyleGallery_SelectionChanged"
+                        SelectionMode="Single" />
+                </toolkit:SettingsCard>
+
+                <toolkit:SettingsCard
+                    x:Name="PhotoClockAlignmentCard"
+                    HorizontalContentAlignment="Right"
+                    Visibility="Collapsed"
+                    svc:Localized.HeaderKey="Glance.Style.Alignment.Title">
+                    <toolkit:SettingsCard.HeaderIcon>
+                        <FontIcon Glyph="&#xE8E3;" />
+                    </toolkit:SettingsCard.HeaderIcon>
+                    <ComboBox svc:Localized.AutomationNameKey="Glance.Style.Alignment.Title"
+                        x:Name="PhotoClockAlignmentComboBox"
+                        MinWidth="{StaticResource SettingsControlMinWidth}"
+                        SelectionChanged="PhotoClockAlignmentComboBox_SelectionChanged" />
+                </toolkit:SettingsCard>
+
+                <!-- Expander 1: Background photos -->
+                <toolkit:SettingsExpander
+                    IsExpanded="False"
+                    svc:Localized.DescriptionKey="Settings.Glance.Group.Background.Description"
+                    svc:Localized.HeaderKey="Settings.Glance.Group.Background">
+                    <toolkit:SettingsExpander.HeaderIcon>
+                        <FontIcon Glyph="&#xE91B;" />
+                    </toolkit:SettingsExpander.HeaderIcon>
+                    <ComboBox svc:Localized.AutomationNameKey="Glance.Background.Title"
+                        x:Name="BackgroundSourceComboBox"
+                        MinWidth="{StaticResource SettingsControlMinWidth}"
+                        SelectionChanged="BackgroundSourceComboBox_SelectionChanged" />
+                    <toolkit:SettingsExpander.Items>
+                        <toolkit:SettingsCard
+                            x:Name="OnlineImageCategoryCard"
+                            HorizontalContentAlignment="Right"
+                            svc:Localized.DescriptionKey="Glance.Background.Category.Description"
+                            svc:Localized.HeaderKey="Glance.Background.Category.Title">
+                            <ComboBox svc:Localized.AutomationNameKey="Glance.Background.Category.Title"
+                                x:Name="OnlineImageCategoryComboBox"
+                                MinWidth="{StaticResource SettingsControlMinWidth}"
+                                SelectionChanged="OnlineImageCategoryComboBox_SelectionChanged" />
+                        </toolkit:SettingsCard>
+                        <toolkit:SettingsCard
+                            x:Name="LocalSourceCard"
+                            ContentAlignment="Vertical"
+                            HorizontalContentAlignment="Stretch"
+                            svc:Localized.HeaderKey="Glance.Background.Files">
+                            <Grid ColumnSpacing="16">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock
+                                    x:Name="LocalSourceSummary"
+                                    VerticalAlignment="Center"
+                                    Style="{StaticResource SettingDescriptionTextStyle}"
+                                    TextWrapping="Wrap" />
+                                <StackPanel
+                                    Grid.Column="1"
+                                    HorizontalAlignment="Right"
+                                    VerticalAlignment="Center"
+                                    Orientation="Horizontal"
+                                    Spacing="8">
+                                    <Button svc:Localized.AutomationNameKey="Glance.Background.ChooseFiles" x:Name="ChooseFilesButton" Style="{StaticResource ActionButtonStyle}" Click="ChooseFilesButton_Click" svc:Localized.Key="Glance.Background.ChooseFiles" />
+                                    <Button svc:Localized.AutomationNameKey="Glance.Background.ChooseFolder" x:Name="ChooseFolderButton" Style="{StaticResource ActionButtonStyle}" Click="ChooseFolderButton_Click" svc:Localized.Key="Glance.Background.ChooseFolder" />
+                                    <Button svc:Localized.AutomationNameKey="Glance.Background.ClearSelection" x:Name="ClearLocalSourceButton" Style="{StaticResource ActionButtonStyle}" Click="ClearLocalSourceButton_Click" svc:Localized.Key="Glance.Background.ClearSelection" />
+                                </StackPanel>
+                            </Grid>
+                        </toolkit:SettingsCard>
+                        <toolkit:SettingsCard
+                            x:Name="RotationCard"
+                            HorizontalContentAlignment="Right"
+                            svc:Localized.HeaderKey="Glance.Rotation.Title">
+                            <ComboBox svc:Localized.AutomationNameKey="Glance.Rotation.Title"
+                                x:Name="RotationComboBox"
+                                MinWidth="{StaticResource SettingsControlMinWidth}"
+                                SelectionChanged="RotationComboBox_SelectionChanged" />
+                        </toolkit:SettingsCard>
+                        <toolkit:SettingsCard
+                            x:Name="RandomOrderCard"
+                            HorizontalContentAlignment="Right"
+                            svc:Localized.HeaderKey="Glance.Rotation.Random">
+                            <ToggleSwitch svc:Localized.AutomationNameKey="Glance.Rotation.Random"
+                                x:Name="RandomOrderToggle"
+                                MinWidth="0"
+                                OffContent=""
+                                OnContent=""
+                                Toggled="RandomOrderToggle_Toggled" />
+                        </toolkit:SettingsCard>
+                        <toolkit:SettingsCard
+                            HorizontalContentAlignment="Right"
+                            svc:Localized.DescriptionKey="Glance.PhotoControls.Description"
+                            svc:Localized.HeaderKey="Glance.PhotoControls.Title">
+                            <ToggleSwitch svc:Localized.AutomationNameKey="Glance.PhotoControls.Title"
+                                x:Name="ShowPhotoControlsToggle"
+                                MinWidth="0"
+                                OffContent=""
+                                OnContent=""
+                                Toggled="ShowPhotoControlsToggle_Toggled" />
+                        </toolkit:SettingsCard>
+                    </toolkit:SettingsExpander.Items>
+                </toolkit:SettingsExpander>
+
+                <!-- Expander 2: What's today (traditional calendar, festivals, holidays, to-dos) -->
+                <toolkit:SettingsExpander
+                    x:Name="DayInfoGroupExpander"
+                    IsExpanded="False"
+                    svc:Localized.DescriptionKey="Settings.Glance.Group.DayInfo.Description"
+                    svc:Localized.HeaderKey="Settings.Glance.Group.DayInfo">
+                    <toolkit:SettingsExpander.HeaderIcon>
+                        <FontIcon Glyph="&#xE787;" />
+                    </toolkit:SettingsExpander.HeaderIcon>
+                    <toolkit:SettingsExpander.Items>
+                        <toolkit:SettingsCard
+                            x:Name="TraditionalCalendarCard"
+                            HorizontalContentAlignment="Right"
+                            svc:Localized.DescriptionKey="Glance.TraditionalCalendar.Description"
+                            svc:Localized.HeaderKey="Glance.TraditionalCalendar.Title">
+                            <ComboBox svc:Localized.AutomationNameKey="Glance.TraditionalCalendar.Title"
+                                x:Name="TraditionalCalendarComboBox"
+                                MinWidth="{StaticResource SettingsControlMinWidth}"
+                                SelectionChanged="TraditionalCalendarComboBox_SelectionChanged" />
+                        </toolkit:SettingsCard>
+                        <toolkit:SettingsCard
+                            x:Name="ChineseFestivalCard"
+                            HorizontalContentAlignment="Right"
+                            Visibility="Collapsed"
+                            svc:Localized.DescriptionKey="Glance.Festivals.Description"
+                            svc:Localized.HeaderKey="Glance.Festivals.Title">
+                            <ToggleSwitch svc:Localized.AutomationNameKey="Glance.Festivals.Title"
+                                x:Name="ShowChineseFestivalsToggle"
+                                MinWidth="0"
+                                OffContent=""
+                                OnContent=""
+                                Toggled="ShowChineseFestivalsToggle_Toggled" />
+                        </toolkit:SettingsCard>
+                        <toolkit:SettingsCard
+                            x:Name="StatutoryHolidaysCard"
+                            HorizontalContentAlignment="Right"
+                            Visibility="Collapsed"
+                            svc:Localized.DescriptionKey="Glance.DayInfo.Holidays.Description"
+                            svc:Localized.HeaderKey="Glance.DayInfo.Holidays.Title">
+                            <ToggleSwitch svc:Localized.AutomationNameKey="Glance.DayInfo.Holidays.Title"
+                                x:Name="ShowStatutoryHolidaysToggle"
+                                MinWidth="0"
+                                OffContent=""
+                                OnContent=""
+                                Toggled="ShowStatutoryHolidaysToggle_Toggled" />
+                        </toolkit:SettingsCard>
+                        <toolkit:SettingsCard
+                            x:Name="TodoAgendaCard"
+                            HorizontalContentAlignment="Right"
+                            svc:Localized.DescriptionKey="Glance.DayInfo.Todos.Description"
+                            svc:Localized.HeaderKey="Glance.DayInfo.Todos.Title">
+                            <ToggleSwitch svc:Localized.AutomationNameKey="Glance.DayInfo.Todos.Title"
+                                x:Name="ShowTodoAgendaToggle"
+                                MinWidth="0"
+                                OffContent=""
+                                OnContent=""
+                                Toggled="ShowTodoAgendaToggle_Toggled" />
+                        </toolkit:SettingsCard>
+                    </toolkit:SettingsExpander.Items>
+                </toolkit:SettingsExpander>
+
+                <!-- Expander 3: Advanced (display items, typography, readability, material, animation) -->
+                <toolkit:SettingsExpander
+                    x:Name="AdvancedGroupExpander"
+                    IsExpanded="False"
+                    svc:Localized.DescriptionKey="Settings.Glance.Group.Advanced.Description"
+                    svc:Localized.HeaderKey="Settings.Glance.Group.Advanced">
+                    <toolkit:SettingsExpander.HeaderIcon>
+                        <FontIcon Glyph="&#xE713;" />
+                    </toolkit:SettingsExpander.HeaderIcon>
+                    <toolkit:SettingsExpander.Items>
+                        <toolkit:SettingsCard
+                            HorizontalContentAlignment="Right"
+                            svc:Localized.DescriptionKey="Glance.Display.Description"
+                            svc:Localized.HeaderKey="Glance.Display.Title">
+                            <DropDownButton
+                                x:Name="DisplayContentDropDownButton"
+                                MinWidth="{StaticResource SettingsControlMinWidth}"
                                 HorizontalAlignment="Right"
-                                VerticalAlignment="Center"
-                                Orientation="Horizontal"
-                                Spacing="8">
-                                <Button svc:Localized.AutomationNameKey="Glance.Background.ChooseFiles" x:Name="ChooseFilesButton" Style="{StaticResource ActionButtonStyle}" Click="ChooseFilesButton_Click" svc:Localized.Key="Glance.Background.ChooseFiles" />
-                                <Button svc:Localized.AutomationNameKey="Glance.Background.ChooseFolder" x:Name="ChooseFolderButton" Style="{StaticResource ActionButtonStyle}" Click="ChooseFolderButton_Click" svc:Localized.Key="Glance.Background.ChooseFolder" />
-                                <Button svc:Localized.AutomationNameKey="Glance.Background.ClearSelection" x:Name="ClearLocalSourceButton" Style="{StaticResource ActionButtonStyle}" Click="ClearLocalSourceButton_Click" svc:Localized.Key="Glance.Background.ClearSelection" />
+                                Click="DisplayContentDropDown_Click" />
+                        </toolkit:SettingsCard>
+                        <toolkit:SettingsCard
+                            HorizontalContentAlignment="Right"
+                            svc:Localized.HeaderKey="Glance.Typography.Font">
+                            <ComboBox svc:Localized.AutomationNameKey="Glance.Typography.Font"
+                                x:Name="FontComboBox"
+                                MinWidth="{StaticResource SettingsControlMinWidth}"
+                                MaxDropDownHeight="360"
+                                SelectionChanged="FontComboBox_SelectionChanged" />
+                        </toolkit:SettingsCard>
+                        <toolkit:SettingsCard
+                            HorizontalContentAlignment="Right"
+                            svc:Localized.DescriptionKey="Settings.Glance.TimeFormat.Description"
+                            svc:Localized.HeaderKey="Glance.Typography.TimeFormat">
+                            <ComboBox svc:Localized.AutomationNameKey="Glance.Typography.TimeFormat"
+                                x:Name="TimeFormatComboBox"
+                                MinWidth="{StaticResource SettingsControlMinWidth}"
+                                SelectionChanged="TimeFormatComboBox_SelectionChanged" />
+                        </toolkit:SettingsCard>
+                        <toolkit:SettingsCard
+                            HorizontalContentAlignment="Right"
+                            svc:Localized.HeaderKey="Glance.Typography.Title">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <TextBlock
+                                    x:Name="TimeScaleValueText"
+                                    VerticalAlignment="Center"
+                                    Style="{StaticResource SettingValueTextStyle}" />
+                                <Slider svc:Localized.AutomationNameKey="Glance.Typography.Title"
+                                    x:Name="TimeScaleSlider"
+                                    Width="190"
+                                    Minimum="0.75"
+                                    Maximum="1.35"
+                                    StepFrequency="0.05"
+                                    ValueChanged="TimeScaleSlider_ValueChanged" />
                             </StackPanel>
-                        </Grid>
-                    </toolkit:SettingsCard>
-                    <toolkit:SettingsCard
-                        HorizontalContentAlignment="Right"
-                        svc:Localized.DescriptionKey="Glance.Background.Transparency.Description"
-                        svc:Localized.HeaderKey="Glance.Background.Transparency.Title">
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <TextBlock
-                                x:Name="BackgroundImageTransparencyValue"
-                                VerticalAlignment="Center"
-                                Style="{StaticResource SettingValueTextStyle}" />
-                            <Slider svc:Localized.AutomationNameKey="Glance.Background.Transparency.Title"
-                                x:Name="BackgroundImageTransparencySlider"
-                                Width="190"
-                                Maximum="1"
-                                Minimum="0"
-                                StepFrequency="0.02"
-                                ValueChanged="BackgroundImageTransparencySlider_ValueChanged" />
-                        </StackPanel>
-                    </toolkit:SettingsCard>
-                    <toolkit:SettingsCard HorizontalContentAlignment="Right" svc:Localized.HeaderKey="Glance.Rotation.Title">
-                        <ComboBox svc:Localized.AutomationNameKey="Glance.Rotation.Title" x:Name="RotationComboBox" Width="220" SelectionChanged="RotationComboBox_SelectionChanged" />
-                    </toolkit:SettingsCard>
-                    <toolkit:SettingsCard HorizontalContentAlignment="Right" svc:Localized.HeaderKey="Glance.Rotation.Random">
-                        <ToggleSwitch svc:Localized.AutomationNameKey="Glance.Rotation.Random"  x:Name="RandomOrderToggle" MinWidth="0" OffContent="" OnContent="" Toggled="RandomOrderToggle_Toggled" />
-                    </toolkit:SettingsCard>
-                    <toolkit:SettingsCard HorizontalContentAlignment="Right" svc:Localized.HeaderKey="Glance.Cache.Title">
-                        <StackPanel Orientation="Horizontal" Spacing="10">
-                            <TextBlock x:Name="CacheSizeText" VerticalAlignment="Center" Style="{StaticResource SettingDescriptionTextStyle}" />
-                            <Button svc:Localized.AutomationNameKey="Glance.Cache.Clear" Style="{StaticResource ActionButtonStyle}" Click="ClearCacheButton_Click" svc:Localized.Key="Glance.Cache.Clear" />
-                        </StackPanel>
-                    </toolkit:SettingsCard>
-                </toolkit:SettingsExpander.Items>
-            </toolkit:SettingsExpander>
+                        </toolkit:SettingsCard>
+                        <toolkit:SettingsCard
+                            HorizontalContentAlignment="Right"
+                            svc:Localized.DescriptionKey="Glance.Background.Transparency.Description"
+                            svc:Localized.HeaderKey="Glance.Background.Transparency.Title">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <TextBlock
+                                    x:Name="BackgroundImageTransparencyValue"
+                                    VerticalAlignment="Center"
+                                    Style="{StaticResource SettingValueTextStyle}" />
+                                <Slider svc:Localized.AutomationNameKey="Glance.Background.Transparency.Title"
+                                    x:Name="BackgroundImageTransparencySlider"
+                                    Width="190"
+                                    Maximum="1"
+                                    Minimum="0"
+                                    StepFrequency="0.02"
+                                    ValueChanged="BackgroundImageTransparencySlider_ValueChanged" />
+                            </StackPanel>
+                        </toolkit:SettingsCard>
+                        <toolkit:SettingsCard
+                            HorizontalContentAlignment="Right"
+                            svc:Localized.DescriptionKey="Settings.Glance.Readability.Description"
+                            svc:Localized.HeaderKey="Glance.Readability.Title"
+                            svc:InfoTip.TitleKey="Settings.Glance.Readability.InfoTip.Title"
+                            svc:InfoTip.BodyKey="Settings.Glance.Readability.InfoTip.Description">
+                            <ComboBox svc:Localized.AutomationNameKey="Glance.Readability.Title"
+                                x:Name="ReadabilityComboBox"
+                                MinWidth="{StaticResource SettingsControlMinWidth}"
+                                SelectionChanged="ReadabilityComboBox_SelectionChanged" />
+                        </toolkit:SettingsCard>
+                        <toolkit:SettingsCard
+                            x:Name="CalendarMaterialCard"
+                            HorizontalContentAlignment="Right"
+                            Visibility="Collapsed"
+                            svc:Localized.DescriptionKey="Glance.CalendarMaterial.Description"
+                            svc:Localized.HeaderKey="Glance.CalendarMaterial.Title">
+                            <ComboBox svc:Localized.AutomationNameKey="Glance.CalendarMaterial.Title"
+                                x:Name="CalendarMaterialComboBox"
+                                MinWidth="{StaticResource SettingsControlMinWidth}"
+                                SelectionChanged="CalendarMaterialComboBox_SelectionChanged" />
+                        </toolkit:SettingsCard>
+                        <toolkit:SettingsCard
+                            x:Name="CalendarImageTransparencyCard"
+                            HorizontalContentAlignment="Right"
+                            Visibility="Collapsed"
+                            svc:Localized.DescriptionKey="Glance.CalendarMaterial.TransparencyDescription"
+                            svc:Localized.HeaderKey="Glance.CalendarMaterial.Transparency">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <TextBlock
+                                    x:Name="CalendarImageTransparencyValue"
+                                    VerticalAlignment="Center"
+                                    Style="{StaticResource SettingValueTextStyle}" />
+                                <Slider svc:Localized.AutomationNameKey="Glance.CalendarMaterial.Transparency"
+                                    x:Name="CalendarImageTransparencySlider"
+                                    Width="190"
+                                    Minimum="0"
+                                    Maximum="1"
+                                    StepFrequency="0.02"
+                                    ValueChanged="CalendarImageTransparencySlider_ValueChanged" />
+                            </StackPanel>
+                        </toolkit:SettingsCard>
+                        <toolkit:SettingsCard
+                            HorizontalContentAlignment="Right"
+                            svc:Localized.HeaderKey="Glance.Transition.Title">
+                            <ComboBox svc:Localized.AutomationNameKey="Glance.Transition.Title"
+                                x:Name="TransitionComboBox"
+                                MinWidth="{StaticResource SettingsControlMinWidth}"
+                                SelectionChanged="TransitionComboBox_SelectionChanged" />
+                        </toolkit:SettingsCard>
+                        <toolkit:SettingsCard
+                            x:Name="TransitionSpeedCard"
+                            HorizontalContentAlignment="Right"
+                            svc:Localized.HeaderKey="Glance.Speed.Title">
+                            <ComboBox svc:Localized.AutomationNameKey="Glance.Speed.Title"
+                                x:Name="SpeedComboBox"
+                                MinWidth="{StaticResource SettingsControlMinWidth}"
+                                SelectionChanged="SpeedComboBox_SelectionChanged" />
+                        </toolkit:SettingsCard>
+                    </toolkit:SettingsExpander.Items>
+                </toolkit:SettingsExpander>
+            </StackPanel>
 
-            <toolkit:SettingsExpander
-                IsExpanded="False"
-                svc:Localized.HeaderKey="Glance.Typography.Font">
-                <toolkit:SettingsExpander.HeaderIcon>
-                    <FontIcon Glyph="&#xE8D2;" />
-                </toolkit:SettingsExpander.HeaderIcon>
-                <ComboBox svc:Localized.AutomationNameKey="Glance.Typography.Font"
-                    x:Name="FontComboBox"
-                    Width="220"
-                    MaxDropDownHeight="360"
-                    SelectionChanged="FontComboBox_SelectionChanged" />
-                <toolkit:SettingsExpander.Items>
-                    <toolkit:SettingsCard
-                        HorizontalContentAlignment="Right"
-                        svc:Localized.DescriptionKey="Settings.Glance.TimeFormat.Description"
-                        svc:Localized.HeaderKey="Glance.Typography.TimeFormat">
-                        <ComboBox svc:Localized.AutomationNameKey="Glance.Typography.TimeFormat"
-                            x:Name="TimeFormatComboBox"
-                            Width="220"
-                            SelectionChanged="TimeFormatComboBox_SelectionChanged" />
-                    </toolkit:SettingsCard>
-                    <toolkit:SettingsCard
-                        HorizontalContentAlignment="Right"
-                        svc:Localized.HeaderKey="Glance.Typography.Title">
-                        <Slider svc:Localized.AutomationNameKey="Glance.Typography.Title"
-                            x:Name="TimeScaleSlider"
-                            Width="190"
-                            Minimum="0.75"
-                            Maximum="1.35"
-                            StepFrequency="0.05"
-                            ValueChanged="TimeScaleSlider_ValueChanged" />
-                    </toolkit:SettingsCard>
-                </toolkit:SettingsExpander.Items>
-            </toolkit:SettingsExpander>
+            <!-- Bottom: Global Storage & Reset -->
+            <StackPanel Style="{StaticResource SettingsSubsectionHeaderStyle}">
+                <TextBlock
+                    Style="{StaticResource SettingsSubsectionTitleTextStyle}"
+                    AutomationProperties.HeadingLevel="Level2"
+                    svc:Localized.Key="Settings.Glance.Section.StorageAndReset" />
+            </StackPanel>
 
             <toolkit:SettingsCard
                 HorizontalContentAlignment="Right"
-                svc:Localized.DescriptionKey="Glance.Display.Description"
-                svc:Localized.HeaderKey="Glance.Display.Title">
+                svc:Localized.HeaderKey="Glance.Cache.Title">
                 <toolkit:SettingsCard.HeaderIcon>
-                    <FontIcon Glyph="&#xE890;" />
+                    <FontIcon Glyph="&#xE74E;" />
                 </toolkit:SettingsCard.HeaderIcon>
-                <DropDownButton
-                    x:Name="DisplayContentDropDownButton"
-                    Width="220"
-                    HorizontalAlignment="Right"
-                    Click="DisplayContentDropDown_Click" />
-            </toolkit:SettingsCard>
-
-            <toolkit:SettingsCard
-                HorizontalContentAlignment="Right"
-                svc:Localized.HeaderKey="Glance.Layout.Title">
-                <toolkit:SettingsCard.HeaderIcon>
-                    <FontIcon Glyph="&#xE8A5;" />
-                </toolkit:SettingsCard.HeaderIcon>
-                <ComboBox svc:Localized.AutomationNameKey="Glance.Layout.Title" x:Name="LayoutComboBox" Width="220" SelectionChanged="LayoutComboBox_SelectionChanged" />
-            </toolkit:SettingsCard>
-
-            <toolkit:SettingsCard
-                x:Name="CalendarMaterialCard"
-                HorizontalContentAlignment="Right"
-                Visibility="Collapsed"
-                svc:Localized.DescriptionKey="Glance.CalendarMaterial.Description"
-                svc:Localized.HeaderKey="Glance.CalendarMaterial.Title">
-                <ComboBox svc:Localized.AutomationNameKey="Glance.CalendarMaterial.Title"
-                    x:Name="CalendarMaterialComboBox"
-                    Width="220"
-                    SelectionChanged="CalendarMaterialComboBox_SelectionChanged" />
-            </toolkit:SettingsCard>
-
-            <toolkit:SettingsCard
-                x:Name="CalendarImageTransparencyCard"
-                HorizontalContentAlignment="Right"
-                Visibility="Collapsed"
-                svc:Localized.DescriptionKey="Glance.CalendarMaterial.TransparencyDescription"
-                svc:Localized.HeaderKey="Glance.CalendarMaterial.Transparency">
-                <StackPanel Orientation="Horizontal" Spacing="8">
+                <StackPanel Orientation="Horizontal" Spacing="10">
                     <TextBlock
-                        x:Name="CalendarImageTransparencyValue"
+                        x:Name="CacheSizeText"
                         VerticalAlignment="Center"
-                        Style="{StaticResource SettingValueTextStyle}" />
-                    <Slider svc:Localized.AutomationNameKey="Glance.CalendarMaterial.Transparency"
-                        x:Name="CalendarImageTransparencySlider"
-                        Width="190"
-                        Minimum="0"
-                        Maximum="1"
-                        StepFrequency="0.02"
-                        ValueChanged="CalendarImageTransparencySlider_ValueChanged" />
+                        Style="{StaticResource SettingDescriptionTextStyle}" />
+                    <Button svc:Localized.AutomationNameKey="Glance.Cache.Clear"
+                        Style="{StaticResource ActionButtonStyle}"
+                        Click="ClearCacheButton_Click"
+                        svc:Localized.Key="Glance.Cache.Clear" />
                 </StackPanel>
             </toolkit:SettingsCard>
 
             <toolkit:SettingsCard
-                x:Name="TraditionalCalendarCard"
                 HorizontalContentAlignment="Right"
-                Visibility="Collapsed"
-                svc:Localized.DescriptionKey="Glance.TraditionalCalendar.Description"
-                svc:Localized.HeaderKey="Glance.TraditionalCalendar.Title">
-                <ComboBox svc:Localized.AutomationNameKey="Glance.TraditionalCalendar.Title"
-                    x:Name="TraditionalCalendarComboBox"
-                    Width="220"
-                    SelectionChanged="TraditionalCalendarComboBox_SelectionChanged" />
+                svc:Localized.DescriptionKey="Settings.Glance.Reset.Description"
+                svc:Localized.HeaderKey="Settings.Glance.Reset.Title">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE72C;" />
+                </toolkit:SettingsCard.HeaderIcon>
+                <Button svc:Localized.AutomationNameKey="Settings.Glance.Reset.Button"
+                    x:Name="ResetGlanceButton"
+                    Style="{StaticResource ActionButtonStyle}"
+                    Click="ResetGlanceButton_Click"
+                    svc:Localized.Key="Settings.Glance.Reset.Button" />
             </toolkit:SettingsCard>
-
-            <toolkit:SettingsCard
-                x:Name="ChineseFestivalCard"
-                HorizontalContentAlignment="Right"
-                Visibility="Collapsed"
-                svc:Localized.DescriptionKey="Glance.Festivals.Description"
-                svc:Localized.HeaderKey="Glance.Festivals.Title">
-                <ToggleSwitch svc:Localized.AutomationNameKey="Glance.Festivals.Title"
-                    x:Name="ShowChineseFestivalsToggle"
-                    MinWidth="0"
-                    OffContent=""
-                    OnContent=""
-                    Toggled="ShowChineseFestivalsToggle_Toggled" />
-            </toolkit:SettingsCard>
-
-            <toolkit:SettingsExpander
-                IsExpanded="False"
-                svc:Localized.HeaderKey="Glance.Transition.Title">
-                <toolkit:SettingsExpander.HeaderIcon>
-                    <FontIcon Glyph="&#xE790;" />
-                </toolkit:SettingsExpander.HeaderIcon>
-                <ComboBox svc:Localized.AutomationNameKey="Glance.Transition.Title" x:Name="TransitionComboBox" Width="220" SelectionChanged="TransitionComboBox_SelectionChanged" />
-                <toolkit:SettingsExpander.Items>
-                    <toolkit:SettingsCard HorizontalContentAlignment="Right" svc:Localized.HeaderKey="Glance.Speed.Title">
-                        <ComboBox svc:Localized.AutomationNameKey="Glance.Speed.Title" x:Name="SpeedComboBox" Width="220" SelectionChanged="SpeedComboBox_SelectionChanged" />
-                    </toolkit:SettingsCard>
-                    <toolkit:SettingsCard HorizontalContentAlignment="Right"
-                        svc:Localized.DescriptionKey="Settings.Glance.Readability.Description"
-                        svc:Localized.HeaderKey="Glance.Readability.Title"
-                        svc:InfoTip.TitleKey="Settings.Glance.Readability.InfoTip.Title"
-                        svc:InfoTip.BodyKey="Settings.Glance.Readability.InfoTip.Description">
-                        <ComboBox svc:Localized.AutomationNameKey="Glance.Readability.Title" x:Name="ReadabilityComboBox" Width="220" SelectionChanged="ReadabilityComboBox_SelectionChanged" />
-                    </toolkit:SettingsCard>
-                </toolkit:SettingsExpander.Items>
-            </toolkit:SettingsExpander>
-
-            <toolkit:SettingsCard
-                HorizontalContentAlignment="Right"
-                svc:Localized.DescriptionKey="Glance.PhotoControls.Description"
-                svc:Localized.HeaderKey="Glance.PhotoControls.Title">
-                <ToggleSwitch svc:Localized.AutomationNameKey="Glance.PhotoControls.Title"
-                    x:Name="ShowPhotoControlsToggle"
-                    MinWidth="0"
-                    OffContent=""
-                    OnContent=""
-                    Toggled="ShowPhotoControlsToggle_Toggled" />
-            </toolkit:SettingsCard>
-            </StackPanel>
         </StackPanel>
     </StackPanel>
 </UserControl>

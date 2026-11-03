@@ -11,7 +11,7 @@
         Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
         KeyDown="RootGrid_KeyDown">
         <Grid.RowDefinitions>
-            <RowDefinition Height="48" />
+            <RowDefinition Height="42" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
@@ -34,9 +34,8 @@
         <Border
             x:Name="ContentLayer"
             Grid.Row="1"
-            Background="{ThemeResource LayerFillColorDefaultBrush}"
-            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-            BorderThickness="0,1,0,0">
+            Background="Transparent"
+            BorderThickness="0">
             <controls:DesktopOrganizationTaskView x:Name="TaskView">
                 <controls:DesktopOrganizationTaskView.Transitions>
                     <TransitionCollection>

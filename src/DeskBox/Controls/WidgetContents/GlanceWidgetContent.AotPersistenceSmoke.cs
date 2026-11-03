@@ -54,6 +54,8 @@ public sealed partial class GlanceWidgetContent
             $"The Glance surface did not stabilize. Snapshot={last}");
     }
 
+    private string? _decodedImagePath => _background.FramePath;
+
     private AotGlanceSurfaceSnapshot CaptureAotGlanceSurface()
     {
         Border active = _isAActive ? BackgroundA : BackgroundB;

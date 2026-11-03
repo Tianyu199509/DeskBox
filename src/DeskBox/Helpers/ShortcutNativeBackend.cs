@@ -99,6 +99,17 @@ internal sealed record ShortcutNativeCallResult(
     uint SourceTruncatedFields)
 {
     internal bool Success => Metadata is not null && Failure == ShortcutNativeCallFailure.None;
+
+    /// <summary>
+    /// True when <c>IPersistFile::Load</c> succeeded on a valid shell link that
+    /// carries only a PIDL / namespace / AppX target and therefore returns
+    /// <c>E_FAIL</c> from <c>IShellLinkW::GetPath(..., SLGP_RAWPATH)</c>.
+    /// </summary>
+    internal bool IsExpectedPidlOnlyOutcome =>
+        Failure == ShortcutNativeCallFailure.NativeFailure &&
+        Status == ShortcutNativeModule.StatusOperationFailed &&
+        LoadHResult >= 0 &&
+        TargetHResult == ShortcutNativeModule.HResultFail;
 }
 
 internal sealed record ShortcutNativeWriteCallResult(
@@ -153,8 +164,10 @@ internal sealed unsafe partial class ShortcutNativeModule
     internal const uint WriteShellNamespaceTargetFlag = 1U << 0;
 
     internal const uint StatusOk = 0;
+    internal const uint StatusOperationFailed = 7;
     internal const uint ModeStoredRaw = 1;
     internal const uint ModeEffectiveDiagnostic = 2;
+    internal const int HResultFail = unchecked((int)0x80004005);
     internal const int HResultNotAttempted = unchecked((int)0x8000000A);
 
     private const uint StructVersion = 2;

@@ -35,7 +35,6 @@ public abstract partial class WidgetWindowBase : Window
     private static readonly UIntPtr DesktopPinnedActivationSubclassId = new(0xDDB5);
 
     private static readonly int[] BackdropRefreshDelays = [80, 240, 580];
-    private static readonly TimeSpan InactiveBackdropControllerRetention = TimeSpan.FromSeconds(3);
     private static readonly ConditionalWeakTable<SolidColorBrush, object> MutableBrushes = new();
     private static readonly object MutableBrushMarker = new();
 
@@ -43,7 +42,7 @@ public abstract partial class WidgetWindowBase : Window
     // Set by derived classes in their constructors before calling ConfigureWindowCore().
     protected SettingsService SettingsService = null!;
     protected IntPtr HWnd;
-    protected AppWindow AppWindow = null!;
+    protected new AppWindow AppWindow = null!;
     protected WidgetWindowDiagnostics Diagnostics = null!;
     protected WidgetTrayAnimationController TrayAnimation = null!;
     
@@ -59,7 +58,8 @@ public abstract partial class WidgetWindowBase : Window
     private Windows.UI.Color _lastLegacyAccentTintColor;
     private double _lastLegacyAccentOpacity;
     private BackdropSignature? _lastAppliedBackdropSignature;
-    private WinUIEx.TransparentTintBackdrop? _solidColorBackdrop;
+    private SolidTintSystemBackdrop? _solidColorBackdrop;
+    private ElementBackdropTargetBridge? _materialBackdropBridge;
     protected SystemBackdropConfiguration? BackdropConfiguration;
     protected ICompositionSupportsSystemBackdrop? BackdropTarget;
     protected bool IsSolidColorBackdropActive { get; private set; }
@@ -67,7 +67,6 @@ public abstract partial class WidgetWindowBase : Window
     // ── Protected state: backdrop refresh ──────────────────────
     protected long BackdropRefreshGeneration;
     private DispatcherQueueTimer? _backdropRefreshTimer;
-    private DispatcherQueueTimer? _inactiveBackdropCleanupTimer;
     private int _backdropRefreshStage;
     private bool _isTrackedForDiagnostics;
 
@@ -113,7 +112,7 @@ public abstract partial class WidgetWindowBase : Window
     private PointerEventHandler? _desktopPinnedPointerPressedHandler;
 
     // ── Protected state: closing ───────────────────────────────
-    protected bool IsClosing;
+    protected internal bool IsClosing;
 
     /// <summary>
     /// Parameterless constructor required by the WinUI 3 XAML compiler.
@@ -146,6 +145,8 @@ public abstract partial class WidgetWindowBase : Window
 
     /// <summary>The opacity value (0–1) used for backdrop tinting.</summary>
     protected abstract double WidgetOpacity { get; }
+
+    protected virtual bool IsWindowVisibleForBackdrop => true;
 
     /// <summary>The root XAML element (typically RootGrid).</summary>
     protected abstract FrameworkElement RootElement { get; }
@@ -190,6 +191,7 @@ public abstract partial class WidgetWindowBase : Window
         if (!IsClosing)
         {
             WidgetShellControl.ApplyPerformanceSettings();
+            ReconcileCollapsedContentWarmthPreference();
         }
     }
 
@@ -210,9 +212,52 @@ public abstract partial class WidgetWindowBase : Window
             return true;
         }
 
+        if (HWnd != IntPtr.Zero && WidgetEditorPopoverWindow.HasOpenPopoverForOwner(HWnd))
+        {
+            return true;
+        }
+
         XamlRoot? xamlRoot = RootElement.XamlRoot;
-        return xamlRoot is not null &&
-            VisualTreeHelper.GetOpenPopupsForXamlRoot(xamlRoot).Count > 0;
+        if (xamlRoot is null)
+        {
+            return false;
+        }
+
+        if (VisualTreeHelper.GetOpenPopupsForXamlRoot(xamlRoot).Count > 0)
+        {
+            return true;
+        }
+
+        return HasActiveFocusedTextInput(xamlRoot);
+    }
+
+    private bool HasActiveFocusedTextInput(XamlRoot xamlRoot)
+    {
+        if (HWnd == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        object? focused;
+        try
+        {
+            focused = Microsoft.UI.Xaml.Input.FocusManager.GetFocusedElement(xamlRoot);
+        }
+        catch
+        {
+            return false;
+        }
+
+        if (focused is not DependencyObject focusedDep ||
+            !DeskBox.Helpers.TransientInputFocusGuard.IsInsideTextInputControl(focusedDep))
+        {
+            return false;
+        }
+
+        IntPtr fg = Win32Helper.GetForegroundWindow();
+        return fg == HWnd ||
+               DeskBox.Helpers.TransientInputFocusGuard.IsWindowsTextInputExperienceWindow(fg) ||
+               DeskBox.Helpers.TransientInputFocusGuard.IsCurrentProcessPopupBridge(fg);
     }
 
     /// <summary>Allows hosts with custom title bars to update collapse actions.</summary>
@@ -306,6 +351,11 @@ public abstract partial class WidgetWindowBase : Window
 
     protected void CleanupBase()
     {
+        if (HWnd != IntPtr.Zero)
+        {
+            WidgetEditorPopoverWindow.ClosePopoversForOwner(HWnd);
+        }
+
         CancelPendingTitleBarDragFrame();
         CompleteBoundsInteractionFrameMetrics(ref _titleBarDragFrameMetrics, "drag", "closed");
         CancelPendingInteractiveResizeFrame();
@@ -325,7 +375,6 @@ public abstract partial class WidgetWindowBase : Window
         try { WidgetShellControl.ReleaseOwnedCompositionResources(); }
         catch (Exception ex) { App.LogVerbose($"[Composition] Shell cleanup failed: {ex.Message}"); }
         StopBackdropRefreshTimer();
-        StopInactiveBackdropCleanupTimer();
         ReleaseTopMostSafetyTimer();
         DetachXamlRootScaleWatcher();
         CleanupWidgetForegroundAppearance();
@@ -334,6 +383,7 @@ public abstract partial class WidgetWindowBase : Window
         ClearSolidColorBackdrop();
         DisposeAcrylicController();
         DisposeMicaController();
+        DisposeMaterialBackdropBridge();
         WidgetLayerService.ReleaseWindow(HWnd);
         TrackWindowClosedForDiagnostics();
     }

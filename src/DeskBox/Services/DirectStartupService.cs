@@ -21,7 +21,7 @@ public sealed partial class DirectStartupService : IStartupService
         : this(
             new DirectStartupTaskBackend(),
             new RegistryStartupRunEntryStore(),
-            () => Environment.ProcessPath,
+            () => AppExecutablePath.ResolveMainExecutablePath(),
             Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.Startup),
                 AppName + ".lnk"),
@@ -99,7 +99,8 @@ public sealed partial class DirectStartupService : IStartupService
             if (_taskBackend.ReadFailed)
                 return StartupRegistrationState.BlockedOrFailed;
 
-            return !string.IsNullOrWhiteSpace(runValue) || task is not null
+            return (!string.IsNullOrWhiteSpace(runValue) && !IsSameInstallCompanionCommand(runValue, executablePath)) ||
+                   (task is not null && !IsSameInstallCompanionTask(task, executablePath))
                 ? StartupRegistrationState.PathMismatch
                 : StartupRegistrationState.NotRegistered;
         }
@@ -181,12 +182,14 @@ public sealed partial class DirectStartupService : IStartupService
         string? existingRun = _runEntryStore.Read();
         if (!string.IsNullOrWhiteSpace(existingRun) &&
             !IsCommandOwnedBy(existingRun, executablePath) &&
+            !IsSameInstallCompanionCommand(existingRun, executablePath) &&
             CommandTargetExists(existingRun))
             return new(StartupRegistrationState.PathMismatch,
                 "The Run entry belongs to another DeskBox installation.");
 
         DirectStartupTaskRegistration? existingTask = _taskBackend.Read();
         if (existingTask is not null && !existingTask.IsOwnedBy(executablePath) &&
+            !IsSameInstallCompanionTask(existingTask, executablePath) &&
             File.Exists(existingTask.ExecutablePath))
             return new(StartupRegistrationState.PathMismatch,
                 "The startup task belongs to another DeskBox installation.");
@@ -210,6 +213,7 @@ public sealed partial class DirectStartupService : IStartupService
                 throw new IOException(shortcutError);
             if (!string.IsNullOrWhiteSpace(existingRun) &&
                 !IsCommandOwnedBy(existingRun, executablePath) &&
+            !IsSameInstallCompanionCommand(existingRun, executablePath) &&
                 !CommandTargetExists(existingRun) &&
                 string.Equals(_runEntryStore.Read(), existingRun, StringComparison.Ordinal))
             {
@@ -264,7 +268,7 @@ public sealed partial class DirectStartupService : IStartupService
 
             List<string> failures = [];
             DirectStartupTaskRegistration? task = _taskBackend.Read();
-            if (task is not null && task.IsOwnedBy(executablePath) && !_taskBackend.TryDelete())
+            if (task is not null && (task.IsOwnedBy(executablePath) || IsSameInstallCompanionTask(task, executablePath)) && !_taskBackend.TryDelete())
             {
                 string failure =
                     $"Failed to delete the owned startup task: {_taskBackend.LastError}";
@@ -329,7 +333,9 @@ public sealed partial class DirectStartupService : IStartupService
                 $"runTarget='{ExtractExecutablePath(runValue) ?? "none"}' " +
                 $"ownsTask={ownsTask} ownsRun={ownsRun} ownsShortcut={ownsShortcut} " +
                 $"process64Bit={Environment.Is64BitProcess}");
-            if (!ownsTask && !ownsRun && !ownsShortcut)
+            if (!ownsTask && !ownsRun && !ownsShortcut &&
+                !(task is { Enabled: true } && IsSameInstallCompanionTask(task, executablePath)) &&
+                !IsSameInstallCompanionCommand(runValue, executablePath))
                 return;
 
             if (ownsRun && !_runEntryApprovedProvider())
@@ -372,7 +378,7 @@ public sealed partial class DirectStartupService : IStartupService
         DirectStartupTaskRegistration? existing = _taskBackend.Read();
         if (existing is not null && !existing.IsOwnedBy(executablePath))
         {
-            if (File.Exists(existing.ExecutablePath))
+            if (!IsSameInstallCompanionTask(existing, executablePath) && File.Exists(existing.ExecutablePath))
             {
                 Log(
                     $"Preserved startup task owned by another installation: " +
@@ -470,10 +476,12 @@ public sealed partial class DirectStartupService : IStartupService
 
     private void DeleteLegacyRunEntryIfOwnedBy(string executablePath)
     {
-        if (IsCommandOwnedBy(_runEntryStore.Read(), executablePath))
+        if (IsCommandOwnedBy(_runEntryStore.Read(), executablePath) ||
+            IsSameInstallCompanionCommand(_runEntryStore.Read(), executablePath))
         {
             _runEntryStore.Delete();
-            if (IsCommandOwnedBy(_runEntryStore.Read(), executablePath))
+            if (IsCommandOwnedBy(_runEntryStore.Read(), executablePath) ||
+            IsSameInstallCompanionCommand(_runEntryStore.Read(), executablePath))
             {
                 throw new IOException("The owned Run entry still exists after removal.");
             }
@@ -546,6 +554,20 @@ public sealed partial class DirectStartupService : IStartupService
             commandExecutablePath,
             executablePath);
     }
+
+    private static bool IsSameInstallCompanionCommand(
+        string? commandLine,
+        string executablePath) =>
+        AppExecutablePath.IsSameInstallCompanionExecutable(
+            ExtractExecutablePath(commandLine),
+            executablePath);
+
+    private static bool IsSameInstallCompanionTask(
+        DirectStartupTaskRegistration task,
+        string executablePath) =>
+        AppExecutablePath.IsSameInstallCompanionExecutable(
+            task.ExecutablePath,
+            executablePath);
 
     private static string? ExtractExecutablePath(string? commandLine)
     {

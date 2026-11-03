@@ -24,11 +24,11 @@ public sealed class AotStage5B4AContractTests
         string source = ReadRepositoryFile("src/DeskBox/App.AotManagedUiSmoke.cs");
 
         Assert.Contains("aot-5b4a-file", source, StringComparison.Ordinal);
-        Assert.Contains("aot-5b4a-search", source, StringComparison.Ordinal);
-        Assert.Contains("_trayIcon.TrayIcon.WindowHandle", source, StringComparison.Ordinal);
+        Assert.Contains("aot-5b4a-music", source, StringComparison.Ordinal);
+        Assert.Contains("_trayHost.WindowHandle", source, StringComparison.Ordinal);
         Assert.Contains("WidgetManager.CreateDiagnosticsSnapshot()", source, StringComparison.Ordinal);
         Assert.Contains("WidgetKind.File", source, StringComparison.Ordinal);
-        Assert.Contains("WidgetKind.Search", source, StringComparison.Ordinal);
+        Assert.Contains("WidgetKind.Music", source, StringComparison.Ordinal);
         Assert.DoesNotContain("CreateWidgetOfKindAsync", source, StringComparison.Ordinal);
         Assert.DoesNotContain("CreateManagedWidgetAsync", source, StringComparison.Ordinal);
         Assert.DoesNotContain("SettingsService.Save", source, StringComparison.Ordinal);
@@ -119,8 +119,8 @@ public sealed class AotStage5B4AContractTests
             Assert.Equal(2, CountOccurrences(source, handler + "("));
         }
 
-        Assert.Contains("ResultFilterComboBox.SelectedItem", source, StringComparison.Ordinal);
-        Assert.Contains("ResultFilterBar.Visibility", source, StringComparison.Ordinal);
+        Assert.Contains("_viewModel.ResultFilter =", source, StringComparison.Ordinal);
+        Assert.Contains("TabsAndFilterRow.Visibility", source, StringComparison.Ordinal);
         Assert.Contains("SortHeaderRow.Visibility", source, StringComparison.Ordinal);
         Assert.Contains("ActionId == \"open-settings\"", source, StringComparison.Ordinal);
     }
@@ -185,7 +185,7 @@ public sealed class AotStage5B4AContractTests
         Assert.Contains("DESKBOX_AOT_MANAGED_UI_SMOKE", script, StringComparison.Ordinal);
         Assert.Contains("BasicReadOnly", script, StringComparison.Ordinal);
         Assert.Contains("aot-5b4a-file", script, StringComparison.Ordinal);
-        Assert.Contains("aot-5b4a-search", script, StringComparison.Ordinal);
+        Assert.Contains("aot-5b4a-music", script, StringComparison.Ordinal);
         Assert.Contains("HasCompletedOnboarding", script, StringComparison.Ordinal);
         Assert.Contains("FeatureWidgetEnabledStates", script, StringComparison.Ordinal);
         Assert.Contains("SearchSaveHistory", script, StringComparison.Ordinal);

@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Collections.ObjectModel;
 using System.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -27,6 +27,7 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     private const string CornerSquare = SettingsService.WidgetCornerPreferenceSquare;
     private const string CornerSmall = SettingsService.WidgetCornerPreferenceSmall;
     private const string CornerRound = SettingsService.WidgetCornerPreferenceRound;
+    private const string CornerLarge = SettingsService.WidgetCornerPreferenceLarge;
     private const string MaterialMica = SettingsService.WidgetMaterialTypeMica;
     private const string MaterialMicaAlt = SettingsService.WidgetMaterialTypeMicaAlt;
     private const string MaterialAcrylic = SettingsService.WidgetMaterialTypeAcrylic;
@@ -39,10 +40,6 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     private const string BorderThin = SettingsService.WidgetBorderStyleThin;
     private const string BorderMedium = SettingsService.WidgetBorderStyleMedium;
     private const string BorderThick = SettingsService.WidgetBorderStyleThick;
-    private const string AnimationPresetGentle = "Gentle";
-    private const string AnimationPresetStandard = "Standard";
-    private const string AnimationPresetEmphasized = "Emphasized";
-    private const string AnimationPresetCustom = "Custom";
     private const string RepositoryUrl = "https://github.com/Tianyu199509/DeskBox";
     private const string OfficialWebsiteUrl = "https://deskbox.fun";
     private const string MicrosoftStoreProductId = "9PBZSNB4D69H";
@@ -186,7 +183,6 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         DeskBox.Features.Backup.BackupSettingsViewModel backupSettings,
         DeskBox.Contracts.IQuickCaptureSettings quickCaptureSettings,
         DeskBox.Features.QuickCapture.QuickCaptureSettingsViewModel quickCaptureSettingsEditor,
-        DeskBox.Contracts.ISearchFeatureSettings searchFeatureSettings,
         DeskBox.Features.Appearance.AppearanceSettingsViewModel appearanceSettings,
         DeskBox.Features.Capsule.CapsuleSettingsViewModel capsuleSettings,
         DeskBox.Features.Interaction.InteractionSettingsViewModel interactionSettings,
@@ -212,7 +208,6 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         _quickCaptureSettings = quickCaptureSettings;
         _quickCaptureSettingsEditor = quickCaptureSettingsEditor;
         _weatherSettings = weatherSettings;
-        _searchFeatureSettings = searchFeatureSettings;
         _appearanceSettings = appearanceSettings;
         _capsuleSettings = capsuleSettings;
         _interactionSettings = interactionSettings;
@@ -298,8 +293,6 @@ _ = PopulateWeatherNearbyCitiesAsync();
 _ = RefreshQuickAccessStateAsync();
         _settingsService.SettingsChanged += OnSettingsChanged;
         _quickCaptureSettings.Changed += OnQuickCaptureSettingsChanged;
-        _quickCaptureSettings.DiagnosticsChanged += OnQuickCaptureClipboardDiagnosticsChanged;
-        _searchFeatureSettings.FeatureChanged += OnSearchFeatureChanged;
         _themeService.AppearanceChanged += OnAppearanceChanged;
         _localizationService.LanguageChanged += OnLanguageChanged;
 
@@ -343,7 +336,6 @@ _ = RefreshQuickAccessStateAsync();
         _appearanceSettings.AppearanceValueCommitted += OnAppearanceValueCommitted;
         _appearanceSettings.TextSizeCommitted += OnAppearanceTextSizeCommitted;
         _appearanceSettings.LayoutDensityMarkedCustom += OnAppearanceLayoutDensityMarkedCustom;
-        _appearanceSettings.AnimationPresetApplied += OnAppearanceAnimationPresetApplied;
         _appearanceSettings.ThemeUserChanged += OnAppearanceThemeUserChanged;
         _appearanceSettings.TrayIconStyleUserChanged += OnAppearanceTrayIconStyleUserChanged;
         _appearanceSettings.AccentColorSourceUserChanged += OnAppearanceAccentColorSourceUserChanged;
@@ -381,8 +373,6 @@ _ = RefreshQuickAccessStateAsync();
         _updateOperationCts?.Cancel();
         _updateOperationCts?.Dispose();
         _quickCaptureSettings.Changed -= OnQuickCaptureSettingsChanged;
-        _quickCaptureSettings.DiagnosticsChanged -= OnQuickCaptureClipboardDiagnosticsChanged;
-        _searchFeatureSettings.FeatureChanged -= OnSearchFeatureChanged;
 
         _settingsService.SettingsChanged -= OnSettingsChanged;
         _themeService.AppearanceChanged -= OnAppearanceChanged;

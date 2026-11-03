@@ -14,51 +14,80 @@ public sealed partial class FileSurfaceContent
         DataPackageOperation allowedOperations,
         bool forceCopy = false,
         string? destinationFolderPath = null,
-        IEnumerable<string>? sourcePathsOverride = null)
+        IEnumerable<string>? sourcePathsOverride = null,
+        FileDropIntent? precomputedIntent = null)
     {
+        if (precomputedIntent is { } cachedIntent)
+        {
+            return cachedIntent;
+        }
+
         DataPackageOperation supported =
             DeskBoxDragData.GetFileTransferOperations(dataView, allowedOperations);
         bool noOperationMetadata =
             supported == DataPackageOperation.None;
         string destination = destinationFolderPath ??
-            ViewModel.CurrentFolderPath ??
-            ViewModel.MappedFolderPath ??
-            string.Empty;
-        string[] sourcePaths = (sourcePathsOverride ?? GetPackagePaths(dataView))
-            .Where(path => !string.IsNullOrWhiteSpace(path))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
+            TransferIntentEngine.ResolveProspectiveManagedDestination(
+                ViewModel.CurrentFolderPath,
+                ViewModel.MappedFolderPath,
+                _settingsService.Settings.FileWidget.DefaultManagedStorageRootPath);
+        string[] sourcePaths = ResolveEffectiveDropSourcePaths(dataView, sourcePathsOverride);
         bool sameVolume = sourcePaths.Length == 0 ||
             (destination.Length > 0 &&
-             FileDropIntentPolicy.AreAllOnSameVolume(sourcePaths, destination));
-        string action = _settingsService.Settings.ManagedDropAction;
+             PathOriginClassifier.AreAllOnSameVolume(
+                 sourcePaths,
+                 destination,
+                 TimeSpan.FromMilliseconds(80)));
+        string action = _settingsService.Settings.FileWidget.ManagedDropAction;
         bool followWindows = string.Equals(
             action,
             SettingsService.ManagedDropActionFollowWindows,
             StringComparison.Ordinal);
+        bool isInternal = DeskBoxDragData.IsInternalFileDrag(dataView);
+        SourceOriginSnapshot origin = PathOriginClassifier.ClassifySources(
+            sourcePaths,
+            TimeSpan.FromMilliseconds(80));
+        uint effects = Views.ContentWidgetWindow.ToNativeAllowedEffects(supported);
 
-        return FileDropIntentPolicy.ResolveMappedTransfer(
-            hasMappedFolder: !string.IsNullOrWhiteSpace(ViewModel.MappedFolderPath),
-            forceCopy,
-            controlDown: Win32Helper.IsKeyPressed(VirtualKey.Control),
-            shiftDown: Win32Helper.IsKeyPressed(VirtualKey.Shift),
-            defaultMove: string.Equals(
+        return TransferIntentEngine.Evaluate(new TransferIntentRequest(
+            Domain: isInternal ? TransferDomain.InternalDeskBox : TransferDomain.ExternalInbound,
+            TargetKind: TransferTargetKind.DirectorySurface,
+            HasFileData: true,
+            HasVirtualFileData: false,
+            HasShellApplicationOrNamespaceData: false,
+            ForceCopy: forceCopy,
+            HasMappedFolder: !string.IsNullOrWhiteSpace(destination),
+            ControlDown: Win32Helper.IsKeyPressed(VirtualKey.Control),
+            ShiftDown: Win32Helper.IsKeyPressed(VirtualKey.Shift),
+            AltDown: Win32Helper.IsKeyPressed(VirtualKey.Menu),
+            AllowedEffects: effects,
+            NoOperationMetadata: noOperationMetadata,
+            DefaultMove: string.Equals(
                 action,
                 SettingsService.ManagedDropActionMove,
                 StringComparison.Ordinal),
-            canCopy: noOperationMetadata ||
-                supported.HasFlag(DataPackageOperation.Copy),
-            // A Link-only source never authorized relocation: treating Link
-            // as move capability would let a managed move delete a file the
-            // drag source did not sanction for deletion.
-            canMove: noOperationMetadata ||
-                supported.HasFlag(DataPackageOperation.Move),
-            altDown: Win32Helper.IsKeyPressed(VirtualKey.Menu),
-            followWindows,
-            sameVolume,
-            // The source may not advertise Link even though an extracted
-            // filesystem path is sufficient for DeskBox to create a shortcut.
-            canLink: true);
+            FollowWindows: followWindows,
+            SameVolume: sameVolume,
+            CanLink: true,
+            SourceOrigin: origin)).Intent;
+    }
+
+    private string[] ResolveEffectiveDropSourcePaths(
+        DataPackageView dataView,
+        IEnumerable<string>? sourcePathsOverride)
+    {
+        string[] explicitPaths = (sourcePathsOverride ?? GetPackagePaths(dataView))
+            .Where(static path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (explicitPaths.Length > 0 ||
+            DeskBoxDragData.IsInternalFileDrag(dataView) ||
+            _externalDropPathHints.Length == 0)
+        {
+            return explicitPaths;
+        }
+
+        return _externalDropPathHints;
     }
 
     internal static bool? ResolveMoveWhenMapped(bool mapped, FileDropIntent intent)
@@ -79,11 +108,11 @@ public sealed partial class FileSurfaceContent
 
     private bool HasShortcutDropDestination()
     {
-        // Shortcut creation needs a concrete folder to write into. Without
-        // one the shortcut leg would create nothing and stay silent, so an
-        // unmapped widget keeps the settings-backed import instead.
-        return (ViewModel.CurrentFolderPath ?? ViewModel.MappedFolderPath) is
-            { Length: > 0 };
+        string destination = TransferIntentEngine.ResolveProspectiveManagedDestination(
+            ViewModel.CurrentFolderPath,
+            ViewModel.MappedFolderPath,
+            _settingsService.Settings.FileWidget.DefaultManagedStorageRootPath);
+        return !string.IsNullOrWhiteSpace(destination);
     }
 
     private FileDropIntent? ResolveShortcutIntentOverride(
@@ -125,20 +154,25 @@ public sealed partial class FileSurfaceContent
         };
     }
 
-    private static string GetShortcutDisplayName(string sourcePath)
+    internal static string GetShortcutDisplayName(string sourcePath, bool isDirectory = false)
     {
         string trimmed = sourcePath.TrimEnd(
             Path.DirectorySeparatorChar,
             Path.AltDirectorySeparatorChar);
-        string name = Path.GetFileNameWithoutExtension(trimmed);
+        string extension = !isDirectory && ShortcutHelper.IsInternetShortcutPath(trimmed)
+            ? ".url"
+            : ".lnk";
+        string name = isDirectory
+            ? Path.GetFileName(trimmed)
+            : Path.GetFileNameWithoutExtension(trimmed);
         if (string.IsNullOrWhiteSpace(name))
         {
             name = Path.GetFileName(trimmed);
         }
 
         return string.IsNullOrWhiteSpace(name)
-            ? "Shortcut.lnk"
-            : name + " - Shortcut.lnk";
+            ? "Shortcut" + extension
+            : name + " - Shortcut" + extension;
     }
 
     /// <summary>
@@ -182,10 +216,19 @@ public sealed partial class FileSurfaceContent
                 reserved);
             try
             {
-                ShortcutHelper.CreateShellNamespaceShortcut(
-                    linkPath,
-                    item.ParsingName,
-                    T("Widget.CreateShortcut"));
+                bool createdFromRawPidl = item.RawPidl is { Length: >= 4 } rawPidl &&
+                    ShortcutHelper.TryCreateShortcutFromRawPidl(
+                        linkPath,
+                        rawPidl,
+                        T("Widget.CreateShortcut"));
+                if (!createdFromRawPidl)
+                {
+                    ShortcutHelper.CreateShellNamespaceShortcut(
+                        linkPath,
+                        item.ParsingName,
+                        T("Widget.CreateShortcut"));
+                }
+
                 reserved.Add(linkPath);
                 created++;
             }
@@ -210,9 +253,10 @@ public sealed partial class FileSurfaceContent
         return created;
     }
 
-    private async Task<IReadOnlyList<string>> CreateShortcutFilesAsync(
+    internal static async Task<IReadOnlyList<string>> CreateShortcutFilesAsync(
         IReadOnlyList<DroppedFilePath> droppedFiles,
         string destinationFolderPath,
+        string shortcutDescription,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(destinationFolderPath))
@@ -236,34 +280,51 @@ public sealed partial class FileSurfaceContent
             }
 
             string source = Path.GetFullPath(droppedFile.Path);
-            if (!File.Exists(source) && !Directory.Exists(source))
+            bool isDirectory = Directory.Exists(source);
+            if (!isDirectory && !File.Exists(source))
             {
                 continue;
             }
 
             string linkPath = FileService.GetAvailablePath(
-                Path.Combine(destination, GetShortcutDisplayName(source)),
+                Path.Combine(destination, GetShortcutDisplayName(source, isDirectory)),
                 reserved);
-            if (Directory.Exists(source))
+            reserved.Add(linkPath);
+            try
             {
-                ShortcutHelper.CreateOrUpdateFolderShortcut(
-                    linkPath,
-                    source,
-                    T("Widget.CreateShortcut"));
-            }
-            else
-            {
-                // No icon override: the system renders the target file's own
-                // icon with the shortcut overlay, matching Explorer's native
-                // Alt-drag shortcut.
-                DragDropPermissionService.CreateOrUpdateShortcut(
-                    linkPath,
-                    source,
-                    string.Empty,
-                    iconPath: null);
-            }
+                if (isDirectory)
+                {
+                    ShortcutHelper.CreateOrUpdateFolderShortcut(
+                        linkPath,
+                        source,
+                        shortcutDescription);
+                }
+                else if (ShortcutHelper.IsShortcutPath(source))
+                {
+                    DropStagingFileOps.CopyShortcutFilePreservingStreams(
+                        source,
+                        linkPath);
+                    ShortcutHelper.InvalidateStoredMetadataCache(linkPath);
+                }
+                else
+                {
+                    // No icon override: the system renders the target file's own
+                    // icon with the shortcut overlay, matching Explorer's native
+                    // Alt-drag shortcut.
+                    DragDropPermissionService.CreateOrUpdateShortcut(
+                        linkPath,
+                        source,
+                        string.Empty,
+                        iconPath: null);
+                }
 
-            created.Add(linkPath);
+                created.Add(linkPath);
+            }
+            catch (Exception ex)
+            {
+                App.Log(
+                    $"[ShortcutDrop] Shortcut creation failed source='{source}': {ex.Message}");
+            }
             // Keep long multi-file drops responsive without moving COM work to
             // an MTA thread (the C# shortcut backend is apartment-sensitive).
             await Task.Yield();
@@ -279,12 +340,18 @@ public sealed partial class FileSurfaceContent
     {
         if (string.IsNullOrWhiteSpace(destinationFolderPath))
         {
+            destinationFolderPath = ViewModel.EnsureManagedFolderForDrop();
+        }
+
+        if (string.IsNullOrWhiteSpace(destinationFolderPath))
+        {
             return [];
         }
 
         IReadOnlyList<string> created = await CreateShortcutFilesAsync(
             droppedFiles,
             destinationFolderPath,
+            T("Widget.CreateShortcut"),
             cancellationToken);
         if (created.Count > 0 &&
             !string.IsNullOrWhiteSpace(ViewModel.MappedFolderPath))

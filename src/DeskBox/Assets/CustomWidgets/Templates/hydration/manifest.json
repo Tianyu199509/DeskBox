@@ -1,0 +1,278 @@
+{
+  "schemaVersion": 1,
+  "id": "custom.hydration-tracker",
+  "name": "今日饮水打卡",
+  "version": "2.0.0",
+  "author": "DeskBox Studio",
+  "description": "轻量记录每日饮水量与打卡时刻，支持自定义目标、杯量规格、28 日热力图与胶囊实时进度。",
+  "icon": "\uD83D\uDCA7",
+  "minSize": {
+    "width": 276,
+    "height": 300
+  },
+  "defaultSize": {
+    "width": 328,
+    "height": 424
+  },
+  "settings": [
+    {
+      "key": "modules",
+      "type": "moduleList",
+      "label": "${$i18n.setModules}",
+      "default": "overview:1,heatmap:1,logs:1",
+      "options": [
+        {
+          "value": "overview",
+          "label": "${$i18n.modOverview}"
+        },
+        {
+          "value": "heatmap",
+          "label": "${$i18n.modHeatmap}"
+        },
+        {
+          "value": "logs",
+          "label": "${$i18n.modLogs}"
+        }
+      ]
+    },
+    {
+      "key": "dailyGoalMl",
+      "type": "number",
+      "label": "${$i18n.setDailyGoal}",
+      "default": "2000",
+      "min": 500,
+      "max": 5000
+    },
+    {
+      "key": "cupSmallMl",
+      "type": "choice",
+      "label": "${$i18n.setSmallCup}",
+      "default": "250",
+      "options": [
+        {
+          "value": "150",
+          "label": "150 ml"
+        },
+        {
+          "value": "200",
+          "label": "200 ml"
+        },
+        {
+          "value": "250",
+          "label": "250 ml"
+        }
+      ]
+    },
+    {
+      "key": "cupLargeMl",
+      "type": "choice",
+      "label": "${$i18n.setLargeCup}",
+      "default": "350",
+      "options": [
+        {
+          "value": "350",
+          "label": "350 ml"
+        },
+        {
+          "value": "450",
+          "label": "450 ml"
+        },
+        {
+          "value": "500",
+          "label": "500 ml"
+        }
+      ]
+    }
+  ],
+  "state": {
+    "todayMl": "500"
+  },
+  "collections": {
+    "logs": {
+      "maxItems": 180,
+      "sort": "newestFirst"
+    }
+  },
+  "capsule": {
+    "title": "${$i18n.capTitlePrefix}${state.todayMl} / ${$settings.dailyGoalMl} ml",
+    "summary": "${$i18n.capSubPrefix}${collections.logs.todayCount}${$i18n.capSubSuffix}",
+    "glyph": "\uD83D\uDCA7",
+    "badge": "${state.todayMl}ml",
+    "progress": "${state.todayMl * 100 / $settings.dailyGoalMl}",
+    "enableBounceOnUpdate": true
+  },
+  "view": {
+    "type": "Stack",
+    "spacing": 8,
+    "padding": "12,8,12,12",
+    "children": [
+      {
+        "type": "ModuleStack",
+        "bind": "settings.modules",
+        "spacing": 8,
+        "children": [
+          {
+            "id": "overview",
+            "type": "Stack",
+            "spacing": 8,
+            "children": [
+              {
+                "type": "StatCard",
+                "title": "${$i18n.cardTitle}",
+                "value": "${state.todayMl} ml",
+                "subtitle": "${$i18n.cardSubGoal}${$settings.dailyGoalMl}${$i18n.cardSubMid}${collections.logs.todayCount}${$i18n.cardSubEnd}",
+                "progress": "${state.todayMl * 100 / $settings.dailyGoalMl}",
+                "color": "cyan"
+              },
+              {
+                "type": "Grid",
+                "columns": "1*,1*,Auto",
+                "spacing": 6,
+                "children": [
+                  {
+                    "type": "Button",
+                    "column": 0,
+                    "icon": "\uE710",
+                    "text": "+${$settings.cupSmallMl} ml",
+                    "variant": "accent",
+                    "onClick": [
+                      {
+                        "type": "state.increment",
+                        "key": "todayMl",
+                        "value": "${$settings.cupSmallMl}"
+                      },
+                      {
+                        "type": "collection.prepend",
+                        "collection": "logs",
+                        "item": {
+                          "amount": "${$settings.cupSmallMl} ml",
+                          "amountMl": "${$settings.cupSmallMl}",
+                          "note": "warm"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "type": "Button",
+                    "column": 1,
+                    "icon": "\uE710",
+                    "text": "+${$settings.cupLargeMl} ml",
+                    "variant": "standard",
+                    "onClick": [
+                      {
+                        "type": "state.increment",
+                        "key": "todayMl",
+                        "value": "${$settings.cupLargeMl}"
+                      },
+                      {
+                        "type": "collection.prepend",
+                        "collection": "logs",
+                        "item": {
+                          "amount": "${$settings.cupLargeMl} ml",
+                          "amountMl": "${$settings.cupLargeMl}",
+                          "note": "quick"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "type": "Button",
+                    "column": 2,
+                    "icon": "\uE72C",
+                    "tooltip": "${$i18n.resetTooltip}",
+                    "variant": "subtle",
+                    "onClick": [
+                      {
+                        "type": "state.set",
+                        "key": "todayMl",
+                        "value": "0"
+                      },
+                      {
+                        "type": "collection.clear",
+                        "collection": "logs"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "heatmap",
+            "type": "Card",
+            "tone": "subtle",
+            "padding": "10,8,10,8",
+            "children": [
+              {
+                "type": "HeatmapGrid",
+                "collection": "logs",
+                "valueField": "amountMl",
+                "days": 28,
+                "color": "cyan",
+                "title": "${$i18n.heatmapTitle}"
+              }
+            ]
+          },
+          {
+            "id": "logs",
+            "type": "List",
+            "items": "logs",
+            "emptyState": {
+              "icon": "\uE823",
+              "title": "${$i18n.emptyTitle}",
+              "subtitle": "${$i18n.emptySubtitle}"
+            },
+            "hoverActions": [
+              {
+                "type": "Button",
+                "icon": "\uE74D",
+                "variant": "ghost",
+                "tooltip": "${$i18n.deleteTooltip}",
+                "onClick": [
+                  {
+                    "type": "state.increment",
+                    "guard": "${$item.isToday == 'true' && $item.amountMl != '' && state.todayMl >= $item.amountMl}",
+                    "key": "todayMl",
+                    "value": "-${$item.amountMl}"
+                  },
+                  {
+                    "type": "collection.remove",
+                    "collection": "logs",
+                    "targetId": "${$item.id}"
+                  }
+                ]
+              }
+            ],
+            "itemTemplate": {
+              "type": "Grid",
+              "columns": "Auto,1*,Auto",
+              "spacing": 8,
+              "children": [
+                {
+                  "type": "Badge",
+                  "column": 0,
+                  "text": "${$item.amount}",
+                  "tone": "accent"
+                },
+                {
+                  "type": "Text",
+                  "column": 1,
+                  "text": "${$item.note == 'warm' ? $i18n.noteWarm : ($item.note == 'quick' ? $i18n.noteQuick : $item.note)}",
+                  "style": "body",
+                  "maxLines": 1
+                },
+                {
+                  "type": "Text",
+                  "column": 2,
+                  "text": "${$item.timeText}",
+                  "style": "caption",
+                  "color": "muted"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -20,7 +20,30 @@ public sealed class SettingsIpcServer : IAsyncDisposable
     private readonly CancellationTokenSource _cts = new();
     private Task? _acceptLoop;
     private NamedPipeServerStream? _current;
+    private volatile bool _suppressEventsForCurrent;
     private readonly object _writeLock = new();
+
+    /// <summary>
+    /// Marks the currently connected settings host as exiting (after <c>HostFarewell</c>)
+    /// so post-farewell background event pushes are skipped cleanly instead of racing
+    /// the closing pipe and logging spurious <c>IO_PipeBroken</c> errors, while still
+    /// allowing the response envelope for <c>HostFarewell</c> itself to complete.
+    /// </summary>
+    public void SuppressEventsForExitingClient()
+    {
+        _suppressEventsForCurrent = true;
+    }
+
+    public bool HasConnectedClient
+    {
+        get
+        {
+            lock (_writeLock)
+            {
+                return _current is { IsConnected: true };
+            }
+        }
+    }
     // Batch R11: see the dispatch loop and SendEventAsync.
     private readonly SemaphoreSlim _dispatchGate = new(16, 16);
     private long _nextEventId = -1;
@@ -234,6 +257,7 @@ public sealed class SettingsIpcServer : IAsyncDisposable
 
             lock (_writeLock)
             {
+                _suppressEventsForCurrent = false;
                 _current = stream;
             }
 
@@ -399,17 +423,27 @@ public sealed class SettingsIpcServer : IAsyncDisposable
             Ok: true,
             payload,
             Error: null));
+        bool droppedAny = false;
         while (_eventQueue.Count > 4096 && _eventQueue.TryDequeue(out _))
         {
-            _droppedEventCount++;
+            Interlocked.Increment(ref _droppedEventCount);
+            droppedAny = true;
         }
 
-        if (Interlocked.CompareExchange(ref _droppedEventLogGate, 0, 0) == 0)
+        if (droppedAny && Interlocked.CompareExchange(ref _droppedEventLogGate, 1, 0) == 0)
         {
-            Interlocked.Exchange(ref _droppedEventLogGate, 1);
             _ = Task.Run(async () =>
             {
-                await Task.Delay(TimeSpan.FromSeconds(30)).ConfigureAwait(false);
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(30), _cts.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    Interlocked.Exchange(ref _droppedEventLogGate, 0);
+                    return;
+                }
+
                 Interlocked.Exchange(ref _droppedEventLogGate, 0);
                 long dropped = Interlocked.Exchange(ref _droppedEventCount, 0);
                 if (dropped > 0)
@@ -480,6 +514,11 @@ public sealed class SettingsIpcServer : IAsyncDisposable
             return;
         }
 
+        if (origin is null && _suppressEventsForCurrent)
+        {
+            return;
+        }
+
         if (stream is null || !stream.IsConnected)
         {
             return;
@@ -493,7 +532,9 @@ public sealed class SettingsIpcServer : IAsyncDisposable
         {
             lock (_writeLock)
             {
-                if (!ReferenceEquals(_current, stream) || !stream.IsConnected)
+                if (!ReferenceEquals(_current, stream) ||
+                    !stream.IsConnected ||
+                    (origin is null && _suppressEventsForCurrent))
                 {
                     return;
                 }
@@ -502,6 +543,10 @@ public sealed class SettingsIpcServer : IAsyncDisposable
             }
 
             await Task.CompletedTask;
+        }
+        catch (IOException) when (origin is null && (_suppressEventsForCurrent || !stream.IsConnected))
+        {
+            // Expected when an outbound push races client-side pipe teardown.
         }
         catch (Exception ex)
         {

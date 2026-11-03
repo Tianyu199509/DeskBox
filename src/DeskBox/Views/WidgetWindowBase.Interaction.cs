@@ -1,4 +1,4 @@
-﻿// Copyright (c) DeskBox. All rights reserved.
+// Copyright (c) DeskBox. All rights reserved.
 
 using DeskBox.Helpers;
 using DeskBox.Models;
@@ -206,6 +206,10 @@ public abstract partial class WidgetWindowBase
         PerformanceLogger.RecordTransientUiTimerReleased();
     }
 
+    protected virtual bool OwnsTransientForegroundWindow(IntPtr foregroundWindow) =>
+        HWnd != IntPtr.Zero &&
+        WidgetEditorPopoverWindow.IsPopoverOwnedBy(foregroundWindow, HWnd);
+
     protected bool ShouldDeferDesktopLayerRestore()
     {
         if (IsDragging ||
@@ -222,8 +226,8 @@ public abstract partial class WidgetWindowBase
             return false;
         }
 
-        return foregroundWindow == HWnd ||
-               Win32Helper.GetAncestor(foregroundWindow, Win32Helper.GA_ROOTOWNER) == HWnd;
+        return WidgetLayerService.IsWindowOrOwnedByWidget(foregroundWindow, HWnd) ||
+               OwnsTransientForegroundWindow(foregroundWindow);
     }
 
     protected void RestoreDesktopLayer(bool force = false)
@@ -278,10 +282,13 @@ public abstract partial class WidgetWindowBase
         {
             IsAtDesktopLayer = true;
         }
+        else
+        {
+            App.Current.WidgetManager?.QueueIdleWidgetZOrderNormalization(
+                $"{LogPrefix}-desktop-layer-restored");
+        }
 
         App.LogVerbose($"[ZOrder] {LogPrefix} ClearTopMostOnly hwnd=0x{HWnd.ToInt64():X} fg=0x{foreground.ToInt64():X} disposition={disposition}");
-        App.Current.WidgetManager?.QueueIdleWidgetZOrderNormalization(
-            $"{LogPrefix}-desktop-layer-restored");
     }
 
     // ── Drag logic ─────────────────────────────────────────────
@@ -893,9 +900,30 @@ public abstract partial class WidgetWindowBase
 
     // ── Tray animation helpers ─────────────────────────────────
 
-    protected WidgetTrayAnimationProfile GetTrayAnimationProfile()
+    private WidgetAnimationOptions? _trayAnimationOptionsOverride;
+
+    protected WidgetAnimationOptions GetEffectiveTrayAnimationOptions() =>
+        _trayAnimationOptionsOverride ?? WidgetAnimationSettings.From(SettingsService.Settings);
+
+    protected void SetTrayAnimationOptionsOverrideCore(WidgetAnimationOptions? optionsOverride)
     {
-        return TrayAnimation.CreateProfile(WidgetAnimationSettings.From(SettingsService.Settings));
+        _trayAnimationOptionsOverride = optionsOverride;
+    }
+
+    protected WidgetTrayAnimationProfile GetTrayAnimationProfile(bool isShowing = true)
+    {
+        return TrayAnimation.CreateProfile(
+            GetEffectiveTrayAnimationOptions(),
+            isShowing,
+            WindowsCompatibilityService.AreAnimationsEnabled);
+    }
+
+    protected WidgetTrayAnimationProfile GetSingleWidgetAnimationProfile(bool isShowing)
+    {
+        return TrayAnimation.CreateSingleWidgetLifecycleProfile(
+            GetEffectiveTrayAnimationOptions(),
+            isShowing,
+            WindowsCompatibilityService.AreAnimationsEnabled);
     }
 
     protected void LogTrayWindow(string message)

@@ -134,6 +134,7 @@ internal static class WidgetCompactAnimationCoordinator
             MaximumConcurrentBoundsTransitions);
 
     internal static bool HasActiveAnimations => FrameCallbacks.Count > 0;
+    internal static int ActiveBoundsTransitionCount => BoundsTransitionRegistrations.Count;
 
     internal static long RecentFrameOverrunMask => s_recentOverrunMask;
 
@@ -635,7 +636,7 @@ internal static class WidgetCompactAnimationCoordinator
             {
                 string details = $"count={moves.Length} elapsedMs={elapsedMs:F1}";
                 PerformanceLogger.Mark("CompactBoundsBatch", details);
-                App.LogVerbose($"[CompactBoundsBatch] {details}");
+                App.Log($"[CompactPerfBatch] {details}");
             }
         }
     }

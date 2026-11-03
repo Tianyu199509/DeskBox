@@ -1,5 +1,6 @@
 using DeskBox.Helpers;
 using DeskBox.Platform;
+using DeskBox.Services;
 using Microsoft.UI;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
@@ -11,6 +12,39 @@ using WinRT.Interop;
 
 namespace DeskBox.Views;
 
+internal readonly record struct WidgetDetachPreviewAppearance(
+    string Caption,
+    double CornerRadius,
+    string MaterialType,
+    bool IsDark,
+    Color AccentColor,
+    double SurfaceOpacity,
+    double MaterialIntensity,
+    Color? CustomBackgroundColor,
+    double BorderThickness,
+    Color BorderColor)
+{
+    public static WidgetDetachPreviewAppearance CreateDefault(
+        string caption,
+        double cornerRadius)
+    {
+        bool isDark = Application.Current?.RequestedTheme == ApplicationTheme.Dark;
+        Color accent = AccentColorHelper.DefaultAccentColor;
+        Color tone = NeutralInteractionBrush.Line(null);
+        return new WidgetDetachPreviewAppearance(
+            caption,
+            cornerRadius,
+            SettingsService.WidgetMaterialTypeMica,
+            isDark,
+            accent,
+            SurfaceOpacity: 0.72,
+            MaterialIntensity: SettingsService.DefaultWidgetMaterialIntensity,
+            CustomBackgroundColor: null,
+            BorderThickness: 1.0,
+            BorderColor: Color.FromArgb(0x68, tone.R, tone.G, tone.B));
+    }
+}
+
 /// <summary>
 /// A click-through, non-activating placement silhouette used while a member is
 /// dragged out of a widget group. Native positioning keeps it responsive while
@@ -18,15 +52,18 @@ namespace DeskBox.Views;
 /// </summary>
 internal sealed class WidgetDetachPlacementPreviewWindow : IDisposable
 {
-    private const byte TrackingOpacity = 220;
-    private const byte CommittedOpacity = 238;
+    private const byte TrackingOpacity = 228;
+    private const byte CommittedOpacity = 242;
     private readonly object _gate = new();
     private readonly Window _window;
     private readonly AppWindow _appWindow;
     private readonly IntPtr _hWnd;
+    private readonly SystemBackdropElement _backdropElement;
     private readonly Border _surfaceBorder;
     private readonly Border _badgeBorder;
     private readonly TextBlock _captionTextBlock;
+    private readonly SolidTintSystemBackdrop _transparentBackdrop;
+    private WidgetMaterialSystemBackdrop? _materialBackdrop;
     private RectInt32 _lastBounds;
     private byte _opacity = TrackingOpacity;
     private int _animationGeneration;
@@ -34,34 +71,25 @@ internal sealed class WidgetDetachPlacementPreviewWindow : IDisposable
     private bool _visible;
     private bool _closed;
 
-    public WidgetDetachPlacementPreviewWindow(string caption, double cornerRadius)
+    public WidgetDetachPlacementPreviewWindow(
+        WidgetDetachPreviewAppearance appearance)
     {
-        // The placement silhouette reports where the widget would land, which
-        // is a drag state, so its outline stays neutral instead of the accent.
-        Color tone = ResolveNeutralTone();
-        double surfaceRadius = Math.Clamp(cornerRadius, 0, 32);
+        double surfaceRadius = Math.Clamp(appearance.CornerRadius, 0, 32);
         var root = new Grid();
+        _backdropElement = new SystemBackdropElement
+        {
+            CornerRadius = new CornerRadius(0),
+            IsHitTestVisible = false,
+            Visibility = Visibility.Collapsed
+        };
         _surfaceBorder = new Border
         {
-            Background = new SolidColorBrush(Color.FromArgb(
-                0x18,
-                tone.R,
-                tone.G,
-                tone.B)),
-            BorderBrush = new SolidColorBrush(Color.FromArgb(
-                0xD8,
-                tone.R,
-                tone.G,
-                tone.B)),
-            // Keep a quiet landing surface and one bottom edge only. The
-            // previous full 2px outline made the detached preview read like a
-            // warning/error state and competed with the corner badge.
-            BorderThickness = new Thickness(0, 0, 0, 2),
-            CornerRadius = new CornerRadius(surfaceRadius)
+            CornerRadius = new CornerRadius(surfaceRadius),
+            IsHitTestVisible = false
         };
         _captionTextBlock = new TextBlock
         {
-            Text = caption,
+            Text = appearance.Caption,
             MaxWidth = 260,
             Foreground = new SolidColorBrush(Colors.White),
             FontSize = 12,
@@ -76,16 +104,11 @@ internal sealed class WidgetDetachPlacementPreviewWindow : IDisposable
             Padding = new Thickness(8, 3, 8, 4),
             HorizontalAlignment = HorizontalAlignment.Left,
             VerticalAlignment = VerticalAlignment.Bottom,
-            Background = new SolidColorBrush(Color.FromArgb(0xE8, 28, 28, 30)),
-            BorderBrush = new SolidColorBrush(Color.FromArgb(
-                0xE8,
-                tone.R,
-                tone.G,
-                tone.B)),
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(Math.Clamp(surfaceRadius * 0.45, 2, 4)),
+            CornerRadius = new CornerRadius(Math.Clamp(surfaceRadius * 0.45, 4, 6)),
             Child = _captionTextBlock
         };
+        root.Children.Add(_backdropElement);
         root.Children.Add(_surfaceBorder);
         root.Children.Add(_badgeBorder);
         _window = new Window
@@ -124,17 +147,14 @@ internal sealed class WidgetDetachPlacementPreviewWindow : IDisposable
             0,
             TrackingOpacity,
             Win32Helper.LWA_ALPHA);
-        Win32Helper.SetWindowBorderColor(
-            _hWnd,
-            unchecked((int)0xFFFFFFFE));
-        int cornerPreference = 2;
-        _ = Win32Helper.TrySetDwmWindowAttribute(
-            _hWnd,
-            Win32Helper.DWMWA_WINDOW_CORNER_PREFERENCE,
-            ref cornerPreference);
+        Win32Helper.DisableWindowFrameShadow(_hWnd);
+        Win32Helper.EnableTransparentWindowHost(_hWnd);
+        _transparentBackdrop = new SolidTintSystemBackdrop(Colors.Transparent);
+        _window.SystemBackdrop = _transparentBackdrop;
+        ApplyAppearanceNoLock(appearance);
     }
 
-    public void BeginTracking(string caption, double cornerRadius)
+    public void BeginTracking(WidgetDetachPreviewAppearance appearance)
     {
         lock (_gate)
         {
@@ -144,7 +164,7 @@ internal sealed class WidgetDetachPlacementPreviewWindow : IDisposable
             }
 
             _animationGeneration++;
-            ApplyAppearanceNoLock(caption, cornerRadius);
+            ApplyAppearanceNoLock(appearance);
             SetOpacityNoLock(TrackingOpacity);
             HideNoLock();
             _hasBounds = false;
@@ -228,6 +248,17 @@ internal sealed class WidgetDetachPlacementPreviewWindow : IDisposable
         }
     }
 
+    internal bool IsVisible
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return !_closed && _visible;
+            }
+        }
+    }
+
     public void Hide()
     {
         lock (_gate)
@@ -256,6 +287,11 @@ internal sealed class WidgetDetachPlacementPreviewWindow : IDisposable
             HideNoLock();
         }
 
+        _materialBackdrop?.Dispose();
+        _materialBackdrop = null;
+        _window.SystemBackdrop = null;
+        _transparentBackdrop.Dispose();
+        Win32Helper.DisableTransparentWindowHost(_hWnd);
         _window.Close();
     }
 
@@ -325,29 +361,126 @@ internal sealed class WidgetDetachPlacementPreviewWindow : IDisposable
         _opacity = opacity;
     }
 
-    private void ApplyAppearanceNoLock(string caption, double cornerRadius)
+    private void ApplyAppearanceNoLock(WidgetDetachPreviewAppearance appearance)
     {
         Color tone = ResolveNeutralTone();
-        double surfaceRadius = Math.Clamp(cornerRadius, 0, 32);
-        _captionTextBlock.Text = caption;
-        _surfaceBorder.Background = new SolidColorBrush(Color.FromArgb(
-            0x18,
-            tone.R,
-            tone.G,
-            tone.B));
-        _surfaceBorder.BorderBrush = new SolidColorBrush(Color.FromArgb(
-            0xD8,
-            tone.R,
-            tone.G,
-            tone.B));
+        double surfaceRadius = Math.Clamp(appearance.CornerRadius, 0, 32);
+        Win32Helper.SetWindowTheme(_hWnd, appearance.IsDark);
+        if (_window.Content is FrameworkElement rootElement)
+        {
+            rootElement.RequestedTheme = appearance.IsDark
+                ? ElementTheme.Dark
+                : ElementTheme.Light;
+        }
+
+        _captionTextBlock.Text = appearance.Caption;
+        _captionTextBlock.Foreground = new SolidColorBrush(
+            appearance.IsDark
+                ? Colors.White
+                : Color.FromArgb(0xEC, 20, 22, 26));
+
+        bool hasCustomColor = appearance.CustomBackgroundColor.HasValue;
+        bool useSystemMaterial = !hasCustomColor &&
+            WidgetMaterialSystemBackdrop.IsSupported(appearance.MaterialType);
+
+        if (useSystemMaterial)
+        {
+            double materialSurfaceOpacity = SettingsService.IsAcrylicMaterial(appearance.MaterialType) &&
+                appearance.SurfaceOpacity <= 0.08
+                    ? 0.42
+                    : appearance.SurfaceOpacity;
+            var backdropAppearance = new WidgetMaterialBackdropAppearance(
+                appearance.MaterialType,
+                appearance.IsDark,
+                appearance.AccentColor,
+                materialSurfaceOpacity,
+                appearance.MaterialIntensity);
+            _materialBackdrop ??= new WidgetMaterialSystemBackdrop(
+                backdropAppearance,
+                closeElementTargetOnDisconnect: true);
+            _materialBackdrop.SetCornerRadius(surfaceRadius);
+            _materialBackdrop.UpdateAppearance(backdropAppearance);
+            _backdropElement.Visibility = Visibility.Visible;
+            if (!ReferenceEquals(_backdropElement.SystemBackdrop, _materialBackdrop))
+            {
+                _backdropElement.SystemBackdrop = _materialBackdrop;
+            }
+
+            // Provide a gentle theme-tinted backing plate so the material silhouette
+            // reads immediately on the first frame even before the composition target settles.
+            Color backingColor = WidgetMaterialVisualCalculator.BuildContentSolidSurfaceColor(
+                appearance.IsDark,
+                appearance.AccentColor,
+                surfaceOpacity: appearance.IsDark ? 0.24 : 0.30);
+            _surfaceBorder.Background = new SolidColorBrush(backingColor);
+        }
+        else
+        {
+            _materialBackdrop?.Suspend();
+            _backdropElement.Visibility = Visibility.Collapsed;
+
+            // In Solid Color mode (or custom background color / fallback),
+            // when in fully transparent mode (surfaceOpacity <= 0.05), render
+            // a semi-transparent surface of the corresponding theme/custom color.
+            bool isFullyTransparent = appearance.SurfaceOpacity <= 0.05;
+            double effectiveSolidOpacity = isFullyTransparent
+                ? (appearance.IsDark ? 0.56 : 0.64)
+                : Math.Clamp(appearance.SurfaceOpacity, 0.28, 0.94);
+
+            Color surfaceColor;
+            if (appearance.CustomBackgroundColor is { } customColor)
+            {
+                byte alpha = (byte)Math.Clamp(Math.Round(effectiveSolidOpacity * 255), 0, 255);
+                surfaceColor = Color.FromArgb(alpha, customColor.R, customColor.G, customColor.B);
+            }
+            else
+            {
+                surfaceColor = WidgetMaterialVisualCalculator.BuildContentSolidSurfaceColor(
+                    appearance.IsDark,
+                    appearance.AccentColor,
+                    effectiveSolidOpacity);
+            }
+
+            _surfaceBorder.Background = new SolidColorBrush(surfaceColor);
+        }
+
+        Color resolvedBorderColor;
+        double resolvedBorderThickness;
+        if (appearance.BorderThickness > 0 && appearance.BorderColor.A > 0)
+        {
+            resolvedBorderThickness = Math.Max(1.0, appearance.BorderThickness);
+            byte minBorderAlpha = appearance.IsDark ? (byte)0x5C : (byte)0x48;
+            resolvedBorderColor = Color.FromArgb(
+                Math.Max(appearance.BorderColor.A, minBorderAlpha),
+                appearance.BorderColor.R,
+                appearance.BorderColor.G,
+                appearance.BorderColor.B);
+        }
+        else
+        {
+            resolvedBorderThickness = 1.0;
+            resolvedBorderColor = Color.FromArgb(
+                appearance.IsDark ? (byte)0x48 : (byte)0x38,
+                tone.R,
+                tone.G,
+                tone.B);
+        }
+
+        _surfaceBorder.BorderBrush = new SolidColorBrush(resolvedBorderColor);
+        _surfaceBorder.BorderThickness = new Thickness(resolvedBorderThickness);
         _surfaceBorder.CornerRadius = new CornerRadius(surfaceRadius);
+
+        _badgeBorder.Background = new SolidColorBrush(
+            appearance.IsDark
+                ? Color.FromArgb(0xE8, 26, 28, 34)
+                : Color.FromArgb(0xEE, 248, 249, 252));
         _badgeBorder.BorderBrush = new SolidColorBrush(Color.FromArgb(
-            0xE8,
+            appearance.IsDark ? (byte)0x68 : (byte)0x48,
             tone.R,
             tone.G,
             tone.B));
         _badgeBorder.CornerRadius = new CornerRadius(
-            Math.Clamp(surfaceRadius * 0.45, 2, 4));
+            Math.Clamp(surfaceRadius * 0.45, 4, 6));
     }
 
     private static RectInt32 NormalizeBounds(RectInt32 bounds)

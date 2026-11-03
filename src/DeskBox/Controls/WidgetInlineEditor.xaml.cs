@@ -61,13 +61,32 @@ public sealed partial class WidgetInlineEditor : UserControl
 
     public event EventHandler<KeyRoutedEventArgs>? EditorKeyDown;
 
+    private readonly KeyEventHandler _editorPreviewKeyDownHandler;
+    private bool _visualHandlersReleased;
+
     public WidgetInlineEditor()
     {
         InitializeComponent();
+        _editorPreviewKeyDownHandler = new KeyEventHandler(EditorTextBox_KeyDown);
         EditorTextBoxElement.AddHandler(
             UIElement.PreviewKeyDownEvent,
-            new KeyEventHandler(EditorTextBox_KeyDown),
+            _editorPreviewKeyDownHandler,
             handledEventsToo: true);
+    }
+
+    internal void ReleaseVisualHandlers()
+    {
+        if (_visualHandlersReleased)
+        {
+            return;
+        }
+
+        _visualHandlersReleased = true;
+        EditorTextBoxElement.RemoveHandler(
+            UIElement.PreviewKeyDownEvent,
+            _editorPreviewKeyDownHandler);
+        Bindings?.StopTracking();
+        Content = null;
     }
 
     public string Title
@@ -126,6 +145,8 @@ public sealed partial class WidgetInlineEditor : UserControl
 
     public void FocusEditor(bool selectAll = false, bool moveCaretToEnd = false)
     {
+        DeskBox.Views.WidgetWindowBase.TryActivateOwnerForKeyboardInput(this);
+        DeskBox.Helpers.ImeCompositionGuard.AttachAncestors(EditorTextBox);
         EditorTextBox.Focus(FocusState.Programmatic);
         if (selectAll)
         {
@@ -151,6 +172,11 @@ public sealed partial class WidgetInlineEditor : UserControl
 
     private void EditorTextBox_KeyDown(object sender, KeyRoutedEventArgs e)
     {
+        if (DeskBox.Helpers.ImeCompositionGuard.IsImeCompositionKeyEvent(e))
+        {
+            return;
+        }
+
         EditorKeyDown?.Invoke(this, e);
     }
 }

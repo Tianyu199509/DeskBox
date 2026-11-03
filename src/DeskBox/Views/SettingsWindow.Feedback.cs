@@ -381,7 +381,7 @@ public sealed partial class SettingsWindow
             XamlRoot = SettingsRoot.XamlRoot,
             Title = T("Feedback.My.Title"),
             CloseButtonText = T("Common.Close"),
-            MinWidth = 480,
+            MinWidth = 520,
         };
 
         async Task LoadAsync()
@@ -429,7 +429,7 @@ public sealed partial class SettingsWindow
                 return;
             }
 
-            var listPanel = new StackPanel { Spacing = 12 };
+            var listPanel = new StackPanel { Spacing = 12, Padding = new Thickness(0, 0, 8, 0) };
             foreach (DeskBoxFeedbackItem item in result.Items)
             {
                 listPanel.Children.Add(BuildMyFeedbackCard(item));
@@ -438,7 +438,7 @@ public sealed partial class SettingsWindow
             dialog.Content = new ScrollViewer
             {
                 Content = listPanel,
-                MaxHeight = 420,
+                MaxHeight = 460,
                 VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
             };
         }
@@ -447,14 +447,15 @@ public sealed partial class SettingsWindow
         await dialog.ShowAsync();
     }
 
-    private StackPanel BuildMyFeedbackCard(DeskBoxFeedbackItem item)
+    private UIElement BuildMyFeedbackCard(DeskBoxFeedbackItem item)
     {
         string T(string key) => _localizationService.T(key);
+        string F(string key, object arg) => _localizationService.Format(key, arg);
 
         string typeLabel = item.Type == "bug" ? T("Feedback.Dialog.TypeBug") : T("Feedback.Dialog.TypeSuggestion");
         var metaText = new TextBlock
         {
-            Text = $"#{item.Id} · {typeLabel} · {StatusText(item.Status)} · {item.CreatedAt.ToLocalTime().ToString("d")}"
+            Text = $"#{item.Id} · {typeLabel} · {StatusText(item.Status)} · {item.CreatedAt.ToLocalTime():d}"
                 + (string.IsNullOrEmpty(item.AppVersion) ? string.Empty : $" · v{item.AppVersion}"),
             FontSize = 11.5,
             Opacity = 0.75,
@@ -467,42 +468,270 @@ public sealed partial class SettingsWindow
             Margin = new Thickness(0, 6, 0, 0),
         };
 
-        var card = new StackPanel();
+        var card = new StackPanel { Spacing = 0 };
         card.Children.Add(metaText);
         card.Children.Add(contentText);
 
-        if (!string.IsNullOrEmpty(item.Reply))
+        var messagesPanel = new StackPanel
         {
-            var replyLabel = new TextBlock
+            Spacing = 6,
+            Margin = new Thickness(0, 10, 0, 0),
+        };
+
+        if (item.Messages is { Count: > 0 })
+        {
+            foreach (DeskBoxFeedbackMessage message in item.Messages)
             {
-                Text = T("Feedback.My.ReplyLabel"),
-                FontSize = 11,
-                FontWeight = Microsoft.UI.Text.FontWeights.Bold,
-                Foreground = TryAccentBrush(),
-                Margin = new Thickness(0, 10, 0, 0),
-            };
-            var replyText = new TextBlock
-            {
-                Text = item.Reply,
-                TextWrapping = TextWrapping.Wrap,
-                FontSize = 12.5,
-            };
-            var replyBorder = new Border
-            {
-                Padding = new Thickness(10, 8, 10, 8),
-                CornerRadius = new CornerRadius(6),
-                BorderThickness = new Thickness(1),
-                Background = TryThemeBrush("CardBackgroundFillColorSecondaryBrush"),
-                BorderBrush = TryThemeBrush("CardStrokeColorDefaultBrush"),
-                Margin = new Thickness(0, 4, 0, 0),
-                Child = new StackPanel(),
-            };
-            ((StackPanel)replyBorder.Child).Children.Add(replyLabel);
-            ((StackPanel)replyBorder.Child).Children.Add(replyText);
-            card.Children.Add(replyBorder);
+                messagesPanel.Children.Add(BuildFeedbackMessageBubble(message));
+            }
+        }
+        else if (!string.IsNullOrEmpty(item.Reply))
+        {
+            messagesPanel.Children.Add(BuildFeedbackMessageBubble(
+                new DeskBoxFeedbackMessage(0, "official", null, item.Reply, item.CreatedAt),
+                showTimestamp: false));
         }
 
-        return card;
+        messagesPanel.Visibility = messagesPanel.Children.Count > 0
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        card.Children.Add(messagesPanel);
+
+        var addReplyButton = new Button
+        {
+            Content = T("Feedback.My.AddReply"),
+            FontSize = 12,
+            Padding = new Thickness(10, 4, 10, 5),
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Margin = new Thickness(0, 10, 0, 0),
+        };
+
+        var replyBox = new TextBox
+        {
+            AcceptsReturn = true,
+            TextWrapping = TextWrapping.Wrap,
+            MaxLength = 2000,
+            MinHeight = 68,
+            PlaceholderText = T("Feedback.My.ReplyPlaceholder"),
+        };
+
+        var replyErrorText = new TextBlock
+        {
+            FontSize = 11.5,
+            TextWrapping = TextWrapping.Wrap,
+            Opacity = 0.9,
+            Visibility = Visibility.Collapsed,
+        };
+
+        var cancelReplyButton = new Button
+        {
+            Content = T("Common.Cancel"),
+            FontSize = 12,
+            Padding = new Thickness(10, 4, 10, 5),
+        };
+
+        var sendReplyButton = new Button
+        {
+            Content = T("Feedback.My.SendReply"),
+            FontSize = 12,
+            Padding = new Thickness(12, 4, 12, 5),
+            IsEnabled = false,
+        };
+        if (Application.Current?.Resources.TryGetValue("AccentButtonStyle", out object accentStyle) == true &&
+            accentStyle is Style buttonStyle)
+        {
+            sendReplyButton.Style = buttonStyle;
+        }
+
+        var composerPanel = new StackPanel
+        {
+            Spacing = 6,
+            Margin = new Thickness(0, 10, 0, 0),
+            Visibility = Visibility.Collapsed,
+        };
+        composerPanel.Children.Add(replyBox);
+        composerPanel.Children.Add(replyErrorText);
+        composerPanel.Children.Add(new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 8,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Children = { cancelReplyButton, sendReplyButton },
+        });
+
+        bool sendingReply = false;
+        void RefreshReplyButtonState()
+        {
+            int length = replyBox.Text.Trim().Length;
+            sendReplyButton.IsEnabled = !sendingReply && length is >= 2 and <= 2000;
+        }
+
+        replyBox.TextChanged += (_, _) =>
+        {
+            if (replyErrorText.Visibility == Visibility.Visible)
+            {
+                replyErrorText.Visibility = Visibility.Collapsed;
+            }
+
+            RefreshReplyButtonState();
+        };
+
+        addReplyButton.Click += (_, _) =>
+        {
+            addReplyButton.Visibility = Visibility.Collapsed;
+            composerPanel.Visibility = Visibility.Visible;
+            replyBox.Focus(FocusState.Programmatic);
+        };
+
+        cancelReplyButton.Click += (_, _) =>
+        {
+            replyErrorText.Visibility = Visibility.Collapsed;
+            composerPanel.Visibility = Visibility.Collapsed;
+            addReplyButton.Visibility = Visibility.Visible;
+        };
+
+        sendReplyButton.Click += async (_, _) =>
+        {
+            if (sendingReply)
+            {
+                return;
+            }
+
+            sendingReply = true;
+            replyBox.IsEnabled = false;
+            cancelReplyButton.IsEnabled = false;
+            sendReplyButton.IsEnabled = false;
+            replyErrorText.Visibility = Visibility.Collapsed;
+
+            try
+            {
+                DeskBoxFeedbackReplyResult replyResult = await FeedbackService.PostReplyAsync(
+                    item.Id,
+                    replyBox.Text);
+                if (replyResult.Ok && replyResult.Message is { } createdMessage)
+                {
+                    messagesPanel.Children.Add(BuildFeedbackMessageBubble(createdMessage));
+                    messagesPanel.Visibility = Visibility.Visible;
+                    replyBox.Text = string.Empty;
+                    composerPanel.Visibility = Visibility.Collapsed;
+                    addReplyButton.Visibility = Visibility.Visible;
+                }
+                else if (replyResult.RetryAfterMinutes is int minutes && minutes > 0)
+                {
+                    replyErrorText.Text = F("Feedback.My.ReplyRateLimited", minutes);
+                    replyErrorText.Visibility = Visibility.Visible;
+                }
+                else if (string.Equals(replyResult.Error, "content_too_short", StringComparison.Ordinal))
+                {
+                    replyErrorText.Text = T("Feedback.My.ReplyTooShort");
+                    replyErrorText.Visibility = Visibility.Visible;
+                }
+                else
+                {
+                    replyErrorText.Text = T("Feedback.Dialog.NetworkError");
+                    replyErrorText.Visibility = Visibility.Visible;
+                }
+            }
+            catch (Exception ex)
+            {
+                App.Log($"[Feedback] Reply submit failed unexpectedly: {ex}");
+                replyErrorText.Text = T("Feedback.Dialog.NetworkError");
+                replyErrorText.Visibility = Visibility.Visible;
+            }
+            finally
+            {
+                sendingReply = false;
+                replyBox.IsEnabled = true;
+                cancelReplyButton.IsEnabled = true;
+                RefreshReplyButtonState();
+            }
+        };
+
+        card.Children.Add(addReplyButton);
+        card.Children.Add(composerPanel);
+
+        return new Border
+        {
+            Padding = new Thickness(12, 10, 12, 10),
+            CornerRadius = new CornerRadius(8),
+            BorderThickness = new Thickness(1),
+            Background = TryThemeBrush("CardBackgroundFillColorDefaultBrush")
+                ?? TryThemeBrush("CardBackgroundFillColorSecondaryBrush"),
+            BorderBrush = TryThemeBrush("CardStrokeColorDefaultBrush"),
+            Child = card,
+        };
+    }
+
+    private Border BuildFeedbackMessageBubble(DeskBoxFeedbackMessage message, bool showTimestamp = true)
+    {
+        string T(string key) => _localizationService.T(key);
+
+        bool isOfficial = string.Equals(message.AuthorRole, "official", StringComparison.OrdinalIgnoreCase);
+        bool isOp = string.Equals(message.AuthorRole, "op", StringComparison.OrdinalIgnoreCase);
+        string authorLabel = isOfficial
+            ? T("Feedback.My.ReplyLabel")
+            : isOp
+                ? T("Feedback.My.MyReplyLabel")
+                : !string.IsNullOrWhiteSpace(message.AuthorNickname)
+                    ? message.AuthorNickname!
+                    : T("Feedback.My.CommunityReplyLabel");
+
+        var headerGrid = new Grid();
+        headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var roleText = new TextBlock
+        {
+            Text = authorLabel,
+            FontSize = 11,
+            FontWeight = Microsoft.UI.Text.FontWeights.Bold,
+            TextWrapping = TextWrapping.NoWrap,
+        };
+        if (isOfficial)
+        {
+            roleText.Foreground = TryAccentBrush();
+        }
+        else
+        {
+            roleText.Opacity = 0.85;
+        }
+
+        headerGrid.Children.Add(roleText);
+
+        if (showTimestamp && message.CreatedAt.Year > 2000)
+        {
+            var timeText = new TextBlock
+            {
+                Text = message.CreatedAt.ToLocalTime().ToString("g"),
+                FontSize = 10.5,
+                Opacity = 0.6,
+                Margin = new Thickness(8, 0, 0, 0),
+            };
+            Grid.SetColumn(timeText, 1);
+            headerGrid.Children.Add(timeText);
+        }
+
+        var bodyText = new TextBlock
+        {
+            Text = message.Content,
+            TextWrapping = TextWrapping.Wrap,
+            FontSize = 12.5,
+            Margin = new Thickness(0, 3, 0, 0),
+        };
+
+        var bubbleStack = new StackPanel();
+        bubbleStack.Children.Add(headerGrid);
+        bubbleStack.Children.Add(bodyText);
+
+        return new Border
+        {
+            Padding = new Thickness(10, 8, 10, 8),
+            CornerRadius = new CornerRadius(6),
+            BorderThickness = new Thickness(1),
+            Background = TryThemeBrush("CardBackgroundFillColorSecondaryBrush"),
+            BorderBrush = TryThemeBrush("CardStrokeColorDefaultBrush"),
+            Child = bubbleStack,
+        };
     }
 
     private string StatusText(string status)

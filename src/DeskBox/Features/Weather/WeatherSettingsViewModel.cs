@@ -131,6 +131,7 @@ public sealed partial class WeatherSettingsViewModel : ObservableObject
                 return;
             }
 
+            OnPropertyChanged(nameof(IsManualLocationSelected));
             OnPropertyChanged(nameof(ShowLocationStatus));
             if (_isSyncingPresentation)
             {
@@ -164,6 +165,9 @@ public sealed partial class WeatherSettingsViewModel : ObservableObject
                 _cachedLocationModeNames));
         }
     }
+
+    public bool IsManualLocationSelected =>
+        _selectedLocationMode == WeatherOptionKinds.LocationModeManual;
 
     // P2-2: the search box is always visible — the user can manually
     // override the city even in auto mode.
@@ -202,6 +206,7 @@ public sealed partial class WeatherSettingsViewModel : ObservableObject
                 return;
             }
 
+            OnPropertyChanged(nameof(UnitsAndSourceSummaryText));
             if (_isSyncingPresentation)
             {
                 return;
@@ -233,6 +238,7 @@ public sealed partial class WeatherSettingsViewModel : ObservableObject
                 return;
             }
 
+            OnPropertyChanged(nameof(UnitsAndSourceSummaryText));
             if (_isSyncingPresentation)
             {
                 return;
@@ -353,6 +359,7 @@ public sealed partial class WeatherSettingsViewModel : ObservableObject
                 return;
             }
 
+            OnPropertyChanged(nameof(UnitsAndSourceSummaryText));
             if (_isSyncingPresentation)
             {
                 return;
@@ -384,6 +391,7 @@ public sealed partial class WeatherSettingsViewModel : ObservableObject
                 return;
             }
 
+            OnPropertyChanged(nameof(UnitsAndSourceSummaryText));
             if (_isSyncingPresentation)
             {
                 return;
@@ -404,6 +412,13 @@ public sealed partial class WeatherSettingsViewModel : ObservableObject
                 WeatherOptionKinds.RefreshIntervalSteps, _cachedRefreshIntervalNames));
         }
     }
+
+    public string UnitsAndSourceSummaryText => string.Join(
+        " · ",
+        GetTemperatureUnitDisplayName(_selectedTemperatureUnit),
+        GetWindSpeedUnitDisplayName(_selectedWindSpeedUnit),
+        GetDataSourceDisplayName(_selectedDataSource),
+        GetRefreshIntervalDisplayName(_selectedRefreshInterval));
 
     // ─── Manual city search (shell-pushed suggestion projection) ───
 
@@ -636,7 +651,9 @@ public sealed partial class WeatherSettingsViewModel : ObservableObject
         }
 
         OnPropertyChanged(nameof(CitySearchText));
+        OnPropertyChanged(nameof(IsManualLocationSelected));
         OnPropertyChanged(nameof(ShowLocationStatus));
+        OnPropertyChanged(nameof(UnitsAndSourceSummaryText));
     }
 
     /// <summary>
@@ -674,6 +691,7 @@ public sealed partial class WeatherSettingsViewModel : ObservableObject
         OnPropertyChanged(nameof(SelectedRefreshInterval));
         OnPropertyChanged(nameof(CitySearchPlaceholder));
         OnPropertyChanged(nameof(NoCityResultsText));
+        OnPropertyChanged(nameof(UnitsAndSourceSummaryText));
     }
 
     private string GetTemperatureUnitDisplayName(string unit) => unit switch

@@ -220,6 +220,32 @@ public sealed partial class WidgetManager
     /// Single-surface move (spec 5.10) — semantic wrapper over
     /// ApplyScreenBindingAsync for menu/settings callers.
     /// </summary>
+    /// <summary>
+    /// Manually recalibrates active display topology layout and repositions all
+    /// loaded widget windows onto their resolved bounds for the current topology.
+    /// </summary>
+    public async Task<int> RecalibrateDisplayLayoutAsync()
+    {
+        int surfaceCount = 0;
+        _settingsService.MutateGraphUnderLock(() =>
+        {
+            var settings = _settingsService.Settings;
+            _ = _topologyLayoutService.RecalibrateCurrentTopology(settings);
+            surfaceCount = EnumerateLayoutSurfaces(settings).Count();
+        });
+
+        RepositionAllLoadedWindows();
+        await Task.Yield();
+        ApplyDisconnectCollapsePolicy(
+            DeskBox.Platform.Win32Helper.GetMonitorWorkAreaInfos()
+                .Select(area => DeskBox.Platform.Win32Helper.ResolveStableMonitorId(area.DeviceName))
+                .ToList());
+        ScheduleCapsuleArrangementConsistencyCheck("manual-display-recalibrate");
+        _settingsService.SaveDebounced(notifySubscribers: false);
+        NotifyScreenHomeChangedAction?.Invoke();
+        return surfaceCount;
+    }
+
     public Task MoveSurfaceToDisplayAsync(string widgetId, string displayStableId) =>
         ApplyScreenBindingAsync(widgetId, WidgetScreenBindingMode.Pinned, displayStableId);
 

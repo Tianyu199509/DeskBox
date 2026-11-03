@@ -1,0 +1,21 @@
+{
+  "defaultFeedTitle": "প্রযুক্তি সংবাদ",
+  "defaultTopHeadline": "সর্বশেষ সংবাদ আনতে উপরের ডান কোণের রিফ্রেশে ক্লিক করুন",
+  "emptySubtitle": "উপরের রিফ্রেশে ক্লিক করুন, বা সেটিংস থেকে প্রিসেট ফিড পরিবর্তন করুন",
+  "emptyTitle": "ফিড সিঙ্কের অপেক্ষায়",
+  "feedCustom": "কাস্টম RSS URL (নিচে)",
+  "feedIthome": "IT之家",
+  "feedSspai": "SSPai (少数派)",
+  "openArticleTooltip": "নিবন্ধ খুলুন",
+  "optDensityCompact": "কমপ্যাক্ট (শুধু শিরোনাম)",
+  "optDensitySummary": "স্ট্যান্ডার্ড (শিরোনাম + সারাংশ)",
+  "refreshBtn": "রিফ্রেশ",
+  "refreshTooltip": "এখনই সর্বশেষ ফিড আইটেম আনুন",
+  "setDensity": "প্রদর্শনের ঘনত্ব",
+  "setFeedUrl": "কাস্টম RSS / Atom URL (https://)",
+  "setPresetFeed": "প্রিসেট সংবাদ উৎস",
+  "syncing": "সর্বশেষ সংবাদ সিঙ্ক হচ্ছে…",
+  "updatedPrefix": "আপডেট হয়েছে ",
+  "widgetDescription": "অফলাইন ক্যাশ সহ Hacker News, GitHub Blog, V2EX বা যেকোনো কাস্টম HTTPS RSS ফিড অটো-সিঙ্ক করুন।",
+  "widgetName": "RSS নিউজ রিডার"
+}

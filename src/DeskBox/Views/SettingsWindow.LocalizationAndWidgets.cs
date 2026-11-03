@@ -1,4 +1,4 @@
-﻿using DeskBox.Controls;
+using DeskBox.Controls;
 using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Services;
@@ -45,6 +45,18 @@ public sealed partial class SettingsWindow
             }
 
             RefreshManagedStoragePathWarning();
+            return;
+        }
+
+        if (e.PropertyName == nameof(SettingsViewModel.UpdateActivityCardVisibility))
+        {
+            if (!DispatcherQueue.HasThreadAccess)
+            {
+                DispatcherQueue.TryEnqueue(() => UpdateResponsiveLayout(GetWindowWidth()));
+                return;
+            }
+
+            UpdateResponsiveLayout(GetWindowWidth());
         }
 
     }
@@ -73,20 +85,57 @@ public sealed partial class SettingsWindow
 
     private void ApplyLocalizedText()
     {
+        if (SettingsRoot is not null)
+        {
+            SettingsRoot.FlowDirection = CustomWidgetLocaleCatalog.IsRightToLeftCulture(_localizationService.CurrentCultureName)
+                ? FlowDirection.RightToLeft
+                : FlowDirection.LeftToRight;
+        }
         Title = _localizationService.T("Settings.WindowTitle");
         Localized.RefreshAll(_localizationService);
+        UpdateTitleBarInsets();
+        if (SaveFailedInfoBar.IsOpen)
+        {
+            SaveFailedInfoBar.Title = Localized.T("Settings.Persistence.SaveFailedTitle");
+            SaveFailedInfoBar.Message = Localized.T("Settings.Persistence.SaveFailedBody");
+        }
         RefreshSettingsSearchResults();
         ApplyToggleSwitchContentVisibility();
         RefreshFeatureWidgetList();
         ViewModel.RefreshGlobalHotkeyState();
         RefreshGlobalHotkeyControls();
+        if (_settingsSectionElements.TryGetValue("CustomWidgetSettings", out FrameworkElement? customWidget) &&
+            customWidget is DeskBox.Views.SettingsSections.CustomWidgetSettingsSection customWidgetSection)
+        {
+            customWidgetSection.RefreshInstances();
+        }
+        if (_settingsSectionElements.TryGetValue("AiSettings", out FrameworkElement? aiSettings) &&
+            aiSettings is DeskBox.Views.SettingsSections.AiSettingsSection aiSettingsSection)
+        {
+            aiSettingsSection.RefreshState();
+        }
         if (_settingsSectionElements.TryGetValue("SearchSettings", out FrameworkElement? search) &&
             search is DeskBox.Views.SettingsSections.SearchSettingsSection searchSection)
         {
             searchSection.RefreshFromSettings();
         }
+        if (_settingsSectionElements.TryGetValue("ClipboardSettings", out FrameworkElement? clipboard) &&
+            clipboard is DeskBox.Views.SettingsSections.ClipboardSettingsSection clipboardSection)
+        {
+            clipboardSection.RefreshFromSettings();
+        }
+        if (_settingsSectionElements.TryGetValue("Appearance", out FrameworkElement? appearance) &&
+            appearance is DeskBox.Views.SettingsSections.AppearanceSettingsSection appearanceSection)
+        {
+            appearanceSection.SyncMaterialEntryCard(reloadOptions: true);
+        }
+        SyncCapsuleModeEntryCard(reloadOptions: true);
+        SyncMaintenanceEntryCards();
+        RefreshAiSettingsEntrySummary();
+        RefreshDisplaysEntrySummary();
         RefreshManagedStoragePathWarning();
         RefreshManagedStorageDesktopShortcutState();
+        SyncManagedStorageQuickAccessToggleState();
         // RefreshAll re-applied the static DescriptionKey text, dropping the
         // Win10 note that RefreshDragOutWin10State appends to it.
         RefreshDragOutWin10State();
@@ -94,11 +143,11 @@ public sealed partial class SettingsWindow
         {
             UpdateBreadcrumb(route);
         }
-        if (string.Equals(_currentSettingsSection, "ManagedStorage", StringComparison.Ordinal))
+        if (string.Equals(_currentSettingsSection, "AppearanceDetail", StringComparison.Ordinal))
         {
-            _ = RefreshManagedStorageFolderListAsync();
+            _ = RefreshOrphanFoldersSummaryAsync();
         }
-        if (string.Equals(_currentSettingsSection, "BackupRestoreSettings", StringComparison.Ordinal))
+        if (string.Equals(_currentSettingsSection, "Maintenance", StringComparison.Ordinal))
         {
             _ = RefreshBackupSnapshotInventoryAsync();
         }
@@ -109,6 +158,14 @@ public sealed partial class SettingsWindow
         foreach (var toggle in FindDescendants<ToggleSwitch>(SettingsRoot))
         {
             ClearToggleSwitchContent(toggle);
+        }
+    }
+
+    private static void ApplySegmentedNeutralStates(DependencyObject root)
+    {
+        foreach (Segmented segmented in FindDescendants<Segmented>(root))
+        {
+            WidgetSegmentedStyleHelper.ApplyNeutralPointerStates(segmented);
         }
     }
 
@@ -133,7 +190,7 @@ public sealed partial class SettingsWindow
                 entries.Any(entry =>
                     !_featureWidgetRows.TryGetValue(entry.Kind, out var row) ||
                     row.HasSettingsPage != entry.HasSettingsPage ||
-                    row.HasReset != FeatureWidgetSettings.IsFeatureWidget(entry.Kind) ||
+                    row.HasReset ||
                     row.HasToggle != entry.ShowToggle);
 
             if (requiresRebuild)
@@ -224,25 +281,6 @@ public sealed partial class SettingsWindow
         };
 
         Button? resetButton = null;
-        if (FeatureWidgetSettings.IsFeatureWidget(entry.Kind))
-        {
-            resetButton = new Button
-            {
-                Padding = new Thickness(0),
-                VerticalAlignment = VerticalAlignment.Center,
-                Style = (Style)SettingsRoot.Resources["IconActionButtonStyle"],
-                Tag = entry.Kind,
-                Content = new FontIcon
-                {
-                    Glyph = "\uE72C",
-                    FontSize = 16,
-                    FontFamily = (FontFamily)Application.Current.Resources["SymbolThemeFontFamily"]
-                }
-            };
-            ToolTipService.SetToolTip(resetButton, _localizationService.T("Settings.FeatureWidgets.ResetTooltip"));
-            resetButton.Click += FeatureWidgetResetButton_Click;
-            contentPanel.Children.Add(resetButton);
-        }
 
         ToggleSwitch? toggle = null;
         if (entry.ShowToggle)
@@ -275,7 +313,7 @@ public sealed partial class SettingsWindow
             resetButton,
             toggle,
             entry.HasSettingsPage,
-            FeatureWidgetSettings.IsFeatureWidget(entry.Kind),
+            false,
             entry.ShowToggle);
     }
 
@@ -362,25 +400,66 @@ public sealed partial class SettingsWindow
             return false;
         }
 
-        string titleKey = kind == WidgetKind.QuickCapture
-            ? "QuickCapture.Name"
-            : $"{kind}.Title";
-        string widgetName = _localizationService.T(titleKey);
-        var dialog = new ContentDialog
+        string titleKey = kind switch
         {
-            XamlRoot = SettingsRoot.XamlRoot,
-            Title = _localizationService.Format("Settings.FeatureWidgets.ResetDialogTitle", widgetName),
-            PrimaryButtonText = _localizationService.T("Settings.FeatureWidgets.ResetConfirm"),
-            CloseButtonText = _localizationService.T("Common.Cancel"),
-            DefaultButton = ContentDialogButton.Close,
-            Content = new TextBlock
-            {
-                Text = _localizationService.T("Settings.FeatureWidgets.ResetDialogBody"),
-                TextWrapping = TextWrapping.Wrap
-            }
+            WidgetKind.QuickCapture => "QuickCapture.Name",
+            WidgetKind.Custom => "CustomWidget.Title",
+            _ => $"{kind}.Title"
         };
+        string widgetName = _localizationService.T(titleKey);
+        string bodyKey = kind == WidgetKind.Custom
+            ? "Settings.FeatureWidgets.ResetCustomDialogBody"
+            : "Settings.FeatureWidgets.ResetDialogBody";
+        return await ShowDialogWhenFreeAsync(() => SettingsRoot.XamlRoot is null
+            ? null
+            : new ContentDialog
+            {
+                XamlRoot = SettingsRoot.XamlRoot,
+                Title = _localizationService.Format("Settings.FeatureWidgets.ResetDialogTitle", widgetName),
+                PrimaryButtonText = _localizationService.T("Settings.FeatureWidgets.ResetConfirm"),
+                CloseButtonText = _localizationService.T("Common.Cancel"),
+                DefaultButton = ContentDialogButton.Close,
+                Content = new TextBlock
+                {
+                    Text = _localizationService.T(bodyKey),
+                    TextWrapping = TextWrapping.Wrap
+                }
+            }) == ContentDialogResult.Primary;
+    }
 
-        return await dialog.ShowAsync() == ContentDialogResult.Primary;
+    private async void FeatureWidgetSubPageResetButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: string kindName } button ||
+            !Enum.TryParse(kindName, out WidgetKind kind))
+        {
+            return;
+        }
+
+        if (!await ConfirmFeatureWidgetResetAsync(kind))
+        {
+            return;
+        }
+
+        button.IsEnabled = false;
+        try
+        {
+            await ViewModel.ResetFeatureWidgetAsync(kind);
+            RefreshFeatureWidgetList();
+            if (kind is WidgetKind.Music or WidgetKind.Weather)
+            {
+                SyncMusicWeatherFeatureEnableState(
+                    kind == WidgetKind.Music ? "MusicSettings" : "WeatherSettings");
+            }
+        }
+        finally
+        {
+            button.IsEnabled = true;
+        }
+    }
+
+    private void OnFeatureSubPageWidgetReset(object? sender, EventArgs e)
+    {
+        RefreshFeatureWidgetList();
     }
 
     private void FeatureWidgetToggle_Toggled(object sender, RoutedEventArgs e)

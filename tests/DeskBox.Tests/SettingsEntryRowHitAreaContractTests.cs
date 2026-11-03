@@ -1,3 +1,5 @@
+using System.Xml.Linq;
+
 namespace DeskBox.Tests;
 
 /// <summary>
@@ -13,18 +15,17 @@ namespace DeskBox.Tests;
 public sealed class SettingsEntryRowHitAreaContractTests
 {
     [Theory]
-    [InlineData("src/DeskBox/Views/SettingsWindow.xaml", 6)]
-    [InlineData("src/DeskBox/Views/SettingsSections/AppearanceSettingsSection.xaml", 5)]
-    [InlineData("src/DeskBox/Views/SettingsSections/CapsuleModeSettingsSection.xaml", 1)]
-    [InlineData("src/DeskBox/Views/SettingsSections/FileWidgetSettingsSection.xaml", 3)]
+    [InlineData("src/DeskBox/Views/SettingsWindow.xaml", 7)]
+    [InlineData("src/DeskBox/Views/SettingsSections/AppearanceSettingsSection.xaml", 1)]
+    [InlineData("src/DeskBox/Views/SettingsSections/CapsuleModeSettingsSection.xaml", 0)]
+    [InlineData("src/DeskBox/Views/SettingsSections/FileWidgetSettingsSection.xaml", 2)]
+    [InlineData("src/DeskBox/Views/SettingsSections/DesktopOrganizationSettingsSection.xaml", 1)]
     public void EntryRows_AreClickableNativeSettingsCards(string path, int expectedCount)
     {
         string xaml = ReadRepositoryFile(path);
 
         int count = CountOccurrences(xaml, "IsClickEnabled=");
-        Assert.True(count >= expectedCount,
-            $"{path}: expected at least {expectedCount} IsClickEnabled entry cards, found {count}. " +
-            "New entry rows must be native SettingsCards so the whole card stays clickable.");
+        Assert.Equal(expectedCount, count);
 
         // The manual drill-down scaffolding must not come back.
         Assert.DoesNotContain("DrillDownRowStyle", xaml, StringComparison.Ordinal);
@@ -36,18 +37,46 @@ public sealed class SettingsEntryRowHitAreaContractTests
         string xaml = ReadRepositoryFile(
             "src/DeskBox/Views/SettingsSections/CapsuleModeSettingsSection.xaml");
 
-        // The three detail entry cards became SettingsExpanders (toolkit
-        // expanders have no IsClickEnabled/IsActionIconVisible surface);
-        // gating now runs through the combos' own IsEnabled bindings so the
-        // inline controls stay operable, and the "custom only" child rows
-        // stay visible but disabled outside custom presets — hiding them
-        // left the expanders promising content they never showed.
         Assert.Contains("IsEnabled=\"{Binding IsBarSpacingEnabled}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("IsEnabled=\"{Binding IsBarEnabled}\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("IsEnabled=\"{Binding ShowHoverResponseCustom}\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("IsEnabled=\"{Binding ShowAnimationCustom}\"", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("Visibility=\"{Binding ShowHoverResponseCustom", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("Visibility=\"{Binding ShowAnimationCustom", xaml, StringComparison.Ordinal);
+        Assert.Contains(
+            "Visibility=\"{Binding ShowHoverResponseCustom, Converter={StaticResource SettingsBoolToVisibilityConverter}}\"",
+            xaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Visibility=\"{Binding ShowAnimationCustom, Converter={StaticResource SettingsBoolToVisibilityConverter}}\"",
+            xaml,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("IsEnabled=\"{Binding ShowHoverResponseCustom}\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("IsEnabled=\"{Binding ShowAnimationCustom}\"", xaml, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("src/DeskBox/Views/SettingsWindow.xaml")]
+    [InlineData("src/DeskBox/Views/SettingsSections/AppearanceSettingsSection.xaml")]
+    [InlineData("src/DeskBox/Views/SettingsSections/CapsuleModeSettingsSection.xaml")]
+    [InlineData("src/DeskBox/Views/SettingsSections/FileWidgetSettingsSection.xaml")]
+    [InlineData("src/DeskBox/Views/SettingsSections/CustomWidgetSettingsSection.xaml")]
+    public void EntryRows_NeverEmbedManualChevronInsideClickableSettingsCard(string path)
+    {
+        XDocument document = XDocument.Parse(ReadRepositoryFile(path));
+        XNamespace toolkit = "using:CommunityToolkit.WinUI.Controls";
+
+        foreach (XElement card in document.Descendants(toolkit + "SettingsCard"))
+        {
+            if (card.Attribute("IsClickEnabled") is null)
+            {
+                continue;
+            }
+
+            bool hasManualChevron = card.Descendants()
+                .Any(element =>
+                    element.Name.LocalName == "FontIcon" &&
+                    string.Equals((string?)element.Attribute("Glyph"), "\uE76C", StringComparison.Ordinal));
+            Assert.False(
+                hasManualChevron,
+                $"{path}: clickable SettingsCard (Tag='{card.Attribute("Tag")?.Value}') must rely on SettingsCard's built-in ActionIcon instead of embedding a duplicate manual \\uE76C FontIcon.");
+        }
     }
 
     [Fact]
@@ -59,7 +88,7 @@ public sealed class SettingsEntryRowHitAreaContractTests
         Assert.Contains("new SettingsCard", code, StringComparison.Ordinal);
         Assert.Contains("IsClickEnabled = entry.HasSettingsPage", code, StringComparison.Ordinal);
         Assert.Contains("card.Click += FeatureWidgetSettingsButton_Click;", code, StringComparison.Ordinal);
-        // The hand-built row scaffolding must not come back.
+        // The hand-built row scaffolding and manual duplicate chevron must not come back.
         Assert.DoesNotContain("Grid.SetColumnSpan", code, StringComparison.Ordinal);
         Assert.DoesNotContain("Glyph = \"\\uE76C\"", code, StringComparison.Ordinal);
         Assert.DoesNotContain("DrillDownRowStyle", code, StringComparison.Ordinal);
@@ -83,6 +112,56 @@ public sealed class SettingsEntryRowHitAreaContractTests
         Assert.Contains(
             "sender is not CommunityToolkit.WinUI.Controls.SettingsCard { Tag: string widgetId }",
             code,
+            StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("src/DeskBox/Views/SettingsWindow.xaml")]
+    [InlineData("src/DeskBox/Views/SettingsSections/AppearanceSettingsSection.xaml")]
+    [InlineData("src/DeskBox/Views/SettingsSections/CapsuleModeSettingsSection.xaml")]
+    [InlineData("src/DeskBox/Views/SettingsSections/FileWidgetSettingsSection.xaml")]
+    [InlineData("src/DeskBox/Views/SettingsSections/ClipboardSettingsSection.xaml")]
+    [InlineData("src/DeskBox/Views/SettingsSections/DesktopOrganizationSettingsSection.xaml")]
+    public void SettingsToggleSwitches_UseZeroMinWidthInsteadOfControlMinWidth(string path)
+    {
+        XDocument document = XDocument.Parse(ReadRepositoryFile(path));
+        XNamespace winui = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+
+        foreach (XElement toggle in document.Descendants(winui + "ToggleSwitch"))
+        {
+            string? minWidth = (string?)toggle.Attribute("MinWidth");
+            Assert.False(
+                string.Equals(minWidth, "{StaticResource SettingsControlMinWidth}", StringComparison.Ordinal),
+                $"{path}: ToggleSwitch must use MinWidth=\"0\" so it stays right-aligned inside SettingsCard.");
+        }
+    }
+
+    [Fact]
+    public void DesktopOrganizationAndFileGridSiblingSwitcher_StayAlignedWithTopLevelPromotion()
+    {
+        string orgXaml = ReadRepositoryFile(
+            "src/DeskBox/Views/SettingsSections/DesktopOrganizationSettingsSection.xaml");
+        string fileWidgetXaml = ReadRepositoryFile(
+            "src/DeskBox/Views/SettingsSections/FileWidgetSettingsSection.xaml");
+        string windowXaml = ReadRepositoryFile("src/DeskBox/Views/SettingsWindow.xaml");
+        string navigation = ReadRepositoryFile("src/DeskBox/Views/SettingsWindow.Navigation.cs");
+        string deferred = ReadRepositoryFile("src/DeskBox/Views/SettingsWindow.DeferredSections.cs");
+
+        Assert.Contains("Style=\"{StaticResource SettingsSubsectionTitleTextStyle}\"", orgXaml, StringComparison.Ordinal);
+        Assert.Contains("svc:Localized.Key=\"DesktopOrganization.Settings.Title\"", orgXaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"AutoToggleExpander\"", orgXaml, StringComparison.Ordinal);
+        Assert.Contains("IsExpanded=\"False\"", orgXaml, StringComparison.Ordinal);
+        Assert.Contains("Style=\"{StaticResource SectionTitleTextStyle}\"", fileWidgetXaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"DesktopOrganizationPart\"", fileWidgetXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("FileGridSiblingSegmented", windowXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("FileGridSiblingSegmented", deferred, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "\"DesktopOrganizationSettings\", \"ManagedStorage\", \"FileDisplaySettings\", \"FileStackSettings\"",
+            navigation,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "\"FileStorageSettings\" or \"FileDisplaySettings\" or \"ManagedStorage\" or \"DesktopOrganizationSettings\" => \"AppearanceDetail\"",
+            navigation,
             StringComparison.Ordinal);
     }
 

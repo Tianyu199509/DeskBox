@@ -1,0 +1,21 @@
+{
+  "defaultFeedTitle": "Noticias de tecnología",
+  "defaultTopHeadline": "Haz clic en Actualizar, arriba a la derecha, para ver las últimas noticias",
+  "emptySubtitle": "Haz clic en Actualizar arriba o cambia de canal en la configuración",
+  "emptyTitle": "Esperando la sincronización del canal",
+  "feedCustom": "URL RSS personalizada (abajo)",
+  "feedIthome": "IT之家",
+  "feedSspai": "SSPai (少数派)",
+  "openArticleTooltip": "Abrir artículo",
+  "optDensityCompact": "Compacta (solo titulares)",
+  "optDensitySummary": "Estándar (título + resumen)",
+  "refreshBtn": "Actualizar",
+  "refreshTooltip": "Obtener ahora los últimos elementos del canal",
+  "setDensity": "Densidad de lectura",
+  "setFeedUrl": "URL RSS / Atom personalizada (https://)",
+  "setPresetFeed": "Fuente predefinida",
+  "syncing": "Sincronizando las últimas noticias…",
+  "updatedPrefix": "Actualizado ",
+  "widgetDescription": "Sincroniza Hacker News, GitHub Blog, V2EX o cualquier canal RSS HTTPS personalizado con caché sin conexión.",
+  "widgetName": "Lector de noticias RSS"
+}

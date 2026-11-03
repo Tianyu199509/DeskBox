@@ -1,12 +1,9 @@
-using System.Collections.ObjectModel;
-using CommunityToolkit.Mvvm.ComponentModel;
+using System.Buffers.Binary;
 using DeskBox.Helpers;
-using DeskBox.Models;
 using DeskBox.Services;
+using DeskBox.Services.Lyrics;
 using Microsoft.UI.Xaml;
-using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
-using Windows.Foundation;
 using Windows.Graphics.Imaging;
 using Windows.Storage.Streams;
 using Windows.UI;
@@ -15,33 +12,13 @@ namespace DeskBox.ViewModels;
 
 public sealed partial class MusicWidgetViewModel
 {
-    private async Task ApplyInfoAsync(MusicSessionInfo? info, int? mediaPropertiesGeneration = null)
+    internal ulong CurrentCoverFingerprintForTesting => _lastCoverFingerprint;
+    internal ulong SessionPlaceholderFingerprintForTesting => _sessionPlaceholderFingerprint;
+    internal int DecodedCoverApplyCountForTesting => _decodedCoverApplyCount;
+    internal bool HasAppliedCoverForCurrentTrackForTesting => _hasAppliedCoverForCurrentTrack;
+
+    private async Task ApplyInfoAsync(MusicSessionInfo? info)
     {
-        // A player can raise MediaPropertiesChanged before its new metadata is
-        // readable. Re-read once after the event burst settles and discard the
-        // original snapshot if a newer event arrived while waiting. This keeps
-        // the capsule on the last complete track until the next complete track
-        // is ready, instead of rendering old/partial metadata for a frame.
-        if (mediaPropertiesGeneration is { } expectedGeneration)
-        {
-            await Task.Delay(100);
-            if (_isDisposed || expectedGeneration != Volatile.Read(ref _mediaPropertiesPendingGeneration))
-            {
-                return;
-            }
-
-            MusicSessionInfo? settledInfo = await _musicSessionService.GetCurrentSessionInfoAsync(_preferredSessionId);
-            if (_isDisposed || expectedGeneration != Volatile.Read(ref _mediaPropertiesPendingGeneration))
-            {
-                return;
-            }
-
-            if (settledInfo is not null)
-            {
-                info = settledInfo;
-            }
-        }
-
         if (ShouldDeferEmptyInfo(info))
         {
             ScheduleTransientEmptyInfoRetry();
@@ -51,25 +28,40 @@ public sealed partial class MusicWidgetViewModel
         ResetTransientEmptyInfoRetry();
         if (info is null)
         {
+            ClearPendingPlayPauseIntent();
             _hasCurrentMediaInfo = false;
             Title = string.Empty;
             Artist = string.Empty;
             Album = string.Empty;
             _sourceAppUserModelId = string.Empty;
             SourceDisplayName = string.Empty;
+            _timelineExtrapolator.Reset();
             PlaybackState = MusicPlaybackState.Unknown;
             UpdateProgressTimerState();
             Position = TimeSpan.Zero;
-        _lastSyncedPosition = TimeSpan.Zero;
-        _lastPositionSyncAt = DateTimeOffset.UtcNow;
             Duration = TimeSpan.Zero;
-            // A no-change clear (both values already zero) raises no property
-            // change, but the row must follow the missing session immediately.
             UpdateTimelineRowEligibility();
+            ++_coverGeneration;
+            ++_lateCoverProbeGeneration;
             ThumbnailImage = null;
+            _hasAppliedCover = false;
+            _hasAppliedCoverForCurrentTrack = false;
             _lastCoverSignature = null;
+            _lastCoverFingerprint = 0;
+            _placeholderCoverSessionId = null;
+            _sessionPlaceholderFingerprint = 0;
+            _currentTrackCoverSignature = null;
+            _currentTrackInitialCoverFingerprint = 0;
+            _previousTrackFinalCoverFingerprint = 0;
+            _currentTrackCoverStartedUtc = default;
+            _confirmedEmptyCoverSignature = null;
             _coverRetrySignature = null;
             _coverRetryCount = 0;
+            _coverRetryInFlight = false;
+            _lastTrackIdentitySignature = null;
+            _previousTrackNativeDuration = TimeSpan.Zero;
+            _currentTrackInitialNativeDuration = TimeSpan.Zero;
+            _currentTrackDurationUntrusted = false;
             SetArtworkColor(AccentColorHelper.DefaultAccentColor, hasArtworkColor: false);
             CanPlay = false;
             CanPause = false;
@@ -79,6 +71,10 @@ public sealed partial class MusicWidgetViewModel
             CanChangeShuffle = false;
             CanChangeRepeat = false;
             PlaybackMode = MusicPlaybackMode.Normal;
+            HasSessionVolume = false;
+            IsLyricsViewOpen = false;
+            ClearSourceAppIcon();
+            ClearLyricsState();
             RaiseDisplayPropertiesChanged();
             return;
         }
@@ -89,58 +85,553 @@ public sealed partial class MusicWidgetViewModel
         Album = info.Album;
         _sourceAppUserModelId = info.SourceAppUserModelId;
         SourceDisplayName = info.SourceDisplayName;
-        PlaybackState = info.PlaybackState;
-        Position = info.Position;
-        Duration = info.Duration;
-        _lastSyncedPosition = info.Position;
-        _lastPositionSyncAt = DateTimeOffset.UtcNow;
-        CanPlay = info.CanPlay;
-        CanPause = info.CanPause;
+        RefreshSourceAppIcon(info.SourceAppUserModelId, info.SourceDisplayName);
+
+        DateTimeOffset nowUtc = DateTimeOffset.UtcNow;
+        string trackIdentitySig = $"{info.SourceAppUserModelId}\u001F{info.Title.Trim()}\u001F{info.Artist.Trim()}";
+        bool trackIdentityChanged = !string.Equals(_lastTrackIdentitySignature, trackIdentitySig, StringComparison.Ordinal);
+        if (trackIdentityChanged)
+        {
+            ClearPendingPlayPauseIntent();
+            TimeSpan prevNativeDuration = _timelineExtrapolator.HasNativeDuration ? _duration : TimeSpan.Zero;
+            _previousTrackNativeDuration = _lastTrackIdentitySignature is not null ? prevNativeDuration : TimeSpan.Zero;
+            _lastTrackIdentitySignature = trackIdentitySig;
+            _currentTrackInitialNativeDuration = info.Duration;
+            _currentTrackDurationUntrusted = _previousTrackNativeDuration > TimeSpan.Zero &&
+                info.Duration > TimeSpan.Zero &&
+                Math.Abs((info.Duration - _previousTrackNativeDuration).TotalMilliseconds) < 50 &&
+                !IsFreshTrackStartTimeline(info.Position, info.PositionUpdatedUtc, nowUtc);
+            _hasRetriedLyricsWithUpdatedDuration = false;
+        }
+        else if (_currentTrackDurationUntrusted &&
+                 info.Duration > TimeSpan.Zero &&
+                 (Math.Abs((info.Duration - _currentTrackInitialNativeDuration).TotalMilliseconds) >= 500 ||
+                  IsFreshTrackStartTimeline(info.Position, info.PositionUpdatedUtc, nowUtc)))
+        {
+            _currentTrackDurationUntrusted = false;
+        }
+
+        MusicPlaybackState effectivePlaybackState = ResolvePlaybackStateWithPendingIntent(
+            info.PlaybackState,
+            nowUtc);
+        (TimeSpan extrapolatedPos, TimeSpan effectiveDur) = _timelineExtrapolator.ApplyFullSnapshot(
+            info.SourceAppUserModelId,
+            info.Title,
+            info.Artist,
+            effectivePlaybackState,
+            info.Position,
+            info.Duration,
+            info.PositionUpdatedUtc,
+            info.PlaybackRate,
+            nowUtc);
+
+        PlaybackState = effectivePlaybackState;
+        Duration = effectiveDur;
+        Position = ShouldExposeTimelinePosition() ? extrapolatedPos : TimeSpan.Zero;
+        if (_pendingCommandTargetState is { } pendingTarget &&
+            !info.CanPlay &&
+            !info.CanPause)
+        {
+            CanPlay = pendingTarget != MusicPlaybackState.Playing;
+            CanPause = pendingTarget == MusicPlaybackState.Playing;
+        }
+        else
+        {
+            CanPlay = info.CanPlay;
+            CanPause = info.CanPause;
+        }
         CanGoPrevious = info.CanGoPrevious;
         CanGoNext = info.CanGoNext;
-        CanSeek = info.CanSeek && info.Duration > TimeSpan.Zero;
+        CanSeek = info.CanSeek && _timelineExtrapolator.HasNativeDuration;
         CanChangeShuffle = info.CanChangeShuffle;
         CanChangeRepeat = info.CanChangeRepeat;
         PlaybackMode = info.PlaybackMode;
         UpdateProgressTimerState();
-        // Re-attaching a session that publishes no timeline may leave both
-        // values unchanged, so the hide-gate evaluation needs an explicit
-        // nudge in addition to the property setters above.
         UpdateTimelineRowEligibility();
-        // Cover signature dedup: skip expensive cover reload when the song hasn't changed.
-        // Timeline and playback events go through lightweight refresh paths, but
-        // MediaPropertiesChanged can fire even when only metadata (not the thumbnail) changes.
+
+        ScheduleLyricsLookupForCurrentTrack();
+        if (!trackIdentityChanged && _timelineExtrapolator.HasNativeDuration)
+        {
+            NotifyTimelineDurationUpdated(info.Duration, info.Position, info.PositionUpdatedUtc, nowUtc);
+        }
+
+        UpdateLyricActiveLineAndScheduleTimer();
+        RaiseDisplayPropertiesChanged();
+
+        if (!string.Equals(_placeholderCoverSessionId, info.SessionId, StringComparison.Ordinal))
+        {
+            _placeholderCoverSessionId = info.SessionId;
+            _sessionPlaceholderFingerprint = 0;
+            _currentTrackCoverSignature = null;
+            _currentTrackInitialCoverFingerprint = 0;
+            _previousTrackFinalCoverFingerprint = 0;
+            _hasAppliedCoverForCurrentTrack = false;
+        }
+
         string coverSig = $"{info.SessionId}\u001E{info.Title}\u001E{info.Artist}\u001E{info.Album}";
+        if (!string.Equals(_currentTrackCoverSignature, coverSig, StringComparison.Ordinal))
+        {
+            _previousTrackFinalCoverFingerprint = _hasAppliedCoverForCurrentTrack ? _lastCoverFingerprint : 0;
+            _currentTrackCoverSignature = coverSig;
+            _currentTrackInitialCoverFingerprint = 0;
+            _currentTrackCoverStartedUtc = nowUtc;
+            _hasAppliedCoverForCurrentTrack = false;
+            ScheduleLateCoverProbes(coverSig);
+        }
+
         bool coverChanged = !string.Equals(_lastCoverSignature, coverSig, StringComparison.Ordinal);
 
-        if (coverChanged)
+        if (info.Thumbnail is null)
         {
-            int gen = ++_coverGeneration;
-            var (cover, artworkColor) = await LoadThumbnailAndColorAsync(info);
-            if (_isDisposed || gen != _coverGeneration) return;
-
-            if (cover is not null)
+            if (!string.Equals(_confirmedEmptyCoverSignature, coverSig, StringComparison.Ordinal) &&
+                !(string.Equals(_lastCoverSignature, coverSig, StringComparison.Ordinal) && _hasAppliedCover) &&
+                !(_coverRetryInFlight && string.Equals(_coverRetrySignature, coverSig, StringComparison.Ordinal)))
             {
-                ThumbnailImage = cover;
-                SetArtworkColor(artworkColor ?? AccentColorHelper.DefaultAccentColor, artworkColor.HasValue);
-                App.ScheduleLightMemoryCleanup();
-                _lastCoverSignature = coverSig;
-                _coverRetrySignature = null;
-                _coverRetryCount = 0;
-            }
-            else
-            {
+                int gen = ++_coverGeneration;
                 _lastCoverSignature = null;
+                _lastCoverFingerprint = 0;
                 if (!ScheduleCoverRetry(coverSig, gen))
                 {
+                    _confirmedEmptyCoverSignature = coverSig;
                     ThumbnailImage = null;
+                    _hasAppliedCover = false;
+                    _hasAppliedCoverForCurrentTrack = false;
                     SetArtworkColor(AccentColorHelper.DefaultAccentColor, hasArtworkColor: false);
-                    App.ScheduleLightMemoryCleanup();
                 }
             }
         }
+        else
+        {
+            _confirmedEmptyCoverSignature = null;
+            byte[]? thumbnailBytes = await ReadThumbnailBytesAsync(info.Thumbnail);
+            if (_isDisposed || !string.Equals(_currentTrackCoverSignature, coverSig, StringComparison.Ordinal))
+            {
+                if (!_isDisposed && !CanRunWindowMediaRefresh())
+                {
+                    Interlocked.Exchange(ref _hiddenMediaStateDirty, 1);
+                }
 
-        RaiseDisplayPropertiesChanged();
+                return;
+            }
+
+            ulong fingerprint = ComputeThumbnailFingerprint(thumbnailBytes);
+            if (fingerprint == 0)
+            {
+                if (!(string.Equals(_lastCoverSignature, coverSig, StringComparison.Ordinal) && _hasAppliedCover) &&
+                    !(_coverRetryInFlight && string.Equals(_coverRetrySignature, coverSig, StringComparison.Ordinal)))
+                {
+                    int gen = ++_coverGeneration;
+                    _lastCoverSignature = null;
+                    _lastCoverFingerprint = 0;
+                    if (!ScheduleCoverRetry(coverSig, gen))
+                    {
+                        _confirmedEmptyCoverSignature = coverSig;
+                        ThumbnailImage = null;
+                        _hasAppliedCover = false;
+                        _hasAppliedCoverForCurrentTrack = false;
+                        SetArtworkColor(AccentColorHelper.DefaultAccentColor, hasArtworkColor: false);
+                    }
+                }
+            }
+            else
+            {
+                bool upgradedFromInitialCover = false;
+                if (_currentTrackInitialCoverFingerprint == 0)
+                {
+                    _currentTrackInitialCoverFingerprint = fingerprint;
+                }
+                else if (fingerprint != _currentTrackInitialCoverFingerprint)
+                {
+                    upgradedFromInitialCover = true;
+                    if (_currentTrackInitialCoverFingerprint != _previousTrackFinalCoverFingerprint)
+                    {
+                        // Chromium/Web Media Session (Brave, Chrome, Edge) publishes its browser app icon
+                        // alongside the new track's Title/Artist first, then swaps in the downloaded album
+                        // artwork on the exact same track signature once fetching completes.
+                        _sessionPlaceholderFingerprint = _currentTrackInitialCoverFingerprint;
+                    }
+
+                    if (_sessionPlaceholderFingerprint == fingerprint)
+                    {
+                        _sessionPlaceholderFingerprint = 0;
+                    }
+                }
+
+                bool isKnownSessionPlaceholder =
+                    _sessionPlaceholderFingerprint != 0 &&
+                    fingerprint == _sessionPlaceholderFingerprint;
+                bool shouldHoldPlaceholderCover =
+                    isKnownSessionPlaceholder &&
+                    DateTimeOffset.UtcNow - _currentTrackCoverStartedUtc < PlaceholderCoverHoldGrace;
+
+                if (!shouldHoldPlaceholderCover)
+                {
+                    bool alreadyDisplayingIdenticalCover =
+                        _hasAppliedCover && fingerprint == _lastCoverFingerprint;
+                    if (alreadyDisplayingIdenticalCover)
+                    {
+                        _lastCoverSignature = coverSig;
+                        _hasAppliedCoverForCurrentTrack = true;
+                        _coverRetryInFlight = false;
+                        _coverRetrySignature = null;
+                        _coverRetryCount = 0;
+                        if (upgradedFromInitialCover && !isKnownSessionPlaceholder)
+                        {
+                            ++_lateCoverProbeGeneration;
+                        }
+                    }
+                    else if (coverChanged || !_hasAppliedCover || fingerprint != _lastCoverFingerprint)
+                    {
+                        int gen = ++_coverGeneration;
+                        _coverRetryInFlight = false;
+                        DecodedCoverResult decoded = await _coverDecoder(thumbnailBytes);
+                        if (_isDisposed ||
+                            gen != _coverGeneration ||
+                            !string.Equals(_currentTrackCoverSignature, coverSig, StringComparison.Ordinal))
+                        {
+                            if (!_isDisposed && !CanRunWindowMediaRefresh())
+                            {
+                                Interlocked.Exchange(ref _hiddenMediaStateDirty, 1);
+                            }
+
+                            return;
+                        }
+
+                        if (decoded.Succeeded)
+                        {
+                            ThumbnailImage = decoded.Image;
+                            _hasAppliedCover = true;
+                            _hasAppliedCoverForCurrentTrack = true;
+                            _decodedCoverApplyCount++;
+                            SetArtworkColor(
+                                decoded.Color ?? AccentColorHelper.DefaultAccentColor,
+                                decoded.Color.HasValue);
+                            _lastCoverSignature = coverSig;
+                            _lastCoverFingerprint = fingerprint;
+                            _coverRetrySignature = null;
+                            _coverRetryCount = 0;
+                            if (upgradedFromInitialCover && !isKnownSessionPlaceholder)
+                            {
+                                ++_lateCoverProbeGeneration;
+                            }
+                        }
+                        else
+                        {
+                            _lastCoverSignature = null;
+                            _lastCoverFingerprint = 0;
+                            if (!ScheduleCoverRetry(coverSig, gen))
+                            {
+                                _confirmedEmptyCoverSignature = coverSig;
+                                ThumbnailImage = null;
+                                _hasAppliedCover = false;
+                                _hasAppliedCoverForCurrentTrack = false;
+                                SetArtworkColor(AccentColorHelper.DefaultAccentColor, hasArtworkColor: false);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private void CancelPendingLyricsLookup()
+    {
+        CancellationTokenSource? cts = Interlocked.Exchange(ref _lyricsFetchCts, null);
+        if (cts is not null)
+        {
+            try
+            {
+                cts.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+            finally
+            {
+                cts.Dispose();
+            }
+        }
+    }
+
+    private void ClearLyricsState()
+    {
+        CancelPendingLyricsLookup();
+        _lastLyricsTrackSignature = null;
+        _lastLyricsQueryDuration = TimeSpan.Zero;
+        _hasRetriedLyricsWithUpdatedDuration = false;
+        ApplyResolvedLyrics(LrcDocument.Empty, isLoading: false);
+    }
+
+    private static bool IsFreshTrackStartTimeline(
+        TimeSpan position,
+        DateTimeOffset updatedUtc,
+        DateTimeOffset nowUtc) =>
+        position >= TimeSpan.Zero &&
+        position < TimeSpan.FromSeconds(5) &&
+        MusicTimelineExtrapolator.IsTimestampUsable(updatedUtc, nowUtc) &&
+        (nowUtc - updatedUtc).TotalSeconds < 2.0;
+
+    private void NotifyTimelineDurationUpdated(
+        TimeSpan nativeDuration,
+        TimeSpan rawPosition,
+        DateTimeOffset updatedUtc,
+        DateTimeOffset nowUtc)
+    {
+        if (nativeDuration <= TimeSpan.FromSeconds(5))
+        {
+            return;
+        }
+
+        if (_currentTrackDurationUntrusted)
+        {
+            if (Math.Abs((nativeDuration - _currentTrackInitialNativeDuration).TotalMilliseconds) >= 500 ||
+                 IsFreshTrackStartTimeline(rawPosition, updatedUtc, nowUtc))
+            {
+                _currentTrackDurationUntrusted = false;
+            }
+            else
+            {
+                return;
+            }
+        }
+
+        if (!_hasCurrentMediaInfo ||
+            !ShowLyrics ||
+            string.IsNullOrWhiteSpace(_title) ||
+            _hasRetriedLyricsWithUpdatedDuration)
+        {
+            return;
+        }
+
+        bool queriedWithoutMatchingDuration =
+            _lastLyricsQueryDuration <= TimeSpan.Zero ||
+            Math.Abs((nativeDuration - _lastLyricsQueryDuration).TotalSeconds) > 5.0;
+        if (!queriedWithoutMatchingDuration)
+        {
+            return;
+        }
+
+        if (_isLoadingLyrics || (!_currentLyrics.HasSyncedLines && !_currentLyrics.IsInstrumental))
+        {
+            _hasRetriedLyricsWithUpdatedDuration = true;
+            _lyricsService.InvalidateNegativeCache(_title, _artist);
+            _lastLyricsTrackSignature = null;
+            ScheduleLyricsLookupForCurrentTrack();
+        }
+    }
+
+    private void ScheduleLyricsLookupForCurrentTrack()
+    {
+        if (!_hasCurrentMediaInfo || !ShowLyrics || string.IsNullOrWhiteSpace(_title))
+        {
+            if (!ShowLyrics || string.IsNullOrWhiteSpace(_title))
+            {
+                CancelPendingLyricsLookup();
+                _lastLyricsTrackSignature = null;
+                _lastLyricsQueryDuration = TimeSpan.Zero;
+                _hasRetriedLyricsWithUpdatedDuration = false;
+                ApplyResolvedLyrics(LrcDocument.Empty, isLoading: false);
+            }
+
+            return;
+        }
+
+        string signature = $"{_title.Trim()}\u001F{_artist.Trim()}\u001F{_localLyricsFolder}";
+        if (string.Equals(_lastLyricsTrackSignature, signature, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _lastLyricsTrackSignature = signature;
+        // Clear stale lyrics from the previous song immediately while marking lookup in progress.
+        ApplyResolvedLyrics(LrcDocument.Empty, isLoading: true);
+
+        CancelPendingLyricsLookup();
+        var cts = new CancellationTokenSource();
+        _lyricsFetchCts = cts;
+        TimeSpan queryDuration = _timelineExtrapolator.HasNativeDuration && !_currentTrackDurationUntrusted
+            ? Duration
+            : TimeSpan.Zero;
+        _lastLyricsQueryDuration = queryDuration;
+        var query = new LyricsQuery(_title, _artist, _album, queryDuration);
+        string localFolder = _localLyricsFolder;
+
+        _ = ResolveTrackLyricsAsync(signature, query, localFolder, cts.Token);
+    }
+
+    private async Task ResolveTrackLyricsAsync(
+        string signature,
+        LyricsQuery query,
+        string localFolder,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(LyricsLookupDebounceMs, cancellationToken);
+            LrcDocument resolved = await _lyricsService
+                .ResolveLyricsAsync(query, localFolder, cancellationToken)
+                .ConfigureAwait(false);
+            if (cancellationToken.IsCancellationRequested || _isDisposed)
+            {
+                return;
+            }
+
+            if (_dispatcherQueue is not null && !_dispatcherQueue.HasThreadAccess)
+            {
+                _dispatcherQueue.TryEnqueue(() =>
+                {
+                    if (!_isDisposed &&
+                        !cancellationToken.IsCancellationRequested &&
+                        string.Equals(_lastLyricsTrackSignature, signature, StringComparison.Ordinal))
+                    {
+                        ApplyResolvedLyrics(resolved, isLoading: false);
+                    }
+                });
+                return;
+            }
+
+            if (string.Equals(_lastLyricsTrackSignature, signature, StringComparison.Ordinal))
+            {
+                ApplyResolvedLyrics(resolved, isLoading: false);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            if (!_isDisposed)
+            {
+                App.Log($"[MusicWidget] Lyrics lookup failed: {ex.Message}");
+                if (_dispatcherQueue is not null && !_dispatcherQueue.HasThreadAccess)
+                {
+                    _dispatcherQueue.TryEnqueue(() =>
+                    {
+                        if (!_isDisposed && string.Equals(_lastLyricsTrackSignature, signature, StringComparison.Ordinal))
+                        {
+                            ApplyResolvedLyrics(LrcDocument.Empty, isLoading: false);
+                        }
+                    });
+                }
+                else if (string.Equals(_lastLyricsTrackSignature, signature, StringComparison.Ordinal))
+                {
+                    ApplyResolvedLyrics(LrcDocument.Empty, isLoading: false);
+                }
+            }
+        }
+    }
+
+    private void ApplyResolvedLyrics(LrcDocument document, bool isLoading = false)
+    {
+        _isLoadingLyrics = isLoading;
+        _currentLyrics = document;
+        LyricLines.Clear();
+        for (int i = 0; i < document.Lines.Count; i++)
+        {
+            LyricLines.Add(document.Lines[i]);
+        }
+
+        // Backfill duration for timeline-less players when LRCLIB or local LRC provides track length!
+        if (!_timelineExtrapolator.HasNativeDuration && document.TrackDuration is { TotalSeconds: > 0 } lyricDuration)
+        {
+            (TimeSpan pos, TimeSpan dur) = _timelineExtrapolator.SetFallbackDuration(lyricDuration, DateTimeOffset.UtcNow);
+            Duration = dur;
+            if (!_isSeeking)
+            {
+                Position = pos;
+            }
+        }
+        else if (!_timelineExtrapolator.HasNativeDuration && document.TrackDuration is null)
+        {
+            (TimeSpan pos, TimeSpan dur) = _timelineExtrapolator.SetFallbackDuration(TimeSpan.Zero, DateTimeOffset.UtcNow);
+            Duration = dur;
+            if (!_isSeeking)
+            {
+                Position = ShouldExposeTimelinePosition() ? pos : TimeSpan.Zero;
+            }
+        }
+
+        OnPropertyChanged(nameof(LyricsListVisibility));
+        OnPropertyChanged(nameof(LyricsPlaceholderVisibility));
+        OnPropertyChanged(nameof(LyricsPlaceholderText));
+        OnPropertyChanged(nameof(LyricsOffsetText));
+        OnPropertyChanged(nameof(HasNonZeroLyricsOffset));
+        OnPropertyChanged(nameof(CurrentLyricDurationSeconds));
+        UpdateLyricActiveLineAndScheduleTimer();
+        RefreshSubtitleState();
+    }
+
+    private void UpdateLyricActiveLineAndScheduleTimer()
+    {
+        _lyricTimer?.Stop();
+
+        if (_isDisposed || !ShowLyrics || !_hasCurrentMediaInfo || !_currentLyrics.HasSyncedLines)
+        {
+            bool previewReset = _isLyricIntroPreview;
+            _isLyricIntroPreview = false;
+            ActiveLyricIndex = -1;
+            CurrentLyricLine = string.Empty;
+            CurrentLyricSecondaryLine = null;
+            if (previewReset)
+            {
+                RefreshSubtitleState();
+            }
+
+            UpdateMusicTimerDiagnostics();
+            return;
+        }
+
+        TimeSpan effectivePos = _timelineExtrapolator.GetPosition(DateTimeOffset.UtcNow);
+        int activeIdx = _currentLyrics.FindActiveLineIndex(effectivePos);
+        ActiveLyricIndex = activeIdx;
+
+        bool nextIntroPreview;
+        if (activeIdx >= 0 && activeIdx < _currentLyrics.Lines.Count)
+        {
+            LrcLine line = _currentLyrics.Lines[activeIdx];
+            nextIntroPreview = false;
+            bool previewChanged = _isLyricIntroPreview != nextIntroPreview;
+            _isLyricIntroPreview = nextIntroPreview;
+            CurrentLyricLine = line.PrimaryText;
+            CurrentLyricSecondaryLine = line.SecondaryText;
+            if (previewChanged)
+            {
+                RefreshSubtitleState();
+            }
+        }
+        else
+        {
+            // During the track intro before the first vocal timestamp, preview line 0 at softer opacity.
+            LrcLine openingLine = _currentLyrics.Lines[0];
+            nextIntroPreview = true;
+            bool previewChanged = _isLyricIntroPreview != nextIntroPreview;
+            _isLyricIntroPreview = nextIntroPreview;
+            CurrentLyricLine = openingLine.PrimaryText;
+            CurrentLyricSecondaryLine = openingLine.SecondaryText;
+            if (previewChanged)
+            {
+                RefreshSubtitleState();
+            }
+        }
+
+        bool shouldScheduleNextWakeup =
+            _lyricTimer is not null &&
+            _isWindowVisible &&
+            _isWindowRevealCompleted &&
+            ShouldAdvancePlaybackClock &&
+            (!_isCompactCollapsed || ShowCapsuleLyrics);
+
+        if (shouldScheduleNextWakeup)
+        {
+            TimeSpan? delay = _currentLyrics.GetNextTransitionDelay(effectivePos, _timelineExtrapolator.PlaybackRate);
+            if (delay.HasValue)
+            {
+                _lyricTimer!.Interval = delay.Value;
+                _lyricTimer.Start();
+            }
+        }
+
+        UpdateMusicTimerDiagnostics();
     }
 
     private bool ShouldDeferEmptyInfo(MusicSessionInfo? info)
@@ -183,10 +674,14 @@ public sealed partial class MusicWidgetViewModel
 
     private void SetArtworkColor(Color value, bool hasArtworkColor)
     {
-        bool didChangeColor = !_artworkColor.Equals(value);
+        Color clampedBackdrop = hasArtworkColor
+            ? MusicDominantColorExtractor.ClampBackdropColor(value)
+            : value;
+        bool didChangeColor = !_artworkColor.Equals(value) || !_backdropColor.Equals(clampedBackdrop);
         bool didChangeAvailability = _hasArtworkColor != hasArtworkColor;
 
         _artworkColor = value;
+        _backdropColor = clampedBackdrop;
         _hasArtworkColor = hasArtworkColor;
 
         if (didChangeColor)
@@ -211,7 +706,9 @@ public sealed partial class MusicWidgetViewModel
 
         if (UseArtworkBackdrop && _hasArtworkColor)
         {
-            return _artworkColor;
+            return MusicDominantColorExtractor.EnsureReadableAccentColor(
+                _artworkColor,
+                TryIsLightApplicationTheme());
         }
 
         try
@@ -225,23 +722,112 @@ public sealed partial class MusicWidgetViewModel
         }
     }
 
+    private static bool TryIsLightApplicationTheme()
+    {
+        try
+        {
+            return Application.Current?.RequestedTheme == ApplicationTheme.Light;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private void RaiseMusicAccentPropertiesChanged()
     {
         OnPropertyChanged(nameof(MusicAccentBrush));
         OnPropertyChanged(nameof(PlayPauseButtonBackgroundBrush));
+        OnPropertyChanged(nameof(LyricsAmbientWashBrush));
     }
 
-    /// <summary>
-    /// Loads the thumbnail BitmapImage and extracts the dominant color in a single
-    /// stream pass, avoiding the double OpenReadAsync that the previous separate
-    /// methods incurred. Uses DecodePixelWidth to cap memory for large artwork.
-    /// </summary>
     private const int CoverDecodePixelWidth = 192;
+    private const int MaxCoverDecodedDimension = 512;
+    private const int DominantColorSampleMaxDimension = 32;
     private const int MaxCoverRetryCount = 3;
+    private const ulong MaxCoverStreamBytes = 32UL * 1024 * 1024;
 
-    private static async Task<(BitmapImage? image, Color? color)> LoadThumbnailAndColorAsync(MusicSessionInfo info)
+    private static async Task<byte[]?> ReadThumbnailBytesAsync(IRandomAccessStreamReference? thumbnail)
     {
-        if (info.Thumbnail is null)
+        if (thumbnail is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            using IRandomAccessStreamWithContentType stream = await thumbnail.OpenReadAsync();
+            ulong rawSize = stream.Size;
+            if (rawSize == 0 || rawSize > MaxCoverStreamBytes)
+            {
+                return null;
+            }
+
+            byte[] bytes = new byte[(int)rawSize];
+            using (var reader = new DataReader(stream.GetInputStreamAt(0)))
+            {
+                uint loaded = await reader.LoadAsync((uint)bytes.Length);
+                if (loaded == 0)
+                {
+                    reader.DetachStream();
+                    return null;
+                }
+
+                if (loaded < bytes.Length)
+                {
+                    Array.Resize(ref bytes, (int)loaded);
+                }
+
+                reader.ReadBytes(bytes);
+                reader.DetachStream();
+            }
+
+            return bytes;
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[MusicWidget] Failed to read thumbnail stream: {ex.Message}");
+            return null;
+        }
+    }
+
+    internal static ulong ComputeThumbnailFingerprint(ReadOnlySpan<byte> bytes)
+    {
+        if (bytes.IsEmpty)
+        {
+            return 0;
+        }
+
+        const ulong fnvOffset = 14695981039346656037UL;
+        const ulong fnvPrime = 1099511628211UL;
+        ulong hash = (fnvOffset ^ (ulong)bytes.Length) * fnvPrime;
+
+        int offset = 0;
+        while (offset + 8 <= bytes.Length)
+        {
+            ulong word = BinaryPrimitives.ReadUInt64LittleEndian(bytes.Slice(offset, 8));
+            hash = (hash ^ word) * fnvPrime;
+            offset += 8;
+        }
+
+        while (offset < bytes.Length)
+        {
+            hash = (hash ^ bytes[offset]) * fnvPrime;
+            offset++;
+        }
+
+        return hash == 0 ? 1UL : hash;
+    }
+
+    private static async Task<DecodedCoverResult> DecodeCoverCoreAsync(byte[]? thumbnailBytes)
+    {
+        var (image, color) = await DecodeThumbnailAndColorAsync(thumbnailBytes);
+        return new DecodedCoverResult(image is not null, image, color);
+    }
+
+    private static async Task<(BitmapImage? image, Color? color)> DecodeThumbnailAndColorAsync(byte[]? thumbnailBytes)
+    {
+        if (thumbnailBytes is null || thumbnailBytes.Length == 0)
         {
             return (null, null);
         }
@@ -249,18 +835,33 @@ public sealed partial class MusicWidgetViewModel
         try
         {
             PerformanceLogger.RecordMusicCoverDecode();
-            using var stream = await info.Thumbnail.OpenReadAsync();
 
-            // Create a clone for BitmapDecoder so BitmapImage can still read the original stream.
-            using var colorStream = stream.CloneStream();
+            // Decode the compressed SMTC cover stream once on a background worker at <= 192px,
+            // derive the 32x32 dominant-color sample directly from those decoded BGRA8 pixels,
+            // and hand XAML an uncompressed 32bpp BMP payload so UI-thread BitmapImage setup
+            // avoids running a second WIC JPEG/PNG/WebP decompression pass.
+            (byte[]? bmpBytes, int decodedWidth, Color? color) = await Task.Run(
+                () => DecodeScaledBmpAndColorCoreAsync(thumbnailBytes));
+            if (bmpBytes is null || decodedWidth <= 0)
+            {
+                return (null, null);
+            }
 
-            // Load BitmapImage with DecodePixelWidth to cap memory for high-res artwork.
-            var image = new BitmapImage { DecodePixelWidth = CoverDecodePixelWidth };
-            await image.SetSourceAsync(stream);
+            using var uiStream = new InMemoryRandomAccessStream();
+            using (var writer = new DataWriter(uiStream.GetOutputStreamAt(0)))
+            {
+                writer.WriteBytes(bmpBytes);
+                await writer.StoreAsync();
+                writer.DetachStream();
+            }
 
-            // Extract dominant color from a tiny downscaled version.
-            Color? color = await ExtractDominantColorAsync(colorStream);
-
+            uiStream.Seek(0);
+            var image = new BitmapImage
+            {
+                DecodePixelType = DecodePixelType.Physical,
+                DecodePixelWidth = decodedWidth
+            };
+            await image.SetSourceAsync(uiStream);
             return (image, color);
         }
         catch (Exception ex)
@@ -280,10 +881,12 @@ public sealed partial class MusicWidgetViewModel
 
         if (_coverRetryCount >= MaxCoverRetryCount)
         {
+            _coverRetryInFlight = false;
             return false;
         }
 
         int retryNumber = ++_coverRetryCount;
+        _coverRetryInFlight = true;
         _ = RetryCoverAsync(coverSignature, generation, retryNumber);
         return true;
     }
@@ -299,73 +902,366 @@ public sealed partial class MusicWidgetViewModel
             return;
         }
 
+        _coverRetryInFlight = false;
         await RefreshAsync();
     }
 
-    private static async Task<Color?> ExtractDominantColorAsync(IRandomAccessStream stream)
+    /// <summary>
+    /// Re-checks the active SMTC session's thumbnail stream at bounded backoff intervals after a track
+    /// change. On Windows 11 (including 26H2), Chromium browsers and Electron players frequently publish
+    /// initial metadata with a browser/app-icon placeholder or previous-track stream and swap in the
+    /// downloaded Media Session artwork asynchronously without raising a second <c>MediaPropertiesChanged</c>.
+    /// </summary>
+    private void ScheduleLateCoverProbes(string coverSignature)
+    {
+        int probeGeneration = ++_lateCoverProbeGeneration;
+        if (!CanRunWindowMediaRefresh())
+        {
+            return;
+        }
+
+        _ = RunLateCoverProbesAsync(coverSignature, probeGeneration);
+    }
+
+    private async Task RunLateCoverProbesAsync(string coverSignature, int probeGeneration)
+    {
+        for (int i = 0; i < LateCoverProbeDelaysMs.Length; i++)
+        {
+            await Task.Delay(LateCoverProbeDelaysMs[i]);
+            if (_isDisposed ||
+                probeGeneration != _lateCoverProbeGeneration ||
+                !CanRunWindowMediaRefresh() ||
+                !string.Equals(_currentTrackCoverSignature, coverSignature, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            IRandomAccessStreamReference? latestThumbnail =
+                await _musicSessionService.GetCurrentThumbnailAsync(_preferredSessionId);
+            if (_isDisposed ||
+                probeGeneration != _lateCoverProbeGeneration ||
+                !CanRunWindowMediaRefresh() ||
+                !string.Equals(_currentTrackCoverSignature, coverSignature, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            byte[]? bytes = await ReadThumbnailBytesAsync(latestThumbnail);
+            if (_isDisposed ||
+                probeGeneration != _lateCoverProbeGeneration ||
+                !CanRunWindowMediaRefresh() ||
+                !string.Equals(_currentTrackCoverSignature, coverSignature, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            ulong fp = ComputeThumbnailFingerprint(bytes);
+            if (fp == 0)
+            {
+                continue;
+            }
+
+            bool hasUnappliedNonPlaceholderCover =
+                !_hasAppliedCoverForCurrentTrack &&
+                (_sessionPlaceholderFingerprint == 0 || fp != _sessionPlaceholderFingerprint);
+            bool placeholderHoldExpired =
+                !_hasAppliedCoverForCurrentTrack &&
+                DateTimeOffset.UtcNow - _currentTrackCoverStartedUtc >= PlaceholderCoverHoldGrace;
+            bool coverChangedFromApplied =
+                _hasAppliedCoverForCurrentTrack && fp != _lastCoverFingerprint;
+
+            if (!hasUnappliedNonPlaceholderCover && !placeholderHoldExpired && !coverChangedFromApplied)
+            {
+                continue;
+            }
+
+            if (_dispatcherQueue is not null && !_dispatcherQueue.HasThreadAccess)
+            {
+                TaskCompletionSource dispatched = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                if (!_dispatcherQueue.TryEnqueue(async () =>
+                    {
+                        try
+                        {
+                            if (!_isDisposed &&
+                                string.Equals(_currentTrackCoverSignature, coverSignature, StringComparison.Ordinal))
+                            {
+                                await RefreshAsync();
+                            }
+                        }
+                        finally
+                        {
+                            dispatched.TrySetResult();
+                        }
+                    }))
+                {
+                    return;
+                }
+
+                await dispatched.Task;
+            }
+            else
+            {
+                await RefreshAsync();
+            }
+
+            if (_isDisposed || probeGeneration != _lateCoverProbeGeneration)
+            {
+                return;
+            }
+        }
+    }
+
+    private static async Task<(byte[]? bmpBytes, int decodedWidth, Color? color)> DecodeScaledBmpAndColorCoreAsync(
+        byte[] thumbnailBytes)
     {
         try
         {
-            var decoder = await BitmapDecoder.CreateAsync(stream);
-            uint targetWidth = Math.Max(1, Math.Min(32, decoder.PixelWidth));
-            uint targetHeight = Math.Max(1, Math.Min(32, decoder.PixelHeight));
+            using var stream = new InMemoryRandomAccessStream();
+            using (var writer = new DataWriter(stream.GetOutputStreamAt(0)))
+            {
+                writer.WriteBytes(thumbnailBytes);
+                await writer.StoreAsync();
+                writer.DetachStream();
+            }
+
+            stream.Seek(0);
+            BitmapDecoder decoder = await BitmapDecoder.CreateAsync(stream);
+            uint srcWidth = decoder.PixelWidth;
+            uint srcHeight = decoder.PixelHeight;
+            if (srcWidth == 0 || srcHeight == 0)
+            {
+                return (null, 0, null);
+            }
+
+            uint targetWidth = Math.Min((uint)CoverDecodePixelWidth, srcWidth);
+            uint targetHeight = Math.Max(1u, (uint)Math.Round((double)srcHeight * targetWidth / srcWidth));
+            if (targetHeight > MaxCoverDecodedDimension)
+            {
+                targetWidth = Math.Max(1u, (uint)Math.Round((double)targetWidth * MaxCoverDecodedDimension / targetHeight));
+                targetHeight = MaxCoverDecodedDimension;
+            }
+
             var transform = new BitmapTransform
             {
                 ScaledWidth = targetWidth,
                 ScaledHeight = targetHeight,
                 InterpolationMode = BitmapInterpolationMode.Fant
             };
-            var data = await decoder.GetPixelDataAsync(
+            PixelDataProvider data = await decoder.GetPixelDataAsync(
                 BitmapPixelFormat.Bgra8,
                 BitmapAlphaMode.Premultiplied,
                 transform,
                 ExifOrientationMode.IgnoreExifOrientation,
                 ColorManagementMode.DoNotColorManage);
             byte[] pixels = data.DetachPixelData();
-            if (pixels.Length < 4)
+            int expectedBytes = checked((int)targetWidth * (int)targetHeight * 4);
+            if (pixels.Length < expectedBytes)
             {
-                return null;
+                return (null, 0, null);
             }
 
-            double totalR = 0;
-            double totalG = 0;
-            double totalB = 0;
-            double weightTotal = 0;
+            byte[] sampled = SamplePremultipliedBgraGrid(
+                pixels,
+                (int)targetWidth,
+                (int)targetHeight,
+                DominantColorSampleMaxDimension);
+            Color? color = sampled.Length < 4
+                ? null
+                : MusicDominantColorExtractor.ExtractDominantColor(sampled);
 
-            for (int i = 0; i <= pixels.Length - 4; i += 4)
-            {
-                byte b = pixels[i];
-                byte g = pixels[i + 1];
-                byte r = pixels[i + 2];
-                byte a = pixels[i + 3];
-                if (a < 24)
-                {
-                    continue;
-                }
-
-                double saturationWeight = 0.55 + (Math.Max(r, Math.Max(g, b)) - Math.Min(r, Math.Min(g, b))) / 255.0;
-                double alphaWeight = a / 255.0;
-                double weight = saturationWeight * alphaWeight;
-                totalR += r * weight;
-                totalG += g * weight;
-                totalB += b * weight;
-                weightTotal += weight;
-            }
-
-            if (weightTotal <= 0.01)
-            {
-                return null;
-            }
-
-            byte averageR = ClampByte(totalR / weightTotal);
-            byte averageG = ClampByte(totalG / weightTotal);
-            byte averageB = ClampByte(totalB / weightTotal);
-            return Color.FromArgb(0xFF, averageR, averageG, averageB);
+            byte[] bmpBytes = EncodeTopDownBgraBmp(pixels, (int)targetWidth, (int)targetHeight);
+            return (bmpBytes, (int)targetWidth, color);
         }
         catch (Exception ex)
         {
-            App.Log($"[MusicWidget] Failed to sample thumbnail color: {ex.Message}");
-            return null;
+            App.Log($"[MusicWidget] Failed to decode thumbnail/color: {ex.Message}");
+            return (null, 0, null);
+        }
+    }
+
+    private static byte[] SamplePremultipliedBgraGrid(
+        ReadOnlySpan<byte> bgra,
+        int width,
+        int height,
+        int maxDimension)
+    {
+        int sampleWidth = Math.Max(1, Math.Min(maxDimension, width));
+        int sampleHeight = Math.Max(1, Math.Min(maxDimension, height));
+        if (sampleWidth == width && sampleHeight == height)
+        {
+            return bgra[..(width * height * 4)].ToArray();
+        }
+
+        byte[] sampled = new byte[sampleWidth * sampleHeight * 4];
+        int dstOffset = 0;
+        for (int sy = 0; sy < sampleHeight; sy++)
+        {
+            int srcY = (sy * height) / sampleHeight;
+            int rowStart = srcY * width;
+            for (int sx = 0; sx < sampleWidth; sx++)
+            {
+                int srcX = (sx * width) / sampleWidth;
+                int srcOffset = (rowStart + srcX) * 4;
+                sampled[dstOffset] = bgra[srcOffset];
+                sampled[dstOffset + 1] = bgra[srcOffset + 1];
+                sampled[dstOffset + 2] = bgra[srcOffset + 2];
+                sampled[dstOffset + 3] = bgra[srcOffset + 3];
+                dstOffset += 4;
+            }
+        }
+
+        return sampled;
+    }
+
+    private static byte[] EncodeTopDownBgraBmp(ReadOnlySpan<byte> premultipliedBgra, int width, int height)
+    {
+        int pixelByteLength = checked(width * height * 4);
+        ReadOnlySpan<byte> pixelSlice = premultipliedBgra[..pixelByteLength];
+
+        bool hasNonOpaqueAlpha = false;
+        for (int i = 3; i < pixelSlice.Length; i += 4)
+        {
+            if (pixelSlice[i] != 255)
+            {
+                hasNonOpaqueAlpha = true;
+                break;
+            }
+        }
+
+        if (!hasNonOpaqueAlpha)
+        {
+            const int v3HeaderSize = 54;
+            byte[] bmp = new byte[v3HeaderSize + pixelByteLength];
+            Span<byte> span = bmp;
+            span[0] = (byte)'B';
+            span[1] = (byte)'M';
+            BinaryPrimitives.WriteInt32LittleEndian(span.Slice(2, 4), bmp.Length);
+            BinaryPrimitives.WriteInt32LittleEndian(span.Slice(10, 4), v3HeaderSize);
+            BinaryPrimitives.WriteInt32LittleEndian(span.Slice(14, 4), 40);
+            BinaryPrimitives.WriteInt32LittleEndian(span.Slice(18, 4), width);
+            BinaryPrimitives.WriteInt32LittleEndian(span.Slice(22, 4), -height);
+            BinaryPrimitives.WriteUInt16LittleEndian(span.Slice(26, 2), 1);
+            BinaryPrimitives.WriteUInt16LittleEndian(span.Slice(28, 2), 32);
+            BinaryPrimitives.WriteInt32LittleEndian(span.Slice(34, 4), pixelByteLength);
+            pixelSlice.CopyTo(span[v3HeaderSize..]);
+            return bmp;
+        }
+
+        // Preserve straight alpha via BITMAPV4HEADER (BI_BITFIELDS + sRGB) when a cover has transparency.
+        const int v4HeaderSize = 122;
+        byte[] alphaBmp = new byte[v4HeaderSize + pixelByteLength];
+        Span<byte> alphaSpan = alphaBmp;
+        alphaSpan[0] = (byte)'B';
+        alphaSpan[1] = (byte)'M';
+        BinaryPrimitives.WriteInt32LittleEndian(alphaSpan.Slice(2, 4), alphaBmp.Length);
+        BinaryPrimitives.WriteInt32LittleEndian(alphaSpan.Slice(10, 4), v4HeaderSize);
+        BinaryPrimitives.WriteInt32LittleEndian(alphaSpan.Slice(14, 4), 108);
+        BinaryPrimitives.WriteInt32LittleEndian(alphaSpan.Slice(18, 4), width);
+        BinaryPrimitives.WriteInt32LittleEndian(alphaSpan.Slice(22, 4), -height);
+        BinaryPrimitives.WriteUInt16LittleEndian(alphaSpan.Slice(26, 2), 1);
+        BinaryPrimitives.WriteUInt16LittleEndian(alphaSpan.Slice(28, 2), 32);
+        BinaryPrimitives.WriteUInt32LittleEndian(alphaSpan.Slice(30, 4), 3u); // BI_BITFIELDS
+        BinaryPrimitives.WriteInt32LittleEndian(alphaSpan.Slice(34, 4), pixelByteLength);
+        BinaryPrimitives.WriteUInt32LittleEndian(alphaSpan.Slice(54, 4), 0x00FF0000u);
+        BinaryPrimitives.WriteUInt32LittleEndian(alphaSpan.Slice(58, 4), 0x0000FF00u);
+        BinaryPrimitives.WriteUInt32LittleEndian(alphaSpan.Slice(62, 4), 0x000000FFu);
+        BinaryPrimitives.WriteUInt32LittleEndian(alphaSpan.Slice(66, 4), 0xFF000000u);
+        BinaryPrimitives.WriteUInt32LittleEndian(alphaSpan.Slice(70, 4), 0x73524742u); // LCS_sRGB
+
+        Span<byte> dstPixels = alphaSpan[v4HeaderSize..];
+        for (int i = 0; i < pixelByteLength; i += 4)
+        {
+            byte a = pixelSlice[i + 3];
+            if (a == 0)
+            {
+                dstPixels[i] = 0;
+                dstPixels[i + 1] = 0;
+                dstPixels[i + 2] = 0;
+                dstPixels[i + 3] = 0;
+            }
+            else if (a == 255)
+            {
+                dstPixels[i] = pixelSlice[i];
+                dstPixels[i + 1] = pixelSlice[i + 1];
+                dstPixels[i + 2] = pixelSlice[i + 2];
+                dstPixels[i + 3] = 255;
+            }
+            else
+            {
+                int half = a >> 1;
+                dstPixels[i] = (byte)Math.Min(255, (pixelSlice[i] * 255 + half) / a);
+                dstPixels[i + 1] = (byte)Math.Min(255, (pixelSlice[i + 1] * 255 + half) / a);
+                dstPixels[i + 2] = (byte)Math.Min(255, (pixelSlice[i + 2] * 255 + half) / a);
+                dstPixels[i + 3] = a;
+            }
+        }
+
+        return alphaBmp;
+    }
+
+    private void ClearSourceAppIcon()
+    {
+        ++_sourceIconRequestVersion;
+        _resolvedSourceIconKey = string.Empty;
+        if (_sourceAppIcon is not null)
+        {
+            _sourceAppIcon = null;
+            OnPropertyChanged(nameof(SourceAppIcon));
+            OnPropertyChanged(nameof(SourceAppIconVisibility));
+            OnPropertyChanged(nameof(SourceFallbackIconVisibility));
+        }
+    }
+
+    private void RefreshSourceAppIcon(string sourceAppUserModelId, string sourceDisplayName)
+    {
+        if (string.IsNullOrWhiteSpace(sourceAppUserModelId))
+        {
+            ClearSourceAppIcon();
+            return;
+        }
+
+        string normalizedKey = sourceAppUserModelId.Trim();
+        bool sourceChanged = !string.Equals(_resolvedSourceIconKey, normalizedKey, StringComparison.OrdinalIgnoreCase);
+        if (!sourceChanged && _sourceAppIcon is not null)
+        {
+            return;
+        }
+
+        _resolvedSourceIconKey = normalizedKey;
+        if (sourceChanged && _sourceAppIcon is not null)
+        {
+            _sourceAppIcon = null;
+            OnPropertyChanged(nameof(SourceAppIcon));
+            OnPropertyChanged(nameof(SourceAppIconVisibility));
+            OnPropertyChanged(nameof(SourceFallbackIconVisibility));
+        }
+
+        int requestVersion = ++_sourceIconRequestVersion;
+        _ = LoadSourceAppIconAsync(normalizedKey, sourceDisplayName, requestVersion);
+    }
+
+    private async Task LoadSourceAppIconAsync(
+        string sourceAppUserModelId,
+        string sourceDisplayName,
+        int requestVersion)
+    {
+        BitmapImage? icon = await MusicSourceAppIconResolver.ResolveIconAsync(
+            _dispatcherQueue,
+            sourceAppUserModelId,
+            sourceDisplayName);
+        if (_isDisposed ||
+            requestVersion != _sourceIconRequestVersion ||
+            !string.Equals(_resolvedSourceIconKey, sourceAppUserModelId, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        if (!ReferenceEquals(_sourceAppIcon, icon))
+        {
+            _sourceAppIcon = icon;
+            OnPropertyChanged(nameof(SourceAppIcon));
+            OnPropertyChanged(nameof(SourceAppIconVisibility));
+            OnPropertyChanged(nameof(SourceFallbackIconVisibility));
         }
     }
 }

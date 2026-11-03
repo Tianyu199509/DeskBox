@@ -1,4 +1,4 @@
-﻿namespace DeskBox.Tests;
+namespace DeskBox.Tests;
 
 public sealed class AotStage4E4ContractTests
 {
@@ -64,7 +64,7 @@ public sealed class AotStage4E4ContractTests
     }
 
     [Fact]
-    public void FileWidgetSettingsSection_PreservesTwoAttachedPropertyTwoWayBindings()
+    public void FileWidgetSettingsSection_PreservesTwoTwoWayEditorBindings()
     {
         string xaml = ReadRepositoryFile(
             "src/DeskBox/Views/SettingsSections/FileWidgetSettingsSection.xaml");
@@ -73,7 +73,7 @@ public sealed class AotStage4E4ContractTests
             1,
             CountOccurrences(
                 xaml,
-                "controls:SettingsComboBox.Value=\"{x:Bind FileStack.OpenMode, Mode=TwoWay}\""));
+                "IsOn=\"{x:Bind Interaction.FileItemContextMenuEnabled, Mode=TwoWay}\""));
         Assert.Equal(
             1,
             CountOccurrences(
@@ -89,7 +89,7 @@ public sealed class AotStage4E4ContractTests
 
         Assert.DoesNotContain("{Binding ", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("{x:Bind ViewModel.", xaml, StringComparison.Ordinal);
-        Assert.Equal(6, CountOccurrences(xaml, "{x:Bind "));
+        Assert.Equal(32, CountOccurrences(xaml, "{x:Bind "));
     }
 
     [Fact]

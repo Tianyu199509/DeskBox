@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text.Json;
 using Windows.Devices.Geolocation;
 
@@ -15,10 +16,21 @@ public static class WindowsLocationHelper
     internal static readonly TimeSpan SuccessfulResultReuseDuration = TimeSpan.FromHours(6);
     internal static readonly TimeSpan FailedResultReuseDuration = TimeSpan.FromMinutes(10);
     private static readonly object s_locationGate = new();
-    private static readonly HttpClient s_httpClient = new()
+    private static readonly HttpClient s_httpClient = CreateHttpClient();
+
+    private static HttpClient CreateHttpClient()
     {
-        Timeout = TimeSpan.FromSeconds(6)
-    };
+        var handler = new SocketsHttpHandler
+        {
+            PooledConnectionLifetime = TimeSpan.FromMinutes(10),
+            PooledConnectionIdleTimeout = TimeSpan.FromSeconds(30),
+            AutomaticDecompression = DecompressionMethods.All
+        };
+        return new HttpClient(handler)
+        {
+            Timeout = TimeSpan.FromSeconds(6)
+        };
+    }
     private static Task<(double Lat, double Lon, string Name)?>? s_inFlightLocationTask;
     private static (double Lat, double Lon, string Name)? s_cachedLocation;
     private static DateTimeOffset s_cachedLocationAtUtc;
@@ -192,11 +204,13 @@ public static class WindowsLocationHelper
         try
         {
             string lang = localizationService?.ApiLanguageCode ?? "en";
-            string json = await s_httpClient.GetStringAsync(
+            await using Stream stream = await s_httpClient.GetStreamAsync(
                 $"http://ip-api.com/json/?fields=status,lat,lon,city,regionName,country&lang={lang}",
-                cancellationToken);
+                cancellationToken).ConfigureAwait(false);
 
-            using var doc = JsonDocument.Parse(json);
+            using var doc = await JsonDocument.ParseAsync(
+                stream,
+                cancellationToken: cancellationToken).ConfigureAwait(false);
             var root = doc.RootElement;
 
             if (root.TryGetProperty("status", out var statusElem) &&
@@ -236,10 +250,12 @@ public static class WindowsLocationHelper
     {
         try
         {
-            string json = await s_httpClient.GetStringAsync(
+            await using Stream stream = await s_httpClient.GetStreamAsync(
                 "https://ipapi.co/json/",
-                cancellationToken);
-            using var doc = JsonDocument.Parse(json);
+                cancellationToken).ConfigureAwait(false);
+            using var doc = await JsonDocument.ParseAsync(
+                stream,
+                cancellationToken: cancellationToken).ConfigureAwait(false);
             var root = doc.RootElement;
 
             if (root.TryGetProperty("latitude", out var latElem) &&
@@ -288,10 +304,12 @@ public static class WindowsLocationHelper
     {
         try
         {
-            string json = await s_httpClient.GetStringAsync(
+            await using Stream stream = await s_httpClient.GetStreamAsync(
                 "https://api.ip.sb/geoip",
-                cancellationToken);
-            using var doc = JsonDocument.Parse(json);
+                cancellationToken).ConfigureAwait(false);
+            using var doc = await JsonDocument.ParseAsync(
+                stream,
+                cancellationToken: cancellationToken).ConfigureAwait(false);
             var root = doc.RootElement;
 
             if (root.TryGetProperty("latitude", out var latElem) &&

@@ -1,0 +1,25 @@
+<!-- ic_fluent_search_sparkle_20_color (@fluentui/react-icons SearchSparkleColor) -->
+<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 20 20">
+  <path fill="url(#ic_fluent_search_sparkle_20_color__a)" d="M14 8.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0" />
+  <path fill="url(#ic_fluent_search_sparkle_20_color__b)" d="M12.54 13.6a6.5 6.5 0 1 1 1.06-1.06l3.43 3.43a.75.75 0 0 1-.98 1.13l-.08-.07zm.96-5.1a5 5 0 1 0-10 0 5 5 0 0 0 10 0" />
+  <path fill="url(#ic_fluent_search_sparkle_20_color__c)" d="m17.78 8.21-.76-.25a1.6 1.6 0 0 1-1-1l-.25-.76a.3.3 0 0 0-.57 0l-.25.77a1.6 1.6 0 0 1-.98 1l-.77.24a.3.3 0 0 0 0 .57l.77.25a1.6 1.6 0 0 1 1 1l.24.77a.3.3 0 0 0 .58 0l.24-.77a1.6 1.6 0 0 1 1-1l.77-.24a.3.3 0 0 0 0-.57z" />
+  <path fill="url(#ic_fluent_search_sparkle_20_color__d)" d="m12.88.28.35 1.07a2.2 2.2 0 0 0 1.4 1.4l1.07.35h.02a.42.42 0 0 1 0 .8l-1.07.35a2.2 2.2 0 0 0-1.4 1.4l-.35 1.07a.42.42 0 0 1-.8 0l-.35-1.07a2.2 2.2 0 0 0-1.4-1.4L9.28 3.9a.42.42 0 0 1 0-.8l1.07-.35a2.2 2.2 0 0 0 1.38-1.4l.35-1.07a.42.42 0 0 1 .8 0" />
+  <defs>
+    <radialGradient id="ic_fluent_search_sparkle_20_color__c" cx="0" cy="0" r="1" gradientTransform="rotate(63.38 12.56 -2.86)scale(28.6137 22.2808)" gradientUnits="userSpaceOnUse">
+      <stop offset=".72" stop-color="#ffcd0f" />
+      <stop offset=".99" stop-color="#e67505" />
+    </radialGradient>
+    <radialGradient id="ic_fluent_search_sparkle_20_color__d" cx="0" cy="0" r="1" gradientTransform="rotate(61.2 15.06 -8.55)scale(30.098 23.4366)" gradientUnits="userSpaceOnUse">
+      <stop offset=".7" stop-color="#ffcd0f" />
+      <stop offset=".99" stop-color="#e67505" />
+    </radialGradient>
+    <linearGradient id="ic_fluent_search_sparkle_20_color__a" x1="11.25" x2="3" y1="4.83" y2="14" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fdfdfd" />
+      <stop offset="1" stop-color="#b3e0ff" />
+    </linearGradient>
+    <linearGradient id="ic_fluent_search_sparkle_20_color__b" x1="2.8" x2="15.64" y1="15.64" y2="5.21" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0094f0" />
+      <stop offset="1" stop-color="#29c3ff" />
+    </linearGradient>
+  </defs>
+</svg>

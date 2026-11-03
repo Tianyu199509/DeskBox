@@ -1,0 +1,21 @@
+{
+  "defaultFeedTitle": "Tech News",
+  "defaultTopHeadline": "Click Refresh in the top-right corner for the latest stories",
+  "emptySubtitle": "Click Refresh above, or switch feed presets in widget settings",
+  "emptyTitle": "Waiting for feed sync",
+  "feedCustom": "Custom RSS URL (below)",
+  "feedIthome": "IT Home (IT之家)",
+  "feedSspai": "SSPai (少数派)",
+  "openArticleTooltip": "Open article",
+  "optDensityCompact": "Compact (Headlines Only)",
+  "optDensitySummary": "Standard (Title + Summary)",
+  "refreshBtn": "Refresh",
+  "refreshTooltip": "Fetch latest feed items now",
+  "setDensity": "Display Density",
+  "setFeedUrl": "Custom RSS / Atom URL (https://)",
+  "setPresetFeed": "Preset News Source",
+  "syncing": "Syncing latest stories…",
+  "updatedPrefix": "Updated ",
+  "widgetDescription": "Auto-sync Hacker News, GitHub Blog, V2EX, SSPai, or any custom HTTPS RSS / Atom feed with offline cache.",
+  "widgetName": "RSS News Reader"
+}

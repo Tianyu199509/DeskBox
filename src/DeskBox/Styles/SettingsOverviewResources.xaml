@@ -65,9 +65,8 @@
 
     <Style x:Key="ActionButtonStyle" TargetType="Button">
         <Setter Property="MinHeight" Value="34" />
-        <Setter Property="Height" Value="34" />
         <Setter Property="MinWidth" Value="104" />
-        <Setter Property="Padding" Value="12,0" />
+        <Setter Property="Padding" Value="12,5" />
         <Setter Property="CornerRadius" Value="6" />
     </Style>
 
@@ -82,9 +81,8 @@
          accent+plain buttons in one row stay height-aligned. -->
     <Style x:Key="AccentActionButtonStyle" TargetType="Button" BasedOn="{StaticResource AccentButtonStyle}">
         <Setter Property="MinHeight" Value="34" />
-        <Setter Property="Height" Value="34" />
         <Setter Property="MinWidth" Value="104" />
-        <Setter Property="Padding" Value="12,0" />
+        <Setter Property="Padding" Value="12,5" />
         <Setter Property="CornerRadius" Value="6" />
     </Style>
 
@@ -100,6 +98,17 @@
         <Setter Property="CornerRadius" Value="5" />
         <Setter Property="HorizontalContentAlignment" Value="Center" />
         <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+
+    <Style x:Key="ShortcutCaptureButtonStyle" TargetType="Button">
+        <Setter Property="MinHeight" Value="34" />
+        <Setter Property="MinWidth" Value="0" />
+        <Setter Property="Padding" Value="4,3" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
 
     <Style x:Key="AccentSwatchButtonStyle" TargetType="Button">

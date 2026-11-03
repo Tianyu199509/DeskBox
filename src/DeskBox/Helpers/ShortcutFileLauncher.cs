@@ -138,6 +138,18 @@ internal static class ShortcutFileLauncher
                 continue;
             }
 
+            if (ShortcutHelper.IsInternetShortcutPath(trimmed) &&
+                File.Exists(trimmed) &&
+                ShortcutHelper.ReadStoredMetadata(trimmed)?.TargetPath is { Length: > 0 } targetUrl &&
+                !targetUrl.Contains('"') &&
+                Uri.TryCreate(targetUrl, UriKind.Absolute, out Uri? parsedUri) &&
+                (string.Equals(parsedUri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(parsedUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)))
+            {
+                sanitized.Add(targetUrl);
+                continue;
+            }
+
             sanitized.Add(trimmed);
         }
 
@@ -161,12 +173,31 @@ internal static class ShortcutFileLauncher
                 continue;
             }
 
+            string rawTrimmed = path.Trim();
+            string trimmed = rawTrimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                             rawTrimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+                ? rawTrimmed
+                : Path.TrimEndingDirectorySeparator(rawTrimmed);
+            if (trimmed.Length == 0)
+            {
+                continue;
+            }
+
             if (builder.Length > 0)
             {
                 builder.Append(' ');
             }
 
-            builder.Append('"').Append(path.Trim()).Append('"');
+            // In Win32 CommandLineToArgvW, a trailing backslash immediately
+            // before the closing quote (e.g. "D:\") escapes the quote itself.
+            // Doubling a drive-root trailing backslash ("D:\\") passes D:\ cleanly.
+            builder.Append('"').Append(trimmed);
+            if (trimmed.EndsWith('\\'))
+            {
+                builder.Append('\\');
+            }
+
+            builder.Append('"');
         }
 
         return builder.ToString();

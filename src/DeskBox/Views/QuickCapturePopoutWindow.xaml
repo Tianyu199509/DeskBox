@@ -1,0 +1,226 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="DeskBox.Views.QuickCapturePopoutWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:DeskBox.Controls"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <Grid
+        x:Name="RootGrid"
+        AllowDrop="True"
+        Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+        DragOver="RootGrid_DragOver"
+        Drop="RootGrid_Drop"
+        IsTabStop="True"
+        KeyDown="RootGrid_KeyDown"
+        PointerWheelChanged="RootGrid_PointerWheelChanged">
+        <Grid.Resources>
+            <Style x:Key="PopoutHeaderIconButtonStyle" TargetType="Button" BasedOn="{StaticResource SubtleButtonStyle}">
+                <Setter Property="Width" Value="28" />
+                <Setter Property="Height" Value="28" />
+                <Setter Property="MinWidth" Value="28" />
+                <Setter Property="MinHeight" Value="28" />
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="CornerRadius" Value="{StaticResource WidgetCornerRadiusSmall}" />
+                <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+            </Style>
+        </Grid.Resources>
+
+        <Grid.RowDefinitions>
+            <RowDefinition Height="36" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Grid
+            x:Name="AppTitleBar"
+            Grid.Row="0"
+            Padding="12,0,142,0"
+            Background="Transparent">
+            <StackPanel
+                Orientation="Horizontal"
+                Spacing="8"
+                VerticalAlignment="Center">
+                <Image
+                    Width="15"
+                    Height="15"
+                    Source="ms-appx:///Assets/deskbox.svg" />
+                <TextBlock
+                    x:Name="WindowTitleText"
+                    FontSize="12"
+                    FontWeight="SemiBold"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    MaxLines="1"
+                    TextTrimming="CharacterEllipsis"
+                    VerticalAlignment="Center" />
+            </StackPanel>
+        </Grid>
+
+        <Border
+            x:Name="ToolbarHost"
+            Grid.Row="1"
+            Margin="10,0,10,6"
+            Padding="4,2"
+            Background="{ThemeResource LayerFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="{StaticResource WidgetCornerRadiusSmall}">
+            <Grid ColumnSpacing="4">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Orientation="Horizontal" Spacing="2">
+                    <Button
+                        x:Name="EditButton"
+                        Click="EditButton_Click"
+                        Style="{StaticResource PopoutHeaderIconButtonStyle}">
+                        <FontIcon FontSize="13" Glyph="&#xE70F;" />
+                    </Button>
+                    <Button
+                        x:Name="DoneButton"
+                        Click="DoneButton_Click"
+                        Style="{StaticResource PopoutHeaderIconButtonStyle}"
+                        Visibility="Collapsed">
+                        <FontIcon FontSize="13" Glyph="&#xE73E;" />
+                    </Button>
+                </StackPanel>
+
+                <TextBlock
+                    x:Name="QuickJotHintText"
+                    Grid.Column="1"
+                    Margin="4,0"
+                    VerticalAlignment="Center"
+                    FontSize="11.5"
+                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                    MaxLines="1"
+                    TextTrimming="CharacterEllipsis"
+                    Visibility="Collapsed" />
+
+                <StackPanel
+                    Grid.Column="2"
+                    HorizontalAlignment="Right"
+                    Orientation="Horizontal"
+                    Spacing="2">
+                    <Button
+                        x:Name="AlwaysOnTopButton"
+                        Click="AlwaysOnTopButton_Click"
+                        Style="{StaticResource PopoutHeaderIconButtonStyle}">
+                        <controls:PinStateIcon
+                            x:Name="AlwaysOnTopIcon"
+                            Width="13"
+                            Height="13"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    </Button>
+                    <Button
+                        x:Name="AppearanceButton"
+                        Click="AppearanceButton_Click"
+                        Style="{StaticResource PopoutHeaderIconButtonStyle}">
+                        <FontIcon FontSize="13" Glyph="&#xE790;" />
+                    </Button>
+                    <Button
+                        x:Name="AddAttachmentButton"
+                        Click="AddAttachmentButton_Click"
+                        Style="{StaticResource PopoutHeaderIconButtonStyle}"
+                        Visibility="Collapsed">
+                        <FontIcon FontSize="13" Glyph="&#xE723;" />
+                    </Button>
+                    <Button
+                        x:Name="CopyButton"
+                        Click="CopyButton_Click"
+                        Style="{StaticResource PopoutHeaderIconButtonStyle}">
+                        <FontIcon x:Name="CopyButtonIcon" FontSize="13" Glyph="&#xE8C8;" />
+                    </Button>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <Border
+            x:Name="ContentMaterialSurface"
+            Grid.Row="2"
+            Margin="10,0,10,6"
+            Padding="10,6,10,8"
+            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="{StaticResource WidgetCornerRadiusSmall}">
+            <Grid RowSpacing="6">
+                <Grid.RowDefinitions>
+                    <RowDefinition x:Name="PrimaryImageRow" Height="0" />
+                    <RowDefinition x:Name="BodyRow" Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <Border
+                    x:Name="PrimaryImageHost"
+                    Grid.Row="0"
+                    MinHeight="110"
+                    Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="{StaticResource WidgetCornerRadiusSmall}"
+                    Visibility="Collapsed">
+                    <Image
+                        x:Name="PrimaryImage"
+                        AutomationProperties.AccessibilityView="Raw"
+                        Stretch="Uniform" />
+                </Border>
+
+                <Grid
+                    x:Name="ReaderEditorHost"
+                    Grid.Row="1">
+                    <controls:MarkdownDocumentView
+                        x:Name="PopoutMarkdownView"
+                        Margin="4,2,0,4"
+                        Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                        TaskToggleRequested="PopoutMarkdownView_TaskToggleRequested"
+                        Visibility="Collapsed" />
+                    <controls:MarkdownSourceEditor
+                        x:Name="PopoutMarkdownEditor"
+                        EnableCtrlSSaveShortcut="True"
+                        Visibility="Collapsed" />
+                </Grid>
+
+                <controls:AttachmentTileStrip
+                    x:Name="PopoutAttachmentStrip"
+                    Grid.Row="2"
+                    OpenRequested="PopoutAttachmentStrip_OpenRequested"
+                    RemoveRequested="PopoutAttachmentStrip_RemoveRequested"
+                    Visibility="Collapsed" />
+            </Grid>
+        </Border>
+
+        <Grid
+            x:Name="FooterRow"
+            Grid.Row="3"
+            Margin="12,0,12,8"
+            ColumnSpacing="8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock
+                x:Name="StatusTimestampText"
+                VerticalAlignment="Center"
+                FontSize="11.5"
+                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                MaxLines="1"
+                TextTrimming="CharacterEllipsis" />
+            <Button
+                x:Name="QuickJotSaveButton"
+                Grid.Column="1"
+                MinHeight="28"
+                Padding="12,3"
+                Click="QuickJotSaveButton_Click"
+                Style="{StaticResource AccentButtonStyle}"
+                Visibility="Collapsed" />
+        </Grid>
+    </Grid>
+</Window>

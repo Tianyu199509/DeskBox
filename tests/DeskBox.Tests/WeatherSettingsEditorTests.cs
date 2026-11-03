@@ -465,23 +465,23 @@ public sealed class WeatherSettingsEditorTests : IDisposable
         // Section-level DataContext switch; the template stays {Binding}-only
         // (no x:Bind, so its x:DataType keeps pointing at the shell type).
         Assert.Contains(
-            "controls:SettingsComboBox.Value=\"{Binding SelectedLocationMode, Mode=TwoWay}\"",
+            "controls:SettingsSegmented.Value=\"{Binding SelectedLocationMode, Mode=TwoWay}\"",
             windowXaml,
             StringComparison.Ordinal);
         Assert.Contains(
-            "ItemsSource=\"{Binding AvailableLocationModeOptions}\"",
+            "controls:SettingsSegmented.Options=\"{Binding AvailableLocationModeOptions}\"",
             windowXaml,
             StringComparison.Ordinal);
         Assert.Contains(
-            "Text=\"{Binding LocationStatusText}\"",
+            "Description=\"{Binding LocationStatusText}\"",
             windowXaml,
             StringComparison.Ordinal);
         Assert.Contains(
-            "Visibility=\"{Binding ShowLocationStatus, Converter={StaticResource SettingsBoolToVisibilityConverter}}\"",
+            "Description=\"{Binding UnitsAndSourceSummaryText}\"",
             windowXaml,
             StringComparison.Ordinal);
         Assert.Contains(
-            "Visibility=\"{Binding ShowCitySearch, Converter={StaticResource SettingsBoolToVisibilityConverter}}\"",
+            "Visibility=\"{Binding IsManualLocationSelected, Converter={StaticResource SettingsBoolToVisibilityConverter}}\"",
             windowXaml,
             StringComparison.Ordinal);
         Assert.Contains(
@@ -505,11 +505,11 @@ public sealed class WeatherSettingsEditorTests : IDisposable
             windowXaml,
             StringComparison.Ordinal);
         Assert.Contains(
-            "controls:SettingsComboBox.Value=\"{Binding SelectedDefaultView, Mode=TwoWay}\"",
+            "controls:SettingsSegmented.Options=\"{Binding AvailableSkinOptions}\"",
             windowXaml,
             StringComparison.Ordinal);
         Assert.Contains(
-            "controls:SettingsComboBox.Value=\"{Binding SelectedSkin, Mode=TwoWay}\"",
+            "controls:SettingsSegmented.Value=\"{Binding SelectedSkin, Mode=TwoWay}\"",
             windowXaml,
             StringComparison.Ordinal);
         Assert.Contains(
@@ -525,7 +525,7 @@ public sealed class WeatherSettingsEditorTests : IDisposable
             windowXaml,
             StringComparison.Ordinal);
         Assert.Contains(
-            "IsOn=\"{Binding ShowForecast, Mode=TwoWay}\"",
+            "IsChecked=\"{Binding ShowForecast, Mode=TwoWay}\"",
             windowXaml,
             StringComparison.Ordinal);
         Assert.DoesNotContain("{Binding Weather", windowXaml, StringComparison.Ordinal);
@@ -551,7 +551,7 @@ public sealed class WeatherSettingsEditorTests : IDisposable
         Assert.Contains("[WinRT.GeneratedBindableCustomProperty([", bridge, StringComparison.Ordinal);
         Assert.Contains("nameof(SelectedLocationMode)", bridge, StringComparison.Ordinal);
         Assert.Contains("nameof(CitySuggestionItems)", bridge, StringComparison.Ordinal);
-        Assert.Equal(31, Regex.Matches(bridge, @"nameof\(").Count);
-        Assert.Equal(39, Regex.Matches(bindableShell, @"nameof\(").Count);
+        Assert.Equal(33, Regex.Matches(bridge, @"nameof\(").Count);
+        Assert.Equal(44, Regex.Matches(bindableShell, @"nameof\(").Count);
     }
 }

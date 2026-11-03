@@ -1,5 +1,3 @@
-using System.Xml.Linq;
-
 namespace DeskBox.Tests;
 
 /// <summary>
@@ -26,62 +24,50 @@ public sealed class SettingsNoticeCardContractTests
     public void SettingsSurfaces_DoNotPlaceRichContentInsideInfoBarContent()
     {
         string window = ReadRepositoryFile("src/DeskBox/Views/SettingsWindow.xaml");
+        Assert.DoesNotContain("InfoBar.Content", window, StringComparison.Ordinal);
+
+        foreach (string sectionPath in Directory.EnumerateFiles(
+                     TestPaths.FromRepository("src/DeskBox/Views/SettingsSections"),
+                     "*.xaml"))
+        {
+            string sectionXaml = File.ReadAllText(sectionPath);
+            Assert.DoesNotContain("InfoBar.Content", sectionXaml, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void Notices_UseNativeInfoBarsOrCompactInfoTipsWithoutPermanentHotkeyBanners()
+    {
+        string window = ReadRepositoryFile("src/DeskBox/Views/SettingsWindow.xaml");
         string search = ReadRepositoryFile(
             "src/DeskBox/Views/SettingsSections/SearchSettingsSection.xaml");
 
-        Assert.DoesNotContain("InfoBar.Content", window, StringComparison.Ordinal);
-        Assert.DoesNotContain("InfoBar.Content", search, StringComparison.Ordinal);
-    }
-
-    [Theory]
-    [InlineData("src/DeskBox/Views/SettingsWindow.xaml", 3)]
-    [InlineData("src/DeskBox/Views/SettingsSections/SearchSettingsSection.xaml", 1)]
-    public void Notices_AreNativeInfoBarsWithTitleAndMessageProperties(string path, int expectedCount)
-    {
-        string xaml = ReadRepositoryFile(path);
-
-        int count = CountOccurrences(xaml, "IsClosable=\"False\"");
-        Assert.True(count >= expectedCount,
-            $"{path}: expected at least {expectedCount} notice InfoBars, found {count}");
-
-        int headerKeyNotices = CountOccurrences(xaml,
-            "svc:Localized.DescriptionKey=\"Settings.GlobalHotkey.ElevatedNotice.Description\"");
-        int storeNotice = CountOccurrences(xaml,
+        int storeNotice = CountOccurrences(window,
             "svc:Localized.HeaderKey=\"Settings.About.Channel.Store\"");
-        int cloudNotice = CountOccurrences(xaml,
+        int cloudNoticeInfoBar = CountOccurrences(window,
             "svc:Localized.HeaderKey=\"Settings.CloudBackup.SyncNotice.Title\"");
-        Assert.True(headerKeyNotices + storeNotice + cloudNotice >= expectedCount,
-            $"{path}: notice InfoBars must carry HeaderKey/DescriptionKey");
-    }
+        int cloudNoticeInfoTip = CountOccurrences(window,
+            "svc:InfoTip.TitleKey=\"Settings.CloudBackup.SyncNotice.Title\"");
+        Assert.Equal(1, storeNotice);
+        Assert.Equal(1, cloudNoticeInfoBar);
+        Assert.Equal(1, cloudNoticeInfoTip);
 
-    [Theory]
-    [InlineData("src/DeskBox/Views/SettingsWindow.xaml")]
-    [InlineData("src/DeskBox/Views/SettingsSections/SearchSettingsSection.xaml")]
-    public void ElevatedNoticeInfoBars_AreSiblingsOfTheHotkeyExpander(string path)
-    {
-        XDocument document = XDocument.Parse(ReadRepositoryFile(path));
-        XNamespace presentation = document.Root!.Name.Namespace;
-        XNamespace toolkit = "using:CommunityToolkit.WinUI.Controls";
-        XNamespace xaml = "http://schemas.microsoft.com/winfx/2006/xaml";
-
-        List<XElement> notices = document
-            .Descendants(presentation + "InfoBar")
-            .Where(element => element.Attributes().Any(attribute =>
-                attribute.Name.LocalName.EndsWith(".HeaderKey", StringComparison.Ordinal) &&
-                string.Equals(
-                    attribute.Value,
-                    "Settings.GlobalHotkey.ElevatedNotice.Title",
-                    StringComparison.Ordinal)))
-            .ToList();
-        Assert.NotEmpty(notices);
-
-        foreach (XElement notice in notices)
-        {
-            Assert.False(notice.Ancestors(toolkit + "SettingsExpander").Any(),
-                $"{path}: the elevated-hotkey notice InfoBar must sit outside the hotkey " +
-                "expander (a sibling below it), not inside its item cards.");
-            Assert.NotNull(notice.Attribute(xaml + "Name") ?? notice.Attribute("Name"));
-        }
+        // Elevated hotkey and SMTC background explanations live in compact InfoTips on their host cards.
+        Assert.Contains(
+            "svc:InfoTip.TitleKey=\"Settings.GlobalHotkey.ElevatedNotice.Title\"",
+            window,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "svc:InfoTip.TitleKey=\"Settings.GlobalHotkey.ElevatedNotice.Title\"",
+            search,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "svc:InfoTip.TitleKey=\"Settings.Music.SmtcNotice.Title\"",
+            window,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("GlobalHotkeyElevatedNoticeInfoBar", window, StringComparison.Ordinal);
+        Assert.DoesNotContain("SearchHotkeyElevatedNoticeInfoBar", search, StringComparison.Ordinal);
+        Assert.DoesNotContain("MusicSmtcNoticeInfoBar", window, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -111,15 +97,12 @@ public sealed class SettingsNoticeCardContractTests
     }
 
     [Fact]
-    public void SearchSectionNoticeBrushes_DelegateToTheSharedPerThemePin()
+    public void SearchSection_DoesNotReadApplicationResourcesDirectly()
     {
         string code = ReadRepositoryFile(
             "src/DeskBox/Views/SettingsSections/SearchSettingsSection.xaml.cs");
 
-        Assert.Contains(
-            "SettingsWindow.ApplyInformationalSeverityBrushes(SearchHotkeyElevatedNoticeInfoBar)",
-            code,
-            StringComparison.Ordinal);
+        Assert.DoesNotContain("SearchHotkeyElevatedNoticeInfoBar", code, StringComparison.Ordinal);
         Assert.DoesNotContain("Application.Current.Resources", code, StringComparison.Ordinal);
     }
 

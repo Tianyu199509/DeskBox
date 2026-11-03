@@ -35,6 +35,13 @@ public enum DeskBoxFeedbackDiagnosticsStatus
     Failed,
 }
 
+public sealed record DeskBoxFeedbackMessage(
+    [property: JsonPropertyName("id")] long Id,
+    [property: JsonPropertyName("author_role")] string AuthorRole,
+    [property: JsonPropertyName("author_nickname")] string? AuthorNickname,
+    [property: JsonPropertyName("content")] string Content,
+    [property: JsonPropertyName("created_at")] DateTimeOffset CreatedAt);
+
 public sealed record DeskBoxFeedbackItem(
     [property: JsonPropertyName("id")] long Id,
     [property: JsonPropertyName("type")] string Type,
@@ -43,7 +50,26 @@ public sealed record DeskBoxFeedbackItem(
     [property: JsonPropertyName("reply")] string? Reply,
     [property: JsonPropertyName("app_version")] string? AppVersion,
     [property: JsonPropertyName("channel")] string? Channel,
-    [property: JsonPropertyName("created_at")] DateTimeOffset CreatedAt);
+    [property: JsonPropertyName("created_at")] DateTimeOffset CreatedAt,
+    [property: JsonPropertyName("messages")] IReadOnlyList<DeskBoxFeedbackMessage>? Messages = null);
+
+public sealed record DeskBoxFeedbackReplyResult(
+    bool Ok,
+    DeskBoxFeedbackMessage? Message,
+    int? RetryAfterMinutes,
+    string? Error)
+{
+    public static DeskBoxFeedbackReplyResult Success(DeskBoxFeedbackMessage message) =>
+        new(true, message, null, null);
+    public static DeskBoxFeedbackReplyResult RateLimited(int retryAfterMinutes) =>
+        new(false, null, retryAfterMinutes, "rate_limited");
+    public static DeskBoxFeedbackReplyResult Rejected(string error) =>
+        new(false, null, null, error);
+    public static DeskBoxFeedbackReplyResult NetworkFailure() =>
+        new(false, null, null, "network");
+    public static DeskBoxFeedbackReplyResult InvalidContent() =>
+        new(false, null, null, "content_too_short");
+}
 
 public sealed record DeskBoxFeedbackMineResult(bool Ok, IReadOnlyList<DeskBoxFeedbackItem> Items)
 {
@@ -54,7 +80,7 @@ public sealed record DeskBoxFeedbackMineResult(bool Ok, IReadOnlyList<DeskBoxFee
 /// Anonymous in-app feedback client for the deskbox.fun feedback API.
 /// Submit → https://deskbox.fun/stats/api/feedback, then optionally attach the
 /// privacy-filtered diagnostics bundle; "my feedback" lists prior submissions
-/// plus official replies keyed by the persisted anonymous client id.
+/// plus multi-turn replies keyed by the persisted anonymous client id.
 /// The submit cooldown is tracked locally as a UTC unix-seconds timestamp that
 /// is written only on a successful submission (#449): it survives restarts
 /// unambiguously, never arms on failed/limited attempts, and lets the client
@@ -64,20 +90,26 @@ public sealed partial class FeedbackService
 {
     public const string DefaultApiBaseUrl = "https://deskbox.fun/stats/api/";
     private const int MinContentLength = 10;
+    private const int MinReplyLength = 2;
     private const int MaxContentLength = 2000;
     private const int MaxDiagnosticsBytes = 5 * 1024 * 1024;
 
-    /// <summary>Intended submit cooldown window, matching the server's default
-    /// and the user-facing "already submitted within N minutes" message.</summary>
-    private const int CooldownWindowMinutes = 10;
+    /// <summary>Intended submit cooldown window, matching the server's 5-minute
+    /// per-thread cooldown and the user-facing rate-limit prompt.</summary>
+    private const int CooldownWindowMinutes = 5;
 
     /// <summary>Clock-skew tolerance before the client declares the server's
     /// per-id rate state stale and rotates the anonymous id (#449).</summary>
     private const int StaleServerRateStateGraceMinutes = 5;
 
-    /// <summary>Upper bound on a server-claimed window the client is willing to
-    /// honor when proving staleness; the product window is minutes-scale.</summary>
+    /// <summary>Upper bound on a short-window server claim the client honors
+    /// when proving staleness. Note: <c>retry_after_minutes &gt;= 60</c> is the
+    /// server's 24-hour rolling daily cap (10 threads / 24h) and is checked
+    /// against a full 24-hour window so legitimate active users never have
+    /// their anonymous history rotated away.</summary>
     private const int MaxTrustedServerWindowMinutes = 60;
+    private const int DailyCapRetryAfterMinutes = 60;
+    private const int DailyCapWindowMinutes = 24 * 60;
 
     private const string ClientStateFileName = "feedback-client-id.txt";
     private const string CooldownStateFileName = "feedback-last-submit.txt";
@@ -198,7 +230,7 @@ public sealed partial class FeedbackService
             if (response.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
             {
                 DeskBoxFeedbackSubmitResponse? body = TryParseSubmitResponse(await ReadBodyAsync(response, cancellationToken));
-                int retryAfter = body?.RetryAfterMinutes is > 0 ? body.RetryAfterMinutes.Value : 10;
+                int retryAfter = body?.RetryAfterMinutes is > 0 ? body.RetryAfterMinutes.Value : CooldownWindowMinutes;
                 return DeskBoxFeedbackSubmissionResult.RateLimited(retryAfter);
             }
 
@@ -320,6 +352,73 @@ public sealed partial class FeedbackService
         }
     }
 
+    public async Task<DeskBoxFeedbackReplyResult> PostReplyAsync(
+        long feedbackId,
+        string content,
+        CancellationToken cancellationToken = default)
+    {
+        if (feedbackId <= 0)
+        {
+            return DeskBoxFeedbackReplyResult.Rejected("invalid_id");
+        }
+
+        string trimmed = (content ?? string.Empty).Trim();
+        if (trimmed.Length < MinReplyLength || trimmed.Length > MaxContentLength)
+        {
+            return DeskBoxFeedbackReplyResult.InvalidContent();
+        }
+
+        string json = JsonSerializer.Serialize(
+            new DeskBoxFeedbackReplyPayload(ClientId, trimmed),
+            FeedbackJsonContext.Default.FeedbackReplyPayload);
+        try
+        {
+            using var request = new HttpRequestMessage(
+                HttpMethod.Post,
+                BuildUri($"feedback/{feedbackId}/messages"));
+            request.Content = new StringContent(json, Encoding.UTF8, "application/json");
+            using HttpResponseMessage response = await _httpClient.SendAsync(request, cancellationToken);
+
+            if (response.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
+            {
+                DeskBoxFeedbackReplyResponse? body = TryParseReplyResponse(
+                    await ReadBodyAsync(response, cancellationToken));
+                int retryAfter = body?.RetryAfterMinutes is > 0 ? body.RetryAfterMinutes.Value : 1;
+                return DeskBoxFeedbackReplyResult.RateLimited(retryAfter);
+            }
+
+            if ((int)response.StatusCode is < 200 or >= 300)
+            {
+                DeskBoxFeedbackReplyResponse? body = TryParseReplyResponse(
+                    await ReadBodyAsync(response, cancellationToken));
+                return DeskBoxFeedbackReplyResult.Rejected(body?.Error ?? $"http_{(int)response.StatusCode}");
+            }
+
+            DeskBoxFeedbackReplyResponse? success = TryParseReplyResponse(
+                await ReadBodyAsync(response, cancellationToken));
+            if (success?.Ok != true)
+            {
+                return DeskBoxFeedbackReplyResult.Rejected("invalid_response");
+            }
+
+            DeskBoxFeedbackMessage message = success.Message ??
+                new DeskBoxFeedbackMessage(0, "op", null, trimmed, _utcClock());
+            return DeskBoxFeedbackReplyResult.Success(message);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            return DeskBoxFeedbackReplyResult.NetworkFailure();
+        }
+        catch (Exception)
+        {
+            return DeskBoxFeedbackReplyResult.NetworkFailure();
+        }
+    }
+
     private static async Task<string> ReadBodyAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
         try
@@ -428,9 +527,11 @@ public sealed partial class FeedbackService
         }
 
         TimeSpan elapsed = utcNow - DateTimeOffset.FromUnixTimeSeconds(stored);
-        int claimedWindowMinutes = Math.Min(
-            Math.Max(serverRetryAfterMinutes, CooldownWindowMinutes),
-            MaxTrustedServerWindowMinutes);
+        int claimedWindowMinutes = serverRetryAfterMinutes >= DailyCapRetryAfterMinutes
+            ? DailyCapWindowMinutes
+            : Math.Min(
+                Math.Max(serverRetryAfterMinutes, CooldownWindowMinutes),
+                MaxTrustedServerWindowMinutes);
         return elapsed >= TimeSpan.FromMinutes(claimedWindowMinutes + StaleServerRateStateGraceMinutes);
     }
 
@@ -508,6 +609,11 @@ public sealed partial class FeedbackService
             ? null
             : JsonSerializer.Deserialize(json, FeedbackJsonContext.Default.FeedbackSubmitResponse);
 
+    private static DeskBoxFeedbackReplyResponse? TryParseReplyResponse(string json) =>
+        string.IsNullOrEmpty(json)
+            ? null
+            : JsonSerializer.Deserialize(json, FeedbackJsonContext.Default.FeedbackReplyResponse);
+
     internal sealed record DeskBoxFeedbackSubmitPayload(
         [property: JsonPropertyName("type")] string Type,
         [property: JsonPropertyName("content")] string Content,
@@ -521,9 +627,19 @@ public sealed partial class FeedbackService
     internal sealed record DeskBoxFeedbackMinePayload(
         [property: JsonPropertyName("client_id")] string ClientId);
 
+    internal sealed record DeskBoxFeedbackReplyPayload(
+        [property: JsonPropertyName("client_id")] string ClientId,
+        [property: JsonPropertyName("content")] string Content);
+
     internal sealed record DeskBoxFeedbackSubmitResponse(
         [property: JsonPropertyName("ok")] bool Ok,
         [property: JsonPropertyName("id")] long? Id,
+        [property: JsonPropertyName("error")] string? Error,
+        [property: JsonPropertyName("retry_after_minutes")] int? RetryAfterMinutes);
+
+    internal sealed record DeskBoxFeedbackReplyResponse(
+        [property: JsonPropertyName("ok")] bool Ok,
+        [property: JsonPropertyName("message")] DeskBoxFeedbackMessage? Message,
         [property: JsonPropertyName("error")] string? Error,
         [property: JsonPropertyName("retry_after_minutes")] int? RetryAfterMinutes);
 
@@ -534,7 +650,9 @@ public sealed partial class FeedbackService
     [JsonSourceGenerationOptions(JsonSerializerDefaults.Web)]
     [JsonSerializable(typeof(DeskBoxFeedbackSubmitPayload), TypeInfoPropertyName = "FeedbackSubmitPayload")]
     [JsonSerializable(typeof(DeskBoxFeedbackMinePayload), TypeInfoPropertyName = "FeedbackMinePayload")]
+    [JsonSerializable(typeof(DeskBoxFeedbackReplyPayload), TypeInfoPropertyName = "FeedbackReplyPayload")]
     [JsonSerializable(typeof(DeskBoxFeedbackSubmitResponse), TypeInfoPropertyName = "FeedbackSubmitResponse")]
+    [JsonSerializable(typeof(DeskBoxFeedbackReplyResponse), TypeInfoPropertyName = "FeedbackReplyResponse")]
     [JsonSerializable(typeof(DeskBoxFeedbackMineResponse), TypeInfoPropertyName = "FeedbackMineResponse")]
     private sealed partial class FeedbackJsonContext : JsonSerializerContext
     {

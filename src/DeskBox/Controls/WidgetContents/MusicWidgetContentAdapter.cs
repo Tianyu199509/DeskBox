@@ -11,6 +11,9 @@ public sealed class MusicWidgetContentAdapter :
     IWidgetResponsiveLayoutContent,
     IWidgetPerformanceAwareContent
 {
+    private bool _isWindowVisible = true;
+    private bool _isCompactCollapsed;
+
     public MusicWidgetContentAdapter(
         WidgetConfig config,
         LocalizationService localizationService,
@@ -46,6 +49,22 @@ public sealed class MusicWidgetContentAdapter :
 
     public MusicWidgetViewModel ViewModel { get; }
 
+    protected override void OnViewMaterialized(FrameworkElement view)
+    {
+        base.OnViewMaterialized(view);
+        if (view is MusicWidgetContent content)
+        {
+            content.OnWindowVisibilityChanged(_isWindowVisible);
+            content.OnCompactStateChanged(_isCompactCollapsed);
+            content.ApplyPerformanceSettings();
+        }
+    }
+
+    protected override void OnHibernatingView(FrameworkElement view)
+    {
+        (view as MusicWidgetContent)?.Dispose();
+    }
+
     public override Task InitializeAsync()
     {
         return ViewModel.InitializeAsync();
@@ -73,6 +92,7 @@ public sealed class MusicWidgetContentAdapter :
 
     public override void OnWindowVisibilityChanged(bool visible)
     {
+        _isWindowVisible = visible;
         ViewModel.OnWindowVisibilityChanged(visible);
         if (MaterializedView is MusicWidgetContent content)
         {
@@ -87,6 +107,7 @@ public sealed class MusicWidgetContentAdapter :
 
     public override void OnCompactStateChanged(bool collapsed)
     {
+        _isCompactCollapsed = collapsed;
         ViewModel.OnCompactStateChanged(collapsed);
         if (MaterializedView is MusicWidgetContent content)
         {

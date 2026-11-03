@@ -1,4 +1,5 @@
 using DeskBox.Models;
+using DeskBox.Platform;
 
 namespace DeskBox.Services;
 
@@ -277,7 +278,7 @@ public static class WidgetStackGroupingService
         IOrderedEnumerable<IndexedItem> ordered = orderBy switch
         {
             SettingsService.FileStackOrderByName => members
-                .OrderBy(entry => entry.Item.Name, StringComparer.CurrentCultureIgnoreCase)
+                .OrderBy(entry => entry.Item.Name, NaturalStringComparer.CurrentCultureIgnoreCase)
                 .ThenBy(entry => entry.Index),
             SettingsService.FileStackOrderByDateAdded => members
                 .OrderByDescending(entry => entry.Item.AddedAt)

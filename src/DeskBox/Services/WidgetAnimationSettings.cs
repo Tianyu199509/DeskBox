@@ -1,3 +1,4 @@
+using DeskBox.Contracts;
 using DeskBox.Models;
 
 namespace DeskBox.Services;
@@ -8,93 +9,108 @@ public sealed record WidgetAnimationOptions(
     string SlideDirection,
     string EasingIntensity)
 {
-    public int DurationMs => WidgetAnimationSettings.GetDurationMs(Speed);
+    public int DurationMs => WidgetAnimationSettings.GetDurationMs(Speed, isShowing: true);
+
+    public int ShowDurationMs => WidgetAnimationSettings.GetDurationMs(Speed, isShowing: true);
+
+    public int HideDurationMs => WidgetAnimationSettings.GetDurationMs(Speed, isShowing: false);
 
     public bool UsesGroupOffset => WidgetAnimationSettings.UsesGroupOffset(Effect);
 }
 
 public static class WidgetAnimationSettings
 {
-    public const int DefaultDurationMs = 240;
+    public const int DefaultShowDurationMs = 210;
+    public const int DefaultHideDurationMs = 150;
+    public const int DefaultDurationMs = DefaultShowDurationMs;
+
+    public const double ShortSlideDistanceDip = 36.0;
+    public const double SeamFallbackSlideDistanceDip = 48.0;
+    public const int MaxTotalStaggerSpreadMs = 100;
 
     public static WidgetAnimationOptions From(AppSettings settings)
     {
-        string effect = NormalizeEffect(settings.WidgetAnimationEffect);
-        string slideDirection = NormalizeSlideDirection(settings.WidgetAnimationSlideDirection);
-        if (effect == SettingsService.WidgetAnimationEffectSlideFade &&
-            slideDirection == SettingsService.WidgetAnimationSlideDirectionNone)
-        {
-            slideDirection = SettingsService.WidgetAnimationSlideDirectionRight;
-        }
+        WidgetShellSettingsSlice shell = settings.WidgetShell;
+        string effect = NormalizeEffect(shell.WidgetAnimationEffect);
+        string slideDirection = WidgetAnimationKinds.NormalizeSlideDirectionForEffect(
+            shell.WidgetAnimationEffect,
+            shell.WidgetAnimationSlideDirection);
 
         return new WidgetAnimationOptions(
             effect,
-            NormalizeSpeed(settings.WidgetAnimationSpeed),
+            NormalizeSpeed(shell.WidgetAnimationSpeed),
             slideDirection,
-            NormalizeEasingIntensity(settings.WidgetAnimationEasingIntensity));
+            NormalizeEasingIntensity(shell.WidgetAnimationEasingIntensity));
     }
 
-    public static int GetDurationMs(string speed)
+    public static WidgetAnimationOptions From(AppearanceAnimationSettings settings)
+    {
+        string effect = NormalizeEffect(settings.Effect);
+        string slideDirection = WidgetAnimationKinds.NormalizeSlideDirectionForEffect(
+            settings.Effect,
+            settings.SlideDirection);
+
+        return new WidgetAnimationOptions(
+            effect,
+            NormalizeSpeed(settings.Speed),
+            slideDirection,
+            NormalizeEasingIntensity(settings.EasingIntensity));
+    }
+
+    public static int GetDurationMs(string speed) =>
+        GetDurationMs(speed, isShowing: true);
+
+    public static int GetDurationMs(string speed, bool isShowing)
     {
         return NormalizeSpeed(speed) switch
         {
-            SettingsService.WidgetAnimationSpeedVeryFast => 120,
-            SettingsService.WidgetAnimationSpeedFast => 220,
-            SettingsService.WidgetAnimationSpeedRelaxed => 520,
-            SettingsService.WidgetAnimationSpeedSlow => 680,
-            _ => DefaultDurationMs
+            SettingsService.WidgetAnimationSpeedFast => isShowing ? 150 : 110,
+            SettingsService.WidgetAnimationSpeedRelaxed => isShowing ? 300 : 210,
+            _ => isShowing ? DefaultShowDurationMs : DefaultHideDurationMs
         };
     }
 
-    public static bool UsesGroupOffset(string effect)
+    public static int GetSingleWidgetLifecycleDurationMs(string speed, bool isShowing)
     {
-        return NormalizeEffect(effect) is not (
-            SettingsService.WidgetAnimationEffectNone or
-            SettingsService.WidgetAnimationEffectFade or
-            SettingsService.WidgetAnimationEffectScaleFade or
-            SettingsService.WidgetAnimationEffectZoom or
-            SettingsService.WidgetAnimationEffectEdgeScale or
-            SettingsService.WidgetAnimationEffectTilt or
-            SettingsService.WidgetAnimationEffectWipe);
+        return NormalizeSpeed(speed) switch
+        {
+            SettingsService.WidgetAnimationSpeedFast => isShowing ? 140 : 105,
+            SettingsService.WidgetAnimationSpeedRelaxed => isShowing ? 230 : 170,
+            _ => isShowing ? 180 : 135
+        };
     }
 
     /// <summary>
-    /// The direction a given effect actually slides in: fixed-direction
-    /// effects carry their own, direction-parameterized effects adopt the
-    /// configured slide direction, and stationary effects slide nowhere.
+    /// Per-widget containment replaces monitor-wide group offsets so a widget
+    /// near a bezel never inherits a cross-screen throw from a distant sibling.
+    /// </summary>
+    public static bool UsesGroupOffset(string effect) => false;
+
+    /// <summary>
+    /// Resolves the direction a directional effect operates along.
     /// </summary>
     public static string GetEffectiveSlideDirection(string effect, string slideDirection)
     {
-        return NormalizeEffect(effect) switch
+        if (WidgetAnimationKinds.TryExtractLegacyDirection(effect) is { } legacyDirection)
         {
-            SettingsService.WidgetAnimationEffectSlideLeft or
-            SettingsService.WidgetAnimationEffectSlideLeftFade =>
-                SettingsService.WidgetAnimationSlideDirectionLeft,
-            SettingsService.WidgetAnimationEffectSlideUp or
-            SettingsService.WidgetAnimationEffectSlideUpFade =>
-                SettingsService.WidgetAnimationSlideDirectionUp,
-            SettingsService.WidgetAnimationEffectSlideDown or
-            SettingsService.WidgetAnimationEffectSlideDownFade =>
-                SettingsService.WidgetAnimationSlideDirectionDown,
-            SettingsService.WidgetAnimationEffectSlideRight or
-            SettingsService.WidgetAnimationEffectSlideRightFade =>
-                SettingsService.WidgetAnimationSlideDirectionRight,
-            SettingsService.WidgetAnimationEffectSlideFade or
-            SettingsService.WidgetAnimationEffectScaleSlide =>
-                NormalizeSlideDirection(slideDirection),
-            _ => SettingsService.WidgetAnimationSlideDirectionNone
-        };
+            return legacyDirection;
+        }
+
+        return WidgetAnimationKinds.NormalizeSlideDirectionForEffect(effect, slideDirection);
     }
 
     public static (double X, double Y) GetDirectionalOffset(
         string direction,
         (double Left, double Right, double Up, double Down) offsets)
     {
-        // Prefer the selected direction's own travel distance so a slide
-        // direction that was clamped at a monitor boundary (adjacent display
-        // on that side) does not inherit the much longer distance computed
-        // for another, unclamped direction.
-        double baseOffset = NormalizeSlideDirection(direction) switch
+        string normalized = NormalizeSlideDirection(direction);
+        if (normalized is SettingsService.WidgetAnimationSlideDirectionNone or
+            SettingsService.WidgetAnimationSlideDirectionAuto)
+        {
+            normalized = SettingsService.WidgetAnimationSlideDirectionDown;
+        }
+
+        double baseOffset = normalized switch
         {
             SettingsService.WidgetAnimationSlideDirectionLeft => offsets.Left,
             SettingsService.WidgetAnimationSlideDirectionRight => offsets.Right,
@@ -112,108 +128,134 @@ public static class WidgetAnimationSettings
 
         if (baseOffset < 1)
         {
-            baseOffset = 200;
+            baseOffset = ShortSlideDistanceDip;
         }
 
-        return NormalizeSlideDirection(direction) switch
+        return normalized switch
         {
             SettingsService.WidgetAnimationSlideDirectionLeft => (-baseOffset, 0),
             SettingsService.WidgetAnimationSlideDirectionRight => (baseOffset, 0),
             SettingsService.WidgetAnimationSlideDirectionUp => (0, -baseOffset),
-            SettingsService.WidgetAnimationSlideDirectionDown => (0, baseOffset),
-            _ => (baseOffset, 0)
+            _ => (0, baseOffset)
         };
+    }
+
+    /// <summary>
+    /// Computes direction-aware per-widget stagger delays capped within
+    /// <see cref="MaxTotalStaggerSpreadMs"/> so leading widgets never get
+    /// overtaken by trailing widgets and stationary effects stagger cleanly.
+    /// </summary>
+    public static int[] ComputeStaggerDelaysMs(
+        IReadOnlyList<(double BaseX, double BaseY, double MotionX, double MotionY)> items,
+        bool staggerEnabled,
+        string? effect)
+    {
+        var delays = new int[items.Count];
+        if (!staggerEnabled ||
+            items.Count < 2 ||
+            NormalizeEffect(effect) == SettingsService.WidgetAnimationEffectNone)
+        {
+            return delays;
+        }
+
+        int stepMs = Math.Clamp(MaxTotalStaggerSpreadMs / (items.Count - 1), 6, 30);
+
+        double sumMotionX = 0;
+        double sumMotionY = 0;
+        bool anyMotion = false;
+        for (int i = 0; i < items.Count; i++)
+        {
+            double mx = items[i].MotionX;
+            double my = items[i].MotionY;
+            if (Math.Abs(mx) > 0.5 || Math.Abs(my) > 0.5)
+            {
+                anyMotion = true;
+                sumMotionX += mx;
+                sumMotionY += my;
+            }
+        }
+
+        double avgMx = sumMotionX / items.Count;
+        double avgMy = sumMotionY / items.Count;
+        double avgLen = Math.Sqrt(avgMx * avgMx + avgMy * avgMy);
+
+        List<int> orderedIndices;
+        if (!anyMotion)
+        {
+            orderedIndices = Enumerable.Range(0, items.Count)
+                .OrderBy(index => items[index].BaseY)
+                .ThenBy(index => items[index].BaseX)
+                .ToList();
+        }
+        else if (avgLen > 4.0)
+        {
+            double dirX = avgMx / avgLen;
+            double dirY = avgMy / avgLen;
+            orderedIndices = Enumerable.Range(0, items.Count)
+                .OrderBy(index => -(items[index].BaseX * dirX + items[index].BaseY * dirY))
+                .ThenBy(index => items[index].BaseY)
+                .ThenBy(index => items[index].BaseX)
+                .ToList();
+        }
+        else
+        {
+            // Divergent edge slides (e.g. Auto nearest bezel): widgets closest
+            // to their target bezel lead the wave.
+            orderedIndices = Enumerable.Range(0, items.Count)
+                .OrderBy(index =>
+                {
+                    double mx = items[index].MotionX;
+                    double my = items[index].MotionY;
+                    return mx * mx + my * my;
+                })
+                .ThenBy(index => items[index].BaseY)
+                .ThenBy(index => items[index].BaseX)
+                .ToList();
+        }
+
+        for (int rank = 0; rank < orderedIndices.Count; rank++)
+        {
+            delays[orderedIndices[rank]] = rank * stepMs;
+        }
+
+        return delays;
     }
 
     public static double Ease(double progress, string easingIntensity, bool isShowing)
     {
-        string intensity = NormalizeEasingIntensity(easingIntensity);
-        if (intensity == SettingsService.WidgetAnimationEasingNone)
+        // Deterministic frame-driver unit tests pass EasingNone explicitly to
+        // verify linear clock progression.
+        if (string.Equals(
+                easingIntensity,
+                SettingsService.WidgetAnimationEasingNone,
+                StringComparison.Ordinal))
         {
-            return progress;
+            return Math.Clamp(progress, 0.0, 1.0);
         }
 
+        string intensity = NormalizeEasingIntensity(easingIntensity);
         if (isShowing)
         {
-            return intensity switch
-            {
-                SettingsService.WidgetAnimationEasingLight => CubicBezierEase(progress, 0.25, 0.9, 0.25, 1.0),
-                SettingsService.WidgetAnimationEasingStrong => CubicBezierEase(progress, 0.05, 1.1, 0.15, 1.0),
-                SettingsService.WidgetAnimationEasingSpring => CubicBezierEase(progress, 0.34, 1.56, 0.64, 1.0),
-                _ => CubicBezierEase(progress, 0.16, 1.0, 0.3, 1.0)
-            };
+            return intensity == SettingsService.WidgetAnimationEasingSpring
+                ? CubicBezierEase(progress, 0.22, 1.22, 0.36, 1.0)
+                : CubicBezierEase(progress, 0.16, 1.0, 0.30, 1.0);
         }
 
-        return intensity switch
-        {
-            SettingsService.WidgetAnimationEasingLight => CubicBezierEase(progress, 0.6, 0.1, 0.9, 0.3),
-            SettingsService.WidgetAnimationEasingStrong => CubicBezierEase(progress, 0.7, 0.0, 0.95, -0.1),
-            // Departure anticipation: eases slightly backwards (progress < 0)
-            // before leaving, mirroring the show-side overshoot.
-            SettingsService.WidgetAnimationEasingSpring => CubicBezierEase(progress, 0.6, -0.28, 0.735, 0.045),
-            _ => CubicBezierEase(progress, 0.7, 0.0, 0.84, 0.0)
-        };
+        // Crisp, responsive hide curve without initial lag or backward bounce.
+        return CubicBezierEase(progress, 0.32, 0.0, 0.67, 0.0);
     }
 
-    public static string NormalizeEffect(string? effect)
-    {
-        return effect is
-            SettingsService.WidgetAnimationEffectNone or
-            SettingsService.WidgetAnimationEffectFade or
-            SettingsService.WidgetAnimationEffectSlideRight or
-            SettingsService.WidgetAnimationEffectSlideLeft or
-            SettingsService.WidgetAnimationEffectSlideUp or
-            SettingsService.WidgetAnimationEffectSlideDown or
-            SettingsService.WidgetAnimationEffectScaleFade or
-            SettingsService.WidgetAnimationEffectSlideFade or
-            SettingsService.WidgetAnimationEffectZoom or
-            SettingsService.WidgetAnimationEffectSlideUpFade or
-            SettingsService.WidgetAnimationEffectSlideDownFade or
-            SettingsService.WidgetAnimationEffectSlideLeftFade or
-            SettingsService.WidgetAnimationEffectSlideRightFade or
-            SettingsService.WidgetAnimationEffectScaleSlide or
-            SettingsService.WidgetAnimationEffectEdgeScale or
-            SettingsService.WidgetAnimationEffectTilt or
-            SettingsService.WidgetAnimationEffectWipe
-            ? effect
-            : SettingsService.WidgetAnimationEffectSlideFade;
-    }
+    public static string NormalizeEffect(string? effect) =>
+        WidgetAnimationKinds.NormalizeEffect(effect);
 
-    public static string NormalizeSpeed(string? speed)
-    {
-        return speed is
-            SettingsService.WidgetAnimationSpeedVeryFast or
-            SettingsService.WidgetAnimationSpeedFast or
-            SettingsService.WidgetAnimationSpeedStandard or
-            SettingsService.WidgetAnimationSpeedRelaxed or
-            SettingsService.WidgetAnimationSpeedSlow
-            ? speed
-            : SettingsService.WidgetAnimationSpeedStandard;
-    }
+    public static string NormalizeSpeed(string? speed) =>
+        WidgetAnimationKinds.NormalizeSpeed(speed);
 
-    public static string NormalizeSlideDirection(string? direction)
-    {
-        return direction is
-            SettingsService.WidgetAnimationSlideDirectionNone or
-            SettingsService.WidgetAnimationSlideDirectionLeft or
-            SettingsService.WidgetAnimationSlideDirectionRight or
-            SettingsService.WidgetAnimationSlideDirectionUp or
-            SettingsService.WidgetAnimationSlideDirectionDown
-            ? direction
-            : SettingsService.WidgetAnimationSlideDirectionRight;
-    }
+    public static string NormalizeSlideDirection(string? direction) =>
+        WidgetAnimationKinds.NormalizeSlideDirection(direction);
 
-    public static string NormalizeEasingIntensity(string? easingIntensity)
-    {
-        return easingIntensity is
-            SettingsService.WidgetAnimationEasingNone or
-            SettingsService.WidgetAnimationEasingLight or
-            SettingsService.WidgetAnimationEasingStandard or
-            SettingsService.WidgetAnimationEasingStrong or
-            SettingsService.WidgetAnimationEasingSpring
-            ? easingIntensity
-            : SettingsService.WidgetAnimationEasingStandard;
-    }
+    public static string NormalizeEasingIntensity(string? easingIntensity) =>
+        WidgetAnimationKinds.NormalizeEasingIntensity(easingIntensity);
 
     private static double CubicBezierEase(double t, double x1, double y1, double x2, double y2)
     {

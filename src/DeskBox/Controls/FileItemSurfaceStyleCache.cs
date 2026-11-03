@@ -22,8 +22,10 @@ public sealed class FileItemSurfaceStyleCache
 {
     private SolidColorBrush? _normalSurfaceBrush;
     private SolidColorBrush? _selectedSurfaceBrush;
+    private SolidColorBrush? _unfocusedSelectedSurfaceBrush;
     private SolidColorBrush? _hoverSurfaceBrush;
     private SolidColorBrush? _selectedHoverSurfaceBrush;
+    private SolidColorBrush? _unfocusedSelectedHoverSurfaceBrush;
     private SolidColorBrush? _normalBorderBrush;
     private SolidColorBrush? _selectedBorderBrush;
     private bool? _isDark;
@@ -39,7 +41,8 @@ public sealed class FileItemSurfaceStyleCache
         ElementTheme theme,
         bool isSelected,
         bool isCut,
-        bool isDropTarget = false)
+        bool isDropTarget = false,
+        bool isWindowFocused = true)
     {
         bool dark = theme == ElementTheme.Dark;
         EnsureBrushes(dark);
@@ -49,22 +52,31 @@ public sealed class FileItemSurfaceStyleCache
         // border, the same treatment a tile shows under the pointer. Only the
         // user's own tile states (hover, press, selection) drive the background
         // here; the accent color no longer enters the drop visual.
+        //
+        // When a desktop-pinned surface does not hold Win32 keyboard focus
+        // (for instance after an MA_NOACTIVATE click while a foreign window
+        // stays foreground), selected tiles drop their active ring and soften
+        // their fill so they never imply keyboard shortcuts will land here.
         bool hovered = state is
             FileItemSurfaceVisualState.Hover or
             FileItemSurfaceVisualState.Pressed ||
             isDropTarget;
         border.Background = hovered
             ? isSelected
-                ? _selectedHoverSurfaceBrush
+                ? isWindowFocused
+                    ? _selectedHoverSurfaceBrush
+                    : _unfocusedSelectedHoverSurfaceBrush
                 : _hoverSurfaceBrush
             : state == FileItemSurfaceVisualState.Normal && isSelected
-                ? _selectedSurfaceBrush
+                ? isWindowFocused
+                    ? _selectedSurfaceBrush
+                    : _unfocusedSelectedSurfaceBrush
                 : _normalSurfaceBrush;
         // Thickness is constant so toggling selection only swaps the brush —
         // changing thickness per state would re-measure every tile in batch
         // selections.
         border.BorderThickness = SelectedBorderThickness;
-        border.BorderBrush = isSelected ? _selectedBorderBrush : _normalBorderBrush;
+        border.BorderBrush = isSelected && isWindowFocused ? _selectedBorderBrush : _normalBorderBrush;
         border.Opacity = isCut ? 0.58 : 1.0;
     }
 
@@ -81,20 +93,35 @@ public sealed class FileItemSurfaceStyleCache
         Windows.UI.Color selectedBackground = GetNeutralStateLayer(
             isDark,
             FileItemSurfaceVisualState.Normal,
-            isSelected: true);
+            isSelected: true,
+            isWindowFocused: true);
+        Windows.UI.Color unfocusedSelectedBackground = GetNeutralStateLayer(
+            isDark,
+            FileItemSurfaceVisualState.Normal,
+            isSelected: true,
+            isWindowFocused: false);
         Windows.UI.Color hoverBackground = GetNeutralStateLayer(
             isDark,
             FileItemSurfaceVisualState.Hover,
-            isSelected: false);
+            isSelected: false,
+            isWindowFocused: true);
         Windows.UI.Color selectedHoverBackground = GetNeutralStateLayer(
             isDark,
             FileItemSurfaceVisualState.Hover,
-            isSelected: true);
+            isSelected: true,
+            isWindowFocused: true);
+        Windows.UI.Color unfocusedSelectedHoverBackground = GetNeutralStateLayer(
+            isDark,
+            FileItemSurfaceVisualState.Hover,
+            isSelected: true,
+            isWindowFocused: false);
 
         _normalSurfaceBrush = UpdateBrush(_normalSurfaceBrush, Colors.Transparent);
         _selectedSurfaceBrush = UpdateBrush(_selectedSurfaceBrush, selectedBackground);
+        _unfocusedSelectedSurfaceBrush = UpdateBrush(_unfocusedSelectedSurfaceBrush, unfocusedSelectedBackground);
         _hoverSurfaceBrush = UpdateBrush(_hoverSurfaceBrush, hoverBackground);
         _selectedHoverSurfaceBrush = UpdateBrush(_selectedHoverSurfaceBrush, selectedHoverBackground);
+        _unfocusedSelectedHoverSurfaceBrush = UpdateBrush(_unfocusedSelectedHoverSurfaceBrush, unfocusedSelectedHoverBackground);
         _normalBorderBrush = UpdateBrush(_normalBorderBrush, Colors.Transparent);
         // Mirrors DeskBoxNeutralLineBrush (App.xaml): #72000000 light / #8BFFFFFF dark.
         _selectedBorderBrush = UpdateBrush(
@@ -118,20 +145,27 @@ public sealed class FileItemSurfaceStyleCache
     internal static Windows.UI.Color GetNeutralStateLayer(
         bool isDark,
         FileItemSurfaceVisualState state,
-        bool isSelected)
+        bool isSelected,
+        bool isWindowFocused = true)
     {
-        byte alpha = (state, isSelected, isDark) switch
+        byte alpha = (state, isSelected, isWindowFocused, isDark) switch
         {
-            (FileItemSurfaceVisualState.Hover, true, true) => 0x38,
-            (FileItemSurfaceVisualState.Hover, true, false) => 0x2D,
-            (FileItemSurfaceVisualState.Pressed, true, true) => 0x38,
-            (FileItemSurfaceVisualState.Pressed, true, false) => 0x2D,
-            (_, true, true) => 0x28,
-            (_, true, false) => 0x20,
-            (FileItemSurfaceVisualState.Pressed, false, true) => 0x20,
-            (FileItemSurfaceVisualState.Pressed, false, false) => 0x18,
-            (FileItemSurfaceVisualState.Hover, false, true) => 0x14,
-            (FileItemSurfaceVisualState.Hover, false, false) => 0x0F,
+            (FileItemSurfaceVisualState.Hover, true, true, true) => 0x38,
+            (FileItemSurfaceVisualState.Hover, true, true, false) => 0x2D,
+            (FileItemSurfaceVisualState.Pressed, true, true, true) => 0x38,
+            (FileItemSurfaceVisualState.Pressed, true, true, false) => 0x2D,
+            (_, true, true, true) => 0x28,
+            (_, true, true, false) => 0x20,
+            (FileItemSurfaceVisualState.Hover, true, false, true) => 0x1C,
+            (FileItemSurfaceVisualState.Hover, true, false, false) => 0x15,
+            (FileItemSurfaceVisualState.Pressed, true, false, true) => 0x1C,
+            (FileItemSurfaceVisualState.Pressed, true, false, false) => 0x15,
+            (_, true, false, true) => 0x10,
+            (_, true, false, false) => 0x0C,
+            (FileItemSurfaceVisualState.Pressed, false, _, true) => 0x20,
+            (FileItemSurfaceVisualState.Pressed, false, _, false) => 0x18,
+            (FileItemSurfaceVisualState.Hover, false, _, true) => 0x14,
+            (FileItemSurfaceVisualState.Hover, false, _, false) => 0x0F,
             _ => 0x00
         };
         byte channel = isDark ? (byte)0xFF : (byte)0x00;

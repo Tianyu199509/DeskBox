@@ -36,9 +36,40 @@ public enum GlanceLayoutMode
     Calendar
 }
 
+/// <summary>
+/// The presentation a Glance widget renders. Replaces the legacy
+/// <see cref="GlanceLayoutMode"/> + display-element combination as the source
+/// of truth (data version 11); <see cref="GlanceWidgetData.Layout"/> and
+/// <see cref="GlanceWidgetData.ShowCalendar"/> are kept as derived mirrors so
+/// older builds can still read the document.
+/// </summary>
+public enum GlanceStyle
+{
+    PhotoClock,
+    Editorial,
+    TodayCard,
+    WeekStrip,
+    MonthCalendar
+}
+
+public enum GlancePhotoClockAlignment
+{
+    Center,
+    BottomLeft
+}
+
+/// <summary>Statutory-holiday marker for one day (China mainland schedule).</summary>
+public enum GlanceHolidayMark
+{
+    None,
+    Off,
+    Work
+}
+
 public enum GlanceDisplayElement
 {
     Time,
+    Seconds,
     Date,
     Year,
     Weekday,
@@ -117,10 +148,21 @@ public enum GlanceImageFocus
 /// </summary>
 public sealed class GlanceWidgetData
 {
-    public const int CurrentVersion = 10;
+    public const int CurrentVersion = 11;
+
+    /// <summary>First data version where <see cref="Style"/> is authoritative.</summary>
+    public const int StyleVersion = 11;
 
     public int Version { get; set; } = CurrentVersion;
+    public GlanceStyle Style { get; set; } = GlanceStyle.PhotoClock;
+    public GlancePhotoClockAlignment PhotoClockAlignment { get; set; } =
+        GlancePhotoClockAlignment.Center;
+    /// <summary>Marks 休/班 days and counts down to the next statutory holiday.</summary>
+    public bool ShowStatutoryHolidays { get; set; } = true;
+    /// <summary>Surfaces due-dated items from the user's To-do widgets.</summary>
+    public bool ShowTodoAgenda { get; set; } = true;
     public bool ShowTime { get; set; } = true;
+    public bool ShowSeconds { get; set; }
     public bool ShowDate { get; set; } = true;
     public bool ShowYear { get; set; }
     public bool ShowWeekday { get; set; } = true;
@@ -183,12 +225,25 @@ public sealed record GlanceCalendarDay(
     bool IsCurrentMonth,
     bool IsToday,
     string TraditionalText = "",
-    string FestivalText = "")
+    string FestivalText = "",
+    GlanceHolidayMark HolidayMark = GlanceHolidayMark.None,
+    string HolidayName = "",
+    int AgendaCount = 0)
 {
     public bool HasTraditionalText => !string.IsNullOrWhiteSpace(TraditionalText);
     public bool HasFestival => !string.IsNullOrWhiteSpace(FestivalText);
     public bool HasSecondaryText => HasFestival || HasTraditionalText;
 }
+
+/// <summary>One due-dated item surfaced from a To-do widget.</summary>
+public sealed record GlanceAgendaItem(
+    string Id,
+    string Title,
+    DateOnly Date,
+    TimeOnly? Time,
+    bool IsImportant,
+    string? ColorHex,
+    string SourceWidgetId);
 
 // Bound from the calendar day-item template via {Binding Tag.*}; Native AOT
 // resolves those bindings through this generated provider, reflection cannot.
@@ -200,7 +255,9 @@ public sealed partial record GlanceCalendarDayDecoration(
     bool IsToday,
     bool IsFestival,
     double PrimaryOpacity,
-    double SecondaryOpacity);
+    double SecondaryOpacity,
+    GlanceHolidayMark HolidayMark = GlanceHolidayMark.None,
+    int AgendaCount = 0);
 
 public sealed record GlanceCalendarMonth(
     DateOnly Month,

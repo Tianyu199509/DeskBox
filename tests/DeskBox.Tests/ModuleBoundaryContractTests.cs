@@ -1,4 +1,4 @@
-﻿using System.Text.RegularExpressions;
+using System.Text.RegularExpressions;
 using System.Reflection;
 using System.Reflection.Emit;
 using DeskBox.Models;
@@ -147,7 +147,6 @@ public sealed class ModuleBoundaryContractTests
         ["src/DeskBox/Services/DesktopDoubleClickActivationService.cs"] = 2,
         ["src/DeskBox/Services/FileMetaService.cs"] = 1,
         ["src/DeskBox/Services/GlobalHotkeyService.cs"] = 2,
-        ["src/DeskBox/Services/QuickCaptureClipboardService.cs"] = 3,
         ["src/DeskBox/Services/PerformanceLogger.cs"] = 1,
         ["src/DeskBox/Services/Localized.cs"] = 1,
         ["src/DeskBox/Services/ResizeGuideOverlayService.cs"] = 4,
@@ -279,7 +278,6 @@ public sealed class ModuleBoundaryContractTests
     {
         foreach (string path in new[]
         {
-            "src/DeskBox/Features/QuickCapture/QuickCaptureClipboardRuntime.cs",
             "src/DeskBox/Services/QuickCaptureSettingsCoordinator.cs",
             "src/DeskBox/ViewModels/SettingsViewModel.QuickCaptureSettings.cs",
             // Batch 46: the enablement/recording switch chain (the old
@@ -317,24 +315,22 @@ public sealed class ModuleBoundaryContractTests
     }
 
     [Fact]
-    public void SearchMasterSwitch_UsesTheCoordinatorInsteadOfWidgetManagerGlobalAccess()
+    public void SearchRuntime_IsDecoupledFromFeatureWidgetsAndWidgetManager()
     {
         string manager = ProductionSource().Single(item =>
             item.Path == "src/DeskBox/Services/WidgetManager.FeatureWidgets.cs").Source;
-        string settings = ProductionSource().Single(item =>
-            item.Path == "src/DeskBox/ViewModels/SettingsViewModel.FeatureOptions.cs").Source;
-        Assert.DoesNotContain("App.Current.SetSearchFeatureEnabled", manager, StringComparison.Ordinal);
-        Assert.Contains("await _searchFeatureSettings.SetEnabledAsync(enabled, reveal)",
-            manager, StringComparison.Ordinal);
-        Assert.Contains("_searchFeatureSettings.CommitEnabledStateAsync(enabled)",
-            manager, StringComparison.Ordinal);
-        // Batch 3d follow-up: the switch rides the facade command; the main
-        // process runs the coordinator chain (delegates wired in App).
-        Assert.Contains("bool applied = await _widgetActions.SetFeatureWidgetEnabled(kind, enabled);",
-            settings, StringComparison.Ordinal);
+        string coordinator = ProductionSource().Single(item =>
+            item.Path == "src/DeskBox/Services/SearchSettingsCoordinator.cs").Source;
         string app = ProductionSource().Single(item =>
             item.Path == "src/DeskBox/App.xaml.cs").Source;
-        Assert.Contains("applySearchEnabled: enabled =>", app, StringComparison.Ordinal);
+
+        Assert.DoesNotContain("WidgetKind.Search", manager, StringComparison.Ordinal);
+        Assert.DoesNotContain("ISearchFeatureSettings", manager, StringComparison.Ordinal);
+        Assert.DoesNotContain("App.Current.SetSearchFeatureEnabled", manager, StringComparison.Ordinal);
+        Assert.DoesNotContain("ISearchFeatureSettings", coordinator, StringComparison.Ordinal);
+        Assert.DoesNotContain("WidgetManager", coordinator, StringComparison.Ordinal);
+        Assert.DoesNotContain("applySearchEnabled", app, StringComparison.Ordinal);
+        Assert.Contains("RunOptionalStartupStep(\"search-shell\"", app, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -523,7 +519,7 @@ public sealed class ModuleBoundaryContractTests
         ["src/DeskBox/Services/LegacySearchIndexCleanupService.cs"] = 1,
         ["src/DeskBox/Services/ManagedStorageDesktopShortcutService.cs"] = 1,
         ["src/DeskBox/Services/NativeNotificationActivationEnvelopeStore.cs"] = 6,
-        ["src/DeskBox/Services/QuickCaptureService.cs"] = 8,
+        ["src/DeskBox/Services/QuickCaptureService.cs"] = 6,
         ["src/DeskBox/Services/ReleaseNotesService.cs"] = 1,
         // +2: RevertLastCommit restores its own .bak (File.Copy) or deletes
         // a primary the same commit created — composite-save rollback inside

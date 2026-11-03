@@ -20,9 +20,15 @@ namespace DeskBox.Controls.WidgetContents;
 
 public sealed partial class TodoWidgetContent
 {
+    private const int CompletionVisualDwellMs = 260;
+    private long _inlineEditOpenedAtTick;
+    private bool _inlineEditorBlurSubscribed;
+    private readonly Dictionary<string, CancellationTokenSource> _pendingCompletionDwells = new(StringComparer.Ordinal);
+
     private Task PickBatchCustomDueDateAsync(
         IReadOnlyList<string> itemIds,
-        DateTimeOffset? initialDueDate)
+        DateTimeOffset? initialDueDate,
+        bool initialHasDueTime = false)
     {
         if (ViewModel is null || itemIds.Count == 0)
         {
@@ -30,16 +36,25 @@ public sealed partial class TodoWidgetContent
         }
 
         CloseTodoEdit();
+        if (!EnsureCustomDueDateOverlayRealized())
+        {
+            return Task.CompletedTask;
+        }
+
         _customDueDateItem = null;
         _customDueDateItemIds = itemIds.ToArray();
         DateTimeOffset dueDate = initialDueDate ?? GetDefaultCustomDueDate();
-        CustomDueDatePicker.MinDate = DateTimeOffset.Now.Date;
-        CustomDueDatePicker.Date = dueDate;
-        SetCustomDueTime(dueDate);
+        if (CustomDueDatePicker is not null)
+        {
+            CustomDueDatePicker.MinDate = DateTimeOffset.Now.Date;
+            CustomDueDatePicker.Date = dueDate;
+        }
+
+        ConfigureCustomDueTimeState(dueDate, includeTime: initialDueDate is not null && initialHasDueTime);
         ApplyLocalizedText();
         ApplyEditorVisualStyle();
-        CustomDueDateOverlay.Visibility = Visibility.Visible;
-        CustomDueDatePicker.Focus(FocusState.Programmatic);
+        CustomDueDateOverlay!.Visibility = Visibility.Visible;
+        CustomDueDatePicker?.Focus(FocusState.Programmatic);
         return Task.CompletedTask;
     }
 
@@ -48,8 +63,24 @@ public sealed partial class TodoWidgetContent
         CloseCustomDueDateOverlay();
     }
 
+    private void CustomDueIncludeTimeToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_isSyncingCustomDueIncludeTime || CustomDueIncludeTimeToggle is null)
+        {
+            return;
+        }
+
+        _customDueIncludeTime = CustomDueIncludeTimeToggle.IsOn;
+        UpdateCustomDueTimeControlsVisibility();
+    }
+
     private void CustomDueTimeButton_Click(object sender, RoutedEventArgs e)
     {
+        if (CustomDueTimeButton is null)
+        {
+            return;
+        }
+
         var flyout = new TimePickerFlyout
         {
             ClockIdentifier = "24HourClock",
@@ -76,23 +107,26 @@ public sealed partial class TodoWidgetContent
             return;
         }
 
-        DateTimeOffset selectedDate = CustomDueDatePicker.Date ?? DateTimeOffset.Now;
-        DateTimeOffset selectedDueDate = CombineCustomDueDateAndTime(selectedDate);
+        DateTimeOffset selectedDate = CustomDueDatePicker?.Date ?? DateTimeOffset.Now;
+        bool hasDueTime = _customDueIncludeTime;
+        DateTimeOffset selectedDueDate = hasDueTime
+            ? CombineCustomDueDateAndTime(selectedDate)
+            : TodoWidgetStore.NormalizeAllDayDueDate(selectedDate);
         TodoItemViewModel? customDueDateItem = _customDueDateItem;
         IReadOnlyList<string>? customDueDateItemIds = _customDueDateItemIds;
         CloseCustomDueDateOverlay();
 
         if (customDueDateItem is { } item)
         {
-            await ViewModel.SetDueDateAsync(item.Id, selectedDueDate);
+            await ViewModel.SetDueDateAsync(item.Id, selectedDueDate, hasDueTime);
         }
         else if (customDueDateItemIds is { Count: > 0 } itemIds)
         {
-            await ViewModel.SetDueDateAsync(itemIds, selectedDueDate);
+            await ViewModel.SetDueDateAsync(itemIds, selectedDueDate, hasDueTime);
         }
         else
         {
-            ViewModel.DraftDueDate = selectedDueDate;
+            ViewModel.SetDraftDueDate(selectedDueDate, hasDueTime);
         }
     }
 
@@ -103,6 +137,45 @@ public sealed partial class TodoWidgetContent
         if (CustomDueDateOverlay is not null)
         {
             CustomDueDateOverlay.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private void ConfigureCustomDueTimeState(DateTimeOffset dueDate, bool includeTime)
+    {
+        _customDueIncludeTime = includeTime;
+        if (includeTime)
+        {
+            SetCustomDueTime(dueDate);
+        }
+        else
+        {
+            _customDueTime = new TimeSpan(9, 0, 0);
+            UpdateCustomDueTimeText();
+        }
+
+        if (CustomDueIncludeTimeToggle is not null)
+        {
+            _isSyncingCustomDueIncludeTime = true;
+            try
+            {
+                CustomDueIncludeTimeToggle.IsOn = includeTime;
+            }
+            finally
+            {
+                _isSyncingCustomDueIncludeTime = false;
+            }
+        }
+
+        UpdateCustomDueTimeControlsVisibility();
+    }
+
+    private void UpdateCustomDueTimeControlsVisibility()
+    {
+        if (CustomDueTimeButton is not null)
+        {
+            CustomDueTimeButton.Visibility = _customDueIncludeTime
+                ? Visibility.Visible
+                : Visibility.Collapsed;
         }
     }
 
@@ -136,11 +209,8 @@ public sealed partial class TodoWidgetContent
         return new DateTimeOffset(localDateTime);
     }
 
-    private static DateTimeOffset GetDefaultCustomDueDate()
-    {
-        DateTime today = DateTime.Now.Date;
-        return new DateTimeOffset(new DateTime(today.Year, today.Month, today.Day, 23, 59, 0, DateTimeKind.Local));
-    }
+    private static DateTimeOffset GetDefaultCustomDueDate() =>
+        TodoWidgetStore.NormalizeAllDayDueDate(DateTimeOffset.Now);
 
     private Task DeleteItemAsync(TodoItemViewModel item) =>
         DeleteTodoItemWithTransitionAsync(item);
@@ -198,16 +268,100 @@ public sealed partial class TodoWidgetContent
         await SaveTodoEditAsync();
     }
 
+    internal void OpenTodoInlineEdit(TodoItemViewModel item)
+    {
+        if (_isDisposed || ViewModel is null || item is null)
+        {
+            return;
+        }
+
+        CloseCustomDueDateOverlay();
+        if (!EnsureTodoInlineEditorRealized())
+        {
+            return;
+        }
+
+        if (!_inlineEditorBlurSubscribed)
+        {
+            _inlineEditorBlurSubscribed = true;
+            TodoEditTextBox.LostFocus += TodoEditTextBox_LostFocus;
+        }
+
+        _editingItem = item;
+        _inlineEditOpenedAtTick = Environment.TickCount64;
+        TodoInlineEditor.Title = App.Current.LocalizationService.T("Todo.Menu.Rename");
+        TodoInlineEditor.Text = item.Text;
+        ApplyEditorVisualStyle();
+        TodoInlineEditor.Visibility = Visibility.Visible;
+        DeskBox.Views.WidgetWindowBase.TryActivateOwnerForKeyboardInput(this, "todo-inline-rename");
+        TodoInlineEditor.FocusEditor(selectAll: true);
+    }
+
+    private async void TodoEditTextBox_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (_isDisposed ||
+            _isFlushingTeardown ||
+            _editingItem is null ||
+            TodoInlineEditor is not { Visibility: Visibility.Visible })
+        {
+            return;
+        }
+
+        if (TransientInputFocusGuard.ShouldDeferInlineEditorBlurCommit(
+                TodoEditTextBox,
+                _inlineEditOpenedAtTick,
+                isStillEditing: () => !_isDisposed && _editingItem is not null && TodoInlineEditor is { Visibility: Visibility.Visible },
+                commitOnExternalDismissAsync: SaveTodoEditAsync))
+        {
+            return;
+        }
+
+        if (XamlRoot is not null &&
+            FocusManager.GetFocusedElement(XamlRoot) is DependencyObject focused &&
+            HasAncestorOrSelf(focused, TodoInlineEditor))
+        {
+            return;
+        }
+
+        await SaveTodoEditAsync();
+    }
+
+    private static bool HasAncestorOrSelf(DependencyObject? source, DependencyObject target)
+    {
+        for (DependencyObject? current = source; current is not null; current = VisualTreeHelper.GetParent(current))
+        {
+            if (ReferenceEquals(current, target))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private void TodoEditCancelButton_Click(object sender, RoutedEventArgs e)
     {
         CloseTodoEdit();
+        if (DeskBox.Views.WidgetWindowBase.IsOwnerWindowKeyboardFocused(this))
+        {
+            TodoListView?.Focus(FocusState.Programmatic);
+        }
     }
 
     private async void TodoEditTextBox_KeyDown(object sender, KeyRoutedEventArgs e)
     {
+        if (ImeCompositionGuard.IsImeCompositionKeyEvent(e))
+        {
+            return;
+        }
+
         if (e.Key == VirtualKey.Escape)
         {
             CloseTodoEdit();
+            if (DeskBox.Views.WidgetWindowBase.IsOwnerWindowKeyboardFocused(this))
+            {
+                TodoListView?.Focus(FocusState.Programmatic);
+            }
             e.Handled = true;
             return;
         }
@@ -265,12 +419,37 @@ public sealed partial class TodoWidgetContent
         }
 
         CloseTodoEdit();
+        if (DeskBox.Views.WidgetWindowBase.IsOwnerWindowKeyboardFocused(this))
+        {
+            TodoListView?.Focus(FocusState.Programmatic);
+        }
         ShowTodoStatus("Todo.Status.Saved");
+    }
+
+    private void CommitOrCloseTodoInlineEdit()
+    {
+        if (_editingItem is { } editingItem &&
+            TodoInlineEditor is { Visibility: Visibility.Visible } &&
+            ViewModel is { } vm)
+        {
+            string editedText = TodoInlineEditor.Text;
+            CloseTodoEdit();
+            if (!string.IsNullOrWhiteSpace(editedText) &&
+                !string.Equals(editingItem.Text, editedText.Trim(), StringComparison.Ordinal))
+            {
+                _ = vm.UpdateItemTextAsync(editingItem.Id, editedText);
+            }
+
+            return;
+        }
+
+        CloseTodoEdit();
     }
 
     private void CloseTodoEdit()
     {
         _editingItem = null;
+        _inlineEditOpenedAtTick = 0;
         if (TodoInlineEditor is null)
         {
             return;
@@ -281,7 +460,7 @@ public sealed partial class TodoWidgetContent
         TodoInlineEditor.Title = App.Current.LocalizationService.T("Todo.Menu.Edit");
     }
 
-    private static void SetTodoItemHoverState(DependencyObject? itemRoot, bool isHovered)
+    private void SetTodoItemHoverState(DependencyObject? itemRoot, bool isHovered)
     {
         if (itemRoot is null)
         {
@@ -293,37 +472,50 @@ public sealed partial class TodoWidgetContent
         // accent tint.
         var hoverBackground = NeutralInteractionBrush.Fill(
             itemRoot as FrameworkElement);
+        var parts = _rowVisuals.GetOrResolveParts(
+            itemRoot,
+            static root => new DeskBox.Controls.Todo.TodoRowVisualController.RowVisualParts(
+                FindVisualChild<Border>(root, "TodoItemHoverBackground"),
+                FindVisualChild<Border>(root, "TodoItemActionHost"),
+                FindVisualChild<CheckBox>(root, "TodoCompletionCheckBox")));
 
-        if (FindVisualChild<Border>(itemRoot, "TodoItemHoverBackground") is { } hoverBackgroundBorder)
+        if ((parts.HoverBackground ?? FindVisualChild<Border>(itemRoot, "TodoItemHoverBackground")) is { } hoverBackgroundBorder)
         {
-            hoverBackgroundBorder.Background = new SolidColorBrush(hoverBackground);
+            hoverBackgroundBorder.Background = SharedBrushCache.GetOrCreate(hoverBackground);
             hoverBackgroundBorder.Opacity = isHovered ? 1 : 0;
         }
 
-        if (FindVisualChild<Border>(itemRoot, "TodoItemActionHost") is { } actions)
+        if ((parts.ActionHost ?? FindVisualChild<Border>(itemRoot, "TodoItemActionHost")) is { } actions)
         {
             actions.Opacity = isHovered ? 1 : 0;
             actions.IsHitTestVisible = isHovered;
         }
-
     }
 
     private void ApplyEditorVisualStyle()
     {
-        if (TodoInlineEditor is null)
+        bool isDark = ActualTheme == ElementTheme.Dark;
+        if (TodoInlineEditor is not null)
+        {
+            TodoInlineEditor.OverlaySurface.Background = new SolidColorBrush(GetNeutralOverlaySurfaceColor(isDark));
+            TodoInlineEditor.OverlaySurface.BorderBrush = GetNeutralOverlayBorderBrush(isDark);
+            TodoInlineEditor.OverlaySurface.BorderThickness = new Thickness(0.8);
+            TodoEditTextBox.Background = new SolidColorBrush(GetNeutralInputSurfaceColor(isDark));
+            TodoEditTextBox.BorderBrush = GetNeutralOverlayBorderBrush(isDark);
+            TodoEditTextBox.Foreground = GetBrushResourceOrFallback(
+                "TextFillColorPrimaryBrush",
+                isDark ? Colors.White : Colors.Black);
+        }
+
+        ApplyCustomDueDateVisualStyle(isDark);
+    }
+
+    private void ApplyCustomDueDateVisualStyle(bool isDark)
+    {
+        if (CustomDueDateOverlay is null)
         {
             return;
         }
-
-        bool isDark = ActualTheme == ElementTheme.Dark;
-        TodoInlineEditor.OverlaySurface.Background = new SolidColorBrush(GetNeutralOverlaySurfaceColor(isDark));
-        TodoInlineEditor.OverlaySurface.BorderBrush = GetNeutralOverlayBorderBrush(isDark);
-        TodoInlineEditor.OverlaySurface.BorderThickness = new Thickness(0.8);
-        TodoEditTextBox.Background = new SolidColorBrush(GetNeutralInputSurfaceColor(isDark));
-        TodoEditTextBox.BorderBrush = GetNeutralOverlayBorderBrush(isDark);
-        TodoEditTextBox.Foreground = GetBrushResourceOrFallback(
-            "TextFillColorPrimaryBrush",
-            isDark ? Colors.White : Colors.Black);
 
         CustomDueDateOverlay.Background = new SolidColorBrush(GetNeutralOverlaySurfaceColor(isDark));
         CustomDueDateOverlay.BorderBrush = GetNeutralOverlayBorderBrush(isDark);
@@ -416,6 +608,11 @@ public sealed partial class TodoWidgetContent
         DependencyObject? current = source;
         while (current is not null)
         {
+            if (current is Border { Name: "TodoItemRoot", DataContext: TodoItemViewModel } rootBorder)
+            {
+                return rootBorder;
+            }
+
             if (current is Grid grid &&
                 grid.DataContext is TodoItemViewModel)
             {
@@ -466,16 +663,17 @@ public sealed partial class TodoWidgetContent
     private void ShowUndoToast(
         string text,
         string? actionText = null,
-        bool clearUndoOnHide = true)
+        bool clearUndoOnHide = false)
     {
         long generation = ++_undoToastGeneration;
+        TodoWidgetViewModel? vm = ViewModel;
         Func<Task>? action = string.IsNullOrWhiteSpace(actionText)
             ? null
             : async () =>
             {
-                if (ViewModel is not null)
+                if (vm is not null && !vm.IsDisposed)
                 {
-                    await ViewModel.UndoLastActionAsync();
+                    await vm.UndoLastActionAsync();
                 }
             };
         var request = new WidgetFeedbackRequest(
@@ -493,7 +691,8 @@ public sealed partial class TodoWidgetContent
         _ = HideUndoToastAfterDelayAsync(
             generation,
             (int)request.DisplayDuration.TotalMilliseconds,
-            clearUndoOnHide);
+            clearUndoOnHide,
+            vm);
     }
 
     private void ShowTodoStatus(string resourceKey) =>
@@ -501,18 +700,135 @@ public sealed partial class TodoWidgetContent
             App.Current.LocalizationService.T(resourceKey),
             clearUndoOnHide: false);
 
+    private void CancelAllCompletionDwells()
+    {
+        if (_pendingCompletionDwells.Count == 0)
+        {
+            return;
+        }
+
+        CancellationTokenSource[] pending = _pendingCompletionDwells.Values.ToArray();
+        _pendingCompletionDwells.Clear();
+        foreach (CancellationTokenSource cts in pending)
+        {
+            try
+            {
+                cts.Cancel();
+                cts.Dispose();
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    private void ApplyCompletionDwellPreview(TodoItemViewModel item, bool? previewCompleted)
+    {
+        if (_isDisposed || TodoListView is null || TodoListView.ContainerFromItem(item) is not DependencyObject container)
+        {
+            return;
+        }
+
+        if (FindVisualChild<CheckBox>(container, "TodoCompletionCheckBox") is { } checkBox)
+        {
+            checkBox.IsChecked = previewCompleted ?? item.IsCompleted;
+        }
+
+        if (FindVisualChild<TextBlock>(container, "TodoItemTitleTextBlock") is { } titleBlock)
+        {
+            titleBlock.TextDecorations = (previewCompleted ?? item.IsCompleted)
+                ? Windows.UI.Text.TextDecorations.Strikethrough
+                : item.TextDecorations;
+        }
+
+        if (FindVisualChild<StackPanel>(container, "TodoItemContentPanel") is { } contentPanel)
+        {
+            contentPanel.Opacity = previewCompleted == true ? 0.56 : item.ContentOpacity;
+        }
+    }
+
     private async Task<bool> SetCompletedWithFeedbackAsync(
         TodoItemViewModel item,
         bool isCompleted)
     {
-        if (ViewModel is null || !await ViewModel.SetCompletedAsync(item.Id, isCompleted))
+        if (ViewModel is null)
         {
             return false;
         }
 
-        ShowTodoStatus(isCompleted
-            ? "Todo.Status.MarkedCompleted"
-            : "Todo.Status.MarkedActive");
+        bool canceledPendingDwell = false;
+        if (_pendingCompletionDwells.Remove(item.Id, out CancellationTokenSource? previousCts))
+        {
+            canceledPendingDwell = true;
+            try
+            {
+                previousCts.Cancel();
+                previousCts.Dispose();
+            }
+            catch
+            {
+            }
+        }
+
+        if (!isCompleted && canceledPendingDwell && !item.IsCompleted)
+        {
+            ApplyCompletionDwellPreview(item, previewCompleted: null);
+            return false;
+        }
+
+        bool shouldDwell = isCompleted &&
+                           !item.IsCompleted &&
+                           IsLoaded &&
+                           !_isDisposed &&
+                           WindowsCompatibilityService.ShouldAnimate;
+        if (shouldDwell)
+        {
+            ApplyCompletionDwellPreview(item, previewCompleted: true);
+            var cts = new CancellationTokenSource();
+            _pendingCompletionDwells[item.Id] = cts;
+            try
+            {
+                await Task.Delay(CompletionVisualDwellMs, cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                ApplyCompletionDwellPreview(item, previewCompleted: null);
+                return false;
+            }
+            finally
+            {
+                if (_pendingCompletionDwells.TryGetValue(item.Id, out CancellationTokenSource? active) &&
+                    ReferenceEquals(active, cts))
+                {
+                    _pendingCompletionDwells.Remove(item.Id);
+                }
+
+                cts.Dispose();
+            }
+
+            if (_isDisposed || ViewModel is null)
+            {
+                return false;
+            }
+
+            ApplyCompletionDwellPreview(item, previewCompleted: null);
+        }
+
+        if (!await ViewModel.SetCompletedAsync(item.Id, isCompleted))
+        {
+            ApplyCompletionDwellPreview(item, previewCompleted: null);
+            return false;
+        }
+
+        if (!isCompleted)
+        {
+            ShowTodoStatus("Todo.Status.MarkedActive");
+        }
+        else if (!ViewModel.CanUndoLastAction)
+        {
+            ShowTodoStatus("Todo.Status.MarkedCompleted");
+        }
+
         return true;
     }
 
@@ -531,27 +847,52 @@ public sealed partial class TodoWidgetContent
         return true;
     }
 
-    private async Task HideUndoToastAfterDelayAsync(long generation, int durationMs, bool clearUndo)
+    private async Task HideUndoToastAfterDelayAsync(
+        long generation,
+        int durationMs,
+        bool clearUndo,
+        TodoWidgetViewModel? vm)
     {
         await Task.Delay(durationMs);
-        DispatcherQueue.TryEnqueue(() =>
+        if (_isDisposed || DispatcherQueue is null)
+        {
+            if (clearUndo &&
+                Interlocked.CompareExchange(ref _undoToastGeneration, generation + 1, generation) == generation)
+            {
+                vm?.DismissUndo();
+            }
+
+            return;
+        }
+
+        bool queued = DispatcherQueue.TryEnqueue(() =>
         {
             if (generation == _undoToastGeneration)
             {
-                HideUndoToast(clearUndo);
+                HideUndoToast(clearUndo, vm);
             }
         });
+        if (!queued &&
+            clearUndo &&
+            Interlocked.CompareExchange(ref _undoToastGeneration, generation + 1, generation) == generation)
+        {
+            vm?.DismissUndo();
+        }
     }
 
-    private void HideUndoToast(bool clearUndo)
+    private void HideUndoToast(bool clearUndo, TodoWidgetViewModel? vm = null)
     {
         _undoToastGeneration++;
-        UndoToast.Opacity = 0;
-        UndoToast.IsHitTestVisible = false;
-        UndoToastActionButton.Visibility = Visibility.Collapsed;
+        if (!_isDisposed)
+        {
+            UndoToast.Opacity = 0;
+            UndoToast.IsHitTestVisible = false;
+            UndoToastActionButton.Visibility = Visibility.Collapsed;
+        }
+
         if (clearUndo)
         {
-            ViewModel?.DismissUndo();
+            (vm ?? ViewModel)?.DismissUndo();
         }
     }
 }

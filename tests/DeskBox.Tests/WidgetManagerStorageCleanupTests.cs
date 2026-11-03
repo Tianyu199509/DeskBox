@@ -11,7 +11,6 @@ public sealed class WidgetManagerStorageCleanupTests : IDisposable
     private readonly string _storageRoot;
     private readonly string _desktopRoot;
     private readonly SettingsService _settingsService;
-    private readonly SearchFeatureSettingsStub _searchSettings;
     private readonly WidgetManager _widgetManager;
 
     public WidgetManagerStorageCleanupTests()
@@ -22,7 +21,6 @@ public sealed class WidgetManagerStorageCleanupTests : IDisposable
 
         _settingsService = new SettingsService(Path.Combine(_tempRoot, "settings"));
         _settingsService.Settings.DefaultManagedStorageRootPath = _storageRoot;
-        _searchSettings = new SearchFeatureSettingsStub(_settingsService);
 
         var fileService = new FileService();
         var organizerService = TestOrganizerServices.Create(_settingsService, fileService);
@@ -35,8 +33,7 @@ public sealed class WidgetManagerStorageCleanupTests : IDisposable
             new QuickCaptureService(new QuickCaptureStore(Path.Combine(_tempRoot, "quick-capture"))),
             localizationService: null,
             desktopPathProvider: () => _desktopRoot,
-            recycleManagedFolderDeletes: false,
-            searchFeatureSettings: _searchSettings);
+            recycleManagedFolderDeletes: false);
     }
 
     [Fact]
@@ -422,35 +419,6 @@ public sealed class WidgetManagerStorageCleanupTests : IDisposable
         Assert.Contains(widget.Id, _settingsService.Settings.DeletedWidgetIds);
         Assert.True(Directory.Exists(mappedFolder));
         Assert.Equal("mapped", File.ReadAllText(mappedFile));
-    }
-
-    [Fact]
-    public async Task RemoveWidgetAsync_SearchAwaitsRuntimeCommitBeforeFinishingDeletion()
-    {
-        var search = new WidgetConfig { Name = "Search", WidgetKind = WidgetKind.Search };
-        _settingsService.Settings.Widgets.Add(search);
-        FeatureWidgetSettings.SetEnabled(_settingsService.Settings, WidgetKind.Search, true);
-        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        _searchSettings.BeforeCommit = async _ =>
-        {
-            entered.TrySetResult();
-            await release.Task;
-        };
-
-        Task deletion = _widgetManager.RemoveWidgetAsync(search.Id);
-        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        Assert.False(deletion.IsCompleted);
-        release.TrySetResult();
-        await deletion;
-
-        Assert.Equal(1, _searchSettings.CommitCount);
-        Assert.False(_searchSettings.Enabled);
-        Assert.DoesNotContain(_settingsService.Settings.Widgets, item => item.Id == search.Id);
-        Assert.Contains(search.Id, _settingsService.Settings.DeletedWidgetIds);
-        var reloaded = new SettingsService(Path.Combine(_tempRoot, "settings"));
-        Assert.False(FeatureWidgetSettings.IsEnabled(reloaded.Settings, WidgetKind.Search));
-        Assert.DoesNotContain(reloaded.Settings.Widgets, item => item.Id == search.Id);
     }
 
     [Fact]
@@ -884,6 +852,100 @@ public sealed class WidgetManagerStorageCleanupTests : IDisposable
     }
 
     [Fact]
+    public async Task TryGetFileWidgetPathConflict_UnresolvableExternalWidgetDoesNotBlockUnrelatedFolder()
+    {
+        string loopA = Path.Combine(_tempRoot, "junction-loop-a");
+        string loopB = Directory.CreateDirectory(Path.Combine(_tempRoot, "junction-loop-b")).FullName;
+        Assert.True(TestJunction.TryCreate(loopA, loopB));
+        Directory.Delete(loopB);
+        // Pointing loopB back to loopA forms a 2-hop reparse cycle so
+        // TryResolvePathIdentity deterministically fails on loopA, matching an
+        // offline SMB/NAS share or locked external drive without network waits.
+        _ = TestJunction.TryCreate(loopB, loopA);
+
+        try
+        {
+            Assert.False(FileService.TryResolvePathIdentity(loopA, out _));
+
+            var offlineLikeWidget = new WidgetConfig
+            {
+                Id = "offline-widget",
+                Name = "OfflineDrive",
+                WidgetKind = WidgetKind.File,
+                MappedFolderPath = loopA,
+                FollowsDefaultStoragePath = false,
+            };
+            _settingsService.Settings.Widgets.Add(offlineLikeWidget);
+
+            string unrelatedLocalFolder = Directory.CreateDirectory(
+                Path.Combine(_tempRoot, "local-folder")).FullName;
+
+            Assert.False(_widgetManager.TryGetFileWidgetPathConflict(
+                unrelatedLocalFolder,
+                out FileWidgetPathConflict? unrelatedConflict));
+            Assert.Null(unrelatedConflict);
+
+            (FileWidgetPathConflict? asyncConflict, _, _) =
+                await _widgetManager.EvaluateExternalMappingConflictAsync(unrelatedLocalFolder);
+            Assert.Null(asyncConflict);
+
+            Assert.True(_widgetManager.TryGetFileWidgetPathConflict(
+                loopA,
+                out FileWidgetPathConflict? exactSameConflict));
+            Assert.Equal("offline-widget", exactSameConflict!.ConflictingWidget!.Id);
+        }
+        finally
+        {
+            TryDeleteJunctionDirectory(loopB);
+            TryDeleteJunctionDirectory(loopA);
+        }
+    }
+
+    [Fact]
+    public void TryGetFileWidgetPathConflict_OnlineDirectoryJunctionAliasStillConflicts()
+    {
+        string realFolder = Directory.CreateDirectory(Path.Combine(_tempRoot, "real-mapped")).FullName;
+        string aliasJunction = Path.Combine(_tempRoot, "alias-mapped");
+        Assert.True(TestJunction.TryCreate(aliasJunction, realFolder));
+
+        try
+        {
+            _settingsService.Settings.Widgets.Add(new WidgetConfig
+            {
+                Id = "real-widget",
+                Name = "RealMapped",
+                WidgetKind = WidgetKind.File,
+                MappedFolderPath = realFolder,
+                FollowsDefaultStoragePath = false,
+            });
+
+            Assert.True(_widgetManager.TryGetFileWidgetPathConflict(
+                aliasJunction,
+                out FileWidgetPathConflict? conflict));
+            Assert.Equal(FileWidgetPathConflictKind.ExistingWidget, conflict!.Kind);
+            Assert.Equal("real-widget", conflict.ConflictingWidget!.Id);
+        }
+        finally
+        {
+            TryDeleteJunctionDirectory(aliasJunction);
+        }
+    }
+
+    private static void TryDeleteJunctionDirectory(string path)
+    {
+        try
+        {
+            if ((File.GetAttributes(path) & FileAttributes.Directory) != 0)
+            {
+                Directory.Delete(path, recursive: false);
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    [Fact]
     public void DescribeFileWidgetPathRelation_DistinguishesSameInsideAndContains()
     {
         string root = Directory.CreateDirectory(Path.Combine(_tempRoot, "relation")).FullName;
@@ -972,28 +1034,5 @@ public sealed class WidgetManagerStorageCleanupTests : IDisposable
         {
             Directory.Delete(_tempRoot, recursive: true);
         }
-    }
-
-    private sealed class SearchFeatureSettingsStub(SettingsService settings) : ISearchFeatureSettings
-    {
-        public bool Enabled => FeatureWidgetSettings.IsEnabled(settings.Settings, WidgetKind.Search);
-        public event Action? FeatureChanged { add { } remove { } }
-        public Func<bool, Task>? BeforeCommit { get; set; }
-        public int CommitCount { get; private set; }
-
-        public Task SetEnabledAsync(bool enabled, bool reveal = true,
-            CancellationToken cancellationToken = default) =>
-            CommitEnabledStateAsync(enabled, cancellationToken);
-
-        public async Task CommitEnabledStateAsync(bool enabled,
-            CancellationToken cancellationToken = default)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (BeforeCommit is not null) await BeforeCommit(enabled);
-            FeatureWidgetSettings.SetEnabled(settings.Settings, WidgetKind.Search, enabled);
-            CommitCount++;
-        }
-
-        public Task StopAsync() => Task.CompletedTask;
     }
 }

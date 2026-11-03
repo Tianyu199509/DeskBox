@@ -4,6 +4,7 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:controls="using:DeskBox.Controls"
+    xmlns:local="using:DeskBox.Views.SettingsSections"
     xmlns:svc="using:DeskBox.Services"
     xmlns:toolkit="using:CommunityToolkit.WinUI.Controls">
 
@@ -12,58 +13,236 @@
             <ResourceDictionary.MergedDictionaries>
                 <ResourceDictionary Source="ms-appx:///Styles/SettingsOverviewResources.xaml" />
             </ResourceDictionary.MergedDictionaries>
+            <Style x:Key="InlineMetricSliderStyle" TargetType="Slider" BasedOn="{StaticResource DefaultSliderStyle}">
+                <Setter Property="Width" Value="200" />
+                <Setter Property="MinWidth" Value="160" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+                <Setter Property="IsThumbToolTipEnabled" Value="False" />
+                <Setter Property="ManipulationMode" Value="All" />
+            </Style>
+            <Style x:Key="SliderSettingValueTextStyle" TargetType="TextBlock" BasedOn="{StaticResource SettingValueTextStyle}">
+                <Setter Property="MinWidth" Value="42" />
+                <Setter Property="TextAlignment" Value="Right" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+            </Style>
         </ResourceDictionary>
     </UserControl.Resources>
 
     <StackPanel Style="{StaticResource SectionPanelStyle}">
-        <TextBlock Style="{StaticResource SectionTitleTextStyle}" AutomationProperties.HeadingLevel="Level1" svc:Localized.Key="Settings.Appearance.DetailTitle" />
-        <StackPanel x:Name="SectionCardsPanel" Margin="0,8,0,0" Spacing="4">
+        <TextBlock
+            x:Name="PageTitleText"
+            Style="{StaticResource SectionTitleTextStyle}"
+            AutomationProperties.HeadingLevel="Level1"
+            svc:Localized.Key="Settings.Appearance.DetailTitle" />
+
+        <local:DesktopOrganizationSettingsSection x:Name="DesktopOrganizationPart" />
+
+        <StackPanel
+            x:Name="FileWidgetSettingsLowerPanel"
+            Margin="0,12,0,0"
+            Spacing="4">
+            <TextBlock
+                Margin="0,0,0,4"
+                Style="{StaticResource SettingsSubsectionTitleTextStyle}"
+                AutomationProperties.HeadingLevel="Level2"
+                svc:Localized.Key="Settings.FileWidget.SectionHeader" />
+
+            <!-- Row 1: 默认收纳位置 -->
+            <toolkit:SettingsExpander
+                x:Name="ManagedStoragePathExpander"
+                HorizontalContentAlignment="Stretch"
+                IsExpanded="False"
+                Description="{x:Bind ManagedStorage.RootPath, Mode=OneWay}"
+                svc:Localized.HeaderKey="Settings.ManagedPath.Title"
+                svc:InfoTip.TitleKey="Settings.ManagedPath.InfoTip.Title"
+                svc:InfoTip.BodyKey="Settings.ManagedPath.InfoTip.Description">
+                <toolkit:SettingsExpander.HeaderIcon>
+                    <FontIcon Glyph="&#xE8B7;" />
+                </toolkit:SettingsExpander.HeaderIcon>
+                <StackPanel
+                    Orientation="Horizontal"
+                    Spacing="8"
+                    VerticalAlignment="Center">
+                    <Button
+                        svc:Localized.AutomationNameKey="Common.Open"
+                        x:Name="OpenManagedStoragePathButton"
+                        Click="OpenManagedStoragePathButton_Click"
+                        Style="{StaticResource ActionButtonStyle}"
+                        svc:Localized.Key="Common.Open"
+                        svc:Localized.ToolTipKey="Settings.ManagedPath.OpenTooltip" />
+                    <Button
+                        svc:Localized.AutomationNameKey="Common.Change"
+                        x:Name="ChangeManagedStoragePathButton"
+                        Click="ChangeManagedStoragePathButton_Click"
+                        Style="{StaticResource ActionButtonStyle}"
+                        svc:Localized.Key="Common.Change"
+                        svc:Localized.ToolTipKey="Settings.ManagedPath.ChangeTooltip" />
+                </StackPanel>
+                <toolkit:SettingsExpander.Items>
+                    <toolkit:SettingsCard
+                        x:Name="ManagedStorageWarningCard"
+                        ContentAlignment="Vertical"
+                        HorizontalContentAlignment="Stretch"
+                        Visibility="Collapsed">
+                        <InfoBar
+                            x:Name="ManagedStorageWarningInfoBar"
+                            HorizontalAlignment="Stretch"
+                            IsClosable="False"
+                            IsOpen="False"
+                            Visibility="Collapsed"
+                            Severity="Warning" />
+                    </toolkit:SettingsCard>
+
+                    <toolkit:SettingsCard
+                        HorizontalContentAlignment="Right"
+                        svc:Localized.DescriptionKey="Settings.ManagedPath.QuickAccess.Description"
+                        svc:Localized.HeaderKey="Settings.ManagedPath.QuickAccess.Title">
+                        <ToggleSwitch svc:Localized.AutomationNameKey="Settings.ManagedPath.QuickAccess.Title"
+                            x:Name="ManagedStorageQuickAccessToggle"
+                            MinWidth="0"
+                            OffContent=""
+                            OnContent=""
+                            Toggled="ManagedStorageQuickAccessToggle_Toggled" />
+                    </toolkit:SettingsCard>
+
+                    <toolkit:SettingsCard
+                        HorizontalContentAlignment="Right"
+                        svc:Localized.DescriptionKey="Settings.ManagedPath.DesktopShortcut.Description"
+                        svc:Localized.HeaderKey="Settings.ManagedPath.DesktopShortcut.Title"
+                        svc:InfoTip.TitleKey="Settings.ManagedPath.DesktopShortcut.InfoTip.Title"
+                        svc:InfoTip.BodyKey="Settings.ManagedPath.DesktopShortcut.InfoTip.Description">
+                        <ToggleSwitch svc:Localized.AutomationNameKey="Settings.ManagedPath.DesktopShortcut.Title"
+                            x:Name="ManagedStorageDesktopShortcutToggle"
+                            MinWidth="0"
+                            OffContent=""
+                            OnContent=""
+                            Toggled="ManagedStorageDesktopShortcutToggle_Toggled" />
+                    </toolkit:SettingsCard>
+
+                    <toolkit:SettingsCard
+                        x:Name="OrphanManagedStorageCard"
+                        HorizontalContentAlignment="Right"
+                        svc:Localized.HeaderKey="Settings.ManagedStorage.OrphanRow.Title">
+                        <Button
+                            svc:Localized.AutomationNameKey="Settings.ManagedStorage.Manage"
+                            x:Name="ManageOrphanFoldersButton"
+                            Click="ManageOrphanFoldersButton_Click"
+                            Style="{StaticResource ActionButtonStyle}"
+                            Visibility="Collapsed"
+                            svc:Localized.Key="Settings.ManagedStorage.Manage"
+                            svc:Localized.ToolTipKey="Settings.ManagedStorage.ManageTooltip" />
+                    </toolkit:SettingsCard>
+                </toolkit:SettingsExpander.Items>
+            </toolkit:SettingsExpander>
+
+            <!-- Row 2: 文件拖放行为 -->
+            <toolkit:SettingsExpander
+                HorizontalContentAlignment="Stretch"
+                IsExpanded="False"
+                svc:Localized.DescriptionKey="Settings.DragBehavior.Group.Description"
+                svc:Localized.HeaderKey="Settings.DragBehavior.Group.Title">
+                <toolkit:SettingsExpander.HeaderIcon>
+                    <FontIcon Glyph="&#xE82F;" />
+                </toolkit:SettingsExpander.HeaderIcon>
+                <TextBlock
+                    VerticalAlignment="Center"
+                    Style="{StaticResource SettingDescriptionTextStyle}"
+                    Text="{x:Bind ManagedStorage.DragBehaviorSummaryText, Mode=OneWay}" />
+                <toolkit:SettingsExpander.Items>
+                    <toolkit:SettingsCard
+                        HorizontalContentAlignment="Right"
+                        svc:Localized.DescriptionKey="Settings.DropAction.Description"
+                        svc:Localized.HeaderKey="Settings.DropAction.Title"
+                        svc:InfoTip.TitleKey="Settings.DropAction.InfoTip.Title"
+                        svc:InfoTip.BodyKey="Settings.DropAction.InfoTip.Description">
+                        <ComboBox
+                            svc:Localized.AutomationNameKey="Settings.DropAction.Title"
+                            MinWidth="{StaticResource SettingsControlMinWidth}"
+                            ItemsSource="{x:Bind ManagedStorage.AvailableDragInBehaviorOptionItems, Mode=OneWay}"
+                            controls:SettingsComboBox.Value="{x:Bind ManagedStorage.DropAction, Mode=TwoWay}" />
+                    </toolkit:SettingsCard>
+
+                    <toolkit:SettingsCard
+                        x:Name="DragOutActionCard"
+                        HorizontalContentAlignment="Right"
+                        svc:Localized.DescriptionKey="Settings.DragOutAction.Description"
+                        svc:Localized.HeaderKey="Settings.DragOutAction.Title"
+                        svc:InfoTip.TitleKey="Settings.DragOutAction.InfoTip.Title"
+                        svc:InfoTip.BodyKey="Settings.DragOutAction.InfoTip.Description">
+                        <ComboBox
+                            svc:Localized.AutomationNameKey="Settings.DragOutAction.Title"
+                            MinWidth="{StaticResource SettingsControlMinWidth}"
+                            HorizontalAlignment="Right"
+                            ItemsSource="{x:Bind ManagedStorage.AvailableDragOutBehaviorOptionItems, Mode=OneWay}"
+                            controls:SettingsComboBox.Value="{x:Bind ManagedStorage.DragOutAction, Mode=TwoWay}" />
+                    </toolkit:SettingsCard>
+
+                    <toolkit:SettingsCard
+                        HorizontalContentAlignment="Right"
+                        svc:Localized.DescriptionKey="Settings.DragOutTips.Modifier.Description"
+                        svc:Localized.HeaderKey="Settings.DragOutTips.Modifier.Title">
+                        <ToggleSwitch svc:Localized.AutomationNameKey="Settings.DragOutTips.Modifier.Title"
+                            x:Name="DragOutModifierTipToggle"
+                            MinWidth="0"
+                            VerticalAlignment="Center"
+                            OnContent=""
+                            OffContent=""
+                            IsOn="{x:Bind ManagedStorage.DragOutModifierTipEnabled, Mode=TwoWay}" />
+                    </toolkit:SettingsCard>
+
+                    <toolkit:SettingsCard
+                        HorizontalContentAlignment="Right"
+                        svc:Localized.DescriptionKey="Settings.DragOutTips.Result.Description"
+                        svc:Localized.HeaderKey="Settings.DragOutTips.Result.Title">
+                        <ToggleSwitch svc:Localized.AutomationNameKey="Settings.DragOutTips.Result.Title"
+                            MinWidth="0"
+                            VerticalAlignment="Center"
+                            OnContent=""
+                            OffContent=""
+                            IsOn="{x:Bind ManagedStorage.DragOutResultHintEnabled, Mode=TwoWay}" />
+                    </toolkit:SettingsCard>
+                </toolkit:SettingsExpander.Items>
+            </toolkit:SettingsExpander>
+
+            <!-- Row 3: 文件与图标显示 -->
             <toolkit:SettingsCard
-                Click="NestedSettingsButton_Click"
+                x:Name="FileDisplayEntryCard"
+                Click="FileDisplayEntryCard_Click"
                 HorizontalContentAlignment="Right"
                 IsClickEnabled="True"
-                Tag="DesktopOrganizationSettings"
-                svc:Localized.DescriptionKey="DesktopOrganization.Settings.EntryDescription"
-                svc:Localized.HeaderKey="DesktopOrganization.Settings.Title">
-                <toolkit:SettingsCard.HeaderIcon>
-                    <FontIcon Glyph="&#xE74C;" />
-                </toolkit:SettingsCard.HeaderIcon>
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                    <Button Click="OrganizeDesktopButton_Click" Style="{StaticResource AccentActionButtonStyle}">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <FontIcon FontSize="16" Glyph="&#xE74C;" />
-                            <TextBlock svc:Localized.Key="DesktopOrganization.Settings.StartAction" />
-                        </StackPanel>
-                    </Button>
-                </StackPanel>
-            </toolkit:SettingsCard>
-
-            <toolkit:SettingsCard
-                Click="NestedSettingsButton_Click"
-                IsClickEnabled="True"
-                Tag="FileDisplaySettings"
-                svc:Localized.DescriptionKey="Settings.Group.FileLayout.Description"
-                svc:Localized.HeaderKey="Settings.Group.FileLayout.Title">
+                svc:Localized.DescriptionKey="Settings.AppearanceDetail.Description"
+                svc:Localized.HeaderKey="Settings.AppearanceDetail.Title">
                 <toolkit:SettingsCard.HeaderIcon>
                     <FontIcon Glyph="&#xE8A5;" />
                 </toolkit:SettingsCard.HeaderIcon>
             </toolkit:SettingsCard>
 
+            <!-- Row 4: 文件叠放 -->
             <toolkit:SettingsCard
                 Click="NestedSettingsButton_Click"
-                Description="{x:Bind FileStack.SettingsSummaryText, Mode=OneWay}"
                 HorizontalContentAlignment="Right"
                 IsClickEnabled="True"
                 Tag="FileStackSettings"
+                Description="{x:Bind FileStack.SettingsSummaryText, Mode=OneWay}"
                 svc:Localized.HeaderKey="Settings.FileStacks.Title">
                 <toolkit:SettingsCard.HeaderIcon>
                     <FontIcon Glyph="&#xE81E;" />
                 </toolkit:SettingsCard.HeaderIcon>
-                <ComboBox svc:Localized.AutomationNameKey="Settings.FileStacks.OpenMode.Title"
-                    MinWidth="{StaticResource SettingsControlMinWidth}"
-                    VerticalAlignment="Center"
-                    ItemsSource="{x:Bind FileStack.AvailableOpenModeOptions, Mode=OneWay}"
-                    controls:SettingsComboBox.Value="{x:Bind FileStack.OpenMode, Mode=TwoWay}" />
+            </toolkit:SettingsCard>
+
+            <!-- Row 5: 打开方式与右键菜单 -->
+            <toolkit:SettingsCard
+                HorizontalContentAlignment="Right"
+                svc:Localized.DescriptionKey="Settings.OpenMethod.Description"
+                svc:Localized.HeaderKey="Settings.OpenMethod.Title">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE8B0;" />
+                </toolkit:SettingsCard.HeaderIcon>
+                <toolkit:Segmented
+                    svc:Localized.AutomationNameKey="Settings.OpenMethod.Title"
+                    SelectionMode="Single"
+                    controls:SettingsSegmented.Options="{x:Bind Interaction.AvailableFileOpenMethodOptions, Mode=OneWay}"
+                    controls:SettingsSegmented.Value="{x:Bind Interaction.FileOpenMethod, Mode=TwoWay}" />
             </toolkit:SettingsCard>
 
             <toolkit:SettingsCard
@@ -73,30 +252,240 @@
                 <toolkit:SettingsCard.HeaderIcon>
                     <FontIcon Glyph="&#xE838;" />
                 </toolkit:SettingsCard.HeaderIcon>
-                <ComboBox svc:Localized.AutomationNameKey="Settings.FileWidget.FolderOpenBehavior.Title"
-                    MinWidth="{StaticResource SettingsControlMinWidth}"
-                    VerticalAlignment="Center"
-                    ItemsSource="{x:Bind FeatureWidgets.AvailableFolderOpenBehaviorOptionItems, Mode=OneWay}"
-                    controls:SettingsComboBox.Value="{x:Bind FeatureWidgets.FolderOpenBehavior, Mode=TwoWay}" />
+                <toolkit:Segmented
+                    svc:Localized.AutomationNameKey="Settings.FileWidget.FolderOpenBehavior.Title"
+                    SelectionMode="Single"
+                    controls:SettingsSegmented.Options="{x:Bind FeatureWidgets.AvailableFolderOpenBehaviorOptionItems, Mode=OneWay}"
+                    controls:SettingsSegmented.Value="{x:Bind FeatureWidgets.FolderOpenBehavior, Mode=TwoWay}" />
             </toolkit:SettingsCard>
 
             <toolkit:SettingsCard
                 HorizontalContentAlignment="Right"
-                svc:Localized.DescriptionKey="Settings.FileWidget.SystemContextMenu.Description"
-                svc:Localized.HeaderKey="Settings.FileWidget.SystemContextMenu.Title"
+                svc:Localized.DescriptionKey="Settings.FileItemContextMenu.Description"
+                svc:Localized.HeaderKey="Settings.FileItemContextMenu.Title"
                 svc:InfoTip.TitleKey="Settings.FileWidget.SystemContextMenu.InfoTip.Title"
                 svc:InfoTip.BodyKey="Settings.FileWidget.SystemContextMenu.InfoTip.Description">
                 <toolkit:SettingsCard.HeaderIcon>
                     <FontIcon Glyph="&#xE712;" />
                 </toolkit:SettingsCard.HeaderIcon>
-                <ToggleSwitch svc:Localized.AutomationNameKey="Settings.FileWidget.SystemContextMenu.Title"
+                <ToggleSwitch svc:Localized.AutomationNameKey="Settings.FileItemContextMenu.Title"
                     MinWidth="0"
                     VerticalAlignment="Center"
                     OnContent=""
                     OffContent=""
                     IsOn="{x:Bind Interaction.FileItemContextMenuEnabled, Mode=TwoWay}" />
             </toolkit:SettingsCard>
+        </StackPanel>
 
+        <!-- Sub-page: 文件与整理 > 文件与图标显示 -->
+        <StackPanel
+            x:Name="FileDisplaySubPagePanel"
+            Visibility="Collapsed"
+            Margin="0,8,0,0"
+            Spacing="4">
+            <toolkit:SettingsExpander
+                IsExpanded="True"
+                svc:Localized.HeaderKey="Settings.FileDisplay.Group.Layout">
+                <toolkit:SettingsExpander.HeaderIcon>
+                    <FontIcon Glyph="&#xE8A5;" />
+                </toolkit:SettingsExpander.HeaderIcon>
+                <toolkit:SettingsExpander.Items>
+                    <toolkit:SettingsCard
+                        HorizontalContentAlignment="Right"
+                        svc:Localized.DescriptionKey="Settings.IconSize.Description"
+                        svc:Localized.HeaderKey="Settings.IconSize.Title">
+                        <StackPanel VerticalAlignment="Center" Orientation="Horizontal" Spacing="8">
+                            <TextBlock
+                                Style="{StaticResource SliderSettingValueTextStyle}"
+                                Text="{x:Bind Appearance.IconSizeValueText, Mode=OneWay}" />
+                            <Slider
+                                svc:Localized.AutomationNameKey="Settings.IconSize.Title"
+                                Maximum="56"
+                                Minimum="24"
+                                StepFrequency="2"
+                                Style="{StaticResource InlineMetricSliderStyle}"
+                                Value="{x:Bind Appearance.IconSize, Mode=TwoWay}"
+                                ManipulationMode="All"
+                                ManipulationStarted="AppearanceSlider_ManipulationStarted"
+                                ManipulationCompleted="AppearanceSlider_ManipulationCompleted"
+                                PointerPressed="AppearanceSlider_PointerPressed"
+                                PointerReleased="AppearanceSlider_PointerReleased"
+                                LostFocus="AppearanceSlider_LostFocus" />
+                        </StackPanel>
+                    </toolkit:SettingsCard>
+
+                    <toolkit:SettingsCard
+                        HorizontalContentAlignment="Right"
+                        svc:Localized.DescriptionKey="Settings.HorizontalSpacing.Description"
+                        svc:Localized.HeaderKey="Settings.HorizontalSpacing.Title">
+                        <StackPanel VerticalAlignment="Center" Orientation="Horizontal" Spacing="8">
+                            <TextBlock
+                                Style="{StaticResource SliderSettingValueTextStyle}"
+                                Text="{x:Bind Appearance.HorizontalSpacingValueText, Mode=OneWay}" />
+                            <Slider
+                                svc:Localized.AutomationNameKey="Settings.HorizontalSpacing.Title"
+                                Maximum="1"
+                                Minimum="0"
+                                StepFrequency="0.02"
+                                Style="{StaticResource InlineMetricSliderStyle}"
+                                Value="{x:Bind Appearance.HorizontalSpacingScale, Mode=TwoWay}"
+                                ManipulationMode="All"
+                                ManipulationStarted="AppearanceSlider_ManipulationStarted"
+                                ManipulationCompleted="AppearanceSlider_ManipulationCompleted"
+                                PointerPressed="AppearanceSlider_PointerPressed"
+                                PointerReleased="AppearanceSlider_PointerReleased"
+                                LostFocus="AppearanceSlider_LostFocus" />
+                        </StackPanel>
+                    </toolkit:SettingsCard>
+
+                    <toolkit:SettingsCard
+                        HorizontalContentAlignment="Right"
+                        svc:Localized.DescriptionKey="Settings.VerticalSpacing.Description"
+                        svc:Localized.HeaderKey="Settings.VerticalSpacing.Title">
+                        <StackPanel VerticalAlignment="Center" Orientation="Horizontal" Spacing="8">
+                            <TextBlock
+                                Style="{StaticResource SliderSettingValueTextStyle}"
+                                Text="{x:Bind Appearance.VerticalSpacingValueText, Mode=OneWay}" />
+                            <Slider
+                                svc:Localized.AutomationNameKey="Settings.VerticalSpacing.Title"
+                                Maximum="1"
+                                Minimum="0"
+                                StepFrequency="0.02"
+                                Style="{StaticResource InlineMetricSliderStyle}"
+                                Value="{x:Bind Appearance.VerticalSpacingScale, Mode=TwoWay}"
+                                ManipulationMode="All"
+                                ManipulationStarted="AppearanceSlider_ManipulationStarted"
+                                ManipulationCompleted="AppearanceSlider_ManipulationCompleted"
+                                PointerPressed="AppearanceSlider_PointerPressed"
+                                PointerReleased="AppearanceSlider_PointerReleased"
+                                LostFocus="AppearanceSlider_LostFocus" />
+                        </StackPanel>
+                    </toolkit:SettingsCard>
+
+                    <toolkit:SettingsCard
+                        HorizontalContentAlignment="Right"
+                        svc:Localized.DescriptionKey="Settings.FileNameWidth.Description"
+                        svc:Localized.HeaderKey="Settings.FileNameWidth.Title">
+                        <StackPanel VerticalAlignment="Center" Orientation="Horizontal" Spacing="8">
+                            <TextBlock
+                                Style="{StaticResource SliderSettingValueTextStyle}"
+                                Text="{x:Bind Appearance.FileNameWidthValueText, Mode=OneWay}" />
+                            <Slider
+                                svc:Localized.AutomationNameKey="Settings.FileNameWidth.Title"
+                                Maximum="1"
+                                Minimum="0"
+                                StepFrequency="0.02"
+                                Style="{StaticResource InlineMetricSliderStyle}"
+                                Value="{x:Bind Appearance.FileNameWidthScale, Mode=TwoWay}"
+                                ManipulationMode="All"
+                                ManipulationStarted="AppearanceSlider_ManipulationStarted"
+                                ManipulationCompleted="AppearanceSlider_ManipulationCompleted"
+                                PointerPressed="AppearanceSlider_PointerPressed"
+                                PointerReleased="AppearanceSlider_PointerReleased"
+                                LostFocus="AppearanceSlider_LostFocus" />
+                        </StackPanel>
+                    </toolkit:SettingsCard>
+
+                    <toolkit:SettingsCard
+                        HorizontalContentAlignment="Right"
+                        svc:Localized.DescriptionKey="Settings.FileNameLines.Description"
+                        svc:Localized.HeaderKey="Settings.FileNameLines.Title">
+                        <toolkit:Segmented
+                            svc:Localized.AutomationNameKey="Settings.FileNameLines.Title"
+                            SelectionMode="Single"
+                            controls:SettingsSegmented.Options="{x:Bind Appearance.AvailableFileNameLineCountOptions, Mode=OneWay}"
+                            controls:SettingsSegmented.Value="{x:Bind Appearance.FileNameLineCount, Mode=TwoWay}" />
+                    </toolkit:SettingsCard>
+                </toolkit:SettingsExpander.Items>
+            </toolkit:SettingsExpander>
+
+            <toolkit:SettingsExpander
+                IsExpanded="True"
+                svc:Localized.HeaderKey="Settings.FileDisplay.Group.Thumbnails">
+                <toolkit:SettingsExpander.HeaderIcon>
+                    <FontIcon Glyph="&#xEB9F;" />
+                </toolkit:SettingsExpander.HeaderIcon>
+                <toolkit:SettingsExpander.Items>
+                    <toolkit:SettingsCard
+                        HorizontalContentAlignment="Right"
+                        svc:Localized.DescriptionKey="Settings.ShowImageThumbnails.Description"
+                        svc:Localized.HeaderKey="Settings.ShowImageThumbnails.Title"
+                        svc:InfoTip.TitleKey="Settings.ShowImageFilesAsIcons.InfoTip.Title"
+                        svc:InfoTip.BodyKey="Settings.ShowImageFilesAsIcons.InfoTip.Description">
+                        <ToggleSwitch svc:Localized.AutomationNameKey="Settings.ShowImageThumbnails.Title"
+                            MinWidth="0"
+                            OffContent=""
+                            OnContent=""
+                            IsOn="{x:Bind FileDisplay.ShowImageThumbnails, Mode=TwoWay}" />
+                    </toolkit:SettingsCard>
+
+                    <toolkit:SettingsCard
+                        HorizontalContentAlignment="Right"
+                        svc:Localized.DescriptionKey="Settings.ShowFileExtensions.Description"
+                        svc:Localized.HeaderKey="Settings.ShowFileExtensions.Title">
+                        <ToggleSwitch svc:Localized.AutomationNameKey="Settings.ShowFileExtensions.Title"
+                            MinWidth="0"
+                            OffContent=""
+                            OnContent=""
+                            IsOn="{x:Bind FileDisplay.ShowFileExtensions, Mode=TwoWay}" />
+                    </toolkit:SettingsCard>
+
+                    <toolkit:SettingsCard
+                        HorizontalContentAlignment="Right"
+                        Visibility="{x:Bind FileDisplay.ShowFileExtensions, Mode=OneWay}"
+                        svc:Localized.DescriptionKey="Settings.HideShortcutExtension.Description"
+                        svc:Localized.HeaderKey="Settings.HideShortcutExtension.Title">
+                        <ToggleSwitch svc:Localized.AutomationNameKey="Settings.HideShortcutExtension.Title"
+                            MinWidth="0"
+                            OffContent=""
+                            OnContent=""
+                            IsEnabled="{x:Bind FileDisplay.ShowFileExtensions, Mode=OneWay}"
+                            IsOn="{x:Bind FileDisplay.HideShortcutExtensionWhenShowingFileExtensions, Mode=TwoWay}" />
+                    </toolkit:SettingsCard>
+
+                    <toolkit:SettingsCard
+                        HorizontalContentAlignment="Right"
+                        svc:Localized.DescriptionKey="Settings.HideShortcutArrow.Description"
+                        svc:Localized.HeaderKey="Settings.HideShortcutArrow.Title">
+                        <ToggleSwitch svc:Localized.AutomationNameKey="Settings.HideShortcutArrow.Title"
+                            MinWidth="0"
+                            OffContent=""
+                            OnContent=""
+                            IsOn="{x:Bind FileDisplay.HideShortcutArrowOverlay, Mode=TwoWay}" />
+                    </toolkit:SettingsCard>
+                </toolkit:SettingsExpander.Items>
+            </toolkit:SettingsExpander>
+
+            <toolkit:SettingsExpander
+                IsExpanded="True"
+                svc:Localized.HeaderKey="Settings.FileDisplay.Group.Details">
+                <toolkit:SettingsExpander.HeaderIcon>
+                    <FontIcon Glyph="&#xE8FD;" />
+                </toolkit:SettingsExpander.HeaderIcon>
+                <toolkit:SettingsExpander.Items>
+                    <toolkit:SettingsCard
+                        HorizontalContentAlignment="Right"
+                        svc:Localized.DescriptionKey="Settings.ListDetails.Description"
+                        svc:Localized.HeaderKey="Settings.ListDetails.Title">
+                        <ToggleSwitch svc:Localized.AutomationNameKey="Settings.ListDetails.Title"
+                            MinWidth="0"
+                            OffContent=""
+                            OnContent=""
+                            IsOn="{x:Bind FileDisplay.ShowListItemDetails, Mode=TwoWay}" />
+                    </toolkit:SettingsCard>
+
+                    <toolkit:SettingsCard
+                        HorizontalContentAlignment="Right"
+                        svc:Localized.DescriptionKey="Settings.FilePathTooltips.Description"
+                        svc:Localized.HeaderKey="Settings.FilePathTooltips.Title">
+                        <ToggleSwitch svc:Localized.AutomationNameKey="Settings.FilePathTooltips.Title"
+                            MinWidth="0"
+                            OffContent=""
+                            OnContent=""
+                            IsOn="{x:Bind FileDisplay.ShowFileItemPathTooltips, Mode=TwoWay}" />
+                    </toolkit:SettingsCard>
+                </toolkit:SettingsExpander.Items>
+            </toolkit:SettingsExpander>
         </StackPanel>
     </StackPanel>
 </UserControl>

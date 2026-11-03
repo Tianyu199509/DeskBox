@@ -196,6 +196,25 @@ public static partial class Win32Helper
     internal static IntPtr GetAnimationMonitorForPoint(int x, int y) =>
         MonitorFromPoint(new POINT { X = x, Y = y }, MONITOR_DEFAULTTONEAREST);
 
+    internal static bool TryGetCachedAnimationDisplayTiming(
+        IntPtr monitor,
+        IReadOnlyDictionary<string, DisplayTiming> timings,
+        out DisplayTiming timing)
+    {
+        if (timings.Count > 0 && monitor != IntPtr.Zero)
+        {
+            var info = new MONITORINFOEX { cbSize = Marshal.SizeOf<MONITORINFOEX>(), szDevice = string.Empty };
+            if (GetMonitorInfoEx(monitor, ref info) &&
+                timings.TryGetValue(info.szDevice, out timing))
+            {
+                return true;
+            }
+        }
+
+        timing = new(WidgetDisplayRefreshRatePolicy.DefaultRefreshRateHz, WidgetDisplayRefreshRatePolicy.DefaultRefreshRateHz, false);
+        return false;
+    }
+
     internal static DisplayTiming GetAnimationDisplayTiming(IntPtr monitor, IReadOnlyDictionary<string, DisplayTiming> timings)
     {
         var info = new MONITORINFOEX { cbSize = Marshal.SizeOf<MONITORINFOEX>(), szDevice = string.Empty };

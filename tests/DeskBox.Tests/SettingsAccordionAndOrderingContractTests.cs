@@ -3,47 +3,38 @@ using System.Text.RegularExpressions;
 namespace DeskBox.Tests;
 
 /// <summary>
-/// Contract tests for the "accordion grouping + reordering" pass over the
-/// settings window: long flat card runs are folded into
-/// toolkit:SettingsExpander accordions (parent header card + child cards in
-/// Items), sections are reordered to the pinned page order, the three
-/// capsule sub-pages collapse into CapsuleModeSettingsSection, the default
-/// window width/height cards merge into one card, and the auto-start mode
-/// copy stops recommending the standard mode. These tests assert the target
-/// shape only; they are expected to fail until the refactor lands.
+/// Contract tests for the 1.6.0 accordion grouping and section ordering across
+/// the settings window and its consolidated section views.
 /// </summary>
 public sealed class SettingsAccordionAndOrderingContractTests
 {
     private const string SettingsWindowXaml = "src/DeskBox/Views/SettingsWindow.xaml";
     private const string SettingsWindowCodeBehind = "src/DeskBox/Views/SettingsWindow.xaml.cs";
+    private const string SettingsWindowNavigation = "src/DeskBox/Views/SettingsWindow.Navigation.cs";
     private const string SearchCatalog = "src/DeskBox/Services/SettingsSearchCatalog.cs";
 
     // ---------------------------------------------------------------- A. 常规页
 
-    // Spec A1: 「开机自动启动」is a SettingsExpander whose Items contain the
-    // 启动方式 sub-card.
+    // Spec A1: 「开机自动启动」is a flat SettingsCard followed by a conditional
+    // 启动方式 sibling card (single-child pseudo-accordion flattened).
     [Fact]
-    public void General_AutoStart_IsAnExpanderWithModeChildCard()
+    public void General_AutoStart_IsAFlatCardWithConditionalModeSibling()
     {
         string general = GeneralSectionSlice();
 
-        Match? expander = FindOpeningTag(
-            general, "toolkit:SettingsExpander", "HeaderKey=\"Settings.AutoStart.Title\"");
-        Assert.NotNull(expander);
+        Match? card = FindOpeningTag(
+            general, "toolkit:SettingsCard", "HeaderKey=\"Settings.AutoStart.Title\"");
+        Assert.NotNull(card);
+        Assert.Null(FindOpeningTag(
+            general, "toolkit:SettingsExpander", "HeaderKey=\"Settings.AutoStart.Title\""));
 
-        // The mode sub-card must live inside the expander block (before the
-        // expander's closing tag), not merely after it.
-        int openEnd = expander.Index + expander.Length;
-        int close = general.IndexOf("</toolkit:SettingsExpander>", openEnd, StringComparison.Ordinal);
-        Assert.True(close >= 0, "GeneralSection: the AutoStart expander is missing its closing tag.");
         int mode = IndexOfOrFail(general, "HeaderKey=\"Settings.AutoStart.Mode.Title\"", "GeneralSection");
-        Assert.True(openEnd <= mode && mode < close,
-            "GeneralSection: Settings.AutoStart.Mode.Title must be an item of the " +
-            "Settings.AutoStart.Title expander (between its opening and closing tags).");
+        Assert.True(card.Index < mode,
+            "GeneralSection: Settings.AutoStart.Mode.Title must follow Settings.AutoStart.Title.");
     }
 
     // Spec A2: pinned GeneralSection order
-    // Language < AutoStart < SilentStartup < Performance < Displays < AttachmentStorageMode < Onboarding.
+    // Language < AutoStart < AutoStart.Mode < SilentStartup < Performance < Nav.AiSettings.
     [Fact]
     public void General_Cards_FollowThePinnedOrder()
     {
@@ -52,78 +43,52 @@ public sealed class SettingsAccordionAndOrderingContractTests
         AssertAscending(general, "GeneralSection ordering",
             "HeaderKey=\"Settings.Language.Title\"",
             "HeaderKey=\"Settings.AutoStart.Title\"",
+            "HeaderKey=\"Settings.AutoStart.Mode.Title\"",
             "HeaderKey=\"Settings.SilentStartup.Title\"",
             "HeaderKey=\"Settings.Performance.Title\"",
-            "HeaderKey=\"Settings.Displays.Title\"",
-            "HeaderKey=\"Settings.AttachmentStorageMode.Title\"",
-            "HeaderKey=\"Settings.Onboarding.Title\"");
+            "HeaderKey=\"Settings.Nav.AiSettings\"");
+        Assert.DoesNotContain("HeaderKey=\"Settings.AttachmentStorageMode.Title\"", general, StringComparison.Ordinal);
+        Assert.DoesNotContain("HeaderKey=\"Settings.Displays.Title\"", general, StringComparison.Ordinal);
+        Assert.DoesNotContain("HeaderKey=\"Settings.Onboarding.Title\"", general, StringComparison.Ordinal);
     }
 
     // -------------------------------------------------- B. 文件叠放（文件堆叠）
 
-    // Spec B1 + B2: the section is headed by the auto-stacking expander
-    // (header binds Settings.FileStacks.Auto.Title with the toggle in the
-    // expander header) whose items are Threshold < GroupBy < Unmatched <
-    // OrderBy, followed by the open-mode expander (header binds
-    // Settings.FileStacks.OpenMode.Title with the combo in the expander
-    // header) whose items are PopoverLayout < PopoverStyle. The retired
-    // master switch and every child-card prefix icon are gone.
+    // Spec B1 + B2: FileWidgetSettingsSection.xaml hosts a direct drill-in
+    // SettingsCard to FileStackSettings, while FileStackSettingsSectionTemplate
+    // hosts the flattened AutoStacking, OpenMode/PopoverLayout/PopoverStyle and rule cards.
     [Fact]
-    public void FileStack_TwoExpanders_GroupTheirChildCards()
+    public void FileStack_DirectOverviewCard_AndFlattenedDetailPage()
     {
+        string overview = ReadRepositoryFile(
+            "src/DeskBox/Views/SettingsSections/FileWidgetSettingsSection.xaml");
         string slice = FileStackSlice();
 
-        Match? autoExpander = FindOpeningTag(
-            slice, "toolkit:SettingsExpander", "HeaderKey=\"Settings.FileStacks.Auto.Title\"");
-        Assert.NotNull(autoExpander);
-        Match? openModeExpander = FindOpeningTag(
-            slice, "toolkit:SettingsExpander", "HeaderKey=\"Settings.FileStacks.OpenMode.Title\"");
-        Assert.NotNull(openModeExpander);
+        Match? overviewCard = FindOpeningTag(
+            overview, "toolkit:SettingsCard", "HeaderKey=\"Settings.FileStacks.Title\"");
+        Assert.NotNull(overviewCard);
+        Assert.Contains("Tag=\"FileStackSettings\"", overviewCard.Value, StringComparison.Ordinal);
+        Assert.Null(FindOpeningTag(
+            overview, "toolkit:SettingsExpander", "HeaderKey=\"Settings.FileStacks.Title\""));
+        Assert.DoesNotContain("HeaderKey=\"Settings.FileStacks.MoreSettings\"", overview, StringComparison.Ordinal);
+        Assert.DoesNotContain("HeaderKey=\"Settings.FileStacks.Auto.Title\"", overview, StringComparison.Ordinal);
 
-        int autoClose = slice.IndexOf(
-            "</toolkit:SettingsExpander>", autoExpander.Index + autoExpander.Length, StringComparison.Ordinal);
-        int openModeClose = slice.IndexOf(
-            "</toolkit:SettingsExpander>", openModeExpander.Index + openModeExpander.Length, StringComparison.Ordinal);
-        Assert.True(autoClose >= 0 && openModeClose >= 0,
-            "FileStack section: both expanders must have closing tags.");
-        Assert.True(openModeClose < autoExpander.Index,
-            "FileStack section: the open-mode expander must come before the auto-stacking expander.");
+        Assert.Equal(0, CountOpeningTags(slice, "toolkit:SettingsExpander"));
+        AssertAscending(slice, "FileStack section ordering",
+            "HeaderKey=\"Settings.FileStacks.Auto.Title\"",
+            "HeaderKey=\"Settings.FileStacks.OpenMode.Title\"",
+            "HeaderKey=\"Settings.FileStacks.PopoverLayout.Title\"",
+            "HeaderKey=\"Settings.FileStacks.PopoverStyle.Title\"",
+            "HeaderKey=\"Settings.FileStacks.Threshold.Title\"",
+            "HeaderKey=\"Settings.FileStacks.GroupBy.Title\"",
+            "HeaderKey=\"Settings.FileStacks.Unmatched.Title\"",
+            "HeaderKey=\"Settings.FileStacks.OrderBy.Title\"");
 
-        // Auto-stacking children live between the auto expander's tags.
-        foreach (string header in new[]
-        {
-             "HeaderKey=\"Settings.FileStacks.Threshold.Title\"",
-             "HeaderKey=\"Settings.FileStacks.GroupBy.Title\"",
-             "HeaderKey=\"Settings.FileStacks.Unmatched.Title\"",
-             "HeaderKey=\"Settings.FileStacks.OrderBy.Title\""
-        })
-        {
-            int index = IndexOfOrFail(slice, header, "FileStack section");
-            Assert.True(autoExpander.Index + autoExpander.Length <= index && index < autoClose,
-                $"FileStack section: {header} must be an item of the auto-stacking expander.");
-        }
-
-        // Popover-only children live between the open-mode expander's tags.
-        foreach (string header in new[]
-        {
-             "HeaderKey=\"Settings.FileStacks.PopoverLayout.Title\"",
-             "HeaderKey=\"Settings.FileStacks.PopoverStyle.Title\""
-        })
-        {
-            int index = IndexOfOrFail(slice, header, "FileStack section");
-            Assert.True(openModeExpander.Index + openModeExpander.Length <= index && index < openModeClose,
-                $"FileStack section: {header} must be an item of the open-mode expander.");
-        }
-
-        // The retired master switch and the old flat enable card header are
-        // gone; the popover-only cards freeze through IsPopoverOpenMode.
         Assert.DoesNotContain("HeaderKey=\"Settings.FileStacks.Enable.Title\"", slice, StringComparison.Ordinal);
         Assert.DoesNotContain("HeaderKey=\"Settings.FileStacks.Mode.Title\"", slice, StringComparison.Ordinal);
         Assert.DoesNotContain("{Binding StacksEnabled", slice, StringComparison.Ordinal);
-        Assert.Contains("IsEnabled=\"{Binding IsPopoverOpenMode}\"", slice, StringComparison.Ordinal);
-
-        // The accordion items keep title + description only — no prefix icons.
-        Assert.DoesNotContain("SettingsCard.HeaderIcon", slice, StringComparison.Ordinal);
+        Assert.Contains("Visibility=\"{Binding IsPopoverOpenMode, Converter={StaticResource SettingsBoolToVisibilityConverter}}\"", slice, StringComparison.Ordinal);
+        Assert.Contains("SettingsCard.HeaderIcon", slice, StringComparison.Ordinal);
     }
 
     // Spec B3: the custom-rules editor stays inside the template.
@@ -136,7 +101,7 @@ public sealed class SettingsAccordionAndOrderingContractTests
         Assert.Contains("x:Name=\"FileStackRulesListView\"", slice, StringComparison.Ordinal);
     }
 
-    // ---------------------------------------------------------- C. 胶囊子页删除
+    // ---------------------------------------------------------- C. 胶囊子页合并
 
     // Spec C1: the three capsule sub-page templates are gone from the window XAML.
     [Fact]
@@ -166,154 +131,222 @@ public sealed class SettingsAccordionAndOrderingContractTests
         Assert.DoesNotContain("\"CapsuleAnimationSettings\"", catalog, StringComparison.Ordinal);
     }
 
-    // Spec C4: the capsule overrides page survives the collapse.
+    // Spec C4: capsule per-widget overrides are consolidated inline inside
+    // CapsuleModeSettingsSection.xaml (hosted in Interaction), while legacy
+    // CapsuleOverridesSettings deep links normalize to Interaction.
     [Fact]
     public void Capsule_OverridesRoute_Survives()
     {
         string codeBehind = ReadRepositoryFile(SettingsWindowCodeBehind);
-        string xaml = ReadRepositoryFile(SettingsWindowXaml);
+        string navigation = ReadRepositoryFile(SettingsWindowNavigation);
+        string windowXaml = ReadRepositoryFile(SettingsWindowXaml);
+        string capsuleXaml = ReadRepositoryFile(
+            "src/DeskBox/Views/SettingsSections/CapsuleModeSettingsSection.xaml");
 
-        Assert.Contains("[\"CapsuleOverridesSettings\"]", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("CapsuleOverridesSettingsSectionTemplate", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("[\"CapsuleOverridesSettings\"]", codeBehind, StringComparison.Ordinal);
+        Assert.DoesNotContain("CapsuleOverridesSettingsSectionTemplate", windowXaml, StringComparison.Ordinal);
+        Assert.Contains("\"CapsuleOverridesSettings\"", navigation, StringComparison.Ordinal);
+        Assert.Contains("=> \"Interaction\"", navigation, StringComparison.Ordinal);
+        Assert.Contains("HeaderKey=\"Settings.Capsule.Overrides.Title\"", capsuleXaml, StringComparison.Ordinal);
+        Assert.Contains("ItemsSource=\"{Binding OverrideItems}\"", capsuleXaml, StringComparison.Ordinal);
+        Assert.Contains("ResetAllCapsuleOverridesCommand", capsuleXaml, StringComparison.Ordinal);
     }
 
-    // Spec C5: the merged capsule main page has exactly three expanders, with
-    // the hover-response expander hosting the expand/collapse delay sub-cards
-    // and the arrangement/animation detail cards folded in as well.
+    // Spec C5: InteractionSection hosts a clickable CapsuleModeEntryCard (with inline
+    // CollapseBehavior combo), while CapsuleModeSettingsSection.xaml is a flat 3rd-level
+    // sub-page starting with the retained CollapseBehavior card and zero SettingsExpanders.
     [Fact]
-    public void CapsuleModeSection_HasThreeExpandersWithMergedChildren()
+    public void CapsuleModeSection_HasArrangementExpanderAndFlatPresetCards()
     {
+        string interaction = InteractionSlice();
+        Match? entryCard = FindOpeningTag(
+            interaction, "toolkit:SettingsCard", "x:Name=\"CapsuleModeEntryCard\"");
+        Assert.NotNull(entryCard);
+        Assert.Contains("HeaderKey=\"Settings.Section.CapsuleMode\"", entryCard.Value, StringComparison.Ordinal);
+
         string xaml = ReadRepositoryFile(
             "src/DeskBox/Views/SettingsSections/CapsuleModeSettingsSection.xaml");
 
         int expanderCount = CountOpeningTags(xaml, "toolkit:SettingsExpander");
-        Assert.True(expanderCount == 3,
-            $"CapsuleModeSettingsSection.xaml: expected exactly 3 SettingsExpander elements " +
-            $"(hover response, arrangement, animation), found {expanderCount}.");
+        Assert.True(expanderCount == 0,
+            $"CapsuleModeSettingsSection.xaml: expected 0 SettingsExpander elements " +
+            $"on the flat 3rd-level sub-page, found {expanderCount}.");
+        Assert.NotNull(FindOpeningTag(
+            xaml, "toolkit:SettingsCard", "HeaderKey=\"Settings.CollapseBehavior.Title\""));
 
         Match? hover = FindOpeningTag(
-            xaml, "toolkit:SettingsExpander", "HeaderKey=\"Settings.Capsule.HoverResponse.Title\"");
+            xaml, "toolkit:SettingsCard", "HeaderKey=\"Settings.Capsule.HoverResponse.Title\"");
         Assert.NotNull(hover);
 
         int expandDelay = IndexOfOrFail(
             xaml, "HeaderKey=\"Settings.Capsule.ExpandDelay.Title\"", "CapsuleMode section");
         Assert.True(hover.Index < expandDelay,
             "CapsuleMode section: the expand-delay sub-card must sit after the " +
-            "Settings.Capsule.HoverResponse.Title expander header.");
+            "Settings.Capsule.HoverResponse.Title card.");
 
-        // The three deleted sub-pages' cards must have a home in this file.
         Assert.Contains("HeaderKey=\"Settings.Capsule.CollapseDelay.Title\"", xaml, StringComparison.Ordinal);
         Assert.Contains("HeaderKey=\"Settings.Capsule.Spacing.Title\"", xaml, StringComparison.Ordinal);
         Assert.Contains("HeaderKey=\"Settings.Capsule.Direction.Title\"", xaml, StringComparison.Ordinal);
         Assert.Contains("HeaderKey=\"Settings.Capsule.AnimationDuration.Title\"", xaml, StringComparison.Ordinal);
     }
 
-    // ------------------------------------------------------------ D. 外观动画
+    // ------------------------------------------------------------ D. 外观动画与折叠子页退役
 
-    // Spec D: the animation template is flattened — no SettingsExpander left;
-    // the preset card (Settings.Group.Animation.Title) leads the page and the
-    // five detail cards (Effect/Speed/Direction/Easing/Stagger) follow in order.
+    // Spec D: the three folded sub-page templates/routes (Density, Window,
+    // Animation) are retired, and AppearanceSettingsSection.xaml owns the
+    // animation expander with Preset + Direction/Speed/Easing/Stagger in order.
     [Fact]
     public void AppearanceAnimation_DetailCards_AreFlattenedWithoutExpander()
     {
-        string slice = Slice(
-            ReadRepositoryFile(SettingsWindowXaml),
-            "x:Key=\"AppearanceAnimationSettingsSectionTemplate\"",
-            "x:Key=\"WidgetGroupsSectionTemplate\"");
+        string windowXaml = ReadRepositoryFile(SettingsWindowXaml);
+        string codeBehind = ReadRepositoryFile(SettingsWindowCodeBehind);
+        string catalog = ReadRepositoryFile(SearchCatalog);
+        string appearanceXaml = ReadRepositoryFile(
+            "src/DeskBox/Views/SettingsSections/AppearanceSettingsSection.xaml");
 
-        Assert.DoesNotContain("<toolkit:SettingsExpander", slice, StringComparison.Ordinal);
+        Assert.DoesNotContain("AppearanceDensitySettingsSectionTemplate", windowXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("AppearanceWindowSettingsSectionTemplate", windowXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("AppearanceAnimationSettingsSectionTemplate", windowXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"AppearanceDensitySettings\"", codeBehind, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"AppearanceWindowSettings\"", codeBehind, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"AppearanceAnimationSettings\"", codeBehind, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"AppearanceDensitySettings\"", catalog, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"AppearanceWindowSettings\"", catalog, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"AppearanceAnimationSettings\"", catalog, StringComparison.Ordinal);
 
-        AssertAscending(slice, "AppearanceAnimation flattened card order",
+        Assert.DoesNotContain("PreviewWidgetAnimationButton_Click", appearanceXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("HeaderKey=\"Settings.Animation.Preset.Title\"", appearanceXaml, StringComparison.Ordinal);
+        AssertAscending(appearanceXaml, "Appearance animation expander card order",
             "HeaderKey=\"Settings.Group.Animation.Title\"",
-            "HeaderKey=\"Settings.Animation.Effect.Title\"",
-            "HeaderKey=\"Settings.Animation.Speed.Title\"",
             "HeaderKey=\"Settings.Animation.Direction.Title\"",
+            "HeaderKey=\"Settings.Animation.Speed.Title\"",
             "HeaderKey=\"Settings.Animation.Easing.Title\"",
             "HeaderKey=\"Settings.Animation.Stagger.Title\"");
     }
 
     // -------------------------------------------------------------- E. 材质
 
-    // Spec E1 + E3: exactly two expanders — the material parent
-    // (Settings.Material.Title) and the text parent (Settings.WidgetForeground.Title),
-    // plus the pre-existing widget-background expander which stays as-is;
-    // the exact count also locks that border/corner cards are not folded in.
+    // Spec E1 + E3: AppearanceMaterialSettingsSectionTemplate is retired; Appearance
+    // overview hosts clickable MaterialEntryCard, and MaterialSubPagePanel hosts the
+    // retained MaterialType card + 2 default-expanded SettingsExpanders (Effect + WidgetBackground).
     [Fact]
-    public void AppearanceMaterial_HasExactlyTheThreeParentExpanders()
+    public void AppearanceMaterial_IsFlattenedWithoutNestedExpanders()
     {
-        string slice = MaterialSlice();
+        string windowXaml = ReadRepositoryFile(SettingsWindowXaml);
+        string codeBehind = ReadRepositoryFile(SettingsWindowCodeBehind);
+        string catalog = ReadRepositoryFile(SearchCatalog);
+        string appearanceXaml = ReadRepositoryFile(
+            "src/DeskBox/Views/SettingsSections/AppearanceSettingsSection.xaml");
 
-        int expanderCount = CountOpeningTags(slice, "toolkit:SettingsExpander");
-        Assert.True(expanderCount == 3,
-            $"AppearanceMaterial section: expected exactly 3 SettingsExpander elements " +
-            $"(material parent + text parent + widget background), found {expanderCount}.");
+        Assert.DoesNotContain("AppearanceMaterialSettingsSectionTemplate", windowXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"AppearanceMaterialSettings\"", codeBehind, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"AppearanceMaterialSettings\"", catalog, StringComparison.Ordinal);
+
+        Match? materialEntryCard = FindOpeningTag(
+            appearanceXaml, "toolkit:SettingsCard", "x:Name=\"MaterialEntryCard\"");
+        Assert.NotNull(materialEntryCard);
+        Assert.Contains("HeaderKey=\"Settings.Material.Title\"", materialEntryCard.Value, StringComparison.Ordinal);
+        Assert.Null(FindOpeningTag(
+            appearanceXaml, "toolkit:SettingsExpander", "HeaderKey=\"Settings.Material.Title\""));
+
+        string subPageSlice = Slice(appearanceXaml, "x:Name=\"MaterialSubPagePanel\"", "</Grid>");
+        Assert.Equal(2, CountOpeningTags(subPageSlice, "toolkit:SettingsExpander"));
+        Assert.NotNull(FindOpeningTag(
+            subPageSlice, "toolkit:SettingsCard", "HeaderKey=\"Settings.Material.Title\""));
 
         Assert.NotNull(FindOpeningTag(
-            slice, "toolkit:SettingsExpander", "HeaderKey=\"Settings.Material.Title\""));
-        Assert.NotNull(FindOpeningTag(
-            slice, "toolkit:SettingsExpander", "HeaderKey=\"Settings.WidgetForeground.Title\""));
+            appearanceXaml, "toolkit:SettingsCard", "HeaderKey=\"Settings.WidgetForeground.Title\""));
     }
 
-    // Spec E2 + E3: Opacity and MaterialIntensity are children of the material
-    // expander, CustomColor is a child of the text expander, while border color,
-    // border style and corner stay flat cards in the template.
+    // Spec E2 + E3: MaterialSubPagePanel groups Effect (3 rows) and WidgetBackground (5 rows)
+    // in default-expanded accordions, while CornerAndBorder and Density stay on AppearanceOverviewPanel.
     [Fact]
-    public void AppearanceMaterial_ChildCards_FollowTheirParentsAndBordersStayFlat()
+    public void AppearanceMaterial_CardsAreFlatAndCornerLivesOnOverview()
     {
-        string slice = MaterialSlice();
+        string appearanceXaml = ReadRepositoryFile(
+            "src/DeskBox/Views/SettingsSections/AppearanceSettingsSection.xaml");
+        string subPageSlice = Slice(appearanceXaml, "x:Name=\"MaterialSubPagePanel\"", "</Grid>");
 
-        Match? material = FindOpeningTag(
-            slice, "toolkit:SettingsExpander", "HeaderKey=\"Settings.Material.Title\"");
-        Match? text = FindOpeningTag(
-            slice, "toolkit:SettingsExpander", "HeaderKey=\"Settings.WidgetForeground.Title\"");
-        Assert.NotNull(material);
-        Assert.NotNull(text);
+        Match? effectExpander = FindOpeningTag(
+            subPageSlice, "toolkit:SettingsExpander", "HeaderKey=\"Settings.Material.Group.Effect\"");
+        Assert.NotNull(effectExpander);
+        Assert.Contains("IsExpanded=\"True\"", effectExpander.Value, StringComparison.Ordinal);
+        AssertInsideExpander(subPageSlice, effectExpander, "HeaderKey=\"Settings.Opacity.Title\"", "Material.Effect");
+        AssertInsideExpander(subPageSlice, effectExpander, "HeaderKey=\"Settings.SystemTransparency.Title\"", "Material.Effect");
 
-        AssertInsideExpander(slice, material, "HeaderKey=\"Settings.Opacity.Title\"", "material");
-        AssertInsideExpander(slice, material, "HeaderKey=\"Settings.MaterialIntensity.Title\"", "material");
-        AssertInsideExpander(slice, text, "HeaderKey=\"Settings.WidgetForeground.CustomColor.Title\"", "text");
+        Match? backgroundExpander = FindOpeningTag(
+            subPageSlice, "toolkit:SettingsExpander", "HeaderKey=\"Settings.Material.Group.WidgetBackground\"");
+        Assert.NotNull(backgroundExpander);
+        Assert.Contains("IsExpanded=\"True\"", backgroundExpander.Value, StringComparison.Ordinal);
 
-        Assert.Contains("HeaderKey=\"Settings.BorderColor.Title\"", slice, StringComparison.Ordinal);
-        Assert.Contains("HeaderKey=\"Settings.Border.Title\"", slice, StringComparison.Ordinal);
-        Assert.Contains("HeaderKey=\"Settings.Corner.Title\"", slice, StringComparison.Ordinal);
+        AssertAscending(subPageSlice, "Appearance Material sub-page ordering",
+            "HeaderKey=\"Settings.Material.Title\"",
+            "HeaderKey=\"Settings.Material.Group.Effect\"",
+            "HeaderKey=\"Settings.Opacity.Title\"",
+            "HeaderKey=\"Settings.MaterialIntensity.Title\"",
+            "HeaderKey=\"Settings.SystemTransparency.Title\"",
+            "HeaderKey=\"Settings.Material.Group.WidgetBackground\"",
+            "HeaderKey=\"Settings.WidgetBackground.Title\"",
+            "HeaderKey=\"Settings.WidgetBackground.Image.Title\"",
+            "HeaderKey=\"Settings.WidgetBackground.Fit.Title\"",
+            "HeaderKey=\"Settings.WidgetBackground.Dim.Title\"",
+            "HeaderKey=\"Settings.WidgetBackground.PerWidget.Title\"");
+
+        Match? cornerExpander = FindOpeningTag(
+            appearanceXaml, "toolkit:SettingsExpander", "HeaderKey=\"Settings.CornerAndBorder.Title\"");
+        Assert.NotNull(cornerExpander);
+        AssertAscending(appearanceXaml, "Appearance CornerAndBorder expander ordering",
+            "HeaderKey=\"Settings.CornerAndBorder.Title\"",
+            "AutomationNameKey=\"Settings.Corner.Title\"",
+            "HeaderKey=\"Settings.BorderColor.Title\"",
+            "HeaderKey=\"Settings.Border.Title\"");
+
+        Match? densityExpander = FindOpeningTag(
+            appearanceXaml, "toolkit:SettingsExpander", "HeaderKey=\"Settings.Density.Title\"");
+        Assert.NotNull(densityExpander);
+        AssertAscending(appearanceXaml, "Appearance Density & Typography expander ordering",
+            "HeaderKey=\"Settings.Density.Title\"",
+            "HeaderKey=\"Settings.Density.Scale.Title\"",
+            "HeaderKey=\"Settings.TextSize.Title\"",
+            "HeaderKey=\"Settings.WidgetForeground.Title\"",
+            "HeaderKey=\"Settings.WidgetForeground.CustomColor.Title\"",
+            "HeaderKey=\"Settings.TextShadow.Title\"");
     }
 
     // ------------------------------------------------------------ F. 文件显示
 
-    // Spec F1: the file-extension card is an expander and the .lnk sub-card
-    // follows it.
+    // Spec F1: FileDisplaySettingsSectionTemplate is consolidated into
+    // FileWidgetSettingsSection.xaml, where the file-extension card is flat and
+    // the conditional .lnk card follows it.
     [Fact]
-    public void FileDisplay_ExtensionsExpander_HostsTheLnkChildCard()
+    public void FileDisplay_ExtensionsCard_IsFollowedByTheLnkCard()
     {
-        string slice = Slice(
-            ReadRepositoryFile(SettingsWindowXaml),
-            "x:Key=\"FileDisplaySettingsSectionTemplate\"",
-            "x:Key=\"FileStorageSettingsSectionTemplate\"");
+        string windowXaml = ReadRepositoryFile(SettingsWindowXaml);
+        string fileWidgetXaml = ReadRepositoryFile(
+            "src/DeskBox/Views/SettingsSections/FileWidgetSettingsSection.xaml");
 
-        Match? expander = FindOpeningTag(
-            slice, "toolkit:SettingsExpander", "HeaderKey=\"Settings.ShowFileExtensions.Title\"");
-        Assert.NotNull(expander);
+        Assert.DoesNotContain("FileDisplaySettingsSectionTemplate", windowXaml, StringComparison.Ordinal);
+
+        Match? card = FindOpeningTag(
+            fileWidgetXaml, "toolkit:SettingsCard", "HeaderKey=\"Settings.ShowFileExtensions.Title\"");
+        Assert.NotNull(card);
 
         int lnk = IndexOfOrFail(
-            slice, "HeaderKey=\"Settings.HideShortcutExtension.Title\"", "FileDisplay section");
-        Assert.True(expander.Index < lnk,
-            "FileDisplay section: the .lnk sub-card must come after the " +
-            "ShowFileExtensions expander declaration.");
+            fileWidgetXaml, "HeaderKey=\"Settings.HideShortcutExtension.Title\"", "FileWidget section");
+        Assert.True(card.Index < lnk,
+            "FileWidget section: the .lnk sub-card must come after the " +
+            "ShowFileExtensions card declaration.");
     }
 
-    // Spec F2: FileNameWidth/FileNameLines move from the density template into
-    // the file-display template.
+    // Spec F2: FileNameWidth/FileNameLines live in FileWidgetSettingsSection.xaml
+    // rather than AppearanceSettingsSection.xaml.
     [Fact]
     public void FileDisplay_ReceivesTheFileNameCardsFromDensity()
     {
-        string display = Slice(
-            ReadRepositoryFile(SettingsWindowXaml),
-            "x:Key=\"FileDisplaySettingsSectionTemplate\"",
-            "x:Key=\"FileStorageSettingsSectionTemplate\"");
-        string density = Slice(
-            ReadRepositoryFile(SettingsWindowXaml),
-            "x:Key=\"AppearanceDensitySettingsSectionTemplate\"",
-            "x:Key=\"AppearanceWindowSettingsSectionTemplate\"");
+        string display = ReadRepositoryFile(
+            "src/DeskBox/Views/SettingsSections/FileWidgetSettingsSection.xaml");
+        string density = ReadRepositoryFile(
+            "src/DeskBox/Views/SettingsSections/AppearanceSettingsSection.xaml");
 
         Assert.Contains("HeaderKey=\"Settings.FileNameWidth.Title\"", display, StringComparison.Ordinal);
         Assert.Contains("HeaderKey=\"Settings.FileNameLines.Title\"", display, StringComparison.Ordinal);
@@ -322,153 +355,157 @@ public sealed class SettingsAccordionAndOrderingContractTests
         Assert.DoesNotContain("HeaderKey=\"Settings.FileNameLines.Title\"", density, StringComparison.Ordinal);
     }
 
-    // ------------------------------------------------------------- G. 本地备份
+    // ------------------------------------------------------------- G. 本地与云备份（数据与重置）
 
-    // Spec G: AutomaticBackup is an expander; Interval/Retention/Directory are
-    // its child cards; the snapshots card is keyed by
-    // Settings.DataBackup.Snapshots.Title.
+    // Spec G: MaintenanceSectionTemplate consolidates local backup, cloud backup,
+    // and settings reset; AutomaticBackup is an expander grouping Interval,
+    // Retention, Directory, and Snapshots.
     [Fact]
     public void BackupRestore_AutomaticBackupExpander_GroupsTheChildCards()
     {
+        string windowXaml = ReadRepositoryFile(SettingsWindowXaml);
+        Assert.DoesNotContain("BackupRestoreSettingsSectionTemplate", windowXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("CloudBackupSettingsSectionTemplate", windowXaml, StringComparison.Ordinal);
+
         string slice = Slice(
-            ReadRepositoryFile(SettingsWindowXaml),
-            "x:Key=\"BackupRestoreSettingsSectionTemplate\"",
-            "x:Key=\"CloudBackupSettingsSectionTemplate\"");
+            windowXaml,
+            "x:Key=\"MaintenanceSectionTemplate\"",
+            "x:Key=\"AboutSectionTemplate\"");
 
-        Match? expander = FindOpeningTag(
-            slice, "toolkit:SettingsExpander", "HeaderKey=\"Settings.DataBackup.AutomaticBackup.Title\"");
-        Assert.NotNull(expander);
+        string overviewSlice = Slice(
+            slice,
+            "x:Name=\"MaintenanceOverviewPanel\"",
+            "x:Name=\"AutomaticBackupSubPagePanel\"");
+        Assert.NotNull(FindOpeningTag(
+            overviewSlice, "toolkit:SettingsCard", "x:Name=\"AutomaticBackupEntryCard\""));
+        Assert.NotNull(FindOpeningTag(
+            overviewSlice, "toolkit:SettingsCard", "x:Name=\"CloudBackupEntryCard\""));
 
-        foreach (string key in new[]
-                 {
-                     "HeaderKey=\"Settings.DataBackup.AutomaticBackupInterval.Title\"",
-                     "HeaderKey=\"Settings.DataBackup.AutomaticBackupRetention.Title\"",
-                     "HeaderKey=\"Settings.DataBackup.AutomaticBackupDirectory.Title\"",
-                 })
-        {
-            int at = IndexOfOrFail(slice, key, "BackupRestore section");
-            Assert.True(expander.Index < at,
-                $"BackupRestore section: {key} must come after the AutomaticBackup expander.");
-        }
+        AssertAscending(overviewSlice, "Maintenance overview ordering",
+            "HeaderKey=\"Settings.DataBackup.Manual.Title\"",
+            "HeaderKey=\"Settings.DataBackup.AutomaticBackup.Title\"",
+            "HeaderKey=\"Settings.CloudBackup.Title\"",
+            "HeaderKey=\"Settings.Restore.Title\"");
 
-        Assert.Contains(
-            "HeaderKey=\"Settings.DataBackup.Snapshots.Title\"", slice, StringComparison.Ordinal);
+        string autoBackupSubPage = Slice(
+            slice,
+            "x:Name=\"AutomaticBackupSubPagePanel\"",
+            "x:Name=\"CloudBackupSubPagePanel\"");
+        Assert.Equal(0, CountOpeningTags(autoBackupSubPage, "toolkit:SettingsExpander"));
+        AssertAscending(autoBackupSubPage, "AutomaticBackup sub-page ordering",
+            "HeaderKey=\"Settings.DataBackup.AutomaticBackup.Title\"",
+            "HeaderKey=\"Settings.DataBackup.AutomaticBackupInterval.Title\"",
+            "HeaderKey=\"Settings.DataBackup.AutomaticBackupRetention.Title\"",
+            "HeaderKey=\"Settings.DataBackup.AutomaticBackupDirectory.Title\"",
+            "HeaderKey=\"Settings.DataBackup.Snapshots.Title\"");
     }
 
     // ----------------------------------------------------------------- H. 天气
 
-    // Spec H1 + H2: the display group is a SettingsExpander with
-    // IsExpanded="True", and the seven display toggles follow it.
+    // Spec H1 + H2: the display group is a single compact WrapFlowPanel
+    // SettingsCard hosting all seven CheckBox options.
     [Fact]
-    public void Weather_DisplayGroup_IsAnExpandedAccordionWithSevenToggles()
+    public void Weather_DisplayGroup_IsACompactWrapFlowCardWithSevenCheckBoxes()
     {
         string slice = WeatherSlice();
 
-        Match? expander = FindOpeningTag(
-            slice, "toolkit:SettingsExpander", "HeaderKey=\"Settings.Weather.Group.Display.Title\"");
-        Assert.NotNull(expander);
-        Assert.Contains("IsExpanded=\"True\"", expander.Value, StringComparison.Ordinal);
+        Match? card = FindOpeningTag(
+            slice, "toolkit:SettingsCard", "HeaderKey=\"Settings.Weather.Group.Display.Title\"");
+        Assert.NotNull(card);
+        Assert.Null(FindOpeningTag(
+            slice, "toolkit:SettingsExpander", "HeaderKey=\"Settings.Weather.Group.Display.Title\""));
 
         foreach (string key in new[]
                  {
-                     "HeaderKey=\"Settings.Weather.ShowForecast.Title\"",
-                     "HeaderKey=\"Settings.Weather.ShowHumidity.Title\"",
-                     "HeaderKey=\"Settings.Weather.ShowPrecipitation.Title\"",
-                     "HeaderKey=\"Settings.Weather.ShowPressure.Title\"",
-                     "HeaderKey=\"Settings.Weather.ShowSunrise.Title\"",
-                     "HeaderKey=\"Settings.Weather.ShowUvIndex.Title\"",
-                     "HeaderKey=\"Settings.Weather.ShowWind.Title\"",
+                     "svc:Localized.Key=\"Settings.Weather.ShowForecast.Title\"",
+                     "svc:Localized.Key=\"Settings.Weather.ShowHumidity.Title\"",
+                     "svc:Localized.Key=\"Settings.Weather.ShowPrecipitation.Title\"",
+                     "svc:Localized.Key=\"Settings.Weather.ShowPressure.Title\"",
+                     "svc:Localized.Key=\"Settings.Weather.ShowSunrise.Title\"",
+                     "svc:Localized.Key=\"Settings.Weather.ShowUvIndex.Title\"",
+                     "svc:Localized.Key=\"Settings.Weather.ShowWind.Title\"",
                  })
         {
             int at = IndexOfOrFail(slice, key, "Weather section");
-            Assert.True(expander.Index < at,
-                $"Weather section: {key} must come after the display-group expander.");
+            Assert.True(card.Index < at,
+                $"Weather section: {key} must live inside the display-group card.");
         }
     }
 
-    // Spec H3: Group.Display before Weather.DefaultView, DataSource after
-    // TemperatureUnit, RefreshInterval last.
+    // Spec H3: Enable < LocationMode < CityName < Group.Display < Skin < IconStyle <
+    // Group.UnitsAndSource (TemperatureUnit < WindSpeedUnit < DataSource < RefreshInterval) < ResetWidget.
     [Fact]
     public void Weather_Cards_FollowThePinnedOrder()
     {
         string slice = WeatherSlice();
 
-        AssertAscending(slice, "Weather display group before default view",
+        Assert.DoesNotContain("HeaderKey=\"Settings.Weather.DefaultView.Title\"", slice, StringComparison.Ordinal);
+
+        AssertAscending(slice, "Weather section ordering",
+            "HeaderKey=\"Settings.Weather.Enable.Title\"",
+            "HeaderKey=\"Settings.Weather.LocationMode.Title\"",
+            "HeaderKey=\"Settings.Weather.CityName.Title\"",
             "HeaderKey=\"Settings.Weather.Group.Display.Title\"",
-            "HeaderKey=\"Settings.Weather.DefaultView.Title\"");
-
-        AssertAscending(slice, "Weather units before data source",
+            "HeaderKey=\"Settings.Weather.Skin.Title\"",
+            "HeaderKey=\"Settings.Weather.IconStyle.Title\"",
+            "HeaderKey=\"Settings.Weather.Group.UnitsAndSource.Title\"",
             "HeaderKey=\"Settings.Weather.TemperatureUnit.Title\"",
-            "HeaderKey=\"Settings.Weather.DataSource.Title\"");
-
-        int refresh = IndexOfOrFail(
-            slice, "HeaderKey=\"Settings.Weather.RefreshInterval.Title\"", "Weather section");
-        foreach (string key in new[]
-                 {
-                     "HeaderKey=\"Settings.Weather.LocationMode.Title\"",
-                     "HeaderKey=\"Settings.Weather.CityName.Title\"",
-                     "HeaderKey=\"Settings.Weather.TemperatureUnit.Title\"",
-                     "HeaderKey=\"Settings.Weather.DataSource.Title\"",
-                     "HeaderKey=\"Settings.Weather.WindSpeedUnit.Title\"",
-                     "HeaderKey=\"Settings.Weather.DefaultView.Title\"",
-                     "HeaderKey=\"Settings.Weather.Skin.Title\"",
-                     "HeaderKey=\"Settings.Weather.IconStyle.Title\"",
-                     "HeaderKey=\"Settings.Weather.Group.Display.Title\"",
-                 })
-        {
-            int at = IndexOfOrFail(slice, key, "Weather section");
-            Assert.True(at < refresh,
-                $"Weather section: RefreshInterval must be the last card, but it comes before {key}.");
-        }
+            "HeaderKey=\"Settings.Weather.WindSpeedUnit.Title\"",
+            "HeaderKey=\"Settings.Weather.DataSource.Title\"",
+            "HeaderKey=\"Settings.Weather.RefreshInterval.Title\"",
+            "HeaderKey=\"Settings.Weather.ResetWidget.Title\"");
     }
 
     // ------------------------------------------------------------- I. 交互页排序
 
-    // Spec I: WidgetLayerMode < GlobalHotkey < ShowDesktop < OpenMethod <
-    // HoverButtons < ResizeSnap < DesktopDoubleClick, with the elevated-notice
-    // InfoBar between the hotkey expander and the show-desktop card.
+    // Spec I: Invocation (GlobalHotkey + DesktopDoubleClick) <
+    // Layout (CapsuleModeSection + WidgetGroups + Displays) <
+    // WindowBehavior (WidgetLayerMode + ResizeSnap + Interaction.Hover).
     [Fact]
     public void Interaction_Section_FollowsThePinnedOrder()
     {
         string slice = InteractionSlice();
 
         AssertAscending(slice, "Interaction ordering",
+            "HeaderKey=\"Settings.GlobalHotkey.Title\"",
+            "HeaderKey=\"Settings.DesktopDoubleClick.Title\"",
+            "x:Name=\"CapsuleModeEntryCard\"",
+            "HeaderKey=\"Settings.Section.WidgetGroups\"",
+            "HeaderKey=\"Settings.Displays.Title\"",
             "HeaderKey=\"Settings.WidgetLayerMode.Title\"",
-            "HeaderKey=\"Settings.GlobalHotkey.Title\"",
+            "HeaderKey=\"Settings.ClickRaiseScope.Title\"",
             "HeaderKey=\"Settings.ShowDesktopBehavior.Title\"",
-            "HeaderKey=\"Settings.OpenMethod.Title\"",
-            "HeaderKey=\"Settings.Interaction.Hover.Title\"",
             "HeaderKey=\"Settings.ResizeSnap.Title\"",
-            "HeaderKey=\"Settings.DesktopDoubleClick.Title\"");
+            "HeaderKey=\"Settings.WidgetSnap.Spacing.Title\"",
+            "HeaderKey=\"Settings.Interaction.Hover.Title\"");
 
-        AssertAscending(slice, "Interaction elevated notice placement",
-            "HeaderKey=\"Settings.GlobalHotkey.Title\"",
-            "HeaderKey=\"Settings.GlobalHotkey.ElevatedNotice.Title\"",
-            "HeaderKey=\"Settings.ShowDesktopBehavior.Title\"");
+        Assert.DoesNotContain("HeaderKey=\"Settings.OpenMethod.Title\"", slice, StringComparison.Ordinal);
+        Assert.Contains(
+            "svc:InfoTip.TitleKey=\"Settings.GlobalHotkey.ElevatedNotice.Title\"",
+            slice,
+            StringComparison.Ordinal);
     }
 
     // -------------------------------------------------------------- J. 窗口子页
 
     // Spec J: DefaultWidth and DefaultHeight share one card (both NumberBoxes
-    // within 800 chars of each other), and the title-icon card leads the page.
+    // within 1200 chars of each other), and the app-visual header leads them.
     [Fact]
     public void AppearanceWindow_DefaultSizeCards_AreMergedAndTitleIconLeads()
     {
-        string slice = Slice(
-            ReadRepositoryFile(SettingsWindowXaml),
-            "x:Key=\"AppearanceWindowSettingsSectionTemplate\"",
-            "x:Key=\"AppearanceAnimationSettingsSectionTemplate\"");
+        string slice = ReadRepositoryFile(
+            "src/DeskBox/Views/SettingsSections/AppearanceSettingsSection.xaml");
 
-        int width = IndexOfOrFail(slice, "x:Name=\"DefaultWidthBox\"", "AppearanceWindow section");
-        int height = IndexOfOrFail(slice, "x:Name=\"DefaultHeightBox\"", "AppearanceWindow section");
+        int width = IndexOfOrFail(slice, "x:Name=\"DefaultWidthBox\"", "Appearance section");
+        int height = IndexOfOrFail(slice, "x:Name=\"DefaultHeightBox\"", "Appearance section");
         Assert.True(Math.Abs(height - width) < 1200,
-            $"AppearanceWindow section: DefaultWidthBox and DefaultHeightBox must share one " +
+            $"Appearance section: DefaultWidthBox and DefaultHeightBox must share one " +
             $"SettingsCard (distance {Math.Abs(height - width)} chars >= 1200).");
 
         int titleIcon = IndexOfOrFail(
-            slice, "HeaderKey=\"Settings.WidgetTitleIcon.Title\"", "AppearanceWindow section");
+            slice, "HeaderKey=\"Settings.Group.AppVisual.Title\"", "Appearance section");
         Assert.True(titleIcon < width && titleIcon < height,
-            "AppearanceWindow section: the title-icon card must come before the merged default-size card.");
+            "Appearance section: the app-visual expander header must come before the merged default-size card.");
     }
 
     // ---------------------------------------------------------------- K. 词典
@@ -510,24 +547,27 @@ public sealed class SettingsAccordionAndOrderingContractTests
 
     // ------------------------------------------------------------ L. 其他 Section
 
-    // Spec L1: Theme < TrayIcon < Accent < Material (the tray-icon card sits
-    // between the theme and the accent colors), and the widget-groups card
-    // after animation.
+    // Spec L1: Theme < TrayIcon < Accent < Material < CornerAndBorder < Density <
+    // Group.AppVisual < Group.Animation, while WidgetGroups lives in Interaction.
     [Fact]
     public void AppearanceSection_FollowsThePinnedOrder()
     {
         string xaml = ReadRepositoryFile(
             "src/DeskBox/Views/SettingsSections/AppearanceSettingsSection.xaml");
 
-        AssertAscending(xaml, "AppearanceSection ordering (colors)",
+        AssertAscending(xaml, "AppearanceSection top-to-bottom ordering",
             "HeaderKey=\"Settings.Theme.Title\"",
             "HeaderKey=\"Settings.TrayIcon.Title\"",
             "HeaderKey=\"Settings.Accent.Title\"",
-            "HeaderKey=\"Settings.Material.Title\"");
+            "AutomationNameKey=\"Settings.Accent.Source.Title\"",
+            "HeaderKey=\"Settings.Material.Title\"",
+            "HeaderKey=\"Settings.CornerAndBorder.Title\"",
+            "AutomationNameKey=\"Settings.Corner.Title\"",
+            "HeaderKey=\"Settings.Density.Title\"",
+            "HeaderKey=\"Settings.Group.AppVisual.Title\"",
+            "HeaderKey=\"Settings.Group.Animation.Title\"");
 
-        AssertAscending(xaml, "AppearanceSection ordering (groups)",
-            "HeaderKey=\"Settings.Group.Animation.Title\"",
-            "HeaderKey=\"Settings.Section.WidgetGroups\"");
+        Assert.DoesNotContain("HeaderKey=\"Settings.Section.WidgetGroups\"", xaml, StringComparison.Ordinal);
     }
 
     // Spec L2: the managed-storage section is no longer force-inserted at index 1.
@@ -551,32 +591,137 @@ public sealed class SettingsAccordionAndOrderingContractTests
     // Spec L3: the glance section exposes a 切换-related SettingsExpander
     // (Glance.Transition.Title = 切换动效).
     [Fact]
-    public void GlanceSection_HasATransitionExpander()
+    public void GlanceSection_KeepsTransitionInsideTheAdvancedGroup()
     {
         string xaml = ReadRepositoryFile(
             "src/DeskBox/Views/SettingsSections/GlanceWidgetSettingsSection.xaml");
 
         Assert.NotNull(FindOpeningTag(
-            xaml, "toolkit:SettingsExpander", "HeaderKey=\"Glance.Transition.Title\""));
+            xaml, "toolkit:SettingsExpander", "HeaderKey=\"Settings.Glance.Group.Advanced\""));
+        Assert.NotNull(FindOpeningTag(
+            xaml, "toolkit:SettingsCard", "HeaderKey=\"Glance.Transition.Title\""));
+        Assert.True(
+            xaml.IndexOf("HeaderKey=\"Settings.Glance.Group.Advanced\"", StringComparison.Ordinal) <
+            xaml.IndexOf("HeaderKey=\"Glance.Transition.Title\"", StringComparison.Ordinal));
     }
 
-    // Spec L4: the desktop-organization auto card is an expander hosting the
-    // 整理时机 (interval) sub-card.
+    // Spec L4 (Round 2): DesktopOrganization overview collapses into AutoToggleExpander
+    // (IsExpanded="False") with 2 items: AutoIntervalCard and OrganizationRulesEntryCard.
     [Fact]
-    public void DesktopOrganization_AutoCard_IsAnExpanderWithIntervalChild()
+    public void DesktopOrganization_AutoCard_IsFlatWithIntervalSibling()
     {
         string xaml = ReadRepositoryFile(
             "src/DeskBox/Views/SettingsSections/DesktopOrganizationSettingsSection.xaml");
 
         Match? expander = FindOpeningTag(
-            xaml, "toolkit:SettingsExpander", "HeaderKey=\"DesktopOrganization.Auto.Title\"");
+            xaml, "toolkit:SettingsExpander", "x:Name=\"AutoToggleExpander\"");
         Assert.NotNull(expander);
+        Assert.Contains("IsExpanded=\"False\"", expander.Value, StringComparison.Ordinal);
+        Assert.Contains("HeaderKey=\"DesktopOrganization.Auto.Title\"", expander.Value, StringComparison.Ordinal);
+        AssertInsideExpander(xaml, expander, "HeaderKey=\"DesktopOrganization.Auto.Interval.Title\"", "AutoToggleExpander");
+        AssertInsideExpander(xaml, expander, "HeaderKey=\"DesktopOrganization.Rules.SectionTitle\"", "AutoToggleExpander");
 
-        int interval = IndexOfOrFail(
-            xaml, "HeaderKey=\"DesktopOrganization.Auto.Interval.Title\"", "DesktopOrganization section");
-        Assert.True(expander.Index < interval,
-            "DesktopOrganization section: the 整理时机 sub-card must come after the " +
-            "auto-organize expander declaration.");
+        AssertAscending(xaml, "DesktopOrganization overview expander ordering",
+            "x:Name=\"AutoToggleExpander\"",
+            "HeaderKey=\"DesktopOrganization.Auto.Interval.Title\"",
+            "HeaderKey=\"DesktopOrganization.Rules.SectionTitle\"");
+    }
+
+    // ------------------------------------------------------------ M. Round 2 Contracts
+
+    [Fact]
+    public void Round2_SettingsWindowSegmentedControls_DoNotSetFixedMinWidth()
+    {
+        var doc = System.Xml.Linq.XDocument.Parse(ReadRepositoryFile(SettingsWindowXaml));
+        System.Xml.Linq.XNamespace toolkit = "using:CommunityToolkit.WinUI.Controls";
+
+        foreach (System.Xml.Linq.XElement segmented in doc.Descendants(toolkit + "Segmented"))
+        {
+            Assert.Null(segmented.Attribute("MinWidth"));
+        }
+    }
+
+    [Fact]
+    public void Round2_AllSettingsExpanders_ContainAtMostFiveDirectSettingsCards()
+    {
+        string[] xamlFiles =
+        {
+            SettingsWindowXaml,
+            "src/DeskBox/Views/SettingsSections/AiSettingsSection.xaml",
+            "src/DeskBox/Views/SettingsSections/AppearanceSettingsSection.xaml",
+            "src/DeskBox/Views/SettingsSections/CapsuleModeSettingsSection.xaml",
+            "src/DeskBox/Views/SettingsSections/ClipboardSettingsSection.xaml",
+            "src/DeskBox/Views/SettingsSections/CustomWidgetSettingsSection.xaml",
+            "src/DeskBox/Views/SettingsSections/DesktopOrganizationSettingsSection.xaml",
+            "src/DeskBox/Views/SettingsSections/DisplaySettingsSection.xaml",
+            "src/DeskBox/Views/SettingsSections/FileWidgetSettingsSection.xaml",
+            "src/DeskBox/Views/SettingsSections/SearchSettingsSection.xaml",
+        };
+
+        System.Xml.Linq.XNamespace toolkit = "using:CommunityToolkit.WinUI.Controls";
+        foreach (string file in xamlFiles)
+        {
+            var doc = System.Xml.Linq.XDocument.Parse(ReadRepositoryFile(file));
+            foreach (System.Xml.Linq.XElement expander in doc.Descendants(toolkit + "SettingsExpander"))
+            {
+                System.Xml.Linq.XElement? items = expander.Element(toolkit + "SettingsExpander.Items");
+                int itemCount = items is null ? 0 : items.Elements().Count();
+                Assert.True(
+                    itemCount <= 5,
+                    $"{file}: SettingsExpander (HeaderKey='{expander.Attributes().FirstOrDefault(a => a.Name.LocalName == "HeaderKey")?.Value}') has {itemCount} direct items (must be <= 5).");
+            }
+        }
+    }
+
+    [Fact]
+    public void Round2_SubPagesWithAtMostThreeExpanders_ExpandAllByDefault()
+    {
+        (string FilePath, string? PanelName)[] subPages =
+        [
+            ("src/DeskBox/Views/SettingsSections/AiSettingsSection.xaml", null),
+            ("src/DeskBox/Views/SettingsSections/DesktopOrganizationSettingsSection.xaml", "RuleDetailPanel"),
+            ("src/DeskBox/Views/SettingsSections/AppearanceSettingsSection.xaml", "MaterialSubPagePanel"),
+            ("src/DeskBox/Views/SettingsSections/FileWidgetSettingsSection.xaml", "FileDisplaySubPagePanel"),
+            (SettingsWindowXaml, "WidgetGroupDetailSubPagePanel"),
+            (SettingsWindowXaml, "CloudBackupSubPagePanel"),
+        ];
+
+        System.Xml.Linq.XNamespace xNs = "http://schemas.microsoft.com/winfx/2006/xaml";
+        System.Xml.Linq.XNamespace toolkit = "using:CommunityToolkit.WinUI.Controls";
+        foreach ((string filePath, string? panelName) in subPages)
+        {
+            var doc = System.Xml.Linq.XDocument.Parse(ReadRepositoryFile(filePath));
+            System.Xml.Linq.XElement? scope = panelName is null
+                ? doc.Root
+                : doc.Descendants().FirstOrDefault(e => (string?)e.Attribute(xNs + "Name") == panelName);
+            Assert.NotNull(scope);
+
+            var expanders = scope.Descendants(toolkit + "SettingsExpander").ToList();
+            Assert.InRange(expanders.Count, 1, 3);
+            foreach (System.Xml.Linq.XElement expander in expanders)
+            {
+                Assert.Equal("True", (string?)expander.Attribute("IsExpanded"));
+            }
+        }
+    }
+
+    [Fact]
+    public void Round2_SubPagesWithInlineEntryControl_RetainEntryOptionCardAtTop()
+    {
+        string appearanceXaml = ReadRepositoryFile("src/DeskBox/Views/SettingsSections/AppearanceSettingsSection.xaml");
+        string capsuleXaml = ReadRepositoryFile("src/DeskBox/Views/SettingsSections/CapsuleModeSettingsSection.xaml");
+        string windowXaml = ReadRepositoryFile(SettingsWindowXaml);
+
+        string materialSubPage = Slice(appearanceXaml, "x:Name=\"MaterialSubPagePanel\"", "</Grid>");
+        Assert.NotNull(FindOpeningTag(materialSubPage, "toolkit:SettingsCard", "HeaderKey=\"Settings.Material.Title\""));
+
+        Assert.NotNull(FindOpeningTag(capsuleXaml, "toolkit:SettingsCard", "HeaderKey=\"Settings.CollapseBehavior.Title\""));
+
+        string autoBackupSubPage = Slice(windowXaml, "x:Name=\"AutomaticBackupSubPagePanel\"", "x:Name=\"CloudBackupSubPagePanel\"");
+        Assert.NotNull(FindOpeningTag(autoBackupSubPage, "toolkit:SettingsCard", "HeaderKey=\"Settings.DataBackup.AutomaticBackup.Title\""));
+
+        string cloudBackupSubPage = Slice(windowXaml, "x:Name=\"CloudBackupSubPagePanel\"", "x:Key=\"AboutSectionTemplate\"");
+        Assert.NotNull(FindOpeningTag(cloudBackupSubPage, "toolkit:SettingsCard", "HeaderKey=\"Settings.CloudBackup.Title\""));
     }
 
     // Spec Z1: expanders must never carry HorizontalContentAlignment="Right".
@@ -589,6 +734,8 @@ public sealed class SettingsAccordionAndOrderingContractTests
         string[] xamlFiles =
         {
             SettingsWindowXaml,
+            "src/DeskBox/Views/SettingsSections/AppearanceSettingsSection.xaml",
+            "src/DeskBox/Views/SettingsSections/FileWidgetSettingsSection.xaml",
             "src/DeskBox/Views/SettingsSections/CapsuleModeSettingsSection.xaml",
             "src/DeskBox/Views/SettingsSections/SearchSettingsSection.xaml",
         };
@@ -611,14 +758,6 @@ public sealed class SettingsAccordionAndOrderingContractTests
         return Slice(ReadRepositoryFile(SettingsWindowXaml), "x:Name=\"GeneralSection\"", "<ContentDialog");
     }
 
-    private static string MaterialSlice()
-    {
-        return Slice(
-            ReadRepositoryFile(SettingsWindowXaml),
-            "x:Key=\"AppearanceMaterialSettingsSectionTemplate\"",
-            "x:Key=\"AppearanceDensitySettingsSectionTemplate\"");
-    }
-
     private static string FileStackSlice()
     {
         return Slice(
@@ -637,13 +776,10 @@ public sealed class SettingsAccordionAndOrderingContractTests
 
     private static string InteractionSlice()
     {
-        // Bounded by the managed-storage template that follows the interaction
-        // family, so the slice keeps covering the interaction cards whether or
-        // not the old InteractionWindowSettingsSectionTemplate survives.
         return Slice(
             ReadRepositoryFile(SettingsWindowXaml),
             "x:Key=\"InteractionSectionTemplate\"",
-            "x:Key=\"ManagedStorageSectionTemplate\"");
+            "x:Key=\"FeatureWidgetsSectionTemplate\"");
     }
 
     private static string Slice(string content, string startMarker, string endMarker)
@@ -732,5 +868,65 @@ public sealed class SettingsAccordionAndOrderingContractTests
     private static string ReadRepositoryFile(string relativePath)
     {
         return File.ReadAllText(TestPaths.FromRepository(relativePath));
+    }
+
+    [Fact]
+    public void Expanders_NeverDeclareExpandedOrCollapsedHandlerBeforeIsExpanded()
+    {
+        string projectDirectory = TestPaths.FromRepository("src/DeskBox");
+        string separator = Path.DirectorySeparatorChar.ToString();
+        var expanderTagRegex = new Regex(
+            @"<(?:toolkit:SettingsExpander|Expander)\b(?:(?!>).)*?>",
+            RegexOptions.CultureInvariant | RegexOptions.Singleline);
+
+        foreach (string path in Directory.EnumerateFiles(projectDirectory, "*.xaml", SearchOption.AllDirectories))
+        {
+            if (path.Contains($"{separator}bin{separator}", StringComparison.OrdinalIgnoreCase) ||
+                path.Contains($"{separator}obj{separator}", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            string xaml = File.ReadAllText(path);
+            foreach (Match tag in expanderTagRegex.Matches(xaml))
+            {
+                int isExpandedIdx = tag.Value.IndexOf("IsExpanded=", StringComparison.Ordinal);
+                if (isExpandedIdx < 0)
+                {
+                    continue;
+                }
+
+                int expandedEventIdx = tag.Value.IndexOf("Expanded=", StringComparison.Ordinal);
+                if (expandedEventIdx == isExpandedIdx + 2)
+                {
+                    // Skip the "Expanded=" substring inside "IsExpanded=" and look for a standalone handler.
+                    expandedEventIdx = tag.Value.IndexOf("Expanded=", isExpandedIdx + "IsExpanded=".Length, StringComparison.Ordinal);
+                }
+
+                // Match standalone Expanded="..." or Collapsed="..." event attributes.
+                Match standaloneEvent = Regex.Match(
+                    tag.Value,
+                    @"(?<![A-Za-z])(?:Expanded|Collapsed)\s*=",
+                    RegexOptions.CultureInvariant);
+                if (standaloneEvent.Success)
+                {
+                    Assert.True(
+                        isExpandedIdx < standaloneEvent.Index,
+                        $"{Path.GetRelativePath(projectDirectory, path)}: IsExpanded must appear before {standaloneEvent.Value} so InitializeComponent does not invoke the handler while child named elements are still null. Tag: {tag.Value}");
+                }
+            }
+        }
+    }
+
+    [Fact]
+    public void AiSettingsSection_GuardsLifecycleAndDeepLinkNavigation()
+    {
+        string aiCode = ReadRepositoryFile("src/DeskBox/Views/SettingsSections/AiSettingsSection.xaml.cs");
+        string navCode = ReadRepositoryFile("src/DeskBox/Views/SettingsWindow.Navigation.cs");
+
+        Assert.Contains("if (!_isSectionLoaded || AgentHubDynamicContentPanel is null)", aiCode, StringComparison.Ordinal);
+        Assert.Contains("RegisterPropertyChangedCallback(VisibilityProperty, OnVisibilityChanged);", aiCode, StringComparison.Ordinal);
+        Assert.Contains("\"CustomWidgetSettings:ai-settings\"", navCode, StringComparison.Ordinal);
+        Assert.Contains("CustomWidgetSettingsSection { IsDetailViewOpen: true }", navCode, StringComparison.Ordinal);
     }
 }

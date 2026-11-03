@@ -11,18 +11,6 @@
     Foreground="{ThemeResource TextFillColorPrimaryBrush}"
     mc:Ignorable="d">
 
-    <UserControl.Resources>
-        <ResourceDictionary>
-            <ResourceDictionary.ThemeDictionaries>
-                <ResourceDictionary x:Key="Default">
-                    <SolidColorBrush x:Key="WidgetGroupTabStripBorderBrush" Color="{ThemeResource TextFillColorPrimary}" Opacity="0.10" />
-                </ResourceDictionary>
-                <ResourceDictionary x:Key="HighContrast">
-                    <SolidColorBrush x:Key="WidgetGroupTabStripBorderBrush" Color="{ThemeResource SystemColorHighlightColor}" />
-                </ResourceDictionary>
-            </ResourceDictionary.ThemeDictionaries>
-        </ResourceDictionary>
-    </UserControl.Resources>
 
     <Grid
         x:Name="ShellRoot"
@@ -39,19 +27,29 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
+        <SystemBackdropElement
+            x:Name="MaterialBackdropSurface"
+            Grid.RowSpan="2"
+            CornerRadius="0"
+            IsHitTestVisible="False" />
+
         <Border
             x:Name="BackgroundPlate"
             Grid.RowSpan="2"
+            BorderBrush="Transparent"
             BorderThickness="0"
             CornerRadius="0">
-            <Grid IsHitTestVisible="False">
+            <Grid x:Name="CustomBackgroundClipHost" IsHitTestVisible="False">
                 <!-- Solid per-widget color sits at the bottom of the custom
                      stack (above the material, below any image); the scrim
                      only tames photos, never the user's chosen color. -->
                 <Border
                     x:Name="CustomBackgroundColorLayer"
                     Visibility="Collapsed" />
-                <Grid x:Name="CustomBackgroundPanoramaHost" Visibility="Collapsed">
+                <Grid
+                    x:Name="CustomBackgroundPanoramaHost"
+                    x:Load="False"
+                    Visibility="Collapsed">
                     <Image
                         x:Name="CustomBackgroundPanoramaImage"
                         HorizontalAlignment="Left"
@@ -128,6 +126,7 @@
 
                 <controls:WidgetGroupTitleSwitcher
                     x:Name="GroupTitleSwitcher"
+                    x:Load="False"
                     Grid.Column="0"
                     MinWidth="0"
                     Margin="-6,0,6,0"
@@ -220,23 +219,30 @@
             Opacity="0.62"
             VerticalAlignment="Bottom" />
 
-        <Grid
-            x:Name="ContentTransitionViewport"
-            Grid.Row="1"
-            Background="Transparent"
-            SizeChanged="ContentTransitionViewport_SizeChanged">
-            <ContentPresenter
-                x:Name="ShellContentPresenter"
-                Content="{x:Bind ShellContent, Mode=OneWay}" />
+        <Grid x:Name="ContentCornerClipHost" Grid.Row="1">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="0" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <Grid
+                x:Name="ContentTransitionViewport"
+                Grid.Row="1"
+                Background="Transparent"
+                SizeChanged="ContentTransitionViewport_SizeChanged">
+                <ContentPresenter
+                    x:Name="ShellContentPresenter"
+                    Content="{x:Bind ShellContent, Mode=OneWay}" />
 
-            <ContentPresenter
-                x:Name="OutgoingContentPresenter"
-                IsHitTestVisible="False"
-                Visibility="Collapsed" />
+                <ContentPresenter
+                    x:Name="OutgoingContentPresenter"
+                    IsHitTestVisible="False"
+                    Visibility="Collapsed" />
+            </Grid>
         </Grid>
 
         <controls:WidgetFeedbackPresenter
             x:Name="FeedbackPresenter"
+            x:Load="False"
             Grid.RowSpan="2"
             Margin="12,0,12,12"
             Canvas.ZIndex="90"
@@ -244,6 +250,7 @@
 
         <Grid
             x:Name="CollapsedChromeLayer"
+            x:Load="False"
             Grid.RowSpan="2"
             Canvas.ZIndex="45"
             Padding="8,0,6,0"
@@ -260,7 +267,7 @@
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="0" />
+                <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
@@ -318,36 +325,6 @@
                 </Border.Background>
             </Border>
 
-            <!-- Shimmer gradient (search capsule) -->
-            <Border x:Name="CompactShimmer"
-                    Grid.ColumnSpan="4"
-                    Margin="-8,0,-6,0"
-                    IsHitTestVisible="False"
-                    Opacity="0">
-                <Border.Background>
-                    <LinearGradientBrush x:Name="CompactShimmerBrush" StartPoint="0,0" EndPoint="1,0">
-                        <GradientStop Color="#0063B1" Offset="0" />
-                        <GradientStop Color="#8B5CF6" Offset="0.5" />
-                        <GradientStop Color="#0063B1" Offset="1" />
-                    </LinearGradientBrush>
-                </Border.Background>
-            </Border>
-
-            <!-- Particle canvas (rain, snow) -->
-            <Canvas x:Name="CompactParticleCanvas"
-                    Grid.ColumnSpan="4"
-                    Margin="-8,0,-6,0"
-                    IsHitTestVisible="False" />
-
-            <!-- Bottom glow bar (music playback) -->
-            <Border x:Name="CompactBottomGlow"
-                    Grid.ColumnSpan="4"
-                    Height="2"
-                    VerticalAlignment="Bottom"
-                    Margin="6,0,6,1"
-                    CornerRadius="1"
-                    IsHitTestVisible="False"
-                    Visibility="Collapsed" />
 
             <!-- Edge glow border -->
             <Border x:Name="CompactEdgeGlow"
@@ -361,50 +338,94 @@
                 </Border.BorderBrush>
             </Border>
 
+            <!-- Soft horizontal gradient scrim behind the left identity/rail/grip zone -->
+            <Border
+                x:Name="CompactLeftDragScrim"
+                Grid.Column="0"
+                Grid.ColumnSpan="2"
+                Width="50"
+                Margin="-8,0,0,0"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Stretch"
+                Canvas.ZIndex="41"
+                CornerRadius="14,0,0,14"
+                IsHitTestVisible="False"
+                Opacity="0">
+                <Border.Background>
+                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                        <GradientStop x:Name="CompactLeftDragScrimStop0" Color="#DC16161B" Offset="0" />
+                        <GradientStop x:Name="CompactLeftDragScrimStop1" Color="#A016161B" Offset="0.62" />
+                        <GradientStop x:Name="CompactLeftDragScrimStop2" Color="#0016161B" Offset="1" />
+                    </LinearGradientBrush>
+                </Border.Background>
+            </Border>
+
             <Grid
                 x:Name="CompactIdentityHost"
                 Width="36"
                 Height="28"
                 VerticalAlignment="Center"
-                Background="Transparent"
-                RenderTransformOrigin="0.5,0.5"
-                PointerEntered="CompactIdentityHost_PointerEntered"
-                PointerExited="CompactIdentityHost_PointerExited">
+                Canvas.ZIndex="42"
+                IsHitTestVisible="False"
+                RenderTransformOrigin="0.5,0.5">
                 <Grid.RenderTransform>
                     <ScaleTransform
                         x:Name="CompactIdentityPulseTransform"
                         ScaleX="1"
                         ScaleY="1" />
                 </Grid.RenderTransform>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition x:Name="CompactGroupPositionRailColumn" Width="0" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
+                <Grid x:Name="CompactIdentityContentLayer">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition x:Name="CompactGroupPositionRailColumn" Width="0" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
 
-                <!-- A collapsed group always exposes its current position. This
-                     is intentionally independent from the expanded title layout. -->
-                <Grid
-                    x:Name="CompactGroupPositionRailViewport"
-                    Grid.Column="0"
-                    Width="5"
-                    Height="20"
-                    Margin="0,0,5,0"
-                    HorizontalAlignment="Center"
-                    VerticalAlignment="Center"
-                    IsHitTestVisible="False">
-                    <StackPanel
-                        x:Name="CompactGroupPositionRail"
+                    <!-- A collapsed group always exposes its current position. Kept
+                         above CompactLeftDragScrim and outside CompactIdentityDimLayer
+                         so hovering/scrolling the left zone keeps the rail crisp. -->
+                    <Grid
+                        x:Name="CompactGroupPositionRailViewport"
+                        Grid.Column="0"
+                        Width="5"
+                        Height="20"
+                        Margin="0,0,5,0"
                         HorizontalAlignment="Center"
                         VerticalAlignment="Center"
-                        IsHitTestVisible="False"
-                        Orientation="Vertical"
-                        Spacing="2"
-                        Visibility="Collapsed" />
-                </Grid>
+                        IsHitTestVisible="False">
+                        <StackPanel
+                            x:Name="CompactGroupPositionRail"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            IsHitTestVisible="False"
+                            Orientation="Vertical"
+                            Spacing="2"
+                            Visibility="Collapsed">
+                            <StackPanel.RenderTransform>
+                                <TranslateTransform x:Name="CompactGroupPositionRailTranslate" />
+                            </StackPanel.RenderTransform>
+                        </StackPanel>
+                    </Grid>
 
-                <Grid
-                    x:Name="CompactIdentityVisualHost"
-                    Grid.Column="1">
+                    <Grid
+                        x:Name="CompactIdentityDimLayer"
+                        Grid.Column="1"
+                        SizeChanged="CompactIdentityDimLayer_SizeChanged">
+                    <controls:WidgetTitleIcon
+                        x:Name="CompactOutgoingTitleIcon"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        IconSize="14"
+                        IsHitTestVisible="False"
+                        Visibility="Collapsed">
+                        <controls:WidgetTitleIcon.RenderTransform>
+                            <TranslateTransform x:Name="CompactIdentityRollOutgoingTransform" />
+                        </controls:WidgetTitleIcon.RenderTransform>
+                    </controls:WidgetTitleIcon>
+                    <Grid
+                        x:Name="CompactIdentityVisualHost">
+                        <Grid.RenderTransform>
+                            <TranslateTransform x:Name="CompactIdentityRollCurrentTransform" />
+                        </Grid.RenderTransform>
                     <controls:WidgetTitleIcon
                         x:Name="CompactTitleIcon"
                         HorizontalAlignment="Center"
@@ -437,22 +458,19 @@
                     <!-- Rotating vinyl disc (music capsule only). Sits before the title text. -->
                     <Grid
                         x:Name="CompactVinylHost"
+                        x:Load="False"
                         Width="26"
                         Height="26"
                         HorizontalAlignment="Center"
                         VerticalAlignment="Center"
-                        RenderTransformOrigin="0.5,0.5"
                         Visibility="Collapsed">
-                        <Grid.RenderTransform>
-                            <RotateTransform x:Name="CompactVinylRotateTransform" Angle="0" />
-                        </Grid.RenderTransform>
                         <!-- black disc body -->
-                        <Ellipse Fill="#0B0B0B" />
+                        <Ellipse Fill="#0B0B0D" />
                         <!-- concentric groove rings -->
-                        <Ellipse Stroke="#222222" StrokeThickness="0.6" Margin="1.5" />
-                        <Ellipse Stroke="#2B2B2B" StrokeThickness="0.5" Margin="3" />
-                        <Ellipse Stroke="#1E1E1E" StrokeThickness="0.5" Margin="4.5" />
-                        <!-- directional sheen -->
+                        <Ellipse Stroke="#222226" StrokeThickness="0.6" Margin="1.5" />
+                        <Ellipse Stroke="#2B2B30" StrokeThickness="0.5" Margin="3" />
+                        <Ellipse Stroke="#1E1E22" StrokeThickness="0.5" Margin="4.5" />
+                        <!-- stationary directional sheen -->
                         <Ellipse>
                             <Ellipse.Fill>
                                 <RadialGradientBrush GradientOrigin="0.32,0.26" Center="0.5,0.5" RadiusX="0.62" RadiusY="0.62">
@@ -463,35 +481,99 @@
                             </Ellipse.Fill>
                         </Ellipse>
                         <!-- center label backing -->
-                        <Ellipse Margin="6.5" Fill="#000000" />
-                        <!-- center label = album cover -->
-                        <Ellipse x:Name="CompactVinylLabel" Margin="6.5">
-                            <Ellipse.Fill>
-                                <ImageBrush x:Name="CompactVinylLabelBrush" Stretch="UniformToFill" />
-                            </Ellipse.Fill>
-                        </Ellipse>
+                        <Ellipse Margin="6.5" Fill="#121216" />
+                        <!-- rotating center label = album cover (13x13 inside 26x26) -->
+                        <Grid
+                            x:Name="CompactVinylLabelHost"
+                            Width="13"
+                            Height="13"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center">
+                            <Ellipse x:Name="CompactVinylLabel">
+                                <Ellipse.Fill>
+                                    <ImageBrush x:Name="CompactVinylLabelBrush" Stretch="UniformToFill" />
+                                </Ellipse.Fill>
+                            </Ellipse>
+                        </Grid>
                         <!-- spindle hole -->
                         <Ellipse Width="1.6" Height="1.6" HorizontalAlignment="Center" VerticalAlignment="Center" Fill="#000000" />
+                    </Grid>
+                    </Grid>
                     </Grid>
                 </Grid>
             </Grid>
 
-            <!-- Stable left-side drag hit zone. It intentionally overlaps only
-                 the leading edge of the text column so moving into the middle
-                 body still switches to the expand interaction. The OS move
-                 cursor set on this element is the drag affordance. -->
+            <!-- Left drag affordance: evenly spaced 6-dot grip above the soft scrim.
+                 Never participates in hit testing so CompactMoveHitRegion stays atomic. -->
+            <Grid
+                x:Name="CompactLeftDragAffordanceHost"
+                Grid.Column="0"
+                Grid.ColumnSpan="2"
+                Width="50"
+                Margin="-8,0,0,0"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Stretch"
+                Canvas.ZIndex="44"
+                IsHitTestVisible="False">
+                <Grid
+                    x:Name="CompactLeftDragGrip"
+                    Margin="16,0,0,0"
+                    HorizontalAlignment="Left"
+                    VerticalAlignment="Center"
+                    Opacity="0"
+                    UseLayoutRounding="True">
+                    <Grid.RenderTransform>
+                        <TranslateTransform x:Name="CompactLeftDragGripTranslate" />
+                    </Grid.RenderTransform>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <Border Grid.Row="1" Height="3" />
+                    <Border Grid.Row="3" Height="3" />
+                    <Border Grid.Column="1" Width="3" />
+                    <Ellipse Grid.Row="0" Grid.Column="0" Width="2.5" Height="2.5" Fill="{ThemeResource TextFillColorPrimaryBrush}" Opacity="0.9" />
+                    <Ellipse Grid.Row="0" Grid.Column="2" Width="2.5" Height="2.5" Fill="{ThemeResource TextFillColorPrimaryBrush}" Opacity="0.9" />
+                    <Ellipse Grid.Row="2" Grid.Column="0" Width="2.5" Height="2.5" Fill="{ThemeResource TextFillColorPrimaryBrush}" Opacity="0.9" />
+                    <Ellipse Grid.Row="2" Grid.Column="2" Width="2.5" Height="2.5" Fill="{ThemeResource TextFillColorPrimaryBrush}" Opacity="0.9" />
+                    <Ellipse Grid.Row="4" Grid.Column="0" Width="2.5" Height="2.5" Fill="{ThemeResource TextFillColorPrimaryBrush}" Opacity="0.9" />
+                    <Ellipse Grid.Row="4" Grid.Column="2" Width="2.5" Height="2.5" Fill="{ThemeResource TextFillColorPrimaryBrush}" Opacity="0.9" />
+                </Grid>
+                <FontIcon
+                    x:Name="CompactLeftLockCueIcon"
+                    Margin="15,0,0,0"
+                    HorizontalAlignment="Left"
+                    VerticalAlignment="Center"
+                    FontSize="11"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Glyph="&#xE72E;"
+                    Opacity="0" />
+            </Grid>
+
+            <!-- Single authoritative left-side drag & group-wheel hit zone across the full capsule
+                 height. Overlaps only the left end-cap so moving into the middle body
+                 cleanly switches to the expand interaction. -->
             <Border
                 x:Name="CompactMoveHitRegion"
                 Grid.Column="0"
                 Grid.ColumnSpan="2"
-                Width="48"
-                Height="34"
+                Width="46"
+                Margin="-8,0,0,0"
                 HorizontalAlignment="Left"
-                VerticalAlignment="Center"
+                VerticalAlignment="Stretch"
                 Background="#01000000"
                 Canvas.ZIndex="47"
                 PointerEntered="CompactMoveHitRegion_PointerEntered"
-                PointerExited="CompactMoveHitRegion_PointerExited" />
+                PointerExited="CompactMoveHitRegion_PointerExited"
+                PointerWheelChanged="CompactMoveHitRegion_PointerWheelChanged" />
 
             <!-- Compact interaction hint. This is an in-tree visual rather than a
                  ToolTip popup, so WinUI cannot dismiss it while the pointer stays
@@ -526,19 +608,65 @@
                 VerticalAlignment="Stretch"
                 Background="Transparent"
                 PointerEntered="CompactTextContainer_PointerEntered"
-                PointerExited="CompactTextContainer_PointerExited">
+                PointerExited="CompactTextContainer_PointerExited"
+                SizeChanged="CompactTextContainer_SizeChanged">
                 <Border
                     x:Name="CompactTextHoverBackground"
                     Background="{ThemeResource SubtleFillColorTertiaryBrush}"
                     CornerRadius="4"
                     Opacity="0"
                     IsHitTestVisible="False" />
+                <Grid
+                    x:Name="CompactTextRollViewport"
+                    VerticalAlignment="Stretch"
+                    SizeChanged="CompactTextRollViewport_SizeChanged">
+                <StackPanel
+                    x:Name="CompactOutgoingTextRow"
+                    HorizontalAlignment="Left"
+                    VerticalAlignment="Center"
+                    Orientation="Horizontal"
+                    Spacing="6"
+                    IsHitTestVisible="False"
+                    Visibility="Collapsed">
+                    <StackPanel.RenderTransform>
+                        <TranslateTransform x:Name="CompactTextRollOutgoingTransform" />
+                    </StackPanel.RenderTransform>
+                    <TextBlock
+                        x:Name="CompactOutgoingTitleText"
+                        HorizontalAlignment="Left"
+                        VerticalAlignment="Center"
+                        FontSize="12.5"
+                        FontWeight="SemiBold"
+                        MaxLines="1"
+                        TextWrapping="NoWrap"
+                        TextTrimming="CharacterEllipsis" />
+                    <Border
+                        x:Name="CompactOutgoingTextSeparator"
+                        Width="3"
+                        Height="3"
+                        VerticalAlignment="Center"
+                        Background="{ThemeResource TextFillColorTertiaryBrush}"
+                        CornerRadius="2" />
+                    <TextBlock
+                        x:Name="CompactOutgoingSummaryText"
+                        MinWidth="0"
+                        HorizontalAlignment="Left"
+                        VerticalAlignment="Center"
+                        FontSize="11.5"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        MaxLines="1"
+                        TextWrapping="NoWrap"
+                        TextTrimming="CharacterEllipsis" />
+                </StackPanel>
                 <StackPanel
                     x:Name="CompactTextColumn"
                     HorizontalAlignment="Left"
                     VerticalAlignment="Center"
                     Orientation="Vertical"
                     Spacing="4">
+                    <StackPanel.RenderTransform>
+                        <TranslateTransform x:Name="CompactTextRollCurrentTransform" />
+                    </StackPanel.RenderTransform>
                 <StackPanel
                     x:Name="CompactTextHost"
                     HorizontalAlignment="Left"
@@ -561,6 +689,7 @@
                                 TextTrimming="CharacterEllipsis" />
                             <TextBlock
                                 x:Name="CompactTitleMarqueeClone"
+                                x:Load="False"
                                 HorizontalAlignment="Left"
                                 VerticalAlignment="Center"
                                 FontSize="12.5"
@@ -592,6 +721,7 @@
                                 TextTrimming="CharacterEllipsis" />
                             <TextBlock
                                 x:Name="CompactSummaryMarqueeClone"
+                                x:Load="False"
                                 MinWidth="0"
                                 HorizontalAlignment="Left"
                                 VerticalAlignment="Center"
@@ -626,6 +756,7 @@
                 </Border>
             </Grid>
             </StackPanel>
+            </Grid>
             <Border
                 x:Name="CompactBadge"
                 HorizontalAlignment="Right"
@@ -643,31 +774,6 @@
                         Foreground="White" />
                 </Border>
             </Grid>
-
-            <Border
-                x:Name="CompactActionRegionHighlight"
-                Grid.Column="1"
-                Grid.ColumnSpan="3"
-                Width="24"
-                Margin="0,0,-6,0"
-                HorizontalAlignment="Right"
-                Background="{ThemeResource SubtleFillColorSecondaryBrush}"
-                CornerRadius="6,14,14,6"
-                Canvas.ZIndex="40"
-                IsHitTestVisible="False"
-                Opacity="0"
-                Visibility="Collapsed" />
-
-            <Border
-                x:Name="CompactActionRegionTrigger"
-                Grid.Column="1"
-                Grid.ColumnSpan="3"
-                Width="32"
-                HorizontalAlignment="Right"
-                Background="#01000000"
-                Canvas.ZIndex="41"
-                PointerEntered="CompactActionRegionTrigger_PointerEntered"
-                PointerExited="CompactActionRegionTrigger_PointerExited" />
 
             <Border
                 x:Name="CompactReorderHandle"
@@ -710,23 +816,22 @@
 
             <StackPanel
                 x:Name="CompactActionHost"
-                Grid.Column="1"
-                Grid.ColumnSpan="3"
+                Grid.Column="2"
                 Margin="0,0,2,0"
                 HorizontalAlignment="Right"
-                VerticalAlignment="Center"
+                VerticalAlignment="Stretch"
+                Background="Transparent"
                 Orientation="Horizontal"
                 Canvas.ZIndex="43"
                 Opacity="0"
                 PointerEntered="CompactActionHost_PointerEntered"
                 PointerExited="CompactActionHost_PointerExited"
                 Spacing="2"
-                IsHitTestVisible="False">
-                <StackPanel.RenderTransform>
-                    <TranslateTransform x:Name="CompactActionHostTransform" X="4" />
-                </StackPanel.RenderTransform>
+                IsHitTestVisible="False"
+                Visibility="Collapsed">
                 <Button
                     x:Name="CompactPrimaryActionButton"
+                    VerticalAlignment="Center"
                     Click="CompactPrimaryActionButton_Click"
                     Style="{StaticResource WidgetTitleActionButtonStyle}"
                     Visibility="Collapsed">
@@ -734,6 +839,8 @@
                 </Button>
                 <Button
                     x:Name="CompactPreviousButton"
+                    x:Load="False"
+                    VerticalAlignment="Center"
                     Click="CompactPreviousButton_Click"
                     Style="{StaticResource WidgetTitleActionButtonStyle}"
                     Visibility="Collapsed">
@@ -743,6 +850,8 @@
                 </Button>
                 <Button
                     x:Name="CompactPlayPauseButton"
+                    x:Load="False"
+                    VerticalAlignment="Center"
                     Click="CompactPlayPauseButton_Click"
                     Style="{StaticResource WidgetTitleActionButtonStyle}"
                     Visibility="Collapsed">
@@ -753,6 +862,8 @@
                 </Button>
                 <Button
                     x:Name="CompactNextButton"
+                    x:Load="False"
+                    VerticalAlignment="Center"
                     Click="CompactNextButton_Click"
                     Style="{StaticResource WidgetTitleActionButtonStyle}"
                     Visibility="Collapsed">
@@ -762,6 +873,7 @@
                 </Button>
                 <Button
                     x:Name="CompactExpandButton"
+                    VerticalAlignment="Center"
                     Click="CompactExpandButton_Click"
                     Style="{StaticResource WidgetTitleActionButtonStyle}">
                     <FontIcon FontSize="12" Glyph="&#xE70D;" />
@@ -802,6 +914,7 @@
 
         <Grid
             x:Name="OverlayChromeLayer"
+            x:Load="False"
             Grid.RowSpan="2"
             Canvas.ZIndex="30"
             Visibility="Collapsed">
@@ -852,6 +965,7 @@
                 HorizontalAlignment="Center"
                 VerticalAlignment="Top"
                 Background="#01000000"
+                BorderBrush="Transparent"
                 BorderThickness="0"
                 Opacity="0"
                 PointerCaptureLost="OverlayDragHandle_PointerCaptureLost"
@@ -905,6 +1019,7 @@
 
         <Border
             x:Name="GroupDropPreview"
+            x:Load="False"
             Grid.RowSpan="2"
             HorizontalAlignment="Left"
             VerticalAlignment="Top"
@@ -927,5 +1042,15 @@
                 FontSize="14"
                 Glyph="&#xE8F1;" />
         </Border>
+
+        <Border
+            x:Name="ShellOutlineBorder"
+            Grid.RowSpan="2"
+            Canvas.ZIndex="110"
+            Background="{x:Null}"
+            BorderBrush="Transparent"
+            BorderThickness="0"
+            CornerRadius="0"
+            IsHitTestVisible="False" />
     </Grid>
 </UserControl>

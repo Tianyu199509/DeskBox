@@ -1,5 +1,6 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using CommunityToolkit.WinUI.Controls;
+using DeskBox.Platform;
 using DeskBox.Services;
 using DeskBox.Views.SettingsSections;
 using Microsoft.UI.Xaml;
@@ -15,13 +16,30 @@ public sealed partial class SettingsWindow
     {
         UpdateSearchSettingsActivity();
         UpdateBackupSettingsActivity();
-        if (_currentSettingsSection is "AppearanceDetail" or "FileStorageSettings")
+        if (_currentSettingsSection == "General")
         {
+            RefreshAiSettingsEntrySummary();
+        }
+        if (_currentSettingsSection == "AppearanceDetail")
+        {
+            AppearanceDetailSection.OrganizationSection.Refresh();
             RefreshManagedStoragePathWarning();
             RefreshManagedStorageDesktopShortcutState();
+            RefreshDragOutWin10State();
+            SyncManagedStorageQuickAccessToggleState();
+            _ = ViewModel.RefreshQuickAccessStateAsync();
+            _ = RefreshOrphanFoldersSummaryAsync();
         }
-        if (_currentSettingsSection is "Interaction" or "Advanced")
+        if (_currentSettingsSection == "Appearance" &&
+            _settingsSectionElements.TryGetValue("Appearance", out FrameworkElement? appearanceEl) &&
+            appearanceEl is AppearanceSettingsSection appearanceSec)
         {
+            appearanceSec.SyncMaterialEntryCard();
+        }
+        if (_currentSettingsSection == "Interaction")
+        {
+            SyncCapsuleModeEntryCard();
+            RefreshDisplaysEntrySummary();
             ViewModel.RefreshGlobalHotkeyState();
             RefreshGlobalHotkeyControls();
         }
@@ -34,6 +52,39 @@ public sealed partial class SettingsWindow
             search is SearchSettingsSection section)
         {
             section.RefreshFromSettings();
+        }
+        if (_currentSettingsSection == "CustomWidgetSettings" &&
+            _settingsSectionElements.TryGetValue("CustomWidgetSettings", out FrameworkElement? customEl) &&
+            customEl is CustomWidgetSettingsSection customSection)
+        {
+            customSection.RefreshInstances();
+        }
+        if (_currentSettingsSection == "AiSettings" &&
+            _settingsSectionElements.TryGetValue("AiSettings", out FrameworkElement? aiEl) &&
+            aiEl is AiSettingsSection aiSection)
+        {
+            aiSection.RefreshState();
+        }
+        if (_currentSettingsSection == "ClipboardSettings" &&
+            _settingsSectionElements.TryGetValue("ClipboardSettings", out FrameworkElement? clipboardEl) &&
+            clipboardEl is ClipboardSettingsSection clipboardSection)
+        {
+            clipboardSection.RefreshFromSettings();
+        }
+        if (_currentSettingsSection is "MusicSettings" or "WeatherSettings")
+        {
+            SyncMusicWeatherFeatureEnableState(_currentSettingsSection);
+        }
+        if (_currentSettingsSection == "Maintenance")
+        {
+            _backupSettingsViewModel.RefreshLocalStatus();
+            SyncMaintenanceEntryCards();
+            _ = RefreshBackupSnapshotInventoryAsync();
+        }
+        if (_currentSettingsSection == "About")
+        {
+            ViewModel.RefreshDragDropPermissionDiagnostic();
+            ViewModel.RefreshRuntimeDiagnostics();
         }
     }
 
@@ -48,10 +99,30 @@ public sealed partial class SettingsWindow
 
     private void UpdateBackupSettingsActivity()
     {
-        if (!_isClosed && IsVisibleToUser && _currentSettingsSection == "CloudBackupSettings")
+        if (!_isClosed && IsVisibleToUser && _currentSettingsSection == "Maintenance")
             _backupSettingsViewModel.Activate();
         else
             _backupSettingsViewModel.Deactivate();
+    }
+
+    private void RefreshLiveClipboardSettingsSection()
+    {
+        if (_isClosed)
+        {
+            return;
+        }
+
+        if (!DispatcherQueue.HasThreadAccess)
+        {
+            DispatcherQueue.TryEnqueue(RefreshLiveClipboardSettingsSection);
+            return;
+        }
+
+        if (_settingsSectionElements.TryGetValue("ClipboardSettings", out FrameworkElement? clipboardEl) &&
+            clipboardEl is ClipboardSettingsSection { IsLoaded: true } clipboardSection)
+        {
+            clipboardSection.RefreshFromSettings();
+        }
     }
 
     private FrameworkElement EnsureSettingsSectionCreated(string sectionTag)
@@ -72,12 +143,16 @@ public sealed partial class SettingsWindow
         section.DataContext = ViewModel;
         // LoadContent is used outside an ItemsControl, so initialize the
         // template's generated compiled bindings with the actual view model.
-        // The file-stack template keeps its compiled x:Bind surface typed to
-        // the section editor (batch 45), so its bindings initialize with the
-        // editor instead of the shell view model.
         object compiledBindingsRoot = sectionTag == "FileStackSettings"
             ? _fileStackSettingsViewModel
-            : ViewModel;
+            : sectionTag == "MusicSettings"
+                ? _musicSettingsViewModel
+                : sectionTag == "QuickCaptureSettings"
+                    ? _quickCaptureSettingsViewModel
+                    : sectionTag == "TodoSettings"
+                        ? _todoSettingsViewModel
+                        : ViewModel;
+
         XamlBindingHelper.GetDataTemplateComponent(section)?.ProcessBindings(compiledBindingsRoot, 0, 0, out _);
 
         switch (section)
@@ -89,169 +164,137 @@ public sealed partial class SettingsWindow
                 fileSettings.FileStack = _fileStackSettingsViewModel;
                 fileSettings.FeatureWidgets = _featureWidgetsSettingsViewModel;
                 fileSettings.Interaction = _interactionSettingsViewModel;
+                fileSettings.ManagedStorage = _managedStorageSettingsViewModel;
+                fileSettings.FileDisplay = _fileDisplaySettingsViewModel;
+                fileSettings.Appearance = _appearanceSettingsViewModel;
                 fileSettings.AppActions = _appActions;
+                fileSettings.OrganizationSection.Configure(_widgetActions, _appActions, _hWnd);
                 break;
-            case CapsuleModeSettingsSection capsuleSettings:
-                capsuleSettings.ViewModel = ViewModel;
+            case AppearanceSettingsSection appearanceSettings:
+                appearanceSettings.ViewModel = ViewModel;
+                appearanceSettings.SubPageChanged -= AppearanceSection_SubPageChanged;
+                appearanceSettings.SubPageChanged += AppearanceSection_SubPageChanged;
+                RefreshSystemAppearanceStates();
                 break;
             case GlanceWidgetSettingsSection glanceSettings:
                 glanceSettings.Configure(_widgetActions, _hWnd);
                 break;
+            case CustomWidgetSettingsSection customWidgetSettings:
+                customWidgetSettings.Configure(_widgetActions, _hWnd);
+                customWidgetSettings.SubPageChanged -= OnCustomWidgetSubPageChanged;
+                customWidgetSettings.SubPageChanged += OnCustomWidgetSubPageChanged;
+                customWidgetSettings.NavigateToAiSettingsRequested -= OnNavigateToAiSettingsRequested;
+                customWidgetSettings.NavigateToAiSettingsRequested += OnNavigateToAiSettingsRequested;
+                break;
+            case AiSettingsSection aiSettings:
+                aiSettings.Configure(_widgetActions, _hWnd);
+                aiSettings.AiConfigurationChanged -= AiSettingsSection_AiConfigurationChanged;
+                aiSettings.AiConfigurationChanged += AiSettingsSection_AiConfigurationChanged;
+                break;
             case DisplaySettingsSection displaySettings:
                 displaySettings.Configure(_widgetActions, _appActions);
                 break;
-            case DesktopOrganizationSettingsSection organizationSettings:
-                organizationSettings.Configure(_widgetActions, _appActions, _hWnd);
+            case ClipboardSettingsSection clipboardSettings:
+                clipboardSettings.Configure(_settingsService, _localizationService, _widgetActions, _dataActions, _hWnd, _hotkeyActions);
+                clipboardSettings.ResetClipboardRequested -= OnFeatureSubPageWidgetReset;
+                clipboardSettings.ResetClipboardRequested += OnFeatureSubPageWidgetReset;
+                ViewModel.ClipboardSettingsRefreshRequested -= RefreshLiveClipboardSettingsSection;
+                ViewModel.ClipboardSettingsRefreshRequested += RefreshLiveClipboardSettingsSection;
                 break;
         }
 
-        // Pilot pattern for retiring the shell binding facade: sections whose
-        // editor owns the binding surface get the editor as their DataContext,
-        // overriding the shell view model set above. {Binding} markup resolves
-        // through the editor's generated custom-property provider under
-        // Native AOT, so no per-property shell bridge is needed anymore.
         if (sectionTag == "MusicSettings")
         {
             section.DataContext = _musicSettingsViewModel;
+            SyncMusicWeatherFeatureEnableState(sectionTag);
         }
 
-        if (sectionTag is "Interaction" or "InteractionWindowSettings")
+        if (sectionTag == "Interaction")
         {
             section.DataContext = _interactionSettingsViewModel;
+            if (CapsuleModeSection is { } capsuleSettings)
+            {
+                capsuleSettings.ViewModel = ViewModel;
+                capsuleSettings.Performance = _performanceSettingsViewModel;
+                capsuleSettings.DataContext = _capsuleSettingsViewModel;
+            }
+            SyncCapsuleModeEntryCard(reloadOptions: true);
+            RefreshDisplaysEntrySummary();
+            ViewModel.RefreshGlobalHotkeyState();
+            RefreshGlobalHotkeyControls();
         }
 
-        // The Quick Capture section binds through the Quick Capture editor
-        // (batch 46): {Binding} markup resolves through its generated custom
-        // property provider under Native AOT. The clipboard-diagnostics and
-        // image-cache lines are pushed in by the shell (host services).
         if (sectionTag == "QuickCaptureSettings")
         {
             section.DataContext = _quickCaptureSettingsViewModel;
+            QuickCaptureAttachmentStorageModeComboBox.DataContext = _featureWidgetsSettingsViewModel;
         }
 
-        // The Todo section binds through the Todo editor (batch 47):
-        // {Binding} markup resolves through its generated custom property
-        // provider under Native AOT; the batch-14 default-filter/tab
-        // linkage renders through the coordinator's snapshot
-        // re-projection.
         if (sectionTag == "TodoSettings")
         {
             section.DataContext = _todoSettingsViewModel;
+            TodoAttachmentStorageModeComboBox.DataContext = _featureWidgetsSettingsViewModel;
         }
 
-        // The Weather section binds through the Weather editor (batch 48):
-        // {Binding} markup resolves through its generated custom property
-        // provider under Native AOT. The city-search state machine (the
-        // search service, the Windows location lookup, the debounced
-        // cancellation) stays on the shell and pushes the suggestion list
-        // and the location status into the editor; the editor answers
-        // user location-mode edits with the AutoLocationUserChanged event.
         if (sectionTag == "WeatherSettings")
         {
             section.DataContext = _weatherSettingsViewModel;
+            SyncMusicWeatherFeatureEnableState(sectionTag);
         }
 
-        // The backup family (local backups, cloud backups and the
-        // compatibility-diagnostics section, batch 49) binds through the
-        // backup editor: {Binding} markup resolves through its generated
-        // custom property provider under Native AOT. The batch-4 visit
-        // state machine (endpoint-scoped reads, generations, cancellation)
-        // stays inside the editor; the manual backup/restore/delete flows
-        // and the drag-drop/runtime diagnostics computation stay on the
-        // shell (host services) and push their results into the editor.
-        if (sectionTag is "BackupRestoreSettings" or
-            "CloudBackupSettings" or
-            "CompatibilityDiagnosticsSettings")
+        if (sectionTag == "Maintenance")
         {
             section.DataContext = _backupSettingsViewModel;
+            SyncMaintenanceEntryCards();
         }
 
-        // The performance section binds through the performance editor
-        // (batch 50): {Binding} markup resolves through its generated custom
-        // property provider under Native AOT. The section's writes (the
-        // legacy eleven custom-mode lambda facade writes, the preset write
-        // and the quiescence trim switch) go through the performance
-        // coordinator; the idle and immediate-hidden trim switches persist
-        // through the interaction coordinator from the editor's handlers.
-        if (sectionTag == "PerformanceSettings")
+        if (sectionTag == "About" && AboutDiagnosticsExpander is { } aboutDiag)
         {
-            section.DataContext = _performanceSettingsViewModel;
+            aboutDiag.DataContext = _backupSettingsViewModel;
+            foreach (FrameworkElement item in aboutDiag.Items.OfType<FrameworkElement>())
+            {
+                item.DataContext = _backupSettingsViewModel;
+            }
         }
 
-        // The file-stack section binds through the file-stack editor
-        // (batch 45): {Binding} markup resolves through its generated custom
-        // property provider under Native AOT, and the template's compiled
-        // x:Bind paths (open-mode combo and the rule list) are typed to the
-        // editor as well.
         if (sectionTag == "FileStackSettings")
         {
             section.DataContext = _fileStackSettingsViewModel;
         }
 
-        if (sectionTag == "FileDisplaySettings")
+        if (sectionTag == "Appearance")
         {
-            section.DataContext = _fileDisplaySettingsViewModel;
+            section.DataContext = _appearanceSettingsViewModel;
         }
 
-        if (sectionTag == "FileStorageSettings")
+        if (sectionTag == "AppearanceDetail")
         {
-            section.DataContext = _managedStorageSettingsViewModel;
+            _managedStorageSettingsViewModel.PropertyChanged -= ManagedStorageSettingsViewModel_DragOutPropertyChanged;
+            _managedStorageSettingsViewModel.PropertyChanged += ManagedStorageSettingsViewModel_DragOutPropertyChanged;
             RefreshManagedStoragePathWarning();
             RefreshManagedStorageDesktopShortcutState();
             RefreshDragOutWin10State();
+            SyncManagedStorageQuickAccessToggleState();
         }
 
-        // The appearance family (main section plus the material, density,
-        // window and animation subsections) binds through the appearance
-        // editor; {Binding} markup resolves through its generated custom
-        // property provider under Native AOT.
-        if (sectionTag is "Appearance" or
-            "AppearanceMaterialSettings" or
-            "AppearanceDensitySettings" or
-            "AppearanceWindowSettings" or
-            "AppearanceAnimationSettings")
-        {
-            section.DataContext = _appearanceSettingsViewModel;
-            if (sectionTag == "AppearanceMaterialSettings")
-            {
-                // The section hosts the system visual-effect status cards;
-                // creation-time refresh covers state changed while the
-                // window sat closed (activation only fires on focus).
-                RefreshSystemAppearanceStates();
-            }
-        }
-
-        // The WidgetGroups section binds through the group-navigation
-        // editor (batch 44); the four defaults are the editor's own persisted
-        // surface and the existing-groups projection is pushed in by the
-        // shell's group-editing state machine.
         if (sectionTag == "WidgetGroups")
         {
             section.DataContext = _groupNavigationSettingsViewModel;
         }
 
-        // The capsule family (main capsule section plus the overrides
-        // subsection) binds through the capsule editor (batch 44); the
-        // override-list projection is pushed in by the shell's override state
-        // machine.
-        if (sectionTag is "CapsuleMode" or
-            "CapsuleOverridesSettings")
+        if (sectionTag == "FeatureWidgets")
         {
-            section.DataContext = _capsuleSettingsViewModel;
-        }
-
-        if (sectionTag == "InteractionWindowSettings")
-        {
-            ViewModel.RefreshGlobalHotkeyState();
-            RefreshGlobalHotkeyControls();
+            Segmented hubSegmented = FeatureWidgetsHubSegmented;
+            WidgetSegmentedStyleHelper.ApplyNeutralPointerStates(hubSegmented);
+            hubSegmented.Loaded += (_, _) => WidgetSegmentedStyleHelper.ApplyNeutralPointerStates(hubSegmented);
+            hubSegmented.ActualThemeChanged += (_, _) => WidgetSegmentedStyleHelper.ApplyNeutralPointerStates(hubSegmented);
         }
 
         section.Loaded += DeferredSettingsSection_Loaded;
-        if (sectionTag == "FileStorageSettings" &&
-            _settingsSectionElements.TryGetValue("AppearanceDetail", out FrameworkElement? parent) &&
-            parent is FileWidgetSettingsSection fileWidgetSection)
+        if (sectionTag == "CustomWidgetSettings")
         {
-            fileWidgetSection.AttachManagedStorageSection(section);
+            EnsureSettingsSectionCreated("FeatureWidgets");
+            CustomWidgetHostPanel.Children.Add(section);
         }
         else
         {
@@ -271,6 +314,7 @@ public sealed partial class SettingsWindow
         }
         section.Loaded -= DeferredSettingsSection_Loaded;
         ApplyToggleSwitchContentVisibility();
+        ApplySegmentedNeutralStates(section);
         CollectResponsiveRows(SettingsRoot);
         UpdateResponsiveLayout(GetWindowWidth());
     }
@@ -334,5 +378,129 @@ public sealed partial class SettingsWindow
             }
         }
         return null;
+    }
+
+    private async void MusicLocalLyricsBrowseButton_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            string? folderPath = await FolderPickerService.PickFolderAsync(_hWnd);
+            if (!string.IsNullOrWhiteSpace(folderPath))
+            {
+                _musicSettingsViewModel.LocalLyricsFolder = folderPath;
+            }
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[MusicSettings] Failed to pick local lyrics folder: {ex}");
+        }
+    }
+
+    private void MusicLocalLyricsOpenButton_Click(object sender, RoutedEventArgs e)
+    {
+        string? folderPath = _musicSettingsViewModel.LocalLyricsFolder;
+        if (string.IsNullOrWhiteSpace(folderPath))
+        {
+            return;
+        }
+
+        try
+        {
+            Directory.CreateDirectory(folderPath);
+            Win32Helper.ShowInExplorer(folderPath);
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[MusicSettings] Failed to open local lyrics folder: {ex}");
+        }
+    }
+
+    private void MusicLocalLyricsClearButton_Click(object sender, RoutedEventArgs e)
+    {
+        _musicSettingsViewModel.LocalLyricsFolder = string.Empty;
+    }
+
+    private void AiSettingsSection_AiConfigurationChanged(object? sender, EventArgs e)
+    {
+        if (!_isClosed)
+        {
+            RefreshAiSettingsEntrySummary();
+        }
+    }
+
+    private void OnNavigateToAiSettingsRequested(object? sender, bool focusAgentHub)
+    {
+        if (_isClosed)
+        {
+            return;
+        }
+
+        if (focusAgentHub)
+        {
+            NavigateToSettingsSection("AiSettings:agent-hub");
+        }
+        else
+        {
+            NavigateToSettingsSection("AiSettings");
+        }
+    }
+
+
+    private void OnCustomWidgetSubPageChanged(object? sender, EventArgs e)
+    {
+        if (_isClosed || !string.Equals(_currentSettingsSection, "CustomWidgetSettings", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        SyncFeatureWidgetsHubState("CustomWidgetSettings");
+        PageScroller.ChangeView(null, 0d, null, disableAnimation: true);
+        if (TryGetSectionRoute("CustomWidgetSettings", out SettingsSectionRoute route))
+        {
+            SettingsNavigationView.IsBackButtonVisible =
+                _settingsSectionElements.TryGetValue("CustomWidgetSettings", out FrameworkElement? customEl) &&
+                customEl is CustomWidgetSettingsSection { IsDetailViewOpen: true }
+                    ? NavigationViewBackButtonVisible.Visible
+                    : NavigationViewBackButtonVisible.Collapsed;
+            UpdateBreadcrumb(route);
+        }
+    }
+
+    private void AppearanceSection_SubPageChanged(object? sender, EventArgs e)
+    {
+        if (_isClosed || !string.Equals(_currentSettingsSection, "Appearance", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        PageScroller.ChangeView(null, 0d, null, disableAnimation: true);
+        if (TryGetSectionRoute("Appearance", out SettingsSectionRoute route))
+        {
+            bool showBack = _settingsSectionElements.TryGetValue("Appearance", out FrameworkElement? appearanceEl) &&
+                appearanceEl is AppearanceSettingsSection { IsMaterialSubPageOpen: true };
+            SettingsNavigationView.IsBackButtonVisible = showBack
+                ? NavigationViewBackButtonVisible.Visible
+                : NavigationViewBackButtonVisible.Collapsed;
+            UpdateBreadcrumb(route);
+        }
+    }
+
+    private void AppearanceDetailSection_SubPageChanged(object? sender, EventArgs e)
+    {
+        if (_isClosed || !string.Equals(_currentSettingsSection, "AppearanceDetail", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        PageScroller.ChangeView(null, 0d, null, disableAnimation: true);
+        if (TryGetSectionRoute("AppearanceDetail", out SettingsSectionRoute route))
+        {
+            bool showBack = _settingsSectionElements.TryGetValue("AppearanceDetail", out FrameworkElement? detailEl) &&
+                detailEl is FileWidgetSettingsSection { IsDetailSubPageOpen: true };
+            SettingsNavigationView.IsBackButtonVisible = showBack
+                ? NavigationViewBackButtonVisible.Visible
+                : NavigationViewBackButtonVisible.Collapsed;
+            UpdateBreadcrumb(route);
+        }
     }
 }

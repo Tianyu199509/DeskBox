@@ -13,13 +13,18 @@ const
   // conservative safety measure.
   DeskBoxStorePackageIdentityName = 'D1FC332A.DeskBoxWidgets';
   DeskBoxTemporaryRootPath = '{%TEMP}\DeskBox';
+  DeskBoxFeedbackTemporaryRootPath = '{%TEMP}\DeskBoxFeedback';
+  DeskBoxSettingsHostTraceLogPath = '{%TEMP}\deskbox-settings-host.log';
+  DeskBoxJumpListCustomDestinationsPath = '{userappdata}\Microsoft\Windows\Recent\CustomDestinations\3bd2d2b294e73d6e.customDestinations-ms';
   DeskBoxProductRegistryKey = 'Software\DeskBox';
   DeskBoxStartupRunKey = 'Software\Microsoft\Windows\CurrentVersion\Run';
+  DeskBoxStartupApprovedRunKey = 'Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run';
   DeskBoxStartupTaskNamePrefix = 'DeskBox User Startup';
   DeskBoxAppUserModelId = 'DeskBox.DeskBox';
   DeskBoxAppUserModelIdRegistryKey = 'Software\Classes\AppUserModelId';
   DeskBoxNotificationSettingsRegistryKey = 'Software\Microsoft\Windows\CurrentVersion\Notifications\Settings';
   DeskBoxClassesClsidRegistryKey = 'Software\Classes\CLSID';
+  DeskBoxProtocolRegistryKey = 'Software\Classes\deskbox';
   DeskBoxPurgeUserDataParameter = '/PURGEUSERDATA';
   DeskBoxManagedStorageShortcutFileName = 'DeskBox Files.lnk';
   DeskBoxManagedStorageShortcutDescription = 'DeskBox managed storage';
@@ -422,6 +427,15 @@ begin
   if (FileCount = 0) and (FolderCount = 0) then
     Exit;
 
+  // Silent runs (including QuietUninstallString = /SILENT without
+  // /SUPPRESSMSGBOXES) have no interactive user to confirm this notice and
+  // never delete managed storage anyway.
+  if UninstallSilent then
+  begin
+    Log('DeskBox silent uninstall preserved non-empty managed storage folder: ' + FolderPath);
+    Exit;
+  end;
+
   Summary := BuildManagedStorageSummary(FolderPath);
   MessageText :=
     ExpandConstant('{cm:ConfirmStorageTitle}') + ':' + #13#10 +
@@ -548,25 +562,38 @@ begin
           Log('DeskBox uninstall skipped the /PURGEUSERDATA purge because the Microsoft Store edition is still installed for this user.');
           // Interactive callers deserve the same explanation the Unknown
           // branch gets; silent runs suppress this automatically.
-          SuppressibleMsgBox(
-            ExpandConstant('{cm:StoreEditionDataPreserved}'),
-            mbInformation,
-            MB_OK,
-            IDOK);
+          if not UninstallSilent then
+            SuppressibleMsgBox(
+              ExpandConstant('{cm:StoreEditionDataPreserved}'),
+              mbInformation,
+              MB_OK,
+              IDOK);
         end;
       StoreDeskBoxStateUnknown:
         begin
           PurgeDeskBoxAppData := False;
           Log('DeskBox uninstall skipped the /PURGEUSERDATA purge because the Microsoft Store edition state could not be verified.');
-          SuppressibleMsgBox(
-            ExpandConstant('{cm:StoreEditionStateUnknown}'),
-            mbInformation,
-            MB_OK,
-            IDOK);
+          if not UninstallSilent then
+            SuppressibleMsgBox(
+              ExpandConstant('{cm:StoreEditionStateUnknown}'),
+              mbInformation,
+              MB_OK,
+              IDOK);
         end;
     else
       Log('DeskBox uninstall will purge application data because /PURGEUSERDATA was specified.');
     end;
+    Result := True;
+    Exit;
+  end;
+
+  // QuietUninstallString passes /SILENT without /SUPPRESSMSGBOXES; never block
+  // background/winget uninstalls on a modal TaskDialog when /PURGEUSERDATA was
+  // not requested.
+  if UninstallSilent then
+  begin
+    PurgeDeskBoxAppData := False;
+    Log('DeskBox silent uninstall will preserve application data and recovery snapshots.');
     Result := True;
     Exit;
   end;
@@ -662,10 +689,15 @@ begin
     if SameInstallPath(ExtractFileDir(StartupExecutablePath), ExpandConstant('{app}')) and
        (CompareText(ExtractFileName(StartupExecutablePath), DeskBoxProcessName) = 0) and
        RegDeleteValue(HKEY_CURRENT_USER, DeskBoxStartupRunKey, 'DeskBox') then
-      Log('DeskBox uninstall removed startup registry entry.')
+    begin
+      RegDeleteValue(HKEY_CURRENT_USER, DeskBoxStartupApprovedRunKey, 'DeskBox');
+      Log('DeskBox uninstall removed startup registry entry.');
+    end
     else
       Log('DeskBox uninstall preserved startup registry entry owned by another DeskBox installation.')
-  end;
+  end
+  else if PurgeDeskBoxAppData then
+    RegDeleteValue(HKEY_CURRENT_USER, DeskBoxStartupApprovedRunKey, 'DeskBox');
 
   // Also remove the legacy startup folder shortcut.
   StartupShortcutPath := ExpandConstant('{userstartup}\DeskBox.lnk');
@@ -737,9 +769,12 @@ end;
 
 procedure RemoveTaskbarPinnedShortcut;
 var
+  TaskbarPinnedDir: string;
   Path: string;
+  FindRec: TFindRec;
 begin
-  Path := ExpandConstant('{userappdata}\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar\DeskBox.lnk');
+  TaskbarPinnedDir := ExpandConstant('{userappdata}\Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar');
+  Path := AddBackslash(TaskbarPinnedDir) + 'DeskBox.lnk';
   if ShortcutTargetsCurrentInstall(Path) then
   begin
     if DeleteFile(Path) then
@@ -747,20 +782,55 @@ begin
     else
       Log('DeskBox uninstall failed to remove taskbar pinned shortcut.');
   end;
+
+  if DirExists(TaskbarPinnedDir) and FindFirst(AddBackslash(TaskbarPinnedDir) + '*.lnk', FindRec) then
+  begin
+    try
+      repeat
+        if (FindRec.Attributes and FILE_ATTRIBUTE_DIRECTORY) = 0 then
+        begin
+          Path := AddBackslash(TaskbarPinnedDir) + FindRec.Name;
+          if ShortcutTargetsCurrentInstall(Path) then
+          begin
+            if DeleteFile(Path) then
+              Log('DeskBox uninstall removed taskbar pinned shortcut: ' + FindRec.Name)
+            else
+              Log('DeskBox uninstall failed to remove taskbar pinned shortcut: ' + FindRec.Name);
+          end;
+        end;
+      until not FindNext(FindRec);
+    finally
+      FindClose(FindRec);
+    end;
+  end;
+end;
+
+procedure RemoveAppCompatFlagForRootAndExe(RootKey: Integer; ExePath: string);
+var
+  Value: string;
+begin
+  if RegQueryStringValue(RootKey, DeskBoxAppCompatLayersKey, ExePath, Value) then
+  begin
+    if RegDeleteValue(RootKey, DeskBoxAppCompatLayersKey, ExePath) then
+      Log('DeskBox uninstall removed AppCompat value: ' + ExePath)
+    else
+      Log('DeskBox uninstall failed to remove AppCompat value: ' + ExePath);
+  end;
 end;
 
 procedure RemoveAppCompatFlag;
 var
   ExePath: string;
-  Value: string;
+  SettingsExePath: string;
 begin
   ExePath := ExpandConstant('{app}\DeskBox.exe');
-  if RegQueryStringValue(HKEY_CURRENT_USER, DeskBoxAppCompatLayersKey, ExePath, Value) then
+  SettingsExePath := ExpandConstant('{app}\DeskBox.Settings.exe');
+  RemoveAppCompatFlagForRootAndExe(HKEY_CURRENT_USER, ExePath);
+  RemoveAppCompatFlagForRootAndExe(HKEY_CURRENT_USER, SettingsExePath);
+  if IsAdminInstallMode then
   begin
-    if RegDeleteValue(HKEY_CURRENT_USER, DeskBoxAppCompatLayersKey, ExePath) then
-      Log('DeskBox uninstall removed AppCompat value: ' + ExePath)
-    else
-      Log('DeskBox uninstall failed to remove AppCompat value: ' + ExePath);
+    RemoveAppCompatFlagForRootAndExe(HKEY_LOCAL_MACHINE, ExePath);
+    RemoveAppCompatFlagForRootAndExe(HKEY_LOCAL_MACHINE, SettingsExePath);
   end;
 end;
 
@@ -802,6 +872,9 @@ var
   AppDataPath: string;
   RecoveryPath: string;
   TemporaryPath: string;
+  FeedbackTemporaryPath: string;
+  SettingsHostTraceLog: string;
+  JumpListPath: string;
   FailedPaths: string;
 begin
   FailedPaths := '';
@@ -811,6 +884,16 @@ begin
       ExpandConstant(DeskBoxTemporaryRootPath),
       'DeskBox') then
     AppendFailedCleanupPath(FailedPaths, TemporaryPath);
+
+  FeedbackTemporaryPath := ExpandConstant(DeskBoxFeedbackTemporaryRootPath);
+  DeleteExpectedDirectory(
+    FeedbackTemporaryPath,
+    ExpandConstant(DeskBoxFeedbackTemporaryRootPath),
+    'DeskBoxFeedback');
+
+  SettingsHostTraceLog := ExpandConstant(DeskBoxSettingsHostTraceLogPath);
+  if FileExists(SettingsHostTraceLog) then
+    DeleteFile(SettingsHostTraceLog);
 
   if PurgeDeskBoxAppData then
   begin
@@ -826,6 +909,17 @@ begin
         ExpandConstant(DeskBoxRecoveryRootPath),
         'DeskBox-Recovery') then
       AppendFailedCleanupPath(FailedPaths, RecoveryPath);
+
+    // Remove the JumpList custom-destinations file only when no other DeskBox
+    // installation still owns the shared DeskBox.DeskBox AUMID registration.
+    if not RegKeyExists(
+         HKEY_CURRENT_USER,
+         DeskBoxAppUserModelIdRegistryKey + '\' + DeskBoxAppUserModelId) then
+    begin
+      JumpListPath := ExpandConstant(DeskBoxJumpListCustomDestinationsPath);
+      if FileExists(JumpListPath) then
+        DeleteFile(JumpListPath);
+    end;
 
     // The product registry key carries the installer language and install
     // state a re-install may want; it is purge data, so it belongs inside
@@ -866,27 +960,83 @@ begin
     (CompareText(ExtractFileName(ExecutablePath), DeskBoxProcessName) = 0);
 end;
 
+function RemoveOwnedNotificationActivators(CurrentActivatorId: string): Boolean;
+var
+  ClsidNames: TArrayOfString;
+  Index: Integer;
+  CandidateId: string;
+begin
+  Result := False;
+  if (CurrentActivatorId <> '') and
+     NotificationRegistrationTargetsCurrentInstall(CurrentActivatorId) then
+  begin
+    if RegDeleteKeyIncludingSubkeys(
+         HKEY_CURRENT_USER,
+         DeskBoxClassesClsidRegistryKey + '\' + CurrentActivatorId) then
+      Result := True;
+  end;
+
+  if RegGetSubkeyNames(
+       HKEY_CURRENT_USER,
+       DeskBoxClassesClsidRegistryKey,
+       ClsidNames) then
+  begin
+    for Index := 0 to GetArrayLength(ClsidNames) - 1 do
+    begin
+      CandidateId := ClsidNames[Index];
+      if (CandidateId <> '') and
+         NotificationRegistrationTargetsCurrentInstall(CandidateId) then
+      begin
+        if RegDeleteKeyIncludingSubkeys(
+             HKEY_CURRENT_USER,
+             DeskBoxClassesClsidRegistryKey + '\' + CandidateId) then
+          Result := True;
+      end;
+    end;
+  end;
+end;
+
 procedure RemoveNotificationRegistration;
 var
   AppUserModelKey: string;
   ActivatorId: string;
   IconPath: string;
   PathAppUserModelId: string;
+  HasAppUserModelKey: Boolean;
+  RemovedOwnedActivator: Boolean;
   OwnsRegistration: Boolean;
 begin
   AppUserModelKey := DeskBoxAppUserModelIdRegistryKey + '\' + DeskBoxAppUserModelId;
+  HasAppUserModelKey := RegKeyExists(HKEY_CURRENT_USER, AppUserModelKey);
   ActivatorId := '';
   IconPath := '';
-  RegQueryStringValue(HKEY_CURRENT_USER, AppUserModelKey, 'CustomActivator', ActivatorId);
-  RegQueryStringValue(HKEY_CURRENT_USER, AppUserModelKey, 'IconUri', IconPath);
-  OwnsRegistration :=
-    (ActivatorId = '') or
-    NotificationRegistrationTargetsCurrentInstall(ActivatorId);
+  if HasAppUserModelKey then
+  begin
+    RegQueryStringValue(HKEY_CURRENT_USER, AppUserModelKey, 'CustomActivator', ActivatorId);
+    RegQueryStringValue(HKEY_CURRENT_USER, AppUserModelKey, 'IconUri', IconPath);
+  end;
+
+  if ActivatorId <> '' then
+    OwnsRegistration := NotificationRegistrationTargetsCurrentInstall(ActivatorId)
+  else
+    OwnsRegistration := False;
+
+  RemovedOwnedActivator := RemoveOwnedNotificationActivators(ActivatorId);
+  if (ActivatorId = '') and
+     (RemovedOwnedActivator or (HasAppUserModelKey and PurgeDeskBoxAppData)) then
+    OwnsRegistration := True;
+
   if IconPath = '' then
     IconPath := ExpandConstant(
       '{localappdata}\Microsoft\WindowsAppSDK\DeskBox.DeskBox.png');
 
   PathAppUserModelId := ExpandConstant('{app}\' + DeskBoxProcessName);
+  StringChangeEx(PathAppUserModelId, '\', '.', True);
+  RegDeleteKeyIncludingSubkeys(
+    HKEY_CURRENT_USER,
+    DeskBoxAppUserModelIdRegistryKey + '\' + PathAppUserModelId);
+
+  PathAppUserModelId := ExpandConstant('{app}\DeskBox.Settings.exe');
   StringChangeEx(PathAppUserModelId, '\', '.', True);
   RegDeleteKeyIncludingSubkeys(
     HKEY_CURRENT_USER,
@@ -911,8 +1061,41 @@ begin
 
     Log('DeskBox uninstall removed the notification registration owned by this installation.');
   end
+  else if RemovedOwnedActivator then
+    Log('DeskBox uninstall removed stale notification activator CLSID(s) for this installation and preserved active registration owned by another DeskBox executable.')
   else if ActivatorId <> '' then
     Log('DeskBox uninstall preserved a notification registration owned by another DeskBox executable.');
+end;
+
+procedure RemoveDeskBoxProtocolRegistration;
+var
+  CommandKey: string;
+  CommandValue: string;
+  ExecutablePath: string;
+begin
+  CommandKey := DeskBoxProtocolRegistryKey + '\shell\open\command';
+  if not RegQueryStringValue(HKEY_CURRENT_USER, CommandKey, '', CommandValue) then
+    Exit;
+
+  ExecutablePath := ExtractExecutablePath(CommandValue);
+  if SameInstallPath(ExtractFileDir(ExecutablePath), ExpandConstant('{app}')) and
+     (CompareText(ExtractFileName(ExecutablePath), DeskBoxProcessName) = 0) then
+  begin
+    if RegDeleteKeyIncludingSubkeys(HKEY_CURRENT_USER, DeskBoxProtocolRegistryKey) then
+      Log('DeskBox uninstall removed per-user deskbox:// protocol registration.')
+    else
+      Log('DeskBox uninstall failed to remove per-user deskbox:// protocol registration.');
+  end
+  else
+    Log('DeskBox uninstall preserved per-user deskbox:// protocol registration owned by another DeskBox executable.');
+end;
+
+function CurrentProfileHasDeskBoxData: Boolean;
+begin
+  Result :=
+    FileExists(ExpandConstant(DeskBoxDataSettingsPath)) or
+    DirExists(ExpandConstant(DeskBoxAppDataRootPath)) or
+    DirExists(ExpandConstant(DeskBoxRecoveryRootPath));
 end;
 
 function InitializeUninstall: Boolean;
@@ -923,25 +1106,40 @@ begin
     // account from the person who started it. Never interpret that elevated
     // account's LocalAppData as the data of every DeskBox user.
     PurgeDeskBoxAppData := False;
-    Log('DeskBox all-users uninstall will preserve every user profile''s application data.');
     // The usual split-token elevation keeps the initiating user's profile, so
-    // their settings file is a safe signal that this uninstaller can offer an
-    // access shortcut for that same profile. If different administrator
-    // credentials were supplied, do not guess another user's storage path.
-    if FileExists(ExpandConstant(DeskBoxDataSettingsPath)) then
-      OfferManagedStorageShortcut
+    // existing DeskBox profile directories (or settings.json) prove this
+    // account used DeskBox and can choose whether to keep or purge its data.
+    // Only offer the managed-storage shortcut when settings.json exists so an
+    // elevated admin account without DeskBox settings never guesses another
+    // user's default storage path.
+    if CurrentProfileHasDeskBoxData then
+    begin
+      if FileExists(ExpandConstant(DeskBoxDataSettingsPath)) then
+      begin
+        Result := ConfirmManagedStoragePreserved;
+        if not Result then
+          Log('DeskBox uninstall aborted: the user cancelled at the non-empty managed storage confirmation.')
+        else
+          OfferManagedStorageShortcut;
+      end
+      else
+        Result := True;
+
+      if Result then
+        Result := ChooseAppDataRemoval;
+    end
     else
-      Log('DeskBox all-users uninstall skipped the managed storage shortcut offer because the current account has no DeskBox settings.');
-    Result := True;
+    begin
+      Log('DeskBox all-users uninstall will preserve every user profile''s application data.');
+      Log('DeskBox all-users uninstall skipped the managed storage shortcut offer because the current account has no DeskBox profile data.');
+      Result := True;
+    end;
   end
   else
   begin
     Result := ConfirmManagedStoragePreserved;
     if not Result then
-      // Deep review R15 (F7 audit): in /VERYSILENT runs the suppressed
-      // dialog takes its DEFBUTTON2 default (No) and the uninstaller exited
-      // here with NO log line — automated fleets saw a silent no-op. Say why.
-      Log('DeskBox uninstall aborted: the managed storage folder is not empty (suppressed confirmation defaulted to keep).')
+      Log('DeskBox uninstall aborted: the user cancelled at the non-empty managed storage confirmation.')
     else
       OfferManagedStorageShortcut;
     if Result then
@@ -960,27 +1158,23 @@ begin
     // removed when their executable action targets this exact installation.
     RemoveStartupScheduledTasks;
 
-    if IsAdminInstallMode then
-    begin
-      // The usual split-token elevation keeps HKCU on the initiating user,
-      // and RemoveStartupRegistryEntry is owner-checked against {app}, so
-      // calling it here removes the initiating user's dead Run entry without
-      // touching another installation. Other per-user surfaces (notifications,
-      // settings, content) stay preserved as before.
-      RemoveStartupRegistryEntry;
-      Log('DeskBox all-users uninstall preserved per-user notifications, settings, and content.')
-    end
+    // The usual split-token elevation keeps HKCU and LocalAppData on the
+    // initiating user, and each per-user registration cleanup below is
+    // owner-checked against {app}, so running them in both install modes
+    // removes the initiating user's dead Run entry, taskbar pin, AppCompat
+    // layer, and COM notification activator without touching another
+    // DeskBox installation. RemoveDeskBoxDataDirectories only purges
+    // LocalAppData/DeskBox-Recovery when PurgeDeskBoxAppData was explicitly
+    // approved in InitializeUninstall.
+    RemoveStartupRegistryEntry;
+    RemoveTaskbarPinnedShortcut;
+    RemoveAppCompatFlag;
+    RemoveNotificationRegistration;
+    RemoveDeskBoxProtocolRegistration;
+    RemoveDeskBoxDataDirectories;
+    if PurgeDeskBoxAppData then
+      Log('DeskBox uninstall removed local app data and recovery snapshots.')
     else
-    begin
-      RemoveStartupRegistryEntry;
-      RemoveTaskbarPinnedShortcut;
-      RemoveAppCompatFlag;
-      RemoveNotificationRegistration;
-      RemoveDeskBoxDataDirectories;
-      if PurgeDeskBoxAppData then
-        Log('DeskBox uninstall removed local app data and recovery snapshots.')
-      else
-        Log('DeskBox uninstall kept local app data and recovery snapshots.');
-    end;
+      Log('DeskBox uninstall kept local app data and recovery snapshots.');
   end;
 end;

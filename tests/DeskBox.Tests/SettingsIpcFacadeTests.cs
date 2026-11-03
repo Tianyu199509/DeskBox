@@ -1,4 +1,4 @@
-﻿using DeskBox.Contracts;
+using DeskBox.Contracts;
 using DeskBox.Models;
 using DeskBox.Services;
 
@@ -88,9 +88,18 @@ public sealed class SettingsIpcFacadeTests : IDisposable
 
         public void SetSearchHotkeyEnabled(bool enabled) => SearchSetEnabledArg = enabled;
 
+        public GlobalHotkeyActivation? SearchAppliedActivation;
+
         public bool TryApplySearchHotkeyGesture(GlobalHotkeyGesture gesture, out string? error)
         {
             SearchAppliedGesture = gesture;
+            error = SearchApplyResult ? null : "search apply failed";
+            return SearchApplyResult;
+        }
+
+        public bool TryApplySearchHotkeyActivation(GlobalHotkeyActivation activation, out string? error)
+        {
+            SearchAppliedActivation = activation;
             error = SearchApplyResult ? null : "search apply failed";
             return SearchApplyResult;
         }
@@ -139,6 +148,25 @@ public sealed class SettingsIpcFacadeTests : IDisposable
 
         public Task<QuickCaptureImageCacheInfo?> GetQuickCaptureImageCacheInfoAsync() =>
             Task.FromResult(InfoToReturn);
+
+        public string? MirrorFolderPath;
+
+        public Task<string?> GetQuickCaptureMirrorFolderAsync() =>
+            Task.FromResult(MirrorFolderPath);
+
+        public Task SetQuickCaptureMirrorFolderAsync(string? folderPath)
+        {
+            MirrorFolderPath = string.IsNullOrWhiteSpace(folderPath) ? null : folderPath;
+            return Task.CompletedTask;
+        }
+
+        public Task<DeskBox.Models.ClipboardStorageStats?> GetClipboardStorageStatsAsync() =>
+            Task.FromResult<DeskBox.Models.ClipboardStorageStats?>(new DeskBox.Models.ClipboardStorageStats(5, 2, 1, 2048, []));
+
+        public Task<int> ClearClipboardUnpinnedAsync() => Task.FromResult(3);
+
+        public Task<IReadOnlyList<DeskBox.Models.ClipboardObservedApp>> GetClipboardObservedAppsAsync() =>
+            Task.FromResult<IReadOnlyList<DeskBox.Models.ClipboardObservedApp>>([]);
     }
 
     private sealed record Loopback(
@@ -264,6 +292,11 @@ public sealed class SettingsIpcFacadeTests : IDisposable
             Assert.True(remote.TryApplyActivation(activation, out string? applyError));
             Assert.Null(applyError);
             Assert.Equal(activation, hotkey.AppliedActivation);
+
+            var searchDoubleShift = GlobalHotkeyActivation.FromDoubleTapModifier(HotkeyModifierKeys.Shift);
+            Assert.True(remote.TryApplySearchHotkeyActivation(searchDoubleShift, out string? searchApplyErr));
+            Assert.Null(searchApplyErr);
+            Assert.Equal(searchDoubleShift, hotkey.SearchAppliedActivation);
 
             hotkey.ResetResult = false;
             Assert.False(remote.ResetToDefault(out string? resetError));
@@ -392,6 +425,13 @@ public sealed class SettingsIpcFacadeTests : IDisposable
             QuickCaptureImageCacheInfo? info = await remote.GetQuickCaptureImageCacheInfoAsync();
             Assert.NotNull(info);
             Assert.Equal(4, info!.TotalFileCount);
+
+            Assert.Null(await remote.GetQuickCaptureMirrorFolderAsync());
+            await remote.SetQuickCaptureMirrorFolderAsync(@"C:\Notes\QuickCapture");
+            Assert.Equal(@"C:\Notes\QuickCapture", data.MirrorFolderPath);
+            Assert.Equal(@"C:\Notes\QuickCapture", await remote.GetQuickCaptureMirrorFolderAsync());
+            await remote.SetQuickCaptureMirrorFolderAsync(null);
+            Assert.Null(await remote.GetQuickCaptureMirrorFolderAsync());
         }
         finally
         {
@@ -568,6 +608,7 @@ public sealed class SettingsIpcFacadeTests : IDisposable
 
         public void NotifyWidgetGroupPresentationSettingsChanged() => NotifiedGroup = true;
 
+
         public Task<bool> ReorderWidgetGroupMemberAsync(string sourceWidgetId, string targetWidgetId) =>
             Task.FromResult(true);
 
@@ -594,15 +635,25 @@ public sealed class SettingsIpcFacadeTests : IDisposable
 
         public int GetDefaultManagedStorageWidgetCount() => 6;
 
+        public Func<string, CancellationToken, Task<ManagedStorageMigrationPreview>>? PreviewHandler;
+        public Func<string, ManagedStorageMigrationOptions?, Task<ManagedStorageMigrationResult>>? MigrateHandler;
+
         public Task<ManagedStorageMigrationPreview> PreviewManagedStorageMigrationAsync(
             string newRootPath,
-            CancellationToken token) => Task.FromResult(
-            new ManagedStorageMigrationPreview(3, 9, 2048, false, null));
+            CancellationToken token) =>
+            PreviewHandler is not null
+                ? PreviewHandler(newRootPath, token)
+                : Task.FromResult(new ManagedStorageMigrationPreview(3, 9, 2048, false, null));
 
         public async Task<ManagedStorageMigrationResult> UpdateDefaultManagedStorageRootAsync(
             string newRootPath,
             ManagedStorageMigrationOptions? options)
         {
+            if (MigrateHandler is not null)
+            {
+                return await MigrateHandler(newRootPath, options);
+            }
+
             MigrationRoot = newRootPath;
             options?.Progress?.Report(new ManagedStorageMigrationProgress(
                 ManagedStorageMigrationPhase.Copying,
@@ -628,22 +679,61 @@ public sealed class SettingsIpcFacadeTests : IDisposable
 
         public Task RemoveGlanceWidgetAsync(string widgetId) => Task.CompletedTask;
 
+        public Task<IReadOnlyList<GlanceWidgetInstanceInfo>> GetCustomWidgetInstancesAsync() => Task.FromResult<IReadOnlyList<GlanceWidgetInstanceInfo>>(Glance);
+
+        public Task<GlanceWidgetInstanceInfo> CreateCustomWidgetAsync(string? templateOrPackageSpec) =>
+            Task.FromResult(new GlanceWidgetInstanceInfo("c1", templateOrPackageSpec ?? "work-logger", true));
+
+        public Contracts.CustomWidgetCreateOptions? LastCustomCreateOptions { get; private set; }
+        public List<Contracts.CustomWidgetSettingsMutation> CustomMutations { get; } = [];
+
+        public Task<GlanceWidgetInstanceInfo> CreateCustomWidgetWithSetupAsync(Contracts.CustomWidgetCreateOptions options)
+        {
+            LastCustomCreateOptions = options;
+            return Task.FromResult(new GlanceWidgetInstanceInfo("c2", options.Spec ?? "custom", true));
+        }
+
+        public Task ApplyCustomWidgetMutationAsync(Contracts.CustomWidgetSettingsMutation mutation)
+        {
+            CustomMutations.Add(mutation);
+            return Task.CompletedTask;
+        }
+
+        public Task SetCustomWidgetInstanceEnabledAsync(string widgetId, bool enabled) => Task.CompletedTask;
+
+        public Task<bool> LocateCustomWidgetAsync(string widgetId) => Task.FromResult(true);
+        public Task OpenCustomWidgetStudioAsync(string? widgetId, string? initialIdea) => Task.CompletedTask;
+
+        public Task RemoveCustomWidgetAsync(string widgetId) => Task.CompletedTask;
+
         public Task RenameWidgetAsync(string widgetId, string newName)
         {
             RenamedGlance = widgetId + ":" + newName;
             return Task.CompletedTask;
         }
 
+        public bool MoveAllPersisted { get; set; } = true;
+
         public async Task<(int MovedCount, WidgetMoveAllUndoToken Token)> MoveAllWidgetSurfacesToDisplayAsync(
             string displayStableId)
         {
             await Task.Yield();
-            _lastMoveAllToken = new WidgetMoveAllUndoToken();
+            _lastMoveAllToken = new WidgetMoveAllUndoToken
+            {
+                Persisted = MoveAllPersisted
+            };
             return (4, _lastMoveAllToken);
         }
 
         public Task<bool> UndoMoveAllWidgetSurfacesAsync(WidgetMoveAllUndoToken token) =>
             Task.FromResult(ReferenceEquals(token, _lastMoveAllToken));
+
+        public int RecalibrateCalls { get; set; }
+        public Task<int> RecalibrateDisplayLayoutAsync()
+        {
+            RecalibrateCalls++;
+            return Task.FromResult(5);
+        }
 
         public Task ApplyScreenBindingAsync(
             string widgetId,
@@ -886,6 +976,76 @@ public sealed class SettingsIpcFacadeTests : IDisposable
             await Task.Delay(300);
             Assert.Contains(progressReports, report => report.Phase == ManagedStorageMigrationPhase.Copying);
 
+            // Structured preview problem & live Stop cancellation over WidgetMigrateCancel:
+            loop.Widget.PreviewHandler = (_, _) => throw new StorageMigrationException(
+                StorageMigrationProblem.RootsOverlap,
+                "Roots overlap")
+            {
+                TemporaryBytes = 4096,
+            };
+            StorageMigrationException previewEx = await Assert.ThrowsAsync<StorageMigrationException>(
+                () => remote.PreviewManagedStorageMigrationAsync("C:\\overlap", CancellationToken.None));
+            Assert.Equal(StorageMigrationProblem.RootsOverlap, previewEx.Problem);
+            Assert.Equal(4096, previewEx.TemporaryBytes);
+            loop.Widget.PreviewHandler = null;
+
+            var migrationStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            loop.Widget.MigrateHandler = async (_, opts) =>
+            {
+                migrationStarted.TrySetResult();
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(10), opts?.CancellationToken ?? default);
+                    return loop.Widget.MigrationResult;
+                }
+                catch (OperationCanceledException oce)
+                {
+                    throw new StorageMigrationStoppedException(oce, temporaryBytes: 8192);
+                }
+            };
+            using var stopCts = new CancellationTokenSource();
+            Task<ManagedStorageMigrationResult> inFlight = remote.UpdateDefaultManagedStorageRootAsync(
+                "C:\\cancel-root",
+                new ManagedStorageMigrationOptions(CancellationToken: stopCts.Token));
+            await migrationStarted.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            stopCts.Cancel();
+            StorageMigrationStoppedException stoppedEx = await Assert.ThrowsAsync<StorageMigrationStoppedException>(
+                () => inFlight);
+            Assert.Equal(8192, stoppedEx.TemporaryBytes);
+            loop.Widget.MigrateHandler = null;
+
+            // Concurrent preview OperationId isolation: canceling preview A must not cancel preview B.
+            var previewAEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var previewBEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var releasePreviewB = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            loop.Widget.PreviewHandler = async (path, tok) =>
+            {
+                if (path == "C:\\preview-a")
+                {
+                    previewAEntered.TrySetResult();
+                    await Task.Delay(TimeSpan.FromSeconds(10), tok);
+                    return new ManagedStorageMigrationPreview(1, 1, 1000, false, null);
+                }
+
+                previewBEntered.TrySetResult();
+                await releasePreviewB.Task.WaitAsync(tok);
+                return new ManagedStorageMigrationPreview(2, 3, 2048, false, null);
+            };
+            using var cancelPreviewA = new CancellationTokenSource();
+            using var cancelPreviewB = new CancellationTokenSource();
+            Task<ManagedStorageMigrationPreview> previewATask =
+                remote.PreviewManagedStorageMigrationAsync("C:\\preview-a", cancelPreviewA.Token);
+            Task<ManagedStorageMigrationPreview> previewBTask =
+                remote.PreviewManagedStorageMigrationAsync("C:\\preview-b", cancelPreviewB.Token);
+            await Task.WhenAll(previewAEntered.Task, previewBEntered.Task).WaitAsync(TimeSpan.FromSeconds(3));
+            cancelPreviewA.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => previewATask);
+            releasePreviewB.TrySetResult();
+            ManagedStorageMigrationPreview previewBResult = await previewBTask;
+            Assert.Equal(2, previewBResult.WidgetCount);
+            Assert.Equal(3, previewBResult.FileCount);
+            loop.Widget.PreviewHandler = null;
+
             IReadOnlyList<GlanceWidgetInstanceInfo> glance = remote.GetGlanceWidgetInstances();
             Assert.Equal(2, glance.Count);
             Assert.True(remote.IsGlanceFeatureEnabled);
@@ -897,11 +1057,42 @@ public sealed class SettingsIpcFacadeTests : IDisposable
             await remote.RenameWidgetAsync("g2", "Renamed");
             Assert.Equal("g2:Renamed", loop.Widget.RenamedGlance);
 
-            // Move-all + undo across the handle registry.
+            GlanceWidgetInstanceInfo createdWithSetup = await remote.CreateCustomWidgetWithSetupAsync(
+                new Contracts.CustomWidgetCreateOptions(
+                    Spec: "C:\\pkg\\demo.deskbox-widget",
+                    InitialSettings: new Dictionary<string, string>(StringComparer.Ordinal) { ["vaultPath"] = "D:\\Vault" },
+                    InitialSecrets: new Dictionary<string, string>(StringComparer.Ordinal) { ["api-key"] = "sk-test-123" }));
+            Assert.Equal("c2", createdWithSetup.Id);
+            Assert.NotNull(loop.Widget.LastCustomCreateOptions);
+            Assert.Equal("D:\\Vault", loop.Widget.LastCustomCreateOptions!.InitialSettings!["vaultPath"]);
+            Assert.Equal("sk-test-123", loop.Widget.LastCustomCreateOptions.InitialSecrets!["api-key"]);
+
+            await remote.ApplyCustomWidgetMutationAsync(
+                new Contracts.CustomWidgetSettingsMutation(
+                    WidgetId: "c2",
+                    Settings: new Dictionary<string, string>(StringComparer.Ordinal) { ["city"] = "Tokyo" },
+                    Secrets: new Dictionary<string, string>(StringComparer.Ordinal) { ["api-key"] = "sk-updated" },
+                    ClearAllData: true));
+            Assert.Single(loop.Widget.CustomMutations);
+            Assert.Equal("Tokyo", loop.Widget.CustomMutations[0].Settings!["city"]);
+            Assert.Equal("sk-updated", loop.Widget.CustomMutations[0].Secrets!["api-key"]);
+            Assert.True(loop.Widget.CustomMutations[0].ClearAllData);
+
+            // Move-all + undo across the handle registry (preserving Persisted flag).
             (int moved, WidgetMoveAllUndoToken token) = await remote.MoveAllWidgetSurfacesToDisplayAsync("screen-1");
             Assert.Equal(4, moved);
             Assert.NotNull(token.IpcHandleId);
+            Assert.True(token.Persisted);
             Assert.True(await remote.UndoMoveAllWidgetSurfacesAsync(token));
+
+            loop.Widget.MoveAllPersisted = false;
+            (_, WidgetMoveAllUndoToken unpersistedToken) = await remote.MoveAllWidgetSurfacesToDisplayAsync("screen-1");
+            Assert.False(unpersistedToken.Persisted);
+            loop.Widget.MoveAllPersisted = true;
+
+            int recalibrated = await remote.RecalibrateDisplayLayoutAsync();
+            Assert.Equal(5, recalibrated);
+            Assert.Equal(1, loop.Widget.RecalibrateCalls);
 
             await remote.ApplyScreenBindingAsync("w1", WidgetScreenBindingMode.Pinned, "screen-2");
             Assert.Equal(("w1", WidgetScreenBindingMode.Pinned, "screen-2"), loop.Widget.Binding);

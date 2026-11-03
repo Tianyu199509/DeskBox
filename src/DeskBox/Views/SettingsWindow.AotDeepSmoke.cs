@@ -11,31 +11,27 @@ public sealed partial class SettingsWindow
     {
         string[] deepSettingsRoutes =
         [
-            "AppearanceDetail",
-            "CapsuleMode",
+            "Appearance",
+            "Interaction",
             "WidgetGroups",
-            "FileDisplaySettings",
-            "ManagedStorage",
+            "Displays",
+            "AppearanceDetail",
             "FileStackSettings",
-            "DesktopOrganizationSettings",
+            "FeatureWidgets",
+            "CustomWidgetSettings",
             "QuickCaptureSettings",
             "TodoSettings",
             "MusicSettings",
             "WeatherSettings",
             "GlanceSettings",
+            "ClipboardSettings",
             "SearchSettings",
-            "AppearanceMaterialSettings",
-            "AppearanceDensitySettings",
-            "AppearanceWindowSettings",
-            "AppearanceAnimationSettings",
-            "CapsuleOverridesSettings",
-            "BackupRestoreSettings",
-            "DataHealthSettings",
-            "CompatibilityDiagnosticsSettings",
-            "PerformanceSettings"
+            "Maintenance",
+            "About",
+            "AiSettings"
         ];
 
-        string searchQuery = _localizationService.T("Settings.DataBackup.Title");
+        string searchQuery = _localizationService.T("Settings.FileStacks.PageTitle");
         if (string.IsNullOrWhiteSpace(searchQuery))
         {
             throw new InvalidOperationException("The deep-settings search query is empty.");
@@ -59,7 +55,7 @@ public sealed partial class SettingsWindow
             match.IsPage &&
             string.Equals(
                 match.SectionTag,
-                deepSettingsRoutes[18],
+                "FileStackSettings",
                 StringComparison.Ordinal));
         if (exactNestedPage is null ||
             !SettingsSearchBox.IsSuggestionListOpen ||
@@ -71,7 +67,7 @@ public sealed partial class SettingsWindow
 
         ActivateSettingsSearchResult(exactNestedPage, SettingsSearchBox);
         AotDeepSettingsPageSnapshot activatedPage =
-            await WaitForAotDeepSettingsPageAsync(deepSettingsRoutes[18]);
+            await WaitForAotDeepSettingsPageAsync("FileStackSettings");
 
         var pageTransitions = new List<AotDeepSettingsPageSnapshot>(deepSettingsRoutes.Length);
         bool breadcrumbParentReturned = false;
@@ -85,52 +81,40 @@ public sealed partial class SettingsWindow
                 await WaitForAotDeepSettingsPageAsync(sectionTag);
             pageTransitions.Add(page);
 
-            if (string.Equals(sectionTag, deepSettingsRoutes[5], StringComparison.Ordinal))
+            if (string.Equals(sectionTag, "FileStackSettings", StringComparison.Ordinal))
             {
                 fileStackRuleCount = await WaitForAotFileStackRuleProjectionAsync();
-            }
-
-            if (string.Equals(sectionTag, deepSettingsRoutes[18], StringComparison.Ordinal))
-            {
-                backupSnapshotCount = await WaitForAotBackupSnapshotProjectionAsync();
-            }
-
-            if (string.Equals(sectionTag, deepSettingsRoutes[17], StringComparison.Ordinal))
-            {
                 List<SettingsBreadcrumbItem> breadcrumbItems =
                     GetAotSettingsBreadcrumbItems();
                 if (breadcrumbItems.Count != 2)
                 {
                     throw new InvalidOperationException(
-                        "The nested capsule page did not expose its two-item breadcrumb.");
+                        "The nested file-stack page did not expose its two-item breadcrumb.");
                 }
 
                 NavigateFromSettingsBreadcrumbItem(breadcrumbItems[0]);
                 AotDeepSettingsPageSnapshot parentPage =
-                    await WaitForAotDeepSettingsPageAsync(deepSettingsRoutes[1]);
+                    await WaitForAotDeepSettingsPageAsync("AppearanceDetail");
                 breadcrumbParentReturned = string.Equals(
                         parentPage.CurrentSection,
-                        deepSettingsRoutes[1],
+                        "AppearanceDetail",
                         StringComparison.Ordinal) &&
                     parentPage.BreadcrumbItems.Count == 0;
+            }
+
+            if (string.Equals(sectionTag, "Maintenance", StringComparison.Ordinal))
+            {
+                backupSnapshotCount = await WaitForAotBackupSnapshotProjectionAsync();
+                if (CloudBackupPasswordBox is null)
+                {
+                    throw new InvalidOperationException(
+                        "The cloud-backup password box did not resolve as a typed section element.");
+                }
             }
 
             await Task.Delay(100);
             SettingsRoot.UpdateLayout();
             App.Log($"[AotManagedUiSmoke] DeepSettings route completed: {sectionTag}");
-        }
-
-        // P1-1 regression net (incident 2026-09-30 §4): on an unfixed NativeAOT
-        // retail build the cloud-backup password box's typed lookup throws
-        // InvalidCastException, and a wrongly-"fixed" build resolves it as a
-        // base class and yields null. With the DynamicDependency root the
-        // visited section must expose the typed element.
-        NavigateToSettingsSection("CloudBackupSettings");
-        await WaitForAotDeepSettingsPageAsync("CloudBackupSettings");
-        if (CloudBackupPasswordBox is null)
-        {
-            throw new InvalidOperationException(
-                "The cloud-backup password box did not resolve as a typed section element.");
         }
 
         return new AotDeepSettingsSnapshot(
@@ -185,23 +169,52 @@ public sealed partial class SettingsWindow
         }
 
         await RefreshBackupSnapshotInventoryAsync();
-        BackupSnapshotsList.UpdateLayout();
-        List<BackupSnapshotListItem> projectedSnapshots =
-            BackupSnapshotsList.ItemsSource is System.Collections.IEnumerable items
-                ? items.Cast<object>().OfType<BackupSnapshotListItem>().ToList()
-                : [];
-        if (projectedSnapshots.Count == 0 ||
-            BackupSnapshotsList.ContainerFromIndex(0) is not FrameworkElement
-            {
-                XamlRoot: not null,
-                ActualHeight: > 0
-            })
+        bool restoreOverview = false;
+        if (AutomaticBackupSubPagePanel is { Visibility: Visibility.Collapsed } autoPanel)
         {
-            throw new InvalidOperationException(
-                "The non-empty backup inventory did not reach its NativeAOT list projection.");
+            if (MaintenanceOverviewPanel is { } overviewPanel)
+            {
+                overviewPanel.Visibility = Visibility.Collapsed;
+            }
+            autoPanel.Visibility = Visibility.Visible;
+            restoreOverview = true;
         }
 
-        return projectedSnapshots.Count;
+        try
+        {
+            SettingsRoot.UpdateLayout();
+            BackupSnapshotsList.UpdateLayout();
+            List<BackupSnapshotListItem> projectedSnapshots =
+                BackupSnapshotsList.ItemsSource is System.Collections.IEnumerable items
+                    ? items.Cast<object>().OfType<BackupSnapshotListItem>().ToList()
+                    : [];
+            if (projectedSnapshots.Count == 0 ||
+                BackupSnapshotsList.ContainerFromIndex(0) is not FrameworkElement
+                {
+                    XamlRoot: not null,
+                    ActualHeight: > 0
+                })
+            {
+                throw new InvalidOperationException(
+                    "The non-empty backup inventory did not reach its NativeAOT list projection.");
+            }
+
+            return projectedSnapshots.Count;
+        }
+        finally
+        {
+            if (restoreOverview)
+            {
+                if (AutomaticBackupSubPagePanel is { } autoPanelToCollapse)
+                {
+                    autoPanelToCollapse.Visibility = Visibility.Collapsed;
+                }
+                if (MaintenanceOverviewPanel is { } overviewPanelToRestore)
+                {
+                    overviewPanelToRestore.Visibility = Visibility.Visible;
+                }
+            }
+        }
     }
 
     private async Task<AotDeepSettingsPageSnapshot> WaitForAotDeepSettingsPageAsync(

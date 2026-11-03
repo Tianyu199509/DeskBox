@@ -4,6 +4,7 @@ using System.Text.Json;
 using DeskBox.Core.Persistence;
 using DeskBox.Models;
 using DeskBox.Services;
+using DeskBox.Services.Lyrics;
 using DeskBox.Contracts;
 
 namespace DeskBox.Tests;
@@ -1235,6 +1236,154 @@ public sealed class DeskBoxDataBackupServiceTests : IDisposable
         Assert.Equal(DeskBoxRestoreApplyResult.NoPendingRestore, result);
         Assert.False(File.Exists(service.PendingRestoreMarkerPath));
         Assert.Contains("Light", await File.ReadAllTextAsync(currentSettingsPath));
+    }
+
+    [Fact]
+    public async Task CrossProfileRestore_RebasesGlanceLocalPathsAndValidatesClipboardAndGlanceJson()
+    {
+        string aliceProfile = Path.Combine(_tempRoot, "Users", "alice");
+        string bobProfile = Path.Combine(_tempRoot, "Users", "bob");
+        string sourceRoot = Directory.CreateDirectory(
+            Path.Combine(aliceProfile, "AppData", "Local", "DeskBox")).FullName;
+        string targetRoot = Directory.CreateDirectory(
+            Path.Combine(bobProfile, "AppData", "Local", "DeskBox")).FullName;
+
+        string sourceData = Directory.CreateDirectory(Path.Combine(sourceRoot, "data")).FullName;
+        await File.WriteAllTextAsync(Path.Combine(sourceData, "settings.json"), "{}");
+
+        string sourceClipboardDir = Directory.CreateDirectory(Path.Combine(sourceData, "clipboard")).FullName;
+        await File.WriteAllTextAsync(
+            Path.Combine(sourceClipboardDir, "clipboard.json"),
+            "{\"version\":1,\"items\":[],\"observedApps\":[]}");
+
+        string sourceGlanceDir = Directory.CreateDirectory(Path.Combine(sourceData, "glance", "widgets")).FullName;
+        var sourceGlance = new GlanceWidgetData
+        {
+            BackgroundSource = GlanceBackgroundSource.LocalFolder,
+            LocalFolderPath = Path.Combine(aliceProfile, "Pictures", "Wallpapers"),
+            LocalImagePaths =
+            [
+                Path.Combine(aliceProfile, "Pictures", "shot-1.jpg"),
+                @"D:\SharedWallpapers\keep.jpg"
+            ]
+        };
+        await File.WriteAllTextAsync(
+            Path.Combine(sourceGlanceDir, "g1.json"),
+            JsonSerializer.Serialize(sourceGlance, GlancePreferencesJsonContext.Default.Preferences));
+
+        string exportDir = Directory.CreateDirectory(Path.Combine(_exportRoot, "glance-cross-profile")).FullName;
+        string validArchive = await new DeskBoxDataBackupService(sourceRoot).ExportBackupAsync(exportDir);
+
+        var targetService = new DeskBoxDataBackupService(targetRoot);
+        await targetService.PrepareRestoreAsync(validArchive);
+        Assert.True(await targetService.ConfirmPendingFullRestoreAsync());
+        DeskBoxRestoreApplyResult applyResult = await targetService.ApplyPendingRestoreAsync();
+        Assert.True(applyResult.Succeeded, applyResult.ErrorMessage);
+
+        GlanceWidgetData? restoredGlance = JsonSerializer.Deserialize(
+            await File.ReadAllTextAsync(Path.Combine(targetService.DataDirectory, "glance", "widgets", "g1.json")),
+            GlancePreferencesJsonContext.Default.Preferences);
+        Assert.NotNull(restoredGlance);
+        Assert.Equal(Path.Combine(bobProfile, "Pictures", "Wallpapers"), restoredGlance!.LocalFolderPath);
+        Assert.Equal(
+            [Path.Combine(bobProfile, "Pictures", "shot-1.jpg"), @"D:\SharedWallpapers\keep.jpg"],
+            restoredGlance.LocalImagePaths);
+
+        // Corrupt data/clipboard/clipboard.json and corrupt data/glance/widgets/g1.json must be rejected
+        // during PrepareRestoreAsync / ValidateRestoreData before overwriting live data.
+        string guardTargetRoot = Directory.CreateDirectory(Path.Combine(_tempRoot, "guard-target")).FullName;
+        string guardLiveData = Directory.CreateDirectory(Path.Combine(guardTargetRoot, "data")).FullName;
+        string guardLiveSettingsPath = Path.Combine(guardLiveData, "settings.json");
+        await File.WriteAllTextAsync(guardLiveSettingsPath, "{\"language\":\"zh-TW\"}");
+        var guardService = new DeskBoxDataBackupService(guardTargetRoot);
+
+        string corruptClipArchive = Path.Combine(_exportRoot, "corrupt-clip.zip");
+        using (ZipArchive archive = ZipFile.Open(corruptClipArchive, ZipArchiveMode.Create))
+        {
+            WriteEntry(
+                archive,
+                "manifest.json",
+                "{\"schemaVersion\":1,\"kind\":\"manual\",\"createdAtUtc\":\"2026-07-01T00:00:00Z\",\"appVersion\":\"1.6.0\"}");
+            WriteEntry(archive, "data/settings.json", "{}");
+            WriteEntry(archive, "data/clipboard/clipboard.json", "{ invalid clipboard json");
+        }
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => guardService.PrepareRestoreAsync(corruptClipArchive));
+        Assert.False(File.Exists(guardService.PendingRestoreMarkerPath));
+        Assert.Contains("zh-TW", await File.ReadAllTextAsync(guardLiveSettingsPath), StringComparison.Ordinal);
+
+        string corruptGlanceArchive = Path.Combine(_exportRoot, "corrupt-glance.zip");
+        using (ZipArchive archive = ZipFile.Open(corruptGlanceArchive, ZipArchiveMode.Create))
+        {
+            WriteEntry(
+                archive,
+                "manifest.json",
+                "{\"schemaVersion\":1,\"kind\":\"manual\",\"createdAtUtc\":\"2026-07-01T00:00:00Z\",\"appVersion\":\"1.6.0\"}");
+            WriteEntry(archive, "data/settings.json", "{}");
+            WriteEntry(archive, "data/glance/widgets/g1.json", "{ invalid glance json");
+        }
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => guardService.PrepareRestoreAsync(corruptGlanceArchive));
+        Assert.False(File.Exists(guardService.PendingRestoreMarkerPath));
+        Assert.Contains("zh-TW", await File.ReadAllTextAsync(guardLiveSettingsPath), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task LyricsCacheStore_PersistsNonZeroUserOffsetOutsideLruEviction()
+    {
+        string lyricsRoot = Directory.CreateDirectory(Path.Combine(_tempRoot, "lyrics-offset-lru")).FullName;
+        string tempCacheDir = Path.Combine(lyricsRoot, "cache", "lyrics");
+        var store = new LyricsCacheStore(tempCacheDir);
+
+        await store.PutAsync(new CachedLyricsEntry
+        {
+            CacheKey = "track-1",
+            Status = CachedLyricsStatus.Synced,
+            SyncedLyrics = "[00:01.00] Opening verse",
+            DurationSeconds = 215,
+            UserOffsetMs = 0
+        });
+
+        int appliedOffset = await store.UpdateUserOffsetAsync("track-1", deltaMs: 450);
+        Assert.Equal(450, appliedOffset);
+
+        string track1CacheFile = Path.Combine(tempCacheDir, "track-1.json");
+        Assert.True(File.Exists(track1CacheFile));
+        File.SetLastWriteTimeUtc(track1CacheFile, DateTime.UtcNow.AddMinutes(-10));
+
+        for (int i = 2; i <= 208; i++)
+        {
+            await store.PutAsync(new CachedLyricsEntry
+            {
+                CacheKey = $"track-{i}",
+                Status = CachedLyricsStatus.Synced,
+                SyncedLyrics = $"[00:01.00] Track {i}",
+                DurationSeconds = 180,
+                UserOffsetMs = 0
+            });
+        }
+
+        store.PruneDiskCacheIfNeeded();
+
+        Assert.False(File.Exists(track1CacheFile));
+        Assert.True(File.Exists(store.OffsetsFilePath));
+        Assert.Equal(LyricsCacheStore.OffsetsFileName, Path.GetFileName(store.OffsetsFilePath));
+
+        var coldStore = new LyricsCacheStore(tempCacheDir);
+        Assert.Equal(450, await coldStore.GetSavedUserOffsetMsAsync("track-1"));
+
+        await coldStore.PutAsync(new CachedLyricsEntry
+        {
+            CacheKey = "track-1",
+            Status = CachedLyricsStatus.Synced,
+            SyncedLyrics = "[00:01.00] Re-cached verse",
+            DurationSeconds = 215,
+            UserOffsetMs = 0
+        });
+
+        CachedLyricsEntry? hydrated = await coldStore.TryGetValidAsync("track-1");
+        Assert.NotNull(hydrated);
+        Assert.Equal(450, hydrated!.UserOffsetMs);
     }
 
     private static void WriteEntry(ZipArchive archive, string name, string content)

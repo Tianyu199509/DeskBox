@@ -207,7 +207,8 @@ public sealed class MarkdownAndSplitterContractTests
         Assert.Contains("LineStackingStrategy.BlockLineHeight", reader, StringComparison.Ordinal);
         Assert.Contains("ListItemSpacing = 3", reader, StringComparison.Ordinal);
         Assert.Contains("Margin = new Thickness(0, 0, 2, 0)", reader, StringComparison.Ordinal);
-        Assert.Contains("RenderTransform = new TranslateTransform { Y = 6 }", reader, StringComparison.Ordinal);
+        Assert.Contains("RenderTransform = new TranslateTransform { Y = 4 }", reader, StringComparison.Ordinal);
+        Assert.Contains("WidgetCompactStepCheckBoxStyle", reader, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"DetailBodyReaderSurface\"", surface, StringComparison.Ordinal);
         Assert.Contains("<Grid\n                            x:Name=\"DetailBodyReaderSurface\"", surface.ReplaceLineEndings("\n"), StringComparison.Ordinal);
         Assert.Contains("DetailBodyReaderSurface.AddHandler", surfaceCode, StringComparison.Ordinal);
@@ -294,7 +295,7 @@ public sealed class MarkdownAndSplitterContractTests
     public void TodoSegmentedTabs_WaitForASafeLayoutSlotBeforeBecomingVisible()
     {
         string xaml = File.ReadAllText(TestPaths.FromRepository(
-            "src/DeskBox/Controls/WidgetContents/TodoWidgetContent.xaml"));
+            "src/DeskBox/Controls/WidgetContents/TodoWidgetContent.xaml")) + "\n" + File.ReadAllText(TestPaths.FromRepository("src/DeskBox/Controls/Todo/TodoQuickAddBar.xaml"));
         string code = File.ReadAllText(TestPaths.FromRepository(
             "src/DeskBox/Controls/WidgetContents/TodoWidgetContent.xaml.cs"));
 
@@ -367,7 +368,7 @@ public sealed class MarkdownAndSplitterContractTests
     public void Todo_UsesSharedResponsiveSplitterAndMarkdownDetailControls()
     {
         string xaml = File.ReadAllText(TestPaths.FromRepository(
-            "src/DeskBox/Controls/WidgetContents/TodoWidgetContent.xaml"));
+            "src/DeskBox/Controls/WidgetContents/TodoWidgetContent.xaml")) + "\n" + File.ReadAllText(TestPaths.FromRepository("src/DeskBox/Controls/Todo/TodoQuickAddBar.xaml"));
         string layout = File.ReadAllText(TestPaths.FromRepository(
             "src/DeskBox/Controls/WidgetContents/TodoWidgetContent.MasterDetail.cs"));
         string detail = File.ReadAllText(TestPaths.FromRepository(
@@ -484,7 +485,7 @@ public sealed class MarkdownAndSplitterContractTests
     public void TodoAndQuickCapture_ReadSurfaces_LookEditableAndSupportDoubleClickEditing()
     {
         string todoXaml = File.ReadAllText(TestPaths.FromRepository(
-            "src/DeskBox/Controls/WidgetContents/TodoWidgetContent.xaml"));
+            "src/DeskBox/Controls/WidgetContents/TodoWidgetContent.xaml")) + "\n" + File.ReadAllText(TestPaths.FromRepository("src/DeskBox/Controls/Todo/TodoQuickAddBar.xaml"));
         string quickCaptureXaml = File.ReadAllText(TestPaths.FromRepository(
             "src/DeskBox/Controls/WidgetContents/QuickCaptureSurfaceContent.xaml"));
         string quickCaptureCode = File.ReadAllText(TestPaths.FromRepository(
@@ -506,7 +507,7 @@ public sealed class MarkdownAndSplitterContractTests
         Assert.Contains("Margin=\"2,2,2,2\"", quickCaptureXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("DetailHeader_SizeChanged", quickCaptureXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("CompactDetailHeaderWidth", quickCaptureCode, StringComparison.Ordinal);
-        Assert.Contains("_detailItem?.IsRecent == true", quickCaptureCode, StringComparison.Ordinal);
+        Assert.DoesNotContain("_detailItem?.IsRecent == true", quickCaptureCode, StringComparison.Ordinal);
         Assert.Contains("BeginDetailEditing()", quickCaptureCode, StringComparison.Ordinal);
     }
 
@@ -514,7 +515,7 @@ public sealed class MarkdownAndSplitterContractTests
     public void TodoAndQuickCapture_CardSurfacesShareTheCompactCornerRadius()
     {
         string todoXaml = File.ReadAllText(TestPaths.FromRepository(
-            "src/DeskBox/Controls/WidgetContents/TodoWidgetContent.xaml"));
+            "src/DeskBox/Controls/WidgetContents/TodoWidgetContent.xaml")) + "\n" + File.ReadAllText(TestPaths.FromRepository("src/DeskBox/Controls/Todo/TodoQuickAddBar.xaml"));
         string quickCaptureXaml = File.ReadAllText(TestPaths.FromRepository(
             "src/DeskBox/Controls/WidgetContents/QuickCaptureSurfaceContent.xaml"));
 
@@ -547,11 +548,11 @@ public sealed class MarkdownAndSplitterContractTests
             todoXaml.ReplaceLineEndings("\n"),
             StringComparison.Ordinal);
         Assert.Contains(
-            "MinHeight=\"42\"\n                        Padding=\"8,5\"",
+            "MinHeight=\"42\"\n            Padding=\"8,5\"",
             todoXaml.ReplaceLineEndings("\n"),
             StringComparison.Ordinal);
         Assert.Contains(
-            "BorderBrush=\"Transparent\"\n                        BorderThickness=\"0\"",
+            "BorderBrush=\"Transparent\"\n            BorderThickness=\"0\"",
             todoXaml.ReplaceLineEndings("\n"),
             StringComparison.Ordinal);
         Assert.Contains(
@@ -592,11 +593,12 @@ public sealed class MarkdownAndSplitterContractTests
         Assert.Contains("ClearDetailForViewChange();", code, StringComparison.Ordinal);
         Assert.DoesNotContain("ViewModel.Items.Count > 0", code, StringComparison.Ordinal);
         Assert.Contains("ViewModel.PropertyChanged -= ViewModel_PropertyChanged", code, StringComparison.Ordinal);
-        Assert.Contains("(IsRecordsView || IsPinnedView) && !IsSearchExpanded", viewModelCode, StringComparison.Ordinal);
+        Assert.Contains("public Visibility InputAreaVisibility =>", viewModelCode, StringComparison.Ordinal);
+        Assert.Contains("!IsSearchExpanded", viewModelCode, StringComparison.Ordinal);
         Assert.Contains("bool addPinned = IsPinnedView;", operationsCode, StringComparison.Ordinal);
         Assert.Contains("pin: addPinned", operationsCode, StringComparison.Ordinal);
         Assert.Contains("EmptyStateVisibility = hasItems", itemSyncCode, StringComparison.Ordinal);
-        Assert.Contains("(IsRecordsView || IsPinnedView) && !HasSearchText", itemSyncCode, StringComparison.Ordinal);
+        Assert.Contains("bool showEmptyAddSurface = !HasSearchText;", itemSyncCode, StringComparison.Ordinal);
         Assert.Equal(
             "DetailContent",
             (string?)timestamp.Parent?.Attribute(xamlNamespace + "Name"));

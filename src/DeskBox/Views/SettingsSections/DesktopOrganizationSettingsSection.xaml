@@ -3,6 +3,7 @@
     x:Class="DeskBox.Views.SettingsSections.DesktopOrganizationSettingsSection"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:DeskBox.Controls"
     xmlns:svc="using:DeskBox.Services"
     xmlns:toolkit="using:CommunityToolkit.WinUI.Controls">
 
@@ -14,143 +15,114 @@
         </ResourceDictionary>
     </UserControl.Resources>
 
-    <StackPanel Style="{StaticResource SectionPanelStyle}">
+    <StackPanel Spacing="12">
         <InfoBar
             x:Name="RuleStatusInfo"
             IsOpen="False"
             IsClosable="True" />
 
-        <StackPanel x:Name="RuleListPanel" Spacing="4">
-            <toolkit:SettingsCard
-                x:Name="OrganizationSummaryCard"
-                HorizontalContentAlignment="Right">
-                <toolkit:SettingsCard.HeaderIcon>
-                    <FontIcon Glyph="&#xE74C;" />
-                </toolkit:SettingsCard.HeaderIcon>
+        <StackPanel x:Name="OrganizationOverviewPanel" Spacing="4">
+            <TextBlock
+                Margin="0,0,0,4"
+                Style="{StaticResource SettingsSubsectionTitleTextStyle}"
+                AutomationProperties.HeadingLevel="Level2"
+                svc:Localized.Key="DesktopOrganization.Settings.Title" />
+
+            <toolkit:SettingsExpander
+                x:Name="AutoToggleExpander"
+                HorizontalContentAlignment="Stretch"
+                IsExpanded="False"
+                svc:Localized.DescriptionKey="DesktopOrganization.Auto.Description"
+                svc:Localized.HeaderKey="DesktopOrganization.Auto.Title"
+                svc:InfoTip.TitleKey="DesktopOrganization.Auto.InfoTip.Title"
+                svc:InfoTip.BodyKey="DesktopOrganization.Auto.InfoTip.Description">
+                <toolkit:SettingsExpander.HeaderIcon>
+                    <FontIcon Glyph="&#xE7F4;" />
+                </toolkit:SettingsExpander.HeaderIcon>
                 <StackPanel
-                    HorizontalAlignment="Right"
                     Orientation="Horizontal"
-                    Spacing="8">
-                    <Button svc:Localized.AutomationNameKey="DesktopOrganization.Notification.Undo"
-                        x:Name="UndoOrganizationButton"
+                    Spacing="8"
+                    VerticalAlignment="Center">
+                    <Button
+                        svc:Localized.AutomationNameKey="DesktopOrganization.Action.OpenWorkbench"
+                        x:Name="OrganizeNowButton"
                         Style="{StaticResource ActionButtonStyle}"
-                        Visibility="Collapsed"
-                        Click="UndoOrganizationButton_Click"
-                        svc:Localized.Key="DesktopOrganization.Notification.Undo" />
-                        <Button svc:Localized.AutomationNameKey="DesktopOrganization.OneClick.Action"
-                            x:Name="OrganizeNowButton"
-                            Style="{StaticResource AccentActionButtonStyle}"
-                            Click="OrganizeNowButton_Click"
-                            svc:Localized.Key="DesktopOrganization.OneClick.Action" />
-                </StackPanel>
-            </toolkit:SettingsCard>
-
-            <StackPanel Margin="0,8,0,0" Spacing="4">
-                <toolkit:SettingsCard
-                    x:Name="AutoSetupCard"
-                    HorizontalContentAlignment="Right"
-                    svc:Localized.DescriptionKey="DesktopOrganization.Auto.SetupDescription"
-                    svc:Localized.HeaderKey="DesktopOrganization.Auto.SetupTitle">
-                    <toolkit:SettingsCard.HeaderIcon>
-                        <FontIcon Glyph="&#xE713;" />
-                    </toolkit:SettingsCard.HeaderIcon>
-                    <Button svc:Localized.AutomationNameKey="DesktopOrganization.Auto.SetupAction"
-                        Style="{StaticResource ActionButtonStyle}"
-                        Click="AutoSetupButton_Click"
-                        svc:Localized.Key="DesktopOrganization.Auto.SetupAction" />
-                </toolkit:SettingsCard>
-
-                <toolkit:SettingsExpander
-                    x:Name="AutoToggleCard"
-                    Visibility="Collapsed"
-                    IsExpanded="False"
-                    svc:Localized.DescriptionKey="DesktopOrganization.Auto.Description"
-                    svc:Localized.HeaderKey="DesktopOrganization.Auto.Title"
-                    svc:InfoTip.TitleKey="DesktopOrganization.Auto.InfoTip.Title"
-                    svc:InfoTip.BodyKey="DesktopOrganization.Auto.InfoTip.Description">
-                    <toolkit:SettingsExpander.HeaderIcon>
-                        <FontIcon Glyph="&#xE7F4;" />
-                    </toolkit:SettingsExpander.HeaderIcon>
+                        Click="OrganizeNowButton_Click"
+                        svc:Localized.Key="DesktopOrganization.Action.OpenWorkbench" />
                     <ToggleSwitch svc:Localized.AutomationNameKey="DesktopOrganization.Auto.Title"
                         x:Name="AutoOrganizationToggle"
                         MinWidth="0"
                         OffContent=""
                         OnContent=""
                         Toggled="AutoOrganizationToggle_Toggled" />
-                    <toolkit:SettingsExpander.Items>
-                        <toolkit:SettingsCard
-                            x:Name="AutoIntervalCard"
-                            Visibility="Collapsed"
-                            HorizontalContentAlignment="Right"
-                            svc:Localized.DescriptionKey="DesktopOrganization.Auto.Interval.Description"
-                            svc:Localized.HeaderKey="DesktopOrganization.Auto.Interval.Title"
-                            svc:InfoTip.TitleKey="DesktopOrganization.Auto.Interval.InfoTip.Title"
-                            svc:InfoTip.BodyKey="DesktopOrganization.Auto.Interval.InfoTip.Description">
-                            <toolkit:SettingsCard.HeaderIcon>
-                                <FontIcon Glyph="&#xE823;" />
-                            </toolkit:SettingsCard.HeaderIcon>
-                            <ComboBox svc:Localized.AutomationNameKey="DesktopOrganization.Auto.Interval.Title"
-                                x:Name="AutoIntervalComboBox"
-                                MinWidth="150"
-                                SelectionChanged="AutoIntervalComboBox_SelectionChanged" />
-                        </toolkit:SettingsCard>
-                    </toolkit:SettingsExpander.Items>
-                </toolkit:SettingsExpander>
-            </StackPanel>
+                </StackPanel>
+                <toolkit:SettingsExpander.Items>
+                    <toolkit:SettingsCard
+                        x:Name="AutoIntervalCard"
+                        HorizontalContentAlignment="Right"
+                        svc:Localized.DescriptionKey="DesktopOrganization.Auto.Interval.Description"
+                        svc:Localized.HeaderKey="DesktopOrganization.Auto.Interval.Title"
+                        svc:InfoTip.TitleKey="DesktopOrganization.Auto.Interval.InfoTip.Title"
+                        svc:InfoTip.BodyKey="DesktopOrganization.Auto.Interval.InfoTip.Description">
+                        <toolkit:SettingsCard.HeaderIcon>
+                            <FontIcon Glyph="&#xE823;" />
+                        </toolkit:SettingsCard.HeaderIcon>
+                        <ComboBox svc:Localized.AutomationNameKey="DesktopOrganization.Auto.Interval.Title"
+                            x:Name="AutoIntervalComboBox"
+                            MinWidth="150"
+                            SelectionChanged="AutoIntervalComboBox_SelectionChanged" />
+                    </toolkit:SettingsCard>
 
-            <StackPanel Margin="0,8,0,0" Spacing="4">
-                <TextBlock
-                    Style="{StaticResource SettingsSubsectionTitleTextStyle}" AutomationProperties.HeadingLevel="Level2"
-                    svc:Localized.Key="DesktopOrganization.Rules.SectionTitle" />
-                <TextBlock
-                    Style="{StaticResource SettingDescriptionTextStyle}"
-                    svc:Localized.Key="DesktopOrganization.Rules.SectionDescription" />
-                <AutoSuggestBox
-                    x:Name="WidgetSearchBox"
-                    Visibility="Collapsed"
-                    QueryIcon="Find"
-                    TextChanged="WidgetSearchBox_TextChanged" />
-                <StackPanel x:Name="WidgetRuleCards" Spacing="4" />
+                    <toolkit:SettingsCard
+                        x:Name="OrganizationRulesEntryCard"
+                        Click="OrganizationRulesEntryCard_Click"
+                        HorizontalContentAlignment="Right"
+                        IsClickEnabled="True"
+                        svc:Localized.HeaderKey="DesktopOrganization.Rules.SectionTitle">
+                        <toolkit:SettingsCard.HeaderIcon>
+                            <FontIcon Glyph="&#xE8FD;" />
+                        </toolkit:SettingsCard.HeaderIcon>
+                    </toolkit:SettingsCard>
+                </toolkit:SettingsExpander.Items>
+            </toolkit:SettingsExpander>
+        </StackPanel>
 
-                <toolkit:SettingsExpander
-                    x:Name="TypeOverviewExpander"
-                    IsExpanded="False"
-                    svc:Localized.DescriptionKey="DesktopOrganization.Rules.ByTypeDescription"
-                    svc:Localized.HeaderKey="DesktopOrganization.Rules.ByType">
-                    <toolkit:SettingsExpander.HeaderIcon>
-                        <FontIcon Glyph="&#xE8FD;" />
-                    </toolkit:SettingsExpander.HeaderIcon>
-                    <toolkit:SettingsExpander.Items>
-                        <toolkit:SettingsCard
-                            ContentAlignment="Vertical"
-                            HorizontalContentAlignment="Stretch">
-                            <StackPanel x:Name="TypeOverviewRows" Spacing="4" />
-                        </toolkit:SettingsCard>
-                    </toolkit:SettingsExpander.Items>
-                </toolkit:SettingsExpander>
-            </StackPanel>
+        <StackPanel x:Name="RuleListPanel" Visibility="Collapsed" Spacing="4">
+            <TextBlock
+                Margin="2,0,2,4"
+                Style="{StaticResource SettingDescriptionTextStyle}"
+                svc:Localized.Key="DesktopOrganization.Rules.SectionDescription" />
+            <AutoSuggestBox
+                x:Name="WidgetSearchBox"
+                Visibility="Collapsed"
+                QueryIcon="Find"
+                TextChanged="WidgetSearchBox_TextChanged" />
+            <StackPanel x:Name="WidgetRuleCards" Spacing="4" />
 
+            <toolkit:SettingsExpander
+                x:Name="TypeOverviewExpander"
+                IsExpanded="False"
+                svc:Localized.DescriptionKey="DesktopOrganization.Rules.ByTypeDescription"
+                svc:Localized.HeaderKey="DesktopOrganization.Rules.ByType">
+                <toolkit:SettingsExpander.HeaderIcon>
+                    <FontIcon Glyph="&#xE8FD;" />
+                </toolkit:SettingsExpander.HeaderIcon>
+            </toolkit:SettingsExpander>
         </StackPanel>
 
         <StackPanel x:Name="RuleDetailPanel" Visibility="Collapsed" Spacing="4">
-            <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
-                <Button svc:Localized.AutomationNameKey="DesktopOrganization.Common.Back"
-                    Width="36"
-                    Height="36"
-                    Padding="0"
-                    Click="CloseRuleDetailButton_Click"
-                    svc:Localized.ToolTipKey="DesktopOrganization.Common.Back">
-                    <FontIcon Glyph="&#xE72B;" FontSize="16" />
-                </Button>
-                <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
-                    <TextBlock x:Name="RuleDetailTitle" FontSize="20" FontWeight="SemiBold" />
-                    <TextBlock
-                        x:Name="RuleDetailPath"
-                        Style="{StaticResource SettingDescriptionTextStyle}"
-                        TextTrimming="CharacterEllipsis"
-                        ToolTipService.ToolTip="{x:Bind RuleDetailPath.Text, Mode=OneWay}" />
-                </StackPanel>
-            </Grid>
+            <TextBlock
+                x:Name="RuleDetailTitle"
+                Margin="2,0,2,0"
+                Style="{StaticResource SettingsSubsectionTitleTextStyle}"
+                AutomationProperties.HeadingLevel="Level2" />
+
+            <TextBlock
+                x:Name="RuleDetailPath"
+                Margin="2,0,2,4"
+                Style="{StaticResource SettingDescriptionTextStyle}"
+                TextTrimming="CharacterEllipsis"
+                ToolTipService.ToolTip="{x:Bind RuleDetailPath.Text, Mode=OneWay}" />
 
             <toolkit:SettingsCard
                 x:Name="RuleEnabledCard"
@@ -169,7 +141,7 @@
 
             <toolkit:SettingsExpander
                 x:Name="FileTypeExpander"
-                IsExpanded="False"
+                IsExpanded="True"
                 svc:Localized.HeaderKey="DesktopOrganization.Rule.AddFileTypes">
                 <toolkit:SettingsExpander.HeaderIcon>
                     <FontIcon Glyph="&#xE8A5;" />
@@ -201,7 +173,8 @@
             </toolkit:SettingsExpander>
 
             <toolkit:SettingsExpander
-                IsExpanded="False"
+                IsExpanded="True"
+                svc:Localized.DescriptionKey="DesktopOrganization.Rule.Advanced.Description"
                 svc:Localized.HeaderKey="DesktopOrganization.Rule.Advanced">
                 <toolkit:SettingsExpander.HeaderIcon>
                     <FontIcon Glyph="&#xE713;" />
@@ -223,7 +196,10 @@
                                     Click="AddExtensionButton_Click"
                                     svc:Localized.Key="DesktopOrganization.Common.Add" />
                             </Grid>
-                            <StackPanel x:Name="ExtensionChips" Orientation="Horizontal" Spacing="6" />
+                            <controls:WrapFlowPanel
+                                x:Name="ExtensionChips"
+                                HorizontalSpacing="6"
+                                VerticalSpacing="6" />
 
                             <TextBlock
                                 Style="{StaticResource SettingTitleTextStyle}"
@@ -237,7 +213,10 @@
                                     Click="AddExcludedExtensionButton_Click"
                                     svc:Localized.Key="DesktopOrganization.Common.Add" />
                             </Grid>
-                            <StackPanel x:Name="ExcludedExtensionChips" Orientation="Horizontal" Spacing="6" />
+                            <controls:WrapFlowPanel
+                                x:Name="ExcludedExtensionChips"
+                                HorizontalSpacing="6"
+                                VerticalSpacing="6" />
                         </StackPanel>
                     </toolkit:SettingsCard>
                 </toolkit:SettingsExpander.Items>

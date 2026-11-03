@@ -1,0 +1,16 @@
+{
+  "modFocus": "フォーカス枠カード",
+  "modRadar": "マルチプラットフォーム一覧",
+  "modTokens": "ローカルトークンとキャッシュ内訳",
+  "modTrend": "直近14日間の消費グラフ",
+  "optQuotaRem": "残り率を表示（例：85% 残り）",
+  "optQuotaUsed": "使用率を表示（例：15% 使用）",
+  "optRef15m": "15 分ごと",
+  "optRef1m": "1 分ごと（推奨）",
+  "optRef5m": "5 分ごと",
+  "setModules": "表示項目と順序",
+  "setQuotaMode": "枠パーセント表示",
+  "setRefresh": "自動更新間隔",
+  "widgetDescription": "Claude Code / Codex のセッション枠使用量と GLM / DeepSeek / Kimi / OpenRouter の残高をリアルタイム監視。",
+  "widgetName": "AI モニター"
+}

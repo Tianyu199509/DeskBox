@@ -16,6 +16,10 @@ internal sealed partial class WidgetMetadataJsonContext : JsonSerializerContext
 {
 }
 
+public readonly record struct WidgetFolderSortOverride(
+    WidgetSortMode SortMode,
+    bool SortDescending);
+
 public static class WidgetFileStackSettings
 {
     private const string LooseItemOrderKeyPrefix = "Item:";
@@ -30,6 +34,9 @@ public static class WidgetFileStackSettings
     public const string StackNameOverridesMetadataKey = "FileStackNameOverrides";
     public const string StackOrderMetadataKey = "FileStackGroupOrder";
     public const string StackMemberOverridesMetadataKey = "FileStackMemberOverrides";
+    public const string SubfolderSortOverridesMetadataKey = "FileSubfolderSortOverrides";
+    public const string SubfolderDisplayOrdersMetadataKey = "FileSubfolderDisplayOrders";
+    public const string SubfolderManualItemOrdersMetadataKey = "FileSubfolderManualItemOrders";
 
     public static bool? GetEnabledOverride(WidgetConfig config)
     {
@@ -365,6 +372,132 @@ public static class WidgetFileStackSettings
                 WidgetMetadataJsonContext.Default.StringListMap);
     }
 
+    public static string NormalizeFolderScopeKey(string folderPath)
+    {
+        if (string.IsNullOrWhiteSpace(folderPath))
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            return NormalizeRootPath(folderPath).ToUpperInvariant();
+        }
+        catch
+        {
+            return folderPath
+                .Trim()
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                .ToUpperInvariant();
+        }
+    }
+
+    public static Dictionary<string, WidgetFolderSortOverride> GetSubfolderSortOverrides(
+        WidgetConfig config)
+    {
+        var result = new Dictionary<string, WidgetFolderSortOverride>(StringComparer.OrdinalIgnoreCase);
+        if (config.Metadata is null ||
+            !config.Metadata.TryGetValue(SubfolderSortOverridesMetadataKey, out string? json) ||
+            string.IsNullOrWhiteSpace(json))
+        {
+            return result;
+        }
+
+        try
+        {
+            Dictionary<string, string>? values = JsonSerializer.Deserialize(
+                json,
+                WidgetMetadataJsonContext.Default.StringMap);
+            if (values is null)
+            {
+                return result;
+            }
+
+            foreach ((string rawFolderKey, string rawSort) in values)
+            {
+                string folderKey = NormalizeFolderScopeKey(rawFolderKey);
+                if (string.IsNullOrWhiteSpace(folderKey) ||
+                    !TryParseFolderSortOverride(rawSort, out WidgetFolderSortOverride parsed))
+                {
+                    continue;
+                }
+
+                result[folderKey] = parsed;
+            }
+        }
+        catch (JsonException)
+        {
+        }
+
+        return result;
+    }
+
+    public static void SetSubfolderSortOverrides(
+        WidgetConfig config,
+        IReadOnlyDictionary<string, WidgetFolderSortOverride>? overrides)
+    {
+        config.Metadata ??= [];
+        if (overrides is null || overrides.Count == 0)
+        {
+            config.Metadata.Remove(SubfolderSortOverridesMetadataKey);
+            return;
+        }
+
+        var serialized = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach ((string rawFolderKey, WidgetFolderSortOverride sortState) in overrides)
+        {
+            string folderKey = NormalizeFolderScopeKey(rawFolderKey);
+            if (string.IsNullOrWhiteSpace(folderKey))
+            {
+                continue;
+            }
+
+            serialized[folderKey] = FormatFolderSortOverride(sortState);
+        }
+
+        if (serialized.Count == 0)
+        {
+            config.Metadata.Remove(SubfolderSortOverridesMetadataKey);
+            return;
+        }
+
+        config.Metadata[SubfolderSortOverridesMetadataKey] = JsonSerializer.Serialize(
+            serialized,
+            WidgetMetadataJsonContext.Default.StringMap);
+    }
+
+    public static Dictionary<string, List<string>> GetSubfolderDisplayOrders(
+        WidgetConfig config) =>
+        ReadFolderScopedStringLists(
+            config,
+            SubfolderDisplayOrdersMetadataKey,
+            StringComparer.Ordinal);
+
+    public static void SetSubfolderDisplayOrders(
+        WidgetConfig config,
+        IReadOnlyDictionary<string, List<string>>? orders) =>
+        WriteFolderScopedStringLists(
+            config,
+            SubfolderDisplayOrdersMetadataKey,
+            orders,
+            StringComparer.Ordinal);
+
+    public static Dictionary<string, List<string>> GetSubfolderManualItemOrders(
+        WidgetConfig config) =>
+        ReadFolderScopedStringLists(
+            config,
+            SubfolderManualItemOrdersMetadataKey,
+            StringComparer.OrdinalIgnoreCase);
+
+    public static void SetSubfolderManualItemOrders(
+        WidgetConfig config,
+        IReadOnlyDictionary<string, List<string>>? orders) =>
+        WriteFolderScopedStringLists(
+            config,
+            SubfolderManualItemOrdersMetadataKey,
+            orders,
+            StringComparer.OrdinalIgnoreCase);
+
     /// <summary>
     /// Rebases every widget-owned absolute path after its managed root folder is
     /// renamed. The calculation is completed before the config is mutated so a
@@ -399,6 +532,47 @@ public static class WidgetFileStackSettings
             .Distinct(StringComparer.Ordinal)
             .ToList();
 
+        Dictionary<string, WidgetFolderSortOverride> currentSubfolderSorts =
+            GetSubfolderSortOverrides(config);
+        var rebasedSubfolderSorts = new Dictionary<string, WidgetFolderSortOverride>(
+            StringComparer.OrdinalIgnoreCase);
+        foreach ((string folderKey, WidgetFolderSortOverride sortState) in currentSubfolderSorts)
+        {
+            rebasedSubfolderSorts[RebaseFolderScopeKey(folderKey, oldRoot, newRoot)] = sortState;
+        }
+
+        Dictionary<string, List<string>> currentSubfolderDisplayOrders =
+            GetSubfolderDisplayOrders(config);
+        var rebasedSubfolderDisplayOrders = new Dictionary<string, List<string>>(
+            StringComparer.OrdinalIgnoreCase);
+        foreach ((string folderKey, List<string> unitKeys) in currentSubfolderDisplayOrders)
+        {
+            List<string> rebasedUnits = unitKeys
+                .Select(key => RebaseLooseItemOrderKey(key, oldRoot, newRoot))
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+            if (rebasedUnits.Count > 0)
+            {
+                rebasedSubfolderDisplayOrders[RebaseFolderScopeKey(folderKey, oldRoot, newRoot)] = rebasedUnits;
+            }
+        }
+
+        Dictionary<string, List<string>> currentSubfolderItemOrders =
+            GetSubfolderManualItemOrders(config);
+        var rebasedSubfolderItemOrders = new Dictionary<string, List<string>>(
+            StringComparer.OrdinalIgnoreCase);
+        foreach ((string folderKey, List<string> itemPaths) in currentSubfolderItemOrders)
+        {
+            List<string> rebasedPaths = itemPaths
+                .Select(path => RebasePath(path, oldRoot, newRoot))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (rebasedPaths.Count > 0)
+            {
+                rebasedSubfolderItemOrders[RebaseFolderScopeKey(folderKey, oldRoot, newRoot)] = rebasedPaths;
+            }
+        }
+
         Dictionary<string, DateTimeOffset> currentAddedAt =
             config.FileAddedAtByPath ?? [];
         var rebasedAddedAt = new Dictionary<string, DateTimeOffset>(
@@ -414,10 +588,26 @@ public static class WidgetFileStackSettings
         bool orderChanged = !currentOrder.SequenceEqual(
             rebasedOrder,
             StringComparer.Ordinal);
+        bool subfolderSortsChanged = !FolderSortMapsEqual(
+            currentSubfolderSorts,
+            rebasedSubfolderSorts);
+        bool subfolderDisplayOrdersChanged = !FolderScopedStringListMapsEqual(
+            currentSubfolderDisplayOrders,
+            rebasedSubfolderDisplayOrders,
+            StringComparer.Ordinal);
+        bool subfolderItemOrdersChanged = !FolderScopedStringListMapsEqual(
+            currentSubfolderItemOrders,
+            rebasedSubfolderItemOrders,
+            StringComparer.OrdinalIgnoreCase);
         bool addedAtChanged = !StringDateMapsEqual(
             currentAddedAt,
             rebasedAddedAt);
-        if (!membersChanged && !orderChanged && !addedAtChanged)
+        if (!membersChanged &&
+            !orderChanged &&
+            !subfolderSortsChanged &&
+            !subfolderDisplayOrdersChanged &&
+            !subfolderItemOrdersChanged &&
+            !addedAtChanged)
         {
             return false;
         }
@@ -430,6 +620,21 @@ public static class WidgetFileStackSettings
         if (orderChanged)
         {
             SetStackOrder(config, rebasedOrder);
+        }
+
+        if (subfolderSortsChanged)
+        {
+            SetSubfolderSortOverrides(config, rebasedSubfolderSorts);
+        }
+
+        if (subfolderDisplayOrdersChanged)
+        {
+            SetSubfolderDisplayOrders(config, rebasedSubfolderDisplayOrders);
+        }
+
+        if (subfolderItemOrdersChanged)
+        {
+            SetSubfolderManualItemOrders(config, rebasedSubfolderItemOrders);
         }
 
         if (addedAtChanged)
@@ -459,6 +664,7 @@ public static class WidgetFileStackSettings
             .ToHashSet(StringComparer.Ordinal);
 
         bool changed = false;
+        var prunedMembersByKey = new Dictionary<string, List<string>>(StringComparer.Ordinal);
         string[] incompleteManualKeys = members
             .Where(entry =>
                 entry.Key.StartsWith(
@@ -469,6 +675,10 @@ public static class WidgetFileStackSettings
             .ToArray();
         foreach (string key in incompleteManualKeys)
         {
+            if (members.TryGetValue(key, out List<string>? paths) && paths.Count > 0)
+            {
+                prunedMembersByKey[key] = paths;
+            }
             changed |= members.Remove(key);
         }
 
@@ -485,10 +695,50 @@ public static class WidgetFileStackSettings
             IsOrphanedManualKey(key, activeManualKeys)) > 0;
 
         List<string> order = GetStackOrder(config);
-        List<string> prunedOrder = order
-            .Where(key => !IsOrphanedManualKey(key, activeManualKeys))
-            .ToList();
-        changed |= prunedOrder.Count != order.Count;
+        bool preserveMemberOrderSlots =
+            config.SortMode == WidgetSortMode.Manual ||
+            order.Any(key => key.StartsWith(LooseItemOrderKeyPrefix, StringComparison.Ordinal));
+        List<string> prunedOrder = PruneOrderKeyList(
+            order,
+            activeManualKeys,
+            prunedMembersByKey,
+            preserveMemberOrderSlots);
+        changed |= !prunedOrder.SequenceEqual(order, StringComparer.Ordinal);
+
+        Dictionary<string, WidgetFolderSortOverride> subfolderSorts =
+            GetSubfolderSortOverrides(config);
+        Dictionary<string, List<string>> subfolderDisplayOrders =
+            GetSubfolderDisplayOrders(config);
+        var prunedSubfolderDisplayOrders = new Dictionary<string, List<string>>(
+            StringComparer.OrdinalIgnoreCase);
+        bool subfolderDisplayOrdersChanged = false;
+        foreach ((string folderKey, List<string> subOrder) in subfolderDisplayOrders)
+        {
+            bool preserveSubfolderSlots =
+                (subfolderSorts.TryGetValue(folderKey, out WidgetFolderSortOverride subSort) &&
+                 subSort.SortMode == WidgetSortMode.Manual) ||
+                subOrder.Any(key => key.StartsWith(LooseItemOrderKeyPrefix, StringComparison.Ordinal));
+            List<string> prunedSubOrder = PruneOrderKeyList(
+                subOrder,
+                activeManualKeys,
+                prunedMembersByKey,
+                preserveSubfolderSlots);
+            if (!prunedSubOrder.SequenceEqual(subOrder, StringComparer.Ordinal))
+            {
+                subfolderDisplayOrdersChanged = true;
+            }
+
+            if (prunedSubOrder.Count > 0)
+            {
+                prunedSubfolderDisplayOrders[folderKey] = prunedSubOrder;
+            }
+            else if (subOrder.Count > 0)
+            {
+                subfolderDisplayOrdersChanged = true;
+            }
+        }
+
+        changed |= subfolderDisplayOrdersChanged;
         if (!changed)
         {
             return false;
@@ -498,7 +748,221 @@ public static class WidgetFileStackSettings
         SetStackNameOverrides(config, names);
         SetDisabledStacks(config, disabled);
         SetStackOrder(config, prunedOrder);
+        if (subfolderDisplayOrdersChanged)
+        {
+            SetSubfolderDisplayOrders(config, prunedSubfolderDisplayOrders);
+        }
+
         return true;
+    }
+
+    private static List<string> PruneOrderKeyList(
+        IReadOnlyList<string> order,
+        IReadOnlySet<string> activeManualKeys,
+        IReadOnlyDictionary<string, List<string>> prunedMembersByKey,
+        bool preserveMemberOrderSlots)
+    {
+        var prunedOrder = new List<string>(order.Count);
+        foreach (string key in order)
+        {
+            if (!IsOrphanedManualKey(key, activeManualKeys))
+            {
+                prunedOrder.Add(key);
+                continue;
+            }
+
+            if (preserveMemberOrderSlots &&
+                prunedMembersByKey.TryGetValue(key, out List<string>? survivingPaths))
+            {
+                foreach (string memberPath in survivingPaths)
+                {
+                    if (string.IsNullOrWhiteSpace(memberPath))
+                    {
+                        continue;
+                    }
+
+                    string normalizedMemberPath;
+                    try
+                    {
+                        normalizedMemberPath = Path.GetFullPath(memberPath);
+                    }
+                    catch
+                    {
+                        normalizedMemberPath = memberPath;
+                    }
+
+                    prunedOrder.Add(
+                        LooseItemOrderKeyPrefix + normalizedMemberPath.ToUpperInvariant());
+                }
+            }
+        }
+
+        return prunedOrder.Distinct(StringComparer.Ordinal).ToList();
+    }
+
+    private static string FormatFolderSortOverride(WidgetFolderSortOverride sortState) =>
+        sortState.SortMode == WidgetSortMode.Manual
+            ? nameof(WidgetSortMode.Manual)
+            : $"{sortState.SortMode}:{(sortState.SortDescending ? "desc" : "asc")}";
+
+    private static bool TryParseFolderSortOverride(
+        string? raw,
+        out WidgetFolderSortOverride sortState)
+    {
+        sortState = default;
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return false;
+        }
+
+        string trimmed = raw.Trim();
+        int separatorIndex = trimmed.IndexOf(':');
+        string modePart = separatorIndex >= 0 ? trimmed[..separatorIndex] : trimmed;
+        string? dirPart = separatorIndex >= 0 ? trimmed[(separatorIndex + 1)..] : null;
+        if (!Enum.TryParse(modePart, ignoreCase: true, out WidgetSortMode mode) ||
+            !Enum.IsDefined(mode))
+        {
+            return false;
+        }
+
+        if (mode == WidgetSortMode.Manual)
+        {
+            sortState = new WidgetFolderSortOverride(WidgetSortMode.Manual, false);
+            return true;
+        }
+
+        bool descending = string.Equals(dirPart, "desc", StringComparison.OrdinalIgnoreCase);
+        sortState = new WidgetFolderSortOverride(mode, descending);
+        return true;
+    }
+
+    private static Dictionary<string, List<string>> ReadFolderScopedStringLists(
+        WidgetConfig config,
+        string metadataKey,
+        StringComparer elementComparer)
+    {
+        var result = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        if (config.Metadata is null ||
+            !config.Metadata.TryGetValue(metadataKey, out string? json) ||
+            string.IsNullOrWhiteSpace(json))
+        {
+            return result;
+        }
+
+        try
+        {
+            Dictionary<string, List<string>>? values = JsonSerializer.Deserialize(
+                json,
+                WidgetMetadataJsonContext.Default.StringListMap);
+            if (values is null)
+            {
+                return result;
+            }
+
+            foreach ((string rawFolderKey, List<string>? entries) in values)
+            {
+                string folderKey = NormalizeFolderScopeKey(rawFolderKey);
+                if (string.IsNullOrWhiteSpace(folderKey) || entries is null)
+                {
+                    continue;
+                }
+
+                List<string> normalized = entries
+                    .Where(entry => !string.IsNullOrWhiteSpace(entry))
+                    .Distinct(elementComparer)
+                    .ToList();
+                if (normalized.Count > 0)
+                {
+                    result[folderKey] = normalized;
+                }
+            }
+        }
+        catch (JsonException)
+        {
+        }
+
+        return result;
+    }
+
+    private static void WriteFolderScopedStringLists(
+        WidgetConfig config,
+        string metadataKey,
+        IReadOnlyDictionary<string, List<string>>? values,
+        StringComparer elementComparer)
+    {
+        config.Metadata ??= [];
+        if (values is null || values.Count == 0)
+        {
+            config.Metadata.Remove(metadataKey);
+            return;
+        }
+
+        var normalized = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        foreach ((string rawFolderKey, List<string>? entries) in values)
+        {
+            string folderKey = NormalizeFolderScopeKey(rawFolderKey);
+            if (string.IsNullOrWhiteSpace(folderKey) || entries is null)
+            {
+                continue;
+            }
+
+            List<string> list = entries
+                .Where(entry => !string.IsNullOrWhiteSpace(entry))
+                .Distinct(elementComparer)
+                .ToList();
+            if (list.Count > 0)
+            {
+                normalized[folderKey] = list;
+            }
+        }
+
+        if (normalized.Count == 0)
+        {
+            config.Metadata.Remove(metadataKey);
+            return;
+        }
+
+        config.Metadata[metadataKey] = JsonSerializer.Serialize(
+            normalized,
+            WidgetMetadataJsonContext.Default.StringListMap);
+    }
+
+    private static string RebaseFolderScopeKey(
+        string folderKey,
+        string oldRoot,
+        string newRoot)
+    {
+        string rebased = RebasePath(folderKey, oldRoot, newRoot);
+        return NormalizeFolderScopeKey(rebased);
+    }
+
+    private static bool FolderSortMapsEqual(
+        IReadOnlyDictionary<string, WidgetFolderSortOverride> left,
+        IReadOnlyDictionary<string, WidgetFolderSortOverride> right)
+    {
+        if (left.Count != right.Count)
+        {
+            return false;
+        }
+
+        return left.All(entry =>
+            right.TryGetValue(entry.Key, out WidgetFolderSortOverride value) &&
+            value == entry.Value);
+    }
+
+    private static bool FolderScopedStringListMapsEqual(
+        IReadOnlyDictionary<string, List<string>> left,
+        IReadOnlyDictionary<string, List<string>> right,
+        StringComparer elementComparer)
+    {
+        if (left.Count != right.Count)
+        {
+            return false;
+        }
+
+        return left.All(entry =>
+            right.TryGetValue(entry.Key, out List<string>? values) &&
+            entry.Value.SequenceEqual(values, elementComparer));
     }
 
     private static bool IsOrphanedManualKey(

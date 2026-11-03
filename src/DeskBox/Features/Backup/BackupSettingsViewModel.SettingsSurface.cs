@@ -47,6 +47,7 @@ public sealed partial class BackupSettingsViewModel
     private bool _todoDataEnabled;
     private bool _quickCaptureDataEnabled;
     private bool _widgetStyleEnabled;
+    private bool _customWidgetsEnabled;
     private int _selectedIntervalMinutes = BackupOptionKinds.DefaultCloudIntervalMinutes;
     private int _selectedRetentionCount = BackupOptionKinds.DefaultCloudRetentionCount;
     private string _dragDropSummaryText = string.Empty;
@@ -134,6 +135,7 @@ public sealed partial class BackupSettingsViewModel
             IncludeTodoData = state.CloudTodoEnabled;
             IncludeQuickCaptureData = state.CloudQuickCaptureEnabled;
             IncludeWidgetStyle = state.CloudWidgetStyleEnabled;
+            IncludeCustomWidgets = state.CloudCustomWidgetsEnabled;
             SelectedIntervalMinutes = state.CloudIntervalMinutes;
             SelectedRetentionCount = state.CloudRetentionCount;
         }
@@ -150,6 +152,7 @@ public sealed partial class BackupSettingsViewModel
         OnPropertyChanged(nameof(LocalFallbackWarningText));
         OnPropertyChanged(nameof(ShowLocalFallbackWarning));
         OnPropertyChanged(nameof(ShowCustomDirectoryRecoveryNote));
+        OnPropertyChanged(nameof(CloudBackupEnabled));
         OnPropertyChanged(nameof(ShowWebDavFields));
         OnPropertyChanged(nameof(ShowHttpWarning));
         OnPropertyChanged(nameof(StatusText));
@@ -312,6 +315,7 @@ public sealed partial class BackupSettingsViewModel
                 return;
             }
 
+            OnPropertyChanged(nameof(CloudBackupEnabled));
             OnPropertyChanged(nameof(ShowWebDavFields));
             if (_isSyncingPresentation)
             {
@@ -331,6 +335,7 @@ public sealed partial class BackupSettingsViewModel
                 IncludeTodoData = false;
                 IncludeQuickCaptureData = false;
                 IncludeWidgetStyle = false;
+                IncludeCustomWidgets = false;
             }
         }
     }
@@ -348,6 +353,13 @@ public sealed partial class BackupSettingsViewModel
                 [BackupOptionKinds.ProviderNone, BackupOptionKinds.ProviderWebDav],
                 _cachedProviderNames));
         }
+    }
+
+    /// <summary>Master switch projection for the WebDAV cloud backup SettingsExpander header.</summary>
+    public bool CloudBackupEnabled
+    {
+        get => _selectedProvider == BackupOptionKinds.ProviderWebDav;
+        set => SelectedProvider = value ? BackupOptionKinds.ProviderWebDav : BackupOptionKinds.ProviderNone;
     }
 
     /// <summary>WebDAV-only fields are hidden when the provider is off.</summary>
@@ -476,6 +488,25 @@ public sealed partial class BackupSettingsViewModel
             }
 
             Update(new(CloudWidgetStyleEnabled: value));
+        }
+    }
+
+    public bool IncludeCustomWidgets
+    {
+        get => _customWidgetsEnabled;
+        set
+        {
+            if (!SetProperty(ref _customWidgetsEnabled, value))
+            {
+                return;
+            }
+
+            if (_isSyncingPresentation)
+            {
+                return;
+            }
+
+            Update(new(CloudCustomWidgetsEnabled: value));
         }
     }
 

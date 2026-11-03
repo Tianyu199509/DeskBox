@@ -1,4 +1,4 @@
-﻿using DeskBox.Controls;
+using DeskBox.Controls;
 using DeskBox.Controls.WidgetContents;
 using DeskBox.Contracts;
 using DeskBox.Helpers;
@@ -40,8 +40,7 @@ public sealed partial class WidgetManager
     private bool _lastWidgetGroupHoverSwitchEnabled;
 
     internal void PrewarmWidgetDetachPlacementPreview(
-        string caption,
-        double cornerRadius)
+        WidgetDetachPreviewAppearance appearance)
     {
         if (_widgetDetachPlacementPreview is not null)
         {
@@ -51,7 +50,7 @@ public sealed partial class WidgetManager
         try
         {
             _widgetDetachPlacementPreview =
-                new WidgetDetachPlacementPreviewWindow(caption, cornerRadius);
+                new WidgetDetachPlacementPreviewWindow(appearance);
         }
         catch (Exception ex)
         {
@@ -60,16 +59,29 @@ public sealed partial class WidgetManager
     }
 
     internal WidgetDetachPlacementPreviewWindow AcquireWidgetDetachPlacementPreview(
-        string caption,
-        double cornerRadius)
+        WidgetDetachPreviewAppearance appearance)
     {
-        PrewarmWidgetDetachPlacementPreview(caption, cornerRadius);
+        PrewarmWidgetDetachPlacementPreview(appearance);
         WidgetDetachPlacementPreviewWindow preview =
             _widgetDetachPlacementPreview ??
             throw new InvalidOperationException(
                 "The widget detach placement preview could not be created.");
-        preview.BeginTracking(caption, cornerRadius);
+        preview.BeginTracking(appearance);
         return preview;
+    }
+
+    internal bool HasWidgetDetachPlacementPreview =>
+        _widgetDetachPlacementPreview is not null;
+
+    internal bool ReleaseIdleWidgetDetachPlacementPreview()
+    {
+        if (_widgetDetachPlacementPreview is not { IsVisible: false })
+        {
+            return false;
+        }
+
+        DisposeWidgetDetachPlacementPreview();
+        return true;
     }
 
     private void DisposeWidgetDetachPlacementPreview()
@@ -221,11 +233,7 @@ public sealed partial class WidgetManager
                 ResolveGroupMemberDisplayName(config),
                 config.WidgetKind,
                 glyph,
-                config.WidgetKind == WidgetKind.File
-                    ? WidgetTitleIconKindNames.FromFileWidget(
-                        config.FollowsDefaultStoragePath)
-                    : WidgetTitleIconKindNames.FromWidgetKind(
-                        config.WidgetKind),
+                WidgetTitleIconKindNames.FromWidgetConfig(config),
                 string.Equals(group.ActiveMemberId, config.Id, StringComparison.Ordinal),
                 customEmoji,
                 customImagePath));
@@ -277,14 +285,8 @@ public sealed partial class WidgetManager
                 group.NavigationStyle,
                 allowFollowDefault: true);
             group.NavigationStyle = normalized;
-            if (string.Equals(
-                    previous,
-                    WidgetGroupNavigationStyles.Tabs,
-                    StringComparison.Ordinal) &&
-                !string.Equals(
-                    normalized,
-                    WidgetGroupNavigationStyles.Tabs,
-                    StringComparison.Ordinal) &&
+            if (WidgetGroupNavigationStyles.UsesTabStrip(previous) &&
+                !WidgetGroupNavigationStyles.UsesTabStrip(normalized) &&
                 group.WheelSwitchEnabled == false)
             {
                 // Tabs historically wrote an implicit wheel-off override.
@@ -697,8 +699,9 @@ public sealed partial class WidgetManager
             WidgetKind.Todo => "Todo.Title",
             WidgetKind.Weather => "Weather.Title",
             WidgetKind.Music => "Music.Title",
-            WidgetKind.Search => "Search.Title",
             WidgetKind.Glance => "Glance.Title",
+            WidgetKind.Custom => "CustomWidget.Title",
+            WidgetKind.Clipboard => "Clipboard.Title",
             WidgetKind.Tags => "Tags.Title",
             WidgetKind.SystemMonitor => "SystemMonitor.Title",
             _ => null
@@ -1239,12 +1242,16 @@ public sealed partial class WidgetManager
 
     public async Task<bool> SwitchWidgetGroupMemberAsync(
         string targetWidgetId,
-        WidgetGroupSwitchOrigin origin = WidgetGroupSwitchOrigin.Programmatic)
+        WidgetGroupSwitchOrigin origin = WidgetGroupSwitchOrigin.Programmatic,
+        bool? preferredForward = null)
     {
         if (!HasUiThreadAccess())
         {
             return await RunOnUiThreadAsync(
-                () => SwitchWidgetGroupMemberAsync(targetWidgetId, origin));
+                () => SwitchWidgetGroupMemberAsync(
+                    targetWidgetId,
+                    origin,
+                    preferredForward));
         }
 
         long switchStartedTimestamp = System.Diagnostics.Stopwatch.GetTimestamp();
@@ -1272,7 +1279,8 @@ public sealed partial class WidgetManager
         WidgetGroupSwitchRequest request = _widgetGroupSwitchRequests.Begin(
             requestedGroup.SurfaceId,
             targetWidgetId,
-            origin);
+            origin,
+            preferredForward);
         bool gateEntered = false;
         SemaphoreSlim? switchGate = null;
         try
@@ -1495,7 +1503,9 @@ public sealed partial class WidgetManager
         }
         LogWidgetSurfaceEvidence(group, "transition");
 
-        if (group.IsVisible && persistentWindow.Visible)
+        if (group.IsVisible &&
+            persistentWindow.Visible &&
+            !persistentWindow.IsSettledCollapsedCapsule)
         {
             // Once the prepared view has entered the live presenter this
             // transaction must settle atomically. A later navigation request
@@ -1556,9 +1566,10 @@ public sealed partial class WidgetManager
                 outgoingContent as IWidgetTransientStateContent);
             int previousIndex = group.MemberIds.IndexOf(previousActiveId);
             int targetIndex = group.MemberIds.IndexOf(targetConfig.Id);
+            bool forward = request.PreferredForward ?? (targetIndex >= previousIndex);
             await transition.CompleteAsync(
                 request.Origin,
-                forward: targetIndex >= previousIndex,
+                forward: forward,
                 CancellationToken.None);
         }
         catch

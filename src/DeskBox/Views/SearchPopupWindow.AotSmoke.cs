@@ -1,7 +1,6 @@
 #if DESKBOX_NATIVE_AOT
 using DeskBox.Models;
 using Microsoft.UI.Xaml;
-using Microsoft.UI.Xaml.Controls;
 using WinRT.Interop;
 
 namespace DeskBox.Views;
@@ -25,58 +24,69 @@ public sealed partial class SearchPopupWindow
             _viewModel.ResultFilter.ToString(),
             _viewModel.SortColumn.ToString(),
             _viewModel.SortAscending,
-            ResultFilterBar.Visibility == Visibility.Visible,
+            TabsAndFilterRow.Visibility == Visibility.Visible,
             SortHeaderRow.Visibility == Visibility.Visible,
             _viewModel.CurrentResults.Any(item => item.ActionId == "open-settings"));
     }
 
     internal AotSearchControlExercise ExerciseAotReadOnlyControls()
     {
-        var filterItems = new (string Name, ComboBoxItem Item)[]
+        var filterItems = new (string Name, SearchResultFilter Filter)[]
         {
-            ("All", FilterAllItem),
-            ("FilesAndFolders", FilterFilesItem),
-            ("Apps", FilterAppsItem),
-            ("Images", FilterImagesItem),
-            ("Documents", FilterDocumentsItem),
-            ("DeskBox", FilterDeskBoxItem)
+            ("All", SearchResultFilter.All),
+            ("FilesAndFolders", SearchResultFilter.FilesAndFolders),
+            ("Apps", SearchResultFilter.Apps),
+            ("Images", SearchResultFilter.Images),
+            ("Documents", SearchResultFilter.Documents),
+            ("DeskBox", SearchResultFilter.DeskBox)
         };
         var filterTransitions = new List<string>(filterItems.Length);
-        foreach ((string name, ComboBoxItem item) in filterItems)
+        foreach ((string name, SearchResultFilter filter) in filterItems)
         {
-            ResultFilterComboBox.SelectedItem = item;
+            _viewModel.ResultFilter = filter;
             filterTransitions.Add($"{name}:{_viewModel.ResultFilter}");
         }
 
-        ResultFilterComboBox.SelectedItem = FilterAllItem;
+        _viewModel.ResultFilter = SearchResultFilter.All;
         _viewModel.SortColumn = ResultSortColumn.Relevance;
         _viewModel.SortAscending = true;
 
+        bool previousShowSortHeader = _settingsService.Settings.Search.SearchShowSortHeader;
         var sortTransitions = new List<string>(8);
-        SortNameHeader_Click(SortNameHeader, null!);
-        sortTransitions.Add($"Name:{_viewModel.SortAscending}");
-        SortNameHeader_Click(SortNameHeader, null!);
-        sortTransitions.Add($"Name:{_viewModel.SortAscending}");
+        try
+        {
+            _settingsService.Settings.Search.SearchShowSortHeader = true;
+            UpdatePanelVisibility();
 
-        SortSizeHeader_Click(SortSizeHeader, null!);
-        sortTransitions.Add($"Size:{_viewModel.SortAscending}");
-        SortSizeHeader_Click(SortSizeHeader, null!);
-        sortTransitions.Add($"Size:{_viewModel.SortAscending}");
+            SortNameHeader_Click(SortNameHeader, null!);
+            sortTransitions.Add($"Name:{_viewModel.SortAscending}");
+            SortNameHeader_Click(SortNameHeader, null!);
+            sortTransitions.Add($"Name:{_viewModel.SortAscending}");
 
-        SortDateHeader_Click(SortDateHeader, null!);
-        sortTransitions.Add($"Date:{_viewModel.SortAscending}");
-        SortDateHeader_Click(SortDateHeader, null!);
-        sortTransitions.Add($"Date:{_viewModel.SortAscending}");
+            SortSizeHeader_Click(SortSizeHeader, null!);
+            sortTransitions.Add($"Size:{_viewModel.SortAscending}");
+            SortSizeHeader_Click(SortSizeHeader, null!);
+            sortTransitions.Add($"Size:{_viewModel.SortAscending}");
 
-        SortTypeHeader_Click(SortTypeHeader, null!);
-        sortTransitions.Add($"Type:{_viewModel.SortAscending}");
-        SortTypeHeader_Click(SortTypeHeader, null!);
-        sortTransitions.Add($"Type:{_viewModel.SortAscending}");
+            SortDateHeader_Click(SortDateHeader, null!);
+            sortTransitions.Add($"Date:{_viewModel.SortAscending}");
+            SortDateHeader_Click(SortDateHeader, null!);
+            sortTransitions.Add($"Date:{_viewModel.SortAscending}");
 
-        ResultFilterComboBox.SelectedItem = FilterAllItem;
-        _viewModel.SortColumn = ResultSortColumn.Relevance;
-        _viewModel.SortAscending = true;
-        UpdateSortHeaders();
+            SortTypeHeader_Click(SortTypeHeader, null!);
+            sortTransitions.Add($"Type:{_viewModel.SortAscending}");
+            SortTypeHeader_Click(SortTypeHeader, null!);
+            sortTransitions.Add($"Type:{_viewModel.SortAscending}");
+        }
+        finally
+        {
+            _settingsService.Settings.Search.SearchShowSortHeader = previousShowSortHeader;
+            _viewModel.ResultFilter = SearchResultFilter.All;
+            _viewModel.SortColumn = ResultSortColumn.Relevance;
+            _viewModel.SortAscending = true;
+            UpdateSortHeaders();
+            UpdatePanelVisibility();
+        }
 
         return new AotSearchControlExercise(filterTransitions, sortTransitions);
     }

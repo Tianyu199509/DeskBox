@@ -15,14 +15,14 @@ public sealed class SearchSettingsCoordinatorTests : IAsyncLifetime
     public Task InitializeAsync() => Task.CompletedTask;
 
     [Fact]
-    public async Task DisabledFeature_DoesNotInitializeOrProbeRuntime()
+    public async Task StoppedCoordinator_DoesNotInitializeOrProbeRuntime()
     {
         int starts = 0;
         var connection = new FakeConnection();
         var coordinator = Create(() => null, () => { starts++; return connection; });
+        await coordinator.StopAsync();
         Assert.False(coordinator.Read().FeatureEnabled);
         Assert.Equal(EverythingConnectionState.Unknown, (await coordinator.RefreshConnectionAsync(default)).State);
-        coordinator.UpdatePreferences(new(EverythingEnabled: true));
         Assert.Equal(0, starts);
         Assert.Equal(0, connection.Probes);
     }
@@ -30,7 +30,6 @@ public sealed class SearchSettingsCoordinatorTests : IAsyncLifetime
     [Fact]
     public async Task RepeatedVisits_BorrowOneRuntime_WithoutDisposingIt()
     {
-        FeatureWidgetSettings.SetEnabled(_settings.Settings, WidgetKind.Search, true);
         int starts = 0;
         FakeConnection? current = null;
         var coordinator = Create(() => current, () => { starts++; return current = new FakeConnection(); });
@@ -53,7 +52,6 @@ public sealed class SearchSettingsCoordinatorTests : IAsyncLifetime
     [Fact]
     public async Task RuntimeReplacement_CancelsOldRequestsAndUnsubscribesOldProvider()
     {
-        FeatureWidgetSettings.SetEnabled(_settings.Settings, WidgetKind.Search, true);
         var completion = new TaskCompletionSource<EverythingConnectionSnapshot>(TaskCreationOptions.RunContinuationsAsynchronously);
         var old = new FakeConnection { Probe = _ => completion.Task };
         var replacement = new FakeConnection();
@@ -81,89 +79,8 @@ public sealed class SearchSettingsCoordinatorTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task DisableClosesWidgetThenDrainsProbeBeforeRuntimeRelease()
-    {
-        FeatureWidgetSettings.SetEnabled(_settings.Settings, WidgetKind.Search, true);
-        var pending = new TaskCompletionSource<EverythingConnectionSnapshot>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var connection = new FakeConnection { Probe = _ => pending.Task };
-        var order = new List<string>();
-        SearchSettingsCoordinator? coordinator = null;
-        coordinator = Create(() => connection, () => connection,
-            applyWidget: async (enabled, _) =>
-            {
-                order.Add($"window:{enabled}");
-                await coordinator!.CommitEnabledStateAsync(enabled);
-            },
-            setRuntime: enabled => order.Add($"runtime:{enabled}"));
-        coordinator.OnRuntimeChanged();
-        Task<EverythingConnectionSnapshot> probe = coordinator.RefreshConnectionAsync(default);
-
-        Task disable = coordinator.SetEnabledAsync(false);
-        Assert.True(connection.LastToken.IsCancellationRequested);
-        Assert.Contains("window:False", order);
-        Assert.DoesNotContain("runtime:False", order);
-        Assert.False(disable.IsCompleted);
-        pending.SetResult(EverythingConnectionSnapshot.Unknown);
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => probe);
-        await disable;
-        Assert.Equal("runtime:False", order.Last());
-        Assert.False(coordinator.Enabled);
-    }
-
-    [Fact]
-    public async Task RapidEnableDisableDoesNotLetOldWindowReenableSearch()
-    {
-        var pendingWindow = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var order = new List<string>();
-        SearchSettingsCoordinator? coordinator = null;
-        coordinator = Create(() => null, () => null,
-            applyWidget: async (enabled, _) =>
-            {
-                order.Add($"window:{enabled}");
-                if (enabled) await pendingWindow.Task;
-                await coordinator!.CommitEnabledStateAsync(enabled);
-            },
-            setRuntime: enabled => order.Add($"runtime:{enabled}"));
-        Task first = coordinator.SetEnabledAsync(true);
-        Task last = coordinator.SetEnabledAsync(false);
-        Assert.False(coordinator.Enabled);
-        pendingWindow.SetResult();
-        await Task.WhenAll(first, last);
-        Assert.False(coordinator.Enabled);
-        Assert.Equal("runtime:False", order.Last());
-        Assert.Equal(1, order.Count(item => item == "runtime:True"));
-    }
-
-    [Fact]
-    public async Task ExternalSettingChangeReconcilesWindowAndFailureCanRetry()
-    {
-        int runtimeStarts = 0;
-        var disabledApplied = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var coordinator = Create(() => null, () => null,
-            applyWidget: (enabled, _) =>
-            {
-                if (!enabled) disabledApplied.TrySetResult();
-                return Task.CompletedTask;
-            },
-            setRuntime: enabled =>
-            {
-                if (enabled && ++runtimeStarts == 1) throw new IOException("runtime unavailable");
-            });
-        await Assert.ThrowsAsync<IOException>(() => coordinator.SetEnabledAsync(true));
-        Assert.True(coordinator.Enabled);
-        await coordinator.SetEnabledAsync(true);
-        Assert.Equal(2, runtimeStarts);
-
-        FeatureWidgetSettings.SetEnabled(_settings.Settings, WidgetKind.Search, false);
-        await _settings.SaveAsync();
-        await disabledApplied.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.False(coordinator.Enabled);
-    }
-
-    [Fact]
     public async Task StopCancelsAndDrainsProbeBeforeDisposal()
     {
-        FeatureWidgetSettings.SetEnabled(_settings.Settings, WidgetKind.Search, true);
         var pending = new TaskCompletionSource<EverythingConnectionSnapshot>(TaskCreationOptions.RunContinuationsAsynchronously);
         var connection = new FakeConnection { Probe = _ => pending.Task };
         var coordinator = Create(() => connection, () => connection);
@@ -174,13 +91,13 @@ public sealed class SearchSettingsCoordinatorTests : IAsyncLifetime
         pending.SetResult(EverythingConnectionSnapshot.Unknown);
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => probe);
         await stop;
-        await Assert.ThrowsAsync<ObjectDisposedException>(() => coordinator.SetEnabledAsync(true));
+        Assert.False(coordinator.Read().FeatureEnabled);
+        Assert.Equal(EverythingConnectionState.Unknown, (await coordinator.RefreshConnectionAsync(default)).State);
     }
 
     [Fact]
     public async Task HungProbe_SkipsBorrowedRuntimeDisposalDuringShutdown()
     {
-        FeatureWidgetSettings.SetEnabled(_settings.Settings, WidgetKind.Search, true);
         var pending = new TaskCompletionSource<EverythingConnectionSnapshot>(
             TaskCreationOptions.RunContinuationsAsynchronously);
         var connection = new FakeConnection { Probe = _ => pending.Task };
@@ -225,7 +142,6 @@ public sealed class SearchSettingsCoordinatorTests : IAsyncLifetime
     [Fact]
     public void HotkeyFailure_IsReportedWithoutOverwritingThePreviousGesture()
     {
-        FeatureWidgetSettings.SetEnabled(_settings.Settings, WidgetKind.Search, true);
         var hotkey = new FakeHotkey(_settings) { RejectGesture = true };
         var coordinator = Create(() => null, () => null, () => hotkey);
         GlobalHotkeyGesture before = coordinator.Read().Hotkey.Gesture;
@@ -235,12 +151,6 @@ public sealed class SearchSettingsCoordinatorTests : IAsyncLifetime
         Assert.Equal(before, coordinator.Read().Hotkey.Gesture);
 
         SearchHotkeyUpdateResult enabled = coordinator.SetHotkeyEnabled(true);
-        // Deep review R13-2 (D11): the enable command is fire-and-forget,
-        // so reading the registration immediately raced the command and
-        // reported false failures right after a successful enable. The
-        // result now reflects command acceptance; the card's registered
-        // state converges through the registration-changed push (the R14
-        // async-ification restores true outcome reporting).
         Assert.True(enabled.Succeeded);
         Assert.True(coordinator.Read().Hotkey.Enabled);
         Assert.False(coordinator.Read().Hotkey.Registered);
@@ -264,12 +174,10 @@ public sealed class SearchSettingsCoordinatorTests : IAsyncLifetime
 
     private SearchSettingsCoordinator Create(
         Func<ISearchConnectionClient?> get, Func<ISearchConnectionClient?> ensure,
-        Func<ISearchHotkeyController?>? hotkey = null, Action<bool>? scopes = null,
-        Func<bool, bool, Task>? applyWidget = null, Action<bool>? setRuntime = null)
+        Func<ISearchHotkeyController?>? hotkey = null, Action<bool>? scopes = null)
     {
         var coordinator = new SearchSettingsCoordinator(_settings, TestServices.CreateLocalizationService(),
-            get, ensure, hotkey ?? (() => null), scopes ?? (_ => { }),
-            applyWidget, setRuntime);
+            get, ensure, hotkey ?? (() => null), scopes ?? (_ => { }));
         _coordinators.Add(coordinator);
         return coordinator;
     }

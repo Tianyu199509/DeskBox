@@ -19,9 +19,11 @@ public abstract partial class WidgetWindowBase
     private bool _groupDetachCommitInProgress;
     private volatile bool _groupDetachDragCanceled;
     private bool _groupDetachPreviewWarmupQueued;
+    private Microsoft.UI.Xaml.Input.PointerEventHandler? _groupDetachPreviewPointerHandler;
     private Win32Helper.SubclassProc? _groupWheelSubclassProc;
     private bool _isGroupWheelSubclassInstalled;
     private bool _nativeGroupWheelEnabled;
+    private bool _nativeCompactGroupWheelEnabled;
 
     protected void InitializeWidgetGrouping()
     {
@@ -41,6 +43,11 @@ public abstract partial class WidgetWindowBase
         WidgetShellControl.GroupDissolveRequested += WidgetShellControl_GroupDissolveRequested;
         WidgetShellControl.GroupPickerOpened += WidgetShellControl_GroupPickerOpened;
         WidgetShellControl.GroupPickerClosed += WidgetShellControl_GroupPickerClosed;
+        _groupDetachPreviewPointerHandler = WidgetShellControl_GroupTitlePointerPressed;
+        WidgetShellControl.AddHandler(
+            Microsoft.UI.Xaml.UIElement.PointerPressedEvent,
+            _groupDetachPreviewPointerHandler,
+            handledEventsToo: true);
 
         if (App.Current.WidgetManager is { } manager)
         {
@@ -121,6 +128,13 @@ public abstract partial class WidgetWindowBase
         WidgetShellControl.GroupDissolveRequested -= WidgetShellControl_GroupDissolveRequested;
         WidgetShellControl.GroupPickerOpened -= WidgetShellControl_GroupPickerOpened;
         WidgetShellControl.GroupPickerClosed -= WidgetShellControl_GroupPickerClosed;
+        if (_groupDetachPreviewPointerHandler is not null)
+        {
+            WidgetShellControl.RemoveHandler(
+                Microsoft.UI.Xaml.UIElement.PointerPressedEvent,
+                _groupDetachPreviewPointerHandler);
+            _groupDetachPreviewPointerHandler = null;
+        }
 
         if (App.Current?.WidgetManager is { } manager)
         {
@@ -140,6 +154,7 @@ public abstract partial class WidgetWindowBase
             CloseGroupDetachPlacementPreview();
         }
         _nativeGroupWheelEnabled = false;
+        _nativeCompactGroupWheelEnabled = false;
     }
 
     private void InstallGroupWheelSubclass()
@@ -218,7 +233,7 @@ public abstract partial class WidgetWindowBase
             X = unchecked((short)(packedPoint & 0xFFFF)),
             Y = unchecked((short)((packedPoint >> 16) & 0xFFFF))
         };
-        if (!_nativeGroupWheelEnabled ||
+        if ((!_nativeGroupWheelEnabled && !_nativeCompactGroupWheelEnabled) ||
             delta == 0 ||
             !Win32Helper.ScreenToClient(HWnd, ref clientPoint))
         {
@@ -233,15 +248,34 @@ public abstract partial class WidgetWindowBase
             scale = 1;
         }
 
-        int broadTitleHeight = Math.Max(
-            1,
-            (int)Math.Ceiling(72 * scale));
-        if (clientPoint.X < 0 ||
-            clientPoint.Y < 0 ||
-            clientPoint.X > AppWindow.Size.Width ||
-            clientPoint.Y > broadTitleHeight)
+        bool isCollapsed = WidgetShellControl.IsCollapsed;
+        if (isCollapsed)
         {
-            return false;
+            int compactLeftZoneWidth = Math.Max(
+                1,
+                (int)Math.Ceiling(60 * scale));
+            if (!_nativeCompactGroupWheelEnabled ||
+                clientPoint.X < 0 ||
+                clientPoint.Y < 0 ||
+                clientPoint.X > compactLeftZoneWidth ||
+                clientPoint.Y > AppWindow.Size.Height)
+            {
+                return false;
+            }
+        }
+        else
+        {
+            int broadTitleHeight = Math.Max(
+                1,
+                (int)Math.Ceiling(72 * scale));
+            if (!_nativeGroupWheelEnabled ||
+                clientPoint.X < 0 ||
+                clientPoint.Y < 0 ||
+                clientPoint.X > AppWindow.Size.Width ||
+                clientPoint.Y > broadTitleHeight)
+            {
+                return false;
+            }
         }
 
         int capturedX = clientPoint.X;
@@ -258,6 +292,12 @@ public abstract partial class WidgetWindowBase
                         logicalPoint))
                 {
                     WidgetShellControl.HandleNativeGroupTitleWheel(delta);
+                }
+                else if (WidgetShellControl.IsPointOverCompactGroupWheelZone(
+                        RootElement,
+                        logicalPoint))
+                {
+                    WidgetShellControl.HandleNativeCompactGroupWheel(delta);
                 }
             }
             catch (Exception ex)
@@ -277,13 +317,15 @@ public abstract partial class WidgetWindowBase
         _nativeGroupWheelEnabled =
             presentation is { WheelSwitchEnabled: true } &&
             presentation.Members.Count > 1;
+        _nativeCompactGroupWheelEnabled =
+            presentation is not null &&
+            presentation.Members.Count > 1;
         Diagnostics.SetSurfaceId(presentation?.SurfaceId);
         WidgetShellControl.SetGroupPresentation(
             presentation,
             animateIdentity,
             origin,
             forward);
-        QueueGroupDetachPreviewWarmup(presentation);
         OnWidgetGroupPresentationChanged(presentation);
     }
 
@@ -354,7 +396,8 @@ public abstract partial class WidgetWindowBase
             // still loading is a valid request to cancel that pending switch.
             succeeded = await manager.SwitchWidgetGroupMemberAsync(
                 e.WidgetId,
-                e.Origin);
+                e.Origin,
+                e.PreferredForward);
         }
         catch (Exception ex)
         {
@@ -498,8 +541,7 @@ public abstract partial class WidgetWindowBase
                 "Widget.Group.DetachDragCaption");
             preview = manager
                 .AcquireWidgetDetachPlacementPreview(
-                    caption,
-                    GetCurrentSurfaceCornerRadius());
+                    BuildDetachPreviewAppearance(caption));
         }
         catch (Exception ex)
         {
@@ -588,35 +630,83 @@ public abstract partial class WidgetWindowBase
         preview?.Hide();
     }
 
-    private void QueueGroupDetachPreviewWarmup(
-        WidgetGroupPresentation? presentation)
+    private void WidgetShellControl_GroupTitlePointerPressed(
+        object sender,
+        Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
     {
-        if (presentation is null || _groupDetachPreviewWarmupQueued)
+        if (!_groupingInitialized ||
+            !WidgetShellControl.HasWidgetGroup ||
+            !e.GetCurrentPoint(WidgetShellControl).Properties.IsLeftButtonPressed)
+        {
+            return;
+        }
+
+        QueueGroupDetachPreviewWarmup();
+    }
+
+    private void QueueGroupDetachPreviewWarmup()
+    {
+        App? app = App.Current;
+        WidgetManager? manager = app?.WidgetManager;
+        if (_groupDetachPreviewWarmupQueued ||
+            manager is null ||
+            manager.HasWidgetDetachPlacementPreview)
         {
             return;
         }
 
         _groupDetachPreviewWarmupQueued = true;
         DispatcherQueue.TryEnqueue(
-            Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
+            Microsoft.UI.Dispatching.DispatcherQueuePriority.Normal,
             () =>
             {
-                App? app = App.Current;
-                WidgetManager? manager = app?.WidgetManager;
+                _groupDetachPreviewWarmupQueued = false;
+                App? currentApp = App.Current;
+                WidgetManager? currentManager = currentApp?.WidgetManager;
                 if (!_groupingInitialized ||
-                    WidgetShellControl.HasWidgetGroup == false ||
-                    app is null ||
-                    manager is null)
+                    !WidgetShellControl.HasWidgetGroup ||
+                    currentApp is null ||
+                    currentManager is null)
                 {
                     return;
                 }
 
-                string caption = app.LocalizationService.T(
+                string caption = currentApp.LocalizationService.T(
                     "Widget.Group.DetachDragCaption");
-                manager.PrewarmWidgetDetachPlacementPreview(
-                    caption,
-                    GetCurrentSurfaceCornerRadius());
+                currentManager.PrewarmWidgetDetachPlacementPreview(
+                    BuildDetachPreviewAppearance(caption));
             });
+    }
+
+    private WidgetDetachPreviewAppearance BuildDetachPreviewAppearance(string caption)
+    {
+        bool isDark = RootElement.ActualTheme == Microsoft.UI.Xaml.ElementTheme.Dark;
+        double cornerRadius = GetCurrentSurfaceCornerRadius();
+        double surfaceOpacity = Math.Clamp(WidgetOpacity, 0.0, 1.0);
+        string materialType = WindowsCompatibilityService.ResolveWidgetMaterialType(
+            SettingsService.Settings.WidgetShell.WidgetMaterialType);
+        double materialIntensity = SettingsService.Settings.WidgetShell.WidgetMaterialIntensity;
+        Windows.UI.Color accentColor = App.Current?.ThemeService?.GetEffectiveAccentColor()
+            ?? AccentColorHelper.DefaultAccentColor;
+        Windows.UI.Color? customBackgroundColor = null;
+        if (WidgetShellControl.CustomBackgroundColorHex is { } customHex &&
+            AccentColorHelper.TryParseHex(customHex, out Windows.UI.Color parsedCustom))
+        {
+            customBackgroundColor = parsedCustom;
+        }
+
+        var (borderThickness, borderColor, _) = GetWidgetBorderVisuals(isDark, accentColor);
+        return new WidgetDetachPreviewAppearance(
+            caption,
+            cornerRadius,
+            materialType,
+            isDark,
+            accentColor,
+            surfaceOpacity,
+            materialIntensity,
+            customBackgroundColor,
+            borderThickness,
+            borderColor);
     }
 
     private PointInt32? TryResolveDetachedPosition(

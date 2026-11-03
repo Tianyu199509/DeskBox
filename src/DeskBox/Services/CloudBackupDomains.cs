@@ -11,7 +11,8 @@ public enum CloudBackupDomain
     None = 0,
     TodoData = 1,
     QuickCaptureData = 2,
-    WidgetStyle = 4
+    WidgetStyle = 4,
+    CustomWidgets = 8
 }
 
 /// <summary>
@@ -35,6 +36,7 @@ public enum CloudBackupDomain
 ///                      (thumbnails/ and exports/ are derived artifacts and
 ///                      stay out either way).
 ///   WidgetStyle      — no data files; carried as widget-style.json.
+///   CustomWidgets    — data/custom-widgets/&lt;id&gt;/{manifest.json,logic.js,locales/*.json,store.json,brief.md,revisions.json}.
 ///
 /// Everything else — settings.json, widget-layout.json (device-local layout
 /// state), FileSafety history/journal, sidecars, caches, device.id,
@@ -49,7 +51,8 @@ internal static class CloudBackupDomains
     internal static readonly CloudBackupDomain[] FileDomains =
     [
         CloudBackupDomain.TodoData,
-        CloudBackupDomain.QuickCaptureData
+        CloudBackupDomain.QuickCaptureData,
+        CloudBackupDomain.CustomWidgets
     ];
 
     internal static bool IsInDomain(CloudBackupDomain domain, string relativePath)
@@ -59,6 +62,7 @@ internal static class CloudBackupDomains
         {
             CloudBackupDomain.TodoData => IsTodoDataPath(normalized),
             CloudBackupDomain.QuickCaptureData => IsQuickCaptureDataPath(normalized),
+            CloudBackupDomain.CustomWidgets => IsCustomWidgetDataPath(normalized),
             // WidgetStyle owns no data-directory files.
             _ => false
         };
@@ -87,6 +91,7 @@ internal static class CloudBackupDomains
         CloudBackupDomain.TodoData => "todo-data",
         CloudBackupDomain.QuickCaptureData => "quick-capture-data",
         CloudBackupDomain.WidgetStyle => "widget-style",
+        CloudBackupDomain.CustomWidgets => "custom-widgets",
         _ => throw new ArgumentOutOfRangeException(nameof(domain), domain, null)
     };
 
@@ -97,6 +102,7 @@ internal static class CloudBackupDomains
             "todo-data" => CloudBackupDomain.TodoData,
             "quick-capture-data" => CloudBackupDomain.QuickCaptureData,
             "widget-style" => CloudBackupDomain.WidgetStyle,
+            "custom-widgets" => CloudBackupDomain.CustomWidgets,
             _ => CloudBackupDomain.None
         };
         return domain != CloudBackupDomain.None;
@@ -184,4 +190,55 @@ internal static class CloudBackupDomains
 
     private static bool IsQuickCaptureDataPath(string normalizedPath) =>
         normalizedPath.Equals("quick-capture/quick-capture.json", StringComparison.OrdinalIgnoreCase);
+
+    internal static string? TryGetCustomWidgetId(string relativePath)
+    {
+        string normalized = relativePath.Replace('\\', '/');
+        const string prefix = CustomWidgetDataStore.SubdirectoryName + "/";
+        if (!normalized.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        string rest = normalized[prefix.Length..];
+        int slash = rest.IndexOf('/');
+        if (slash <= 0)
+        {
+            return null;
+        }
+
+        string widgetId = rest[..slash];
+        if (widgetId.Equals("_studio-draft", StringComparison.OrdinalIgnoreCase) ||
+            widgetId.StartsWith("__studio_template_", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        string tail = rest[(slash + 1)..];
+        if (tail.Equals("manifest.json", StringComparison.OrdinalIgnoreCase) ||
+            tail.Equals(CustomWidgetDataStore.LogicJsFileName, StringComparison.OrdinalIgnoreCase) ||
+            tail.Equals("store.json", StringComparison.OrdinalIgnoreCase) ||
+            tail.Equals(CustomWidgetStudioSessionStore.BriefFileName, StringComparison.OrdinalIgnoreCase) ||
+            tail.Equals(CustomWidgetStudioSessionStore.RevisionsFileName, StringComparison.OrdinalIgnoreCase))
+        {
+            return widgetId;
+        }
+
+        const string localesPrefix = CustomWidgetDataStore.LocalesDirectoryName + "/";
+        if (tail.StartsWith(localesPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            string localeFile = tail[localesPrefix.Length..];
+            if (localeFile.Length > 5 &&
+                !localeFile.Contains('/') &&
+                localeFile.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+            {
+                return widgetId;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsCustomWidgetDataPath(string normalizedPath) =>
+        TryGetCustomWidgetId(normalizedPath) is not null;
 }

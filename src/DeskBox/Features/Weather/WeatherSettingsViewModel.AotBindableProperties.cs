@@ -17,6 +17,7 @@ namespace DeskBox.Features.Weather;
     nameof(CitySearchPlaceholder),
     nameof(CitySearchText),
     nameof(CitySuggestionItems),
+    nameof(IsManualLocationSelected),
     nameof(LocationStatusText),
     nameof(NoCityResultsText),
     nameof(SelectedDataSource),
@@ -36,7 +37,8 @@ namespace DeskBox.Features.Weather;
     nameof(ShowPressure),
     nameof(ShowSunrise),
     nameof(ShowUvIndex),
-    nameof(ShowWind)
+    nameof(ShowWind),
+    nameof(UnitsAndSourceSummaryText)
 ], [])]
 public sealed partial class WeatherSettingsViewModel
 {

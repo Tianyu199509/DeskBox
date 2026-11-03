@@ -1,9 +1,11 @@
 using DeskBox.Contracts;
+using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Services;
 using DeskBox.ViewModels;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
+using Windows.ApplicationModel.DataTransfer;
 
 namespace DeskBox.Controls.WidgetContents;
 
@@ -20,8 +22,14 @@ public sealed class QuickCaptureWidgetContentAdapter :
     IWidgetHostViewportContent,
     IWidgetInteractiveResizeContent,
     IWidgetAddActionContent,
-    IWidgetGroupContentCacheable
+    IWidgetGroupContentCacheable,
+    IWidgetPerformanceAwareContent
 {
+    private readonly SettingsService _settingsService;
+    private readonly LocalizationService _localizationService;
+    private bool _isWindowVisible = true;
+    private bool _isCompactCollapsed;
+
     public QuickCaptureWidgetContentAdapter(
         WidgetConfig config,
         QuickCaptureService quickCaptureService,
@@ -61,14 +69,21 @@ public sealed class QuickCaptureWidgetContentAdapter :
     {
         ArgumentNullException.ThrowIfNull(viewModel);
 
+        _settingsService = settingsService;
+        _localizationService = localizationService;
         ViewModel = viewModel;
     }
+
+    private bool ShouldKeepCollapsedViewWarm =>
+        _settingsService.Settings.Performance.KeepCapsuleContentWarm;
 
     public QuickCaptureWidgetViewModel ViewModel { get; }
 
     public bool IsReadyForReuse =>
-        MaterializedView is QuickCaptureSurfaceContent content &&
-        content.IsReadyForReuse;
+        !IsDisposed &&
+        (MaterializedView is QuickCaptureSurfaceContent content
+            ? content.IsReadyForReuse
+            : ViewModel.IsInitialized);
 
     public event EventHandler<WidgetFeedbackRequestedEventArgs>? FeedbackRequested;
 
@@ -77,6 +92,175 @@ public sealed class QuickCaptureWidgetContentAdapter :
         if (view is QuickCaptureSurfaceContent content)
         {
             content.FeedbackRequested += Content_FeedbackRequested;
+            content.OnCompactStateChanged(_isCompactCollapsed);
+            content.OnWindowVisibilityChanged(_isWindowVisible);
+            content.SyncFromResidentViewModel();
+        }
+    }
+
+    protected override void OnHibernatingView(FrameworkElement view)
+    {
+        QuickCaptureSurfaceContent.QuickCaptureHibernatingWork? pendingWork = null;
+        if (view is QuickCaptureSurfaceContent content)
+        {
+            pendingWork = content.ExtractAndReleasePendingWorkBeforeTeardown();
+            content.FeedbackRequested -= Content_FeedbackRequested;
+            content.DisposeLeafOnly();
+        }
+
+        if (pendingWork is not null)
+        {
+            _ = PersistHibernatingWorkAsync(pendingWork);
+        }
+
+        ViewModel.ReleaseAttachmentThumbnails();
+        IconHelper.ClearCacheScope(TodoAttachmentViewModel.QuickCapturePreviewCacheScope);
+    }
+
+    private async Task PersistHibernatingWorkAsync(
+        QuickCaptureSurfaceContent.QuickCaptureHibernatingWork work)
+    {
+        try
+        {
+            string inlineBody = work.InlineComposerDraft?.Trim() ?? string.Empty;
+            DroppedFilePath[] inlineAttachments = work.PendingInlineAttachments ?? [];
+            if (!string.IsNullOrWhiteSpace(inlineBody) || inlineAttachments.Length > 0)
+            {
+                if (inlineAttachments.Length > 0)
+                {
+                    QuickCaptureItemViewModel? createdWithFiles =
+                        await ViewModel.AddItemWithAttachmentsAsync(inlineAttachments);
+                    if (createdWithFiles is not null && !string.IsNullOrWhiteSpace(inlineBody))
+                    {
+                        await ViewModel.EditItemDetailsWithResultAsync(
+                            createdWithFiles,
+                            createdWithFiles.Title,
+                            inlineBody,
+                            QuickCaptureAppearancePreset.Default,
+                            ViewModel.EditorContentFormat);
+                    }
+                }
+                else
+                {
+                    await ViewModel.AddDetailedItemWithResultAsync(
+                        null,
+                        inlineBody,
+                        QuickCaptureAppearancePreset.Default,
+                        ViewModel.EditorContentFormat);
+                }
+
+                if (HasHibernatedTransientState &&
+                    HibernatedTransientState is QuickCaptureSurfaceContent.QuickCaptureSurfaceSwitchState inlineState)
+                {
+                    SaveHibernatedTransientState(inlineState with
+                    {
+                        IsInlineComposerOpen = false,
+                        InlineComposerDraft = null,
+                        PendingInlineAttachments = null
+                    });
+                }
+            }
+
+            if (work.IsCreatingDetail)
+            {
+                string? createdId = null;
+                if (work.PendingAttachments.Length > 0)
+                {
+                    QuickCaptureItemViewModel? attached =
+                        await ViewModel.AddItemWithAttachmentsAsync(work.PendingAttachments);
+                    if (attached is not null)
+                    {
+                        if (!string.IsNullOrWhiteSpace(work.Body) ||
+                            work.Appearance != QuickCaptureAppearancePreset.Default ||
+                            work.ContentFormat != ViewModel.EditorContentFormat)
+                        {
+                            QuickCaptureWriteResult updateResult =
+                                await ViewModel.EditItemDetailsWithResultAsync(
+                                    attached,
+                                    attached.Title,
+                                    work.Body,
+                                    work.Appearance,
+                                    work.ContentFormat);
+                            createdId = updateResult.Item?.Id ?? attached.Id;
+                        }
+                        else
+                        {
+                            createdId = attached.Id;
+                        }
+                    }
+                }
+                else if (!string.IsNullOrWhiteSpace(work.Body))
+                {
+                    QuickCaptureWriteResult addResult =
+                        await ViewModel.AddDetailedItemWithResultAsync(
+                            null,
+                            work.Body,
+                            work.Appearance,
+                            work.ContentFormat);
+                    createdId = addResult.Item?.Id;
+                }
+
+                if (!string.IsNullOrWhiteSpace(createdId) && !IsDisposed)
+                {
+                    await ViewModel.RefreshItemsAsync();
+                    if (MaterializedView is QuickCaptureSurfaceContent liveContent)
+                    {
+                        liveContent.PromoteHibernatedDraftToPersistedItem(createdId);
+                    }
+                    else if (HasHibernatedTransientState)
+                    {
+                        if (HibernatedTransientState is QuickCaptureSurfaceContent.QuickCaptureSurfaceSwitchState switchState &&
+                            switchState.ExtendedState.IsCreatingDetail)
+                        {
+                            SaveHibernatedTransientState(switchState with
+                            {
+                                ExtendedState = switchState.ExtendedState with
+                                {
+                                    BaseState = switchState.ExtendedState.BaseState with
+                                    {
+                                        SelectedDetailItemId = createdId,
+                                        IsDetailEditing = true,
+                                        DetailDraft = null
+                                    },
+                                    IsCreatingDetail = false,
+                                    PendingDetailAttachments = null
+                                }
+                            });
+                        }
+                        else if (HibernatedTransientState is QuickCaptureExtendedTransientState savedState &&
+                                 savedState.IsCreatingDetail)
+                        {
+                            SaveHibernatedTransientState(savedState with
+                            {
+                                BaseState = savedState.BaseState with
+                                {
+                                    SelectedDetailItemId = createdId,
+                                    IsDetailEditing = true,
+                                    DetailDraft = null
+                                },
+                                IsCreatingDetail = false,
+                                PendingDetailAttachments = null
+                            });
+                        }
+                    }
+                }
+
+                return;
+            }
+
+            if (work.ExistingItem is { } existingItem && !string.IsNullOrWhiteSpace(work.Body))
+            {
+                await ViewModel.EditItemDetailsWithResultAsync(
+                    existingItem,
+                    existingItem.Title,
+                    work.Body,
+                    work.Appearance,
+                    work.ContentFormat);
+            }
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[WidgetSurface] Quick Capture hibernate save failed id={WidgetId}: {ex}");
         }
     }
 
@@ -89,7 +273,9 @@ public sealed class QuickCaptureWidgetContentAdapter :
 
     public override Task InitializeAsync()
     {
-        return AsContent(View).InitializeContentAsync();
+        return MaterializedView is QuickCaptureSurfaceContent content
+            ? content.InitializeContentAsync()
+            : ViewModel.InitializeAsync();
     }
 
     public override Task RefreshAsync()
@@ -107,6 +293,10 @@ public sealed class QuickCaptureWidgetContentAdapter :
         if (MaterializedView is QuickCaptureSurfaceContent content)
         {
             content.ApplyAppearance();
+        }
+        else
+        {
+            ViewModel.ApplyAppearancePreview();
         }
     }
 
@@ -126,11 +316,63 @@ public sealed class QuickCaptureWidgetContentAdapter :
         }
     }
 
+    public override void OnCompactStateChanged(bool collapsed)
+    {
+        _isCompactCollapsed = collapsed;
+        if (MaterializedView is QuickCaptureSurfaceContent content)
+        {
+            content.OnCompactStateChanged(collapsed);
+        }
+
+        if (collapsed && !ShouldKeepCollapsedViewWarm)
+        {
+            ViewModel.ReleaseAttachmentThumbnails();
+            IconHelper.ClearCacheScope(TodoAttachmentViewModel.QuickCapturePreviewCacheScope);
+        }
+    }
+
     public override void OnWindowVisibilityChanged(bool visible)
     {
+        _isWindowVisible = visible;
         if (MaterializedView is QuickCaptureSurfaceContent content)
         {
             content.OnWindowVisibilityChanged(visible);
+        }
+        else if (!visible)
+        {
+            ViewModel.SuspendWindowRefresh();
+        }
+    }
+
+    public override void OnWindowLongHidden()
+    {
+        // Keep any expanded live view intact; collapsed leaf hibernation is owned
+        // exclusively by WidgetShell.HibernateHostedContentView().
+        EffectivePerformanceSettings performance =
+            PerformanceSettingsPolicy.Resolve(_settingsService.Settings);
+        if (MaterializedView is null ||
+            (!_isWindowVisible &&
+             string.Equals(
+                 performance.HiddenCacheCleanupScope,
+                 PerformanceSettingsPolicy.HiddenCacheCleanupScopeAllRecreatable,
+                 StringComparison.Ordinal)))
+        {
+            ViewModel.ReleaseAttachmentThumbnails();
+            IconHelper.ClearCacheScope(TodoAttachmentViewModel.QuickCapturePreviewCacheScope);
+        }
+    }
+
+    public void ApplyPerformanceSettings()
+    {
+        if (IsDisposed)
+        {
+            return;
+        }
+
+        if (_isCompactCollapsed && !ShouldKeepCollapsedViewWarm)
+        {
+            ViewModel.ReleaseAttachmentThumbnails();
+            IconHelper.ClearCacheScope(TodoAttachmentViewModel.QuickCapturePreviewCacheScope);
         }
     }
 
@@ -202,9 +444,12 @@ public sealed class QuickCaptureWidgetContentAdapter :
 
     object? IWidgetTransientStateContent.CaptureTransientState()
     {
-        return MaterializedView is QuickCaptureSurfaceContent content
-            ? content.CaptureSwitchTransientState()
-            : null;
+        if (MaterializedView is QuickCaptureSurfaceContent content)
+        {
+            return content.CaptureSwitchTransientState();
+        }
+
+        return HasHibernatedTransientState ? HibernatedTransientState : null;
     }
 
     void IWidgetTransientStateContent.RestoreTransientState(object? state)
@@ -212,14 +457,104 @@ public sealed class QuickCaptureWidgetContentAdapter :
         if (MaterializedView is QuickCaptureSurfaceContent content)
         {
             content.RestoreSwitchTransientState(state);
+            return;
         }
+
+        SaveHibernatedTransientState(state);
     }
 
     internal Task RevealItemAsync(string? itemId)
     {
-        return MaterializedView is QuickCaptureSurfaceContent content
+        return View is QuickCaptureSurfaceContent content
             ? content.RevealItemAsync(itemId)
             : Task.CompletedTask;
+    }
+
+    internal void FlushPendingEditsForShutdown()
+    {
+        if (IsDisposed || MaterializedView is not QuickCaptureSurfaceContent content)
+        {
+            return;
+        }
+
+        QuickCaptureSurfaceContent.QuickCaptureHibernatingWork? pendingWork =
+            content.FlushPendingEditsForShutdown();
+        if (pendingWork is not null)
+        {
+            _ = PersistHibernatingWorkAsync(pendingWork);
+        }
+    }
+
+    internal bool CanImportExternalDrop(DataPackageView? dataView)
+    {
+        return !IsDisposed && QuickCaptureSurfaceContent.CanImportExternalDrop(dataView);
+    }
+
+    internal async Task<bool> ImportExternalDropAsync(DataPackageView? dataView)
+    {
+        if (IsDisposed || dataView is null)
+        {
+            return false;
+        }
+
+        if (MaterializedView is QuickCaptureSurfaceContent content)
+        {
+            return await content.ImportExternalDropAsync(dataView);
+        }
+
+        try
+        {
+            if (DeskBoxDragData.TryGetTodoDragItems(dataView) is { Count: > 0 } todoItems)
+            {
+                int importedCount = await ViewModel.ImportTodoItemsAsync(todoItems);
+                if (importedCount <= 0)
+                {
+                    return false;
+                }
+
+                RaiseHibernatedFeedback(
+                    _localizationService.T("QuickCapture.Dropped"),
+                    WidgetFeedbackSeverity.Success,
+                    "quick-todo-drop");
+                return true;
+            }
+
+            if (DeskBoxDragData.HasDroppedFiles(dataView))
+            {
+                using DroppedFileBatch batch =
+                    await DeskBoxDragData.TryGetDroppedFilesAsync(dataView);
+                return await ImportHibernatedNativeDroppedFilesAsync(
+                    batch.Files,
+                    targetItem: null);
+            }
+
+            string? text = await DeskBoxDragData.TryGetTextAsync(dataView);
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                QuickCaptureWriteResult writeResult = await ViewModel.AddTextAsync(text);
+                if (writeResult.Saved)
+                {
+                    RaiseHibernatedFeedback(
+                        _localizationService.T("QuickCapture.Dropped"),
+                        WidgetFeedbackSeverity.Success,
+                        "quick-text-drop");
+                    return true;
+                }
+            }
+
+            return false;
+        }
+        catch (Exception ex)
+        {
+            App.Log(
+                $"[WidgetSurface] Quick Capture external drop failed " +
+                $"id={WidgetId}: {ex}");
+            RaiseHibernatedFeedback(
+                _localizationService.T("Common.OperationFailedRetry"),
+                WidgetFeedbackSeverity.Error,
+                "quick-external-drop-error");
+            return false;
+        }
     }
 
     internal Task<bool> ImportNativeDroppedFilesAsync(
@@ -228,7 +563,59 @@ public sealed class QuickCaptureWidgetContentAdapter :
     {
         return MaterializedView is QuickCaptureSurfaceContent content
             ? content.ImportNativeDroppedFilesAsync(files, targetItem)
-            : Task.FromResult(false);
+            : ImportHibernatedNativeDroppedFilesAsync(files, targetItem);
+    }
+
+    private async Task<bool> ImportHibernatedNativeDroppedFilesAsync(
+        IReadOnlyList<DroppedFilePath> files,
+        QuickCaptureItemViewModel? targetItem)
+    {
+        if (files.Count == 0 || IsDisposed)
+        {
+            return false;
+        }
+
+        try
+        {
+            QuickCaptureItemViewModel? imported = targetItem is null
+                ? await ViewModel.AddItemWithAttachmentsAsync(files)
+                : await ViewModel.AddAttachmentsAsync(targetItem, files);
+            if (imported is null)
+            {
+                return false;
+            }
+
+            RaiseHibernatedFeedback(
+                _localizationService.T("QuickCapture.Dropped"),
+                WidgetFeedbackSeverity.Success,
+                targetItem is null ? "quick-native-drop" : "quick-native-attach");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            App.Log(
+                $"[WidgetSurface] Quick Capture native file drop failed " +
+                $"id={WidgetId}: {ex}");
+            RaiseHibernatedFeedback(
+                _localizationService.T("Common.OperationFailedRetry"),
+                WidgetFeedbackSeverity.Error,
+                "quick-native-drop-error");
+            return false;
+        }
+    }
+
+    private void RaiseHibernatedFeedback(
+        string message,
+        WidgetFeedbackSeverity severity,
+        string? deduplicationKey)
+    {
+        FeedbackRequested?.Invoke(
+            this,
+            new WidgetFeedbackRequestedEventArgs(
+                new WidgetFeedbackRequest(
+                    message,
+                    severity,
+                    deduplicationKey)));
     }
 
     private QuickCaptureSurfaceContent AsContent(FrameworkElement view)
@@ -242,6 +629,13 @@ public sealed class QuickCaptureWidgetContentAdapter :
     {
         if (MaterializedView is QuickCaptureSurfaceContent content)
         {
+            QuickCaptureSurfaceContent.QuickCaptureHibernatingWork? pendingWork =
+                content.ExtractAndReleasePendingWorkBeforeTeardown();
+            if (pendingWork is not null)
+            {
+                _ = PersistHibernatingWorkAsync(pendingWork);
+            }
+
             // The leaf's dispose chain releases view subscriptions and
             // disposes the view model, matching the pre-adapter ownership.
             content.FeedbackRequested -= Content_FeedbackRequested;
@@ -251,5 +645,7 @@ public sealed class QuickCaptureWidgetContentAdapter :
         {
             ViewModel.Dispose();
         }
+
+        IconHelper.ClearCacheScope(TodoAttachmentViewModel.QuickCapturePreviewCacheScope);
     }
 }

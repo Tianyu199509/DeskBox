@@ -16,8 +16,9 @@ public sealed class GlanceCalendarAndImageServiceTests : IDisposable
         Guid.NewGuid().ToString("N"));
 
     [Theory]
-    [InlineData(360, 247, 1, 546)]
-    [InlineData(360, 247, 2, 1092)]
+    [InlineData(360, 247, 1, 512)]
+    [InlineData(360, 247, 2, 896)]
+    [InlineData(640, 320, 1.5, 1024)]
     [InlineData(100, 100, 1, GlanceImageDecodeSizeCalculator.MinimumDecodePixelWidth)]
     [InlineData(2000, 1400, 2, GlanceImageDecodeSizeCalculator.MaximumDecodePixelWidth)]
     public void ImageDecodeSize_UsesBoundedPhysicalSupersampling(
@@ -26,15 +27,23 @@ public sealed class GlanceCalendarAndImageServiceTests : IDisposable
         double scale,
         int expected)
     {
+        Assert.Equal(384, GlanceImageDecodeSizeCalculator.MinimumDecodePixelWidth);
+        Assert.Equal(128, GlanceImageDecodeSizeCalculator.DecodeStepPixels);
+        Assert.Equal(1920, GlanceImageDecodeSizeCalculator.MaximumDecodePixelWidth);
+        Assert.Equal(1280, GlanceImageDecodeSizeCalculator.ResourceSaverMaximumDecodePixelWidth);
         Assert.Equal(expected, GlanceImageDecodeSizeCalculator.Calculate(width, height, scale));
+        Assert.Equal(
+            GlanceImageDecodeSizeCalculator.ResourceSaverMaximumDecodePixelWidth,
+            GlanceImageDecodeSizeCalculator.Calculate(2000, 1400, 2, resourceSaver: true));
     }
 
     [Theory]
-    [InlineData(0, 874, true)]
-    [InlineData(874, 900, true)]
-    [InlineData(1747, 874, true)]
+    [InlineData(0, 896, true)]
+    [InlineData(896, 1024, true)]
+    [InlineData(1024, 896, false)]
+    [InlineData(1024, 768, true)]
     [InlineData(1000, 850, false)]
-    [InlineData(1000, 800, true)]
+    [InlineData(1000, 750, true)]
     [InlineData(1000, 0, false)]
     public void ImageDecodeSize_RefreshesForGrowthAndMeaningfulShrink(
         int current,
@@ -91,12 +100,16 @@ public sealed class GlanceCalendarAndImageServiceTests : IDisposable
         Assert.Contains("MaxWidth=\"{Binding CalendarPanelMaxWidth}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Width=\"{Binding CalendarPanelWidth}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("HorizontalAlignment=\"Center\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("x:Name=\"NativeCalendarView\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("CalendarViewDayItemStyle=\"{StaticResource GlanceCalendarDayItemStyle}\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("CalendarViewDayItemChanging=\"NativeCalendarView_DayItemChanging\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("SelectionMode=\"None\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("NumberOfWeeksInView=\"6\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("DayOfWeekFormat=\"{}{dayofweek.abbreviated(1)}\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("<CalendarView", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("NativeCalendarView", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("CalendarViewDayItem", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"CalendarSurfaceRoot\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Load=\"{x:Bind IsCalendarElementLoaded}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"CalendarMonthHeaderText\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"CalendarPreviousMonthButton\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"CalendarNextMonthButton\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"CalendarWeekdayHeaderGrid\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"CalendarDaysGrid\"", xaml, StringComparison.Ordinal);
         Assert.Contains("CornerRadius=\"{Binding CalendarCornerRadius}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("x:Key=\"GlanceCalendarAcrylicBrush\"", xaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"CalendarMaterialSurface\"", xaml, StringComparison.Ordinal);
@@ -157,11 +170,11 @@ public sealed class GlanceCalendarAndImageServiceTests : IDisposable
         Assert.True(traditionalNoneOption >= 0 && traditionalNoneOption < traditionalAutoOption);
         Assert.DoesNotContain("SliderSettingValueTextStyle", settingsXaml, StringComparison.Ordinal);
         Assert.Contains("Glance.CalendarMaterial.FollowImage", settingsCodeBehind, StringComparison.Ordinal);
-        int layoutOption = settingsXaml.IndexOf("x:Name=\"LayoutComboBox\"", StringComparison.Ordinal);
-        int calendarMaterialOption = settingsXaml.IndexOf("x:Name=\"CalendarMaterialCard\"", StringComparison.Ordinal);
+        int styleCard = settingsXaml.IndexOf("x:Name=\"StyleCard\"", StringComparison.Ordinal);
         int traditionalCalendarOption = settingsXaml.IndexOf("x:Name=\"TraditionalCalendarCard\"", StringComparison.Ordinal);
-        Assert.True(layoutOption >= 0 && layoutOption < calendarMaterialOption);
-        Assert.True(calendarMaterialOption < traditionalCalendarOption);
+        int calendarMaterialOption = settingsXaml.IndexOf("x:Name=\"CalendarMaterialCard\"", StringComparison.Ordinal);
+        Assert.True(styleCard >= 0 && styleCard < traditionalCalendarOption);
+        Assert.True(traditionalCalendarOption < calendarMaterialOption);
         Assert.Contains("Glance.Rotation.10Seconds", settingsCodeBehind, StringComparison.Ordinal);
         Assert.Contains("Glance.Rotation.30Seconds", settingsCodeBehind, StringComparison.Ordinal);
         Assert.Contains("Glance.Rotation.60Seconds", settingsCodeBehind, StringComparison.Ordinal);
@@ -181,26 +194,17 @@ public sealed class GlanceCalendarAndImageServiceTests : IDisposable
         Assert.Contains("ShowExpandedCalendarImageReadability", xaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"ImageForegroundThemeScope\"", xaml, StringComparison.Ordinal);
         Assert.Contains("ApplyImageAwareTheme", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("x:Key=\"GlanceCalendarDayItemStyle\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("CalendarItemCornerRadius=\"6\"", xaml, StringComparison.Ordinal);
-        // The today accent is host-side: the native TodayBackground runs on a
-        // today date the CalendarView caches once at creation and never
-        // refreshes across midnight (microsoft-ui-xaml #11205), so the surface
-        // must keep the native chrome off and draw the pill from Tag.IsToday.
-        Assert.Contains("IsTodayHighlighted=\"False\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("TodayBackground=", xaml, StringComparison.Ordinal);
-        // Pin the host-side pill binding itself: without it the flag above
-        // would silently drop today's visual distinction entirely.
-        Assert.Contains("Tag.IsToday", xaml, StringComparison.Ordinal);
-        Assert.Contains("Tag.SecondaryText", xaml, StringComparison.Ordinal);
-        Assert.Contains("Tag.HasSecondaryText", xaml, StringComparison.Ordinal);
+        Assert.Contains("CalendarColumnCount = 7", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("CalendarRowCount = 6", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("WidgetTextShadow.SetCast(cell.PrimaryText, !decoration.IsToday)", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("WidgetTextShadow.SetCast(cell.SecondaryText, !decoration.IsToday)", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("cell.TodayPill.Visibility = decoration.IsToday", codeBehind, StringComparison.Ordinal);
         Assert.Contains("day?.FestivalText", decorationBuilder, StringComparison.Ordinal);
         Assert.Contains("day?.TraditionalText", decorationBuilder, StringComparison.Ordinal);
         Assert.Contains("GlanceCalendarDayDecorationBuilder.Build", codeBehind, StringComparison.Ordinal);
         Assert.Contains("RefreshIfObservedDateChanged", viewModel, StringComparison.Ordinal);
         Assert.Contains("TraditionalCalendarTitle", xaml, StringComparison.Ordinal);
-        Assert.Contains("LineHeight=\"10\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Opacity=\"0.86\"", xaml, StringComparison.Ordinal);
         Assert.Contains("CornerRadius=\"6\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Padding=\"14,8\" RowSpacing=\"3\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("SystemControlAcrylicElementBrush", xaml, StringComparison.Ordinal);
@@ -213,15 +217,10 @@ public sealed class GlanceCalendarAndImageServiceTests : IDisposable
         Assert.Contains("WidgetCompactBoundsCalculator.ResolveOuterCornerRadius", viewModel, StringComparison.Ordinal);
         Assert.Contains("CalendarPanelMaximumWidth = 360", viewModel, StringComparison.Ordinal);
         Assert.Contains("SetDisplayedCalendarMonthAsync", viewModel, StringComparison.Ordinal);
-        Assert.Contains("GlanceCalendarNavigationResolver.ResolveDisplayedMonth", codeBehind, StringComparison.Ordinal);
         Assert.Contains("GlanceCalendarNavigationResolver.ResolveWheelTarget", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("MonthViewScrollViewer", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("VerticalScrollMode = ScrollMode.Disabled", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("handledEventsToo: true", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("TryInvokeNativeCalendarNavigationButton", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("ButtonAutomationPeer", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("IInvokeProvider", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("CalendarViewDisplayMode.Month", codeBehind, StringComparison.Ordinal);
+        Assert.DoesNotContain("MonthViewScrollViewer", codeBehind, StringComparison.Ordinal);
+        Assert.DoesNotContain("ButtonAutomationPeer", codeBehind, StringComparison.Ordinal);
+        Assert.DoesNotContain("IInvokeProvider", codeBehind, StringComparison.Ordinal);
         Assert.Contains("IsCompactCalendarPresentation", viewModel, StringComparison.Ordinal);
         Assert.Contains("IsExpandedCalendarPresentation", viewModel, StringComparison.Ordinal);
         Assert.Contains("CompactCalendarDateText", xaml, StringComparison.Ordinal);
@@ -230,14 +229,11 @@ public sealed class GlanceCalendarAndImageServiceTests : IDisposable
         Assert.Contains("Margin=\"0,5,0,-5\"", xaml, StringComparison.Ordinal);
         Assert.Contains("ShowCalendarTraditionalDetails", viewModel, StringComparison.Ordinal);
         Assert.Contains("CalendarDayItemMinimumHeight", viewModel, StringComparison.Ordinal);
-        Assert.Contains("item.Height = itemHeight", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("_calendarDensityRefreshTimer", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("QueueCalendarDensityRefresh", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("cell.Root.MinHeight = itemHeight", codeBehind, StringComparison.Ordinal);
         Assert.Contains("_layoutResizeTimer", codeBehind, StringComparison.Ordinal);
         Assert.Contains("LayoutResizeTimer_Tick", codeBehind, StringComparison.Ordinal);
         Assert.Contains("_layoutResizeTimer.Stop();\n        _layoutResizeTimer.Start();", codeBehind.Replace("\r\n", "\n"), StringComparison.Ordinal);
         Assert.DoesNotContain("_viewModel.UpdateAvailableSize(e.NewSize.Width, e.NewSize.Height)", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("CalendarViewHeaderNavigationButtonPadding\">8,6,8,6", xaml, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -435,61 +431,96 @@ public sealed class GlanceCalendarAndImageServiceTests : IDisposable
     }
 
     [Fact]
-    public void CalendarLayout_ReservesStableNativeCalendarRows()
+    public void CalendarLayout_FitsThePanelToTheWeeksTheMonthOccupies()
     {
-        double standardPanel = GlanceCalendarLayoutCalculator.CalculatePanelHeight(
+        double fiveWeekPanel = GlanceCalendarLayoutCalculator.CalculatePanelHeight(
             availableHeight: 314,
             isCompact: false,
-            hasTraditionalCalendar: false);
-        double traditionalPanel = GlanceCalendarLayoutCalculator.CalculatePanelHeight(
-            availableHeight: 314,
+            hasTraditionalCalendar: false,
+            weekRows: 5);
+        double fiveWeekDay = GlanceCalendarLayoutCalculator.CalculateDayHeight(
+            fiveWeekPanel,
             isCompact: false,
-            hasTraditionalCalendar: true);
-        double standardDay = GlanceCalendarLayoutCalculator.CalculateDayHeight(
-            standardPanel,
+            hasTraditionalCalendar: false,
+            weekRows: 5,
+            availableHeight: 314);
+        double sixWeekDay = GlanceCalendarLayoutCalculator.CalculateDayHeight(
+            fiveWeekPanel,
             isCompact: false,
-            hasTraditionalCalendar: false);
-        double traditionalDay = GlanceCalendarLayoutCalculator.CalculateDayHeight(
-            traditionalPanel,
-            isCompact: false,
-            hasTraditionalCalendar: true);
+            hasTraditionalCalendar: false,
+            weekRows: 6,
+            availableHeight: 314);
         double compactPanel = GlanceCalendarLayoutCalculator.CalculatePanelHeight(
             availableHeight: 285,
             isCompact: true,
-            hasTraditionalCalendar: true);
+            hasTraditionalCalendar: true,
+            weekRows: 5);
         double compactDay = GlanceCalendarLayoutCalculator.CalculateDayHeight(
             compactPanel,
             isCompact: true,
-            hasTraditionalCalendar: true);
+            hasTraditionalCalendar: true,
+            weekRows: 5,
+            availableHeight: 285);
+        double minimalPanel = GlanceCalendarLayoutCalculator.CalculatePanelHeight(
+            availableHeight: 230,
+            isCompact: true,
+            hasTraditionalCalendar: false,
+            weekRows: 5);
+        double minimalDay = GlanceCalendarLayoutCalculator.CalculateDayHeight(
+            minimalPanel,
+            isCompact: true,
+            hasTraditionalCalendar: false,
+            weekRows: 5,
+            availableHeight: 230);
         double largePanel = GlanceCalendarLayoutCalculator.CalculatePanelHeight(
             availableHeight: 500,
             isCompact: false,
-            hasTraditionalCalendar: true);
-        double largeDay = GlanceCalendarLayoutCalculator.CalculateDayHeight(
-            largePanel,
-            isCompact: false,
-            hasTraditionalCalendar: true);
+            hasTraditionalCalendar: true,
+            weekRows: 6);
 
-        Assert.Equal(244, standardPanel);
-        Assert.Equal(standardPanel, traditionalPanel);
-        Assert.Equal(31, standardDay);
-        Assert.Equal(standardDay, traditionalDay);
+        // No sixth empty row is reserved: five weeks get taller cells.
+        Assert.Equal(212, fiveWeekPanel);
+        Assert.True(fiveWeekDay > sixWeekDay);
+        Assert.InRange(fiveWeekDay, 30, 31);
+        // Compact keeps the clock strip inside the panel.
         Assert.Equal(245, compactPanel);
-        Assert.Equal(24, compactDay);
+        Assert.InRange(compactDay, 28, 29);
+        // Below the minimal breakpoint the clock strip is dropped, not the weeks.
+        Assert.True(GlanceCalendarLayoutCalculator.IsMinimal(230));
+        Assert.False(GlanceCalendarLayoutCalculator.IsMinimal(260));
+        Assert.Equal(200, minimalPanel);
+        Assert.InRange(minimalDay, 28, 29);
+        // Large widgets cap the cell height instead of stretching forever.
         Assert.Equal(310, largePanel);
-        Assert.Equal(42, largeDay);
         Assert.True(GlanceCalendarLayoutCalculator.IsCompact(319));
         Assert.False(GlanceCalendarLayoutCalculator.IsCompact(320));
         Assert.False(GlanceCalendarLayoutCalculator.ShouldShowTraditionalDetails(
             panelWidth: 285,
-            dayHeight: compactDay,
+            dayHeight: 24,
             isCompact: true,
             hasTraditionalCalendar: true));
         Assert.True(GlanceCalendarLayoutCalculator.ShouldShowTraditionalDetails(
             panelWidth: 285,
-            dayHeight: standardDay,
+            dayHeight: fiveWeekDay,
             isCompact: false,
             hasTraditionalCalendar: true));
+    }
+
+    [Theory]
+    [InlineData(2026, 2, 4)]
+    [InlineData(2026, 11, 5)]
+    [InlineData(2026, 8, 6)]
+    public async Task CalendarLayout_CountsTheWeekRowsOfTheDisplayedMonth(int year, int month, int expectedRows)
+    {
+        // en-US grids start on Sunday: Feb 2026 starts on Sunday (4 weeks),
+        // Aug 2026 starts on Saturday and spills into a sixth week.
+        var source = new LocalCalendarPresentationSource();
+        GlanceCalendarMonth calendar = await source.GetMonthAsync(
+            new DateOnly(year, month, 1),
+            CultureInfo.GetCultureInfo("en-US"));
+
+        Assert.Equal(expectedRows, GlanceCalendarLayoutCalculator.CountWeekRows(calendar.Days));
+        Assert.Equal(0, GlanceCalendarLayoutCalculator.GetFirstWeekRow(calendar.Days));
     }
 
     [Fact]

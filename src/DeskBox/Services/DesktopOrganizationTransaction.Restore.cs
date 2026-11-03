@@ -1,4 +1,4 @@
-﻿using DeskBox.Models;
+using DeskBox.Models;
 
 namespace DeskBox.Services;
 
@@ -154,6 +154,11 @@ public sealed partial class DesktopOrganizationTransaction
             var candidates = new List<DesktopOrganizationRecoveryItem>();
             foreach (var item in journal.Items)
             {
+                if (item.ShortcutRebaseInProgress)
+                {
+                    Platform.ShellLinkVtableInterop.CleanupStagedShortcutTempFiles(item.DestinationPath);
+                }
+
                 if (!EntryExists(item.DestinationPath)) continue;
                 // A planned name alone is not proof that the move happened.
                 if (!item.Completed && (EntryExists(item.SourcePath) || !MatchesSnapshot(item.DestinationPath, item))) continue;
@@ -389,10 +394,12 @@ public sealed partial class DesktopOrganizationTransaction
             AutoOrganizationSuppressions?.BeginOperation(suppressionId, plans);
             void Record(FileService.FileTransferResult result)
             {
+                var item = batch.FirstOrDefault(candidate => string.Equals(candidate.DestinationPath, result.SourcePath, StringComparison.OrdinalIgnoreCase));
+                if (item is null || item.Completed) return;
                 if (!FileService.IsCompletedShellMove(result.SourcePath, result.DestinationPath)) return;
-                var item = batch.First(candidate => string.Equals(candidate.DestinationPath, result.SourcePath, StringComparison.OrdinalIgnoreCase));
                 item.RestorePath = result.DestinationPath;
                 item.Completed = true;
+                item.ShortcutRebaseInProgress = false;
                 // The undo journal's receipts also carry the restored object's
                 // identity so a later reconcile can verify them the same way.
                 RecordDestinationIdentity(item, result.DestinationPath);
@@ -417,6 +424,10 @@ public sealed partial class DesktopOrganizationTransaction
                         .Concat(plans.Select(plan => plan.DestinationPath)));
             }
         }
+
+        await RebaseCompletedShortcutsAndSaveJournalAsync(
+            journal,
+            isRestore: true);
     }
 
     private static void ApplyUndoReceipts(OrganizationHistoryEntry history, DesktopOrganizationRecoveryJournal journal)
@@ -474,10 +485,22 @@ public sealed partial class DesktopOrganizationTransaction
             return false;
         }
 
-        return FileService.TryCaptureSourceIdentity(path) is { } current &&
-            current.FileId is { } currentId &&
-            currentId == new FileService.FileId128(identity.FileIdHigh, identity.FileIdLow) &&
-            current.VolumeSerialNumber == identity.VolumeSerialNumber &&
+        if (FileService.TryCaptureSourceIdentity(path) is not { } current ||
+            current.FileId is not { } currentId ||
+            current.VolumeSerialNumber != identity.VolumeSerialNumber)
+        {
+            return false;
+        }
+
+        if (item.ShortcutRebaseInProgress &&
+            !Directory.Exists(path) &&
+            Path.GetExtension(path).Equals(".lnk", StringComparison.OrdinalIgnoreCase) &&
+            current.Length >= 76)
+        {
+            return true;
+        }
+
+        return currentId == new FileService.FileId128(identity.FileIdHigh, identity.FileIdLow) &&
             (!item.Size.HasValue || current.Length == item.Size.Value) &&
             (!item.LastWriteTimeUtc.HasValue ||
                 current.LastWriteTimeUtc == item.LastWriteTimeUtc.Value);

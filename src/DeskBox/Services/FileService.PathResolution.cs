@@ -1,3 +1,5 @@
+using DeskBox.Platform;
+
 namespace DeskBox.Services;
 
 public sealed partial class FileService
@@ -27,32 +29,14 @@ public sealed partial class FileService
     }
 
     /// <summary>
-    /// Returns whether the path itself is a directory junction or symbolic
-    /// link. This inspects the link rather than traversing it.
+    /// Returns whether the path itself is a directory junction, NTFS volume
+    /// mount point, or symbolic link. This inspects the reparse tag directly
+    /// rather than traversing it, and fails closed if an existing reparse
+    /// point's tag cannot be read.
     /// </summary>
     public static bool IsFileSystemLink(string path)
     {
-        try
-        {
-            string normalizedPath = Path.GetFullPath(path);
-            FileAttributes attributes = File.GetAttributes(normalizedPath);
-            if ((attributes & FileAttributes.ReparsePoint) == 0)
-            {
-                return false;
-            }
-
-            FileSystemInfo info = (attributes & FileAttributes.Directory) != 0
-                ? new DirectoryInfo(normalizedPath)
-                : new FileInfo(normalizedPath);
-            return info.ResolveLinkTarget(returnFinalTarget: false) is not null;
-        }
-        catch (Exception ex) when (
-            ex is IOException or UnauthorizedAccessException or
-            ArgumentException or NotSupportedException or
-            System.Security.SecurityException)
-        {
-            return false;
-        }
+        return StorageMigrationNativeMethods.IsFileSystemLinkOrMountPoint(path);
     }
 
     private static bool TryResolvePathWithMissingSuffix(
@@ -162,6 +146,11 @@ public sealed partial class FileService
 
             if (target is null)
             {
+                if (StorageMigrationNativeMethods.IsFileSystemLinkOrMountPoint(candidate))
+                {
+                    return false;
+                }
+
                 // Not every reparse point is a filesystem link (for example,
                 // cloud placeholders). Keep those paths intact.
                 current = candidate;

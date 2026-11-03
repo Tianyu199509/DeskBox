@@ -47,8 +47,12 @@ public sealed class RecycleBinDropContractTests
             StringComparison.Ordinal);
         Assert.True(armRegion >= 0, "native drag pointer observer exists");
         Assert.Contains(
+            "ComputeNativeDropTargetsOnUiThread(",
+            window[armRegion..Math.Min(window.Length, armRegion + 3000)],
+            StringComparison.Ordinal);
+        Assert.Contains(
             "ItemDropBehavior.RecycleBinDelete",
-            window[armRegion..Math.Min(window.Length, armRegion + 4000)],
+            window[armRegion..Math.Min(window.Length, armRegion + 5500)],
             StringComparison.Ordinal);
         int normalizeRegion = window.IndexOf(
             "private static WidgetItem? NormalizeNativeFileDropItemTarget(",

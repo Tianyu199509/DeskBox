@@ -154,26 +154,54 @@ public sealed class GlanceWidgetInstanceManagementTests
                 "SettingsExpander",
                 StringComparison.Ordinal))
             .ToArray();
+        // Style gallery and alignment are flat cards; everything else lives in
+        // three groups: background, "what's today", advanced.
         Assert.Equal(3, expanders.Length);
-        System.Xml.Linq.XElement typography = Assert.Single(expanders.Where(element =>
-            element.Attributes().Any(attribute =>
-                attribute.Name.LocalName == "Localized.HeaderKey" &&
-                attribute.Value == "Glance.Typography.Font")));
+
         System.Xml.Linq.XElement background = Assert.Single(expanders.Where(element =>
             element.Attributes().Any(attribute =>
                 attribute.Name.LocalName == "Localized.HeaderKey" &&
-                attribute.Value == "Glance.Background.Title")));
-        Assert.True(ContainsNamedElement(typography, "TimeScaleSlider"));
+                attribute.Value == "Settings.Glance.Group.Background")));
+        System.Xml.Linq.XElement dayInfo = Assert.Single(expanders.Where(element =>
+            element.Attributes().Any(attribute =>
+                attribute.Name.LocalName == "Localized.HeaderKey" &&
+                attribute.Value == "Settings.Glance.Group.DayInfo")));
+        System.Xml.Linq.XElement advanced = Assert.Single(expanders.Where(element =>
+            element.Attributes().Any(attribute =>
+                attribute.Name.LocalName == "Localized.HeaderKey" &&
+                attribute.Value == "Settings.Glance.Group.Advanced")));
+        System.Xml.Linq.XElement cacheCard = Assert.Single(document.Descendants().Where(element =>
+            string.Equals(element.Name.LocalName, "SettingsCard", StringComparison.Ordinal) &&
+            element.Attributes().Any(attribute =>
+                attribute.Name.LocalName == "Localized.HeaderKey" &&
+                attribute.Value == "Glance.Cache.Title")));
+
+        Assert.True(ContainsNamedElement(background, "BackgroundSourceComboBox"));
         Assert.True(ContainsNamedElement(background, "RotationComboBox"));
         Assert.True(ContainsNamedElement(background, "RandomOrderToggle"));
-        Assert.True(ContainsNamedElement(background, "CacheSizeText"));
+        Assert.True(ContainsNamedElement(dayInfo, "TraditionalCalendarComboBox"));
+        Assert.True(ContainsNamedElement(dayInfo, "ShowChineseFestivalsToggle"));
+        Assert.True(ContainsNamedElement(dayInfo, "ShowStatutoryHolidaysToggle"));
+        Assert.True(ContainsNamedElement(dayInfo, "ShowTodoAgendaToggle"));
+        Assert.True(ContainsNamedElement(advanced, "DisplayContentDropDownButton"));
+        Assert.True(ContainsNamedElement(advanced, "CalendarMaterialComboBox"));
+        Assert.True(ContainsNamedElement(advanced, "FontComboBox"));
+        Assert.True(ContainsNamedElement(advanced, "TimeFormatComboBox"));
+        Assert.True(ContainsNamedElement(advanced, "TimeScaleSlider"));
+        Assert.True(ContainsNamedElement(advanced, "ReadabilityComboBox"));
+        Assert.True(ContainsNamedElement(advanced, "TransitionComboBox"));
+        Assert.True(ContainsNamedElement(advanced, "SpeedComboBox"));
+        Assert.True(ContainsNamedElement(cacheCard, "CacheSizeText"));
 
         string[] orderedControlNames =
         [
+            "StyleGallery",
             "BackgroundSourceComboBox",
-            "FontComboBox",
+            "TraditionalCalendarComboBox",
             "DisplayContentDropDownButton",
-            "LayoutComboBox",
+            "FontComboBox",
+            "TransitionComboBox",
+            "CacheSizeText",
         ];
         int previousControlIndex = -1;
         foreach (string controlName in orderedControlNames)
@@ -183,32 +211,33 @@ public sealed class GlanceWidgetInstanceManagementTests
             previousControlIndex = controlIndex;
         }
 
-        string[] fixedWidthSelectorNames =
+        string[] selectorNames =
         [
+            "PhotoClockAlignmentComboBox",
             "DisplayContentDropDownButton",
             "BackgroundSourceComboBox",
             "OnlineImageCategoryComboBox",
+            "ReadabilityComboBox",
             "RotationComboBox",
-            "FontComboBox",
-            "LayoutComboBox",
             "CalendarMaterialComboBox",
             "TraditionalCalendarComboBox",
+            "FontComboBox",
+            "TimeFormatComboBox",
             "TransitionComboBox",
             "SpeedComboBox",
-            "ReadabilityComboBox",
         ];
-        foreach (string controlName in fixedWidthSelectorNames)
+        foreach (string controlName in selectorNames)
         {
             System.Xml.Linq.XElement control = Assert.Single(document.Descendants().Where(element =>
                 element.Attributes().Any(attribute =>
                     attribute.Name.LocalName == "Name" &&
                     attribute.Value == controlName)));
-            Assert.Equal("220", control.Attribute("Width")?.Value);
+            Assert.Equal("{StaticResource SettingsControlMinWidth}", control.Attribute("MinWidth")?.Value);
         }
 
         Assert.Contains("svc:Localized.HeaderKey=\"Glance.Typography.Font\"", xaml, StringComparison.Ordinal);
         Assert.Contains("svc:Localized.HeaderKey=\"Glance.Typography.Title\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("svc:Localized.HeaderKey=\"Glance.Background.Title\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("svc:Localized.HeaderKey=\"Settings.Glance.Group.Background\"", xaml, StringComparison.Ordinal);
         Assert.Contains("svc:Localized.HeaderKey=\"Glance.Speed.Title\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Glance.LayoutGroup.Title", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Glance.AppearanceGroup.Title", xaml, StringComparison.Ordinal);

@@ -1,0 +1,309 @@
+{
+  "schemaVersion": 1,
+  "id": "deskbox.sys-pulse",
+  "name": "系统监控",
+  "version": "3.1.0",
+  "author": "DeskBox",
+  "description": "实时监测 CPU、内存、GPU 显存与运行中应用排行，支持自由拖拽卡片顺序与按需开关模块。",
+  "icon": "\uE9D9",
+  "minSize": {
+    "width": 276,
+    "height": 220
+  },
+  "defaultSize": {
+    "width": 336,
+    "height": 436
+  },
+  "settings": [
+    {
+      "key": "modules",
+      "type": "moduleList",
+      "label": "${$i18n.setModules}",
+      "default": "cpu:1,memory:1,gpu:1,processes:1,network:1,storage:0",
+      "options": [
+        {
+          "value": "cpu",
+          "label": "${$i18n.modCpu}"
+        },
+        {
+          "value": "memory",
+          "label": "${$i18n.modMemory}"
+        },
+        {
+          "value": "gpu",
+          "label": "${$i18n.modGpu}"
+        },
+        {
+          "value": "processes",
+          "label": "${$i18n.modProcesses}"
+        },
+        {
+          "value": "network",
+          "label": "${$i18n.modNetwork}"
+        },
+        {
+          "value": "storage",
+          "label": "${$i18n.modStorage}"
+        }
+      ]
+    },
+    {
+      "key": "topProcessCount",
+      "type": "choice",
+      "label": "${$i18n.setTopProc}",
+      "default": "5",
+      "options": [
+        {
+          "value": "3",
+          "label": "${$i18n.optTop3}"
+        },
+        {
+          "value": "5",
+          "label": "${$i18n.optTop5}"
+        },
+        {
+          "value": "8",
+          "label": "${$i18n.optTop8}"
+        },
+        {
+          "value": "10",
+          "label": "${$i18n.optTop10}"
+        }
+      ]
+    },
+    {
+      "key": "defaultProcessSort",
+      "type": "choice",
+      "label": "${$i18n.setProcSort}",
+      "default": "memory",
+      "options": [
+        {
+          "value": "memory",
+          "label": "${$i18n.optSortMem}"
+        },
+        {
+          "value": "cpu",
+          "label": "${$i18n.optSortCpu}"
+        }
+      ]
+    },
+    {
+      "key": "refreshRate",
+      "type": "choice",
+      "label": "${$i18n.setRefresh}",
+      "default": "2000",
+      "options": [
+        {
+          "value": "1000",
+          "label": "${$i18n.optRef1s}"
+        },
+        {
+          "value": "2000",
+          "label": "${$i18n.optRef2s}"
+        },
+        {
+          "value": "5000",
+          "label": "${$i18n.optRef5s}"
+        }
+      ]
+    },
+    {
+      "key": "targetDrive",
+      "type": "choice",
+      "label": "${$i18n.setDrive}",
+      "default": "auto",
+      "options": [
+        {
+          "value": "auto",
+          "label": "${$i18n.optDriveAuto}"
+        }
+      ]
+    },
+    {
+      "key": "warnThreshold",
+      "type": "choice",
+      "label": "${$i18n.setWarn}",
+      "default": "85",
+      "options": [
+        {
+          "value": "75",
+          "label": "${$i18n.optWarn75}"
+        },
+        {
+          "value": "85",
+          "label": "${$i18n.optWarn85}"
+        },
+        {
+          "value": "95",
+          "label": "${$i18n.optWarn95}"
+        },
+        {
+          "value": "999",
+          "label": "${$i18n.optWarnOff}"
+        }
+      ]
+    }
+  ],
+  "state": {
+    "processSort": ""
+  },
+  "sources": [
+    {
+      "type": "systemMetrics",
+      "intervalMs": 2000
+    }
+  ],
+  "capsule": {
+    "title": "CPU ${$sys.cpu.percent}% · ${$i18n.capMemLabel} ${$sys.memory.percent}% · GPU ${$sys.gpu.percent}%",
+    "summary": "↓ ${$sys.net.downText} · ↑ ${$sys.net.upText}",
+    "glyph": "\uE9D9",
+    "progress": "${$sys.cpu.percent}",
+    "badge": "${$sys.cpu.percent >= $settings.warnThreshold ? $i18n.highLoadBadge : ''}",
+    "badgeIsWarning": "${$sys.cpu.percent >= $settings.warnThreshold}"
+  },
+  "view": {
+    "type": "Stack",
+    "spacing": 8,
+    "padding": "12,8,12,12",
+    "children": [
+      {
+        "type": "ModuleStack",
+        "bind": "settings.modules",
+        "spacing": 8,
+        "children": [
+          {
+            "id": "cpu",
+            "type": "StatCard",
+            "compactPair": true,
+            "color": "accent",
+            "title": "CPU",
+            "value": "${$sys.cpu.percent}%",
+            "subtitle": "${$i18n.cpuSubtitle}",
+            "progress": "${$sys.cpu.percent}",
+            "sparkline": "$sys.cpu.history",
+            "warningThreshold": "${$settings.warnThreshold}"
+          },
+          {
+            "id": "memory",
+            "type": "StatCard",
+            "compactPair": true,
+            "color": "violet",
+            "title": "${$i18n.memTitle}",
+            "value": "${$sys.memory.percent}%",
+            "subtitle": "${$sys.memory.summaryText}",
+            "progress": "${$sys.memory.percent}",
+            "sparkline": "$sys.memory.history",
+            "warningThreshold": "${$settings.warnThreshold}"
+          },
+          {
+            "id": "gpu",
+            "type": "GpuCard",
+            "title": "GPU",
+            "color": "emerald",
+            "warningThreshold": "${$settings.warnThreshold}"
+          },
+          {
+            "id": "processes",
+            "type": "ProcessList",
+            "title": "${$i18n.procTitle}"
+          },
+          {
+            "id": "network",
+            "type": "Card",
+            "tone": "subtle",
+            "cornerRadius": 6,
+            "padding": "12,9,12,9",
+            "children": [
+              {
+                "type": "Grid",
+                "columns": "1*,Auto,1*",
+                "spacing": 12,
+                "children": [
+                  {
+                    "type": "Grid",
+                    "column": 0,
+                    "columns": "Auto,1*",
+                    "spacing": 6,
+                    "children": [
+                      {
+                        "type": "Text",
+                        "column": 0,
+                        "text": "${$i18n.netDown}",
+                        "style": "caption",
+                        "color": "secondary",
+                        "verticalAlignment": "center"
+                      },
+                      {
+                        "type": "Text",
+                        "column": 1,
+                        "text": "${$sys.net.downText}",
+                        "style": "bodyStrong",
+                        "horizontalAlignment": "right",
+                        "verticalAlignment": "center"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "Text",
+                    "column": 1,
+                    "text": "·",
+                    "style": "caption",
+                    "color": "muted",
+                    "verticalAlignment": "center"
+                  },
+                  {
+                    "type": "Grid",
+                    "column": 2,
+                    "columns": "Auto,1*",
+                    "spacing": 6,
+                    "children": [
+                      {
+                        "type": "Text",
+                        "column": 0,
+                        "text": "${$i18n.netUp}",
+                        "style": "caption",
+                        "color": "secondary",
+                        "verticalAlignment": "center"
+                      },
+                      {
+                        "type": "Text",
+                        "column": 1,
+                        "text": "${$sys.net.upText}",
+                        "style": "bodyStrong",
+                        "horizontalAlignment": "right",
+                        "verticalAlignment": "center"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "id": "storage",
+            "type": "Card",
+            "tone": "subtle",
+            "cornerRadius": 6,
+            "padding": "12,10,12,10",
+            "spacing": 8,
+            "children": [
+              {
+                "type": "ProgressRow",
+                "title": "${$i18n.diskTitlePrefix}${$sys.disk.selectedName})",
+                "subtitle": "${$i18n.diskSubFree}${$sys.disk.selectedFreeGb}${$i18n.diskSubOf}${$sys.disk.selectedTotalGb} GB",
+                "value": "${$sys.disk.selectedPercent}%",
+                "progress": "${$sys.disk.selectedPercent}",
+                "warningThreshold": "${$settings.warnThreshold}"
+              },
+              {
+                "type": "KeyValueRow",
+                "title": "${$sys.status.label}",
+                "value": "${$sys.status.value}"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

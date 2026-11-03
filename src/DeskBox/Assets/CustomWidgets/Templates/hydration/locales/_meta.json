@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "baseLocale": "zh-CN",
+  "hashes": {
+    "capSubPrefix": "e55fb9b6",
+    "capSubSuffix": "f81526ef",
+    "capTitlePrefix": "cd4fa044",
+    "cardSubEnd": "82dc15ed",
+    "cardSubGoal": "536d5626",
+    "cardSubMid": "b98f7afd",
+    "cardTitle": "68e4fb1d",
+    "deleteTooltip": "f2cf9101",
+    "emptySubtitle": "8007d237",
+    "emptyTitle": "24fb3d63",
+    "heatmapTitle": "da233f77",
+    "modHeatmap": "f24b453c",
+    "modLogs": "838b2425",
+    "modOverview": "13257c4f",
+    "noteQuick": "bf1fd231",
+    "noteWarm": "d6b0bb0f",
+    "resetTooltip": "359f5a29",
+    "setDailyGoal": "8291a76b",
+    "setLargeCup": "cfa913ea",
+    "setModules": "e500c2e6",
+    "setSmallCup": "123ff923",
+    "widgetDescription": "ca8c5ba9",
+    "widgetName": "365539ad"
+  }
+}

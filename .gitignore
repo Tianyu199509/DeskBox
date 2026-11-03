@@ -75,6 +75,7 @@ shots/
 
 # Local product-video workspace and rendered previews
 /video-shotcraft/
+/promo-video/
 
 # Auto-generated code audit reports
 docs/audit/

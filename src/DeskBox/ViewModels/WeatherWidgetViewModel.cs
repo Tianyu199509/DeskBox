@@ -186,13 +186,16 @@ public sealed partial class WeatherWidgetViewModel : ObservableObject, IDisposab
         ? _localizationService.T("Weather.Title")
         : _config.Name;
 
+    private object[] _cachedDailyForecastItemsSource = [];
+    private object[] _cachedHourlyForecastItemsSource = [];
+
     public ObservableCollection<WeatherDayViewModel> DailyForecast { get; } = [];
 
-    public object[] DailyForecastItemsSource => DailyForecast.Cast<object>().ToArray();
+    public object[] DailyForecastItemsSource => _cachedDailyForecastItemsSource;
 
     public ObservableCollection<WeatherHourViewModel> HourlyForecast { get; } = [];
 
-    public object[] HourlyForecastItemsSource => HourlyForecast.Cast<object>().ToArray();
+    public object[] HourlyForecastItemsSource => _cachedHourlyForecastItemsSource;
 
     public string CurrentTemperatureText
     {
@@ -392,8 +395,20 @@ public sealed partial class WeatherWidgetViewModel : ObservableObject, IDisposab
     public string LayoutMode
     {
         get => _layoutMode;
-        private set => SetProperty(ref _layoutMode, value);
+        private set
+        {
+            if (SetProperty(ref _layoutMode, value))
+            {
+                OnPropertyChanged(nameof(IsMiniLayout));
+                OnPropertyChanged(nameof(IsCompactLayout));
+                OnPropertyChanged(nameof(IsExpandedLayout));
+            }
+        }
     }
+
+    public bool IsMiniLayout => _layoutMode == "Mini";
+    public bool IsCompactLayout => _layoutMode == "Compact";
+    public bool IsExpandedLayout => _layoutMode == "Expanded";
 
     public string ViewSwitchText => _isWeekView
         ? _localizationService.T("Weather.View.Today")
@@ -987,20 +1002,71 @@ public sealed partial class WeatherWidgetViewModel : ObservableObject, IDisposab
 /// </summary>
 public sealed partial class WeatherDayViewModel : ObservableObject
 {
-    public string DayLabel { get; set; } = string.Empty;
-    public string IconGlyph { get; set; } = "\uE706";
-    public ImageSource? Icon { get; set; }
+    private string _dayLabel = string.Empty;
+    private string _iconGlyph = "\uE706";
+    private ImageSource? _icon;
+    private string _description = string.Empty;
+    private string _tempMaxText = string.Empty;
+    private string _tempMinText = string.Empty;
+    private string _precipitationText = string.Empty;
+    private double _tempBarOffset;
+    private double _tempBarWidth = 1.0;
 
-    public string Description { get; set; } = string.Empty;
-    public string TempMaxText { get; set; } = string.Empty;
-    public string TempMinText { get; set; } = string.Empty;
-    public string PrecipitationText { get; set; } = string.Empty;
+    public string DayLabel
+    {
+        get => _dayLabel;
+        set => SetProperty(ref _dayLabel, value);
+    }
+
+    public string IconGlyph
+    {
+        get => _iconGlyph;
+        set => SetProperty(ref _iconGlyph, value);
+    }
+
+    public ImageSource? Icon
+    {
+        get => _icon;
+        set => SetProperty(ref _icon, value);
+    }
+
+    public string Description
+    {
+        get => _description;
+        set => SetProperty(ref _description, value);
+    }
+
+    public string TempMaxText
+    {
+        get => _tempMaxText;
+        set => SetProperty(ref _tempMaxText, value);
+    }
+
+    public string TempMinText
+    {
+        get => _tempMinText;
+        set => SetProperty(ref _tempMinText, value);
+    }
+
+    public string PrecipitationText
+    {
+        get => _precipitationText;
+        set => SetProperty(ref _precipitationText, value);
+    }
 
     /// <summary>Temperature range bar: left offset as fraction (0..1) of the full weekly range.</summary>
-    public double TempBarOffset { get; set; }
+    public double TempBarOffset
+    {
+        get => _tempBarOffset;
+        set => SetProperty(ref _tempBarOffset, value);
+    }
 
     /// <summary>Temperature range bar: width as fraction (0..1) of the full weekly range.</summary>
-    public double TempBarWidth { get; set; } = 1.0;
+    public double TempBarWidth
+    {
+        get => _tempBarWidth;
+        set => SetProperty(ref _tempBarWidth, value);
+    }
 }
 
 /// <summary>
@@ -1008,16 +1074,50 @@ public sealed partial class WeatherDayViewModel : ObservableObject
 /// </summary>
 public sealed partial class WeatherHourViewModel : ObservableObject
 {
+    private string _hourLabel = string.Empty;
+    private string _temperatureText = string.Empty;
+    private string _precipitationText = string.Empty;
+    private string _iconGlyph = "\uE706";
+    private ImageSource? _icon;
+    private bool _isCurrentHour;
     private double _forecastHourTextSize = 9;
 
-    public string HourLabel { get; set; } = string.Empty;
-    public string TemperatureText { get; set; } = string.Empty;
-    public string PrecipitationText { get; set; } = string.Empty;
-    public string IconGlyph { get; set; } = "\uE706";
-    public ImageSource? Icon { get; set; }
+    public string HourLabel
+    {
+        get => _hourLabel;
+        set => SetProperty(ref _hourLabel, value);
+    }
+
+    public string TemperatureText
+    {
+        get => _temperatureText;
+        set => SetProperty(ref _temperatureText, value);
+    }
+
+    public string PrecipitationText
+    {
+        get => _precipitationText;
+        set => SetProperty(ref _precipitationText, value);
+    }
+
+    public string IconGlyph
+    {
+        get => _iconGlyph;
+        set => SetProperty(ref _iconGlyph, value);
+    }
+
+    public ImageSource? Icon
+    {
+        get => _icon;
+        set => SetProperty(ref _icon, value);
+    }
 
     /// <summary>Whether this is the current hour (used for highlight).</summary>
-    public bool IsCurrentHour { get; set; }
+    public bool IsCurrentHour
+    {
+        get => _isCurrentHour;
+        set => SetProperty(ref _isCurrentHour, value);
+    }
 
     public double ForecastHourTextSize
     {

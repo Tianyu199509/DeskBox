@@ -18,7 +18,7 @@
 
 - 拖到桌面/Explorer：Win11 与资源管理器一致的原生移动——同卷改名、跨卷复制、Ctrl/Shift/冲突对话框/Ctrl+Z 全部系统原生。Win10 因公告集收单比特：默认（FollowWindows）/复制档落放即复制（**同卷也是复制**，原文件留在格子内；想要移动须把设置档切到"移动"）；移动档落放即移动（跨卷也是移动=copy+删源，等价资源管理器跨卷移动语义，且 copy-only 接收端会拒收该拖放）。
 - 拖到微信等第三方：看到与从资源管理器拖出相同的允许集；即使对方误报 `Move`，DeskBox 也不删源。残余风险是接收方主动修改或删除原路径——与从资源管理器拖出同等，DeskBox 无法也不应额外防护。
-- `Link` 不对外公告（XAML 把 `Copy|Move|Link` 全选当无偏好）；Alt 拖出创建快捷方式与任务栏固定暂不支持，需要时可用 `Microsoft.UI.Input.DragDrop.DragOperation` 自发起补齐。
+- Windows 11 的 `FollowWindows` 档因 `RequestedOperation = None` 本就无偏好，对外安全公告完整 `Copy | Move | Link`（恢复 Alt 拖出创建快捷方式与任务栏/开始菜单固定）；显式 `Move` 档保持 `Copy | Move` + 单值 `Move` 偏好以避开 XAML 三位全选抑制。Windows 10 的 `FollowWindows` 档默认静默复制，并在落放桌面/Explorer 时提供一次性底部轻胶囊一键切为「默认移动」（`win10-default-copy-guide`）；`FileDragSourceGuardDataObject.EnumFormatEtc(DATADIR_GET)` 同步枚举有效单值 `Preferred DropEffect` 并过滤完成回执格式。
 - 源文件真实路径仍通过 CF_HDROP 交给目标；不把原件设为只读、不复制大文件到 UI 线程、不复活中途接管 DoDragDrop 的旧实验（`NativeFileDragOut` 已删除）。
 
 ## 验证

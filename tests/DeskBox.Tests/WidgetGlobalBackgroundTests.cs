@@ -230,7 +230,7 @@ public sealed class WidgetGlobalBackgroundTests
     public void GlobalBackground_IsWiredAcrossSchemaSettingsAndShell()
     {
         Assert.Contains(
-            "CurrentSchemaVersion = 15",
+            "CurrentSchemaVersion = 18",
             File.ReadAllText(TestPaths.FromRepository(
                 "src/DeskBox/Services/SettingsMigrationService.cs")),
             StringComparison.Ordinal);
@@ -241,7 +241,7 @@ public sealed class WidgetGlobalBackgroundTests
             StringComparison.Ordinal);
 
         string settingsXaml = File.ReadAllText(TestPaths.FromRepository(
-            "src/DeskBox/Views/SettingsWindow.xaml"));
+            "src/DeskBox/Views/SettingsSections/AppearanceSettingsSection.xaml"));
         Assert.Contains("{Binding WidgetBackgroundMode, Mode=TwoWay}", settingsXaml, StringComparison.Ordinal);
         Assert.Contains("{Binding WidgetBackgroundDimPercent, Mode=TwoWay}", settingsXaml, StringComparison.Ordinal);
         Assert.Contains("ChooseWidgetBackgroundImage_Click", settingsXaml, StringComparison.Ordinal);

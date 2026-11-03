@@ -30,7 +30,8 @@ internal static class SearchResultRanker
     public static IReadOnlyList<SearchResultItem> MergeAndRank(
         IEnumerable<SearchResultItem> results,
         string query,
-        int maxResults)
+        int maxResults,
+        Func<string, double>? frecencyBoostProvider = null)
     {
         if (maxResults <= 0)
         {
@@ -40,17 +41,33 @@ internal static class SearchResultRanker
         var byIdentity = new Dictionary<string, SearchResultItem>(StringComparer.OrdinalIgnoreCase);
         foreach (var item in results)
         {
-            double adjustedScore = AdjustScore(item, query);
             if (item.RelevanceScore <= 0)
             {
                 continue;
             }
 
-            // No matching item is silently discarded. Noisy paths remain available
-            // at the end of the continuously paged Everything result set.
-            item.RelevanceScore = Math.Max(1, adjustedScore);
-
             string identity = GetIdentityKey(item);
+            if (item.IsFallback)
+            {
+                item.RelevanceScore = 0.25;
+            }
+            else
+            {
+                double adjustedScore = AdjustScore(item, query);
+                if (frecencyBoostProvider is not null)
+                {
+                    double frecency = frecencyBoostProvider(identity);
+                    if (double.IsFinite(frecency) && frecency > 0)
+                    {
+                        adjustedScore += frecency;
+                    }
+                }
+
+                // No matching item is silently discarded. Noisy paths remain available
+                // at the end of the continuously paged Everything result set.
+                item.RelevanceScore = Math.Max(1, adjustedScore);
+            }
+
             if (!byIdentity.TryGetValue(identity, out var existing) || IsBetterDuplicate(item, existing))
             {
                 byIdentity[identity] = item;
@@ -81,6 +98,11 @@ internal static class SearchResultRanker
         if (item.Kind == SearchResultKind.QuickCapture && !string.IsNullOrWhiteSpace(item.QuickCaptureItemId))
         {
             return $"note:{item.QuickCaptureItemId}";
+        }
+
+        if (item.Kind == SearchResultKind.Clipboard && !string.IsNullOrWhiteSpace(item.ClipboardItemId))
+        {
+            return $"clipboard:{item.ClipboardItemId}";
         }
 
         if (item.Kind == SearchResultKind.Action && !string.IsNullOrWhiteSpace(item.ActionId))
@@ -119,6 +141,7 @@ internal static class SearchResultRanker
             SearchResultKind.Action => 6,
             SearchResultKind.Todo => 5,
             SearchResultKind.QuickCapture => 4,
+            SearchResultKind.Clipboard => 3,
             SearchResultKind.Folder => 1,
             _ => 0
         };

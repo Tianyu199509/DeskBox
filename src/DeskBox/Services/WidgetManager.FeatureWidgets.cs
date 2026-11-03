@@ -1,4 +1,4 @@
-﻿﻿// Copyright (c) DeskBox. All rights reserved.
+// Copyright (c) DeskBox. All rights reserved.
 
 using DeskBox.Models;
 using DeskBox.Helpers;
@@ -268,6 +268,7 @@ public sealed partial class WidgetManager
 
         window ??= await CreateTodoWidgetAsync();
         await window.ContentReadyTask;
+        window.PrepareSurfaceForExternalInteraction();
         if (window.CurrentContent?.View is TodoWidgetContent todoContent)
         {
             bool surfaceLoaded = await WaitForTodoReminderSurfaceLoadedAsync(
@@ -382,8 +383,9 @@ public sealed partial class WidgetManager
             WidgetKind.Todo => "Todo.Title",
             WidgetKind.Music => "Music.Title",
             WidgetKind.Weather => "Weather.Title",
-            WidgetKind.Search => "Search.Title",
             WidgetKind.Glance => "Glance.Title",
+            WidgetKind.Custom => "CustomWidget.Title",
+            WidgetKind.Clipboard => "Clipboard.Title",
             WidgetKind.Tags => "Tags.Title",
             WidgetKind.SystemMonitor => "SystemMonitor.Title",
             _ => string.Empty
@@ -431,16 +433,18 @@ public sealed partial class WidgetManager
             {
                 WidgetKind.Music => 380,
                 WidgetKind.Weather => 200,
-                WidgetKind.Search => 280,
                 WidgetKind.Glance => 360,
+                WidgetKind.Custom => 360,
+                WidgetKind.Clipboard => 320,
                 _ => Math.Max(_settingsService.Settings.DefaultWidgetWidth, 320)
             },
             Height = kind switch
             {
                 WidgetKind.Music => 190,
                 WidgetKind.Weather => 200,
-                WidgetKind.Search => 90,
                 WidgetKind.Glance => 260,
+                WidgetKind.Custom => 460,
+                WidgetKind.Clipboard => 420,
                 _ => Math.Max(_settingsService.Settings.DefaultWidgetHeight, 360)
             }
         };
@@ -624,18 +628,530 @@ public sealed partial class WidgetManager
             return _contentWidgets.GetValueOrDefault(created.Id);
         }
 
-        ApplyGlanceMasterState(configs, enabled: true);
+        List<WidgetConfig> activeConfigs = configs
+            .Where(config => !IsCustomWidgetParkedByUser(config))
+            .ToList();
+        if (activeConfigs.Count == 0 && reveal)
+        {
+            configs[0].Metadata.Remove(CustomParkedByUserMetadataKey);
+            activeConfigs.Add(configs[0]);
+        }
+
+        foreach (WidgetConfig parkedConfig in configs.Except(activeConfigs))
+        {
+            parkedConfig.IsDisabled = true;
+            parkedConfig.IsVisible = false;
+        }
+
+        ApplyGlanceMasterState(activeConfigs, enabled: true);
 
         await _settingsService.SaveAsync();
         if (reveal)
         {
-            foreach (WidgetConfig config in configs)
+            foreach (WidgetConfig config in activeConfigs)
             {
                 await ShowWidgetAsync(config.Id, reveal: true, autoRestoreOnReveal: false);
             }
         }
 
-        return configs
+        return activeConfigs
+            .Select(config => _contentWidgets.GetValueOrDefault(config.Id))
+            .FirstOrDefault(window => window is not null);
+    }
+
+    private const string CustomParkedByUserMetadataKey = "custom.parkedByUser";
+
+    private static bool IsCustomWidgetParkedByUser(WidgetConfig config) =>
+        config.Metadata.TryGetValue(CustomParkedByUserMetadataKey, out string? parked) &&
+        string.Equals(parked, "true", StringComparison.OrdinalIgnoreCase);
+
+    public IReadOnlyList<GlanceWidgetInstanceInfo> GetCustomWidgetInstances()
+    {
+        bool featureEnabled = GetFeatureWidgetEnabledState(WidgetKind.Custom);
+        return _settingsService.Settings.WidgetLayout.Widgets
+            .Where(widget => widget.WidgetKind == WidgetKind.Custom && !IsDeleted(widget.Id))
+            .Select(widget => new GlanceWidgetInstanceInfo(
+                widget.Id,
+                widget.Name,
+                featureEnabled && !widget.IsDisabled))
+            .ToList();
+    }
+
+    public async Task<GlanceWidgetInstanceInfo> CreateCustomWidgetAsync(
+        string? templateOrPackageSpec = null,
+        string? logicJsOverride = null,
+        bool hasLogicJsOverride = false,
+        CustomWidgetLocaleCatalog? localesOverride = null,
+        bool hasLocalesOverride = false,
+        IReadOnlyDictionary<string, string>? initialSettings = null,
+        IReadOnlyDictionary<string, string>? initialSecrets = null)
+    {
+        if (!HasUiThreadAccess())
+        {
+            return await RunOnUiThreadAsync(() => CreateCustomWidgetAsync(
+                templateOrPackageSpec,
+                logicJsOverride,
+                hasLogicJsOverride,
+                localesOverride,
+                hasLocalesOverride,
+                initialSettings,
+                initialSecrets));
+        }
+
+        if (!GetFeatureWidgetEnabledState(WidgetKind.Custom))
+        {
+            SetFeatureWidgetEnabledState(WidgetKind.Custom, true);
+        }
+
+        string templateId = CustomWidgetTemplates.SystemPulseTemplateId;
+        string? importedManifestJson = null;
+        string? importedLogicJs = null;
+        CustomWidgetLocaleCatalog? importedLocales = null;
+        CustomWidgetManifest? importedManifest = null;
+
+        if (!string.IsNullOrWhiteSpace(templateOrPackageSpec))
+        {
+            if (templateOrPackageSpec.StartsWith("update:", StringComparison.OrdinalIgnoreCase))
+            {
+                string rest = templateOrPackageSpec["update:".Length..];
+                int sep = rest.IndexOf(':');
+                if (sep > 0 && sep < rest.Length - 1)
+                {
+                    string targetWidgetId = rest[..sep].Trim();
+                    string updatedJson = rest[(sep + 1)..];
+                    GlanceWidgetInstanceInfo updatedInfo = await UpdateCustomWidgetManifestAsync(
+                        targetWidgetId,
+                        updatedJson,
+                        resizeToDefault: false,
+                        reveal: true);
+                    if (initialSettings is { Count: > 0 } || initialSecrets is { Count: > 0 })
+                    {
+                        await ApplyCustomWidgetMutationAsync(new Contracts.CustomWidgetSettingsMutation(
+                            updatedInfo.Id,
+                            initialSettings?.ToDictionary(static kv => kv.Key, static kv => kv.Value, StringComparer.Ordinal),
+                            initialSecrets?.ToDictionary(static kv => kv.Key, static kv => kv.Value, StringComparer.Ordinal)));
+                    }
+
+                    return updatedInfo;
+                }
+            }
+            else if (templateOrPackageSpec.StartsWith("file:", StringComparison.OrdinalIgnoreCase))
+            {
+                string filePath = templateOrPackageSpec["file:".Length..];
+                CustomWidgetImportedBundle bundle = await CustomWidgetPackageService.ReadPackageBundleAsync(filePath);
+                importedManifest = bundle.Manifest;
+                importedManifestJson = bundle.RawJson;
+                importedLogicJs = bundle.LogicJs;
+                importedLocales = bundle.Locales;
+                templateId = importedManifest.Id;
+            }
+            else if (templateOrPackageSpec.StartsWith("json:", StringComparison.OrdinalIgnoreCase))
+            {
+                string rawJson = templateOrPackageSpec["json:".Length..];
+                CustomWidgetParseResult parsed = CustomWidgetManifestParser.Parse(rawJson);
+                if (parsed.Manifest is null || parsed.Diagnostics.Any(d => d.IsError))
+                {
+                    string msg = parsed.Diagnostics.FirstOrDefault(d => d.IsError)?.Message ?? "Invalid manifest.json";
+                    throw new InvalidDataException(msg);
+                }
+
+                importedManifest = parsed.Manifest;
+                importedManifestJson = rawJson;
+                templateId = importedManifest.Id;
+            }
+            else
+            {
+                templateId = templateOrPackageSpec;
+                if (CustomWidgetTemplates.MatchPresetOrNull(templateId) is null)
+                {
+                    CustomWidgetTemplateBundle tplBundle = CustomWidgetTemplates.ResolveEffectiveTemplateBundle(templateId);
+                    CustomWidgetParseResult tplParsed = CustomWidgetManifestParser.Parse(tplBundle.ManifestJson);
+                    if (tplParsed.Manifest is not null && !tplParsed.Diagnostics.Any(d => d.IsError))
+                    {
+                        importedManifest = tplParsed.Manifest;
+                        importedManifestJson = CustomWidgetManifestMetadataStamper.StampProvenance(
+                            tplBundle.ManifestJson,
+                            origin: CustomWidgetOriginKinds.Official,
+                            isCustomized: false);
+                        importedLocales = tplBundle.Locales;
+                        importedLogicJs = tplBundle.LogicJs;
+                    }
+                }
+            }
+        }
+
+        if (hasLogicJsOverride)
+        {
+            importedLogicJs = logicJsOverride;
+        }
+        if (hasLocalesOverride)
+        {
+            importedLocales = localesOverride;
+        }
+        if (importedManifest is not null && importedLocales is { HasAnyLocale: true })
+        {
+            importedManifest = importedManifest.WithLocales(importedLocales);
+        }
+
+        CustomWidgetCatalogEntry? catalogEntry = CustomWidgetRemoteCatalogService.Shared
+            .GetMergedOfficialTemplates()
+            .FirstOrDefault(e =>
+                string.Equals(e.Id, templateId, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(e.ManifestId, templateId, StringComparison.OrdinalIgnoreCase));
+        CustomWidgetPresetInfo preset = CustomWidgetTemplates.GetPreset(templateId);
+        string baseTitle = importedManifest?.ResolveLocalizedName(_localizationService.CurrentCultureName) ??
+                           catalogEntry?.ResolveDisplayName(_localizationService) ??
+                           _localizationService.T(preset.NameKey);
+        if (string.IsNullOrWhiteSpace(baseTitle) || baseTitle == preset.NameKey)
+        {
+            baseTitle = catalogEntry?.DefaultTitle ?? preset.DefaultTitle;
+        }
+
+        WidgetConfig? placementSource = _settingsService.Settings.WidgetLayout.Widgets
+            .LastOrDefault(widget => widget.WidgetKind == WidgetKind.Custom && !IsDeleted(widget.Id));
+
+        var config = new WidgetConfig
+        {
+            Name = GetUniqueCustomWidgetName(baseTitle),
+            IsDefaultTitle = false,
+            WidgetKind = WidgetKind.Custom,
+            BoundsCoordinateVersion = WidgetConfig.CurrentBoundsCoordinateVersion,
+            X = (placementSource?.X ?? 120) + (placementSource is null ? 0 : 28),
+            Y = (placementSource?.Y ?? 120) + (placementSource is null ? 0 : 28),
+            Width = importedManifest?.DefaultSize.Width ?? catalogEntry?.DefaultWidth ?? preset.DefaultWidth,
+            Height = importedManifest?.DefaultSize.Height ?? catalogEntry?.DefaultHeight ?? preset.DefaultHeight,
+            ViewMode = ViewMode.Icon,
+            IsVisible = true,
+            IsDisabled = false,
+            Metadata = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [ViewModels.CustomWidgetViewModel.TemplateMetadataKey] = templateId
+            }
+        };
+        ApplyDefaultFeatureWidgetChromeMode(config, WidgetKind.Custom);
+
+        string? initialEmoji = CustomWidgetTemplates.IsEmojiIcon(importedManifest?.Icon)
+            ? importedManifest!.Icon.Trim()
+            : CustomWidgetTemplates.IsEmojiIcon(catalogEntry?.IconGlyph)
+                ? catalogEntry!.IconGlyph
+                : CustomWidgetTemplates.IsEmojiIcon(preset.IconGlyph)
+                    ? preset.IconGlyph
+                    : null;
+        if (initialEmoji is not null)
+        {
+            WidgetTitleIconCustomization.SetEmojiOverride(config, initialEmoji);
+        }
+
+        bool isExternalImport =
+            (templateOrPackageSpec?.StartsWith("file:", StringComparison.OrdinalIgnoreCase) == true) ||
+            string.Equals(importedManifest?.Origin, CustomWidgetOriginKinds.Community, StringComparison.OrdinalIgnoreCase);
+        CustomWidgetTrustStore.Shared.RegisterWidgetProvenance(
+            config.Id,
+            trustedLocalAuthoring: !isExternalImport);
+
+        CustomWidgetDataStore store = CustomWidgetDataStore.ForWidget(config.Id);
+        if (!string.IsNullOrWhiteSpace(importedManifestJson))
+        {
+            await store.WriteWorkspaceBundleAsync(
+                importedManifestJson,
+                importedLogicJs,
+                updateLogicJs: true,
+                importedLocales,
+                updateLocales: true);
+        }
+        else
+        {
+            await store.ReadOrCreateManifestJsonAsync(templateId);
+        }
+
+        if (initialSecrets is { Count: > 0 })
+        {
+            foreach ((string secKey, string secVal) in initialSecrets)
+            {
+                if (!string.IsNullOrWhiteSpace(secKey))
+                {
+                    CustomWidgetSecretStore.Shared.SetSecret(config.Id, secKey.Trim(), secVal);
+                }
+            }
+        }
+
+        if (initialSettings is { Count: > 0 })
+        {
+            var secretKeys = importedManifest is not null
+                ? new HashSet<string>(
+                    importedManifest.Settings
+                        .Where(static d => string.Equals(d.Type, "secret", StringComparison.OrdinalIgnoreCase))
+                        .Select(static d => d.Key),
+                    StringComparer.Ordinal)
+                : new HashSet<string>(StringComparer.Ordinal);
+            CustomWidgetStorePayload initialPayload = await store.LoadAsync();
+            foreach ((string setKey, string setVal) in initialSettings)
+            {
+                if (!string.IsNullOrWhiteSpace(setKey) && !secretKeys.Contains(setKey))
+                {
+                    initialPayload.Settings[setKey] = setVal ?? string.Empty;
+                }
+            }
+
+            await store.SaveAsync(initialPayload);
+        }
+
+        _ = CustomWidgetTemplates.EnsureAgentWorkspacePreparedAsync(store.WidgetDirectory, config.Id);
+
+        ApplyNewWidgetPlacement(config);
+        _settingsService.Settings.WidgetLayout.Widgets.Add(config);
+        await _settingsService.SaveAsync();
+
+        await CreateContentWidgetFromConfigAsync(config, revealAfterCreate: true);
+
+        App.Log(
+            $"[WidgetManager] Custom widget instance created id={config.Id} " +
+            $"template={templateId}");
+        return new GlanceWidgetInstanceInfo(config.Id, config.Name, true);
+    }
+
+    public async Task SetCustomWidgetInstanceEnabledAsync(string widgetId, bool enabled)
+    {
+        if (!HasUiThreadAccess())
+        {
+            await RunOnUiThreadAsync(() => SetCustomWidgetInstanceEnabledAsync(widgetId, enabled));
+            return;
+        }
+
+        WidgetConfig? config = _settingsService.Settings.WidgetLayout.Widgets.FirstOrDefault(widget =>
+            widget.WidgetKind == WidgetKind.Custom &&
+            string.Equals(widget.Id, widgetId, StringComparison.Ordinal) &&
+            !IsDeleted(widget.Id));
+        if (config is null)
+        {
+            return;
+        }
+
+        if (enabled)
+        {
+            if (!GetFeatureWidgetEnabledState(WidgetKind.Custom))
+            {
+                SetFeatureWidgetEnabledState(WidgetKind.Custom, true);
+            }
+
+            config.Metadata.Remove(CustomParkedByUserMetadataKey);
+            config.IsDisabled = false;
+            config.IsVisible = true;
+            await _settingsService.SaveAsync();
+            await ShowWidgetAsync(config.Id, reveal: true, autoRestoreOnReveal: false);
+        }
+        else
+        {
+            await RemoveWidgetFromGroupAsync(config.Id, revealStandalone: false);
+            config.Metadata[CustomParkedByUserMetadataKey] = "true";
+            config.IsDisabled = true;
+            config.IsVisible = false;
+            if (_contentWidgets.TryGetValue(config.Id, out ContentWidgetWindow? window))
+            {
+                CloseFeatureWidgetInstance(window);
+            }
+
+            await _settingsService.SaveAsync();
+        }
+    }
+
+    public async Task<bool> LocateCustomWidgetAsync(string widgetId)
+    {
+        if (!GetFeatureWidgetEnabledState(WidgetKind.Custom))
+        {
+            return false;
+        }
+
+        bool shown = await ShowWidgetAsync(widgetId, reveal: true, autoRestoreOnReveal: false);
+        if (shown && _contentWidgets.TryGetValue(widgetId, out var window) && window.Content is Microsoft.UI.Xaml.UIElement root)
+        {
+            DeskBox.Helpers.FluentMotionHelper.PlayDesktopArrivalPulse(root);
+        }
+
+        return shown;
+    }
+
+    public Task RemoveCustomWidgetAsync(string widgetId) => RemoveWidgetAsync(widgetId);
+
+    internal IReadOnlyList<DeskBox.Controls.WidgetContents.CustomWidgetContentAdapter> FindLiveCustomWidgetAdapters(string widgetId)
+    {
+        var matches = new List<DeskBox.Controls.WidgetContents.CustomWidgetContentAdapter>(2);
+        if (string.IsNullOrWhiteSpace(widgetId))
+        {
+            return matches;
+        }
+
+        foreach (ContentWidgetWindow window in _contentWidgets.Values.Distinct())
+        {
+            if (window.CurrentContent is DeskBox.Controls.WidgetContents.CustomWidgetContentAdapter activeAdapter &&
+                string.Equals(activeAdapter.WidgetId, widgetId, StringComparison.Ordinal) &&
+                !matches.Contains(activeAdapter))
+            {
+                matches.Add(activeAdapter);
+            }
+
+            foreach (Contracts.IWidgetContent cached in window.CachedGroupContents)
+            {
+                if (cached is DeskBox.Controls.WidgetContents.CustomWidgetContentAdapter cachedAdapter &&
+                    string.Equals(cachedAdapter.WidgetId, widgetId, StringComparison.Ordinal) &&
+                    !matches.Contains(cachedAdapter))
+                {
+                    matches.Add(cachedAdapter);
+                }
+            }
+        }
+
+        return matches;
+    }
+
+    public async Task ApplyCustomWidgetMutationAsync(Contracts.CustomWidgetSettingsMutation mutation)
+    {
+        if (mutation is null || string.IsNullOrWhiteSpace(mutation.WidgetId))
+        {
+            return;
+        }
+
+        if (!HasUiThreadAccess())
+        {
+            await RunOnUiThreadAsync(() => ApplyCustomWidgetMutationAsync(mutation));
+            return;
+        }
+
+        string widgetId = mutation.WidgetId.Trim();
+        if (mutation.Permissions is { Count: > 0 })
+        {
+            CustomWidgetTrustStore.Shared.InvalidateCache();
+            string? diskManifestJson = await CustomWidgetDataStore.ForWidget(widgetId).TryReadExistingManifestJsonAsync();
+            string? diskOrigin = !string.IsNullOrWhiteSpace(diskManifestJson)
+                ? CustomWidgetManifestParser.Parse(diskManifestJson).Manifest?.Origin
+                : null;
+            bool defaultTrusted = !string.Equals(diskOrigin, CustomWidgetOriginKinds.Community, StringComparison.OrdinalIgnoreCase);
+            CustomWidgetTrustStore.Shared.ApplyPermissionMutations(
+                widgetId,
+                mutation.Permissions,
+                defaultTrustedIfNew: defaultTrusted);
+        }
+
+        IReadOnlyList<DeskBox.Controls.WidgetContents.CustomWidgetContentAdapter> liveAdapters =
+            FindLiveCustomWidgetAdapters(widgetId);
+        if (liveAdapters.Count > 0)
+        {
+            foreach (DeskBox.Controls.WidgetContents.CustomWidgetContentAdapter adapter in liveAdapters)
+            {
+                await adapter.ViewModel.ApplyAuthoritativeMutationAsync(mutation);
+            }
+            return;
+        }
+
+        CustomWidgetDataStore store = CustomWidgetDataStore.ForWidget(widgetId);
+        if (mutation.ClearAllData)
+        {
+            await store.ClearAllDataAsync();
+        }
+
+        if (mutation.Secrets is { Count: > 0 })
+        {
+            foreach ((string secKey, string secVal) in mutation.Secrets)
+            {
+                if (!string.IsNullOrWhiteSpace(secKey))
+                {
+                    CustomWidgetSecretStore.Shared.SetSecret(widgetId, secKey.Trim(), secVal);
+                }
+            }
+        }
+
+        if (mutation.Settings is { Count: > 0 } || mutation.Secrets is { Count: > 0 })
+        {
+            CustomWidgetStorePayload payload = await store.ReloadFromDiskAsync();
+            if (mutation.Secrets is { Count: > 0 })
+            {
+                foreach (string secKey in mutation.Secrets.Keys)
+                {
+                    payload.Settings.Remove(secKey);
+                }
+            }
+
+            if (mutation.Settings is { Count: > 0 })
+            {
+                foreach ((string key, string val) in mutation.Settings)
+                {
+                    if (!string.IsNullOrWhiteSpace(key))
+                    {
+                        payload.Settings[key] = val ?? string.Empty;
+                        if (payload.State.ContainsKey(CustomWidgetPomodoroEngine.KeyRemainingSec) ||
+                            payload.State.ContainsKey(CustomWidgetPomodoroEngine.KeyPhase))
+                        {
+                            CustomWidgetPomodoroEngine.SyncIdleDurationWithSettings(payload.State, payload.Settings, key);
+                        }
+                    }
+                }
+            }
+
+            await store.SaveAsync(payload);
+        }
+    }
+
+    private string GetUniqueCustomWidgetName(string baseName)
+    {
+        HashSet<string> existingNames = _settingsService.Settings.WidgetLayout.Widgets
+            .Where(widget => widget.WidgetKind == WidgetKind.Custom && !IsDeleted(widget.Id))
+            .Select(widget => widget.Name)
+            .ToHashSet(StringComparer.CurrentCultureIgnoreCase);
+        if (!existingNames.Contains(baseName))
+        {
+            return baseName;
+        }
+
+        for (int index = 2; ; index++)
+        {
+            string candidate = $"{baseName} {index}";
+            if (!existingNames.Contains(candidate))
+            {
+                return candidate;
+            }
+        }
+    }
+
+    private async Task<IDesktopWidgetWindow?> CreateOrShowCustomWidgetsAsync(bool reveal)
+    {
+        SetFeatureWidgetEnabledState(WidgetKind.Custom, true);
+        List<WidgetConfig> configs = _settingsService.Settings.WidgetLayout.Widgets
+            .Where(widget => widget.WidgetKind == WidgetKind.Custom && !IsDeleted(widget.Id))
+            .ToList();
+        if (configs.Count == 0)
+        {
+            GlanceWidgetInstanceInfo created = await CreateCustomWidgetAsync(
+                CustomWidgetTemplates.SystemPulseTemplateId);
+            return _contentWidgets.GetValueOrDefault(created.Id);
+        }
+
+        List<WidgetConfig> activeConfigs = configs
+            .Where(config => !IsCustomWidgetParkedByUser(config))
+            .ToList();
+        if (activeConfigs.Count == 0 && reveal)
+        {
+            configs[0].Metadata.Remove(CustomParkedByUserMetadataKey);
+            activeConfigs.Add(configs[0]);
+        }
+
+        foreach (WidgetConfig parkedConfig in configs.Except(activeConfigs))
+        {
+            parkedConfig.IsDisabled = true;
+            parkedConfig.IsVisible = false;
+        }
+
+        ApplyGlanceMasterState(activeConfigs, enabled: true);
+
+        await _settingsService.SaveAsync();
+        if (reveal)
+        {
+            foreach (WidgetConfig config in activeConfigs)
+            {
+                await ShowWidgetAsync(config.Id, reveal: true, autoRestoreOnReveal: false);
+            }
+        }
+
+        return activeConfigs
             .Select(config => _contentWidgets.GetValueOrDefault(config.Id))
             .FirstOrDefault(window => window is not null);
     }
@@ -675,7 +1191,7 @@ public sealed partial class WidgetManager
             config.IsDisabled = false;
         }
 
-        CloseLoadedQuickCaptureWidgets();
+        await CloseLoadedQuickCaptureWidgetsAsync();
         await _settingsService.SaveAsync();
     }
 
@@ -687,6 +1203,17 @@ public sealed partial class WidgetManager
                      .ToList())
         {
             CloseFeatureWidgetInstance(window);
+        }
+    }
+
+    private async Task CloseLoadedQuickCaptureWidgetsAsync()
+    {
+        foreach (ContentWidgetWindow window in _contentWidgets.Values
+                     .Where(window => window.Config.WidgetKind == WidgetKind.QuickCapture)
+                     .DistinctBy(window => window.WindowHandle)
+                     .ToList())
+        {
+            await CloseFeatureWidgetInstanceAsync(window);
         }
     }
 
@@ -811,10 +1338,233 @@ public sealed partial class WidgetManager
         string fileName = BuildQuickCaptureContentFileName(
             body,
             _localizationService.T("QuickCapture.TextFileNamePrefix"),
-            ".txt");
+            item.ContentFormat == TextContentFormat.Markdown ? ".md" : ".txt");
         string destinationPath = FileService.GetAvailablePath(Path.Combine(targetFolderPath, fileName));
-        await File.WriteAllTextAsync(destinationPath, body);
+        string serializedContent = item.ContentFormat == TextContentFormat.Markdown &&
+                                   !string.IsNullOrWhiteSpace(item.Title)
+            ? $"# {item.Title.Trim()}{Environment.NewLine}{Environment.NewLine}{body}"
+            : body;
+        await File.WriteAllTextAsync(destinationPath, serializedContent);
         return destinationPath;
+    }
+
+    public async Task RefreshTodoWidgetAsync(string widgetId)
+    {
+        if (string.IsNullOrWhiteSpace(widgetId))
+        {
+            return;
+        }
+
+        if (!HasUiThreadAccess())
+        {
+            await RunOnUiThreadAsync(() => RefreshTodoWidgetAsync(widgetId));
+            return;
+        }
+
+        foreach (ContentWidgetWindow window in _contentWidgets.Values.Distinct())
+        {
+            if (window.CurrentContent is TodoWidgetContentAdapter activeTodo &&
+                string.Equals(activeTodo.WidgetId, widgetId, StringComparison.Ordinal))
+            {
+                await activeTodo.RefreshAsync();
+            }
+
+            foreach (Contracts.IWidgetContent cached in window.CachedGroupContents)
+            {
+                if (cached is TodoWidgetContentAdapter cachedTodo &&
+                    string.Equals(cachedTodo.WidgetId, widgetId, StringComparison.Ordinal))
+                {
+                    await cachedTodo.RefreshAsync();
+                }
+            }
+        }
+    }
+
+    public async Task<int> ConvertQuickCaptureItemsToTodoAsync(IReadOnlyList<QuickCaptureItem> items)
+    {
+        if (items is null || items.Count == 0)
+        {
+            return 0;
+        }
+
+        var validItems = items
+            .Where(item => item is not null && !item.IsDeleted)
+            .ToList();
+        if (validItems.Count == 0)
+        {
+            return 0;
+        }
+
+        WidgetConfig? todoConfig = _settingsService.Settings.WidgetLayout.Widgets
+            .FirstOrDefault(w => w.WidgetKind == WidgetKind.Todo && !w.IsDisabled && !IsDeleted(w.Id));
+        if (todoConfig is null)
+        {
+            ContentWidgetWindow createdWindow = await CreateTodoWidgetAsync();
+            todoConfig = _settingsService.Settings.WidgetLayout.Widgets
+                .FirstOrDefault(w => string.Equals(w.Id, createdWindow.Identity.WidgetId, StringComparison.Ordinal));
+            if (todoConfig is null)
+            {
+                return 0;
+            }
+        }
+
+        var store = new TodoWidgetStore(todoConfig.Id);
+        TodoWidgetData data = await store.LoadAsync();
+        string fallbackTitle = _localizationService.T("QuickCapture.Untitled");
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        bool insertAtTop = string.Equals(
+            Contracts.TodoOptionKinds.NormalizeNewTaskPosition(_settingsService.Settings.Todo.TodoNewTaskPosition),
+            Contracts.TodoOptionKinds.NewTaskPositionTop,
+            StringComparison.Ordinal);
+
+        var createdTodos = new List<TodoItem>();
+        foreach (QuickCaptureItem source in validItems)
+        {
+            IReadOnlyList<(string Title, bool IsCompleted, List<TodoStep> Steps, string? Notes)> blueprints =
+                QuickCaptureTagParser.SplitItemsForTodoConversion(source, fallbackTitle);
+
+            for (int index = 0; index < blueprints.Count; index++)
+            {
+                (string title, bool isCompleted, List<TodoStep> steps, string? notes) = blueprints[index];
+                var todoItem = new TodoItem
+                {
+                    Text = title,
+                    IsCompleted = isCompleted,
+                    CompletedAt = isCompleted ? now : null,
+                    IsImportant = source.IsPinned,
+                    Steps = steps,
+                    Notes = notes,
+                    CreatedAt = now,
+                    UpdatedAt = now
+                };
+
+                if (index == 0)
+                {
+                    foreach (TodoAttachment attachment in source.Attachments ?? [])
+                    {
+                        if (string.IsNullOrWhiteSpace(attachment.FilePath))
+                        {
+                            continue;
+                        }
+
+                        TodoAttachment cloned = attachment.Clone();
+                        if (cloned.IsManagedCopy && File.Exists(cloned.FilePath))
+                        {
+                            TodoAttachment? imported = await AttachmentStorageService.ImportPathAsync(
+                                cloned.FilePath,
+                                Path.Combine(store.AttachmentDirectory, todoItem.Id),
+                                copyToManagedStorage: true);
+                            if (imported is not null)
+                            {
+                                todoItem.Attachments.Add(imported);
+                                continue;
+                            }
+                        }
+
+                        todoItem.Attachments.Add(cloned);
+                    }
+                }
+
+                createdTodos.Add(todoItem);
+            }
+        }
+
+        if (createdTodos.Count == 0)
+        {
+            return 0;
+        }
+
+        if (insertAtTop)
+        {
+            foreach (TodoItem existing in data.Items)
+            {
+                existing.SortOrder += createdTodos.Count;
+            }
+
+            for (int i = 0; i < createdTodos.Count; i++)
+            {
+                createdTodos[i].SortOrder = i;
+                data.Items.Insert(i, createdTodos[i]);
+            }
+        }
+        else
+        {
+            foreach (TodoItem created in createdTodos)
+            {
+                created.SortOrder = data.Items.Count;
+                data.Items.Add(created);
+            }
+        }
+
+        await store.SaveAsync(data);
+        await RefreshTodoWidgetAsync(todoConfig.Id);
+        return createdTodos.Count;
+    }
+
+    public async Task<int> ConvertTodoItemsToQuickCaptureAsync(
+        IReadOnlyList<TodoItem> items,
+        bool forcePin = false)
+    {
+        if (items is null || items.Count == 0)
+        {
+            return 0;
+        }
+
+        var validItems = items
+            .Where(item => item is not null && !item.IsDeleted)
+            .ToList();
+        if (validItems.Count == 0)
+        {
+            return 0;
+        }
+
+        WidgetConfig? qcConfig = _settingsService.Settings.WidgetLayout.Widgets
+            .FirstOrDefault(w => w.WidgetKind == WidgetKind.QuickCapture && !w.IsDisabled && !IsDeleted(w.Id));
+        if (qcConfig is null)
+        {
+            await CreateOrShowQuickCaptureWidgetAsync(reveal: true);
+        }
+
+        string fallbackTitle = _localizationService.T("Todo.Reminder.Untitled");
+        bool copyAttachments = string.Equals(
+            Contracts.AttachmentStorageModes.Normalize(_settingsService.Settings.QuickCapture.AttachmentStorageMode),
+            Contracts.AttachmentStorageModes.Copy,
+            StringComparison.Ordinal);
+        int createdCount = 0;
+
+        for (int index = validItems.Count - 1; index >= 0; index--)
+        {
+            TodoItem source = validItems[index];
+            (string? title, string body, bool pin) =
+                QuickCaptureTagParser.FormatTodoForQuickCapture(source, fallbackTitle);
+
+            QuickCaptureWriteResult result = await _quickCaptureService.AddDetailedItemWithResultAsync(
+                title,
+                body,
+                QuickCaptureAppearancePreset.Default,
+                TextContentFormat.Markdown,
+                pin: forcePin || pin);
+
+            if (!result.Saved || result.Item is null)
+            {
+                continue;
+            }
+
+            createdCount++;
+            string[] existingAttachmentPaths = (source.Attachments ?? [])
+                .Select(att => att.FilePath)
+                .Where(path => !string.IsNullOrWhiteSpace(path) && File.Exists(path))
+                .ToArray()!;
+            if (existingAttachmentPaths.Length > 0)
+            {
+                await _quickCaptureService.AddAttachmentsAsync(
+                    result.Item.Id,
+                    existingAttachmentPaths,
+                    copyToManagedStorage: copyAttachments);
+            }
+        }
+
+        return createdCount;
     }
 
     private async Task<string?> SaveQuickCaptureLinkToFolderAsync(QuickCaptureItem item, string targetFolderPath)
@@ -971,7 +1721,7 @@ public sealed partial class WidgetManager
     internal static bool RequiresSingletonFeatureWidgetConfig(WidgetKind kind)
     {
         return FeatureWidgetSettings.IsFeatureWidget(kind) &&
-               kind != WidgetKind.Glance;
+               kind is not (WidgetKind.Glance or WidgetKind.Custom);
     }
 
     internal IDesktopWidgetWindow? GetFeatureWidget(WidgetKind kind)
@@ -1026,11 +1776,6 @@ public sealed partial class WidgetManager
             await _quickCaptureSettings.SetEnabledAsync(enabled, reveal);
             return;
         }
-        if (kind == WidgetKind.Search && _searchFeatureSettings is not null)
-        {
-            await _searchFeatureSettings.SetEnabledAsync(enabled, reveal);
-            return;
-        }
         if (kind == WidgetKind.Todo && _todoSettings is not null)
         {
             await _todoSettings.SetEnabledAsync(enabled);
@@ -1075,25 +1820,6 @@ public sealed partial class WidgetManager
         finally { gate.Release(); }
     }
 
-    internal async Task ApplySearchWindowStateAsync(bool enabled, bool reveal)
-    {
-        if (!HasUiThreadAccess())
-        {
-            await RunOnUiThreadAsync(() => ApplySearchWindowStateAsync(enabled, reveal));
-            return;
-        }
-
-        SemaphoreSlim gate = _featureWidgetUpdateLocks[WidgetKind.Search];
-        await gate.WaitAsync();
-        try
-        {
-            if (_searchFeatureSettings is not null && _searchFeatureSettings.Enabled != enabled)
-                return;
-            await SetSearchFeatureWidgetEnabledAsync(enabled, reveal);
-        }
-        finally { gate.Release(); }
-    }
-
     public async Task ResetFeatureWidgetAsync(WidgetKind kind)
     {
         if (!HasUiThreadAccess())
@@ -1120,7 +1846,7 @@ public sealed partial class WidgetManager
 
         try
         {
-            CloseLoadedFeatureWidgetWindows(kind);
+            await CloseLoadedFeatureWidgetWindowsAsync(kind);
 
             var configs = _settingsService.Settings.Widgets
                 .Where(widget => widget.WidgetKind == kind)
@@ -1149,6 +1875,28 @@ public sealed partial class WidgetManager
                 }
                 await new GlanceImageService().ClearCacheAsync();
             }
+            else if (kind == WidgetKind.Custom)
+            {
+                foreach (WidgetConfig customConfig in configs)
+                {
+                    await CustomWidgetDataStore.ForWidget(customConfig.Id).ClearAllDataAsync();
+                    DeleteCustomWidgetSecretsAndStages(customConfig.Id);
+                }
+            }
+            else if (kind == WidgetKind.Clipboard)
+            {
+                ClipboardHistoryService? clipboardService = ClipboardHistoryServiceProvider?.Invoke();
+                if (clipboardService is not null)
+                {
+                    await clipboardService.ClearAllAsync();
+                }
+                else
+                {
+                    string settingsDir = _settingsService.DataDirectoryPath;
+                    await ClipboardStore.ClearDiskAllAsync(
+                        !string.IsNullOrWhiteSpace(settingsDir) ? Path.Combine(settingsDir, "clipboard") : null);
+                }
+            }
 
             await CommitFeatureWidgetStateAsync(kind, false);
             var config = configs.FirstOrDefault(widget => !IsDeleted(widget.Id)) ??
@@ -1167,6 +1915,10 @@ public sealed partial class WidgetManager
                     // attachments; dropping the config alone used to orphan
                     // them under data/widgets/{id}/.
                     await TodoWidgetStore.DeleteForWidgetAsync(duplicate.Id);
+                }
+                else if (kind == WidgetKind.Custom)
+                {
+                    DeleteCustomWidgetStorageSecretsAndStages(duplicate.Id);
                 }
                 if (!_settingsService.Settings.DeletedWidgetIds.Contains(duplicate.Id))
                 {
@@ -1203,6 +1955,20 @@ public sealed partial class WidgetManager
             else if (kind == WidgetKind.Glance)
             {
                 await GlanceWidgetStore.ForWidget(config.Id).ResetAsync();
+            }
+            else if (kind == WidgetKind.Custom)
+            {
+                config.Metadata.Remove(CustomParkedByUserMetadataKey);
+                config.Metadata[CustomWidgetViewModel.TemplateMetadataKey] =
+                    CustomWidgetTemplates.SystemPulseTemplateId;
+                CustomWidgetTemplateBundle sysBundle =
+                    CustomWidgetTemplates.GetTemplateBundle(CustomWidgetTemplates.SystemPulseTemplateId);
+                await CustomWidgetDataStore.ForWidget(config.Id).WriteWorkspaceBundleAsync(
+                    sysBundle.ManifestJson,
+                    sysBundle.LogicJs,
+                    updateLogicJs: true,
+                    sysBundle.Locales,
+                    updateLocales: true);
             }
 
             await _settingsService.SaveAsync();
@@ -1247,7 +2013,7 @@ public sealed partial class WidgetManager
         (config.Width, config.Height) = GetDefaultFeatureWidgetSize(kind);
         config.ViewMode = ViewMode.Icon;
         config.IsVisible = isEnabled;
-        config.IsDisabled = kind == WidgetKind.Glance && !isEnabled;
+        config.IsDisabled = kind is (WidgetKind.Glance or WidgetKind.Custom) && !isEnabled;
         config.IsPositionLocked = false;
         config.IsSizeLocked = false;
         config.Metadata ??= [];
@@ -1264,10 +2030,29 @@ public sealed partial class WidgetManager
 
     internal static void ApplyDefaultFeatureWidgetChromeMode(WidgetConfig config, WidgetKind kind)
     {
-        if (kind == WidgetKind.Search)
+        _ = config;
+        _ = kind;
+    }
+
+    private void DeleteCustomWidgetStorageSecretsAndStages(string widgetId)
+    {
+        CustomWidgetDataStore.DeleteWidgetStorage(widgetId);
+        DeleteCustomWidgetSecretsAndStages(widgetId);
+    }
+
+    private void DeleteCustomWidgetSecretsAndStages(string widgetId)
+    {
+        CustomWidgetSecretStore.Shared.DeleteWidgetSecrets(widgetId);
+        CustomWidgetTrustStore.Shared.RemoveWidget(widgetId);
+        string settingsDir = _settingsService.DataDirectoryPath;
+        if (!string.IsNullOrWhiteSpace(settingsDir) &&
+            !string.Equals(settingsDir, DeskBoxDataPathService.Current.DataDirectory, StringComparison.OrdinalIgnoreCase))
         {
-            WidgetChromeModeNames.SetOverrideMode(config, WidgetChromeMode.Overlay);
+            new CustomWidgetSecretStore(settingsDir).DeleteWidgetSecrets(widgetId);
+            new CustomWidgetTrustStore(settingsDir).RemoveWidget(widgetId);
         }
+
+        DeskBox.FileSafety.CustomWidgetAgentStageStore.DeleteStagesForWidget(widgetId);
     }
 
     private void CloseLoadedFeatureWidgetWindows(WidgetKind kind)
@@ -1283,6 +2068,22 @@ public sealed partial class WidgetManager
                      .ToList())
         {
             CloseFeatureWidgetInstance(window);
+        }
+    }
+
+    private async Task CloseLoadedFeatureWidgetWindowsAsync(WidgetKind kind)
+    {
+        if (kind == WidgetKind.QuickCapture)
+        {
+            await CloseLoadedQuickCaptureWidgetsAsync();
+            return;
+        }
+
+        foreach (var window in _contentWidgets.Values
+                     .Where(window => window.Config.WidgetKind == kind)
+                     .ToList())
+        {
+            await CloseFeatureWidgetInstanceAsync(window);
         }
     }
 
@@ -1321,7 +2122,7 @@ public sealed partial class WidgetManager
             config.IsDisabled = false;
         }
 
-        HideAndCloseFeatureWidgetAsync(WidgetKind.Todo);
+        await HideAndCloseFeatureWidgetCoreAsync(WidgetKind.Todo);
         await _settingsService.SaveAsync();
     }
 
@@ -1359,10 +2160,11 @@ public sealed partial class WidgetManager
             config.IsDisabled = false;
         }
 
-        HideAndCloseFeatureWidgetAsync(kind);
-        // Close the content window while feature-owned services are still
-        // available. Search content, for example, must unsubscribe from the
-        // exact SearchHistoryService instance before that service is released.
+        // Close the content window (including its exit animation) while
+        // feature-owned services are still available. Search content, for
+        // example, must unsubscribe from the exact SearchHistoryService
+        // instance before that service is released.
+        await HideAndCloseFeatureWidgetCoreAsync(kind);
         await CommitFeatureWidgetStateAsync(kind, false);
         await _settingsService.SaveAsync();
     }
@@ -1387,14 +2189,19 @@ public sealed partial class WidgetManager
         return SetContentFeatureWidgetEnabledAsync(WidgetKind.Weather, enabled, reveal);
     }
 
-    private Task SetSearchFeatureWidgetEnabledAsync(bool enabled, bool reveal)
+    private Task SetClipboardFeatureWidgetEnabledAsync(bool enabled, bool reveal)
     {
-        return SetContentFeatureWidgetEnabledAsync(WidgetKind.Search, enabled, reveal);
+        return SetContentFeatureWidgetEnabledAsync(WidgetKind.Clipboard, enabled, reveal);
     }
 
     private Task SetGlanceFeatureWidgetEnabledAsync(bool enabled, bool reveal)
     {
         return SetGlanceFeatureWidgetEnabledCoreAsync(enabled, reveal);
+    }
+
+    private Task SetCustomFeatureWidgetEnabledAsync(bool enabled, bool reveal)
+    {
+        return SetCustomFeatureWidgetEnabledCoreAsync(enabled, reveal);
     }
 
     private async Task SetGlanceFeatureWidgetEnabledCoreAsync(bool enabled, bool reveal)
@@ -1413,8 +2220,29 @@ public sealed partial class WidgetManager
             .ToList();
         ApplyGlanceMasterState(configs, enabled: false);
 
-        CloseLoadedFeatureWidgetWindows(WidgetKind.Glance);
+        await CloseLoadedFeatureWidgetWindowsAsync(WidgetKind.Glance);
         SetFeatureWidgetEnabledState(WidgetKind.Glance, false);
+        await _settingsService.SaveAsync();
+    }
+
+    private async Task SetCustomFeatureWidgetEnabledCoreAsync(bool enabled, bool reveal)
+    {
+        if (enabled)
+        {
+            await CreateOrShowCustomWidgetsAsync(reveal);
+            return;
+        }
+
+        await DetachFeatureWidgetsFromGroupsAsync(WidgetKind.Custom);
+        List<WidgetConfig> configs = _settingsService.Settings.WidgetLayout.Widgets
+            .Where(widget =>
+                widget.WidgetKind == WidgetKind.Custom &&
+                !IsDeleted(widget.Id))
+            .ToList();
+        ApplyGlanceMasterState(configs, enabled: false);
+
+        await CloseLoadedFeatureWidgetWindowsAsync(WidgetKind.Custom);
+        SetFeatureWidgetEnabledState(WidgetKind.Custom, false);
         await _settingsService.SaveAsync();
     }
 
@@ -1441,21 +2269,14 @@ public sealed partial class WidgetManager
         return FeatureWidgetSettings.IsFeatureWidget(kind);
     }
 
-    private async Task CommitFeatureWidgetStateAsync(WidgetKind kind, bool enabled)
+    private Task CommitFeatureWidgetStateAsync(WidgetKind kind, bool enabled)
     {
-        if (kind == WidgetKind.Search && _searchFeatureSettings is not null)
-        {
-            await _searchFeatureSettings.CommitEnabledStateAsync(enabled);
-            _lastFeatureWidgetEnabledStates[kind] = GetFeatureWidgetEnabledState(kind);
-            return;
-        }
         SetFeatureWidgetEnabledState(kind, enabled);
+        return Task.CompletedTask;
     }
 
     private void SetFeatureWidgetEnabledState(WidgetKind kind, bool enabled)
     {
-        if (kind == WidgetKind.Search && _searchFeatureSettings is not null)
-            throw new InvalidOperationException("Search state commits must await their runtime boundary.");
         _lastFeatureWidgetEnabledStates[kind] = enabled;
         if (kind == WidgetKind.Todo && _todoSettings is not null)
         {
@@ -1479,15 +2300,25 @@ public sealed partial class WidgetManager
         }
     }
 
+    private async Task HideAndCloseFeatureWidgetCoreAsync(WidgetKind kind)
+    {
+        var existing = GetFeatureWidget(kind);
+        if (existing is not null)
+        {
+            await CloseFeatureWidgetInstanceAsync(existing);
+        }
+    }
+
     private void CloseFeatureWidgetInstance(IDesktopWidgetWindow window)
+    {
+        _ = CloseFeatureWidgetInstanceAsync(window);
+    }
+
+    private async Task CloseFeatureWidgetInstanceAsync(IDesktopWidgetWindow window)
     {
         if (!HasUiThreadAccess())
         {
-            _ = RunOnUiThreadAsync(() =>
-            {
-                CloseFeatureWidgetInstance(window);
-                return Task.CompletedTask;
-            });
+            await RunOnUiThreadAsync(() => CloseFeatureWidgetInstanceAsync(window));
             return;
         }
 
@@ -1496,8 +2327,22 @@ public sealed partial class WidgetManager
         RemoveFileWidgetSessionsForHost(window);
 
         if (window is ContentWidgetWindow contentWindow)
+        {
             _contentWindowRegistration.Unregister(contentWindow);
+            if (contentWindow.Visible)
+            {
+                await RetireFeatureWidgetWindowAnimatedAsync(contentWindow);
+                _settingsService.SaveDebounced();
+                if (FeatureWidgetSettings.IsFeatureWidget(window.Config.WidgetKind))
+                {
+                    App.ScheduleLightMemoryCleanup(completedHeavyOperation: true);
+                }
 
+                return;
+            }
+        }
+
+        EnsureXamlLoopLifelineAction?.Invoke();
         try
         {
             window.CloseWindow();
@@ -1510,6 +2355,60 @@ public sealed partial class WidgetManager
         if (FeatureWidgetSettings.IsFeatureWidget(window.Config.WidgetKind))
         {
             App.ScheduleLightMemoryCleanup(completedHeavyOperation: true);
+        }
+    }
+
+    private async Task RetireFeatureWidgetWindowAnimatedAsync(ContentWidgetWindow window)
+    {
+        try
+        {
+            await window.PlayDeleteExitAnimationAsync();
+        }
+        catch
+        {
+        }
+
+        EnsureXamlLoopLifelineAction?.Invoke();
+        try
+        {
+            window.CloseWindow();
+        }
+        catch
+        {
+        }
+    }
+
+    internal void RefreshTodoWidgetsForDateRollover()
+    {
+        foreach (ContentWidgetWindow window in _contentWidgets.Values.ToArray())
+        {
+            if (window.CurrentContent is TodoWidgetContentAdapter todo)
+            {
+                todo.RefreshForDateRollover();
+                window.RefreshCompactPresentationFromHost();
+            }
+        }
+    }
+
+    internal void FlushDirtyFeatureWidgetsForEndSession()
+    {
+        foreach (ContentWidgetWindow window in _contentWidgets.Values.ToArray())
+        {
+            try
+            {
+                if (window.CurrentContent is TodoWidgetContentAdapter todo)
+                {
+                    todo.FlushPendingEditsForShutdown();
+                }
+                else if (window.CurrentContent is QuickCaptureWidgetContentAdapter quickCapture)
+                {
+                    quickCapture.FlushPendingEditsForShutdown();
+                }
+            }
+            catch (Exception ex)
+            {
+                App.Log($"[Lifecycle] Feature widget flush failed id={window.Identity.WidgetId}: {ex.Message}");
+            }
         }
     }
 

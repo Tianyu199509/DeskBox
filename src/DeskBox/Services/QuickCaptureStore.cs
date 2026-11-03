@@ -24,18 +24,26 @@ public sealed class QuickCaptureStore
     private const int CurrentVersion = 4;
 
     private readonly string _storePath;
+    private readonly string _exportDirectory;
 
     public QuickCaptureStore()
-        : this(Path.Combine(
-            DeskBoxDataPathService.Current.DataDirectory,
-            "quick-capture"))
+        : this(
+            Path.Combine(
+                DeskBoxDataPathService.Current.DataDirectory,
+                "quick-capture"),
+            DeskBoxDataPathService.Current.IsDevelopmentRoot
+                ? null
+                : Path.Combine(Path.GetTempPath(), "DeskBox", "QuickCaptureExports"))
     {
     }
 
-    internal QuickCaptureStore(string dataDir)
+    internal QuickCaptureStore(string dataDir, string? exportDirectory = null)
     {
         Directory.CreateDirectory(dataDir);
         _storePath = Path.Combine(dataDir, "quick-capture.json");
+        _exportDirectory = string.IsNullOrWhiteSpace(exportDirectory)
+            ? Path.Combine(Path.GetDirectoryName(_storePath)!, "exports")
+            : Path.GetFullPath(exportDirectory);
     }
 
     internal string StorePath => _storePath;
@@ -44,7 +52,7 @@ public sealed class QuickCaptureStore
 
     internal string ThumbnailDirectory => Path.Combine(Path.GetDirectoryName(_storePath)!, "thumbnails");
 
-    internal string ExportDirectory => Path.Combine(Path.GetDirectoryName(_storePath)!, "exports");
+    internal string ExportDirectory => _exportDirectory;
 
     internal string AttachmentDirectory => Path.Combine(Path.GetDirectoryName(_storePath)!, "attachments");
 
@@ -86,6 +94,9 @@ public sealed class QuickCaptureStore
     {
         data ??= new QuickCaptureStoreData();
         data.Version = CurrentVersion;
+        data.MirrorFolderPath = string.IsNullOrWhiteSpace(data.MirrorFolderPath)
+            ? null
+            : data.MirrorFolderPath.Trim();
         data.Items ??= [];
         data.RecentItems ??= [];
 

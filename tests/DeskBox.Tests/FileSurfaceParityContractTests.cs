@@ -571,20 +571,12 @@ public sealed class FileSurfaceParityContractTests
             "src/DeskBox/Controls/FileItemSurface.xaml.cs"));
 
         Assert.Contains("ListItemDetailVisibility", xaml, StringComparison.Ordinal);
-        Assert.Contains("ShowFileItemPathTooltips", xaml, StringComparison.Ordinal);
-        Assert.Equal(
-            1,
-            xaml.Split(
-                "Text=\"{Binding FullPath}\"",
-                StringSplitOptions.None).Length - 1);
-        Assert.Contains(
-            "Visibility=\"{x:Bind ActivityStatusVisibility, Mode=OneWay}\"",
-            xaml,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "Visibility=\"{x:Bind PathTooltipVisibility, Mode=OneWay}\"",
-            xaml,
-            StringComparison.Ordinal);
+        Assert.DoesNotContain("<ToolTipService.ToolTip>", xaml, StringComparison.Ordinal);
+        Assert.Contains("ShowFileItemPathTooltips", source, StringComparison.Ordinal);
+        Assert.Contains("FullPath", source, StringComparison.Ordinal);
+        Assert.Contains("ActivityStatusVisibility", source, StringComparison.Ordinal);
+        Assert.Contains("PathTooltipVisibility", source, StringComparison.Ordinal);
+        Assert.Contains("ToolTipService.SetToolTip(", source, StringComparison.Ordinal);
         Assert.DoesNotContain("PathOnlyTooltipVisibility", source, StringComparison.Ordinal);
         Assert.Contains(
             "DataContextChanged += FileItemSurface_DataContextChanged",
@@ -675,9 +667,9 @@ public sealed class FileSurfaceParityContractTests
         string stackPopover = File.ReadAllText(Path.Combine(
             root,
             "src/DeskBox/Controls/WidgetContents/FileSurfaceContent.StackPopover.cs"));
-        string stackPopoverRenameWindow = File.ReadAllText(Path.Combine(
+        Assert.False(File.Exists(Path.Combine(
             root,
-            "src/DeskBox/Views/StackPopoverInlineRenameWindow.cs"));
+            "src/DeskBox/Views/StackPopoverInlineRenameWindow.cs")));
         string stackPopoverHostWindow = File.ReadAllText(Path.Combine(
             root,
             "src/DeskBox/Views/StackPopoverHostWindow.cs"));
@@ -795,7 +787,11 @@ public sealed class FileSurfaceParityContractTests
             stackPopoverHostWindow,
             StringComparison.Ordinal);
         Assert.Contains(
-            "_neutralBackdrop ??= new DesktopAcrylicBackdrop()",
+            "!followMaterialStyle && WindowsCompatibilityService.SupportsDesktopAcrylic",
+            stackPopoverHostWindow,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "_backdropElement.SystemBackdrop = _materialBackdrop",
             stackPopoverHostWindow,
             StringComparison.Ordinal);
         Assert.DoesNotContain(
@@ -975,16 +971,28 @@ public sealed class FileSurfaceParityContractTests
             "_stackPopoverTitleEditor",
             stackPopover,
             StringComparison.Ordinal);
-        Assert.Contains(
-            "new StackPopoverInlineRenameWindow(",
+        Assert.DoesNotContain(
+            "StackPopoverInlineRenameWindow",
             stackPopover,
             StringComparison.Ordinal);
         Assert.Contains(
-            "ResolveStackPopoverTitleEditorBounds(",
+            "titleHost.Children.Add(titleEditor);",
             stackPopover,
             StringComparison.Ordinal);
         Assert.Contains(
-            "editorWindow.ShowAndFocus(",
+            "ActivateStackPopoverInput();",
+            stackPopover,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "host.ActivateInput(",
+            stackPopover,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "InlineEditorFocus.FocusWhenLoaded(",
+            stackPopover,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "static editor => editor.SelectAll()",
             stackPopover,
             StringComparison.Ordinal);
         Assert.Contains(
@@ -996,47 +1004,10 @@ public sealed class FileSurfaceParityContractTests
             stackPopover,
             StringComparison.Ordinal);
         Assert.Contains(
-            "class StackPopoverInlineRenameWindow : Window",
-            stackPopoverRenameWindow,
-            StringComparison.Ordinal);
-        // The borderless presenter is applied through the shared degrading
-        // helper: early-logon sessions reject these windowing calls outright.
-        Assert.Contains(
-            "WindowShellState.TryApplyBorderlessOverlappedPresenter(_appWindow);",
-            stackPopoverRenameWindow,
-            StringComparison.Ordinal);
-        Assert.Contains(
             "presenter.SetBorderAndTitleBar(false, false)",
             File.ReadAllText(Path.Combine(
                 root,
                 "src/DeskBox/Helpers/WindowShellState.cs")),
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "extendedStyle &= ~Win32Helper.WS_EX_NOACTIVATE",
-            stackPopoverRenameWindow,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "Activate();",
-            stackPopoverRenameWindow,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "Win32Helper.SetForegroundWindow(WindowHandle)",
-            stackPopoverRenameWindow,
-            StringComparison.Ordinal);
-        // The editor focuses through InlineEditorFocus: the freshly created
-        // window content is not focusable until its first layout pass, and a
-        // bare Focus call at this point fails silently.
-        Assert.Contains(
-            "InlineEditorFocus.FocusWhenLoaded(",
-            stackPopoverRenameWindow,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "static editor => editor.SelectAll()",
-            stackPopoverRenameWindow,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "WindowShellState.TryHideFromSwitchers(_appWindow);",
-            stackPopoverRenameWindow,
             StringComparison.Ordinal);
         Assert.Contains(
             "appWindow.IsShownInSwitchers = false;",
@@ -2052,14 +2023,12 @@ public sealed class FileSurfaceParityContractTests
             "src/DeskBox/Controls/WidgetShell.xaml"));
 
         Assert.Contains("ResetDragPayloadCache();", visuals, StringComparison.Ordinal);
-        Assert.Contains("_groupFileDropFormatCached", native, StringComparison.Ordinal);
-        Assert.Equal(1, native.Split(
-            "RequiresGroupManualDropFallback(dataView)",
-            StringSplitOptions.None).Length - 1);
-        Assert.Contains(
-            "_groupFileDropFormatCached = false;",
-            native,
-            StringComparison.Ordinal);
+        // Hover pre-materialization and VK_LBUTTON auto-drop polling are permanently
+        // retired so one-shot virtual streams and right-button / swapped-button /
+        // touch-pen drags are never consumed or hijacked during hover.
+        Assert.DoesNotContain("CacheGroupFileDropAsync", native, StringComparison.Ordinal);
+        Assert.DoesNotContain("EnsureGroupFileDropPoll", native, StringComparison.Ordinal);
+        Assert.DoesNotContain("RequiresGroupManualDropFallback", native, StringComparison.Ordinal);
         Assert.DoesNotContain("ContentDropHighlight", shell, StringComparison.Ordinal);
         Assert.DoesNotContain("ContentDropHighlight", shellXaml, StringComparison.Ordinal);
     }

@@ -98,11 +98,12 @@ public sealed partial class DirectStartupService
         if (_taskBackend.ReadFailed)
             return new(StartupRegistrationState.BlockedOrFailed, _taskBackend.LastError);
         if ((!string.IsNullOrWhiteSpace(previousRun) &&
-                !IsCommandOwnedBy(previousRun, executablePath) && CommandTargetExists(previousRun)) ||
-            (previousTask is not null && !previousTask.IsOwnedBy(executablePath) &&
+                !IsCommandOwnedBy(previousRun, executablePath) && !IsSameInstallCompanionCommand(previousRun, executablePath) && CommandTargetExists(previousRun)) ||
+            (previousTask is not null && !previousTask.IsOwnedBy(executablePath) && !IsSameInstallCompanionTask(previousTask, executablePath) &&
                 File.Exists(previousTask.ExecutablePath)))
             return new(StartupRegistrationState.PathMismatch, "Another installation owns the startup registration.");
-        if (!_runEntryApprovedProvider())
+        bool runApproved = _runEntryApprovedProvider();
+        if (!runApproved && (IsCommandOwnedBy(previousRun, executablePath) || previousTask is not null))
             return new(StartupRegistrationState.DisabledByUser);
 
         string command = $"\"{executablePath}\" --startup --startup-source=run";
@@ -126,6 +127,12 @@ public sealed partial class DirectStartupService
         {
             return new(StartupRegistrationState.BlockedOrFailed,
                 CombineErrors(ex.Message, RestoreRunValue(previousRun)));
+        }
+
+        if (!runApproved)
+        {
+            Log("Restored standard Run entry so Windows Startup Apps can re-enable DeskBox");
+            return new(StartupRegistrationState.DisabledByUser, EffectiveMode: StartupMode.Standard);
         }
 
         Log("Startup enabled through the standard Run entry");

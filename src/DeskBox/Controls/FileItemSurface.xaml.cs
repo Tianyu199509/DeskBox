@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using DeskBox.Models;
 using DeskBox.Services;
 using DeskBox.ViewModels;
+using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
@@ -59,8 +60,9 @@ public sealed partial class FileItemSurface : UserControl, INotifyPropertyChange
     private string _transferStatusText = string.Empty;
     private bool _isOpening;
     private string _openingStatusText = string.Empty;
-    private WidgetViewModel? _subscribedLayoutContext;
-    private bool _isSurfaceLoaded;
+    private ToolTip? _lazyToolTip;
+    private TextBlock? _activityToolTipText;
+    private TextBlock? _pathToolTipText;
     private FrameworkElement? _iconLayout;
     private FrameworkElement? _listLayout;
     private TextBlock? _iconItemNameText;
@@ -68,18 +70,46 @@ public sealed partial class FileItemSurface : UserControl, INotifyPropertyChange
     private FrameworkElement? _iconIconHost;
     private FrameworkElement? _listIconHost;
     private FrameworkElement? _listTextHost;
+    private readonly PointerEventHandler _surfaceBorderPointerMovedHandler;
+    private bool _isPointerMovedHandlerAttached;
 
     public FileItemSurface()
     {
         InitializeComponent();
+        ApplyLayoutMetrics();
         DataContextChanged += FileItemSurface_DataContextChanged;
+        _surfaceBorderPointerMovedHandler = new PointerEventHandler(SurfaceBorder_PointerMoved);
+        AttachPointerMovedHandler();
+    }
+
+    private void AttachPointerMovedHandler()
+    {
+        if (_isPointerMovedHandlerAttached)
+        {
+            return;
+        }
+
         // PointerEntered alone is not a reliable recovery signal during
         // initial layout or container reuse. Observe movement even when a
         // child handles it, without consuming input or taking pointer capture.
         SurfaceBorder.AddHandler(
             UIElement.PointerMovedEvent,
-            new PointerEventHandler(SurfaceBorder_PointerMoved),
+            _surfaceBorderPointerMovedHandler,
             handledEventsToo: true);
+        _isPointerMovedHandlerAttached = true;
+    }
+
+    private void DetachPointerMovedHandler()
+    {
+        if (!_isPointerMovedHandlerAttached)
+        {
+            return;
+        }
+
+        SurfaceBorder.RemoveHandler(
+            UIElement.PointerMovedEvent,
+            _surfaceBorderPointerMovedHandler);
+        _isPointerMovedHandlerAttached = false;
     }
 
     public event EventHandler<FileItemSurfaceVisualStateChangedEventArgs>? VisualStateChanged;
@@ -239,6 +269,7 @@ public sealed partial class FileItemSurface : UserControl, INotifyPropertyChange
     public string ActivityStatusText =>
         IsTransferActive ? _transferStatusText : _openingStatusText;
 
+    // PathTooltipVisibility is derived from LayoutContext.ShowFileItemPathTooltips.
     public Visibility PathTooltipVisibility =>
         LayoutContext?.ShowFileItemPathTooltips == true
             ? Visibility.Visible
@@ -278,6 +309,76 @@ public sealed partial class FileItemSurface : UserControl, INotifyPropertyChange
         // while still measuring the real content before it can receive input.
         EnsureActiveLayout();
         return base.MeasureOverride(availableSize);
+    }
+
+    private void ApplyLayoutMetrics()
+    {
+        SurfaceBorder.HorizontalAlignment = SurfaceHorizontalAlignment;
+        SurfaceBorder.MaxWidth = SurfaceMaxWidth;
+        SurfaceBorder.Margin = SurfaceMargin;
+        SurfaceBorder.Padding = SurfacePadding;
+    }
+
+    private void SyncSurfaceToolTip(bool materializeIfNeeded)
+    {
+        if (!ToolTipEnabled)
+        {
+            ClearAttachedSurfaceToolTip();
+            return;
+        }
+
+        if (_lazyToolTip is null)
+        {
+            if (!materializeIfNeeded)
+            {
+                return;
+            }
+
+            _activityToolTipText = new TextBlock
+            {
+                FontWeight = FontWeights.SemiBold
+            };
+            _pathToolTipText = new TextBlock
+            {
+                MaxWidth = 360,
+                MaxLines = 2,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                TextWrapping = TextWrapping.Wrap
+            };
+            var panel = new StackPanel { Spacing = 2 };
+            panel.Children.Add(_activityToolTipText);
+            panel.Children.Add(_pathToolTipText);
+            _lazyToolTip = new ToolTip
+            {
+                Content = panel
+            };
+        }
+
+        string fullPath = (DataContext as WidgetItem)?.FullPath ?? string.Empty;
+        _activityToolTipText!.Text = ActivityStatusText;
+        _activityToolTipText.Visibility = ActivityStatusVisibility;
+        _pathToolTipText!.Text = fullPath;
+        _pathToolTipText.Visibility = string.IsNullOrWhiteSpace(fullPath)
+            ? Visibility.Collapsed
+            : PathTooltipVisibility;
+
+        bool hasVisibleContent =
+            _activityToolTipText.Visibility == Visibility.Visible ||
+            _pathToolTipText.Visibility == Visibility.Visible;
+        _lazyToolTip.IsEnabled = hasVisibleContent;
+        ToolTipService.SetToolTip(
+            SurfaceBorder,
+            hasVisibleContent ? _lazyToolTip : null);
+    }
+
+    private void ClearAttachedSurfaceToolTip()
+    {
+        if (_lazyToolTip is not null)
+        {
+            _lazyToolTip.IsEnabled = false;
+        }
+
+        ToolTipService.SetToolTip(SurfaceBorder, null);
     }
 
     private void EnsureActiveLayout()
@@ -385,6 +486,7 @@ public sealed partial class FileItemSurface : UserControl, INotifyPropertyChange
         OnPropertyChanged(nameof(ActivityStatusVisibility));
         OnPropertyChanged(nameof(ActivityStatusText));
         OnPropertyChanged(nameof(ToolTipEnabled));
+        SyncSurfaceToolTip(materializeIfNeeded: false);
     }
 
     public static Border? TryGetInteractiveBorder(object? source)
@@ -419,11 +521,6 @@ public sealed partial class FileItemSurface : UserControl, INotifyPropertyChange
     {
         if (sender is FileItemSurface surface)
         {
-            if (args.Property == LayoutContextProperty)
-            {
-                surface.RefreshLayoutContextSubscription();
-            }
-
             if (args.Property == ModeProperty)
             {
                 if (surface._iconLayout is not null || surface._listLayout is not null)
@@ -437,38 +534,14 @@ public sealed partial class FileItemSurface : UserControl, INotifyPropertyChange
         }
     }
 
-    private void RefreshLayoutContextSubscription()
-    {
-        if (!_isSurfaceLoaded || ReferenceEquals(_subscribedLayoutContext, LayoutContext))
-        {
-            return;
-        }
+    internal static bool ShouldNotifyPresentationForLayoutProperty(string? propertyName) =>
+        string.IsNullOrEmpty(propertyName) ||
+        propertyName is nameof(WidgetViewModel.ListItemMargin)
+            or nameof(WidgetViewModel.ListItemPadding)
+            or nameof(WidgetViewModel.IconTilePadding)
+            or nameof(WidgetViewModel.ShowFileItemPathTooltips);
 
-        if (_subscribedLayoutContext is not null)
-        {
-            _subscribedLayoutContext.PropertyChanged -= LayoutContext_PropertyChanged;
-        }
-
-        _subscribedLayoutContext = LayoutContext;
-        if (_subscribedLayoutContext is not null)
-        {
-            _subscribedLayoutContext.PropertyChanged += LayoutContext_PropertyChanged;
-        }
-    }
-
-    private void DetachLayoutContextSubscription()
-    {
-        if (_subscribedLayoutContext is not null)
-        {
-            _subscribedLayoutContext.PropertyChanged -= LayoutContext_PropertyChanged;
-            _subscribedLayoutContext = null;
-        }
-    }
-
-    private void LayoutContext_PropertyChanged(object? sender, PropertyChangedEventArgs e)
-    {
-        NotifyPresentationChanged();
-    }
+    internal void RefreshLayoutMetrics() => NotifyPresentationChanged();
 
     private void FileItemSurface_DataContextChanged(
         FrameworkElement sender,
@@ -481,6 +554,7 @@ public sealed partial class FileItemSurface : UserControl, INotifyPropertyChange
         _visualState = FileItemSurfaceVisualState.Normal;
         SetOpeningState(false, string.Empty);
         SetTransferState(FileTransferPathState.None, string.Empty);
+        ClearAttachedSurfaceToolTip();
         VisualStateChanged?.Invoke(
             this,
             new FileItemSurfaceVisualStateChangedEventArgs(_visualState));
@@ -490,6 +564,7 @@ public sealed partial class FileItemSurface : UserControl, INotifyPropertyChange
 
     private void NotifyPresentationChanged()
     {
+        ApplyLayoutMetrics();
         OnPropertyChanged(nameof(IconLayoutVisibility));
         OnPropertyChanged(nameof(ListLayoutVisibility));
         OnPropertyChanged(nameof(SurfaceHorizontalAlignment));
@@ -498,13 +573,19 @@ public sealed partial class FileItemSurface : UserControl, INotifyPropertyChange
         OnPropertyChanged(nameof(SurfacePadding));
         OnPropertyChanged(nameof(PathTooltipVisibility));
         OnPropertyChanged(nameof(ToolTipEnabled));
+        SyncSurfaceToolTip(materializeIfNeeded: false);
     }
 
     private void SurfaceBorder_Loaded(object sender, RoutedEventArgs e)
     {
+        if (!SurfaceBorder.IsLoaded)
+        {
+            return;
+        }
+
+        AttachPointerMovedHandler();
         EnsureActiveLayout();
-        _isSurfaceLoaded = true;
-        RefreshLayoutContextSubscription();
+        ClearAttachedSurfaceToolTip();
         _pointerFeedback.ResetForReuse();
         SetVisualState(FileItemSurfaceVisualState.Normal);
         NotifyPresentationChanged();
@@ -512,8 +593,22 @@ public sealed partial class FileItemSurface : UserControl, INotifyPropertyChange
 
     private void SurfaceBorder_Unloaded(object sender, RoutedEventArgs e)
     {
-        _isSurfaceLoaded = false;
-        DetachLayoutContextSubscription();
+        if (SurfaceBorder.IsLoaded)
+        {
+            return;
+        }
+
+        DetachPointerMovedHandler();
+        ClearAttachedSurfaceToolTip();
+        SetOpeningState(false, string.Empty);
+        _pointerFeedback.ResetForReuse();
+        SetVisualState(FileItemSurfaceVisualState.Normal);
+    }
+
+    internal void PrepareForContainerDetach()
+    {
+        DetachPointerMovedHandler();
+        ClearAttachedSurfaceToolTip();
         SetOpeningState(false, string.Empty);
         _pointerFeedback.ResetForReuse();
         SetVisualState(FileItemSurfaceVisualState.Normal);
@@ -521,6 +616,7 @@ public sealed partial class FileItemSurface : UserControl, INotifyPropertyChange
 
     private void SurfaceBorder_PointerEntered(object sender, PointerRoutedEventArgs e)
     {
+        SyncSurfaceToolTip(materializeIfNeeded: true);
         ObservePointerPosition(e);
         SetVisualState(_pointerFeedback.OnPointerEntered());
     }

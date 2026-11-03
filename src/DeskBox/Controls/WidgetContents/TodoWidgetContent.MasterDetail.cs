@@ -17,6 +17,12 @@ public sealed partial class TodoWidgetContent
 
     internal bool IsDualPane => _isDualPane;
 
+    internal bool WideSelectionWasAutomatic
+    {
+        get => _wideSelectionWasAutomatic;
+        set => _wideSelectionWasAutomatic = value;
+    }
+
     private void TodoWidgetContent_SizeChanged(object sender, SizeChangedEventArgs e)
     {
         if (_isInteractiveResizeActive)
@@ -73,10 +79,13 @@ public sealed partial class TodoWidgetContent
             Grid.SetColumnSpan(ListHeaderArea, 1);
             Grid.SetColumnSpan(ListArea, 1);
             Grid.SetColumnSpan(ListFooterArea, 1);
-            Grid.SetColumn(DetailPage, 2);
-            Grid.SetColumnSpan(DetailPage, 1);
-            DetailBackColumn.Width = new GridLength(0);
-            DetailBackButton.Visibility = Visibility.Collapsed;
+            if (DetailPage is not null)
+            {
+                Grid.SetColumn(DetailPage, 2);
+                Grid.SetColumnSpan(DetailPage, 1);
+                DetailBackColumn.Width = new GridLength(0);
+                DetailBackButton.Visibility = Visibility.Collapsed;
+            }
 
             if (enteringDualPane)
             {
@@ -98,10 +107,13 @@ public sealed partial class TodoWidgetContent
             Grid.SetColumnSpan(ListHeaderArea, 3);
             Grid.SetColumnSpan(ListArea, 3);
             Grid.SetColumnSpan(ListFooterArea, 3);
-            Grid.SetColumn(DetailPage, 0);
-            Grid.SetColumnSpan(DetailPage, 3);
-            DetailBackColumn.Width = new GridLength(30);
-            DetailBackButton.Visibility = Visibility.Visible;
+            if (DetailPage is not null)
+            {
+                Grid.SetColumn(DetailPage, 0);
+                Grid.SetColumnSpan(DetailPage, 3);
+                DetailBackColumn.Width = new GridLength(30);
+                DetailBackButton.Visibility = Visibility.Visible;
+            }
 
             if (leavingDualPane && _wideSelectionWasAutomatic &&
                 ViewModel?.IsCreatingDetailItem != true)
@@ -111,20 +123,7 @@ public sealed partial class TodoWidgetContent
             }
         }
 
-        ApplyDetailSaveButtonVisibility();
         ApplyMasterDetailVisibility();
-    }
-
-    private void ApplyDetailSaveButtonVisibility()
-    {
-        bool showSave = ViewModel?.SelectedDetailItem is not null;
-        DetailSaveButton.Visibility = showSave
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-        if (_isDualPane)
-        {
-            DetailBackColumn.Width = new GridLength(0);
-        }
     }
 
     private void ApplyMasterDetailVisibility()
@@ -134,7 +133,14 @@ public sealed partial class TodoWidgetContent
         ListHeaderArea.Visibility = showList ? Visibility.Visible : Visibility.Collapsed;
         ListArea.Visibility = showList ? Visibility.Visible : Visibility.Collapsed;
         ListFooterArea.Visibility = showList ? Visibility.Visible : Visibility.Collapsed;
-        DetailPage.Visibility = hasDetail ? Visibility.Visible : Visibility.Collapsed;
+        if (hasDetail && EnsureDetailPageRealized())
+        {
+            DetailPage.Visibility = Visibility.Visible;
+        }
+        else if (DetailPage is not null)
+        {
+            DetailPage.Visibility = Visibility.Collapsed;
+        }
         WideDetailEmptyState.Visibility = _isDualPane && !hasDetail
             ? Visibility.Visible
             : Visibility.Collapsed;

@@ -71,6 +71,7 @@ public sealed partial class GroupNavigationSettingsViewModel : ObservableObject
                 return;
             }
 
+            OnPropertyChanged(nameof(IsDefaultHoverSwitchApplicable));
             if (_isSyncingPresentation)
             {
                 return;
@@ -93,6 +94,7 @@ public sealed partial class GroupNavigationSettingsViewModel : ObservableObject
             string[] values =
             [
                 WidgetGroupNavigationStyles.Tabs,
+                WidgetGroupNavigationStyles.EqualTabs,
                 WidgetGroupNavigationStyles.Stack
             ];
             _cachedNavigationStyleNames ??= values
@@ -177,6 +179,9 @@ public sealed partial class GroupNavigationSettingsViewModel : ObservableObject
             }
         }
     }
+
+    public bool IsDefaultHoverSwitchApplicable =>
+        WidgetGroupNavigationStyles.UsesTabStrip(_defaultNavigationStyle);
 
     public bool HoverSwitchEnabled
     {
@@ -296,6 +301,7 @@ public sealed partial class GroupNavigationSettingsViewModel : ObservableObject
             HoverSwitchEnabled = snapshot.HoverSwitchEnabled;
             DefaultSwitchAnimationStyle = WidgetGroupSwitchAnimationStyles.Normalize(
                 snapshot.SwitchAnimationStyle);
+            OnPropertyChanged(nameof(IsDefaultHoverSwitchApplicable));
         }
         finally
         {

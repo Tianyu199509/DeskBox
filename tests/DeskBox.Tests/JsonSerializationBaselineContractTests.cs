@@ -37,22 +37,30 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             // display-only content-manifest fetch (release-notes window).
             ["src/DeskBox/Services/AppUpdateService.cs"] = 3,
             ["src/DeskBox/Services/CitySearchService.cs"] = 1,
+            ["src/DeskBox/Services/ClipboardStore.cs"] = 2,
+            ["src/DeskBox/Services/CustomWidgetDataStore.cs"] = 4,
+            ["src/DeskBox/Services/CustomWidgetNetworkSourceEngine.cs"] = 2,
+            ["src/DeskBox/Services/CustomWidgetRemoteCatalogService.cs"] = 5,
+            ["src/DeskBox/Services/CustomWidgetRemotePromptService.cs"] = 4,
             ["src/DeskBox/Services/DeskBoxAttachmentHealthService.cs"] = 1,
-            ["src/DeskBox/Services/DeskBoxDataBackupService.cs"] = 12,
+            ["src/DeskBox/Services/DeskBoxDataBackupService.cs"] = 20,
             ["src/DeskBox/Services/DeskBoxDiagnosticsBundleService.cs"] = 1,
             ["src/DeskBox/Services/DesktopAutoOrganizationSuppressionRegistry.cs"] = 2,
             ["src/DeskBox/Services/DesktopOrganizationHistoryStore.cs"] = 2,
             ["src/DeskBox/Services/DesktopOrganizationRecoveryStore.cs"] = 2,
-            ["src/DeskBox/Services/FeedbackService.cs"] = 4,
+            ["src/DeskBox/Services/FeedbackService.cs"] = 6,
             ["src/DeskBox/Services/GlanceImageService.cs"] = 2,
             ["src/DeskBox/Services/GlanceWidgetStore.cs"] = 8,
             ["src/DeskBox/Services/LocalizationService.cs"] = 1,
+            ["src/DeskBox/Services/Lyrics/LrclibLyricsProvider.cs"] = 1,
+            ["src/DeskBox/Services/Lyrics/LyricsCacheStore.cs"] = 4,
             ["src/DeskBox/Services/ManagedStorageMigrationService.cs"] = 2,
             ["src/DeskBox/Services/NativeNotificationActivationEnvelopeStore.cs"] = 2,
             ["src/DeskBox/Services/QuickCaptureStore.cs"] = 2,
             // 2: the wipe-recovery offer marker (read deserialize, atomic save serialize).
             ["src/DeskBox/Services/RecoveryOfferStore.cs"] = 2,
             ["src/DeskBox/Services/SearchHistoryService.cs"] = 2,
+            ["src/DeskBox/Services/SearchRecommendationLayoutService.cs"] = 2,
             // Settings-host IPC pipe (batch 3b): envelope encode/decode on
             // the client and server. The remote sink itself serializes via
             // SettingsService.SerializeCurrentSettings under the service
@@ -75,7 +83,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             ["src/DeskBox/Services/SyncStateStore.cs"] = 2,
             ["src/DeskBox/Services/TodoWidgetStore.cs"] = 3,
             ["src/DeskBox/Services/WeatherService.cs"] = 5,
-            ["src/DeskBox/Services/WidgetFileStackSettings.cs"] = 7,
+            ["src/DeskBox/Services/WidgetFileStackSettings.cs"] = 11,
             ["src/DeskBox/Services/WidgetLayoutStore.cs"] = 2,
             // 3: the title-icon asset store's recent-emoji state file
             // (load deserialize, add deserialize, atomic save serialize).
@@ -99,8 +107,8 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             Assert.Equal(expectedCount, actual[path]);
         }
 
-        Assert.Equal(44, actual.Count);
-        Assert.Equal(111, actual.Values.Sum());
+        Assert.Equal(52, actual.Count);
+        Assert.Equal(149, actual.Values.Sum());
 
         string[] expectedContextOwners =
         [
@@ -117,6 +125,11 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             "src/DeskBox/App.AotTodoNotificationLifecycleSmoke.cs",
             "src/DeskBox/App.AotTodoRecurrenceReminderSmoke.cs",
             "src/DeskBox/Services/AppUpdateService.cs",
+            "src/DeskBox/Services/ClipboardStore.cs",
+            "src/DeskBox/Services/CustomWidgetDataStore.cs",
+            "src/DeskBox/Services/CustomWidgetNetworkSourceEngine.cs",
+            "src/DeskBox/Services/CustomWidgetRemoteCatalogService.cs",
+            "src/DeskBox/Services/CustomWidgetRemotePromptService.cs",
             "src/DeskBox/Services/DeskBoxDataBackupService.cs",
             "src/DeskBox/Services/DeskBoxDiagnosticsBundleService.cs",
             "src/DeskBox/Services/DesktopOrganizationHistoryStore.cs",
@@ -125,11 +138,13 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             "src/DeskBox/Services/GlanceImageService.cs",
             "src/DeskBox/Services/GlanceWidgetStore.cs",
             "src/DeskBox/Services/LocalizationService.cs",
+            "src/DeskBox/Services/Lyrics/LyricsJsonContext.cs",
             "src/DeskBox/Services/ManagedStorageMigrationModels.cs",
             "src/DeskBox/Services/NativeNotificationActivationEnvelopeStore.cs",
             "src/DeskBox/Services/QuickCaptureStore.cs",
             "src/DeskBox/Services/RecoveryOfferStore.cs",
             "src/DeskBox/Services/SearchHistoryService.cs",
+            "src/DeskBox/Services/SearchRecommendationLayoutService.cs",
             "src/DeskBox/Services/SettingsIpcProtocol.cs",
             "src/DeskBox/Services/SettingsService.cs",
             "src/DeskBox/Services/StartupSessionLedger.cs",
@@ -151,7 +166,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             .Order()
             .ToArray();
 
-        Assert.Equal(38, actualContextOwners.Length);
+        Assert.Equal(45, actualContextOwners.Length);
         Assert.Equal(expectedContextOwners, actualContextOwners);
     }
 
@@ -194,6 +209,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             "LocalizationJsonContext.Default.LocalizedStrings",
             "DiagnosticsJsonContext.Default.DiagnosticSnapshot"
         ];
+        Assert.Contains("new Utf8JsonReader(", localization, StringComparison.Ordinal);
         string allPhaseOneSources = string.Join(
             Environment.NewLine,
             appUpdate,
@@ -263,8 +279,8 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             // paths) + the settings-host relay serialize (batch R8).
             ["GlancePreferencesJsonContext.Default.Preferences"] = 8,
             ["GlanceImageCatalogJsonContext.Default.ImageCatalog"] = 2,
-            ["WidgetMetadataJsonContext.Default.StringMap"] = 2,
-            ["WidgetMetadataJsonContext.Default.StringListMap"] = 2,
+            ["WidgetMetadataJsonContext.Default.StringMap"] = 4,
+            ["WidgetMetadataJsonContext.Default.StringListMap"] = 4,
             ["WidgetMetadataJsonContext.Default.StringList"] = 3
         };
         foreach ((string reference, int expectedCount) in expectedTypeInfoReferences)
@@ -276,7 +292,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
                     Regex.Escape(reference) + @"\b").Count);
         }
 
-        Assert.Equal(30, expectedTypeInfoReferences.Values.Sum());
+        Assert.Equal(34, expectedTypeInfoReferences.Values.Sum());
         Assert.DoesNotContain("JsonSerializerOptions", allPhaseTwoSources, StringComparison.Ordinal);
         Assert.DoesNotContain(
             "new JsonStringEnumConverter()",
@@ -485,7 +501,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             ["QuickCaptureStoreData", "TodoWidgetData"],
             GenericTypeArguments(attachmentHealth, "ReadJson"));
         Assert.Equal(
-            ["AppSettings", "DesktopOrganizationHistoryData", "QuickCaptureStoreData", "TodoWidgetData", "WidgetLayoutDocument"],
+            ["AppSettings", "ClipboardStoreDocument", "CustomWidgetStorePayload", "DesktopOrganizationHistoryData", "GlanceWidgetData", "QuickCaptureStoreData", "TodoWidgetData", "WidgetLayoutDocument"],
             GenericTypeArguments(backup, "ValidateJsonFileIfPresent"));
         Assert.Contains(
             "private static T ReadJson<T>(string path, JsonTypeInfo<T> jsonTypeInfo)",

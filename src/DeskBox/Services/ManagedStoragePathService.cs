@@ -20,6 +20,23 @@ internal readonly record struct ManagedStoragePathAssessment(
     string? SuitableNonSystemDrivePath,
     bool IsTransientBusDrive);
 
+internal enum ManagedStorageRootValidationProblem
+{
+    None,
+    InvalidPath,
+    DriveOrShareRoot,
+    DesktopOverlap,
+    SystemOrProfileRoot,
+    StoreVirtualizedAppData,
+}
+
+internal readonly record struct ManagedStorageRootValidationResult(
+    ManagedStorageRootValidationProblem Problem,
+    string NormalizedPath)
+{
+    internal bool IsValid => Problem == ManagedStorageRootValidationProblem.None;
+}
+
 internal static class ManagedStoragePathService
 {
     internal const long MinimumRecommendedFreeSpaceBytes = 10L * 1024 * 1024 * 1024;
@@ -82,15 +99,230 @@ internal static class ManagedStoragePathService
     }
 
     /// <summary>
-    /// True when the candidate storage root is the user desktop, the common
-    /// (public) desktop, or a subfolder of either. The desktop organizer
-    /// sweeps those folders on every run, so such a root would re-ingest its
-    /// own managed folders and the organization transaction rejects it.
+    /// True when the candidate storage root overlaps the user desktop or common
+    /// (public) desktop in either direction (inside Desktop, or an ancestor that
+    /// contains Desktop such as <c>%USERPROFILE%</c> or <c>%OneDrive%</c>).
     /// </summary>
     public static bool OverlapsDesktop(string path)
     {
-        return IsSameOrDescendant(path, Environment.GetFolderPath(Environment.SpecialFolder.Desktop)) ||
-            IsSameOrDescendant(path, Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory));
+        return OverlapsDesktop(
+            path,
+            Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory));
+    }
+
+    internal static bool OverlapsDesktop(
+        string path,
+        string userDesktopPath,
+        string commonDesktopPath)
+    {
+        return PathsOverlapEitherDirection(path, userDesktopPath) ||
+            PathsOverlapEitherDirection(path, commonDesktopPath);
+    }
+
+    /// <summary>
+    /// Normalizes a folder chosen in the interactive folder picker so drive roots
+    /// (<c>D:\</c>) and non-empty pre-existing user folders (<c>D:\Work</c>) are
+    /// scoped to a dedicated <c>DeskBox</c> child folder instead of mixing widget
+    /// directories with unrelated user directories.
+    /// </summary>
+    internal static string ResolvePickedStorageRootPath(
+        string pickedPath,
+        string temporaryMigrationFolderName = ".deskbox-migration-temp")
+    {
+        if (string.IsNullOrWhiteSpace(pickedPath))
+        {
+            return string.Empty;
+        }
+
+        string normalized;
+        try
+        {
+            normalized = Path.GetFullPath(pickedPath);
+        }
+        catch
+        {
+            return pickedPath.Trim();
+        }
+
+        if (IsDriveOrShareRoot(normalized))
+        {
+            return Path.Combine(normalized, "DeskBox");
+        }
+
+        string trimmed = Path.TrimEndingDirectorySeparator(normalized);
+        if (!ManagedStorageOwnershipFileOps.IsDedicatedDeskBoxRootPath(trimmed) &&
+            !ManagedStorageOwnershipFileOps.HasManifestFile(trimmed) &&
+            ManagedStorageOwnershipFileOps.HasExistingUserEntries(trimmed, temporaryMigrationFolderName))
+        {
+            return Path.Combine(trimmed, "DeskBox");
+        }
+
+        return trimmed;
+    }
+
+    internal static ManagedStorageRootValidationResult ValidateStorageRootCandidate(
+        string? path,
+        bool isStoreChannel = false)
+    {
+        return ValidateStorageRootCandidate(
+            path,
+            isStoreChannel,
+            userDesktopPath: Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
+            commonDesktopPath: Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory),
+            userProfilePath: Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            localAppDataPath: Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            roamingAppDataPath: Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData));
+    }
+
+    internal static ManagedStorageRootValidationResult ValidateStorageRootCandidate(
+        string? path,
+        bool isStoreChannel,
+        string userDesktopPath,
+        string commonDesktopPath,
+        string userProfilePath,
+        string localAppDataPath,
+        string roamingAppDataPath)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return new ManagedStorageRootValidationResult(
+                ManagedStorageRootValidationProblem.InvalidPath,
+                string.Empty);
+        }
+
+        string normalized;
+        try
+        {
+            if (!Path.IsPathRooted(path))
+            {
+                return new ManagedStorageRootValidationResult(
+                    ManagedStorageRootValidationProblem.InvalidPath,
+                    path);
+            }
+
+            normalized = Path.GetFullPath(path);
+        }
+        catch
+        {
+            return new ManagedStorageRootValidationResult(
+                ManagedStorageRootValidationProblem.InvalidPath,
+                path);
+        }
+
+        if (IsDriveOrShareRoot(normalized))
+        {
+            return new ManagedStorageRootValidationResult(
+                ManagedStorageRootValidationProblem.DriveOrShareRoot,
+                normalized);
+        }
+
+        if (OverlapsDesktop(normalized, userDesktopPath, commonDesktopPath))
+        {
+            return new ManagedStorageRootValidationResult(
+                ManagedStorageRootValidationProblem.DesktopOverlap,
+                normalized);
+        }
+
+        string trimmed = Path.TrimEndingDirectorySeparator(normalized);
+        if (IsSameOrAncestorOf(trimmed, userProfilePath))
+        {
+            return new ManagedStorageRootValidationResult(
+                ManagedStorageRootValidationProblem.SystemOrProfileRoot,
+                trimmed);
+        }
+
+        ReadOnlySpan<Environment.SpecialFolder> protectedSystemRoots =
+        [
+            Environment.SpecialFolder.Windows,
+            Environment.SpecialFolder.System,
+            Environment.SpecialFolder.SystemX86,
+            Environment.SpecialFolder.ProgramFiles,
+            Environment.SpecialFolder.ProgramFilesX86,
+            Environment.SpecialFolder.CommonProgramFiles,
+            Environment.SpecialFolder.CommonProgramFilesX86,
+        ];
+        foreach (Environment.SpecialFolder special in protectedSystemRoots)
+        {
+            string systemDir = Environment.GetFolderPath(special);
+            if (PathsOverlapEitherDirection(trimmed, systemDir))
+            {
+                return new ManagedStorageRootValidationResult(
+                    ManagedStorageRootValidationProblem.SystemOrProfileRoot,
+                    trimmed);
+            }
+        }
+
+        string programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+        if (IsSameOrAncestorOf(trimmed, programData))
+        {
+            return new ManagedStorageRootValidationResult(
+                ManagedStorageRootValidationProblem.SystemOrProfileRoot,
+                trimmed);
+        }
+
+        if (isStoreChannel &&
+            (PathsOverlapEitherDirection(trimmed, localAppDataPath) ||
+             PathsOverlapEitherDirection(trimmed, roamingAppDataPath)))
+        {
+            return new ManagedStorageRootValidationResult(
+                ManagedStorageRootValidationProblem.StoreVirtualizedAppData,
+                trimmed);
+        }
+
+        if (!string.IsNullOrWhiteSpace(userProfilePath))
+        {
+            string storeAppData = Path.Combine(
+                userProfilePath,
+                "DeskBox",
+                DeskBoxDataPathService.StoreDurableSubdirectoryName);
+            string storeRecovery = Path.Combine(
+                userProfilePath,
+                "DeskBox",
+                DeskBoxDataPathService.StoreDurableRecoverySubdirectoryName);
+            if (IsSameOrAncestorOf(storeAppData, trimmed) ||
+                IsSameOrAncestorOf(storeRecovery, trimmed))
+            {
+                return new ManagedStorageRootValidationResult(
+                    ManagedStorageRootValidationProblem.SystemOrProfileRoot,
+                    trimmed);
+            }
+        }
+
+        return new ManagedStorageRootValidationResult(
+            ManagedStorageRootValidationProblem.None,
+            trimmed);
+    }
+
+    internal static bool IsDriveOrShareRoot(string path)
+    {
+        string? pathRoot = TryGetPathRoot(path);
+        if (string.IsNullOrWhiteSpace(pathRoot))
+        {
+            return true;
+        }
+
+        try
+        {
+            string fullPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+            string fullRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(pathRoot));
+            return string.Equals(fullPath, fullRoot, StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return true;
+        }
+    }
+
+    private static bool PathsOverlapEitherDirection(string left, string right)
+    {
+        return IsSameOrDescendant(left, right) || IsSameOrDescendant(right, left);
+    }
+
+    private static bool IsSameOrAncestorOf(string candidateAncestor, string targetPath)
+    {
+        return !string.IsNullOrWhiteSpace(targetPath) &&
+            IsSameOrDescendant(targetPath, candidateAncestor);
     }
 
     public static ManagedStoragePathAssessment AssessPath(string path)

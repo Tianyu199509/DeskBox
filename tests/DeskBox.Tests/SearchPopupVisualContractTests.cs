@@ -60,7 +60,7 @@ public sealed class SearchPopupVisualContractTests
         Assert.Contains("LoadMoreResultsAsync", viewModel, StringComparison.Ordinal);
         Assert.Contains("LoadMoreAndAdvanceSelectionAsync", viewModel, StringComparison.Ordinal);
         Assert.Contains("_nextFileResultOffset", viewModel, StringComparison.Ordinal);
-        Assert.Contains("SetOffset", everything, StringComparison.Ordinal);
+        Assert.Contains("offset: checked((uint)resultOffset)", everything, StringComparison.Ordinal);
         Assert.DoesNotContain("MaxMaterializedFileResults", everything, StringComparison.Ordinal);
         Assert.DoesNotContain("x:Bind Count", popupXaml, StringComparison.Ordinal);
     }
@@ -108,24 +108,28 @@ public sealed class SearchPopupVisualContractTests
         Assert.Contains("Tag=\"InteractiveSurface\"", fileSurface, StringComparison.Ordinal);
         Assert.Contains("CornerRadius=\"2\"", fileSurface, StringComparison.Ordinal);
         Assert.Contains(
-            "Padding=\"4,5\" Margin=\"0,1\" CornerRadius=\"4\"",
+            "Padding=\"10,0\" Margin=\"0,1\" CornerRadius=\"10\" Height=\"44\"",
+            resultRow,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "x:Name=\"MultiSelectedIcon\"",
             resultRow,
             StringComparison.Ordinal);
         Assert.Contains(
-            "Margin=\"12,2\" Padding=\"4,3\" CornerRadius=\"4\"",
+            "Height=\"28\" Margin=\"8,0,8,2\" Padding=\"9,0,9,1\"",
+            searchPopup,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "x:Name=\"ResultFilterBar\"",
             searchPopup,
             StringComparison.Ordinal);
         Assert.Contains(
             "<Setter Property=\"AllowFocusOnInteraction\" Value=\"False\"/>",
             searchPopup,
             StringComparison.Ordinal);
-        // Sort headers keep the system focus visual on (IsTabStop=True);
-        // AllowFocusOnInteraction stays False on them so mouse sorting never
-        // steals focus from the search box. The favorites/recent row style
-        // that used to carry the second occurrence was dead UI and is gone.
         Assert.Equal(1, CountOccurrences(searchPopup, "<Setter Property=\"UseSystemFocusVisuals\" Value=\"True\"/>"));
         Assert.Contains(
-            "<Setter Property=\"CornerRadius\" Value=\"2\"/>",
+            "<Setter Property=\"CornerRadius\" Value=\"5\"/>",
             searchPopup,
             StringComparison.Ordinal);
         Assert.Contains(
@@ -183,11 +187,11 @@ public sealed class SearchPopupVisualContractTests
             popupXaml,
             StringComparison.Ordinal);
         Assert.Contains(
-            "<Setter Property=\"Padding\" Value=\"14,4\"/>",
+            "<Setter Property=\"Padding\" Value=\"12,0\"/>",
             popupXaml,
             StringComparison.Ordinal);
         Assert.Contains(
-            "<RowDefinition Height=\"8\"/>",
+            "CornerRadius=\"14\"",
             popupXaml,
             StringComparison.Ordinal);
         Assert.DoesNotContain(
@@ -218,7 +222,7 @@ public sealed class SearchPopupVisualContractTests
             "src/DeskBox/Views/SearchPopupWindow.xaml.cs"));
 
         Assert.Contains("FindVisualAncestor<TextBox>(focusedObject)", popup, StringComparison.Ordinal);
-        Assert.Contains("IsVisualDescendantOf(focusedObject, ResultFilterComboBox)", popup, StringComparison.Ordinal);
+        Assert.DoesNotContain("ResultFilterComboBox", popup, StringComparison.Ordinal);
         Assert.Contains("ReferenceEquals(previousSelection, _viewModel.SelectedItem)", popup, StringComparison.Ordinal);
         Assert.Contains("UpdateSelectionHighlight();", popup, StringComparison.Ordinal);
         Assert.Contains("FocusSelectedResult();", popup, StringComparison.Ordinal);

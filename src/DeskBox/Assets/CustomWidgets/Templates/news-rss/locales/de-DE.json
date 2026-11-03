@@ -1,0 +1,21 @@
+{
+  "defaultFeedTitle": "Tech-News",
+  "defaultTopHeadline": "Für die neuesten Meldungen oben rechts auf Aktualisieren klicken",
+  "emptySubtitle": "Oben auf Aktualisieren klicken oder in den Einstellungen die Quelle wechseln",
+  "emptyTitle": "Warten auf Feed-Synchronisierung",
+  "feedCustom": "Eigene RSS-URL (unten)",
+  "feedIthome": "IT之家",
+  "feedSspai": "SSPai (少数派)",
+  "openArticleTooltip": "Artikel öffnen",
+  "optDensityCompact": "Kompakt (nur Schlagzeilen)",
+  "optDensitySummary": "Standard (Titel + Vorschau)",
+  "refreshBtn": "Aktualisieren",
+  "refreshTooltip": "Neueste Feed-Beiträge jetzt abrufen",
+  "setDensity": "Anzeigedichte",
+  "setFeedUrl": "Eigene RSS- / Atom-URL (https://)",
+  "setPresetFeed": "Voreingestellte Quelle",
+  "syncing": "Neueste Meldungen werden synchronisiert…",
+  "updatedPrefix": "Aktualisiert ",
+  "widgetDescription": "Hacker News, GitHub Blog, V2EX oder eigene HTTPS-RSS-Feeds mit Offline-Cache automatisch synchronisieren.",
+  "widgetName": "RSS-Newsreader"
+}

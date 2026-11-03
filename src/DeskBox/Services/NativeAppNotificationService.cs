@@ -1,4 +1,4 @@
-using Microsoft.Windows.AppLifecycle;
+﻿using Microsoft.Windows.AppLifecycle;
 using Microsoft.Windows.AppNotifications;
 using Microsoft.Windows.AppNotifications.Builder;
 
@@ -39,7 +39,8 @@ public sealed record NativeAppNotificationActivation(
 public sealed record NativeAppNotificationOptions(
     string? Tag = null,
     string? Group = null,
-    AppNotificationScenario? Scenario = null);
+    AppNotificationScenario? Scenario = null,
+    bool MuteAudio = false);
 
 public sealed record NativeAppNotificationSnapshot(
     uint Id,
@@ -211,6 +212,11 @@ public sealed class NativeAppNotificationService : IDisposable
             if (options?.Scenario is { } scenario)
             {
                 builder.SetScenario(scenario);
+            }
+
+            if (options?.MuteAudio == true)
+            {
+                builder.MuteAudio();
             }
 
             if (arguments is not null)

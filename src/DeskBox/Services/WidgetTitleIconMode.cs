@@ -57,7 +57,12 @@ public enum WidgetTitleIconKind
     Glance,
     Tags,
     Search,
-    SystemMonitor
+    SystemMonitor,
+    Pomodoro,
+    Countdown,
+    AiMonitor,
+    Custom,
+    Clipboard
 }
 
 public static class WidgetTitleIconKindNames
@@ -73,6 +78,11 @@ public static class WidgetTitleIconKindNames
     public const string Tags = nameof(WidgetTitleIconKind.Tags);
     public const string Search = nameof(WidgetTitleIconKind.Search);
     public const string SystemMonitor = nameof(WidgetTitleIconKind.SystemMonitor);
+    public const string Pomodoro = nameof(WidgetTitleIconKind.Pomodoro);
+    public const string Countdown = nameof(WidgetTitleIconKind.Countdown);
+    public const string AiMonitor = nameof(WidgetTitleIconKind.AiMonitor);
+    public const string Custom = nameof(WidgetTitleIconKind.Custom);
+    public const string Clipboard = nameof(WidgetTitleIconKind.Clipboard);
 
     public static WidgetTitleIconKind NormalizeKind(string? value)
     {
@@ -95,6 +105,11 @@ public static class WidgetTitleIconKindNames
             WidgetTitleIconKind.Tags => Tags,
             WidgetTitleIconKind.Search => Search,
             WidgetTitleIconKind.SystemMonitor => SystemMonitor,
+            WidgetTitleIconKind.Pomodoro => Pomodoro,
+            WidgetTitleIconKind.Countdown => Countdown,
+            WidgetTitleIconKind.AiMonitor => AiMonitor,
+            WidgetTitleIconKind.Custom => Custom,
+            WidgetTitleIconKind.Clipboard => Clipboard,
             _ => Default
         };
     }
@@ -102,6 +117,73 @@ public static class WidgetTitleIconKindNames
     public static string FromFileWidget(bool followsDefaultStoragePath)
     {
         return followsDefaultStoragePath ? ManagedStorage : MappedFolder;
+    }
+
+    public static string? FromCustomTemplateId(string? templateOrManifestId)
+    {
+        if (string.IsNullOrWhiteSpace(templateOrManifestId))
+        {
+            return null;
+        }
+
+        string trimmed = templateOrManifestId.Trim();
+        string normalized = trimmed.StartsWith("deskbox.", StringComparison.OrdinalIgnoreCase)
+            ? trimmed["deskbox.".Length..]
+            : trimmed;
+
+        return normalized.ToLowerInvariant() switch
+        {
+            CustomWidgetTemplates.SystemPulseTemplateId => SystemMonitor,
+            CustomWidgetTemplates.PomodoroTemplateId => Pomodoro,
+            CustomWidgetTemplates.CountdownTemplateId => Countdown,
+            CustomWidgetTemplates.AiPulseTemplateId => AiMonitor,
+            _ => null
+        };
+    }
+
+    private const string LegacyCustomTemplateMetadataKey = "CustomTemplateId";
+
+    public static bool TryGetCustomTemplateId(
+        IReadOnlyDictionary<string, string>? metadata,
+        out string templateId)
+    {
+        if (metadata is not null)
+        {
+            if (metadata.TryGetValue(ViewModels.CustomWidgetViewModel.TemplateMetadataKey, out string? current) &&
+                !string.IsNullOrWhiteSpace(current))
+            {
+                templateId = current;
+                return true;
+            }
+
+            if (metadata.TryGetValue(LegacyCustomTemplateMetadataKey, out string? legacy) &&
+                !string.IsNullOrWhiteSpace(legacy))
+            {
+                templateId = legacy;
+                return true;
+            }
+        }
+
+        templateId = string.Empty;
+        return false;
+    }
+
+    public static string FromWidgetConfig(WidgetConfig config)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        if (config.WidgetKind == WidgetKind.File)
+        {
+            return FromFileWidget(config.FollowsDefaultStoragePath);
+        }
+
+        if (config.WidgetKind == WidgetKind.Custom &&
+            TryGetCustomTemplateId(config.Metadata, out string templateId) &&
+            FromCustomTemplateId(templateId) is { } presetIconKind)
+        {
+            return presetIconKind;
+        }
+
+        return FromWidgetKind(config.WidgetKind);
     }
 
     public static string FromWidgetKind(WidgetKind kind)
@@ -117,6 +199,8 @@ public static class WidgetTitleIconKindNames
             WidgetKind.Tags => Tags,
             WidgetKind.Search => Search,
             WidgetKind.SystemMonitor => SystemMonitor,
+            WidgetKind.Custom => Custom,
+            WidgetKind.Clipboard => Clipboard,
             _ => Default
         };
     }
@@ -134,6 +218,11 @@ public static class WidgetTitleIconKindNames
             "\uE8EC" => Tags,
             "\uE721" => Search,
             "\uE9D9" => SystemMonitor,
+            "\uE916" => Pomodoro,
+            "\uE787" => Countdown,
+            "\uE950" => AiMonitor,
+            "\uE77F" => Clipboard,
+            "\uF0E3" => Clipboard,
             _ => Default
         };
     }
@@ -152,6 +241,11 @@ public static class WidgetTitleIconKindNames
             WidgetTitleIconKind.Tags => "WidgetTitleIcon.Label.Tags",
             WidgetTitleIconKind.Search => "WidgetTitleIcon.Label.Search",
             WidgetTitleIconKind.SystemMonitor => "WidgetTitleIcon.Label.SystemMonitor",
+            WidgetTitleIconKind.Pomodoro => "CustomWidget.Template.Pomodoro.Name",
+            WidgetTitleIconKind.Countdown => "CustomWidget.Template.Countdown.Name",
+            WidgetTitleIconKind.AiMonitor => "CustomWidget.Template.AiPulse.Name",
+            WidgetTitleIconKind.Custom => "CustomWidget.Title",
+            WidgetTitleIconKind.Clipboard => "Clipboard.Title",
             _ => "WidgetTitleIcon.Label.Default"
         };
     }
@@ -170,6 +264,11 @@ public static class WidgetTitleIconKindNames
             WidgetTitleIconKind.Tags => "tags",
             WidgetTitleIconKind.Search => "search",
             WidgetTitleIconKind.SystemMonitor => "system-monitor",
+            WidgetTitleIconKind.Pomodoro => "pomodoro",
+            WidgetTitleIconKind.Countdown => "countdown",
+            WidgetTitleIconKind.AiMonitor => "ai-monitor",
+            WidgetTitleIconKind.Custom => "custom",
+            WidgetTitleIconKind.Clipboard => "clipboard",
             _ => "default"
         };
     }

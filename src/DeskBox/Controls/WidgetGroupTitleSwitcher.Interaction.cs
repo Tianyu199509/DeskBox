@@ -1,4 +1,5 @@
 using DeskBox.Models;
+using DeskBox.Platform;
 using Microsoft.UI;
 using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
@@ -31,6 +32,8 @@ public sealed partial class WidgetGroupTitleSwitcher
     private DispatcherTimer? _wheelFeedbackFallbackTimer;
     private double _pendingIdentityWidth;
 
+    private KeyboardAccelerator? _openPickerAccelerator;
+
     private void RegisterKeyboardAccelerators()
     {
         var openPicker = new KeyboardAccelerator
@@ -38,17 +41,37 @@ public sealed partial class WidgetGroupTitleSwitcher
             Key = VirtualKey.Down,
             Modifiers = VirtualKeyModifiers.Menu
         };
-        openPicker.Invoked += (_, args) =>
-        {
-            if (_presentation is null || _pickerOpen)
-            {
-                return;
-            }
-
-            OpenPicker();
-            args.Handled = true;
-        };
+        openPicker.Invoked += OpenPickerAccelerator_Invoked;
+        _openPickerAccelerator = openPicker;
         KeyboardAccelerators.Add(openPicker);
+    }
+
+    private void OpenPickerAccelerator_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
+    {
+        if (_presentation is null || _pickerOpen)
+        {
+            return;
+        }
+
+        OpenPicker();
+        args.Handled = true;
+    }
+
+    private void ReleaseInteractionTimersAndAccelerators()
+    {
+        if (_openPickerAccelerator is not null)
+        {
+            _openPickerAccelerator.Invoked -= OpenPickerAccelerator_Invoked;
+            KeyboardAccelerators.Remove(_openPickerAccelerator);
+            _openPickerAccelerator = null;
+        }
+
+        if (_wheelFeedbackFallbackTimer is not null)
+        {
+            _wheelFeedbackFallbackTimer.Stop();
+            _wheelFeedbackFallbackTimer.Tick -= WheelFeedbackFallbackTimer_Tick;
+            _wheelFeedbackFallbackTimer = null;
+        }
     }
 
     private void SelectorButton_KeyDown(
@@ -184,11 +207,23 @@ public sealed partial class WidgetGroupTitleSwitcher
 
     private bool ProcessWheelDelta(double delta)
     {
-        if (!WheelSwitchEnabled || IsTabInteractionBusy || _draggingMemberId is not null ||
-            _pickerOpen ||
-            _presentation is null ||
-            _presentation.Members.Count < 2 ||
-            delta == 0)
+        if (delta == 0 || _pickerOpen || _presentation is null || _presentation.Members.Count < 2)
+        {
+            return false;
+        }
+
+        if (UsesTabs &&
+            (IsVirtualKeyDown(VirtualKey.Control) || Win32Helper.IsKeyDown((int)VirtualKey.Control)))
+        {
+            return TryHandleCtrlWheelReorder(delta);
+        }
+
+        if (!WheelSwitchEnabled)
+        {
+            return TryHandleOverflowWheelScroll(delta);
+        }
+
+        if (IsTabInteractionBusy || _draggingMemberId is not null)
         {
             return false;
         }
@@ -221,10 +256,7 @@ public sealed partial class WidgetGroupTitleSwitcher
             // can reject a storyboard at runtime when a theme/animation state
             // changes while the wheel event is being processed.
             _wheelFeedbackStoryboard = null;
-            UpWheelFeedback.Opacity = 0;
-            DownWheelFeedback.Opacity = 0;
-            UpWheelFeedbackTransform.ScaleY = 1;
-            DownWheelFeedbackTransform.ScaleY = 1;
+            ResetWheelFeedbackVisuals();
             App.Log($"[WidgetGroup] Wheel feedback animation failed: {ex}");
         }
 
@@ -268,6 +300,18 @@ public sealed partial class WidgetGroupTitleSwitcher
         _pointerEnteredAt = default;
     }
 
+    private void ResetWheelFeedbackVisuals()
+    {
+        UpWheelFeedback.Opacity = 0;
+        DownWheelFeedback.Opacity = 0;
+        LeftWheelFeedback.Opacity = 0;
+        RightWheelFeedback.Opacity = 0;
+        UpWheelFeedbackTransform.ScaleY = 1;
+        DownWheelFeedbackTransform.ScaleY = 1;
+        LeftWheelFeedbackTransform.ScaleX = 1;
+        RightWheelFeedbackTransform.ScaleX = 1;
+    }
+
     private void AnimateWheelDirectionFeedback(bool scrollsUp)
     {
         if (XamlRoot is null)
@@ -276,17 +320,18 @@ public sealed partial class WidgetGroupTitleSwitcher
         }
 
         StopWheelFeedbackStoryboard();
-        UpWheelFeedback.Opacity = 0;
-        DownWheelFeedback.Opacity = 0;
-        UpWheelFeedbackTransform.ScaleY = 1;
-        DownWheelFeedbackTransform.ScaleY = 1;
+        ResetWheelFeedbackVisuals();
 
-        Border target = scrollsUp
-            ? UpWheelFeedback
-            : DownWheelFeedback;
-        ScaleTransform transform = scrollsUp
-            ? UpWheelFeedbackTransform
-            : DownWheelFeedbackTransform;
+        bool horizontal = UsesTabs;
+        Border target = horizontal
+            ? (scrollsUp ? LeftWheelFeedback : RightWheelFeedback)
+            : (scrollsUp ? UpWheelFeedback : DownWheelFeedback);
+        ScaleTransform transform = horizontal
+            ? (scrollsUp ? LeftWheelFeedbackTransform : RightWheelFeedbackTransform)
+            : (scrollsUp ? UpWheelFeedbackTransform : DownWheelFeedbackTransform);
+        string scaleProperty = horizontal
+            ? nameof(ScaleTransform.ScaleX)
+            : nameof(ScaleTransform.ScaleY);
         const double peakOpacity = 0.25;
 
         if (!AreSystemAnimationsEnabled())
@@ -340,7 +385,7 @@ public sealed partial class WidgetGroupTitleSwitcher
             EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseInOut }
         });
         Storyboard.SetTarget(scaleAnimation, transform);
-        Storyboard.SetTargetProperty(scaleAnimation, nameof(ScaleTransform.ScaleY));
+        Storyboard.SetTargetProperty(scaleAnimation, scaleProperty);
         storyboard.Children.Add(scaleAnimation);
 
         storyboard.Completed += WheelFeedbackStoryboard_Completed;
@@ -364,10 +409,7 @@ public sealed partial class WidgetGroupTitleSwitcher
         }
 
         _wheelFeedbackStoryboard = null;
-        UpWheelFeedback.Opacity = 0;
-        DownWheelFeedback.Opacity = 0;
-        UpWheelFeedbackTransform.ScaleY = 1;
-        DownWheelFeedbackTransform.ScaleY = 1;
+        ResetWheelFeedbackVisuals();
     }
 
     private void StopWheelFeedbackStoryboard()
@@ -387,10 +429,7 @@ public sealed partial class WidgetGroupTitleSwitcher
     {
         StopWheelFeedbackStoryboard();
         _wheelFeedbackFallbackTimer?.Stop();
-        UpWheelFeedback.Opacity = 0;
-        DownWheelFeedback.Opacity = 0;
-        UpWheelFeedbackTransform.ScaleY = 1;
-        DownWheelFeedbackTransform.ScaleY = 1;
+        ResetWheelFeedbackVisuals();
         CancelBoundaryRebound();
         StopScrollSurfaceStoryboard();
         TitleInteractionChromeTransform.ScaleX = 1;
@@ -403,13 +442,14 @@ public sealed partial class WidgetGroupTitleSwitcher
         {
             Interval = TimeSpan.FromMilliseconds(220)
         };
-        timer.Tick += (_, _) =>
-        {
-            timer.Stop();
-            UpWheelFeedback.Opacity = 0;
-            DownWheelFeedback.Opacity = 0;
-        };
+        timer.Tick += WheelFeedbackFallbackTimer_Tick;
         return timer;
+    }
+
+    private void WheelFeedbackFallbackTimer_Tick(object? sender, object e)
+    {
+        _wheelFeedbackFallbackTimer?.Stop();
+        ResetWheelFeedbackVisuals();
     }
 
     private void AnimateScrollSurfaceFeedback()
@@ -521,9 +561,19 @@ public sealed partial class WidgetGroupTitleSwitcher
             return;
         }
 
-        double attemptedOffset = -Math.Sign(direction) * 4.5;
+        bool horizontal = UsesTabs;
+        double attemptedOffset = horizontal
+            ? Math.Sign(direction) * 3.5
+            : -Math.Sign(direction) * 4.5;
         var transform = new TranslateTransform();
-        CurrentIdentityLayer.RenderTransform = transform;
+        if (horizontal)
+        {
+            TabsView.RenderTransform = transform;
+        }
+        else
+        {
+            CurrentIdentityLayer.RenderTransform = transform;
+        }
         var motion = new DoubleAnimationUsingKeyFrames();
         motion.KeyFrames.Add(new EasingDoubleKeyFrame
         {
@@ -542,7 +592,9 @@ public sealed partial class WidgetGroupTitleSwitcher
             }
         });
         Storyboard.SetTarget(motion, transform);
-        Storyboard.SetTargetProperty(motion, nameof(TranslateTransform.Y));
+        Storyboard.SetTargetProperty(
+            motion,
+            horizontal ? nameof(TranslateTransform.X) : nameof(TranslateTransform.Y));
         var storyboard = new Storyboard();
         storyboard.Children.Add(motion);
         storyboard.Completed += BoundaryReboundStoryboard_Completed;
@@ -567,6 +619,7 @@ public sealed partial class WidgetGroupTitleSwitcher
 
         _boundaryReboundStoryboard = null;
         CurrentIdentityLayer.RenderTransform = null;
+        TabsView.RenderTransform = null;
     }
 
     private void CancelBoundaryRebound()
@@ -582,6 +635,7 @@ public sealed partial class WidgetGroupTitleSwitcher
         {
             CurrentIdentityLayer.RenderTransform = null;
         }
+        TabsView.RenderTransform = null;
     }
 
     private bool SwitchRelative(
@@ -641,8 +695,16 @@ public sealed partial class WidgetGroupTitleSwitcher
             this,
             new WidgetGroupMemberEventArgs(
                 targetId,
-                origin));
+                origin)
+            {
+                PreferredForward = delta > 0
+            });
         return true;
+    }
+
+    internal bool StepFromCompactWheel(int direction)
+    {
+        return SwitchRelative(direction, WidgetGroupSwitchOrigin.Wheel);
     }
 
     internal void NotifyMemberInvocationCompleted(
