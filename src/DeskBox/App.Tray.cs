@@ -1,31 +1,37 @@
 // Copyright (c) DeskBox. All rights reserved.
 
-using CommunityToolkit.Mvvm.Input;
 using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Platform;
 using DeskBox.Services;
 using DeskBox.Views;
-using H.NotifyIcon;
-using H.NotifyIcon.Core;
 using Microsoft.UI.Xaml;
-using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Controls.Primitives;
-using Microsoft.UI.Xaml.Media;
 using WinRT.Interop;
 using DrawingPoint = System.Drawing.Point;
 
 namespace DeskBox;
 
 /// <summary>
-/// Tray icon management: creation, context menu, positioning, tooltip, and layer toggle.
-/// Extracted from App.xaml.cs to reduce God Class complexity.
+/// Pure Win32 tray icon management: creation, native themed popup menu,
+/// positioning, tooltip, balloon fallback, and layer toggle.
 /// </summary>
 public partial class App
 {
     /// <summary>Tray icon style that keeps the notification-area icon absent
     /// for the whole session (see <see cref="IsTrayIconHiddenByUserSetting"/>).</summary>
     private const string TrayIconStyleHidden = "Hidden";
+
+    private const int TrayCommandOrganizeDesktop = 1;
+    private const int TrayCommandMapFolder = 2;
+    private const int TrayCommandAddFeatureWidget = 3;
+    private const int TrayCommandOpenManagedStorage = 4;
+    private const int TrayCommandUpdateAvailable = 5;
+    private const int TrayCommandSettings = 6;
+    private const int TrayCommandExit = 7;
+    private const int TrayCommandCreateAiWidget = 8;
+    private const int TrayCommandCreateWidgetFirst = 100;
+
+    internal IntPtr TrayHostWindowHandle => _trayHost?.WindowHandle ?? IntPtr.Zero;
 
     // Reads the Core slice, not the AppSettings facade: the facade-access
     // ratchet forbids new passthrough reads (SettingsSliceOwnershipContract).
@@ -34,282 +40,59 @@ public partial class App
 
     private void CreateTrayIcon()
     {
-        var localization = LocalizationService;
-        var contextMenu = new MenuFlyout();
-        contextMenu.ShouldConstrainToRootBounds = false;
-        var organizeDesktopItem = new MenuFlyoutItem
-        {
-            Text = localization.T("Tray.OrganizeDesktop"),
-            Width = TrayMenuItemWidth,
-            Icon = new FontIcon { Glyph = "\uE74C" }
-        };
-        organizeDesktopItem.Loaded += OnTrayMenuVisualLoaded;
-        AttachTrayMenuItemInteraction(
-            organizeDesktopItem,
-            () => RunTraySettingsActionAsync(
-                contextMenu,
-                OpenDesktopOrganizationFromTray));
+        _trayHost?.Dispose();
+        _trayHost = new NativeTrayIconHost("DeskBox Tray Host");
+        _trayHost.SetIconPath(AppBranding.ResolveTrayIconPath(
+            SettingsService.Settings.Core.TrayIconStyle ?? "System",
+            IsDarkThemeActive()));
+        RefreshTrayToolTipText();
 
-        var mapFolderItem = new MenuFlyoutItem
-        {
-            Text = localization.T("Common.NewFolderMapping"),
-            Width = TrayMenuItemWidth,
-            Icon = new SymbolIcon(Symbol.OpenFile)
-        };
-        AttachTrayMenuItemInteraction(
-            mapFolderItem,
-            () => RunTrayMenuActionAsync(contextMenu, CreateFolderWidgetFromPickerAsync));
-
-        var addFeatureWidgetItem = new MenuFlyoutItem
-        {
-            Text = localization.T("Common.AddFeatureWidget"),
-            Width = TrayMenuItemWidth,
-            Icon = new FontIcon { Glyph = "\uE710" }
-        };
-        AttachTrayMenuItemInteraction(
-            addFeatureWidgetItem,
-            () => RunTraySettingsActionAsync(
-                contextMenu,
-                OpenFeatureWidgetsFromTray));
-
-        var settingsItem = new MenuFlyoutItem
-        {
-            Text = localization.T("Tray.Settings"),
-            Width = TrayMenuItemWidth,
-            Icon = new SymbolIcon(Symbol.Setting)
-        };
-        AttachTrayMenuItemInteraction(
-            settingsItem,
-            () => RunTraySettingsActionAsync(contextMenu, OpenSettingsFromTray));
-
-        var openManagedStorageItem = new MenuFlyoutItem
-        {
-            Text = localization.T("Tray.OpenManagedStorage"),
-            Width = TrayMenuItemWidth,
-            Icon = new SymbolIcon(Symbol.Folder)
-        };
-        AttachTrayMenuItemInteraction(
-            openManagedStorageItem,
-            () => RunTrayMenuActionAsync(contextMenu, OpenManagedStorageFromTray));
-
-        var updateItem = new MenuFlyoutItem
-        {
-            Text = localization.T("Tray.UpdateAvailable"),
-            Width = TrayMenuItemWidth,
-            Icon = new SymbolIcon(Symbol.Download),
-            Visibility = Visibility.Collapsed
-        };
-        AttachTrayMenuItemInteraction(
-            updateItem,
-            () => RunTraySettingsActionAsync(contextMenu, OpenAboutSettingsFromTray));
-
-        var exitItem = new MenuFlyoutItem
-        {
-            Text = localization.T("Tray.Exit"),
-            Width = TrayMenuItemWidth,
-            Icon = new SymbolIcon(Symbol.Cancel)
-        };
-        AttachTrayMenuItemInteraction(
-            exitItem,
-            () => RunTrayMenuActionAsync(contextMenu, ExitApplication));
-
-        _trayCreateWidgetItems.Clear();
-        contextMenu.Items.Add(organizeDesktopItem);
-        contextMenu.Items.Add(new MenuFlyoutSeparator());
-        foreach (var descriptor in new WidgetContentFactory(LocalizationService).GetCreateEntryDescriptors())
-        {
-            var createItem = CreateTrayCreateWidgetItem(contextMenu, descriptor, localization);
-            _trayCreateWidgetItems[descriptor.WidgetKind] = createItem;
-            contextMenu.Items.Add(createItem);
-        }
-
-        contextMenu.Items.Add(mapFolderItem);
-        contextMenu.Items.Add(addFeatureWidgetItem);
-        contextMenu.Items.Add(new MenuFlyoutSeparator());
-        contextMenu.Items.Add(openManagedStorageItem);
-        contextMenu.Items.Add(new MenuFlyoutSeparator());
-        contextMenu.Items.Add(updateItem);
-        contextMenu.Items.Add(settingsItem);
-        contextMenu.Items.Add(new MenuFlyoutSeparator());
-        contextMenu.Items.Add(exitItem);
-
-        _trayOrganizeDesktopItem = organizeDesktopItem;
-        _trayMapFolderItem = mapFolderItem;
-        _trayAddFeatureWidgetItem = addFeatureWidgetItem;
-        _trayOpenManagedStorageItem = openManagedStorageItem;
-        _trayUpdateItem = updateItem;
-        _traySettingsItem = settingsItem;
-        _trayExitItem = exitItem;
-        _trayContextMenu = contextMenu;
-        PrepareTrayContextMenu(contextMenu);
-
-        _trayWindow = new Window { Title = "DeskBox Tray Host" };
-        AppBranding.ApplyWindowIcon(_trayWindow.AppWindow);
-        // Early-logon sessions can reject these windowing calls (E_NOTIMPL is
-        // observed on IsShownInSwitchers); a 1x1 host window that leaks into
-        // Alt+Tab is the acceptable degraded state, failing startup is not.
-        WindowShellState.TryHideFromSwitchers(_trayWindow.AppWindow);
-        try
-        {
-            _trayWindow.AppWindow.Resize(new Windows.Graphics.SizeInt32(1, 1));
-        }
-        catch (Exception ex)
-        {
-            Log($"[Tray] Tray window resize not applied: {ex.Message}");
-        }
-
-        _trayIcon = new TaskbarIcon
-        {
-            Icon = AppBranding.CreateTrayIcon(SettingsService.Settings.TrayIconStyle ?? "System", IsDarkThemeActive()),
-            ToolTipText = localization.T("Tray.Tooltip"),
-            ContextMenuMode = ContextMenuMode.SecondWindow,
-            MenuActivation = PopupActivationMode.None,
-            NoLeftClickDelay = true,
-            RightClickCommand = new RelayCommand(() =>
-            {
-                CallbackDepth.Enter();
-                try
-                {
-                    ShowTrayContextMenuFromTray();
-                }
-                finally
-                {
-                    CallbackDepth.Exit();
-                }
-            }),
-            LeftClickCommand = new RelayCommand(() =>
-            {
-                CallbackDepth.Enter();
-                try
-                {
-                    if (WidgetManager is not null)
-                    {
-                        SafeFireAndForget(() => ToggleTrayWidgetsAsync(
-                            DeskBox.Services.TrayToggleRequestQueue.TrayIconSource));
-                    }
-                }
-                finally
-                {
-                    CallbackDepth.Exit();
-                }
-            })
-        };
-        _trayIcon.SecondWindowContextMenuOpened += OnSecondWindowTrayContextMenuOpened;
-        // The flyout setter synchronously builds H.NotifyIcon's second window,
-        // which early-logon sessions can reject with E_NOTIMPL before the
-        // shell desktop is ready. Retry on the tray creation cadence and fall
-        // back to the native menu instead of failing startup (feedback 343).
-        if (!TryAssignTrayContextFlyout())
-        {
-            SafeFireAndForget(() => RetryTrayContextFlyoutAssignmentAsync());
-        }
-
-        if (_trayWindow.Content is null)
-        {
-            _trayWindow.Content = new Grid
-            {
-                Width = 1,
-                Height = 1,
-                MinWidth = 1,
-                MinHeight = 1,
-                Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent)
-            };
-        }
-
-        if (_trayWindow.Content is Panel panel)
-        {
-            panel.Width = 1;
-            panel.Height = 1;
-            panel.MinWidth = 1;
-            panel.MinHeight = 1;
-            panel.Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent);
-            panel.Children.Clear();
-            panel.Children.Add(_trayIcon);
-        }
-
-        try
-        {
-            ThemeService.TrackWindow(_trayWindow);
-        }
-        catch (Exception ex)
-        {
-            Log($"[Tray] Tray window theme tracking not applied: {ex.Message}");
-        }
-
-        try
-        {
-            // The tray icon is created independently of this window, so a
-            // failed activation only costs the hidden host window's state.
-            _trayWindow.Activate();
-        }
-        catch (Exception ex)
-        {
-            Log($"[Tray] Tray window activation not applied: {ex.Message}");
-        }
-
-        // A user-hidden tray must stay hidden across explorer restarts: the
-        // library's own TaskbarCreated handler (wired in its constructor)
-        // unconditionally re-adds the icon. This subscriber registers after
-        // the library's, so it runs second and removes the re-added icon,
-        // deferred off the message-window callback frame per the
-        // callback-isolation contract. The library creates every icon with
-        // NIS_HIDDEN before promoting it, so nothing visible flashes during
-        // that one dispatcher turn.
-        try
-        {
-            _trayIcon.TrayIcon.MessageWindow.TaskbarCreated +=
-                OnTaskbarCreatedWithTrayHidden;
-        }
-        catch (Exception ex)
-        {
-            Log($"[Tray] Hidden-style taskbar-restart guard not attached: {ex.Message}");
-        }
+        _trayHost.RightClickRequested += ShowTrayContextMenuFromTray;
+        _trayHost.LeftClickRequested += OnTrayLeftClickRequested;
 
         if (IsTrayIconHiddenByUserSetting())
         {
+            _trayHost.DesiredVisible = false;
             Log("[Tray] Tray icon hidden by user setting; skipping icon creation");
-            RemoveTrayIconCreatedByLibraryLoad();
         }
         else
         {
+            _trayHost.DesiredVisible = true;
             StartTrayIconCreationWithRetry();
         }
 
         try
         {
-            var trayHwnd = WindowNative.GetWindowHandle(_trayWindow);
-            Log($"[Init] Attaching GlobalHotkeyService to tray hwnd=0x{trayHwnd.ToInt64():X}");
-            GlobalHotkeyService?.Attach(trayHwnd);
-            Log("[Init] GlobalHotkeyService attached");
+            if (GlobalHotkeyService is { } globalHotkeyService)
+            {
+                IntPtr trayHwnd = TrayHostWindowHandle;
+                Log($"[Init] Attaching GlobalHotkeyService to tray hwnd=0x{trayHwnd.ToInt64():X}");
+                globalHotkeyService.Attach(trayHwnd);
+                Log("[Init] GlobalHotkeyService attached");
+            }
         }
         catch (Exception ex)
         {
             Log($"[Init] GlobalHotkeyService attach failed: {ex}");
         }
 
-        _trayWindow.DispatcherQueue.TryEnqueue(() =>
-        {
-            if (_trayWindow is null)
-            {
-                return;
-            }
-
-            WindowExtensions.Hide(_trayWindow, enableEfficiencyMode: false);
-        });
-
+        ThemeService.AppearanceChanged -= UpdateTrayIconAppearance;
         ThemeService.AppearanceChanged += UpdateTrayIconAppearance;
+    }
+
+    private void OnTrayLeftClickRequested()
+    {
+        TrayContextMenuWindow.DismissActiveIfOpen();
+        if (WidgetManager is not null)
+        {
+            SafeFireAndForget(() => ToggleTrayWidgetsAsync(
+                DeskBox.Services.TrayToggleRequestQueue.TrayIconSource));
+        }
     }
 
     /// <summary>Attempts per tray creation pass through the early-logon window
     /// where the taskbar may not exist yet (roughly the first 30 seconds after
-    /// logon in the field reports). This cap governs tray ICON creation; the
-    /// context-menu flyout retry loop shares the constant but can never run it
-    /// out in the failure path — every assignment failure records a
-    /// TrayContextMenuModePolicy failure and the session degrades to the
-    /// native menu after the second, so the flyout loop's practical ceiling is
-    /// three attempts (~6 s). Do not tighten this constant to shrink that
-    /// loop; it would silently cut the icon-creation window instead
-    /// (drag-freeze review, 2026-10-14).</summary>
+    /// logon in the field reports).</summary>
     private const int TrayCreationMaxAttempts = 15;
 
     private static readonly TimeSpan TrayCreationRetryDelay = TimeSpan.FromSeconds(2);
@@ -317,11 +100,8 @@ public partial class App
     private Task<bool>? _trayIconCreationTask;
 
     /// <summary>
-    /// Creates the tray icon, retrying through the early-logon race that makes
-    /// the first attempt fail (H.NotifyIcon TryCreate failures and E_NOTIMPL
-    /// windowing calls both recover once the shell finishes starting). The
-    /// first attempt runs inline so the normal path is unchanged; later
-    /// attempts continue on the UI thread while the rest of startup proceeds.
+    /// Creates the tray icon, retrying through the early-logon race where
+    /// Shell_NotifyIconW fails before Explorer's taskbar finishes starting.
     /// </summary>
     private Task<bool> StartTrayIconCreationWithRetry()
     {
@@ -337,16 +117,18 @@ public partial class App
             {
                 if (IsTrayIconHiddenByUserSetting())
                 {
+                    if (_trayHost is not null)
+                    {
+                        _trayHost.DesiredVisible = false;
+                    }
+
                     Log("[Tray] Tray icon hidden by user setting; creation retry stopped");
                     return false;
                 }
 
-                if (_trayIcon is { IsCreated: false })
+                if (_trayHost is { IsCreated: false })
                 {
-                    // Keep the process at normal QoS. Tray creation must never
-                    // opt the whole application into a lower-priority
-                    // efficiency mode.
-                    _trayIcon.ForceCreate(enablesEfficiencyMode: false);
+                    _ = _trayHost.TryCreateIcon();
                 }
 
                 if (IsTraySurfaceUsable())
@@ -379,18 +161,15 @@ public partial class App
 
     /// <summary>
     /// Mirrors the tray surface checks the AOT smoke harness pins: the icon
-    /// must exist, own a message window, and have a real host window. Once this
-    /// holds, startup has something the user can act on and exceptions stop
-    /// being fatal.
+    /// must be registered with the shell and own a live Win32 host window.
     /// </summary>
     private bool IsTraySurfaceUsable()
     {
         try
         {
-            return _trayIcon is { IsCreated: true } trayIcon &&
-                trayIcon.TrayIcon.WindowHandle != IntPtr.Zero &&
-                _trayWindow is not null &&
-                WindowNative.GetWindowHandle(_trayWindow) != IntPtr.Zero;
+            return _trayHost is { IsCreated: true } trayHost &&
+                trayHost.WindowHandle != IntPtr.Zero &&
+                Win32Helper.IsWindow(trayHost.WindowHandle);
         }
         catch (Exception ex)
         {
@@ -399,246 +178,138 @@ public partial class App
         }
     }
 
-    private bool TryAssignTrayContextFlyout()
-    {
-        try
-        {
-            if (_trayIcon is null)
-            {
-                return false;
-            }
-
-            _trayIcon.ContextFlyout = _trayContextMenu;
-            return true;
-        }
-        catch (Exception ex)
-        {
-            Log($"[Tray] Tray context flyout assignment failed: {ex.Message}");
-            _trayContextMenuModePolicy.RecordFailure();
-            return false;
-        }
-    }
-
-    private async Task RetryTrayContextFlyoutAssignmentAsync()
-    {
-        for (int attempt = 2; attempt <= TrayCreationMaxAttempts; attempt++)
-        {
-            await Task.Delay(TrayCreationRetryDelay);
-            if (_trayIcon is not { } trayIcon)
-            {
-                return;
-            }
-
-            if (TryAssignTrayContextFlyout())
-            {
-                Log($"[Tray] Tray context flyout assigned on retry attempt {attempt}");
-                _trayContextMenuModePolicy.RecordSuccess();
-                return;
-            }
-
-            if (_trayContextMenuModePolicy.IsDegradedToPopupMenu)
-            {
-                try
-                {
-                    SwitchTrayContextMenuToNativeMode(trayIcon);
-                }
-                catch (Exception ex)
-                {
-                    Log($"[Tray] Failed to degrade tray context menu to native PopupMenu mode: {ex.Message}");
-                }
-
-                return;
-            }
-        }
-    }
-
-    private MenuFlyoutItem CreateTrayCreateWidgetItem(
-        MenuFlyout contextMenu,
-        WidgetContentDescriptor descriptor,
-        LocalizationService localization)
-    {
-        var item = new MenuFlyoutItem
-        {
-            Text = GetCreateEntryText(descriptor, localization),
-            Width = TrayMenuItemWidth,
-            Icon = new FontIcon { Glyph = descriptor.DefaultGlyph }
-        };
-        AttachTrayMenuItemInteraction(item, () => RunTrayMenuActionAsync(contextMenu, async () =>
-        {
-            if (WidgetManager is not null)
-            {
-                await WidgetManager.CreateWidgetOfKindAsync(descriptor.WidgetKind);
-            }
-        }));
-        return item;
-    }
-
-    /// <summary>
-    /// Wires one tray menu item so both invocation paths work: the XAML click
-    /// path (SecondWindow flyout mode) and the command path (the library's
-    /// native PopupMenu fallback only executes Command, never Click). WinUI
-    /// raises Click and executes the command back-to-back on the same
-    /// dispatch, so a per-item gate keeps each interaction single-shot.
-    /// </summary>
-    private static void AttachTrayMenuItemInteraction(MenuFlyoutItem item, Func<Task> interaction)
-    {
-        var gate = new TrayMenuInteractionGate(action => UiDispatcherQueue.TryEnqueue(() => action()));
-        async Task RunInteractionOnceAsync()
-        {
-            if (!gate.TryEnter())
-            {
-                return;
-            }
-
-            await interaction();
-        }
-
-        item.Click += async (_, _) => await RunInteractionOnceAsync();
-        item.Command = new RelayCommand(async () => await RunInteractionOnceAsync());
-    }
-
-    private void PrepareTrayContextMenu(MenuFlyout contextMenu)
+    internal IReadOnlyList<NativeTrayMenuEntry> BuildTrayMenuEntries()
     {
         bool canCreateWidget = WidgetManager is not null;
-        if (_trayOrganizeDesktopItem is not null)
-        {
-            _trayOrganizeDesktopItem.IsEnabled = canCreateWidget;
-        }
-
-        foreach (var item in _trayCreateWidgetItems.Values)
-        {
-            item.IsEnabled = canCreateWidget;
-        }
-
-        if (_trayMapFolderItem is not null)
-        {
-            _trayMapFolderItem.IsEnabled = canCreateWidget;
-        }
-
-        contextMenu.MenuFlyoutPresenterStyle = CreateTrayMenuPresenterStyle();
+        return BuildTrayMenuEntriesCore(
+            LocalizationService,
+            canCreateWidget,
+            _hasUpdateAvailable,
+            _availableUpdateVersion,
+            () => RunTraySettingsActionAsync(OpenDesktopOrganizationFromTray),
+            kind => RunTrayMenuActionAsync(async () =>
+            {
+                if (WidgetManager is not null)
+                {
+                    await WidgetManager.CreateWidgetOfKindAsync(kind);
+                }
+            }),
+            () => RunTrayMenuActionAsync(() => CreateFolderWidgetFromPickerAsync()),
+            () => RunTraySettingsActionAsync(OpenFeatureWidgetsFromTray),
+            () => RunTrayMenuActionAsync(OpenManagedStorageFromTray),
+            () => RunTraySettingsActionAsync(OpenAboutSettingsFromTray),
+            () => RunTraySettingsActionAsync(OpenSettingsFromTray),
+            () => RunTrayMenuActionAsync(ExitApplication),
+            () => RunTraySettingsActionAsync(OpenAiCreateStudioFromTray));
     }
 
-    private Style CreateTrayMenuPresenterStyle()
+    internal static IReadOnlyList<NativeTrayMenuEntry> BuildTrayMenuEntriesCore(
+        LocalizationService localization,
+        bool canCreateWidget,
+        bool hasUpdateAvailable,
+        string? availableUpdateVersion,
+        Func<Task> onOrganizeDesktop,
+        Func<WidgetKind, Task> onCreateWidgetOfKind,
+        Func<Task> onMapFolder,
+        Func<Task> onAddFeatureWidget,
+        Func<Task> onOpenManagedStorage,
+        Func<Task> onOpenUpdate,
+        Func<Task> onOpenSettings,
+        Func<Task> onExit,
+        Func<Task>? onCreateAiWidget = null)
     {
-        var style = new Style(typeof(MenuFlyoutPresenter))
+        var entries = new List<NativeTrayMenuEntry>(18)
         {
-            BasedOn = (Style)Resources[typeof(MenuFlyoutPresenter)]
+            NativeTrayMenuEntry.Item(
+                TrayCommandOrganizeDesktop,
+                localization.T("Tray.OrganizeDesktop"),
+                "\uE74C",
+                canCreateWidget,
+                onOrganizeDesktop),
+            NativeTrayMenuEntry.Separator,
         };
-        style.Setters.Add(new Setter(ScrollViewer.VerticalScrollModeProperty, ScrollMode.Disabled));
-        style.Setters.Add(new Setter(
-            ScrollViewer.VerticalScrollBarVisibilityProperty,
-            ScrollBarVisibility.Disabled));
-        // Remove the default MaxHeight so every menu item is visible without
-        // scrolling — the tray menu is short enough to always fit on screen.
-        style.Setters.Add(new Setter(FrameworkElement.MaxHeightProperty, double.PositiveInfinity));
-        return style;
+
+        int nextCreateCommandId = TrayCommandCreateWidgetFirst;
+        foreach (WidgetContentDescriptor descriptor in new WidgetContentFactory(localization).GetCreateEntryDescriptors())
+        {
+            WidgetKind kind = descriptor.WidgetKind;
+            entries.Add(NativeTrayMenuEntry.Item(
+                nextCreateCommandId++,
+                GetCreateEntryText(descriptor, localization),
+                descriptor.DefaultGlyph,
+                canCreateWidget,
+                () => onCreateWidgetOfKind(kind)));
+        }
+
+        entries.Add(NativeTrayMenuEntry.Item(
+            TrayCommandMapFolder,
+            localization.T("Common.NewFolderMapping"),
+            "\uE8E5",
+            canCreateWidget,
+            onMapFolder));
+        entries.Add(NativeTrayMenuEntry.Item(
+            TrayCommandAddFeatureWidget,
+            localization.T("Common.AddFeatureWidget"),
+            "\uE710",
+            isEnabled: true,
+            onAddFeatureWidget));
+        if (onCreateAiWidget is not null)
+        {
+            entries.Add(NativeTrayMenuEntry.Item(
+                TrayCommandCreateAiWidget,
+                localization.T("Common.CreateAiWidget"),
+                "\uE945",
+                isEnabled: true,
+                onCreateAiWidget));
+        }
+        entries.Add(NativeTrayMenuEntry.Separator);
+        entries.Add(NativeTrayMenuEntry.Item(
+            TrayCommandOpenManagedStorage,
+            localization.T("Tray.OpenManagedStorage"),
+            "\uE8B7",
+            isEnabled: true,
+            onOpenManagedStorage));
+        entries.Add(NativeTrayMenuEntry.Separator);
+
+        if (hasUpdateAvailable)
+        {
+            string updateText = string.IsNullOrWhiteSpace(availableUpdateVersion)
+                ? localization.T("Tray.UpdateAvailable")
+                : localization.Format("Tray.UpdateAvailableWithVersion", availableUpdateVersion);
+            entries.Add(NativeTrayMenuEntry.Item(
+                TrayCommandUpdateAvailable,
+                updateText,
+                "\uE896",
+                isEnabled: true,
+                onOpenUpdate));
+        }
+
+        entries.Add(NativeTrayMenuEntry.Item(
+            TrayCommandSettings,
+            localization.T("Tray.Settings"),
+            "\uE713",
+            isEnabled: true,
+            onOpenSettings));
+        entries.Add(NativeTrayMenuEntry.Separator);
+        entries.Add(NativeTrayMenuEntry.Item(
+            TrayCommandExit,
+            localization.T("Tray.Exit"),
+            "\uE711",
+            isEnabled: true,
+            onExit));
+
+        return entries;
     }
-
-    private void OnTrayMenuVisualLoaded(object sender, RoutedEventArgs args)
-    {
-        if (sender is MenuFlyoutItemBase anchorItem)
-        {
-            ApplySecondWindowTrayPresenterSettings(anchorItem);
-        }
-    }
-
-    private void OnSecondWindowTrayContextMenuOpened(object? sender, EventArgs args)
-    {
-        if (_trayOrganizeDesktopItem is not null)
-        {
-            ApplySecondWindowTrayPresenterSettings(_trayOrganizeDesktopItem);
-        }
-    }
-
-    private void ApplySecondWindowTrayPresenterSettings(MenuFlyoutItemBase anchorItem)
-    {
-        MenuFlyoutPresenter? presenter = FindVisualAncestor<MenuFlyoutPresenter>(anchorItem);
-        if (presenter is null)
-        {
-            return;
-        }
-
-        presenter.SetValue(ScrollViewer.VerticalScrollModeProperty, ScrollMode.Disabled);
-        presenter.SetValue(
-            ScrollViewer.VerticalScrollBarVisibilityProperty,
-            ScrollBarVisibility.Disabled);
-        presenter.MaxHeight = double.PositiveInfinity;
-
-        bool popupConfigured = ConfigureOwningPopup(presenter);
-        if (!_traySecondWindowSyncLogged)
-        {
-            Log($"[Tray] Synchronized SecondWindow presenter through public visual tree; popup={popupConfigured}");
-            _traySecondWindowSyncLogged = true;
-        }
-    }
-
-    private static T? FindVisualAncestor<T>(DependencyObject child)
-        where T : DependencyObject
-    {
-        for (DependencyObject? current = child; current is not null; current = VisualTreeHelper.GetParent(current))
-        {
-            if (current is T match)
-            {
-                return match;
-            }
-        }
-
-        return null;
-    }
-
-    private static bool ConfigureOwningPopup(MenuFlyoutPresenter presenter)
-    {
-        XamlRoot? xamlRoot = presenter.XamlRoot;
-        if (xamlRoot is null)
-        {
-            return false;
-        }
-
-        foreach (Popup popup in VisualTreeHelper.GetOpenPopupsForXamlRoot(xamlRoot))
-        {
-            if (popup.Child is not null && ContainsVisual(popup.Child, presenter))
-            {
-                popup.ShouldConstrainToRootBounds = false;
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private static bool ContainsVisual(DependencyObject root, DependencyObject target)
-    {
-        if (ReferenceEquals(root, target))
-        {
-            return true;
-        }
-
-        int childCount = VisualTreeHelper.GetChildrenCount(root);
-        for (int index = 0; index < childCount; index++)
-        {
-            if (ContainsVisual(VisualTreeHelper.GetChild(root, index), target))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private readonly TrayContextMenuModePolicy _trayContextMenuModePolicy = new();
 
     /// <summary>Suppresses a second deferred menu open while the first is
     /// still landing or blocking inside TrackPopupMenuEx's modal loop (the
     /// loop pumps dispatcher items, so a naive re-enqueue would open a nested
-    /// menu). Monotonic TickCount64, not wall clock: an NTP resync jumping
-    /// the clock backwards would otherwise extend the bounded suppression by
-    /// the whole jump size. Bounded expiry so a lost finally cannot brick
-    /// the tray menu for the whole session.</summary>
+    /// menu). Monotonic TickCount64, not wall clock.</summary>
     private long _trayContextMenuReentrySuppressedUntilTick;
 
     private void ShowTrayContextMenuFromTray()
     {
-        if (_trayIcon is null ||
+        if (_trayHost is null ||
             !Win32Helper.GetCursorPos(out var cursor))
         {
             return;
@@ -650,13 +321,10 @@ public partial class App
         }
 
         var clickPoint = new DrawingPoint(cursor.X, cursor.Y);
-        // Tray commands run inside H.NotifyIcon's WndProc for the tray click.
+        // Tray notifications run inside NativeTrayIconHost's WndProc.
         // Building or showing the menu there re-enters win32k from a message
-        // callback (the drag-freeze family), so capture the click anchor now —
-        // the pointer can keep moving during the deferred turn — and open the
-        // menu one dispatcher turn later, outside the callback frame. The
-        // SetForegroundWindow + TrackPopupMenuEx pairing moves as one unit
-        // inside the library call, preserving dismiss-on-outside-click.
+        // callback (the drag-freeze family), so capture the click anchor now
+        // and open the menu one dispatcher turn later, outside the callback frame.
         UiDispatch.PostAfterCallback(() =>
         {
             if (Environment.TickCount64 < _trayContextMenuReentrySuppressedUntilTick)
@@ -679,146 +347,85 @@ public partial class App
 
     private void ShowTrayContextMenuAt(DrawingPoint point)
     {
-        // This lands one dispatcher turn after the tray click; the tray icon
-        // may have been recreated or torn down in between.
-        if (_trayIcon is not { } trayIcon)
+        if (_trayHost is not { } trayHost)
         {
             return;
         }
 
-        if (_trayContextMenu is not null)
-        {
-            PrepareTrayContextMenu(_trayContextMenu);
-        }
+        bool isRightToLeft = string.Equals(
+            LocalizationService.CurrentCultureName,
+            LocalizationService.LanguageArabic,
+            StringComparison.OrdinalIgnoreCase);
 
+        TrayMenuPlacement placement;
         try
         {
-            point = GetTrayContextMenuAnchorPoint(point);
+            placement = GetTrayContextMenuPlacement(point, isRightToLeft);
         }
         catch (Exception ex)
         {
             Log($"[Tray] Failed to calculate tray context menu anchor: {ex}");
-        }
-
-        if (_trayContextMenuModePolicy.IsDegradedToPopupMenu)
-        {
-            ShowTrayContextMenuInNativeMode(point);
-            return;
+            placement = new TrayMenuPlacement(
+                point,
+                isRightToLeft ? TrayMenuHorizontalAlignment.Right : TrayMenuHorizontalAlignment.Left,
+                TrayMenuVerticalAlignment.Bottom);
         }
 
         try
         {
-            trayIcon.ShowContextMenu(point);
-            _trayContextMenuModePolicy.RecordSuccess();
-        }
-        catch (Exception ex) when (IsSecondWindowHostFailure(ex))
-        {
-            Log($"[Tray] Tray context menu SecondWindow host failed: {ex.Message}");
-            RecoverTrayContextMenuAfterSecondWindowFailure(point);
+            IReadOnlyList<NativeTrayMenuEntry> entries = BuildTrayMenuEntries();
+            bool isDarkMenuTheme = ThemeService is not null
+                ? ThemeService.EffectiveTheme == ElementTheme.Dark
+                : IsDarkThemeActive();
+
+            if (TrayContextMenuWindow.TryShow(
+                    entries,
+                    placement.Anchor,
+                    placement.HorizontalAlignment,
+                    placement.VerticalAlignment,
+                    isDarkMenuTheme,
+                    isRightToLeft,
+                    EnsureXamlLoopLifelineIfNoOtherWindows,
+                    invoked =>
+                    {
+                        if (invoked.Action is not null)
+                        {
+                            SafeFireAndForget(invoked.Action, $"tray-menu-{invoked.CommandId}");
+                        }
+                    }))
+            {
+                return;
+            }
+
+            int selectedCommand = trayHost.ShowContextMenu(
+                placement.Anchor.X,
+                placement.Anchor.Y,
+                entries,
+                isDarkMenuTheme,
+                isRightToLeft,
+                placement.HorizontalAlignment,
+                placement.VerticalAlignment);
+            if (selectedCommand <= 0)
+            {
+                return;
+            }
+
+            foreach (NativeTrayMenuEntry entry in entries)
+            {
+                if (!entry.IsSeparator &&
+                    entry.CommandId == selectedCommand &&
+                    entry.IsEnabled &&
+                    entry.Action is not null)
+                {
+                    SafeFireAndForget(entry.Action, $"tray-menu-{selectedCommand}");
+                    break;
+                }
+            }
         }
         catch (Exception ex)
         {
             Log($"[Tray] Failed to show tray context menu: {ex}");
         }
-    }
-
-    private static bool IsSecondWindowHostFailure(Exception exception)
-    {
-        // H.NotifyIcon 2.5.0-beta.1's second window can fail its prewarm race
-        // (Activate is synchronously followed by SW_HIDE, so Loaded never
-        // fires), leaving the host frame without a XamlRoot; every flyout
-        // ShowAt then throws this ArgumentException.
-        return exception is ArgumentException &&
-            exception.Message.Contains("XamlRoot", StringComparison.Ordinal);
-    }
-
-    private void ShowTrayContextMenuInNativeMode(DrawingPoint point)
-    {
-        if (_trayIcon is not { } trayIcon)
-        {
-            return;
-        }
-
-        // ContextMenuMode is already PopupMenu, so the same public call routes
-        // to the library's native menu without touching the second-window host.
-        try
-        {
-            trayIcon.ShowContextMenu(point);
-        }
-        catch (Exception ex)
-        {
-            Log($"[Tray] Failed to show native tray context menu: {ex.Message}");
-        }
-    }
-
-    private void RecoverTrayContextMenuAfterSecondWindowFailure(DrawingPoint point)
-    {
-        if (_trayIcon is not { } trayIcon)
-        {
-            return;
-        }
-
-        if (_trayContextMenuModePolicy.RecordFailure())
-        {
-            DegradeTrayContextMenuToNativeMode(trayIcon, point);
-            return;
-        }
-
-        try
-        {
-            // Re-assigning the flyout makes the library rebuild its hidden
-            // second window from scratch; the replaced window leaks once,
-            // which beta.1 makes unavoidable for this one-shot retry.
-            trayIcon.ContextFlyout = null;
-            trayIcon.ContextFlyout = _trayContextMenu;
-        }
-        catch (Exception ex)
-        {
-            Log($"[Tray] Failed to rebuild tray context menu SecondWindow host: {ex.Message}");
-            if (_trayContextMenuModePolicy.RecordFailure())
-            {
-                DegradeTrayContextMenuToNativeMode(trayIcon, point);
-            }
-
-            return;
-        }
-
-        try
-        {
-            trayIcon.ShowContextMenu(point);
-            _trayContextMenuModePolicy.RecordSuccess();
-        }
-        catch (Exception ex) when (IsSecondWindowHostFailure(ex))
-        {
-            Log($"[Tray] Tray context menu SecondWindow host failed after rebuild: {ex.Message}");
-            if (_trayContextMenuModePolicy.RecordFailure())
-            {
-                DegradeTrayContextMenuToNativeMode(trayIcon, point);
-            }
-        }
-        catch (Exception ex)
-        {
-            Log($"[Tray] Failed to show tray context menu after host rebuild: {ex.Message}");
-        }
-    }
-
-    private void DegradeTrayContextMenuToNativeMode(TaskbarIcon trayIcon, DrawingPoint point)
-    {
-        try
-        {
-            SwitchTrayContextMenuToNativeMode(trayIcon);
-            ShowTrayContextMenuInNativeMode(point);
-        }
-        catch (Exception ex)
-        {
-            Log($"[Tray] Failed to degrade tray context menu to native PopupMenu mode: {ex.Message}");
-        }
-    }
-
-    private void SwitchTrayContextMenuToNativeMode(TaskbarIcon trayIcon)
-    {
-        trayIcon.ContextMenuMode = ContextMenuMode.PopupMenu;
-        Log("[Tray] Tray context menu degraded to native PopupMenu mode (SecondWindow host failed to initialize)");
     }
 
     internal void ShowTrayContextMenuForOnboarding()
@@ -832,10 +439,66 @@ public partial class App
         return WidgetManager?.HasVisibleWidgets == true;
     }
 
+    private readonly record struct TrayMenuPlacement(
+        DrawingPoint Anchor,
+        TrayMenuHorizontalAlignment HorizontalAlignment,
+        TrayMenuVerticalAlignment VerticalAlignment);
+
+    private TrayMenuPlacement GetTrayContextMenuPlacement(
+        DrawingPoint fallbackPoint,
+        bool isRightToLeft)
+    {
+        if (TryGetTrayIconIdentity(out IntPtr trayIconWindowHandle, out Guid trayIconId, out uint trayNumericId) &&
+            Win32Helper.TryGetNotifyIconRect(trayIconWindowHandle, trayIconId, out var iconRect, trayNumericId) &&
+            IsUsableTrayIconRect(iconRect))
+        {
+            int centerX = iconRect.Left + ((iconRect.Right - iconRect.Left) / 2);
+            int centerY = iconRect.Top + ((iconRect.Bottom - iconRect.Top) / 2);
+            if (Win32Helper.TryGetMonitorWorkArea(centerX, centerY, out var monitor, out var workArea))
+            {
+                TaskbarEdge edge = GetNearestTaskbarEdge(iconRect, monitor, workArea);
+                return edge switch
+                {
+                    TaskbarEdge.Bottom => new TrayMenuPlacement(
+                        ClampPointToRect(new DrawingPoint(centerX, Math.Min(workArea.Bottom - 1, iconRect.Top)), monitor),
+                        TrayMenuHorizontalAlignment.Center,
+                        TrayMenuVerticalAlignment.Bottom),
+                    TaskbarEdge.Top => new TrayMenuPlacement(
+                        ClampPointToRect(new DrawingPoint(centerX, Math.Max(workArea.Top, iconRect.Bottom)), monitor),
+                        TrayMenuHorizontalAlignment.Center,
+                        TrayMenuVerticalAlignment.Top),
+                    TaskbarEdge.Right => new TrayMenuPlacement(
+                        ClampPointToRect(new DrawingPoint(Math.Min(workArea.Right - 1, iconRect.Left), centerY), monitor),
+                        TrayMenuHorizontalAlignment.Right,
+                        TrayMenuVerticalAlignment.Center),
+                    TaskbarEdge.Left => new TrayMenuPlacement(
+                        ClampPointToRect(new DrawingPoint(Math.Max(workArea.Left, iconRect.Right), centerY), monitor),
+                        TrayMenuHorizontalAlignment.Left,
+                        TrayMenuVerticalAlignment.Center),
+                    _ => new TrayMenuPlacement(
+                        GetFallbackTrayContextMenuAnchorPoint(fallbackPoint),
+                        isRightToLeft ? TrayMenuHorizontalAlignment.Right : TrayMenuHorizontalAlignment.Left,
+                        TrayMenuVerticalAlignment.Bottom),
+                };
+            }
+
+            return new TrayMenuPlacement(
+                new DrawingPoint(centerX, centerY),
+                TrayMenuHorizontalAlignment.Center,
+                TrayMenuVerticalAlignment.Bottom);
+        }
+
+        DrawingPoint fallbackAnchor = GetTrayContextMenuAnchorPoint(fallbackPoint);
+        return new TrayMenuPlacement(
+            fallbackAnchor,
+            isRightToLeft ? TrayMenuHorizontalAlignment.Right : TrayMenuHorizontalAlignment.Left,
+            TrayMenuVerticalAlignment.Bottom);
+    }
+
     private DrawingPoint GetTrayContextMenuAnchorPoint(DrawingPoint fallbackPoint)
     {
-        if (TryGetTrayIconIdentity(out var trayIconWindowHandle, out var trayIconId) &&
-            Win32Helper.TryGetNotifyIconRect(trayIconWindowHandle, trayIconId, out var iconRect) &&
+        if (TryGetTrayIconIdentity(out var trayIconWindowHandle, out var trayIconId, out uint trayNumericId) &&
+            Win32Helper.TryGetNotifyIconRect(trayIconWindowHandle, trayIconId, out var iconRect, trayNumericId) &&
             IsUsableTrayIconRect(iconRect))
         {
             return GetTrayContextMenuAnchorPointFromIconRect(iconRect, fallbackPoint);
@@ -844,21 +507,21 @@ public partial class App
         return GetFallbackTrayContextMenuAnchorPoint(fallbackPoint);
     }
 
-    private bool TryGetTrayIconIdentity(out IntPtr windowHandle, out Guid id)
+    private bool TryGetTrayIconIdentity(out IntPtr windowHandle, out Guid id, out uint numericId)
     {
         windowHandle = IntPtr.Zero;
         id = Guid.Empty;
+        numericId = 0;
 
-        if (_trayIcon is null)
+        if (_trayHost is not { } trayHost)
         {
             return false;
         }
 
-        H.NotifyIcon.Core.TrayIcon trayIcon = _trayIcon.TrayIcon;
-        windowHandle = trayIcon.WindowHandle;
-        id = trayIcon.Id;
-
-        return windowHandle != IntPtr.Zero && id != Guid.Empty;
+        windowHandle = trayHost.WindowHandle;
+        id = trayHost.IconId;
+        numericId = trayHost.NumericId;
+        return windowHandle != IntPtr.Zero && (id != Guid.Empty || numericId != 0);
     }
 
     private static DrawingPoint GetTrayContextMenuAnchorPointFromIconRect(
@@ -1046,8 +709,8 @@ public partial class App
             return;
         }
 
-        // The left-click command runs inside H.NotifyIcon's WndProc; the
-        // toggle preamble (cancel animations, per-window restores) must not
+        // The left-click notification runs inside NativeTrayIconHost's WndProc;
+        // the toggle preamble (cancel animations, per-window restores) must not
         // run on that callback frame. One yield leaves the frame before any
         // window work; UiDispatch keeps running inline on the UI thread.
         await Task.Yield();
@@ -1087,68 +750,28 @@ public partial class App
 
     private void RefreshTrayMenuText()
     {
-        if (_trayOrganizeDesktopItem is not null)
-        {
-            _trayOrganizeDesktopItem.Text = LocalizationService.T(
-                "Tray.OrganizeDesktop");
-        }
-
-        if (_trayMapFolderItem is not null)
-        {
-            _trayMapFolderItem.Text = LocalizationService.T("Common.NewFolderMapping");
-        }
-
-        if (_trayAddFeatureWidgetItem is not null)
-        {
-            _trayAddFeatureWidgetItem.Text = LocalizationService.T("Common.AddFeatureWidget");
-        }
-
-        foreach (var (widgetKind, item) in _trayCreateWidgetItems)
-        {
-            var descriptor = new WidgetContentFactory(LocalizationService).GetDescriptor(widgetKind);
-            item.Text = GetCreateEntryText(descriptor, LocalizationService);
-        }
-
-        if (_traySettingsItem is not null)
-        {
-            _traySettingsItem.Text = LocalizationService.T("Tray.Settings");
-        }
-
-        if (_trayUpdateItem is not null)
-        {
-            _trayUpdateItem.Text = string.IsNullOrWhiteSpace(_availableUpdateVersion)
-                ? LocalizationService.T("Tray.UpdateAvailable")
-                : LocalizationService.Format("Tray.UpdateAvailableWithVersion", _availableUpdateVersion);
-            _trayUpdateItem.Visibility = _hasUpdateAvailable ? Visibility.Visible : Visibility.Collapsed;
-        }
-
-        if (_trayOpenManagedStorageItem is not null)
-        {
-            _trayOpenManagedStorageItem.Text = LocalizationService.T("Tray.OpenManagedStorage");
-        }
-
-        if (_trayExitItem is not null)
-        {
-            _trayExitItem.Text = LocalizationService.T("Tray.Exit");
-        }
+        // Native tray menu entries are materialized lazily on right-click from
+        // LocalizationService and current update state, keeping zero resident
+        // XAML menu controls at idle.
     }
 
     private void RefreshTrayToolTipText()
     {
-        if (_trayIcon is null)
+        if (_trayHost is null)
         {
             return;
         }
 
         if (_hasUpdateAvailable && !string.IsNullOrWhiteSpace(_availableUpdateVersion))
         {
-            _trayIcon.ToolTipText = LocalizationService.Format("Tray.TooltipUpdateAvailable", _availableUpdateVersion);
+            _trayHost.SetToolTipText(
+                LocalizationService.Format("Tray.TooltipUpdateAvailable", _availableUpdateVersion));
             return;
         }
 
-        _trayIcon.ToolTipText = _widgetsRaisedFromTray
+        _trayHost.SetToolTipText(_widgetsRaisedFromTray
             ? LocalizationService.T("Tray.TooltipRaised")
-            : LocalizationService.T("Tray.TooltipNormal");
+            : LocalizationService.T("Tray.TooltipNormal"));
     }
 
     private static string GetCreateEntryText(WidgetContentDescriptor descriptor, LocalizationService localization)
@@ -1158,35 +781,30 @@ public partial class App
             : localization.T(descriptor.CreateEntryTextKey);
     }
 
-    private static async Task RunTrayMenuActionAsync(MenuFlyout contextMenu, Action action)
+    private int _isFolderMappingPickerFlowActive;
+
+    private static async Task RunTrayMenuActionAsync(Action action)
     {
-        contextMenu.Hide();
         await Task.Yield();
         action();
     }
 
-    private static async Task RunTrayMenuActionAsync(MenuFlyout contextMenu, Func<Task> action)
+    private static async Task RunTrayMenuActionAsync(Func<Task> action)
     {
-        contextMenu.Hide();
         await Task.Yield();
         await action();
     }
 
-    private async Task RunTraySettingsActionAsync(MenuFlyout contextMenu, Action action)
+    private async Task RunTraySettingsActionAsync(Action action)
     {
         var widgetManager = WidgetManager;
         widgetManager?.BeginWidgetInteraction("tray-settings-opening");
         try
         {
-            await RunTrayMenuActionAsync(contextMenu, action);
-            // The tray flyout is hosted by a helper window. Keep the raised-widget
-            // session stable while that window closes and Settings takes foreground.
-            // In degraded PopupMenu mode the menu is a native modal, so there is
-            // no helper window to wait for.
-            if (!_trayContextMenuModePolicy.IsDegradedToPopupMenu)
-            {
-                await Task.Delay(300);
-            }
+            // TrackPopupMenuEx is a native modal loop that has already closed
+            // before returning the selected command, so no SecondWindow helper
+            // settle delay is needed.
+            await RunTrayMenuActionAsync(action);
         }
         finally
         {
@@ -1194,81 +812,126 @@ public partial class App
         }
     }
 
-    internal async Task CreateFolderWidgetFromPickerAsync()
+    internal async Task CreateFolderWidgetFromPickerAsync(IntPtr preferredOwnerHwnd = default)
     {
-        FolderPickResult pick = FolderPickerService.PickFolderWithOutcome(
-            GetFolderPickerOwner(out PickerOwnerSource ownerSource),
-            DescribePickerOwner(ownerSource));
-        if (pick.Outcome == FolderPickOutcome.Failed)
+        if (Interlocked.CompareExchange(ref _isFolderMappingPickerFlowActive, 1, 0) != 0)
         {
-            // The picker used to fold this into a silent null (a click that
-            // did nothing at all); the toast makes a dead picker visible and
-            // carries the HRESULT for support.
-            ShowFolderMappingFailure(LocalizationService.Format(
-                "Widget.MapFolder.PickerFailedBody",
-                $"0x{pick.HResult:X8}"));
-            return;
-        }
+            if (_folderMappingConflictWindow is { } activeConflictWindow)
+            {
+                activeConflictWindow.Activate();
+                _ = Win32Helper.SetForegroundWindow(
+                    WindowNative.GetWindowHandle(activeConflictWindow));
+            }
+            else
+            {
+                _ = Task.Run(NativeFileOpenDialog.TryActivateActiveFolderDialog);
+            }
 
-        if (!string.IsNullOrWhiteSpace(pick.Folder))
-        {
-            await TryCreateFolderWidgetAsync(pick.Folder);
-        }
-    }
-
-    /// <summary>
-    /// Creates a mapped widget, or resolves a path conflict visibly through
-    /// <see cref="FolderMappingConflictWindow"/>. The earlier design (toast
-    /// plus an unasked settings jump) explained nothing on machines where
-    /// notifications never render — elevated processes above all — and field
-    /// users read it as "confirm does nothing".
-    /// </summary>
-    internal async Task TryCreateFolderWidgetAsync(string folderPath)
-    {
-        if (WidgetManager is not { } widgetManager)
-        {
-            return;
-        }
-
-        if (widgetManager.TryGetFileWidgetPathConflict(folderPath, out FileWidgetPathConflict? conflict) &&
-            conflict is not null)
-        {
-            await HandleFolderMappingConflictAsync(folderPath, conflict);
             return;
         }
 
         try
         {
-            await widgetManager.CreateFolderWidgetAsync(folderPath);
+            while (true)
+            {
+                IntPtr ownerHwnd;
+                string ownerLabel;
+                if (IsUsablePickerOwner(preferredOwnerHwnd))
+                {
+                    ownerHwnd = preferredOwnerHwnd;
+                    ownerLabel = "widget";
+                }
+                else
+                {
+                    ownerHwnd = GetFolderPickerOwner(out PickerOwnerSource ownerSource);
+                    ownerLabel = DescribePickerOwner(ownerSource);
+                }
+
+                FolderPickResult pick = await FolderPickerService.PickFolderWithOutcomeAsync(
+                    ownerHwnd,
+                    ownerLabel);
+                if (pick.Outcome == FolderPickOutcome.Failed)
+                {
+                    ShowFolderMappingFailure(LocalizationService.Format(
+                        "Widget.MapFolder.PickerFailedBody",
+                        $"0x{pick.HResult:X8}"));
+                    return;
+                }
+
+                if (string.IsNullOrWhiteSpace(pick.Folder))
+                {
+                    return;
+                }
+
+                bool repick = await TryCreateFolderWidgetCoreAsync(pick.Folder);
+                if (!repick)
+                {
+                    return;
+                }
+            }
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _isFolderMappingPickerFlowActive, 0);
+        }
+    }
+
+    internal async Task TryCreateFolderWidgetAsync(string folderPath)
+    {
+        _ = await TryCreateFolderWidgetCoreAsync(folderPath);
+    }
+
+    private async Task<bool> TryCreateFolderWidgetCoreAsync(string folderPath)
+    {
+        if (WidgetManager is not { } widgetManager)
+        {
+            return false;
+        }
+
+        (FileWidgetPathConflict? conflict, FileWidgetPathRelation relation, string storageRoot) =
+            await widgetManager.EvaluateExternalMappingConflictAsync(folderPath);
+        if (conflict is not null)
+        {
+            return await HandleFolderMappingConflictAsync(
+                folderPath,
+                conflict,
+                relation,
+                storageRoot);
+        }
+
+        try
+        {
+            await widgetManager.CreateFolderWidgetCoreAsync(
+                folderPath,
+                skipConflictCheck: true);
         }
         catch (Exception ex)
         {
             ShowFolderMappingFailure(ex.Message);
         }
+
+        return false;
     }
 
-    private async Task HandleFolderMappingConflictAsync(
+    private async Task<bool> HandleFolderMappingConflictAsync(
         string folderPath,
-        FileWidgetPathConflict conflict)
+        FileWidgetPathConflict conflict,
+        FileWidgetPathRelation relation,
+        string storageRoot)
     {
         if (WidgetManager is not { } widgetManager)
         {
-            return;
+            return false;
         }
 
         string kindToken;
-        string relationToken;
+        string relationToken = DescribeFileWidgetRelation(relation);
         string body;
         string? conflictingWidgetId = null;
-        FileWidgetPathRelation relation;
         if (conflict.Kind == FileWidgetPathConflictKind.ExistingWidget &&
             conflict.ConflictingWidget is { } existing)
         {
             kindToken = "existing-widget";
-            relation = global::DeskBox.Services.WidgetManager.DescribeFileWidgetPathRelation(
-                folderPath,
-                existing.MappedFolderPath!);
-            relationToken = DescribeFileWidgetRelation(relation);
             body = LocalizationService.Format(
                 "Widget.MapFolder.ConflictDialogWidgetBody",
                 existing.Name);
@@ -1276,26 +939,17 @@ public partial class App
         }
         else
         {
-            string storageRoot = SettingsService.NormalizeManagedStorageRootPath(
-                SettingsService.Settings.FileWidget.DefaultManagedStorageRootPath);
             kindToken = "storage-root";
-            relation = global::DeskBox.Services.WidgetManager.DescribeFileWidgetPathRelation(folderPath, storageRoot);
-            relationToken = DescribeFileWidgetRelation(relation);
             body = widgetManager.FormatFileWidgetPathConflictMessage(
-                folderPath,
+                relation,
                 LocalizationService.T("WidgetTitleIcon.Label.ManagedStorage"),
                 storageRoot);
             if (relation == FileWidgetPathRelation.CandidateInsideOther)
             {
-                // Moving the storage root migrates the whole tree, so the
-                // "move it out first" guidance is the only real way out for
-                // a folder inside the managed tree.
                 body += "\n\n" + LocalizationService.T("Widget.MapFolder.ConflictInsideExtraHint");
             }
         }
 
-        // The conflict flow used to be zero-log, which sent the first
-        // diagnostics round after a picker failure that never happened.
         Log($"[WidgetMapping] outcome=conflict kind={kindToken} relation={relationToken}");
 
         FolderMappingConflictWindow window = ShowFolderMappingConflictWindow(
@@ -1313,15 +967,17 @@ public partial class App
                     Log($"[WidgetMapping] Could not reveal the conflicting widget: {ex.Message}");
                 }
 
-                break;
+                return false;
 
             case FolderMappingConflictResult.ChangeStorage:
                 ShowSettings("FileStorageSettings");
-                break;
+                return false;
 
             case FolderMappingConflictResult.Repick:
-                await CreateFolderWidgetFromPickerAsync();
-                break;
+                return true;
+
+            default:
+                return false;
         }
     }
 
@@ -1331,6 +987,7 @@ public partial class App
         string body,
         FolderMappingConflictButtonPlan plan)
     {
+        EnsureXamlLoopLifelineIfNoOtherWindows();
         if (_folderMappingConflictWindow is not null)
         {
             try
@@ -1367,6 +1024,34 @@ public partial class App
         _ => "unresolvable",
     };
 
+    internal bool TryShowTrayBalloonNotification(
+        string title,
+        string message,
+        TrayBalloonIconKind iconKind,
+        bool largeIcon = false)
+    {
+        if (_trayHost is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            return _trayHost.TryShowBalloonNotification(
+                title,
+                message,
+                iconKind,
+                largeIcon: largeIcon,
+                sound: false,
+                respectQuietTime: true);
+        }
+        catch (Exception ex)
+        {
+            Log($"[Tray] Balloon notification fallback failed: {ex.Message}");
+            return false;
+        }
+    }
+
     private void ShowFolderMappingFailure(string message)
     {
         string title = LocalizationService.T("Common.NewFolderMapping");
@@ -1375,48 +1060,19 @@ public partial class App
                 message,
                 options: new NativeAppNotificationOptions(
                     Tag: FolderMappingConflictNotificationTag,
-                    Group: FolderMappingNotificationGroup)) == true || _trayIcon is null)
+                    Group: FolderMappingNotificationGroup)) == true)
         {
             return;
         }
 
-        try
-        {
-            _trayIcon.ShowNotification(
-                title,
-                message,
-                NotificationIcon.Info,
-                customIconHandle: null,
-                largeIcon: false,
-                sound: false,
-                respectQuietTime: true,
-                realtime: false,
-                timeout: TimeSpan.FromSeconds(7));
-        }
-        catch (Exception notificationException)
-        {
-            Log($"[WidgetMapping] Failed to show path conflict: {notificationException.Message}");
-        }
+        _ = TryShowTrayBalloonNotification(title, message, TrayBalloonIconKind.Info);
     }
 
     internal IntPtr GetFolderPickerOwner(out PickerOwnerSource source)
     {
-        // A picker dialog follows its owner's virtual desktop and DWM cloak
-        // state: when the tray host stays behind on a desktop the user has
-        // switched away from, it is shell-cloaked and a dialog owned by it
-        // never composes (issue 489). Prefer the tray host while it is
-        // usable, then a window that is demonstrably on the active desktop,
-        // and recreate the hidden helper as a last resort — a fresh window
-        // always lands on the active desktop.
-        IntPtr trayHwnd = _trayWindow is null
-            ? IntPtr.Zero
-            : WindowNative.GetWindowHandle(_trayWindow);
-        IntPtr settingsHwnd = _settingsWindow is null
-            ? IntPtr.Zero
-            : WindowNative.GetWindowHandle(_settingsWindow);
-        IntPtr helperHwnd = _folderPickerHelperWindow is null
-            ? IntPtr.Zero
-            : WindowNative.GetWindowHandle(_folderPickerHelperWindow);
+        IntPtr trayHwnd = TrayHostWindowHandle;
+        IntPtr settingsHwnd = GetVisibleSettingsWindowHandle();
+        IntPtr helperHwnd = _folderPickerHelperWindowHandle;
 
         PickerOwnerSource resolved = PickerOwnerResolutionPolicy.Resolve(
             IsUsablePickerOwner(trayHwnd),
@@ -1433,11 +1089,6 @@ public partial class App
         };
     }
 
-    /// <summary>
-    /// The picker-owner source is a diagnostic discriminator: folder-pick
-    /// failures that only ever happen with one owner source point at the
-    /// owner window, not at the dialog.
-    /// </summary>
     internal static string DescribePickerOwner(PickerOwnerSource source) => source switch
     {
         PickerOwnerSource.TrayWindow => "tray",
@@ -1455,36 +1106,9 @@ public partial class App
 
     private IntPtr RecreateFolderPickerHelperWindow()
     {
-        if (_folderPickerHelperWindow is not null)
-        {
-            try
-            {
-                _folderPickerHelperWindow.Close();
-            }
-            catch (Exception ex)
-            {
-                Log($"[FolderPicker] Stale helper window close failed: {ex.Message}");
-            }
-
-            _folderPickerHelperWindow = null;
-        }
-
-        // Same shape as the tray host (1x1, out of the switcher), never
-        // activated: the native hwnd exists from construction, and creating
-        // the window now assigns it to the active virtual desktop.
-        var helper = new Window { Title = "DeskBox Picker Host" };
-        WindowShellState.TryHideFromSwitchers(helper.AppWindow);
-        try
-        {
-            helper.AppWindow.Resize(new Windows.Graphics.SizeInt32(1, 1));
-        }
-        catch (Exception ex)
-        {
-            Log($"[FolderPicker] Helper window resize not applied: {ex.Message}");
-        }
-
-        _folderPickerHelperWindow = helper;
-        return WindowNative.GetWindowHandle(helper);
+        NativeTrayIconHost.DestroyTransientOwnerWindow(ref _folderPickerHelperWindowHandle);
+        _folderPickerHelperWindowHandle = NativeTrayIconHost.CreateTransientOwnerWindow("DeskBox Picker Host");
+        return _folderPickerHelperWindowHandle;
     }
 
     private void OpenSettingsFromTray()
@@ -1498,6 +1122,11 @@ public partial class App
         ShowSettings("FeatureWidgets");
     }
 
+    private void OpenAiCreateStudioFromTray()
+    {
+        ShowCustomWidgetStudio();
+    }
+
     private void OpenDesktopOrganizationFromTray()
     {
         CancelBackgroundMemoryCleanup();
@@ -1507,8 +1136,6 @@ public partial class App
     private void OpenAboutSettingsFromTray()
     {
         CancelBackgroundMemoryCleanup();
-        // ShowSettings deep-links "About"; the host brings the update status
-        // into view when it applies the section navigation.
         ShowSettings("About");
     }
 
@@ -1524,95 +1151,23 @@ public partial class App
         return Win32Helper.IsSystemDarkMode();
     }
 
-    private void OnTaskbarCreatedWithTrayHidden(object? sender, EventArgs args)
-    {
-        if (!IsTrayIconHiddenByUserSetting())
-        {
-            return;
-        }
-
-        UiDispatcherQueue.TryEnqueue(() =>
-        {
-            if (_trayIcon is { IsCreated: true } && IsTrayIconHiddenByUserSetting())
-            {
-                try
-                {
-                    _trayIcon.TrayIcon.TryRemove();
-                    Log("[Tray] Removed the tray icon re-added by a taskbar restart");
-                }
-                catch (Exception ex)
-                {
-                    Log($"[Tray] Failed to remove the restarted hidden tray icon: {ex.Message}");
-                }
-            }
-        });
-    }
-
-    // H.NotifyIcon's constructor subscribes its own Loaded handler that
-    // calls ForceCreate, so mounting the icon element into the tray host
-    // window creates a visible icon even when the user's style is Hidden —
-    // the hidden branch in CreateTrayIcon only stops OUR retry loop. Remove
-    // whatever that library handler created, and keep a late Loaded removal
-    // subscribed after the library's (multicast order) for a Loaded that
-    // fires after this point.
-    private void RemoveTrayIconCreatedByLibraryLoad()
-    {
-        if (_trayIcon is null)
-        {
-            return;
-        }
-
-        _trayIcon.Loaded += OnTrayIconLoadedWhileHidden;
-        RemoveHiddenTrayIconIfCreated("startup");
-    }
-
-    private void OnTrayIconLoadedWhileHidden(object sender, RoutedEventArgs e)
-    {
-        if (_trayIcon is null)
-        {
-            return;
-        }
-
-        _trayIcon.Loaded -= OnTrayIconLoadedWhileHidden;
-        if (IsTrayIconHiddenByUserSetting())
-        {
-            RemoveHiddenTrayIconIfCreated("library load");
-        }
-    }
-
-    private void RemoveHiddenTrayIconIfCreated(string reason)
-    {
-        if (_trayIcon is not { IsCreated: true })
-        {
-            return;
-        }
-
-        try
-        {
-            _trayIcon.TrayIcon.TryRemove();
-            Log($"[Tray] Removed the hidden tray icon created by the library ({reason})");
-        }
-        catch (Exception ex)
-        {
-            Log($"[Tray] Failed to remove the hidden tray icon created by the library ({reason}): {ex.Message}");
-        }
-    }
-
     private void UpdateTrayIconAppearance()
     {
-        if (_trayIcon is null)
+        TrayContextMenuWindow.DismissActiveIfOpen();
+        if (_trayHost is null)
         {
             return;
         }
 
-        string style = SettingsService.Settings.TrayIconStyle ?? "System";
+        string style = SettingsService.Settings.Core.TrayIconStyle ?? "System";
         if (style == TrayIconStyleHidden)
         {
-            if (_trayIcon is { IsCreated: true })
+            _trayHost.DesiredVisible = false;
+            if (_trayHost.IsCreated)
             {
                 try
                 {
-                    _trayIcon.TrayIcon.TryRemove();
+                    _ = _trayHost.TryRemoveIcon();
                     Log("[Tray] Tray icon removed (hidden by user setting)");
                 }
                 catch (Exception ex)
@@ -1624,104 +1179,134 @@ public partial class App
             return;
         }
 
-        _trayIcon.Icon = AppBranding.CreateTrayIcon(style, IsDarkThemeActive());
-        if (_trayIcon is { IsCreated: false })
+        _trayHost.DesiredVisible = true;
+        _trayHost.SetIconPath(AppBranding.ResolveTrayIconPath(style, IsDarkThemeActive()));
+        if (!_trayHost.IsCreated)
         {
-            // Coming back from the hidden style at runtime: the settings
-            // window is open, so the taskbar is up and one inline attempt is
-            // enough — the startup retry loop is for the early-logon race
-            // that cannot apply here.
             try
             {
-                _trayIcon.ForceCreate(enablesEfficiencyMode: false);
-                Log("[Tray] Tray icon re-created after leaving the hidden style");
+                if (_trayHost.TryCreateIcon())
+                {
+                    Log("[Tray] Tray icon re-created after leaving the hidden style");
+                }
             }
             catch (Exception ex)
             {
                 Log($"[Tray] Failed to re-create the tray icon after unhide: {ex.Message}");
             }
         }
+
+        ScheduleTrayContextMenuPrewarm();
+    }
+
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _trayMenuPrewarmTimer;
+
+    private void ScheduleTrayContextMenuPrewarm()
+    {
+        if (IsShuttingDown || IsTrayIconHiddenByUserSetting())
+        {
+            return;
+        }
+
+        if (UiDispatcherQueue is not { } queue)
+        {
+            return;
+        }
+
+        if (_trayMenuPrewarmTimer is null)
+        {
+            _trayMenuPrewarmTimer = queue.CreateTimer();
+            _trayMenuPrewarmTimer.Interval = TimeSpan.FromMilliseconds(1200);
+            _trayMenuPrewarmTimer.IsRepeating = false;
+            _trayMenuPrewarmTimer.Tick += OnTrayMenuPrewarmTimerTick;
+        }
+
+        _trayMenuPrewarmTimer.Stop();
+        _trayMenuPrewarmTimer.Start();
+    }
+
+    private void OnTrayMenuPrewarmTimerTick(
+        Microsoft.UI.Dispatching.DispatcherQueueTimer sender,
+        object args)
+    {
+        sender.Stop();
+        if (IsShuttingDown || IsTrayIconHiddenByUserSetting())
+        {
+            return;
+        }
+
+        bool isDarkMenuTheme = ThemeService is not null
+            ? ThemeService.EffectiveTheme == ElementTheme.Dark
+            : IsDarkThemeActive();
+        TrayContextMenuWindow.WarmUpIfNeeded(
+            EnsureXamlLoopLifelineIfNoOtherWindows,
+            isDarkMenuTheme);
     }
 
     public void UpdateTrayIcon()
     {
         UpdateTrayIconAppearance();
     }
-}
-
-/// <summary>
-/// Session state for the tray context menu's SecondWindow-to-PopupMenu
-/// fallback: consecutive host failures are counted across right-clicks, a
-/// successful open resets the count, and reaching the threshold degrades the
-/// session permanently — the native menu is the terminal escape hatch.
-/// </summary>
-internal sealed class TrayContextMenuModePolicy
-{
-    internal const int DegradationFailureThreshold = 2;
-
-    private int _consecutiveSecondWindowFailures;
-    private bool _degradedToPopupMenu;
-
-    internal int ConsecutiveSecondWindowFailures => _consecutiveSecondWindowFailures;
-
-    internal bool IsDegradedToPopupMenu => _degradedToPopupMenu;
-
-    /// <summary>Resets the failure count after a successful open. Degradation
-    /// itself is terminal for the session.</summary>
-    internal void RecordSuccess()
-    {
-        _consecutiveSecondWindowFailures = 0;
-    }
 
     /// <summary>
-    /// Records a second-window host failure and reports whether this call
-    /// crossed the degradation threshold.
+    /// WinUI 3's DXamlCore posts WM_QUIT when the last constructed
+    /// Microsoft.UI.Xaml.Window closes. Because the tray host is now a pure
+    /// Win32 HWND, we keep zero XAML windows when none are needed, and lazily
+    /// create one bare unactivated Window (no Content, no Activate, no
+    /// swapchain) only if a transient XAML window is used while zero widget
+    /// windows exist.
     /// </summary>
-    internal bool RecordFailure()
+    internal void EnsureXamlLoopLifelineIfNoOtherWindows()
     {
-        _consecutiveSecondWindowFailures++;
-        if (_degradedToPopupMenu ||
-            _consecutiveSecondWindowFailures < DegradationFailureThreshold)
+        if (IsShuttingDown ||
+            _xamlLoopLifelineWindow is not null ||
+            WidgetManager?.LoadedWidgetCount > 0)
         {
-            return false;
+            return;
         }
 
-        _degradedToPopupMenu = true;
-        return true;
-    }
-}
-
-/// <summary>
-/// Single-shot gate for one tray menu item interaction. In SecondWindow mode
-/// WinUI raises the item's Click event and executes its command back-to-back
-/// on the same dispatch, while the native PopupMenu fallback only executes
-/// the command. The gate lets the first path win and re-arms on the next
-/// dispatcher pass so the next interaction works again.
-/// </summary>
-internal sealed class TrayMenuInteractionGate
-{
-    private readonly Action<Action> _scheduleReset;
-    private int _entered;
-
-    internal TrayMenuInteractionGate(Action<Action> scheduleReset)
-    {
-        _scheduleReset = scheduleReset;
-    }
-
-    /// <summary>true for the first caller of the current interaction.</summary>
-    internal bool TryEnter()
-    {
-        if (Interlocked.Exchange(ref _entered, 1) != 0)
+        try
         {
-            return false;
+            var lifeline = new Window { Title = "DeskBox XAML Lifeline" };
+            WindowShellState.TryHideFromSwitchers(lifeline.AppWindow);
+            _xamlLoopLifelineWindow = lifeline;
+        }
+        catch (Exception ex)
+        {
+            Log($"[Tray] XAML loop lifeline creation skipped: {ex.Message}");
+        }
+    }
+
+    private void CloseTrayAndLifelineForShutdown()
+    {
+        if (_trayMenuPrewarmTimer is not null)
+        {
+            _trayMenuPrewarmTimer.Stop();
+            _trayMenuPrewarmTimer.Tick -= OnTrayMenuPrewarmTimerTick;
+            _trayMenuPrewarmTimer = null;
         }
 
-        _scheduleReset(Reset);
-        return true;
-    }
+        TrayContextMenuWindow.DismissActiveIfOpen();
+        TrayContextMenuWindow.Shutdown();
+        NativeTrayIconHost.DestroyTransientOwnerWindow(ref _folderPickerHelperWindowHandle);
+        try
+        {
+            _trayHost?.Dispose();
+            _trayHost = null;
+        }
+        catch (Exception ex)
+        {
+            Log($"[Shutdown] Native tray host dispose failed: {ex.Message}");
+        }
 
-    internal void Reset()
-    {
-        _entered = 0;
+        try
+        {
+            _xamlLoopLifelineWindow?.Close();
+            _xamlLoopLifelineWindow = null;
+        }
+        catch (Exception ex)
+        {
+            Log($"[Shutdown] XAML loop lifeline close failed: {ex.Message}");
+        }
     }
 }

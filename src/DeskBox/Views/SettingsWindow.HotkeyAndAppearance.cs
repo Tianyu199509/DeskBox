@@ -1,4 +1,6 @@
 using DeskBox.Contracts;
+using DeskBox.Controls;
+using Microsoft.UI.Xaml.Automation;
 using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Platform;
@@ -56,6 +58,11 @@ public sealed partial class SettingsWindow
             return;
         }
 
+        if (DeskBox.Helpers.ImeCompositionGuard.IsComposingOrWithinGrace())
+        {
+            return;
+        }
+
         // User pressed Enter without selecting a suggestion — pick the first match
         if (!string.IsNullOrWhiteSpace(args.QueryText) && _weatherSettingsViewModel.HasCitySuggestions)
         {
@@ -67,9 +74,23 @@ public sealed partial class SettingsWindow
 
     private void WeatherCitySearchBox_LostFocus(object sender, RoutedEventArgs e)
     {
+        if (sender is Control control &&
+            (DeskBox.Helpers.TransientInputFocusGuard.HasOpenPopupsInXamlRoot(control.XamlRoot) ||
+             DeskBox.Helpers.TransientInputFocusGuard.IsWindowsTextInputExperienceWindow(Win32Helper.GetForegroundWindow())))
+        {
+            return;
+        }
+
         // Clear search results and restore the saved city name if the user didn't select anything.
         DispatcherQueue.TryEnqueue(() =>
         {
+            if (sender is Control liveControl &&
+                (DeskBox.Helpers.TransientInputFocusGuard.HasOpenPopupsInXamlRoot(liveControl.XamlRoot) ||
+                 DeskBox.Helpers.TransientInputFocusGuard.IsWindowsTextInputExperienceWindow(Win32Helper.GetForegroundWindow())))
+            {
+                return;
+            }
+
             _weatherSettingsViewModel.ClearCitySuggestions();
             _weatherSettingsViewModel.RestoreCitySearchText();
         });
@@ -96,6 +117,9 @@ public sealed partial class SettingsWindow
                 new GlobalHotkeyActivation(
                     HotkeyActivationKind.DoubleControl,
                     current.Gesture)),
+            new(
+                _localizationService.T("Settings.GlobalHotkey.Preset.DoubleShift"),
+                GlobalHotkeyActivation.FromDoubleTapModifier(HotkeyModifierKeys.Shift)),
             new(
                 _localizationService.T("Settings.GlobalHotkey.Preset.AltSpace"),
                 GlobalHotkeyActivation.FromChord(new GlobalHotkeyGesture(
@@ -131,16 +155,16 @@ public sealed partial class SettingsWindow
         await dialog.ShowAsync();
     }
 
-    private Task<string?> ApplyGlobalHotkeyActivationFromRecorderAsync(
+    private async Task<string?> ApplyGlobalHotkeyActivationFromRecorderAsync(
         GlobalHotkeyActivation activation)
     {
         if (_hotkeyActions.GetRuntimeState() is null)
         {
-            return Task.FromResult<string?>(
-                _localizationService.T("Settings.GlobalHotkey.Status.Unavailable"));
+            return _localizationService.T("Settings.GlobalHotkey.Status.Unavailable");
         }
 
-        string? error = _hotkeyActions.TryApplyActivation(activation, out string? applyError)
+        (bool applied, string? applyError) = await _hotkeyActions.TryApplyActivationAsync(activation);
+        string? error = applied
             ? null
             : applyError ?? _localizationService.T(
                 "Settings.GlobalHotkey.Status.Unregistered");
@@ -150,26 +174,40 @@ public sealed partial class SettingsWindow
             RefreshGlobalHotkeyControls();
         }
 
-        return Task.FromResult(error);
+        return error;
     }
 
-    private string? GetGlobalHotkeyRecorderConflict(GlobalHotkeyGesture gesture)
+    private string? GetGlobalHotkeyRecorderConflict(GlobalHotkeyActivation activation)
     {
         // Deep review R13-3 (R14 hot-path pass): this check runs on every
         // captured keystroke, so it must not take a pipe round trip (the
         // R10/R11 modal-loop wedge family). The predicate is exactly the
-        // service's: the search hotkey's current gesture normalized from
+        // service's: the search hotkey's current activation normalized from
         // the same settings fields both processes mirror.
-        var search = App.Current?.SettingsService?.Settings.Search;
-        if (search is null)
+        var settings = _settingsService.Settings;
+        if (FeatureWidgetSettings.IsEnabled(settings, WidgetKind.Clipboard) &&
+            settings.Clipboard.ClipboardHotkeyEnabled)
+        {
+            GlobalHotkeyActivation clipboardActivation = GlobalHotkeyService.NormalizeActivation(
+                settings.Clipboard.ClipboardHotkeyActivationKind,
+                settings.Clipboard.ClipboardHotkeyModifiers,
+                settings.Clipboard.ClipboardHotkeyKey);
+            if (GlobalHotkeyService.DoActivationsConflict(activation, clipboardActivation))
+            {
+                return _localizationService.T("Settings.Clipboard.Hotkey.Status.ClipboardHotkeyConflict");
+            }
+        }
+        var search = settings.Search;
+        if (!search.SearchHotkeyEnabled)
         {
             return null;
         }
 
-        GlobalHotkeyGesture searchGesture = GlobalHotkeyService.NormalizeGesture(
+        GlobalHotkeyActivation searchActivation = GlobalHotkeyService.NormalizeActivation(
+            search.SearchHotkeyActivationKind,
             search.SearchHotkeyModifiers,
             search.SearchHotkeyKey);
-        return searchGesture.Equals(gesture)
+        return GlobalHotkeyService.DoActivationsConflict(activation, searchActivation)
             ? _localizationService.T("Settings.GlobalHotkey.Status.SearchHotkeyConflict")
             : null;
     }
@@ -192,24 +230,6 @@ public sealed partial class SettingsWindow
                 _localizationService.T("Settings.DesktopDoubleClick.Status.Unavailable"));
         }
 
-        RefreshGlobalHotkeyControls();
-    }
-
-    private async void ResetGlobalHotkeyButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (_hotkeyActions.GetRuntimeState() is null)
-        {
-            return;
-        }
-
-        if (!_hotkeyActions.ResetToDefault(out string? error))
-        {
-            await ShowInfoDialogAsync(
-                _localizationService.T("Settings.GlobalHotkey.Dialog.FailedTitle"),
-                error ?? _localizationService.T("Settings.GlobalHotkey.Status.Unregistered"));
-        }
-
-        ViewModel.RefreshGlobalHotkeyState();
         RefreshGlobalHotkeyControls();
     }
 
@@ -252,23 +272,20 @@ public sealed partial class SettingsWindow
         }
     }
 
-    // ── System visual-effect deep links (material section) ────────
-    // Both cards mirror Windows-wide switches read-only: an in-app write
+    // ── System visual-effect deep link (material section) ─────────
+    // Mirrors the Windows-wide transparency switch read-only: an in-app write
     // would land in the MSIX copy-on-write private hive and silently revert
-    // after the next sign-in, so the buttons open the OS surfaces instead.
-    // The appearance editor owns the status projections (it is the section's
-    // DataContext); the Win32 probes stay here on the shell and push in.
+    // after the next sign-in, so the button opens the OS surface instead.
+    // The appearance editor owns the status projection (it is the section's
+    // DataContext); the Win32 probe stays here on the shell and pushes in.
 
     public void RefreshSystemAppearanceStates()
     {
-        bool? shadowOn = Win32Helper.TryGetWindowDropShadowEnabled(out bool shadowsEnabled)
-            ? shadowsEnabled
-            : null;
         bool? transparencyOn =
             Win32Helper.TryGetSystemTransparencyEffectsEnabled(out bool transparencyEnabled)
                 ? transparencyEnabled
                 : null;
-        _appearanceSettingsViewModel.UpdateSystemEffectStates(shadowOn, transparencyOn);
+        _appearanceSettingsViewModel.UpdateSystemEffectStates(transparencyOn);
     }
 
     private async void OpenSystemTransparencySettingsButton_Click(object sender, RoutedEventArgs e)
@@ -286,29 +303,17 @@ public sealed partial class SettingsWindow
         }
     }
 
-    private void OpenWindowShadowSettingsButton_Click(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            using System.Diagnostics.Process? process = System.Diagnostics.Process.Start(
-                new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = "SystemPropertiesPerformance.exe",
-                    UseShellExecute = true
-                });
-            if (process is null)
-            {
-                App.Log("[Settings] Windows performance options could not be opened.");
-            }
-        }
-        catch (Exception ex)
-        {
-            App.Log($"[Settings] Failed to open Windows performance options: {ex.Message}");
-        }
-    }
-
     private void SettingsRoot_PointerPressedHandled(object sender, PointerRoutedEventArgs e)
     {
+        if (!e.Handled &&
+            e.GetCurrentPoint(SettingsRoot).Properties.PointerUpdateKind == Microsoft.UI.Input.PointerUpdateKind.XButton1Pressed &&
+            !HasOpenOverlayPopup() &&
+            TryNavigateBack())
+        {
+            e.Handled = true;
+            return;
+        }
+
         if (TryFindAncestor<Slider>(e.OriginalSource as DependencyObject, out var slider))
         {
             BeginAppearanceSliderDrag();
@@ -392,7 +397,18 @@ public sealed partial class SettingsWindow
         _isRefreshingHotkeyControls = true;
         try
         {
-            GlobalHotkeyCaptureButton.Content = _interactionSettingsViewModel.HotkeyText;
+            GlobalHotkeyActivation currentActivation = ViewModel.GetCurrentGlobalHotkeyActivation();
+            KeyVisualState visualState = _settingsService.Settings.Core.GlobalHotkeyEnabled &&
+                _hotkeyActions.GetRuntimeState() is { IsRegistered: false }
+                ? KeyVisualState.Warning
+                : KeyVisualState.Normal;
+            GlobalHotkeyCaptureButton.Content = KeyVisualControl.CreateInlineButtonContent(
+                currentActivation,
+                _interactionSettingsViewModel.HotkeyText,
+                showEditIcon: true,
+                state: visualState,
+                doubleTapBadgeText: _localizationService.T("Settings.HotkeyRecorder.DoubleTapBadge"));
+            AutomationProperties.SetName(GlobalHotkeyCaptureButton, _interactionSettingsViewModel.HotkeyText);
             DesktopDoubleClickToggle.IsOn =
                 _settingsService.Settings.DesktopDoubleClickEnabled;
         }
@@ -498,6 +514,110 @@ public sealed partial class SettingsWindow
 
     private void ClearPerWidgetBackgroundsButton_Click(object sender, RoutedEventArgs e)
     {
-        _appearanceSettingsViewModel.ClearPerWidgetBackgrounds();
+        if (sender is not FrameworkElement anchor)
+        {
+            _appearanceSettingsViewModel.ClearPerWidgetBackgrounds();
+            return;
+        }
+
+        var flyout = new Flyout
+        {
+            Placement = FlyoutPlacementMode.BottomEdgeAlignedRight
+        };
+
+        var promptText = new TextBlock
+        {
+            MaxWidth = 280,
+            Text = _localizationService.T("Settings.WidgetBackground.PerWidget.ConfirmPrompt"),
+            TextWrapping = TextWrapping.Wrap
+        };
+
+        var cancelButton = new Button
+        {
+            MinHeight = 32,
+            Content = _localizationService.T("Common.Cancel")
+        };
+        if (SettingsRoot.Resources.TryGetValue("ActionButtonStyle", out object? actionStyleObj) &&
+            actionStyleObj is Style actionStyle)
+        {
+            cancelButton.Style = actionStyle;
+        }
+        cancelButton.Click += (_, _) => flyout.Hide();
+
+        var confirmButton = new Button
+        {
+            MinHeight = 32,
+            Content = _localizationService.T("Settings.WidgetBackground.PerWidget.Clear")
+        };
+        if (SettingsRoot.Resources.TryGetValue("DangerActionButtonStyle", out object? dangerStyleObj) &&
+            dangerStyleObj is Style dangerStyle)
+        {
+            confirmButton.Style = dangerStyle;
+        }
+        confirmButton.Click += (_, _) =>
+        {
+            flyout.Hide();
+            _appearanceSettingsViewModel.ClearPerWidgetBackgrounds();
+        };
+
+        var buttonRow = new StackPanel
+        {
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Orientation = Orientation.Horizontal,
+            Spacing = 8
+        };
+        buttonRow.Children.Add(cancelButton);
+        buttonRow.Children.Add(confirmButton);
+
+        var contentPanel = new StackPanel
+        {
+            MinWidth = 220,
+            MaxWidth = 300,
+            Spacing = 12,
+            RequestedTheme = anchor.ActualTheme
+        };
+        contentPanel.Children.Add(promptText);
+        contentPanel.Children.Add(buttonRow);
+
+        flyout.Content = contentPanel;
+        flyout.ShowAt(anchor);
+    }
+
+    private void AppearanceSection_ChooseBackgroundImageRequested(object? sender, RoutedEventArgs e) =>
+        ChooseWidgetBackgroundImage_Click(sender ?? this, e);
+
+    private void AppearanceSection_ClearPerWidgetBackgroundsRequested(object? sender, RoutedEventArgs e) =>
+        ClearPerWidgetBackgroundsButton_Click(sender ?? this, e);
+
+    private void AppearanceSection_OpenSystemTransparencyRequested(object? sender, RoutedEventArgs e) =>
+        OpenSystemTransparencySettingsButton_Click(sender ?? this, e);
+
+    private void AppearanceSection_SliderDragStarted(object? sender, EventArgs e) =>
+        BeginAppearanceSliderDrag();
+
+    private void AppearanceSection_SliderDragCompleted(object? sender, EventArgs e) =>
+        CommitAppearanceSliderDrag();
+
+    private void RefreshDisplaysEntrySummary()
+    {
+        if (DisplaysEntryCard is not { } card)
+        {
+            return;
+        }
+
+        IReadOnlyList<WidgetScreenInfo> screens = WidgetScreenCatalog.Capture();
+        WidgetScreenInfo? primary = screens.FirstOrDefault(s => s.IsPrimary) ?? screens.FirstOrDefault();
+        card.Description = Views.SettingsSections.DisplaySettingsSection.BuildEntrySummary(
+            _localizationService,
+            screens.Count,
+            primary?.DisplayName);
+    }
+
+    private void RefreshAiSettingsEntrySummary()
+    {
+        if (AiSettingsEntryCard is { } card)
+        {
+            card.Description = Views.SettingsSections.AiSettingsSection.BuildEntrySummary(_localizationService);
+        }
     }
 }

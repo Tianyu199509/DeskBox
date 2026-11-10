@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Collections.ObjectModel;
 using System.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -151,9 +151,10 @@ private void OnLanguageChanged()
 
         RefreshSelectionProperties(refreshLocalizedOptions: false);
         RefreshGlobalHotkeyState();
+        NotifyWidgetChromeOverrideCommandsChanged();
         OnPropertyChanged(nameof(FeatureWidgetEntries));
+        ClipboardSettingsRefreshRequested?.Invoke();
         NotifyCapsuleOverridePropertiesChanged();
-        RefreshQuickCaptureClipboardDiagnostics();
         _ = RefreshQuickAccessStateAsync();
     }
 
@@ -175,6 +176,7 @@ private void OnLanguageChanged()
             {
                 UpdateStatusText = _localizationService.T("Settings.Update.Status.Ready");
                 UpdateDetailText = GetReadyUpdateDetailText();
+                NotifyUpdateActionPropertiesChanged();
             }
         }
         OnPropertyChanged(nameof(AutoStartStatusText));
@@ -190,7 +192,6 @@ private void OnLanguageChanged()
         // The group-navigation editor rebuilds its option tables itself; the
         // existing-groups projection rebuild follows.
         RefreshWidgetGroupSettings();
-        RefreshQuickCaptureClipboardDiagnostics();
     }
 
     private void RefreshSelectionProperties(bool refreshLocalizedOptions)

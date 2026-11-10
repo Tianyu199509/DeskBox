@@ -18,6 +18,7 @@ namespace DeskBox.ViewModels;
 public sealed partial class GlanceWidgetViewModel : ObservableObject, IDisposable
 {
     private const double CalendarPanelMaximumWidth = 360;
+    private const double CalendarPanelMinimumWidth = 216;
     private const double CalendarPanelHorizontalInset = 28;
 
     private readonly GlanceWidgetStore _store;
@@ -64,7 +65,8 @@ public sealed partial class GlanceWidgetViewModel : ObservableObject, IDisposabl
         GlanceImageService? imageService = null,
         ICalendarPresentationSource? calendarSource = null,
         DispatcherQueue? dispatcherQueue = null,
-        SettingsService? settingsService = null)
+        SettingsService? settingsService = null,
+        GlanceTodoAgendaSource? agendaSource = null)
     {
         if (config.WidgetKind != WidgetKind.Glance)
         {
@@ -77,6 +79,7 @@ public sealed partial class GlanceWidgetViewModel : ObservableObject, IDisposabl
         _imageService = imageService ?? new GlanceImageService();
         _calendarSource = calendarSource ?? new LocalCalendarPresentationSource();
         _settingsService = settingsService;
+        _agendaSource = agendaSource ?? new GlanceTodoAgendaSource(settingsService);
         _dispatcherQueue = dispatcherQueue ?? DispatcherQueue.GetForCurrentThread()
             ?? throw new InvalidOperationException("Glance content must be created on a UI thread.");
 
@@ -93,9 +96,13 @@ public sealed partial class GlanceWidgetViewModel : ObservableObject, IDisposabl
         {
             _settingsService.SettingsChanged += SettingsService_SettingsChanged;
         }
+
+        InitializeDayInfo();
     }
 
     public WidgetConfig Config { get; }
+
+    internal SettingsService? SettingsService => _settingsService;
     public ObservableCollection<string> WeekdayHeaders { get; } = [];
     public ObservableCollection<GlanceCalendarDay> CalendarDays { get; } = [];
     public DateOnly DisplayedCalendarMonth => _displayedCalendarMonth;
@@ -172,17 +179,27 @@ public sealed partial class GlanceWidgetViewModel : ObservableObject, IDisposabl
         (!string.IsNullOrWhiteSpace(CurrentImagePath) && File.Exists(CurrentImagePath));
 
     public bool ShowTime => _settings.ShowTime;
+    public bool ShowSeconds => _settings.ShowTime && _settings.ShowSeconds;
     public bool ShowDate => _settings.ShowDate;
     public bool ShowYear => _settings.ShowYear;
     public bool ShowWeekday => _settings.ShowWeekday;
-    public bool ShowCalendar => _settings.ShowCalendar && _availableWidth >= 300 && _availableHeight >= 280;
+    /// <summary>
+    /// True when the month grid renders (style + size). The legacy
+    /// <see cref="GlanceWidgetData.ShowCalendar"/> flag is only a mirror now.
+    /// </summary>
+    public bool ShowCalendar => IsMonthCalendarStyle;
     public bool ShowPhotoControls => _settings.ShowPhotoControls && HasCurrentImage;
-    public bool IsForegroundVisible => ShowTime || ShowDate || ShowWeekday || ShowCalendar;
-    public bool IsImmersiveLayout => _settings.Layout == GlanceLayoutMode.Immersive ||
-        (_settings.Layout == GlanceLayoutMode.Calendar && !ShowCalendar);
-    public bool IsCenteredLayout => _settings.Layout == GlanceLayoutMode.Centered;
-    public bool IsEditorialLayout => _settings.Layout == GlanceLayoutMode.Editorial;
-    public bool IsCalendarLayout => _settings.Layout == GlanceLayoutMode.Calendar && ShowCalendar;
+    public bool IsForegroundVisible =>
+        ShowTime || ShowDate || ShowWeekday ||
+        EffectiveStyle is GlanceStyle.MonthCalendar or GlanceStyle.WeekStrip or GlanceStyle.TodayCard;
+    public bool IsImmersiveLayout =>
+        EffectiveStyle == GlanceStyle.PhotoClock &&
+        _settings.PhotoClockAlignment == GlancePhotoClockAlignment.BottomLeft;
+    public bool IsCenteredLayout =>
+        EffectiveStyle == GlanceStyle.PhotoClock &&
+        _settings.PhotoClockAlignment != GlancePhotoClockAlignment.BottomLeft;
+    public bool IsEditorialLayout => EffectiveStyle == GlanceStyle.Editorial;
+    public bool IsCalendarLayout => IsMonthCalendarStyle;
     public bool IsNonCalendarForeground => IsForegroundVisible && !IsCalendarLayout;
     public bool IsCompactCalendarPresentation =>
         IsCalendarLayout && GlanceCalendarLayoutCalculator.IsCompact(_availableHeight);
@@ -201,28 +218,37 @@ public sealed partial class GlanceWidgetViewModel : ObservableObject, IDisposabl
         ? "XamlAutoFontFamily"
         : _settings.TimeFontFamily);
     public double TimeFontSize => RoundFontSize(
-        Math.Clamp(Math.Min(_availableWidth * 0.18, _availableHeight * 0.28), 38, 78) * _settings.TimeScale);
+        Math.Clamp(
+            Math.Min(_availableWidth * (ShowSeconds ? 0.122 : 0.18), _availableHeight * 0.28),
+            ShowSeconds ? 24 : 38,
+            ShowSeconds ? 62 : 78) * _settings.TimeScale);
     public double CompactTimeFontSize => RoundFontSize(
-        Math.Clamp(Math.Min(_availableWidth * 0.13, _availableHeight * 0.2), 30, 60) * _settings.TimeScale);
+        Math.Clamp(
+            Math.Min(_availableWidth * (ShowSeconds ? 0.092 : 0.13), _availableHeight * 0.2),
+            ShowSeconds ? 22 : 30,
+            ShowSeconds ? 46 : 60) * _settings.TimeScale);
     public double CalendarCompactTimeFontSize => RoundFontSize(Math.Clamp(
-        Math.Min(_availableWidth * 0.078, _availableHeight * 0.095),
-        22,
-        28) * _settings.TimeScale);
+        Math.Min(_availableWidth * (ShowSeconds ? 0.058 : 0.078), _availableHeight * 0.095),
+        ShowSeconds ? 16 : 22,
+        ShowSeconds ? 22 : 28) * _settings.TimeScale);
     public double CalendarPanelHeight
         => Math.Round(GlanceCalendarLayoutCalculator.CalculatePanelHeight(
             _availableHeight,
             IsCompactCalendarPresentation,
-            HasTraditionalCalendar));
+            HasTraditionalCalendar,
+            _calendarWeekRows));
     public double CalendarPanelMaxWidth => CalendarPanelMaximumWidth;
     public double CalendarPanelWidth => Math.Round(Math.Clamp(
         _availableWidth - CalendarPanelHorizontalInset,
-        272,
+        CalendarPanelMinimumWidth,
         CalendarPanelMaximumWidth));
     public double CalendarDayItemMinimumHeight =>
         Math.Round(GlanceCalendarLayoutCalculator.CalculateDayHeight(
             CalendarPanelHeight,
             IsCompactCalendarPresentation,
-            HasTraditionalCalendar) * 2) / 2;
+            HasTraditionalCalendar,
+            _calendarWeekRows,
+            _availableHeight) * 2) / 2;
     public bool ShowCalendarTraditionalDetails =>
         GlanceCalendarLayoutCalculator.ShouldShowTraditionalDetails(
             CalendarPanelWidth,
@@ -306,7 +332,10 @@ public sealed partial class GlanceWidgetViewModel : ObservableObject, IDisposabl
             UpdateDateAndTime();
             // The clock timer stops while hidden; catch up on any day change
             // missed across midnight so the calendar is not stale on reveal.
-            RefreshIfObservedDateChanged(DateOnly.FromDateTime(DateTime.Now));
+            if (!RefreshIfObservedDateChanged(DateOnly.FromDateTime(DateTime.Now)))
+            {
+                FlushDeferredAgendaIfNeeded();
+            }
             if (!_isCompact && IsOnlineSource(_settings.BackgroundSource) && !_onlineRefreshCompletedForSession)
             {
                 _ = RefreshOnlineInBackgroundAsync();
@@ -324,7 +353,10 @@ public sealed partial class GlanceWidgetViewModel : ObservableObject, IDisposabl
         UpdateTimers();
         if (!collapsed && _isWindowVisible)
         {
-            RefreshIfObservedDateChanged(DateOnly.FromDateTime(DateTime.Now));
+            if (!RefreshIfObservedDateChanged(DateOnly.FromDateTime(DateTime.Now)))
+            {
+                FlushDeferredAgendaIfNeeded();
+            }
             if (IsOnlineSource(_settings.BackgroundSource) && !_onlineRefreshCompletedForSession)
             {
                 _ = RefreshOnlineInBackgroundAsync();
@@ -357,6 +389,7 @@ public sealed partial class GlanceWidgetViewModel : ObservableObject, IDisposabl
         }
 
         bool oldShowCalendar = ShowCalendar;
+        GlanceStyle oldEffectiveStyle = EffectiveStyle;
         bool oldCompactCalendar = IsCompactCalendarPresentation;
         double oldTimeFontSize = TimeFontSize;
         double oldCompactTimeFontSize = CompactTimeFontSize;
@@ -399,10 +432,36 @@ public sealed partial class GlanceWidgetViewModel : ObservableObject, IDisposabl
         {
             OnPropertyChanged(nameof(ShowCalendar));
             OnPropertyChanged(nameof(IsForegroundVisible));
+            if (ShowCalendar && CalendarDays.Count == 0)
+            {
+                _ = UpdateCalendarAsync();
+            }
         }
         if (oldShowCalendar != ShowCalendar || oldCompactCalendar != IsCompactCalendarPresentation)
         {
             RaiseLayoutProperties();
+        }
+
+        RaiseSizeDependentStyleProperties();
+        if (oldEffectiveStyle != EffectiveStyle)
+        {
+            RaiseStyleProperties();
+            RaiseLayoutProperties();
+            OnPropertyChanged(nameof(IsForegroundVisible));
+            EnsureCurrentMonthForWeekStrip();
+        }
+    }
+
+    /// <summary>
+    /// Non-month-calendar styles always reflect today/current week; when a
+    /// navigated month calendar switches style or degrades to the strip, snap
+    /// back to the current month.
+    /// </summary>
+    private void EnsureCurrentMonthForWeekStrip()
+    {
+        if (EffectiveStyle != GlanceStyle.MonthCalendar && !IsDisplayingCurrentMonth)
+        {
+            _ = ReturnToCurrentMonthAsync();
         }
     }
 
@@ -418,7 +477,15 @@ public sealed partial class GlanceWidgetViewModel : ObservableObject, IDisposabl
 
         _displayedCalendarMonth = normalized;
         OnPropertyChanged(nameof(DisplayedCalendarMonth));
+        OnPropertyChanged(nameof(IsDisplayingCurrentMonth));
         await UpdateCalendarAsync();
+    }
+
+    internal string FormatDisplayedCalendarMonthHeader()
+    {
+        CultureInfo culture = GetCulture();
+        DateTime monthStart = new(_displayedCalendarMonth.Year, _displayedCalendarMonth.Month, 1);
+        return monthStart.ToString(culture.DateTimeFormat.YearMonthPattern, culture);
     }
 
     internal GlanceCalendarDay? FindCalendarDay(DateOnly date) =>
@@ -537,6 +604,7 @@ public sealed partial class GlanceWidgetViewModel : ObservableObject, IDisposabl
         }
         ApplySettingsProperties();
         UpdateDateAndTime();
+        EnsureCurrentMonthForWeekStrip();
         await UpdateCalendarAsync();
         await ReloadImagesAsync(refreshOnline: false);
         UpdateTimers();
@@ -707,10 +775,12 @@ public sealed partial class GlanceWidgetViewModel : ObservableObject, IDisposabl
     {
         OnPropertyChanged(nameof(Settings));
         OnPropertyChanged(nameof(ShowTime));
+        OnPropertyChanged(nameof(ShowSeconds));
         OnPropertyChanged(nameof(ShowDate));
         OnPropertyChanged(nameof(ShowYear));
         OnPropertyChanged(nameof(ShowWeekday));
         OnPropertyChanged(nameof(ShowCalendar));
+        OnPropertyChanged(nameof(TodayMonthText));
         OnPropertyChanged(nameof(ShowPhotoControls));
         OnPropertyChanged(nameof(IsForegroundVisible));
         OnPropertyChanged(nameof(BackgroundImageTransparency));
@@ -735,6 +805,7 @@ public sealed partial class GlanceWidgetViewModel : ObservableObject, IDisposabl
         OnPropertyChanged(nameof(TraditionalCalendarMode));
         OnPropertyChanged(nameof(ShowChineseFestivals));
         OnPropertyChanged(nameof(CanPauseRotation));
+        RaiseStyleProperties();
         RaiseLayoutProperties();
     }
 
@@ -765,7 +836,7 @@ public sealed partial class GlanceWidgetViewModel : ObservableObject, IDisposabl
     {
         CultureInfo culture = GetCulture();
         DateTime now = DateTime.Now;
-        TimeText = FormatTimeText(now, _settings.TimeFormat, culture);
+        TimeText = FormatTimeText(now, _settings.TimeFormat, culture, includeSeconds: ShowSeconds);
         DateText = FormatDateText(now, culture, _settings.ShowYear);
         CompactCalendarDateText = FormatCompactCalendarDateText(now, culture);
         WeekdayText = now.ToString("dddd", culture);
@@ -775,22 +846,63 @@ public sealed partial class GlanceWidgetViewModel : ObservableObject, IDisposabl
         DateTime date,
         GlanceTimeFormatMode mode,
         CultureInfo displayCulture,
-        CultureInfo? systemCulture = null)
+        CultureInfo? systemCulture = null,
+        bool includeSeconds = false)
     {
         ArgumentNullException.ThrowIfNull(displayCulture);
         CultureInfo timeCulture = mode == GlanceTimeFormatMode.FollowSystem
             ? systemCulture ?? CultureInfo.CurrentCulture
             : displayCulture;
-        string pattern = mode switch
+        string pattern = (mode, includeSeconds) switch
         {
-            GlanceTimeFormatMode.FollowSystem => RemoveAmPmDesignator(
+            (GlanceTimeFormatMode.Hour24, false) => "HH:mm",
+            (GlanceTimeFormatMode.Hour24, true) => "HH:mm:ss",
+            (GlanceTimeFormatMode.Hour12, false) => "h:mm",
+            (GlanceTimeFormatMode.Hour12, true) => "h:mm:ss",
+            (GlanceTimeFormatMode.FollowSystem, true) => EnsureSecondsInPattern(
+                RemoveAmPmDesignator(timeCulture.DateTimeFormat.LongTimePattern)),
+            (GlanceTimeFormatMode.FollowSystem, false) => RemoveAmPmDesignator(
                 timeCulture.DateTimeFormat.ShortTimePattern),
-            GlanceTimeFormatMode.Hour24 => "HH:mm",
-            GlanceTimeFormatMode.Hour12 => "h:mm",
+            (_, true) => EnsureSecondsInPattern(
+                RemoveAmPmDesignator(CultureInfo.CurrentCulture.DateTimeFormat.LongTimePattern)),
             _ => RemoveAmPmDesignator(
                 CultureInfo.CurrentCulture.DateTimeFormat.ShortTimePattern)
         };
         return date.ToString(pattern, timeCulture);
+    }
+
+    private static string EnsureSecondsInPattern(string pattern)
+    {
+        if (string.IsNullOrWhiteSpace(pattern))
+        {
+            return "HH:mm:ss";
+        }
+
+        for (int index = 0; index < pattern.Length; index++)
+        {
+            char current = pattern[index];
+            if (current is '\'' or '"')
+            {
+                char quote = current;
+                while (++index < pattern.Length && pattern[index] != quote)
+                {
+                }
+                continue;
+            }
+
+            if (current == '\\')
+            {
+                index++;
+                continue;
+            }
+
+            if (current == 's')
+            {
+                return pattern;
+            }
+        }
+
+        return $"{pattern}:ss";
     }
 
     private static string RemoveAmPmDesignator(string pattern)
@@ -873,8 +985,13 @@ public sealed partial class GlanceWidgetViewModel : ObservableObject, IDisposabl
         return date.ToString(pattern, culture);
     }
 
-    private async Task UpdateCalendarAsync()
+    private Task UpdateCalendarAsync() => RebuildCalendarDays();
+
+    private async Task RebuildCalendarDays()
     {
+        // Every style surfaces "what's today" (traditional date, festival,
+        // holiday, agenda), so the 42-day grid is always materialized; it is a
+        // handful of records and keeps all faces in sync from one source.
         int loadVersion = Interlocked.Increment(ref _calendarLoadVersion);
         CultureInfo culture = GetCulture();
         DateOnly today = DateOnly.FromDateTime(DateTime.Today);
@@ -899,11 +1016,20 @@ public sealed partial class GlanceWidgetViewModel : ObservableObject, IDisposabl
                 _settings.ShowChineseFestivals,
                 _settings.TraditionalCalendarMode,
                 culture);
+            month = GlanceHolidayMarkService.Apply(
+                month,
+                _settings.ShowStatutoryHolidays,
+                culture);
+            GlanceCalendarDay[] days = month.Days.ToArray();
+            IReadOnlyList<GlanceAgendaItem> agenda = await LoadGridAgendaAsync(days);
+            ApplyAgendaCounts(days, agenda);
             if (loadVersion != _calendarLoadVersion || requestedMonth != _displayedCalendarMonth)
             {
                 return;
             }
 
+            _agendaRefreshVersion++;
+            _gridAgenda = agenda;
             TraditionalCalendarTitle = month.TraditionalTitle;
             WeekdayHeaders.Clear();
             foreach (string header in month.WeekdayHeaders)
@@ -912,12 +1038,24 @@ public sealed partial class GlanceWidgetViewModel : ObservableObject, IDisposabl
             }
 
             CalendarDays.Clear();
-            foreach (GlanceCalendarDay day in month.Days)
+            foreach (GlanceCalendarDay day in days)
             {
                 CalendarDays.Add(day);
             }
 
+            int weekRows = GlanceCalendarLayoutCalculator.CountWeekRows(days);
+            if (weekRows != _calendarWeekRows)
+            {
+                _calendarWeekRows = weekRows;
+                OnPropertyChanged(nameof(CalendarWeekRows));
+                OnPropertyChanged(nameof(CalendarPanelHeight));
+                OnPropertyChanged(nameof(CalendarDayItemMinimumHeight));
+                OnPropertyChanged(nameof(ShowCalendarTraditionalDetails));
+            }
+
+            OnPropertyChanged(nameof(WeekdayHeaders));
             OnPropertyChanged(nameof(CalendarDays));
+            UpdateDayInfo(days);
         }
         catch (OperationCanceledException) when (_lifetimeCts.IsCancellationRequested)
         {
@@ -947,7 +1085,9 @@ public sealed partial class GlanceWidgetViewModel : ObservableObject, IDisposabl
         _clockTimer.Stop();
         bool needsCalendarClock = _settings.ShowDate ||
             _settings.ShowWeekday ||
-            _settings.ShowCalendar ||
+            _settings.Style != GlanceStyle.PhotoClock ||
+            _settings.ShowStatutoryHolidays ||
+            _settings.ShowTodoAgenda ||
             _settings.TraditionalCalendarMode != GlanceTraditionalCalendarMode.None;
         if (!_isWindowVisible || (!_settings.ShowTime && !needsCalendarClock) || _isDisposed)
         {
@@ -955,9 +1095,11 @@ public sealed partial class GlanceWidgetViewModel : ObservableObject, IDisposabl
         }
 
         DateTime now = DateTime.Now;
-        _clockTimer.Interval = _settings.ShowTime
-            ? TimeSpan.FromSeconds(Math.Max(1, 60 - now.Second)) - TimeSpan.FromMilliseconds(now.Millisecond)
-            : now.Date.AddDays(1).AddMilliseconds(100) - now;
+        _clockTimer.Interval = ShowSeconds
+            ? TimeSpan.FromMilliseconds(Math.Max(50, 1000 - now.Millisecond + 15))
+            : _settings.ShowTime
+                ? TimeSpan.FromSeconds(Math.Max(1, 60 - now.Second)) - TimeSpan.FromMilliseconds(now.Millisecond)
+                : now.Date.AddDays(1).AddMilliseconds(100) - now;
         _clockTimer.Start();
     }
 
@@ -1000,11 +1142,11 @@ public sealed partial class GlanceWidgetViewModel : ObservableObject, IDisposabl
     /// Calendar data, the text highlight and the today background all hang off
     /// this refresh, so none of them can lag the others.
     /// </summary>
-    private void RefreshIfObservedDateChanged(DateOnly currentDate)
+    private bool RefreshIfObservedDateChanged(DateOnly currentDate)
     {
         if (currentDate == _lastObservedDate)
         {
-            return;
+            return false;
         }
 
         GlanceCalendarDayChangeDecision decision = GlanceCalendarDayChangePolicy.Evaluate(
@@ -1014,16 +1156,20 @@ public sealed partial class GlanceWidgetViewModel : ObservableObject, IDisposabl
         _lastObservedDate = currentDate;
         if (!decision.CalendarRefreshRequired)
         {
-            return;
+            // Today's surface (countdown, agenda cut-off, week slice) still moves.
+            UpdateDayInfo(CalendarDays.ToArray());
+            return false;
         }
 
         if (decision.DisplayedMonth != _displayedCalendarMonth)
         {
             _displayedCalendarMonth = decision.DisplayedMonth;
             OnPropertyChanged(nameof(DisplayedCalendarMonth));
+            OnPropertyChanged(nameof(IsDisplayingCurrentMonth));
         }
 
         _ = UpdateCalendarAsync();
+        return true;
     }
 
     private void RotationTimer_Tick(DispatcherQueueTimer sender, object args)
@@ -1059,6 +1205,7 @@ public sealed partial class GlanceWidgetViewModel : ObservableObject, IDisposabl
         {
             UpdateDateAndTime();
             OnPropertyChanged(nameof(CalendarLanguage));
+            RaiseStyleProperties();
             _ = UpdateCalendarAsync();
             OnPropertyChanged(nameof(PauseToolTip));
             OnPropertyChanged(nameof(NextToolTip));
@@ -1074,19 +1221,25 @@ public sealed partial class GlanceWidgetViewModel : ObservableObject, IDisposabl
 
         if (_dispatcherQueue.HasThreadAccess)
         {
-            UpdateRotationTimer();
-            OnPropertyChanged(nameof(CalendarCornerRadius));
-            RaiseCalendarMaterialProperties();
+            HandleSettingsServiceChanged();
         }
         else
         {
-            _dispatcherQueue.TryEnqueue(() =>
-            {
-                UpdateRotationTimer();
-                OnPropertyChanged(nameof(CalendarCornerRadius));
-                RaiseCalendarMaterialProperties();
-            });
+            _dispatcherQueue.TryEnqueue(HandleSettingsServiceChanged);
         }
+    }
+
+    private void HandleSettingsServiceChanged()
+    {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        UpdateRotationTimer();
+        OnPropertyChanged(nameof(CalendarCornerRadius));
+        RaiseCalendarMaterialProperties();
+        RefreshAgendaIfTodoWidgetsChanged();
     }
 
     private void RaiseCalendarMaterialProperties()
@@ -1118,6 +1271,7 @@ public sealed partial class GlanceWidgetViewModel : ObservableObject, IDisposabl
 
         _isDisposed = true;
         _store.Changed -= Store_Changed;
+        DisposeDayInfo();
         _localizationService.LanguageChanged -= LocalizationService_LanguageChanged;
         if (_settingsService is not null)
         {

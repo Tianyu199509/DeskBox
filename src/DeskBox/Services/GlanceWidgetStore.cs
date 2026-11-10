@@ -29,11 +29,17 @@ public sealed class GlanceWidgetStore
 
     internal static int CachedWidgetStoreCount => WidgetStores.Count;
 
+    private readonly record struct FileStamp(
+        bool Exists,
+        DateTime LastWriteTimeUtc,
+        long Length);
+
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly string _widgetId;
     private readonly string _storePath;
     private readonly string? _legacyStorePath;
     private GlanceWidgetData? _cached;
+    private FileStamp _cachedStamp;
 
     /// <summary>
     /// Settings-host relay (batch R8): in the two-process world the settings
@@ -106,6 +112,7 @@ public sealed class GlanceWidgetStore
         try
         {
             await MigrateLegacyStoreIfNeededLockedAsync();
+            InvalidateCacheIfStaleLocked();
             _cached ??= await ResilientJsonStore.LoadAsync(
                 _storePath,
                 json => Normalize(JsonSerializer.Deserialize(
@@ -113,6 +120,7 @@ public sealed class GlanceWidgetStore
                     GlancePreferencesJsonContext.Default.Preferences)),
                 () => new GlanceWidgetData(),
                 nameof(GlanceWidgetStore));
+            _cachedStamp = ReadFileStamp(_storePath);
             return Clone(_cached);
         }
         finally
@@ -127,6 +135,8 @@ public sealed class GlanceWidgetStore
         if (SaveRelay is { } relay && _widgetId.Length > 0)
         {
             GlanceWidgetData? previousCache;
+            FileStamp previousStamp;
+            GlanceWidgetData nextCache;
             await _gate.WaitAsync();
             try
             {
@@ -134,7 +144,9 @@ public sealed class GlanceWidgetStore
                 // authoritative normalize + persist + Changed happen in the
                 // MAIN process, whose store owns the file.
                 previousCache = _cached;
-                _cached = Normalize(Clone(data));
+                previousStamp = _cachedStamp;
+                nextCache = Normalize(Clone(data));
+                _cached = nextCache;
             }
             finally
             {
@@ -146,6 +158,18 @@ public sealed class GlanceWidgetStore
                 await relay(
                     _widgetId,
                     JsonSerializer.Serialize(data, GlancePreferencesJsonContext.Default.Preferences));
+                await _gate.WaitAsync();
+                try
+                {
+                    if (ReferenceEquals(_cached, nextCache))
+                    {
+                        _cachedStamp = ReadFileStamp(_storePath);
+                    }
+                }
+                finally
+                {
+                    _gate.Release();
+                }
             }
             catch
             {
@@ -156,6 +180,7 @@ public sealed class GlanceWidgetStore
                 try
                 {
                     _cached = previousCache;
+                    _cachedStamp = previousStamp;
                 }
                 finally
                 {
@@ -189,6 +214,7 @@ public sealed class GlanceWidgetStore
         try
         {
             await MigrateLegacyStoreIfNeededLockedAsync();
+            InvalidateCacheIfStaleLocked();
             _cached ??= await ResilientJsonStore.LoadAsync(
                 _storePath,
                 json => Normalize(JsonSerializer.Deserialize(
@@ -227,12 +253,36 @@ public sealed class GlanceWidgetStore
         try
         {
             _cached = null;
+            _cachedStamp = default;
             TryDeleteFile(_storePath);
             TryDeleteFile(ResilientJsonStore.GetBackupPath(_storePath));
         }
         finally
         {
             _gate.Release();
+        }
+    }
+
+    private void InvalidateCacheIfStaleLocked()
+    {
+        if (_cached is not null && ReadFileStamp(_storePath) != _cachedStamp)
+        {
+            _cached = null;
+        }
+    }
+
+    private static FileStamp ReadFileStamp(string path)
+    {
+        try
+        {
+            var info = new FileInfo(path);
+            return info.Exists
+                ? new FileStamp(true, info.LastWriteTimeUtc, info.Length)
+                : default;
+        }
+        catch
+        {
+            return default;
         }
     }
 
@@ -273,11 +323,27 @@ public sealed class GlanceWidgetStore
             _cached,
             GlancePreferencesJsonContext.Default.Preferences);
         await ResilientJsonStore.SaveAsync(_storePath, json);
+        _cachedStamp = ReadFileStamp(_storePath);
     }
 
     private static GlanceWidgetData Normalize(GlanceWidgetData? data)
     {
         data ??= new GlanceWidgetData();
+        data.Layout = Enum.IsDefined(data.Layout) ? data.Layout : GlanceLayoutMode.Centered;
+        if (GlanceWidgetSettingsPolicy.ShouldAdoptLegacyLayout(data))
+        {
+            // v10 and earlier expressed the presentation through Layout (+
+            // ShowCalendar); derive the authoritative Style once.
+            GlanceWidgetSettingsPolicy.MigrateLegacyStyle(data);
+        }
+
+        data.Style = Enum.IsDefined(data.Style) ? data.Style : GlanceStyle.PhotoClock;
+        data.PhotoClockAlignment = Enum.IsDefined(data.PhotoClockAlignment)
+            ? data.PhotoClockAlignment
+            : GlancePhotoClockAlignment.Center;
+        // Keep the legacy mirrors coherent so an older build reading this
+        // document still renders a sensible layout.
+        GlanceWidgetSettingsPolicy.SyncLegacyMirrors(data);
         data.Version = GlanceWidgetData.CurrentVersion;
         data.LocalImagePaths ??= [];
         data.LocalImagePaths = data.LocalImagePaths
@@ -288,6 +354,10 @@ public sealed class GlanceWidgetStore
         data.LocalFolderPath = string.IsNullOrWhiteSpace(data.LocalFolderPath)
             ? null
             : data.LocalFolderPath.Trim();
+        if (!data.ShowTime)
+        {
+            data.ShowSeconds = false;
+        }
         if (!data.ShowDate)
         {
             data.ShowYear = false;
@@ -319,7 +389,6 @@ public sealed class GlanceWidgetStore
         data.TimeFormat = Enum.IsDefined(data.TimeFormat)
             ? data.TimeFormat
             : GlanceTimeFormatMode.FollowSystem;
-        data.Layout = Enum.IsDefined(data.Layout) ? data.Layout : GlanceLayoutMode.Centered;
         data.BackgroundSource = Enum.IsDefined(data.BackgroundSource)
             ? data.BackgroundSource
             : GlanceBackgroundSource.Bing;

@@ -1,4 +1,4 @@
-﻿namespace DeskBox.Services;
+namespace DeskBox.Services;
 
 using DeskBox.Contracts;
 using DeskBox.Models;
@@ -13,6 +13,8 @@ using DeskBox.Models;
 public sealed class RemoteSettingsHotkeyActions : ISettingsHotkeyActions
 {
     private readonly SettingsIpcClient _client;
+    private readonly Action<GlobalHotkeyActivation>? _mirrorGlobalActivationLocally;
+    private readonly Func<GlobalHotkeyActivation, string>? _formatActivation;
 
     // Deep review R18 (A-#3): GetRuntimeState used to take a blocking pipe
     // roundtrip on EVERY settings push (the host's ApplySettingsSnapshot →
@@ -22,9 +24,14 @@ public sealed class RemoteSettingsHotkeyActions : ISettingsHotkeyActions
     // (callers are property refresh chains), only the transport disappears.
     private volatile GlobalHotkeyRuntimeState? _cachedRuntimeState;
 
-    public RemoteSettingsHotkeyActions(SettingsIpcClient client)
+    public RemoteSettingsHotkeyActions(
+        SettingsIpcClient client,
+        Action<GlobalHotkeyActivation>? mirrorGlobalActivationLocally = null,
+        Func<GlobalHotkeyActivation, string>? formatActivation = null)
     {
         _client = client;
+        _mirrorGlobalActivationLocally = mirrorGlobalActivationLocally;
+        _formatActivation = formatActivation;
         _client.EventReceived += OnEventReceived;
         RefreshRuntimeStateCache();
     }
@@ -67,15 +74,29 @@ public sealed class RemoteSettingsHotkeyActions : ISettingsHotkeyActions
 
     public GlobalHotkeyRuntimeState? GetRuntimeState() => _cachedRuntimeState;
 
-    public bool TryApplyActivation(GlobalHotkeyActivation activation, out string? applyError)
+    public async Task<(bool Applied, string? Error)> TryApplyActivationAsync(GlobalHotkeyActivation activation)
     {
-        (bool ok, _, string? error) = _client.RequestAsync(
-                SettingsIpcMethods.HotkeyApply,
-                SettingsIpcPayload.Encode(activation, SettingsIpcJsonContext.Default.GlobalHotkeyActivation))
-            .GetAwaiter().GetResult();
-        applyError = error;
+        (bool ok, _, string? error) = await _client.RequestAsync(
+            SettingsIpcMethods.HotkeyApply,
+            SettingsIpcPayload.Encode(activation, SettingsIpcJsonContext.Default.GlobalHotkeyActivation));
         if (ok)
         {
+            ApplyOptimisticGlobalMirror(activation);
+            RefreshRuntimeStateCache();
+        }
+
+        return (ok, error);
+    }
+
+    public bool TryApplyActivation(GlobalHotkeyActivation activation, out string? applyError)
+    {
+        bool ok = SendApplySync(
+            SettingsIpcMethods.HotkeyApply,
+            SettingsIpcPayload.Encode(activation, SettingsIpcJsonContext.Default.GlobalHotkeyActivation),
+            out applyError);
+        if (ok)
+        {
+            ApplyOptimisticGlobalMirror(activation);
             RefreshRuntimeStateCache();
         }
 
@@ -89,10 +110,28 @@ public sealed class RemoteSettingsHotkeyActions : ISettingsHotkeyActions
         error = resetError;
         if (ok)
         {
+            ApplyOptimisticGlobalMirror(new GlobalHotkeyActivation(
+                SettingsService.DefaultGlobalHotkeyActivationKind,
+                new GlobalHotkeyGesture(
+                    (HotkeyModifierKeys)SettingsService.DefaultGlobalHotkeyModifiers,
+                    SettingsService.DefaultGlobalHotkeyKey)));
             RefreshRuntimeStateCache();
         }
 
         return ok;
+    }
+
+    private void ApplyOptimisticGlobalMirror(GlobalHotkeyActivation activation)
+    {
+        _mirrorGlobalActivationLocally?.Invoke(activation);
+        if (_formatActivation is not null)
+        {
+            _cachedRuntimeState = new GlobalHotkeyRuntimeState(
+                IsRegistered: true,
+                LastError: null,
+                CurrentGestureText: _formatActivation(activation),
+                CurrentActivation: activation);
+        }
     }
 
     // Fire-and-forget notifications (batch R10): invoked from settings-page
@@ -138,11 +177,21 @@ public sealed class RemoteSettingsHotkeyActions : ISettingsHotkeyActions
     private Task NotifyWithoutBlockingAsync(string method, string? payload, string caller) =>
         SettingsIpcShell.NotifyWithoutBlockingAsync(_client, method, payload, caller);
 
-    public bool TryApplySearchHotkeyGesture(GlobalHotkeyGesture gesture, out string? error)
+    public bool TryApplySearchHotkeyGesture(GlobalHotkeyGesture gesture, out string? error) =>
+        SendApplySync(
+            SettingsIpcMethods.SearchHotkeyApplyGesture,
+            SettingsIpcPayload.Encode(gesture, SettingsIpcJsonContext.Default.GlobalHotkeyGesture),
+            out error);
+
+    public bool TryApplySearchHotkeyActivation(GlobalHotkeyActivation activation, out string? error) =>
+        SendApplySync(
+            SettingsIpcMethods.SearchHotkeyApplyActivation,
+            SettingsIpcPayload.Encode(activation, SettingsIpcJsonContext.Default.GlobalHotkeyActivation),
+            out error);
+
+    private bool SendApplySync(string method, string payload, out string? error)
     {
-        (bool ok, _, string? applyError) = _client.RequestAsync(
-                SettingsIpcMethods.SearchHotkeyApplyGesture,
-                SettingsIpcPayload.Encode(gesture, SettingsIpcJsonContext.Default.GlobalHotkeyGesture))
+        (bool ok, _, string? applyError) = _client.RequestAsync(method, payload)
             .GetAwaiter().GetResult();
         error = applyError;
         return ok;
@@ -158,6 +207,39 @@ public sealed class RemoteSettingsHotkeyActions : ISettingsHotkeyActions
             SettingsIpcMethods.SearchHotkeyRefreshRegistration,
             payload: null,
             nameof(RefreshSearchHotkeyRegistration));
+
+    public async Task<bool> IsClipboardHotkeyRegisteredAsync()
+    {
+        (bool ok, string? payload, _) = await _client.RequestAsync(
+            SettingsIpcMethods.ClipboardHotkeyState);
+        return ok && SettingsIpcPayload.DecodeBoolean(payload);
+    }
+
+    public void SetClipboardHotkeyEnabled(bool enabled) =>
+        _ = NotifyWithoutBlockingAsync(
+            SettingsIpcMethods.ClipboardHotkeySetEnabled,
+            SettingsIpcPayload.EncodeBoolean(enabled),
+            nameof(SetClipboardHotkeyEnabled));
+
+    public bool TryApplyClipboardHotkeyActivation(GlobalHotkeyActivation activation, out string? error) =>
+        SendApplySync(
+            SettingsIpcMethods.ClipboardHotkeyApplyActivation,
+            SettingsIpcPayload.Encode(activation, SettingsIpcJsonContext.Default.GlobalHotkeyActivation),
+            out error);
+
+    public async Task<(bool Applied, string? Error)> TryApplyClipboardHotkeyActivationAsync(GlobalHotkeyActivation activation)
+    {
+        (bool ok, _, string? error) = await _client.RequestAsync(
+            SettingsIpcMethods.ClipboardHotkeyApplyActivation,
+            SettingsIpcPayload.Encode(activation, SettingsIpcJsonContext.Default.GlobalHotkeyActivation));
+        return (ok, error);
+    }
+
+    public void RefreshClipboardHotkeyRegistration() =>
+        _ = NotifyWithoutBlockingAsync(
+            SettingsIpcMethods.ClipboardHotkeyRefreshRegistration,
+            payload: null,
+            nameof(RefreshClipboardHotkeyRegistration));
 
     public DesktopDoubleClickToggleResult TrySetDesktopDoubleClickEnabled(bool enabled)
     {

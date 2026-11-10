@@ -1,19 +1,25 @@
 using System.Numerics;
+using DeskBox.Helpers;
 using DeskBox.Models;
+using DeskBox.Platform;
 using DeskBox.Services;
 using Microsoft.UI.Composition;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Hosting;
+using Windows.ApplicationModel.DataTransfer;
 
 namespace DeskBox.Controls.WidgetContents;
 
 public sealed partial class FileSurfaceContent
 {
+    internal const int FolderNavigationSpringBackDelayMs = 500;
     private static readonly TimeSpan FolderNavigationLoadingDelay =
         TimeSpan.FromSeconds(1);
     private CancellationTokenSource? _folderNavigationLoadingDelayCancellation;
+    private DispatcherTimer? _folderNavigationSpringBackTimer;
+    private Button? _highlightedFolderNavigationButton;
     private bool _isFolderNavigationOperationActive;
     private bool _folderNavigationVisualPrepared;
     private Visual? _folderNavigationAnimatedVisual;
@@ -432,8 +438,335 @@ public sealed partial class FileSurfaceContent
         }
     }
 
+    internal WidgetItem? TryResolveFolderNavigationDropTarget(
+        int screenX,
+        int screenY,
+        out bool isUpButton)
+    {
+        isUpButton = false;
+        if (_isDisposed || !ViewModel.CanNavigateUp ||
+            FolderNavigationBar.Visibility != Visibility.Visible)
+        {
+            return null;
+        }
+
+        if (IsScreenPointInsideElement(FolderNavigationRootButton, screenX, screenY) &&
+            ViewModel.TryGetRootNavigationFolderTarget(out string rootPath, out string rootName))
+        {
+            return new WidgetItem
+            {
+                Name = rootName,
+                Path = rootPath,
+                IsFolder = true,
+            };
+        }
+
+        if (IsScreenPointInsideElement(FolderNavigationUpButton, screenX, screenY) &&
+            ViewModel.TryGetParentNavigationFolderTarget(out string parentPath, out string parentName))
+        {
+            isUpButton = true;
+            return new WidgetItem
+            {
+                Name = parentName,
+                Path = parentPath,
+                IsFolder = true,
+            };
+        }
+
+        return null;
+    }
+
+    private void ObserveFolderNavigationSpringBack(bool hoveringUpButton)
+    {
+        if (!hoveringUpButton || !ViewModel.CanNavigateUp || _isFolderNavigationOperationActive)
+        {
+            CancelFolderNavigationSpringBack();
+            return;
+        }
+
+        SetHighlightedFolderNavigationButton(FolderNavigationUpButton);
+        if (_folderNavigationSpringBackTimer is null)
+        {
+            _folderNavigationSpringBackTimer = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromMilliseconds(FolderNavigationSpringBackDelayMs),
+            };
+            _folderNavigationSpringBackTimer.Tick += FolderNavigationSpringBackTimer_Tick;
+        }
+
+        if (!_folderNavigationSpringBackTimer.IsEnabled)
+        {
+            _folderNavigationSpringBackTimer.Start();
+        }
+    }
+
+    private async void FolderNavigationSpringBackTimer_Tick(object? sender, object e)
+    {
+        _folderNavigationSpringBackTimer?.Stop();
+        if (_isDisposed || !ViewModel.CanNavigateUp || _isFolderNavigationOperationActive ||
+            !Win32Helper.IsAnyMouseButtonDown() ||
+            !Win32Helper.GetCursorPos(out Win32Helper.POINT cursor) ||
+            !IsScreenPointInsideElement(FolderNavigationUpButton, cursor.X, cursor.Y))
+        {
+            ClearHighlightedFolderNavigationButton();
+            return;
+        }
+
+        await NavigateUpFromSurfaceAsync();
+        // If still deeper than root and user keeps hovering over Up, re-arm next level.
+        if (!_isDisposed && ViewModel.CanNavigateUp &&
+            Win32Helper.IsAnyMouseButtonDown() &&
+            Win32Helper.GetCursorPos(out Win32Helper.POINT afterCursor) &&
+            IsScreenPointInsideElement(FolderNavigationUpButton, afterCursor.X, afterCursor.Y))
+        {
+            _folderNavigationSpringBackTimer?.Start();
+        }
+        else
+        {
+            ClearHighlightedFolderNavigationButton();
+        }
+    }
+
+    private void CancelFolderNavigationSpringBack()
+    {
+        _folderNavigationSpringBackTimer?.Stop();
+        ClearHighlightedFolderNavigationButton();
+    }
+
+    private void SetHighlightedFolderNavigationButton(Button? button)
+    {
+        if (ReferenceEquals(_highlightedFolderNavigationButton, button))
+        {
+            return;
+        }
+
+        if (_highlightedFolderNavigationButton is { } previous)
+        {
+            previous.BorderBrush = null;
+            previous.BorderThickness = new Thickness(0);
+        }
+
+        _highlightedFolderNavigationButton = button;
+        if (button is not null)
+        {
+            button.BorderBrush = ResolveBrush("AccentFillColorDefaultBrush");
+            button.BorderThickness = new Thickness(1.5);
+        }
+    }
+
+    private void ClearHighlightedFolderNavigationButton() =>
+        SetHighlightedFolderNavigationButton(null);
+
+    private void FolderNavigationUpButton_DragOver(object sender, DragEventArgs e)
+    {
+        HandleFolderNavigationButtonDragOver(e, isRootTarget: false);
+    }
+
+    private void FolderNavigationRootButton_DragOver(object sender, DragEventArgs e)
+    {
+        HandleFolderNavigationButtonDragOver(e, isRootTarget: true);
+    }
+
+    private void HandleFolderNavigationButtonDragOver(DragEventArgs e, bool isRootTarget)
+    {
+        e.Handled = true;
+        ClearFolderDropTarget();
+        ClearStackMemberDropTarget();
+        ResetExternalDropPreview();
+
+        bool resolved = isRootTarget
+            ? ViewModel.TryGetRootNavigationFolderTarget(out string targetPath, out string targetName)
+            : ViewModel.TryGetParentNavigationFolderTarget(out targetPath, out targetName);
+        if (!resolved || _isImportBusy)
+        {
+            CancelFolderNavigationSpringBack();
+            e.AcceptedOperation = DataPackageOperation.None;
+            return;
+        }
+
+        DragPayloadSnapshot payload = GetDragPayload(e.DataView);
+        if (!string.IsNullOrWhiteSpace(payload.StackReorderKey))
+        {
+            // Whole-stack tile headers are projections, not filesystem transfers;
+            // still allow 500ms spring-back on Up without advertising a file drop.
+            ObserveFolderNavigationSpringBack(!isRootTarget);
+            e.AcceptedOperation = DataPackageOperation.None;
+            return;
+        }
+
+        IReadOnlyList<string> hoverPaths = GetEffectiveHoverPaths(payload);
+        if (!payload.HasSurfacePathData ||
+            HasTransferConflict(hoverPaths, targetPath) ||
+            IsUnsafeFolderDrop(hoverPaths, targetPath) ||
+            AreAllSourcesAlreadyInDestinationLexically(hoverPaths, targetPath))
+        {
+            CancelFolderNavigationSpringBack();
+            e.AcceptedOperation = DataPackageOperation.None;
+            return;
+        }
+
+        if (isRootTarget)
+        {
+            _folderNavigationSpringBackTimer?.Stop();
+            SetHighlightedFolderNavigationButton(FolderNavigationRootButton);
+        }
+        else
+        {
+            ObserveFolderNavigationSpringBack(hoveringUpButton: true);
+        }
+
+        FileDropIntent intent = payload.IsInternalReorder
+            ? (Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Menu)
+                ? FileDropIntent.Shortcut
+                : Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control)
+                    ? FileDropIntent.Copy
+                    : FileDropIntent.Move)
+            : ResolveSurfaceDropIntent(
+                payload.DataView,
+                e.AllowedOperations,
+                destinationFolderPath: targetPath,
+                sourcePathsOverride: hoverPaths);
+        DataPackageOperation op = ToDataPackageOperation(intent);
+        if (payload.IsDeskBoxFileDrag)
+        {
+            ApplyDeskBoxFileDragFeedback(e, op, FormatDropCaption(intent, targetName));
+        }
+        else if (!HasActiveHostShellDragWindow())
+        {
+            ApplyExternalDragOperationVisuals(e, op, FormatDropCaption(intent, targetName));
+        }
+        else
+        {
+            SuppressExternalDragOperationBadge(e);
+            e.AcceptedOperation = op;
+        }
+    }
+
+    private void FolderNavigationTarget_DragLeave(object sender, DragEventArgs e)
+    {
+        CancelFolderNavigationSpringBack();
+    }
+
+    private async void FolderNavigationUpButton_Drop(object sender, DragEventArgs e)
+    {
+        await HandleFolderNavigationButtonDropAsync(e, isRootTarget: false);
+    }
+
+    private async void FolderNavigationRootButton_Drop(object sender, DragEventArgs e)
+    {
+        await HandleFolderNavigationButtonDropAsync(e, isRootTarget: true);
+    }
+
+    private async Task HandleFolderNavigationButtonDropAsync(DragEventArgs e, bool isRootTarget)
+    {
+        e.Handled = true;
+        e.AcceptedOperation = DataPackageOperation.None;
+        CancelFolderNavigationSpringBack();
+        StopInteractiveAutoScroll();
+
+        bool resolved = isRootTarget
+            ? ViewModel.TryGetRootNavigationFolderTarget(out string targetPath, out string targetName)
+            : ViewModel.TryGetParentNavigationFolderTarget(out targetPath, out targetName);
+        if (!resolved || _isImportBusy)
+        {
+            ResetDragPayloadCache();
+            return;
+        }
+
+        DragPayloadSnapshot payload = GetDragPayload(e.DataView);
+        if (!payload.HasSurfacePathData || !string.IsNullOrWhiteSpace(payload.StackReorderKey))
+        {
+            ResetDragPayloadCache();
+            return;
+        }
+
+        _activeDragHandledAsStackMembership = payload.IsInternalReorder;
+        var targetFolder = new WidgetItem
+        {
+            Name = targetName,
+            Path = targetPath,
+            IsFolder = true,
+        };
+        var deferral = e.GetDeferral();
+        BeginTrackedImport();
+        try
+        {
+            using DroppedFileBatch batch = await GetSurfaceDropFilesAsync(e.DataView);
+            if (batch.Files.Count == 0)
+            {
+                return;
+            }
+
+            bool containsTemp = batch.Files.Any(static f => f.ForceManagedCopy);
+            FileDropIntent intent = payload.IsInternalReorder
+                ? (Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Menu)
+                    ? FileDropIntent.Shortcut
+                    : Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control)
+                        ? FileDropIntent.Copy
+                        : FileDropIntent.Move)
+                : ResolveSurfaceDropIntent(
+                    e.DataView,
+                    e.AllowedOperations,
+                    forceCopy: containsTemp,
+                    destinationFolderPath: targetPath,
+                    sourcePathsOverride: batch.Files.Select(static f => f.Path));
+            if (intent == FileDropIntent.None)
+            {
+                return;
+            }
+
+            bool move = intent == FileDropIntent.Move;
+            bool imported = await ImportNativeDroppedFilesIntoFolderAsync(
+                batch.Files,
+                targetFolder,
+                move: move,
+                intentOverride: intent == FileDropIntent.Shortcut ? FileDropIntent.Shortcut : null);
+            if (imported)
+            {
+                string? sourceWidgetId = TryGetString(e.DataView.Properties, DeskBoxDragData.SourceWidgetIdProperty);
+                if (move && !string.IsNullOrWhiteSpace(sourceWidgetId) &&
+                    !string.Equals(sourceWidgetId, WidgetId, StringComparison.OrdinalIgnoreCase) &&
+                    App.Current?.WidgetManager is { } manager)
+                {
+                    await manager.NotifyItemsMovedOutAsync(
+                        sourceWidgetId,
+                        batch.Files.Select(static f => f.Path).ToArray());
+                }
+
+                DataPackageOperation desiredOp = ToDataPackageOperation(intent);
+                int reqCount = batch.Files.Count(static f => !f.ForceManagedCopy);
+                e.AcceptedOperation = ResolveSafeDropCompletionOperation(
+                    desiredOp,
+                    payload.IsDeskBoxFileDrag,
+                    reqCount,
+                    reqCount,
+                    e.AllowedOperations.HasFlag(DataPackageOperation.Copy));
+                e.AcceptedOperation = DeskBoxDragData.ResolveFileDragFeedbackOperation(
+                    e.DataView,
+                    e.AcceptedOperation);
+            }
+        }
+        finally
+        {
+            if (_activeImportCancellation is not null)
+            {
+                CancelAndResetTrackedImport();
+            }
+
+            ResetDragPayloadCache();
+            deferral.Complete();
+        }
+    }
+
     private void StopFolderNavigationVisuals()
     {
+        CancelFolderNavigationSpringBack();
+        if (_folderNavigationSpringBackTimer is not null)
+        {
+            _folderNavigationSpringBackTimer.Tick -= FolderNavigationSpringBackTimer_Tick;
+            _folderNavigationSpringBackTimer = null;
+        }
+
         if (_folderNavigationAnimatedVisual is { } visual)
         {
             ResetFolderNavigationVisual(visual);

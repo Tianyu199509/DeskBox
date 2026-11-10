@@ -8,12 +8,24 @@ namespace DeskBox.ViewModels;
 
 public sealed class TodoAttachmentViewModel : ObservableObject
 {
+    internal const string PreviewCacheScope = "attachment-preview";
+    internal const string TodoPreviewCacheScope = "attachment-preview:todo";
+    internal const string QuickCapturePreviewCacheScope = "attachment-preview:quickcapture";
+    internal const int PreviewDecodePixelWidth = 128;
+
+    internal static string GetTodoPreviewCacheScope(string? widgetId) =>
+        string.IsNullOrWhiteSpace(widgetId)
+            ? TodoPreviewCacheScope
+            : $"{TodoPreviewCacheScope}:{widgetId}";
+
+    private readonly string _cacheScope;
     private BitmapImage? _thumbnail;
     private bool _thumbnailLoadAttempted;
 
-    public TodoAttachmentViewModel(TodoAttachment attachment)
+    public TodoAttachmentViewModel(TodoAttachment attachment, string cacheScope = PreviewCacheScope)
     {
         Attachment = attachment;
+        _cacheScope = string.IsNullOrWhiteSpace(cacheScope) ? PreviewCacheScope : cacheScope;
     }
 
     public TodoAttachment Attachment { get; }
@@ -75,7 +87,11 @@ public sealed class TodoAttachmentViewModel : ObservableObject
         _thumbnailLoadAttempted = true;
         try
         {
-            Thumbnail = await IconHelper.GetIconAsync(FilePath);
+            string previewPath = ResolvePreviewSourcePath(FilePath);
+            Thumbnail = await IconHelper.GetIconAsync(
+                previewPath,
+                decodePixelWidth: PreviewDecodePixelWidth,
+                cacheScope: _cacheScope);
         }
         finally
         {
@@ -84,5 +100,44 @@ public sealed class TodoAttachmentViewModel : ObservableObject
             // when virtualization presents the item again.
             _thumbnailLoadAttempted = Thumbnail is not null;
         }
+    }
+
+    public void ReleaseThumbnail()
+    {
+        Thumbnail = null;
+        _thumbnailLoadAttempted = false;
+    }
+
+    internal static string ResolvePreviewSourcePath(string filePath)
+    {
+        if (string.IsNullOrWhiteSpace(filePath))
+        {
+            return filePath;
+        }
+
+        try
+        {
+            string? directory = Path.GetDirectoryName(filePath);
+            string stem = Path.GetFileNameWithoutExtension(filePath);
+            if (!string.IsNullOrWhiteSpace(directory) &&
+                !string.IsNullOrWhiteSpace(stem) &&
+                string.Equals(Path.GetFileName(directory), "images", StringComparison.OrdinalIgnoreCase))
+            {
+                string? parentDirectory = Path.GetDirectoryName(directory);
+                if (!string.IsNullOrWhiteSpace(parentDirectory))
+                {
+                    string siblingThumbnail = Path.Combine(parentDirectory, "thumbnails", $"{stem}.png");
+                    if (File.Exists(siblingThumbnail))
+                    {
+                        return siblingThumbnail;
+                    }
+                }
+            }
+        }
+        catch
+        {
+        }
+
+        return filePath;
     }
 }

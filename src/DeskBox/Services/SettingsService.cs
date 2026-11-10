@@ -1,7 +1,10 @@
-﻿using System.Collections.Concurrent;
+using System.Buffers;
+using System.Collections.Concurrent;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 using System.Runtime.CompilerServices;
 using DeskBox.Core.Persistence;
 using DeskBox.Contracts;
@@ -11,6 +14,7 @@ using DeskBox.Helpers;
 using DeskBox.Models;
 
 [assembly: InternalsVisibleTo("DeskBox.Tests")]
+[assembly: InternalsVisibleTo("DeskBox.Settings")]
 
 namespace DeskBox.Services;
 
@@ -84,6 +88,7 @@ public sealed class SettingsService
     public const string WidgetCornerPreferenceSquare = Contracts.WidgetCornerKinds.Square;
     public const string WidgetCornerPreferenceSmall = Contracts.WidgetCornerKinds.Small;
     public const string WidgetCornerPreferenceRound = Contracts.WidgetCornerKinds.Round;
+    public const string WidgetCornerPreferenceLarge = Contracts.WidgetCornerKinds.Large;
     public const string WidgetAnimationEffectNone = Contracts.WidgetAnimationKinds.EffectNone;
     public const string WidgetAnimationEffectFade = Contracts.WidgetAnimationKinds.EffectFade;
     public const string WidgetAnimationEffectSlideRight = Contracts.WidgetAnimationKinds.EffectSlideRight;
@@ -101,12 +106,14 @@ public sealed class SettingsService
     public const string WidgetAnimationEffectEdgeScale = Contracts.WidgetAnimationKinds.EffectEdgeScale;
     public const string WidgetAnimationEffectTilt = Contracts.WidgetAnimationKinds.EffectTilt;
     public const string WidgetAnimationEffectWipe = Contracts.WidgetAnimationKinds.EffectWipe;
+    public const string WidgetAnimationEffectScreenEdgeSlide = Contracts.WidgetAnimationKinds.EffectScreenEdgeSlide;
     public const string WidgetAnimationSpeedVeryFast = Contracts.WidgetAnimationKinds.SpeedVeryFast;
     public const string WidgetAnimationSpeedFast = Contracts.WidgetAnimationKinds.SpeedFast;
     public const string WidgetAnimationSpeedStandard = Contracts.WidgetAnimationKinds.SpeedStandard;
     public const string WidgetAnimationSpeedRelaxed = Contracts.WidgetAnimationKinds.SpeedRelaxed;
     public const string WidgetAnimationSpeedSlow = Contracts.WidgetAnimationKinds.SpeedSlow;
     public const string WidgetAnimationSlideDirectionNone = Contracts.WidgetAnimationKinds.DirectionNone;
+    public const string WidgetAnimationSlideDirectionAuto = Contracts.WidgetAnimationKinds.DirectionAuto;
     public const string WidgetAnimationSlideDirectionLeft = Contracts.WidgetAnimationKinds.DirectionLeft;
     public const string WidgetAnimationSlideDirectionRight = Contracts.WidgetAnimationKinds.DirectionRight;
     public const string WidgetAnimationSlideDirectionUp = Contracts.WidgetAnimationKinds.DirectionUp;
@@ -133,6 +140,8 @@ public sealed class SettingsService
     public const string WidgetLayerModeDynamic = Contracts.WidgetLayerModes.Dynamic;
     public const string WidgetLayerModeDesktopPinned = Contracts.WidgetLayerModes.DesktopPinned;
     public const string WidgetLayerModeQuickReveal = Contracts.WidgetLayerModes.QuickReveal;
+    public const string DynamicClickRaiseScopeSingle = Contracts.DynamicClickRaiseScopes.Single;
+    public const string DynamicClickRaiseScopeGroup = Contracts.DynamicClickRaiseScopes.Group;
     public const string WidgetChromeModeStandard = WidgetChromeModeNames.Standard;
     public const string WidgetChromeModeCompact = WidgetChromeModeNames.Compact;
     public const string WidgetChromeModeOverlay = WidgetChromeModeNames.Overlay;
@@ -323,12 +332,21 @@ public sealed class SettingsService
     public const string MusicDisplayModeControls = Contracts.MusicDisplayModes.Controls;
     public const string MusicDisplayModeRecordVertical = Contracts.MusicDisplayModes.RecordVertical;
     public const string MusicDisplayModeRecordHorizontal = Contracts.MusicDisplayModes.RecordHorizontal;
+    public const string MusicSpectrumStyleAuto = Contracts.MusicSpectrumStyles.Auto;
+    public const string MusicSpectrumStyleOff = Contracts.MusicSpectrumStyles.Off;
+    public const string MusicSpectrumStyleSymmetricWave = Contracts.MusicSpectrumStyles.SymmetricWave;
+    public const string MusicSpectrumStyleWaveformScrub = Contracts.MusicSpectrumStyles.WaveformScrub;
+    public const string MusicSpectrumStylePeakHoldBars = Contracts.MusicSpectrumStyles.PeakHoldBars;
+    public const string MusicSpectrumStyleAuroraSilk = Contracts.MusicSpectrumStyles.AuroraSilk;
+    public const string MusicSpectrumStyleMatrixLed = Contracts.MusicSpectrumStyles.MatrixLed;
+    public const string MusicSpectrumStyleVinylRadialHalo = Contracts.MusicSpectrumStyles.VinylRadialHalo;
     public const int MaxRecentOrganizationHistoryCount = 24;
     public const string TodoNewTaskPositionTop = TodoOptionKinds.NewTaskPositionTop;
     public const string TodoNewTaskPositionBottom = TodoOptionKinds.NewTaskPositionBottom;
     public const string TodoDefaultFilterAll = TodoOptionKinds.DefaultFilterAll;
     public const string TodoDefaultFilterActive = TodoOptionKinds.DefaultFilterActive;
     public const string TodoDefaultFilterToday = TodoOptionKinds.DefaultFilterToday;
+    public const string TodoDefaultFilterOverdue = TodoOptionKinds.DefaultFilterOverdue;
     public const string TodoDefaultFilterThisWeek = TodoOptionKinds.DefaultFilterThisWeek;
     public const string TodoDefaultFilterThisMonth = TodoOptionKinds.DefaultFilterThisMonth;
     public const string TodoDefaultFilterImportant = TodoOptionKinds.DefaultFilterImportant;
@@ -339,6 +357,9 @@ public sealed class SettingsService
     public const int DefaultTodoReminderOffsetMinutes = TodoOptionKinds.DefaultReminderOffsetMinutes;
     public const int MinTodoReminderOffsetMinutes = TodoOptionKinds.MinReminderOffsetMinutes;
     public const int MaxTodoReminderOffsetMinutes = TodoOptionKinds.MaxReminderOffsetMinutes;
+    public const int DefaultTodoAllDayReminderTimeMinutes = TodoOptionKinds.DefaultAllDayReminderTimeMinutes;
+    public const int MinTodoAllDayReminderTimeMinutes = TodoOptionKinds.MinAllDayReminderTimeMinutes;
+    public const int MaxTodoAllDayReminderTimeMinutes = TodoOptionKinds.MaxAllDayReminderTimeMinutes;
     public const string QuickCaptureDefaultViewRecords = QuickCaptureOptionKinds.DefaultViewRecords;
     public const string QuickCaptureDefaultViewPinned = QuickCaptureOptionKinds.DefaultViewPinned;
     public const string QuickCaptureDefaultViewRecent = QuickCaptureOptionKinds.DefaultViewRecent;
@@ -390,6 +411,7 @@ public const int DefaultSearchMaxResults = 100;
                 [nameof(AppSettings.WidgetDefaultBoundScreenId)] = DefaultPreferencePreservationReason.UserData,
                 [nameof(AppSettings.WidgetNewPlacementTarget)] = DefaultPreferencePreservationReason.UserChoice,
                 [nameof(AppSettings.WidgetDisplayDisconnectBehavior)] = DefaultPreferencePreservationReason.UserChoice,
+                [nameof(AppSettings.WidgetDisplayScalingMode)] = DefaultPreferencePreservationReason.UserChoice,
                 [nameof(AppSettings.WidgetCapsuleBarOrder)] = DefaultPreferencePreservationReason.UserData,
                 [nameof(AppSettings.WidgetCapsuleFreePlacements)] = DefaultPreferencePreservationReason.UserData,
                 [nameof(AppSettings.DeletedWidgetIds)] = DefaultPreferencePreservationReason.UserData,
@@ -398,8 +420,11 @@ public const int DefaultSearchMaxResults = 100;
                 [nameof(AppSettings.DesktopAutoOrganizationEnabled)] = DefaultPreferencePreservationReason.UserChoice,
                 [nameof(AppSettings.DesktopAutoOrganizationDelaySeconds)] = DefaultPreferencePreservationReason.UserChoice,
                 [nameof(AppSettings.DesktopAutoOrganizationBaselineUtc)] = DefaultPreferencePreservationReason.RuntimeState,
+                [nameof(AppSettings.ClipboardExcludedApps)] = DefaultPreferencePreservationReason.UserData,
                 [nameof(AppSettings.DefaultManagedStorageRootPath)] = DefaultPreferencePreservationReason.Storage,
                 [nameof(AppSettings.AutomaticBackupDirectory)] = DefaultPreferencePreservationReason.Storage,
+                [nameof(AppSettings.MusicLocalLyricsFolder)] = DefaultPreferencePreservationReason.Storage,
+                [nameof(AppSettings.SearchEverythingExecutablePath)] = DefaultPreferencePreservationReason.SystemIntegration,
                 [nameof(AppSettings.CloudBackupProvider)] = DefaultPreferencePreservationReason.UserChoice,
                 [nameof(AppSettings.CloudBackupServerUrl)] = DefaultPreferencePreservationReason.Storage,
                 [nameof(AppSettings.CloudBackupRemotePath)] = DefaultPreferencePreservationReason.Storage,
@@ -407,6 +432,7 @@ public const int DefaultSearchMaxResults = 100;
                 [nameof(AppSettings.CloudBackupTodoDataEnabled)] = DefaultPreferencePreservationReason.UserChoice,
                 [nameof(AppSettings.CloudBackupQuickCaptureDataEnabled)] = DefaultPreferencePreservationReason.UserChoice,
                 [nameof(AppSettings.CloudBackupWidgetStyleEnabled)] = DefaultPreferencePreservationReason.UserChoice,
+                [nameof(AppSettings.CloudBackupCustomWidgetsEnabled)] = DefaultPreferencePreservationReason.UserChoice,
                 [nameof(AppSettings.CloudBackupLastSuccessUtcTicks)] = DefaultPreferencePreservationReason.RuntimeState,
                 [nameof(AppSettings.CloudBackupLastFailureUtcTicks)] = DefaultPreferencePreservationReason.RuntimeState,
                 [nameof(AppSettings.CloudBackupLastUnverifiedUtcTicks)] = DefaultPreferencePreservationReason.RuntimeState,
@@ -428,6 +454,7 @@ public const int DefaultSearchMaxResults = 100;
 
     private readonly string _settingsPath;
     private AppSettings _settings = new();
+    private AppSettings? _prePreviewSettings;
 
     /// <summary>
     /// True once the in-memory widget list is the merged layout truth (or a
@@ -508,6 +535,8 @@ public const int DefaultSearchMaxResults = 100;
 
     public bool HasPendingSave => Volatile.Read(ref _hasPendingSave) != 0;
 
+    internal string DataDirectoryPath => Path.GetDirectoryName(_settingsPath)!;
+
     public AppSettings Settings
     {
         get { lock (_lock) return _settings; }
@@ -548,6 +577,8 @@ public const int DefaultSearchMaxResults = 100;
             PerformanceSettingsPolicy.DefaultGlanceImageAutoRotationEnabled;
         settings.EnableCompactAmbientAnimations =
             PerformanceSettingsPolicy.DefaultCompactAmbientAnimationsEnabled;
+        settings.Performance.KeepCapsuleContentWarm =
+            PerformanceSettingsPolicy.DefaultKeepCapsuleContentWarm;
         settings.DefaultWidgetWidth = DefaultWidgetWidth;
         settings.DefaultWidgetHeight = DefaultWidgetHeight;
         settings.WidgetCornerPreference = WidgetCornerPreferenceRound;
@@ -566,12 +597,13 @@ public const int DefaultSearchMaxResults = 100;
         backgroundShell.WidgetBackgroundDim = null;
         backgroundShell.WidgetBackgroundUnifiedFit = null;
         backgroundShell.WidgetTextShadowEnabled = false;
-        settings.WidgetAnimationEffect = WidgetAnimationEffectSlideFade;
-        settings.WidgetAnimationSpeed = WidgetAnimationSpeedStandard;
-        settings.WidgetAnimationSlideDirection = WidgetAnimationSlideDirectionRight;
-        settings.WidgetAnimationEasingIntensity = WidgetAnimationEasingStandard;
-        settings.WidgetAnimationStaggerEnabled = false;
+        backgroundShell.WidgetAnimationEffect = WidgetAnimationEffectScreenEdgeSlide;
+        backgroundShell.WidgetAnimationSpeed = WidgetAnimationSpeedRelaxed;
+        backgroundShell.WidgetAnimationSlideDirection = WidgetAnimationSlideDirectionRight;
+        backgroundShell.WidgetAnimationEasingIntensity = WidgetAnimationEasingStandard;
+        backgroundShell.WidgetAnimationStaggerEnabled = false;
         settings.WidgetLayerMode = WidgetLayerModeDynamic;
+        settings.WidgetShell.DynamicClickRaiseScope = DynamicClickRaiseScopeGroup;
         settings.KeepWidgetsVisibleOnShowDesktop = true;
         settings.DisplayWidgetChromeMode = WidgetChromeModeOverlay;
         settings.InteractiveWidgetChromeMode = WidgetChromeModeStandard;
@@ -619,7 +651,7 @@ public const int DefaultSearchMaxResults = 100;
         settings.FileStackGroupBy = FileStackGroupByKind;
         settings.FileStackThreshold = DefaultFileStackThreshold;
         settings.FileStackOrderBy = FileStackOrderByWidget;
-        settings.FileStackOpenMode = FileStackOpenModeInline;
+        settings.FileStackOpenMode = FileStackOpenModePopover;
         settings.FileStackPopoverLayout = FileStackPopoverLayoutGrid3;
         settings.FileStackPopoverStyle = FileStackPopoverStyleNeutral;
         settings.FileStackCustomRules = [];
@@ -657,6 +689,8 @@ public const int DefaultSearchMaxResults = 100;
         settings.TodoShowClearCompletedButton = true;
         settings.TodoReminderEnabled = true;
         settings.TodoDefaultReminderOffsetMinutes = DefaultTodoReminderOffsetMinutes;
+        settings.Todo.TodoAllDayReminderEnabled = true;
+        settings.Todo.TodoAllDayReminderTimeMinutes = DefaultTodoAllDayReminderTimeMinutes;
         settings.TodoUseWideDetailPane = true;
         settings.TodoLayoutMode = TodoLayoutModeAuto;
         settings.TodoAutoSelectFirstInWideLayout = true;
@@ -664,6 +698,9 @@ public const int DefaultSearchMaxResults = 100;
         settings.MusicEnableCoverHoverMotion = true;
         settings.MusicDisplayMode = MusicDisplayModeAuto;
         settings.MusicHideTimelineWhenUnavailable = true;
+        settings.Music.MusicShowLyrics = true;
+        settings.Music.MusicShowCapsuleLyrics = true;
+        settings.Music.MusicSpectrumStyle = MusicSpectrumStyleAuto;
 settings.WeatherAutoLocation = true;
 settings.WeatherCityName = string.Empty;
 settings.WeatherLatitude = 0;
@@ -685,10 +722,10 @@ settings.WeatherRefreshIntervalMinutes = 60;
         settings.SearchHotkeyEnabled = false;
         settings.SearchHotkeyModifiers = (int)HotkeyModifierKeys.Alt;
         settings.SearchHotkeyKey = 0x44;
+        settings.Search.SearchHotkeyActivationKind = Models.HotkeyActivationKind.Chord;
         settings.SearchDisplayMode = "Spotlight";
         settings.SearchIncludeDeskBoxContent = true;
         settings.SearchEverythingEnabled = false;
-        settings.SearchEverythingExecutablePath = string.Empty;
         settings.SearchEverythingAdvancedSyntaxEnabled = false;
         settings.SearchShowRecommendations = true;
         settings.SearchMaxResults = DefaultSearchMaxResults;
@@ -699,6 +736,20 @@ settings.WeatherRefreshIntervalMinutes = 60;
         settings.SearchPopupCustomY = null;
         settings.SearchPopupCustomWidth = null;
         settings.SearchPopupCustomHeight = null;
+        settings.Search.SearchCategoryBarMode = "auto";
+        settings.Search.SearchShowSortHeader = false;
+        settings.Search.SearchDefaultSortColumn = "relevance";
+        settings.Search.SearchIncludeClipboard = true;
+        settings.Search.SearchIncludeCalculator = true;
+        settings.Search.SearchShowDetailsPane = true;
+        settings.Search.SearchIncludeWebFallback = true;
+        settings.Search.SearchDefaultWebEngine = "bing";
+        settings.Search.SearchCustomWebUrl = string.Empty;
+        settings.Search.SearchQuickCreateTodoEnabled = true;
+        settings.Search.SearchQuickCreateNoteEnabled = true;
+        settings.Search.SearchQuickCreateDisplayMode = "always";
+        settings.Search.SearchQuickCreateDefaultTarget = "todo";
+        settings.Search.SearchQuickCreateShowHud = true;
         settings.TodoNewTaskPosition = TodoNewTaskPositionTop;
         settings.TodoDefaultFilter = TodoDefaultFilterAll;
         settings.TodoTabStyle = WidgetTabStyleButton;
@@ -706,6 +757,7 @@ settings.WeatherRefreshIntervalMinutes = 60;
         settings.TodoShowAllTab = true;
         settings.TodoShowActiveTab = false;
         settings.TodoShowTodayTab = true;
+        settings.Todo.TodoShowOverdueTab = true;
         settings.TodoShowThisWeekTab = false;
         settings.TodoShowThisMonthTab = false;
         settings.TodoShowImportantTab = true;
@@ -738,6 +790,7 @@ settings.ShowListItemDetails = false;
 settings.ShowFileItemPathTooltips = true;
 settings.CustomAccentColor = "#0078D4";
 settings.FocusClickedWidgetOnRaise = false;
+        ApplyDefaultClipboardPreferences(settings.Clipboard, preserveExcludedApps: true);
     }
 
     public SettingsService(ISettingsPersistenceSink? persistenceSink = null)
@@ -768,6 +821,15 @@ settings.FocusClickedWidgetOnRaise = false;
     private long _commitSequence;
     private long _lastOutboundCommitId;
     private bool _lastCommitIncludedLayout;
+    private bool _lastCommitWroteSettingsFile;
+    private bool _forceNextLocalPersistNotice;
+    private byte[]? _lastPersistedSettingsSha256;
+    private long _settingsFileWriteCount;
+    private long _layoutFileWriteCount;
+
+    internal long SettingsFileWriteCountForTesting => Volatile.Read(ref _settingsFileWriteCount);
+
+    internal long LayoutFileWriteCountForTesting => Volatile.Read(ref _layoutFileWriteCount);
 
     /// <summary>
     /// FileSafety-domain store owning the desktop-organization undo receipts.
@@ -801,6 +863,7 @@ settings.FocusClickedWidgetOnRaise = false;
     /// </summary>
     public async Task LoadAsync()
     {
+        _lastPersistedSettingsSha256 = null;
         try
         {
             await MigrateLegacySettingsIfNeededAsync();
@@ -827,6 +890,7 @@ settings.FocusClickedWidgetOnRaise = false;
             lock (_lock)
             {
                 _settings = loadResult.Value;
+                _prePreviewSettings = null;
                 // A settings.json stamped by a NEWER build must never be
                 // overwritten by this one: the typed model silently drops its
                 // unknown fields, so a save would strip them irreversibly
@@ -909,6 +973,7 @@ settings.FocusClickedWidgetOnRaise = false;
                 // the master switch on every boot (feedback #553 family).
                 changed |= NormalizeHotkeySettings(_settings);
                 changed |= NormalizeSearchSettings(_settings);
+                changed |= NormalizeClipboardSettings(_settings);
                 changed |= NormalizeQuickCaptureSettings(_settings);
                 changed |= NormalizeTodoSettings(_settings);
                 changed |= NormalizeWeatherSettings(_settings);
@@ -953,6 +1018,7 @@ settings.FocusClickedWidgetOnRaise = false;
                     // must not make rule-deletion decisions.
                     changed |= NormalizeOrganizerSettings(_settings);
                     changed |= NormalizeDeletionSettings(_settings);
+                    changed |= ClearRetiredQuickCaptureClipboardFlags(_settings);
                 }
 
                 changed |= layoutResult.NeedsPersist;
@@ -974,12 +1040,21 @@ settings.FocusClickedWidgetOnRaise = false;
             {
                 await SaveToFileOnlyAsync();
             }
+            else if (loadedFromDisk)
+            {
+                _lastPersistedSettingsSha256 = TryComputeFileSha256(_settingsPath);
+            }
         }
         catch (Exception ex)
         {
+            _lastPersistedSettingsSha256 = null;
             App.Log($"[SettingsService] Failed to load settings: {ex}");
             LastLoadRecoveryState = SettingsLoadRecoveryState.DefaultsAfterFailure;
-            lock (_lock) _settings = new AppSettings();
+            lock (_lock)
+            {
+                _settings = new AppSettings();
+                _prePreviewSettings = null;
+            }
             ApplyDefaultPreferences(_settings);
             _settings.HasResolvedInitialFileWidgetSetup = true;
             try
@@ -1040,7 +1115,7 @@ settings.FocusClickedWidgetOnRaise = false;
     public async Task SaveAsync(bool notifySubscribers = true)
     {
         CancelPendingDebouncedSave();
-        bool saved = await SaveToFileOnlyAsync();
+        bool saved = await SaveToFileOnlyAsync(allowUnchangedSettingsSkip: true);
         // Clear even on failure (batch R9): a latched pending flag suppressed
         // every later reload push — divergence without convergence.
         Volatile.Write(ref _hasPendingSave, 0);
@@ -1078,7 +1153,7 @@ settings.FocusClickedWidgetOnRaise = false;
         return SaveCheckedAsync(notifySubscribers);
     }
 
-    private async Task<bool> SaveToFileOnlyAsync()
+    private async Task<bool> SaveToFileOnlyAsync(bool allowUnchangedSettingsSkip = false)
     {
         if (_settingsSchemaNewerThanBuild)
         {
@@ -1120,7 +1195,8 @@ settings.FocusClickedWidgetOnRaise = false;
                 commit = new SettingsPersistenceCommit(
                     commitId,
                     _settings,
-                    _widgetLayoutMerged);
+                    _widgetLayoutMerged,
+                    allowUnchangedSettingsSkip);
             }
 
             bool saved = await _persistenceSink.SaveAsync(this, commit);
@@ -1142,7 +1218,10 @@ settings.FocusClickedWidgetOnRaise = false;
 
             try
             {
-                LocalPersistCompleted?.Invoke(commitId);
+                if (_lastCommitWroteSettingsFile || _forceNextLocalPersistNotice)
+                {
+                    LocalPersistCompleted?.Invoke(commitId);
+                }
                 if (_lastCommitIncludedLayout)
                 {
                     LayoutPersistCompleted?.Invoke();
@@ -1249,11 +1328,14 @@ settings.FocusClickedWidgetOnRaise = false;
     {
         lock (_lock)
         {
-            return System.Text.Json.JsonSerializer.Serialize(
-                _settings,
-                SettingsJsonContext.Default.AppSettings);
+            return SerializeSettingsSnapshot(_settings);
         }
     }
+
+    private static string SerializeSettingsSnapshot(AppSettings settings) =>
+        System.Text.Json.JsonSerializer.Serialize(
+            settings,
+            SettingsJsonContext.Default.AppSettings);
 
     /// <summary>
     /// Settings-host boot adoption (batch R8): replaces the host's former
@@ -1292,7 +1374,9 @@ settings.FocusClickedWidgetOnRaise = false;
         lock (_lock)
         {
             _settings = parsed;
+            _prePreviewSettings = null;
             _settingsSchemaNewerThanBuild = false;
+            _lastPersistedSettingsSha256 = null;
             // The layout domain arrived inside the graph; keep the merged
             // flag consistent with a completed disk load (its consumers —
             // the local sink's layout commit/stripping and the organizer
@@ -1379,7 +1463,40 @@ settings.FocusClickedWidgetOnRaise = false;
         parsed.DesktopOrganization.RecentOrganizationHistory is null ||
         parsed.DesktopOrganization.DesktopOrganizationRules is null ||
         parsed.WidgetShell.WidgetCapsuleBarOrder is null ||
-        parsed.WidgetShell.WidgetCapsuleFreePlacements is null;
+        parsed.WidgetShell.WidgetCapsuleFreePlacements is null ||
+        parsed.Clipboard.ClipboardExcludedApps is null;
+
+    public static void ApplyDefaultClipboardPreferences(
+        ClipboardSettingsSlice clipboard,
+        bool preserveExcludedApps = false)
+    {
+        clipboard.ClipboardCaptureText = true;
+        clipboard.ClipboardCaptureImages = true;
+        clipboard.ClipboardCaptureFiles = true;
+        clipboard.ClipboardMaxImageSizeMb = 32;
+        clipboard.ClipboardMaxTextSizeMb = 4;
+        clipboard.ClipboardClickBehavior = ClipboardSettingsSlice.ClickCopyOnSinglePasteOnDouble;
+        clipboard.ClipboardDefaultPastePlainText = false;
+        clipboard.ClipboardMoveToTopOnReuse = false;
+        clipboard.ClipboardViewMode = ClipboardSettingsSlice.ViewModeStandard;
+        clipboard.ClipboardTabDisplayMode = ClipboardSettingsSlice.TabDisplayIconAndText;
+        clipboard.ClipboardCardDensity = ClipboardSettingsSlice.DensityStandard;
+        clipboard.ClipboardShowSourceApp = true;
+        clipboard.ClipboardIgnoreSystemPrivacyFormats = true;
+        clipboard.ClipboardSensitiveProtectionMode = ClipboardSettingsSlice.SecretProtectionMask;
+        if (!preserveExcludedApps)
+        {
+            clipboard.ClipboardExcludedApps = [];
+        }
+        clipboard.ClipboardMaxItems = 500;
+        clipboard.ClipboardRetentionDays = 30;
+        clipboard.ClipboardHotkeyEnabled = true;
+        clipboard.ClipboardHotkeyActivationKind = HotkeyActivationKind.Chord;
+        clipboard.ClipboardHotkeyModifiers = (int)HotkeyModifierKeys.Alt;
+        clipboard.ClipboardHotkeyKey = ClipboardSettingsSlice.DefaultHotkeyKey;
+        clipboard.ClipboardPopupPlacementMode = ClipboardSettingsSlice.PopupFollowCaret;
+        clipboard.ClipboardDoubleCopyAction = ClipboardSettingsSlice.DoubleCopyNone;
+    }
 
     public async Task<bool> ApplyExternalSnapshotAsync(string settingsJson)
     {
@@ -1421,20 +1538,41 @@ settings.FocusClickedWidgetOnRaise = false;
         }
 
         AppSettings before;
+        bool appearanceOrAnimationOnly;
         lock (_lock)
         {
-            before = _settings;
-            PreserveMainOwnedState(before, parsed);
+            before = _prePreviewSettings ?? _settings;
+            _prePreviewSettings = null;
+            PreserveMainOwnedState(_settings, parsed);
+            if (!ReferenceEquals(before, _settings))
+            {
+                PreserveMainOwnedState(_settings, before);
+            }
+            appearanceOrAnimationOnly = IsUnchangedOutsideWidgetAnimation(before, parsed);
             _settings = parsed;
             _settingsSchemaNewerThanBuild = false;
         }
 
-        if (!await SaveCheckedAsync(notifySubscribers: false))
+        bool savedExternal;
+        _forceNextLocalPersistNotice = true;
+        try
+        {
+            savedExternal = await SaveCheckedAsync(notifySubscribers: false);
+        }
+        finally
+        {
+            _forceNextLocalPersistNotice = false;
+        }
+
+        if (!savedExternal)
         {
             return false;
         }
 
-        NotifySettingsChangedSafely(SettingsChangeKind.General);
+        NotifySettingsChangedSafely(
+            appearanceOrAnimationOnly
+                ? SettingsChangeKind.Appearance
+                : SettingsChangeKind.General);
         try
         {
             ExternalSnapshotApplied?.Invoke(before, parsed);
@@ -1501,8 +1639,11 @@ settings.FocusClickedWidgetOnRaise = false;
             // main process owns it and feature switches travel as commands.
             parsed.WidgetLayout.CopyFrom(_settings.WidgetLayout);
             _settings = parsed;
+            _prePreviewSettings = null;
             _settingsSchemaNewerThanBuild = false;
         }
+
+        _lastPersistedSettingsSha256 = TryComputeFileSha256(_settingsPath);
 
         if (notifySubscribers)
         {
@@ -1524,6 +1665,7 @@ settings.FocusClickedWidgetOnRaise = false;
             try
             {
                 owner._lastCommitIncludedLayout = false;
+                owner._lastCommitWroteSettingsFile = false;
                 // Layout first when the device store is authoritative: it owns the
                 // durable layout state, and a crash between the two commits still
                 // leaves a consistent pair (newer layout file plus an older
@@ -1570,9 +1712,36 @@ settings.FocusClickedWidgetOnRaise = false;
                 bool stripLayoutKeys = owner.Layout.IsAuthoritative && owner._widgetLayoutMerged && layoutSaved;
                 try
                 {
-                    await ResilientJsonStore.SaveAsync(
-                        owner._settingsPath,
-                        tempPath => owner.WriteSettingsTempFileAsync(tempPath, stripLayoutKeys));
+                    ArrayBufferWriter<byte> encodedSettings =
+                        await owner.EncodeSettingsPayloadAsync(stripLayoutKeys);
+                    byte[] currentSettingsSha256 = SHA256.HashData(encodedSettings.WrittenSpan);
+                    bool skipSettingsWrite =
+                        commit.AllowUnchangedSettingsSkip &&
+                        stripLayoutKeys &&
+                        owner._lastPersistedSettingsSha256 is { } previousSha256 &&
+                        CryptographicOperations.FixedTimeEquals(previousSha256, currentSettingsSha256) &&
+                        File.Exists(owner._settingsPath);
+
+                    if (!skipSettingsWrite)
+                    {
+                        await ResilientJsonStore.SaveAsync(
+                            owner._settingsPath,
+                            async tempPath =>
+                            {
+                                await using var stream = new FileStream(
+                                    tempPath,
+                                    FileMode.Create,
+                                    FileAccess.Write,
+                                    FileShare.None,
+                                    bufferSize: 64 * 1024,
+                                    useAsync: true);
+                                await stream.WriteAsync(encodedSettings.WrittenMemory);
+                                await stream.FlushAsync();
+                                Interlocked.Increment(ref owner._settingsFileWriteCount);
+                            });
+                        owner._lastPersistedSettingsSha256 = currentSettingsSha256;
+                        owner._lastCommitWroteSettingsFile = true;
+                    }
                 }
                 catch
                 {
@@ -1619,28 +1788,39 @@ settings.FocusClickedWidgetOnRaise = false;
         }
     }
 
-    /// <summary>
-    /// Streams the locked settings snapshot straight into the store's temp
-    /// file. Serializing directly to the stream replaces the previous
-    /// SerializeToUtf8Bytes materialization of the whole document - with the
-    /// file-count-backed settings graphs of a large import that buffer was
-    /// the multi-megabyte large-object garbage measured in the 2026-09-17
-    /// memory investigation. The snapshot consistency contract is
-    /// deliberately unchanged from the buffered path: every normalization
-    /// pass and the serialization itself run under <c>_lock</c>, so one
-    /// save still corresponds to exactly one coherent snapshot; only the
-    /// destination of the encoder changed. The synchronous encode runs on a
-    /// pool thread (the caller already holds FileWriteLock) so UI-thread
-    /// savers pay the same lock time as before, not the encode.
-    /// </summary>
-    private Task WriteSettingsTempFileAsync(string tempPath, bool stripLayoutKeys) => Task.Run(() =>
+    private static byte[]? TryComputeFileSha256(string path)
     {
-        using var stream = new FileStream(
-            tempPath,
-            FileMode.Create,
-            FileAccess.Write,
-            FileShare.None,
-            bufferSize: 64 * 1024);
+        try
+        {
+            if (!File.Exists(path))
+            {
+                return null;
+            }
+
+            using var stream = new FileStream(
+                path,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete,
+                bufferSize: 16 * 1024);
+            return SHA256.HashData(stream);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Encodes the locked settings snapshot into an in-memory buffer so
+    /// layout-only commits whose stripped settings.json payload is unchanged
+    /// can skip rewriting settings.json altogether. Every normalization
+    /// pass and the serialization itself still run under <c>_lock</c> on a
+    /// pool thread so one save corresponds to one coherent snapshot.
+    /// </summary>
+    private Task<ArrayBufferWriter<byte>> EncodeSettingsPayloadAsync(bool stripLayoutKeys) => Task.Run(() =>
+    {
+        var buffer = new ArrayBufferWriter<byte>(16 * 1024);
         lock (_lock)
         {
             PerformanceSettingsPolicy.Normalize(_settings);
@@ -1656,9 +1836,11 @@ settings.FocusClickedWidgetOnRaise = false;
                 // list is empty or legacy and the normalize would disable
                 // every enabled rule as a deleted target.
                 NormalizeOrganizerSettings(_settings);
+                ClearRetiredQuickCaptureClipboardFlags(_settings);
             }
             NormalizeHotkeySettings(_settings);
             NormalizeSearchSettings(_settings);
+            NormalizeClipboardSettings(_settings);
             NormalizeQuickCaptureSettings(_settings);
             NormalizeTodoSettings(_settings);
             NormalizeWeatherSettings(_settings);
@@ -1666,38 +1848,160 @@ settings.FocusClickedWidgetOnRaise = false;
             {
                 // Write-time projection: while the layout store owns the
                 // device domain, its 11 wire keys are stripped from
-                // settings.json. The typed facade keeps serializing for
-                // migrations, style backups and round-trip baselines — only
-                // the file view changes — and the strip set is derived from
-                // the slice's own wire names. The DOM detour (vs. streaming)
-                // is the price of key removal without a second serializer
-                // profile; it runs on a pool thread under the same lock.
-                JsonObject settingsDom = JsonSerializer.SerializeToNode(
-                        _settings,
-                        SettingsJsonContext.Default.AppSettings)!
-                    .AsObject();
-                foreach (string layoutKey in WidgetLayoutStore.SettingsWireKeys)
-                {
-                    settingsDom.Remove(layoutKey);
-                }
-
-                using var writer = new Utf8JsonWriter(
-                    stream,
-                    new JsonWriterOptions { Indented = true });
-                settingsDom.WriteTo(writer);
-                writer.Flush();
+                // settings.json without materializing a JsonObject DOM tree.
+                WriteSettingsStrippingTopLevelKeys(
+                    buffer,
+                    _settings,
+                    SettingsJsonContext.Default.AppSettings,
+                    WidgetLayoutStore.SettingsWireKeys);
             }
             else
             {
-                JsonSerializer.Serialize(
-                    stream,
+                using var directWriter = new Utf8JsonWriter(
+                    buffer,
+                    new JsonWriterOptions { Indented = true });
+                SerializeSettingsToWriter(
+                    directWriter,
                     _settings,
                     SettingsJsonContext.Default.AppSettings);
+                directWriter.Flush();
             }
         }
 
-        stream.Flush();
+        return buffer;
     });
+
+    private static void SerializeSettingsToWriter(
+        Utf8JsonWriter writer,
+        AppSettings settings,
+        JsonTypeInfo<AppSettings> typeInfo)
+    {
+        JsonSerializer.Serialize(writer, settings, typeInfo);
+    }
+
+    private static void WriteSettingsStrippingTopLevelKeys(
+        IBufferWriter<byte> destination,
+        AppSettings settings,
+        JsonTypeInfo<AppSettings> typeInfo,
+        IReadOnlySet<string> keysToStrip)
+    {
+        var rawBuffer = new ArrayBufferWriter<byte>(32 * 1024);
+        using (var rawWriter = new Utf8JsonWriter(rawBuffer))
+        {
+            SerializeSettingsToWriter(rawWriter, settings, typeInfo);
+            rawWriter.Flush();
+        }
+
+        var reader = new Utf8JsonReader(rawBuffer.WrittenSpan);
+        using var writer = new Utf8JsonWriter(
+            destination,
+            new JsonWriterOptions { Indented = true });
+
+        if (!reader.Read() || reader.TokenType != JsonTokenType.StartObject)
+        {
+            return;
+        }
+
+        writer.WriteStartObject();
+        while (reader.Read() && reader.TokenType != JsonTokenType.EndObject)
+        {
+            if (reader.TokenType != JsonTokenType.PropertyName)
+            {
+                continue;
+            }
+
+            string propertyName = reader.GetString()!;
+            if (keysToStrip.Contains(propertyName))
+            {
+                if (reader.Read())
+                {
+                    reader.Skip();
+                }
+
+                continue;
+            }
+
+            writer.WritePropertyName(propertyName);
+            if (reader.Read())
+            {
+                CopyJsonTokenTree(ref reader, writer);
+            }
+        }
+
+        writer.WriteEndObject();
+        writer.Flush();
+    }
+
+    private static void CopyJsonTokenTree(ref Utf8JsonReader reader, Utf8JsonWriter writer)
+    {
+        switch (reader.TokenType)
+        {
+            case JsonTokenType.StartObject:
+                writer.WriteStartObject();
+                while (reader.Read() && reader.TokenType != JsonTokenType.EndObject)
+                {
+                    if (reader.TokenType != JsonTokenType.PropertyName)
+                    {
+                        continue;
+                    }
+
+                    if (reader.ValueIsEscaped)
+                    {
+                        writer.WritePropertyName(reader.GetString()!);
+                    }
+                    else
+                    {
+                        writer.WritePropertyName(reader.ValueSpan);
+                    }
+
+                    if (reader.Read())
+                    {
+                        CopyJsonTokenTree(ref reader, writer);
+                    }
+                }
+
+                writer.WriteEndObject();
+                break;
+
+            case JsonTokenType.StartArray:
+                writer.WriteStartArray();
+                while (reader.Read() && reader.TokenType != JsonTokenType.EndArray)
+                {
+                    CopyJsonTokenTree(ref reader, writer);
+                }
+
+                writer.WriteEndArray();
+                break;
+
+            case JsonTokenType.String:
+                if (reader.ValueIsEscaped)
+                {
+                    writer.WriteStringValue(reader.GetString());
+                }
+                else
+                {
+                    writer.WriteStringValue(reader.ValueSpan);
+                }
+
+                break;
+
+            case JsonTokenType.Number:
+                writer.WriteRawValue(reader.ValueSpan, skipInputValidation: true);
+                break;
+
+            case JsonTokenType.True:
+                writer.WriteBooleanValue(true);
+                break;
+
+            case JsonTokenType.False:
+                writer.WriteBooleanValue(false);
+                break;
+
+            case JsonTokenType.Null:
+                writer.WriteNullValue();
+                break;
+        }
+    }
 
     /// <summary>
     /// Streams the locked layout slice into the device store's temp file,
@@ -1722,6 +2026,7 @@ settings.FocusClickedWidgetOnRaise = false;
         }
 
         stream.Flush();
+        Interlocked.Increment(ref _layoutFileWriteCount);
     });
 
     /// <summary>
@@ -1872,10 +2177,27 @@ settings.FocusClickedWidgetOnRaise = false;
         });
     }
 
+    public bool LastAppearancePreviewWasAnimationOnly { get; private set; }
+
     public void NotifyAppearancePreviewNow()
     {
         _appearancePreviewCts?.Cancel();
+        LastAppearancePreviewWasAnimationOnly = false;
         AppearancePreviewChanged?.Invoke();
+    }
+
+    public void NotifyWidgetAnimationSettingsChangedNow()
+    {
+        _appearancePreviewCts?.Cancel();
+        LastAppearancePreviewWasAnimationOnly = true;
+        try
+        {
+            AppearancePreviewChanged?.Invoke();
+        }
+        finally
+        {
+            LastAppearancePreviewWasAnimationOnly = false;
+        }
     }
 
     /// <summary>
@@ -1914,6 +2236,7 @@ settings.FocusClickedWidgetOnRaise = false;
             return false;
         }
 
+        bool onlyAnimationChanged;
         lock (_lock)
         {
             // Same ownership rules as the commit path: a preview payload
@@ -1923,13 +2246,63 @@ settings.FocusClickedWidgetOnRaise = false;
             // persist the rollback (deep review R13 unified the two
             // previously hand-copied preserve lists).
             PreserveMainOwnedState(_settings, parsed);
+            _prePreviewSettings ??= _settings;
+            onlyAnimationChanged =
+                HasAnyWidgetAnimationDifference(_settings, parsed) &&
+                IsUnchangedOutsideWidgetAnimation(_settings, parsed);
             _settings = parsed;
             _settingsSchemaNewerThanBuild = false;
         }
 
         _appearancePreviewCts?.Cancel();
-        AppearancePreviewChanged?.Invoke();
+        if (!onlyAnimationChanged)
+        {
+            LastAppearancePreviewWasAnimationOnly = false;
+            AppearancePreviewChanged?.Invoke();
+        }
         return true;
+    }
+
+    private static bool HasAnyWidgetAnimationDifference(AppSettings before, AppSettings parsed)
+    {
+        WidgetShellSettingsSlice a = before.WidgetShell;
+        WidgetShellSettingsSlice b = parsed.WidgetShell;
+        return !string.Equals(a.WidgetAnimationEffect, b.WidgetAnimationEffect, StringComparison.Ordinal) ||
+               !string.Equals(a.WidgetAnimationSpeed, b.WidgetAnimationSpeed, StringComparison.Ordinal) ||
+               !string.Equals(a.WidgetAnimationSlideDirection, b.WidgetAnimationSlideDirection, StringComparison.Ordinal) ||
+               !string.Equals(a.WidgetAnimationEasingIntensity, b.WidgetAnimationEasingIntensity, StringComparison.Ordinal) ||
+               a.WidgetAnimationStaggerEnabled != b.WidgetAnimationStaggerEnabled;
+    }
+
+    private static bool IsUnchangedOutsideWidgetAnimation(AppSettings before, AppSettings parsed)
+    {
+        WidgetShellSettingsSlice shell = before.WidgetShell;
+        string origEffect = shell.WidgetAnimationEffect;
+        string origSpeed = shell.WidgetAnimationSpeed;
+        string origDirection = shell.WidgetAnimationSlideDirection;
+        string origEasing = shell.WidgetAnimationEasingIntensity;
+        bool origStagger = shell.WidgetAnimationStaggerEnabled;
+        try
+        {
+            shell.WidgetAnimationEffect = parsed.WidgetShell.WidgetAnimationEffect;
+            shell.WidgetAnimationSpeed = parsed.WidgetShell.WidgetAnimationSpeed;
+            shell.WidgetAnimationSlideDirection = parsed.WidgetShell.WidgetAnimationSlideDirection;
+            shell.WidgetAnimationEasingIntensity = parsed.WidgetShell.WidgetAnimationEasingIntensity;
+            shell.WidgetAnimationStaggerEnabled = parsed.WidgetShell.WidgetAnimationStaggerEnabled;
+
+            return string.Equals(
+                SerializeSettingsSnapshot(before),
+                SerializeSettingsSnapshot(parsed),
+                StringComparison.Ordinal);
+        }
+        finally
+        {
+            shell.WidgetAnimationEffect = origEffect;
+            shell.WidgetAnimationSpeed = origSpeed;
+            shell.WidgetAnimationSlideDirection = origDirection;
+            shell.WidgetAnimationEasingIntensity = origEasing;
+            shell.WidgetAnimationStaggerEnabled = origStagger;
+        }
     }
 
     /// <summary>
@@ -2119,6 +2492,8 @@ settings.FocusClickedWidgetOnRaise = false;
             settings.WidgetNewPlacementTarget);
         settings.WidgetDisplayDisconnectBehavior = NormalizeWidgetDisplayDisconnectBehavior(
             settings.WidgetDisplayDisconnectBehavior);
+        settings.WidgetLayout.WidgetDisplayScalingMode = NormalizeWidgetDisplayScalingMode(
+            settings.WidgetLayout.WidgetDisplayScalingMode);
     }
 
     public const string WidgetNewPlacementCursorDisplay = "CursorDisplay";
@@ -2143,6 +2518,16 @@ settings.FocusClickedWidgetOnRaise = false;
         return string.Equals(value, WidgetDisplayDisconnectCollapseToCapsule)
             ? WidgetDisplayDisconnectCollapseToCapsule
             : WidgetDisplayDisconnectMoveToRemaining;
+    }
+
+    public const string WidgetDisplayScalingFixedSize = "FixedSize";
+    public const string WidgetDisplayScalingElasticScale = "ElasticScale";
+
+    public static string NormalizeWidgetDisplayScalingMode(string? value)
+    {
+        return string.Equals(value, WidgetDisplayScalingElasticScale, StringComparison.Ordinal)
+            ? WidgetDisplayScalingElasticScale
+            : WidgetDisplayScalingFixedSize;
     }
 
     private static bool NormalizeWidgetTopologyLayouts(AppSettings settings)
@@ -2239,7 +2624,8 @@ settings.FocusClickedWidgetOnRaise = false;
         if (settings.WidgetCornerPreference is not (
             WidgetCornerPreferenceSquare or
             WidgetCornerPreferenceSmall or
-            WidgetCornerPreferenceRound))
+            WidgetCornerPreferenceRound or
+            WidgetCornerPreferenceLarge))
         {
             settings.WidgetCornerPreference = WidgetCornerPreferenceRound;
             changed = true;
@@ -2302,95 +2688,38 @@ settings.FocusClickedWidgetOnRaise = false;
             changed = true;
         }
 
-        string? migratedAnimationDirection = settings.WidgetAnimationEffect switch
+        WidgetShellSettingsSlice animationShell = settings.WidgetShell;
+        string normalizedAnimationDirection = Contracts.WidgetAnimationKinds.NormalizeSlideDirectionForEffect(
+            animationShell.WidgetAnimationEffect,
+            animationShell.WidgetAnimationSlideDirection);
+        string normalizedAnimationEffect = Contracts.WidgetAnimationKinds.NormalizeEffect(
+            animationShell.WidgetAnimationEffect);
+        string normalizedAnimationSpeed = Contracts.WidgetAnimationKinds.NormalizeSpeed(
+            animationShell.WidgetAnimationSpeed);
+        string normalizedAnimationEasing = Contracts.WidgetAnimationKinds.NormalizeEasingIntensity(
+            animationShell.WidgetAnimationEasingIntensity);
+
+        if (!string.Equals(animationShell.WidgetAnimationEffect, normalizedAnimationEffect, StringComparison.Ordinal))
         {
-            WidgetAnimationEffectSlideLeft or WidgetAnimationEffectSlideLeftFade =>
-                WidgetAnimationSlideDirectionLeft,
-            WidgetAnimationEffectSlideRight or WidgetAnimationEffectSlideRightFade =>
-                WidgetAnimationSlideDirectionRight,
-            WidgetAnimationEffectSlideUp or WidgetAnimationEffectSlideUpFade =>
-                WidgetAnimationSlideDirectionUp,
-            WidgetAnimationEffectSlideDown or WidgetAnimationEffectSlideDownFade =>
-                WidgetAnimationSlideDirectionDown,
-            _ => null
-        };
-        if (migratedAnimationDirection is not null)
-        {
-            settings.WidgetAnimationEffect = WidgetAnimationEffectSlideFade;
-            settings.WidgetAnimationSlideDirection = migratedAnimationDirection;
-            changed = true;
-        }
-        else if (settings.WidgetAnimationEffect == WidgetAnimationEffectScaleSlide)
-        {
-            settings.WidgetAnimationEffect = WidgetAnimationEffectSlideFade;
+            animationShell.WidgetAnimationEffect = normalizedAnimationEffect;
             changed = true;
         }
 
-        if (settings.WidgetAnimationEffect == WidgetAnimationEffectNone)
+        if (!string.Equals(animationShell.WidgetAnimationSpeed, normalizedAnimationSpeed, StringComparison.Ordinal))
         {
-            settings.WidgetAnimationEffect = WidgetAnimationEffectSlideFade;
-            settings.WidgetAnimationSpeed = WidgetAnimationSpeedStandard;
-            settings.WidgetAnimationSlideDirection = WidgetAnimationSlideDirectionRight;
-            settings.WidgetAnimationEasingIntensity = WidgetAnimationEasingStandard;
-            changed = true;
-        }
-        else if (settings.WidgetAnimationEffect is not (
-            WidgetAnimationEffectFade or
-            WidgetAnimationEffectScaleFade or
-            WidgetAnimationEffectSlideFade or
-            WidgetAnimationEffectZoom or
-            WidgetAnimationEffectEdgeScale or
-            WidgetAnimationEffectTilt or
-            WidgetAnimationEffectWipe))
-        {
-            settings.WidgetAnimationEffect = WidgetAnimationEffectSlideFade;
+            animationShell.WidgetAnimationSpeed = normalizedAnimationSpeed;
             changed = true;
         }
 
-        if (settings.WidgetAnimationSpeed is not (
-            WidgetAnimationSpeedVeryFast or
-            WidgetAnimationSpeedFast or
-            WidgetAnimationSpeedStandard or
-            WidgetAnimationSpeedRelaxed or
-            WidgetAnimationSpeedSlow))
+        if (!string.Equals(animationShell.WidgetAnimationSlideDirection, normalizedAnimationDirection, StringComparison.Ordinal))
         {
-            settings.WidgetAnimationSpeed = WidgetAnimationSpeedStandard;
+            animationShell.WidgetAnimationSlideDirection = normalizedAnimationDirection;
             changed = true;
         }
 
-        if (settings.WidgetAnimationSlideDirection is not (
-            WidgetAnimationSlideDirectionNone or
-            WidgetAnimationSlideDirectionLeft or
-            WidgetAnimationSlideDirectionRight or
-            WidgetAnimationSlideDirectionUp or
-            WidgetAnimationSlideDirectionDown))
+        if (!string.Equals(animationShell.WidgetAnimationEasingIntensity, normalizedAnimationEasing, StringComparison.Ordinal))
         {
-            settings.WidgetAnimationSlideDirection = WidgetAnimationSlideDirectionRight;
-            changed = true;
-        }
-
-        if (settings.WidgetAnimationEffect == WidgetAnimationEffectSlideFade &&
-            settings.WidgetAnimationSlideDirection == WidgetAnimationSlideDirectionNone)
-        {
-            settings.WidgetAnimationSlideDirection = WidgetAnimationSlideDirectionRight;
-            changed = true;
-        }
-
-        if (settings.WidgetAnimationEasingIntensity is not (
-            WidgetAnimationEasingNone or
-            WidgetAnimationEasingLight or
-            WidgetAnimationEasingStandard or
-            WidgetAnimationEasingStrong or
-            WidgetAnimationEasingSpring))
-        {
-            settings.WidgetAnimationEasingIntensity = WidgetAnimationEasingStandard;
-            changed = true;
-        }
-
-        if (!Contracts.WidgetAnimationKinds.UsesSlideDirection(settings.WidgetAnimationEffect) &&
-            settings.WidgetAnimationSlideDirection != WidgetAnimationSlideDirectionNone)
-        {
-            settings.WidgetAnimationSlideDirection = WidgetAnimationSlideDirectionNone;
+            animationShell.WidgetAnimationEasingIntensity = normalizedAnimationEasing;
             changed = true;
         }
 
@@ -2398,6 +2727,17 @@ settings.FocusClickedWidgetOnRaise = false;
         if (!string.Equals(settings.WidgetLayerMode, normalizedLayerMode, StringComparison.Ordinal))
         {
             settings.WidgetLayerMode = normalizedLayerMode;
+            changed = true;
+        }
+
+        string normalizedClickRaiseScope = NormalizeDynamicClickRaiseScopeSetting(
+            settings.WidgetShell.DynamicClickRaiseScope);
+        if (!string.Equals(
+                settings.WidgetShell.DynamicClickRaiseScope,
+                normalizedClickRaiseScope,
+                StringComparison.Ordinal))
+        {
+            settings.WidgetShell.DynamicClickRaiseScope = normalizedClickRaiseScope;
             changed = true;
         }
 
@@ -2747,6 +3087,19 @@ settings.FocusClickedWidgetOnRaise = false;
             changed = true;
         }
 
+        string normalizedMusicSpectrumStyle = NormalizeMusicSpectrumStyle(settings.MusicSpectrumStyle);
+        if (!string.Equals(settings.MusicSpectrumStyle, normalizedMusicSpectrumStyle, StringComparison.Ordinal))
+        {
+            settings.MusicSpectrumStyle = normalizedMusicSpectrumStyle;
+            changed = true;
+        }
+
+        if (settings.Music.MusicLocalLyricsFolder is null)
+        {
+            settings.Music.MusicLocalLyricsFolder = string.Empty;
+            changed = true;
+        }
+
         double normalizedWidgetWidth = double.IsFinite(settings.DefaultWidgetWidth)
             ? Math.Clamp(settings.DefaultWidgetWidth, MinWidgetWidth, 1200)
             : DefaultWidgetWidth;
@@ -2815,6 +3168,21 @@ settings.FocusClickedWidgetOnRaise = false;
             MusicDisplayModeRecordVertical => MusicDisplayModeRecordVertical,
             MusicDisplayModeRecordHorizontal => MusicDisplayModeRecordHorizontal,
             _ => MusicDisplayModeAuto
+        };
+    }
+
+    public static string NormalizeMusicSpectrumStyle(string? style)
+    {
+        return style switch
+        {
+            MusicSpectrumStyleOff => MusicSpectrumStyleOff,
+            MusicSpectrumStyleSymmetricWave => MusicSpectrumStyleSymmetricWave,
+            MusicSpectrumStyleWaveformScrub => MusicSpectrumStyleWaveformScrub,
+            MusicSpectrumStylePeakHoldBars => MusicSpectrumStylePeakHoldBars,
+            MusicSpectrumStyleAuroraSilk => MusicSpectrumStyleAuroraSilk,
+            MusicSpectrumStyleMatrixLed => MusicSpectrumStyleMatrixLed,
+            MusicSpectrumStyleVinylRadialHalo => MusicSpectrumStyleVinylRadialHalo,
+            _ => MusicSpectrumStyleAuto
         };
     }
 
@@ -3059,6 +3427,15 @@ settings.FocusClickedWidgetOnRaise = false;
         };
     }
 
+    public static string NormalizeDynamicClickRaiseScopeSetting(string? value)
+    {
+        return value switch
+        {
+            DynamicClickRaiseScopeSingle => DynamicClickRaiseScopeSingle,
+            _ => DynamicClickRaiseScopeGroup
+        };
+    }
+
     private static bool NormalizeAppearanceSettings(AppSettings settings)
     {
         bool changed = false;
@@ -3107,6 +3484,7 @@ settings.FocusClickedWidgetOnRaise = false;
             changed = true;
         }
 
+        changed |= RetireLegacyWidgets(settings);
         changed |= WidgetGroupSettings.Normalize(settings);
         if (!settings.WidgetGroupsEnabled)
         {
@@ -3117,20 +3495,8 @@ settings.FocusClickedWidgetOnRaise = false;
             changed = true;
         }
 
-        int removedProductivityWidgets = settings.Widgets.RemoveAll(widget => widget.WidgetKind == WidgetKind.Productivity);
-        if (removedProductivityWidgets > 0)
-        {
-            changed = true;
-        }
-
         foreach (var widget in settings.Widgets)
         {
-            if (widget.WidgetKind is WidgetKind.Productivity)
-            {
-                widget.WidgetKind = WidgetKind.File;
-                changed = true;
-            }
-
             if (!WidgetRegistry.Default.IsKnown(widget.WidgetKind))
             {
                 widget.WidgetKind = WidgetKind.File;
@@ -3138,6 +3504,7 @@ settings.FocusClickedWidgetOnRaise = false;
             }
 
             widget.Metadata ??= [];
+            changed |= PruneWidgetFileAddedAtEntries(widget);
 
             if (widget.IconSizeOverride is { } iconSizeOverride)
             {
@@ -3233,7 +3600,7 @@ settings.FocusClickedWidgetOnRaise = false;
                 changed = true;
             }
 
-            if (widget.IsDisabled && widget.WidgetKind != WidgetKind.Glance)
+            if (widget.IsDisabled && widget.WidgetKind is not (WidgetKind.Glance or WidgetKind.Custom))
             {
                 widget.IsDisabled = false;
                 changed = true;
@@ -3243,9 +3610,233 @@ settings.FocusClickedWidgetOnRaise = false;
         return changed;
     }
 
+    private static bool RetireLegacyWidgets(AppSettings settings)
+    {
+        settings.Widgets ??= [];
+        bool hasRetiredWidget = settings.Widgets.Any(
+            widget => widget.WidgetKind is WidgetKind.Productivity or WidgetKind.Search);
+        if (!hasRetiredWidget)
+        {
+            return false;
+        }
+
+        HashSet<string> retiredIds = settings.Widgets
+            .Where(widget => widget.WidgetKind is WidgetKind.Productivity or WidgetKind.Search)
+            .Select(widget => widget.Id)
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .ToHashSet(StringComparer.Ordinal);
+
+        settings.WidgetGroups ??= [];
+        settings.DeletedWidgetIds ??= [];
+        HashSet<string> deletedIds = settings.DeletedWidgetIds.ToHashSet(StringComparer.Ordinal);
+
+        foreach (WidgetGroupConfig? group in settings.WidgetGroups)
+        {
+            if (group?.MemberIds is not { Count: > 0 } ||
+                !group.MemberIds.Any(retiredIds.Contains))
+            {
+                continue;
+            }
+
+            bool activeWasRetired = retiredIds.Contains(group.ActiveMemberId);
+            List<string> remainingMembers = group.MemberIds
+                .Where(id => !retiredIds.Contains(id) &&
+                             !deletedIds.Contains(id) &&
+                             settings.Widgets.Any(w => string.Equals(w.Id, id, StringComparison.Ordinal)))
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+
+            if (activeWasRetired && remainingMembers.Count > 0)
+            {
+                TransferCapsuleIdentityOnRetire(settings, group.ActiveMemberId, remainingMembers[0]);
+                group.ActiveMemberId = remainingMembers[0];
+            }
+
+            group.MemberIds.RemoveAll(retiredIds.Contains);
+
+            if (remainingMembers.Count == 1)
+            {
+                WidgetConfig? survivor = settings.Widgets.FirstOrDefault(
+                    w => string.Equals(w.Id, remainingMembers[0], StringComparison.Ordinal));
+                if (survivor is not null)
+                {
+                    ApplyDissolvedGroupLayoutToMember(group, survivor);
+                    MigrateDissolvedGroupTopologySurface(settings, group.SurfaceId, survivor.Id);
+                }
+            }
+        }
+
+        if (settings.WidgetCapsuleBarOrder is not null && retiredIds.Count > 0)
+        {
+            settings.WidgetCapsuleBarOrder.RemoveAll(retiredIds.Contains);
+        }
+
+        if (settings.WidgetCapsuleFreePlacements is not null)
+        {
+            foreach (string retiredId in retiredIds)
+            {
+                settings.WidgetCapsuleFreePlacements.Remove(retiredId);
+            }
+        }
+
+        if (settings.WidgetTopologyLayouts is not null && retiredIds.Count > 0)
+        {
+            foreach (WidgetTopologyLayoutProfile? profile in settings.WidgetTopologyLayouts.Values)
+            {
+                if (profile?.Surfaces is null)
+                {
+                    continue;
+                }
+
+                foreach (string retiredId in retiredIds)
+                {
+                    profile.Surfaces.Remove(retiredId);
+                }
+            }
+        }
+
+        settings.Widgets.RemoveAll(
+            widget => widget.WidgetKind is WidgetKind.Productivity or WidgetKind.Search);
+        return true;
+    }
+
+    private static void TransferCapsuleIdentityOnRetire(
+        AppSettings settings,
+        string previousWidgetId,
+        string targetWidgetId)
+    {
+        if (string.IsNullOrWhiteSpace(previousWidgetId) ||
+            string.IsNullOrWhiteSpace(targetWidgetId) ||
+            string.Equals(previousWidgetId, targetWidgetId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        if (settings.WidgetCapsuleBarOrder is not null)
+        {
+            int previousIndex = settings.WidgetCapsuleBarOrder.FindIndex(id =>
+                string.Equals(id, previousWidgetId, StringComparison.Ordinal));
+            settings.WidgetCapsuleBarOrder.RemoveAll(id =>
+                string.Equals(id, targetWidgetId, StringComparison.Ordinal));
+            if (previousIndex >= 0 && settings.WidgetCapsuleBarOrder.Count > 0)
+            {
+                previousIndex = Math.Clamp(previousIndex, 0, settings.WidgetCapsuleBarOrder.Count - 1);
+                settings.WidgetCapsuleBarOrder[previousIndex] = targetWidgetId;
+            }
+        }
+
+        if (settings.WidgetCapsuleFreePlacements is not null &&
+            settings.WidgetCapsuleFreePlacements.Remove(previousWidgetId, out WidgetCompactPlacement? placement) &&
+            placement is not null)
+        {
+            settings.WidgetCapsuleFreePlacements[targetWidgetId] = CloneCompactPlacementForRetire(placement)!;
+        }
+    }
+
+    private static void ApplyDissolvedGroupLayoutToMember(WidgetGroupConfig group, WidgetConfig member)
+    {
+        member.X = group.X;
+        member.Y = group.Y;
+        member.PositionAnchor = group.PositionAnchor;
+        member.PositionMarginX = group.PositionMarginX;
+        member.PositionMarginY = group.PositionMarginY;
+        member.PositionMonitorKey = group.PositionMonitorKey;
+        member.PositionMonitorDeviceName = group.PositionMonitorDeviceName;
+        member.PositionMonitorStableId = group.PositionMonitorStableId;
+        member.PositionMonitorWasPrimary = group.PositionMonitorWasPrimary;
+        member.ScreenBindingMode = group.ScreenBindingMode;
+        member.BoundScreenId = group.BoundScreenId;
+        member.BoundScreenLabel = group.BoundScreenLabel;
+        member.DisconnectCollapsedForScreenId = group.DisconnectCollapsedForScreenId;
+        member.BoundsCoordinateVersion = group.BoundsCoordinateVersion;
+        member.Width = group.Width;
+        member.Height = group.Height;
+        member.IsPositionLocked = group.IsPositionLocked;
+        member.IsSizeLocked = group.IsSizeLocked;
+        member.IsCollapsed = group.IsCollapsed;
+        member.CompactPlacement = CloneCompactPlacementForRetire(group.CompactPlacement);
+        member.CompactWidth = group.CompactWidth;
+        member.IsVisible = group.IsVisible;
+
+        WidgetCollapseBehaviorNames.SetOverride(
+            member,
+            WidgetCollapseBehaviorNames.Normalize(
+                group.CollapseBehavior,
+                WidgetCollapseBehavior.System,
+                allowSystem: true));
+    }
+
+    private static WidgetCompactPlacement? CloneCompactPlacementForRetire(WidgetCompactPlacement? source)
+    {
+        return source is null
+            ? null
+            : new WidgetCompactPlacement
+            {
+                X = source.X,
+                Y = source.Y,
+                PositionAnchor = source.PositionAnchor,
+                PositionMarginX = source.PositionMarginX,
+                PositionMarginY = source.PositionMarginY,
+                PositionMonitorKey = source.PositionMonitorKey,
+                PositionMonitorDeviceName = source.PositionMonitorDeviceName,
+                PositionMonitorStableId = source.PositionMonitorStableId,
+                PositionMonitorWasPrimary = source.PositionMonitorWasPrimary,
+                BoundsCoordinateVersion = source.BoundsCoordinateVersion
+            };
+    }
+
+    private static void MigrateDissolvedGroupTopologySurface(
+        AppSettings settings,
+        string? groupSurfaceId,
+        string survivorWidgetId)
+    {
+        if (string.IsNullOrWhiteSpace(groupSurfaceId) ||
+            string.IsNullOrWhiteSpace(survivorWidgetId) ||
+            settings.WidgetTopologyLayouts is null)
+        {
+            return;
+        }
+
+        foreach (WidgetTopologyLayoutProfile? profile in settings.WidgetTopologyLayouts.Values)
+        {
+            if (profile?.Surfaces is not null &&
+                profile.Surfaces.Remove(groupSurfaceId, out WidgetSurfaceLayoutProfile? surface) &&
+                surface is not null)
+            {
+                profile.Surfaces[survivorWidgetId] = surface;
+            }
+        }
+    }
+
     internal static bool NormalizeFeatureWidgetSettings(AppSettings settings)
     {
-        return FeatureWidgetSettings.Normalize(settings);
+        bool changed = false;
+        if (HasExplicitlyDisabledLegacySearchWidget(settings) && settings.SearchHotkeyEnabled)
+        {
+            settings.SearchHotkeyEnabled = false;
+            changed = true;
+        }
+
+        changed |= FeatureWidgetSettings.Normalize(settings);
+        return changed;
+    }
+
+    private static bool HasExplicitlyDisabledLegacySearchWidget(AppSettings settings)
+    {
+        if (settings.FeatureWidgetEnabledStates is null)
+        {
+            return false;
+        }
+
+        foreach ((string key, bool enabled) in settings.FeatureWidgetEnabledStates)
+        {
+            if (string.Equals(key, nameof(WidgetKind.Search), StringComparison.OrdinalIgnoreCase))
+            {
+                return !enabled;
+            }
+        }
+
+        return false;
     }
 
     public static string GetDefaultManagedStorageRootPath()
@@ -3528,6 +4119,14 @@ settings.FocusClickedWidgetOnRaise = false;
                     : NormalizeManagedStorageRootPath(widget.MappedFolderPath);
                 if (!string.Equals(widget.MappedFolderPath, normalizedWidgetPath, StringComparison.OrdinalIgnoreCase))
                 {
+                    string? previousMappedPath = widget.MappedFolderPath;
+                    if (!string.IsNullOrWhiteSpace(previousMappedPath))
+                    {
+                        WidgetPathRebaseHelper.RebaseFolderTree(
+                            widget,
+                            previousMappedPath,
+                            normalizedWidgetPath);
+                    }
                     widget.MappedFolderPath = normalizedWidgetPath;
                     changed = true;
                 }
@@ -3639,8 +4238,12 @@ settings.FocusClickedWidgetOnRaise = false;
             changed = true;
         }
 
-        var gesture = GlobalHotkeyService.NormalizeGesture(settings.GlobalHotkeyModifiers, settings.GlobalHotkeyKey);
-        if (!GlobalHotkeyService.IsValidGesture(gesture))
+
+        var globalActivation = GlobalHotkeyService.NormalizeActivation(
+            settings.Core.GlobalHotkeyActivationKind,
+            settings.Core.GlobalHotkeyModifiers,
+            settings.Core.GlobalHotkeyKey);
+        if (!GlobalHotkeyService.IsValidActivation(globalActivation))
         {
             settings.GlobalHotkeyActivationKind = DefaultGlobalHotkeyActivationKind;
             settings.GlobalHotkeyModifiers = DefaultGlobalHotkeyModifiers;
@@ -3650,7 +4253,15 @@ settings.FocusClickedWidgetOnRaise = false;
 
         // Normalize the search hotkey modifiers.
         int searchNormalizedModifiers = (int)((Models.HotkeyModifierKeys)settings.SearchHotkeyModifiers &
-            (Models.HotkeyModifierKeys.Alt | Models.HotkeyModifierKeys.Control | Models.HotkeyModifierKeys.Shift));
+            (Models.HotkeyModifierKeys.Alt |
+             Models.HotkeyModifierKeys.Control |
+             Models.HotkeyModifierKeys.Shift |
+             Models.HotkeyModifierKeys.Windows));
+        if (!Enum.IsDefined(settings.Search.SearchHotkeyActivationKind))
+        {
+            settings.Search.SearchHotkeyActivationKind = Models.HotkeyActivationKind.Chord;
+            changed = true;
+        }
         if (settings.SearchHotkeyModifiers != searchNormalizedModifiers)
         {
             settings.SearchHotkeyModifiers = searchNormalizedModifiers;
@@ -3661,13 +4272,32 @@ settings.FocusClickedWidgetOnRaise = false;
         // hotkey at a time. When the main hotkey owns it, reset a saved Alt+Space
         // search gesture to the working default (Alt+D) so search stays usable.
         var searchModifiers = (Models.HotkeyModifierKeys)settings.SearchHotkeyModifiers;
-        if (settings.SearchHotkeyKey == 0x20 && searchModifiers == Models.HotkeyModifierKeys.Alt &&
+        if (settings.Core.GlobalHotkeyEnabled && settings.SearchHotkeyKey == 0x20 && searchModifiers == Models.HotkeyModifierKeys.Alt &&
             settings.GlobalHotkeyActivationKind == Models.HotkeyActivationKind.Chord &&
             settings.GlobalHotkeyModifiers == (int)Models.HotkeyModifierKeys.Alt &&
             settings.GlobalHotkeyKey == 0x20)
         {
             settings.SearchHotkeyModifiers = (int)Models.HotkeyModifierKeys.Alt;
+            settings.Search.SearchHotkeyActivationKind = Models.HotkeyActivationKind.Chord;
             settings.SearchHotkeyKey = 0x44; // D
+            changed = true;
+        }
+
+        var normalizedGlobalActivation = GlobalHotkeyService.NormalizeActivation(
+            settings.Core.GlobalHotkeyActivationKind,
+            settings.Core.GlobalHotkeyModifiers,
+            settings.Core.GlobalHotkeyKey);
+        var normalizedSearchActivation = GlobalHotkeyService.NormalizeActivation(
+            settings.Search.SearchHotkeyActivationKind,
+            settings.Search.SearchHotkeyModifiers,
+            settings.Search.SearchHotkeyKey);
+        if (!GlobalHotkeyService.IsValidActivation(normalizedSearchActivation) ||
+            (settings.Core.GlobalHotkeyEnabled &&
+             GlobalHotkeyService.DoActivationsConflict(normalizedSearchActivation, normalizedGlobalActivation)))
+        {
+            settings.Search.SearchHotkeyActivationKind = Models.HotkeyActivationKind.Chord;
+            settings.Search.SearchHotkeyModifiers = (int)Models.HotkeyModifierKeys.Alt;
+            settings.Search.SearchHotkeyKey = 0x44; // D
             changed = true;
         }
 
@@ -3704,6 +4334,233 @@ settings.FocusClickedWidgetOnRaise = false;
         {
             settings.SearchMaxResults = DefaultSearchMaxResults;
             changed = true;
+        }
+
+        string categoryMode = settings.Search.SearchCategoryBarMode?.Trim().ToLowerInvariant() ?? "auto";
+        if (categoryMode is not ("auto" or "always" or "hidden"))
+        {
+            categoryMode = "auto";
+        }
+        if (!string.Equals(settings.Search.SearchCategoryBarMode, categoryMode, StringComparison.Ordinal))
+        {
+            settings.Search.SearchCategoryBarMode = categoryMode;
+            changed = true;
+        }
+
+        string defaultSort = settings.Search.SearchDefaultSortColumn?.Trim().ToLowerInvariant() ?? "relevance";
+        if (defaultSort is not ("relevance" or "date" or "name" or "size"))
+        {
+            defaultSort = "relevance";
+        }
+        if (!string.Equals(settings.Search.SearchDefaultSortColumn, defaultSort, StringComparison.Ordinal))
+        {
+            settings.Search.SearchDefaultSortColumn = defaultSort;
+            changed = true;
+        }
+
+        string defaultWebEngine = settings.Search.SearchDefaultWebEngine?.Trim().ToLowerInvariant() ?? "bing";
+        if (defaultWebEngine is not ("bing" or "google" or "duckduckgo" or "baidu" or "custom"))
+        {
+            defaultWebEngine = "bing";
+        }
+        if (!string.Equals(settings.Search.SearchDefaultWebEngine, defaultWebEngine, StringComparison.Ordinal))
+        {
+            settings.Search.SearchDefaultWebEngine = defaultWebEngine;
+            changed = true;
+        }
+
+        string customWebUrl = settings.Search.SearchCustomWebUrl?.Trim() ?? string.Empty;
+        if (!string.Equals(settings.Search.SearchCustomWebUrl, customWebUrl, StringComparison.Ordinal))
+        {
+            settings.Search.SearchCustomWebUrl = customWebUrl;
+            changed = true;
+        }
+
+        return changed;
+    }
+
+    private static bool NormalizeClipboardSettings(AppSettings settings)
+    {
+        bool changed = false;
+        ClipboardSettingsSlice clipboard = settings.Clipboard;
+
+        if (clipboard.ClipboardMaxImageSizeMb is not (8 or 16 or 32 or 64))
+        {
+            clipboard.ClipboardMaxImageSizeMb = 32;
+            changed = true;
+        }
+
+        if (clipboard.ClipboardMaxTextSizeMb is not (1 or 4 or 16))
+        {
+            clipboard.ClipboardMaxTextSizeMb = 4;
+            changed = true;
+        }
+
+        string clickBehavior = clipboard.ClipboardClickBehavior?.Trim() ?? ClipboardSettingsSlice.ClickCopyOnSinglePasteOnDouble;
+        if (clickBehavior is not (
+            ClipboardSettingsSlice.ClickCopyOnSinglePasteOnDouble or
+            ClipboardSettingsSlice.ClickPasteOnSingle or
+            ClipboardSettingsSlice.ClickCopyOnDouble or
+            ClipboardSettingsSlice.ClickCopyOnSingle))
+        {
+            clickBehavior = ClipboardSettingsSlice.ClickCopyOnSinglePasteOnDouble;
+        }
+
+        if (!string.Equals(clipboard.ClipboardClickBehavior, clickBehavior, StringComparison.Ordinal))
+        {
+            clipboard.ClipboardClickBehavior = clickBehavior;
+            changed = true;
+        }
+
+        string viewMode = clipboard.ClipboardViewMode?.Trim() ?? ClipboardSettingsSlice.ViewModeStandard;
+        if (viewMode is not (
+            ClipboardSettingsSlice.ViewModeStandard or
+            ClipboardSettingsSlice.ViewModeCompact))
+        {
+            viewMode = ClipboardSettingsSlice.ViewModeStandard;
+        }
+
+        if (!string.Equals(clipboard.ClipboardViewMode, viewMode, StringComparison.Ordinal))
+        {
+            clipboard.ClipboardViewMode = viewMode;
+            changed = true;
+        }
+
+        string tabDisplayMode = ClipboardSettingsSlice.NormalizeTabDisplayMode(clipboard.ClipboardTabDisplayMode);
+        if (!string.Equals(clipboard.ClipboardTabDisplayMode, tabDisplayMode, StringComparison.Ordinal))
+        {
+            clipboard.ClipboardTabDisplayMode = tabDisplayMode;
+            changed = true;
+        }
+
+        string density = clipboard.ClipboardCardDensity?.Trim() ?? ClipboardSettingsSlice.DensityStandard;
+        if (density is not (
+            ClipboardSettingsSlice.DensityCompact or
+            ClipboardSettingsSlice.DensityStandard or
+            ClipboardSettingsSlice.DensityRelaxed))
+        {
+            density = ClipboardSettingsSlice.DensityStandard;
+        }
+
+        if (!string.Equals(clipboard.ClipboardCardDensity, density, StringComparison.Ordinal))
+        {
+            clipboard.ClipboardCardDensity = density;
+            changed = true;
+        }
+
+        string secretMode = clipboard.ClipboardSensitiveProtectionMode?.Trim() ?? ClipboardSettingsSlice.SecretProtectionMask;
+        if (secretMode is not (
+            ClipboardSettingsSlice.SecretProtectionMask or
+            ClipboardSettingsSlice.SecretProtectionSkip or
+            ClipboardSettingsSlice.SecretProtectionNone))
+        {
+            secretMode = ClipboardSettingsSlice.SecretProtectionMask;
+        }
+
+        if (!string.Equals(clipboard.ClipboardSensitiveProtectionMode, secretMode, StringComparison.Ordinal))
+        {
+            clipboard.ClipboardSensitiveProtectionMode = secretMode;
+            changed = true;
+        }
+
+        if (clipboard.ClipboardMaxItems is not (100 or 200 or 500 or 1000 or 2000))
+        {
+            clipboard.ClipboardMaxItems = 500;
+            changed = true;
+        }
+
+        if (clipboard.ClipboardRetentionDays is not (0 or 1 or 7 or 30 or 90))
+        {
+            clipboard.ClipboardRetentionDays = 30;
+            changed = true;
+        }
+
+        if (!Enum.IsDefined(clipboard.ClipboardHotkeyActivationKind))
+        {
+            clipboard.ClipboardHotkeyActivationKind = HotkeyActivationKind.Chord;
+            changed = true;
+        }
+
+        int clipboardNormalizedModifiers = (int)((HotkeyModifierKeys)clipboard.ClipboardHotkeyModifiers &
+            (HotkeyModifierKeys.Alt |
+             HotkeyModifierKeys.Control |
+             HotkeyModifierKeys.Shift |
+             HotkeyModifierKeys.Windows));
+        if (clipboard.ClipboardHotkeyModifiers != clipboardNormalizedModifiers)
+        {
+            clipboard.ClipboardHotkeyModifiers = clipboardNormalizedModifiers;
+            changed = true;
+        }
+
+        GlobalHotkeyActivation normalizedHotkey = GlobalHotkeyService.NormalizeActivation(
+            clipboard.ClipboardHotkeyActivationKind,
+            clipboard.ClipboardHotkeyModifiers,
+            clipboard.ClipboardHotkeyKey);
+        if (!GlobalHotkeyService.IsValidActivation(normalizedHotkey))
+        {
+            normalizedHotkey = GlobalHotkeyActivation.FromChord(new GlobalHotkeyGesture(
+                HotkeyModifierKeys.Alt,
+                ClipboardSettingsSlice.DefaultHotkeyKey));
+        }
+
+        if (clipboard.ClipboardHotkeyActivationKind != normalizedHotkey.Kind ||
+            clipboard.ClipboardHotkeyModifiers != (int)normalizedHotkey.Gesture.Modifiers ||
+            clipboard.ClipboardHotkeyKey != normalizedHotkey.Gesture.VirtualKey)
+        {
+            clipboard.ClipboardHotkeyActivationKind = normalizedHotkey.Kind;
+            clipboard.ClipboardHotkeyModifiers = (int)normalizedHotkey.Gesture.Modifiers;
+            clipboard.ClipboardHotkeyKey = normalizedHotkey.Gesture.VirtualKey;
+            changed = true;
+        }
+
+        string popupPlacement = clipboard.ClipboardPopupPlacementMode?.Trim() ?? ClipboardSettingsSlice.PopupFollowCaret;
+        if (popupPlacement is not (
+            ClipboardSettingsSlice.PopupFollowCaret or
+            ClipboardSettingsSlice.PopupFollowMouse or
+            ClipboardSettingsSlice.PopupScreenCenter))
+        {
+            popupPlacement = ClipboardSettingsSlice.PopupFollowCaret;
+        }
+
+        if (!string.Equals(clipboard.ClipboardPopupPlacementMode, popupPlacement, StringComparison.Ordinal))
+        {
+            clipboard.ClipboardPopupPlacementMode = popupPlacement;
+            changed = true;
+        }
+
+        string doubleCopy = clipboard.ClipboardDoubleCopyAction?.Trim() ?? ClipboardSettingsSlice.DoubleCopyNone;
+        if (doubleCopy is not (
+            ClipboardSettingsSlice.DoubleCopyNone or
+            ClipboardSettingsSlice.DoubleCopyPin or
+            ClipboardSettingsSlice.DoubleCopyQuickCapture))
+        {
+            doubleCopy = ClipboardSettingsSlice.DoubleCopyNone;
+        }
+
+        if (!string.Equals(clipboard.ClipboardDoubleCopyAction, doubleCopy, StringComparison.Ordinal))
+        {
+            clipboard.ClipboardDoubleCopyAction = doubleCopy;
+            changed = true;
+        }
+
+        if (clipboard.ClipboardExcludedApps is null)
+        {
+            clipboard.ClipboardExcludedApps = [];
+            changed = true;
+        }
+        else
+        {
+            var normalizedApps = clipboard.ClipboardExcludedApps
+                .Where(entry => !string.IsNullOrWhiteSpace(entry))
+                .Select(entry => entry.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (normalizedApps.Count != clipboard.ClipboardExcludedApps.Count ||
+                !normalizedApps.SequenceEqual(clipboard.ClipboardExcludedApps, StringComparer.Ordinal))
+            {
+                clipboard.ClipboardExcludedApps = normalizedApps;
+                changed = true;
+            }
         }
 
         return changed;
@@ -3778,8 +4635,7 @@ settings.FocusClickedWidgetOnRaise = false;
         }
 
         if (!settings.QuickCaptureShowRecordsTab &&
-            !settings.QuickCaptureShowPinnedTab &&
-            !settings.QuickCaptureShowRecentTab)
+            !settings.QuickCaptureShowPinnedTab)
         {
             settings.QuickCaptureShowRecordsTab = true;
             changed = true;
@@ -3798,23 +4654,22 @@ settings.FocusClickedWidgetOnRaise = false;
             changed = true;
         }
 
-        if (!FeatureWidgetSettings.IsEnabled(settings, WidgetKind.QuickCapture))
-        {
-            if (settings.QuickCaptureClipboardEnabled)
-            {
-                settings.QuickCaptureClipboardEnabled = false;
-                changed = true;
-            }
+        return changed;
+    }
 
-            if (settings.QuickCaptureImageClipboardEnabled)
-            {
-                settings.QuickCaptureImageClipboardEnabled = false;
-                changed = true;
-            }
-        }
-        else if (!settings.QuickCaptureClipboardEnabled && settings.QuickCaptureImageClipboardEnabled)
+    private static bool ClearRetiredQuickCaptureClipboardFlags(AppSettings settings)
+    {
+        bool changed = false;
+        QuickCaptureSettingsSlice quickCapture = settings.QuickCapture;
+        if (quickCapture.QuickCaptureClipboardEnabled)
         {
-            settings.QuickCaptureImageClipboardEnabled = false;
+            quickCapture.QuickCaptureClipboardEnabled = false;
+            changed = true;
+        }
+
+        if (quickCapture.QuickCaptureImageClipboardEnabled)
+        {
+            quickCapture.QuickCaptureImageClipboardEnabled = false;
             changed = true;
         }
 
@@ -3877,6 +4732,7 @@ settings.FocusClickedWidgetOnRaise = false;
         if (!settings.TodoShowAllTab &&
             !settings.TodoShowActiveTab &&
             !settings.TodoShowTodayTab &&
+            !settings.Todo.TodoShowOverdueTab &&
             !settings.TodoShowThisWeekTab &&
             !settings.TodoShowThisMonthTab &&
             !settings.TodoShowImportantTab &&
@@ -3896,6 +4752,13 @@ settings.FocusClickedWidgetOnRaise = false;
         if (settings.TodoDefaultReminderOffsetMinutes != normalizedReminderOffset)
         {
             settings.TodoDefaultReminderOffsetMinutes = normalizedReminderOffset;
+            changed = true;
+        }
+
+        int normalizedAllDayReminderMinutes = NormalizeTodoAllDayReminderTimeMinutes(settings.Todo.TodoAllDayReminderTimeMinutes);
+        if (settings.Todo.TodoAllDayReminderTimeMinutes != normalizedAllDayReminderMinutes)
+        {
+            settings.Todo.TodoAllDayReminderTimeMinutes = normalizedAllDayReminderMinutes;
             changed = true;
         }
 
@@ -3951,7 +4814,6 @@ settings.FocusClickedWidgetOnRaise = false;
     public static bool IsQuickCaptureTabVisible(AppSettings settings, string? view) => view switch
     {
         QuickCaptureDefaultViewPinned => settings.QuickCaptureShowPinnedTab,
-        QuickCaptureDefaultViewRecent => settings.QuickCaptureShowRecentTab,
         _ => settings.QuickCaptureShowRecordsTab
     };
 
@@ -3959,7 +4821,6 @@ settings.FocusClickedWidgetOnRaise = false;
     {
         if (settings.QuickCaptureShowRecordsTab) return QuickCaptureDefaultViewRecords;
         if (settings.QuickCaptureShowPinnedTab) return QuickCaptureDefaultViewPinned;
-        if (settings.QuickCaptureShowRecentTab) return QuickCaptureDefaultViewRecent;
         return QuickCaptureDefaultViewRecords;
     }
 
@@ -3973,6 +4834,7 @@ settings.FocusClickedWidgetOnRaise = false;
     {
         TodoDefaultFilterActive => todo.TodoShowActiveTab,
         TodoDefaultFilterToday => todo.TodoShowTodayTab,
+        TodoDefaultFilterOverdue => todo.TodoShowOverdueTab,
         TodoDefaultFilterThisWeek => todo.TodoShowThisWeekTab,
         TodoDefaultFilterThisMonth => todo.TodoShowThisMonthTab,
         TodoDefaultFilterImportant => todo.TodoShowImportantTab,
@@ -3988,6 +4850,7 @@ settings.FocusClickedWidgetOnRaise = false;
         if (todo.TodoShowAllTab) return TodoDefaultFilterAll;
         if (todo.TodoShowActiveTab) return TodoDefaultFilterActive;
         if (todo.TodoShowTodayTab) return TodoDefaultFilterToday;
+        if (todo.TodoShowOverdueTab) return TodoDefaultFilterOverdue;
         if (todo.TodoShowThisWeekTab) return TodoDefaultFilterThisWeek;
         if (todo.TodoShowThisMonthTab) return TodoDefaultFilterThisMonth;
         if (todo.TodoShowImportantTab) return TodoDefaultFilterImportant;
@@ -3997,6 +4860,9 @@ settings.FocusClickedWidgetOnRaise = false;
 
     public static int NormalizeTodoReminderOffsetMinutes(int minutes) =>
         TodoOptionKinds.NormalizeReminderOffsetMinutes(minutes);
+
+    public static int NormalizeTodoAllDayReminderTimeMinutes(int minutes) =>
+        TodoOptionKinds.NormalizeAllDayReminderTimeMinutes(minutes);
 
     internal static bool NormalizeWeatherSettings(AppSettings settings)
     {
@@ -4086,6 +4952,48 @@ settings.FocusClickedWidgetOnRaise = false;
         int staleRemoved = settings.Widgets.RemoveAll(widget => IsStaleHiddenWidget(settings, widget));
         if (staleRemoved > 0)
         {
+            changed = true;
+        }
+
+        return changed;
+    }
+
+    private static bool PruneWidgetFileAddedAtEntries(WidgetConfig widget)
+    {
+        const int maxTrackedAddedAtEntries = 2048;
+        if (widget.FileAddedAtByPath is null)
+        {
+            widget.FileAddedAtByPath = [];
+            return true;
+        }
+
+        if (widget.WidgetKind != WidgetKind.File)
+        {
+            if (widget.FileAddedAtByPath.Count == 0)
+            {
+                return false;
+            }
+
+            widget.FileAddedAtByPath.Clear();
+            return true;
+        }
+
+        bool changed = false;
+        foreach (string emptyKey in widget.FileAddedAtByPath.Keys
+                     .Where(string.IsNullOrWhiteSpace)
+                     .ToList())
+        {
+            widget.FileAddedAtByPath.Remove(emptyKey);
+            changed = true;
+        }
+
+        if (widget.FileAddedAtByPath.Count > maxTrackedAddedAtEntries)
+        {
+            var retained = widget.FileAddedAtByPath
+                .OrderByDescending(pair => pair.Value)
+                .Take(maxTrackedAddedAtEntries)
+                .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
+            widget.FileAddedAtByPath = retained;
             changed = true;
         }
 

@@ -228,14 +228,18 @@ public partial class SettingsViewModel
             details.Add(_localizationService.T("Settings.Capsule.Overrides.Item.Position"));
         }
 
+        WidgetTitleIconKind iconKind = WidgetTitleIconKindNames.NormalizeKind(
+            WidgetTitleIconKindNames.FromWidgetConfig(widget));
+        string colorIconAssetName = WidgetTitleIconKindNames.GetColorAssetName(iconKind);
         string displayName = string.IsNullOrWhiteSpace(widget.Name)
-            ? GetWidgetKindDisplayName(widget.WidgetKind)
+            ? _localizationService.T(WidgetTitleIconKindNames.GetLocalizationKey(iconKind))
             : widget.Name.Trim();
         return new CapsuleOverrideSettingsItem(
             widget.Id,
             displayName,
             string.Join(" · ", details),
-            GetWidgetKindGlyph(widget.WidgetKind));
+            GetWidgetKindGlyph(widget.WidgetKind),
+            colorIconAssetName);
     }
 
     private string GetWidgetKindDisplayName(WidgetKind kind) => kind switch

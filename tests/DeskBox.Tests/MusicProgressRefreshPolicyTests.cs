@@ -6,8 +6,8 @@ namespace DeskBox.Tests;
 public sealed class MusicProgressRefreshPolicyTests
 {
     [Theory]
-    [InlineData(false, 500)]
-    [InlineData(true, 1000)]
+    [InlineData(false, 1000)]
+    [InlineData(true, 2000)]
     public void ResolveProgressRefreshIntervalMs_UsesLowerCadenceForCapsule(
         bool isCompactCollapsed,
         int expectedIntervalMs)

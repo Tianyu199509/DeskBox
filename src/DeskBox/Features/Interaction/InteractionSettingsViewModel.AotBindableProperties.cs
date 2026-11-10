@@ -6,10 +6,12 @@ namespace DeskBox.Features.Interaction;
 // used by that XAML surface in NativeAOT builds, mirroring the
 // GlanceWidgetViewModel / MusicSettingsViewModel bridge pattern.
 [WinRT.GeneratedBindableCustomProperty([
+    nameof(AvailableClickRaiseScopeOptions),
     nameof(AvailableFileOpenMethodOptions),
     nameof(AvailableLayerModeOptions),
     nameof(AvailableShowDesktopBehaviorOptions),
     nameof(CanShowHotkeyWarning),
+    nameof(ClickRaiseScope),
     nameof(FileOpenMethod),
     nameof(HoverButtonActionsSummary),
     nameof(HotkeyDescription),
@@ -17,6 +19,7 @@ namespace DeskBox.Features.Interaction;
     nameof(HotkeyStatusText),
     nameof(HotkeyText),
     nameof(HotkeyWarningText),
+    nameof(IsDynamicLayerMode),
     nameof(LayerMode),
     nameof(ShowDesktopBehavior),
     nameof(SnapEnabled),

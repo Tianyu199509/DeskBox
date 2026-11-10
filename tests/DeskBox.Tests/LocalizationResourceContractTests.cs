@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
+using DeskBox.Services;
 
 namespace DeskBox.Tests;
 
@@ -115,8 +116,14 @@ public sealed partial class LocalizationResourceContractTests
             IReadOnlyDictionary<string, string> locale = ReadJsonLocale(file);
             foreach ((string key, string value) in locale)
             {
+                bool documentsExpressionSyntax =
+                    key.StartsWith("CustomWidget.ApiDocs.", StringComparison.Ordinal) ||
+                    key.StartsWith("CustomWidget.Cap.", StringComparison.Ordinal);
+                bool hasTemplateLeak = documentsExpressionSyntax
+                    ? value.Contains("${LQ}", StringComparison.Ordinal) || value.Contains("${RQ}", StringComparison.Ordinal)
+                    : value.Contains("${", StringComparison.Ordinal);
                 Assert.False(
-                    value.Contains("${", StringComparison.Ordinal),
+                    hasTemplateLeak,
                     $"{Path.GetFileName(file)}:{key} contains a template placeholder leak.");
                 Assert.False(
                     value.IndexOf('\u0001') >= 0 || value.IndexOf('\u0000') >= 0 || value.IndexOf('\u000b') >= 0,
@@ -184,4 +191,104 @@ public sealed partial class LocalizationResourceContractTests
 
     [GeneratedRegex(@"\{(\d+)(?:[^{}]*)\}", RegexOptions.CultureInvariant)]
     private static partial Regex CompositePlaceholderRegex();
+
+    [GeneratedRegex(
+        @"(?:\b\w+:)?(?:Localized\.(?:Key|HeaderKey|DescriptionKey|PlaceholderKey|PlaceholderTextKey|ToolTipKey|AutomationNameKey|OnContentKey|OffContentKey)|InfoTip\.(?:TitleKey|BodyKey))\s*=\s*""([^""]+)""",
+        RegexOptions.CultureInvariant)]
+    private static partial Regex XamlLocalizedKeyAttributeRegex();
+
+    [Fact]
+    public void EveryXamlLocalizedKeyAndInfoTipKey_ExistsInBaselineLocales()
+    {
+        string root = FindRepositoryRoot();
+        string projectDirectory = Path.Combine(root, "src", "DeskBox");
+        string stringsDirectory = Path.Combine(projectDirectory, "Strings");
+
+        IReadOnlyDictionary<string, string> enUs = ReadJsonLocale(Path.Combine(stringsDirectory, "en-US.json"));
+        IReadOnlyDictionary<string, string> zhCn = ReadJsonLocale(Path.Combine(stringsDirectory, "zh-CN.json"));
+
+        var extractedKeys = new List<(string RelativeFile, string Key)>();
+        foreach (string xamlPath in Directory.EnumerateFiles(projectDirectory, "*.xaml", SearchOption.AllDirectories))
+        {
+            string relativePath = Path.GetRelativePath(projectDirectory, xamlPath);
+            string[] segments = relativePath.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            if (segments.Any(segment =>
+                    segment.Equals("bin", StringComparison.OrdinalIgnoreCase) ||
+                    segment.Equals("obj", StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
+            string xamlContent = File.ReadAllText(xamlPath);
+            foreach (Match match in XamlLocalizedKeyAttributeRegex().Matches(xamlContent))
+            {
+                string key = match.Groups[1].Value.Trim();
+                if (key.Length == 0 || key.StartsWith('{'))
+                {
+                    continue;
+                }
+
+                extractedKeys.Add((relativePath, key));
+            }
+        }
+
+        Assert.NotEmpty(extractedKeys);
+
+        foreach ((string relativeFile, string key) in extractedKeys)
+        {
+            Assert.True(
+                enUs.TryGetValue(key, out string? enValue) && !string.IsNullOrWhiteSpace(enValue),
+                $"XAML file '{relativeFile}' references missing or empty en-US key '{key}'.");
+            Assert.True(
+                zhCn.TryGetValue(key, out string? zhValue) && !string.IsNullOrWhiteSpace(zhValue),
+                $"XAML file '{relativeFile}' references missing or empty zh-CN key '{key}'.");
+        }
+    }
+
+    [Fact]
+    public void ResidentHostKeyFilter_RetainsClipboardAndContentEditorDesktopKeys()
+    {
+        string root = FindRepositoryRoot();
+        string stringsDirectory = Path.Combine(root, "src", "DeskBox", "Strings");
+
+        // Verify the resident-host key predicate directly on both representative subtree paths
+        // and actual baseline locale keys without mutating the process-wide static locale cache.
+        Assert.False(LocalizationService.IsPureSettingsUiKey("Settings.Clipboard.DoubleCopy.Action.OpenPaste"));
+        Assert.False(LocalizationService.IsPureSettingsUiKey("Settings.Clipboard.Hotkey.Status.Conflict"));
+        Assert.False(LocalizationService.IsPureSettingsUiKey("Settings.Clipboard.DoubleCopy.Pin"));
+        Assert.False(LocalizationService.IsPureSettingsUiKey("Settings.Clipboard.Hotkey.Status.GlobalHotkeyConflict"));
+        Assert.False(LocalizationService.IsPureSettingsUiKey("Settings.ContentEditor.EnterBehavior.EnterSaves"));
+
+        Assert.True(LocalizationService.IsPureSettingsUiKey("Settings.About.Description"));
+        Assert.True(LocalizationService.IsPureSettingsUiKey("Settings.About.Version"));
+        Assert.True(LocalizationService.IsPureSettingsUiKey("Settings.Appearance.Theme"));
+
+        foreach (string locale in new[] { "en-US", "zh-CN" })
+        {
+            var dictionary = new Dictionary<string, string>(
+                ReadJsonLocale(Path.Combine(stringsDirectory, locale + ".json")),
+                StringComparer.Ordinal)
+            {
+                ["Settings.Clipboard.DoubleCopy.Action.OpenPaste"] = "Open paste",
+                ["Settings.Clipboard.Hotkey.Status.Conflict"] = "Conflict"
+            };
+
+            Assert.True(dictionary.ContainsKey("Settings.About.Description"));
+            Assert.True(dictionary.ContainsKey("Settings.About.Version"));
+
+            LocalizationService.FilterDictionaryInPlace(dictionary);
+
+            Assert.True(dictionary.ContainsKey("Settings.Clipboard.DoubleCopy.Action.OpenPaste"));
+            Assert.True(dictionary.ContainsKey("Settings.Clipboard.Hotkey.Status.Conflict"));
+            Assert.True(dictionary.ContainsKey("Settings.Clipboard.DoubleCopy.Pin"));
+            Assert.True(dictionary.ContainsKey("Settings.Clipboard.Hotkey.Status.GlobalHotkeyConflict"));
+            Assert.True(dictionary.ContainsKey("Settings.ContentEditor.EnterBehavior.EnterSaves"));
+
+            Assert.False(dictionary.ContainsKey("Settings.About.Description"));
+            Assert.False(dictionary.ContainsKey("Settings.About.Version"));
+            Assert.DoesNotContain(
+                dictionary.Keys,
+                key => key.StartsWith("Settings.About.", StringComparison.Ordinal));
+        }
+    }
 }

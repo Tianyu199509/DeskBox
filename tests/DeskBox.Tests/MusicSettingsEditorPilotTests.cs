@@ -40,6 +40,17 @@ public sealed class MusicSettingsEditorPilotTests : IDisposable
     }
 
     [Fact]
+    public void Defaults_EnableLyricsDisplayOutOfTheBox()
+    {
+        (SettingsService settings, MusicSettingsViewModel editor) = CreateEditor(_root);
+
+        Assert.True(settings.Settings.Music.MusicShowLyrics);
+        Assert.True(settings.Settings.Music.MusicShowCapsuleLyrics);
+        Assert.True(editor.ShowLyrics);
+        Assert.True(editor.ShowCapsuleLyrics);
+    }
+
+    [Fact]
     public void Constructor_ProjectsPersistedPresentationFromTheReadSnapshot()
     {
         (_, MusicSettingsViewModel editor) = CreateEditor(
@@ -51,11 +62,18 @@ public sealed class MusicSettingsEditorPilotTests : IDisposable
                 music.MusicUseArtworkBackdrop = false;
                 music.MusicEnableCoverHoverMotion = false;
                 music.MusicHideTimelineWhenUnavailable = false;
+                music.MusicShowLyrics = false;
+                music.MusicShowCapsuleLyrics = false;
+                music.MusicLocalLyricsFolder = @"D:\Music\Lyrics";
             });
 
         Assert.False(editor.UseArtworkBackdrop);
         Assert.False(editor.EnableCoverHoverMotion);
         Assert.False(editor.HideTimelineWhenUnavailable);
+        Assert.False(editor.ShowLyrics);
+        Assert.False(editor.ShowCapsuleLyrics);
+        Assert.Equal(@"D:\Music\Lyrics", editor.LocalLyricsFolder);
+        Assert.True(editor.HasLocalLyricsFolder);
         Assert.Equal(MusicDisplayModes.Cover, editor.DisplayMode);
     }
 
@@ -79,14 +97,20 @@ public sealed class MusicSettingsEditorPilotTests : IDisposable
         editor.UseArtworkBackdrop = false;
         editor.EnableCoverHoverMotion = false;
         editor.HideTimelineWhenUnavailable = false;
+        editor.ShowLyrics = false;
+        editor.ShowCapsuleLyrics = false;
+        editor.LocalLyricsFolder = @"D:\Music\Lrc";
         editor.DisplayMode = MusicDisplayModes.RecordVertical;
 
         MusicSettingsSlice music = settings.Settings.Music;
         Assert.False(music.MusicUseArtworkBackdrop);
         Assert.False(music.MusicEnableCoverHoverMotion);
         Assert.False(music.MusicHideTimelineWhenUnavailable);
+        Assert.False(music.MusicShowLyrics);
+        Assert.False(music.MusicShowCapsuleLyrics);
+        Assert.Equal(@"D:\Music\Lrc", music.MusicLocalLyricsFolder);
         Assert.Equal(MusicDisplayModes.RecordVertical, music.MusicDisplayMode);
-        Assert.Equal(4, notified);
+        Assert.Equal(7, notified);
     }
 
     [Fact]
@@ -102,6 +126,9 @@ public sealed class MusicSettingsEditorPilotTests : IDisposable
         music.MusicUseArtworkBackdrop = false;
         music.MusicEnableCoverHoverMotion = false;
         music.MusicHideTimelineWhenUnavailable = false;
+        music.MusicShowLyrics = false;
+        music.MusicShowCapsuleLyrics = false;
+        music.MusicLocalLyricsFolder = @"D:\External\Lyrics";
 
         int notifiedBeforeSync = notified;
         editor.SyncPresentation();
@@ -109,6 +136,9 @@ public sealed class MusicSettingsEditorPilotTests : IDisposable
         Assert.False(editor.UseArtworkBackdrop);
         Assert.False(editor.EnableCoverHoverMotion);
         Assert.False(editor.HideTimelineWhenUnavailable);
+        Assert.False(editor.ShowLyrics);
+        Assert.False(editor.ShowCapsuleLyrics);
+        Assert.Equal(@"D:\External\Lyrics", editor.LocalLyricsFolder);
         Assert.Equal(MusicDisplayModes.Controls, editor.DisplayMode);
         Assert.Equal(notifiedBeforeSync, notified);
     }
@@ -127,6 +157,17 @@ public sealed class MusicSettingsEditorPilotTests : IDisposable
         Assert.Equal(MusicDisplayModes.RecordHorizontal, options[4].Value);
         Assert.Equal("Settings.Music.DisplayMode.Auto", options[0].DisplayName);
         Assert.Equal("Settings.Music.DisplayMode.RecordHorizontal", options[4].DisplayName);
+
+        SettingsOption[] spectrumOptions = [.. editor.AvailableSpectrumStyleOptions];
+        Assert.Equal(8, spectrumOptions.Length);
+        Assert.Equal(MusicSpectrumStyles.Auto, spectrumOptions[0].Value);
+        Assert.Equal(MusicSpectrumStyles.SymmetricWave, spectrumOptions[1].Value);
+        Assert.Equal(MusicSpectrumStyles.WaveformScrub, spectrumOptions[2].Value);
+        Assert.Equal(MusicSpectrumStyles.PeakHoldBars, spectrumOptions[3].Value);
+        Assert.Equal(MusicSpectrumStyles.AuroraSilk, spectrumOptions[4].Value);
+        Assert.Equal(MusicSpectrumStyles.MatrixLed, spectrumOptions[5].Value);
+        Assert.Equal(MusicSpectrumStyles.VinylRadialHalo, spectrumOptions[6].Value);
+        Assert.Equal(MusicSpectrumStyles.Off, spectrumOptions[7].Value);
     }
 
     [Fact]
@@ -206,13 +247,15 @@ public sealed class MusicSettingsEditorPilotTests : IDisposable
         string sync = File.ReadAllText(
             TestPaths.FromRepository("src/DeskBox/ViewModels/SettingsViewModel.SettingsSync.cs"));
 
-        // {Binding} markup stays (WMC1510 count unchanged); only the paths
-        // and the section DataContext change.
+        // {Binding} markup stays (WMC1510 count unchanged); lyrics cards
+        // bind via compiled {x:Bind} typed to MusicSettingsViewModel.
         Assert.Contains("ItemsSource=\"{Binding AvailableDisplayModeOptions}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("controls:SettingsComboBox.Value=\"{Binding DisplayMode, Mode=TwoWay}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("IsOn=\"{Binding UseArtworkBackdrop, Mode=TwoWay}\"", xaml, StringComparison.Ordinal);
         Assert.Contains("IsOn=\"{Binding EnableCoverHoverMotion, Mode=TwoWay}\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("IsOn=\"{Binding HideTimelineWhenUnavailable, Mode=TwoWay}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("IsOn=\"{x:Bind ShowLyrics, Mode=TwoWay}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("IsOn=\"{x:Bind ShowCapsuleLyrics, Mode=TwoWay}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"{x:Bind LocalLyricsFolderDisplayText, Mode=OneWay}\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("{Binding MusicUseArtworkBackdrop", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("{Binding MusicEnableCoverHoverMotion", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("{Binding SelectedMusicDisplayMode", xaml, StringComparison.Ordinal);
@@ -236,6 +279,9 @@ public sealed class MusicSettingsEditorPilotTests : IDisposable
         Assert.Contains("nameof(UseArtworkBackdrop)", editorBridge, StringComparison.Ordinal);
         Assert.Contains("nameof(EnableCoverHoverMotion)", editorBridge, StringComparison.Ordinal);
         Assert.Contains("nameof(HideTimelineWhenUnavailable)", editorBridge, StringComparison.Ordinal);
+        Assert.Contains("nameof(ShowLyrics)", editorBridge, StringComparison.Ordinal);
+        Assert.Contains("nameof(ShowCapsuleLyrics)", editorBridge, StringComparison.Ordinal);
+        Assert.Contains("nameof(LocalLyricsFolder)", editorBridge, StringComparison.Ordinal);
 
         // External refresh paths re-sync the editor projection instead of
         // assigning shell facade properties.

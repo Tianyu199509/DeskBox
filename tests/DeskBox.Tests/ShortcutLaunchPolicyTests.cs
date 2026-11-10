@@ -161,17 +161,24 @@ public sealed class ShortcutLaunchPolicyTests
     }
 
     [Fact]
-    public void StackPopoverMemberDrag_KeepsItsMembershipSemantics()
+    public void StackPopoverMemberDrag_LaunchesOnMainSurfaceButStaysReorderInsidePopover()
     {
-        // Popover paths address stack membership, not files to hand an
-        // application, so the reorder gesture must survive.
         Assert.Equal(
             ShortcutLaunchDecision.None,
             ShortcutLaunchPolicy.EvaluateInternalDrag(
                 isDeskBoxFileDrag: true,
                 isStackPopoverMemberDrag: true,
                 paths: [@"C:\grid\photo.png"],
-                shortcutPath: @"C:\grid\Photoshop.lnk"));
+                shortcutPath: @"C:\grid\Photoshop.lnk",
+                targetHostedInStackPopover: true));
+        Assert.Equal(
+            ShortcutLaunchDecision.Launch,
+            ShortcutLaunchPolicy.EvaluateInternalDrag(
+                isDeskBoxFileDrag: true,
+                isStackPopoverMemberDrag: true,
+                paths: [@"C:\grid\photo.png"],
+                shortcutPath: @"C:\grid\Photoshop.lnk",
+                targetHostedInStackPopover: false));
     }
 
     [Fact]

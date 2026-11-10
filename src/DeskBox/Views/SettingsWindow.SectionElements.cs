@@ -42,90 +42,79 @@ public sealed partial class SettingsWindow
 
     private global::DeskBox.Views.SettingsSections.AppearanceSettingsSection AppearanceSection =>
         FindCreatedSectionElement<global::DeskBox.Views.SettingsSections.AppearanceSettingsSection>("Appearance", "AppearanceSection")!;
-    private global::Microsoft.UI.Xaml.Controls.StackPanel AppearanceMaterialSettingsSection =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("AppearanceMaterialSettings", "AppearanceMaterialSettingsSection")!;
-    private global::Microsoft.UI.Xaml.Controls.StackPanel AppearanceDensitySettingsSection =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("AppearanceDensitySettings", "AppearanceDensitySettingsSection")!;
-    private global::Microsoft.UI.Xaml.Controls.StackPanel AppearanceWindowSettingsSection =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("AppearanceWindowSettings", "AppearanceWindowSettingsSection")!;
-    private global::Microsoft.UI.Xaml.Controls.StackPanel AppearanceAnimationSettingsSection =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("AppearanceAnimationSettings", "AppearanceAnimationSettingsSection")!;
     private global::Microsoft.UI.Xaml.Controls.StackPanel WidgetGroupsSection =>
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("WidgetGroups", "WidgetGroupsSection")!;
-    private global::DeskBox.Views.SettingsSections.CapsuleModeSettingsSection CapsuleModeSection =>
-        FindCreatedSectionElement<global::DeskBox.Views.SettingsSections.CapsuleModeSettingsSection>("CapsuleMode", "CapsuleModeSection")!;
-    private global::Microsoft.UI.Xaml.Controls.StackPanel CapsuleOverridesSettingsSection =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("CapsuleOverridesSettings", "CapsuleOverridesSettingsSection")!;
+    private global::Microsoft.UI.Xaml.Controls.StackPanel? WidgetGroupsOverviewPanel =>
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("WidgetGroups", "WidgetGroupsOverviewPanel");
+    private global::Microsoft.UI.Xaml.Controls.StackPanel? WidgetGroupDetailSubPagePanel =>
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("WidgetGroups", "WidgetGroupDetailSubPagePanel");
+    [DynamicDependency(
+        DynamicallyAccessedMemberTypes.All,
+        typeof(global::Microsoft.UI.Xaml.Controls.ContentControl))]
+    private global::Microsoft.UI.Xaml.Controls.ContentControl? FindWidgetGroupDetailPresenter() =>
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.ContentControl>("WidgetGroups", "WidgetGroupDetailPresenter");
+    private global::Microsoft.UI.Xaml.Controls.ContentControl? WidgetGroupDetailPresenter => FindWidgetGroupDetailPresenter();
     private global::DeskBox.Views.SettingsSections.FileWidgetSettingsSection AppearanceDetailSection =>
         FindCreatedSectionElement<global::DeskBox.Views.SettingsSections.FileWidgetSettingsSection>("AppearanceDetail", "AppearanceDetailSection")!;
-    private global::DeskBox.Views.SettingsSections.DesktopOrganizationSettingsSection DesktopOrganizationSettingsSection =>
-        FindCreatedSectionElement<global::DeskBox.Views.SettingsSections.DesktopOrganizationSettingsSection>("DesktopOrganizationSettings", "DesktopOrganizationSettingsSection")!;
     private global::DeskBox.Views.SettingsSections.DisplaySettingsSection DisplaysSection =>
         FindCreatedSectionElement<global::DeskBox.Views.SettingsSections.DisplaySettingsSection>("Displays", "DisplaysSection")!;
-    private global::Microsoft.UI.Xaml.Controls.StackPanel FileDisplaySettingsSection =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("FileDisplaySettings", "FileDisplaySettingsSection")!;
-    private global::Microsoft.UI.Xaml.Controls.StackPanel FileStorageSettingsSection =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("FileStorageSettings", "FileStorageSettingsSection")!;
-    private global::Microsoft.UI.Xaml.Controls.InfoBar ManagedStoragePathWarningBorder =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.InfoBar>("FileStorageSettings", "ManagedStoragePathWarningBorder")!;
-    private global::Microsoft.UI.Xaml.Controls.TextBlock ManagedStoragePathWarningText =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.TextBlock>("FileStorageSettings", "ManagedStoragePathWarningText")!;
-    private global::CommunityToolkit.WinUI.Controls.SettingsCard DragOutActionCard =>
-        FindCreatedSectionElement<global::CommunityToolkit.WinUI.Controls.SettingsCard>("FileStorageSettings", "DragOutActionCard")!;
-    private global::Microsoft.UI.Xaml.Controls.ToggleSwitch DragOutModifierTipToggle =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.ToggleSwitch>("FileStorageSettings", "DragOutModifierTipToggle")!;
-    private global::Microsoft.UI.Xaml.Controls.StackPanel PathActionsPanel =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("FileStorageSettings", "PathActionsPanel")!;
-    private global::Microsoft.UI.Xaml.Controls.Button OpenPathButton =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Button>("FileStorageSettings", "OpenPathButton")!;
-    private global::Microsoft.UI.Xaml.Controls.Button PinQuickAccessButton =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Button>("FileStorageSettings", "PinQuickAccessButton")!;
-    private global::Microsoft.UI.Xaml.Controls.Button ChangePathButton =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Button>("FileStorageSettings", "ChangePathButton")!;
-    private global::Microsoft.UI.Xaml.Controls.Button CleanupStorageButton =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Button>("FileStorageSettings", "CleanupStorageButton")!;
-    private global::Microsoft.UI.Xaml.Controls.ToggleSwitch ManagedStorageDesktopShortcutToggle =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.ToggleSwitch>("FileStorageSettings", "ManagedStorageDesktopShortcutToggle")!;
     private global::Microsoft.UI.Xaml.Controls.StackPanel FileStackSettingsSection =>
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("FileStackSettings", "FileStackSettingsSection")!;
     private global::Microsoft.UI.Xaml.Controls.ListView FileStackRulesListView =>
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.ListView>("FileStackSettings", "FileStackRulesListView")!;
     private global::Microsoft.UI.Xaml.Controls.StackPanel InteractionSection =>
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("Interaction", "InteractionSection")!;
-    private global::Microsoft.UI.Xaml.Controls.StackPanel InteractionWindowSettingsSection =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("InteractionWindowSettings", "InteractionWindowSettingsSection")!;
+    private global::Microsoft.UI.Xaml.Controls.StackPanel? InteractionOverviewPanel =>
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("Interaction", "InteractionOverviewPanel");
+    private global::Microsoft.UI.Xaml.Controls.StackPanel? CapsuleModeSubPagePanel =>
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("Interaction", "CapsuleModeSubPagePanel");
+    private global::CommunityToolkit.WinUI.Controls.SettingsCard? CapsuleModeEntryCard =>
+        FindCreatedSectionElement<global::CommunityToolkit.WinUI.Controls.SettingsCard>("Interaction", "CapsuleModeEntryCard");
+    private global::Microsoft.UI.Xaml.Controls.ComboBox? CapsuleModeEntryComboBox =>
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.ComboBox>("Interaction", "CapsuleModeEntryComboBox");
+    private global::DeskBox.Views.SettingsSections.CapsuleModeSettingsSection CapsuleModeSection =>
+        FindCreatedSectionElement<global::DeskBox.Views.SettingsSections.CapsuleModeSettingsSection>("Interaction", "CapsuleModeSection")!;
+    private global::CommunityToolkit.WinUI.Controls.SettingsCard? DisplaysEntryCard =>
+        FindCreatedSectionElement<global::CommunityToolkit.WinUI.Controls.SettingsCard>("Interaction", "DisplaysEntryCard");
     private global::Microsoft.UI.Xaml.Controls.Grid GlobalHotkeyCustomRow =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Grid>("InteractionWindowSettings", "GlobalHotkeyCustomRow")!;
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Grid>("Interaction", "GlobalHotkeyCustomRow")!;
     private global::Microsoft.UI.Xaml.Controls.Grid GlobalHotkeyActionsPanel =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Grid>("InteractionWindowSettings", "GlobalHotkeyActionsPanel")!;
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Grid>("Interaction", "GlobalHotkeyActionsPanel")!;
     private global::Microsoft.UI.Xaml.Controls.Button GlobalHotkeyCaptureButton =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Button>("InteractionWindowSettings", "GlobalHotkeyCaptureButton")!;
-    private global::Microsoft.UI.Xaml.Controls.Button ResetGlobalHotkeyButton =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Button>("InteractionWindowSettings", "ResetGlobalHotkeyButton")!;
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Button>("Interaction", "GlobalHotkeyCaptureButton")!;
     private global::Microsoft.UI.Xaml.Controls.InfoBar GlobalHotkeyReservedWarning =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.InfoBar>("InteractionWindowSettings", "GlobalHotkeyReservedWarning")!;
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.InfoBar>("Interaction", "GlobalHotkeyReservedWarning")!;
     private global::Microsoft.UI.Xaml.Controls.ToggleSwitch DesktopDoubleClickToggle =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.ToggleSwitch>("InteractionWindowSettings", "DesktopDoubleClickToggle")!;
-    private global::Microsoft.UI.Xaml.Controls.StackPanel ManagedStorageSection =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("ManagedStorage", "ManagedStorageSection")!;
-    private global::Microsoft.UI.Xaml.Controls.TextBlock ManagedStorageSummaryText =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.TextBlock>("ManagedStorage", "ManagedStorageSummaryText")!;
-    private global::Microsoft.UI.Xaml.Controls.Button ManagedStorageRefreshButton =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Button>("ManagedStorage", "ManagedStorageRefreshButton")!;
-    private global::Microsoft.UI.Xaml.Controls.Border ManagedStorageEmptyState =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Border>("ManagedStorage", "ManagedStorageEmptyState")!;
-    private global::Microsoft.UI.Xaml.Controls.StackPanel ManagedStorageFolderList =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("ManagedStorage", "ManagedStorageFolderList")!;
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.ToggleSwitch>("Interaction", "DesktopDoubleClickToggle")!;
     private global::Microsoft.UI.Xaml.Controls.StackPanel FeatureWidgetsSection =>
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("FeatureWidgets", "FeatureWidgetsSection")!;
+    private global::Microsoft.UI.Xaml.Controls.StackPanel FeatureWidgetsHubHeaderPanel =>
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("FeatureWidgets", "FeatureWidgetsHubHeaderPanel")!;
+    private global::Microsoft.UI.Xaml.Controls.TextBlock FeatureWidgetsHubTitleText =>
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.TextBlock>("FeatureWidgets", "FeatureWidgetsHubTitleText")!;
+    // Segmented is a managed C# control instantiated via XamlTypeInfo and
+    // directly referenced by SettingsWindow.g.cs (SelectionChanged + x:Bind);
+    // unlike the unreferenced native PasswordBox below, rooting All members
+    // here is unnecessary and pulls dead net8.0 reflection helpers into
+    // Native AOT codegen (IL3050).
+    private global::CommunityToolkit.WinUI.Controls.Segmented FeatureWidgetsHubSegmented =>
+        FindCreatedSectionElement<global::CommunityToolkit.WinUI.Controls.Segmented>("FeatureWidgets", "FeatureWidgetsHubSegmented")!;
+    private global::Microsoft.UI.Xaml.Controls.StackPanel CustomWidgetsToolbarPanel =>
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("FeatureWidgets", "CustomWidgetsToolbarPanel")!;
+    private global::Microsoft.UI.Xaml.Controls.StackPanel FeatureWidgetListHost =>
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("FeatureWidgets", "FeatureWidgetListHost")!;
+    private global::Microsoft.UI.Xaml.Controls.StackPanel CustomWidgetHostPanel =>
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("FeatureWidgets", "CustomWidgetHostPanel")!;
     private global::Microsoft.UI.Xaml.Controls.StackPanel FeatureWidgetList =>
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("FeatureWidgets", "FeatureWidgetList")!;
     private global::Microsoft.UI.Xaml.Controls.StackPanel QuickCaptureSettingsSection =>
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("QuickCaptureSettings", "QuickCaptureSettingsSection")!;
-    private global::Microsoft.UI.Xaml.Controls.ToggleSwitch QuickCaptureClipboardToggle =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.ToggleSwitch>("QuickCaptureSettings", "QuickCaptureClipboardToggle")!;
+    private global::Microsoft.UI.Xaml.Controls.ComboBox QuickCaptureAttachmentStorageModeComboBox =>
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.ComboBox>("QuickCaptureSettings", "QuickCaptureAttachmentStorageModeComboBox")!;
     private global::Microsoft.UI.Xaml.Controls.StackPanel TodoSettingsSection =>
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("TodoSettings", "TodoSettingsSection")!;
+    private global::Microsoft.UI.Xaml.Controls.ComboBox TodoAttachmentStorageModeComboBox =>
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.ComboBox>("TodoSettings", "TodoAttachmentStorageModeComboBox")!;
     private global::Microsoft.UI.Xaml.Controls.StackPanel MusicSettingsSection =>
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("MusicSettings", "MusicSettingsSection")!;
     private global::Microsoft.UI.Xaml.Controls.StackPanel WeatherSettingsSection =>
@@ -134,40 +123,44 @@ public sealed partial class SettingsWindow
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.AutoSuggestBox>("WeatherSettings", "WeatherCitySearchBox")!;
     private global::DeskBox.Views.SettingsSections.GlanceWidgetSettingsSection GlanceSettingsSection =>
         FindCreatedSectionElement<global::DeskBox.Views.SettingsSections.GlanceWidgetSettingsSection>("GlanceSettings", "GlanceSettingsSection")!;
+    private global::DeskBox.Views.SettingsSections.CustomWidgetSettingsSection CustomWidgetSettingsSection =>
+        FindCreatedSectionElement<global::DeskBox.Views.SettingsSections.CustomWidgetSettingsSection>("CustomWidgetSettings", "CustomWidgetSettingsSection")!;
+    private global::DeskBox.Views.SettingsSections.AiSettingsSection AiSettingsSection =>
+        FindCreatedSectionElement<global::DeskBox.Views.SettingsSections.AiSettingsSection>("AiSettings", "AiSettingsSection")!;
+    private global::DeskBox.Views.SettingsSections.ClipboardSettingsSection ClipboardSettingsSection =>
+        FindCreatedSectionElement<global::DeskBox.Views.SettingsSections.ClipboardSettingsSection>("ClipboardSettings", "ClipboardSettingsSection")!;
     private global::DeskBox.Views.SettingsSections.SearchSettingsSection SearchSettingsSection =>
         FindCreatedSectionElement<global::DeskBox.Views.SettingsSections.SearchSettingsSection>("SearchSettings", "SearchSettingsSection")!;
-    private global::Microsoft.UI.Xaml.Controls.StackPanel PerformanceSettingsSection =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("PerformanceSettings", "PerformanceSettingsSection")!;
     private global::Microsoft.UI.Xaml.Controls.StackPanel MaintenanceSection =>
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("Maintenance", "MaintenanceSection")!;
-    private global::Microsoft.UI.Xaml.Controls.StackPanel BackupRestoreSettingsSection =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("BackupRestoreSettings", "BackupRestoreSettingsSection")!;
+    private global::Microsoft.UI.Xaml.Controls.StackPanel? MaintenanceOverviewPanel =>
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("Maintenance", "MaintenanceOverviewPanel");
+    private global::Microsoft.UI.Xaml.Controls.StackPanel? AutomaticBackupSubPagePanel =>
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("Maintenance", "AutomaticBackupSubPagePanel");
+    private global::Microsoft.UI.Xaml.Controls.StackPanel? CloudBackupSubPagePanel =>
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("Maintenance", "CloudBackupSubPagePanel");
+    private global::CommunityToolkit.WinUI.Controls.SettingsCard? AutomaticBackupEntryCard =>
+        FindCreatedSectionElement<global::CommunityToolkit.WinUI.Controls.SettingsCard>("Maintenance", "AutomaticBackupEntryCard");
+    private global::Microsoft.UI.Xaml.Controls.ToggleSwitch? AutomaticBackupEntryToggle =>
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.ToggleSwitch>("Maintenance", "AutomaticBackupEntryToggle");
+    private global::CommunityToolkit.WinUI.Controls.SettingsCard? CloudBackupEntryCard =>
+        FindCreatedSectionElement<global::CommunityToolkit.WinUI.Controls.SettingsCard>("Maintenance", "CloudBackupEntryCard");
+    private global::Microsoft.UI.Xaml.Controls.ToggleSwitch? CloudBackupEntryToggle =>
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.ToggleSwitch>("Maintenance", "CloudBackupEntryToggle");
     private global::Microsoft.UI.Xaml.Controls.Button RestoreDataBackupButton =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Button>("BackupRestoreSettings", "RestoreDataBackupButton")!;
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Button>("Maintenance", "RestoreDataBackupButton")!;
     private global::Microsoft.UI.Xaml.Controls.Button ExportDataBackupButton =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Button>("BackupRestoreSettings", "ExportDataBackupButton")!;
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Button>("Maintenance", "ExportDataBackupButton")!;
     private global::Microsoft.UI.Xaml.Controls.Button CreateBackupSnapshotButton =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Button>("BackupRestoreSettings", "CreateBackupSnapshotButton")!;
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Button>("Maintenance", "CreateBackupSnapshotButton")!;
     private global::Microsoft.UI.Xaml.Controls.Button OpenBackupFolderButton =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Button>("BackupRestoreSettings", "OpenBackupFolderButton")!;
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Button>("Maintenance", "OpenBackupFolderButton")!;
     private global::Microsoft.UI.Xaml.Controls.Button RefreshBackupSnapshotsButton =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Button>("BackupRestoreSettings", "RefreshBackupSnapshotsButton")!;
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Button>("Maintenance", "RefreshBackupSnapshotsButton")!;
     private global::Microsoft.UI.Xaml.Controls.TextBlock BackupSnapshotSummaryText =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.TextBlock>("BackupRestoreSettings", "BackupSnapshotSummaryText")!;
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.TextBlock>("Maintenance", "BackupSnapshotSummaryText")!;
     private global::Microsoft.UI.Xaml.Controls.ListView BackupSnapshotsList =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.ListView>("BackupRestoreSettings", "BackupSnapshotsList")!;
-    private global::Microsoft.UI.Xaml.Controls.StackPanel DataHealthSettingsSection =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("DataHealthSettings", "DataHealthSettingsSection")!;
-    private global::Microsoft.UI.Xaml.Controls.TextBlock AttachmentHealthSummaryText =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.TextBlock>("DataHealthSettings", "AttachmentHealthSummaryText")!;
-    private global::Microsoft.UI.Xaml.Controls.Button CheckAttachmentHealthButton =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Button>("DataHealthSettings", "CheckAttachmentHealthButton")!;
-    private global::Microsoft.UI.Xaml.Controls.StackPanel ResetSettingsSection =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("ResetSettings", "ResetSettingsSection")!;
-    private global::Microsoft.UI.Xaml.Controls.StackPanel CompatibilityDiagnosticsSettingsSection =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("CompatibilityDiagnosticsSettings", "CompatibilityDiagnosticsSettingsSection")!;
-    private global::Microsoft.UI.Xaml.Controls.Button ExportDiagnosticsButton =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Button>("CompatibilityDiagnosticsSettings", "ExportDiagnosticsButton")!;
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.ListView>("Maintenance", "BackupSnapshotsList")!;
     private global::Microsoft.UI.Xaml.Controls.StackPanel AboutSection =>
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("About", "AboutSection")!;
     private global::Microsoft.UI.Xaml.Controls.Grid AboutInfoGrid =>
@@ -192,6 +185,15 @@ public sealed partial class SettingsWindow
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Button>("About", "OpenManualUpdateDownloadButton")!;
     private global::Microsoft.UI.Xaml.Controls.Button StoreSupportButton =>
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Button>("About", "StoreSupportButton")!;
+    private global::CommunityToolkit.WinUI.Controls.SettingsExpander? AboutDiagnosticsExpander =>
+        FindCreatedSectionElement<global::CommunityToolkit.WinUI.Controls.SettingsExpander>("About", "AboutDiagnosticsExpander");
+    private global::Microsoft.UI.Xaml.Controls.TextBlock AttachmentHealthSummaryText =>
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.TextBlock>("About", "AttachmentHealthSummaryText")!;
+    private global::Microsoft.UI.Xaml.Controls.Button CheckAttachmentHealthButton =>
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Button>("About", "CheckAttachmentHealthButton")!;
+    private global::Microsoft.UI.Xaml.Controls.Button ExportDiagnosticsButton =>
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Button>("About", "ExportDiagnosticsButton")!;
+
     // P1-1 (incident 2026-09-30 §4): the cloud-backup PasswordBox is the one
     // deferred-section control the XAML compiler never references — it has no
     // x:Bind and no managed handler, so SettingsWindow.g.cs / XamlTypeInfo
@@ -207,7 +209,7 @@ public sealed partial class SettingsWindow
         DynamicallyAccessedMemberTypes.All,
         typeof(global::Microsoft.UI.Xaml.Controls.PasswordBox))]
     private global::Microsoft.UI.Xaml.Controls.PasswordBox? FindCloudBackupPasswordBox() =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.PasswordBox>("CloudBackupSettings", "CloudBackupPasswordBox");
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.PasswordBox>("Maintenance", "CloudBackupPasswordBox");
 
     // Nullable by contract: the section is created on demand (DeferredSections),
     // so a consumer can run before creation or against a torn-down window.

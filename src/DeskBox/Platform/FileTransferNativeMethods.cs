@@ -108,4 +108,18 @@ internal static unsafe partial class FileTransferNativeMethods
         int fileInformationClass,
         out FileIdInfo lpFileInformation,
         int dwBufferSize);
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct FileAttributeTagInfo
+    {
+        public uint FileAttributes;
+        public uint ReparseTag;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true, EntryPoint = "GetFileInformationByHandleEx")]
+    internal static extern bool GetFileAttributeTagByHandle(
+        SafeFileHandle hFile,
+        int fileInformationClass,
+        out FileAttributeTagInfo lpFileInformation,
+        int dwBufferSize);
 }

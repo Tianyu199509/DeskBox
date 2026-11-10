@@ -1,5 +1,6 @@
 using DeskBox.Helpers;
 using DeskBox.Models;
+using DeskBox.Platform;
 using DeskBox.ViewModels;
 
 namespace DeskBox.Services;
@@ -29,7 +30,7 @@ internal static class ItemDropBehaviorPolicy
             return ItemDropBehavior.StackImport;
         }
 
-        if (item.IsFolder && item.Path.Length > 0)
+        if (TryGetFolderDropDestinationPath(item, out _))
         {
             return ItemDropBehavior.FolderImport;
         }
@@ -47,5 +48,52 @@ internal static class ItemDropBehaviorPolicy
         return ShortcutLaunchPolicy.EvaluateItem(item) == ShortcutLaunchDecision.Launch
             ? ItemDropBehavior.Launch
             : ItemDropBehavior.None;
+    }
+
+    internal static bool TryGetFolderDropDestinationPath(
+        WidgetItem? item,
+        out string destinationPath)
+    {
+        destinationPath = string.Empty;
+        if (item is null || item is WidgetStackItem)
+        {
+            return false;
+        }
+
+        if (item.IsFolder && item.Path.Length > 0)
+        {
+            destinationPath = item.Path;
+            return true;
+        }
+
+        if (!item.IsShortcut ||
+            string.IsNullOrWhiteSpace(item.Path) ||
+            !ShortcutHelper.IsShellLinkPath(item.Path))
+        {
+            return false;
+        }
+
+        string? targetPath = item.TargetPath;
+        if (string.IsNullOrWhiteSpace(targetPath))
+        {
+            targetPath = ShortcutHelper.ReadStoredMetadata(item.Path)?.TargetPath;
+        }
+
+        if (string.IsNullOrWhiteSpace(targetPath) ||
+            ShortcutTargetProbe.Classify(targetPath) != ShortcutTargetKind.LocalFileSystem)
+        {
+            return false;
+        }
+
+        string expanded = ShortcutLaunchPolicy.ExpandTargetPath(targetPath);
+        if (expanded.Length == 0 ||
+            DriveMediaInterop.IsProtectedDragOutSource([expanded]) ||
+            !ShortcutLaunchPolicy.IsExpandedTargetDirectory(expanded))
+        {
+            return false;
+        }
+
+        destinationPath = expanded;
+        return true;
     }
 }

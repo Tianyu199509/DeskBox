@@ -21,7 +21,7 @@ public interface ISettingsMigration
 public sealed class SettingsMigrationPipeline
 {
     /// <summary>The current schema version that the application expects.</summary>
-    public const int CurrentSchemaVersion = 15;
+    public const int CurrentSchemaVersion = 18;
 
     private readonly List<ISettingsMigration> _migrations = [];
 
@@ -43,6 +43,9 @@ public sealed class SettingsMigrationPipeline
         _migrations.Add(new Migration_12_To_13());
         _migrations.Add(new Migration_13_To_14());
         _migrations.Add(new Migration_14_To_15());
+        _migrations.Add(new Migration_15_To_16());
+        _migrations.Add(new Migration_16_To_17());
+        _migrations.Add(new Migration_17_To_18());
     }
 
     /// <summary>
@@ -730,6 +733,120 @@ internal sealed class Migration_14_To_15 : ISettingsMigration
 
     public void Migrate(AppSettings settings)
     {
+    }
+}
+
+/// <summary>
+/// v16 adds ClipboardViewMode (Standard/Compact) and flips the default of
+/// ClipboardMoveToTopOnReuse to false so clicking an item inside the Clipboard
+/// widget copies it in place instead of jumping it to index 0.
+/// </summary>
+internal sealed class Migration_15_To_16 : ISettingsMigration
+{
+    public int FromVersion => 15;
+
+    public void Migrate(AppSettings settings)
+    {
+        settings.Clipboard.ClipboardMoveToTopOnReuse = false;
+        if (string.IsNullOrWhiteSpace(settings.Clipboard.ClipboardViewMode))
+        {
+            settings.Clipboard.ClipboardViewMode = ClipboardSettingsSlice.ViewModeStandard;
+        }
+    }
+}
+
+/// <summary>
+/// v17 adds the global Clipboard quick-paste shortcut, popup placement mode,
+/// and optional double-Ctrl+C quick action.
+/// </summary>
+internal sealed class Migration_16_To_17 : ISettingsMigration
+{
+    public int FromVersion => 16;
+
+    public void Migrate(AppSettings settings)
+    {
+        ClipboardSettingsSlice clipboard = settings.Clipboard;
+        HotkeyActivationKind kind = Enum.IsDefined(clipboard.ClipboardHotkeyActivationKind)
+            ? clipboard.ClipboardHotkeyActivationKind
+            : HotkeyActivationKind.Chord;
+        int modifiers = (int)((HotkeyModifierKeys)clipboard.ClipboardHotkeyModifiers &
+            (HotkeyModifierKeys.Alt |
+             HotkeyModifierKeys.Control |
+             HotkeyModifierKeys.Shift |
+             HotkeyModifierKeys.Windows));
+
+        GlobalHotkeyActivation clipboardActivation = GlobalHotkeyService.NormalizeActivation(
+            kind,
+            modifiers,
+            clipboard.ClipboardHotkeyKey);
+        if (!GlobalHotkeyService.IsValidActivation(clipboardActivation))
+        {
+            clipboardActivation = GlobalHotkeyActivation.FromChord(new GlobalHotkeyGesture(
+                HotkeyModifierKeys.Alt,
+                ClipboardSettingsSlice.DefaultHotkeyKey));
+        }
+
+        clipboard.ClipboardHotkeyActivationKind = clipboardActivation.Kind;
+        clipboard.ClipboardHotkeyModifiers = (int)clipboardActivation.Gesture.Modifiers;
+        clipboard.ClipboardHotkeyKey = clipboardActivation.Gesture.VirtualKey;
+
+        if (clipboard.ClipboardHotkeyEnabled)
+        {
+            bool conflictsWithExisting = false;
+            if (settings.Core.GlobalHotkeyEnabled)
+            {
+                GlobalHotkeyActivation globalActivation = GlobalHotkeyService.NormalizeActivation(
+                    settings.Core.GlobalHotkeyActivationKind,
+                    settings.Core.GlobalHotkeyModifiers,
+                    settings.Core.GlobalHotkeyKey);
+                if (GlobalHotkeyService.DoActivationsConflict(clipboardActivation, globalActivation))
+                {
+                    conflictsWithExisting = true;
+                }
+            }
+
+            if (!conflictsWithExisting && settings.Search.SearchHotkeyEnabled)
+            {
+                GlobalHotkeyActivation searchActivation = GlobalHotkeyService.NormalizeActivation(
+                    settings.Search.SearchHotkeyActivationKind,
+                    settings.Search.SearchHotkeyModifiers,
+                    settings.Search.SearchHotkeyKey);
+                if (GlobalHotkeyService.DoActivationsConflict(clipboardActivation, searchActivation))
+                {
+                    conflictsWithExisting = true;
+                }
+            }
+
+            if (conflictsWithExisting)
+            {
+                clipboard.ClipboardHotkeyEnabled = false;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(clipboard.ClipboardPopupPlacementMode))
+        {
+            clipboard.ClipboardPopupPlacementMode = ClipboardSettingsSlice.PopupFollowCaret;
+        }
+
+        if (string.IsNullOrWhiteSpace(clipboard.ClipboardDoubleCopyAction))
+        {
+            clipboard.ClipboardDoubleCopyAction = ClipboardSettingsSlice.DoubleCopyNone;
+        }
+    }
+}
+
+/// <summary>
+/// v18 flips the default of KeepCapsuleContentWarm to true so collapsed
+/// capsules retain their inner views and expand without reloading unless the
+/// user explicitly turns capsule cache retention off in Settings.
+/// </summary>
+internal sealed class Migration_17_To_18 : ISettingsMigration
+{
+    public int FromVersion => 17;
+
+    public void Migrate(AppSettings settings)
+    {
+        settings.Performance.KeepCapsuleContentWarm = true;
     }
 }
 

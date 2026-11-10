@@ -1,31 +1,27 @@
-﻿namespace DeskBox.Tests;
+namespace DeskBox.Tests;
 
 public sealed class AotStage5B4B1ContractTests
 {
     private static readonly string[] DeepSettingsRoutes =
     [
-        "AppearanceDetail",
-        "CapsuleMode",
+        "Appearance",
+        "Interaction",
         "WidgetGroups",
-        "FileDisplaySettings",
-        "ManagedStorage",
+        "Displays",
+        "AppearanceDetail",
         "FileStackSettings",
-        "DesktopOrganizationSettings",
+        "FeatureWidgets",
+        "CustomWidgetSettings",
         "QuickCaptureSettings",
         "TodoSettings",
         "MusicSettings",
         "WeatherSettings",
         "GlanceSettings",
+        "ClipboardSettings",
         "SearchSettings",
-        "AppearanceMaterialSettings",
-        "AppearanceDensitySettings",
-        "AppearanceWindowSettings",
-        "AppearanceAnimationSettings",
-        "CapsuleOverridesSettings",
-        "BackupRestoreSettings",
-        "DataHealthSettings",
-        "CompatibilityDiagnosticsSettings",
-        "PerformanceSettings"
+        "Maintenance",
+        "About",
+        "AiSettings"
     ];
 
     [Fact]
@@ -47,9 +43,12 @@ public sealed class AotStage5B4B1ContractTests
         string source = ReadRepositoryFile("src/DeskBox/Views/SettingsWindow.AotDeepSmoke.cs");
 
         Assert.Contains("ExerciseAotDeepReadOnlySettingsAsync", source, StringComparison.Ordinal);
+        int routesStart = source.IndexOf("string[] deepSettingsRoutes =", StringComparison.Ordinal);
+        int routesEnd = source.IndexOf("];", routesStart, StringComparison.Ordinal);
+        string routesSlice = source[routesStart..routesEnd];
         foreach (string route in DeepSettingsRoutes)
         {
-            Assert.Equal(1, CountOccurrences(source, $"\"{route}\""));
+            Assert.Equal(1, CountOccurrences(routesSlice, $"\"{route}\""));
         }
 
         Assert.Contains("NavigateToSettingsSection(sectionTag)", source, StringComparison.Ordinal);
@@ -64,10 +63,10 @@ public sealed class AotStage5B4B1ContractTests
         string source = ReadRepositoryFile("src/DeskBox/Views/SettingsWindow.AotDeepSmoke.cs");
         string navigation = ReadRepositoryFile("src/DeskBox/Views/SettingsWindow.Navigation.cs");
 
-        Assert.Contains("Settings.DataBackup.Title", source, StringComparison.Ordinal);
+        Assert.Contains("Settings.FileStacks.PageTitle", source, StringComparison.Ordinal);
         Assert.Contains("UpdateSettingsSearchSuggestions(searchQuery)", source, StringComparison.Ordinal);
         Assert.Contains("SettingsSearchBox.ItemsSource", source, StringComparison.Ordinal);
-        Assert.Contains("BackupRestoreSettings", source, StringComparison.Ordinal);
+        Assert.Contains("FileStackSettings", source, StringComparison.Ordinal);
         Assert.Contains("ActivateSettingsSearchResult", source, StringComparison.Ordinal);
         Assert.Contains("ActivateSettingsSearchResult(result, sender)", navigation, StringComparison.Ordinal);
         Assert.Contains("NavigateToSettingsSection(result.SectionTag)", navigation, StringComparison.Ordinal);
@@ -79,8 +78,8 @@ public sealed class AotStage5B4B1ContractTests
     {
         string source = ReadRepositoryFile("src/DeskBox/Views/SettingsWindow.AotDeepSmoke.cs");
 
-        Assert.Contains("CapsuleOverridesSettings", source, StringComparison.Ordinal);
-        Assert.Contains("CapsuleMode", source, StringComparison.Ordinal);
+        Assert.Contains("FileStackSettings", source, StringComparison.Ordinal);
+        Assert.Contains("AppearanceDetail", source, StringComparison.Ordinal);
         Assert.Contains("BreadcrumbItems", source, StringComparison.Ordinal);
         Assert.Contains("NavigateFromSettingsBreadcrumbItem", source, StringComparison.Ordinal);
         Assert.Contains("BreadcrumbParentReturned", source, StringComparison.Ordinal);
@@ -153,11 +152,11 @@ public sealed class AotStage5B4B1ContractTests
             weatherData,
             StringComparison.Ordinal);
         Assert.Contains(
-            "controls:SettingsComboBox.Value=\"{x:Bind FileStack.OpenMode, Mode=TwoWay}\"",
+            "Description=\"{x:Bind FileStack.SettingsSummaryText, Mode=OneWay}\"",
             fileWidgetXaml,
             StringComparison.Ordinal);
         Assert.Contains(
-            "ItemsSource=\"{x:Bind FeatureWidgets.AvailableFolderOpenBehaviorOptionItems, Mode=OneWay}\"",
+            "controls:SettingsSegmented.Options=\"{x:Bind FeatureWidgets.AvailableFolderOpenBehaviorOptionItems, Mode=OneWay}\"",
             fileWidgetXaml,
             StringComparison.Ordinal);
         string fileStackEditor = ReadRepositoryFile(
@@ -168,7 +167,7 @@ public sealed class AotStage5B4B1ContractTests
             ReadRepositoryFile("src/DeskBox/Features/FeatureWidgets/FeatureWidgetsSettingsViewModel.cs"),
             StringComparison.Ordinal);
         Assert.Contains(
-            "controls:SettingsComboBox.Value=\"{x:Bind FeatureWidgets.FolderOpenBehavior, Mode=TwoWay}\"",
+            "controls:SettingsSegmented.Value=\"{x:Bind FeatureWidgets.FolderOpenBehavior, Mode=TwoWay}\"",
             fileWidgetXaml,
             StringComparison.Ordinal);
         Assert.Contains(
@@ -205,7 +204,7 @@ public sealed class AotStage5B4B1ContractTests
             "ItemsSource=\"{x:Bind CustomRules, Mode=OneWay}\"",
             xaml,
             StringComparison.Ordinal);
-        Assert.Equal(39, CountOccurrences(bindableViewModel, "nameof("));
+        Assert.Equal(44, CountOccurrences(bindableViewModel, "nameof("));
         Assert.Contains("nameof(AvailableAutoStartModeOptions)", bindableViewModel, StringComparison.Ordinal);
         // Batch 50: the performance section (and the General section's
         // inline preset combo + attachment-storage combo) bind through the
@@ -215,24 +214,24 @@ public sealed class AotStage5B4B1ContractTests
         Assert.DoesNotContain("nameof(IdleWorkingSetTrimEnabled)", bindableViewModel, StringComparison.Ordinal);
         Assert.DoesNotContain("nameof(SelectedAttachmentStorageMode)", bindableViewModel, StringComparison.Ordinal);
         Assert.Contains(
-            "PerformanceModeInlineComboBox.DataContext = _performanceSettingsViewModel;",
-            ReadRepositoryFile("src/DeskBox/Views/SettingsWindow.xaml.cs"),
+            "x:Name=\"PerformanceInlineCard\"",
+            ReadRepositoryFile("src/DeskBox/Views/SettingsWindow.xaml"),
             StringComparison.Ordinal);
         Assert.Contains(
-            "AttachmentStorageModeComboBox.DataContext = _featureWidgetsSettingsViewModel;",
-            ReadRepositoryFile("src/DeskBox/Views/SettingsWindow.xaml.cs"),
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "section.DataContext = _performanceSettingsViewModel;",
+            "QuickCaptureAttachmentStorageModeComboBox.DataContext = _featureWidgetsSettingsViewModel;",
             ReadRepositoryFile("src/DeskBox/Views/SettingsWindow.DeferredSections.cs"),
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "PerformanceInlineCard.DataContext = _performanceSettingsViewModel;",
+            window,
             StringComparison.Ordinal);
         Assert.DoesNotContain("nameof(WidgetCapsuleModeEnabled)", bindableViewModel, StringComparison.Ordinal);
         Assert.DoesNotContain("nameof(SelectedWidgetCapsuleBarPlacement)", bindableViewModel, StringComparison.Ordinal);
         Assert.DoesNotContain("nameof(ResetAllCapsuleOverridesCommand)", bindableViewModel, StringComparison.Ordinal);
         Assert.DoesNotContain("nameof(ResetCapsuleWidthOverridesCommand)", bindableViewModel, StringComparison.Ordinal);
         Assert.Contains(
-            "Command=\"{x:Bind ResetAllCapsuleOverridesCommand, Mode=OneWay}\"",
-            xaml,
+            "Command=\"{x:Bind ViewModel.ResetAllCapsuleOverridesCommand, Mode=OneWay}\"",
+            capsuleXaml,
             StringComparison.Ordinal);
         Assert.Contains("x:DataType=\"viewModels:SettingsViewModel\"", xaml, StringComparison.Ordinal);
         Assert.Contains(
@@ -334,8 +333,8 @@ public sealed class AotStage5B4B1ContractTests
         string baseline = ReadRepositoryFile("tests/DeskBox.Tests/JsonSerializationBaselineContractTests.cs");
         string source = ReadRepositoryFile("src/DeskBox/App.AotManagedUiSmoke.cs");
 
-        Assert.Contains("Assert.Equal(44, actual.Count);", baseline, StringComparison.Ordinal);
-        Assert.Contains("Assert.Equal(111, actual.Values.Sum());", baseline, StringComparison.Ordinal);
+        Assert.Contains("Assert.Equal(52, actual.Count);", baseline, StringComparison.Ordinal);
+        Assert.Contains("Assert.Equal(149, actual.Values.Sum());", baseline, StringComparison.Ordinal);
         Assert.Contains("\"src/DeskBox/App.AotManagedUiSmoke.cs\"", baseline, StringComparison.Ordinal);
         Assert.Equal(1, CountOccurrences(source, "JsonSerializer.Serialize("));
     }
@@ -390,7 +389,7 @@ public sealed class AotStage5B4B1ContractTests
         Assert.Contains("stage5B4B1RequiredCommandXamlPatterns", audit, StringComparison.Ordinal);
         Assert.Contains("stage5B4B1RequiredCapsuleCommandXamlPatterns", audit, StringComparison.Ordinal);
         Assert.Contains("stage5B4B1RequiredCapsuleCodeBehindPatterns", audit, StringComparison.Ordinal);
-        Assert.Contains("stage5B4B1ExpectedBindableViewModelPropertyCount = 39", audit, StringComparison.Ordinal);
+        Assert.Contains("stage5B4B1ExpectedBindableViewModelPropertyCount = 44", audit, StringComparison.Ordinal);
         Assert.Contains("stage5B4B1RequiredSmokeScriptPatterns", audit, StringComparison.Ordinal);
         Assert.Contains("stage5B4B1MissingRoutePatterns", audit, StringComparison.Ordinal);
         Assert.Contains("stage5B4B1UnsafeMutationPatterns", audit, StringComparison.Ordinal);

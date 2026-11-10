@@ -3,11 +3,12 @@ using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Services;
 using DeskBox.ViewModels;
+using Microsoft.UI;
 using Microsoft.UI.Xaml;
-using Microsoft.UI.Xaml.Automation.Peers;
-using Microsoft.UI.Xaml.Automation.Provider;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Data;
+using Microsoft.UI.Xaml.Documents;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
@@ -15,17 +16,22 @@ using Microsoft.UI.Xaml.Media.Imaging;
 
 namespace DeskBox.Controls.WidgetContents;
 
-public sealed partial class GlanceWidgetContent : UserControl
+public sealed partial class GlanceWidgetContent : UserControl, IDisposable
 {
+    private const int CalendarColumnCount = 7;
+    private const int CalendarRowCount = 6;
+    private const int CalendarCellCount = CalendarColumnCount * CalendarRowCount;
+    private static readonly DateOnly MinCalendarMonth = new(1900, 1, 1);
+    private static readonly DateOnly MaxCalendarMonth = new(2100, 12, 1);
+    private static readonly SolidColorBrush TransparentBrush = new(Colors.Transparent);
+    private static readonly TimeSpan BackgroundSuspendGracePeriod = TimeSpan.FromSeconds(30);
+
     private readonly GlanceWidgetViewModel _viewModel;
-    private readonly GlanceImagePaletteService _paletteService = new();
+    private readonly GlanceImagePaletteService _paletteService = GlanceImagePaletteService.Shared;
     private readonly DispatcherTimer _loadingDelayTimer = new() { Interval = TimeSpan.FromMilliseconds(800) };
     private readonly DispatcherTimer _imageResizeDelayTimer = new() { Interval = TimeSpan.FromMilliseconds(220) };
     private readonly DispatcherTimer _layoutResizeTimer = new() { Interval = TimeSpan.FromMilliseconds(100) };
-    private readonly DispatcherTimer _calendarMonthSyncTimer = new() { Interval = TimeSpan.FromMilliseconds(120) };
-    private readonly DispatcherTimer _calendarDensityRefreshTimer = new() { Interval = TimeSpan.FromMilliseconds(100) };
-    private readonly DispatcherTimer _calendarWheelGestureTimer = new() { Interval = TimeSpan.FromMilliseconds(180) };
-    private readonly Dictionary<CalendarViewDayItem, DateOnly> _realizedCalendarDays = [];
+    private DispatcherTimer? _calendarWheelGestureTimer;
     private readonly SolidColorBrush _calendarSolidMaterialBrush = new();
     private readonly LinearGradientBrush _calendarImageGradientBrush = new()
     {
@@ -35,29 +41,47 @@ public sealed partial class GlanceWidgetContent : UserControl
     private readonly GradientStop _calendarImageGradientStart = new() { Offset = 0 };
     private readonly GradientStop _calendarImageGradientEnd = new() { Offset = 1 };
     private Storyboard? _transitionStoryboard;
+    private TextBlock[]? _calendarWeekdayLabels;
+    private CalendarDayCellVisual[]? _calendarCellVisuals;
     private bool _isAActive;
     private bool _isLoaded;
-    private bool _nativeCalendarConfigured;
-    private bool _isSynchronizingCalendarMonth;
     private bool _isCalendarWheelGestureActive;
-    private bool _isCalendarWheelNavigationInProgress;
-    private int _imageLoadVersion;
+    private bool _isCalendarNavigationInProgress;
+    private readonly GlanceBackgroundPresenterState _background = new();
+    // Keeps the last accepted frame across short hides (Show desktop, tray
+    // toggles) so a reveal neither flashes nor re-decodes; the frame is dropped
+    // when the hide outlasts the grace period.
+    private readonly DispatcherTimer _backgroundReleaseTimer = new() { Interval = BackgroundSuspendGracePeriod };
+    private DispatcherTimer? _backgroundRetryTimer;
+    private GlanceBackgroundLoadTicket? _backgroundRetryTicket;
     private bool _shellCustomBackgroundActive;
-    private long? _calendarDisplayModeCallbackToken;
+    private bool _isWindowVisible = true;
+    private bool _isCompactCollapsed;
+    private bool _isDisposed;
     private string? _calendarImagePalettePath;
     private GlanceImagePalette? _calendarImagePalette;
     private CancellationTokenSource? _paletteCts;
-    private string? _requestedImagePath;
-    private int _requestedImageDecodePixelWidth;
-    private string? _decodedImagePath;
-    private int _decodedImagePixelWidth;
-    private ScrollViewer? _monthViewScrollViewer;
-    private Button? _calendarPreviousButton;
-    private Button? _calendarNextButton;
-    private PointerEventHandler? _calendarPointerWheelHandler;
     private double _pendingAvailableWidth;
     private double _pendingAvailableHeight;
     private bool _hasPendingAvailableSize;
+    private bool _pendingCalendarSurfaceRefresh;
+    private bool _pendingStyleFacesRefresh;
+    private bool _surfaceRefreshEnqueued;
+
+    private sealed class CalendarDayCellVisual
+    {
+        public required Grid Root { get; init; }
+        public required Border TodayPill { get; init; }
+        public required StackPanel TextStack { get; init; }
+        public required TextBlock PrimaryText { get; init; }
+        public required TextBlock SecondaryText { get; init; }
+        public required TextBlock HolidayBadge { get; init; }
+        public required Microsoft.UI.Xaml.Shapes.Ellipse AgendaDot { get; init; }
+        public DateOnly Date { get; set; }
+        public bool IsCurrentMonth { get; set; }
+        public bool IsToday { get; set; }
+        public bool IsPointerOver { get; set; }
+    }
 
     public GlanceWidgetContent(GlanceWidgetViewModel viewModel)
     {
@@ -69,10 +93,669 @@ public sealed partial class GlanceWidgetContent : UserControl
         _loadingDelayTimer.Tick += LoadingDelayTimer_Tick;
         _imageResizeDelayTimer.Tick += ImageResizeDelayTimer_Tick;
         _layoutResizeTimer.Tick += LayoutResizeTimer_Tick;
-        _calendarMonthSyncTimer.Tick += CalendarMonthSyncTimer_Tick;
-        _calendarDensityRefreshTimer.Tick += CalendarDensityRefreshTimer_Tick;
-        _calendarWheelGestureTimer.Tick += CalendarWheelGestureTimer_Tick;
+        _backgroundReleaseTimer.Tick += BackgroundReleaseTimer_Tick;
         _viewModel.PropertyChanged += ViewModel_PropertyChanged;
+    }
+
+    public GlanceWidgetViewModel ViewModel => _viewModel;
+
+    private bool ShouldKeepWarmWhileCollapsed =>
+        (_viewModel.SettingsService ?? App.Current?.SettingsService)?.Settings.Performance.KeepCapsuleContentWarm == true;
+
+    private bool ShouldKeepWarmWhileHidden
+    {
+        get
+        {
+            SettingsService? settingsService = _viewModel.SettingsService ?? App.Current?.SettingsService;
+            if (settingsService is null)
+            {
+                return true;
+            }
+
+            EffectivePerformanceSettings performance =
+                PerformanceSettingsPolicy.Resolve(settingsService.Settings);
+            return string.Equals(
+                performance.HiddenCacheCleanupScope,
+                PerformanceSettingsPolicy.HiddenCacheCleanupScopeWarm,
+                StringComparison.Ordinal);
+        }
+    }
+
+    public bool IsCalendarElementLoaded =>
+        _isLoaded &&
+        _viewModel.IsCalendarLayout &&
+        (_isWindowVisible
+            ? (!_isCompactCollapsed || ShouldKeepWarmWhileCollapsed)
+            : ShouldKeepWarmWhileHidden);
+
+    internal bool IsCalendarSurfaceRealized => CalendarSurfaceRoot is not null;
+
+    internal bool IsNativeCalendarViewRealized => CalendarSurfaceRoot is not null;
+
+    internal void OnWindowVisibilityChanged(bool visible)
+    {
+        if (_isWindowVisible == visible)
+        {
+            return;
+        }
+
+        _isWindowVisible = visible;
+        ReconcileExpandedImageResidency();
+        ReconcileCalendarSurfaceRealization();
+        if (visible && !_isCompactCollapsed)
+        {
+            RefreshStyleFaces();
+        }
+    }
+
+    internal void OnCompactStateChanged(bool collapsed)
+    {
+        if (_isCompactCollapsed == collapsed)
+        {
+            return;
+        }
+
+        _isCompactCollapsed = collapsed;
+        ReconcileExpandedImageResidency();
+        ReconcileCalendarSurfaceRealization();
+        if (!collapsed && _isWindowVisible)
+        {
+            RefreshStyleFaces();
+        }
+    }
+
+    internal void ApplyPerformanceSettings()
+    {
+        if (_isDisposed || !_isLoaded)
+        {
+            return;
+        }
+
+        ReconcileExpandedImageResidency();
+        ReconcileCalendarSurfaceRealization();
+    }
+
+    private void ReconcileExpandedImageResidency()
+    {
+        if (!_isWindowVisible || _isCompactCollapsed)
+        {
+            CancelPaletteUpdate();
+            _imageResizeDelayTimer.Stop();
+            if (_isLoaded &&
+                !_shellCustomBackgroundActive &&
+                _isWindowVisible &&
+                _isCompactCollapsed &&
+                ShouldKeepWarmWhileCollapsed &&
+                !_background.HasFrame)
+            {
+                WarmInitialCollapsedBackgroundImage();
+            }
+
+            SuspendBackground();
+            return;
+        }
+
+        if (_isLoaded && !_shellCustomBackgroundActive)
+        {
+            QueueCalendarImagePaletteUpdate(_viewModel.CurrentImagePath);
+            SyncBackgroundImage(allowTransition: false);
+        }
+    }
+
+    private DispatcherTimer EnsureCalendarWheelGestureTimer()
+    {
+        if (_calendarWheelGestureTimer is null)
+        {
+            _calendarWheelGestureTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(180) };
+            _calendarWheelGestureTimer.Tick += CalendarWheelGestureTimer_Tick;
+        }
+
+        return _calendarWheelGestureTimer;
+    }
+
+    private void ReconcileCalendarSurfaceRealization()
+    {
+        if (!_isLoaded)
+        {
+            return;
+        }
+
+        if (!IsCalendarElementLoaded)
+        {
+            _calendarWheelGestureTimer?.Stop();
+            _isCalendarWheelGestureActive = false;
+            _calendarWeekdayLabels = null;
+            _calendarCellVisuals = null;
+            Bindings.Update();
+            UpdateTraditionalCalendarTitleVisibility();
+            return;
+        }
+
+        if (_isCompactCollapsed || !_isWindowVisible)
+        {
+            _calendarWheelGestureTimer?.Stop();
+            _isCalendarWheelGestureActive = false;
+        }
+
+        Bindings.Update();
+        if (CalendarSurfaceRoot is not null)
+        {
+            EnsureCalendarGridInitialized();
+            RefreshCalendarSurface();
+        }
+
+        UpdateTraditionalCalendarTitleVisibility();
+    }
+
+    private void CalendarSurfaceRoot_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (!IsCalendarElementLoaded)
+        {
+            return;
+        }
+
+        EnsureCalendarGridInitialized();
+        RefreshCalendarSurface();
+    }
+
+    private void CalendarSurfaceRoot_Unloaded(object sender, RoutedEventArgs e)
+    {
+        _isCalendarPointerInside = false;
+        _calendarWeekdayLabels = null;
+        _calendarCellVisuals = null;
+        UpdateTraditionalCalendarTitleVisibility();
+    }
+
+    private void EnsureCalendarGridInitialized()
+    {
+        if (CalendarWeekdayHeaderGrid is not { } weekdayGrid ||
+            CalendarDaysGrid is not { } daysGrid)
+        {
+            return;
+        }
+
+        if (_calendarWeekdayLabels is null || weekdayGrid.Children.Count != CalendarColumnCount)
+        {
+            weekdayGrid.Children.Clear();
+            weekdayGrid.ColumnDefinitions.Clear();
+            var labels = new TextBlock[CalendarColumnCount];
+            for (int column = 0; column < CalendarColumnCount; column++)
+            {
+                weekdayGrid.ColumnDefinitions.Add(new ColumnDefinition
+                {
+                    Width = new GridLength(1, GridUnitType.Star)
+                });
+
+                var weekdayLabel = new TextBlock
+                {
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    FontSize = 10.5,
+                    MaxLines = 1,
+                    TextAlignment = TextAlignment.Center,
+                    IsTextSelectionEnabled = false
+                };
+                Grid.SetColumn(weekdayLabel, column);
+                weekdayGrid.Children.Add(weekdayLabel);
+                labels[column] = weekdayLabel;
+            }
+
+            _calendarWeekdayLabels = labels;
+        }
+
+        if (_calendarCellVisuals is null || daysGrid.Children.Count != CalendarCellCount)
+        {
+            daysGrid.Children.Clear();
+            daysGrid.ColumnDefinitions.Clear();
+            daysGrid.RowDefinitions.Clear();
+
+            for (int column = 0; column < CalendarColumnCount; column++)
+            {
+                daysGrid.ColumnDefinitions.Add(new ColumnDefinition
+                {
+                    Width = new GridLength(1, GridUnitType.Star)
+                });
+            }
+
+            for (int row = 0; row < CalendarRowCount; row++)
+            {
+                daysGrid.RowDefinitions.Add(new RowDefinition
+                {
+                    Height = new GridLength(1, GridUnitType.Star)
+                });
+            }
+
+            var cells = new CalendarDayCellVisual[CalendarCellCount];
+            for (int index = 0; index < CalendarCellCount; index++)
+            {
+                int row = index / CalendarColumnCount;
+                int column = index % CalendarColumnCount;
+
+                var cellRoot = new Grid
+                {
+                    MinWidth = 26,
+                    MinHeight = 22,
+                    Background = TransparentBrush,
+                    CornerRadius = new CornerRadius(6)
+                };
+
+                var todayPill = new Border
+                {
+                    CornerRadius = new CornerRadius(6),
+                    IsHitTestVisible = false,
+                    Visibility = Visibility.Collapsed
+                };
+
+                var primaryText = new TextBlock
+                {
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    FontSize = 11,
+                    LineHeight = 13,
+                    LineStackingStrategy = LineStackingStrategy.BlockLineHeight,
+                    IsTextSelectionEnabled = false
+                };
+                Typography.SetNumeralAlignment(primaryText, FontNumeralAlignment.Tabular);
+
+                var secondaryText = new TextBlock
+                {
+                    MaxWidth = 32,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    FontSize = 7.5,
+                    LineHeight = 10,
+                    LineStackingStrategy = LineStackingStrategy.BlockLineHeight,
+                    MaxLines = 1,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                    Visibility = Visibility.Collapsed,
+                    IsTextSelectionEnabled = false
+                };
+
+                var textStack = new StackPanel
+                {
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Spacing = 0,
+                    IsHitTestVisible = false
+                };
+                textStack.Children.Add(primaryText);
+                textStack.Children.Add(secondaryText);
+
+                // 休/班 corner mark and agenda dot: markers instead of more text,
+                // so dense months stay legible at small sizes.
+                var holidayBadge = new TextBlock
+                {
+                    HorizontalAlignment = HorizontalAlignment.Right,
+                    VerticalAlignment = VerticalAlignment.Top,
+                    Margin = new Thickness(0, 1, 2, 0),
+                    FontSize = 7.5,
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                    IsHitTestVisible = false,
+                    IsTextSelectionEnabled = false,
+                    Visibility = Visibility.Collapsed
+                };
+                var agendaDot = new Microsoft.UI.Xaml.Shapes.Ellipse
+                {
+                    Width = 4,
+                    Height = 4,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Bottom,
+                    Margin = new Thickness(0, 0, 0, 1.5),
+                    IsHitTestVisible = false,
+                    Visibility = Visibility.Collapsed
+                };
+
+                cellRoot.Children.Add(todayPill);
+                cellRoot.Children.Add(textStack);
+                cellRoot.Children.Add(holidayBadge);
+                cellRoot.Children.Add(agendaDot);
+                Grid.SetRow(cellRoot, row);
+                Grid.SetColumn(cellRoot, column);
+                daysGrid.Children.Add(cellRoot);
+
+                var visual = new CalendarDayCellVisual
+                {
+                    Root = cellRoot,
+                    TodayPill = todayPill,
+                    TextStack = textStack,
+                    PrimaryText = primaryText,
+                    SecondaryText = secondaryText,
+                    HolidayBadge = holidayBadge,
+                    AgendaDot = agendaDot
+                };
+
+                cellRoot.PointerEntered += (_, _) =>
+                {
+                    visual.IsPointerOver = true;
+                    UpdateCalendarCellBackground(visual);
+                };
+                cellRoot.PointerExited += (_, _) =>
+                {
+                    visual.IsPointerOver = false;
+                    UpdateCalendarCellBackground(visual);
+                };
+                cellRoot.Tapped += async (_, args) =>
+                {
+                    if (visual.Date == default)
+                    {
+                        return;
+                    }
+
+                    args.Handled = true;
+                    if (!visual.IsCurrentMonth)
+                    {
+                        await NavigateToCalendarMonthAsync(new DateOnly(visual.Date.Year, visual.Date.Month, 1));
+                        return;
+                    }
+
+                    ShowDayDetail(visual.Root, visual.Date);
+                };
+
+                cells[index] = visual;
+            }
+
+            _calendarCellVisuals = cells;
+        }
+    }
+
+    private void UpdateCalendarCellBackground(CalendarDayCellVisual cell)
+    {
+        if (cell.IsPointerOver && !cell.IsToday)
+        {
+            cell.Root.Background = CalendarThemeProbe?.BorderBrush ?? TransparentBrush;
+        }
+        else
+        {
+            cell.Root.Background = TransparentBrush;
+        }
+    }
+
+    private void RefreshCalendarSurface()
+    {
+        if (!IsCalendarElementLoaded || CalendarSurfaceRoot is null)
+        {
+            UpdateTraditionalCalendarTitleVisibility();
+            return;
+        }
+
+        EnsureCalendarGridInitialized();
+        if (_calendarWeekdayLabels is null || _calendarCellVisuals is null)
+        {
+            return;
+        }
+
+        Brush primaryBrush = CalendarMonthHeaderText?.Foreground ?? Foreground;
+        Brush secondaryBrush = TraditionalCalendarTitlePresenter?.Foreground ?? primaryBrush;
+        Brush accentBrush = CalendarThemeProbe?.Background ?? primaryBrush;
+        Brush onAccentBrush = CalendarOnAccentThemeProbe?.Foreground ?? primaryBrush;
+
+        if (CalendarMonthHeaderText is not null)
+        {
+            CalendarMonthHeaderText.Text = _viewModel.FormatDisplayedCalendarMonthHeader();
+        }
+
+        DateOnly displayedMonth = _viewModel.DisplayedCalendarMonth;
+        if (CalendarPreviousMonthButton is not null)
+        {
+            CalendarPreviousMonthButton.IsEnabled = displayedMonth > MinCalendarMonth;
+            string previousMonth = _viewModel.FormatPreviousMonth();
+            ToolTipService.SetToolTip(CalendarPreviousMonthButton, previousMonth);
+            AutomationProperties.SetName(CalendarPreviousMonthButton, previousMonth);
+        }
+
+        if (CalendarNextMonthButton is not null)
+        {
+            CalendarNextMonthButton.IsEnabled = displayedMonth < MaxCalendarMonth;
+            string nextMonth = _viewModel.FormatNextMonth();
+            ToolTipService.SetToolTip(CalendarNextMonthButton, nextMonth);
+            AutomationProperties.SetName(CalendarNextMonthButton, nextMonth);
+        }
+
+        UpdateCalendarNavigationVisibility();
+
+        var weekdayHeaders = _viewModel.WeekdayHeaders;
+        for (int column = 0; column < CalendarColumnCount; column++)
+        {
+            TextBlock label = _calendarWeekdayLabels[column];
+            label.Foreground = secondaryBrush;
+            label.Text = column < weekdayHeaders.Count ? weekdayHeaders[column] : string.Empty;
+        }
+
+        DateOnly today = DateOnly.FromDateTime(DateTime.Today);
+        bool showTraditional = _viewModel.ShowCalendarTraditionalDetails;
+        string calendarLanguage = _viewModel.CalendarLanguage;
+        double itemHeight = _viewModel.CalendarDayItemMinimumHeight;
+        var days = _viewModel.CalendarDays;
+
+        DateOnly fallbackStart = GetFallbackGridStartDate(displayedMonth);
+        for (int index = 0; index < CalendarCellCount; index++)
+        {
+            CalendarDayCellVisual cell = _calendarCellVisuals[index];
+            GlanceCalendarDay? day = index < days.Count ? days[index] : null;
+            DateOnly date = day?.Date ?? fallbackStart.AddDays(index);
+
+            GlanceCalendarDayDecoration decoration = GlanceCalendarDayDecorationBuilder.Build(
+                day,
+                date,
+                today,
+                showTraditional,
+                displayedMonth,
+                calendarLanguage);
+
+            cell.Date = date;
+            cell.IsCurrentMonth = day?.IsCurrentMonth ??
+                (date.Year == displayedMonth.Year && date.Month == displayedMonth.Month);
+            cell.IsToday = decoration.IsToday;
+            if (Math.Abs(cell.Root.MinHeight - itemHeight) >= 0.1)
+            {
+                cell.Root.MinHeight = itemHeight;
+            }
+
+            cell.TodayPill.Background = accentBrush;
+            cell.TodayPill.Visibility = decoration.IsToday
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+            UpdateCalendarCellBackground(cell);
+
+            cell.TextStack.Opacity = decoration.IsToday ? 1.0 : decoration.PrimaryOpacity;
+            cell.PrimaryText.Text = decoration.DayText;
+            cell.PrimaryText.FontWeight = decoration.IsToday
+                ? Microsoft.UI.Text.FontWeights.SemiBold
+                : Microsoft.UI.Text.FontWeights.Normal;
+            cell.PrimaryText.Foreground = decoration.IsToday ? onAccentBrush : primaryBrush;
+            WidgetTextShadow.SetCast(cell.PrimaryText, !decoration.IsToday);
+
+            if (decoration.HasSecondaryText)
+            {
+                cell.SecondaryText.Visibility = Visibility.Visible;
+                cell.SecondaryText.Text = decoration.SecondaryText;
+                cell.SecondaryText.FontWeight = decoration.IsFestival
+                    ? Microsoft.UI.Text.FontWeights.SemiBold
+                    : Microsoft.UI.Text.FontWeights.Normal;
+                cell.SecondaryText.Foreground = decoration.IsToday ? onAccentBrush : secondaryBrush;
+                cell.SecondaryText.Opacity = decoration.IsToday ? 0.86 : decoration.SecondaryOpacity;
+                WidgetTextShadow.SetCast(cell.SecondaryText, !decoration.IsToday);
+            }
+            else
+            {
+                cell.SecondaryText.Visibility = Visibility.Collapsed;
+                cell.SecondaryText.Text = string.Empty;
+                WidgetTextShadow.SetCast(cell.SecondaryText, false);
+            }
+
+            ApplyHolidayBadge(cell.HolidayBadge, decoration.HolidayMark, decoration.IsToday, onAccentBrush);
+            cell.HolidayBadge.Opacity = cell.IsCurrentMonth ? 1 : 0.5;
+            cell.AgendaDot.Fill = decoration.IsToday ? onAccentBrush : accentBrush;
+            cell.AgendaDot.Visibility = decoration.AgendaCount > 0 && cell.IsCurrentMonth
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        }
+
+        ApplyCalendarWeekRows(_calendarCellVisuals);
+        if (CalendarTodayButton is not null)
+        {
+            CalendarTodayButton.Visibility = _viewModel.IsDisplayingCurrentMonth
+                ? Visibility.Collapsed
+                : Visibility.Visible;
+            ToolTipService.SetToolTip(CalendarTodayButton, _viewModel.FormatBackToToday());
+            AutomationProperties.SetName(CalendarTodayButton, _viewModel.FormatBackToToday());
+        }
+
+        UpdateTraditionalCalendarTitleVisibility();
+    }
+
+    /// <summary>
+    /// Draws only the weeks the month occupies: rows outside the span collapse
+    /// to zero height so a 5-week month does not reserve a sixth empty row.
+    /// </summary>
+    private void ApplyCalendarWeekRows(CalendarDayCellVisual[] cells)
+    {
+        if (CalendarDaysGrid is not { } daysGrid || daysGrid.RowDefinitions.Count != CalendarRowCount)
+        {
+            return;
+        }
+
+        IReadOnlyList<GlanceCalendarDay> days = _viewModel.CalendarDays;
+        int firstRow = days.Count > 0 ? GlanceCalendarLayoutCalculator.GetFirstWeekRow(days) : 0;
+        int rows = _viewModel.CalendarWeekRows;
+        for (int row = 0; row < CalendarRowCount; row++)
+        {
+            bool visible = row >= firstRow && row < firstRow + rows;
+            daysGrid.RowDefinitions[row].Height = visible
+                ? new GridLength(1, GridUnitType.Star)
+                : new GridLength(0);
+            for (int column = 0; column < CalendarColumnCount; column++)
+            {
+                cells[row * CalendarColumnCount + column].Root.Visibility = visible
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+            }
+        }
+    }
+
+    private static readonly SolidColorBrush HolidayOffBrush = new(Windows.UI.Color.FromArgb(0xFF, 0x2F, 0xB3, 0x6F));
+    private static readonly SolidColorBrush HolidayWorkBrush = new(Windows.UI.Color.FromArgb(0xFF, 0xE8, 0x83, 0x3A));
+
+    private void ApplyHolidayBadge(TextBlock badge, GlanceHolidayMark mark, bool onAccent, Brush onAccentBrush)
+    {
+        if (mark == GlanceHolidayMark.None)
+        {
+            badge.Visibility = Visibility.Collapsed;
+            badge.Text = string.Empty;
+            return;
+        }
+
+        badge.Text = _viewModel.FormatHolidayBadge(mark);
+        badge.Foreground = onAccent
+            ? onAccentBrush
+            : mark == GlanceHolidayMark.Off ? HolidayOffBrush : HolidayWorkBrush;
+        badge.Visibility = Visibility.Visible;
+    }
+
+    private DateOnly GetFallbackGridStartDate(DateOnly displayedMonth)
+    {
+        DateOnly monthStart = new(displayedMonth.Year, displayedMonth.Month, 1);
+        DayOfWeek firstDayOfWeek = DayOfWeek.Sunday;
+        try
+        {
+            firstDayOfWeek = System.Globalization.CultureInfo
+                .GetCultureInfo(_viewModel.CalendarLanguage)
+                .DateTimeFormat
+                .FirstDayOfWeek;
+        }
+        catch
+        {
+        }
+
+        int offset = (7 + (monthStart.DayOfWeek - firstDayOfWeek)) % 7;
+        return monthStart.AddDays(-offset);
+    }
+
+    private async void CalendarPreviousMonthButton_Click(object sender, RoutedEventArgs e)
+    {
+        DateOnly current = _viewModel.DisplayedCalendarMonth;
+        if (current <= MinCalendarMonth)
+        {
+            return;
+        }
+
+        await NavigateToCalendarMonthAsync(current.AddMonths(-1));
+    }
+
+    private async void CalendarNextMonthButton_Click(object sender, RoutedEventArgs e)
+    {
+        DateOnly current = _viewModel.DisplayedCalendarMonth;
+        if (current >= MaxCalendarMonth)
+        {
+            return;
+        }
+
+        await NavigateToCalendarMonthAsync(current.AddMonths(1));
+    }
+
+    private async void CalendarSurfaceRoot_PointerWheelChanged(
+        object sender,
+        PointerRoutedEventArgs e)
+    {
+        if (!IsCalendarElementLoaded || CalendarSurfaceRoot is not { } surfaceRoot)
+        {
+            return;
+        }
+
+        int wheelDelta = e.GetCurrentPoint(surfaceRoot).Properties.MouseWheelDelta;
+        if (wheelDelta == 0)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        DispatcherTimer wheelTimer = EnsureCalendarWheelGestureTimer();
+        wheelTimer.Stop();
+        wheelTimer.Start();
+        if (_isCalendarWheelGestureActive || _isCalendarNavigationInProgress)
+        {
+            return;
+        }
+
+        _isCalendarWheelGestureActive = true;
+        DateOnly targetMonth = GlanceCalendarNavigationResolver.ResolveWheelTarget(
+            _viewModel.DisplayedCalendarMonth,
+            wheelDelta,
+            MinCalendarMonth,
+            MaxCalendarMonth);
+        if (targetMonth == _viewModel.DisplayedCalendarMonth)
+        {
+            return;
+        }
+
+        await NavigateToCalendarMonthAsync(targetMonth);
+    }
+
+    private async Task NavigateToCalendarMonthAsync(DateOnly targetMonth)
+    {
+        DateOnly clamped = targetMonth < MinCalendarMonth
+            ? MinCalendarMonth
+            : targetMonth > MaxCalendarMonth
+                ? MaxCalendarMonth
+                : new DateOnly(targetMonth.Year, targetMonth.Month, 1);
+        if (_isCalendarNavigationInProgress || clamped == _viewModel.DisplayedCalendarMonth)
+        {
+            return;
+        }
+
+        _isCalendarNavigationInProgress = true;
+        try
+        {
+            await _viewModel.SetDisplayedCalendarMonthAsync(clamped);
+        }
+        finally
+        {
+            _isCalendarNavigationInProgress = false;
+        }
+    }
+
+    private void CalendarWheelGestureTimer_Tick(object? sender, object e)
+    {
+        _calendarWheelGestureTimer?.Stop();
+        _isCalendarWheelGestureActive = false;
     }
 
     private void UserControl_Loaded(object sender, RoutedEventArgs e)
@@ -83,11 +766,11 @@ public sealed partial class GlanceWidgetContent : UserControl
         ApplyBackgroundBrushOptions();
         ApplyBackgroundImageOpacity();
         ApplyImageAwareTheme();
-        ConfigureNativeCalendarView();
+        ReconcileCalendarSurfaceRealization();
         ApplyCalendarMaterial();
-        QueueCalendarImagePaletteUpdate(_viewModel.CurrentImagePath);
-        BeginLoadImage(_viewModel.CurrentImagePath);
+        ReconcileExpandedImageResidency();
         UpdateLoadingIndicator();
+        RefreshStyleFaces();
     }
 
     /// <summary>
@@ -110,7 +793,7 @@ public sealed partial class GlanceWidgetContent : UserControl
             }
             else
             {
-                BeginLoadImage(_viewModel.CurrentImagePath);
+                SyncBackgroundImage(allowTransition: false);
             }
         }
     }
@@ -123,14 +806,60 @@ public sealed partial class GlanceWidgetContent : UserControl
         _imageResizeDelayTimer.Stop();
         _layoutResizeTimer.Stop();
         _hasPendingAvailableSize = false;
-        _calendarMonthSyncTimer.Stop();
-        _calendarDensityRefreshTimer.Stop();
-        _calendarWheelGestureTimer.Stop();
+        _calendarWheelGestureTimer?.Stop();
         _isCalendarWheelGestureActive = false;
-        UnconfigureNativeCalendarView();
         DelayedLoadingRing.IsActive = false;
         DelayedLoadingRing.Visibility = Visibility.Collapsed;
-        _transitionStoryboard?.Stop();
+        SuspendBackground();
+    }
+
+    public void Dispose()
+    {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        _isDisposed = true;
+        _isLoaded = false;
+        _viewModel.PropertyChanged -= ViewModel_PropertyChanged;
+        _loadingDelayTimer.Stop();
+        _loadingDelayTimer.Tick -= LoadingDelayTimer_Tick;
+        _imageResizeDelayTimer.Stop();
+        _imageResizeDelayTimer.Tick -= ImageResizeDelayTimer_Tick;
+        _layoutResizeTimer.Stop();
+        _layoutResizeTimer.Tick -= LayoutResizeTimer_Tick;
+        _backgroundReleaseTimer.Stop();
+        _backgroundReleaseTimer.Tick -= BackgroundReleaseTimer_Tick;
+        StopBackgroundRetry();
+        if (_backgroundRetryTimer is not null)
+        {
+            _backgroundRetryTimer.Tick -= BackgroundRetryTimer_Tick;
+            _backgroundRetryTimer = null;
+        }
+        if (_calendarWheelGestureTimer is not null)
+        {
+            _calendarWheelGestureTimer.Stop();
+            _calendarWheelGestureTimer.Tick -= CalendarWheelGestureTimer_Tick;
+            _calendarWheelGestureTimer = null;
+        }
+
+        _hasPendingAvailableSize = false;
+        _pendingCalendarSurfaceRefresh = false;
+        _pendingStyleFacesRefresh = false;
+        _surfaceRefreshEnqueued = false;
+        _isCalendarWheelGestureActive = false;
+        _isCalendarPointerInside = false;
+        CancelPaletteUpdate();
+        ClearBackgroundImage();
+        _agendaColorBrushes.Clear();
+        _calendarWeekdayLabels = null;
+        _calendarCellVisuals = null;
+        _weekCells = null;
+        Bindings.Update();
+        StopAndClearTransitionStoryboard();
+        DataContext = null;
+        Content = null;
     }
 
     private void UserControl_SizeChanged(object sender, SizeChangedEventArgs e)
@@ -138,8 +867,7 @@ public sealed partial class GlanceWidgetContent : UserControl
         _pendingAvailableWidth = e.NewSize.Width;
         _pendingAvailableHeight = e.NewSize.Height;
         _hasPendingAvailableSize = true;
-        // CalendarView is expensive to remeasure. Keep the window resize itself responsive,
-        // then apply only the latest responsive layout after the drag briefly settles.
+        // Debounce responsive layout sizing during drag resize and settle once.
         _layoutResizeTimer.Stop();
         _layoutResizeTimer.Start();
 
@@ -165,9 +893,19 @@ public sealed partial class GlanceWidgetContent : UserControl
             return;
         }
 
+        if (string.IsNullOrEmpty(e.PropertyName) ||
+            e.PropertyName == nameof(GlanceWidgetViewModel.IsCalendarLayout))
+        {
+            ReconcileCalendarSurfaceRealization();
+            if (!string.IsNullOrEmpty(e.PropertyName))
+            {
+                return;
+            }
+        }
+
         if (e.PropertyName == nameof(GlanceWidgetViewModel.CurrentImagePath))
         {
-            BeginLoadImage(_viewModel.CurrentImagePath);
+            SyncBackgroundImage();
             QueueCalendarImagePaletteUpdate(_viewModel.CurrentImagePath);
             ApplyImageAwareTheme();
         }
@@ -187,29 +925,35 @@ public sealed partial class GlanceWidgetContent : UserControl
         {
             UpdateLoadingIndicator();
         }
-        else if (e.PropertyName == nameof(GlanceWidgetViewModel.CalendarDays))
+        else if (e.PropertyName is
+            nameof(GlanceWidgetViewModel.CalendarDays) or
+            nameof(GlanceWidgetViewModel.WeekdayHeaders) or
+            nameof(GlanceWidgetViewModel.DisplayedCalendarMonth) or
+            nameof(GlanceWidgetViewModel.CalendarLanguage) or
+            nameof(GlanceWidgetViewModel.CalendarDayItemMinimumHeight) or
+            nameof(GlanceWidgetViewModel.ShowCalendarTraditionalDetails) or
+            nameof(GlanceWidgetViewModel.CalendarWeekRows) or
+            nameof(GlanceWidgetViewModel.IsDisplayingCurrentMonth))
         {
-            RefreshRealizedCalendarDays();
+            QueueSurfaceRefresh(includeCalendar: true, includeStyleFaces: true);
         }
         else if (e.PropertyName is
-            nameof(GlanceWidgetViewModel.CalendarDayItemMinimumHeight) or
-            nameof(GlanceWidgetViewModel.ShowCalendarTraditionalDetails))
+            nameof(GlanceWidgetViewModel.WeekDays) or
+            nameof(GlanceWidgetViewModel.TodayAgenda) or
+            nameof(GlanceWidgetViewModel.TodayCardAgendaCapacity) or
+            nameof(GlanceWidgetViewModel.HolidayCountdownText) or
+            nameof(GlanceWidgetViewModel.IsTodayHolidayOff) or
+            nameof(GlanceWidgetViewModel.IsTodayCardStyle) or
+            nameof(GlanceWidgetViewModel.IsWeekStripStyle) or
+            nameof(GlanceWidgetViewModel.WeekStripShowsSecondaryText) or
+            nameof(GlanceWidgetViewModel.ShowSeconds) or
+            nameof(GlanceWidgetViewModel.Settings))
         {
-            QueueCalendarDensityRefresh();
+            QueueSurfaceRefresh(includeCalendar: false, includeStyleFaces: true);
         }
         else if (e.PropertyName == nameof(GlanceWidgetViewModel.TraditionalCalendarTitle))
         {
             UpdateTraditionalCalendarTitleVisibility();
-        }
-        else if (e.PropertyName == nameof(GlanceWidgetViewModel.CalendarLanguage))
-        {
-            ConfigureNativeCalendarCulture();
-            SetNativeCalendarDisplayDate(_viewModel.DisplayedCalendarMonth);
-        }
-        else if (e.PropertyName == nameof(GlanceWidgetViewModel.DisplayedCalendarMonth) &&
-                 !_isSynchronizingCalendarMonth)
-        {
-            SetNativeCalendarDisplayDate(_viewModel.DisplayedCalendarMonth);
         }
         else if (e.PropertyName is
             nameof(GlanceWidgetViewModel.CalendarMaterialType) or
@@ -232,6 +976,8 @@ public sealed partial class GlanceWidgetContent : UserControl
         {
             ApplyImageAwareTheme();
             ApplyCalendarMaterial();
+            RefreshCalendarSurface();
+            RefreshStyleFaces();
         }
     }
 
@@ -241,6 +987,7 @@ public sealed partial class GlanceWidgetContent : UserControl
             ? ElementTheme.Dark
             : ElementTheme.Default;
         CalendarGlassSurface.RequestedTheme = RootGrid.ActualTheme;
+        WeekStripSurface.RequestedTheme = RootGrid.ActualTheme;
     }
 
     private void ApplyBackgroundImageOpacity()
@@ -249,6 +996,14 @@ public sealed partial class GlanceWidgetContent : UserControl
     }
 
     private void ApplyCalendarMaterial()
+    {
+        ApplyCalendarMaterialCore();
+        // The week strip sits on the same material as the month panel.
+        WeekStripMaterialSurface.Background = CalendarMaterialSurface.Background;
+        WeekStripMaterialSurface.Opacity = CalendarMaterialSurface.Opacity;
+    }
+
+    private void ApplyCalendarMaterialCore()
     {
         bool isDark = RootGrid.ActualTheme == ElementTheme.Dark;
         var accentColor = App.Current.ThemeService?.GetEffectiveAccentColor()
@@ -323,431 +1078,20 @@ public sealed partial class GlanceWidgetContent : UserControl
         CalendarMaterialSurface.Background = _calendarSolidMaterialBrush;
     }
 
-    private void ConfigureNativeCalendarView()
-    {
-        if (_nativeCalendarConfigured)
-        {
-            return;
-        }
-
-        _nativeCalendarConfigured = true;
-        ConfigureNativeCalendarCulture();
-        NativeCalendarView.MinDate = ToDateTimeOffset(new DateOnly(1900, 1, 1));
-        NativeCalendarView.MaxDate = ToDateTimeOffset(new DateOnly(2100, 12, 31));
-        _calendarPointerWheelHandler ??= NativeCalendarView_PointerWheelChanged;
-        NativeCalendarView.AddHandler(
-            UIElement.PointerWheelChangedEvent,
-            _calendarPointerWheelHandler,
-            handledEventsToo: true);
-        ConfigureMonthViewScrolling();
-        _calendarDisplayModeCallbackToken = NativeCalendarView.RegisterPropertyChangedCallback(
-            CalendarView.DisplayModeProperty,
-            (_, _) =>
-            {
-                UpdateTraditionalCalendarTitleVisibility();
-                if (NativeCalendarView.DisplayMode == CalendarViewDisplayMode.Month)
-                {
-                    QueueCalendarMonthSync();
-                }
-            });
-        SetNativeCalendarDisplayDate(_viewModel.DisplayedCalendarMonth);
-        UpdateTraditionalCalendarTitleVisibility();
-    }
-
-    private void UnconfigureNativeCalendarView()
-    {
-        if (_calendarPointerWheelHandler is not null)
-        {
-            NativeCalendarView.RemoveHandler(
-                UIElement.PointerWheelChangedEvent,
-                _calendarPointerWheelHandler);
-        }
-
-        if (_monthViewScrollViewer is not null)
-        {
-            _monthViewScrollViewer.VerticalScrollMode = ScrollMode.Enabled;
-            _monthViewScrollViewer = null;
-        }
-        _calendarPreviousButton = null;
-        _calendarNextButton = null;
-
-        if (_calendarDisplayModeCallbackToken is long token)
-        {
-            NativeCalendarView.UnregisterPropertyChangedCallback(
-                CalendarView.DisplayModeProperty,
-                token);
-            _calendarDisplayModeCallbackToken = null;
-        }
-
-        foreach (CalendarViewDayItem item in _realizedCalendarDays.Keys)
-        {
-            item.Tag = null;
-        }
-
-        _realizedCalendarDays.Clear();
-        _nativeCalendarConfigured = false;
-    }
-
-    private void ConfigureMonthViewScrolling()
-    {
-        if (!_nativeCalendarConfigured)
-        {
-            return;
-        }
-
-        NativeCalendarView.ApplyTemplate();
-        CacheNativeCalendarNavigationButtons();
-        _monthViewScrollViewer = FindDescendantByName<ScrollViewer>(
-            NativeCalendarView,
-            "MonthViewScrollViewer");
-        if (_monthViewScrollViewer is not null)
-        {
-            DisableFreeMonthViewScrolling(_monthViewScrollViewer);
-            return;
-        }
-
-        DispatcherQueue.TryEnqueue(() =>
-        {
-            if (!_nativeCalendarConfigured)
-            {
-                return;
-            }
-
-            NativeCalendarView.ApplyTemplate();
-            CacheNativeCalendarNavigationButtons();
-            _monthViewScrollViewer = FindDescendantByName<ScrollViewer>(
-                NativeCalendarView,
-                "MonthViewScrollViewer");
-            if (_monthViewScrollViewer is not null)
-            {
-                DisableFreeMonthViewScrolling(_monthViewScrollViewer);
-            }
-        });
-    }
-
-    private void CacheNativeCalendarNavigationButtons()
-    {
-        _calendarPreviousButton ??= FindDescendantByName<Button>(
-            NativeCalendarView,
-            "PreviousButton");
-        _calendarNextButton ??= FindDescendantByName<Button>(
-            NativeCalendarView,
-            "NextButton");
-    }
-
-    private static void DisableFreeMonthViewScrolling(ScrollViewer scrollViewer)
-    {
-        // CalendarView defaults to optional snap points and can stop between
-        // months. User wheel input is handled below as discrete month paging.
-        scrollViewer.VerticalScrollMode = ScrollMode.Disabled;
-        scrollViewer.VerticalScrollBarVisibility = ScrollBarVisibility.Hidden;
-    }
-
-    private static T? FindDescendantByName<T>(DependencyObject root, string name)
-        where T : FrameworkElement
-    {
-        int childCount = VisualTreeHelper.GetChildrenCount(root);
-        for (int index = 0; index < childCount; index++)
-        {
-            DependencyObject child = VisualTreeHelper.GetChild(root, index);
-            if (child is T match && string.Equals(match.Name, name, StringComparison.Ordinal))
-            {
-                return match;
-            }
-
-            T? nestedMatch = FindDescendantByName<T>(child, name);
-            if (nestedMatch is not null)
-            {
-                return nestedMatch;
-            }
-        }
-
-        return null;
-    }
-
-    private void ConfigureNativeCalendarCulture()
-    {
-        NativeCalendarView.Language = _viewModel.CalendarLanguage;
-        NativeCalendarView.CalendarIdentifier =
-            Windows.Globalization.CalendarIdentifiers.Gregorian;
-        try
-        {
-            var culture = System.Globalization.CultureInfo.GetCultureInfo(
-                _viewModel.CalendarLanguage);
-            NativeCalendarView.FirstDayOfWeek = culture.DateTimeFormat.FirstDayOfWeek switch
-            {
-                DayOfWeek.Monday => Windows.Globalization.DayOfWeek.Monday,
-                DayOfWeek.Tuesday => Windows.Globalization.DayOfWeek.Tuesday,
-                DayOfWeek.Wednesday => Windows.Globalization.DayOfWeek.Wednesday,
-                DayOfWeek.Thursday => Windows.Globalization.DayOfWeek.Thursday,
-                DayOfWeek.Friday => Windows.Globalization.DayOfWeek.Friday,
-                DayOfWeek.Saturday => Windows.Globalization.DayOfWeek.Saturday,
-                _ => Windows.Globalization.DayOfWeek.Sunday
-            };
-        }
-        catch
-        {
-            NativeCalendarView.FirstDayOfWeek = Windows.Globalization.DayOfWeek.Sunday;
-        }
-    }
-
-    private void SetNativeCalendarDisplayDate(DateOnly month)
-    {
-        if (!_nativeCalendarConfigured)
-        {
-            return;
-        }
-
-        DateOnly middleOfMonth = new DateOnly(month.Year, month.Month, 1).AddDays(14);
-        NativeCalendarView.SetDisplayDate(ToDateTimeOffset(middleOfMonth));
-        QueueCalendarMonthSync();
-    }
-
-    private static DateTimeOffset ToDateTimeOffset(DateOnly date) =>
-        new(date.ToDateTime(new TimeOnly(12, 0), DateTimeKind.Local));
-
-    private async void NativeCalendarView_PointerWheelChanged(
-        object sender,
-        PointerRoutedEventArgs e)
-    {
-        if (!_isLoaded || NativeCalendarView.DisplayMode != CalendarViewDisplayMode.Month)
-        {
-            return;
-        }
-
-        int wheelDelta = e.GetCurrentPoint(NativeCalendarView).Properties.MouseWheelDelta;
-        if (wheelDelta == 0)
-        {
-            return;
-        }
-
-        e.Handled = true;
-        _calendarWheelGestureTimer.Stop();
-        _calendarWheelGestureTimer.Start();
-        if (_isCalendarWheelGestureActive || _isCalendarWheelNavigationInProgress)
-        {
-            return;
-        }
-
-        _isCalendarWheelGestureActive = true;
-        DateOnly targetMonth = GlanceCalendarNavigationResolver.ResolveWheelTarget(
-            _viewModel.DisplayedCalendarMonth,
-            wheelDelta,
-            new DateOnly(1900, 1, 1),
-            new DateOnly(2100, 12, 1));
-        if (targetMonth == _viewModel.DisplayedCalendarMonth)
-        {
-            return;
-        }
-
-        CacheNativeCalendarNavigationButtons();
-        Button? navigationButton = wheelDelta > 0
-            ? _calendarPreviousButton
-            : _calendarNextButton;
-        if (TryInvokeNativeCalendarNavigationButton(navigationButton))
-        {
-            return;
-        }
-
-        _isCalendarWheelNavigationInProgress = true;
-        try
-        {
-            await _viewModel.SetDisplayedCalendarMonthAsync(targetMonth);
-        }
-        finally
-        {
-            _isCalendarWheelNavigationInProgress = false;
-        }
-    }
-
-    private static bool TryInvokeNativeCalendarNavigationButton(Button? button)
-    {
-        if (button?.IsEnabled != true)
-        {
-            return false;
-        }
-
-        var peer = new ButtonAutomationPeer(button);
-        if (peer.GetPattern(PatternInterface.Invoke) is not IInvokeProvider invokeProvider)
-        {
-            return false;
-        }
-
-        // Reuse CalendarView's own previous/next command so wheel navigation
-        // receives exactly the same month transition as clicking the buttons.
-        invokeProvider.Invoke();
-        return true;
-    }
-
-    private void CalendarWheelGestureTimer_Tick(object? sender, object e)
-    {
-        _calendarWheelGestureTimer.Stop();
-        _isCalendarWheelGestureActive = false;
-    }
-
-    private void NativeCalendarView_DayItemChanging(
-        CalendarView sender,
-        CalendarViewDayItemChangingEventArgs args)
-    {
-        CalendarViewDayItem item = args.Item;
-        if (args.InRecycleQueue)
-        {
-            _realizedCalendarDays.Remove(item);
-            item.Tag = null;
-            return;
-        }
-
-        DateOnly date = DateOnly.FromDateTime(item.Date.DateTime);
-        _realizedCalendarDays[item] = date;
-        ApplyCalendarDayDecoration(item, date, DateOnly.FromDateTime(DateTime.Today));
-        if (sender.DisplayMode == CalendarViewDisplayMode.Month)
-        {
-            QueueCalendarMonthSync();
-        }
-    }
-
-    private void ApplyCalendarDayDecoration(CalendarViewDayItem item, DateOnly date, DateOnly today)
-    {
-        GlanceCalendarDay? day = _viewModel.FindCalendarDay(date);
-        double itemHeight = _viewModel.CalendarDayItemMinimumHeight;
-        if (Math.Abs(item.MinHeight - itemHeight) >= 0.1)
-        {
-            item.MinHeight = itemHeight;
-        }
-        if (double.IsNaN(item.Height) || Math.Abs(item.Height - itemHeight) >= 0.1)
-        {
-            item.Height = itemHeight;
-        }
-
-        GlanceCalendarDayDecoration decoration =
-            GlanceCalendarDayDecorationBuilder.Build(
-                day,
-                date,
-                today,
-                _viewModel.ShowCalendarTraditionalDetails,
-                _viewModel.DisplayedCalendarMonth,
-                _viewModel.CalendarLanguage);
-        if (!Equals(item.Tag, decoration))
-        {
-            item.Tag = decoration;
-        }
-    }
-
-    private void RefreshRealizedCalendarDays()
-    {
-        DateOnly today = DateOnly.FromDateTime(DateTime.Today);
-        foreach ((CalendarViewDayItem item, DateOnly date) in _realizedCalendarDays.ToArray())
-        {
-            ApplyCalendarDayDecoration(item, date, today);
-        }
-
-        UpdateTraditionalCalendarTitleVisibility();
-    }
-
-    private void QueueCalendarDensityRefresh()
-    {
-        if (!_isLoaded)
-        {
-            return;
-        }
-
-        _calendarDensityRefreshTimer.Stop();
-        _calendarDensityRefreshTimer.Start();
-    }
-
-    private void CalendarDensityRefreshTimer_Tick(object? sender, object e)
-    {
-        _calendarDensityRefreshTimer.Stop();
-        RefreshRealizedCalendarDays();
-    }
-
-    private void QueueCalendarMonthSync()
-    {
-        if (!_isLoaded || NativeCalendarView.DisplayMode != CalendarViewDisplayMode.Month)
-        {
-            return;
-        }
-
-        _calendarMonthSyncTimer.Stop();
-        _calendarMonthSyncTimer.Start();
-    }
-
-    private async void CalendarMonthSyncTimer_Tick(object? sender, object e)
-    {
-        _calendarMonthSyncTimer.Stop();
-        if (!_isLoaded || NativeCalendarView.DisplayMode != CalendarViewDisplayMode.Month)
-        {
-            return;
-        }
-
-        DateOnly[] visibleDates = _realizedCalendarDays
-            .Where(pair => IsCalendarDayVisible(pair.Key))
-            .Select(pair => pair.Value)
-            .ToArray();
-        if (visibleDates.Length == 0)
-        {
-            return;
-        }
-
-        DateOnly displayedMonth = GlanceCalendarNavigationResolver.ResolveDisplayedMonth(
-            visibleDates,
-            _viewModel.DisplayedCalendarMonth);
-        _isSynchronizingCalendarMonth = true;
-        try
-        {
-            await _viewModel.SetDisplayedCalendarMonthAsync(displayedMonth);
-        }
-        finally
-        {
-            _isSynchronizingCalendarMonth = false;
-        }
-
-        if (_isLoaded)
-        {
-            RefreshRealizedCalendarDays();
-        }
-    }
-
-    private bool IsCalendarDayVisible(CalendarViewDayItem item)
-    {
-        if (!item.IsLoaded || item.ActualWidth <= 0 || item.ActualHeight <= 0)
-        {
-            return false;
-        }
-
-        try
-        {
-            Windows.Foundation.Rect bounds = item
-                .TransformToVisual(NativeCalendarView)
-                .TransformBounds(new Windows.Foundation.Rect(
-                    0,
-                    0,
-                    item.ActualWidth,
-                    item.ActualHeight));
-            return bounds.Right > 0 &&
-                bounds.Left < NativeCalendarView.ActualWidth &&
-                bounds.Bottom > 0 &&
-                bounds.Top < NativeCalendarView.ActualHeight;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
     private void UpdateTraditionalCalendarTitleVisibility()
     {
         TraditionalCalendarTitlePresenter.Visibility =
-            _isLoaded &&
-            NativeCalendarView.DisplayMode == CalendarViewDisplayMode.Month &&
-            _viewModel.ShowCalendarTraditionalDetails
+            IsCalendarElementLoaded &&
+            CalendarSurfaceRoot is not null &&
+            _viewModel.ShowCalendarTraditionalDetails &&
+            _viewModel.HasTraditionalCalendar
                 ? Visibility.Visible
                 : Visibility.Collapsed;
     }
 
     private void QueueCalendarImagePaletteUpdate(string? path)
     {
-        if (!_isLoaded || _viewModel.CalendarMaterialMode != GlanceCalendarMaterialMode.FollowImage)
+        if (!_isLoaded || !_isWindowVisible || _isCompactCollapsed || _viewModel.CalendarMaterialMode != GlanceCalendarMaterialMode.FollowImage)
         {
             return;
         }
@@ -825,8 +1169,19 @@ public sealed partial class GlanceWidgetContent : UserControl
         }
     }
 
-    private void BeginLoadImage(string? path, bool allowTransition = true)
+    /// <summary>
+    /// Drives the background surface toward the view model's current image.
+    /// All residency rules (shell override, hidden, collapsed, missing file)
+    /// funnel through here; the presenter state decides whether a decode is
+    /// actually needed, so repeated calls are cheap and idempotent.
+    /// </summary>
+    private void SyncBackgroundImage(bool allowTransition = true)
     {
+        if (!_isLoaded)
+        {
+            return;
+        }
+
         // A user-set widget background wins over this surface's own
         // background image (per-widget customization rule): yield by keeping
         // the layer clear; removing the override restores it.
@@ -836,52 +1191,85 @@ public sealed partial class GlanceWidgetContent : UserControl
             return;
         }
 
-        int version = ++_imageLoadVersion;
+        if (!_isWindowVisible || _isCompactCollapsed)
+        {
+            SuspendBackground();
+            return;
+        }
+
+        string? path = _viewModel.CurrentImagePath;
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
         {
             ClearBackgroundImage();
             return;
         }
 
-        Border incoming = _isAActive ? BackgroundB : BackgroundA;
-        int decodePixelWidth = CalculateImageDecodePixelWidth();
-        int knownDecodePixelWidth = GetKnownDecodePixelWidth(path);
-        bool isDecodeRefresh = knownDecodePixelWidth > 0 && decodePixelWidth != knownDecodePixelWidth;
+        _backgroundReleaseTimer.Stop();
+        _background.Activate();
+        GlanceBackgroundLoadTicket? ticket = _background.Request(
+            path,
+            CalculateImageDecodePixelWidth(),
+            allowTransition);
+        if (ticket is { } request)
+        {
+            StartBackgroundLoad(request);
+        }
+        else if (!_background.HasPending)
+        {
+            // The displayed frame already satisfies the request; drop any
+            // superseded decode still parked on the inactive layer.
+            StopBackgroundRetry();
+            DiscardInactiveBackgroundLayer();
+        }
+    }
+
+    private void StartBackgroundLoad(GlanceBackgroundLoadTicket ticket)
+    {
+        StopBackgroundRetry();
+        SettleInterruptedTransition();
+
+        string path = ticket.Path;
+        int token = ticket.Token;
+        // The inactive layer receives the new frame; it stays transparent
+        // until the decode is accepted, so the current frame keeps showing.
+        Border incoming = _background.HasFrame && _isAActive ? BackgroundB : BackgroundA;
+        if (!_background.HasFrame)
+        {
+            _isAActive = false;
+        }
+
         var bitmap = new BitmapImage
         {
             DecodePixelType = DecodePixelType.Physical,
-            DecodePixelWidth = decodePixelWidth,
-            CreateOptions = isDecodeRefresh
-                ? BitmapCreateOptions.IgnoreImageCache
-                : BitmapCreateOptions.None
+            DecodePixelWidth = ticket.DecodePixelWidth
         };
-        _requestedImagePath = path;
-        _requestedImageDecodePixelWidth = decodePixelWidth;
         bitmap.ImageOpened += (_, _) =>
         {
-            if (version == _imageLoadVersion && _isLoaded)
+            if (!_isLoaded || !_background.TryAcceptOpened(token))
             {
-                _decodedImagePath = path;
-                _decodedImagePixelWidth = decodePixelWidth;
-                App.LogVerbose(
-                    $"[GlanceWidgetContent] Image opened '{path}', " +
-                    $"requestedWidth={decodePixelWidth}, decoded={bitmap.PixelWidth}x{bitmap.PixelHeight}");
-                RunTransition(incoming, allowTransition);
+                return;
             }
+
+            App.LogVerbose(
+                $"[GlanceWidgetContent] Image opened '{path}', " +
+                $"requestedWidth={ticket.DecodePixelWidth}, decoded={bitmap.PixelWidth}x{bitmap.PixelHeight}, " +
+                $"attempt={ticket.Attempt}");
+            RunTransition(incoming, ticket.AllowTransition);
         };
         bitmap.ImageFailed += (_, args) =>
         {
-            if (version == _imageLoadVersion)
+            App.Log(
+                $"[GlanceWidgetContent] Image decode failed for '{path}' " +
+                $"(attempt {ticket.Attempt}/{GlanceBackgroundPresenterState.MaxDecodeAttempts}): {args.ErrorMessage}");
+            if (_background.OnFailed(token) is { } retry)
             {
-                _requestedImagePath = _decodedImagePath;
-                _requestedImageDecodePixelWidth = _decodedImagePixelWidth;
+                ScheduleBackgroundRetry(retry);
             }
-
-            App.Log($"[GlanceWidgetContent] Image decode failed for '{path}': {args.ErrorMessage}");
         };
 
-        ImageBrush brush = CreateImageBrush(bitmap);
-        incoming.Background = brush;
+        ResetTransform(incoming);
+        incoming.Opacity = 0;
+        incoming.Background = CreateImageBrush(bitmap);
         // Rotation pins every decoded frame of the set when it goes through
         // the URI-keyed framework cache, which has no eviction API — and
         // small sets are the common case, so a size threshold cannot bound
@@ -889,6 +1277,120 @@ public sealed partial class GlanceWidgetContent : UserControl
         // footprint at ~2 bitmaps; the crossfade runs only after
         // ImageOpened, so the re-decode on each rotation is invisible.
         _ = GlanceImageStreamLoader.LoadAsync(bitmap, path);
+    }
+
+    private void ScheduleBackgroundRetry(GlanceBackgroundLoadTicket retry)
+    {
+        if (_backgroundRetryTimer is null)
+        {
+            _backgroundRetryTimer = new DispatcherTimer();
+            _backgroundRetryTimer.Tick += BackgroundRetryTimer_Tick;
+        }
+
+        _backgroundRetryTicket = retry;
+        _backgroundRetryTimer.Stop();
+        _backgroundRetryTimer.Interval = GlanceBackgroundPresenterState.GetRetryDelay(retry.Attempt);
+        _backgroundRetryTimer.Start();
+    }
+
+    private void BackgroundRetryTimer_Tick(object? sender, object e)
+    {
+        _backgroundRetryTimer?.Stop();
+        GlanceBackgroundLoadTicket? retry = _backgroundRetryTicket;
+        _backgroundRetryTicket = null;
+        if (retry is { } ticket &&
+            _isLoaded &&
+            _background.IsCurrent(ticket.Token) &&
+            File.Exists(ticket.Path))
+        {
+            StartBackgroundLoad(ticket);
+        }
+    }
+
+    private void StopBackgroundRetry()
+    {
+        _backgroundRetryTimer?.Stop();
+        _backgroundRetryTicket = null;
+    }
+
+    /// <summary>
+    /// Hidden, collapsed or unloaded: cancel in-flight decodes and keep the
+    /// displayed frame for a grace period so quick hide/show cycles reuse it.
+    /// </summary>
+    private void WarmInitialCollapsedBackgroundImage()
+    {
+        string? path = _viewModel.CurrentImagePath;
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+        {
+            return;
+        }
+
+        _backgroundReleaseTimer.Stop();
+        _background.Activate();
+        GlanceBackgroundLoadTicket? ticket = _background.Request(
+            path,
+            CalculateImageDecodePixelWidth(),
+            allowTransition: false);
+        if (ticket is { } request)
+        {
+            StartBackgroundLoad(request);
+        }
+    }
+
+    private void SuspendBackground()
+    {
+        bool retainDisplayedFrame = _isWindowVisible
+            ? ShouldKeepWarmWhileCollapsed
+            : ShouldKeepWarmWhileHidden;
+        if (retainDisplayedFrame && _background.HasPending)
+        {
+            // Let the single initial warm-up frame finish decoding so the first
+            // expand shows a ready photo without blanking.
+            _backgroundReleaseTimer.Stop();
+            return;
+        }
+
+        _background.Suspend();
+        StopBackgroundRetry();
+        SettleInterruptedTransition();
+        DiscardInactiveBackgroundLayer();
+
+        bool resourceSaver = App.Current?.IsResourceSaverPerformanceMode == true;
+        if (!_background.HasFrame || (resourceSaver && !retainDisplayedFrame) || _isDisposed)
+        {
+            ClearBackgroundImage();
+            return;
+        }
+
+        _backgroundReleaseTimer.Stop();
+        if (!retainDisplayedFrame)
+        {
+            _backgroundReleaseTimer.Start();
+        }
+    }
+
+    private void BackgroundReleaseTimer_Tick(object? sender, object e)
+    {
+        _backgroundReleaseTimer.Stop();
+        if (!_background.IsActive)
+        {
+            ClearBackgroundImage();
+        }
+    }
+
+    private void DiscardInactiveBackgroundLayer()
+    {
+        // Without an accepted frame nothing is visible and ClearBackgroundImage
+        // owns both layers; mid-crossfade the inactive layer is still fading.
+        if (_transitionStoryboard is not null || !_background.HasFrame)
+        {
+            return;
+        }
+
+        Border inactive = _isAActive ? BackgroundB : BackgroundA;
+        inactive.Background = null;
+        inactive.Opacity = 0;
+        ResetTransform(inactive);
     }
 
     private void QueueImageQualityRefresh()
@@ -902,7 +1404,7 @@ public sealed partial class GlanceWidgetContent : UserControl
         }
 
         int requiredDecodePixelWidth = CalculateImageDecodePixelWidth();
-        int knownDecodePixelWidth = GetKnownDecodePixelWidth(_viewModel.CurrentImagePath);
+        int knownDecodePixelWidth = _background.GetKnownDecodePixelWidth(_viewModel.CurrentImagePath);
         if (!GlanceImageDecodeSizeCalculator.NeedsRefresh(
                 knownDecodePixelWidth,
                 requiredDecodePixelWidth))
@@ -916,19 +1418,7 @@ public sealed partial class GlanceWidgetContent : UserControl
     private void ImageResizeDelayTimer_Tick(object? sender, object e)
     {
         _imageResizeDelayTimer.Stop();
-        string? path = _viewModel.CurrentImagePath;
-        if (!_isLoaded || string.IsNullOrWhiteSpace(path) || !File.Exists(path))
-        {
-            return;
-        }
-
-        int requiredDecodePixelWidth = CalculateImageDecodePixelWidth();
-        if (GlanceImageDecodeSizeCalculator.NeedsRefresh(
-                GetKnownDecodePixelWidth(path),
-                requiredDecodePixelWidth))
-        {
-            BeginLoadImage(path, allowTransition: false);
-        }
+        SyncBackgroundImage(allowTransition: false);
     }
 
     private int CalculateImageDecodePixelWidth()
@@ -936,29 +1426,44 @@ public sealed partial class GlanceWidgetContent : UserControl
         return GlanceImageDecodeSizeCalculator.Calculate(
             ActualWidth,
             ActualHeight,
-            XamlRoot?.RasterizationScale ?? 1);
+            XamlRoot?.RasterizationScale ?? 1,
+            resourceSaver: App.Current?.IsResourceSaverPerformanceMode == true);
     }
 
-    private int GetKnownDecodePixelWidth(string path)
+    private void StopAndClearTransitionStoryboard()
     {
-        int knownDecodePixelWidth = 0;
-        if (string.Equals(path, _requestedImagePath, StringComparison.OrdinalIgnoreCase))
+        _transitionStoryboard?.Stop();
+        _transitionStoryboard?.Children.Clear();
+        _transitionStoryboard = null;
+    }
+
+    /// <summary>
+    /// Completes an interrupted crossfade instantly: the incoming (already
+    /// accepted) layer becomes the sole visible layer.
+    /// </summary>
+    private void SettleInterruptedTransition()
+    {
+        if (_transitionStoryboard is null)
         {
-            knownDecodePixelWidth = _requestedImageDecodePixelWidth;
+            return;
         }
 
-        if (string.Equals(path, _decodedImagePath, StringComparison.OrdinalIgnoreCase))
-        {
-            knownDecodePixelWidth = Math.Max(knownDecodePixelWidth, _decodedImagePixelWidth);
-        }
-
-        return knownDecodePixelWidth;
+        StopAndClearTransitionStoryboard();
+        Border active = _isAActive ? BackgroundA : BackgroundB;
+        Border inactive = _isAActive ? BackgroundB : BackgroundA;
+        active.Opacity = 1;
+        ResetTransform(active);
+        inactive.Background = null;
+        inactive.Opacity = 0;
+        ResetTransform(inactive);
     }
 
     private void ClearBackgroundImage()
     {
-        _transitionStoryboard?.Stop();
-        _transitionStoryboard = null;
+        StopAndClearTransitionStoryboard();
+        StopBackgroundRetry();
+        _backgroundReleaseTimer.Stop();
+        _background.ReleaseFrame();
 
         foreach (Border background in new[] { BackgroundA, BackgroundB })
         {
@@ -968,16 +1473,12 @@ public sealed partial class GlanceWidgetContent : UserControl
         }
 
         _isAActive = false;
-        _requestedImagePath = null;
-        _requestedImageDecodePixelWidth = 0;
-        _decodedImagePath = null;
-        _decodedImagePixelWidth = 0;
     }
 
     private void RunTransition(Border incoming, bool allowTransition)
     {
         Border outgoing = ReferenceEquals(incoming, BackgroundA) ? BackgroundB : BackgroundA;
-        _transitionStoryboard?.Stop();
+        StopAndClearTransitionStoryboard();
         ResetTransform(incoming);
         ResetTransform(outgoing);
 
@@ -994,6 +1495,7 @@ public sealed partial class GlanceWidgetContent : UserControl
             return;
         }
 
+        _isAActive = ReferenceEquals(incoming, BackgroundA);
         TimeSpan duration = TimeSpan.FromMilliseconds(_viewModel.TransitionSpeed switch
         {
             GlanceTransitionSpeed.Fast => 170,
@@ -1020,13 +1522,27 @@ public sealed partial class GlanceWidgetContent : UserControl
             AddAnimation(storyboard, zoom, "ScaleY", 1.035, 1, duration);
         }
 
-        storyboard.Completed += (_, _) =>
+        EventHandler<object>? completedHandler = null;
+        completedHandler = (_, _) =>
         {
+            storyboard.Completed -= completedHandler;
+            if (!ReferenceEquals(_transitionStoryboard, storyboard))
+            {
+                return;
+            }
+
+            _transitionStoryboard = null;
+            // WinUI keeps HoldEnd storyboards in an active clock state during
+            // Completed; Stop() must precede Children.Clear() to avoid 0x800F1000.
+            storyboard.Stop();
+            storyboard.Children.Clear();
+            incoming.Opacity = 1;
             outgoing.Background = null;
             outgoing.Opacity = 0;
             ResetTransform(incoming);
             _isAActive = ReferenceEquals(incoming, BackgroundA);
         };
+        storyboard.Completed += completedHandler;
         _transitionStoryboard = storyboard;
         storyboard.Begin();
     }
@@ -1120,14 +1636,63 @@ public sealed partial class GlanceWidgetContent : UserControl
         }
     }
 
+    private void QueueSurfaceRefresh(bool includeCalendar, bool includeStyleFaces)
+    {
+        if (!_isLoaded)
+        {
+            return;
+        }
+
+        _pendingCalendarSurfaceRefresh |= includeCalendar;
+        _pendingStyleFacesRefresh |= includeStyleFaces;
+        if (_surfaceRefreshEnqueued)
+        {
+            return;
+        }
+
+        if (DispatcherQueue is { } dispatcherQueue &&
+            dispatcherQueue.TryEnqueue(FlushPendingSurfaceRefresh))
+        {
+            _surfaceRefreshEnqueued = true;
+            return;
+        }
+
+        FlushPendingSurfaceRefresh();
+    }
+
+    private void FlushPendingSurfaceRefresh()
+    {
+        _surfaceRefreshEnqueued = false;
+        bool refreshCalendar = _pendingCalendarSurfaceRefresh;
+        bool refreshFaces = _pendingStyleFacesRefresh;
+        _pendingCalendarSurfaceRefresh = false;
+        _pendingStyleFacesRefresh = false;
+        if (!_isLoaded || _isDisposed)
+        {
+            return;
+        }
+
+        if (refreshCalendar)
+        {
+            RefreshCalendarSurface();
+        }
+
+        if (refreshFaces)
+        {
+            RefreshStyleFaces();
+        }
+    }
+
     private void Root_PointerEntered(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
     {
         ActionLayer.Opacity = 1;
+        ActionLayer.IsHitTestVisible = true;
     }
 
     private void Root_PointerExited(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
     {
         ActionLayer.Opacity = 0;
+        ActionLayer.IsHitTestVisible = false;
     }
 
     private void PauseButton_Click(object sender, RoutedEventArgs e) => _viewModel.TogglePause();

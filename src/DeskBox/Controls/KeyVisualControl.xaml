@@ -1,0 +1,172 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!--
+    Portions adapted from Microsoft PowerToys (KeyVisual / KeyCharPresenter),
+    Copyright (c) Microsoft Corporation, licensed under the MIT License.
+-->
+<UserControl
+    x:Class="DeskBox.Controls.KeyVisualControl"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    AutomationProperties.AccessibilityView="Raw"
+    IsTabStop="False"
+    mc:Ignorable="d">
+
+    <Grid
+        x:Name="KeyHolder"
+        MinWidth="54"
+        MinHeight="48"
+        Padding="20,14"
+        HorizontalAlignment="Center"
+        VerticalAlignment="Center"
+        Background="{ThemeResource AccentFillColorDefaultBrush}"
+        BackgroundSizing="OuterBorderEdge"
+        BorderBrush="{ThemeResource AccentControlElevationBorderBrush}"
+        BorderThickness="{ThemeResource ButtonBorderThemeThickness}"
+        CornerRadius="8">
+        <Grid.BackgroundTransition>
+            <BrushTransition Duration="0:0:0.083" />
+        </Grid.BackgroundTransition>
+
+        <Grid
+            x:Name="ContentHost"
+            HorizontalAlignment="Center"
+            VerticalAlignment="Center">
+            <TextBlock
+                x:Name="KeyTextBlock"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                FontSize="16"
+                FontWeight="SemiBold"
+                Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}"
+                TextLineBounds="Tight" />
+
+            <Viewbox
+                x:Name="KeyGlyphBox"
+                Width="16"
+                Height="16"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                Visibility="Collapsed">
+                <FontIcon
+                    x:Name="KeyFontIcon"
+                    FontFamily="{ThemeResource SymbolThemeFontFamily}"
+                    FontSize="16"
+                    FontWeight="SemiBold"
+                    Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}" />
+            </Viewbox>
+
+            <Viewbox
+                x:Name="WindowsIconBox"
+                Width="16"
+                Height="16"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                Visibility="Collapsed">
+                <PathIcon
+                    x:Name="WindowsPathIcon"
+                    Data="M9 20H0V11H9V20ZM20 20H11V11H20V20ZM9 9H0V0H9V9ZM20 9H11V0H20V9Z"
+                    Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}" />
+            </Viewbox>
+
+            <StackPanel
+                x:Name="CopilotPanel"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                Orientation="Horizontal"
+                Spacing="6"
+                Visibility="Collapsed">
+                <Viewbox
+                    x:Name="CopilotIconBox"
+                    Width="16"
+                    Height="16"
+                    VerticalAlignment="Center">
+                    <PathIcon
+                        x:Name="CopilotPathIcon"
+                        Data="M0 1213q0-60 10-124t27-130 35-129 38-121q18-55 41-119t54-129 70-125 87-106 106-74 129-28h661q59 0 114 17t96 64q30 34 46 72t33 81l22 58q11 29 34 52 23 25 56 31t65 9h4q157 0 238 83t82 240q0 60-10 125t27 130-35 128-38 121q-18 55-41 119t-54 129-70 125-87 106-106 74-129 28H790q-61 0-107-15t-82-44-61-72-46-98q-11-29-24-60t-35-55q-23-25-51-31t-60-9h-4q-157 0-238-83T0 1213zm598-957q-50 0-93 25t-79 68-67 94-54 108-42 106-31 91q-17 51-35 110t-33 119-26 121-10 114q0 102 43 149t147 47h163q39 0 74-12t64-35 50-53 34-67q19-58 35-115t35-117q35-117 70-232t72-233q23-73 47-147t63-141H598zm452 285q69-29 143-29h281q-18-29-29-59t-21-58-21-54-30-44-46-30-69-11q-32 0-60 9t-48 35q-17 23-31 53t-27 63-23 65-19 60zm-296 867h101q39 0 74-12t66-34 52-52 33-68l58-191 42-140q21-70 43-140 11-36 28-69t43-62h-101q-39 0-74 12t-66 34-52 52-33 68q-15 48-29 96t-29 96q-21 70-41 140t-44 140q-11 36-28 68t-43 62zm814-768q-39 0-74 12t-64 35-50 53-34 68q-56 174-107 347t-106 349q-23 74-47 147t-63 141h427q50 0 93-25t79-68 67-94 54-108 42-106 31-91q16-51 34-110t34-119 26-121 10-114q0-102-43-149t-147-47h-162zm-570 867q-69 29-143 29H564q17 28 29 58t22 58 24 54 32 45 48 30 71 11q31 0 60-8t49-35q15-19 29-50t28-65 24-69 18-58z"
+                        Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}" />
+                </Viewbox>
+                <TextBlock
+                    x:Name="CopilotLabel"
+                    VerticalAlignment="Center"
+                    FontSize="16"
+                    FontWeight="SemiBold"
+                    Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}"
+                    Text="Copilot"
+                    TextLineBounds="Tight" />
+            </StackPanel>
+        </Grid>
+
+        <VisualStateManager.VisualStateGroups>
+            <VisualStateGroup x:Name="KeyVisualStates">
+                <VisualState x:Name="NormalState" />
+
+                <VisualState x:Name="DisabledState">
+                    <VisualState.Setters>
+                        <Setter Target="KeyHolder.Background" Value="{ThemeResource AccentButtonBackgroundDisabled}" />
+                        <Setter Target="KeyHolder.BorderBrush" Value="{ThemeResource AccentButtonBorderBrushDisabled}" />
+                        <Setter Target="KeyTextBlock.Foreground" Value="{ThemeResource AccentButtonForegroundDisabled}" />
+                        <Setter Target="KeyFontIcon.Foreground" Value="{ThemeResource AccentButtonForegroundDisabled}" />
+                        <Setter Target="WindowsPathIcon.Foreground" Value="{ThemeResource AccentButtonForegroundDisabled}" />
+                        <Setter Target="CopilotPathIcon.Foreground" Value="{ThemeResource AccentButtonForegroundDisabled}" />
+                        <Setter Target="CopilotLabel.Foreground" Value="{ThemeResource AccentButtonForegroundDisabled}" />
+                    </VisualState.Setters>
+                </VisualState>
+
+                <VisualState x:Name="InvalidState">
+                    <VisualState.Setters>
+                        <Setter Target="KeyHolder.Background" Value="{ThemeResource SystemFillColorCriticalBackgroundBrush}" />
+                        <Setter Target="KeyHolder.BorderBrush" Value="{ThemeResource SystemFillColorCriticalBrush}" />
+                        <Setter Target="KeyHolder.BorderThickness" Value="1" />
+                        <Setter Target="KeyTextBlock.Foreground" Value="{ThemeResource SystemFillColorCriticalBrush}" />
+                        <Setter Target="KeyFontIcon.Foreground" Value="{ThemeResource SystemFillColorCriticalBrush}" />
+                        <Setter Target="WindowsPathIcon.Foreground" Value="{ThemeResource SystemFillColorCriticalBrush}" />
+                        <Setter Target="CopilotPathIcon.Foreground" Value="{ThemeResource SystemFillColorCriticalBrush}" />
+                        <Setter Target="CopilotLabel.Foreground" Value="{ThemeResource SystemFillColorCriticalBrush}" />
+                    </VisualState.Setters>
+                </VisualState>
+
+                <VisualState x:Name="WarningState">
+                    <VisualState.Setters>
+                        <Setter Target="KeyHolder.Background" Value="{ThemeResource SystemFillColorCautionBackgroundBrush}" />
+                        <Setter Target="KeyHolder.BorderBrush" Value="{ThemeResource SystemFillColorCautionBrush}" />
+                        <Setter Target="KeyHolder.BorderThickness" Value="1" />
+                        <Setter Target="KeyTextBlock.Foreground" Value="{ThemeResource SystemFillColorCautionBrush}" />
+                        <Setter Target="KeyFontIcon.Foreground" Value="{ThemeResource SystemFillColorCautionBrush}" />
+                        <Setter Target="WindowsPathIcon.Foreground" Value="{ThemeResource SystemFillColorCautionBrush}" />
+                        <Setter Target="CopilotPathIcon.Foreground" Value="{ThemeResource SystemFillColorCautionBrush}" />
+                        <Setter Target="CopilotLabel.Foreground" Value="{ThemeResource SystemFillColorCautionBrush}" />
+                    </VisualState.Setters>
+                </VisualState>
+
+                <VisualState x:Name="BadgeNormalState">
+                    <VisualState.Setters>
+                        <Setter Target="KeyHolder.Background" Value="{ThemeResource CardBackgroundFillColorSecondaryBrush}" />
+                        <Setter Target="KeyHolder.BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+                        <Setter Target="KeyHolder.BorderThickness" Value="1" />
+                        <Setter Target="KeyTextBlock.Foreground" Value="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                    </VisualState.Setters>
+                </VisualState>
+
+                <VisualState x:Name="BadgeInvalidState">
+                    <VisualState.Setters>
+                        <Setter Target="KeyHolder.Background" Value="{ThemeResource SystemFillColorCriticalBackgroundBrush}" />
+                        <Setter Target="KeyHolder.BorderBrush" Value="{ThemeResource SystemFillColorCriticalBrush}" />
+                        <Setter Target="KeyHolder.BorderThickness" Value="1" />
+                        <Setter Target="KeyTextBlock.Foreground" Value="{ThemeResource SystemFillColorCriticalBrush}" />
+                    </VisualState.Setters>
+                </VisualState>
+
+                <VisualState x:Name="BadgeDisabledState">
+                    <VisualState.Setters>
+                        <Setter Target="KeyHolder.Background" Value="{ThemeResource SubtleFillColorTransparentBrush}" />
+                        <Setter Target="KeyHolder.BorderBrush" Value="{ThemeResource CardStrokeColorDefaultSolidBrush}" />
+                        <Setter Target="KeyHolder.BorderThickness" Value="1" />
+                        <Setter Target="KeyTextBlock.Foreground" Value="{ThemeResource TextFillColorDisabledBrush}" />
+                    </VisualState.Setters>
+                </VisualState>
+            </VisualStateGroup>
+        </VisualStateManager.VisualStateGroups>
+    </Grid>
+</UserControl>

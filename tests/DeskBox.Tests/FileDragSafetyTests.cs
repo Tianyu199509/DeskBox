@@ -53,7 +53,7 @@ public sealed class FileDragSafetyTests
             var package = new DataPackage();
             Assert.True(FileItemDragPackage.TryPrepare(package,
                 [new WidgetItem { Path = first }, new WidgetItem { Path = second }],
-                "test-source", _ => items, _ => "2 files", out var result));
+                "test-source", _ => items, _ => "2 files", out var result, allowNativeShellDataObject: false));
             Assert.False(result.UsesNativeShellDataObject);
             Assert.Equal(DataPackageOperation.None, package.GetView().RequestedOperation);
             package.GetView().ReportOperationCompleted(DataPackageOperation.Move);

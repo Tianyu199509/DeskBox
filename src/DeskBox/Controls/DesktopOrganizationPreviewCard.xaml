@@ -6,15 +6,19 @@
     <UserControl.Resources>
         <Style x:Key="PreviewFileToggleStyle" TargetType="ToggleButton">
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="0" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             <Setter Property="VerticalContentAlignment" Value="Top" />
             <Setter Property="UseSystemFocusVisuals" Value="True" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ToggleButton">
-                        <Border x:Name="TileBorder" Background="{TemplateBinding Background}"
-                                BorderBrush="Transparent" BorderThickness="1"
+                        <Border x:Name="TileBorder"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
                                 CornerRadius="6">
                             <VisualStateManager.VisualStateGroups>
                                 <VisualStateGroup x:Name="CommonStates">
@@ -32,7 +36,10 @@
                                     <VisualState x:Name="Disabled" />
                                 </VisualStateGroup>
                             </VisualStateManager.VisualStateGroups>
-                            <ContentPresenter Content="{TemplateBinding Content}" />
+                            <ContentPresenter
+                                HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                Content="{TemplateBinding Content}" />
                         </Border>
                     </ControlTemplate>
                 </Setter.Value>
@@ -41,36 +48,30 @@
         <Style x:Key="GroupSelectionToggleStyle" TargetType="CheckBox">
             <Setter Property="Background" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="MinWidth" Value="0" />
             <Setter Property="HorizontalContentAlignment" Value="Stretch" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
             <Setter Property="UseSystemFocusVisuals" Value="True" />
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="CheckBox">
-                        <!-- Root carries the templated background so the whole row
-                             hit-tests; without it the empty title area is dead space
-                             even though it looks like part of the toggle. -->
                         <Grid x:Name="RootGrid" ColumnDefinitions="Auto,*"
+                              Padding="4,2,8,2"
                               Background="{TemplateBinding Background}"
-                              CornerRadius="4">
+                              CornerRadius="6">
                             <Border x:Name="SelectionBox" Width="20" Height="20" CornerRadius="4"
+                                    VerticalAlignment="Center"
                                     BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}" BorderThickness="1"
                                     Background="Transparent">
                                 <FontIcon x:Name="CheckIcon" Glyph="&#xE73E;" FontSize="11"
                                           HorizontalAlignment="Center" VerticalAlignment="Center"
                                           Visibility="Collapsed" Foreground="{ThemeResource SolidBackgroundFillColorBaseBrush}" />
                             </Border>
-                            <ContentPresenter Grid.Column="1" Margin="8,0,0,0"
+                            <ContentPresenter Grid.Column="1" Margin="10,0,0,0"
                                               VerticalAlignment="Center"
                                               HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
                                               Content="{TemplateBinding Content}" />
                             <VisualStateManager.VisualStateGroups>
-                                <!-- Single cartesian group (the official CheckBox pattern):
-                                     separate CommonStates/CheckStates groups would both write
-                                     SelectionBox.Background and the most recently entered
-                                     state wins, erasing the checked fill while hovering.
-                                     Row-as-toggle: hover lights the row in both check
-                                     states, mirroring the file tile's Subtle treatment. -->
                                 <VisualStateGroup x:Name="CombinedStates">
                                     <VisualState x:Name="Unchecked" />
                                     <VisualState x:Name="UncheckedPointerOver">
@@ -158,48 +159,146 @@
             </Setter>
         </Style>
     </UserControl.Resources>
-    <Grid>
+
+    <Grid
+        x:Name="CardRootGrid"
+        Width="320"
+        Height="216"
+        HorizontalAlignment="Left"
+        VerticalAlignment="Top"
+        AllowDrop="True"
+        PointerEntered="CardRootGrid_PointerEntered"
+        PointerExited="CardRootGrid_PointerExited"
+        Tapped="CardRootGrid_Tapped"
+        DragOver="CardRootGrid_DragOver"
+        DragLeave="CardRootGrid_DragLeave"
+        Drop="CardRootGrid_Drop">
         <SystemBackdropElement x:Name="MaterialSurface" IsHitTestVisible="False" />
         <Border x:Name="FallbackSurface" IsHitTestVisible="False" />
-        <Border x:Name="CardOutline" Height="360"
-                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
-            <Grid RowDefinitions="Auto,*,Auto">
-                <Border x:Name="HeaderDivider" BorderThickness="0,0,0,1" Padding="12,8">
-                    <Grid RowDefinitions="Auto,Auto" RowSpacing="6" ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                        <Grid Grid.Row="0" ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                            <TextBlock x:Name="ReadOnlyTitleText" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
-                                       FontWeight="SemiBold" Visibility="Collapsed" />
-                            <CheckBox x:Name="GroupCheckBox" MinWidth="0" HorizontalAlignment="Stretch"
-                                      Style="{StaticResource GroupSelectionToggleStyle}"
-                                      Checked="GroupCheckBox_Changed" Unchecked="GroupCheckBox_Changed">
-                                <TextBlock x:Name="TitleText" TextTrimming="CharacterEllipsis" />
-                            </CheckBox>
+        <Border
+            x:Name="CardOutline"
+            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1">
+            <Grid RowDefinitions="38,*">
+                <Border
+                    x:Name="HeaderDivider"
+                    Height="38"
+                    Padding="14,0,8,0"
+                    BorderThickness="0,0,0,1">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                        <!-- Hidden compatibility elements -->
+                        <StackPanel Visibility="Collapsed">
+                            <StackPanel x:Name="ReadOnlyHeaderPanel">
+                                <Border x:Name="ReadOnlyIconBadge">
+                                    <FontIcon x:Name="ReadOnlyCategoryIcon" />
+                                </Border>
+                                <TextBlock x:Name="ReadOnlyTitleText" />
+                            </StackPanel>
+                            <CheckBox
+                                x:Name="GroupCheckBox"
+                                Style="{StaticResource GroupSelectionToggleStyle}"
+                                Checked="GroupCheckBox_Changed"
+                                Unchecked="GroupCheckBox_Changed" />
+                            <Border x:Name="CategoryIconBadge">
+                                <FontIcon x:Name="CategoryIcon" />
+                            </Border>
+                            <Border x:Name="DestinationBadge">
+                                <TextBlock x:Name="DestinationBadgeText" />
+                            </Border>
+                            <TextBlock x:Name="GroupDescriptionText" />
+                            <TextBlock x:Name="RoutePrefixText" />
+                            <TextBlock x:Name="DestinationText" />
+                            <Button x:Name="InlineIncludeButton" Click="InlineIncludeButton_Click">
+                                <TextBlock x:Name="InlineIncludeText" />
+                            </Button>
+                        </StackPanel>
+
+                        <!-- Pure DeskBox Widget Title (Double-click to rename) -->
+                        <Grid Grid.Column="0" VerticalAlignment="Center">
+                            <StackPanel
+                                x:Name="TitleDisplayPanel"
+                                Orientation="Horizontal"
+                                VerticalAlignment="Center"
+                                Background="Transparent"
+                                DoubleTapped="TitleDisplayPanel_DoubleTapped">
+                                <TextBlock
+                                    x:Name="TitleText"
+                                    FontSize="13"
+                                    FontWeight="SemiBold"
+                                    MaxWidth="172"
+                                    VerticalAlignment="Center"
+                                    TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+
+                            <TextBox
+                                x:Name="TitleRenameBox"
+                                Visibility="Collapsed"
+                                FontSize="12.5"
+                                MinHeight="26"
+                                Width="172"
+                                HorizontalAlignment="Left"
+                                Padding="6,2"
+                                VerticalAlignment="Center"
+                                LostFocus="TitleRenameBox_LostFocus"
+                                KeyDown="TitleRenameBox_KeyDown" />
                         </Grid>
-                        <Border Grid.Row="0" Grid.Column="1" Background="{ThemeResource SubtleFillColorSecondaryBrush}"
-                                CornerRadius="10" Padding="8,2" VerticalAlignment="Center">
-                            <TextBlock x:Name="CountText" FontSize="12" VerticalAlignment="Center" />
-                        </Border>
-                        <Button x:Name="DestinationButton" Grid.Row="1" Grid.ColumnSpan="2" MaxWidth="260" MinWidth="0" MinHeight="32"
-                                FontSize="12" HorizontalAlignment="Left" HorizontalContentAlignment="Stretch">
-                            <TextBlock x:Name="DestinationText" TextTrimming="CharacterEllipsis" />
-                            <Button.Flyout>
-                                <MenuFlyout x:Name="DestinationFlyout" Placement="Bottom" />
-                            </Button.Flyout>
-                        </Button>
-                        <TextBlock x:Name="GroupDescriptionText" Grid.Row="1" Grid.ColumnSpan="2" FontSize="12" TextWrapping="Wrap"
-                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" Visibility="Collapsed" />
+
+                        <!-- Plain-text metadata + subtle '...' button -->
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                            <TextBlock
+                                x:Name="CountText"
+                                FontSize="12"
+                                VerticalAlignment="Center"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+
+                            <StackPanel x:Name="DestinationPanel" Orientation="Horizontal" VerticalAlignment="Center">
+                                <Button
+                                    x:Name="DestinationButton"
+                                    Width="26"
+                                    Height="26"
+                                    MinWidth="26"
+                                    MinHeight="26"
+                                    Padding="0"
+                                    CornerRadius="5"
+                                    Opacity="0.52"
+                                    Background="Transparent"
+                                    BorderThickness="0"
+                                    VerticalAlignment="Center">
+                                    <FontIcon
+                                        Glyph="&#xE712;"
+                                        FontSize="13"
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Center"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                    <Button.Flyout>
+                                        <MenuFlyout
+                                            x:Name="DestinationFlyout"
+                                            Placement="BottomEdgeAlignedRight"
+                                            Opened="DestinationFlyout_Opened"
+                                            Closed="DestinationFlyout_Closed" />
+                                    </Button.Flyout>
+                                </Button>
+                            </StackPanel>
+                        </StackPanel>
                     </Grid>
                 </Border>
-                <ScrollViewer x:Name="ItemsScrollViewer" Grid.Row="1" Margin="8,6"
-                              HorizontalScrollBarVisibility="Disabled"
-                              VerticalScrollBarVisibility="Auto" VerticalScrollMode="Auto"
-                              HorizontalContentAlignment="Stretch" Padding="2,0,2,0">
-                    <Grid x:Name="ItemsPanel" Margin="2,4" SizeChanged="ItemsPanel_SizeChanged" />
+
+                <!-- Inner ScrollViewer: scrolls vertically inside the fixed 320x216 box when > 8 items -->
+                <ScrollViewer
+                    x:Name="InnerItemsScrollViewer"
+                    Grid.Row="1"
+                    HorizontalScrollBarVisibility="Disabled"
+                    VerticalScrollBarVisibility="Auto"
+                    VerticalScrollMode="Auto"
+                    Padding="10,6,10,8">
+                    <Grid
+                        x:Name="ItemsPanel"
+                        ColumnSpacing="4"
+                        RowSpacing="4"
+                        VerticalAlignment="Top"
+                        SizeChanged="ItemsPanel_SizeChanged" />
                 </ScrollViewer>
-                <Button x:Name="ExpandButton" Grid.Row="2" HorizontalAlignment="Stretch"
-                        Background="Transparent" BorderThickness="0" FontSize="12"
-                        Click="ExpandButton_Click" Visibility="Collapsed" />
             </Grid>
         </Border>
     </Grid>

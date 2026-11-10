@@ -255,7 +255,9 @@ public static class WidgetCompactBoundsCalculator
         {
             SettingsService.WidgetCornerPreferenceSquare => 0,
             SettingsService.WidgetCornerPreferenceSmall => 4,
-            _ => 8
+            SettingsService.WidgetCornerPreferenceRound => 8,
+            SettingsService.WidgetCornerPreferenceLarge => 16,
+            _ => 16
         };
     }
 
@@ -265,7 +267,9 @@ public static class WidgetCompactBoundsCalculator
         {
             SettingsService.WidgetCornerPreferenceSquare => 0,
             SettingsService.WidgetCornerPreferenceSmall => 2,
-            _ => 4
+            SettingsService.WidgetCornerPreferenceRound => 4,
+            SettingsService.WidgetCornerPreferenceLarge => 8,
+            _ => 8
         };
     }
 

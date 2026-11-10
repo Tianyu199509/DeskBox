@@ -14,11 +14,19 @@ public sealed class OnboardingExperienceTests
         "Onboarding.Step1.Hint",
         "Onboarding.Step2.Title",
         "Onboarding.Step2.Body",
-        "Onboarding.Step2.PathLabel",
-        "Onboarding.Step2.PathSub",
         "Onboarding.Step2.ChangeInSettings",
-        "Onboarding.Step2.Hint1",
-        "Onboarding.Step2.Hint2",
+        "Onboarding.Step2.MoveExplain",
+        "Onboarding.Step2.CopyExplain",
+        "Onboarding.Step2.WarningTitle",
+        "Onboarding.Step2.WarningBody",
+        "Onboarding.Kind.Managed.Title",
+        "Onboarding.Kind.Managed.Body",
+        "Onboarding.Kind.Mapped.Title",
+        "Onboarding.Kind.Mapped.Body",
+        "Onboarding.Step3.ChangeHotkey",
+        "Onboarding.Step4.QuickSettings",
+        "Onboarding.Skip",
+        "Onboarding.Scene.DesktopLabel",
         "Onboarding.Scene.FileName1",
         "Onboarding.Scene.FileName2",
         "Onboarding.Scene.FileName3",
@@ -77,7 +85,7 @@ public sealed class OnboardingExperienceTests
 
         Assert.Contains("Click=\"Step3Try_Click\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Click=\"Step4OpenMenu_Click\"", xaml, StringComparison.Ordinal);
-        foreach (string kind in new[] { "Todo", "QuickCapture", "Search", "Weather", "Music", "Glance" })
+        foreach (string kind in new[] { "Todo", "QuickCapture", "Clipboard", "Weather", "Music", "Glance" })
         {
             Assert.Contains(
                 $"Tag=\"{kind}\" Toggled=\"Step5FeatureToggle_Toggled\"",
@@ -369,6 +377,86 @@ public sealed class OnboardingExperienceTests
         Assert.DoesNotContain("IntroMarkHost", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("PlayIntroSequence", code, StringComparison.Ordinal);
         Assert.Contains("PlaySceneEntrance", code, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MoveStep_MakesThePathConsequenceExplicitAndEditableInPlace()
+    {
+        string root = FindRepositoryRoot();
+        string xaml = File.ReadAllText(Path.Combine(root, "src/DeskBox/Views/OnboardingWindow.xaml"));
+        string steps = File.ReadAllText(Path.Combine(root, "src/DeskBox/Views/OnboardingWindow.Steps.cs"));
+        string scene = File.ReadAllText(Path.Combine(root, "src/DeskBox/Views/OnboardingWindow.Scene.cs"));
+        string code = File.ReadAllText(Path.Combine(root, "src/DeskBox/Views/OnboardingWindow.xaml.cs"));
+        using JsonDocument strings = JsonDocument.Parse(File.ReadAllText(Path.Combine(
+            root,
+            "src/DeskBox/Strings/zh-CN.json")));
+
+        // The move consequence is the headline, and the warning names the
+        // safe alternatives (folder mapping, Alt-drop shortcut).
+        Assert.Contains("移动", strings.RootElement.GetProperty("Onboarding.Step2.Title").GetString(), StringComparison.Ordinal);
+        string warning = strings.RootElement.GetProperty("Onboarding.Step2.WarningBody").GetString()!;
+        Assert.Contains("映射", warning, StringComparison.Ordinal);
+        Assert.Contains("Alt", warning, StringComparison.Ordinal);
+
+        // Drop mode is editable on the step through the FileWidget slice, and
+        // the stage replays the story in the chosen mode.
+        Assert.Contains("Checked=\"Step2DropMode_Checked\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Severity=\"Warning\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Settings.FileWidget", steps, StringComparison.Ordinal);
+        Assert.Contains("SetDropSceneMode(copy, replay: true)", steps, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"ScenePathStrike\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"SceneFileGhost1\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("\"Scale.X\"", scene, StringComparison.Ordinal);
+
+        // Skipping is only offered after the move/path safety step.
+        Assert.Contains("FirstSkippableStep = 2", code, StringComparison.Ordinal);
+        Assert.Contains("Click=\"SkipButton_Click\"", xaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Stage_AnswersRealInputAndHonorsReducedMotionWithStaticFrames()
+    {
+        string root = FindRepositoryRoot();
+        string steps = File.ReadAllText(Path.Combine(root, "src/DeskBox/Views/OnboardingWindow.Steps.cs"));
+        string scene = File.ReadAllText(Path.Combine(root, "src/DeskBox/Views/OnboardingWindow.Scene.cs"));
+        string code = File.ReadAllText(Path.Combine(root, "src/DeskBox/Views/OnboardingWindow.xaml.cs"));
+
+        // Real F7/tray toggles take over the summon scene.
+        Assert.Contains("MirrorSummonScene(hasVisibleWidgets)", steps, StringComparison.Ordinal);
+        // Feature switches pop their stage tiles.
+        Assert.Contains("ApplyFeatureTileState(kind, toggle.IsOn, animate: true)", steps, StringComparison.Ordinal);
+        // Direction-aware hand-off and staggered copy reveal.
+        Assert.Contains("ApplySceneState(newStep, animate: true, direction)", code, StringComparison.Ordinal);
+        Assert.Contains("PlayTextReveal", code, StringComparison.Ordinal);
+        // Reduced motion lands on a meaningful end frame, not a blank stage.
+        Assert.Contains("PrepareStepPose(step, finalFrame: !MotionEnabled)", scene, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Onboarding_NeverReferencesSettingsKeysTheResidentHostFiltersOut()
+    {
+        // The main process drops pure settings-UI strings to save memory; the
+        // guide runs there, so a filtered key would render as its raw name.
+        string root = FindRepositoryRoot();
+        string viewsDirectory = Path.Combine(root, "src/DeskBox/Views");
+        IEnumerable<string> sources =
+        [
+            Path.Combine(viewsDirectory, "OnboardingWindow.xaml"),
+            .. Directory.GetFiles(viewsDirectory, "OnboardingWindow*.cs")
+        ];
+        foreach (string source in sources)
+        {
+            foreach (System.Text.RegularExpressions.Match match in
+                     System.Text.RegularExpressions.Regex.Matches(
+                         File.ReadAllText(source),
+                         "\"(Settings\\.[A-Za-z0-9.]+)\""))
+            {
+                string key = match.Groups[1].Value;
+                Assert.False(
+                    DeskBox.Services.LocalizationService.IsPureSettingsUiKey(key),
+                    $"{Path.GetFileName(source)} references filtered key {key}.");
+            }
+        }
     }
 
     private static string FindRepositoryRoot()

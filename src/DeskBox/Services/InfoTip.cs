@@ -1,4 +1,6 @@
+#if DESKBOX_AOT_SMOKE_HARNESS || DESKBOX_STORE
 using CommunityToolkit.WinUI.Controls;
+#endif
 using CommunityToolkit.WinUI;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
@@ -35,18 +37,30 @@ namespace DeskBox.Services;
 public static class InfoTip
 {
     public static readonly DependencyProperty TitleKeyProperty =
-        DependencyProperty.RegisterAttached(
-            "TitleKey",
-            typeof(string),
-            typeof(InfoTip),
-            new PropertyMetadata(null, OnKeyChanged));
+        RegisterAttachedSafe("TitleKey", typeof(string), typeof(InfoTip), OnKeyChanged);
 
     public static readonly DependencyProperty BodyKeyProperty =
-        DependencyProperty.RegisterAttached(
-            "BodyKey",
-            typeof(string),
-            typeof(InfoTip),
-            new PropertyMetadata(null, OnKeyChanged));
+        RegisterAttachedSafe("BodyKey", typeof(string), typeof(InfoTip), OnKeyChanged);
+
+    private static DependencyProperty RegisterAttachedSafe(
+        string name,
+        Type propertyType,
+        Type ownerType,
+        PropertyChangedCallback callback)
+    {
+        try
+        {
+            return DependencyProperty.RegisterAttached(
+                name,
+                propertyType,
+                ownerType,
+                new PropertyMetadata(null, callback));
+        }
+        catch (System.Runtime.InteropServices.COMException)
+        {
+            return null!;
+        }
+    }
 
     public static string? GetTitleKey(DependencyObject obj)
     {
@@ -88,7 +102,7 @@ public static class InfoTip
         // the Localized pipeline applies the header). Wrapping eagerly would
         // bake a partially-attached state into the badge. Defer the wrap to
         // after the parse batch, when all keys are present.
-        if (d is SettingsCard or SettingsExpander)
+        if (IsSettingsHeaderElement(d))
         {
             if (d is FrameworkElement { DispatcherQueue: { } queue } element)
             {
@@ -99,8 +113,7 @@ public static class InfoTip
                         return;
                     }
 
-                    string? current = (element as SettingsCard)?.Header as string
-                        ?? (element as SettingsExpander)?.Header as string;
+                    string? current = TryGetSettingsElementHeaderText(element);
                     if (current is null)
                     {
                         return;
@@ -112,17 +125,69 @@ public static class InfoTip
                         return;
                     }
 
-                    if (element is SettingsCard card)
-                    {
-                        card.Header = composite;
-                    }
-                    else if (element is SettingsExpander expander)
-                    {
-                        expander.Header = composite;
-                    }
+                    TrySetSettingsElementHeader(element, composite);
                 });
             }
         }
+    }
+
+    private static Func<DependencyObject, bool>? s_externalCardPredicate;
+    private static Func<FrameworkElement, string?>? s_externalGetHeader;
+    private static Action<FrameworkElement, object>? s_externalSetHeader;
+
+    internal static void RegisterExternalCardAdapter(
+        Func<DependencyObject, bool> predicate,
+        Func<FrameworkElement, string?> getHeader,
+        Action<FrameworkElement, object> setHeader)
+    {
+        s_externalCardPredicate = predicate;
+        s_externalGetHeader = getHeader;
+        s_externalSetHeader = setHeader;
+    }
+
+    private static bool IsSettingsHeaderElement(DependencyObject d)
+    {
+#if DESKBOX_AOT_SMOKE_HARNESS || DESKBOX_STORE
+        if (d is SettingsCard or SettingsExpander)
+        {
+            return true;
+        }
+#endif
+        return s_externalCardPredicate?.Invoke(d) == true;
+    }
+
+    private static string? TryGetSettingsElementHeaderText(FrameworkElement element)
+    {
+#if DESKBOX_AOT_SMOKE_HARNESS || DESKBOX_STORE
+        if (element is SettingsCard card)
+        {
+            return card.Header as string;
+        }
+
+        if (element is SettingsExpander expander)
+        {
+            return expander.Header as string;
+        }
+#endif
+        return s_externalGetHeader?.Invoke(element);
+    }
+
+    private static void TrySetSettingsElementHeader(FrameworkElement element, object composite)
+    {
+#if DESKBOX_AOT_SMOKE_HARNESS || DESKBOX_STORE
+        if (element is SettingsCard card)
+        {
+            card.Header = composite;
+            return;
+        }
+
+        if (element is SettingsExpander expander)
+        {
+            expander.Header = composite;
+            return;
+        }
+#endif
+        s_externalSetHeader?.Invoke(element, composite);
     }
 
     /// <summary>
@@ -167,7 +232,7 @@ public static class InfoTip
     /// circle — bare glyph anchors were rejected, but inside the tinted
     /// badge it renders pixel-hinted and native at this size.
     /// </summary>
-    private static Button CreateAnchorButton(string? titleKey, string? bodyKey)
+    public static Button CreateAnchorButton(string? titleKey, string? bodyKey)
     {
         var button = new Button();
         if (button.TryFindResource("InfoTipButtonStyle") is Style style)

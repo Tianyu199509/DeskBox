@@ -1,4 +1,4 @@
-﻿using DeskBox.Services;
+using DeskBox.Services;
 
 namespace DeskBox.Tests;
 
@@ -137,6 +137,7 @@ public sealed class StackPopoverLayoutCalculatorTests
     [InlineData(SettingsService.WidgetCornerPreferenceSquare, 0)]
     [InlineData(SettingsService.WidgetCornerPreferenceSmall, 4)]
     [InlineData(SettingsService.WidgetCornerPreferenceRound, 8)]
+    [InlineData(SettingsService.WidgetCornerPreferenceLarge, 8.4)]
     public void FolderPreview_CornerRadiusFollowsWidgetPreference(
         string cornerPreference,
         double expectedRadius)

@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Collections.ObjectModel;
 using System.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -48,6 +48,7 @@ public partial class SettingsViewModel
 
         _autoStartUsedFallback = result.UsedFallback;
         _autoStartOperationFailed = !result.UsedFallback &&
+            result.State != StartupRegistrationState.DisabledByUser &&
             (result.State is StartupRegistrationState.BlockedOrFailed or StartupRegistrationState.PathMismatch ||
                 !string.IsNullOrWhiteSpace(result.ErrorMessage));
         // A failed mode switch may have preserved the old working entry.

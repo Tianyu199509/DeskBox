@@ -1,4 +1,4 @@
-﻿using System.Text.RegularExpressions;
+using System.Text.RegularExpressions;
 using DeskBox.Contracts;
 using DeskBox.Features.Todo;
 using DeskBox.Models;
@@ -250,7 +250,7 @@ public sealed class TodoSettingsEditorTests : IDisposable
 
         // Defaults: All/Today/Important/Completed are visible.
         Assert.True(editor.CanToggleTab(TodoOptionKinds.DefaultFilterToday));
-        Assert.Equal(4, editor.VisibleDefaultFilterOptions.Count);
+        Assert.Equal(5, editor.VisibleDefaultFilterOptions.Count);
         Assert.Contains(
             TodoOptionKinds.DefaultFilterAll,
             editor.VisibleDefaultFilterOptions.Select(option => (string)option.Value!));
@@ -261,6 +261,7 @@ public sealed class TodoSettingsEditorTests : IDisposable
         // Drop down to a single visible tab; the last one is protected.
         editor.ToggleTab(TodoOptionKinds.DefaultFilterImportant);
         editor.ToggleTab(TodoOptionKinds.DefaultFilterToday);
+        editor.ToggleTab(TodoOptionKinds.DefaultFilterOverdue);
         editor.ToggleTab(TodoOptionKinds.DefaultFilterCompleted);
         Assert.True(editor.IsTabSelected(TodoOptionKinds.DefaultFilterAll));
         Assert.Equal(1, editor.VisibleDefaultFilterOptions.Count);
@@ -346,11 +347,11 @@ public sealed class TodoSettingsEditorTests : IDisposable
         Assert.True(editor.RemindersEnabled);
         // The default offset (5 minutes) renders through the minutes format.
         Assert.Equal(
-            PassthroughFormat("Settings.Todo.ReminderOffset.Minutes", [5]),
+            $"{PassthroughFormat("Settings.Todo.ReminderOffset.Minutes", [5])} · {PassthroughLocalize("Settings.Todo.AllDayReminder.ShortPrefix")} 09:00",
             editor.ReminderSummaryText);
         editor.DefaultOffsetMinutes = 60;
         Assert.Equal(
-            PassthroughLocalize("Settings.Todo.ReminderOffset.OneHour"),
+            $"{PassthroughLocalize("Settings.Todo.ReminderOffset.OneHour")} · {PassthroughLocalize("Settings.Todo.AllDayReminder.ShortPrefix")} 09:00",
             editor.ReminderSummaryText);
         editor.RemindersEnabled = false;
         Assert.Equal(
@@ -405,7 +406,7 @@ public sealed class TodoSettingsEditorTests : IDisposable
         Assert.Equal(2, editor.AvailableEnterBehaviorOptions.Count);
         Assert.Equal(10, editor.AvailablePreviewLineOptions.Count);
         Assert.Equal(7, editor.AvailableReminderOffsetOptions.Count);
-        Assert.Equal(7, editor.AvailableDefaultFilters.Length);
+        Assert.Equal(8, editor.AvailableDefaultFilters.Length);
         Assert.Equal(
             new[] { "Stats", "ClearCompleted" },
             editor.AvailableFooterDisplayOptions);
@@ -572,11 +573,11 @@ public sealed class TodoSettingsEditorTests : IDisposable
             windowXaml,
             StringComparison.Ordinal);
         Assert.Contains(
-            "controls:SettingsComboBox.Value=\"{Binding DefaultFilter, Mode=TwoWay}\"",
+            "controls:SettingsComboBox.Value=\"{Binding SelectedDefaultFilter, Mode=TwoWay}\"",
             windowXaml,
             StringComparison.Ordinal);
         Assert.Contains(
-            "ItemsSource=\"{Binding VisibleDefaultFilterOptions}\"",
+            "ItemsSource=\"{Binding AllDefaultFilterOptions}\"",
             windowXaml,
             StringComparison.Ordinal);
         Assert.Contains(
@@ -584,11 +585,27 @@ public sealed class TodoSettingsEditorTests : IDisposable
             windowXaml,
             StringComparison.Ordinal);
         Assert.Contains(
+            "x:DataType=\"todo:TodoSettingsViewModel\"",
+            windowXaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
             "SelectedIndex=\"{Binding TabStyleIndex, Mode=TwoWay}\"",
             windowXaml,
             StringComparison.Ordinal);
         Assert.Contains(
-            "Visibility=\"{Binding ShowWideOptions, Converter={StaticResource SettingsBoolToVisibilityConverter}}\"",
+            "IsEnabled=\"{x:Bind CanConfigureWideAutoSelect, Mode=OneWay}\"",
+            windowXaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "SelectedIndex=\"{x:Bind NewTaskPositionIndex, Mode=TwoWay}\"",
+            windowXaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "IsChecked=\"{x:Bind ShowAllTab, Mode=TwoWay}\"",
+            windowXaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "IsChecked=\"{x:Bind ShowFooterStats, Mode=TwoWay}\"",
             windowXaml,
             StringComparison.Ordinal);
         Assert.Contains(
@@ -610,6 +627,10 @@ public sealed class TodoSettingsEditorTests : IDisposable
             deferred,
             StringComparison.Ordinal);
         Assert.Contains(
+            "? _todoSettingsViewModel",
+            deferred,
+            StringComparison.Ordinal);
+        Assert.Contains(
             "todoSettings.AvailableDefaultFilters,",
             navigation,
             StringComparison.Ordinal);
@@ -626,8 +647,50 @@ public sealed class TodoSettingsEditorTests : IDisposable
         Assert.Contains("[WinRT.GeneratedBindableCustomProperty([", bridge, StringComparison.Ordinal);
         Assert.Contains("nameof(Enabled)", bridge, StringComparison.Ordinal);
         Assert.Contains("nameof(DefaultFilter)", bridge, StringComparison.Ordinal);
-        Assert.Equal(29, Regex.Matches(bridge, @"nameof\(").Count);
+        Assert.Equal(39, Regex.Matches(bridge, @"nameof\(").Count);
         Assert.DoesNotContain("nameof(ShowAllTab)", bridge, StringComparison.Ordinal);
-        Assert.Equal(39, Regex.Matches(bindableShell, @"nameof\(").Count);
+        Assert.Equal(44, Regex.Matches(bindableShell, @"nameof\(").Count);
+    }
+
+    [Fact]
+    public void InlineTabs_SegmentedPosition_AndWideAutoSelectGate_StaySynchronized()
+    {
+        (_, _, TodoSettingsViewModel editor) = CreateEditor(
+            _root,
+            s => FeatureWidgetSettings.SetEnabled(s.Settings, WidgetKind.Todo, true));
+
+        Assert.True(editor.Enabled);
+        Assert.True(editor.CanConfigureWideAutoSelect);
+        Assert.Equal(0, editor.NewTaskPositionIndex);
+
+        editor.NewTaskPositionIndex = 1;
+        Assert.Equal(TodoOptionKinds.NewTaskPositionBottom, editor.NewTaskPosition);
+
+        editor.LayoutMode = TodoOptionKinds.LayoutModeSinglePane;
+        Assert.False(editor.CanConfigureWideAutoSelect);
+
+        // Inline CheckBox properties mirror persisted visibility and protect the last visible tab.
+        Assert.True(editor.ShowAllTab);
+        Assert.True(editor.ShowTodayTab);
+        Assert.True(editor.ShowOverdueTab);
+        Assert.True(editor.ShowImportantTab);
+        Assert.True(editor.ShowCompletedTab);
+        Assert.False(editor.ShowThisWeekTab);
+
+        editor.ShowTodayTab = false;
+        editor.ShowOverdueTab = false;
+        editor.ShowImportantTab = false;
+        editor.ShowCompletedTab = false;
+        Assert.True(editor.ShowAllTab);
+        Assert.False(editor.CanEditAllTab);
+
+        // Unchecking the sole remaining tab is refused.
+        editor.ShowAllTab = false;
+        Assert.True(editor.ShowAllTab);
+
+        // Selecting a hidden default filter reveals its inline tab checkbox automatically.
+        editor.DefaultFilter = TodoOptionKinds.DefaultFilterThisWeek;
+        Assert.True(editor.ShowThisWeekTab);
+        Assert.True(editor.CanEditAllTab);
     }
 }

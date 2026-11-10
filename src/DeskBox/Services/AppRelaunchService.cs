@@ -19,7 +19,7 @@ public static class AppRelaunchService
             return AppRelaunchScheduleResult.StartedSuccessfully;
         }
 
-        string appPath = Environment.ProcessPath ?? Path.Combine(AppContext.BaseDirectory, "DeskBox.exe");
+        string appPath = AppExecutablePath.ResolveMainExecutablePath() ?? Path.Combine(AppContext.BaseDirectory, "DeskBox.exe");
         if (!File.Exists(appPath))
         {
             return AppRelaunchScheduleResult.Failed("DeskBox.exe was not found.");

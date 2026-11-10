@@ -26,15 +26,15 @@ public sealed partial class ManagedStorageSettingsViewModel : ObservableObject
 {
     private static readonly string[] DropActions =
     [
-        ManagedDropActions.Copy,
         ManagedDropActions.Move,
+        ManagedDropActions.Copy,
         ManagedDropActions.FollowWindows
     ];
 
     private static readonly string[] DropActionNameKeys =
     [
-        "Settings.DropAction.Copy",
         "Settings.DropAction.Move",
+        "Settings.DropAction.Copy",
         "Settings.DropAction.System"
     ];
 
@@ -90,6 +90,7 @@ public sealed partial class ManagedStorageSettingsViewModel : ObservableObject
                 return;
             }
 
+            OnPropertyChanged(nameof(DragBehaviorSummaryText));
             if (!_isSyncingPresentation)
             {
                 _settings.SetManagedDropAction(value);
@@ -115,6 +116,9 @@ public sealed partial class ManagedStorageSettingsViewModel : ObservableObject
         }
     }
 
+    public object[] AvailableDragInBehaviorOptionItems =>
+        AvailableDropActionOptions.Cast<object>().ToArray();
+
     /// <summary>
     /// The preferred drop effect advertised to external targets when files
     /// are dragged out of a file widget (FollowWindows/Copy/Move).
@@ -129,6 +133,7 @@ public sealed partial class ManagedStorageSettingsViewModel : ObservableObject
                 return;
             }
 
+            OnPropertyChanged(nameof(DragBehaviorSummaryText));
             if (!_isSyncingPresentation)
             {
                 _settings.SetManagedDragOutAction(value);
@@ -149,6 +154,28 @@ public sealed partial class ManagedStorageSettingsViewModel : ObservableObject
 
             return options;
         }
+    }
+
+    public object[] AvailableDragOutBehaviorOptionItems =>
+        AvailableDragOutActionOptions.Cast<object>().ToArray();
+
+    public string DragBehaviorSummaryText =>
+        $"{GetOptionDisplayName(AvailableDropActionOptions, _dropAction)} · {GetOptionDisplayName(AvailableDragOutActionOptions, _dragOutAction)}";
+
+    private static string GetOptionDisplayName(
+        IReadOnlyList<SettingsOption> options,
+        string value)
+    {
+        foreach (SettingsOption option in options)
+        {
+            if (option.Value is string candidate &&
+                string.Equals(candidate, value, StringComparison.Ordinal))
+            {
+                return option.DisplayName;
+            }
+        }
+
+        return options.Count > 0 ? options[0].DisplayName : string.Empty;
     }
 
     /// <summary>
@@ -264,6 +291,8 @@ public sealed partial class ManagedStorageSettingsViewModel : ObservableObject
         {
             _isSyncingPresentation = false;
         }
+
+        OnPropertyChanged(nameof(DragBehaviorSummaryText));
     }
 
     /// <summary>
@@ -275,7 +304,10 @@ public sealed partial class ManagedStorageSettingsViewModel : ObservableObject
         _cachedDropActionNames = null;
         _cachedDragOutActionNames = null;
         OnPropertyChanged(nameof(AvailableDropActionOptions));
+        OnPropertyChanged(nameof(AvailableDragInBehaviorOptionItems));
         OnPropertyChanged(nameof(AvailableDragOutActionOptions));
+        OnPropertyChanged(nameof(AvailableDragOutBehaviorOptionItems));
+        OnPropertyChanged(nameof(DragBehaviorSummaryText));
     }
 
     /// <summary>

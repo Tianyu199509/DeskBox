@@ -33,7 +33,7 @@ public sealed partial class PerformanceSettingsViewModel : ObservableObject
         PerformanceOptionKinds.CleanupAfter5Minutes;
     private string _selectedPerformanceCacheBudget = PerformanceOptionKinds.CacheBudgetSmall;
     private string _selectedHiddenCacheCleanupScope =
-        PerformanceOptionKinds.HiddenCacheCleanupScopeAllRecreatable;
+        PerformanceOptionKinds.HiddenCacheCleanupScopeWarm;
     private bool _enableTextMarqueeAnimations = true;
     private bool _enableVinylRotationAnimations = true;
     private bool _enableGlanceImageAutoRotation = true;
@@ -251,8 +251,56 @@ public sealed partial class PerformanceSettingsViewModel : ObservableObject
             }
 
             _settings.SetHiddenCacheCleanupScope(normalized);
+            OnPropertyChanged(nameof(KeepWarmCacheWhenHidden));
             SyncPresentation();
         }
+    }
+
+    public bool KeepWarmCacheWhenHidden
+    {
+        get => string.Equals(
+            _selectedHiddenCacheCleanupScope,
+            PerformanceOptionKinds.HiddenCacheCleanupScopeWarm,
+            StringComparison.Ordinal);
+        set => SelectedHiddenCacheCleanupScope = value
+            ? PerformanceOptionKinds.HiddenCacheCleanupScopeWarm
+            : PerformanceOptionKinds.HiddenCacheCleanupScopeAllRecreatable;
+    }
+
+    public bool AllowTextMarquee
+    {
+        get => _enableTextMarqueeAnimations;
+        set => SetDecorativeAnimationOption(
+            PerformanceOptionKinds.DecorativeAnimationTextMarquee,
+            ref _enableTextMarqueeAnimations,
+            value);
+    }
+
+    public bool AllowVinylRotation
+    {
+        get => _enableVinylRotationAnimations;
+        set => SetDecorativeAnimationOption(
+            PerformanceOptionKinds.DecorativeAnimationVinylRotation,
+            ref _enableVinylRotationAnimations,
+            value);
+    }
+
+    public bool AllowGlanceRotation
+    {
+        get => _enableGlanceImageAutoRotation;
+        set => SetDecorativeAnimationOption(
+            PerformanceOptionKinds.DecorativeAnimationGlanceRotation,
+            ref _enableGlanceImageAutoRotation,
+            value);
+    }
+
+    public bool AllowCompactAmbient
+    {
+        get => _enableCompactAmbientAnimations;
+        set => SetDecorativeAnimationOption(
+            PerformanceOptionKinds.DecorativeAnimationCompactAmbient,
+            ref _enableCompactAmbientAnimations,
+            value);
     }
 
     // The three working-set trim switches. The idle and immediate-hidden
@@ -267,6 +315,9 @@ public sealed partial class PerformanceSettingsViewModel : ObservableObject
 
     [ObservableProperty]
     public partial bool QuiescenceWorkingSetTrimEnabled { get; set; }
+
+    [ObservableProperty]
+    public partial bool KeepCapsuleContentWarm { get; set; }
 
     public IReadOnlyList<string> AvailableContinuousDecorativeAnimationOptions =>
         PerformanceOptionKinds.SupportedDecorativeAnimationOptions;
@@ -383,6 +434,7 @@ public sealed partial class PerformanceSettingsViewModel : ObservableObject
                 presentation.ImmediateHiddenWorkingSetTrimEnabled;
             QuiescenceWorkingSetTrimEnabled =
                 presentation.QuiescenceWorkingSetTrimEnabled;
+            KeepCapsuleContentWarm = presentation.KeepCapsuleContentWarm;
         }
         finally
         {
@@ -395,10 +447,16 @@ public sealed partial class PerformanceSettingsViewModel : ObservableObject
         OnPropertyChanged(nameof(SelectedVisibleIdleCacheCleanupDelaySeconds));
         OnPropertyChanged(nameof(SelectedPerformanceCacheBudget));
         OnPropertyChanged(nameof(SelectedHiddenCacheCleanupScope));
+        OnPropertyChanged(nameof(KeepWarmCacheWhenHidden));
+        OnPropertyChanged(nameof(AllowTextMarquee));
+        OnPropertyChanged(nameof(AllowVinylRotation));
+        OnPropertyChanged(nameof(AllowGlanceRotation));
+        OnPropertyChanged(nameof(AllowCompactAmbient));
         OnPropertyChanged(nameof(ContinuousDecorativeAnimationsSummaryText));
         OnPropertyChanged(nameof(IdleWorkingSetTrimEnabled));
         OnPropertyChanged(nameof(ImmediateHiddenWorkingSetTrimEnabled));
         OnPropertyChanged(nameof(QuiescenceWorkingSetTrimEnabled));
+        OnPropertyChanged(nameof(KeepCapsuleContentWarm));
     }
 
     /// <summary>
@@ -447,6 +505,33 @@ public sealed partial class PerformanceSettingsViewModel : ObservableObject
         }
 
         _settings.SetQuiescenceWorkingSetTrimEnabled(value);
+    }
+
+    partial void OnKeepCapsuleContentWarmChanged(bool value)
+    {
+        if (_isSyncingPresentation)
+        {
+            return;
+        }
+
+        _settings.SetKeepCapsuleContentWarm(value);
+    }
+
+    private void SetDecorativeAnimationOption(string option, ref bool backingField, bool value)
+    {
+        if (backingField == value)
+        {
+            return;
+        }
+
+        backingField = value;
+        if (_isSyncingPresentation)
+        {
+            return;
+        }
+
+        _settings.SetDecorativeAnimationEnabled(option, value);
+        SyncPresentation();
     }
 
     private SettingsOption CreateCleanupDelayOption(int value, string key) =>

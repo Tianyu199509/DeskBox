@@ -1,4 +1,4 @@
-﻿using DeskBox.Controls;
+using DeskBox.Controls;
 using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Services;
@@ -30,11 +30,29 @@ public sealed partial class SettingsWindow
 
     private Storyboard? _settingsSearchHighlightStoryboard;
     private EventHandler<object>? _settingsSearchHighlightCompletedHandler;
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _settingsSearchHighlightTimer;
+    private Windows.Foundation.TypedEventHandler<Microsoft.UI.Dispatching.DispatcherQueueTimer, object>? _settingsSearchHighlightTimerTickHandler;
     private FrameworkElement? _settingsSearchHighlightTarget;
     private double _settingsSearchHighlightOriginalOpacity = 1;
+    private object? _settingsSearchHighlightOriginalBorderBrush = DependencyProperty.UnsetValue;
+    private object? _settingsSearchHighlightOriginalBorderThickness = DependencyProperty.UnsetValue;
     private readonly List<SettingsExpander> _featureSettingsExpanders = [];
     private readonly Dictionary<SettingsExpander, long> _featureSettingsExpanderCallbacks = [];
     private bool _isSynchronizingFeatureSettingsExpanders;
+    private enum MaintenanceSubPageKind
+    {
+        None,
+        AutomaticBackup,
+        CloudBackup
+    }
+
+    private bool _isSyncingFeatureWidgetsHubTab;
+    private bool _isCapsuleModeSubPageOpen;
+    private bool _isSyncingCapsuleModeEntry;
+    private IReadOnlyList<SettingsOption>? _capsuleEntryOptions;
+    private MaintenanceSubPageKind _activeMaintenanceSubPage;
+    private bool _isSyncingMaintenanceEntries;
+    private string? _activeWidgetGroupId;
     private List<string>? _navigationTagOrder;
     private readonly HashSet<InfoBar> _pinnedNoticeInfoBars = [];
 
@@ -49,29 +67,22 @@ public sealed partial class SettingsWindow
     /// </summary>
     private static readonly string[] SubSectionTagOrder =
     [
+        // General family
+        "AiSettings",
+        // Interaction family
+        "WidgetGroups", "Displays",
+        // AppearanceDetail family
+        "FileStackSettings",
         // FeatureWidgets family
         "QuickCaptureSettings", "TodoSettings", "MusicSettings",
-        "WeatherSettings", "GlanceSettings", "SearchSettings",
-        // Appearance family
-        "AppearanceMaterialSettings", "AppearanceDensitySettings",
-        "AppearanceWindowSettings", "AppearanceAnimationSettings",
-        // AppearanceDetail family
-        "FileDisplaySettings", "ManagedStorage", "FileStackSettings",
-        "DesktopOrganizationSettings",
-        // Maintenance family
-        "BackupRestoreSettings", "CloudBackupSettings", "DataHealthSettings",
-        "CompatibilityDiagnosticsSettings",
-        // CapsuleMode family
-        "CapsuleOverridesSettings",
-        // General family
-        "PerformanceSettings", "Displays"
+        "WeatherSettings", "GlanceSettings", "ClipboardSettings"
     ];
 
     private void InitializeSettingsSectionElements()
     {
         _settingsSectionElements.Add("General", GeneralSection);
         string[] missingRoutes = SectionRoutes.Keys
-            .Where(tag => tag is not "Advanced" and not "General" &&
+            .Where(tag => tag != "General" &&
                 !ContentHost.Resources.ContainsKey(tag + "SectionTemplate"))
             .ToArray();
         if (missingRoutes.Length > 0)
@@ -94,10 +105,82 @@ public sealed partial class SettingsWindow
         }
     }
 
+    private void SettingsNavigationView_ItemInvoked(NavigationView sender, NavigationViewItemInvokedEventArgs args)
+    {
+        if (_isSyncingNavigationSelection ||
+            args.InvokedItemContainer is not NavigationViewItem { Tag: string invokedTag })
+        {
+            return;
+        }
+
+        if (string.Equals(invokedTag, "FeatureWidgets", StringComparison.Ordinal) &&
+            string.Equals(_currentSettingsSection, "CustomWidgetSettings", StringComparison.Ordinal) &&
+            _settingsSectionElements.TryGetValue("CustomWidgetSettings", out FrameworkElement? customEl) &&
+            customEl is CustomWidgetSettingsSection customSection &&
+            customSection.TryNavigateBackToStudio())
+        {
+            CloseTransientNavigationOverlayIfNeeded();
+            return;
+        }
+
+        if (string.Equals(invokedTag, "Appearance", StringComparison.Ordinal) &&
+            string.Equals(_currentSettingsSection, "Appearance", StringComparison.Ordinal) &&
+            _settingsSectionElements.TryGetValue("Appearance", out FrameworkElement? appearanceEl) &&
+            appearanceEl is AppearanceSettingsSection appearanceSection &&
+            appearanceSection.TryNavigateBack())
+        {
+            CloseTransientNavigationOverlayIfNeeded();
+            return;
+        }
+
+        if (string.Equals(invokedTag, "Interaction", StringComparison.Ordinal) &&
+            string.Equals(_currentSettingsSection, "Interaction", StringComparison.Ordinal) &&
+            TryCloseCapsuleModeSubPage())
+        {
+            CloseTransientNavigationOverlayIfNeeded();
+            return;
+        }
+
+        if (string.Equals(invokedTag, "AppearanceDetail", StringComparison.Ordinal) &&
+            string.Equals(_currentSettingsSection, "AppearanceDetail", StringComparison.Ordinal) &&
+            _settingsSectionElements.TryGetValue("AppearanceDetail", out FrameworkElement? detailEl) &&
+            detailEl is FileWidgetSettingsSection detailSection &&
+            detailSection.IsDetailSubPageOpen)
+        {
+            detailSection.CloseAllSubPages(animate: true);
+            CloseTransientNavigationOverlayIfNeeded();
+            return;
+        }
+
+        if (string.Equals(invokedTag, "Maintenance", StringComparison.Ordinal) &&
+            string.Equals(_currentSettingsSection, "Maintenance", StringComparison.Ordinal) &&
+            TryCloseMaintenanceSubPage())
+        {
+            CloseTransientNavigationOverlayIfNeeded();
+            return;
+        }
+
+        if (!string.Equals(invokedTag, _currentSettingsSection, StringComparison.Ordinal))
+        {
+            ShowSettingsSection(invokedTag, isNestedSection: false);
+        }
+
+        CloseTransientNavigationOverlayIfNeeded();
+    }
+
+    private void CloseTransientNavigationOverlayIfNeeded()
+    {
+        if (SettingsNavigationView.PaneDisplayMode != NavigationViewPaneDisplayMode.Left &&
+            SettingsNavigationView.IsPaneOpen)
+        {
+            SettingsNavigationView.IsPaneOpen = false;
+        }
+    }
+
     private void RefreshSettingsSearchResults()
     {
         var results = new List<SettingsSearchResult>();
-        foreach (SettingsSectionRoute route in SectionRoutes.Values.Where(route => route.Tag != "Advanced"))
+        foreach (SettingsSectionRoute route in SectionRoutes.Values)
         {
             string title = _localizationService.T(route.TitleKey);
             results.Add(new SettingsSearchResult(
@@ -167,6 +250,8 @@ public sealed partial class SettingsWindow
 
     private IEnumerable<SettingsSearchResult> CreateSettingItemSearchResults()
     {
+        bool isStoreBuild = AppDistributionService.Current.IsMicrosoftStore;
+
         foreach (SettingsSearchCatalogEntry entry in SettingsSearchCatalog.Entries)
         {
             // Store-channel filter (route 1): the entries flagged by the
@@ -174,7 +259,7 @@ public sealed partial class SettingsWindow
             // search results would dead-end in Store builds. The key set is
             // pinned against the catalog by SettingsSearchChannelPolicyTests.
             if (SettingsSearchChannelPolicy.IsHiddenInStore(entry.HeaderKey) &&
-                AppDistributionService.Current.IsMicrosoftStore)
+                isStoreBuild)
             {
                 continue;
             }
@@ -202,6 +287,11 @@ public sealed partial class SettingsWindow
 
     private string BuildSettingsRouteBreadcrumb(SettingsSectionRoute route)
     {
+        if (string.Equals(route.Tag, "CustomWidgetSettings", StringComparison.Ordinal))
+        {
+            return $"{_localizationService.T("Settings.Section.FeatureWidgets")} / {_localizationService.T(route.TitleKey)}";
+        }
+
         var titles = new Stack<string>();
         var visited = new HashSet<string>(StringComparer.Ordinal);
         SettingsSectionRoute? current = route;
@@ -237,6 +327,14 @@ public sealed partial class SettingsWindow
             .ToArray();
     }
 
+    private void SettingsSearchBox_GotFocus(object sender, RoutedEventArgs e)
+    {
+        if (sender is AutoSuggestBox searchBox && !string.IsNullOrWhiteSpace(searchBox.Text))
+        {
+            UpdateSettingsSearchSuggestions(searchBox.Text);
+        }
+    }
+
     private void SettingsSearchBox_TextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
     {
         if (args.Reason == AutoSuggestionBoxTextChangeReason.UserInput)
@@ -247,6 +345,12 @@ public sealed partial class SettingsWindow
 
     private void SettingsSearchBox_QuerySubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args)
     {
+        if (args.ChosenSuggestion is null &&
+            DeskBox.Helpers.ImeCompositionGuard.IsComposingOrWithinGrace())
+        {
+            return;
+        }
+
         SettingsSearchResult? result = args.ChosenSuggestion as SettingsSearchResult;
         if (result is null)
         {
@@ -269,8 +373,8 @@ public sealed partial class SettingsWindow
     {
         NavigateToSettingsSection(result.SectionTag);
         ScheduleSettingsSearchTarget(result);
-        sender.Text = string.Empty;
-        UpdateSettingsSearchSuggestions(string.Empty);
+        sender.IsSuggestionListOpen = false;
+        CloseTransientNavigationOverlayIfNeeded();
     }
 
     private void ScheduleSettingsSearchTarget(SettingsSearchResult result)
@@ -298,24 +402,126 @@ public sealed partial class SettingsWindow
             {
                 return;
             }
+            RevealContainingSettingsSubPage(targetSectionTag, target);
             ExpandSettingsSearchTargetAncestors(target);
             section.UpdateLayout();
             DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
             {
-                if (_isClosed || navigationGeneration != _settingsNavigationGeneration || target.XamlRoot is null)
+                if (_isClosed || navigationGeneration != _settingsNavigationGeneration || section.XamlRoot is null)
                 {
                     return;
                 }
 
-                target.StartBringIntoView(new BringIntoViewOptions
+                section.UpdateLayout();
+                FrameworkElement effectiveTarget = ResolveVisibleSettingsSearchTarget(target, section);
+                effectiveTarget.StartBringIntoView(new BringIntoViewOptions
                 {
-                    AnimationDesired = true,
+                    AnimationDesired = WindowsCompatibilityService.ShouldAnimate,
                     VerticalAlignmentRatio = 0.18
                 });
-                HighlightSettingsSearchTarget(target);
-                FocusSettingsSearchTarget(target);
+                HighlightSettingsSearchTarget(effectiveTarget);
+                FocusSettingsSearchTarget(effectiveTarget);
             });
         });
+    }
+
+    private static FrameworkElement ResolveVisibleSettingsSearchTarget(
+        FrameworkElement target,
+        FrameworkElement sectionRoot)
+    {
+        if (IsEffectivelyVisibleWithinSection(target, sectionRoot))
+        {
+            return target;
+        }
+
+        if (string.Equals(target.Name, "EmptyMyWidgetsCard", StringComparison.Ordinal) &&
+            sectionRoot.FindName("MyWidgetsListPanel") is Panel listPanel &&
+            IsEffectivelyVisibleWithinSection(listPanel, sectionRoot))
+        {
+            foreach (UIElement child in listPanel.Children)
+            {
+                if (child is FrameworkElement card && card.Visibility == Visibility.Visible)
+                {
+                    return card;
+                }
+            }
+        }
+
+        DependencyObject? branch = target;
+        DependencyObject? parent = VisualTreeHelper.GetParent(target);
+        while (parent is not null && !ReferenceEquals(branch, sectionRoot))
+        {
+            if (parent is SettingsExpander expander &&
+                IsEffectivelyVisibleWithinSection(expander, sectionRoot))
+            {
+                return expander;
+            }
+
+            if (parent is Panel panel &&
+                IsEffectivelyVisibleWithinSection(panel, sectionRoot))
+            {
+                int branchIndex = -1;
+                for (int index = 0; index < panel.Children.Count; index++)
+                {
+                    if (ReferenceEquals(panel.Children[index], branch))
+                    {
+                        branchIndex = index;
+                        break;
+                    }
+                }
+
+                if (branchIndex >= 0)
+                {
+                    for (int index = branchIndex - 1; index >= 0; index--)
+                    {
+                        if (panel.Children[index] is FrameworkElement previous &&
+                            previous.Visibility == Visibility.Visible)
+                        {
+                            return previous;
+                        }
+                    }
+
+                    for (int index = branchIndex + 1; index < panel.Children.Count; index++)
+                    {
+                        if (panel.Children[index] is FrameworkElement next &&
+                            next.Visibility == Visibility.Visible)
+                        {
+                            return next;
+                        }
+                    }
+                }
+
+                return panel;
+            }
+
+            branch = parent;
+            parent = VisualTreeHelper.GetParent(parent);
+        }
+
+        return target;
+    }
+
+    private static bool IsEffectivelyVisibleWithinSection(
+        FrameworkElement element,
+        FrameworkElement sectionRoot)
+    {
+        DependencyObject? current = element;
+        while (current is not null)
+        {
+            if (current is UIElement uiElement && uiElement.Visibility != Visibility.Visible)
+            {
+                return false;
+            }
+
+            if (ReferenceEquals(current, sectionRoot))
+            {
+                return true;
+            }
+
+            current = VisualTreeHelper.GetParent(current);
+        }
+
+        return false;
     }
 
     private static void ExpandSettingsSearchTargetAncestors(DependencyObject target)
@@ -356,42 +562,95 @@ public sealed partial class SettingsWindow
 
         _settingsSearchHighlightTarget = target;
         _settingsSearchHighlightOriginalOpacity = target.Opacity;
-        target.Opacity = Math.Min(0.68, _settingsSearchHighlightOriginalOpacity);
 
-        var animation = new DoubleAnimation
+        if (target is Control targetControl)
         {
-            From = target.Opacity,
-            To = _settingsSearchHighlightOriginalOpacity,
-            Duration = TimeSpan.FromMilliseconds(650),
-            EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
-        };
-        Storyboard.SetTarget(animation, target);
-        Storyboard.SetTargetProperty(animation, nameof(UIElement.Opacity));
+            _settingsSearchHighlightOriginalBorderBrush = targetControl.ReadLocalValue(Control.BorderBrushProperty);
+            _settingsSearchHighlightOriginalBorderThickness = targetControl.ReadLocalValue(Control.BorderThicknessProperty);
 
-        var storyboard = new Storyboard();
-        storyboard.Children.Add(animation);
-        EventHandler<object>? completedHandler = null;
-        completedHandler = (_, _) =>
+            Brush? accentBrush = NeutralInteractionBrush.ResolveThemedResource(
+                "AccentFillColorDefaultBrush",
+                targetControl);
+            if (accentBrush is not null)
+            {
+                targetControl.BorderBrush = accentBrush;
+                targetControl.BorderThickness = new Thickness(2);
+            }
+        }
+        else
         {
-            storyboard.Completed -= completedHandler;
-            if (!ReferenceEquals(_settingsSearchHighlightStoryboard, storyboard))
+            _settingsSearchHighlightOriginalBorderBrush = DependencyProperty.UnsetValue;
+            _settingsSearchHighlightOriginalBorderThickness = DependencyProperty.UnsetValue;
+        }
+
+        if (WindowsCompatibilityService.ShouldAnimate)
+        {
+            target.Opacity = Math.Min(0.76, _settingsSearchHighlightOriginalOpacity);
+            var animation = new DoubleAnimation
+            {
+                From = target.Opacity,
+                To = _settingsSearchHighlightOriginalOpacity,
+                Duration = TimeSpan.FromMilliseconds(450),
+                EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
+            };
+            Storyboard.SetTarget(animation, target);
+            Storyboard.SetTargetProperty(animation, nameof(UIElement.Opacity));
+
+            var storyboard = new Storyboard();
+            storyboard.Children.Add(animation);
+            EventHandler<object>? completedHandler = null;
+            completedHandler = (_, _) =>
+            {
+                storyboard.Completed -= completedHandler;
+                if (!ReferenceEquals(_settingsSearchHighlightStoryboard, storyboard))
+                {
+                    return;
+                }
+
+                target.Opacity = _settingsSearchHighlightOriginalOpacity;
+                _settingsSearchHighlightStoryboard = null;
+                _settingsSearchHighlightCompletedHandler = null;
+            };
+            _settingsSearchHighlightCompletedHandler = completedHandler;
+            storyboard.Completed += completedHandler;
+            _settingsSearchHighlightStoryboard = storyboard;
+            storyboard.Begin();
+        }
+
+        Microsoft.UI.Dispatching.DispatcherQueueTimer timer = DispatcherQueue.CreateTimer();
+        timer.Interval = TimeSpan.FromMilliseconds(1600);
+        timer.IsRepeating = false;
+        Windows.Foundation.TypedEventHandler<Microsoft.UI.Dispatching.DispatcherQueueTimer, object>? tickHandler = null;
+        tickHandler = (senderTimer, _) =>
+        {
+            senderTimer.Tick -= tickHandler;
+            senderTimer.Stop();
+            if (!ReferenceEquals(_settingsSearchHighlightTimer, senderTimer))
             {
                 return;
             }
 
-            target.Opacity = _settingsSearchHighlightOriginalOpacity;
-            _settingsSearchHighlightStoryboard = null;
-            _settingsSearchHighlightCompletedHandler = null;
-            _settingsSearchHighlightTarget = null;
+            ClearSettingsSearchHighlight();
         };
-        _settingsSearchHighlightCompletedHandler = completedHandler;
-        storyboard.Completed += completedHandler;
-        _settingsSearchHighlightStoryboard = storyboard;
-        storyboard.Begin();
+        _settingsSearchHighlightTimerTickHandler = tickHandler;
+        timer.Tick += tickHandler;
+        _settingsSearchHighlightTimer = timer;
+        timer.Start();
     }
 
     private void ClearSettingsSearchHighlight()
     {
+        Microsoft.UI.Dispatching.DispatcherQueueTimer? timer = _settingsSearchHighlightTimer;
+        Windows.Foundation.TypedEventHandler<Microsoft.UI.Dispatching.DispatcherQueueTimer, object>? tickHandler =
+            _settingsSearchHighlightTimerTickHandler;
+        if (timer is not null && tickHandler is not null)
+        {
+            timer.Tick -= tickHandler;
+        }
+        timer?.Stop();
+        _settingsSearchHighlightTimer = null;
+        _settingsSearchHighlightTimerTickHandler = null;
+
         Storyboard? storyboard = _settingsSearchHighlightStoryboard;
         EventHandler<object>? completedHandler =
             _settingsSearchHighlightCompletedHandler;
@@ -405,15 +664,38 @@ public sealed partial class SettingsWindow
         {
             storyboard.Children.Clear();
         }
+
         if (_settingsSearchHighlightTarget is not null)
         {
             _settingsSearchHighlightTarget.Opacity = _settingsSearchHighlightOriginalOpacity;
+            if (_settingsSearchHighlightTarget is Control targetControl)
+            {
+                if (ReferenceEquals(_settingsSearchHighlightOriginalBorderBrush, DependencyProperty.UnsetValue))
+                {
+                    targetControl.ClearValue(Control.BorderBrushProperty);
+                }
+                else
+                {
+                    targetControl.BorderBrush = _settingsSearchHighlightOriginalBorderBrush as Brush;
+                }
+
+                if (ReferenceEquals(_settingsSearchHighlightOriginalBorderThickness, DependencyProperty.UnsetValue))
+                {
+                    targetControl.ClearValue(Control.BorderThicknessProperty);
+                }
+                else if (_settingsSearchHighlightOriginalBorderThickness is Thickness originalThickness)
+                {
+                    targetControl.BorderThickness = originalThickness;
+                }
+            }
         }
 
         _settingsSearchHighlightStoryboard = null;
         _settingsSearchHighlightCompletedHandler = null;
         _settingsSearchHighlightTarget = null;
         _settingsSearchHighlightOriginalOpacity = 1;
+        _settingsSearchHighlightOriginalBorderBrush = DependencyProperty.UnsetValue;
+        _settingsSearchHighlightOriginalBorderThickness = DependencyProperty.UnsetValue;
     }
 
     /// <summary>
@@ -446,11 +728,66 @@ public sealed partial class SettingsWindow
 
     private void SettingsNavigationView_BackRequested(NavigationView sender, NavigationViewBackRequestedEventArgs args)
     {
+        _ = TryNavigateBack();
+    }
+
+    internal bool TryNavigateBack()
+    {
+        if (_isClosed)
+        {
+            return false;
+        }
+
+        if (string.Equals(_currentSettingsSection, "CustomWidgetSettings", StringComparison.Ordinal) &&
+            _settingsSectionElements.TryGetValue("CustomWidgetSettings", out FrameworkElement? customEl) &&
+            customEl is CustomWidgetSettingsSection customSection &&
+            customSection.TryNavigateBackToStudio())
+        {
+            return true;
+        }
+
+        if (string.Equals(_currentSettingsSection, "Appearance", StringComparison.Ordinal) &&
+            _settingsSectionElements.TryGetValue("Appearance", out FrameworkElement? appearanceEl) &&
+            appearanceEl is AppearanceSettingsSection appearanceSection &&
+            appearanceSection.TryNavigateBack())
+        {
+            return true;
+        }
+
+        if (string.Equals(_currentSettingsSection, "Interaction", StringComparison.Ordinal) &&
+            TryCloseCapsuleModeSubPage())
+        {
+            return true;
+        }
+
+        if (string.Equals(_currentSettingsSection, "WidgetGroups", StringComparison.Ordinal) &&
+            TryCloseWidgetGroupDetailSubPage())
+        {
+            return true;
+        }
+
+        if (string.Equals(_currentSettingsSection, "AppearanceDetail", StringComparison.Ordinal) &&
+            _settingsSectionElements.TryGetValue("AppearanceDetail", out FrameworkElement? detailEl) &&
+            detailEl is FileWidgetSettingsSection detailSection &&
+            detailSection.TryNavigateBack())
+        {
+            return true;
+        }
+
+        if (string.Equals(_currentSettingsSection, "Maintenance", StringComparison.Ordinal) &&
+            TryCloseMaintenanceSubPage())
+        {
+            return true;
+        }
+
         if (TryGetSectionRoute(_currentSettingsSection, out var route) &&
             !string.IsNullOrWhiteSpace(route.ParentTag))
         {
             NavigateToSettingsSection(route.ParentTag);
+            return true;
         }
+
+        return false;
     }
 
     public void ShowSection(string sectionTag)
@@ -521,9 +858,79 @@ public sealed partial class SettingsWindow
 
     private void NavigateToSettingsSection(string sectionTag)
     {
-        sectionTag = NormalizeSettingsSectionTag(sectionTag);
+        if (!string.IsNullOrWhiteSpace(sectionTag))
+        {
+            int atIndex = sectionTag.IndexOf('@');
+            if (atIndex > 0 && atIndex + 1 < sectionTag.Length)
+            {
+                string rawTag = sectionTag[..atIndex];
+                string headerKey = sectionTag[(atIndex + 1)..];
+                string destinationTag = NormalizeSettingsSectionTag(rawTag);
+                NavigateToSettingsSectionCore(destinationTag);
+                ScheduleSettingsSearchTarget(new SettingsSearchResult(
+                    destinationTag,
+                    string.Empty,
+                    string.Empty,
+                    string.Empty,
+                    destinationTag,
+                    headerKey));
+                return;
+            }
+        }
+
+        NavigateToSettingsSectionCore(sectionTag);
+    }
+
+    private void NavigateToSettingsSectionCore(string sectionTag)
+    {
+        if (string.Equals(sectionTag, "CustomWidgetSettings:ai-settings", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(sectionTag, "CustomWidgetSettings:AiSettings", StringComparison.OrdinalIgnoreCase))
+        {
+            EnsureSettingsSectionCreated("AiSettings");
+            if (SettingsRoot.IsLoaded &&
+                string.Equals(_currentSettingsSection, "AiSettings", StringComparison.Ordinal))
+            {
+                AiSettingsSection.RefreshState();
+                return;
+            }
+
+            sectionTag = "AiSettings";
+        }
+        else if (string.Equals(sectionTag, "CustomWidgetSettings:agent-hub", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(sectionTag, "AiSettings:agent-hub", StringComparison.OrdinalIgnoreCase))
+        {
+            EnsureSettingsSectionCreated("AiSettings");
+            AiSettingsSection.StageFocusAgentHub();
+            if (SettingsRoot.IsLoaded &&
+                string.Equals(_currentSettingsSection, "AiSettings", StringComparison.Ordinal))
+            {
+                AiSettingsSection.RefreshState();
+                return;
+            }
+
+            sectionTag = "AiSettings";
+        }
+        else if (!string.IsNullOrWhiteSpace(sectionTag) &&
+            sectionTag.StartsWith("CustomWidgetSettings:", StringComparison.OrdinalIgnoreCase))
+        {
+            string deepLinkPayload = sectionTag["CustomWidgetSettings:".Length..];
+            EnsureSettingsSectionCreated("CustomWidgetSettings");
+            CustomWidgetSettingsSection.StageDeepLink(deepLinkPayload);
+            if (SettingsRoot.IsLoaded &&
+                string.Equals(_currentSettingsSection, "CustomWidgetSettings", StringComparison.Ordinal))
+            {
+                CustomWidgetSettingsSection.RefreshInstances();
+                return;
+            }
+
+            sectionTag = "CustomWidgetSettings";
+        }
+
+        string rawSectionTag = sectionTag ?? string.Empty;
+        sectionTag = NormalizeSettingsSectionTag(rawSectionTag);
 
         ShowSettingsSection(sectionTag);
+        ApplyRawSectionSubPageDeepLink(rawSectionTag);
         var navItem = GetNavItemForSection(sectionTag);
         if (navItem is not null && !ReferenceEquals(SettingsNavigationView.SelectedItem, navItem))
         {
@@ -570,15 +977,26 @@ public sealed partial class SettingsWindow
         string previousSectionTag = _currentSettingsSection;
         isNestedSection = !string.IsNullOrWhiteSpace(route.ParentTag);
         _currentSettingsSection = sectionTag;
+        ViewModel.SetIsOnAboutPage(string.Equals(sectionTag, "About", StringComparison.Ordinal));
+        if (string.Equals(previousSectionTag, "CustomWidgetSettings", StringComparison.Ordinal) &&
+            !string.Equals(sectionTag, "CustomWidgetSettings", StringComparison.Ordinal) &&
+            _settingsSectionElements.TryGetValue("CustomWidgetSettings", out FrameworkElement? prevCustomEl) &&
+            prevCustomEl is CustomWidgetSettingsSection prevCustomSection)
+        {
+            prevCustomSection.CloseDetailView(animate: false);
+        }
+        ResetInSectionSubPagesOnExit(previousSectionTag, sectionTag);
         int navigationGeneration = ++_settingsNavigationGeneration;
         ClearSettingsSearchHighlight();
-        string visibleSectionTag = sectionTag == "Advanced" ? "Interaction" : sectionTag;
+        string visibleSectionTag = sectionTag switch
+        {
+            "CustomWidgetSettings" => "FeatureWidgets",
+            _ => sectionTag
+        };
         EnsureSettingsSectionCreated(visibleSectionTag);
         string? inlineSectionTag = sectionTag switch
         {
-            "AppearanceDetail" => "FileStorageSettings",
-            "Interaction" or "Advanced" => "InteractionWindowSettings",
-            "Maintenance" => "ResetSettings",
+            "CustomWidgetSettings" => "CustomWidgetSettings",
             _ => null
         };
         if (inlineSectionTag is not null)
@@ -592,16 +1010,12 @@ public sealed partial class SettingsWindow
                 tag,
                 visibleSectionTag,
                 StringComparison.Ordinal);
-            bool isInlineSection = sectionTag switch
-            {
-                "AppearanceDetail" => tag == "FileStorageSettings",
-                "Interaction" or "Advanced" => tag == "InteractionWindowSettings",
-                "Maintenance" => tag == "ResetSettings",
-                _ => false
-            };
+            bool isInlineSection = sectionTag == "CustomWidgetSettings" && tag == "CustomWidgetSettings";
             sectionElement.Visibility = isPrimarySection || isInlineSection
                 ? Visibility.Visible : Visibility.Collapsed;
         }
+
+        SyncFeatureWidgetsHubState(sectionTag);
 
         // Reset scrolling before the enter transition starts: a page sliding
         // in at a stale scroll offset would visibly jump to the top mid-slide.
@@ -611,13 +1025,29 @@ public sealed partial class SettingsWindow
 
         PlaySettingsSectionEnterTransition(visibleSectionTag, previousSectionTag, sectionTag, inlineSectionTag);
 
+        if (sectionTag == "General")
+        {
+            RefreshAiSettingsEntrySummary();
+        }
+        if (sectionTag == "Interaction")
+        {
+            RefreshDisplaysEntrySummary();
+            ViewModel.RefreshGlobalHotkeyState();
+            RefreshGlobalHotkeyControls();
+        }
         if (sectionTag == "FileStackSettings")
         {
             _ = ViewModel.RefreshFileStackRulePreviewFromDiskAsync();
         }
-        if (sectionTag == "DesktopOrganizationSettings")
+        if (sectionTag == "AppearanceDetail")
         {
-            DesktopOrganizationSettingsSection.Refresh();
+            AppearanceDetailSection.OrganizationSection.Refresh();
+            RefreshManagedStoragePathWarning();
+            RefreshManagedStorageDesktopShortcutState();
+            RefreshDragOutWin10State();
+            SyncManagedStorageQuickAccessToggleState();
+            _ = ViewModel.RefreshQuickAccessStateAsync();
+            _ = RefreshOrphanFoldersSummaryAsync();
         }
         if (sectionTag == "Displays")
         {
@@ -633,7 +1063,6 @@ public sealed partial class SettingsWindow
         }
         if (sectionTag == "QuickCaptureSettings")
         {
-            ViewModel.RefreshQuickCaptureClipboardDiagnostics();
             _ = ViewModel.RefreshQuickCaptureImageCacheInfoAsync();
         }
         UpdateSearchSettingsActivity();
@@ -642,32 +1071,24 @@ public sealed partial class SettingsWindow
         {
             _ = GlanceSettingsSection.RefreshFromStoreAsync();
         }
-        if (sectionTag == "CloudBackupSettings")
+        if (sectionTag == "CustomWidgetSettings")
         {
-            _ = InitializeCloudBackupSectionAsync();
+            CustomWidgetSettingsSection.RefreshInstances();
         }
-        if (sectionTag == "ManagedStorage")
+        if (sectionTag == "AiSettings")
         {
-            _ = RefreshManagedStorageFolderListAsync();
+            AiSettingsSection.RefreshState();
         }
-        else if (sectionTag == "FileStorageSettings")
-        {
-            RefreshManagedStorageDesktopShortcutState();
-            _ = ViewModel.RefreshQuickAccessStateAsync();
-        }
-        else if (sectionTag == "AppearanceDetail")
-        {
-            _ = ViewModel.RefreshQuickAccessStateAsync();
-        }
-        if (sectionTag == "CompatibilityDiagnosticsSettings")
-        {
-            ViewModel.RefreshDragDropPermissionDiagnostic();
-            ViewModel.RefreshRuntimeDiagnostics();
-        }
-        if (sectionTag == "BackupRestoreSettings")
+        if (sectionTag == "Maintenance")
         {
             _backupSettingsViewModel.RefreshLocalStatus();
             _ = RefreshBackupSnapshotInventoryAsync();
+            _ = InitializeCloudBackupSectionAsync();
+        }
+        if (sectionTag == "About")
+        {
+            ViewModel.RefreshDragDropPermissionDiagnostic();
+            ViewModel.RefreshRuntimeDiagnostics();
         }
         SettingsNavigationView.IsBackButtonVisible = isNestedSection
             ? NavigationViewBackButtonVisible.Visible
@@ -697,6 +1118,18 @@ public sealed partial class SettingsWindow
             return;
         }
 
+        if (IsFeatureWidgetsHubSiblingSwitch(previousSectionTag, sectionTag))
+        {
+            FrameworkElement tabContent = string.Equals(sectionTag, "CustomWidgetSettings", StringComparison.Ordinal)
+                ? CustomWidgetSettingsSection
+                : FeatureWidgetListHost;
+            tabContent.UpdateLayout();
+            float tabOffsetX = DetermineNavigationEnterOffset(previousSectionTag, sectionTag);
+            DetailPageTransitionHelper.PlayNavigationEnter(tabContent, tabOffsetX);
+            App.Log($"[SettingsNav] transition tag={sectionTag} offset={tabOffsetX}");
+            return;
+        }
+
         // Force layout (notably the first, lazy instantiation of the section)
         // before animating so the page does not visibly grow while sliding.
         enteringSection.UpdateLayout();
@@ -708,6 +1141,7 @@ public sealed partial class SettingsWindow
         // with Maintenance) enter together with the primary page in the same
         // direction so the composed page slides as one.
         if (inlineSectionTag is not null &&
+            !string.Equals(inlineSectionTag, "CustomWidgetSettings", StringComparison.Ordinal) &&
             _settingsSectionElements.TryGetValue(inlineSectionTag, out FrameworkElement? inlineSection) &&
             !ReferenceEquals(inlineSection, enteringSection))
         {
@@ -791,7 +1225,9 @@ public sealed partial class SettingsWindow
             return null;
         }
 
-        int subIndex = route.ParentTag is null ? 0 : IndexOfTag(subSectionTagOrder, sectionTag);
+        int subIndex = route.ParentTag is null
+            ? (string.Equals(sectionTag, "CustomWidgetSettings", StringComparison.Ordinal) ? 1 : 0)
+            : IndexOfTag(subSectionTagOrder, sectionTag);
         return (navIndex, subIndex);
     }
 
@@ -855,6 +1291,129 @@ public sealed partial class SettingsWindow
 
     private void UpdateBreadcrumb(SettingsSectionRoute route)
     {
+        if (string.Equals(route.Tag, "CustomWidgetSettings", StringComparison.Ordinal) &&
+            _settingsSectionElements.TryGetValue("CustomWidgetSettings", out FrameworkElement? customEl) &&
+            customEl is CustomWidgetSettingsSection { IsDetailViewOpen: true, ActiveDetailTitle: { Length: > 0 } detailTitle })
+        {
+            SettingsBreadcrumbBar.ItemsSource = new object[]
+            {
+                new SettingsBreadcrumbItem("FeatureWidgets", _localizationService.T("Settings.Section.FeatureWidgets"), 0.62),
+                new SettingsBreadcrumbItem(route.Tag, _localizationService.T(route.TitleKey), 0.62),
+                new SettingsBreadcrumbItem("CustomWidgetSettings:__detail__", detailTitle, 1.0)
+            };
+            SettingsBreadcrumbHost.Visibility = Visibility.Visible;
+            SettingsBreadcrumbBar.Visibility = Visibility.Visible;
+            SettingsNavigationView.IsBackButtonVisible = NavigationViewBackButtonVisible.Visible;
+            return;
+        }
+
+        if (string.Equals(route.Tag, "Appearance", StringComparison.Ordinal) &&
+            _settingsSectionElements.TryGetValue("Appearance", out FrameworkElement? appearanceEl) &&
+            appearanceEl is AppearanceSettingsSection { IsMaterialSubPageOpen: true })
+        {
+            SettingsBreadcrumbBar.ItemsSource = new object[]
+            {
+                new SettingsBreadcrumbItem(route.Tag, _localizationService.T(route.TitleKey), 0.62),
+                new SettingsBreadcrumbItem("Appearance:__material__", _localizationService.T("Settings.Material.Title"), 1.0)
+            };
+            SettingsBreadcrumbHost.Visibility = Visibility.Visible;
+            SettingsBreadcrumbBar.Visibility = Visibility.Visible;
+            SettingsNavigationView.IsBackButtonVisible = NavigationViewBackButtonVisible.Visible;
+            return;
+        }
+
+        if (string.Equals(route.Tag, "Interaction", StringComparison.Ordinal) &&
+            _isCapsuleModeSubPageOpen)
+        {
+            SettingsBreadcrumbBar.ItemsSource = new object[]
+            {
+                new SettingsBreadcrumbItem(route.Tag, _localizationService.T(route.TitleKey), 0.62),
+                new SettingsBreadcrumbItem("Interaction:__capsule__", _localizationService.T("Settings.Section.CapsuleMode"), 1.0)
+            };
+            SettingsBreadcrumbHost.Visibility = Visibility.Visible;
+            SettingsBreadcrumbBar.Visibility = Visibility.Visible;
+            SettingsNavigationView.IsBackButtonVisible = NavigationViewBackButtonVisible.Visible;
+            return;
+        }
+
+        if (string.Equals(route.Tag, "WidgetGroups", StringComparison.Ordinal) &&
+            _activeWidgetGroupId is not null &&
+            WidgetGroupDetailPresenter?.Content is WidgetGroupSettingsItem { DisplayName: { Length: > 0 } groupTitle })
+        {
+            SettingsBreadcrumbBar.ItemsSource = new object[]
+            {
+                new SettingsBreadcrumbItem("Interaction", _localizationService.T("Settings.Section.Interaction"), 0.62),
+                new SettingsBreadcrumbItem(route.Tag, _localizationService.T(route.TitleKey), 0.62),
+                new SettingsBreadcrumbItem("WidgetGroups:__detail__", groupTitle, 1.0)
+            };
+            SettingsBreadcrumbHost.Visibility = Visibility.Visible;
+            SettingsBreadcrumbBar.Visibility = Visibility.Visible;
+            SettingsNavigationView.IsBackButtonVisible = NavigationViewBackButtonVisible.Visible;
+            return;
+        }
+
+        if (string.Equals(route.Tag, "AppearanceDetail", StringComparison.Ordinal) &&
+            _settingsSectionElements.TryGetValue("AppearanceDetail", out FrameworkElement? detailEl) &&
+            detailEl is FileWidgetSettingsSection detailSection)
+        {
+            if (detailSection.IsFileDisplaySubPageOpen)
+            {
+                SettingsBreadcrumbBar.ItemsSource = new object[]
+                {
+                    new SettingsBreadcrumbItem(route.Tag, _localizationService.T(route.TitleKey), 0.62),
+                    new SettingsBreadcrumbItem("AppearanceDetail:__filedisplay__", _localizationService.T("Settings.AppearanceDetail.Title"), 1.0)
+                };
+                SettingsBreadcrumbHost.Visibility = Visibility.Visible;
+                SettingsBreadcrumbBar.Visibility = Visibility.Visible;
+                SettingsNavigationView.IsBackButtonVisible = NavigationViewBackButtonVisible.Visible;
+                return;
+            }
+
+            if (detailSection.OrganizationSection is { IsRuleDetailOpen: true, ActiveRuleDetailTitle: { Length: > 0 } ruleTitle })
+            {
+                SettingsBreadcrumbBar.ItemsSource = new object[]
+                {
+                    new SettingsBreadcrumbItem(route.Tag, _localizationService.T(route.TitleKey), 0.62),
+                    new SettingsBreadcrumbItem("AppearanceDetail:__rules__", _localizationService.T("DesktopOrganization.Rules.SectionTitle"), 0.62),
+                    new SettingsBreadcrumbItem("AppearanceDetail:__detail__", ruleTitle, 1.0)
+                };
+                SettingsBreadcrumbHost.Visibility = Visibility.Visible;
+                SettingsBreadcrumbBar.Visibility = Visibility.Visible;
+                SettingsNavigationView.IsBackButtonVisible = NavigationViewBackButtonVisible.Visible;
+                return;
+            }
+
+            if (detailSection.OrganizationSection.IsRuleListOpen)
+            {
+                SettingsBreadcrumbBar.ItemsSource = new object[]
+                {
+                    new SettingsBreadcrumbItem(route.Tag, _localizationService.T(route.TitleKey), 0.62),
+                    new SettingsBreadcrumbItem("AppearanceDetail:__rules__", _localizationService.T("DesktopOrganization.Rules.SectionTitle"), 1.0)
+                };
+                SettingsBreadcrumbHost.Visibility = Visibility.Visible;
+                SettingsBreadcrumbBar.Visibility = Visibility.Visible;
+                SettingsNavigationView.IsBackButtonVisible = NavigationViewBackButtonVisible.Visible;
+                return;
+            }
+        }
+
+        if (string.Equals(route.Tag, "Maintenance", StringComparison.Ordinal) &&
+            _activeMaintenanceSubPage != MaintenanceSubPageKind.None)
+        {
+            string subPageTitleKey = _activeMaintenanceSubPage == MaintenanceSubPageKind.AutomaticBackup
+                ? "Settings.DataBackup.AutomaticBackup.Title"
+                : "Settings.CloudBackup.Title";
+            SettingsBreadcrumbBar.ItemsSource = new object[]
+            {
+                new SettingsBreadcrumbItem(route.Tag, _localizationService.T(route.TitleKey), 0.62),
+                new SettingsBreadcrumbItem("Maintenance:__subpage__", _localizationService.T(subPageTitleKey), 1.0)
+            };
+            SettingsBreadcrumbHost.Visibility = Visibility.Visible;
+            SettingsBreadcrumbBar.Visibility = Visibility.Visible;
+            SettingsNavigationView.IsBackButtonVisible = NavigationViewBackButtonVisible.Visible;
+            return;
+        }
+
         if (string.IsNullOrWhiteSpace(route.ParentTag) ||
             !TryGetSectionRoute(route.ParentTag, out var parentRoute))
         {
@@ -869,6 +1428,7 @@ public sealed partial class SettingsWindow
             new SettingsBreadcrumbItem(parentRoute.Tag, _localizationService.T(parentRoute.TitleKey), 0.62),
             new SettingsBreadcrumbItem(route.Tag, _localizationService.T(route.TitleKey), 1.0)
         };
+
         SettingsBreadcrumbHost.Visibility = Visibility.Visible;
         SettingsBreadcrumbBar.Visibility = Visibility.Visible;
     }
@@ -883,6 +1443,75 @@ public sealed partial class SettingsWindow
 
     private void NavigateFromSettingsBreadcrumbItem(SettingsBreadcrumbItem item)
     {
+        if (string.Equals(item.SectionTag, "CustomWidgetSettings:__detail__", StringComparison.Ordinal) ||
+            string.Equals(item.SectionTag, "Appearance:__material__", StringComparison.Ordinal) ||
+            string.Equals(item.SectionTag, "Interaction:__capsule__", StringComparison.Ordinal) ||
+            string.Equals(item.SectionTag, "WidgetGroups:__detail__", StringComparison.Ordinal) ||
+            string.Equals(item.SectionTag, "AppearanceDetail:__filedisplay__", StringComparison.Ordinal) ||
+            string.Equals(item.SectionTag, "AppearanceDetail:__detail__", StringComparison.Ordinal) ||
+            string.Equals(item.SectionTag, "Maintenance:__subpage__", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        if (string.Equals(item.SectionTag, "CustomWidgetSettings", StringComparison.Ordinal) &&
+            string.Equals(_currentSettingsSection, "CustomWidgetSettings", StringComparison.Ordinal) &&
+            _settingsSectionElements.TryGetValue("CustomWidgetSettings", out FrameworkElement? customEl) &&
+            customEl is CustomWidgetSettingsSection customSection &&
+            customSection.TryNavigateBackToStudio())
+        {
+            return;
+        }
+
+        if (string.Equals(item.SectionTag, "Appearance", StringComparison.Ordinal) &&
+            string.Equals(_currentSettingsSection, "Appearance", StringComparison.Ordinal) &&
+            _settingsSectionElements.TryGetValue("Appearance", out FrameworkElement? appearanceEl) &&
+            appearanceEl is AppearanceSettingsSection appearanceSection &&
+            appearanceSection.TryNavigateBack())
+        {
+            return;
+        }
+
+        if (string.Equals(item.SectionTag, "Interaction", StringComparison.Ordinal) &&
+            string.Equals(_currentSettingsSection, "Interaction", StringComparison.Ordinal) &&
+            TryCloseCapsuleModeSubPage())
+        {
+            return;
+        }
+
+        if (string.Equals(item.SectionTag, "WidgetGroups", StringComparison.Ordinal) &&
+            string.Equals(_currentSettingsSection, "WidgetGroups", StringComparison.Ordinal) &&
+            TryCloseWidgetGroupDetailSubPage())
+        {
+            return;
+        }
+
+        if (string.Equals(item.SectionTag, "AppearanceDetail:__rules__", StringComparison.Ordinal) &&
+            string.Equals(_currentSettingsSection, "AppearanceDetail", StringComparison.Ordinal) &&
+            _settingsSectionElements.TryGetValue("AppearanceDetail", out FrameworkElement? rulesDetailEl) &&
+            rulesDetailEl is FileWidgetSettingsSection rulesDetailSection)
+        {
+            _ = rulesDetailSection.OrganizationSection.TryNavigateBackToRuleList();
+            return;
+        }
+
+        if (string.Equals(item.SectionTag, "AppearanceDetail", StringComparison.Ordinal) &&
+            string.Equals(_currentSettingsSection, "AppearanceDetail", StringComparison.Ordinal) &&
+            _settingsSectionElements.TryGetValue("AppearanceDetail", out FrameworkElement? detailEl) &&
+            detailEl is FileWidgetSettingsSection detailSection &&
+            detailSection.IsDetailSubPageOpen)
+        {
+            detailSection.CloseAllSubPages(animate: true);
+            return;
+        }
+
+        if (string.Equals(item.SectionTag, "Maintenance", StringComparison.Ordinal) &&
+            string.Equals(_currentSettingsSection, "Maintenance", StringComparison.Ordinal) &&
+            TryCloseMaintenanceSubPage())
+        {
+            return;
+        }
+
         if (string.Equals(item.SectionTag, _currentSettingsSection, StringComparison.Ordinal))
         {
             return;
@@ -898,13 +1527,727 @@ public sealed partial class SettingsWindow
 
     private static string NormalizeSettingsSectionTag(string sectionTag)
     {
-        return sectionTag switch
+        if (string.IsNullOrWhiteSpace(sectionTag))
         {
-            "FileStorageSettings" => "AppearanceDetail",
-            "InteractionWindowSettings" => "Interaction",
-            "ResetSettings" => "Maintenance",
-            _ => sectionTag
+            return "General";
+        }
+
+        string trimmed = sectionTag.Trim();
+        return trimmed switch
+        {
+            "PerformanceSettings" => "General",
+            "AppearanceMaterialSettings" or "AppearanceDensitySettings" or "AppearanceWindowSettings" or "AppearanceAnimationSettings" => "Appearance",
+            "CapsuleMode" or "CapsuleOverridesSettings" or "InteractionWindowSettings" => "Interaction",
+            "FileStorageSettings" or "FileDisplaySettings" or "ManagedStorage" or "DesktopOrganizationSettings" => "AppearanceDetail",
+            "BackupRestoreSettings" or "CloudBackupSettings" or "ResetSettings" or "DataHealthSettings" => "Maintenance",
+            "CompatibilityDiagnosticsSettings" => "About",
+            _ when string.Equals(trimmed, "ai", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(trimmed, "ai-settings", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(trimmed, "aisettings", StringComparison.OrdinalIgnoreCase) => "AiSettings",
+            _ when string.Equals(trimmed, "custom-widgets", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(trimmed, "customwidgets", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(trimmed, "customwidgetsettings", StringComparison.OrdinalIgnoreCase) => "CustomWidgetSettings",
+            _ => trimmed
         };
+    }
+
+    private static bool IsFeatureWidgetsHubSiblingSwitch(string previousSectionTag, string sectionTag) =>
+        (string.Equals(previousSectionTag, "FeatureWidgets", StringComparison.Ordinal) &&
+         string.Equals(sectionTag, "CustomWidgetSettings", StringComparison.Ordinal)) ||
+        (string.Equals(previousSectionTag, "CustomWidgetSettings", StringComparison.Ordinal) &&
+         string.Equals(sectionTag, "FeatureWidgets", StringComparison.Ordinal));
+
+    private void SyncFeatureWidgetsHubState(string sectionTag)
+    {
+        if (!_settingsSectionElements.ContainsKey("FeatureWidgets"))
+        {
+            return;
+        }
+
+        if (string.Equals(sectionTag, "FeatureWidgets", StringComparison.Ordinal))
+        {
+            Localized.SetKey(FeatureWidgetsHubTitleText, "Settings.Section.FeatureWidgets");
+            FeatureWidgetsHubHeaderPanel.Visibility = Visibility.Visible;
+            CustomWidgetsToolbarPanel.Visibility = Visibility.Collapsed;
+            FeatureWidgetListHost.Visibility = Visibility.Visible;
+            CustomWidgetHostPanel.Visibility = Visibility.Collapsed;
+            SetFeatureWidgetsHubTabIndex(0);
+        }
+        else if (string.Equals(sectionTag, "CustomWidgetSettings", StringComparison.Ordinal))
+        {
+            bool isDetailOpen =
+                _settingsSectionElements.TryGetValue("CustomWidgetSettings", out FrameworkElement? customEl) &&
+                customEl is CustomWidgetSettingsSection { IsDetailViewOpen: true };
+            Localized.SetKey(FeatureWidgetsHubTitleText, "CustomWidget.Settings.Title");
+            FeatureWidgetsHubHeaderPanel.Visibility = isDetailOpen ? Visibility.Collapsed : Visibility.Visible;
+            CustomWidgetsToolbarPanel.Visibility = isDetailOpen ? Visibility.Collapsed : Visibility.Visible;
+            FeatureWidgetListHost.Visibility = Visibility.Collapsed;
+            CustomWidgetHostPanel.Visibility = Visibility.Visible;
+            SetFeatureWidgetsHubTabIndex(1);
+        }
+    }
+
+    private void SetFeatureWidgetsHubTabIndex(int index)
+    {
+        Segmented segmented = FeatureWidgetsHubSegmented;
+        if (segmented.SelectedIndex == index)
+        {
+            return;
+        }
+
+        _isSyncingFeatureWidgetsHubTab = true;
+        try
+        {
+            segmented.SelectedIndex = index;
+        }
+        finally
+        {
+            _isSyncingFeatureWidgetsHubTab = false;
+        }
+    }
+
+    private void FeatureWidgetsHubSegmented_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_isSyncingFeatureWidgetsHubTab || _isClosed)
+        {
+            return;
+        }
+
+        string targetSection = FeatureWidgetsHubSegmented.SelectedIndex == 1
+            ? "CustomWidgetSettings"
+            : "FeatureWidgets";
+        if (!string.Equals(_currentSettingsSection, targetSection, StringComparison.Ordinal))
+        {
+            NavigateToSettingsSection(targetSection);
+        }
+    }
+
+    private void CustomWidgetsApiDocsButton_Click(object sender, RoutedEventArgs e)
+    {
+        EnsureSettingsSectionCreated("CustomWidgetSettings");
+        CustomWidgetSettingsSection.TriggerOpenApiDocs();
+    }
+
+    private void CustomWidgetsImportButton_Click(object sender, RoutedEventArgs e)
+    {
+        EnsureSettingsSectionCreated("CustomWidgetSettings");
+        CustomWidgetSettingsSection.TriggerImportPackage();
+    }
+
+    private void CustomWidgetsQuickCreateButton_Click(object sender, RoutedEventArgs e)
+    {
+        EnsureSettingsSectionCreated("CustomWidgetSettings");
+        CustomWidgetSettingsSection.OpenStudio();
+    }
+
+    private void ResetInSectionSubPagesOnExit(string previousSectionTag, string nextSectionTag)
+    {
+        if (string.Equals(previousSectionTag, nextSectionTag, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        if (string.Equals(previousSectionTag, "Appearance", StringComparison.Ordinal) &&
+            _settingsSectionElements.TryGetValue("Appearance", out FrameworkElement? prevAppearanceEl) &&
+            prevAppearanceEl is AppearanceSettingsSection prevAppearanceSection)
+        {
+            prevAppearanceSection.CloseMaterialSubPage(animate: false);
+        }
+
+        if (string.Equals(previousSectionTag, "Interaction", StringComparison.Ordinal))
+        {
+            CloseCapsuleModeSubPage(animate: false);
+        }
+
+        if (string.Equals(previousSectionTag, "WidgetGroups", StringComparison.Ordinal))
+        {
+            CloseWidgetGroupDetailSubPage(animate: false);
+        }
+
+        if (string.Equals(previousSectionTag, "AppearanceDetail", StringComparison.Ordinal) &&
+            _settingsSectionElements.TryGetValue("AppearanceDetail", out FrameworkElement? prevDetailEl) &&
+            prevDetailEl is FileWidgetSettingsSection prevDetailSection)
+        {
+            prevDetailSection.CloseAllSubPages(animate: false);
+        }
+
+        if (string.Equals(previousSectionTag, "Maintenance", StringComparison.Ordinal))
+        {
+            CloseMaintenanceSubPage(animate: false);
+        }
+    }
+
+    private void ApplyRawSectionSubPageDeepLink(string rawSectionTag)
+    {
+        switch (rawSectionTag)
+        {
+            case "AppearanceMaterialSettings":
+                if (_settingsSectionElements.TryGetValue("Appearance", out FrameworkElement? appearanceEl) &&
+                    appearanceEl is AppearanceSettingsSection appearanceSection)
+                {
+                    appearanceSection.OpenMaterialSubPage(animate: false);
+                }
+                break;
+            case "CapsuleMode":
+            case "CapsuleOverridesSettings":
+                OpenCapsuleModeSubPage(animate: false);
+                break;
+            case "FileDisplaySettings":
+                if (_settingsSectionElements.TryGetValue("AppearanceDetail", out FrameworkElement? fileDisplayEl) &&
+                    fileDisplayEl is FileWidgetSettingsSection fileDisplaySection)
+                {
+                    fileDisplaySection.OpenFileDisplaySubPage(animate: false);
+                }
+                break;
+            case "DesktopOrganizationSettings":
+                if (_settingsSectionElements.TryGetValue("AppearanceDetail", out FrameworkElement? orgEl) &&
+                    orgEl is FileWidgetSettingsSection orgSection)
+                {
+                    orgSection.OrganizationSection.OpenRuleList(animate: false);
+                }
+                break;
+            case "BackupRestoreSettings":
+                OpenMaintenanceSubPage(MaintenanceSubPageKind.AutomaticBackup, animate: false);
+                break;
+            case "CloudBackupSettings":
+                OpenMaintenanceSubPage(MaintenanceSubPageKind.CloudBackup, animate: false);
+                break;
+        }
+    }
+
+    private void RevealContainingSettingsSubPage(string targetSectionTag, FrameworkElement target)
+    {
+        if (string.Equals(targetSectionTag, "Appearance", StringComparison.Ordinal) &&
+            _settingsSectionElements.TryGetValue("Appearance", out FrameworkElement? appearanceEl) &&
+            appearanceEl is AppearanceSettingsSection appearanceSection &&
+            appearanceSection.FindName("MaterialSubPagePanel") is DependencyObject materialPanel &&
+            IsDescendantOf(target, materialPanel))
+        {
+            appearanceSection.OpenMaterialSubPage(animate: false);
+            return;
+        }
+
+        if (string.Equals(targetSectionTag, "Interaction", StringComparison.Ordinal) &&
+            CapsuleModeSubPagePanel is { } capsulePanel &&
+            IsDescendantOf(target, capsulePanel))
+        {
+            OpenCapsuleModeSubPage(animate: false);
+            return;
+        }
+
+        if (string.Equals(targetSectionTag, "AppearanceDetail", StringComparison.Ordinal) &&
+            _settingsSectionElements.TryGetValue("AppearanceDetail", out FrameworkElement? detailEl) &&
+            detailEl is FileWidgetSettingsSection detailSection)
+        {
+            if (detailSection.FindName("FileDisplaySubPagePanel") is DependencyObject fileDisplayPanel &&
+                IsDescendantOf(target, fileDisplayPanel))
+            {
+                detailSection.OpenFileDisplaySubPage(animate: false);
+                return;
+            }
+
+            if (detailSection.OrganizationSection.FindName("RuleListPanel") is DependencyObject ruleListPanel &&
+                IsDescendantOf(target, ruleListPanel))
+            {
+                detailSection.OrganizationSection.OpenRuleList(animate: false);
+                return;
+            }
+
+            if (detailSection.IsDetailSubPageOpen)
+            {
+                detailSection.CloseAllSubPages(animate: false);
+            }
+        }
+
+        if (string.Equals(targetSectionTag, "Maintenance", StringComparison.Ordinal))
+        {
+            if (AutomaticBackupSubPagePanel is { } autoBackupPanel &&
+                IsDescendantOf(target, autoBackupPanel))
+            {
+                OpenMaintenanceSubPage(MaintenanceSubPageKind.AutomaticBackup, animate: false);
+                return;
+            }
+
+            if (CloudBackupSubPagePanel is { } cloudBackupPanel &&
+                IsDescendantOf(target, cloudBackupPanel))
+            {
+                OpenMaintenanceSubPage(MaintenanceSubPageKind.CloudBackup, animate: false);
+            }
+        }
+
+        if (string.Equals(targetSectionTag, "CustomWidgetSettings", StringComparison.Ordinal) &&
+            _settingsSectionElements.TryGetValue("CustomWidgetSettings", out FrameworkElement? customEl) &&
+            customEl is CustomWidgetSettingsSection { IsDetailViewOpen: true } customSection &&
+            customSection.FindName("StudioViewPanel") is DependencyObject studioViewPanel &&
+            IsDescendantOf(target, studioViewPanel))
+        {
+            customSection.CloseDetailView(animate: false);
+        }
+    }
+
+    private static bool IsDescendantOf(DependencyObject element, DependencyObject ancestor)
+    {
+        DependencyObject? current = element;
+        while (current is not null)
+        {
+            if (ReferenceEquals(current, ancestor))
+            {
+                return true;
+            }
+            current = VisualTreeHelper.GetParent(current);
+        }
+        return false;
+    }
+
+    private void RefreshCurrentSectionHeaderAndBreadcrumb()
+    {
+        if (!TryGetSectionRoute(_currentSettingsSection, out SettingsSectionRoute route))
+        {
+            return;
+        }
+
+        bool isSubPageOpen =
+            (string.Equals(_currentSettingsSection, "Appearance", StringComparison.Ordinal) &&
+             _settingsSectionElements.TryGetValue("Appearance", out FrameworkElement? appEl) &&
+             appEl is AppearanceSettingsSection { IsMaterialSubPageOpen: true }) ||
+            (string.Equals(_currentSettingsSection, "Interaction", StringComparison.Ordinal) &&
+             _isCapsuleModeSubPageOpen) ||
+            (string.Equals(_currentSettingsSection, "WidgetGroups", StringComparison.Ordinal) &&
+             _activeWidgetGroupId is not null) ||
+            (string.Equals(_currentSettingsSection, "AppearanceDetail", StringComparison.Ordinal) &&
+             _settingsSectionElements.TryGetValue("AppearanceDetail", out FrameworkElement? detEl) &&
+             detEl is FileWidgetSettingsSection { IsDetailSubPageOpen: true }) ||
+            (string.Equals(_currentSettingsSection, "CustomWidgetSettings", StringComparison.Ordinal) &&
+             _settingsSectionElements.TryGetValue("CustomWidgetSettings", out FrameworkElement? customEl) &&
+             customEl is CustomWidgetSettingsSection { IsDetailViewOpen: true }) ||
+            (string.Equals(_currentSettingsSection, "Maintenance", StringComparison.Ordinal) &&
+             _activeMaintenanceSubPage != MaintenanceSubPageKind.None);
+
+        bool isNestedSection = !string.IsNullOrWhiteSpace(route.ParentTag) || isSubPageOpen;
+        SettingsNavigationView.IsBackButtonVisible = isNestedSection
+            ? NavigationViewBackButtonVisible.Visible
+            : NavigationViewBackButtonVisible.Collapsed;
+        UpdateBreadcrumb(route);
+    }
+
+    private void CapsuleSettingsViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (_isClosed)
+        {
+            return;
+        }
+
+        if (string.IsNullOrEmpty(e.PropertyName) ||
+            e.PropertyName == nameof(DeskBox.Features.Capsule.CapsuleSettingsViewModel.AvailableCollapseBehaviorOptions))
+        {
+            if (!DispatcherQueue.HasThreadAccess)
+            {
+                DispatcherQueue.TryEnqueue(() => SyncCapsuleModeEntryCard(reloadOptions: true));
+                return;
+            }
+            SyncCapsuleModeEntryCard(reloadOptions: true);
+        }
+        else if (e.PropertyName is
+            nameof(DeskBox.Features.Capsule.CapsuleSettingsViewModel.CollapseBehavior) or
+            nameof(DeskBox.Features.Capsule.CapsuleSettingsViewModel.CollapseSummaryText))
+        {
+            if (!DispatcherQueue.HasThreadAccess)
+            {
+                DispatcherQueue.TryEnqueue(() => SyncCapsuleModeEntryCard());
+                return;
+            }
+            SyncCapsuleModeEntryCard();
+        }
+    }
+
+    private void SyncCapsuleModeEntryCard(bool reloadOptions = false)
+    {
+        if (CapsuleModeEntryCard is not { } card ||
+            CapsuleModeEntryComboBox is not { } comboBox)
+        {
+            return;
+        }
+
+        _isSyncingCapsuleModeEntry = true;
+        try
+        {
+            card.Description = _capsuleSettingsViewModel.CollapseSummaryText;
+            if (reloadOptions || _capsuleEntryOptions is null || !ReferenceEquals(comboBox.ItemsSource, _capsuleEntryOptions))
+            {
+                _capsuleEntryOptions = _capsuleSettingsViewModel.AvailableCollapseBehaviorOptions;
+                comboBox.ItemsSource = _capsuleEntryOptions;
+            }
+
+            SettingsOption? selected = _capsuleEntryOptions
+                .FirstOrDefault(option => Equals(option.Value, _capsuleSettingsViewModel.CollapseBehavior));
+            if (!ReferenceEquals(comboBox.SelectedItem, selected))
+            {
+                comboBox.SelectedItem = selected;
+            }
+        }
+        finally
+        {
+            _isSyncingCapsuleModeEntry = false;
+        }
+    }
+
+    private void CapsuleModeEntryComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_isSyncingCapsuleModeEntry ||
+            CapsuleModeEntryComboBox is not { SelectedItem: SettingsOption { Value: string collapseBehavior } })
+        {
+            return;
+        }
+
+        _capsuleSettingsViewModel.CollapseBehavior = collapseBehavior;
+    }
+
+    private void CapsuleModeEntryCard_Click(object sender, RoutedEventArgs e)
+    {
+        OpenCapsuleModeSubPage(animate: true);
+    }
+
+    private void OpenCapsuleModeSubPage(bool animate)
+    {
+        if (InteractionOverviewPanel is not { } overviewPanel ||
+            CapsuleModeSubPagePanel is not { } subPagePanel)
+        {
+            return;
+        }
+
+        bool wasAlreadyOpen = _isCapsuleModeSubPageOpen;
+        _isCapsuleModeSubPageOpen = true;
+        overviewPanel.Visibility = Visibility.Collapsed;
+        subPagePanel.Visibility = Visibility.Visible;
+        ApplySegmentedNeutralStates(subPagePanel);
+        PageScroller.ChangeView(null, 0d, null, disableAnimation: true);
+        RefreshCurrentSectionHeaderAndBreadcrumb();
+        if (animate && !wasAlreadyOpen && SettingsRoot.IsLoaded)
+        {
+            subPagePanel.UpdateLayout();
+            DetailPageTransitionHelper.PlayNavigationEnter(subPagePanel, NavigationEnterOffsetPx);
+        }
+    }
+
+    private void CloseCapsuleModeSubPage(bool animate)
+    {
+        if (!_isCapsuleModeSubPageOpen && CapsuleModeSubPagePanel is not { Visibility: Visibility.Visible })
+        {
+            return;
+        }
+
+        _isCapsuleModeSubPageOpen = false;
+        if (CapsuleModeSubPagePanel is { } subPagePanel)
+        {
+            subPagePanel.Visibility = Visibility.Collapsed;
+        }
+        if (InteractionOverviewPanel is { } overviewPanel)
+        {
+            overviewPanel.Visibility = Visibility.Visible;
+        }
+
+        SyncCapsuleModeEntryCard();
+        if (string.Equals(_currentSettingsSection, "Interaction", StringComparison.Ordinal))
+        {
+            PageScroller.ChangeView(null, 0d, null, disableAnimation: true);
+            RefreshCurrentSectionHeaderAndBreadcrumb();
+            if (animate && SettingsRoot.IsLoaded && InteractionOverviewPanel is { } visibleOverview)
+            {
+                visibleOverview.UpdateLayout();
+                DetailPageTransitionHelper.PlayNavigationEnter(visibleOverview, -NavigationEnterOffsetPx);
+            }
+        }
+    }
+
+    private bool TryCloseCapsuleModeSubPage()
+    {
+        if (!_isCapsuleModeSubPageOpen)
+        {
+            return false;
+        }
+
+        CloseCapsuleModeSubPage(animate: true);
+        return true;
+    }
+
+    private void BackupSettingsViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (_isClosed)
+        {
+            return;
+        }
+
+        if (string.IsNullOrEmpty(e.PropertyName) ||
+            e.PropertyName is
+                nameof(DeskBox.Features.Backup.BackupSettingsViewModel.LocalBackupEnabled) or
+                nameof(DeskBox.Features.Backup.BackupSettingsViewModel.CloudBackupEnabled) or
+                nameof(DeskBox.Features.Backup.BackupSettingsViewModel.StatusText))
+        {
+            if (!DispatcherQueue.HasThreadAccess)
+            {
+                DispatcherQueue.TryEnqueue(SyncMaintenanceEntryCards);
+                return;
+            }
+            SyncMaintenanceEntryCards();
+        }
+    }
+
+    private void SyncMaintenanceEntryCards()
+    {
+        _isSyncingMaintenanceEntries = true;
+        try
+        {
+            if (AutomaticBackupEntryToggle is { } autoToggle)
+            {
+                autoToggle.IsOn = _backupSettingsViewModel.LocalBackupEnabled;
+                ClearToggleSwitchContent(autoToggle);
+            }
+
+            if (CloudBackupEntryCard is { } cloudCard)
+            {
+                cloudCard.Description = _backupSettingsViewModel.StatusText;
+            }
+
+            if (CloudBackupEntryToggle is { } cloudToggle)
+            {
+                cloudToggle.IsOn = _backupSettingsViewModel.CloudBackupEnabled;
+                ClearToggleSwitchContent(cloudToggle);
+            }
+        }
+        finally
+        {
+            _isSyncingMaintenanceEntries = false;
+        }
+    }
+
+    private void AutomaticBackupEntryToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_isSyncingMaintenanceEntries || sender is not ToggleSwitch toggle)
+        {
+            return;
+        }
+
+        _backupSettingsViewModel.LocalBackupEnabled = toggle.IsOn;
+    }
+
+    private void CloudBackupEntryToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_isSyncingMaintenanceEntries || sender is not ToggleSwitch toggle)
+        {
+            return;
+        }
+
+        _backupSettingsViewModel.CloudBackupEnabled = toggle.IsOn;
+    }
+
+    private void AutomaticBackupEntryCard_Click(object sender, RoutedEventArgs e)
+    {
+        OpenMaintenanceSubPage(MaintenanceSubPageKind.AutomaticBackup, animate: true);
+    }
+
+    private void CloudBackupEntryCard_Click(object sender, RoutedEventArgs e)
+    {
+        OpenMaintenanceSubPage(MaintenanceSubPageKind.CloudBackup, animate: true);
+    }
+
+    private void OpenMaintenanceSubPage(MaintenanceSubPageKind kind, bool animate)
+    {
+        if (kind == MaintenanceSubPageKind.None ||
+            MaintenanceOverviewPanel is not { } overviewPanel ||
+            AutomaticBackupSubPagePanel is not { } autoPanel ||
+            CloudBackupSubPagePanel is not { } cloudPanel)
+        {
+            return;
+        }
+
+        bool wasAlreadyOpen = _activeMaintenanceSubPage == kind;
+        _activeMaintenanceSubPage = kind;
+        overviewPanel.Visibility = Visibility.Collapsed;
+        autoPanel.Visibility = kind == MaintenanceSubPageKind.AutomaticBackup
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        cloudPanel.Visibility = kind == MaintenanceSubPageKind.CloudBackup
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        PageScroller.ChangeView(null, 0d, null, disableAnimation: true);
+        RefreshCurrentSectionHeaderAndBreadcrumb();
+        if (animate && !wasAlreadyOpen && SettingsRoot.IsLoaded)
+        {
+            StackPanel targetPanel = kind == MaintenanceSubPageKind.AutomaticBackup ? autoPanel : cloudPanel;
+            targetPanel.UpdateLayout();
+            DetailPageTransitionHelper.PlayNavigationEnter(targetPanel, NavigationEnterOffsetPx);
+        }
+    }
+
+    private void CloseMaintenanceSubPage(bool animate)
+    {
+        if (_activeMaintenanceSubPage == MaintenanceSubPageKind.None &&
+            AutomaticBackupSubPagePanel is not { Visibility: Visibility.Visible } &&
+            CloudBackupSubPagePanel is not { Visibility: Visibility.Visible })
+        {
+            return;
+        }
+
+        _activeMaintenanceSubPage = MaintenanceSubPageKind.None;
+        if (AutomaticBackupSubPagePanel is { } autoPanel)
+        {
+            autoPanel.Visibility = Visibility.Collapsed;
+        }
+        if (CloudBackupSubPagePanel is { } cloudPanel)
+        {
+            cloudPanel.Visibility = Visibility.Collapsed;
+        }
+        if (MaintenanceOverviewPanel is { } overviewPanel)
+        {
+            overviewPanel.Visibility = Visibility.Visible;
+        }
+
+        SyncMaintenanceEntryCards();
+        if (string.Equals(_currentSettingsSection, "Maintenance", StringComparison.Ordinal))
+        {
+            PageScroller.ChangeView(null, 0d, null, disableAnimation: true);
+            RefreshCurrentSectionHeaderAndBreadcrumb();
+            if (animate && SettingsRoot.IsLoaded && MaintenanceOverviewPanel is { } visibleOverview)
+            {
+                visibleOverview.UpdateLayout();
+                DetailPageTransitionHelper.PlayNavigationEnter(visibleOverview, -NavigationEnterOffsetPx);
+            }
+        }
+    }
+
+    private bool TryCloseMaintenanceSubPage()
+    {
+        if (_activeMaintenanceSubPage == MaintenanceSubPageKind.None)
+        {
+            return false;
+        }
+
+        CloseMaintenanceSubPage(animate: true);
+        return true;
+    }
+
+    private void GroupNavigationSettingsViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (_isClosed)
+        {
+            return;
+        }
+
+        if (string.IsNullOrEmpty(e.PropertyName) ||
+            e.PropertyName == nameof(DeskBox.Features.GroupNavigation.GroupNavigationSettingsViewModel.ExistingGroups))
+        {
+            if (!DispatcherQueue.HasThreadAccess)
+            {
+                DispatcherQueue.TryEnqueue(SyncActiveWidgetGroupDetail);
+                return;
+            }
+            SyncActiveWidgetGroupDetail();
+        }
+    }
+
+    private void WidgetGroupItemCard_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: WidgetGroupSettingsItem groupItem })
+        {
+            OpenWidgetGroupDetailSubPage(groupItem.GroupId, animate: true);
+        }
+    }
+
+    private void OpenWidgetGroupDetailSubPage(string groupId, bool animate)
+    {
+        WidgetGroupSettingsItem? groupItem = _groupNavigationSettingsViewModel.ExistingGroups
+            .FirstOrDefault(item => string.Equals(item.GroupId, groupId, StringComparison.Ordinal));
+        if (groupItem is null ||
+            WidgetGroupsOverviewPanel is not { } overviewPanel ||
+            WidgetGroupDetailSubPagePanel is not { } detailPanel ||
+            WidgetGroupDetailPresenter is not { } presenter)
+        {
+            return;
+        }
+
+        bool wasAlreadyOpen = string.Equals(_activeWidgetGroupId, groupId, StringComparison.Ordinal) &&
+            detailPanel.Visibility == Visibility.Visible;
+        _activeWidgetGroupId = groupId;
+        presenter.Content = groupItem;
+        overviewPanel.Visibility = Visibility.Collapsed;
+        detailPanel.Visibility = Visibility.Visible;
+        PageScroller.ChangeView(null, 0d, null, disableAnimation: true);
+        RefreshCurrentSectionHeaderAndBreadcrumb();
+        if (animate && !wasAlreadyOpen && SettingsRoot.IsLoaded)
+        {
+            detailPanel.UpdateLayout();
+            DetailPageTransitionHelper.PlayNavigationEnter(detailPanel, NavigationEnterOffsetPx);
+        }
+    }
+
+    private void CloseWidgetGroupDetailSubPage(bool animate)
+    {
+        if (_activeWidgetGroupId is null && WidgetGroupDetailSubPagePanel is not { Visibility: Visibility.Visible })
+        {
+            return;
+        }
+
+        _activeWidgetGroupId = null;
+        if (WidgetGroupDetailPresenter is { } presenter)
+        {
+            presenter.Content = null;
+        }
+        if (WidgetGroupDetailSubPagePanel is { } detailPanel)
+        {
+            detailPanel.Visibility = Visibility.Collapsed;
+        }
+        if (WidgetGroupsOverviewPanel is { } overviewPanel)
+        {
+            overviewPanel.Visibility = Visibility.Visible;
+        }
+
+        if (string.Equals(_currentSettingsSection, "WidgetGroups", StringComparison.Ordinal))
+        {
+            PageScroller.ChangeView(null, 0d, null, disableAnimation: true);
+            RefreshCurrentSectionHeaderAndBreadcrumb();
+            if (animate && SettingsRoot.IsLoaded && WidgetGroupsOverviewPanel is { } visibleOverview)
+            {
+                visibleOverview.UpdateLayout();
+                DetailPageTransitionHelper.PlayNavigationEnter(visibleOverview, -NavigationEnterOffsetPx);
+            }
+        }
+    }
+
+    private bool TryCloseWidgetGroupDetailSubPage()
+    {
+        if (_activeWidgetGroupId is null)
+        {
+            return false;
+        }
+
+        CloseWidgetGroupDetailSubPage(animate: true);
+        return true;
+    }
+
+    private void SyncActiveWidgetGroupDetail()
+    {
+        if (_activeWidgetGroupId is not string groupId)
+        {
+            return;
+        }
+
+        WidgetGroupSettingsItem? updatedItem = _groupNavigationSettingsViewModel.ExistingGroups
+            .FirstOrDefault(item => string.Equals(item.GroupId, groupId, StringComparison.Ordinal));
+        if (updatedItem is null)
+        {
+            CloseWidgetGroupDetailSubPage(animate: string.Equals(_currentSettingsSection, "WidgetGroups", StringComparison.Ordinal));
+            return;
+        }
+
+        if (WidgetGroupDetailPresenter is { } presenter)
+        {
+            presenter.Content = updatedItem;
+        }
+
+        if (string.Equals(_currentSettingsSection, "WidgetGroups", StringComparison.Ordinal))
+        {
+            RefreshCurrentSectionHeaderAndBreadcrumb();
+        }
     }
 
     private void NestedSettingsButton_Click(object sender, RoutedEventArgs e)
@@ -927,6 +2270,30 @@ public sealed partial class SettingsWindow
         if (sender is Button { Tag: string widgetId })
         {
             ViewModel.ResetCapsuleOverridesForWidget(widgetId);
+        }
+    }
+
+    private void WidgetGroupRenameTextBox_KeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (DeskBox.Helpers.ImeCompositionGuard.IsImeCompositionKeyEvent(e))
+        {
+            return;
+        }
+
+        if (e.Key == VirtualKey.Enter &&
+            sender is TextBox { Tag: string groupId } textBox)
+        {
+            ViewModel.RenameWidgetGroup(groupId, textBox.Text);
+            e.Handled = true;
+        }
+    }
+
+    private void SaveWidgetGroupRenameButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: string groupId, Parent: Panel parent } &&
+            parent.Children.OfType<TextBox>().FirstOrDefault() is { } textBox)
+        {
+            ViewModel.RenameWidgetGroup(groupId, textBox.Text);
         }
     }
 
@@ -1068,24 +2435,27 @@ public sealed partial class SettingsWindow
             return;
         }
 
-        var dialog = new ContentDialog
-        {
-            XamlRoot = SettingsRoot.XamlRoot,
-            Title = _localizationService.T(
-                "Settings.WidgetGroups.DissolveDialog.Title"),
-            PrimaryButtonText = _localizationService.T(
-                "Settings.WidgetGroups.DissolveDialog.Confirm"),
-            CloseButtonText = _localizationService.T("Common.Cancel"),
-            DefaultButton = ContentDialogButton.Close,
-            Content = new TextBlock
-            {
-                Text = _localizationService.T(
-                    "Settings.WidgetGroups.DissolveDialog.Description"),
-                TextWrapping = TextWrapping.Wrap
-            }
-        };
+        ContentDialogResult choice = await ShowDialogWhenFreeAsync(() =>
+            SettingsRoot.XamlRoot is null
+                ? null
+                : new ContentDialog
+                {
+                    XamlRoot = SettingsRoot.XamlRoot,
+                    Title = _localizationService.T(
+                        "Settings.WidgetGroups.DissolveDialog.Title"),
+                    PrimaryButtonText = _localizationService.T(
+                        "Settings.WidgetGroups.DissolveDialog.Confirm"),
+                    CloseButtonText = _localizationService.T("Common.Cancel"),
+                    DefaultButton = ContentDialogButton.Close,
+                    Content = new TextBlock
+                    {
+                        Text = _localizationService.T(
+                            "Settings.WidgetGroups.DissolveDialog.Description"),
+                        TextWrapping = TextWrapping.Wrap
+                    }
+                });
 
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        if (choice != ContentDialogResult.Primary)
         {
             return;
         }
@@ -1122,6 +2492,20 @@ public sealed partial class SettingsWindow
         if (sender is Button { DataContext: FileStackCustomRuleEditor editor })
         {
             _fileStackSettingsViewModel.MoveRule(editor, 1);
+        }
+    }
+
+    private void FileStackRulesListView_Loaded(
+        object sender,
+        RoutedEventArgs e)
+    {
+        if (sender is ListView listView &&
+            DragDropPermissionService.IsCurrentProcessElevatedCached())
+        {
+            // WinUI's ListView drag/reorder throws inside an elevated process;
+            // Up/Down rule buttons remain available.
+            listView.CanDragItems = false;
+            listView.CanReorderItems = false;
         }
     }
 
@@ -1192,6 +2576,86 @@ public sealed partial class SettingsWindow
         }
     }
 
+    // Music / Weather in-page master switches (batch 1 gating fix). These
+    // widgets' editors have no Enabled surface (unlike Quick Capture/Todo),
+    // so the switch state is owned here: optimistic write through the shell
+    // facade, reconciled on the settings-reload push.
+    private bool _isSyncingMusicWeatherFeatureEnable;
+
+
+
+    private void MusicWeatherFeatureEnableToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_isSyncingMusicWeatherFeatureEnable ||
+            sender is not ToggleSwitch { Tag: string kindTag } toggle ||
+            !Enum.TryParse(kindTag, out WidgetKind kind) ||
+            kind is not (WidgetKind.Music or WidgetKind.Weather))
+        {
+            return;
+        }
+
+        ViewModel.SetWidgetEnabled(kind, toggle.IsOn);
+        string sectionTag = kind == WidgetKind.Music ? "MusicSettings" : "WeatherSettings";
+        if (ResolveMusicWeatherFeatureElements(sectionTag).Body is { } body)
+        {
+            SetPanelChildrenEnabled(body, toggle.IsOn);
+        }
+    }
+
+    private void SyncMusicWeatherFeatureEnableState(string sectionTag)
+    {
+        (ToggleSwitch? toggle, StackPanel? body) = ResolveMusicWeatherFeatureElements(sectionTag);
+        if (toggle is null || body is null)
+        {
+            return;
+        }
+
+        WidgetKind kind = sectionTag == "MusicSettings" ? WidgetKind.Music : WidgetKind.Weather;
+        bool enabled = ViewModel.IsWidgetEnabled(kind);
+        _isSyncingMusicWeatherFeatureEnable = true;
+        try
+        {
+            toggle.IsOn = enabled;
+        }
+        finally
+        {
+            _isSyncingMusicWeatherFeatureEnable = false;
+        }
+
+        SetPanelChildrenEnabled(body, enabled);
+    }
+
+    // Panels are not Controls (no IsEnabled of their own); gate the direct
+    // card children instead — same semantics as the Quick Capture per-card
+    // bindings.
+    private static void SetPanelChildrenEnabled(Panel panel, bool enabled)
+    {
+        foreach (UIElement child in panel.Children)
+        {
+            if (child is Control control)
+            {
+                control.IsEnabled = enabled;
+            }
+            else
+            {
+                child.Opacity = enabled ? 1.0 : 0.45;
+            }
+        }
+    }
+
+    private (ToggleSwitch? Toggle, StackPanel? Body) ResolveMusicWeatherFeatureElements(string sectionTag)
+    {
+        if (!_settingsSectionElements.TryGetValue(sectionTag, out FrameworkElement? section))
+        {
+            return (null, null);
+        }
+
+        bool isMusic = sectionTag == "MusicSettings";
+        return (
+            section.FindName(isMusic ? "MusicFeatureEnableToggle" : "WeatherFeatureEnableToggle") as ToggleSwitch,
+            section.FindName(isMusic ? "MusicSettingsBodyPanel" : "WeatherSettingsBodyPanel") as StackPanel);
+    }
+
     private void QuickCaptureTabsDropDown_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not DropDownButton button)
@@ -1248,127 +2712,26 @@ public sealed partial class SettingsWindow
             todoSettings.ToggleFooterDisplayOption);
     }
 
-    private void ContinuousDecorativeAnimationsDropDown_Click(
-        object sender,
-        RoutedEventArgs e)
-    {
-        if (sender is not DropDownButton button)
-        {
-            return;
-        }
+    private void QuickCaptureResetTextSizeButton_Click(object sender, RoutedEventArgs e) =>
+        _quickCaptureSettingsViewModel.ResetTextSizesToGlobal();
 
-        // The decorative-animation flyout's selection surface lives on the
-        // performance editor (batch 50); the section reaches it through its
-        // DataContext.
-        var performanceSettings = _performanceSettingsViewModel;
-        SettingsMultiSelectMenu.Show(
-            button,
-            performanceSettings.AvailableContinuousDecorativeAnimationOptions,
-            performanceSettings.GetContinuousDecorativeAnimationDisplayName,
-            performanceSettings.IsContinuousDecorativeAnimationSelected,
-            _ => true,
-            performanceSettings.ToggleContinuousDecorativeAnimation);
-    }
-
-    private void HoverButtonActionsDropDown_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is not DropDownButton button)
-        {
-            return;
-        }
-
-        double flyoutWidth = Math.Max(220, Math.Max(button.ActualWidth, button.MinWidth));
-        var flyout = new MenuFlyout
-        {
-            ShouldConstrainToRootBounds = false
-        };
-
-        const string noneAction = "__None";
-        var noneItem = new ToggleMenuFlyoutItem
-        {
-            Tag = noneAction,
-            Text = _localizationService.T("Settings.HoverButtonActions.None"),
-            IsChecked = !ViewModel.ShowHoverButtons,
-            MinWidth = flyoutWidth
-        };
-        noneItem.Click += (_, _) =>
-        {
-            ViewModel.ShowHoverButtons = false;
-            RefreshHoverButtonActionsMenu(flyout);
-        };
-        flyout.Items.Add(noneItem);
-        flyout.Items.Add(new MenuFlyoutSeparator());
-
-        foreach (string action in ViewModel.AvailableWidgetHoverButtonActions)
-        {
-            var item = new ToggleMenuFlyoutItem
-            {
-                Tag = action,
-                Text = ViewModel.GetHoverButtonActionDisplayName(action),
-                IsChecked = ViewModel.IsHoverButtonActionSelected(action),
-                IsEnabled = ViewModel.CanToggleHoverButtonAction(action),
-                MinWidth = flyoutWidth
-            };
-            item.Click += (_, _) =>
-            {
-                ViewModel.ToggleHoverButtonAction(action);
-                ViewModel.ShowHoverButtons = true;
-                item.IsChecked = ViewModel.IsHoverButtonActionSelected(action);
-                RefreshHoverButtonActionsMenu(flyout);
-            };
-            flyout.Items.Add(item);
-        }
-
-        flyout.ShowAt(button);
-    }
-
-    private void RefreshHoverButtonActionsMenu(MenuFlyout flyout)
-    {
-        foreach (var item in flyout.Items.OfType<ToggleMenuFlyoutItem>())
-        {
-            if (item.Tag is not string action)
-            {
-                continue;
-            }
-
-            if (string.Equals(action, "__None", StringComparison.Ordinal))
-            {
-                item.IsChecked = !ViewModel.ShowHoverButtons;
-                item.IsEnabled = true;
-                continue;
-            }
-
-            item.IsChecked = ViewModel.ShowHoverButtons &&
-                ViewModel.IsHoverButtonActionSelected(action);
-            item.IsEnabled = ViewModel.CanToggleHoverButtonAction(action);
-        }
-    }
+    private void TodoResetTextSizeButton_Click(object sender, RoutedEventArgs e) =>
+        _todoSettingsViewModel.ResetTextSizesToGlobal();
 
     // ── Deferred-notice InfoBar severity brushes ────────────────
 
-    // Accessors live here rather than SectionElements.cs so the notice
-    // pinning stays self-contained; both lookups follow the established
-    // FindCreatedSectionElement deferred-name pattern (never forces
-    // section creation, returns null before the section exists).
-    private global::Microsoft.UI.Xaml.Controls.InfoBar? GlobalHotkeyElevatedNoticeInfoBar =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.InfoBar>(
-            "InteractionWindowSettings", "GlobalHotkeyElevatedNoticeInfoBar");
-
     private global::Microsoft.UI.Xaml.Controls.InfoBar? Windows10CompatibilityInfoBar =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.InfoBar>(
-            "AppearanceMaterialSettings", "Windows10CompatibilityInfoBar");
+        _settingsSectionElements.TryGetValue("Appearance", out FrameworkElement? el)
+            ? el.FindName("Windows10CompatibilityInfoBar") as global::Microsoft.UI.Xaml.Controls.InfoBar
+            : null;
 
     private global::Microsoft.UI.Xaml.Controls.InfoBar? CloudBackupSyncNoticeInfoBar =>
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.InfoBar>(
-            "CloudBackupSettings", "CloudBackupSyncNoticeInfoBar");
-
-    private global::Microsoft.UI.Xaml.Controls.InfoBar? MusicSmtcNoticeInfoBar =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.InfoBar>(
-            "MusicSettings", "MusicSmtcNoticeInfoBar");
+            "Maintenance", "CloudBackupSyncNoticeInfoBar");
 
     private global::Microsoft.UI.Xaml.Controls.InfoBar? StoreUninstallDataNoticeInfoBar =>
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.InfoBar>(
-            "CloudBackupSettings", "StoreUninstallDataNoticeInfoBar");
+            "Maintenance", "StoreUninstallDataNoticeInfoBar");
 
     private void PrepareDeferredNoticeInfoBars()
     {
@@ -1379,15 +2742,11 @@ public sealed partial class SettingsWindow
         // informational severity brushes from the application resources;
         // null-guarded because each template only populates its field once
         // its section has been created.
-        PinInformationalSeverityBrushes(GlobalHotkeyElevatedNoticeInfoBar);
         PinInformationalSeverityBrushes(Windows10CompatibilityInfoBar);
-        PinInformationalSeverityBrushes(MusicSmtcNoticeInfoBar);
         PinInformationalSeverityBrushes(StoreUninstallDataNoticeInfoBar);
         ApplyNoticeMessageTypography(CloudBackupSyncNoticeInfoBar);
-        ApplyNoticeMessageTypography(GlobalHotkeyElevatedNoticeInfoBar);
         ApplyNoticeMessageTypography(Windows10CompatibilityInfoBar);
         ApplyNoticeMessageTypography(AboutStoreNoticeInfoBar);
-        ApplyNoticeMessageTypography(MusicSmtcNoticeInfoBar);
         ApplyNoticeMessageTypography(StoreUninstallDataNoticeInfoBar);
     }
 

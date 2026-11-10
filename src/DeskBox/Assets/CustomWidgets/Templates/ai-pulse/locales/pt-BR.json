@@ -1,0 +1,16 @@
+{
+  "modFocus": "Cartão de cota em destaque",
+  "modRadar": "Radar de múltiplos provedores",
+  "modTokens": "Detalhes locais de tokens e cache",
+  "modTrend": "Tendência de uso (14 dias)",
+  "optQuotaRem": "Mostrar % restante (ex.: 85% livre)",
+  "optQuotaUsed": "Mostrar % usado (ex.: 15% usado)",
+  "optRef15m": "A cada 15 minutos",
+  "optRef1m": "A cada 1 minuto (Recomendado)",
+  "optRef5m": "A cada 5 minutos",
+  "setModules": "Módulos visíveis e ordem",
+  "setQuotaMode": "Exibição de cota da janela",
+  "setRefresh": "Intervalo de atualização automática",
+  "widgetDescription": "Monitore as janelas de limite de taxa das sessões do Claude Code e do Codex, além dos saldos das contas Zhipu GLM, DeepSeek, Kimi e OpenRouter.",
+  "widgetName": "Monitor de IA"
+}

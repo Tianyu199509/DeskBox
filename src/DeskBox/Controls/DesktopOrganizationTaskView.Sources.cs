@@ -48,7 +48,7 @@ public sealed partial class DesktopOrganizationTaskView
             if (_plan is not null) RenderSources(_plan);
             ResultInfo.Severity = InfoBarSeverity.Error;
             ResultInfo.Title = T("DesktopOrganization.Result.FailedTitle");
-            ResultInfo.Message = ex.Message;
+            ResultInfo.Message = T("DesktopOrganization.Result.FailedBody");
             ResultInfo.IsOpen = true;
         }
     }
@@ -115,7 +115,7 @@ public sealed partial class DesktopOrganizationTaskView
             App.Log($"[DesktopOrganization] Retry plan unavailable: {ex}");
             ResultInfo.Severity = InfoBarSeverity.Error;
             ResultInfo.Title = T("DesktopOrganization.Result.FailedTitle");
-            ResultInfo.Message = ex.Message;
+            ResultInfo.Message = T("DesktopOrganization.Error.TargetUnavailable");
             ResultInfo.IsOpen = true;
         }
     }

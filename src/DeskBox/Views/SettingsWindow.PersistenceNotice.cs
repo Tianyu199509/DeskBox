@@ -1,3 +1,6 @@
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
+
 namespace DeskBox.Views;
 
 /// <summary>
@@ -15,8 +18,18 @@ public sealed partial class SettingsWindow
     {
         SaveFailedInfoBar.Title = Services.Localized.T("Settings.Persistence.SaveFailedTitle");
         SaveFailedInfoBar.Message = Services.Localized.T("Settings.Persistence.SaveFailedBody");
+        SaveFailedInfoBar.Visibility = Visibility.Visible;
         SaveFailedInfoBar.IsOpen = true;
     }
 
-    internal void DismissSaveFailedBanner() => SaveFailedInfoBar.IsOpen = false;
+    internal void DismissSaveFailedBanner()
+    {
+        SaveFailedInfoBar.IsOpen = false;
+        SaveFailedInfoBar.Visibility = Visibility.Collapsed;
+    }
+
+    private void SaveFailedInfoBar_Closed(InfoBar sender, InfoBarClosedEventArgs args)
+    {
+        SaveFailedInfoBar.Visibility = Visibility.Collapsed;
+    }
 }

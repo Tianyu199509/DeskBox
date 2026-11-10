@@ -30,6 +30,7 @@ internal readonly unsafe struct NativeOleDataObject
     private const int GetDataVtableSlot = 3;
     private const int QueryGetDataVtableSlot = 5;
     private const int SetDataVtableSlot = 7;
+    private const int EnumFormatEtcVtableSlot = 8;
 
     private readonly nint _pointer;
 
@@ -94,6 +95,54 @@ internal readonly unsafe struct NativeOleDataObject
                 mediumPointer,
                 release ? 1 : 0);
         }
+    }
+
+    public int EnumFormatEtcRaw(uint direction, nint enumerator)
+    {
+        var enumFn = (delegate* unmanaged[Stdcall]<nint, uint, nint, int>)
+            GetVtableEntry(EnumFormatEtcVtableSlot);
+        return enumFn(_pointer, direction, enumerator);
+    }
+
+    public HashSet<ushort> EnumerateGetFormatIds()
+    {
+        nint enumerator = 0;
+        int hr = EnumFormatEtcRaw(1u, (nint)(&enumerator));
+        if (hr < 0 || enumerator == 0)
+        {
+            throw new InvalidOperationException($"EnumFormatEtc(DATADIR_GET) failed with 0x{hr:X8}.");
+        }
+
+        var result = new HashSet<ushort>();
+        try
+        {
+            var nextFn = (delegate* unmanaged[Stdcall]<nint, uint, NativeFormatEtc*, uint*, int>)
+                (*(nint**)enumerator)[3];
+            while (true)
+            {
+                NativeFormatEtc item = default;
+                uint fetched = 0;
+                int nextHr = nextFn(enumerator, 1u, &item, &fetched);
+                if (nextHr < 0 || fetched == 0)
+                {
+                    break;
+                }
+
+                if (item.TargetDevice != 0)
+                {
+                    DeskBox.Platform.ShellItemDragNativeMethods.CoTaskMemFree(item.TargetDevice);
+                }
+
+                result.Add(item.ClipboardFormat);
+            }
+        }
+        finally
+        {
+            var releaseFn = (delegate* unmanaged[Stdcall]<nint, uint>)(*(nint**)enumerator)[2];
+            releaseFn(enumerator);
+        }
+
+        return result;
     }
 
     private nint GetVtableEntry(int slot)

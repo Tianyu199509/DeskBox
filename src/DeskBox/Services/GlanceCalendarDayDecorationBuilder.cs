@@ -38,6 +38,8 @@ public static class GlanceCalendarDayDecorationBuilder
             date == today,
             isFestival,
             isCurrentMonth ? 1.0 : 0.42,
-            !isCurrentMonth ? 0.34 : isFestival ? 0.88 : 0.62);
+            !isCurrentMonth ? 0.34 : isFestival ? 0.88 : 0.62,
+            day?.HolidayMark ?? GlanceHolidayMark.None,
+            day?.AgendaCount ?? 0);
     }
 }

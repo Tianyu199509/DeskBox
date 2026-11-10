@@ -413,6 +413,36 @@ public sealed class DirectStartupServiceTests
     }
 
     [Fact]
+    public void Enable_RestoresMissingRunEntryWhenWindowsOptOutPersistsAfterDisable()
+    {
+        bool approved = false;
+        var backend = new FakeTaskBackend();
+        var run = new FakeRunEntryStore { Value = $"\"{ExecutablePath}\" --startup --startup-source=run" };
+        StartupMode? preference = StartupMode.Standard;
+        var service = new DirectStartupService(
+            backend,
+            run,
+            () => ExecutablePath,
+            logger: _ => { },
+            runEntryApprovedProvider: () => approved,
+            modeProvider: () => preference,
+            modeWriter: mode => preference = mode);
+
+        Assert.Equal(StartupRegistrationState.NotRegistered, service.Disable().State);
+        Assert.Null(run.Value);
+
+        StartupOperationResult reenable = service.Enable();
+        Assert.Equal(StartupRegistrationState.DisabledByUser, reenable.State);
+        Assert.True(reenable.RequiresSystemSettings);
+        Assert.Equal(1, run.WriteCount);
+        Assert.Contains("--startup-source=run", run.Value, StringComparison.Ordinal);
+        Assert.Equal(StartupRegistrationState.DisabledByUser, service.GetState());
+
+        approved = true;
+        Assert.Equal(StartupRegistrationState.Enabled, service.GetState());
+    }
+
+    [Fact]
     public void StandardStartup_DoesNotBypassWindowsOptOut()
     {
         var backend = new FakeTaskBackend { RegisterResult = false };

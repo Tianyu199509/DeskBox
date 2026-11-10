@@ -69,6 +69,20 @@ internal static class ActiveDeskBoxDragRegistry
         }
     }
 
+    internal static bool HasActiveDrag
+    {
+        get
+        {
+            DateTime now = DateTime.UtcNow;
+            lock (Gate)
+            {
+                Active.RemoveAll(
+                    entry => now - entry.RegisteredAtUtc > EntryLifetime);
+                return Active.Count > 0;
+            }
+        }
+    }
+
     /// <summary>
     /// True when every dropped path belongs to one in-flight DeskBox drag —
     /// i.e. the payload is DeskBox's own file drag and not an Explorer or
@@ -78,8 +92,17 @@ internal static class ActiveDeskBoxDragRegistry
         IReadOnlyCollection<string> paths,
         out string widgetId,
         out bool fromStackPopover,
+        DateTime? utcNow = null) =>
+        TryMatch(paths, out _, out widgetId, out fromStackPopover, utcNow);
+
+    internal static bool TryMatch(
+        IReadOnlyCollection<string> paths,
+        out string sessionId,
+        out string widgetId,
+        out bool fromStackPopover,
         DateTime? utcNow = null)
     {
+        sessionId = string.Empty;
         widgetId = string.Empty;
         fromStackPopover = false;
         if (paths.Count == 0)
@@ -118,6 +141,7 @@ internal static class ActiveDeskBoxDragRegistry
 
                 if (allMatch)
                 {
+                    sessionId = entry.SessionId;
                     widgetId = entry.WidgetId;
                     fromStackPopover = entry.FromStackPopover;
                     return true;

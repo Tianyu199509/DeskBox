@@ -24,10 +24,11 @@
                         <Viewbox Stretch="Uniform">
                             <Grid Width="36" Height="36">
                                 <Border
+                                    Margin="2"
                                     Background="{ThemeResource SubtleFillColorSecondaryBrush}"
                                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                                     BorderThickness="1"
-                                    CornerRadius="9"
+                                    CornerRadius="8"
                                     Opacity="0.62" />
                             </Grid>
                         </Viewbox>
@@ -313,7 +314,7 @@
                                 Background="{ThemeResource AccentFillColorDefaultBrush}"
                                 CornerRadius="8">
                                 <TextBlock
-                                    helpers:WidgetTextShadow.Cast="True"
+                                    helpers:WidgetTextShadow.Cast="False"
                                     Tag="StackPreviewCountText"
                                     HorizontalAlignment="Center"
                                     VerticalAlignment="Center"
@@ -337,19 +338,21 @@
                             <FontIcon FontSize="12" Glyph="&#xE70E;" />
                         </Button>
                     </Grid>
-                    <TextBlock
-                        helpers:WidgetTextShadow.Cast="True"
-                        MaxWidth="{Binding LabelMaxWidth}"
-                        Margin="2,0"
-                        HorizontalAlignment="Center"
-                        FontSize="{Binding LabelFontSize}"
-                        MaxLines="{Binding DataContext.IconLabelMaxLines, ElementName=ItemsGrid}"
-                        Tag="StackName"
-                        Text="{Binding Name}"
-                        TextAlignment="Center"
-                        TextTrimming="CharacterEllipsis"
-                        TextWrapping="Wrap"
-                        Visibility="{Binding DataContext.IconLabelVisibility, ElementName=ItemsGrid}" />
+                    <Grid>
+                        <TextBlock
+                            helpers:WidgetTextShadow.Cast="True"
+                            MaxWidth="{Binding LabelMaxWidth}"
+                            Margin="2,0"
+                            HorizontalAlignment="Center"
+                            FontSize="{Binding LabelFontSize}"
+                            MaxLines="{Binding DataContext.IconLabelMaxLines, ElementName=ItemsGrid}"
+                            Tag="StackName"
+                            Text="{Binding Name}"
+                            TextAlignment="Center"
+                            TextTrimming="CharacterEllipsis"
+                            TextWrapping="Wrap"
+                            Visibility="{Binding DataContext.IconLabelVisibility, ElementName=ItemsGrid}" />
+                    </Grid>
                 </StackPanel>
             </Border>
         </DataTemplate>
@@ -479,7 +482,7 @@
                                 Background="{ThemeResource AccentFillColorDefaultBrush}"
                                 CornerRadius="7">
                                 <TextBlock
-                                    helpers:WidgetTextShadow.Cast="True"
+                                    helpers:WidgetTextShadow.Cast="False"
                                     Tag="StackPreviewCountText"
                                     HorizontalAlignment="Center"
                                     VerticalAlignment="Center"
@@ -619,6 +622,10 @@
                             Padding="0"
                             HorizontalAlignment="Stretch"
                             HorizontalContentAlignment="Stretch"
+                            AllowDrop="True"
+                            DragOver="FolderNavigationUpButton_DragOver"
+                            DragLeave="FolderNavigationTarget_DragLeave"
+                            Drop="FolderNavigationUpButton_Drop"
                             Click="FolderNavigationUpButton_Click"
                             Style="{StaticResource WidgetTitleActionButtonStyle}">
                             <Grid ColumnDefinitions="28,*" ColumnSpacing="5">
@@ -643,6 +650,10 @@
                             Height="28"
                             Margin="0,0,4,0"
                             Padding="0"
+                            AllowDrop="True"
+                            DragOver="FolderNavigationRootButton_DragOver"
+                            DragLeave="FolderNavigationTarget_DragLeave"
+                            Drop="FolderNavigationRootButton_Drop"
                             Click="FolderNavigationRootButton_Click"
                             Style="{StaticResource WidgetTitleActionButtonStyle}">
                             <PathIcon
@@ -671,7 +682,7 @@
                 ItemClick="Items_ItemClick"
                 ContainerContentChanging="ItemsView_ContainerContentChanging"
                 Loaded="ItemsGrid_UniformPanelLoaded"
-                ItemsSource="{Binding RenderedItems}"
+
                 DoubleTapped="Items_DoubleTapped"
                 KeyDown="Root_KeyDown"
                 PointerPressed="Items_PointerPressed"
@@ -705,7 +716,7 @@
                 IsItemClickEnabled="True"
                 ItemClick="Items_ItemClick"
                 ContainerContentChanging="ItemsView_ContainerContentChanging"
-                ItemsSource="{Binding RenderedItems}"
+
                 DoubleTapped="Items_DoubleTapped"
                 KeyDown="Root_KeyDown"
                 PointerPressed="Items_PointerPressed"
@@ -807,17 +818,19 @@
                 CornerRadius="2"
                 IsHitTestVisible="False"
                 Visibility="Collapsed">
-                <TextBlock
-                    x:Name="NameExpansionText"
-                    Margin="4,2"
-                    HorizontalAlignment="Center"
-                    TextAlignment="Center"
-                    TextTrimming="CharacterEllipsis"
-                    TextWrapping="Wrap" />
+                <Grid>
+                    <TextBlock
+                        x:Name="NameExpansionText"
+                        Margin="4,2"
+                        HorizontalAlignment="Center"
+                        TextAlignment="Center"
+                        TextTrimming="CharacterEllipsis"
+                        TextWrapping="Wrap" />
+                </Grid>
             </Border>
 
             <TextBox
-                x:Name="ItemRenameTextBox"
+                x:Name="ItemRenameTextBox" x:Load="False"
                 Canvas.ZIndex="30"
                 Width="220"
                 MaxWidth="280"
@@ -834,7 +847,7 @@
                 VerticalAlignment="Center"
                 Spacing="8"
                 Visibility="Collapsed"
-                x:Name="EmptyState">
+                x:Name="EmptyState" x:Load="False">
                 <FontIcon
                     HorizontalAlignment="Center"
                     FontSize="24"
@@ -924,22 +937,24 @@
                 IsHitTestVisible="False"
                 Opacity="0"
                 Visibility="Collapsed">
-                <StackPanel
-                    HorizontalAlignment="Center"
-                    VerticalAlignment="Center"
-                    Spacing="8">
-                    <FontIcon
-                        x:Name="DropOverlayIcon"
+                <Grid>
+                    <StackPanel
                         HorizontalAlignment="Center"
-                        FontSize="24"
-                        Glyph="&#xE898;" />
-                    <TextBlock
-                        x:Name="DropOverlayText"
-                        MaxWidth="260"
-                        FontWeight="SemiBold"
-                        TextAlignment="Center"
-                        TextWrapping="Wrap" />
-                </StackPanel>
+                        VerticalAlignment="Center"
+                        Spacing="8">
+                        <FontIcon
+                            x:Name="DropOverlayIcon"
+                            HorizontalAlignment="Center"
+                            FontSize="24"
+                            Glyph="&#xE898;" />
+                        <TextBlock
+                            x:Name="DropOverlayText"
+                            MaxWidth="260"
+                            FontWeight="SemiBold"
+                            TextAlignment="Center"
+                            TextWrapping="Wrap" />
+                    </StackPanel>
+                </Grid>
             </Border>
 
             </Grid>
@@ -948,7 +963,7 @@
             <!-- Hallmark · component: file import progress card · genre: modern-minimal · theme: DeskBox native -->
             <!-- Hallmark · pre-emit critique: P5 H5 E5 S5 R5 V4 -->
             <Border
-                x:Name="ImportProgressCard"
+                x:Name="ImportProgressCard" x:Load="False"
                 Grid.Row="0"
                 Canvas.ZIndex="1000"
                 Margin="0,4,0,0"
@@ -1030,7 +1045,7 @@
                         Grid.Column="0"
                         Grid.ColumnSpan="3"
                         Height="3"
-                        IsIndeterminate="True"
+                        IsIndeterminate="False"
                         Maximum="100"
                         Minimum="0" />
                     <TextBlock
@@ -1046,7 +1061,7 @@
             </Border>
 
         <CommandBar
-            x:Name="SelectionCommandBar"
+            x:Name="SelectionCommandBar" x:Load="False"
             Grid.Row="1"
             Margin="0,6,0,0"
             Padding="2,0"

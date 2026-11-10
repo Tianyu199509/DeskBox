@@ -9,9 +9,9 @@ namespace DeskBox.Services;
 
 /// <summary>
 /// Manages the global hotkey for invoking the search popup. Ordinary gestures
-/// use the standard Win32 RegisterHotKey + WM_HOTKEY mechanism; the opt-in
-/// Alt+Space preset rides the reserved low-level hook, matching how the main
-/// hotkey handles system-reserved gestures.
+/// use the standard Win32 RegisterHotKey + WM_HOTKEY mechanism; system-reserved
+/// and modifier-tap activations ride the reserved low-level hook, matching how
+/// the main hotkey handles reserved gestures.
 /// </summary>
 public sealed class SearchHotkeyService : IDisposable, IHookHealthProbeTarget, IHookRegistrationMaintenanceTarget, ISearchHotkeyController
 {
@@ -20,6 +20,7 @@ public sealed class SearchHotkeyService : IDisposable, IHookHealthProbeTarget, I
     private const uint ModAlt = 0x0001;
     private const uint ModControl = 0x0002;
     private const uint ModShift = 0x0004;
+    private const uint ModWin = 0x0008;
     private const uint ModNoRepeat = 0x4000;
     private static readonly UIntPtr SubclassId = new(0x4444);
 
@@ -28,6 +29,7 @@ public sealed class SearchHotkeyService : IDisposable, IHookHealthProbeTarget, I
     private readonly Func<Task> _invokeAsync;
     private readonly Win32Helper.SubclassProc _subclassProc;
     private readonly ReservedHotkeyHookService _reservedHotkeyHook = new();
+    private readonly DoubleTapChordGate _doubleTapChordGate = new();
     private IntPtr _windowHandle;
     private bool _isSubclassInstalled;
     private bool _isRegistered;
@@ -54,16 +56,25 @@ public sealed class SearchHotkeyService : IDisposable, IHookHealthProbeTarget, I
         _subclassProc = CallbackDepth.WrapSubclassProc(WindowSubclassProc);
     }
 
+    public event Action? RegistrationChanged;
+
     public bool IsRegistered => _isRegistered &&
         (!_usesReservedHook || _reservedHotkeyHook.IsActive);
     public bool UsesReservedHook => _usesReservedHook && IsRegistered;
+    public bool IsSuspendedForRecording => _suspendedForRecording;
+    public string? LastError { get; private set; }
     public long ReceivedCount => Interlocked.Read(ref _receivedSequence);
     public long InvocationCount => Interlocked.Read(ref _invocationSequence);
     public long DispatchFailureCount => Interlocked.Read(ref _dispatchFailureSequence);
 
-    public GlobalHotkeyGesture CurrentGesture => GlobalHotkeyService.NormalizeGesture(
-        _settingsService.Settings.SearchHotkeyModifiers,
-        _settingsService.Settings.SearchHotkeyKey);
+    public GlobalHotkeyActivation CurrentActivation => GlobalHotkeyService.NormalizeActivation(
+        _settingsService.Settings.Search.SearchHotkeyActivationKind,
+        _settingsService.Settings.Search.SearchHotkeyModifiers,
+        _settingsService.Settings.Search.SearchHotkeyKey);
+
+    public GlobalHotkeyGesture CurrentGesture => CurrentActivation.Gesture;
+
+    public string CurrentGestureText => GlobalHotkeyService.FormatActivation(CurrentActivation, _localizationService);
 
     public void Attach(IntPtr windowHandle)
     {
@@ -86,7 +97,7 @@ public sealed class SearchHotkeyService : IDisposable, IHookHealthProbeTarget, I
 
     public void RefreshRegistration()
     {
-        RefreshRegistrationCore(quiet: false);
+        RefreshRegistrationCore(quiet: false, allowWhileSuspended: false);
     }
 
     /// <summary>
@@ -95,11 +106,17 @@ public sealed class SearchHotkeyService : IDisposable, IHookHealthProbeTarget, I
     /// used by the watchdog heartbeat so a healthy periodic refresh does not
     /// flood the log.
     /// </summary>
-    private void RefreshRegistrationCore(bool quiet)
+    private void RefreshRegistrationCore(bool quiet, bool allowWhileSuspended = false)
     {
         Unregister();
+        LastError = null;
 
-        if (_windowHandle == IntPtr.Zero || !_settingsService.Settings.SearchHotkeyEnabled)
+        if (_suspendedForRecording && !allowWhileSuspended)
+        {
+            return;
+        }
+
+        if (_windowHandle == IntPtr.Zero || !_settingsService.Settings.Search.SearchHotkeyEnabled)
         {
             RemoveSubclass();
             return;
@@ -114,48 +131,66 @@ public sealed class SearchHotkeyService : IDisposable, IHookHealthProbeTarget, I
                 UIntPtr.Zero);
             if (!_isSubclassInstalled)
             {
+                LastError = _localizationService.T("Settings.GlobalHotkey.Status.Unavailable");
                 App.Log("[SearchHotkey] Failed to install tray window subclass");
                 return;
             }
         }
 
-        var gesture = CurrentGesture;
-        if (gesture.Equals(AltSpaceGesture))
+        GlobalHotkeyActivation activation = CurrentActivation;
+        if (!GlobalHotkeyService.IsValidActivation(activation))
         {
-            ApplyReservedAltSpaceGesture();
+            LastError = _localizationService.T("Settings.GlobalHotkey.Status.Invalid");
             return;
         }
 
-        if (gesture.Modifiers.HasFlag(HotkeyModifierKeys.Windows) ||
-            !GlobalHotkeyService.IsValidGesture(gesture))
+        if (IsActivationOwnedByMainHotkey(activation))
         {
+            LastError = _localizationService.T("Settings.Search.Hotkey.Status.GlobalHotkeyConflict");
+            App.Log($"[SearchHotkey] Activation {CurrentGestureText} is owned by the main hotkey; staying unregistered");
             return;
         }
 
-        if (Register(_windowHandle, gesture))
+        if (TryGetReservedSearchHookMode(activation, out ReservedHotkeyMode reservedMode))
+        {
+            ApplyReservedHookMode(reservedMode, quiet);
+            return;
+        }
+
+        if (Register(_windowHandle, activation.Gesture))
         {
             _isRegistered = true;
             if (!quiet)
             {
-                App.Log($"[SearchHotkey] Registered gesture={FormatGesture(gesture)}");
+                App.Log($"[SearchHotkey] Registered gesture={CurrentGestureText}");
             }
 
             return;
         }
 
-        App.Log($"[SearchHotkey] Failed to register gesture={FormatGesture(gesture)} (may be in use by another app)");
+        LastError = _localizationService.T("Settings.GlobalHotkey.Status.Conflict");
+        App.Log($"[SearchHotkey] Failed to register gesture={CurrentGestureText} (may be in use by another app)");
     }
 
-    private void ApplyReservedAltSpaceGesture()
+    private static bool TryGetReservedSearchHookMode(
+        GlobalHotkeyActivation activation,
+        out ReservedHotkeyMode mode)
     {
-        if (IsGestureOwnedByMainHotkey())
+        if (activation.Kind == HotkeyActivationKind.Chord &&
+            activation.Gesture.Equals(AltSpaceGesture))
         {
-            App.Log("[SearchHotkey] Alt+Space is owned by the main hotkey; staying unregistered");
-            return;
+            mode = ReservedHotkeyMode.AltSpace;
+            return true;
         }
 
+        return GlobalHotkeyService.TryResolveReservedHookMode(activation, out mode);
+    }
+
+    private void ApplyReservedHookMode(ReservedHotkeyMode reservedMode, bool quiet)
+    {
         if (IsReservedHookDisabledByEnvironment())
         {
+            LastError = _localizationService.T("Settings.GlobalHotkey.Status.Unavailable");
             App.Log("[SearchHotkey] Reserved hotkey hook disabled by environment");
             return;
         }
@@ -167,7 +202,7 @@ public sealed class SearchHotkeyService : IDisposable, IHookHealthProbeTarget, I
             hookStarted = _reservedHotkeyHook.TryStart(
                 _windowHandle,
                 WmReservedSearchHotkey,
-                ReservedHotkeyMode.AltSpace,
+                reservedMode,
                 out hookError);
         }
         catch (Exception ex)
@@ -181,10 +216,15 @@ public sealed class SearchHotkeyService : IDisposable, IHookHealthProbeTarget, I
         {
             _isRegistered = true;
             _usesReservedHook = true;
-            App.Log("[SearchHotkey] Registered reserved gesture=Alt + Space mode=hook");
+            if (!quiet)
+            {
+                App.Log($"[SearchHotkey] Registered reserved gesture={CurrentGestureText} mode=hook");
+            }
+
             return;
         }
 
+        LastError = _localizationService.T("Settings.GlobalHotkey.Status.Unavailable");
         App.Log($"[SearchHotkey] Reserved hook registration failed error={hookError}");
     }
 
@@ -195,9 +235,38 @@ public sealed class SearchHotkeyService : IDisposable, IHookHealthProbeTarget, I
 
     public bool IsGestureOwnedByMainHotkey(GlobalHotkeyGesture gesture)
     {
-        return App.Current?.GlobalHotkeyService?.CurrentActivation is
-            { Kind: HotkeyActivationKind.Chord } activation &&
-            activation.Gesture.Equals(gesture);
+        return IsActivationOwnedByMainHotkey(GlobalHotkeyActivation.FromChord(gesture));
+    }
+
+    public bool IsActivationOwnedByMainHotkey(GlobalHotkeyActivation activation)
+    {
+        if (!_settingsService.Settings.Core.GlobalHotkeyEnabled)
+        {
+            return false;
+        }
+
+        GlobalHotkeyActivation mainActivation = App.Current?.GlobalHotkeyService?.CurrentActivation
+            ?? GlobalHotkeyService.NormalizeActivation(
+                _settingsService.Settings.Core.GlobalHotkeyActivationKind,
+                _settingsService.Settings.Core.GlobalHotkeyModifiers,
+                _settingsService.Settings.Core.GlobalHotkeyKey);
+        return GlobalHotkeyService.DoActivationsConflict(activation, mainActivation);
+    }
+
+    public bool IsActivationOwnedByClipboardHotkey(GlobalHotkeyActivation activation)
+    {
+        var settings = _settingsService.Settings;
+        if (!FeatureWidgetSettings.IsEnabled(settings, WidgetKind.Clipboard) ||
+            !settings.Clipboard.ClipboardHotkeyEnabled)
+        {
+            return false;
+        }
+
+        GlobalHotkeyActivation clipboardActivation = GlobalHotkeyService.NormalizeActivation(
+            settings.Clipboard.ClipboardHotkeyActivationKind,
+            settings.Clipboard.ClipboardHotkeyModifiers,
+            settings.Clipboard.ClipboardHotkeyKey);
+        return GlobalHotkeyService.DoActivationsConflict(activation, clipboardActivation);
     }
 
     private static bool IsReservedHookDisabledByEnvironment()
@@ -214,43 +283,63 @@ public sealed class SearchHotkeyService : IDisposable, IHookHealthProbeTarget, I
 
     public bool TryApplyGesture(GlobalHotkeyGesture gesture, out string? error)
     {
+        return TryApplyActivation(GlobalHotkeyActivation.FromChord(gesture), out error);
+    }
+
+    public bool TryApplyActivation(GlobalHotkeyActivation activation, out string? error)
+    {
         error = null;
-        gesture = GlobalHotkeyService.NormalizeGesture((int)gesture.Modifiers, gesture.VirtualKey);
-        if (gesture.Modifiers.HasFlag(HotkeyModifierKeys.Windows) ||
-            !GlobalHotkeyService.IsValidGesture(gesture))
+        activation = GlobalHotkeyService.NormalizeActivation(
+            activation.Kind,
+            (int)activation.Gesture.Modifiers,
+            activation.Gesture.VirtualKey);
+        if (!GlobalHotkeyService.IsValidActivation(activation))
         {
             error = _localizationService.T("Settings.GlobalHotkey.Status.Invalid");
             return false;
         }
 
-        if (IsGestureOwnedByMainHotkey(gesture))
+        if (IsActivationOwnedByMainHotkey(activation))
         {
             error = _localizationService.T("Settings.Search.Hotkey.Status.GlobalHotkeyConflict");
             return false;
         }
 
+        if (IsActivationOwnedByClipboardHotkey(activation))
+        {
+            error = _localizationService.T("Settings.Clipboard.Hotkey.Status.ClipboardHotkeyConflict");
+            return false;
+        }
+
         var settings = _settingsService.Settings;
-        int previousModifiers = settings.SearchHotkeyModifiers;
-        int previousVirtualKey = settings.SearchHotkeyKey;
-        var previousGesture = GlobalHotkeyService.NormalizeGesture(
+        HotkeyActivationKind previousKind = settings.Search.SearchHotkeyActivationKind;
+        int previousModifiers = settings.Search.SearchHotkeyModifiers;
+        int previousVirtualKey = settings.Search.SearchHotkeyKey;
+        GlobalHotkeyActivation previousActivation = GlobalHotkeyService.NormalizeActivation(
+            previousKind,
             previousModifiers,
             previousVirtualKey);
-        bool isCurrentGesture = gesture.Equals(previousGesture);
-        bool shouldBeActive = _windowHandle != IntPtr.Zero && settings.SearchHotkeyEnabled;
+        bool isCurrentActivation = activation.Equals(previousActivation);
+        bool shouldBeActive = _windowHandle != IntPtr.Zero && settings.Search.SearchHotkeyEnabled;
 
-        if (isCurrentGesture)
+        if (isCurrentActivation)
         {
             if (shouldBeActive && !IsRegistered)
             {
-                RefreshRegistration();
-                return IsRegistered;
+                RefreshRegistrationCore(quiet: false, allowWhileSuspended: true);
+                if (!IsRegistered)
+                {
+                    error = LastError ?? _localizationService.T("Settings.GlobalHotkey.Status.Conflict");
+                    return false;
+                }
             }
 
             return true;
         }
 
-        settings.SearchHotkeyModifiers = (int)gesture.Modifiers;
-        settings.SearchHotkeyKey = gesture.VirtualKey;
+        settings.Search.SearchHotkeyActivationKind = activation.Kind;
+        settings.Search.SearchHotkeyModifiers = (int)activation.Gesture.Modifiers;
+        settings.Search.SearchHotkeyKey = activation.Gesture.VirtualKey;
 
         if (!shouldBeActive)
         {
@@ -261,36 +350,43 @@ public sealed class SearchHotkeyService : IDisposable, IHookHealthProbeTarget, I
         // As with the main hotkey, the real RegisterHotKey call is the commit
         // point. Restore both settings and registration if the requested
         // gesture is already owned by another process or hotkey id.
-        RefreshRegistration();
+        RefreshRegistrationCore(quiet: false, allowWhileSuspended: true);
         if (IsRegistered)
         {
             _settingsService.SaveDebounced();
+            RegistrationChanged?.Invoke();
             return true;
         }
 
+        string registrationError = LastError ??
+            _localizationService.T("Settings.GlobalHotkey.Status.Conflict");
+        settings.Search.SearchHotkeyActivationKind = previousKind;
         settings.SearchHotkeyModifiers = previousModifiers;
         settings.SearchHotkeyKey = previousVirtualKey;
         RefreshRegistration();
-        if (!IsRegistered)
+        if (!_suspendedForRecording && !IsRegistered)
         {
             App.Log(
                 $"[SearchHotkey] Rollback registration failed previousGesture=" +
-                $"{FormatGesture(previousGesture)}");
+                $"{FormatGesture(previousActivation.Gesture)}");
         }
 
+        RegistrationChanged?.Invoke();
+        error = registrationError;
         return false;
     }
 
     public void SetEnabled(bool enabled)
     {
-        if (_settingsService.Settings.SearchHotkeyEnabled == enabled)
+        if (_settingsService.Settings.Search.SearchHotkeyEnabled == enabled)
         {
             return;
         }
 
-        _settingsService.Settings.SearchHotkeyEnabled = enabled;
+        _settingsService.Settings.Search.SearchHotkeyEnabled = enabled;
         _settingsService.SaveDebounced();
         RefreshRegistration();
+        RegistrationChanged?.Invoke();
     }
 
     /// <summary>
@@ -329,8 +425,8 @@ public sealed class SearchHotkeyService : IDisposable, IHookHealthProbeTarget, I
     bool IHookRegistrationMaintenanceTarget.RegistrationMaintenanceWanted =>
         !_suspendedForRecording &&
         _windowHandle != IntPtr.Zero &&
-        _settingsService.Settings.SearchHotkeyEnabled &&
-        UsesRegisterHotKeyChord(CurrentGesture);
+        _settingsService.Settings.Search.SearchHotkeyEnabled &&
+        UsesRegisterHotKeyChord(CurrentActivation);
 
     bool IHookRegistrationMaintenanceTarget.RegistrationHealthy => IsRegistered;
 
@@ -345,86 +441,92 @@ public sealed class SearchHotkeyService : IDisposable, IHookHealthProbeTarget, I
         }
 
         bool wasRegistered = IsRegistered;
-        RefreshRegistrationCore(quiet: true);
+        RefreshRegistrationCore(quiet: true, allowWhileSuspended: false);
         if (IsRegistered != wasRegistered)
         {
             // A silent unregister path (handle lost while disabled) can leave
             // IsRegistered false without an error line; the flip itself is the
             // signal worth the default log level.
             App.Log(
-                $"[SearchHotkey] Heartbeat refreshed gesture={FormatGesture(CurrentGesture)} " +
+                $"[SearchHotkey] Heartbeat refreshed gesture={CurrentGestureText} " +
                 $"registered={IsRegistered}");
+            RegistrationChanged?.Invoke();
         }
         else
         {
             App.LogVerbose(
-                $"[SearchHotkey] Heartbeat refreshed gesture={FormatGesture(CurrentGesture)} " +
+                $"[SearchHotkey] Heartbeat refreshed gesture={CurrentGestureText} " +
                 $"registered={IsRegistered}");
         }
     }
 
     /// <summary>
-    /// True when the gesture rides the plain RegisterHotKey path (the one the
-    /// watchdog heartbeat keeps alive); Alt+Space rides the reserved
-    /// low-level hook that the liveness probe covers instead, and
-    /// Win-modifier/invalid gestures can never register.
+    /// True when the activation rides the plain RegisterHotKey path (the one the
+    /// watchdog heartbeat keeps alive); reserved system chords and modifier-tap
+    /// modes ride the low-level hook that the liveness probe covers instead.
     /// </summary>
+    internal static bool UsesRegisterHotKeyChord(GlobalHotkeyActivation activation)
+    {
+        return GlobalHotkeyService.UsesRegisterHotKeyChord(activation);
+    }
+
     internal static bool UsesRegisterHotKeyChord(GlobalHotkeyGesture gesture)
     {
-        return !gesture.Equals(AltSpaceGesture) &&
-            !gesture.Modifiers.HasFlag(HotkeyModifierKeys.Windows) &&
-            GlobalHotkeyService.IsValidGesture(gesture);
+        return GlobalHotkeyService.UsesRegisterHotKeyChord(
+            GlobalHotkeyActivation.FromChord(gesture));
     }
 
     private IntPtr WindowSubclassProc(IntPtr hWnd, uint message, UIntPtr wParam, IntPtr lParam, UIntPtr uIdSubclass, UIntPtr dwRefData)
     {
         if (message == WmReservedSearchHotkey && _usesReservedHook)
         {
-            long reservedReceivedId = Interlocked.Increment(ref _receivedSequence);
-            // The Alt+Space hook path owns its Alt key-up state and never
-            // injects synthetic modifier releases.
-            if (App.UiDispatcherQueue.TryEnqueue(() =>
-            {
-                _ = InvokeAsync();
-            }))
-            {
-                return IntPtr.Zero;
-            }
-
-            Interlocked.Increment(ref _dispatchFailureSequence);
-            App.Log($"[SearchHotkey] UI dispatch rejected id={reservedReceivedId}");
+            QueueHotkeyInvocation(releaseStandardModifiers: false);
             return IntPtr.Zero;
         }
 
         if (message == GlobalHotkeyService.WmHotkey &&
             wParam.ToUInt32() == SearchHotkeyId)
         {
-            long receivedId = Interlocked.Increment(ref _receivedSequence);
-            // Immediately release all modifier keys to clear any stuck state.
-            // In RDP sessions, the modifier key-up event can be lost or delayed,
-            // leaving the system thinking Alt is still held.  This would cause
-            // every subsequent press of the gesture key (e.g. 'D') to be
-            // intercepted as Alt+D by RegisterHotKey, making the key appear dead.
+            QueueHotkeyInvocation(releaseStandardModifiers: true);
+            return IntPtr.Zero;
+        }
+
+        return Win32Helper.DefSubclassProc(hWnd, message, wParam, lParam);
+    }
+
+    private void QueueHotkeyInvocation(bool releaseStandardModifiers)
+    {
+        long receivedId = Interlocked.Increment(ref _receivedSequence);
+        GlobalHotkeyActivation currentActivation = CurrentActivation;
+
+        if (currentActivation.Kind == HotkeyActivationKind.DoubleTap &&
+            !currentActivation.IsModifierOnlyDoubleTap &&
+            !currentActivation.IsStandaloneSpaceDoubleTap &&
+            !_doubleTapChordGate.RecordPressAndShouldTrigger(currentActivation.Gesture, Environment.TickCount64))
+        {
+            return;
+        }
+
+        if (releaseStandardModifiers)
+        {
+            // Clear Ctrl/Alt/Shift states that can become stuck in RDP.
             // Deliberately synchronous (callback-isolation exemption, input
             // family, not window family — see GlobalHotkeyService for the full
             // rationale): deferring to "before the next input" would release a
             // combination the user is actively holding.
             Win32Helper.ReleaseAllModifiers();
-
-            if (App.UiDispatcherQueue.TryEnqueue(() =>
-            {
-                _ = InvokeAsync();
-            }))
-            {
-                return IntPtr.Zero;
-            }
-
-            Interlocked.Increment(ref _dispatchFailureSequence);
-            App.Log($"[SearchHotkey] UI dispatch rejected id={receivedId}");
-            return IntPtr.Zero;
         }
 
-        return Win32Helper.DefSubclassProc(hWnd, message, wParam, lParam);
+        if (App.UiDispatcherQueue.TryEnqueue(() =>
+        {
+            _ = InvokeAsync();
+        }))
+        {
+            return;
+        }
+
+        Interlocked.Increment(ref _dispatchFailureSequence);
+        App.Log($"[SearchHotkey] UI dispatch rejected id={receivedId}");
     }
 
     private async Task InvokeAsync()
@@ -464,6 +566,8 @@ public sealed class SearchHotkeyService : IDisposable, IHookHealthProbeTarget, I
 
     private void Unregister()
     {
+        _doubleTapChordGate.Reset();
+
         if (_usesReservedHook || _reservedHotkeyHook.IsActive)
         {
             try
@@ -521,12 +625,22 @@ public sealed class SearchHotkeyService : IDisposable, IHookHealthProbeTarget, I
             value |= ModShift;
         }
 
+        if (modifiers.HasFlag(HotkeyModifierKeys.Windows))
+        {
+            value |= ModWin;
+        }
+
         return value;
     }
 
     private static string FormatGesture(GlobalHotkeyGesture gesture)
     {
         var parts = new List<string>();
+        if (gesture.Modifiers.HasFlag(HotkeyModifierKeys.Windows))
+        {
+            parts.Add("Win");
+        }
+
         if (gesture.Modifiers.HasFlag(HotkeyModifierKeys.Control))
         {
             parts.Add("Ctrl");

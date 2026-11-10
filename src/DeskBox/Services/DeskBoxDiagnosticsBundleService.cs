@@ -215,8 +215,14 @@ public sealed partial class DeskBoxDiagnosticsBundleService
         """;
 
     [GeneratedRegex(
-        "(?imx)\\b([a-z0-9_]*(?:path|folder|root|directory|dir|file|exe|commandline)[a-z0-9_]*)\\s*=\\s*(?<value>'[^'\\r\\n]*'|\"[^\"\\r\\n]*\"|[^\\r\\n]*?)(?=\\s+[a-z0-9_]+\\s*=|\\r?$)")]
+        "(?imx)\\b([a-z0-9_]*(?:path|folder|root|directory|dir|file|exe|commandline|token|secret|apikey|api_key|password|authorization)[a-z0-9_]*)\\s*=\\s*(?<value>'[^'\\r\\n]*'|\"[^\"\\r\\n]*\"|[^\\r\\n]*?)(?=\\s+[a-z0-9_]+\\s*=|\\r?$)")]
     private static partial Regex SensitiveAssignmentRegex();
+
+    [GeneratedRegex(@"(?i)\b(?:Bearer\s+[A-Za-z0-9\._\-]{12,}|sk-[A-Za-z0-9_\-]{16,}|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AIza[A-Za-z0-9_\-]{30,})\b")]
+    private static partial Regex InlineCredentialTokenRegex();
+
+    [GeneratedRegex(@"(?i)(https?://[^\s\x27""<>?]+)\?[^\s\x27""<>]+")]
+    private static partial Regex UrlQueryParametersRegex();
 
     [GeneratedRegex("(?i)(?<quote>['\"])(?:[a-z]:[\\\\/]|\\\\\\\\)[^\\r\\n]*?\\k<quote>")]
     private static partial Regex QuotedWindowsPathRegex();
@@ -308,6 +314,8 @@ public sealed partial class DeskBoxDiagnosticsBundleService
             });
         sanitized = QuotedWindowsPathRegex().Replace(sanitized, "'<PATH>'");
         sanitized = UnquotedWindowsPathRegex().Replace(sanitized, "<PATH>");
+        sanitized = InlineCredentialTokenRegex().Replace(sanitized, "<SECRET>");
+        sanitized = UrlQueryParametersRegex().Replace(sanitized, "$1?<QUERY_REDACTED>");
         sanitized = EmailRegex().Replace(sanitized, "<EMAIL>");
         sanitized = SecurityIdentifierRegex().Replace(sanitized, "<SID>");
 
@@ -343,6 +351,8 @@ public sealed partial class DeskBoxDiagnosticsBundleService
                 string fileName = Path.GetFileName(match.Value.TrimEnd('.', ','));
                 return string.IsNullOrEmpty(fileName) ? "<PATH>" : $"<PATH>\\{fileName}";
             });
+        sanitized = InlineCredentialTokenRegex().Replace(sanitized, "<SECRET>");
+        sanitized = UrlQueryParametersRegex().Replace(sanitized, "$1?<QUERY_REDACTED>");
         sanitized = EmailRegex().Replace(sanitized, "<EMAIL>");
         sanitized = SecurityIdentifierRegex().Replace(sanitized, "<SID>");
 

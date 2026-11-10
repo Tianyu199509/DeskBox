@@ -11,10 +11,14 @@ internal enum WidgetAnimationTemplate
     CompactOpacity,
     CompactScale,
     CompactTranslation,
+    CompactClipCornerRadius,
+    LayerRaiseScale,
     GroupDropBreathing,
     CompactLiveTranslation,
     CompactLiveOpacity,
     EdgeGlow,
+    DeferredContentRevealOpacity,
+    DeferredContentRevealTranslation,
 }
 
 /// <summary>
@@ -27,6 +31,10 @@ internal sealed class WidgetCompositionResources : IDisposable
     private readonly Dictionary<WidgetAnimationTemplate, CompositionAnimation> _animations = [];
     private readonly Dictionary<(string Intensity, bool Showing), CompositionEasingFunction> _trayEasings = [];
     private CubicBezierEasingFunction? _breathingEasing;
+    private CubicBezierEasingFunction? _softOutEasing;
+    private CompositionRoundedRectangleGeometry? _compactClipGeometry;
+    private CompositionGeometricClip? _compactGeometricClip;
+    private ExpressionAnimation? _compactClipSizeExpression;
     private bool _isDisposed;
 
     internal ScalarKeyFrameAnimation GetScalar(
@@ -40,6 +48,21 @@ internal sealed class WidgetCompositionResources : IDisposable
         }
 
         ScalarKeyFrameAnimation animation = Track(compositor.CreateScalarKeyFrameAnimation());
+        _animations.Add(template, animation);
+        return animation;
+    }
+
+    internal Vector2KeyFrameAnimation GetVector2(
+        Compositor compositor,
+        WidgetAnimationTemplate template)
+    {
+        ObjectDisposedException.ThrowIf(_isDisposed, this);
+        if (_animations.TryGetValue(template, out CompositionAnimation? existing))
+        {
+            return (Vector2KeyFrameAnimation)existing;
+        }
+
+        Vector2KeyFrameAnimation animation = Track(compositor.CreateVector2KeyFrameAnimation());
         _animations.Add(template, animation);
         return animation;
     }
@@ -59,15 +82,35 @@ internal sealed class WidgetCompositionResources : IDisposable
         return animation;
     }
 
+    internal (CompositionRoundedRectangleGeometry Geometry, CompositionGeometricClip Clip, ExpressionAnimation SizeExpression) GetCompactClip(
+        Compositor compositor)
+    {
+        ObjectDisposedException.ThrowIf(_isDisposed, this);
+        _compactClipGeometry ??= Track(compositor.CreateRoundedRectangleGeometry());
+        _compactGeometricClip ??= Track(compositor.CreateGeometricClip(_compactClipGeometry));
+        _compactClipSizeExpression ??= Track(compositor.CreateExpressionAnimation("host.Size"));
+        return (_compactClipGeometry, _compactGeometricClip, _compactClipSizeExpression);
+    }
+
+    internal CubicBezierEasingFunction GetSoftOutEasing(Compositor compositor)
+    {
+        ObjectDisposedException.ThrowIf(_isDisposed, this);
+        return _softOutEasing ??= Track(compositor.CreateCubicBezierEasingFunction(
+            new Vector2(0.22f, 0.80f), new Vector2(0.28f, 1.0f)));
+    }
+
     internal CompositionEasingFunction GetTrayEasing(
         Compositor compositor,
         string easingIntensity,
         bool isShowing)
     {
         ObjectDisposedException.ThrowIf(_isDisposed, this);
-        string intensity = WidgetAnimationSettings.NormalizeEasingIntensity(easingIntensity);
-        // Normalization limits this dictionary to eight entries, independent of
-        // how many times settings or the animation direction change.
+        string intensity = string.Equals(
+                easingIntensity,
+                SettingsService.WidgetAnimationEasingNone,
+                StringComparison.Ordinal)
+            ? SettingsService.WidgetAnimationEasingNone
+            : WidgetAnimationSettings.NormalizeEasingIntensity(easingIntensity);
         var key = (intensity, isShowing);
         if (_trayEasings.TryGetValue(key, out CompositionEasingFunction? easing))
         {
@@ -96,23 +139,12 @@ internal sealed class WidgetCompositionResources : IDisposable
 
         if (isShowing)
         {
-            return intensity switch
-            {
-                SettingsService.WidgetAnimationEasingLight => compositor.CreateCubicBezierEasingFunction(new Vector2(0.25f, 0.9f), new Vector2(0.25f, 1.0f)),
-                SettingsService.WidgetAnimationEasingStrong => compositor.CreateCubicBezierEasingFunction(new Vector2(0.05f, 1.1f), new Vector2(0.15f, 1.0f)),
-                SettingsService.WidgetAnimationEasingSpring => compositor.CreateCubicBezierEasingFunction(new Vector2(0.34f, 1.56f), new Vector2(0.64f, 1.0f)),
-                _ => compositor.CreateCubicBezierEasingFunction(new Vector2(0.16f, 1.0f), new Vector2(0.3f, 1.0f))
-            };
+            return intensity == SettingsService.WidgetAnimationEasingSpring
+                ? compositor.CreateCubicBezierEasingFunction(new Vector2(0.22f, 1.22f), new Vector2(0.36f, 1.0f))
+                : compositor.CreateCubicBezierEasingFunction(new Vector2(0.16f, 1.0f), new Vector2(0.30f, 1.0f));
         }
 
-        return intensity switch
-        {
-            SettingsService.WidgetAnimationEasingLight => compositor.CreateCubicBezierEasingFunction(new Vector2(0.6f, 0.1f), new Vector2(0.9f, 0.3f)),
-            SettingsService.WidgetAnimationEasingStrong => compositor.CreateCubicBezierEasingFunction(new Vector2(0.7f, 0.0f), new Vector2(0.95f, -0.1f)),
-            // Departure anticipation mirrors the show-side spring overshoot.
-            SettingsService.WidgetAnimationEasingSpring => compositor.CreateCubicBezierEasingFunction(new Vector2(0.6f, -0.28f), new Vector2(0.735f, 0.045f)),
-            _ => compositor.CreateCubicBezierEasingFunction(new Vector2(0.7f, 0.0f), new Vector2(0.84f, 0.0f))
-        };
+        return compositor.CreateCubicBezierEasingFunction(new Vector2(0.32f, 0.0f), new Vector2(0.67f, 0.0f));
     }
 
     internal static T Track<T>(T resource) where T : CompositionObject
@@ -160,5 +192,13 @@ internal sealed class WidgetCompositionResources : IDisposable
         _trayEasings.Clear();
         Release(_breathingEasing);
         _breathingEasing = null;
+        Release(_softOutEasing);
+        _softOutEasing = null;
+        Release(_compactClipSizeExpression);
+        _compactClipSizeExpression = null;
+        Release(_compactGeometricClip);
+        _compactGeometricClip = null;
+        Release(_compactClipGeometry);
+        _compactClipGeometry = null;
     }
 }

@@ -129,6 +129,8 @@ public sealed class OrganizerService
             throw new InvalidOperationException("No items were available to organize.");
         }
 
+        Dictionary<string, HashSet<string>?> preExistingMergeSnapshots =
+            new(StringComparer.OrdinalIgnoreCase);
         try
         {
             IReadOnlyList<FileService.FileTransferPlan> plans = await Task.Run(
@@ -149,6 +151,13 @@ public sealed class OrganizerService
                 };
             }
 
+            if (move)
+            {
+                preExistingMergeSnapshots = await Task.Run(
+                    () => SnapshotPreExistingMergeDestinations(plans),
+                    cancellationToken);
+            }
+
             var results = await _fileService.ExecuteTransferPlanAsync(
                 plans,
                 move,
@@ -156,19 +165,31 @@ public sealed class OrganizerService
                 ownerWindowHandle,
                 progress,
                 cancellationToken);
+            if (move && results.Count > 0)
+            {
+                await RebaseMovedShortcutsOffThreadAsync(results);
+            }
+
+            (IReadOnlyList<FileService.FileTransferResult> undoableResults, bool allMergesUndoable) = move
+                ? await Task.Run(
+                    () => ExpandResultsForSafeFolderMergeUndo(results, preExistingMergeSnapshots),
+                    cancellationToken)
+                : (results, false);
+
             // Capture undo receipts off the UI thread: each is a native
             // open+stat pair, and a 2000-item drop would otherwise freeze
             // the caller for seconds after the transfer already finished.
             // Copy imports can never be undone, so they skip the cost.
-            var receipts = move
-                ? await CaptureUndoReceiptsAsync(results)
+            bool canSafelyUndo = move && allMergesUndoable && undoableResults.Count > 0;
+            var receipts = canSafelyUndo
+                ? await CaptureUndoReceiptsAsync(undoableResults)
                 : UndoReceiptBatch.Empty;
             var historyEntry = CreateHistoryEntry(
                 widget.Id,
                 widgetName,
                 OrganizationActionType.ManagedDrop,
                 move,
-                results.Select(result => new OrganizationHistoryItem
+                (canSafelyUndo ? undoableResults : results).Select(result => new OrganizationHistoryItem
                 {
                     Name = Path.GetFileName(result.DestinationPath),
                     SourcePath = result.SourcePath,
@@ -178,13 +199,22 @@ public sealed class OrganizerService
                     // Durable undo receipt: undo verifies the object at the
                     // destination against the identity recorded here, never a
                     // fresh capture of whatever later occupies the path.
-                    DestinationIdentity = receipts.GetValue(result.DestinationPath)
+                    DestinationIdentity = canSafelyUndo ? receipts.GetValue(result.DestinationPath) : null
                 }).ToList(),
-                canUndo: move);
+                canUndo: canSafelyUndo);
 
             // Snapshot before the retention policy may compact the same
             // entry: callers render per-run results from this list.
-            var completedItems = historyEntry.Items.ToList();
+            var completedItems = ReferenceEquals(undoableResults, results)
+                ? historyEntry.Items.ToList()
+                : results.Select(result => new OrganizationHistoryItem
+                {
+                    Name = Path.GetFileName(result.DestinationPath),
+                    SourcePath = result.SourcePath,
+                    DestinationPath = result.DestinationPath,
+                    TargetWidgetId = widget.Id,
+                    TargetWidgetName = widgetName
+                }).ToList();
             await AddHistoryEntryAsync(historyEntry);
             return new OrganizerOperationResult
             {
@@ -199,19 +229,35 @@ public sealed class OrganizerService
                 partial.CompletedResults;
             if (completedResults.Count > 0)
             {
-                bool canUndoCompletedMove = move && completedResults.All(
+                bool allCompletedSourcesRemoved = move && completedResults.All(
                     result =>
                         !File.Exists(result.SourcePath) &&
                         !Directory.Exists(result.SourcePath));
+                if (move)
+                {
+                    await RebaseMovedShortcutsOffThreadAsync(completedResults);
+                }
+
+                (IReadOnlyList<FileService.FileTransferResult> undoablePartialResults, bool allPartialMergesUndoable) =
+                    allCompletedSourcesRemoved
+                        ? await Task.Run(
+                            () => ExpandResultsForSafeFolderMergeUndo(completedResults, preExistingMergeSnapshots),
+                            CancellationToken.None)
+                        : (completedResults, false);
+                bool canUndoCompletedMove =
+                    allCompletedSourcesRemoved &&
+                    allPartialMergesUndoable &&
+                    undoablePartialResults.Count > 0;
+
                 var partialReceipts = canUndoCompletedMove
-                    ? await CaptureUndoReceiptsAsync(completedResults)
+                    ? await CaptureUndoReceiptsAsync(undoablePartialResults)
                     : UndoReceiptBatch.Empty;
                 await AddHistoryEntryAsync(CreateHistoryEntry(
                     widget.Id,
                     widgetName,
                     OrganizationActionType.ManagedDrop,
                     move,
-                    completedResults.Select(result =>
+                    (canUndoCompletedMove ? undoablePartialResults : completedResults).Select(result =>
                         new OrganizationHistoryItem
                         {
                             Name = Path.GetFileName(result.DestinationPath),
@@ -219,7 +265,9 @@ public sealed class OrganizerService
                             DestinationPath = result.DestinationPath,
                             TargetWidgetId = widget.Id,
                             TargetWidgetName = widgetName,
-                            DestinationIdentity = partialReceipts.GetValue(result.DestinationPath)
+                            DestinationIdentity = canUndoCompletedMove
+                                ? partialReceipts.GetValue(result.DestinationPath)
+                                : null
                         }).ToList(),
                     canUndo: canUndoCompletedMove));
             }
@@ -283,15 +331,18 @@ public sealed class OrganizerService
         IReadOnlyList<string> sourcePaths)
     {
         var reservedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var reservedFilePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         return sourcePaths
             .Where(path => !FileService.IsEntryDirectlyInDirectoryResolved(
                 path,
                 rootPath))
             .Select(path =>
             {
-                string destinationPath = FileService.GetAvailablePath(
-                    Path.Combine(rootPath, Path.GetFileName(path)),
-                    reservedPaths);
+                string destinationPath = FileService.ResolveTransferDestinationPath(
+                    path,
+                    rootPath,
+                    reservedPaths,
+                    reservedFilePaths);
                 return new FileService.FileTransferPlan(path, destinationPath);
             })
             .ToArray();
@@ -356,6 +407,11 @@ public sealed class OrganizerService
                 operationId,
                 results.Select(result => result.DestinationPath));
 
+            if (results.Count > 0)
+            {
+                await RebaseMovedShortcutsOffThreadAsync(results);
+            }
+
             var receipts = await CaptureUndoReceiptsAsync(results);
             var historyEntry = CreateHistoryEntry(
                 widget.Id,
@@ -397,6 +453,7 @@ public sealed class OrganizerService
                     : [];
             if (completed.Count > 0)
             {
+                await RebaseMovedShortcutsOffThreadAsync(completed);
                 var partialReceipts = await CaptureUndoReceiptsAsync(completed);
                 await AddHistoryEntryAsync(CreateHistoryEntry(
                     widget.Id,
@@ -441,6 +498,22 @@ public sealed class OrganizerService
 
             throw;
         }
+    }
+
+    private static Task RebaseMovedShortcutsOffThreadAsync(
+        IReadOnlyList<FileService.FileTransferResult> results)
+    {
+        if (results.Count == 0)
+        {
+            return Task.CompletedTask;
+        }
+
+        (string SourcePath, string DestinationPath)[] movedPairs = results
+            .Select(result => (result.SourcePath, result.DestinationPath))
+            .ToArray();
+        return Task.Run(
+            () => _ = Helpers.ShortcutHelper.RebaseMovedShortcuts(movedPairs),
+            CancellationToken.None);
     }
 
     private static string GetDefaultDesktopPath()
@@ -514,6 +587,12 @@ public sealed class OrganizerService
                     $"undone safely: {item.Name}");
             }
 
+            string? sourceParentDir = Path.GetDirectoryName(item.SourcePath);
+            if (!string.IsNullOrWhiteSpace(sourceParentDir))
+            {
+                Directory.CreateDirectory(sourceParentDir);
+            }
+
             string restorePath = FileService.GetAvailablePath(item.SourcePath, reservedPaths);
             pending.Add((item, new FileService.FileTransferPlan(item.DestinationPath, restorePath)));
         }
@@ -528,6 +607,10 @@ public sealed class OrganizerService
             _autoOrganizationSuppressions.CompleteOperation(
                 operationId,
                 results.Select(result => result.DestinationPath));
+            if (results.Count > 0)
+            {
+                await RebaseMovedShortcutsOffThreadAsync(results);
+            }
         }
         catch (Exception ex)
         {
@@ -538,6 +621,10 @@ public sealed class OrganizerService
             // before the failure so a retry only targets the rest.
             if (ex is FileService.IFileTransferWithCompletedResults partial)
             {
+                if (partial.CompletedResults.Count > 0)
+                {
+                    await RebaseMovedShortcutsOffThreadAsync(partial.CompletedResults);
+                }
                 foreach (FileService.FileTransferResult result in partial.CompletedResults)
                 {
                     var match = pending.FirstOrDefault(pair => string.Equals(
@@ -556,6 +643,7 @@ public sealed class OrganizerService
 
                 historyEntry.IsUndone = historyEntry.Items.All(item => item.IsRestored);
                 historyEntry.CanUndo = !historyEntry.IsUndone;
+                await _settingsService.OrganizationHistory.SaveCheckedAsync();
                 await _settingsService.SaveAsync(notifySubscribers: false);
             }
 
@@ -566,10 +654,249 @@ public sealed class OrganizerService
         historyEntry.CanUndo = false;
         foreach (var (item, plan) in pending)
         {
+            item.IsRestored = true;
+            item.RestoredPath = plan.DestinationPath;
             item.DestinationPath = plan.DestinationPath;
         }
 
+        await _settingsService.OrganizationHistory.SaveCheckedAsync();
         await _settingsService.SaveAsync(notifySubscribers: false);
+    }
+
+    public async Task<OrganizationHistoryEntry?> RecordCompletedMoveHistoryAsync(
+        WidgetConfig widget,
+        string widgetName,
+        IReadOnlyList<FileService.FileTransferResult> results,
+        IReadOnlyDictionary<string, HashSet<string>?>? preExistingMergeSnapshots = null)
+    {
+        if (results.Count == 0)
+        {
+            return null;
+        }
+
+        IReadOnlyList<FileService.FileTransferResult> movedResults = results
+            .Where(static r =>
+                !string.IsNullOrWhiteSpace(r.SourcePath) &&
+                !string.IsNullOrWhiteSpace(r.DestinationPath) &&
+                !File.Exists(r.SourcePath) &&
+                !Directory.Exists(r.SourcePath))
+            .ToList();
+        if (movedResults.Count == 0)
+        {
+            return null;
+        }
+
+        await RebaseMovedShortcutsOffThreadAsync(movedResults);
+
+        var snapshots = preExistingMergeSnapshots is not null
+            ? new Dictionary<string, HashSet<string>?>(preExistingMergeSnapshots, StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, HashSet<string>?>(StringComparer.OrdinalIgnoreCase);
+        (IReadOnlyList<FileService.FileTransferResult> undoableResults, bool allMergesUndoable) =
+            await Task.Run(() => ExpandResultsForSafeFolderMergeUndo(movedResults, snapshots));
+        bool canSafelyUndo = allMergesUndoable && undoableResults.Count > 0;
+        UndoReceiptBatch receipts = canSafelyUndo
+            ? await CaptureUndoReceiptsAsync(undoableResults)
+            : UndoReceiptBatch.Empty;
+        var entry = CreateHistoryEntry(
+            widget.Id,
+            widgetName,
+            OrganizationActionType.ManagedDrop,
+            move: true,
+            (canSafelyUndo ? undoableResults : movedResults).Select(result => new OrganizationHistoryItem
+            {
+                Name = Path.GetFileName(result.DestinationPath),
+                SourcePath = result.SourcePath,
+                DestinationPath = result.DestinationPath,
+                TargetWidgetId = widget.Id,
+                TargetWidgetName = widgetName,
+                DestinationIdentity = canSafelyUndo ? receipts.GetValue(result.DestinationPath) : null,
+            }).ToList(),
+            canUndo: canSafelyUndo);
+        await AddHistoryEntryAsync(entry);
+        return entry;
+    }
+
+    private const int MaxFolderMergeUndoSnapshotEntries = 4096;
+
+    internal static Dictionary<string, HashSet<string>?> SnapshotPreExistingMergeDestinations(
+        IReadOnlyList<FileService.FileTransferPlan> plans)
+    {
+        var snapshots = new Dictionary<string, HashSet<string>?>(StringComparer.OrdinalIgnoreCase);
+        foreach (FileService.FileTransferPlan plan in plans)
+        {
+            string dest = Path.TrimEndingDirectorySeparator(Path.GetFullPath(plan.DestinationPath));
+            if (!Directory.Exists(dest) || FileService.IsFileSystemLink(dest))
+            {
+                continue;
+            }
+
+            snapshots[dest] = TryCaptureRelativeSubtreeEntries(dest);
+        }
+
+        return snapshots;
+    }
+
+    private static HashSet<string>? TryCaptureRelativeSubtreeEntries(string rootDir)
+    {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var pending = new Stack<string>();
+        pending.Push(rootDir);
+        while (pending.Count > 0)
+        {
+            string current = pending.Pop();
+            try
+            {
+                foreach (string entry in Directory.EnumerateFileSystemEntries(current))
+                {
+                    if (set.Count >= MaxFolderMergeUndoSnapshotEntries)
+                    {
+                        return null;
+                    }
+
+                    string rel = Path.GetRelativePath(rootDir, entry);
+                    set.Add(rel);
+                    if (Directory.Exists(entry) && !FileService.IsFileSystemLink(entry))
+                    {
+                        pending.Push(entry);
+                    }
+                }
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        return set;
+    }
+
+    internal static (IReadOnlyList<FileService.FileTransferResult> UndoableResults, bool AllMergesUndoable)
+        ExpandResultsForSafeFolderMergeUndo(
+            IReadOnlyList<FileService.FileTransferResult> results,
+            Dictionary<string, HashSet<string>?> preExistingMergeSnapshots)
+    {
+        if (preExistingMergeSnapshots.Count == 0)
+        {
+            return (results, true);
+        }
+
+        var expanded = new List<FileService.FileTransferResult>(results.Count);
+        foreach (FileService.FileTransferResult result in results)
+        {
+            string dest = Path.TrimEndingDirectorySeparator(Path.GetFullPath(result.DestinationPath));
+            if (!preExistingMergeSnapshots.TryGetValue(dest, out HashSet<string>? preExisting))
+            {
+                expanded.Add(result);
+                continue;
+            }
+
+            // Never record the pre-existing destination folder itself as an undo
+            // unit: undoing it would move files that lived there before the merge.
+            if (preExisting is null || !Directory.Exists(dest))
+            {
+                return ([], false);
+            }
+
+            Dictionary<string, string>? exactSourceByDestination = null;
+            if (result.MergedLeafResults is { Count: > 0 })
+            {
+                exactSourceByDestination = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (FileService.FileTransferResult leaf in result.MergedLeafResults)
+                {
+                    if (!string.IsNullOrWhiteSpace(leaf.SourcePath) &&
+                        !string.IsNullOrWhiteSpace(leaf.DestinationPath))
+                    {
+                        exactSourceByDestination[Path.GetFullPath(leaf.DestinationPath)] =
+                            Path.GetFullPath(leaf.SourcePath);
+                    }
+                }
+            }
+
+            string sourceRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(result.SourcePath));
+            var walk = new Stack<string>();
+            walk.Push(dest);
+            while (walk.Count > 0)
+            {
+                string current = walk.Pop();
+                IEnumerable<string> children;
+                try
+                {
+                    children = Directory.EnumerateFileSystemEntries(current);
+                }
+                catch
+                {
+                    return ([], false);
+                }
+
+                foreach (string child in children)
+                {
+                    string rel = Path.GetRelativePath(dest, child);
+                    if (!preExisting.Contains(rel))
+                    {
+                        string fullChild = Path.GetFullPath(child);
+                        string resolvedSourcePath;
+                        if (exactSourceByDestination is not null &&
+                            exactSourceByDestination.TryGetValue(fullChild, out string? mappedSourcePath))
+                        {
+                            resolvedSourcePath = mappedSourcePath;
+                        }
+                        else if (TryResolveUnnumberedMergeRelativePath(rel, preExisting, out string unnumberedRel))
+                        {
+                            resolvedSourcePath = Path.Combine(sourceRoot, unnumberedRel);
+                        }
+                        else
+                        {
+                            resolvedSourcePath = Path.Combine(sourceRoot, rel);
+                        }
+
+                        expanded.Add(new FileService.FileTransferResult(
+                            resolvedSourcePath,
+                            child));
+                    }
+                    else if (Directory.Exists(child) && !FileService.IsFileSystemLink(child))
+                    {
+                        walk.Push(child);
+                    }
+                }
+            }
+        }
+
+        return (expanded, true);
+    }
+
+    private static bool TryResolveUnnumberedMergeRelativePath(
+        string relativePath,
+        HashSet<string> preExisting,
+        out string unnumberedRelativePath)
+    {
+        unnumberedRelativePath = string.Empty;
+        string? directoryPart = Path.GetDirectoryName(relativePath);
+        string fileName = Path.GetFileName(relativePath);
+        string extension = Path.GetExtension(fileName);
+        string stem = Path.GetFileNameWithoutExtension(fileName);
+        int openParen = stem.LastIndexOf(" (", StringComparison.Ordinal);
+        if (openParen <= 0 || !stem.EndsWith(')'))
+        {
+            return false;
+        }
+
+        ReadOnlySpan<char> numberSlice = stem.AsSpan(openParen + 2, stem.Length - openParen - 3);
+        if (!int.TryParse(numberSlice, out int suffixNumber) || suffixNumber < 2)
+        {
+            return false;
+        }
+
+        string originalFileName = stem[..openParen] + extension;
+        string candidateRel = string.IsNullOrEmpty(directoryPart)
+            ? originalFileName
+            : Path.Combine(directoryPart, originalFileName);
+        if (!preExisting.Contains(candidateRel))
+        {
+            return false;
+        }
+
+        unnumberedRelativePath = candidateRel;
+        return true;
     }
 
     private async Task AddHistoryEntryAsync(OrganizationHistoryEntry entry)

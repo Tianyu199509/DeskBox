@@ -11,7 +11,7 @@
     <ApplicationManifest>../../src/DeskBox/app.manifest</ApplicationManifest>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.5.1" />
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.6.5" />
     <Compile Include="../../src/DeskBox/Services/NativeAppNotificationService.cs" Link="NativeAppNotificationService.cs" />
     <Compile Include="../../src/DeskBox/Services/NativeNotificationActivationBootstrap.cs" Link="NativeNotificationActivationBootstrap.cs" />
     <Compile Include="../../src/DeskBox/Services/NativeNotificationActivationEnvelopeStore.cs" Link="NativeNotificationActivationEnvelopeStore.cs" />

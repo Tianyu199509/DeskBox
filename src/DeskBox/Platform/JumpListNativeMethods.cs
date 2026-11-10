@@ -11,8 +11,7 @@ internal static partial class JumpListNativeMethods
 {
     [DllImport("shell32.dll", EntryPoint = "SetCurrentProcessExplicitAppUserModelID",
         CharSet = CharSet.Unicode, SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    internal static extern bool SetCurrentProcessExplicitAppUserModelID(string appId);
+    internal static extern int SetCurrentProcessExplicitAppUserModelID(string appId);
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
     internal static extern int SHGetPropertyStoreFromParsingName(

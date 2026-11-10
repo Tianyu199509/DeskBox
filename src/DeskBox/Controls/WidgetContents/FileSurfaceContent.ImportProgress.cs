@@ -11,11 +11,16 @@ public sealed partial class FileSurfaceContent
 {
     private static readonly TimeSpan ImportCardShowDelay =
         TimeSpan.FromMilliseconds(120);
+    private static readonly TimeSpan ImportCompleteHoldDuration =
+        TimeSpan.FromMilliseconds(650);
+    private static readonly TimeSpan ImportFailedHoldDuration =
+        TimeSpan.FromSeconds(1.8);
     private CancellationTokenSource? _activeImportCancellation;
     private CancellationTokenSource? _importCardDelayCancellation;
     private ImportCompletionState? _activeImportVisualState;
     private bool _importCardWasShown;
     private bool _isImportCancellationPending;
+    private bool _activeImportIndeterminate;
 
     private CancellationToken ActiveImportCancellationToken =>
         _activeImportCancellation?.Token ?? CancellationToken.None;
@@ -23,6 +28,7 @@ public sealed partial class FileSurfaceContent
     private void BeginTrackedImport()
     {
         CancelAndResetTrackedImport();
+        EnsureImportProgressCardLoaded();
         _isImportBusy = true;
         _importBusyStartedAtUtc = DateTimeOffset.UtcNow;
         _activeImportCancellation = CancellationTokenSource.CreateLinkedTokenSource(
@@ -31,6 +37,7 @@ public sealed partial class FileSurfaceContent
         _activeImportVisualState = null;
         _importCardWasShown = false;
         _isImportCancellationPending = false;
+        _activeImportIndeterminate = true;
 
         ImportProgressCard.Visibility = Visibility.Collapsed;
         ImportCancelButton.Visibility = Visibility.Visible;
@@ -43,11 +50,14 @@ public sealed partial class FileSurfaceContent
         ImportTitleText.Text = T("Widget.Import.Preparing");
         ImportDescriptionText.Text = T("Widget.Import.Description");
         ImportPercentText.Text = string.Empty;
-        ImportProgressBar.IsIndeterminate = true;
+        ImportProgressBar.IsIndeterminate = false;
         ImportProgressBar.Value = 0;
         ImportStateIcon.Foreground = ImportProgressBar.Foreground;
         VisualStateManager.GoToState(this, "ImportPreparingState", false);
-        SelectionCommandBar.IsEnabled = false;
+        if (SelectionCommandBar is not null)
+        {
+            SelectionCommandBar.IsEnabled = false;
+        }
         ApplyDropVisual(FileDropVisualState.None);
         ImportBusyChanged?.Invoke(true);
 
@@ -93,8 +103,10 @@ public sealed partial class FileSurfaceContent
             return;
         }
 
+        EnsureImportProgressCardLoaded();
         _importCardWasShown = true;
         ImportProgressCard.Visibility = Visibility.Visible;
+        ImportProgressBar.IsIndeterminate = _activeImportIndeterminate;
     }
 
     private void ReportImportProgress(FileService.FileTransferProgress progress)
@@ -109,6 +121,8 @@ public sealed partial class FileSurfaceContent
         {
             return;
         }
+
+        EnsureImportProgressCardLoaded();
 
         // Progress callbacks are queued from the transfer worker. Once the
         // user has requested cancellation, an older transferring callback
@@ -135,6 +149,8 @@ public sealed partial class FileSurfaceContent
                 // not cover the widget with a second competing progress card.
                 _importCardDelayCancellation?.Cancel();
                 ImportProgressCard.Visibility = Visibility.Collapsed;
+                ImportProgressBar.IsIndeterminate = false;
+                _activeImportIndeterminate = false;
                 _importCardWasShown = false;
                 return;
             case FileService.FileTransferPhase.Finalizing:
@@ -165,7 +181,10 @@ public sealed partial class FileSurfaceContent
         }
 
         double? percentage = progress.Percentage;
-        ImportProgressBar.IsIndeterminate = percentage is null;
+        _activeImportIndeterminate = percentage is null;
+        ImportProgressBar.IsIndeterminate =
+            ImportProgressCard.Visibility == Visibility.Visible &&
+            _activeImportIndeterminate;
         if (percentage is { } value)
         {
             ImportProgressBar.Value = value;
@@ -244,8 +263,10 @@ public sealed partial class FileSurfaceContent
             return;
         }
 
+        EnsureImportProgressCardLoaded();
         _importCardDelayCancellation?.Cancel();
         _activeImportVisualState = completionState;
+        _activeImportIndeterminate = false;
         ImportProgressBar.IsIndeterminate = false;
         ImportProgressBar.Value = completionState == ImportCompletionState.Completed
             ? 100
@@ -293,9 +314,21 @@ public sealed partial class FileSurfaceContent
 
         if (_importCardWasShown)
         {
-            await Task.Delay(completionState == ImportCompletionState.Failed
-                ? TimeSpan.FromSeconds(1.8)
-                : TimeSpan.FromMilliseconds(650));
+            TimeSpan holdDuration = completionState == ImportCompletionState.Failed
+                ? ImportFailedHoldDuration
+                : ImportCompleteHoldDuration;
+            try
+            {
+                await Task.Delay(holdDuration, _lifetimeCancellation.Token);
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        }
+
+        if (_isDisposed)
+        {
+            return;
         }
 
         CancelAndResetTrackedImport();
@@ -336,7 +369,13 @@ public sealed partial class FileSurfaceContent
 
     private void ShowImportCancelingState()
     {
+        if (!_isImportBusy || _isDisposed)
+        {
+            return;
+        }
+
         _isImportCancellationPending = true;
+        _activeImportIndeterminate = true;
         ShowImportCard();
         ImportTitleText.Text = T("Widget.Import.Canceling");
         ImportDescriptionText.Text = T("Widget.Import.Canceling.Description");
@@ -371,12 +410,20 @@ public sealed partial class FileSurfaceContent
             _activeImportCancellation = null;
         }
 
-        ImportProgressCard.Visibility = Visibility.Collapsed;
-        ImportCancelButton.Visibility = Visibility.Visible;
-        ImportCancelButton.IsEnabled = true;
-        ImportCancelProgressRing.IsActive = false;
-        ImportCancelProgressRing.Visibility = Visibility.Collapsed;
-        SelectionCommandBar.IsEnabled = true;
+        _activeImportIndeterminate = false;
+        if (ImportProgressCard is not null)
+        {
+            ImportProgressCard.Visibility = Visibility.Collapsed;
+            ImportProgressBar.IsIndeterminate = false;
+            ImportCancelButton.Visibility = Visibility.Visible;
+            ImportCancelButton.IsEnabled = true;
+            ImportCancelProgressRing.IsActive = false;
+            ImportCancelProgressRing.Visibility = Visibility.Collapsed;
+        }
+        if (SelectionCommandBar is not null)
+        {
+            SelectionCommandBar.IsEnabled = true;
+        }
         _importCardWasShown = false;
         _activeImportVisualState = null;
         _isImportCancellationPending = false;

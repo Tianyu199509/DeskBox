@@ -23,7 +23,7 @@ public sealed class SettingsSliceContractBaselineTests
         Assert.False(s.SilentStartup);
         Assert.Equal("ResourceSaver", s.PerformanceMode);
         Assert.Equal(30, s.HiddenCacheCleanupDelaySeconds);
-        Assert.Equal("AllRecreatable", s.HiddenCacheCleanupScope);
+        Assert.Equal("Warm", s.HiddenCacheCleanupScope);
         Assert.Equal(5 * 60, s.VisibleIdleCacheCleanupDelaySeconds);
         Assert.True(s.IdleWorkingSetTrimEnabled);
         Assert.True(s.ImmediateHiddenWorkingSetTrimEnabled);
@@ -35,6 +35,7 @@ public sealed class SettingsSliceContractBaselineTests
         Assert.True(s.EnableVinylRotationAnimations);
         Assert.True(s.EnableGlanceImageAutoRotation);
         Assert.True(s.EnableCompactAmbientAnimations);
+        Assert.True(s.KeepCapsuleContentWarm);
         Assert.True(s.AutoCheckForUpdates);
         Assert.Null(s.LastUpdateCheckAt);
         Assert.True(s.ShowReleaseNotesAfterUpdate);
@@ -69,6 +70,7 @@ public sealed class SettingsSliceContractBaselineTests
         Assert.True(s.TodoShowAllTab);
         Assert.False(s.TodoShowActiveTab);
         Assert.True(s.TodoShowTodayTab);
+        Assert.True(s.TodoShowOverdueTab);
         Assert.False(s.TodoShowThisWeekTab);
         Assert.False(s.TodoShowThisMonthTab);
         Assert.True(s.TodoShowImportantTab);
@@ -83,6 +85,8 @@ public sealed class SettingsSliceContractBaselineTests
         Assert.True(s.TodoShowClearCompletedButton);
         Assert.True(s.TodoReminderEnabled);
         Assert.Equal(5, s.TodoDefaultReminderOffsetMinutes);
+        Assert.True(s.TodoAllDayReminderEnabled);
+        Assert.Equal(9 * 60, s.TodoAllDayReminderTimeMinutes);
         Assert.True(s.TodoUseWideDetailPane);
         Assert.Equal(string.Empty, s.TodoLayoutMode);
         Assert.True(s.TodoAutoSelectFirstInWideLayout);
@@ -90,6 +94,10 @@ public sealed class SettingsSliceContractBaselineTests
         Assert.True(s.MusicEnableCoverHoverMotion);
         Assert.Equal("Auto", s.MusicDisplayMode);
         Assert.True(s.MusicHideTimelineWhenUnavailable);
+        Assert.True(s.MusicShowLyrics);
+        Assert.True(s.MusicShowCapsuleLyrics);
+        Assert.Equal(string.Empty, s.MusicLocalLyricsFolder);
+        Assert.Equal("Auto", s.MusicSpectrumStyle);
         Assert.Equal(string.Empty, s.LastQuickCaptureFileWidgetId);
         Assert.True(s.GlobalHotkeyEnabled);
         Assert.Equal(HotkeyActivationKind.Chord, s.GlobalHotkeyActivationKind);
@@ -110,11 +118,12 @@ public sealed class SettingsSliceContractBaselineTests
         Assert.Equal("Neutral", s.WidgetBorderColorMode);
         Assert.Equal("Thin", s.WidgetBorderStyle);
         Assert.Equal("Round", s.WidgetCornerPreference);
-        Assert.Equal("SlideFade", s.WidgetAnimationEffect);
-        Assert.Equal("Standard", s.WidgetAnimationSpeed);
+        Assert.Equal("ScreenEdgeSlide", s.WidgetAnimationEffect);
+        Assert.Equal("Relaxed", s.WidgetAnimationSpeed);
         Assert.Equal("Right", s.WidgetAnimationSlideDirection);
         Assert.Equal("Standard", s.WidgetAnimationEasingIntensity);
         Assert.Equal("Dynamic", s.WidgetLayerMode);
+        Assert.Equal("Group", s.DynamicClickRaiseScope);
         Assert.True(s.KeepWidgetsVisibleOnShowDesktop);
         Assert.Equal("Overlay", s.DisplayWidgetChromeMode);
         Assert.Equal("Standard", s.InteractiveWidgetChromeMode);
@@ -154,7 +163,7 @@ public sealed class SettingsSliceContractBaselineTests
         Assert.Equal("Kind", s.FileStackGroupBy);
         Assert.Equal(3, s.FileStackThreshold);
         Assert.Equal("Widget", s.FileStackOrderBy);
-        Assert.Equal("Inline", s.FileStackOpenMode);
+        Assert.Equal("Popover", s.FileStackOpenMode);
         Assert.Equal("Grid3", s.FileStackPopoverLayout);
         Assert.Equal("Neutral", s.FileStackPopoverStyle);
         Assert.Empty(s.FileStackCustomRules);
@@ -186,6 +195,7 @@ public sealed class SettingsSliceContractBaselineTests
         Assert.False(s.ShowFileExtensions);
         Assert.True(s.HideShortcutExtensionWhenShowingFileExtensions);
         Assert.Empty(s.Widgets);
+        Assert.Equal("FixedSize", s.WidgetDisplayScalingMode);
         Assert.Empty(s.WidgetGroups);
         Assert.Empty(s.WidgetTopologyLayouts);
         Assert.Null(s.ActiveWidgetTopologyKey);
@@ -216,6 +226,7 @@ public sealed class SettingsSliceContractBaselineTests
         Assert.False(s.WeatherShowPressure);
         Assert.Equal(60, s.WeatherRefreshIntervalMinutes);
         Assert.False(s.SearchHotkeyEnabled);
+        Assert.Equal(HotkeyActivationKind.Chord, s.SearchHotkeyActivationKind);
         Assert.Equal((int)HotkeyModifierKeys.Alt, s.SearchHotkeyModifiers);
         Assert.Equal(0x44, s.SearchHotkeyKey);
         Assert.Equal("Spotlight", s.SearchDisplayMode);
@@ -232,6 +243,20 @@ public sealed class SettingsSliceContractBaselineTests
         Assert.Null(s.SearchPopupCustomY);
         Assert.Null(s.SearchPopupCustomWidth);
         Assert.Null(s.SearchPopupCustomHeight);
+        Assert.Equal("auto", s.SearchCategoryBarMode);
+        Assert.False(s.SearchShowSortHeader);
+        Assert.Equal("relevance", s.SearchDefaultSortColumn);
+        Assert.True(s.SearchIncludeClipboard);
+        Assert.True(s.SearchIncludeCalculator);
+        Assert.True(s.SearchShowDetailsPane);
+        Assert.True(s.SearchIncludeWebFallback);
+        Assert.Equal("bing", s.SearchDefaultWebEngine);
+        Assert.Equal(string.Empty, s.SearchCustomWebUrl);
+        Assert.True(s.SearchQuickCreateTodoEnabled);
+        Assert.True(s.SearchQuickCreateNoteEnabled);
+        Assert.Equal("always", s.SearchQuickCreateDisplayMode);
+        Assert.Equal("todo", s.SearchQuickCreateDefaultTarget);
+        Assert.True(s.SearchQuickCreateShowHud);
         Assert.Equal("none", s.CloudBackupProvider);
         Assert.Equal("", s.CloudBackupServerUrl);
         Assert.Equal("DeskBox/backups", s.CloudBackupRemotePath);
@@ -239,10 +264,33 @@ public sealed class SettingsSliceContractBaselineTests
         Assert.False(s.CloudBackupTodoDataEnabled);
         Assert.False(s.CloudBackupQuickCaptureDataEnabled);
         Assert.False(s.CloudBackupWidgetStyleEnabled);
+        Assert.False(s.CloudBackupCustomWidgetsEnabled);
         Assert.Equal(5, s.CloudBackupRetentionCount);
         Assert.Equal(24 * 60, s.CloudBackupIntervalMinutes);
         Assert.Equal(0L, s.CloudBackupLastSuccessUtcTicks);
         Assert.Equal(0L, s.CloudBackupLastFailureUtcTicks);
+        Assert.True(s.ClipboardCaptureText);
+        Assert.True(s.ClipboardCaptureImages);
+        Assert.True(s.ClipboardCaptureFiles);
+        Assert.Equal(32, s.ClipboardMaxImageSizeMb);
+        Assert.Equal(4, s.ClipboardMaxTextSizeMb);
+        Assert.Equal("CopyOnSinglePasteOnDouble", s.ClipboardClickBehavior);
+        Assert.False(s.ClipboardDefaultPastePlainText);
+        Assert.False(s.ClipboardMoveToTopOnReuse);
+        Assert.Equal("Standard", s.ClipboardViewMode);
+        Assert.Equal("Standard", s.ClipboardCardDensity);
+        Assert.True(s.ClipboardShowSourceApp);
+        Assert.True(s.ClipboardIgnoreSystemPrivacyFormats);
+        Assert.Equal("Mask", s.ClipboardSensitiveProtectionMode);
+        Assert.Empty(s.ClipboardExcludedApps);
+        Assert.Equal(500, s.ClipboardMaxItems);
+        Assert.Equal(30, s.ClipboardRetentionDays);
+        Assert.True(s.ClipboardHotkeyEnabled);
+        Assert.Equal(HotkeyActivationKind.Chord, s.ClipboardHotkeyActivationKind);
+        Assert.Equal((int)HotkeyModifierKeys.Alt, s.ClipboardHotkeyModifiers);
+        Assert.Equal(0x56, s.ClipboardHotkeyKey);
+        Assert.Equal("FollowCaret", s.ClipboardPopupPlacementMode);
+        Assert.Equal("None", s.ClipboardDoubleCopyAction);
     }
 
     [Fact]
@@ -284,6 +332,7 @@ public sealed class SettingsSliceContractBaselineTests
         "enableVinylRotationAnimations",
         "enableGlanceImageAutoRotation",
         "enableCompactAmbientAnimations",
+        "keepCapsuleContentWarm",
         "autoCheckForUpdates",
         "lastUpdateCheckAt",
         "showReleaseNotesAfterUpdate",
@@ -318,6 +367,7 @@ public sealed class SettingsSliceContractBaselineTests
         "todoShowAllTab",
         "todoShowActiveTab",
         "todoShowTodayTab",
+        "todoShowOverdueTab",
         "todoShowThisWeekTab",
         "todoShowThisMonthTab",
         "todoShowImportantTab",
@@ -332,6 +382,8 @@ public sealed class SettingsSliceContractBaselineTests
         "todoShowClearCompletedButton",
         "todoReminderEnabled",
         "todoDefaultReminderOffsetMinutes",
+        "todoAllDayReminderEnabled",
+        "todoAllDayReminderTimeMinutes",
         "todoUseWideDetailPane",
         "todoLayoutMode",
         "todoAutoSelectFirstInWideLayout",
@@ -339,6 +391,10 @@ public sealed class SettingsSliceContractBaselineTests
         "musicEnableCoverHoverMotion",
         "musicDisplayMode",
         "musicHideTimelineWhenUnavailable",
+        "musicShowLyrics",
+        "musicShowCapsuleLyrics",
+        "musicLocalLyricsFolder",
+        "musicSpectrumStyle",
         "lastQuickCaptureFileWidgetId",
         "globalHotkeyEnabled",
         "globalHotkeyActivationKind",
@@ -367,6 +423,7 @@ public sealed class SettingsSliceContractBaselineTests
         "widgetAnimationEasingIntensity",
         "widgetAnimationStaggerEnabled",
         "widgetLayerMode",
+        "dynamicClickRaiseScope",
         "keepWidgetsVisibleOnShowDesktop",
         "displayWidgetChromeMode",
         "interactiveWidgetChromeMode",
@@ -441,6 +498,7 @@ public sealed class SettingsSliceContractBaselineTests
         "widgetDefaultBoundScreenId",
         "widgetNewPlacementTarget",
         "widgetDisplayDisconnectBehavior",
+        "widgetDisplayScalingMode",
         "widgetGroups",
         "widgetTopologyLayouts",
         "activeWidgetTopologyKey",
@@ -471,6 +529,7 @@ public sealed class SettingsSliceContractBaselineTests
         "weatherShowPressure",
         "weatherRefreshIntervalMinutes",
         "searchHotkeyEnabled",
+        "searchHotkeyActivationKind",
         "searchHotkeyModifiers",
         "searchHotkeyKey",
         "searchDisplayMode",
@@ -487,6 +546,20 @@ public sealed class SettingsSliceContractBaselineTests
         "searchPopupCustomY",
         "searchPopupCustomWidth",
         "searchPopupCustomHeight",
+        "searchCategoryBarMode",
+        "searchShowSortHeader",
+        "searchDefaultSortColumn",
+        "searchIncludeClipboard",
+        "searchIncludeCalculator",
+        "searchShowDetailsPane",
+        "searchIncludeWebFallback",
+        "searchDefaultWebEngine",
+        "searchCustomWebUrl",
+        "searchQuickCreateTodoEnabled",
+        "searchQuickCreateNoteEnabled",
+        "searchQuickCreateDisplayMode",
+        "searchQuickCreateDefaultTarget",
+        "searchQuickCreateShowHud",
         "cloudBackupProvider",
         "cloudBackupServerUrl",
         "cloudBackupRemotePath",
@@ -494,10 +567,34 @@ public sealed class SettingsSliceContractBaselineTests
         "cloudBackupTodoDataEnabled",
         "cloudBackupQuickCaptureDataEnabled",
         "cloudBackupWidgetStyleEnabled",
+        "cloudBackupCustomWidgetsEnabled",
         "cloudBackupRetentionCount",
         "cloudBackupIntervalMinutes",
         "cloudBackupLastSuccessUtcTicks",
         "cloudBackupLastFailureUtcTicks",
         "cloudBackupLastUnverifiedUtcTicks",
+        "clipboardCaptureText",
+        "clipboardCaptureImages",
+        "clipboardCaptureFiles",
+        "clipboardMaxImageSizeMb",
+        "clipboardMaxTextSizeMb",
+        "clipboardClickBehavior",
+        "clipboardDefaultPastePlainText",
+        "clipboardMoveToTopOnReuse",
+        "clipboardViewMode",
+        "clipboardTabDisplayMode",
+        "clipboardCardDensity",
+        "clipboardShowSourceApp",
+        "clipboardIgnoreSystemPrivacyFormats",
+        "clipboardSensitiveProtectionMode",
+        "clipboardExcludedApps",
+        "clipboardMaxItems",
+        "clipboardRetentionDays",
+        "clipboardHotkeyEnabled",
+        "clipboardHotkeyActivationKind",
+        "clipboardHotkeyModifiers",
+        "clipboardHotkeyKey",
+        "clipboardPopupPlacementMode",
+        "clipboardDoubleCopyAction",
     ];
 }

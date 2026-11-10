@@ -1,4 +1,4 @@
-﻿#if DESKBOX_NATIVE_AOT
+#if DESKBOX_NATIVE_AOT
 namespace DeskBox.ViewModels;
 
 [WinRT.GeneratedBindableCustomProperty([
@@ -16,6 +16,7 @@ namespace DeskBox.ViewModels;
     nameof(ShowReleaseNotesAfterUpdate),
     nameof(AvailableLanguageOptions),
     nameof(CanOpenUpdateFallback),
+    nameof(DistributionChannelAndArchText),
     nameof(DonationQrCodeVisibility),
     nameof(IsOneClickActionEnabled),
     nameof(ManualUpdateDownloadUrl),
@@ -34,12 +35,16 @@ namespace DeskBox.ViewModels;
     nameof(UpdateDetailText),
     nameof(UpdateFallbackActionText),
     nameof(UpdateFallbackVisibility),
+    nameof(UpdateMandatoryBadgeText),
+    nameof(UpdateMandatoryBadgeVisibility),
     nameof(UpdateProgressIsIndeterminate),
     nameof(UpdateProgressText),
     nameof(UpdateProgressTextVisibility),
     nameof(UpdateProgressValue),
     nameof(UpdateProgressVisibility),
     nameof(UpdateStatusText),
+    nameof(UpdateSummaryText),
+    nameof(UpdateSummaryVisibility),
     nameof(ViewReleaseNotesButtonText),
 ], [])]
 public partial class SettingsViewModel

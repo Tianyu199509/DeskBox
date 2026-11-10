@@ -62,8 +62,9 @@ public sealed partial class DesktopOrganizationTaskView
             if (!_isScanning && !_isExecuting && !_hasCompletedExecution && _basePlan is not null &&
                 !string.Equals(_basePlan.StorageRootPath, SettingsService.NormalizeManagedStorageRootPath(
                     App.Current.SettingsService.Settings.DefaultManagedStorageRootPath), StringComparison.OrdinalIgnoreCase))
+            {
                 _ = ScanAsync(preserveSelection: true);
-            LayoutTargetCards();
+            }
             UpdateSectionVisibility();
         });
     }

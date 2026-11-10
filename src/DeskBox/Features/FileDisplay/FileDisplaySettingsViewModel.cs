@@ -69,8 +69,15 @@ public sealed partial class FileDisplaySettingsViewModel : ObservableObject
     [ObservableProperty]
     public partial bool ShowImageFilesAsIcons { get; set; }
 
+    public bool ShowImageThumbnails
+    {
+        get => !ShowImageFilesAsIcons;
+        set => ShowImageFilesAsIcons = !value;
+    }
+
     partial void OnShowImageFilesAsIconsChanged(bool value)
     {
+        OnPropertyChanged(nameof(ShowImageThumbnails));
         if (!_isSyncingPresentation)
         {
             _settings.SetShowImageFilesAsIcons(value);
@@ -122,5 +129,7 @@ public sealed partial class FileDisplaySettingsViewModel : ObservableObject
         {
             _isSyncingPresentation = false;
         }
+
+        OnPropertyChanged(nameof(ShowImageThumbnails));
     }
 }

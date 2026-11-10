@@ -44,21 +44,35 @@ public sealed class StoreStartupService : IStartupService
 
             if (task.State == StartupTaskState.Disabled)
             {
-                // Fire-and-forget: RequestEnableAsync may show a consent dialog
-                // that requires the UI thread. Blocking with GetAwaiter().GetResult()
-                // would dead-lock the UI thread.
-                _ = task.RequestEnableAsync().AsTask().ContinueWith(t =>
+                if (Thread.CurrentThread.GetApartmentState() == ApartmentState.STA)
                 {
-                    if (t.IsCompletedSuccessfully)
+                    // RequestEnableAsync may show a consent dialog that pumps
+                    // UI messages; never synchronously block the STA UI thread.
+                    _ = task.RequestEnableAsync().AsTask().ContinueWith(t =>
                     {
-                        global::DeskBox.App.Log($"[StoreStartupService] StartupTask enable requested: {t.Result}");
-                    }
-                    else if (t.IsFaulted)
-                    {
-                        global::DeskBox.App.Log($"[StoreStartupService] StartupTask enable failed: {t.Exception?.GetBaseException()?.Message}");
-                    }
-                }, TaskScheduler.Default);
-                return new StartupOperationResult(StartupRegistrationState.Pending);
+                        if (t.IsCompletedSuccessfully)
+                        {
+                            global::DeskBox.App.Log($"[StoreStartupService] StartupTask enable requested: {t.Result}");
+                        }
+                        else if (t.IsFaulted)
+                        {
+                            global::DeskBox.App.Log($"[StoreStartupService] StartupTask enable failed: {t.Exception?.GetBaseException()?.Message}");
+                        }
+                    }, TaskScheduler.Default);
+                    return new StartupOperationResult(StartupRegistrationState.Pending);
+                }
+
+                StartupTaskState requestedState = Task.Run(
+                    async () => await task.RequestEnableAsync()).GetAwaiter().GetResult();
+                global::DeskBox.App.Log($"[StoreStartupService] StartupTask enable completed: {requestedState}");
+                return requestedState switch
+                {
+                    StartupTaskState.Enabled or StartupTaskState.EnabledByPolicy =>
+                        new StartupOperationResult(StartupRegistrationState.Enabled),
+                    StartupTaskState.DisabledByUser =>
+                        new StartupOperationResult(StartupRegistrationState.DisabledByUser),
+                    _ => new StartupOperationResult(StartupRegistrationState.Pending)
+                };
             }
 
             if (task.State == StartupTaskState.DisabledByUser)
@@ -67,8 +81,7 @@ public sealed class StoreStartupService : IStartupService
                     "Windows Startup apps has disabled the DeskBox startup task.";
                 global::DeskBox.App.Log($"[StoreStartupService] {message}");
                 return new StartupOperationResult(
-                    StartupRegistrationState.DisabledByUser,
-                    message);
+                    StartupRegistrationState.DisabledByUser);
             }
 
             string failure =
@@ -120,6 +133,9 @@ public sealed class StoreStartupService : IStartupService
 
     private static StartupTask GetStartupTask()
     {
-        return StartupTask.GetAsync(StartupTaskId).AsTask().GetAwaiter().GetResult();
+        // Execute off any captured UI SynchronizationContext so querying
+        // StartupTask.GetAsync from WinUI's STA thread cannot deadlock.
+        return Task.Run(
+            async () => await StartupTask.GetAsync(StartupTaskId)).GetAwaiter().GetResult();
     }
 }

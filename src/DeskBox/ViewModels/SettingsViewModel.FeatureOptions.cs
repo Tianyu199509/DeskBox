@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Collections.ObjectModel;
 using System.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -128,7 +128,6 @@ public partial class SettingsViewModel
         // The Todo switch's state (incl. its pending async transition) is
         // the section editor's projection (batch 47).
         if (kind == WidgetKind.Todo) return _todoSettings.Enabled;
-        if (kind == WidgetKind.Search) return _searchFeatureSettings.Enabled;
         return _widgetActions.IsFeatureWidgetEnabled(kind);
     }
 
@@ -174,6 +173,8 @@ public partial class SettingsViewModel
         OnPropertyChanged(nameof(FeatureWidgetEntries));
     }
 
+    internal event Action? ClipboardSettingsRefreshRequested;
+
     public async Task ResetFeatureWidgetAsync(WidgetKind kind)
     {
         if (!FeatureWidgetSettings.IsFeatureWidget(kind))
@@ -199,7 +200,6 @@ public partial class SettingsViewModel
 
     private async Task ApplyFeatureWidgetDefaultSettingsAsync(WidgetKind kind)
     {
-        Task recordingDrain = Task.CompletedTask;
         bool wasApplyingSnapshot = _isApplyingSettingsSnapshot;
         _isApplyingSettingsSnapshot = true;
         try
@@ -209,14 +209,8 @@ public partial class SettingsViewModel
                 case WidgetKind.QuickCapture:
                     _quickCaptureSettings.ResetTabPreferences(scheduleSave: false);
                     _quickCaptureSettings.ResetPresentationPreferences(scheduleSave: false);
-                    _quickCaptureSettings.ResetRecentLimit(scheduleSave: false);
-                    recordingDrain = _quickCaptureSettings.ResetRecordingAsync();
                     _quickCaptureSettings.ResetEditorPreferences(scheduleSave: false);
-                    // The section editor re-projects from the coordinator's
-                    // reset state (the old shell mirror assignments and the
-                    // diagnostics rebuild folded into this sync).
                     _quickCaptureSettingsEditor.SyncPresentation();
-                    _quickCaptureSettingsEditor.RefreshClipboardDiagnostics();
                     break;
                 case WidgetKind.Todo:
                     _todoSettings.ResetDisplayOptions(scheduleSave: false);
@@ -238,6 +232,10 @@ public partial class SettingsViewModel
                     // are gone).
                     _weatherSettings.ResetPreferences(scheduleSave: false);
                     break;
+                case WidgetKind.Clipboard:
+                    _settingsService.MutateGraphUnderLock(() =>
+                        SettingsService.ApplyDefaultClipboardPreferences(_settingsService.Settings.Clipboard));
+                    break;
             }
         }
         finally
@@ -245,8 +243,11 @@ public partial class SettingsViewModel
             _isApplyingSettingsSnapshot = wasApplyingSnapshot;
         }
 
-        await recordingDrain;
         await _settingsService.SaveAsync();
+        if (kind == WidgetKind.Clipboard)
+        {
+            _hotkeyActions.RefreshClipboardHotkeyRegistration();
+        }
     }
 
     private void RefreshFeatureWidgetViewState(WidgetKind kind)
@@ -254,11 +255,7 @@ public partial class SettingsViewModel
         switch (kind)
         {
             case WidgetKind.QuickCapture:
-                // The section editor re-projects the whole Quick Capture
-                // surface (the old per-property notifications are its own
-                // PropertyChanged broadcasts now).
                 _quickCaptureSettingsEditor.SyncPresentation();
-                _quickCaptureSettingsEditor.RefreshClipboardDiagnostics();
                 break;
             case WidgetKind.Todo:
                 // The section editor re-projects the whole Todo surface
@@ -274,6 +271,9 @@ public partial class SettingsViewModel
                 // (the old per-property notifications are its own
                 // PropertyChanged broadcasts now).
                 _weatherSettings.Refresh();
+                break;
+            case WidgetKind.Clipboard:
+                ClipboardSettingsRefreshRequested?.Invoke();
                 break;
         }
     }

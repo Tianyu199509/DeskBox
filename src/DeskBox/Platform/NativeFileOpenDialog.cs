@@ -34,6 +34,18 @@ internal static unsafe class NativeFileOpenDialog
     private const uint FosPickFolders = 0x00000020;
     private const uint SigdnFileSysPath = 0x80058000;
 
+    /// <summary>COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE.</summary>
+    private const uint StaCoInitializationFlags = 0x2 | 0x4;
+
+    private const int ApproximateDialogWidth = 960;
+    private const int ApproximateDialogHeight = 640;
+    private const int OwnerCascadeOffset = 32;
+
+    internal const uint PickFolderOptions =
+        FosPickFolders | FosForceFileSystem | FosPathMustExist;
+
+    private static IntPtr s_activeStaOwnerHwnd;
+
     // ERROR_CANCELLED is 1223 (0x4C7): IFileDialog::Show returns
     // HRESULT_FROM_WIN32(ERROR_CANCELLED) when the user dismisses the
     // dialog without a selection.
@@ -79,14 +91,248 @@ internal static unsafe class NativeFileOpenDialog
     }
 
     /// <summary>
-    /// Shows the modal folder picker on the caller's STA thread (the owner
-    /// window's UI thread). Returns the picked folder's file-system path;
-    /// cancelling returns null.
+    /// Runs a modal folder-picker operation on a dedicated background STA
+    /// thread, creating and destroying a same-thread invisible popup owner
+    /// window on the target monitor so IFileOpenDialog::Show never couples to
+    /// or blocks the main XAML UI thread.
+    /// </summary>
+    public static Task<T> RunOnDedicatedStaAsync<T>(
+        IntPtr referenceOwnerHwnd,
+        Func<IntPtr, T> operation)
+    {
+        ArgumentNullException.ThrowIfNull(operation);
+
+        _ = Win32Helper.AllowSetForegroundWindow((uint)Environment.ProcessId);
+        (int anchorX, int anchorY) = ComputeDialogOwnerAnchor(referenceOwnerHwnd);
+
+        var completion = new TaskCompletionSource<T>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                int hr = Ole32NativeMethods.CoInitializeEx(
+                    IntPtr.Zero,
+                    StaCoInitializationFlags);
+                Marshal.ThrowExceptionForHR(hr);
+                T result;
+                try
+                {
+                    IntPtr staOwnerHwnd = CreateStaDialogOwnerWindow(anchorX, anchorY);
+                    try
+                    {
+                        Volatile.Write(ref s_activeStaOwnerHwnd, staOwnerHwnd);
+                        result = operation(staOwnerHwnd);
+                    }
+                    finally
+                    {
+                        Volatile.Write(ref s_activeStaOwnerHwnd, IntPtr.Zero);
+                        if (staOwnerHwnd != IntPtr.Zero)
+                        {
+                            _ = Win32Helper.DestroyWindow(staOwnerHwnd);
+                        }
+
+                        DrainCurrentThreadMessages();
+                    }
+                }
+                finally
+                {
+                    Ole32NativeMethods.CoUninitialize();
+                    DrainCurrentThreadMessages();
+                }
+
+                completion.TrySetResult(result);
+            }
+            catch (Exception ex)
+            {
+                completion.TrySetException(ex);
+            }
+        })
+        {
+            IsBackground = true,
+            Name = "DeskBox FolderPicker STA",
+        };
+
+        try
+        {
+            thread.SetApartmentState(ApartmentState.STA);
+            thread.Start();
+        }
+        catch (Exception ex)
+        {
+            completion.TrySetException(ex);
+        }
+
+        return completion.Task;
+    }
+
+    /// <summary>
+    /// Brings an in-flight folder picker dialog to the foreground when the
+    /// user invokes a folder-pick entrance again while a dialog is already open.
+    /// </summary>
+    public static bool TryActivateActiveFolderDialog()
+    {
+        IntPtr activeOwner = Volatile.Read(ref s_activeStaOwnerHwnd);
+        if (activeOwner == IntPtr.Zero || !Win32Helper.IsWindow(activeOwner))
+        {
+            return false;
+        }
+
+        IReadOnlyList<IntPtr> dialogs = Win32Helper.FindVisibleDialogWindowsForCurrentProcess(
+            excludeHwnd: activeOwner,
+            requiredOwnerHwnd: activeOwner);
+        if (dialogs.Count == 0)
+        {
+            return false;
+        }
+
+        return Win32Helper.SetForegroundWindow(dialogs[0]);
+    }
+
+    private static IntPtr CreateStaDialogOwnerWindow(int x, int y)
+    {
+        IntPtr hwnd = Win32Helper.CreateWindowEx(
+            Win32Helper.WS_EX_TOOLWINDOW |
+                Win32Helper.WS_EX_LAYERED |
+                Win32Helper.WS_EX_TRANSPARENT,
+            "STATIC",
+            "DeskBox FolderPicker Host",
+            Win32Helper.WS_POPUP,
+            x,
+            y,
+            1,
+            1,
+            IntPtr.Zero,
+            IntPtr.Zero,
+            Win32Helper.GetModuleHandle(null),
+            IntPtr.Zero);
+        if (hwnd == IntPtr.Zero)
+        {
+            return IntPtr.Zero;
+        }
+
+        _ = Win32Helper.SetLayeredWindowAttributes(hwnd, 0, 0, Win32Helper.LWA_ALPHA);
+        _ = Win32Helper.ShowWindow(hwnd, Win32Helper.SW_SHOWNORMAL);
+        if (!Win32Helper.SetForegroundWindow(hwnd))
+        {
+            // When Windows foreground lock blocks activation (e.g. cold-start
+            // jump-list launch), lift the invisible owner to the topmost band
+            // so the owned #32770 dialog never opens hidden behind other apps.
+            _ = Win32Helper.SetWindowPos(
+                hwnd,
+                Win32Helper.HWND_TOPMOST,
+                0,
+                0,
+                0,
+                0,
+                Win32Helper.SWP_NOMOVE |
+                    Win32Helper.SWP_NOSIZE |
+                    Win32Helper.SWP_NOACTIVATE);
+        }
+
+        DrainCurrentThreadMessages();
+        return hwnd;
+    }
+
+    internal static (int X, int Y) ComputeDialogOwnerAnchor(IntPtr referenceOwnerHwnd)
+    {
+        if (referenceOwnerHwnd != IntPtr.Zero &&
+            Win32Helper.IsWindow(referenceOwnerHwnd) &&
+            Win32Helper.IsWindowVisible(referenceOwnerHwnd) &&
+            Win32Helper.GetWindowRect(referenceOwnerHwnd, out Win32Helper.RECT ownerRect) &&
+            (ownerRect.Right - ownerRect.Left) > 8 &&
+            (ownerRect.Bottom - ownerRect.Top) > 8)
+        {
+            IntPtr ownerMonitor = Win32Helper.MonitorFromWindow(
+                referenceOwnerHwnd,
+                Win32Helper.MONITOR_DEFAULTTONEAREST);
+            if (TryGetWorkArea(ownerMonitor, out Win32Helper.RECT ownerWorkArea))
+            {
+                int maxX = Math.Max(ownerWorkArea.Left, ownerWorkArea.Right - 1);
+                int maxY = Math.Max(ownerWorkArea.Top, ownerWorkArea.Bottom - 1);
+                return (
+                    Math.Clamp(ownerRect.Left + OwnerCascadeOffset, ownerWorkArea.Left, maxX),
+                    Math.Clamp(ownerRect.Top + OwnerCascadeOffset, ownerWorkArea.Top, maxY));
+            }
+
+            return (ownerRect.Left + OwnerCascadeOffset, ownerRect.Top + OwnerCascadeOffset);
+        }
+
+        IntPtr targetMonitor = Win32Helper.GetCursorPos(out Win32Helper.POINT cursor)
+            ? Win32Helper.MonitorFromPoint(cursor, Win32Helper.MONITOR_DEFAULTTONEAREST)
+            : IntPtr.Zero;
+        if (targetMonitor == IntPtr.Zero &&
+            referenceOwnerHwnd != IntPtr.Zero &&
+            Win32Helper.IsWindow(referenceOwnerHwnd))
+        {
+            targetMonitor = Win32Helper.MonitorFromWindow(
+                referenceOwnerHwnd,
+                Win32Helper.MONITOR_DEFAULTTONEAREST);
+        }
+
+        if (targetMonitor == IntPtr.Zero)
+        {
+            targetMonitor = Win32Helper.MonitorFromPoint(
+                default,
+                Win32Helper.MONITOR_DEFAULTTOPRIMARY);
+        }
+
+        if (TryGetWorkArea(targetMonitor, out Win32Helper.RECT workArea))
+        {
+            int workWidth = Math.Max(1, workArea.Right - workArea.Left);
+            int workHeight = Math.Max(1, workArea.Bottom - workArea.Top);
+            return (
+                workArea.Left + Math.Max(0, (workWidth - ApproximateDialogWidth) / 2),
+                workArea.Top + Math.Max(0, (workHeight - ApproximateDialogHeight) / 2));
+        }
+
+        return (120, 120);
+    }
+
+    private static bool TryGetWorkArea(IntPtr monitor, out Win32Helper.RECT workArea)
+    {
+        if (monitor == IntPtr.Zero)
+        {
+            workArea = default;
+            return false;
+        }
+
+        var info = new Win32Helper.MONITORINFO
+        {
+            cbSize = sizeof(Win32Helper.MONITORINFO),
+        };
+        if (!Win32Helper.GetMonitorInfo(monitor, ref info))
+        {
+            workArea = default;
+            return false;
+        }
+
+        workArea = info.rcWork;
+        return true;
+    }
+
+    private static void DrainCurrentThreadMessages()
+    {
+        while (Win32Helper.PeekMessage(
+                   out Win32Helper.MSG msg,
+                   IntPtr.Zero,
+                   0,
+                   0,
+                   Win32Helper.PM_REMOVE))
+        {
+            _ = Win32Helper.TranslateMessage(in msg);
+            _ = Win32Helper.DispatchMessage(in msg);
+        }
+    }
+
+    /// <summary>
+    /// Shows the modal folder picker on the caller's STA thread. Returns the
+    /// picked folder's file-system path; cancelling returns null.
     /// </summary>
     public static string? ShowPickFolder(IntPtr ownerHwnd)
     {
         using var dialog = CreateDialog();
-        Marshal.ThrowExceptionForHR(dialog.SetOptions(FosPickFolders | FosForceFileSystem));
+        Marshal.ThrowExceptionForHR(dialog.SetOptions(PickFolderOptions));
 
         int hr = dialog.Show(ownerHwnd);
         if (IsUserCancelled(hr))

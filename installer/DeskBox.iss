@@ -1,4 +1,4 @@
-; DeskBox 安装脚本
+﻿; DeskBox 安装脚本
 ; 零售安装包由 scripts\build-stage-7c1-distribution.ps1 产出（Full Native AOT 载荷）。
 ; 载荷必须由 ..\scripts\publish-aot-retail.ps1 -Platform x64 生成，
 ; 以便同时生成 DeskBox.InstallManifest.txt。
@@ -6,8 +6,8 @@
 ; ISCC /DDeskBoxNativeAot=1 /DDeskBoxBundledRuntime=1 /DMyAppReleaseDir=<publish 目录> DeskBox.iss
 
 #define MyAppName "DeskBox"
-#define MyAppVersion "1.5.9"
-#define MyAppVersionInfo "1.5.9.0"
+#define MyAppVersion "1.6.0"
+#define MyAppVersionInfo "1.6.0.0"
 #define MyAppPublisher "朱天雨"
 #define MyAppExeName "DeskBox.exe"
 #define MyAppOutputBaseName "DeskBox_Setup"
@@ -69,8 +69,10 @@ UsePreviousPrivileges=yes
 CloseApplications=force
 ; The short-lived thumbnail proxy batches can outlive a killed host when a
 ; shell handler hangs, so Restart Manager must cover it as well.
-CloseApplicationsFilter={#MyAppExeName},DeskBox.ThumbnailProxy.exe
+CloseApplicationsFilter={#MyAppExeName},DeskBox.Settings.exe,DeskBox.ThumbnailProxy.exe
 RestartApplications=no
+SetupLogging=yes
+UninstallLogging=yes
 OutputDir=..\Output
 #if DeskBoxBundledRuntime
 OutputBaseFilename={#MyAppOutputBaseName}_{#MyAppVersion}_x64
@@ -112,6 +114,7 @@ Name: "korean"; MessagesFile: "Languages\Korean.islu"
 
 [Messages]
 #include "DeskBox.HindiBengaliMessages.iss"
+#include "DeskBox.StartupErrorMessages.iss"
 
 [CustomMessages]
 chinesesimplified.MultipleInstallationsTitle=检测到多个 DeskBox 安装
@@ -134,11 +137,16 @@ brazilianportuguese.MultipleInstallationsTitle=Várias instalações do DeskBox 
 brazilianportuguese.MultipleInstallationsBody=As seguintes pastas de instalação do DeskBox foram encontradas:%n%n%1
 brazilianportuguese.MultipleInstallationsFooter=Para evitar a criação de outra cópia, desinstale a versão extra nas Configurações do Windows e execute a instalação novamente.
 brazilianportuguese.UpgradeDirectoryMismatch=Esta é uma atualização, mas a pasta de instalação solicitada não corresponde à instalação existente.%n%nPasta existente: %1%nPasta solicitada: %2%n%nA atualização deve usar a pasta existente. Cancele a instalação e execute-a novamente.
-chinesesimplified.ArchitectureMismatchBody=%1 处已有的 DeskBox 安装是原生 ARM64 版本。此 x64 安装包会把它替换为模拟运行的 x64 版本，且后续更新将一直停留在 x64 通道。若要保留原生 ARM64 版本，请改用 DeskBox_Setup_arm64.exe。
-english.ArchitectureMismatchBody=The existing DeskBox installation at %1 is the native ARM64 build. This x64 installer would replace it with an emulated build, and every future update would stay on the x64 channel. To keep the native ARM64 build, run DeskBox_Setup_arm64.exe instead.
-japanese.ArchitectureMismatchBody=%1 の既存の DeskBox はネイティブ ARM64 版です。この x64 インストーラーはそれをエミュレーションで実行される x64 版に置き換え、今後の更新も x64 チャネルのままになります。ネイティブ ARM64 版を残すには、代わりに DeskBox_Setup_arm64.exe を実行してください。
-german.ArchitectureMismatchBody=Die vorhandene DeskBox-Installation unter %1 ist die native ARM64-Version. Dieses x64-Installationsprogramm würde sie durch eine emulierte x64-Version ersetzen, und alle künftigen Updates blieben auf dem x64-Kanal. Um die native ARM64-Version zu behalten, verwenden Sie stattdessen DeskBox_Setup_arm64.exe.
-brazilianportuguese.ArchitectureMismatchBody=A instalação existente do DeskBox em %1 é a versão ARM64 nativa. Este instalador x64 a substituiria por uma versão x64 emulada, e todas as atualizações futuras permaneceriam no canal x64. Para manter a versão ARM64 nativa, execute o DeskBox_Setup_arm64.exe.
+chinesesimplified.ArchitectureMismatchBody=%1 处已有的 DeskBox 安装是原生 ARM64 版本。此 x64 安装包会把它替换为模拟运行的 x64 版本，且后续更新将一直停留在 x64 通道。若要保留原生 ARM64 版本，请改用 {#MyAppOutputBaseName}_{#MyAppVersion}_arm64.exe。
+english.ArchitectureMismatchBody=The existing DeskBox installation at %1 is the native ARM64 build. This x64 installer would replace it with an emulated build, and every future update would stay on the x64 channel. To keep the native ARM64 build, run {#MyAppOutputBaseName}_{#MyAppVersion}_arm64.exe instead.
+japanese.ArchitectureMismatchBody=%1 の既存の DeskBox はネイティブ ARM64 版です。この x64 インストーラーはそれをエミュレーションで実行される x64 版に置き換え、今後の更新も x64 チャネルのままになります。ネイティブ ARM64 版を残すには、代わりに {#MyAppOutputBaseName}_{#MyAppVersion}_arm64.exe を実行してください。
+german.ArchitectureMismatchBody=Die vorhandene DeskBox-Installation unter %1 ist die native ARM64-Version. Dieses x64-Installationsprogramm würde sie durch eine emulierte x64-Version ersetzen, und alle künftigen Updates blieben auf dem x64-Kanal. Um die native ARM64-Version zu behalten, verwenden Sie stattdessen {#MyAppOutputBaseName}_{#MyAppVersion}_arm64.exe.
+brazilianportuguese.ArchitectureMismatchBody=A instalação existente do DeskBox em %1 é a versão ARM64 nativa. Este instalador x64 a substituiria por uma versão x64 emulada, e todas as atualizações futuras permaneceriam no canal x64. Para manter a versão ARM64 nativa, execute o {#MyAppOutputBaseName}_{#MyAppVersion}_arm64.exe.
+chinesesimplified.PerUserUpgradeScopeMismatch=检测到当前账户下已有个人模式的 DeskBox 安装：%n%n%1%n%n“为所有用户安装”不能直接覆盖个人账户目录（否则会将个人路径写入系统级注册表）。请取消后重新运行安装程序并选择“仅为我安装”（或使用 /CURRENTUSER 参数），或先移除旧目录后再为所有用户安装。
+english.PerUserUpgradeScopeMismatch=An existing per-user DeskBox installation was found in the current profile:%n%n%1%n%nAll-users mode cannot upgrade a private user-profile folder in place without registering it machine-wide. Cancel Setup and run it again choosing "Install for me only" (or pass /CURRENTUSER), or remove the old per-user copy before installing for all users.
+japanese.PerUserUpgradeScopeMismatch=現在のアカウントに個人用モードの DeskBox インストールが見つかりました：%n%n%1%n%n「すべてのユーザー用にインストール」では個人のプロファイル フォルダーをそのまま上書きできません（個人用パスがシステム全体のレジストリに登録されてしまいます）。セットアップをキャンセルして再実行し、「自分用にのみインストール」（または /CURRENTUSER）を選択するか、既存の個人用フォルダーを削除してから再度インストールしてください。
+german.PerUserUpgradeScopeMismatch=Im aktuellen Benutzerprofil wurde eine benutzerspezifische DeskBox-Installation gefunden:%n%n%1%n%nDer Modus „Für alle Benutzer installieren“ kann keinen privaten Profilordner direkt aktualisieren, ohne ihn systemweit zu registrieren. Brechen Sie Setup ab und wählen Sie beim erneuten Start „Nur für mich installieren“ (oder /CURRENTUSER) oder entfernen Sie zuerst die alte benutzerspezifische Kopie.
+brazilianportuguese.PerUserUpgradeScopeMismatch=Foi encontrada uma instalação por usuário do DeskBox no perfil atual:%n%n%1%n%nO modo "Instalar para todos os usuários" não pode atualizar uma pasta privada do perfil sem registrá-la para todo o sistema. Cancele e execute o instalador novamente escolhendo "Instalar somente para mim" (ou /CURRENTUSER), ou remova a cópia antiga antes de instalar para todos os usuários.
 chinesesimplified.ConfirmStorageTitle=检测到 DeskBox 收纳目录中仍有内容
 chinesesimplified.ConfirmStorageBody=当前包含 %1 个文件夹、%2 个文件。
 chinesesimplified.ConfirmStorageFooter=卸载 DeskBox 不会删除这个目录，也不会删除里面的用户文件。%n请确认你已经知道这些文件的位置。是否继续卸载？
@@ -155,10 +163,10 @@ chinesesimplified.DependencyDownloadSubtitle=正在下载缺少的运行时依�
 chinesesimplified.DependencyInstallTitle=正在准备 DeskBox 运行环境
 chinesesimplified.DependencyInstallSubtitle=正在安装缺少的运行时依赖。
 chinesesimplified.DownloadingDotNet=正在下载 .NET 10 Runtime x64...
-chinesesimplified.DownloadingWinAppRuntime=正在下载 Windows App Runtime 2.5 x64...
+chinesesimplified.DownloadingWinAppRuntime=正在下载 Windows App Runtime 2.6 x64...
 chinesesimplified.InstallingDependency=正在安装 %1...%n这可能需要几分钟，请勿关闭此窗口。
 chinesesimplified.NeedsRestart=运行时依赖已安装，但 Windows 需要重启。请重启电脑后重新运行 DeskBox 安装程序。
-chinesesimplified.DependencyVerificationFailed=依赖安装完成后，系统仍未识别到所需运行环境。DeskBox 尚未安装。请先安装稳定版 .NET 10 Runtime 和 Windows App Runtime 2.5，然后重新运行安装程序。
+chinesesimplified.DependencyVerificationFailed=依赖安装完成后，系统仍未识别到所需运行环境。DeskBox 尚未安装。请先安装稳定版 .NET 10 Runtime 和 Windows App Runtime 2.6，然后重新运行安装程序。
 english.ConfirmStorageTitle=DeskBox storage folder still contains files
 english.ConfirmStorageBody=It currently has %1 folder(s) and %2 file(s).
 english.ConfirmStorageFooter=Uninstalling DeskBox will not delete this folder or any user files inside it.%nPlease confirm you know where these files are. Continue uninstalling?
@@ -175,10 +183,10 @@ english.DependencyDownloadSubtitle=Downloading missing runtime dependencies.
 english.DependencyInstallTitle=Preparing DeskBox runtime
 english.DependencyInstallSubtitle=Installing missing runtime dependencies.
 english.DownloadingDotNet=Downloading .NET 10 Runtime x64...
-english.DownloadingWinAppRuntime=Downloading Windows App Runtime 2.5 x64...
+english.DownloadingWinAppRuntime=Downloading Windows App Runtime 2.6 x64...
 english.InstallingDependency=Installing %1...%nThis may take a few minutes. Please do not close this window.
 english.NeedsRestart=Runtime dependencies were installed, but Windows needs to restart. Restart your PC, then run DeskBox setup again.
-english.DependencyVerificationFailed=The required runtime was still not detected after dependency installation. DeskBox has not been installed. Install the stable .NET 10 Runtime and Windows App Runtime 2.5, then run setup again.
+english.DependencyVerificationFailed=The required runtime was still not detected after dependency installation. DeskBox has not been installed. Install the stable .NET 10 Runtime and Windows App Runtime 2.6, then run setup again.
 
 japanese.ConfirmStorageTitle=DeskBox の保存フォルダにまだファイルがあります
 japanese.ConfirmStorageBody=現在、フォルダ %1 個とファイル %2 個が含まれています。
@@ -196,10 +204,10 @@ japanese.DependencyDownloadSubtitle=不足しているランタイム依存関�
 japanese.DependencyInstallTitle=DeskBox の実行環境を準備しています
 japanese.DependencyInstallSubtitle=不足しているランタイム依存関係をインストールしています。
 japanese.DownloadingDotNet=.NET 10 Runtime x64 をダウンロードしています...
-japanese.DownloadingWinAppRuntime=Windows App Runtime 2.5 x64 をダウンロードしています...
+japanese.DownloadingWinAppRuntime=Windows App Runtime 2.6 x64 をダウンロードしています...
 japanese.InstallingDependency=%1 をインストールしています...%n数分かかる場合があります。このウィンドウを閉じないでください。
 japanese.NeedsRestart=ランタイム依存関係はインストールされましたが、Windows の再起動が必要です。PC を再起動してから DeskBox セットアップを再度実行してください。
-japanese.DependencyVerificationFailed=依存関係のインストール後も、必要なランタイムを確認できませんでした。DeskBox はまだインストールされていません。安定版の .NET 10 Runtime と Windows App Runtime 2.5 をインストールしてから、セットアップを再実行してください。
+japanese.DependencyVerificationFailed=依存関係のインストール後も、必要なランタイムを確認できませんでした。DeskBox はまだインストールされていません。安定版の .NET 10 Runtime と Windows App Runtime 2.6 をインストールしてから、セットアップを再実行してください。
 
 german.ConfirmStorageTitle=Der DeskBox-Speicherordner enthält noch Dateien
 german.ConfirmStorageBody=Er enthält derzeit %1 Ordner und %2 Datei(en).
@@ -217,10 +225,10 @@ german.DependencyDownloadSubtitle=Fehlende Laufzeitabhängigkeiten werden herunt
 german.DependencyInstallTitle=DeskBox-Laufzeitumgebung wird vorbereitet
 german.DependencyInstallSubtitle=Fehlende Laufzeitabhängigkeiten werden installiert.
 german.DownloadingDotNet=.NET 10 Runtime x64 wird heruntergeladen...
-german.DownloadingWinAppRuntime=Windows App Runtime 2.5 x64 wird heruntergeladen...
+german.DownloadingWinAppRuntime=Windows App Runtime 2.6 x64 wird heruntergeladen...
 german.InstallingDependency=%1 wird installiert...%nDies kann einige Minuten dauern. Bitte schließen Sie dieses Fenster nicht.
 german.NeedsRestart=Die Laufzeitabhängigkeiten wurden installiert, aber Windows muss neu gestartet werden. Starten Sie den PC neu und führen Sie das DeskBox-Setup erneut aus.
-german.DependencyVerificationFailed=Die erforderliche Laufzeit wurde nach der Installation der Abhängigkeiten weiterhin nicht erkannt. DeskBox wurde noch nicht installiert. Installieren Sie die stabile .NET 10 Runtime und Windows App Runtime 2.5, und starten Sie Setup erneut.
+german.DependencyVerificationFailed=Die erforderliche Laufzeit wurde nach der Installation der Abhängigkeiten weiterhin nicht erkannt. DeskBox wurde noch nicht installiert. Installieren Sie die stabile .NET 10 Runtime und Windows App Runtime 2.6, und starten Sie Setup erneut.
 
 brazilianportuguese.ConfirmStorageTitle=A pasta de armazenamento do DeskBox ainda contém arquivos
 brazilianportuguese.ConfirmStorageBody=Ela contém atualmente %1 pasta(s) e %2 arquivo(s).
@@ -238,10 +246,10 @@ brazilianportuguese.DependencyDownloadSubtitle=Baixando as dependências de runt
 brazilianportuguese.DependencyInstallTitle=Preparando o ambiente de execução do DeskBox
 brazilianportuguese.DependencyInstallSubtitle=Instalando as dependências de runtime ausentes.
 brazilianportuguese.DownloadingDotNet=Baixando o .NET 10 Runtime x64...
-brazilianportuguese.DownloadingWinAppRuntime=Baixando o Windows App Runtime 2.5 x64...
+brazilianportuguese.DownloadingWinAppRuntime=Baixando o Windows App Runtime 2.6 x64...
 brazilianportuguese.InstallingDependency=Instalando %1...%nIsso pode levar alguns minutos. Não feche esta janela.
 brazilianportuguese.NeedsRestart=As dependências de runtime foram instaladas, mas o Windows precisa reiniciar. Reinicie o PC e execute o instalador do DeskBox novamente.
-brazilianportuguese.DependencyVerificationFailed=O ambiente de execução necessário ainda não foi detectado após a instalação das dependências. O DeskBox ainda não foi instalado. Instale o .NET 10 Runtime estável e o Windows App Runtime 2.5 e execute o instalador novamente.
+brazilianportuguese.DependencyVerificationFailed=O ambiente de execução necessário ainda não foi detectado após a instalação das dependências. O DeskBox ainda não foi instalado. Instale o .NET 10 Runtime estável e o Windows App Runtime 2.6 e execute o instalador novamente.
 
 #include "DeskBox.NewLanguageCustomMessages.iss"
 #include "DeskBox.UninstallCustomMessages.iss"
@@ -260,23 +268,23 @@ Type: files; Name: "{autostartup}\{#MyAppName}.lnk"
 Source: "..\scripts\cleanup-deskbox-install.ps1"; Flags: dontcopy
 Source: "DeskBox.LegacyBundledRuntimeFiles.txt"; Flags: dontcopy
 Source: "{#MyAppReleaseDir}\DeskBox.InstallManifest.txt"; DestDir: "{tmp}"; DestName: "DeskBox.InstallManifest.current.txt"; Flags: ignoreversion deleteafterinstall
-Source: "{#MyAppReleaseDir}\*"; DestDir: "{app}"; Excludes: "DeskBox.Updater.*,deskbox_native.dll,deskbox_native.pdb,DeskBox.InstallManifest.txt"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#MyAppReleaseDir}\*"; DestDir: "{app}"; Excludes: "DeskBox.Updater.*,deskbox_native.dll,*.pdb,DeskBox.InstallManifest.txt,.mimosa\*,*\.mimosa\*"; Flags: ignoreversion recursesubdirs createallsubdirs
 #if DeskBoxNativeAot
 Source: "{#MyAppReleaseDir}\deskbox_native.dll"; DestDir: "{app}"; Flags: ignoreversion
 #endif
-Source: "{#MyAppReleaseDir}\DeskBox.Updater.*"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#MyAppReleaseDir}\DeskBox.Updater.*"; DestDir: "{app}"; Excludes: "*.pdb"; Flags: ignoreversion
 Source: "{#MyAppReleaseDir}\DeskBox.InstallManifest.txt"; DestDir: "{app}"; Flags: ignoreversion; BeforeInstall: CleanupDeskBoxInstall
 #else
-Source: "{#MyAppReleaseDir}\*"; DestDir: "{app}"; Excludes: "DeskBox.Updater.*,deskbox_native.dll,deskbox_native.pdb"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#MyAppReleaseDir}\*"; DestDir: "{app}"; Excludes: "DeskBox.Updater.*,deskbox_native.dll,*.pdb,.mimosa\*,*\.mimosa\*"; Flags: ignoreversion recursesubdirs createallsubdirs
 #if DeskBoxNativeAot
 Source: "{#MyAppReleaseDir}\deskbox_native.dll"; DestDir: "{app}"; Flags: ignoreversion
 #endif
-Source: "{#MyAppReleaseDir}\DeskBox.Updater.*"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#MyAppReleaseDir}\DeskBox.Updater.*"; DestDir: "{app}"; Excludes: "*.pdb"; Flags: ignoreversion
 #endif
 
 [Icons]
-Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\Assets\deskbox.ico"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\Assets\deskbox.ico"; Tasks: desktopicon
+Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\Assets\deskbox.ico"; AppUserModelID: "DeskBox.DeskBox"
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\Assets\deskbox.ico"; AppUserModelID: "DeskBox.DeskBox"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent runasoriginaluser
@@ -292,6 +300,11 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChang
 Root: HKA; Subkey: "Software\DeskBox\DirectInstall"; ValueType: string; ValueName: "InstallLocation"; ValueData: "{app}"; Flags: uninsdeletevalue uninsdeletekeyifempty
 Root: HKA; Subkey: "Software\DeskBox\DirectInstall"; ValueType: string; ValueName: "InstallVersion"; ValueData: "{#MyAppVersion}"; Flags: uninsdeletevalue uninsdeletekeyifempty
 Root: HKA; Subkey: "Software\DeskBox\DirectInstall"; ValueType: string; ValueName: "InstallScope"; ValueData: "{code:GetInstallScopeName}"; Flags: uninsdeletevalue uninsdeletekeyifempty
+Root: HKA; Subkey: "Software\DeskBox\DirectInstall"; ValueType: string; ValueName: "InstallLanguage"; ValueData: "{code:InstallLanguageCode}"; Flags: uninsdeletevalue uninsdeletekeyifempty
+Root: HKA; Subkey: "Software\Classes\deskbox"; ValueType: string; ValueName: ""; ValueData: "URL:DeskBox Protocol"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\deskbox"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\deskbox\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"",0"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\deskbox\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"" ""%1"""; Flags: uninsdeletekey
 
 [Code]
 function InstallLanguageCode(Value: string): string;

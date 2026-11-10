@@ -1,4 +1,4 @@
-﻿using System.Reflection;
+using System.Reflection;
 using DeskBox.Models;
 using DeskBox.Services;
 using Microsoft.UI.Xaml;
@@ -51,14 +51,21 @@ public partial class SettingsViewModel
         IsDirectInstallerUpdateDelivery ? Visibility.Visible : Visibility.Collapsed;
     public Visibility UpdateToastNotificationVisibility =>
         IsDirectInstallerUpdateDelivery ? Visibility.Visible : Visibility.Collapsed;
+    private bool _isOnAboutPage;
+
+    public string DistributionChannelAndArchText =>
+        $"{DistributionChannelText} · {System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture}";
+
     /// <summary>
     /// The floating update-activity card (settings page bottom-right, the
     /// PowerToys pattern): visible whenever an update story is live — an
     /// update waiting, a download in flight or finished, or a failure —
-    /// until the user dismisses it for this window session.
+    /// until the user dismisses it for this window session, except when
+    /// already viewing the About page where the inline update controls live.
     /// </summary>
     public Visibility UpdateActivityCardVisibility =>
         IsDirectInstallerUpdateDelivery &&
+        !_isOnAboutPage &&
         !_updateActivityDismissed &&
         (IsCheckingForUpdates ||
          IsDownloadingUpdate ||
@@ -66,6 +73,17 @@ public partial class SettingsViewModel
          _lastUpdateDownloadFailed ||
          _availableUpdateManifest is not null)
             ? Visibility.Visible : Visibility.Collapsed;
+
+    public void SetIsOnAboutPage(bool isOnAboutPage)
+    {
+        if (_isOnAboutPage == isOnAboutPage)
+        {
+            return;
+        }
+
+        _isOnAboutPage = isOnAboutPage;
+        OnPropertyChanged(nameof(UpdateActivityCardVisibility));
+    }
 
     public void DismissUpdateActivity()
     {
@@ -202,7 +220,17 @@ public partial class SettingsViewModel
     public bool CanOpenManualUpdateDownload =>
         IsDirectInstallerUpdateDelivery &&
         !string.IsNullOrWhiteSpace(ManualUpdateDownloadUrl) &&
-        (_showManualUpdateFallback || HasManifestManualDownloadUrl(_availableUpdateManifest));
+        _showManualUpdateFallback;
+    public bool IsAvailableUpdateMandatory =>
+        _availableUpdateManifest is { } manifest && manifest.IsMandatoryForVersion(AppVersion);
+    public Visibility UpdateMandatoryBadgeVisibility =>
+        IsDirectInstallerUpdateDelivery && IsAvailableUpdateMandatory ? Visibility.Visible : Visibility.Collapsed;
+    public string UpdateMandatoryBadgeText => _localizationService.T("Settings.Update.MandatoryBadge");
+    public string UpdateSummaryText =>
+        _availableUpdateManifest?.GetLocalizedSummary(_localizationService.CurrentCultureName) ?? string.Empty;
+    public Visibility UpdateSummaryVisibility =>
+        IsDirectInstallerUpdateDelivery && !string.IsNullOrWhiteSpace(UpdateSummaryText)
+            ? Visibility.Visible : Visibility.Collapsed;
     public bool CanInstallUpdate =>
         IsDirectInstallerUpdateDelivery &&
         !IsCheckingForUpdates &&
@@ -373,14 +401,17 @@ public partial class SettingsViewModel
             var result = await _appUpdateService.CheckForUpdatesAsync(AppVersion, cancellationToken);
             if (result.Manifest is not null && AppUpdateService.IsManifestUsable(result.Manifest))
             {
-                return result.Manifest;
+                return AppUpdateService.NormalizeManifestForReleaseNotes(result.Manifest, AppVersion);
             }
 
             // Store builds synthesize a ms-windowsstore:// manifest that the
             // installer gate above rejects, and an up-to-date direct check
             // carries no manifest at all; display surfaces still deserve the
             // published notes, so fall back to the content-only manifest.
-            return await AppUpdateService.FetchContentManifestAsync(cancellationToken);
+            var contentManifest = await AppUpdateService.FetchContentManifestAsync(cancellationToken);
+            return contentManifest is not null
+                ? AppUpdateService.NormalizeManifestForReleaseNotes(contentManifest, AppVersion)
+                : null;
         }
         catch (OperationCanceledException)
         {
@@ -464,6 +495,8 @@ public partial class SettingsViewModel
         string? installerPath = _appUpdateService.LastDownloadedInstallerPath;
         if (!CanInstallUpdate || string.IsNullOrWhiteSpace(installerPath))
         {
+            _showManualUpdateFallback = IsDirectInstallerUpdateDelivery;
+            NotifyUpdateActionPropertiesChanged();
             return AppUpdateInstallResult.Failed(_localizationService.T("Settings.Update.Detail.DownloadMissing"));
         }
 
@@ -472,11 +505,16 @@ public partial class SettingsViewModel
             appCultureName: _localizationService.CurrentCultureName);
         if (result.Success)
         {
+            _showManualUpdateFallback = false;
             UpdateStatusText = _localizationService.T("Settings.Update.Status.Installing");
             UpdateDetailText = _localizationService.T("Settings.Update.Detail.Installing");
-            NotifyUpdateActionPropertiesChanged();
+        }
+        else
+        {
+            _showManualUpdateFallback = IsDirectInstallerUpdateDelivery;
         }
 
+        NotifyUpdateActionPropertiesChanged();
         return result;
     }
 
@@ -504,7 +542,7 @@ public partial class SettingsViewModel
     {
         if (result.Manifest is not null && AppUpdateService.IsManifestUsable(result.Manifest))
         {
-            _latestUpdateManifest = result.Manifest;
+            _latestUpdateManifest = AppUpdateService.NormalizeManifestForReleaseNotes(result.Manifest, AppVersion);
         }
 
         // Downloaded-installer lifetime is owned by the service (version-
@@ -555,8 +593,9 @@ public partial class SettingsViewModel
 
     private void ApplyDownloadFailure(AppUpdateDownloadResult result)
     {
-        _showManualUpdateFallback = IsDirectInstallerUpdateDelivery;
-        _lastUpdateDownloadFailed = result.FailureKind != AppUpdateDownloadFailureKind.Cancelled;
+        bool isRealFailure = result.FailureKind != AppUpdateDownloadFailureKind.Cancelled;
+        _showManualUpdateFallback = IsDirectInstallerUpdateDelivery && isRealFailure;
+        _lastUpdateDownloadFailed = isRealFailure;
         UpdateStatusText = _localizationService.T("Settings.Update.Status.Failed");
         UpdateDetailText = result.FailureKind switch
         {
@@ -636,13 +675,8 @@ public partial class SettingsViewModel
     {
         // This action is labelled "Official download". Older manifests may
         // carry a direct cloud-drive link; let the website offer those mirrors.
+        _ = manifest;
         return AppUpdateService.DefaultManualDownloadUrl;
-    }
-
-    private static bool HasManifestManualDownloadUrl(AppUpdateManifest? manifest)
-    {
-        return AppUpdateManifest.IsSafeWebUrl(manifest?.ManualDownloadUrl) ||
-            AppUpdateManifest.IsSafeWebUrl(manifest?.MirrorUrl);
     }
 
     private static string FormatByteSize(long bytes)
@@ -679,6 +713,12 @@ public partial class SettingsViewModel
         OnPropertyChanged(nameof(ManualUpdateFallbackVisibility));
         OnPropertyChanged(nameof(CanOpenUpdateFallback));
         OnPropertyChanged(nameof(UpdateFallbackVisibility));
+        OnPropertyChanged(nameof(UpdateFallbackActionText));
+        OnPropertyChanged(nameof(IsAvailableUpdateMandatory));
+        OnPropertyChanged(nameof(UpdateMandatoryBadgeVisibility));
+        OnPropertyChanged(nameof(UpdateMandatoryBadgeText));
+        OnPropertyChanged(nameof(UpdateSummaryText));
+        OnPropertyChanged(nameof(UpdateSummaryVisibility));
         OnPropertyChanged(nameof(UpdateReminderBadgeVisibility));
         OnPropertyChanged(nameof(UpdateProgressText));
         OnPropertyChanged(nameof(UpdateBadgeStateName));

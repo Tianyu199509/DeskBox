@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using DeskBox.Platform;
 
 namespace DeskBox.Services;
 
@@ -7,15 +8,39 @@ public sealed class DeskBoxDataPathService
 {
     public const string DevelopmentRootEnvironmentVariable = "DESKBOX_DEV_DATA_ROOT";
     public const string AotPreviewRootEnvironmentVariable = "DESKBOX_AOT_PREVIEW_DATA_ROOT";
+    internal const string StoreDurableSubdirectoryName = ".appdata";
+    internal const string StoreDurableRecoverySubdirectoryName = ".appdata-recovery";
     private const string ProductionInstanceScope = "7F3A9B2E";
+
+    private readonly string _recoveryDirectory;
 
     public static DeskBoxDataPathService Current { get; } = new(ResolveConfiguredRoot());
 
     public DeskBoxDataPathService(string? rootPath = null)
-    {
-        string productionRoot = Path.GetFullPath(Path.Combine(
+        : this(
+            rootPath,
+            AppDistributionService.Current.IsMicrosoftStore,
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile))
+    {
+    }
+
+    internal DeskBoxDataPathService(
+        string? rootPath,
+        bool isMicrosoftStore,
+        string localAppDataPath,
+        string userProfilePath)
+    {
+        string legacyLocalAppDataRoot = Path.GetFullPath(Path.Combine(
+            localAppDataPath,
             "DeskBox"));
+        string storeDurableRoot = Path.GetFullPath(Path.Combine(
+            userProfilePath,
+            "DeskBox",
+            StoreDurableSubdirectoryName));
+        string productionRoot = isMicrosoftStore && !string.IsNullOrWhiteSpace(userProfilePath)
+            ? storeDurableRoot
+            : legacyLocalAppDataRoot;
         RootPath = string.IsNullOrWhiteSpace(rootPath)
             ? productionRoot
             : Path.GetFullPath(rootPath.Trim());
@@ -28,6 +53,34 @@ public sealed class DeskBoxDataPathService
             : ProductionInstanceScope;
         SettingsIpcPipeName =
             $"DeskBox_Settings_Ipc_{InstanceScope}_S{System.Diagnostics.Process.GetCurrentProcess().SessionId}";
+        AgentBridgePipeName =
+            $"DeskBox_Agent_Ipc_{InstanceScope}_S{System.Diagnostics.Process.GetCurrentProcess().SessionId}";
+
+        if (IsDevelopmentRoot)
+        {
+            _recoveryDirectory = $"{RootPath}-Recovery";
+        }
+        else if (isMicrosoftStore && !string.IsNullOrWhiteSpace(userProfilePath))
+        {
+            _recoveryDirectory = Path.GetFullPath(Path.Combine(
+                userProfilePath,
+                "DeskBox",
+                StoreDurableRecoverySubdirectoryName));
+            string legacyRecoveryRoot = Path.Combine(
+                Path.GetDirectoryName(legacyLocalAppDataRoot) ?? legacyLocalAppDataRoot,
+                "DeskBox-Recovery");
+            StoreUserAssetMigrationFileOps.EnsureStoreDurableRootInitialized(
+                legacyLocalAppDataRoot,
+                RootPath,
+                legacyRecoveryRoot,
+                _recoveryDirectory);
+        }
+        else
+        {
+            _recoveryDirectory = Path.Combine(
+                Path.GetDirectoryName(RootPath) ?? RootPath,
+                "DeskBox-Recovery");
+        }
     }
 
     public string RootPath { get; }
@@ -45,25 +98,15 @@ public sealed class DeskBoxDataPathService
     /// never connect — settings silently unopenable for that whole session
     /// (batch R9).</summary>
     public string SettingsIpcPipeName { get; }
+    public string AgentBridgePipeName { get; }
     public string DataDirectory => Path.Combine(RootPath, "data");
     public string UpdatesDirectory => Path.Combine(RootPath, "updates");
     // Recovery snapshots intentionally live beside, rather than inside, the
-    // app-data root. Direct install: the directory really is
-    // %LOCALAPPDATA%\DeskBox-Recovery and survives a normal uninstall.
-    // Store (MSIX): AppData write virtualization redirects the write into
-    // Packages\<PFN>\LocalCache, so uninstalling the package deletes the
-    // recovery copy with it; an in-place update over the same
-    // PackageFamilyName keeps LocalCache and therefore the snapshots.
-    // Guaranteeing uninstall survival on the store channel as well would
-    // require declaring desktop6:FileSystemWriteVirtualization=disabled —
-    // a restricted capability that is effectively unavailable to third-party
-    // apps (store-lifecycle audit 2026-10-07, option D); the accepted
-    // alternative is the in-product disclosure on the backup settings page.
-    public string RecoveryDirectory => IsDevelopmentRoot
-        ? $"{RootPath}-Recovery"
-        : Path.Combine(
-            Path.GetDirectoryName(RootPath) ?? RootPath,
-            "DeskBox-Recovery");
+    // app-data root. Direct install uses %LOCALAPPDATA%\DeskBox-Recovery;
+    // Store (MSIX) uses %USERPROFILE%\DeskBox\.appdata-recovery alongside
+    // %USERPROFILE%\DeskBox\.appdata so MSIX LocalCache resets/reinstalls
+    // never wipe automatic snapshots or user-owned attachments.
+    public string RecoveryDirectory => _recoveryDirectory;
     public string LogFilePath => Path.Combine(RootPath, "DeskBox.log");
 
     /// <summary>

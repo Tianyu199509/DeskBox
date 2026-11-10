@@ -106,8 +106,14 @@ public sealed class SettingsIpcClient : IAsyncDisposable
             // while the main process kept migrating/restoring (the migrate
             // dialog even lost its progress subscription mid-flight).
             [SettingsIpcMethods.RestorePrepare] = TimeSpan.FromMinutes(10),
-            [SettingsIpcMethods.WidgetMigratePreview] = TimeSpan.FromMinutes(10),
-            [SettingsIpcMethods.WidgetMigrateRoot] = TimeSpan.FromMinutes(10),
+            // Storage migration preview & copy can walk/copy tens of gigabytes
+            // on slow or external media. A fixed client ceiling caused split-brain:
+            // the settings dialog reported failure at 10m while the main process
+            // kept copying and later committed the new root behind the user's back.
+            // Explicit cancellation rides WidgetMigrateCancel; pipe loss faults
+            // pending calls via StartReader's FailPending.
+            [SettingsIpcMethods.WidgetMigratePreview] = Timeout.InfiniteTimeSpan,
+            [SettingsIpcMethods.WidgetMigrateRoot] = Timeout.InfiniteTimeSpan,
             [SettingsIpcMethods.WidgetRestoreOrphans] = TimeSpan.FromMinutes(10),
             [SettingsIpcMethods.WidgetMoveOrphanToDesktop] = TimeSpan.FromMinutes(10),
             [SettingsIpcMethods.WidgetDeleteOrphan] = TimeSpan.FromMinutes(10),

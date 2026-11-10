@@ -1,0 +1,16 @@
+{
+  "modFocus": "포커스 한도 카드",
+  "modRadar": "멀티 플랫폼 요약 목록",
+  "modTokens": "로컬 토큰 및 캐시 분석",
+  "modTrend": "최근 14일 사용량 차트",
+  "optQuotaRem": "남은 비율 표시 (예: 85% 남음)",
+  "optQuotaUsed": "사용 비율 표시 (예: 15% 사용)",
+  "optRef15m": "15분마다",
+  "optRef1m": "1분마다 (권장)",
+  "optRef5m": "5분마다",
+  "setModules": "표시 항목 및 순서",
+  "setQuotaMode": "세션 한도 퍼센트 표시",
+  "setRefresh": "자동 갱신 주기",
+  "widgetDescription": "Claude Code / Codex 로컬 세션 한도 및 GLM / DeepSeek / Kimi / OpenRouter 계정 잔액을 실시간으로 모니터링합니다.",
+  "widgetName": "AI 모니터"
+}

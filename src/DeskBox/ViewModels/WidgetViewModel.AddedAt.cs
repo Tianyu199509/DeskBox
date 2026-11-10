@@ -4,8 +4,33 @@ namespace DeskBox.ViewModels;
 
 public partial class WidgetViewModel
 {
+    private string[]? _activeAddedAtDirectories;
+
+    private static string NormalizeAddedAtDirectoryKey(string? directoryPath)
+    {
+        if (string.IsNullOrWhiteSpace(directoryPath))
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            return Path.TrimEndingDirectorySeparator(Path.GetFullPath(directoryPath));
+        }
+        catch
+        {
+            return Path.TrimEndingDirectorySeparator(directoryPath);
+        }
+    }
+
     private void ApplyPersistedAddedTimes(IReadOnlyList<WidgetItem> items)
     {
+        HashSet<string>? scopedDirectories = _activeAddedAtDirectories is { Length: > 0 } dirs
+            ? dirs.Where(static dir => dir.Length > 0)
+                  .ToHashSet(StringComparer.OrdinalIgnoreCase)
+            : null;
+        _activeAddedAtDirectories = null;
+
         EnsureAddedAtDictionaryComparer();
         bool isLegacySeed = !Config.FileAddedAtTrackingInitialized;
         bool changed = false;
@@ -31,7 +56,11 @@ public partial class WidgetViewModel
         }
 
         foreach (string stalePath in Config.FileAddedAtByPath.Keys
-                     .Where(path => !currentPaths.Contains(path))
+                     .Where(path => !currentPaths.Contains(path) &&
+                                    (scopedDirectories is null ||
+                                     scopedDirectories.Contains(
+                                         NormalizeAddedAtDirectoryKey(
+                                             Path.GetDirectoryName(path)))))
                      .ToArray())
         {
             Config.FileAddedAtByPath.Remove(stalePath);
@@ -84,6 +113,30 @@ public partial class WidgetViewModel
             : DateTimeOffset.Now;
         Config.FileAddedAtByPath.Remove(oldPath);
         Config.FileAddedAtByPath[newPath] = addedAt;
+
+        try
+        {
+            string normalizedOldDir = Path.GetFullPath(oldPath)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            string normalizedNewDir = Path.GetFullPath(newPath)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            string oldPrefix = normalizedOldDir + Path.DirectorySeparatorChar;
+            List<KeyValuePair<string, DateTimeOffset>> descendants = Config.FileAddedAtByPath
+                .Where(entry => entry.Key.StartsWith(oldPrefix, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            foreach ((string descendantOldPath, DateTimeOffset descendantAddedAt) in descendants)
+            {
+                Config.FileAddedAtByPath.Remove(descendantOldPath);
+                string rebasedDescendant = Path.Combine(
+                    normalizedNewDir,
+                    descendantOldPath[oldPrefix.Length..]);
+                Config.FileAddedAtByPath[rebasedDescendant] = descendantAddedAt;
+            }
+        }
+        catch
+        {
+        }
+
         PersistAddedAtTrackingIfNeeded();
     }
 

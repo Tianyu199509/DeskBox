@@ -63,7 +63,10 @@ public partial class SettingsViewModel
 
         string warningText = activation.Kind == HotkeyActivationKind.WindowsTap
             ? _localizationService.T("Settings.GlobalHotkey.WindowsTapWarning")
-            : activation.Kind == HotkeyActivationKind.Chord &&
+            : activation.IsStandaloneSpaceDoubleTap
+                ? _localizationService.T("Settings.GlobalHotkey.DoubleSpaceWarning")
+            : activation.Kind is HotkeyActivationKind.Chord or HotkeyActivationKind.DoubleTap &&
+              !activation.IsModifierOnlyDoubleTap &&
               activation.Gesture.Modifiers == HotkeyModifierKeys.Alt &&
               activation.Gesture.VirtualKey == (int)Windows.System.VirtualKey.Space
                 ? _localizationService.T("Settings.GlobalHotkey.AltSpaceWarning")
@@ -71,7 +74,9 @@ public partial class SettingsViewModel
 
         bool canShowWarning = enabled &&
             (activation.Kind == HotkeyActivationKind.WindowsTap ||
-             (activation.Kind == HotkeyActivationKind.Chord &&
+             activation.IsStandaloneSpaceDoubleTap ||
+             (activation.Kind is HotkeyActivationKind.Chord or HotkeyActivationKind.DoubleTap &&
+              !activation.IsModifierOnlyDoubleTap &&
               GlobalHotkeyService.IsReservedSystemGesture(activation.Gesture)));
 
         _interactionSettings.UpdateGlobalHotkeyPresentation(new GlobalHotkeyPresentationSettings(

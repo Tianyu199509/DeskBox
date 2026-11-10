@@ -1,4 +1,5 @@
 using DeskBox.Models;
+using DeskBox.Platform;
 
 namespace DeskBox.Services;
 
@@ -113,6 +114,41 @@ public static class AttachmentStorageService
             App.Log($"[AttachmentStorage] Failed to delete managed attachment '{filePath}': {ex.Message}");
             return false;
         }
+    }
+
+    /// <summary>
+    /// Recycles unreferenced managed attachment copies under
+    /// <paramref name="managedRootDirectory"/> via <paramref name="recycleFileAsync"/>
+    /// and prunes any emptied <c>&lt;itemId&gt;</c> bucket directories.
+    /// </summary>
+    public static async Task<int> RecycleUnreferencedManagedCopiesAsync(
+        string managedRootDirectory,
+        IReadOnlySet<string> referencedPaths,
+        Func<string, Task<bool>>? recycleFileAsync,
+        IReadOnlySet<string>? knownTombstoneItemIds = null,
+        TimeSpan? unknownDirectoryGracePeriod = null)
+    {
+        if (recycleFileAsync is null || string.IsNullOrWhiteSpace(managedRootDirectory))
+        {
+            return 0;
+        }
+
+        IReadOnlyList<string> candidates = AttachmentCleanupFileOps.FindUnreferencedManagedFiles(
+            managedRootDirectory,
+            referencedPaths,
+            knownTombstoneItemIds,
+            unknownDirectoryGracePeriod);
+        int recycledCount = 0;
+        foreach (string candidate in candidates)
+        {
+            if (await TryDeleteManagedCopyAsync(candidate, managedRootDirectory, recycleFileAsync))
+            {
+                recycledCount++;
+            }
+        }
+
+        AttachmentCleanupFileOps.RemoveEmptyManagedSubdirectories(managedRootDirectory);
+        return recycledCount;
     }
 
     private static TodoAttachment CreateAttachment(string path, string storageMode)

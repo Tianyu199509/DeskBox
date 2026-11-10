@@ -17,6 +17,7 @@ public sealed record WidgetCompactPresentation(
     ImageSource? Thumbnail = null,
     bool ShowPrimaryAction = false,
     string PrimaryActionGlyph = "\uE73E",
+    string PrimaryActionTooltip = "",
     bool ShowMediaControls = false,
     bool IsPlaying = false,
     bool CanGoPrevious = false,

@@ -44,8 +44,6 @@ public sealed partial class QuickCaptureWidgetViewModel
         OnPropertyChanged(nameof(DisplayName));
         OnPropertyChanged(nameof(RecordsTabText));
         OnPropertyChanged(nameof(PinnedTabText));
-        OnPropertyChanged(nameof(RecentTabText));
-        OnPropertyChanged(nameof(EnableRecentCaptureText));
         OnPropertyChanged(nameof(SearchPlaceholderText));
         OnPropertyChanged(nameof(CloseSearchText));
         OnPropertyChanged(nameof(SearchCancelText));
@@ -60,6 +58,7 @@ public sealed partial class QuickCaptureWidgetViewModel
         OnPropertyChanged(nameof(DetailAppearanceText));
         OnPropertyChanged(nameof(DetailCopyText));
         OnPropertyChanged(nameof(DetailPinText));
+        OnPropertyChanged(nameof(DetailPopoutText));
         OnPropertyChanged(nameof(DetailCopyImageText));
         OnPropertyChanged(nameof(DetailReplaceImageText));
         OnPropertyChanged(nameof(DetailDeleteText));
@@ -76,9 +75,6 @@ public sealed partial class QuickCaptureWidgetViewModel
         OnPropertyChanged(nameof(MaterialBlueText));
         OnPropertyChanged(nameof(SearchScopeText));
         OnPropertyChanged(nameof(SearchScopeVisibility));
-        OnPropertyChanged(nameof(RecentCaptureStatusText));
-        OnPropertyChanged(nameof(RecentCaptureStatusVisibility));
-        OnPropertyChanged(nameof(RecentCaptureActionVisibility));
         foreach (var item in Items)
         {
             item.Update(item.ToModel());
@@ -106,9 +102,6 @@ public sealed partial class QuickCaptureWidgetViewModel
         OnPropertyChanged(nameof(EditorEnterBehavior));
         OnPropertyChanged(nameof(EditorContentFormat));
         OnPropertyChanged(nameof(CreatedTimeVisibility));
-        OnPropertyChanged(nameof(RecentCaptureStatusText));
-        OnPropertyChanged(nameof(RecentCaptureStatusVisibility));
-        OnPropertyChanged(nameof(RecentCaptureActionVisibility));
     }
 
     private void RefreshAppearanceFromSettings()
@@ -139,11 +132,9 @@ public sealed partial class QuickCaptureWidgetViewModel
         _showTabBar = settings.QuickCaptureShowTabBar;
         _showRecordsTab = settings.QuickCaptureShowRecordsTab;
         _showPinnedTab = settings.QuickCaptureShowPinnedTab;
-        _showRecentTab = settings.QuickCaptureShowRecentTab;
         OnPropertyChanged(nameof(TabBarVisibility));
         OnPropertyChanged(nameof(RecordsTabVisibility));
         OnPropertyChanged(nameof(PinnedTabVisibility));
-        OnPropertyChanged(nameof(RecentTabVisibility));
         OnPropertyChanged(nameof(VisibleTabCount));
 
         if (!IsViewVisible(SelectedView))
@@ -155,8 +146,8 @@ public sealed partial class QuickCaptureWidgetViewModel
     private bool IsViewVisible(QuickCaptureViewMode view) => view switch
     {
         QuickCaptureViewMode.Pinned => _showPinnedTab,
-        QuickCaptureViewMode.Recent => _showRecentTab,
-        _ => _showRecordsTab
+        QuickCaptureViewMode.Records => _showRecordsTab,
+        _ => false
     };
 
     private static double NormalizeDensity(double value) =>
@@ -176,13 +167,43 @@ public sealed partial class QuickCaptureWidgetViewModel
     private static double Lerp(double min, double max, double t) =>
         min + ((max - min) * Math.Clamp(t, 0, 1));
 
-    private async Task RefreshVisibleItemsAsync()
+    private long _startedRefreshSequence;
+    private Task? _inFlightVisibleRefreshTask;
+
+    internal long CurrentRefreshSequence => Volatile.Read(ref _startedRefreshSequence);
+
+    internal Task EnsureRefreshedSinceAsync(long sequenceBeforeWrite)
     {
         if (_isDisposed)
         {
-            return;
+            return Task.CompletedTask;
         }
 
+        if (Volatile.Read(ref _startedRefreshSequence) > sequenceBeforeWrite &&
+            _inFlightVisibleRefreshTask is { } triggeredTask)
+        {
+            return triggeredTask;
+        }
+
+        Interlocked.Exchange(ref _windowRefreshDirty, 0);
+        return RefreshVisibleItemsAsync();
+    }
+
+    private Task RefreshVisibleItemsAsync()
+    {
+        if (_isDisposed)
+        {
+            return Task.CompletedTask;
+        }
+
+        Interlocked.Increment(ref _startedRefreshSequence);
+        Task task = RefreshVisibleItemsCoreAsync();
+        _inFlightVisibleRefreshTask = task;
+        return task;
+    }
+
+    private async Task RefreshVisibleItemsCoreAsync()
+    {
         int generation = System.Threading.Interlocked.Increment(ref _visibleItemsRefreshGeneration);
         var data = await _quickCaptureService.GetDataAsync();
         if (_isDisposed || generation != System.Threading.Volatile.Read(ref _visibleItemsRefreshGeneration))

@@ -58,17 +58,32 @@ public sealed partial class WidgetManager
 
         RemoveStaleMappedWidgetShortcuts(rootPath, activeWidgetIds);
 
+        var activeManagedNames = new List<string>();
         foreach (var config in _settingsService.Settings.Widgets
                      .Where(widget => widget.WidgetKind == WidgetKind.File && !IsDeleted(widget.Id))
                      .ToList())
         {
             if (config.FollowsDefaultStoragePath)
             {
+                foreach (string activePath in GetPossibleManagedStoragePaths(config, rootPath))
+                {
+                    string folderName = Path.GetFileName(activePath);
+                    if (!string.IsNullOrWhiteSpace(folderName))
+                    {
+                        activeManagedNames.Add(folderName);
+                    }
+                }
+
                 continue;
             }
 
             SyncMappedWidgetShortcut(config);
         }
+
+        ManagedStorageOwnershipFileOps.RegisterManagedFolders(
+            rootPath,
+            activeManagedNames,
+            ManagedStorageMigrationService.TemporaryFolderName);
 
         return true;
     }
@@ -90,6 +105,15 @@ public sealed partial class WidgetManager
             return [];
         }
 
+        bool rootIsValid = ManagedStoragePathService
+            .ValidateStorageRootCandidate(rootPath, AppDistributionService.Current.IsMicrosoftStore)
+            .IsValid;
+        ManagedStorageOwnershipSnapshot ownership = ManagedStorageOwnershipFileOps.ReadSnapshot(rootPath);
+        if (!rootIsValid && !ownership.HasManifest)
+        {
+            return [];
+        }
+
         var activePaths = _settingsService.Settings.Widgets
             .Where(widget => widget.WidgetKind == WidgetKind.File &&
                              widget.FollowsDefaultStoragePath &&
@@ -99,8 +123,10 @@ public sealed partial class WidgetManager
 
         return Directory.EnumerateDirectories(rootPath)
             .Select(Path.GetFullPath)
-            .Where(path => !Path.GetFileName(path).Equals(
-                ManagedStorageMigrationService.TemporaryFolderName, StringComparison.OrdinalIgnoreCase))
+            .Where(path => !ManagedStorageOwnershipFileOps.IsExcludedOrSystemDirectory(
+                path,
+                ManagedStorageMigrationService.TemporaryFolderName))
+            .Where(path => IsOwnedOrphanFolderCandidate(path, rootIsValid, ownership))
             .Where(path => !activePaths.Contains(path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)))
             .Select(path => new ManagedStorageFolderCleanupCandidate(
                 Path.GetFileName(path),
@@ -114,6 +140,9 @@ public sealed partial class WidgetManager
     {
         string normalizedPath = ValidateOrphanManagedStorageFolderPath(folderPath);
         await MoveManagedFolderContentsToDesktopAsync(normalizedPath);
+        ManagedStorageOwnershipFileOps.UnregisterRemovedOrphanFolder(
+            GetManagedStorageRootPath(),
+            Path.GetFileName(normalizedPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)));
     }
 
     public async Task DeleteOrphanManagedStorageFolderAsync(
@@ -122,7 +151,7 @@ public sealed partial class WidgetManager
     {
         string normalizedPath = ValidateOrphanManagedStorageFolderPath(folderPath);
         IntPtr ownerHandle = Directory.Exists(normalizedPath) &&
-            FileService.IsNetworkVolumePath(normalizedPath)
+            ShouldPassOwnerWindowForManagedDelete(normalizedPath)
                 ? ownerWindowHandle
                 : IntPtr.Zero;
         if (!await _fileService.DeleteEntryAsync(
@@ -134,6 +163,10 @@ public sealed partial class WidgetManager
             // would promise a deletion that never happened.
             throw new InvalidOperationException(LocalizeOrKey("Widget.Error.ManagedFolderDeleteFailed"));
         }
+
+        ManagedStorageOwnershipFileOps.UnregisterRemovedOrphanFolder(
+            GetManagedStorageRootPath(),
+            Path.GetFileName(normalizedPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)));
     }
 
     // Test hosts construct this manager without a localization service;
@@ -172,6 +205,10 @@ public sealed partial class WidgetManager
 
             ApplyNewWidgetPlacement(config);
             _settingsService.Settings.Widgets.Add(config);
+            ManagedStorageOwnershipFileOps.RegisterManagedFolders(
+                GetManagedStorageRootPath(),
+                [folderName],
+                ManagedStorageMigrationService.TemporaryFolderName);
             if (canCreateWindow)
             {
                 await CreateWidgetFromConfigAsync(config, revealAfterCreate: true);
@@ -204,28 +241,13 @@ public sealed partial class WidgetManager
             return;
         }
 
-        if (_fileWidgets.TryGetValue(widgetId, out var entry))
+        if (!HasUiThreadAccess())
         {
-            await entry.ViewModel.HandleItemsMovedOutAsync(paths);
+            await RunOnUiThreadAsync(() => NotifyItemsMovedOutAsync(widgetId, paths));
             return;
         }
 
-        ContentWidgetWindow? contentWindow =
-            _contentWidgets.TryGetValue(widgetId, out var registeredWindow)
-                ? registeredWindow
-                : _contentWidgets.Values
-                    .Distinct()
-                    .FirstOrDefault(window =>
-                        window.CurrentContent is FileWidgetContentAdapter surface &&
-                        string.Equals(
-                            surface.WidgetId,
-                            widgetId,
-                            StringComparison.Ordinal));
-        if (contentWindow?.CurrentContent is not FileWidgetContentAdapter fileSurface ||
-            !string.Equals(
-                fileSurface.WidgetId,
-                widgetId,
-                StringComparison.Ordinal))
+        if (FindLoadedFileWidgetAdapter(widgetId) is not { } fileSurface)
         {
             App.Log(
                 $"[WidgetManager] Moved-out refresh target not loaded " +
@@ -234,27 +256,53 @@ public sealed partial class WidgetManager
         }
 
         await fileSurface.ViewModel.HandleItemsMovedOutAsync(paths);
+        fileSurface.Surface?.NotifyItemsMovedOutFromExternalWidget();
+    }
+
+    public async Task RefreshFileWidgetsAfterUndoAsync(string? targetWidgetId = null)
+    {
+        if (!HasUiThreadAccess())
+        {
+            await RunOnUiThreadAsync(() => RefreshFileWidgetsAfterUndoAsync(targetWidgetId));
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(targetWidgetId) &&
+            FindLoadedFileWidgetAdapter(targetWidgetId) is { } targetAdapter)
+        {
+            await targetAdapter.ViewModel.RefreshFolderContentsAsync();
+            targetAdapter.Surface?.NotifyItemsMovedOutFromExternalWidget();
+            return;
+        }
+
+        foreach (WidgetConfig cfg in _settingsService.Settings.WidgetLayout.Widgets)
+        {
+            if (cfg.WidgetKind == WidgetKind.File &&
+                FindLoadedFileWidgetAdapter(cfg.Id) is { } adapter)
+            {
+                await adapter.ViewModel.RefreshFolderContentsAsync();
+                adapter.Surface?.NotifyItemsMovedOutFromExternalWidget();
+            }
+        }
     }
 
     private void SetManagedStorageMigrationBusy(IEnumerable<string> widgetIds, bool isBusy)
     {
-        foreach (string widgetId in widgetIds.Distinct(StringComparer.Ordinal))
+        string[] snapshot = widgetIds.Distinct(StringComparer.Ordinal).ToArray();
+        if (snapshot.Length == 0)
         {
-            if (_fileWidgets.TryGetValue(widgetId, out var entry))
-            {
-                entry.SetMigrationBusy(isBusy);
-                continue;
-            }
+            return;
+        }
 
-            ContentWidgetWindow? contentWindow = _contentWidgets.Values
-                .Distinct()
-                .FirstOrDefault(window =>
-                    window.CurrentContent is FileWidgetContentAdapter surface &&
-                    string.Equals(surface.WidgetId, widgetId, StringComparison.Ordinal));
-            if (contentWindow?.CurrentContent is FileWidgetContentAdapter fileSurface)
-            {
-                fileSurface.SetMigrationBusy(isBusy);
-            }
+        if (!HasUiThreadAccess())
+        {
+            UiDispatch.RunOrDefer(() => SetManagedStorageMigrationBusy(snapshot, isBusy));
+            return;
+        }
+
+        foreach (string widgetId in snapshot)
+        {
+            FindLoadedFileWidgetAdapter(widgetId)?.SetMigrationBusy(isBusy);
         }
     }
 
@@ -324,17 +372,64 @@ public sealed partial class WidgetManager
                 destinationFolderPath,
                 excludedWidgetId: config.Id,
                 candidateFollowsDefaultStoragePath: true);
+            ManagedStorageOwnershipSnapshot renameOwnership =
+                ManagedStorageOwnershipFileOps.ReadSnapshot(rootPath);
+            if (renameOwnership.ForeignFolders.Contains(desiredFolderName))
+            {
+                throw new InvalidOperationException(
+                    _localizationService.T("Widget.Error.ManagedFolderNameUnavailable"));
+            }
 
-            // The empty current folder is the default folder a fresh widget
-            // got; the existing destination is the managed folder a closed
-            // widget kept behind on purpose. Adopt it as the storage
-            // location instead of dead-ending the name (feedback #113):
-            // nothing inside either folder is moved, merged, or deleted, and
-            // the kept contents show up in the widget again.
-            Directory.Delete(currentFolderPath);
-            App.Log(
-                $"[WidgetManager] Managed folder rename adopted the existing " +
-                $"folder '{destinationFolderPath}' for widget '{config.Id}'");
+            // Release ReadDirectoryChangesW on currentFolderPath before
+            // deleting the adopted-out empty directory so the live watcher
+            // does not surface a spurious ERROR_ACCESS_DENIED (5) fault.
+            await SuspendFileWidgetWatchersAsync(config.Id);
+            bool adoptionRefreshed = false;
+            try
+            {
+                // The empty current folder is the default folder a fresh widget
+                // got; the existing destination is the managed folder a closed
+                // widget kept behind on purpose. Adopt it as the storage
+                // location instead of dead-ending the name (feedback #113):
+                // nothing inside either folder is moved, merged, or deleted, and
+                // the kept contents show up in the widget again.
+                Directory.Delete(currentFolderPath);
+                App.Log(
+                    $"[WidgetManager] Managed folder rename adopted the existing " +
+                    $"folder '{destinationFolderPath}' for widget '{config.Id}'");
+
+                WidgetPathRebaseHelper.RebaseFolderTree(
+                    config,
+                    currentFolderPath,
+                    destinationFolderPath);
+                config.ManagedFolderName = desiredFolderName;
+                config.MappedFolderPath = destinationFolderPath;
+                if (_settingsService.OrganizationHistory.RebaseWidgetDirectory(
+                        config.Id,
+                        currentFolderPath,
+                        destinationFolderPath,
+                        refreshCopiedDestinationIdentities: false))
+                {
+                    await _settingsService.OrganizationHistory.SaveCheckedAsync();
+                }
+                ManagedStorageOwnershipFileOps.RecordManagedFolderRename(
+                    rootPath,
+                    currentFolderName,
+                    desiredFolderName,
+                    ManagedStorageMigrationService.TemporaryFolderName);
+
+                await RefreshFileWidgetAsync(config.Id);
+                adoptionRefreshed = true;
+            }
+            finally
+            {
+                if (!adoptionRefreshed)
+                {
+                    await ResumeFileWidgetWatchersIfStoppedAsync(config.Id);
+                }
+            }
+
+            return;
         }
         else if (File.Exists(destinationFolderPath))
         {
@@ -343,20 +438,80 @@ public sealed partial class WidgetManager
             throw new InvalidOperationException(_localizationService.T("Widget.Error.ManagedFolderNameUnavailable"));
         }
 
-        if (!string.Equals(currentFolderPath, destinationFolderPath, StringComparison.OrdinalIgnoreCase) &&
-            !Directory.Exists(destinationFolderPath))
+        await SuspendFileWidgetWatchersAsync(config.Id);
+        bool moveRefreshed = false;
+        try
         {
-            await Task.Run(() => MoveManagedFolderWithRetry(currentFolderPath, destinationFolderPath));
+            if (!string.Equals(currentFolderPath, destinationFolderPath, StringComparison.OrdinalIgnoreCase) &&
+                !Directory.Exists(destinationFolderPath))
+            {
+                await Task.Run(() => MoveManagedFolderWithRetry(currentFolderPath, destinationFolderPath));
+            }
+
+            WidgetPathRebaseHelper.RebaseFolderTree(
+                config,
+                currentFolderPath,
+                destinationFolderPath);
+            config.ManagedFolderName = desiredFolderName;
+            config.MappedFolderPath = destinationFolderPath;
+            if (_settingsService.OrganizationHistory.RebaseWidgetDirectory(
+                    config.Id,
+                    currentFolderPath,
+                    destinationFolderPath,
+                    refreshCopiedDestinationIdentities: false))
+            {
+                await _settingsService.OrganizationHistory.SaveCheckedAsync();
+            }
+            ManagedStorageOwnershipFileOps.RecordManagedFolderRename(
+                rootPath,
+                currentFolderName,
+                desiredFolderName,
+                ManagedStorageMigrationService.TemporaryFolderName);
+
+            await RefreshFileWidgetAsync(config.Id);
+            moveRefreshed = true;
+        }
+        finally
+        {
+            if (!moveRefreshed)
+            {
+                await ResumeFileWidgetWatchersIfStoppedAsync(config.Id);
+            }
+        }
+    }
+
+    private async Task SuspendFileWidgetWatchersAsync(string widgetId)
+    {
+        if (!HasUiThreadAccess())
+        {
+            await RunOnUiThreadAsync(() =>
+            {
+                SuspendFileWidgetWatchersCore(widgetId);
+                return Task.CompletedTask;
+            });
+            return;
         }
 
-        WidgetFileStackSettings.RebaseManagedFolderPaths(
-            config,
-            currentFolderPath,
-            destinationFolderPath);
-        config.ManagedFolderName = desiredFolderName;
-        config.MappedFolderPath = destinationFolderPath;
+        SuspendFileWidgetWatchersCore(widgetId);
+    }
 
-        await RefreshFileWidgetAsync(config.Id);
+    private void SuspendFileWidgetWatchersCore(string widgetId)
+    {
+        FindLoadedFileWidgetAdapter(widgetId)?.ViewModel.SuspendFolderWatchers();
+    }
+
+    private async Task ResumeFileWidgetWatchersIfStoppedAsync(string widgetId)
+    {
+        if (!HasUiThreadAccess())
+        {
+            await RunOnUiThreadAsync(() => ResumeFileWidgetWatchersIfStoppedAsync(widgetId));
+            return;
+        }
+
+        if (FindLoadedFileWidgetAdapter(widgetId) is { } fileSurface)
+        {
+            await fileSurface.ViewModel.ResumeFolderWatchersIfStoppedAsync();
+        }
     }
 
     /// <summary>
@@ -557,6 +712,11 @@ public sealed partial class WidgetManager
             return;
         }
 
+        if (DeskBox.Platform.StorageMigrationNativeMethods.IsFileSystemLinkOrMountPoint(folderPath))
+        {
+            throw new IOException("Refusing to operate on a symbolic link or mount point.");
+        }
+
         if (removalAction == WidgetRemovalAction.MoveManagedFolderContentsToDesktop)
         {
             await MoveManagedFolderContentsToDesktopAsync(folderPath);
@@ -568,7 +728,7 @@ public sealed partial class WidgetManager
             // Local volumes recycle silently as before; on a network volume
             // the Recycle Bin cannot catch a mistake, so route through the
             // interactive Shell confirmation when an owner is available.
-            IntPtr ownerHandle = FileService.IsNetworkVolumePath(folderPath)
+            IntPtr ownerHandle = ShouldPassOwnerWindowForManagedDelete(folderPath)
                 ? ownerWindowHandle
                 : IntPtr.Zero;
             if (!await _fileService.DeleteEntryAsync(
@@ -592,6 +752,11 @@ public sealed partial class WidgetManager
             return;
         }
 
+        if (DeskBox.Platform.StorageMigrationNativeMethods.IsFileSystemLinkOrMountPoint(folderPath))
+        {
+            throw new IOException("Refusing to move contents from a symbolic link or mount point.");
+        }
+
         string desktopPath = _desktopPathProvider();
         var reservedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var plans = Directory.EnumerateFileSystemEntries(folderPath)
@@ -602,7 +767,22 @@ public sealed partial class WidgetManager
 
         if (plans.Count > 0)
         {
-            await _fileService.ExecuteTransferPlanAsync(plans, move: true);
+            string operationId = Guid.NewGuid().ToString("N");
+            _organizerService?.AutoOrganizationSuppressions.BeginOperation(operationId, plans);
+            try
+            {
+                var results = await _fileService.ExecuteTransferPlanAsync(plans, move: true);
+                _organizerService?.AutoOrganizationSuppressions.CompleteOperation(
+                    operationId,
+                    results.Select(static result => result.DestinationPath));
+            }
+            catch
+            {
+                _organizerService?.AutoOrganizationSuppressions.CompleteOperation(
+                    operationId,
+                    plans.Select(static plan => plan.DestinationPath));
+                throw;
+            }
         }
 
         if (!Directory.Exists(folderPath) ||
@@ -624,12 +804,29 @@ public sealed partial class WidgetManager
             LocalizeOrKey("Widget.Error.ManagedFolderMoveIncomplete"));
     }
 
+    private static bool ShouldPassOwnerWindowForManagedDelete(string path) =>
+        FileService.IsNetworkVolumePath(path) ||
+        !DeskBox.Platform.FileOperationNativeMethods.CanHeadlessRecyclePath(path);
+
     private string ValidateOrphanManagedStorageFolderPath(string folderPath)
     {
         string normalizedPath = Path.GetFullPath(folderPath);
         if (!IsDefaultManagedStorageFolder(normalizedPath))
         {
-            throw new InvalidOperationException(_localizationService.T("Widget.Error.ManagedFolderCleanupOnlyDefault"));
+            throw new InvalidOperationException(LocalizeOrKey("Widget.Error.ManagedFolderCleanupOnlyDefault"));
+        }
+
+        string rootPath = GetManagedStorageRootPath();
+        bool rootIsValid = ManagedStoragePathService
+            .ValidateStorageRootCandidate(rootPath, AppDistributionService.Current.IsMicrosoftStore)
+            .IsValid;
+        ManagedStorageOwnershipSnapshot ownership = ManagedStorageOwnershipFileOps.ReadSnapshot(rootPath);
+        if (ManagedStorageOwnershipFileOps.IsExcludedOrSystemDirectory(
+                normalizedPath,
+                ManagedStorageMigrationService.TemporaryFolderName) ||
+            !IsOwnedOrphanFolderCandidate(normalizedPath, rootIsValid, ownership))
+        {
+            throw new InvalidOperationException(LocalizeOrKey("Widget.Error.ManagedFolderCleanupOnlyDefault"));
         }
 
         if (!Directory.Exists(normalizedPath))
@@ -708,9 +905,40 @@ public sealed partial class WidgetManager
 
     private string BuildManagedFolderPath(string managedFolderName)
     {
+        string rootPath = GetManagedStorageRootPath();
+        ManagedStorageOwnershipFileOps.RegisterManagedFolders(
+            rootPath,
+            [managedFolderName],
+            ManagedStorageMigrationService.TemporaryFolderName);
         return Path.Combine(
-            GetManagedStorageRootPath(),
+            rootPath,
             managedFolderName);
+    }
+
+    private static bool IsOwnedOrphanFolderCandidate(
+        string directoryPath,
+        bool rootIsValid,
+        ManagedStorageOwnershipSnapshot ownership)
+    {
+        string folderName = Path.GetFileName(
+            directoryPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        if (string.IsNullOrWhiteSpace(folderName) ||
+            ownership.ForeignFolders.Contains(folderName))
+        {
+            return false;
+        }
+
+        if (!rootIsValid)
+        {
+            return ownership.HasManifest && ownership.ManagedFolders.Contains(folderName);
+        }
+
+        if (ownership.HasManifest)
+        {
+            return ownership.ManagedFolders.Contains(folderName);
+        }
+
+        return true;
     }
 
     private string GetManagedStorageRootPath()

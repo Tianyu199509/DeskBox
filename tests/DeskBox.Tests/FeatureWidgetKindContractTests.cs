@@ -22,8 +22,9 @@ public sealed class FeatureWidgetKindContractTests
                 WidgetKind.Todo,
                 WidgetKind.Music,
                 WidgetKind.Weather,
-                WidgetKind.Search,
-                WidgetKind.Glance
+                WidgetKind.Glance,
+                WidgetKind.Custom,
+                WidgetKind.Clipboard
             },
             FeatureWidgetSettings.FeatureKinds);
     }
@@ -35,6 +36,7 @@ public sealed class FeatureWidgetKindContractTests
         Assert.False(FeatureWidgetSettings.IsFeatureWidget(WidgetKind.Tags));
         Assert.False(FeatureWidgetSettings.IsFeatureWidget(WidgetKind.SystemMonitor));
         Assert.False(FeatureWidgetSettings.IsFeatureWidget(WidgetKind.Productivity));
+        Assert.False(FeatureWidgetSettings.IsFeatureWidget(WidgetKind.Search));
     }
 
     [Fact]
@@ -50,12 +52,10 @@ public sealed class FeatureWidgetKindContractTests
     [Fact]
     public void EveryWidgetKindIsDescribedExceptTheKnownGap()
     {
-        // WidgetKind.Productivity is declared in the enum but has neither a
-        // content descriptor nor a WidgetRegistry entry, so nothing can create
-        // it and nothing enumerates the enum to notice. It stays listed here as
-        // a known gap: either give it a descriptor (Placeholder/Planned, like
-        // Tags) or drop the enum member, then remove it from this list.
-        WidgetKind[] knownGap = [WidgetKind.Productivity];
+        // WidgetKind.Productivity and WidgetKind.Search remain in the enum for
+        // backward-compatible settings migration, without active descriptors or
+        // WidgetRegistry entries.
+        WidgetKind[] knownGap = [WidgetKind.Productivity, WidgetKind.Search];
 
         WidgetKind[] described = WidgetContentFactory.DescriptorList
             .Select(descriptor => descriptor.WidgetKind)

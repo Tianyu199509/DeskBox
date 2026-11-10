@@ -203,10 +203,7 @@ public sealed class StoreAppUpdateService : IAppUpdateService
     {
         try
         {
-            return global::DeskBox.App.Current.SettingsWindowInstance is
-                { IsVisibleToUser: true } window
-                ? WindowNative.GetWindowHandle(window)
-                : IntPtr.Zero;
+            return global::DeskBox.App.Current.GetStoreUpdateOwnerWindowHandle();
         }
         catch
         {

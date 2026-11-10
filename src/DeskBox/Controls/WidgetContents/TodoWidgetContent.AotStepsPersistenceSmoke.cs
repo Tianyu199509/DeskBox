@@ -153,6 +153,17 @@ public sealed partial class TodoWidgetContent
 
     private AotTodoStepUiSnapshot CaptureAotTodoStepUiSnapshot()
     {
+        if (DetailStepsItemsControl is null)
+        {
+            return new AotTodoStepUiSnapshot(
+                ItemCount: 0,
+                ContainerRealized: false,
+                DataContextId: null,
+                Text: string.Empty,
+                IsChecked: null,
+                Opacity: null);
+        }
+
         int itemCount = DetailStepsItemsControl.Items.Count;
         AotTodoStepRowControls? row = TryGetAotTodoStepRowControls();
         if (row is null)

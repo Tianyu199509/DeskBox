@@ -151,4 +151,85 @@ public sealed class WidgetSlideBoundaryPolicyTests
         Assert.Equal(220, decision.StartOffset);
         Assert.Equal(220, decision.EndOffset);
     }
+
+    [Fact]
+    public void ShortSlide_ClampsInsideMonitorWhenSlidingTowardAdjacentSeam()
+    {
+        var outerBounds = new Windows.Graphics.RectInt32(0, 0, 1920, 1080);
+        // Widget right edge is at 1908 -> only 12px from the right seam at 1920.
+        var resting = new Windows.Foundation.Rect(1608, 200, 300, 400);
+        var adjacentRight = new WidgetSlideBoundaryPolicy.AdjacentDisplaySides(
+            Left: false, Right: true, Up: false, Down: false);
+
+        var (seamX, seamY) = WidgetSlideBoundaryPolicy.ResolveShortSlideOffset(
+            SettingsService.WidgetAnimationSlideDirectionRight,
+            resting,
+            outerBounds,
+            adjacentRight,
+            desiredThrowPx: 36);
+        Assert.Equal(12, seamX);
+        Assert.Equal(0, seamY);
+        Assert.True(resting.Right + seamX <= outerBounds.X + outerBounds.Width);
+
+        // Sliding left (non-adjacent outer bezel) keeps the full 36px throw.
+        var (bezelX, bezelY) = WidgetSlideBoundaryPolicy.ResolveShortSlideOffset(
+            SettingsService.WidgetAnimationSlideDirectionLeft,
+            resting,
+            outerBounds,
+            adjacentRight,
+            desiredThrowPx: 36);
+        Assert.Equal(-36, bezelX);
+        Assert.Equal(0, bezelY);
+    }
+
+    [Fact]
+    public void ScreenEdgeSlide_AutoAvoidsAdjacentMonitorSeamAndPicksNearestBezel()
+    {
+        var outerBounds = new Windows.Graphics.RectInt32(0, 0, 1920, 1080);
+        var workArea = new Windows.Graphics.RectInt32(0, 0, 1920, 1032);
+        // Widget sits near the right seam (gap=20) and near the top bezel (gap=40),
+        // with a second monitor attached on the right. Auto must skip Right and
+        // slide out through the Top physical bezel!
+        var resting = new Windows.Foundation.Rect(1600, 40, 300, 400);
+        var adjacentRight = new WidgetSlideBoundaryPolicy.AdjacentDisplaySides(
+            Left: false, Right: true, Up: false, Down: false);
+
+        var autoPlan = WidgetSlideBoundaryPolicy.ResolveScreenEdgeSlide(
+            SettingsService.WidgetAnimationSlideDirectionAuto,
+            resting,
+            workArea,
+            outerBounds,
+            adjacentRight,
+            offscreenPaddingPx: 16,
+            fallbackShortThrowPx: 48);
+
+        Assert.Equal(SettingsService.WidgetAnimationSlideDirectionUp, autoPlan.ResolvedDirection);
+        Assert.False(autoPlan.UseShortFadeFallback);
+        Assert.Equal(0, autoPlan.OffsetX);
+        Assert.Equal(-(440 + 16), autoPlan.OffsetY);
+    }
+
+    [Fact]
+    public void ScreenEdgeSlide_ForcedTowardAdjacentSeam_FallsBackToContainedShortFade()
+    {
+        var outerBounds = new Windows.Graphics.RectInt32(0, 0, 1920, 1080);
+        var workArea = new Windows.Graphics.RectInt32(0, 0, 1920, 1032);
+        var resting = new Windows.Foundation.Rect(1600, 200, 300, 400);
+        var adjacentRight = new WidgetSlideBoundaryPolicy.AdjacentDisplaySides(
+            Left: false, Right: true, Up: false, Down: false);
+
+        var blockedPlan = WidgetSlideBoundaryPolicy.ResolveScreenEdgeSlide(
+            SettingsService.WidgetAnimationSlideDirectionRight,
+            resting,
+            workArea,
+            outerBounds,
+            adjacentRight,
+            offscreenPaddingPx: 16,
+            fallbackShortThrowPx: 48);
+
+        Assert.Equal(SettingsService.WidgetAnimationSlideDirectionRight, blockedPlan.ResolvedDirection);
+        Assert.True(blockedPlan.UseShortFadeFallback);
+        Assert.Equal(20, blockedPlan.OffsetX);
+        Assert.True(resting.Right + blockedPlan.OffsetX <= outerBounds.X + outerBounds.Width);
+    }
 }

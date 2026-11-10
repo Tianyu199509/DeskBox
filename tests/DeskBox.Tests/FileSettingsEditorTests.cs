@@ -282,11 +282,11 @@ public sealed class FileSettingsEditorTests : IDisposable
 
         SettingsOption[] options = [.. storage.AvailableDropActionOptions];
         Assert.Equal(3, options.Length);
-        Assert.Equal(ManagedDropActions.Copy, options[0].Value);
-        Assert.Equal(ManagedDropActions.Move, options[1].Value);
+        Assert.Equal(ManagedDropActions.Move, options[0].Value);
+        Assert.Equal(ManagedDropActions.Copy, options[1].Value);
         Assert.Equal(ManagedDropActions.FollowWindows, options[2].Value);
-        Assert.Equal("Settings.DropAction.Copy", options[0].DisplayName);
-        Assert.Equal("Settings.DropAction.Move", options[1].DisplayName);
+        Assert.Equal("Settings.DropAction.Move", options[0].DisplayName);
+        Assert.Equal("Settings.DropAction.Copy", options[1].DisplayName);
         Assert.Equal("Settings.DropAction.System", options[2].DisplayName);
     }
 
@@ -311,7 +311,7 @@ public sealed class FileSettingsEditorTests : IDisposable
             new ManagedStorageSettingsCoordinator(
                 new SettingsService(Path.Combine(_root, "second"))),
             static key => key == "Settings.DropAction.Move" ? "zh:移动" : key);
-        Assert.Equal("zh:移动", relabeled.AvailableDropActionOptions[1].DisplayName);
+        Assert.Equal("zh:移动", relabeled.AvailableDropActionOptions[0].DisplayName);
     }
 
     [Fact]
@@ -358,6 +358,8 @@ public sealed class FileSettingsEditorTests : IDisposable
     {
         string xaml = File.ReadAllText(
             TestPaths.FromRepository("src/DeskBox/Views/SettingsWindow.xaml"));
+        string fileWidgetXaml = File.ReadAllText(
+            TestPaths.FromRepository("src/DeskBox/Views/SettingsSections/FileWidgetSettingsSection.xaml"));
         string deferred = File.ReadAllText(
             TestPaths.FromRepository("src/DeskBox/Views/SettingsWindow.DeferredSections.cs"));
         string bindable = File.ReadAllText(
@@ -373,23 +375,26 @@ public sealed class FileSettingsEditorTests : IDisposable
         string smoke = File.ReadAllText(
             TestPaths.FromRepository("src/DeskBox/App.AotManagedUiSmoke.cs"));
 
-        // {Binding} markup stays (WMC1510 count unchanged); only the storage
-        // paths and the section DataContexts change.
-        Assert.Contains("IsOn=\"{Binding ShowFileExtensions, Mode=TwoWay}\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("IsEnabled=\"{Binding ShowFileExtensions}\"", xaml, StringComparison.Ordinal);
+        // File display and managed storage merged into AppearanceDetail
+        // (FileWidgetSettingsSection.xaml) with compiled {x:Bind} editor bridges.
+        Assert.Contains("IsOn=\"{x:Bind FileDisplay.ShowImageThumbnails, Mode=TwoWay}\"", fileWidgetXaml, StringComparison.Ordinal);
+        Assert.Contains("IsOn=\"{x:Bind FileDisplay.ShowFileExtensions, Mode=TwoWay}\"", fileWidgetXaml, StringComparison.Ordinal);
+        Assert.Contains("Visibility=\"{x:Bind FileDisplay.ShowFileExtensions, Mode=OneWay}\"", fileWidgetXaml, StringComparison.Ordinal);
+        Assert.Contains("IsEnabled=\"{x:Bind FileDisplay.ShowFileExtensions, Mode=OneWay}\"", fileWidgetXaml, StringComparison.Ordinal);
         Assert.Contains(
-            "IsOn=\"{Binding HideShortcutExtensionWhenShowingFileExtensions, Mode=TwoWay}\"",
-            xaml, StringComparison.Ordinal);
-        Assert.Contains("IsOn=\"{Binding ShowImageFilesAsIcons, Mode=TwoWay}\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("IsOn=\"{Binding HideShortcutArrowOverlay, Mode=TwoWay}\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("IsOn=\"{Binding ShowListItemDetails, Mode=TwoWay}\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("IsOn=\"{Binding ShowFileItemPathTooltips, Mode=TwoWay}\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("ItemsSource=\"{Binding AvailableDropActionOptions}\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("controls:SettingsComboBox.Value=\"{Binding DropAction, Mode=TwoWay}\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("ItemsSource=\"{Binding AvailableDragOutActionOptions}\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("controls:SettingsComboBox.Value=\"{Binding DragOutAction, Mode=TwoWay}\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("IsOn=\"{Binding DragOutModifierTipEnabled, Mode=TwoWay}\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("IsOn=\"{Binding DragOutResultHintEnabled, Mode=TwoWay}\"", xaml, StringComparison.Ordinal);
+            "IsOn=\"{x:Bind FileDisplay.HideShortcutExtensionWhenShowingFileExtensions, Mode=TwoWay}\"",
+            fileWidgetXaml, StringComparison.Ordinal);
+        Assert.Contains("IsOn=\"{x:Bind FileDisplay.HideShortcutArrowOverlay, Mode=TwoWay}\"", fileWidgetXaml, StringComparison.Ordinal);
+        Assert.Contains("IsOn=\"{x:Bind FileDisplay.ShowListItemDetails, Mode=TwoWay}\"", fileWidgetXaml, StringComparison.Ordinal);
+        Assert.Contains("IsOn=\"{x:Bind FileDisplay.ShowFileItemPathTooltips, Mode=TwoWay}\"", fileWidgetXaml, StringComparison.Ordinal);
+        Assert.Contains("Description=\"{x:Bind ManagedStorage.RootPath, Mode=OneWay}\"", fileWidgetXaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"{x:Bind ManagedStorage.DragBehaviorSummaryText, Mode=OneWay}\"", fileWidgetXaml, StringComparison.Ordinal);
+        Assert.Contains("ItemsSource=\"{x:Bind ManagedStorage.AvailableDragInBehaviorOptionItems, Mode=OneWay}\"", fileWidgetXaml, StringComparison.Ordinal);
+        Assert.Contains("controls:SettingsComboBox.Value=\"{x:Bind ManagedStorage.DropAction, Mode=TwoWay}\"", fileWidgetXaml, StringComparison.Ordinal);
+        Assert.Contains("ItemsSource=\"{x:Bind ManagedStorage.AvailableDragOutBehaviorOptionItems, Mode=OneWay}\"", fileWidgetXaml, StringComparison.Ordinal);
+        Assert.Contains("controls:SettingsComboBox.Value=\"{x:Bind ManagedStorage.DragOutAction, Mode=TwoWay}\"", fileWidgetXaml, StringComparison.Ordinal);
+        Assert.Contains("IsOn=\"{x:Bind ManagedStorage.DragOutModifierTipEnabled, Mode=TwoWay}\"", fileWidgetXaml, StringComparison.Ordinal);
+        Assert.Contains("IsOn=\"{x:Bind ManagedStorage.DragOutResultHintEnabled, Mode=TwoWay}\"", fileWidgetXaml, StringComparison.Ordinal);
         // The drag-out card is named so the shell can append the Windows 10
         // note to its description: the content column is an Auto grid column,
         // and a wide note placed there overflows the card on high-scale
@@ -398,8 +403,8 @@ public sealed class FileSettingsEditorTests : IDisposable
         // never as an element inside the content column. The modifier-tip
         // toggle stays a named element: the shell greys it out on Win10,
         // where external drops cannot carry a two-effect advertisement.
-        Assert.Contains("x:Name=\"DragOutActionCard\"", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("DragOutWin10Note", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"DragOutActionCard\"", fileWidgetXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("DragOutWin10Note", fileWidgetXaml + xaml, StringComparison.Ordinal);
         string shellStorage = File.ReadAllText(
             TestPaths.FromRepository("src/DeskBox/Views/SettingsWindow.StorageAndUpdates.cs"));
         Assert.Contains(
@@ -408,13 +413,8 @@ public sealed class FileSettingsEditorTests : IDisposable
             StringComparison.Ordinal);
         Assert.Contains(
             "x:Name=\"DragOutModifierTipToggle\"",
-            xaml,
+            fileWidgetXaml,
             StringComparison.Ordinal);
-        Assert.Contains("Text=\"{Binding RootPath, Mode=OneWay}\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Text=\"{Binding QuickAccessStatusText}\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("IsEnabled=\"{Binding CanInvokeQuickAccessAction}\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("ToolTipService.ToolTip=\"{Binding PinQuickAccessToolTipText}\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Text=\"{Binding PinQuickAccessButtonText}\"", xaml, StringComparison.Ordinal);
         foreach (string legacy in new[]
                  {
                      "{Binding SelectedManagedDropAction",
@@ -423,15 +423,16 @@ public sealed class FileSettingsEditorTests : IDisposable
                      "{Binding ShouldUnpinManagedStorageFromQuickAccess"
                  })
         {
-            Assert.DoesNotContain(legacy, xaml, StringComparison.Ordinal);
+            Assert.DoesNotContain(legacy, fileWidgetXaml + xaml, StringComparison.Ordinal);
         }
 
-        // The deferred-section host switches both section DataContexts to
-        // the editors instead of leaving the shell view model in place.
-        Assert.Contains("if (sectionTag == \"FileDisplaySettings\")", deferred, StringComparison.Ordinal);
-        Assert.Contains("section.DataContext = _fileDisplaySettingsViewModel;", deferred, StringComparison.Ordinal);
-        Assert.Contains("if (sectionTag == \"FileStorageSettings\")", deferred, StringComparison.Ordinal);
-        Assert.Contains("section.DataContext = _managedStorageSettingsViewModel;", deferred, StringComparison.Ordinal);
+        // The deferred-section host assigns both typed editor bridges on
+        // FileWidgetSettingsSection; standalone FileDisplaySettings /
+        // FileStorageSettings routes are retired.
+        Assert.Contains("fileSettings.FileDisplay = _fileDisplaySettingsViewModel;", deferred, StringComparison.Ordinal);
+        Assert.Contains("fileSettings.ManagedStorage = _managedStorageSettingsViewModel;", deferred, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"FileDisplaySettings\"", deferred, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"FileStorageSettings\"", deferred, StringComparison.Ordinal);
 
         // The shell bridge drops the thirteen file-domain entries; the
         // editors carry their own NativeAOT custom-property bridges.
@@ -464,6 +465,7 @@ public sealed class FileSettingsEditorTests : IDisposable
                      "ShowFileExtensions",
                      "ShowFileItemPathTooltips",
                      "ShowImageFilesAsIcons",
+                     "ShowImageThumbnails",
                      "ShowListItemDetails"
                  })
         {
@@ -473,9 +475,12 @@ public sealed class FileSettingsEditorTests : IDisposable
         Assert.Contains("#if DESKBOX_NATIVE_AOT", storageBridge, StringComparison.Ordinal);
         foreach (string name in new[]
                  {
+                     "AvailableDragInBehaviorOptionItems",
                      "AvailableDragOutActionOptions",
+                     "AvailableDragOutBehaviorOptionItems",
                      "AvailableDropActionOptions",
                      "CanInvokeQuickAccessAction",
+                     "DragBehaviorSummaryText",
                      "DragOutAction",
                      "DragOutModifierTipEnabled",
                      "DragOutResultHintEnabled",

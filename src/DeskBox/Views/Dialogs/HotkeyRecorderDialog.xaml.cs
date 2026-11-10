@@ -1,30 +1,31 @@
 // Copyright (c) DeskBox. All rights reserved.
 
 using DeskBox.Contracts;
+using DeskBox.Controls;
 using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
-using Microsoft.UI.Xaml.Markup;
 using Microsoft.UI.Xaml.Media;
 
 namespace DeskBox.Views.Dialogs;
 
 /// <summary>
-/// PowerToys-style activation-shortcut editor. A low-level keyboard hook feeds
-/// every key event into <see cref="HotkeyRecordingSession"/> while the dialog
-/// is open, so OS-reserved chords (Win+V, Alt+Space, …) are captured instead of
-/// stolen by the shell. The dialog itself stays dumb about hotkey storage: the
-/// caller supplies presets, a conflict checker, and the apply callback.
+/// PowerToys-style activation-shortcut editor with optional double-tap
+/// recording and recommended presets. A low-level keyboard hook feeds every key
+/// event into <see cref="HotkeyRecordingSession"/> while the dialog is open, so
+/// OS-reserved chords (Win+V, Alt+Space, …) are captured instead of stolen by
+/// the shell.
 /// </summary>
 public sealed partial class HotkeyRecorderDialog : ContentDialog
 {
     public enum Scope
     {
         Global,
-        Search
+        Search,
+        Clipboard
     }
 
     public sealed record Preset(
@@ -32,26 +33,23 @@ public sealed partial class HotkeyRecorderDialog : ContentDialog
         GlobalHotkeyActivation Activation,
         string? ToolTip = null);
 
-    private const string WindowsLogoPathData =
-        "M0.2 1.2 L5.0 0.5 L5.0 5.4 L0.2 5.4 Z " +
-        "M5.6 0.3 L10.6 0.3 L10.6 5.4 L5.6 5.4 Z " +
-        "M0.2 6.0 L5.0 6.0 L5.0 10.7 L0.2 10.0 Z " +
-        "M5.6 6.0 L10.6 6.0 L10.6 10.9 L5.6 10.9 Z";
-
     private readonly LocalizationService _localization;
     private readonly ISettingsHotkeyActions _hotkeyActions;
-    private readonly Scope _scope;
+    internal Scope RecorderScope { get; }
     private readonly GlobalHotkeyActivation _initialActivation;
     private readonly IReadOnlyList<Preset> _presets;
     private readonly Func<GlobalHotkeyActivation, Task<string?>> _applyAsync;
-    private readonly Func<GlobalHotkeyGesture, string?> _conflictChecker;
+    private readonly Func<GlobalHotkeyActivation, string?> _conflictChecker;
     private readonly HotkeyRecordingSession _session = new();
     private readonly HotkeyRecorderHookService _hook;
     private readonly List<ToggleButton> _presetButtons = [];
     private readonly TextBlock _emptyHint;
+    private readonly string _doubleTapBadgeText;
     private GlobalHotkeyActivation? _selectedActivation;
     private int _selectedPresetIndex = -1;
-    private int _buttonFocusCount;
+    private readonly HashSet<ButtonBase> _keyboardFocusedButtons = [];
+    private bool _isDoubleTapMode;
+    private bool _isSyncingToggle;
     private bool _isApplying;
 
     /// <summary>
@@ -71,53 +69,92 @@ public sealed partial class HotkeyRecorderDialog : ContentDialog
         IReadOnlyList<Preset> presets,
         Func<GlobalHotkeyActivation, Task<string?>> applyAsync,
         Func<GlobalHotkeyGesture, string?> conflictChecker)
+        : this(
+            xamlRoot,
+            localization,
+            hotkeyActions,
+            scope,
+            initialActivation,
+            presets,
+            applyAsync,
+            activation => GlobalHotkeyService.IsValidActivation(activation) &&
+                          activation.Kind is HotkeyActivationKind.Chord or HotkeyActivationKind.DoubleTap &&
+                          !activation.IsModifierOnlyDoubleTap
+                ? conflictChecker(activation.Gesture)
+                : null)
+    {
+    }
+
+    public HotkeyRecorderDialog(
+        XamlRoot xamlRoot,
+        LocalizationService localization,
+        ISettingsHotkeyActions hotkeyActions,
+        Scope scope,
+        GlobalHotkeyActivation initialActivation,
+        IReadOnlyList<Preset> presets,
+        Func<GlobalHotkeyActivation, Task<string?>> applyAsync,
+        Func<GlobalHotkeyActivation, string?> conflictChecker)
     {
         InitializeComponent();
         XamlRoot = xamlRoot;
         _hook = new HotkeyRecorderHookService(DispatcherQueue);
-        // Any command button (presets, Save/Cancel/Reset/Clear) that owns
-        // focus must keep Enter/Space for itself — the recording hook would
-        // otherwise swallow the activation press into the chord. The dialog
-        // template's buttons are part of this visual tree, so the bubbled
-        // GotFocus/LostFocus pair covers every button.
-        GotFocus += (_, e) => AdjustButtonPassthrough(e.OriginalSource, +1);
-        LostFocus += (_, e) => AdjustButtonPassthrough(e.OriginalSource, -1);
+        // Any command button (presets, Save/Cancel/Reset/Clear/DoubleTap) that owns
+        // focus must keep bare Enter/Space for itself while modifier+Space chords
+        // continue to capture inside HotkeyRecorderHookService.
+        GotFocus += (_, e) => OnElementGotFocus(e.OriginalSource);
+        LostFocus += (_, e) => OnElementLostFocus(e.OriginalSource);
+        ActualThemeChanged += (_, _) => UpdateEmptyHintForeground();
+
         _localization = localization;
         _hotkeyActions = hotkeyActions;
-        _scope = scope;
+        RecorderScope = scope;
         _initialActivation = initialActivation;
         _presets = presets;
         _applyAsync = applyAsync;
         _conflictChecker = conflictChecker;
+        _doubleTapBadgeText = localization.T("Settings.HotkeyRecorder.DoubleTapBadge");
 
         Title = localization.T("Settings.HotkeyRecorder.Title");
         PrimaryButtonText = localization.T("Common.Save");
         CloseButtonText = localization.T("Common.Cancel");
-        RuleHintTextBlock.Text = localization.T("Settings.HotkeyRecorder.RuleHint");
-        ResetButton.Content = localization.T("Settings.HotkeyRecorder.Reset");
-        ClearButton.Content = localization.T("Settings.HotkeyRecorder.Clear");
+        ResetButtonLabel.Text = localization.T("Settings.HotkeyRecorder.Reset");
+        ClearButtonLabel.Text = localization.T("Settings.HotkeyRecorder.Clear");
+        DoubleTapToggleLabel.Text = localization.T("Settings.HotkeyRecorder.DoubleTap");
+        ToolTipService.SetToolTip(
+            DoubleTapToggle,
+            localization.T("Settings.HotkeyRecorder.DoubleTapTooltip"));
         PresetsLabel.Text = localization.T("Settings.GlobalHotkey.PresetsTitle");
+
         _emptyHint = new TextBlock
         {
             Text = localization.T("Settings.HotkeyRecorder.PressKeys"),
-            Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
-            // Application-scope themed lookups follow the system theme;
-            // resolve against the dialog's window-scoped theme instead.
-            Foreground = NeutralInteractionBrush.ResolveThemedResource(
-                "TextFillColorSecondaryBrush", this) ??
-                new SolidColorBrush(Windows.UI.Color.FromArgb(0xFF, 0x9E, 0x9E, 0x9E)),
-            VerticalAlignment = VerticalAlignment.Center
+            FontSize = 13,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            TextAlignment = TextAlignment.Center
         };
+        UpdateEmptyHintForeground();
 
         BuildPresets();
 
         _selectedActivation = IsSelectableActivation(initialActivation)
             ? initialActivation
             : null;
+        _isDoubleTapMode = _selectedActivation?.IsDoubleTap == true;
+        SyncDoubleTapToggleVisual();
+        UpdateRuleHintText();
         _selectedPresetIndex = FindPresetIndex(_selectedActivation);
         UpdatePresetChecks();
-        RenderKeys();
-        Revalidate();
+        RevalidateAndRender();
+    }
+
+    private void UpdateEmptyHintForeground()
+    {
+        // Application-scope themed lookups follow the system theme;
+        // resolve against the dialog's window-scoped theme instead.
+        _emptyHint.Foreground = NeutralInteractionBrush.ResolveThemedResource(
+            "TextFillColorSecondaryBrush", this) ??
+            new SolidColorBrush(Windows.UI.Color.FromArgb(0xFF, 0x9E, 0x9E, 0x9E));
     }
 
     private void OnOpened(ContentDialog sender, ContentDialogOpenedEventArgs args)
@@ -162,10 +199,7 @@ public sealed partial class HotkeyRecorderDialog : ContentDialog
 
     /// <summary>
     /// Closes the recorder dialog (if one is capturing) so its low-level
-    /// keyboard hook and hotkey suspensions are released. Called when the
-    /// settings window hides or really closes while a recording is in
-    /// progress: those paths never raise ContentDialog.Closing on their own,
-    /// and a leaked hook swallows every keystroke system-wide.
+    /// keyboard hook and hotkey suspensions are released.
     /// </summary>
     internal static void ShutdownActiveRecorder()
     {
@@ -177,14 +211,10 @@ public sealed partial class HotkeyRecorderDialog : ContentDialog
 
         try
         {
-            // Programmatic Hide always raises Closing, which runs the full
-            // teardown through TeardownCapture.
             recorder.Hide();
         }
         catch (Exception ex)
         {
-            // XAML teardown races a closing window; stop the hook directly so
-            // input is released even if the dialog itself is already dead.
             App.Log($"[HotkeyRecorder] Forced shutdown failed: {ex.Message}");
             recorder.TeardownCapture();
         }
@@ -199,25 +229,113 @@ public sealed partial class HotkeyRecorderDialog : ContentDialog
             return;
         }
 
-        _selectedPresetIndex = -1;
-        _selectedActivation = _session.HasGesture
-            ? GlobalHotkeyActivation.FromChord(_session.Gesture)
-            : null;
+        if (_session.HasGesture)
+        {
+            _selectedActivation = _isDoubleTapMode
+                ? GlobalHotkeyActivation.FromDoubleTapChord(_session.Gesture)
+                : GlobalHotkeyActivation.FromChord(_session.Gesture);
+        }
+        else if (_session.HeldModifiers != HotkeyModifierKeys.None)
+        {
+            // Live modifier hold in progress: clear committed selection so the
+            // hero well previews the held modifier keys dynamically.
+            _selectedActivation = null;
+        }
+        else if (_session.HasStandaloneModifier)
+        {
+            _selectedActivation = _isDoubleTapMode
+                ? GlobalHotkeyActivation.FromDoubleTapModifier(_session.LastStandaloneModifier)
+                : new GlobalHotkeyActivation(
+                    HotkeyActivationKind.Chord,
+                    new GlobalHotkeyGesture(_session.LastStandaloneModifier, 0));
+        }
+
+        _selectedPresetIndex = FindPresetIndex(_selectedActivation);
         UpdatePresetChecks();
-        RenderKeys();
-        Revalidate();
+        RevalidateAndRender();
     }
+
+    private void DoubleTapToggle_Click(object sender, RoutedEventArgs e)
+    {
+        if (_isSyncingToggle)
+        {
+            return;
+        }
+
+        _isDoubleTapMode = DoubleTapToggle.IsChecked == true;
+        UpdateRuleHintText();
+
+        if (_selectedActivation is { } current)
+        {
+            _selectedActivation = ConvertActivationForDoubleTapMode(current, _isDoubleTapMode);
+        }
+
+        _selectedPresetIndex = FindPresetIndex(_selectedActivation);
+        UpdatePresetChecks();
+        RevalidateAndRender();
+    }
+
+    private static GlobalHotkeyActivation ConvertActivationForDoubleTapMode(
+        GlobalHotkeyActivation current,
+        bool doubleTapEnabled)
+    {
+        if (doubleTapEnabled)
+        {
+            return current.Kind switch
+            {
+                HotkeyActivationKind.DoubleControl => current,
+                HotkeyActivationKind.DoubleTap => current,
+                HotkeyActivationKind.WindowsTap =>
+                    GlobalHotkeyActivation.FromDoubleTapModifier(HotkeyModifierKeys.Windows),
+                HotkeyActivationKind.Chord when current.Gesture.VirtualKey <= 0 &&
+                    GlobalHotkeyActivation.IsSingleModifierFlag(current.Gesture.Modifiers) =>
+                    GlobalHotkeyActivation.FromDoubleTapModifier(current.Gesture.Modifiers),
+                _ => GlobalHotkeyActivation.FromDoubleTapChord(current.Gesture)
+            };
+        }
+
+        return current.Kind switch
+        {
+            HotkeyActivationKind.DoubleControl =>
+                new GlobalHotkeyActivation(
+                    HotkeyActivationKind.Chord,
+                    new GlobalHotkeyGesture(HotkeyModifierKeys.Control, 0)),
+            HotkeyActivationKind.DoubleTap when current.IsModifierOnlyDoubleTap =>
+                new GlobalHotkeyActivation(
+                    HotkeyActivationKind.Chord,
+                    new GlobalHotkeyGesture(current.DoubleTapModifier, 0)),
+            HotkeyActivationKind.DoubleTap =>
+                GlobalHotkeyActivation.FromChord(current.Gesture),
+            _ => current
+        };
+    }
+
+    public static GlobalHotkeyActivation GetDefaultActivation(Scope scope) => scope switch
+    {
+        Scope.Search => GlobalHotkeyActivation.FromChord(
+            DeskBox.Features.Search.SearchSettingsViewModel.DefaultGesture),
+        Scope.Clipboard => GlobalHotkeyActivation.FromChord(
+            ClipboardHotkeyService.DefaultGesture),
+        _ => new GlobalHotkeyActivation(
+            SettingsService.DefaultGlobalHotkeyActivationKind,
+            new GlobalHotkeyGesture(
+                (HotkeyModifierKeys)SettingsService.DefaultGlobalHotkeyModifiers,
+                SettingsService.DefaultGlobalHotkeyKey))
+    };
 
     private void ResetButton_Click(object sender, RoutedEventArgs e)
     {
         _session.Clear();
-        _selectedActivation = IsSelectableActivation(_initialActivation)
-            ? _initialActivation
+        GlobalHotkeyActivation defaultActivation = GetDefaultActivation(RecorderScope);
+        _selectedActivation = IsSelectableActivation(defaultActivation)
+            ? defaultActivation
             : null;
+        _isDoubleTapMode = _selectedActivation?.IsDoubleTap == true;
+        SyncDoubleTapToggleVisual();
+        UpdateRuleHintText();
         _selectedPresetIndex = FindPresetIndex(_selectedActivation);
         UpdatePresetChecks();
-        RenderKeys();
-        Revalidate();
+        RevalidateAndRender();
     }
 
     private void ClearButton_Click(object sender, RoutedEventArgs e)
@@ -226,8 +344,7 @@ public sealed partial class HotkeyRecorderDialog : ContentDialog
         _selectedActivation = null;
         _selectedPresetIndex = -1;
         UpdatePresetChecks();
-        RenderKeys();
-        Revalidate();
+        RevalidateAndRender();
     }
 
     private async void OnPrimaryButtonClick(
@@ -256,7 +373,7 @@ public sealed partial class HotkeyRecorderDialog : ContentDialog
         finally
         {
             _isApplying = false;
-            Revalidate();
+            RevalidateAndRender();
             deferral.Complete();
         }
 
@@ -287,8 +404,6 @@ public sealed partial class HotkeyRecorderDialog : ContentDialog
                 Style = (Style)Resources["PresetButtonStyle"],
                 Content = new TextBlock { Text = _presets[index].Label }
             };
-            // Presets stay one-word compact; hardware requirements (e.g. the
-            // Copilot key) ride along as tooltips instead of label suffixes.
             if (!string.IsNullOrWhiteSpace(_presets[index].ToolTip))
             {
                 ToolTipService.SetToolTip(button, _presets[index].ToolTip);
@@ -305,32 +420,64 @@ public sealed partial class HotkeyRecorderDialog : ContentDialog
         _session.Clear();
         _selectedPresetIndex = index;
         _selectedActivation = _presets[index].Activation;
+        _isDoubleTapMode = _selectedActivation.Value.IsDoubleTap;
+        SyncDoubleTapToggleVisual();
+        UpdateRuleHintText();
         UpdatePresetChecks();
-        RenderKeys();
-        Revalidate();
+        RevalidateAndRender();
     }
 
-    private void AdjustButtonPassthrough(object focusedElement, int delta)
+    private void SyncDoubleTapToggleVisual()
     {
-        if (focusedElement is not ButtonBase)
+        _isSyncingToggle = true;
+        try
         {
-            return;
+            DoubleTapToggle.IsChecked = _isDoubleTapMode;
         }
+        finally
+        {
+            _isSyncingToggle = false;
+        }
+    }
 
-        _buttonFocusCount = Math.Max(0, _buttonFocusCount + delta);
-        _hook.PassthroughRequested = _buttonFocusCount > 0;
+    private void UpdateRuleHintText()
+    {
+        RuleHintTextBlock.Text = _localization.T(
+            _isDoubleTapMode
+                ? "Settings.HotkeyRecorder.DoubleTapRuleHint"
+                : "Settings.HotkeyRecorder.RuleHint");
+    }
+
+    private void OnElementGotFocus(object focusedElement)
+    {
+        // Only keyboard focus (Tab navigation) passes bare Space/Enter through
+        // to buttons; clicking Double-Tap/Clear/Reset with a mouse leaves Space
+        // available for recording (e.g. Double-tap Space).
+        if (focusedElement is ButtonBase { FocusState: FocusState.Keyboard } button)
+        {
+            _keyboardFocusedButtons.Add(button);
+            _hook.PassthroughRequested = _keyboardFocusedButtons.Count > 0;
+        }
+    }
+
+    private void OnElementLostFocus(object focusedElement)
+    {
+        if (focusedElement is ButtonBase button && _keyboardFocusedButtons.Remove(button))
+        {
+            _hook.PassthroughRequested = _keyboardFocusedButtons.Count > 0;
+        }
     }
 
     private int FindPresetIndex(GlobalHotkeyActivation? activation)
     {
-        if (activation is not { } selected)
+        if (activation is not { } selected || !GlobalHotkeyService.IsValidActivation(selected))
         {
             return -1;
         }
 
         for (int index = 0; index < _presets.Count; index++)
         {
-            if (_presets[index].Activation.Equals(selected))
+            if (GlobalHotkeyService.AreEquivalentActivations(_presets[index].Activation, selected))
             {
                 return index;
             }
@@ -347,104 +494,7 @@ public sealed partial class HotkeyRecorderDialog : ContentDialog
         }
     }
 
-    private void RenderKeys()
-    {
-        KeysPanel.Children.Clear();
-
-        if (_selectedActivation is { Kind: not HotkeyActivationKind.Chord } presetActivation)
-        {
-            KeysPanel.Children.Add(CreateKeyCap(new TextBlock
-            {
-                Text = GlobalHotkeyService.FormatActivation(presetActivation, _localization)
-            }));
-            return;
-        }
-
-        HotkeyModifierKeys modifiers = HotkeyModifierKeys.None;
-        int primaryKey = 0;
-        if (_selectedActivation is { Kind: HotkeyActivationKind.Chord } selected)
-        {
-            modifiers = selected.Gesture.Modifiers;
-            primaryKey = selected.Gesture.VirtualKey;
-        }
-        else if (_session.HeldModifiers != HotkeyModifierKeys.None)
-        {
-            modifiers = _session.HeldModifiers;
-        }
-
-        if (modifiers == HotkeyModifierKeys.None && primaryKey <= 0)
-        {
-            KeysPanel.Children.Add(_emptyHint);
-            return;
-        }
-
-        if (modifiers.HasFlag(HotkeyModifierKeys.Windows))
-        {
-            KeysPanel.Children.Add(CreateKeyCap(CreateWindowsKeyContent()));
-        }
-
-        if (modifiers.HasFlag(HotkeyModifierKeys.Control))
-        {
-            KeysPanel.Children.Add(CreateKeyCap(new TextBlock { Text = "Ctrl" }));
-        }
-
-        if (modifiers.HasFlag(HotkeyModifierKeys.Alt))
-        {
-            KeysPanel.Children.Add(CreateKeyCap(new TextBlock { Text = "Alt" }));
-        }
-
-        if (modifiers.HasFlag(HotkeyModifierKeys.Shift))
-        {
-            KeysPanel.Children.Add(CreateKeyCap(new TextBlock { Text = "Shift" }));
-        }
-
-        if (primaryKey > 0)
-        {
-            KeysPanel.Children.Add(CreateKeyCap(new TextBlock
-            {
-                Text = GlobalHotkeyService.FormatVirtualKey(primaryKey)
-            }));
-        }
-    }
-
-    private Border CreateKeyCap(FrameworkElement content)
-    {
-        if (content is TextBlock textBlock)
-        {
-            textBlock.FontSize = 13;
-            textBlock.HorizontalAlignment = HorizontalAlignment.Center;
-            textBlock.VerticalAlignment = VerticalAlignment.Center;
-        }
-        else if (content is IconElement icon)
-        {
-            icon.HorizontalAlignment = HorizontalAlignment.Center;
-            icon.VerticalAlignment = VerticalAlignment.Center;
-        }
-
-        return new Border
-        {
-            Style = (Style)Resources["KeyCapStyle"],
-            Child = content
-        };
-    }
-
-    private static FrameworkElement CreateWindowsKeyContent()
-    {
-        if (XamlBindingHelper.ConvertValue(typeof(Geometry), WindowsLogoPathData)
-                is Geometry geometry)
-        {
-            return new PathIcon
-            {
-                Data = geometry,
-                Width = 13,
-                Height = 13
-            };
-        }
-
-        return new TextBlock { Text = "Win" };
-    }
-
-    private void Revalidate()
+    private void RevalidateAndRender()
     {
         string? error = null;
         string? warning = null;
@@ -452,41 +502,33 @@ public sealed partial class HotkeyRecorderDialog : ContentDialog
 
         if (_selectedActivation is { } activation)
         {
-            if (activation.Kind == HotkeyActivationKind.Chord)
+            if (!GlobalHotkeyService.IsValidActivation(activation))
             {
-                GlobalHotkeyGesture gesture = activation.Gesture;
-                if (!GlobalHotkeyService.IsValidGesture(gesture))
+                if (activation.Kind == HotkeyActivationKind.Chord &&
+                    activation.Gesture.VirtualKey <= 0 &&
+                    GlobalHotkeyActivation.IsSingleModifierFlag(activation.Gesture.Modifiers))
                 {
-                    error = _localization.T("Settings.HotkeyRecorder.InvalidGesture");
+                    error = _localization.T("Settings.HotkeyRecorder.SingleModifierNeedsDoubleTap");
                 }
-                else if (_scope == Scope.Search &&
-                         gesture.Modifiers.HasFlag(HotkeyModifierKeys.Windows))
+                else if (activation.Kind == HotkeyActivationKind.Chord &&
+                         activation.Gesture.Modifiers == HotkeyModifierKeys.None &&
+                         activation.Gesture.VirtualKey == (int)Windows.System.VirtualKey.Space)
                 {
-                    // SearchHotkeyService registers through RegisterHotKey
-                    // without MOD_WIN; the Win chords stay unavailable there.
-                    error = _localization.T("Settings.HotkeyRecorder.WindowsUnsupported");
-                }
-                else if (_conflictChecker(gesture) is { } conflict)
-                {
-                    error = conflict;
+                    error = _localization.T("Settings.HotkeyRecorder.SingleSpaceNeedsDoubleTap");
                 }
                 else
                 {
-                    canSave = true;
-                    warning = GetWarningText(activation);
+                    error = _localization.T("Settings.HotkeyRecorder.InvalidGesture");
                 }
+            }
+            else if (_conflictChecker(activation) is { } conflict)
+            {
+                error = conflict;
             }
             else
             {
-                canSave = _scope == Scope.Global;
-                if (!canSave)
-                {
-                    error = _localization.T("Settings.HotkeyRecorder.InvalidGesture");
-                }
-                else
-                {
-                    warning = GetWarningText(activation);
-                }
+                canSave = true;
+                warning = GetWarningText(activation);
             }
         }
 
@@ -495,6 +537,49 @@ public sealed partial class HotkeyRecorderDialog : ContentDialog
         WarningInfoBar.Message = warning ?? string.Empty;
         WarningInfoBar.IsOpen = warning is not null;
         IsPrimaryButtonEnabled = canSave && !_isApplying;
+
+        KeyVisualState visualState = error is not null
+            ? KeyVisualState.Error
+            : KeyVisualState.Normal;
+        RenderKeys(visualState);
+    }
+
+    private void RenderKeys(KeyVisualState visualState)
+    {
+        KeysPanel.Children.Clear();
+
+        IReadOnlyList<KeyVisualToken> tokens;
+        if (_selectedActivation is { } selected)
+        {
+            tokens = KeyVisualControl.BuildTokens(selected, _doubleTapBadgeText);
+        }
+        else if (_session.HeldModifiers != HotkeyModifierKeys.None)
+        {
+            tokens = KeyVisualControl.BuildLiveCaptureTokens(
+                _session.HeldModifiers,
+                primaryKey: 0,
+                isDoubleTap: _isDoubleTapMode,
+                _doubleTapBadgeText);
+        }
+        else
+        {
+            tokens = [];
+        }
+
+        ClearButton.Visibility = tokens.Count > 0
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+
+        if (tokens.Count == 0)
+        {
+            KeysPanel.Children.Add(_emptyHint);
+            return;
+        }
+
+        foreach (KeyVisualToken token in tokens)
+        {
+            KeysPanel.Children.Add(KeyVisualControl.CreateHeroVisual(token, visualState));
+        }
     }
 
     private string? GetWarningText(GlobalHotkeyActivation activation)
@@ -504,26 +589,42 @@ public sealed partial class HotkeyRecorderDialog : ContentDialog
             return _localization.T("Settings.GlobalHotkey.WindowsTapWarning");
         }
 
-        if (activation.Kind != HotkeyActivationKind.Chord)
+        if (activation.IsStandaloneSpaceDoubleTap)
+        {
+            return _localization.T("Settings.GlobalHotkey.DoubleSpaceWarning");
+        }
+
+        if (activation.Kind is not (HotkeyActivationKind.Chord or HotkeyActivationKind.DoubleTap) ||
+            activation.IsModifierOnlyDoubleTap)
         {
             return null;
         }
 
-        if (GlobalHotkeyService.IsReservedSystemGesture(activation.Gesture))
+        GlobalHotkeyGesture gesture = activation.Gesture;
+        if (GlobalHotkeyService.IsReservedSystemGesture(gesture))
         {
-            return activation.Gesture.Modifiers == HotkeyModifierKeys.Alt
+            return gesture.Modifiers == HotkeyModifierKeys.Alt
                 ? _localization.T("Settings.GlobalHotkey.AltSpaceWarning")
                 : _localization.T("Settings.GlobalHotkey.ReservedWarning");
         }
 
-        return GlobalHotkeyService.IsRiskyGesture(activation.Gesture)
+        if (GlobalHotkeyService.IsWellKnownWindowsShortcut(gesture))
+        {
+            return _localization.T("Settings.HotkeyRecorder.SystemShortcutWarning");
+        }
+
+        if (gesture.Modifiers == (HotkeyModifierKeys.Control | HotkeyModifierKeys.Alt))
+        {
+            return _localization.T("Settings.HotkeyRecorder.AltGrWarning");
+        }
+
+        return GlobalHotkeyService.IsRiskyGesture(gesture)
             ? _localization.T("Settings.HotkeyRecorder.RiskyWarning")
             : null;
     }
 
     private static bool IsSelectableActivation(GlobalHotkeyActivation activation)
     {
-        return activation.Kind != HotkeyActivationKind.Chord ||
-               activation.Gesture.VirtualKey > 0;
+        return GlobalHotkeyService.IsValidActivation(activation);
     }
 }

@@ -1,4 +1,4 @@
-﻿using System.Collections.ObjectModel;
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Numerics;
 using DeskBox.Controls;
@@ -22,7 +22,53 @@ namespace DeskBox.Controls.WidgetContents;
 public sealed partial class FileSurfaceContent
 {
 
+    internal static readonly TimeSpan StackPopoverIdleReleaseDelay =
+        TimeSpan.FromSeconds(45);
+    internal const int StackSpringLoadDelayMilliseconds = 500;
+    internal const int StackPopoverLightDismissMaxDeferralMilliseconds = 450;
+    private const int StackSpringLoadedAutoCloseGraceMilliseconds = 270;
+    private static readonly UIntPtr StackPopoverDropSubclassId = new(0xDDB3);
+    private static WeakReference<FileSurfaceContent>? s_leasedStackPopoverOwner;
+
+    internal static FileSurfaceContent? TryGetActiveStackPopoverOwner(IntPtr rootWindowHandle)
+    {
+        if (rootWindowHandle == IntPtr.Zero ||
+            s_leasedStackPopoverOwner?.TryGetTarget(out FileSurfaceContent? owner) != true ||
+            owner is null ||
+            owner._isDisposed ||
+            !owner._stackPopoverPopupOpen ||
+            owner._stackPopoverHostWindow is not { WindowHandle: var hwnd } ||
+            hwnd != rootWindowHandle)
+        {
+            return null;
+        }
+
+        return owner;
+    }
+
     private StackPopoverHostWindow? _stackPopoverHostWindow;
+    private NativeDropHostBridge? _stackPopoverNativeDropBridge;
+    private bool _stackPopoverNativeDragOver;
+    private long _stackPopoverInboundEpoch;
+    private long _lastStackPopoverXamlClaimedEpoch = -1;
+    private string? _lastStackPopoverXamlClaimedSessionId;
+    private long _lastStackPopoverNativeClaimedGestureId;
+    private long _lastStackPopoverNativeCompletedTick64;
+    private string? _lastStackPopoverNativeFirstPath;
+    private DispatcherQueueTimer? _deferredStackPopoverDismissTimer;
+    private long _deferredStackPopoverDismissStartedTick;
+    private Win32Helper.POINT? _deferredStackPopoverDismissOriginCursor;
+    private bool _deferredStackPopoverDismissPointerMoved;
+    private bool _bypassStackPopoverLightDismissDeferral;
+    private DispatcherQueueTimer? _stackSpringLoadTimer;
+    private string? _pendingSpringLoadStackKey;
+    private bool _stackPopoverRevealWithoutActivation;
+    private bool _stackPopoverOpenedBySpringLoad;
+    private DispatcherQueueTimer? _springLoadedPopoverWatchTimer;
+    private DispatcherQueueTimer? _stackPopoverOutboundPassthroughTimer;
+    private bool _stackPopoverDragForeignWindowActivated;
+    private long _springLoadedPopoverOutsideSinceTick;
+    private DispatcherQueueTimer? _stackPopoverIdleReleaseTimer;
     private Windows.Graphics.RectInt32 _stackPopoverScreenBounds =
         new(0, 0, 0, 0);
     private ListViewBase? _stackPopoverItemsView;
@@ -35,7 +81,6 @@ public sealed partial class FileSurfaceContent
     private Grid? _stackPopoverTitleHost;
     private TextBlock? _stackPopoverTitleText;
     private TextBox? _stackPopoverTitleEditor;
-    private StackPopoverInlineRenameWindow? _stackPopoverTitleEditorWindow;
     private TextBlock? _stackPopoverEmptyText;
     private Canvas? _stackPopoverReorderOverlay;
     private Border? _stackPopoverReorderIndicator;
@@ -58,11 +103,17 @@ public sealed partial class FileSurfaceContent
     private Services.FlyoutBridgeBandPromoter? _popoverFlyoutBandPromoter;
     private bool _stackPopoverDragActive;
     private bool _stackPopoverCleanupPending;
+    private bool _stackPopoverCleanupRestoreOwnerForeground = true;
+    private string? _lightDismissedByOwnTileClickKey;
+    private long _lightDismissedByOwnTileClickTick;
     private long _stackPopoverShowGeneration;
     private string? _pendingStackPopoverKey;
     private EventHandler<object>? _stackPopoverRevealRenderingHandler;
+    private DispatcherQueueTimer? _stackPopoverRevealFallbackTimer;
     private int _stackPopoverRevealFrameCount;
+    private long _stackPopoverOpenedAtTick;
     private KeyEventHandler? _stackPopoverPreviewKeyHandler;
+    private PointerEventHandler? _stackPopoverExpansionWheelHandler;
     private PointerEventHandler? _stackPopoverSelectionPointerPressedHandler;
     private PointerEventHandler? _stackPopoverSelectionPointerMovedHandler;
     private PointerEventHandler? _stackPopoverSelectionPointerReleasedHandler;
@@ -70,6 +121,7 @@ public sealed partial class FileSurfaceContent
     private PointerEventHandler? _stackPopoverSurfacePointerPressedHandler;
     private bool _stackPopoverTitleEditing;
     private bool _stackPopoverTitleCommitInProgress;
+    private bool _stackPopoverTitleCancelling;
     private string? _stackPopoverTitleOriginalName;
     private long _stackPopoverTitleOpenedAtTick;
     private bool _stackPopoverLayoutRefreshQueued;
@@ -87,6 +139,57 @@ public sealed partial class FileSurfaceContent
         _stackPopoverTitleEditing ||
         IsStackPopoverItemRenameEditing;
 
+    internal IntPtr ActiveStackPopoverWindowHandle =>
+        (_stackPopoverPopupOpen ||
+            _stackPopoverPopupClosing ||
+            _pendingStackPopoverKey is not null) &&
+        _stackPopoverHostWindow is { } host
+            ? host.WindowHandle
+            : IntPtr.Zero;
+
+    internal void CloseOpenStackPopover()
+    {
+        if (_stackPopoverPopupOpen ||
+            _stackPopoverPopupClosing ||
+            _pendingStackPopoverKey is not null)
+        {
+            CloseStackPopover(restoreOwnerForeground: false);
+        }
+    }
+
+    internal static bool IsActiveStackPopoverWindow(IntPtr windowHandle) =>
+        windowHandle != IntPtr.Zero &&
+        s_leasedStackPopoverOwner is { } lease &&
+        lease.TryGetTarget(out FileSurfaceContent? owner) &&
+        owner is { _isDisposed: false, _stackPopoverPopupOpen: true, _stackPopoverHostWindow: { } host } &&
+        host.WindowHandle == windowHandle;
+
+    internal static void DismissActiveStackPopoverFromDesktopPinnedClick(
+        IntPtr clickedWidgetHandle,
+        object? originalSource)
+    {
+        if (s_leasedStackPopoverOwner is not { } lease ||
+            !lease.TryGetTarget(out FileSurfaceContent? owner) ||
+            owner is not { _isDisposed: false, _stackPopoverPopupOpen: true })
+        {
+            return;
+        }
+
+        if (clickedWidgetHandle == owner._hostWindowHandle &&
+            FindItemFromSource(originalSource) is WidgetStackItem)
+        {
+            return;
+        }
+
+        UiDispatch.PostAfterCallback(() =>
+        {
+            if (!owner._isDisposed && owner._stackPopoverPopupOpen)
+            {
+                owner.StackPopoverHost_DeactivatedByOutsideClick();
+            }
+        });
+    }
+
     private void InitializeStackPopoverLifecycle()
     {
         ViewModel.PropertyChanged += ViewModel_StackPopoverPropertyChanged;
@@ -95,6 +198,7 @@ public sealed partial class FileSurfaceContent
     private void DisposeStackPopoverLifecycle()
     {
         ViewModel.PropertyChanged -= ViewModel_StackPopoverPropertyChanged;
+        DisposeStackSpringLoadAndDismissTimers();
         CloseStackPopover(releaseImmediately: true);
     }
 
@@ -175,16 +279,13 @@ public sealed partial class FileSurfaceContent
         }
     }
 
+    internal static readonly TimeSpan StackPopoverRevealFallbackDelay =
+        TimeSpan.FromMilliseconds(48);
+
     private void UpdateStackFolderPreviewModes()
     {
-        foreach (Border surface in _stackSurfaces.ToArray())
+        foreach (Border surface in EnumerateRealizedStackSurfaces())
         {
-            if (surface.XamlRoot is null)
-            {
-                _stackSurfaces.Remove(surface);
-                continue;
-            }
-
             ApplyStackFolderPreviewMode(surface);
         }
     }
@@ -427,6 +528,19 @@ public sealed partial class FileSurfaceContent
                 _stackPopoverKey,
                 stackKey,
                 StringComparison.Ordinal);
+            if (sameStack &&
+                _stackPopoverPopupOpen &&
+                !_stackPopoverPopupClosing &&
+                _settingsService.Settings.FileWidget.DoubleClickToOpen)
+            {
+                long sinceOpened = Environment.TickCount64 - _stackPopoverOpenedAtTick;
+                if (sinceOpened >= 0 &&
+                    sinceOpened < Win32Helper.GetDoubleClickTime())
+                {
+                    return;
+                }
+            }
+
             CloseStackPopover();
             if (sameStack)
             {
@@ -445,9 +559,33 @@ public sealed partial class FileSurfaceContent
             return;
         }
 
+        string? dismissedOwnTileKey = _lightDismissedByOwnTileClickKey;
+        long dismissedOwnTileTick = _lightDismissedByOwnTileClickTick;
+        _lightDismissedByOwnTileClickKey = null;
+        if (string.Equals(dismissedOwnTileKey, stackKey, StringComparison.Ordinal) &&
+            Environment.TickCount64 - dismissedOwnTileTick <= 600)
+        {
+            return;
+        }
+
         // A normally dismissed popover keeps its control tree as a bounded
         // per-surface cache. Reopening it only rebinds the current members.
         QueueStackPopoverShow(stackKey);
+    }
+
+    private FrameworkElement? ResolveStackPopoverAnchorHint(string stackKey)
+    {
+        if (_lastStackInputAnchor is null ||
+            !_lastStackInputAnchor.TryGetTarget(out FrameworkElement? candidate) ||
+            candidate is null ||
+            candidate.XamlRoot is null ||
+            candidate.DataContext is not WidgetStackItem candidateStack ||
+            !string.Equals(candidateStack.StackKey, stackKey, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        return candidate;
     }
 
     private void QueueStackPopoverShow(string stackKey)
@@ -520,8 +658,7 @@ public sealed partial class FileSurfaceContent
             !ViewModel.UsesStackPopover ||
             _stackPopoverPopupOpen ||
             _stackPopoverPopupClosing ||
-            XamlRoot is null ||
-            FindStackSurface(stack.StackKey) is not { } anchor)
+            XamlRoot is null)
         {
             ClearPendingStackPopoverShow(generation, stack.StackKey);
             return;
@@ -535,8 +672,20 @@ public sealed partial class FileSurfaceContent
             return;
         }
 
+        FrameworkElement? anchor = FindStackSurface(currentStack.StackKey) ??
+            ResolveStackPopoverAnchorHint(currentStack.StackKey);
+        if (anchor is null)
+        {
+            App.LogVerbose(
+                $"[FileStack] Popover anchor unresolved; falling back to cursor/host placement " +
+                $"widget={WidgetId} stack={currentStack.StackKey}");
+        }
+
         try
         {
+            CancelStackPopoverIdleReleaseTimer();
+            ClaimSingletonStackPopoverLease();
+
             StackPopoverLayout layout = CalculateStackPopoverLayout(
                 currentStack.Members.Count);
 
@@ -547,10 +696,14 @@ public sealed partial class FileSurfaceContent
             if (_stackPopoverHostWindow is { } cachedHost &&
                 _stackPopoverIsListMode != ViewModel.IsListMode)
             {
+                bool preserveNoActivate = _stackPopoverRevealWithoutActivation;
+                bool preserveSpringLoad = _stackPopoverOpenedBySpringLoad;
                 ReleaseStackPopover();
                 // Release clears ordinary pending state. This open request is
                 // still current and is about to build the correctly typed tree.
                 _pendingStackPopoverKey = currentStack.StackKey;
+                _stackPopoverRevealWithoutActivation = preserveNoActivate;
+                _stackPopoverOpenedBySpringLoad = preserveSpringLoad;
             }
 
             StackPopoverHostWindow host;
@@ -566,6 +719,7 @@ public sealed partial class FileSurfaceContent
                 host.DeactivatedByOutsideClick +=
                     StackPopoverHost_DeactivatedByOutsideClick;
                 host.EscapeRequested += StackPopoverHost_EscapeRequested;
+                host.UndoRequested += StackPopoverHost_UndoRequested;
                 _stackPopoverHostWindow = host;
                 _stackPopoverItemsView = itemsView;
                 _stackPopoverSurface = surface;
@@ -576,6 +730,8 @@ public sealed partial class FileSurfaceContent
                 host = _stackPopoverHostWindow;
             }
 
+            EnsureStackPopoverNativeDropBridge(host);
+
             if (_stackPopoverItemsView is null || _stackPopoverSurface is null)
             {
                 ReleaseStackPopover();
@@ -584,6 +740,7 @@ public sealed partial class FileSurfaceContent
 
             _stackPopoverKey = currentStack.StackKey;
             _stackPopoverMembers = currentStack.Members.ToArray();
+            ViewModel.SetOpenPopoverStackKey(currentStack.StackKey);
             // The popover is the only surface that displays every folded
             // member at once; acquiring their icons here keeps the
             // release/acquire pairing intact when a release ran while the
@@ -597,19 +754,26 @@ public sealed partial class FileSurfaceContent
             // selection must not keep an expanded label under the popover.
             CollapseMainSurfaceNameExpansion();
             bool switchingStacks =
-                _stackPopoverItems.Count > 0 &&
+                !string.IsNullOrEmpty(_stackPopoverItemsStackKey) &&
                 !string.Equals(
                     _stackPopoverItemsStackKey,
                     currentStack.StackKey,
                     StringComparison.Ordinal);
-            // Switching to a different stack must not go through the in-place
-            // reconcile: container recycling keeps the previous stack's tiles
-            // visible mid-flight (realized containers enter a null DataContext
-            // intermediate state that preserves the old visuals). Clearing and
-            // refilling reuses the exact first-open path, which has no flash.
+            // Switching to a different stack replaces the inner XAML view inside
+            // the persistent host window so no recycled ItemsWrapGrid containers
+            // from the previous stack survive, while keeping the host HWND/island.
             if (switchingStacks)
             {
-                _stackPopoverItems.Clear();
+                RebuildStackPopoverContentForHost(
+                    host,
+                    currentStack,
+                    layout);
+            }
+
+            if (_stackPopoverItemsView is null || _stackPopoverSurface is null)
+            {
+                ReleaseStackPopover();
+                return;
             }
 
             ReconcileStackPopoverItems(_stackPopoverMembers);
@@ -661,47 +825,94 @@ public sealed partial class FileSurfaceContent
 
     private void ShowStackPopoverHost(
         StackPopoverHostWindow host,
-        FrameworkElement anchor,
+        FrameworkElement? anchor,
         StackPopoverLayout layout,
         long generation,
         string stackKey,
         bool waitForContentCommit)
     {
-        StackPopoverPosition position = ResolveStackPopoverPosition(
-            anchor,
-            layout.Width,
-            layout.Height);
-        double scale = Math.Max(
+        double hostScale = Math.Max(
             0.5,
             Win32Helper.GetDpiScaleForWindow(
                 _hostWindowHandle,
                 XamlRoot));
-        int width = StackPopoverPixelCalculator.ToCoveringPhysicalPixels(
-            layout.Width,
-            scale);
-        int height = StackPopoverPixelCalculator.ToCoveringPhysicalPixels(
-            layout.Height,
-            scale);
         int left;
         int top;
-        if (_hostWindowHandle != IntPtr.Zero &&
+        double targetScale = hostScale;
+        if (anchor is not null &&
+            _hostWindowHandle != IntPtr.Zero &&
             Win32Helper.GetWindowRect(
                 _hostWindowHandle,
                 out Win32Helper.RECT hostBounds))
         {
-            left = hostBounds.Left + (int)Math.Round(position.Left * scale);
-            top = hostBounds.Top + (int)Math.Round(position.Top * scale);
+            StackPopoverPosition position = ResolveStackPopoverPosition(
+                anchor,
+                layout.Width,
+                layout.Height);
+            left = hostBounds.Left + (int)Math.Round(position.Left * hostScale);
+            top = hostBounds.Top + (int)Math.Round(position.Top * hostScale);
+            int probeX = left + (int)Math.Round((layout.Width * hostScale) / 2);
+            int probeY = top + (int)Math.Round((layout.Height * hostScale) / 2);
+            targetScale = Math.Max(0.5, Win32Helper.GetDpiScaleForPoint(probeX, probeY));
         }
         else if (Win32Helper.GetCursorPos(out Win32Helper.POINT cursor))
         {
-            left = cursor.X - (width / 2);
-            top = cursor.Y - (height / 2);
+            targetScale = Math.Max(0.5, Win32Helper.GetDpiScaleForPoint(cursor.X, cursor.Y));
+            int cursorWidth = StackPopoverPixelCalculator.ToCoveringPhysicalPixels(
+                layout.Width,
+                targetScale);
+            int cursorHeight = StackPopoverPixelCalculator.ToCoveringPhysicalPixels(
+                layout.Height,
+                targetScale);
+            left = cursor.X - (cursorWidth / 2);
+            top = cursor.Y - (cursorHeight / 2);
+            if (Win32Helper.TryGetMonitorWorkArea(
+                    cursor.X,
+                    cursor.Y,
+                    out _,
+                    out Win32Helper.RECT workArea))
+            {
+                left = Math.Clamp(
+                    left,
+                    workArea.Left,
+                    Math.Max(workArea.Left, workArea.Right - cursorWidth));
+                top = Math.Clamp(
+                    top,
+                    workArea.Top,
+                    Math.Max(workArea.Top, workArea.Bottom - cursorHeight));
+            }
+        }
+        else if (_hostWindowHandle != IntPtr.Zero &&
+                 Win32Helper.GetWindowRect(
+                     _hostWindowHandle,
+                     out Win32Helper.RECT fallbackHostBounds))
+        {
+            int hostCenterX = fallbackHostBounds.Left +
+                (fallbackHostBounds.Right - fallbackHostBounds.Left) / 2;
+            int hostCenterY = fallbackHostBounds.Top +
+                (fallbackHostBounds.Bottom - fallbackHostBounds.Top) / 2;
+            targetScale = Math.Max(0.5, Win32Helper.GetDpiScaleForPoint(hostCenterX, hostCenterY));
+            int fallbackWidth = StackPopoverPixelCalculator.ToCoveringPhysicalPixels(
+                layout.Width,
+                targetScale);
+            int fallbackHeight = StackPopoverPixelCalculator.ToCoveringPhysicalPixels(
+                layout.Height,
+                targetScale);
+            left = hostCenterX - (fallbackWidth / 2);
+            top = hostCenterY - (fallbackHeight / 2);
         }
         else
         {
             left = 0;
             top = 0;
         }
+
+        int width = StackPopoverPixelCalculator.ToCoveringPhysicalPixels(
+            layout.Width,
+            targetScale);
+        int height = StackPopoverPixelCalculator.ToCoveringPhysicalPixels(
+            layout.Height,
+            targetScale);
 
         _stackPopoverScreenBounds = new Windows.Graphics.RectInt32(
             left,
@@ -723,7 +934,7 @@ public sealed partial class FileSurfaceContent
             $"cell={layout.CellWidth:0.#}x{layout.CellHeight:0.#} " +
             $"items={layout.ItemsWidth:0.#}x{layout.ItemsHeight:0.#} " +
             $"win={layout.Width:0.#}x{layout.Height:0.#} " +
-            $"scale={scale:0.###} phys={width}x{height} at={left},{top}");
+            $"scale={targetScale:0.###} phys={width}x{height} at={left},{top}");
         if (waitForContentCommit)
         {
             QueueStackPopoverRevealAfterContentCommit(
@@ -756,6 +967,10 @@ public sealed partial class FileSurfaceContent
             // has to reuse the previously opened stack's presented texture.
             if (++_stackPopoverRevealFrameCount < 2)
             {
+                // Nudge the cloaked XAML tree so the render loop schedules
+                // frame two on the very next VSync instead of going idle when
+                // no uncloaked element is animating.
+                _stackPopoverSurface?.InvalidateArrange();
                 return;
             }
 
@@ -765,6 +980,7 @@ public sealed partial class FileSurfaceContent
             CompleteStackPopoverReveal(host, generation, stackKey);
         };
         CompositionTarget.Rendering += _stackPopoverRevealRenderingHandler;
+        ArmStackPopoverRevealFallbackTimer(host, generation, stackKey);
     }
 
     private bool CanCompleteStackPopoverReveal(
@@ -797,19 +1013,36 @@ public sealed partial class FileSurfaceContent
         // the owner window's Deactivated synchronously, and the selection-clear
         // guard must already see the popover as open.
         _stackPopoverPopupOpen = true;
+        _stackPopoverOpenedAtTick = Environment.TickCount64;
+        bool revealWithoutActivation = _stackPopoverRevealWithoutActivation;
+        _stackPopoverRevealWithoutActivation = false;
         try
         {
-            host.RevealPrepared(_stackPopoverScreenBounds);
+            if (revealWithoutActivation)
+            {
+                host.RevealPreparedWithoutActivation(_stackPopoverScreenBounds);
+            }
+            else
+            {
+                host.RevealPrepared(_stackPopoverScreenBounds);
+            }
+            EnsureStackPopoverNativeDropBridge(host);
             _ = host.DispatcherQueue.TryEnqueue(
                 Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
                 LogStackPopoverRealizedGeometry);
-            App.Current?.WidgetManager?.ReassertRaisedWidgetGroupAfterDeskBoxActivation(
-                _hostWindowHandle,
-                "stack-popover-opened");
+            if (!revealWithoutActivation)
+            {
+                App.Current?.WidgetManager?.ReassertRaisedWidgetGroupAfterDeskBoxActivation(
+                    _hostWindowHandle,
+                    "stack-popover-opened");
+            }
             App.LogVerbose(
                 $"[FileStack] Popover opened widget={WidgetId} " +
-                $"stack={stackKey}");
-            _stackPopoverItemsView?.Focus(FocusState.Programmatic);
+                $"stack={stackKey} noActivate={revealWithoutActivation}");
+            if (!revealWithoutActivation)
+            {
+                _stackPopoverItemsView?.Focus(FocusState.Programmatic);
+            }
         }
         catch (Exception ex)
         {
@@ -822,6 +1055,7 @@ public sealed partial class FileSurfaceContent
 
     private void CancelStackPopoverReveal()
     {
+        _stackPopoverRevealFallbackTimer?.Stop();
         if (_stackPopoverRevealRenderingHandler is not null)
         {
             CompositionTarget.Rendering -= _stackPopoverRevealRenderingHandler;
@@ -928,29 +1162,111 @@ public sealed partial class FileSurfaceContent
             return;
         }
 
+        string? closingStackKey = _stackPopoverKey;
+        Win32Helper.POINT? deactivationCursor =
+            _stackPopoverHostWindow?.LastDeactivationCursorPoint;
+        bool clickedOwnAnchorTile = closingStackKey is not null &&
+            IsScreenPointInsideStackSurface(closingStackKey, deactivationCursor);
+        if (!_bypassStackPopoverLightDismissDeferral &&
+            !clickedOwnAnchorTile &&
+            ShouldDeferStackPopoverLightDismiss(
+                mouseButtonDown: IsAnyMouseButtonPressed(),
+                dragActive: IsAnyPopoverTargetDragInFlight(),
+                nativeDragOver: _stackPopoverNativeDragOver,
+                elapsedSinceDeactivateMs: 0))
+        {
+            ArmDeferredStackPopoverDismissTimer(deactivationCursor);
+            return;
+        }
+
+        if (clickedOwnAnchorTile)
+        {
+            _lightDismissedByOwnTileClickKey = closingStackKey;
+            _lightDismissedByOwnTileClickTick = Environment.TickCount64;
+        }
+        else
+        {
+            _lightDismissedByOwnTileClickKey = null;
+        }
+
         if (IsStackPopoverItemRenameEditing)
         {
             // Keep the same commit-on-lost-focus behavior as the normal file
             // surface. CloseStackPopover defers the hide until the async file
             // rename has finished, so an activation change cannot tear down
             // the editor while the filesystem operation is still in flight.
-            CloseStackPopover();
-            return;
-        }
-
-        if (_stackPopoverTitleEditing)
-        {
+            CloseStackPopover(restoreOwnerForeground: false);
             return;
         }
 
         CommitStackPopoverTitleRename();
-        HideStackPopoverForReuse();
+        HideStackPopoverForReuse(restoreOwnerForeground: false);
+        App.Current?.WidgetManager?.NotifyTransientPopupDismissedFromWidget(_hostWindowHandle);
+    }
+
+    private bool IsScreenPointInsideStackSurface(
+        string stackKey,
+        Win32Helper.POINT? screenPoint)
+    {
+        if (screenPoint is not { } pt ||
+            _hostWindowHandle == IntPtr.Zero ||
+            FindStackSurface(stackKey) is not
+            {
+                XamlRoot: not null,
+                ActualWidth: > 0,
+                ActualHeight: > 0
+            } anchor ||
+            !Win32Helper.GetWindowRect(_hostWindowHandle, out Win32Helper.RECT hostRect))
+        {
+            return false;
+        }
+
+        IntPtr pointWindow = Win32Helper.WindowFromPoint(pt);
+        if (pointWindow == IntPtr.Zero ||
+            (pointWindow != _hostWindowHandle &&
+             Win32Helper.GetAncestor(pointWindow, Win32Helper.GA_ROOT) != _hostWindowHandle))
+        {
+            return false;
+        }
+
+        double scale = Math.Max(
+            0.5,
+            Win32Helper.GetDpiScaleForWindow(_hostWindowHandle, XamlRoot));
+        Windows.Foundation.Point topLeftDip =
+            anchor.TransformToVisual(null).TransformPoint(default);
+        double left = hostRect.Left + (topLeftDip.X * scale);
+        double top = hostRect.Top + (topLeftDip.Y * scale);
+        double right = left + (anchor.ActualWidth * scale);
+        double bottom = top + (anchor.ActualHeight * scale);
+        return pt.X >= left && pt.X <= right && pt.Y >= top && pt.Y <= bottom;
+    }
+
+    private async void StackPopoverHost_UndoRequested()
+    {
+        if (_isDisposed || !_stackPopoverPopupOpen)
+        {
+            return;
+        }
+
+        await ExecuteUndoLatestMoveAsync();
     }
 
     private void StackPopoverHost_EscapeRequested()
     {
         if (_isDisposed || !_stackPopoverPopupOpen)
         {
+            return;
+        }
+
+        if (_isBoxSelecting && _stackPopoverItemsView is { } marqueeView)
+        {
+            CancelBoxSelection(marqueeView);
+            return;
+        }
+
+        if (_stackPopoverTitleEditing)
+        {
+            CancelStackPopoverTitleRename();
             return;
         }
 
@@ -1060,9 +1376,11 @@ public sealed partial class FileSurfaceContent
         view.RightTapped += Items_RightTapped;
         view.SelectionChanged += Items_SelectionChanged;
         view.CharacterReceived += Root_CharacterReceived;
+        _stackPopoverExpansionWheelHandler =
+            new PointerEventHandler(StackPopoverItems_PointerWheelDuringExpansion);
         view.AddHandler(
             UIElement.PointerWheelChangedEvent,
-            new PointerEventHandler(StackPopoverItems_PointerWheelDuringExpansion),
+            _stackPopoverExpansionWheelHandler,
             handledEventsToo: true);
         _stackPopoverPreviewKeyHandler =
             new KeyEventHandler(ItemsView_PreviewKeyDown);
@@ -1225,6 +1543,34 @@ public sealed partial class FileSurfaceContent
         AutomationProperties.SetName(title, stack.Name);
         _stackPopoverTitleHost = titleHost;
         _stackPopoverTitleText = title;
+        var titleEditor = new TextBox
+        {
+            MaxWidth = titleMaximumWidth,
+            Height = StackPopoverLayoutCalculator.TitleEditorHeight,
+            MaxLength = 128,
+            FontSize = 13,
+            TextAlignment = TextAlignment.Center,
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            IsHitTestVisible = false,
+            Visibility = Visibility.Collapsed,
+            Style = Application.Current.Resources.TryGetValue(
+                "WidgetInlineRenameTextBoxStyle",
+                out object? inlineRenameStyleValue)
+                ? inlineRenameStyleValue as Style
+                : null
+        };
+        if (ResolveBrush("TextFillColorPrimaryBrush") is { } titleEditorForeground)
+        {
+            titleEditor.Foreground = titleEditorForeground;
+        }
+        titleEditor.Loaded += StackPopoverTitleEditor_Loaded;
+        titleEditor.KeyDown += StackPopoverTitleEditor_KeyDown;
+        titleEditor.LostFocus += StackPopoverTitleEditor_LostFocus;
+        AutomationProperties.SetName(titleEditor, T("Common.Rename"));
+        _stackPopoverTitleEditor = titleEditor;
         var closeButton = new Button
         {
             Style = Application.Current.Resources.TryGetValue(
@@ -1245,6 +1591,7 @@ public sealed partial class FileSurfaceContent
             closeButton,
             T("Widget.Stack.Popover.Close"));
         titleHost.Children.Add(title);
+        titleHost.Children.Add(titleEditor);
         titleHost.Children.Add(closeButton);
         _stackPopoverCloseButton = closeButton;
         content.Children.Add(titleHost);
@@ -1338,6 +1685,8 @@ public sealed partial class FileSurfaceContent
             handledEventsToo: true);
 
         double cornerRadius = ResolveStackPopoverCornerRadius();
+        content.CornerRadius = new CornerRadius(
+            Math.Max(0, cornerRadius - StackPopoverLayoutCalculator.SurfacePadding));
         WidgetBorderVisuals borderVisuals =
             ResolveStackPopoverBorderVisuals();
         var surface = new Border
@@ -1352,9 +1701,7 @@ public sealed partial class FileSurfaceContent
             BorderThickness = new Thickness(borderVisuals.Thickness),
             AllowDrop = true,
             DataContext = stack,
-            Child = content,
-            Shadow = new ThemeShadow(),
-            Translation = new Vector3(0, 0, 48)
+            Child = content
         };
         surface.DragOver += StackSurface_DragOver;
         surface.DragLeave += StackSurface_DragLeave;
@@ -1367,9 +1714,14 @@ public sealed partial class FileSurfaceContent
         object sender,
         DoubleTappedRoutedEventArgs e)
     {
-        App.Log(
-            "[DiagRename] Title double-tapped fired " +
-            $"titleText={_stackPopoverTitleText is not null}");
+        if (_stackPopoverTitleEditing ||
+            IsVisualDescendantOf(
+                e.OriginalSource as DependencyObject,
+                _stackPopoverCloseButton))
+        {
+            return;
+        }
+
         if (_stackPopoverTitleText is { } title)
         {
             BeginStackPopoverTitleRename(title);
@@ -1386,144 +1738,88 @@ public sealed partial class FileSurfaceContent
         CloseStackPopover();
     }
 
+    private void ActivateStackPopoverInput(UIElement? focusTarget = null)
+    {
+        if (_stackPopoverHostWindow is not { } host)
+        {
+            return;
+        }
+
+        host.ActivateInput(focusTarget);
+    }
+
     private void BeginStackPopoverTitleRename(TextBlock title)
     {
         if (_stackPopoverTitleEditing ||
             !ReferenceEquals(_stackPopoverTitleText, title) ||
+            _stackPopoverTitleEditor is not { } editor ||
             _stackPopoverKey is not { } stackKey ||
             ViewModel.FindStackByKey(stackKey) is not { } stack)
         {
-            App.Log(
-                "[DiagRename] Title rename guard rejected " +
-                $"editing={_stackPopoverTitleEditing} " +
-                $"sameText={ReferenceEquals(_stackPopoverTitleText, title)} " +
-                $"key={_stackPopoverKey ?? "<null>"} " +
-                $"stackFound={_stackPopoverKey is not null && ViewModel.FindStackByKey(_stackPopoverKey) is not null}");
             return;
         }
 
-        App.Log("[DiagRename] Title rename proceeding");
+        if (IsStackPopoverItemRenameEditing)
+        {
+            CancelStackPopoverItemRename(finishPendingClose: false);
+        }
 
         const double editorHeight =
             StackPopoverLayoutCalculator.TitleEditorHeight;
         double maximumWidth = Math.Max(
             StackPopoverLayoutCalculator.TitleMinimumWidth,
             (_stackPopoverSurface?.ActualWidth ?? 0) -
-                (StackPopoverLayoutCalculator.SurfacePadding * 2));
+                (StackPopoverLayoutCalculator.SurfacePadding * 2) -
+                StackPopoverLayoutCalculator.TitleTrailingButtonWidth);
         double editorWidth = Math.Clamp(
-            Math.Max(title.ActualWidth, title.DesiredSize.Width) + 6,
+            Math.Max(title.ActualWidth, title.DesiredSize.Width) + 12,
             StackPopoverLayoutCalculator.TitleMinimumWidth,
             maximumWidth);
-        Style? inlineRenameStyle =
-            Application.Current.Resources.TryGetValue(
-                "WidgetInlineRenameTextBoxStyle",
-                out object? inlineRenameStyleValue)
-                ? inlineRenameStyleValue as Style
-                : null;
-        bool followMaterial = UsesStackPopoverMaterialStyle();
-        WidgetMaterialBackdropAppearance materialAppearance =
-            ResolveStackPopoverMaterialAppearance();
-        Brush editorBackground = followMaterial
-            ? CreateStackPopoverSurfaceBrush(materialAppearance)
-            : CreateStackPopoverNeutralBrush(materialAppearance.IsDark);
-        WidgetMaterialBackdropAppearance editorMaterialAppearance =
-            followMaterial
-                ? materialAppearance
-                : materialAppearance with
-                {
-                    MaterialType = SettingsService.WidgetMaterialTypeSolid
-                };
-        var editorWindow = new StackPopoverInlineRenameWindow(
-            stack.Name,
-            inlineRenameStyle,
-            editorBackground,
-            ResolveBrush("TextFillColorPrimaryBrush"),
-            editorMaterialAppearance,
-            _stackPopoverHostWindow?.WindowHandle ?? _hostWindowHandle);
-        TextBox editor = editorWindow.Editor;
-        editor.Loaded += StackPopoverTitleEditor_Loaded;
-        editor.KeyDown += StackPopoverTitleEditor_KeyDown;
-        editor.LostFocus += StackPopoverTitleEditor_LostFocus;
-        editorWindow.Closed += StackPopoverTitleEditorWindow_Closed;
-        AutomationProperties.SetName(editor, T("Common.Rename"));
+
+        editor.MaxWidth = maximumWidth;
+        editor.Width = editorWidth;
+        editor.Height = editorHeight;
+        editor.Text = stack.Name;
+        if (ResolveBrush("TextFillColorPrimaryBrush") is { } foreground)
+        {
+            editor.Foreground = foreground;
+        }
 
         _stackPopoverTitleEditing = true;
+        _stackPopoverTitleCancelling = false;
         _stackPopoverTitleOriginalName = stack.Name;
-        _stackPopoverTitleEditor = editor;
-        _stackPopoverTitleEditorWindow = editorWindow;
         _stackPopoverTitleOpenedAtTick = Environment.TickCount64;
         title.Visibility = Visibility.Collapsed;
+        editor.Visibility = Visibility.Visible;
+        editor.IsHitTestVisible = true;
+        HideStackPopoverTitleDeleteButton(editor);
         App.Current?.WidgetManager?.BeginWidgetInteraction(
             "surface-stack-popover-title-rename-opened");
-        editorWindow.ShowAndFocus(ResolveStackPopoverTitleEditorBounds(
-            editorWidth,
-            editorHeight));
-    }
-
-    private Windows.Graphics.RectInt32 ResolveStackPopoverTitleEditorBounds(
-        double editorWidth,
-        double editorHeight)
-    {
-        double scale = Math.Max(
-            0.5,
-            Win32Helper.GetDpiScaleForWindow(
-                _hostWindowHandle,
-                XamlRoot));
-        int width = Math.Max(1, (int)Math.Round(editorWidth * scale));
-        int height = Math.Max(1, (int)Math.Round(editorHeight * scale));
-        if (_stackPopoverScreenBounds.Width > 0 &&
-            _stackPopoverScreenBounds.Height > 0 &&
-            _stackPopoverSurface is { } surface)
-        {
-            double left = ((surface.ActualWidth - editorWidth) / 2);
-            double top = surface.Padding.Top +
-                ((StackPopoverLayoutCalculator.TitleHeight -
-                    editorHeight) / 2);
-            return new Windows.Graphics.RectInt32(
-                _stackPopoverScreenBounds.X + (int)Math.Round(left * scale),
-                _stackPopoverScreenBounds.Y + (int)Math.Round(top * scale),
-                width,
-                height);
-        }
-
-        if (Win32Helper.GetCursorPos(out Win32Helper.POINT cursor))
-        {
-            return new Windows.Graphics.RectInt32(
-                cursor.X - (width / 2),
-                cursor.Y - (height / 2),
-                width,
-                height);
-        }
-
-        return new Windows.Graphics.RectInt32(0, 0, width, height);
-    }
-
-    private void StackPopoverTitleEditorWindow_Closed(
-        object sender,
-        WindowEventArgs args)
-    {
-        if (_stackPopoverTitleEditing &&
-            ReferenceEquals(sender, _stackPopoverTitleEditorWindow))
-        {
-            App.Log("[DiagRename] Closed by window Closed event");
-            CommitStackPopoverTitleRename();
-        }
+        ActivateStackPopoverInput();
+        InlineEditorFocus.FocusWhenLoaded(
+            editor,
+            static editor => editor.SelectAll(),
+            DispatcherQueue,
+            "StackPopoverTitleRename");
     }
 
     private void StackPopoverTitleEditor_KeyDown(
         object sender,
         KeyRoutedEventArgs e)
     {
+        if (DeskBox.Helpers.ImeCompositionGuard.IsImeCompositionKeyEvent(e))
+        {
+            return;
+        }
+
         if (e.Key == Windows.System.VirtualKey.Enter)
         {
             e.Handled = true;
-            App.Log("[DiagRename] KeyDown Enter");
             CommitStackPopoverTitleRename();
         }
         else if (e.Key == Windows.System.VirtualKey.Escape)
         {
             e.Handled = true;
-            App.Log("[DiagRename] KeyDown Escape");
             CancelStackPopoverTitleRename();
         }
     }
@@ -1561,23 +1857,52 @@ public sealed partial class FileSurfaceContent
         }
     }
 
+    private static bool IsVisualDescendantOf(
+        DependencyObject? source,
+        DependencyObject? ancestor)
+    {
+        if (source is null || ancestor is null)
+        {
+            return false;
+        }
+
+        for (DependencyObject? current = source;
+             current is not null;
+             current = VisualTreeHelper.GetParent(current))
+        {
+            if (ReferenceEquals(current, ancestor))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private void StackPopoverTitleEditor_LostFocus(
         object sender,
         RoutedEventArgs e)
     {
-        // The editor window and the popover host exchange Win32 activation
-        // while the editor is still coming up, which raises one spurious
-        // LostFocus. The item editor swallows that via the same grace period;
-        // committing on it closed the title editor ~30ms after it opened.
-        if (InlineEditorFocus.TryRecoverFocusWithinGrace(
-                _stackPopoverTitleOpenedAtTick,
-                sender as TextBox))
+        if (_stackPopoverTitleCancelling)
         {
-            App.Log("[DiagRename] LostFocus recovered within grace");
+            _stackPopoverTitleCancelling = false;
             return;
         }
 
-        App.Log("[DiagRename] Editor LostFocus committing");
+        if (DeskBox.Helpers.TransientInputFocusGuard.ShouldDeferInlineEditorBlurCommit(
+                sender as Control,
+                _stackPopoverTitleOpenedAtTick,
+                _stackPopoverHostWindow?.WindowHandle ?? default,
+                () => _stackPopoverTitleEditing,
+                () =>
+                {
+                    CommitStackPopoverTitleRename();
+                    return Task.CompletedTask;
+                }))
+        {
+            return;
+        }
+
         CommitStackPopoverTitleRename();
     }
 
@@ -1585,9 +1910,11 @@ public sealed partial class FileSurfaceContent
         object sender,
         PointerRoutedEventArgs e)
     {
-        if (_stackPopoverTitleEditing)
+        if (_stackPopoverTitleEditing &&
+            !IsVisualDescendantOf(
+                e.OriginalSource as DependencyObject,
+                _stackPopoverTitleEditor))
         {
-            App.Log("[DiagRename] Surface pointer press while editing");
             CommitStackPopoverTitleRename();
         }
     }
@@ -1645,8 +1972,7 @@ public sealed partial class FileSurfaceContent
                 T("Widget.RenameFailed"),
                 WidgetFeedbackSeverity.Error,
                 "stack-popover-title-rename-error"));
-            editor.Focus(FocusState.Programmatic);
-            editor.SelectAll();
+            CompleteStackPopoverTitleRename();
         }
         finally
         {
@@ -1661,6 +1987,7 @@ public sealed partial class FileSurfaceContent
             return;
         }
 
+        _stackPopoverTitleCancelling = true;
         if (_stackPopoverTitleText is { } title &&
             _stackPopoverTitleOriginalName is { } originalName)
         {
@@ -1679,20 +2006,11 @@ public sealed partial class FileSurfaceContent
 
         _stackPopoverTitleEditing = false;
         _stackPopoverTitleOriginalName = null;
-        TextBox? editor = _stackPopoverTitleEditor;
-        StackPopoverInlineRenameWindow? editorWindow =
-            _stackPopoverTitleEditorWindow;
-        _stackPopoverTitleEditor = null;
-        _stackPopoverTitleEditorWindow = null;
-        if (editor is not null)
+        if (_stackPopoverTitleEditor is { } editor)
         {
-            editor.Loaded -= StackPopoverTitleEditor_Loaded;
-            editor.KeyDown -= StackPopoverTitleEditor_KeyDown;
-            editor.LostFocus -= StackPopoverTitleEditor_LostFocus;
-        }
-        if (editorWindow is not null)
-        {
-            editorWindow.Closed -= StackPopoverTitleEditorWindow_Closed;
+            editor.Visibility = Visibility.Collapsed;
+            editor.IsHitTestVisible = false;
+            editor.Text = string.Empty;
         }
         if (_stackPopoverTitleText is { } title)
         {
@@ -1700,16 +2018,11 @@ public sealed partial class FileSurfaceContent
         }
         App.Current?.WidgetManager?.EndWidgetInteraction(
             "surface-stack-popover-title-rename-closed");
-        editorWindow?.CloseEditorWindow();
-        // The rename editor is a separate top-level window; closing it leaves
-        // the popover host in a deactivated state, and the outside-click
-        // dismiss depends on a fresh Activated->Deactivated transition. Hand
-        // activation back so the popover can be dismissed by clicking away.
-        if (_stackPopoverPopupOpen &&
-            _stackPopoverHostWindow is { } host)
+        if (_stackPopoverPopupOpen && !_stackPopoverCleanupPending)
         {
-            host.Activate();
+            _stackPopoverItemsView?.Focus(FocusState.Programmatic);
         }
+        TryFinishStackPopoverCleanup();
     }
 
     private void ApplyStackPopoverForegroundResources(FrameworkElement scope)
@@ -1806,21 +2119,7 @@ public sealed partial class FileSurfaceContent
         bool materialSupported = WidgetMaterialSystemBackdrop.IsSupported(
             appearance.MaterialType);
         Windows.UI.Color surfaceColor;
-        if (materialSupported &&
-            WindowsCompatibilityService.UsesLegacyWindowAcrylic &&
-            SettingsService.IsAcrylicMaterial(appearance.MaterialType))
-        {
-            surfaceColor =
-                WidgetMaterialVisualCalculator
-                    .BuildLegacyAcrylicSurfaceOverlayColor(
-                        appearance.IsDark,
-                        appearance.AccentColor,
-                        appearance.MaterialType ==
-                            SettingsService.WidgetMaterialTypeAcrylicBase,
-                        appearance.SurfaceOpacity,
-                        appearance.MaterialIntensity);
-        }
-        else if (materialSupported)
+        if (materialSupported)
         {
             surfaceColor = Windows.UI.Color.FromArgb(0, 0, 0, 0);
         }
@@ -1831,6 +2130,14 @@ public sealed partial class FileSurfaceContent
                     appearance.IsDark,
                     appearance.AccentColor,
                     appearance.SurfaceOpacity);
+            if (surfaceColor.A == 0)
+            {
+                surfaceColor = Windows.UI.Color.FromArgb(
+                    1,
+                    surfaceColor.R,
+                    surfaceColor.G,
+                    surfaceColor.B);
+            }
         }
 
         return SharedBrushCache.GetOrCreate(surfaceColor);
@@ -1843,14 +2150,26 @@ public sealed partial class FileSurfaceContent
 
     private WidgetBorderVisuals ResolveStackPopoverBorderVisuals()
     {
+        bool isDark = IsStackPopoverDarkTheme();
         Windows.UI.Color accentColor =
             App.Current.ThemeService?.GetEffectiveAccentColor() ??
             AccentColorHelper.DefaultAccentColor;
-        return WidgetBorderVisualCalculator.Resolve(
+        WidgetBorderVisuals visuals = WidgetBorderVisualCalculator.Resolve(
             _settingsService.Settings.WidgetBorderStyle,
             _settingsService.Settings.WidgetBorderColorMode,
-            IsStackPopoverDarkTheme(),
+            isDark,
             accentColor);
+        if (visuals.Thickness <= 0 || visuals.BorderColor.A == 0)
+        {
+            byte channel = isDark ? (byte)0xFF : (byte)0x00;
+            byte alpha = isDark ? (byte)0x22 : (byte)0x16;
+            return new WidgetBorderVisuals(
+                1.0,
+                Windows.UI.Color.FromArgb(alpha, channel, channel, channel),
+                visuals.DividerColor);
+        }
+
+        return visuals;
     }
 
     private bool IsStackPopoverDarkTheme() =>
@@ -1905,6 +2224,11 @@ public sealed partial class FileSurfaceContent
         _stackPopoverSurface.RequestedTheme = requestedTheme;
         _stackPopoverSurface.Background = background;
         _stackPopoverSurface.CornerRadius = new CornerRadius(cornerRadius);
+        if (_stackPopoverSurface.Child is Grid contentGrid)
+        {
+            contentGrid.CornerRadius = new CornerRadius(
+                Math.Max(0, cornerRadius - StackPopoverLayoutCalculator.SurfacePadding));
+        }
         _stackPopoverSurface.BorderBrush =
             SharedBrushCache.GetOrCreate(borderVisuals.BorderColor);
         _stackPopoverSurface.BorderThickness =
@@ -1921,6 +2245,14 @@ public sealed partial class FileSurfaceContent
         {
             _stackPopoverTitleText.Foreground = primary;
         }
+        if (_stackPopoverTitleEditor is not null)
+        {
+            _stackPopoverTitleEditor.Foreground = primary;
+        }
+        if (_stackPopoverItemRenameEditor is not null)
+        {
+            _stackPopoverItemRenameEditor.Foreground = primary;
+        }
         if (_stackPopoverEmptyText is not null)
         {
             _stackPopoverEmptyText.Foreground = secondary;
@@ -1932,16 +2264,6 @@ public sealed partial class FileSurfaceContent
         }
 
         _stackPopoverHostWindow?.UpdateAppearance(materialAppearance, followMaterial);
-
-        _stackPopoverTitleEditorWindow?.UpdateAppearance(
-            background,
-            primary,
-            followMaterial
-                ? materialAppearance
-                : materialAppearance with
-                {
-                    MaterialType = SettingsService.WidgetMaterialTypeSolid
-                });
     }
 
     private bool UsesStackPopoverMaterialStyle() =>
@@ -1977,7 +2299,9 @@ public sealed partial class FileSurfaceContent
                 : ScrollBarVisibility.Disabled);
     }
 
-    private void CloseStackPopover(bool releaseImmediately = false)
+    private void CloseStackPopover(
+        bool releaseImmediately = false,
+        bool restoreOwnerForeground = true)
     {
         _stackPopoverShowGeneration++;
         CancelStackPopoverReveal();
@@ -1997,6 +2321,7 @@ public sealed partial class FileSurfaceContent
         if (IsStackPopoverItemRenameEditing)
         {
             _stackPopoverCleanupPending = true;
+            _stackPopoverCleanupRestoreOwnerForeground = restoreOwnerForeground;
             _ = CommitStackPopoverItemRenameAsync();
             return;
         }
@@ -2006,10 +2331,18 @@ public sealed partial class FileSurfaceContent
             _stackPopoverTitleEditing)
         {
             _stackPopoverCleanupPending = true;
+            _stackPopoverCleanupRestoreOwnerForeground = restoreOwnerForeground;
             return;
         }
 
-        HideStackPopoverForReuse();
+        if (restoreOwnerForeground)
+        {
+            HideStackPopoverForReuse();
+        }
+        else
+        {
+            HideStackPopoverForReuse(restoreOwnerForeground: false);
+        }
     }
 
     /// <summary>
@@ -2017,7 +2350,10 @@ public sealed partial class FileSurfaceContent
     /// state. The realized tree stays alive inside the hidden window, so
     /// reopening performs no container or island work at all.
     /// </summary>
-    private void HideStackPopoverForReuse()
+    private void HideStackPopoverForReuse() =>
+        HideStackPopoverForReuse(restoreOwnerForeground: true);
+
+    private void HideStackPopoverForReuse(bool restoreOwnerForeground)
     {
         if (_stackPopoverHostWindow is not { } host)
         {
@@ -2028,18 +2364,14 @@ public sealed partial class FileSurfaceContent
         if (IsStackPopoverItemRenameEditing)
         {
             _stackPopoverCleanupPending = true;
+            _stackPopoverCleanupRestoreOwnerForeground = restoreOwnerForeground;
             _ = CommitStackPopoverItemRenameAsync();
             return;
         }
-        // Hiding the popover while another widget is being activated makes
-        // the activation handler re-assert the raised group's z-order across
-        // every visible widget — a batch SetWindowPos that DWM repaints as a
-        // visible flash. The order did not actually change, so suppress the
-        // next reassert briefly.
-        App.Current?.WidgetManager?.SuppressRaisedGroupReassertBriefly();
+
         try
         {
-            host.HidePopover();
+            host.HidePopover(restoreOwnerForeground);
         }
         catch (Exception ex)
         {
@@ -2062,15 +2394,25 @@ public sealed partial class FileSurfaceContent
             surface.DataContext = null;
         }
 
+        CancelDeferredStackPopoverDismissTimer();
+        StopInteractiveAutoScroll(InteractiveAutoScrollMode.StackPopoverDrag);
+        StopSpringLoadedPopoverWatchTimer();
+        StopStackPopoverOutboundDragPassthroughWatch();
+        _stackPopoverOpenedBySpringLoad = false;
+        _stackPopoverRevealWithoutActivation = false;
+        _stackPopoverNativeDragOver = false;
         ResetBoxSelectionState();
         HideStackPopoverReorderIndicator();
         _stackPopoverMembers = [];
         _stackPopoverKey = null;
+        ViewModel.SetOpenPopoverStackKey(null);
         _stackPopoverLayout = null;
         _stackPopoverScreenBounds = new Windows.Graphics.RectInt32(0, 0, 0, 0);
+        ArmStackPopoverIdleReleaseTimer();
         _stackPopoverPopupOpen = false;
         _stackPopoverPopupClosing = false;
         _stackPopoverCleanupPending = false;
+        _stackPopoverCleanupRestoreOwnerForeground = true;
         _stackPopoverContextMenuOpen = false;
         _stackPopoverSystemContextMenuOpen = false;
         _stackPopoverDragActive = false;
@@ -2153,6 +2495,7 @@ public sealed partial class FileSurfaceContent
 
     private void DetachStackPopoverItemSurfaces(ListViewBase view)
     {
+        DetachStackPopoverItemSurfaces((DependencyObject)view);
         foreach (object item in view.Items)
         {
             if (view.ContainerFromItem(item) is DependencyObject container)
@@ -2164,16 +2507,27 @@ public sealed partial class FileSurfaceContent
 
     private void DetachStackPopoverItemSurfaces(DependencyObject root)
     {
+        if (root is SelectorItem selectorItem)
+        {
+            selectorItem.DragStarting -= Items_DragStarting;
+            selectorItem.DropCompleted -= Items_DropCompleted;
+        }
+
         if (root is FileItemSurface surface)
         {
             surface.VisualStateChanged -= ItemSurface_VisualStateChanged;
             surface.DataContextChanged -= ItemSurface_DataContextChanged;
             surface.LayoutContext = null;
+            surface.PrepareForContainerDetach();
             _itemSurfaces.Remove(surface.InteractiveBorder);
             if (ReferenceEquals(surface.InteractiveBorder, _folderDropTarget))
             {
                 _folderDropTarget = null;
                 _folderDropVisualActive = false;
+            }
+            if (ReferenceEquals(surface.InteractiveBorder, _launchDropTarget))
+            {
+                _launchDropTarget = null;
             }
         }
 
@@ -2185,22 +2539,182 @@ public sealed partial class FileSurfaceContent
         }
     }
 
-    private void ReleaseStackPopover()
+    private void ClaimSingletonStackPopoverLease()
     {
-        // A popover member drag can outlive the popover: once the events are
-        // detached below, DropCompleted can never arrive and the drag-session
-        // fields would stay armed until the next gesture. Complete the
-        // session first so the in-flight drop's observation, suppression and
-        // reorder cleanup still run.
-        if (_sourceDragSession.ReleaseRecoveryPending || _stackPopoverDragActive)
+        if (s_leasedStackPopoverOwner?.TryGetTarget(out FileSurfaceContent? previous) == true &&
+            !ReferenceEquals(previous, this))
         {
-            CompleteDragItemsSession(
-                DataPackageOperation.None,
-                _stackPopoverDragActive,
-                eventItems: []);
+            previous.EvictParkedStackPopoverFromSingletonLease();
         }
 
-        CancelStackPopoverReveal();
+        s_leasedStackPopoverOwner = new WeakReference<FileSurfaceContent>(this);
+    }
+
+    private void EvictParkedStackPopoverFromSingletonLease()
+    {
+        if (_isDisposed ||
+            _stackPopoverHostWindow is null ||
+            IsStackPopoverBlockingSurfaceOpen)
+        {
+            return;
+        }
+
+        ReleaseStackPopover();
+    }
+
+    private void ArmStackPopoverIdleReleaseTimer()
+    {
+        if (_isDisposed || _stackPopoverHostWindow is null)
+        {
+            return;
+        }
+
+        DispatcherQueue? queue = DispatcherQueue;
+        if (queue is null)
+        {
+            return;
+        }
+
+        if (_stackPopoverIdleReleaseTimer is null)
+        {
+            DispatcherQueueTimer timer = queue.CreateTimer();
+            timer.IsRepeating = false;
+            timer.Interval = StackPopoverIdleReleaseDelay;
+            timer.Tick += StackPopoverIdleReleaseTimer_Tick;
+            _stackPopoverIdleReleaseTimer = timer;
+            PerformanceLogger.RecordTransientUiTimerCreated();
+        }
+        else
+        {
+            _stackPopoverIdleReleaseTimer.Stop();
+            _stackPopoverIdleReleaseTimer.Interval = StackPopoverIdleReleaseDelay;
+        }
+
+        _stackPopoverIdleReleaseTimer.Start();
+    }
+
+    private void CancelStackPopoverIdleReleaseTimer()
+    {
+        _stackPopoverIdleReleaseTimer?.Stop();
+    }
+
+    private void DisposeStackPopoverIdleReleaseTimer()
+    {
+        if (_stackPopoverIdleReleaseTimer is not { } timer)
+        {
+            return;
+        }
+
+        _stackPopoverIdleReleaseTimer = null;
+        timer.Stop();
+        timer.Tick -= StackPopoverIdleReleaseTimer_Tick;
+        PerformanceLogger.RecordTransientUiTimerReleased();
+    }
+
+    private void StackPopoverIdleReleaseTimer_Tick(
+        DispatcherQueueTimer sender,
+        object args)
+    {
+        sender.Stop();
+        if (_isDisposed ||
+            _stackPopoverHostWindow is null ||
+            IsStackPopoverBlockingSurfaceOpen)
+        {
+            return;
+        }
+
+        App.LogVerbose(
+            $"[FileStack] Releasing idle parked popover widget={WidgetId}");
+        ReleaseStackPopover();
+    }
+
+    private void ArmStackPopoverRevealFallbackTimer(
+        StackPopoverHostWindow host,
+        long generation,
+        string stackKey)
+    {
+        if (_isDisposed || DispatcherQueue is not { } queue)
+        {
+            return;
+        }
+
+        if (_stackPopoverRevealFallbackTimer is null)
+        {
+            DispatcherQueueTimer timer = queue.CreateTimer();
+            timer.IsRepeating = false;
+            timer.Interval = StackPopoverRevealFallbackDelay;
+            timer.Tick += StackPopoverRevealFallbackTimer_Tick;
+            _stackPopoverRevealFallbackTimer = timer;
+            PerformanceLogger.RecordTransientUiTimerCreated();
+        }
+        else
+        {
+            _stackPopoverRevealFallbackTimer.Stop();
+            _stackPopoverRevealFallbackTimer.Interval = StackPopoverRevealFallbackDelay;
+        }
+
+        _stackPopoverRevealFallbackTimer.Start();
+    }
+
+    private void DisposeStackPopoverRevealFallbackTimer()
+    {
+        if (_stackPopoverRevealFallbackTimer is not { } timer)
+        {
+            return;
+        }
+
+        _stackPopoverRevealFallbackTimer = null;
+        timer.Stop();
+        timer.Tick -= StackPopoverRevealFallbackTimer_Tick;
+        PerformanceLogger.RecordTransientUiTimerReleased();
+    }
+
+    private void StackPopoverRevealFallbackTimer_Tick(
+        DispatcherQueueTimer sender,
+        object args)
+    {
+        sender.Stop();
+        if (_stackPopoverHostWindow is not { } host ||
+            _pendingStackPopoverKey is not { } stackKey)
+        {
+            CancelStackPopoverReveal();
+            return;
+        }
+
+        long generation = _stackPopoverShowGeneration;
+        if (!CanCompleteStackPopoverReveal(host, generation, stackKey))
+        {
+            CancelStackPopoverReveal();
+            return;
+        }
+
+        App.LogVerbose(
+            $"[FileStack] Popover content commit fallback fired widget={WidgetId} " +
+            $"stack={stackKey} frames={_stackPopoverRevealFrameCount}");
+        CompleteStackPopoverReveal(host, generation, stackKey);
+    }
+
+    private void RebuildStackPopoverContentForHost(
+        StackPopoverHostWindow host,
+        WidgetStackItem currentStack,
+        StackPopoverLayout layout)
+    {
+        DetachStackPopoverContentTree();
+        _stackPopoverItems.Clear();
+        ListViewBase itemsView = CreateStackPopoverItemsView(layout);
+        Border surface = CreateStackPopoverSurface(
+            currentStack,
+            itemsView,
+            layout);
+        host.SetContent(surface);
+        _stackPopoverItemsView = itemsView;
+        _stackPopoverSurface = surface;
+        _stackPopoverIsListMode = ViewModel.IsListMode;
+        EnsureStackPopoverNativeDropBridge(host);
+    }
+
+    private void DetachStackPopoverContentTree()
+    {
         ReleaseStackPopoverItemRenameEditor();
         if (_stackPopoverTitleHost is not null)
         {
@@ -2216,11 +2730,14 @@ public sealed partial class FileSurfaceContent
             _stackPopoverTitleEditor.LostFocus -=
                 StackPopoverTitleEditor_LostFocus;
         }
-        if (_stackPopoverTitleEditorWindow is not null)
+        if (_stackPopoverSurface is { } surface)
         {
-            _stackPopoverTitleEditorWindow.Closed -=
-                StackPopoverTitleEditorWindow_Closed;
+            surface.DragOver -= StackSurface_DragOver;
+            surface.DragLeave -= StackSurface_DragLeave;
+            surface.Drop -= StackSurface_Drop;
+            surface.DataContext = null;
         }
+
         if (_stackPopoverItemsView is { } view)
         {
             DetachStackPopoverItemSurfaces(view);
@@ -2237,26 +2754,20 @@ public sealed partial class FileSurfaceContent
             view.RightTapped -= Items_RightTapped;
             view.SelectionChanged -= Items_SelectionChanged;
             view.CharacterReceived -= Root_CharacterReceived;
+            if (_stackPopoverExpansionWheelHandler is not null)
+            {
+                view.RemoveHandler(
+                    UIElement.PointerWheelChangedEvent,
+                    _stackPopoverExpansionWheelHandler);
+            }
             if (_stackPopoverPreviewKeyHandler is not null)
             {
                 view.RemoveHandler(
                     UIElement.PreviewKeyDownEvent,
                     _stackPopoverPreviewKeyHandler);
             }
+            UnregisterScrollBarActivityTracking(view);
             view.ItemsSource = null;
-        }
-
-        // The collection is intentionally retained during ordinary light
-        // dismisses, but a lifecycle release must drop every member reference
-        // before the cached native tree is detached.
-        _stackPopoverItems.Clear();
-
-        if (_stackPopoverSurface is { } surface)
-        {
-            surface.DragOver -= StackSurface_DragOver;
-            surface.DragLeave -= StackSurface_DragLeave;
-            surface.Drop -= StackSurface_Drop;
-            surface.DataContext = null;
         }
 
         if (_stackPopoverSelectionHost is { } selectionHost)
@@ -2295,21 +2806,12 @@ public sealed partial class FileSurfaceContent
                 _stackPopoverSurfacePointerPressedHandler);
         }
 
-        StackPopoverInlineRenameWindow? titleEditorWindow =
-            _stackPopoverTitleEditorWindow;
         if (_stackPopoverCloseButton is not null)
         {
             _stackPopoverCloseButton.Click -= StackPopoverCloseButton_Click;
         }
-        ResetBoxSelectionState();        if (_stackPopoverHostWindow is { } releasingHost)
-        {
-            releasingHost.DeactivatedByOutsideClick -=
-                StackPopoverHost_DeactivatedByOutsideClick;
-            releasingHost.EscapeRequested -=
-                StackPopoverHost_EscapeRequested;
-            releasingHost.Destroy();
-        }
-        _stackPopoverHostWindow = null;
+
+        ResetBoxSelectionState();
         _stackPopoverAppearanceSignature = 0;
         _stackPopoverItemsView = null;
         _stackPopoverSurface = null;
@@ -2317,7 +2819,6 @@ public sealed partial class FileSurfaceContent
         _stackPopoverTitleText = null;
         _stackPopoverCloseButton = null;
         _stackPopoverTitleEditor = null;
-        _stackPopoverTitleEditorWindow = null;
         _stackPopoverItemRenameEditor = null;
         _stackPopoverEmptyText = null;
         _stackPopoverReorderOverlay = null;
@@ -2326,9 +2827,9 @@ public sealed partial class FileSurfaceContent
         _stackPopoverSelectionRectangle = null;
         ReleaseStackPopoverNameExpansionOverlay();
         _stackPopoverSelectionHost = null;
-        _stackPopoverLayout = null;
         _stackPopoverReorderInsertionIndex = -1;
         _stackPopoverPreviewKeyHandler = null;
+        _stackPopoverExpansionWheelHandler = null;
         _stackPopoverSelectionPointerPressedHandler = null;
         _stackPopoverSelectionPointerMovedHandler = null;
         _stackPopoverSelectionPointerReleasedHandler = null;
@@ -2336,19 +2837,73 @@ public sealed partial class FileSurfaceContent
         _stackPopoverSurfacePointerPressedHandler = null;
         _stackPopoverTitleEditing = false;
         _stackPopoverTitleCommitInProgress = false;
+        _stackPopoverTitleCancelling = false;
         _stackPopoverTitleOriginalName = null;
-        titleEditorWindow?.CloseEditorWindow();
+        _stackPopoverIconContainerStyleSignature = 0;
+    }
+
+    private void ReleaseStackPopover()
+    {
+        // A popover member drag can outlive the popover: once the events are
+        // detached below, DropCompleted can never arrive and the drag-session
+        // fields would stay armed until the next gesture. Complete the
+        // session first so the in-flight drop's observation, suppression and
+        // reorder cleanup still run.
+        DisposeStackPopoverIdleReleaseTimer();
+        DisposeStackPopoverRevealFallbackTimer();
+        DisposeStackSpringLoadAndDismissTimers();
+        _stackPopoverNativeDropBridge = null;
+        _stackPopoverNativeDragOver = false;
+        _stackPopoverOpenedBySpringLoad = false;
+        _stackPopoverRevealWithoutActivation = false;
+        if (s_leasedStackPopoverOwner?.TryGetTarget(out FileSurfaceContent? owner) == true &&
+            ReferenceEquals(owner, this))
+        {
+            s_leasedStackPopoverOwner = null;
+        }
+
+        if (_sourceDragSession.ReleaseRecoveryPending || _stackPopoverDragActive)
+        {
+            CompleteDragItemsSession(
+                DataPackageOperation.None,
+                _stackPopoverDragActive,
+                eventItems: []);
+        }
+
+        CancelStackPopoverReveal();
+        DetachStackPopoverContentTree();
+
+        // The collection is intentionally retained during ordinary light
+        // dismisses, but a lifecycle release must drop every member reference
+        // before the cached native tree is detached.
+        _stackPopoverItems.Clear();
+        _stackPopoverItemsStackKey = null;
+
+        if (_stackPopoverHostWindow is { } releasingHost)
+        {
+            releasingHost.DeactivatedByOutsideClick -=
+                StackPopoverHost_DeactivatedByOutsideClick;
+            releasingHost.EscapeRequested -=
+                StackPopoverHost_EscapeRequested;
+            releasingHost.UndoRequested -=
+                StackPopoverHost_UndoRequested;
+            releasingHost.Destroy();
+        }
+        _stackPopoverHostWindow = null;
+        _stackPopoverLayout = null;
         _stackPopoverMembers = [];
         _stackPopoverKey = null;
+        ViewModel.SetOpenPopoverStackKey(null);
         _stackPopoverPopupOpen = false;
         _stackPopoverPopupClosing = false;
         _stackPopoverContextMenuOpen = false;
         _stackPopoverSystemContextMenuOpen = false;
         _stackPopoverDragActive = false;
         _stackPopoverCleanupPending = false;
+        _stackPopoverCleanupRestoreOwnerForeground = true;
+        _lightDismissedByOwnTileClickKey = null;
         _pendingStackPopoverKey = null;
         _stackPopoverLayoutRefreshQueued = false;
-        _stackPopoverIconContainerStyleSignature = 0;
         UpdateSelectionCommandBar();
         UpdateItemSurfaceVisuals();
     }
@@ -2390,6 +2945,7 @@ public sealed partial class FileSurfaceContent
         object sender,
         PointerRoutedEventArgs e)
     {
+        HandleElevatedPointerCaptureLost(e.Pointer.PointerId);
         if (_stackPopoverItemsView is { } listView)
         {
             HandleItemsPointerCaptureLost(listView);
@@ -2405,7 +2961,17 @@ public sealed partial class FileSurfaceContent
             !IsStackPopoverItemRenameEditing &&
             _stackPopoverHostWindow is not null)
         {
-            HideStackPopoverForReuse();
+            bool restoreOwnerForeground = _stackPopoverCleanupRestoreOwnerForeground;
+            HideStackPopoverForReuse(restoreOwnerForeground);
+            if (!restoreOwnerForeground)
+            {
+                App.Current?.WidgetManager?.NotifyTransientPopupDismissedFromWidget(_hostWindowHandle);
+            }
+        }
+
+        if (_stackPopoverPopupOpen)
+        {
+            QueueStackPopoverReconciliation();
         }
 
         SchedulePopoverDismissIfDeactivated();
@@ -2444,6 +3010,66 @@ public sealed partial class FileSurfaceContent
 
     private void CompleteStackPopoverDrag()
     {
+        CompleteStackPopoverDragCore();
+        NotifyOutboundDragCompletedIfIdle();
+    }
+
+    private void StartStackPopoverOutboundDragPassthroughWatch()
+    {
+        _stackPopoverDragForeignWindowActivated = false;
+        if (_stackPopoverOutboundPassthroughTimer is null)
+        {
+            _stackPopoverOutboundPassthroughTimer = DispatcherQueue.CreateTimer();
+            _stackPopoverOutboundPassthroughTimer.Interval = TimeSpan.FromMilliseconds(45);
+            _stackPopoverOutboundPassthroughTimer.IsRepeating = true;
+            _stackPopoverOutboundPassthroughTimer.Tick += StackPopoverOutboundPassthroughTimer_Tick;
+        }
+
+        if (!_stackPopoverOutboundPassthroughTimer.IsRunning)
+        {
+            _stackPopoverOutboundPassthroughTimer.Start();
+        }
+    }
+
+    private void StopStackPopoverOutboundDragPassthroughWatch()
+    {
+        _stackPopoverOutboundPassthroughTimer?.Stop();
+        _stackPopoverDragForeignWindowActivated = false;
+        _stackPopoverHostWindow?.SetExternalDragPassthrough(false);
+    }
+
+    private void StackPopoverOutboundPassthroughTimer_Tick(
+        DispatcherQueueTimer sender,
+        object args)
+    {
+        if (_isDisposed ||
+            !_stackPopoverDragActive ||
+            !_stackPopoverPopupOpen ||
+            _stackPopoverHostWindow is not { IsVisible: true } host ||
+            host.WindowHandle == IntPtr.Zero)
+        {
+            StopStackPopoverOutboundDragPassthroughWatch();
+            return;
+        }
+
+        IntPtr fg = Win32Helper.GetForegroundWindow();
+        if (fg != IntPtr.Zero &&
+            fg != host.WindowHandle &&
+            fg != _hostWindowHandle &&
+            !TransientInputFocusGuard.IsCurrentProcessPopupBridge(fg) &&
+            !Win32Helper.IsWindowInCurrentProcess(fg))
+        {
+            _stackPopoverDragForeignWindowActivated = true;
+        }
+
+        bool insidePopover = IsCursorInsideOpenStackPopoverBounds(marginPixels: 0);
+        bool passthrough = !insidePopover || _stackPopoverDragForeignWindowActivated;
+        host.SetExternalDragPassthrough(passthrough);
+    }
+
+    private void CompleteStackPopoverDragCore()
+    {
+        StopStackPopoverOutboundDragPassthroughWatch();
         HideStackPopoverReorderIndicator();
         _stackPopoverDragActive = false;
         if (_stackPopoverCleanupPending &&
@@ -2452,9 +3078,24 @@ public sealed partial class FileSurfaceContent
             !IsStackPopoverItemRenameEditing &&
             _stackPopoverHostWindow is not null)
         {
-            HideStackPopoverForReuse();
+            bool restoreOwnerForeground = _stackPopoverCleanupRestoreOwnerForeground;
+            HideStackPopoverForReuse(restoreOwnerForeground);
+            if (!restoreOwnerForeground)
+            {
+                App.Current?.WidgetManager?.NotifyTransientPopupDismissedFromWidget(_hostWindowHandle);
+            }
+
+            return;
         }
+
+        if (_stackPopoverPopupOpen)
+        {
+            QueueStackPopoverReconciliation();
+        }
+
+        SchedulePopoverDismissIfDeactivated();
     }
+
 
     private bool TryCompleteReleasedStackPopoverReorder(
         IReadOnlyCollection<string> sourcePaths,
@@ -2535,6 +3176,7 @@ public sealed partial class FileSurfaceContent
             return;
         }
 
+        BeginStackPopoverDragAutoScroll();
         DragPayloadSnapshot payload = GetDragPayload(e.DataView);
         if (!TryGetCurrentStackPopoverDrag(
                 payload,
@@ -2559,6 +3201,15 @@ public sealed partial class FileSurfaceContent
                     e.DataView,
                     ToDataPackageOperation(resolvedIntent),
                     e.AllowedOperations);
+                string popoverTargetName = _stackPopoverKey is { } key &&
+                    ViewModel.FindStackByKey(key) is { } targetStack
+                        ? targetStack.Name
+                        : string.Empty;
+                string popoverCaption = resolvedIntent == FileDropIntent.Shortcut
+                    ? FormatDropCaption(resolvedIntent, popoverTargetName)
+                    : _localizationService.Format(
+                        "Widget.Stack.DragCaption.Add",
+                        popoverTargetName);
                 if (payload.IsDeskBoxFileDrag)
                 {
                     e.DragUIOverride.IsGlyphVisible =
@@ -2566,12 +3217,14 @@ public sealed partial class FileSurfaceContent
                         Windows.ApplicationModel.DataTransfer
                             .DataPackageOperation.None;
                     e.DragUIOverride.IsCaptionVisible = true;
-                    e.DragUIOverride.Caption = _localizationService.Format(
-                        "Widget.Stack.DragCaption.Add",
-                        _stackPopoverKey is { } key &&
-                        ViewModel.FindStackByKey(key) is { } targetStack
-                            ? targetStack.Name
-                            : string.Empty);
+                    e.DragUIOverride.Caption = popoverCaption;
+                }
+                else if (!HasActivePopoverShellDragWindow())
+                {
+                    ApplyExternalDragOperationVisuals(
+                        e,
+                        e.AcceptedOperation,
+                        popoverCaption);
                 }
 
                 Windows.Foundation.Point externalPosition =
@@ -2580,6 +3233,17 @@ public sealed partial class FileSurfaceContent
                     payload,
                     view,
                     externalPosition);
+                return;
+            }
+
+            if (payload.HasSurfacePathData &&
+                payload.IsInternalReorder &&
+                !payload.IsStackPopoverMemberDrag)
+            {
+                UpdateStackPopoverExternalDropPreview(
+                    payload,
+                    view,
+                    e.GetPosition(view));
                 return;
             }
 
@@ -2716,6 +3380,7 @@ public sealed partial class FileSurfaceContent
             e.DataView.RequestedOperation);
         HideStackPopoverReorderIndicator();
         PersistSurfaceReorder();
+        ResetExternalDropPreview();
         ResetDragPayloadCache();
         if (!reordered)
         {
@@ -2758,13 +3423,16 @@ public sealed partial class FileSurfaceContent
         int insertionIndex)
     {
         bool reordered = false;
+        string resolvedStackKey = sourceStack.StackKey;
         ApplyStackProjectionChange(() =>
             reordered = ViewModel.MoveStackMembersForReorder(
                 sourceStack.StackKey,
                 items,
-                insertionIndex));
+                insertionIndex,
+                out resolvedStackKey));
         if (reordered)
         {
+            _stackPopoverKey = resolvedStackKey;
             UpdateStackPopoverKeyAfterReorder(items);
             ScheduleStackPopoverReorderSelectionRestore(items);
         }
@@ -2924,6 +3592,20 @@ public sealed partial class FileSurfaceContent
         }
     }
 
+    internal void NotifyItemsMovedOutFromExternalWidget()
+    {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        UpdateEmptyState();
+        if (_stackPopoverHostWindow is not null)
+        {
+            QueueStackPopoverReconciliation();
+        }
+    }
+
     private void QueueStackPopoverReconciliation(
         string? expectedStackKey = null,
         IReadOnlyList<string>? memberAnchorPaths = null)
@@ -2995,9 +3677,24 @@ public sealed partial class FileSurfaceContent
 
     private void ReconcileStackPopover()
     {
-        if (_stackPopoverHostWindow is null ||
-            _stackPopoverKey is not { } stackKey)
+        if (_stackPopoverHostWindow is null)
         {
+            return;
+        }
+
+        if (_stackPopoverKey is not { } stackKey)
+        {
+            if (!string.IsNullOrEmpty(_stackPopoverItemsStackKey) &&
+                ViewModel.FindStackByKey(_stackPopoverItemsStackKey) is null &&
+                _stackPopoverItems.Count > 0)
+            {
+                // A parked stack was dissolved while the popover was closed.
+                // Drop stale member references immediately while retaining
+                // _stackPopoverItemsStackKey so the next open treats the host
+                // as switchingStacks and rebuilds its inner view cleanly.
+                _stackPopoverItems.Clear();
+            }
+
             return;
         }
 
@@ -3065,6 +3762,17 @@ public sealed partial class FileSurfaceContent
                 titleMaxWidth);
             title.MaxWidth = titleMaxWidth;
         }
+        if (_stackPopoverTitleEditor is { } titleEditor)
+        {
+            titleEditor.MaxWidth = titleMaxWidth;
+            if (_stackPopoverTitleEditing)
+            {
+                titleEditor.Width = Math.Clamp(
+                    titleEditor.Width,
+                    StackPopoverLayoutCalculator.TitleMinimumWidth,
+                    titleMaxWidth);
+            }
+        }
         UpdateStackPopoverScrollPolicy(itemsView.Items.Count);
 
         if (FindStackSurface(stack.StackKey) is not { } anchor)
@@ -3087,15 +3795,20 @@ public sealed partial class FileSurfaceContent
                 out Win32Helper.RECT hostBounds) &&
             _stackPopoverHostWindow.IsVisible)
         {
+            int left = hostBounds.Left + (int)Math.Round(position.Left * scale);
+            int top = hostBounds.Top + (int)Math.Round(position.Top * scale);
+            int probeX = left + (int)Math.Round((layout.Width * scale) / 2);
+            int probeY = top + (int)Math.Round((layout.Height * scale) / 2);
+            double targetScale = Math.Max(0.5, Win32Helper.GetDpiScaleForPoint(probeX, probeY));
             var bounds = new Windows.Graphics.RectInt32(
-                hostBounds.Left + (int)Math.Round(position.Left * scale),
-                hostBounds.Top + (int)Math.Round(position.Top * scale),
+                left,
+                top,
                 StackPopoverPixelCalculator.ToCoveringPhysicalPixels(
                     layout.Width,
-                    scale),
+                    targetScale),
                 StackPopoverPixelCalculator.ToCoveringPhysicalPixels(
                     layout.Height,
-                    scale));
+                    targetScale));
             _stackPopoverScreenBounds = bounds;
             _stackPopoverHostWindow.UpdateBounds(bounds);
         }
@@ -3191,5 +3904,1461 @@ public sealed partial class FileSurfaceContent
                 (height - popoverHeight) / 2);
             return new StackPopoverPosition(left, top, true, true);
         }
+    }
+
+    internal static bool ShouldDeferStackPopoverLightDismiss(
+        bool mouseButtonDown,
+        bool dragActive,
+        bool nativeDragOver,
+        long elapsedSinceDeactivateMs)
+    {
+        if (dragActive || nativeDragOver)
+        {
+            return true;
+        }
+
+        return mouseButtonDown &&
+            elapsedSinceDeactivateMs >= 0 &&
+            elapsedSinceDeactivateMs < StackPopoverLightDismissMaxDeferralMilliseconds;
+    }
+
+    internal static bool ShouldArmStackSpringLoad(
+        bool usesStackPopover,
+        bool isStackExpanded,
+        bool isDraggingStackHeader,
+        string? hoveredStackKey,
+        string? openPopoverStackKey,
+        string? sourceStackKey)
+    {
+        if (!usesStackPopover ||
+            isStackExpanded ||
+            isDraggingStackHeader ||
+            string.IsNullOrWhiteSpace(hoveredStackKey))
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(openPopoverStackKey) &&
+            string.Equals(hoveredStackKey, openPopoverStackKey, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(sourceStackKey) &&
+            string.Equals(hoveredStackKey, sourceStackKey, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static bool IsAnyMouseButtonPressed() =>
+        Win32Helper.IsKeyPressed(Windows.System.VirtualKey.LeftButton) ||
+        Win32Helper.IsKeyPressed(Windows.System.VirtualKey.RightButton);
+
+    private bool IsAnyPopoverTargetDragInFlight() =>
+        ActiveDeskBoxDragRegistry.HasActiveDrag ||
+        _elevatedDragSession is not null ||
+        _stackPopoverDragActive ||
+        _externalDropPathHints.Length > 0;
+
+    private bool HasActivePopoverShellDragWindow() =>
+        _stackPopoverNativeDropBridge?.HasActiveShellDragWindow == true;
+
+    private bool IsCursorInsideOpenStackPopoverBounds(int marginPixels = 0)
+    {
+        if (!_stackPopoverPopupOpen ||
+            _stackPopoverHostWindow is not { IsVisible: true } host ||
+            !Win32Helper.GetCursorPos(out Win32Helper.POINT pt) ||
+            !Win32Helper.GetWindowRect(host.WindowHandle, out Win32Helper.RECT rect))
+        {
+            return false;
+        }
+
+        return pt.X >= rect.Left - marginPixels &&
+               pt.X <= rect.Right + marginPixels &&
+               pt.Y >= rect.Top - marginPixels &&
+               pt.Y <= rect.Bottom + marginPixels;
+    }
+
+    private void ArmDeferredStackPopoverDismissTimer(Win32Helper.POINT? originCursor)
+    {
+        _deferredStackPopoverDismissStartedTick = Environment.TickCount64;
+        _deferredStackPopoverDismissOriginCursor = originCursor;
+        _deferredStackPopoverDismissPointerMoved = false;
+        if (_deferredStackPopoverDismissTimer is null)
+        {
+            _deferredStackPopoverDismissTimer = DispatcherQueue.CreateTimer();
+            _deferredStackPopoverDismissTimer.Interval = TimeSpan.FromMilliseconds(35);
+            _deferredStackPopoverDismissTimer.IsRepeating = true;
+            _deferredStackPopoverDismissTimer.Tick += DeferredStackPopoverDismissTimer_Tick;
+        }
+
+        if (!_deferredStackPopoverDismissTimer.IsRunning)
+        {
+            _deferredStackPopoverDismissTimer.Start();
+        }
+    }
+
+    private void CancelDeferredStackPopoverDismissTimer()
+    {
+        _deferredStackPopoverDismissTimer?.Stop();
+        _deferredStackPopoverDismissOriginCursor = null;
+        _deferredStackPopoverDismissPointerMoved = false;
+    }
+
+    private void DeferredStackPopoverDismissTimer_Tick(
+        DispatcherQueueTimer sender,
+        object args)
+    {
+        if (_isDisposed || !_stackPopoverPopupOpen || _stackPopoverPopupClosing)
+        {
+            CancelDeferredStackPopoverDismissTimer();
+            return;
+        }
+
+        if (_stackPopoverHostWindow is { } host &&
+            Win32Helper.GetForegroundWindow() == host.WindowHandle)
+        {
+            CancelDeferredStackPopoverDismissTimer();
+            return;
+        }
+
+        bool mouseDown = IsAnyMouseButtonPressed();
+        if (mouseDown &&
+            !_deferredStackPopoverDismissPointerMoved &&
+            _deferredStackPopoverDismissOriginCursor is { } origin &&
+            Win32Helper.GetCursorPos(out Win32Helper.POINT current))
+        {
+            int dx = Math.Abs(current.X - origin.X);
+            int dy = Math.Abs(current.Y - origin.Y);
+            if (dx >= 6 || dy >= 6)
+            {
+                _deferredStackPopoverDismissPointerMoved = true;
+            }
+        }
+
+        long elapsed = Environment.TickCount64 - _deferredStackPopoverDismissStartedTick;
+        bool externalDragMoving = mouseDown &&
+            _deferredStackPopoverDismissPointerMoved &&
+            elapsed < 15_000;
+        bool dragActive = IsAnyPopoverTargetDragInFlight() || externalDragMoving;
+
+        if (ShouldDeferStackPopoverLightDismiss(
+                mouseDown,
+                dragActive,
+                _stackPopoverNativeDragOver,
+                elapsed))
+        {
+            return;
+        }
+
+        CancelDeferredStackPopoverDismissTimer();
+        if (IsCursorInsideOpenStackPopoverBounds(marginPixels: 4))
+        {
+            return;
+        }
+
+        _bypassStackPopoverLightDismissDeferral = true;
+        try
+        {
+            StackPopoverHost_DeactivatedByOutsideClick();
+        }
+        finally
+        {
+            _bypassStackPopoverLightDismissDeferral = false;
+        }
+    }
+
+    private void ObserveStackTileSpringLoad(
+        WidgetStackItem? stack,
+        bool isStackHeader,
+        string? sourceStackKey)
+    {
+        if (_isDisposed ||
+            _isImportBusy ||
+            !ShouldArmStackSpringLoad(
+                ViewModel.UsesStackPopover,
+                stack?.IsExpanded ?? false,
+                isStackHeader,
+                stack?.StackKey,
+                _stackPopoverPopupOpen ? _stackPopoverKey : null,
+                sourceStackKey))
+        {
+            CancelStackSpringLoadTimer();
+            return;
+        }
+
+        string targetKey = stack!.StackKey;
+        if (string.Equals(_pendingSpringLoadStackKey, targetKey, StringComparison.Ordinal) &&
+            _stackSpringLoadTimer is { IsRunning: true })
+        {
+            return;
+        }
+
+        _pendingSpringLoadStackKey = targetKey;
+        if (_stackSpringLoadTimer is null)
+        {
+            _stackSpringLoadTimer = DispatcherQueue.CreateTimer();
+            _stackSpringLoadTimer.Interval = TimeSpan.FromMilliseconds(StackSpringLoadDelayMilliseconds);
+            _stackSpringLoadTimer.IsRepeating = false;
+            _stackSpringLoadTimer.Tick += StackSpringLoadTimer_Tick;
+        }
+
+        _stackSpringLoadTimer.Stop();
+        _stackSpringLoadTimer.Start();
+    }
+
+    private void CancelStackSpringLoadTimer()
+    {
+        _pendingSpringLoadStackKey = null;
+        _stackSpringLoadTimer?.Stop();
+    }
+
+    private void StackSpringLoadTimer_Tick(DispatcherQueueTimer sender, object args)
+    {
+        string? targetKey = _pendingSpringLoadStackKey;
+        _pendingSpringLoadStackKey = null;
+        sender.Stop();
+
+        if (_isDisposed ||
+            _isImportBusy ||
+            string.IsNullOrWhiteSpace(targetKey) ||
+            !ViewModel.UsesStackPopover ||
+            !IsAnyMouseButtonPressed() ||
+            ViewModel.FindStackByKey(targetKey) is not { Members.Count: > 0 } currentStack)
+        {
+            return;
+        }
+
+        if (Win32Helper.GetCursorPos(out Win32Helper.POINT pt) &&
+            !IsScreenPointInsideStackSurface(targetKey, pt) &&
+            (_stackMemberDropTarget?.DataContext is not WidgetStackItem memberStack ||
+             !string.Equals(memberStack.StackKey, targetKey, StringComparison.Ordinal)))
+        {
+            return;
+        }
+
+        if (_stackPopoverPopupOpen &&
+            !string.Equals(_stackPopoverKey, targetKey, StringComparison.Ordinal))
+        {
+            HideStackPopoverForReuse(restoreOwnerForeground: false);
+        }
+
+        if (_stackPopoverPopupOpen)
+        {
+            return;
+        }
+
+        _stackPopoverRevealWithoutActivation = true;
+        _stackPopoverOpenedBySpringLoad = true;
+        ShowStackPopover(currentStack);
+        StartSpringLoadedPopoverWatchTimer();
+    }
+
+    private void StartSpringLoadedPopoverWatchTimer()
+    {
+        _springLoadedPopoverOutsideSinceTick = 0;
+        if (_springLoadedPopoverWatchTimer is null)
+        {
+            _springLoadedPopoverWatchTimer = DispatcherQueue.CreateTimer();
+            _springLoadedPopoverWatchTimer.Interval = TimeSpan.FromMilliseconds(90);
+            _springLoadedPopoverWatchTimer.IsRepeating = true;
+            _springLoadedPopoverWatchTimer.Tick += SpringLoadedPopoverWatchTimer_Tick;
+        }
+
+        if (!_springLoadedPopoverWatchTimer.IsRunning)
+        {
+            _springLoadedPopoverWatchTimer.Start();
+        }
+    }
+
+    private void StopSpringLoadedPopoverWatchTimer()
+    {
+        _springLoadedPopoverWatchTimer?.Stop();
+        _springLoadedPopoverOutsideSinceTick = 0;
+    }
+
+    private void SpringLoadedPopoverWatchTimer_Tick(
+        DispatcherQueueTimer sender,
+        object args)
+    {
+        if (_isDisposed || !_stackPopoverOpenedBySpringLoad)
+        {
+            StopSpringLoadedPopoverWatchTimer();
+            return;
+        }
+
+        // While switchingStacks is waiting 2 render frames to reveal, keep the
+        // watch timer armed until CompleteStackPopoverReveal sets PopupOpen.
+        if (!_stackPopoverPopupOpen)
+        {
+            if (string.IsNullOrEmpty(_pendingStackPopoverKey))
+            {
+                StopSpringLoadedPopoverWatchTimer();
+            }
+
+            return;
+        }
+
+        if (_stackPopoverKey is not { } openKey)
+        {
+            StopSpringLoadedPopoverWatchTimer();
+            return;
+        }
+
+        Win32Helper.POINT? cursor = Win32Helper.GetCursorPos(out Win32Helper.POINT pt)
+            ? pt
+            : null;
+        bool insidePopover = IsCursorInsideOpenStackPopoverBounds(marginPixels: 28) ||
+            _stackPopoverNativeDragOver;
+        bool overAnchor = IsScreenPointInsideStackSurface(openKey, cursor);
+        bool mouseDown = IsAnyMouseButtonPressed();
+
+        if (insidePopover || overAnchor)
+        {
+            _springLoadedPopoverOutsideSinceTick = 0;
+            if (!mouseDown && !_stackPopoverNativeDragOver && !_stackPopoverContextMenuOpen)
+            {
+                // Spring-loaded popovers open via SW_SHOWNOACTIVATE; if the drag
+                // ended or cancelled via Esc without dropping, close the transient
+                // TOPMOST host so it cannot remain stranded without light-dismiss.
+                HideStackPopoverForReuse(restoreOwnerForeground: false);
+            }
+
+            return;
+        }
+
+        if (!mouseDown)
+        {
+            HideStackPopoverForReuse(restoreOwnerForeground: false);
+            return;
+        }
+
+        long now = Environment.TickCount64;
+        if (_springLoadedPopoverOutsideSinceTick == 0)
+        {
+            _springLoadedPopoverOutsideSinceTick = now;
+            return;
+        }
+
+        if (now - _springLoadedPopoverOutsideSinceTick >= StackSpringLoadedAutoCloseGraceMilliseconds)
+        {
+            HideStackPopoverForReuse(restoreOwnerForeground: false);
+        }
+    }
+
+    private void DisposeStackSpringLoadAndDismissTimers()
+    {
+        if (_deferredStackPopoverDismissTimer is not null)
+        {
+            _deferredStackPopoverDismissTimer.Stop();
+            _deferredStackPopoverDismissTimer.Tick -= DeferredStackPopoverDismissTimer_Tick;
+            _deferredStackPopoverDismissTimer = null;
+        }
+
+        if (_stackSpringLoadTimer is not null)
+        {
+            _stackSpringLoadTimer.Stop();
+            _stackSpringLoadTimer.Tick -= StackSpringLoadTimer_Tick;
+            _stackSpringLoadTimer = null;
+        }
+
+        if (_springLoadedPopoverWatchTimer is not null)
+        {
+            _springLoadedPopoverWatchTimer.Stop();
+            _springLoadedPopoverWatchTimer.Tick -= SpringLoadedPopoverWatchTimer_Tick;
+            _springLoadedPopoverWatchTimer = null;
+        }
+
+        if (_stackPopoverOutboundPassthroughTimer is not null)
+        {
+            _stackPopoverOutboundPassthroughTimer.Stop();
+            _stackPopoverOutboundPassthroughTimer.Tick -= StackPopoverOutboundPassthroughTimer_Tick;
+            _stackPopoverOutboundPassthroughTimer = null;
+        }
+
+        _pendingSpringLoadStackKey = null;
+        _deferredStackPopoverDismissOriginCursor = null;
+        _deferredStackPopoverDismissPointerMoved = false;
+        _springLoadedPopoverOutsideSinceTick = 0;
+    }
+
+    internal void MarkStackPopoverXamlDropClaimed(DataPackageView? dataView)
+    {
+        _lastStackPopoverXamlClaimedEpoch = _stackPopoverInboundEpoch;
+        if (dataView is not null &&
+            dataView.Properties.TryGetValue(
+                DeskBoxDragData.DragSessionIdProperty,
+                out object? rawSessionId) &&
+            rawSessionId is string sessionId &&
+            !string.IsNullOrWhiteSpace(sessionId))
+        {
+            _lastStackPopoverXamlClaimedSessionId = sessionId;
+        }
+
+        if (_stackPopoverNativeDropBridge is { MaxActiveGestureId: > 0 } bridge &&
+            bridge.MaxActiveGestureId > _lastStackPopoverNativeClaimedGestureId)
+        {
+            _lastStackPopoverNativeClaimedGestureId = bridge.MaxActiveGestureId;
+        }
+    }
+
+    private void EnsureStackPopoverNativeDropBridge(StackPopoverHostWindow host)
+    {
+        if (_isDisposed || host.WindowHandle == IntPtr.Zero)
+        {
+            return;
+        }
+
+        if (_stackPopoverNativeDropBridge is null ||
+            _stackPopoverNativeDropBridge.HostWindowHandle != host.WindowHandle)
+        {
+            _stackPopoverNativeDropBridge?.Dispose();
+            _stackPopoverNativeDropBridge = new NativeDropHostBridge(
+                host.WindowHandle,
+                host.DispatcherQueue,
+                StackPopoverDropSubclassId,
+                CreateStackPopoverNativeDropTarget,
+                DetachStackPopoverNativeDropTarget,
+                ShouldSkipStackPopoverLegacyDropFiles,
+                HandleStackPopoverLegacyDropFiles);
+            host.AttachNativeDropBridge(_stackPopoverNativeDropBridge);
+        }
+
+        _stackPopoverNativeDropBridge.EnsureRegistered();
+    }
+
+    private NativeDropTarget CreateStackPopoverNativeDropTarget(IntPtr targetWindow)
+    {
+        var target = new NativeDropTarget(
+            targetWindow,
+            ShouldDefaultStackPopoverNativeDropToMove,
+            CreateStackPopoverNativeDropDescription,
+            ShouldUseStackPopoverNativeDropVisual,
+            ShouldFollowWindowsStackPopoverNativeDrop)
+        {
+            SameVolumeProbe = IsStackPopoverNativeDropOnSameVolume,
+            HasMappedFolderProbe = HasStackPopoverMappedFolder,
+            UndisplayablePathProbe = FileService.IsFilteredFromWidgetDisplay,
+            ImportBusyProbe = () => _isImportBusy
+        };
+        target.DragEnterEvent += StackPopoverNativeDrop_DragEnter;
+        target.DragOverEvent += StackPopoverNativeDrop_DragOver;
+        target.DragLeaveEvent += StackPopoverNativeDrop_DragLeave;
+        target.UndisplayableDropBlocked += StackPopoverNativeDrop_UndisplayableBlocked;
+        target.ZeroResultDropBlocked += StackPopoverNativeDrop_ZeroResultBlocked;
+        target.ImportBusyDropBlocked += StackPopoverNativeDrop_ImportBusyBlocked;
+        target.DropIntentEvent += StackPopoverNativeDrop_DropIntent;
+        return target;
+    }
+
+    private void DetachStackPopoverNativeDropTarget(NativeDropTarget target)
+    {
+        target.DragEnterEvent -= StackPopoverNativeDrop_DragEnter;
+        target.DragOverEvent -= StackPopoverNativeDrop_DragOver;
+        target.DragLeaveEvent -= StackPopoverNativeDrop_DragLeave;
+        target.UndisplayableDropBlocked -= StackPopoverNativeDrop_UndisplayableBlocked;
+        target.ZeroResultDropBlocked -= StackPopoverNativeDrop_ZeroResultBlocked;
+        target.ImportBusyDropBlocked -= StackPopoverNativeDrop_ImportBusyBlocked;
+        target.DropIntentEvent -= StackPopoverNativeDrop_DropIntent;
+    }
+
+    private bool ShouldUseStackPopoverNativeDropVisual() =>
+        !SuppressesNativeShellDragVisual && !_stackPopoverDragActive;
+
+    private bool ShouldDefaultStackPopoverNativeDropToMove() =>
+        string.Equals(
+            _settingsService.Settings.FileWidget.ManagedDropAction,
+            SettingsService.ManagedDropActionMove,
+            StringComparison.Ordinal);
+
+    private bool ShouldFollowWindowsStackPopoverNativeDrop() =>
+        string.Equals(
+            _settingsService.Settings.FileWidget.ManagedDropAction,
+            SettingsService.ManagedDropActionFollowWindows,
+            StringComparison.Ordinal);
+
+    private bool HasStackPopoverMappedFolder()
+    {
+        string prospective = TransferIntentEngine.ResolveProspectiveManagedDestination(
+            ViewModel.CurrentFolderPath,
+            ViewModel.MappedFolderPath,
+            _settingsService.Settings.FileWidget.DefaultManagedStorageRootPath);
+        return !string.IsNullOrWhiteSpace(prospective);
+    }
+
+    private bool IsStackPopoverNativeDropOnSameVolume(IReadOnlyList<string> paths)
+    {
+        string destination = TransferIntentEngine.ResolveProspectiveManagedDestination(
+            ViewModel.CurrentFolderPath,
+            ViewModel.MappedFolderPath,
+            _settingsService.Settings.FileWidget.DefaultManagedStorageRootPath);
+        if (string.IsNullOrWhiteSpace(destination))
+        {
+            return true;
+        }
+
+        return PathOriginClassifier.AreAllOnSameVolume(
+            paths,
+            destination,
+            TimeSpan.FromMilliseconds(80));
+    }
+
+    private NativeDropDescriptionText? CreateStackPopoverNativeDropDescription(uint effect)
+    {
+        if (effect == NativeDropEffectPolicy.None)
+        {
+            return null;
+        }
+
+        string stackName = _stackPopoverKey is { } key &&
+            ViewModel.FindStackByKey(key) is { } stack
+                ? stack.Name
+                : (string.IsNullOrWhiteSpace(ViewModel.Name) ? "DeskBox" : ViewModel.Name);
+
+        if (effect == NativeDropEffectPolicy.Link)
+        {
+            string linkMessage = ContentWidgetWindow.ToShellDropDescriptionMessage(
+                _localizationService.T("Widget.CreateShortcut"));
+            return linkMessage.Contains("%1", StringComparison.Ordinal)
+                ? new NativeDropDescriptionText(linkMessage, stackName)
+                : new NativeDropDescriptionText("%1", linkMessage);
+        }
+
+        string importMessage = ContentWidgetWindow.ToShellDropDescriptionMessage(
+            _localizationService.T("Widget.Stack.DragCaption.Import"));
+        return importMessage.Contains("%1", StringComparison.Ordinal)
+            ? new NativeDropDescriptionText(importMessage, stackName)
+            : null;
+    }
+
+    private void StackPopoverNativeDrop_UndisplayableBlocked(int count)
+    {
+        _ = DispatcherQueue.TryEnqueue(() =>
+        {
+            if (!_isDisposed)
+            {
+                NotifyNativeDropBlockedUndisplayable(count);
+            }
+        });
+    }
+
+    private void StackPopoverNativeDrop_ZeroResultBlocked()
+    {
+        _ = DispatcherQueue.TryEnqueue(() =>
+        {
+            if (!_isDisposed)
+            {
+                NotifyNativeDropZeroResult();
+            }
+        });
+    }
+
+    private void StackPopoverNativeDrop_ImportBusyBlocked()
+    {
+        _ = DispatcherQueue.TryEnqueue(() =>
+        {
+            if (!_isDisposed)
+            {
+                NotifyNativeDropImportBusy();
+            }
+        });
+    }
+
+    private void StackPopoverNativeDrop_DragEnter(int screenX, int screenY, bool hasFileData)
+    {
+        System.Threading.Interlocked.Increment(ref _stackPopoverInboundEpoch);
+        _stackPopoverNativeDragOver = hasFileData;
+        ObserveStackPopoverNativePointer(screenX, screenY, hasFileData);
+    }
+
+    private void StackPopoverNativeDrop_DragOver(int screenX, int screenY)
+    {
+        bool hasFileData = _stackPopoverNativeDropBridge?.Targets.Any(static t => t.HasFileData) == true;
+        _stackPopoverNativeDragOver = hasFileData;
+        ObserveStackPopoverNativePointer(screenX, screenY, hasFileData);
+    }
+
+    private void StackPopoverNativeDrop_DragLeave()
+    {
+        _stackPopoverNativeDragOver = false;
+        System.Threading.Interlocked.Increment(ref _stackPopoverInboundEpoch);
+        _ = DispatcherQueue.TryEnqueue(() =>
+        {
+            if (_isDisposed)
+            {
+                return;
+            }
+
+            StopInteractiveAutoScroll(InteractiveAutoScrollMode.StackPopoverDrag);
+            HideStackPopoverReorderIndicator();
+            if (ReferenceEquals(_stackMemberDropTarget, _stackPopoverSurface))
+            {
+                ClearStackMemberDropTarget();
+            }
+        });
+    }
+
+    private void ObserveStackPopoverNativePointer(int screenX, int screenY, bool hasFileData)
+    {
+        _ = DispatcherQueue.TryEnqueue(() =>
+        {
+            if (_isDisposed || !_stackPopoverPopupOpen)
+            {
+                return;
+            }
+
+            if (!hasFileData || _isImportBusy || _stackPopoverDragActive)
+            {
+                HideStackPopoverReorderIndicator();
+                if (ReferenceEquals(_stackMemberDropTarget, _stackPopoverSurface))
+                {
+                    ClearStackMemberDropTarget();
+                }
+
+                return;
+            }
+
+            BeginStackPopoverDragAutoScroll();
+            if (TryResolveStackPopoverChildIconDropTarget(
+                    screenX,
+                    screenY,
+                    out Border? childBorder,
+                    out WidgetItem? childTarget) &&
+                childBorder is not null &&
+                childTarget is not null)
+            {
+                HideStackPopoverReorderIndicator();
+                if (ReferenceEquals(_stackMemberDropTarget, _stackPopoverSurface))
+                {
+                    ClearStackMemberDropTarget();
+                }
+
+                if (ItemDropBehaviorPolicy.Resolve(childTarget) == ItemDropBehavior.Launch)
+                {
+                    SetLaunchDropTarget(childBorder);
+                }
+                else
+                {
+                    SetFolderDropTarget(childBorder);
+                }
+
+                return;
+            }
+
+            ClearFolderDropTarget();
+            ClearLaunchDropTarget();
+            if (_stackPopoverSurface is { } surface)
+            {
+                SetStackMemberDropTarget(surface);
+            }
+
+            UpdateStackPopoverIndicatorFromScreenPoint(screenX, screenY);
+        });
+    }
+
+    internal bool TryResolveStackPopoverChildIconDropTarget(
+        int? screenX,
+        int? screenY,
+        out Border? targetBorder,
+        out WidgetItem? childTarget)
+    {
+        targetBorder = null;
+        childTarget = null;
+        if (screenX is not { } sx ||
+            screenY is not { } sy ||
+            _stackPopoverHostWindow is not { IsVisible: true, WindowHandle: not 0 } host ||
+            _stackPopoverItemsView is not { Items.Count: > 0, XamlRoot.Content: FrameworkElement rootContent } view ||
+            !TryGetScreenPointInElement(
+                rootContent,
+                host.WindowHandle,
+                sx,
+                sy,
+                out Windows.Foundation.Point rootPoint))
+        {
+            return false;
+        }
+
+        foreach (DependencyObject element in VisualTreeHelper.FindElementsInHostCoordinates(rootPoint, view))
+        {
+            if (FileItemSurface.FindOwner(element) is not { } itemSurface ||
+                itemSurface.DataContext is not WidgetItem item ||
+                item is WidgetStackItem)
+            {
+                continue;
+            }
+
+            ItemDropBehavior behavior = ItemDropBehaviorPolicy.Resolve(item);
+            if (behavior is not (ItemDropBehavior.FolderImport or
+                ItemDropBehavior.RecycleBinDelete or
+                ItemDropBehavior.Launch))
+            {
+                return false;
+            }
+
+            if (itemSurface.IconHitTestElement is not { } iconHost ||
+                !TryGetScreenPointInElement(
+                    iconHost,
+                    host.WindowHandle,
+                    sx,
+                    sy,
+                    out Windows.Foundation.Point localPoint) ||
+                !ShortcutLaunchPolicy.IsPointInsideRectWithSlack(
+                    0,
+                    0,
+                    iconHost.ActualWidth,
+                    iconHost.ActualHeight,
+                    LaunchIconSlackPixels,
+                    localPoint.X,
+                    localPoint.Y))
+            {
+                return false;
+            }
+
+            targetBorder = itemSurface.InteractiveBorder;
+            childTarget = item;
+            return true;
+        }
+
+        return false;
+    }
+
+    private void UpdateStackPopoverIndicatorFromScreenPoint(int screenX, int screenY)
+    {
+        if (_stackPopoverHostWindow is not { IsVisible: true } host ||
+            _stackPopoverItemsView is not { Items.Count: > 0 } view ||
+            !TryGetScreenPointInElement(
+                view,
+                host.WindowHandle,
+                screenX,
+                screenY,
+                out Windows.Foundation.Point pointInView) ||
+            !ReorderDropIndexCalculator.IsPointerOverRealizedItem(view, pointInView))
+        {
+            HideStackPopoverReorderIndicator();
+            return;
+        }
+
+        _stackPopoverReorderInsertionIndex = ReorderDropIndexCalculator.Compute(
+            view,
+            pointInView,
+            _stackPopoverReorderInsertionIndex);
+        if (_stackPopoverReorderInsertionIndex < 0 ||
+            _stackPopoverReorderInsertionIndex >= view.Items.Count)
+        {
+            HideStackPopoverReorderIndicator();
+            return;
+        }
+
+        UpdateStackPopoverReorderIndicator(
+            view,
+            pointInView,
+            _stackPopoverReorderInsertionIndex);
+    }
+
+    private int? TryResolveStackPopoverNativeInsertionIndex(int? screenX, int? screenY)
+    {
+        if (screenX is not { } sx ||
+            screenY is not { } sy ||
+            _stackPopoverHostWindow is not { } host ||
+            _stackPopoverItemsView is not { Items.Count: > 0 } view ||
+            !TryGetScreenPointInElement(
+                view,
+                host.WindowHandle,
+                sx,
+                sy,
+                out Windows.Foundation.Point pointInView) ||
+            !ReorderDropIndexCalculator.IsPointerOverRealizedItem(view, pointInView))
+        {
+            return null;
+        }
+
+        int visibleIndex = ReorderDropIndexCalculator.Compute(
+            view,
+            pointInView,
+            _stackPopoverReorderInsertionIndex);
+        if (visibleIndex < 0 || visibleIndex >= view.Items.Count)
+        {
+            return null;
+        }
+
+        return ResolveStackPopoverMemberInsertionIndex(view, visibleIndex);
+    }
+
+    private bool IsStackPopoverGestureAlreadyClaimed(
+        IReadOnlyList<string> paths,
+        long gestureId,
+        long epochAtDrop)
+    {
+        if (gestureId > 0 && gestureId <= _lastStackPopoverNativeClaimedGestureId)
+        {
+            return true;
+        }
+
+        if (epochAtDrop >= 0 && _lastStackPopoverXamlClaimedEpoch == epochAtDrop)
+        {
+            return true;
+        }
+
+        if (ActiveDeskBoxDragRegistry.TryMatch(
+                paths,
+                out string matchedSessionId,
+                out _,
+                out _) &&
+            !string.IsNullOrWhiteSpace(matchedSessionId) &&
+            string.Equals(
+                matchedSessionId,
+                _lastStackPopoverXamlClaimedSessionId,
+                StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private void StackPopoverNativeDrop_DropIntent(NativeDropIntentEventArgs args)
+    {
+        _stackPopoverNativeDragOver = false;
+        long capturedEpoch = _stackPopoverInboundEpoch;
+        System.Threading.Interlocked.Increment(ref _stackPopoverInboundEpoch);
+
+        string[] ownedPaths = args.Paths.ToArray();
+        if (ownedPaths.Length == 0 ||
+            IsStackPopoverGestureAlreadyClaimed(ownedPaths, args.GestureId, capturedEpoch))
+        {
+            if (args.ContainsTemporaryFiles)
+            {
+                _ = Task.Run(() => NativeDropMaterializationWorker.CleanupVirtualDropDirectories(ownedPaths));
+            }
+
+            return;
+        }
+
+        if (args.GestureId > _lastStackPopoverNativeClaimedGestureId)
+        {
+            _lastStackPopoverNativeClaimedGestureId = args.GestureId;
+        }
+
+        _lastStackPopoverNativeCompletedTick64 = Environment.TickCount64;
+        _lastStackPopoverNativeFirstPath = ownedPaths[0];
+
+        uint allowedEffects = args.AllowedEffects;
+        bool isDeskBoxOwnedSource = ActiveDeskBoxDragRegistry.TryMatch(
+            ownedPaths,
+            out _,
+            out _,
+            out _);
+        SourceOriginSnapshot sourceOrigin = PathOriginClassifier.ClassifySources(
+            ownedPaths,
+            TimeSpan.FromMilliseconds(80));
+        bool allItemsTemporary = args.ItemOrigins is { Count: > 0 } origins
+            ? origins.All(static o => o != DroppedItemOriginKind.RealFileSystemPath)
+            : args.ContainsTemporaryFiles;
+        bool sourceCanCopy = isDeskBoxOwnedSource ||
+            (allowedEffects & NativeDropEffectPolicy.Copy) != 0;
+        bool sourceCanMove = !allItemsTemporary &&
+            !sourceOrigin.IsMoveProtectedSystemOrSharedSource &&
+            (isDeskBoxOwnedSource ||
+             (allowedEffects & NativeDropEffectPolicy.Move) != 0);
+        if (args.RightButtonDrag)
+        {
+            if (!DispatcherQueue.TryEnqueue(() => _ = HandleStackPopoverRightButtonDropAsync(
+                    ownedPaths,
+                    args.ContainsTemporaryFiles,
+                    allowedEffects,
+                    args.ScreenX,
+                    args.ScreenY,
+                    args.ItemOrigins,
+                    sourceCanCopy,
+                    sourceCanMove,
+                    allItemsTemporary)))
+            {
+                if (args.ContainsTemporaryFiles)
+                {
+                    _ = Task.Run(() => NativeDropMaterializationWorker.CleanupVirtualDropDirectories(ownedPaths));
+                }
+            }
+
+            return;
+        }
+
+        bool ctrlDown = (args.KeyState & NativeDropEffectPolicy.ControlKeyState) != 0;
+        bool shiftDown = (args.KeyState & NativeDropEffectPolicy.ShiftKeyState) != 0;
+        FileDropIntent? forcedIntent = args.ShortcutRequested && !allItemsTemporary
+            ? FileDropIntent.Shortcut
+            : ctrlDown && !shiftDown
+                ? (sourceCanCopy ? FileDropIntent.Copy : FileDropIntent.None)
+                : shiftDown && !ctrlDown
+                    ? (sourceCanMove ? FileDropIntent.Move : FileDropIntent.None)
+                    : null;
+
+        if (!DispatcherQueue.TryEnqueue(() => _ = ImportStackPopoverNativeDropAsync(
+                ownedPaths,
+                args.ContainsTemporaryFiles,
+                forcedIntent,
+                allowedEffects,
+                args.ScreenX,
+                args.ScreenY,
+                args.ItemOrigins)))
+        {
+            if (args.ContainsTemporaryFiles)
+            {
+                _ = Task.Run(() => NativeDropMaterializationWorker.CleanupVirtualDropDirectories(ownedPaths));
+            }
+        }
+    }
+
+    private async Task HandleStackPopoverRightButtonDropAsync(
+        string[] ownedPaths,
+        bool containsTemporaryFiles,
+        uint allowedEffects,
+        int screenX,
+        int screenY,
+        IReadOnlyList<DroppedItemOriginKind>? itemOrigins,
+        bool sourceCanCopy,
+        bool sourceCanMove,
+        bool allItemsTemporary)
+    {
+        if (_isDisposed ||
+            !_stackPopoverPopupOpen ||
+            _stackPopoverSurface is not { XamlRoot: not null } surface ||
+            _stackPopoverHostWindow is not { WindowHandle: not 0 } host)
+        {
+            if (containsTemporaryFiles)
+            {
+                _ = Task.Run(() => NativeDropMaterializationWorker.CleanupVirtualDropDirectories(ownedPaths));
+            }
+
+            return;
+        }
+
+        HideStackPopoverReorderIndicator();
+        var tcs = new TaskCompletionSource<FileDropIntent?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var menu = new MenuFlyout();
+
+        void AddItem(string text, FileDropIntent? choice)
+        {
+            var item = new MenuFlyoutItem { Text = text };
+            item.Click += (_, _) => tcs.TrySetResult(choice);
+            menu.Items.Add(item);
+        }
+
+        if (sourceCanCopy)
+        {
+            AddItem(T("Common.Copy"), FileDropIntent.Copy);
+        }
+
+        if (sourceCanMove && HasStackPopoverMappedFolder())
+        {
+            AddItem(T("Common.Move"), FileDropIntent.Move);
+        }
+
+        if (!allItemsTemporary && HasStackPopoverMappedFolder())
+        {
+            AddItem(T("Widget.CreateShortcut"), FileDropIntent.Shortcut);
+        }
+
+        menu.Items.Add(new MenuFlyoutSeparator());
+        AddItem(T("Common.Cancel"), null);
+        menu.Closed += (_, _) => tcs.TrySetResult(null);
+
+        _stackPopoverContextMenuOpen = true;
+        FileDropIntent? selected;
+        try
+        {
+            var clientPt = new Win32Helper.POINT { X = screenX, Y = screenY };
+            double scale = surface.XamlRoot.RasterizationScale > 0 ? surface.XamlRoot.RasterizationScale : 1.0;
+            Windows.Foundation.Point localPt = Win32Helper.ScreenToClient(host.WindowHandle, ref clientPt)
+                ? new Windows.Foundation.Point(clientPt.X / scale, clientPt.Y / scale)
+                : new Windows.Foundation.Point(16, 16);
+            menu.ShowAt(surface, localPt);
+            selected = await tcs.Task;
+        }
+        catch
+        {
+            selected = null;
+        }
+        finally
+        {
+            _stackPopoverContextMenuOpen = false;
+        }
+
+        if (selected is null)
+        {
+            if (_stackPopoverOpenedBySpringLoad && _stackPopoverPopupOpen)
+            {
+                HideStackPopoverForReuse(restoreOwnerForeground: false);
+            }
+
+            if (containsTemporaryFiles)
+            {
+                _ = Task.Run(() => NativeDropMaterializationWorker.CleanupVirtualDropDirectories(ownedPaths));
+            }
+
+            return;
+        }
+
+        await ImportStackPopoverNativeDropAsync(
+            ownedPaths,
+            containsTemporaryFiles,
+            selected,
+            allowedEffects,
+            screenX,
+            screenY,
+            itemOrigins);
+    }
+
+    private bool ShouldSkipStackPopoverLegacyDropFiles(IReadOnlyList<string> paths)
+    {
+        if (_isDisposed || !_stackPopoverPopupOpen || paths.Count == 0)
+        {
+            return true;
+        }
+
+        if (Environment.TickCount64 - _lastStackPopoverNativeCompletedTick64 < 250 &&
+            string.Equals(paths[0], _lastStackPopoverNativeFirstPath, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private void HandleStackPopoverLegacyDropFiles(LegacyDropFilesPayload payload)
+    {
+        _ = ImportStackPopoverNativeDropAsync(
+            payload.StagedPaths,
+            payload.ContainsTemporaryFiles,
+            forcedIntent: null,
+            allowedEffects: null,
+            payload.ScreenX,
+            payload.ScreenY,
+            payload.ItemOrigins);
+    }
+
+    private async Task<bool> ImportStackPopoverNativeDropAsync(
+        IReadOnlyList<string> paths,
+        bool containsTemporaryFiles,
+        FileDropIntent? forcedIntent,
+        uint? allowedEffects,
+        int? screenX,
+        int? screenY,
+        IReadOnlyList<DroppedItemOriginKind>? itemOrigins)
+    {
+        try
+        {
+            if (_isDisposed ||
+                !_stackPopoverPopupOpen ||
+                _stackPopoverKey is not { } stackKey ||
+                ViewModel.FindStackByKey(stackKey) is not { } targetStack)
+            {
+                return false;
+            }
+
+            int? preferredMemberIndex = TryResolveStackPopoverNativeInsertionIndex(screenX, screenY);
+            TryResolveStackPopoverChildIconDropTarget(
+                screenX,
+                screenY,
+                out _,
+                out WidgetItem? childIconTarget);
+            ClearFolderDropTarget();
+            ClearLaunchDropTarget();
+            HideStackPopoverReorderIndicator();
+            if (ReferenceEquals(_stackMemberDropTarget, _stackPopoverSurface))
+            {
+                ClearStackMemberDropTarget();
+            }
+
+            bool closeAfterSpringDrop = _stackPopoverOpenedBySpringLoad;
+            _stackPopoverOpenedBySpringLoad = false;
+            StopSpringLoadedPopoverWatchTimer();
+
+            if (childIconTarget is not null &&
+                ItemDropBehaviorPolicy.Resolve(childIconTarget) == ItemDropBehavior.Launch)
+            {
+                bool launched = ShortcutFileLauncher.TryLaunchWithFiles(
+                    childIconTarget.Path,
+                    paths);
+                MarkNativeLaunchConsumed();
+                if (!launched)
+                {
+                    ShowShortcutLaunchRefusedFeedback(childIconTarget.Name);
+                }
+
+                if (closeAfterSpringDrop && _stackPopoverPopupOpen)
+                {
+                    HideStackPopoverForReuse(restoreOwnerForeground: false);
+                }
+
+                return launched;
+            }
+
+            WidgetItem effectiveTargetItem = childIconTarget is not null &&
+                ItemDropBehaviorPolicy.Resolve(childIconTarget) is
+                    ItemDropBehavior.FolderImport or ItemDropBehavior.RecycleBinDelete
+                ? childIconTarget
+                : targetStack;
+
+            bool imported = await ImportNativeDroppedFilesAsync(
+                paths,
+                containsTemporaryFiles,
+                copyWhenMapped: null,
+                targetItem: effectiveTargetItem,
+                forcedIntent: forcedIntent,
+                screenX: screenX,
+                screenY: screenY,
+                allowedEffects: allowedEffects,
+                itemOrigins: itemOrigins,
+                preferredStackMemberIndex: ReferenceEquals(effectiveTargetItem, targetStack)
+                    ? preferredMemberIndex
+                    : null);
+            if (closeAfterSpringDrop && _stackPopoverPopupOpen)
+            {
+                HideStackPopoverForReuse(restoreOwnerForeground: false);
+            }
+
+            return imported;
+        }
+        finally
+        {
+            if (containsTemporaryFiles)
+            {
+                _ = Task.Run(() => NativeDropMaterializationWorker.CleanupVirtualDropDirectories(paths));
+            }
+        }
+    }
+
+    internal string ObserveCrossWidgetElevatedStackPopoverDrag(
+        int screenX,
+        int screenY,
+        IReadOnlyList<string> sourcePaths,
+        out bool canDrop)
+    {
+        canDrop = false;
+        if (_isDisposed ||
+            !_stackPopoverPopupOpen ||
+            _isImportBusy ||
+            _stackPopoverKey is not { } stackKey ||
+            ViewModel.FindStackByKey(stackKey) is not { } targetStack)
+        {
+            return string.Empty;
+        }
+
+        if (TryResolveStackPopoverChildIconDropTarget(
+                screenX,
+                screenY,
+                out Border? childBorder,
+                out WidgetItem? childTarget) &&
+            childBorder is not null &&
+            childTarget is not null)
+        {
+            HideStackPopoverReorderIndicator();
+            if (ReferenceEquals(_stackMemberDropTarget, _stackPopoverSurface))
+            {
+                ClearStackMemberDropTarget();
+            }
+
+            ItemDropBehavior childBehavior = ItemDropBehaviorPolicy.Resolve(childTarget);
+            if (childBehavior == ItemDropBehavior.Launch)
+            {
+                if (ShortcutLaunchPolicy.ContainsSameFile(sourcePaths, childTarget.Path))
+                {
+                    ClearLaunchDropTarget();
+                    return string.Empty;
+                }
+
+                SetLaunchDropTarget(childBorder);
+                canDrop = true;
+                return _localizationService.Format(
+                    "Widget.DropOnShortcutOpenWith",
+                    childTarget.Name);
+            }
+
+            if (childBehavior == ItemDropBehavior.RecycleBinDelete)
+            {
+                if (sourcePaths.Contains(childTarget.Path, StringComparer.OrdinalIgnoreCase))
+                {
+                    ClearFolderDropTarget();
+                    return string.Empty;
+                }
+
+                SetFolderDropTarget(childBorder);
+                canDrop = true;
+                return T("Widget.DropOnRecycleBinHint");
+            }
+
+            if (childBehavior == ItemDropBehavior.FolderImport &&
+                ItemDropBehaviorPolicy.TryGetFolderDropDestinationPath(
+                    childTarget,
+                    out string childFolderPath))
+            {
+                if (HasTransferConflict(sourcePaths, childFolderPath) ||
+                    IsUnsafeFolderDrop(sourcePaths, childFolderPath))
+                {
+                    ClearFolderDropTarget();
+                    return T("Widget.Error.UnsafeFolderTransfer");
+                }
+
+                if (AreAllSourcesAlreadyInDestinationLexically(sourcePaths, childFolderPath))
+                {
+                    ClearFolderDropTarget();
+                    return T("Widget.DragCaption.CurrentWidget");
+                }
+
+                FileDropIntent childFolderIntent = ResolveCrossWidgetElevatedPopoverIntent(
+                    sourcePaths,
+                    childFolderPath,
+                    hasMappedFolder: true,
+                    controlDown: null,
+                    shiftDown: null,
+                    altDown: null);
+                if (childFolderIntent == FileDropIntent.None)
+                {
+                    ClearFolderDropTarget();
+                    return string.Empty;
+                }
+
+                SetFolderDropTarget(childBorder);
+                canDrop = true;
+                return FormatDropCaption(childFolderIntent, childTarget.Name);
+            }
+        }
+
+        ClearFolderDropTarget();
+        ClearLaunchDropTarget();
+        if (HasTransferConflict(sourcePaths, ViewModel.CurrentFolderPath))
+        {
+            HideStackPopoverReorderIndicator();
+            if (ReferenceEquals(_stackMemberDropTarget, _stackPopoverSurface))
+            {
+                ClearStackMemberDropTarget();
+            }
+
+            return string.Empty;
+        }
+
+        if (IsUnsafeFolderDrop(sourcePaths, ViewModel.CurrentFolderPath))
+        {
+            HideStackPopoverReorderIndicator();
+            if (ReferenceEquals(_stackMemberDropTarget, _stackPopoverSurface))
+            {
+                ClearStackMemberDropTarget();
+            }
+
+            return T("Widget.Error.UnsafeFolderTransfer");
+        }
+
+        if (AreAllSourcesAlreadyInDestinationLexically(sourcePaths, ViewModel.CurrentFolderPath))
+        {
+            HideStackPopoverReorderIndicator();
+            if (ReferenceEquals(_stackMemberDropTarget, _stackPopoverSurface))
+            {
+                ClearStackMemberDropTarget();
+            }
+
+            return T("Widget.DragCaption.CurrentWidget");
+        }
+
+        if (_stackPopoverSurface is { } surface)
+        {
+            SetStackMemberDropTarget(surface);
+        }
+
+        UpdateStackPopoverIndicatorFromScreenPoint(screenX, screenY);
+
+        string destination = TransferIntentEngine.ResolveProspectiveManagedDestination(
+            ViewModel.CurrentFolderPath,
+            ViewModel.MappedFolderPath,
+            _settingsService.Settings.FileWidget.DefaultManagedStorageRootPath);
+        FileDropIntent resolvedIntent = ResolveCrossWidgetElevatedPopoverIntent(
+            sourcePaths,
+            destination,
+            hasMappedFolder: !string.IsNullOrWhiteSpace(destination),
+            controlDown: null,
+            shiftDown: null,
+            altDown: null);
+        if (resolvedIntent == FileDropIntent.None)
+        {
+            return string.Empty;
+        }
+
+        canDrop = true;
+        return resolvedIntent == FileDropIntent.Shortcut
+            ? FormatDropCaption(resolvedIntent, targetStack.Name)
+            : _localizationService.Format("Widget.Stack.DragCaption.Add", targetStack.Name);
+    }
+
+    internal void LeaveCrossWidgetElevatedStackPopoverDrag()
+    {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        ClearFolderDropTarget();
+        ClearLaunchDropTarget();
+        HideStackPopoverReorderIndicator();
+        if (ReferenceEquals(_stackMemberDropTarget, _stackPopoverSurface))
+        {
+            ClearStackMemberDropTarget();
+        }
+    }
+
+    internal async Task<bool> AcceptCrossWidgetElevatedStackPopoverDropAsync(
+        IReadOnlyList<string> sourcePaths,
+        int screenX,
+        int screenY,
+        bool? controlDown,
+        bool? shiftDown,
+        bool? altDown)
+    {
+        if (_isDisposed ||
+            sourcePaths.Count == 0 ||
+            !_stackPopoverPopupOpen ||
+            _stackPopoverKey is not { } stackKey ||
+            ViewModel.FindStackByKey(stackKey) is not { } targetStack)
+        {
+            LeaveCrossWidgetElevatedStackPopoverDrag();
+            return false;
+        }
+
+        int? preferredMemberIndex = TryResolveStackPopoverNativeInsertionIndex(screenX, screenY);
+        TryResolveStackPopoverChildIconDropTarget(
+            screenX,
+            screenY,
+            out _,
+            out WidgetItem? childIconTarget);
+        LeaveCrossWidgetElevatedStackPopoverDrag();
+        bool closeAfterSpringDrop = _stackPopoverOpenedBySpringLoad;
+        _stackPopoverOpenedBySpringLoad = false;
+        StopSpringLoadedPopoverWatchTimer();
+
+        if (childIconTarget is not null &&
+            ItemDropBehaviorPolicy.Resolve(childIconTarget) == ItemDropBehavior.Launch)
+        {
+            bool launched = ShortcutFileLauncher.TryLaunchWithFiles(
+                childIconTarget.Path,
+                sourcePaths);
+            MarkNativeLaunchConsumed();
+            if (!launched)
+            {
+                ShowShortcutLaunchRefusedFeedback(childIconTarget.Name);
+            }
+
+            if (closeAfterSpringDrop && _stackPopoverPopupOpen)
+            {
+                HideStackPopoverForReuse(restoreOwnerForeground: false);
+            }
+
+            return launched;
+        }
+
+        WidgetItem effectiveTargetItem = childIconTarget is not null &&
+            ItemDropBehaviorPolicy.Resolve(childIconTarget) is
+                ItemDropBehavior.FolderImport or ItemDropBehavior.RecycleBinDelete
+            ? childIconTarget
+            : targetStack;
+
+        string destination = childIconTarget is not null &&
+            ItemDropBehaviorPolicy.TryGetFolderDropDestinationPath(
+                childIconTarget,
+                out string childFolderDest)
+            ? childFolderDest
+            : TransferIntentEngine.ResolveProspectiveManagedDestination(
+                ViewModel.CurrentFolderPath,
+                ViewModel.MappedFolderPath,
+                _settingsService.Settings.FileWidget.DefaultManagedStorageRootPath);
+        FileDropIntent snapshotIntent = ResolveCrossWidgetElevatedPopoverIntent(
+            sourcePaths,
+            destination,
+            hasMappedFolder: !string.IsNullOrWhiteSpace(destination),
+            controlDown: controlDown,
+            shiftDown: shiftDown,
+            altDown: altDown);
+        if (snapshotIntent == FileDropIntent.None)
+        {
+            return false;
+        }
+
+        FileDropIntent? forcedIntent = snapshotIntent == FileDropIntent.Reference
+            ? null
+            : snapshotIntent;
+        SourceOriginSnapshot origin = PathOriginClassifier.ClassifySources(
+            sourcePaths,
+            TimeSpan.FromMilliseconds(80));
+        uint allowedEffects = !origin.IsMoveProtectedSystemOrSharedSource
+            ? NativeDropEffectPolicy.Copy | NativeDropEffectPolicy.Move | NativeDropEffectPolicy.Link
+            : NativeDropEffectPolicy.Copy | NativeDropEffectPolicy.Link;
+
+        bool imported = await ImportNativeDroppedFilesAsync(
+            sourcePaths,
+            containsTemporaryFiles: false,
+            copyWhenMapped: null,
+            targetItem: effectiveTargetItem,
+            forcedIntent: forcedIntent,
+            screenX: screenX,
+            screenY: screenY,
+            allowedEffects: allowedEffects,
+            preferredStackMemberIndex: ReferenceEquals(effectiveTargetItem, targetStack)
+                ? preferredMemberIndex
+                : null);
+        if (closeAfterSpringDrop && _stackPopoverPopupOpen)
+        {
+            HideStackPopoverForReuse(restoreOwnerForeground: false);
+        }
+
+        return imported;
+    }
+
+    private FileDropIntent ResolveCrossWidgetElevatedPopoverIntent(
+        IReadOnlyList<string> sourcePaths,
+        string destination,
+        bool hasMappedFolder,
+        bool? controlDown,
+        bool? shiftDown,
+        bool? altDown)
+    {
+        string dropAction = _settingsService.Settings.FileWidget.ManagedDropAction;
+        bool followWindows = string.Equals(
+            dropAction,
+            SettingsService.ManagedDropActionFollowWindows,
+            StringComparison.Ordinal);
+        bool defaultMove = followWindows ||
+            string.Equals(
+                dropAction,
+                SettingsService.ManagedDropActionMove,
+                StringComparison.Ordinal);
+        SourceOriginSnapshot origin = PathOriginClassifier.ClassifySources(
+            sourcePaths,
+            TimeSpan.FromMilliseconds(80));
+        bool sameVolume = !string.IsNullOrWhiteSpace(destination) &&
+            PathOriginClassifier.AreAllOnSameVolume(
+                sourcePaths,
+                destination,
+                TimeSpan.FromMilliseconds(80));
+        uint allowedEffects = !origin.IsMoveProtectedSystemOrSharedSource
+            ? NativeDropEffectPolicy.Copy | NativeDropEffectPolicy.Move | NativeDropEffectPolicy.Link
+            : NativeDropEffectPolicy.Copy | NativeDropEffectPolicy.Link;
+        return TransferIntentEngine.Evaluate(new TransferIntentRequest(
+            Domain: TransferDomain.InternalDeskBox,
+            TargetKind: TransferTargetKind.DirectorySurface,
+            HasFileData: true,
+            HasVirtualFileData: false,
+            HasShellApplicationOrNamespaceData: false,
+            ForceCopy: false,
+            HasMappedFolder: hasMappedFolder,
+            ControlDown: controlDown ?? Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control),
+            ShiftDown: shiftDown ?? Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Shift),
+            AltDown: altDown ?? Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Menu),
+            AllowedEffects: allowedEffects,
+            NoOperationMetadata: false,
+            DefaultMove: defaultMove,
+            FollowWindows: followWindows,
+            SameVolume: sameVolume,
+            CanLink: true,
+            SourceOrigin: origin)).Intent;
     }
 }

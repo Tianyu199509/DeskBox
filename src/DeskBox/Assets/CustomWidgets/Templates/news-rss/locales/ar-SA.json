@@ -1,0 +1,21 @@
+{
+  "defaultFeedTitle": "أخبار التقنية",
+  "defaultTopHeadline": "انقر زر التحديث في الزاوية العلوية اليمنى للحصول على أحدث الأخبار",
+  "emptySubtitle": "انقر زر التحديث في الأعلى، أو بدّل مصدر الخلاصة من الإعدادات",
+  "emptyTitle": "بانتظار مزامنة الخلاصة",
+  "feedCustom": "عنوان RSS مخصص (أدناه)",
+  "feedIthome": "IT之家",
+  "feedSspai": "SSPai (少数派)",
+  "openArticleTooltip": "فتح المقال",
+  "optDensityCompact": "مدمج (العناوين فقط)",
+  "optDensitySummary": "قياسي (العنوان + الملخص)",
+  "refreshBtn": "تحديث",
+  "refreshTooltip": "جلب أحدث عناصر الخلاصة الآن",
+  "setDensity": "كثافة العرض",
+  "setFeedUrl": "عنوان URL مخصص لخلاصة RSS / Atom (https://)",
+  "setPresetFeed": "مصدر الأخبار الجاهز",
+  "syncing": "جارٍ مزامنة أحدث الأخبار…",
+  "updatedPrefix": "تم التحديث ",
+  "widgetDescription": "مزامنة تلقائية لـ Hacker News وGitHub Blog وV2EX أو أي خلاصة RSS عبر HTTPS مع تخزين مؤقت دون اتصال.",
+  "widgetName": "قارئ أخبار RSS"
+}

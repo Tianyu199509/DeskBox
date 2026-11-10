@@ -50,4 +50,24 @@ internal static class WindowShellState
             App.Log($"[Window] Borderless presenter not applied: {ex.Message}");
         }
     }
+
+    public static void TryApplyFloatingPopupPresenter(AppWindow appWindow)
+    {
+        try
+        {
+            appWindow.SetPresenter(AppWindowPresenterKind.Overlapped);
+            if (appWindow.Presenter is OverlappedPresenter presenter)
+            {
+                presenter.IsResizable = false;
+                presenter.IsMaximizable = false;
+                presenter.IsMinimizable = false;
+                presenter.IsAlwaysOnTop = true;
+                presenter.SetBorderAndTitleBar(true, false);
+            }
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[Window] Floating popup presenter not applied: {ex.Message}");
+        }
+    }
 }

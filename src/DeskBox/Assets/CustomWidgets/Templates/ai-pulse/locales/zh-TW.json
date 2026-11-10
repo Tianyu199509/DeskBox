@@ -1,0 +1,16 @@
+{
+  "modFocus": "焦點額度主卡",
+  "modRadar": "多平台速覽清單",
+  "modTokens": "本機 Token 與快取透視",
+  "modTrend": "近 14 日消耗長條圖",
+  "optQuotaRem": "顯示剩餘百分比（如 85% 剩餘）",
+  "optQuotaUsed": "顯示已用百分比（如 15% 已用）",
+  "optRef15m": "每 15 分鐘",
+  "optRef1m": "每 1 分鐘（推薦）",
+  "optRef5m": "每 5 分鐘",
+  "setModules": "顯示內容與順序",
+  "setQuotaMode": "視窗配額百分比語意",
+  "setRefresh": "自動輪詢重新整理間隔",
+  "widgetDescription": "即時監控 Claude Code / Codex 本機工作階段視窗配額與智譜 GLM / DeepSeek / Kimi / OpenRouter 帳戶餘額。",
+  "widgetName": "AI 監控"
+}

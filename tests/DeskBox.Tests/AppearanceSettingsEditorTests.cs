@@ -1,4 +1,4 @@
-﻿using DeskBox.Contracts;
+using DeskBox.Contracts;
 using DeskBox.ViewModels;
 using DeskBox.Features.Appearance;
 using DeskBox.Models;
@@ -71,10 +71,10 @@ public sealed class AppearanceSettingsEditorTests : IDisposable
                 shell.DisplayWidgetChromeMode = "Compact";
                 shell.InteractiveWidgetChromeMode = "Hidden";
                 shell.WidgetTitleIconMode = SettingsService.WidgetTitleIconModeTextLabel;
-                shell.WidgetAnimationEffect = SettingsService.WidgetAnimationEffectZoom;
+                shell.WidgetAnimationEffect = SettingsService.WidgetAnimationEffectWipe;
                 shell.WidgetAnimationSpeed = SettingsService.WidgetAnimationSpeedFast;
                 shell.WidgetAnimationSlideDirection = SettingsService.WidgetAnimationSlideDirectionLeft;
-                shell.WidgetAnimationEasingIntensity = SettingsService.WidgetAnimationEasingStrong;
+                shell.WidgetAnimationEasingIntensity = SettingsService.WidgetAnimationEasingSpring;
                 settings.Settings.Core.TrayIconStyle = "Black";
             });
 
@@ -100,11 +100,10 @@ public sealed class AppearanceSettingsEditorTests : IDisposable
         Assert.Equal("Compact", editor.DisplayChromeMode);
         Assert.Equal("Hidden", editor.InteractiveChromeMode);
         Assert.Equal(SettingsService.WidgetTitleIconModeTextLabel, editor.TitleIconMode);
-        Assert.Equal(SettingsService.WidgetAnimationEffectZoom, editor.AnimationEffect);
+        Assert.Equal(SettingsService.WidgetAnimationEffectWipe, editor.AnimationEffect);
         Assert.Equal(SettingsService.WidgetAnimationSpeedFast, editor.AnimationSpeed);
         Assert.Equal(SettingsService.WidgetAnimationSlideDirectionLeft, editor.AnimationSlideDirection);
-        Assert.Equal(SettingsService.WidgetAnimationEasingStrong, editor.AnimationEasingIntensity);
-        Assert.Equal(WidgetAnimationKinds.PresetCustom, editor.AnimationPreset);
+        Assert.Equal(SettingsService.WidgetAnimationEasingSpring, editor.AnimationEasingIntensity);
         Assert.Equal("Black", editor.TrayIconStyle);
     }
 
@@ -131,8 +130,8 @@ public sealed class AppearanceSettingsEditorTests : IDisposable
         Assert.Equal(SettingsService.WidgetBorderColorModeNeutral, editor.BorderColorMode);
         Assert.True(editor.IsBorderStyleEnabled);
         Assert.Equal(SettingsService.WidgetBorderStyleThin, editor.BorderStyle);
-        Assert.Equal(SettingsService.WidgetAnimationEffectSlideFade, editor.AnimationEffect);
-        Assert.Equal(SettingsService.WidgetAnimationSpeedStandard, editor.AnimationSpeed);
+        Assert.Equal(SettingsService.WidgetAnimationEffectScreenEdgeSlide, editor.AnimationEffect);
+        Assert.Equal(SettingsService.WidgetAnimationSpeedRelaxed, editor.AnimationSpeed);
         Assert.Equal(SettingsService.WidgetAnimationSlideDirectionRight, editor.AnimationSlideDirection);
         Assert.Equal(SettingsService.WidgetAnimationEasingStandard, editor.AnimationEasingIntensity);
         Assert.Equal(SettingsService.WidgetTitleIconModeColor, editor.TitleIconMode);
@@ -140,7 +139,6 @@ public sealed class AppearanceSettingsEditorTests : IDisposable
         Assert.Equal(WidgetChromeKinds.Standard, editor.InteractiveChromeMode);
         Assert.Equal(SettingsService.DefaultFileNameLineCount, editor.FileNameLineCount);
         Assert.Equal("System", editor.TrayIconStyle);
-        Assert.Equal(WidgetAnimationKinds.PresetStandard, editor.AnimationPreset);
     }
 
     [Fact]
@@ -250,28 +248,7 @@ public sealed class AppearanceSettingsEditorTests : IDisposable
     }
 
     [Fact]
-    public void AnimationPreset_WritesFourFieldsDeferredAndRaisesThePresetEvent()
-    {
-        (SettingsService settings, AppearanceSettingsViewModel editor) = CreateEditor(_root);
-        int presetApplied = 0;
-        editor.AnimationPresetApplied += () => presetApplied++;
-
-        editor.AnimationPreset = WidgetAnimationKinds.PresetEmphasized;
-        WidgetShellSettingsSlice shell = settings.Settings.WidgetShell;
-        Assert.Equal(SettingsService.WidgetAnimationEffectScaleFade, shell.WidgetAnimationEffect);
-        Assert.Equal(SettingsService.WidgetAnimationSpeedRelaxed, shell.WidgetAnimationSpeed);
-        Assert.Equal(SettingsService.WidgetAnimationSlideDirectionNone, shell.WidgetAnimationSlideDirection);
-        Assert.Equal(SettingsService.WidgetAnimationEasingStrong, shell.WidgetAnimationEasingIntensity);
-        Assert.Equal(1, presetApplied);
-        Assert.Equal(WidgetAnimationKinds.PresetEmphasized, editor.AnimationPreset);
-
-        // Individual edits resolve the preset label back to custom.
-        editor.AnimationSpeed = SettingsService.WidgetAnimationSpeedFast;
-        Assert.Equal(WidgetAnimationKinds.PresetCustom, editor.AnimationPreset);
-    }
-
-    [Fact]
-    public void SlideFadeEffect_WithNoDirection_NudgesTheDirectionToRight()
+    public void AnimationEffects_NormalizeDirectionOptions_VisibilityFlags_AndSummaryText()
     {
         (SettingsService settings, AppearanceSettingsViewModel editor) = CreateEditor(
             _root,
@@ -285,12 +262,45 @@ public sealed class AppearanceSettingsEditorTests : IDisposable
 
         editor.AnimationEffect = SettingsService.WidgetAnimationEffectSlideFade;
         Assert.Equal(
-            SettingsService.WidgetAnimationSlideDirectionRight,
+            SettingsService.WidgetAnimationSlideDirectionDown,
             settings.Settings.WidgetShell.WidgetAnimationSlideDirection);
-        Assert.False(editor.IsDirectionEnabled is false && editor.IsSpeedEnabled is false);
+        Assert.True(editor.IsAnimationEnabled);
+        Assert.True(editor.ShowAnimationDirection);
+        Assert.True(editor.IsDirectionEnabled);
         Assert.True(editor.IsSpeedEnabled);
         Assert.True(editor.IsEasingEnabled);
-        Assert.True(editor.IsDirectionEnabled);
+        Assert.True(editor.IsStaggerEnabled);
+        Assert.DoesNotContain(
+            editor.AvailableAnimationSlideDirectionOptions,
+            option => Equals(option.Value, SettingsService.WidgetAnimationSlideDirectionAuto));
+
+        editor.AnimationEffect = SettingsService.WidgetAnimationEffectScreenEdgeSlide;
+        Assert.Equal(
+            SettingsService.WidgetAnimationSlideDirectionDown,
+            editor.AnimationSlideDirection);
+        Assert.Equal(
+            SettingsService.WidgetAnimationSlideDirectionAuto,
+            editor.AvailableAnimationSlideDirectionOptions[0].Value);
+
+        // Switching from a stationary effect (DirectionNone) to ScreenEdgeSlide defaults to Auto.
+        editor.AnimationEffect = SettingsService.WidgetAnimationEffectScaleFade;
+        Assert.False(editor.ShowAnimationDirection);
+        Assert.Equal(SettingsService.WidgetAnimationSlideDirectionNone, editor.AnimationSlideDirection);
+        Assert.True(editor.IsStaggerEnabled);
+
+        editor.AnimationEffect = SettingsService.WidgetAnimationEffectScreenEdgeSlide;
+        Assert.Equal(SettingsService.WidgetAnimationSlideDirectionAuto, editor.AnimationSlideDirection);
+        Assert.Equal(
+            SettingsService.WidgetAnimationSlideDirectionAuto,
+            settings.Settings.WidgetShell.WidgetAnimationSlideDirection);
+
+        editor.AnimationEffect = SettingsService.WidgetAnimationEffectNone;
+        Assert.False(editor.IsAnimationEnabled);
+        Assert.False(editor.ShowAnimationDirection);
+        Assert.False(editor.IsSpeedEnabled);
+        Assert.False(editor.IsEasingEnabled);
+        Assert.False(editor.IsStaggerEnabled);
+        Assert.Equal("Settings.Animation.Summary.Disabled", editor.AnimationSummaryText);
     }
 
     [Fact]
@@ -538,24 +548,36 @@ public sealed class AppearanceSettingsEditorTests : IDisposable
             Path.Combine(TestPaths.FromRepository("src/DeskBox"), "ViewModels/SettingsViewModel.AotBindableProperties.cs"));
 
         // Editor binding paths on the section family ({Binding} markers kept).
-        Assert.Contains("controls:SettingsComboBox.Value=\"{Binding Theme, Mode=TwoWay}\"", section);
+        string fileSection = File.ReadAllText(
+            Path.Combine(TestPaths.FromRepository("src/DeskBox"), "Views/SettingsSections/FileWidgetSettingsSection.xaml"));
+        Assert.Contains("controls:SettingsSegmented.Options=\"{Binding AvailableThemeOptions}\"", section);
+        Assert.Contains("controls:SettingsSegmented.Value=\"{Binding Theme, Mode=TwoWay}\"", section);
+        Assert.Contains("Value=\"{x:Bind Appearance.IconSize, Mode=TwoWay}\"", fileSection);
+        Assert.Contains("controls:SettingsSegmented.Value=\"{x:Bind Appearance.FileNameLineCount, Mode=TwoWay}\"", fileSection);
         Assert.Contains("controls:SettingsComboBox.Value=\"{Binding TrayIconStyle, Mode=TwoWay}\"", section);
         Assert.Contains(
             "SelectedColor=\"{Binding SelectedAccentColorHex, Mode=TwoWay, Converter={StaticResource SettingsColorStringConverter}}\"",
             section);
         Assert.Contains("controls:SettingsComboBox.Value=\"{Binding MaterialType, Mode=TwoWay}\"", section);
-        Assert.Contains("controls:SettingsComboBox.Value=\"{Binding LayoutDensity, Mode=TwoWay}\"", window);
-        Assert.Contains("controls:SettingsComboBox.Value=\"{Binding TitleIconMode, Mode=TwoWay}\"", window);
-        Assert.Contains("controls:SettingsComboBox.Value=\"{Binding AnimationPreset, Mode=TwoWay}\"", window);
-        Assert.Contains("Value=\"{Binding WidgetTransparency, Mode=TwoWay}\"", window);
-        Assert.Contains("Value=\"{Binding TextSize, Mode=TwoWay}\"", window);
-        // Conditional appearance sub-settings stay visible and gray out
-        // instead of collapsing, so the expanders always have content.
-        Assert.Contains("IsEnabled=\"{Binding ShowOpacitySlider}\"", window);
-        Assert.Contains("IsEnabled=\"{Binding ShowMaterialIntensitySlider}\"", window);
-        Assert.Contains("IsEnabled=\"{Binding ShowForegroundCustomColor}\"", window);
-        Assert.Contains("IsOpen=\"{Binding Windows10Compatibility}\"", window);
-        Assert.Contains("IsEnabled=\"{Binding NativeCornersSupported}\"", window);
+        Assert.Contains("controls:SettingsComboBox.Value=\"{Binding LayoutDensity, Mode=TwoWay}\"", section);
+        Assert.Contains("controls:SettingsComboBox.Value=\"{Binding TitleIconMode, Mode=TwoWay}\"", section);
+        Assert.Contains("controls:SettingsComboBox.Value=\"{Binding AnimationEffect, Mode=TwoWay}\"", section);
+        Assert.Contains("Description=\"{Binding AnimationSummaryText}\"", section);
+        Assert.Contains("Value=\"{Binding WidgetTransparency, Mode=TwoWay}\"", section);
+        Assert.Contains("Value=\"{Binding TextSize, Mode=TwoWay}\"", section);
+        // Dual-entry contract (2026-11-05 UX call): the entry card keeps an
+        // inline material combo for direct edits, while the advanced material
+        // page heads itself with the same selector — both write the editor
+        // and stay in sync.
+        Assert.DoesNotContain("controls:SettingsComboBox.Value=\"{Binding MaterialType, Mode=TwoWay}\"", window);
+        Assert.DoesNotContain("controls:SettingsComboBox.Value=\"{Binding LayoutDensity, Mode=TwoWay}\"", window);
+        Assert.DoesNotContain("controls:SettingsComboBox.Value=\"{Binding TitleIconMode, Mode=TwoWay}\"", window);
+        Assert.DoesNotContain("controls:SettingsComboBox.Value=\"{Binding AnimationEffect, Mode=TwoWay}\"", window);
+        Assert.Contains("IsEnabled=\"{Binding ShowOpacitySlider}\"", section);
+        Assert.Contains("IsEnabled=\"{Binding ShowMaterialIntensitySlider}\"", section);
+        Assert.Contains("Visibility=\"{Binding ShowForegroundCustomColor, Converter={StaticResource SettingsBoolToVisibilityConverter}}\"", section);
+        Assert.Contains("IsOpen=\"{Binding Windows10Compatibility}\"", section);
+        Assert.Contains("IsEnabled=\"{Binding NativeCornersSupported}\"", section);
 
         // The legacy shell paths are gone from the appearance family.
         Assert.DoesNotContain("{Binding SelectedTheme", section + window);
@@ -566,18 +588,23 @@ public sealed class AppearanceSettingsEditorTests : IDisposable
         Assert.DoesNotContain("{Binding WidgetOpacityVisibility", window);
         Assert.DoesNotContain("{Binding IsWindows10VisualCompatibilityMode", window);
 
-        // Section-level DataContext switch covers the whole family.
-        Assert.Contains("\"Appearance\" or", deferred);
-        Assert.Contains("\"AppearanceMaterialSettings\"", deferred);
-        Assert.Contains("\"AppearanceDensitySettings\"", deferred);
-        Assert.Contains("\"AppearanceWindowSettings\"", deferred);
-        Assert.Contains("\"AppearanceAnimationSettings\"", deferred);
+        // Section-level DataContext switch covers Appearance and AppearanceMaterialSettings;
+        // the three folded sub-pages are retired.
+        Assert.Contains("if (sectionTag == \"Appearance\")", deferred);
+        Assert.Contains("fileSettings.Appearance = _appearanceSettingsViewModel;", deferred);
+        Assert.DoesNotContain("\"AppearanceMaterialSettings\"", deferred);
+        Assert.DoesNotContain("\"AppearanceDensitySettings\"", deferred);
+        Assert.DoesNotContain("\"AppearanceWindowSettings\"", deferred);
+        Assert.DoesNotContain("\"AppearanceAnimationSettings\"", deferred);
         Assert.Contains("section.DataContext = _appearanceSettingsViewModel;", deferred);
 
         // The editor exposes an AOT bridge and the shell bridge dropped the
         // migrated names.
         Assert.Contains("[WinRT.GeneratedBindableCustomProperty([", bridge);
         Assert.Contains("nameof(WidgetTransparency)", bridge);
+        Assert.Contains("nameof(AnimationSummaryText)", bridge);
+        Assert.Contains("nameof(IsAnimationEnabled)", bridge);
+        Assert.Contains("nameof(ShowAnimationDirection)", bridge);
         Assert.DoesNotContain("nameof(SelectedWidgetMaterialType)", shellBridge);
         Assert.DoesNotContain("nameof(WidgetTransparency)", shellBridge);
         Assert.DoesNotContain("nameof(SelectedTheme)", shellBridge);

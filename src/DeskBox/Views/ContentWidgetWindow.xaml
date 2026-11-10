@@ -79,7 +79,6 @@
             PositionLockRequested="PositionLockButton_Click"
             SizeLockRequested="SizeLockButton_Click"
             OverlayTitle="{Binding DisplayName}"
-            TitleDoubleTapped="ContentWidgetShell_TitleDoubleTapped"
             TitlePointerMoved="TitleBarGrid_PointerMoved"
             TitlePointerPressed="TitleBarGrid_PointerPressed"
             TitlePointerReleased="TitleBarGrid_PointerReleased"
@@ -89,14 +88,14 @@
             x:Name="ResizeGrid"
             IsHitTestVisible="True">
             <Grid.RowDefinitions>
-                <RowDefinition Height="4" />
+                <RowDefinition x:Name="ResizeTopRow" Height="4" />
                 <RowDefinition Height="*" />
-                <RowDefinition Height="8" />
+                <RowDefinition x:Name="ResizeBottomRow" Height="8" />
             </Grid.RowDefinitions>
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="8" />
+                <ColumnDefinition x:Name="ResizeLeftColumn" Width="8" />
                 <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="8" />
+                <ColumnDefinition x:Name="ResizeRightColumn" Width="8" />
             </Grid.ColumnDefinitions>
 
             <Border Grid.Row="0" Grid.Column="0" Background="Transparent" Tag="TopLeft" PointerPressed="ResizeBorder_PointerPressed" />

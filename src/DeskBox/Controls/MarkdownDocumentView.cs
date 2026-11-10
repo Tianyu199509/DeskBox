@@ -34,6 +34,8 @@ public sealed partial class MarkdownDocumentView : UserControl
     private const double EmbeddedBlockMinimumWidth = 160;
     private const double TableColumnMinimumWidth = 96;
     private const int WidthRenderDebounceMilliseconds = 160;
+    private const double MaxShadowMirrorRenderWidth = 2048;
+    private const double MaxShadowMirrorRenderHeight = 1024;
     private const double LightThemeSemanticMinimumContrast = 4.5;
     private static readonly Windows.UI.Color LightMarkdownWorstCaseSurface =
         Windows.UI.Color.FromArgb(0xFF, 0xB8, 0xB8, 0xB8);
@@ -78,6 +80,13 @@ public sealed partial class MarkdownDocumentView : UserControl
     private bool _hasRenderedState;
     private int _renderParseGeneration;
     private string _renderInvalidationReason = "initial";
+    private readonly long _fontSizeCallbackToken;
+    private readonly long _foregroundCallbackToken;
+    private readonly long _visibilityCallbackToken;
+    private readonly List<CheckBox> _inlineTaskMarkers = [];
+    private readonly List<(Hyperlink Link, Windows.Foundation.TypedEventHandler<Hyperlink, HyperlinkClickEventArgs> Handler)> _inlineAttachmentLinks = [];
+    private readonly List<Image> _inlineImages = [];
+    private bool _visualHandlersReleased;
 
     public MarkdownDocumentView()
         : this(new MarkdownDocumentService())
@@ -96,42 +105,186 @@ public sealed partial class MarkdownDocumentView : UserControl
         _contentRoot.Children.Add(_shadowMirror);
         _contentRoot.Children.Add(_documentText);
         ApplyContentHost();
-        RegisterPropertyChangedCallback(
+        _fontSizeCallbackToken = RegisterPropertyChangedCallback(
             FontSizeProperty,
-            (_, _) => InvalidateRenderForAppearanceChange("font-size"));
-        RegisterPropertyChangedCallback(
+            OnFontSizePropertyChanged);
+        _foregroundCallbackToken = RegisterPropertyChangedCallback(
             ForegroundProperty,
-            (_, _) => InvalidateRenderForAppearanceChange("foreground"));
-        RegisterPropertyChangedCallback(VisibilityProperty, (_, _) => QueueInvalidatedRender());
-        ActualThemeChanged += (_, _) => InvalidateRenderForAppearanceChange("theme");
-        SizeChanged += (_, args) => QueueWidthDependentRender(args.NewSize.Width);
-        Loaded += (_, _) =>
+            OnForegroundPropertyChanged);
+        _visibilityCallbackToken = RegisterPropertyChangedCallback(
+            VisibilityProperty,
+            OnVisibilityPropertyChanged);
+        ActualThemeChanged += OnActualThemeChanged;
+        SizeChanged += OnSizeChanged;
+        Loaded += OnLoaded;
+        Unloaded += OnUnloaded;
+    }
+
+    private void OnFontSizePropertyChanged(DependencyObject sender, DependencyProperty dp) =>
+        InvalidateRenderForAppearanceChange("font-size");
+
+    private void OnForegroundPropertyChanged(DependencyObject sender, DependencyProperty dp) =>
+        InvalidateRenderForAppearanceChange("foreground");
+
+    private void OnVisibilityPropertyChanged(DependencyObject sender, DependencyProperty dp)
+    {
+        if (_visualHandlersReleased)
         {
-            _isLoaded = true;
-            QueueInvalidatedRender();
-            if (!_shadowSubscribed)
-            {
-                _shadowSubscribed = true;
-                WidgetTextShadow.ShadowSettingChanged += OnShadowSettingChanged;
-            }
-        };
-        Unloaded += (_, _) =>
+            return;
+        }
+
+        if (Visibility != Visibility.Visible)
         {
-            _isLoaded = false;
-            ReleaseWidthRenderTimer();
-            if (_shadowSubscribed)
-            {
-                _shadowSubscribed = false;
-                WidgetTextShadow.ShadowSettingChanged -= OnShadowSettingChanged;
-            }
-        };
+            ClearShadowMirrorSnapshot();
+            return;
+        }
+
+        if (_shadowMirror.Source is null &&
+            _hasRenderedState &&
+            WidgetTextShadow.IsActiveFor(_shadowMirror))
+        {
+            QueueShadowSnapshot();
+        }
+
+        QueueInvalidatedRender();
+    }
+
+    private void OnActualThemeChanged(FrameworkElement sender, object args) =>
+        InvalidateRenderForAppearanceChange("theme");
+
+    private void OnSizeChanged(object sender, SizeChangedEventArgs args)
+    {
+        if (_visualHandlersReleased)
+        {
+            return;
+        }
+
+        if (args.NewSize.Width <= 0 || args.NewSize.Height <= 0)
+        {
+            ClearShadowMirrorSnapshot();
+        }
+        else if (_shadowMirror.Source is null &&
+                 _hasRenderedState &&
+                 CanRenderShadowMirror())
+        {
+            QueueShadowSnapshot();
+        }
+
+        QueueWidthDependentRender(args.NewSize.Width);
+    }
+
+    private void OnLoaded(object sender, RoutedEventArgs args)
+    {
+        if (_visualHandlersReleased)
+        {
+            return;
+        }
+
+        _isLoaded = true;
+        QueueInvalidatedRender();
+        if (_shadowMirror.Source is null &&
+            _hasRenderedState &&
+            Visibility == Visibility.Visible &&
+            WidgetTextShadow.IsActiveFor(_shadowMirror))
+        {
+            QueueShadowSnapshot();
+        }
+
+        if (!_shadowSubscribed)
+        {
+            _shadowSubscribed = true;
+            WidgetTextShadow.ShadowSettingChanged += OnShadowSettingChanged;
+        }
+    }
+
+    private void OnUnloaded(object sender, RoutedEventArgs args)
+    {
+        _isLoaded = false;
+        ReleaseWidthRenderTimer();
+        ClearShadowMirrorSnapshot();
+        if (_shadowSubscribed)
+        {
+            _shadowSubscribed = false;
+            WidgetTextShadow.ShadowSettingChanged -= OnShadowSettingChanged;
+        }
+    }
+
+    internal void ReleaseVisualHandlers()
+    {
+        if (_visualHandlersReleased)
+        {
+            return;
+        }
+
+        _visualHandlersReleased = true;
+        _isLoaded = false;
+        _attachmentResolver = null;
+        ReleaseWidthRenderTimer();
+        ClearShadowMirrorSnapshot();
+        if (_shadowSubscribed)
+        {
+            _shadowSubscribed = false;
+            WidgetTextShadow.ShadowSettingChanged -= OnShadowSettingChanged;
+        }
+
+        UnregisterPropertyChangedCallback(FontSizeProperty, _fontSizeCallbackToken);
+        UnregisterPropertyChangedCallback(ForegroundProperty, _foregroundCallbackToken);
+        UnregisterPropertyChangedCallback(VisibilityProperty, _visibilityCallbackToken);
+        ActualThemeChanged -= OnActualThemeChanged;
+        SizeChanged -= OnSizeChanged;
+        Loaded -= OnLoaded;
+        Unloaded -= OnUnloaded;
+        ReleaseDynamicInlineElements();
+        _documentText.Blocks.Clear();
+        _contentRoot.Children.Clear();
+        _scrollViewer.Content = null;
+        Content = null;
+    }
+
+    private void ReleaseDynamicInlineElements()
+    {
+        foreach (CheckBox marker in _inlineTaskMarkers)
+        {
+            marker.Click -= TaskMarker_Click;
+        }
+
+        _inlineTaskMarkers.Clear();
+
+        foreach ((Hyperlink link, Windows.Foundation.TypedEventHandler<Hyperlink, HyperlinkClickEventArgs> handler) in _inlineAttachmentLinks)
+        {
+            link.Click -= handler;
+        }
+
+        _inlineAttachmentLinks.Clear();
+
+        foreach (Image image in _inlineImages)
+        {
+            image.ImageOpened -= InlineImage_ImageOpened;
+            image.ImageFailed -= InlineImage_ImageFailed;
+            image.Source = null;
+        }
+
+        _inlineImages.Clear();
+        ReleaseEnhancedCodeElements();
     }
 
     private void OnShadowSettingChanged()
     {
-        // The snapshot only exists while shadows are on; a flip in either
-        // direction needs a render pass to pick up (or drop) the mirror.
-        InvalidateRenderForAppearanceChange("text-shadow");
+        if (_visualHandlersReleased)
+        {
+            return;
+        }
+
+        // Clear the RenderTargetBitmap immediately when shadows turn off, or capture
+        // the mirror without re-parsing Markdown when shadows turn on for a visible view.
+        if (!CanRenderShadowMirror())
+        {
+            ClearShadowMirrorSnapshot();
+            return;
+        }
+
+        UpdateForegrounds();
+        QueueShadowSnapshot();
     }
 
     public static readonly DependencyProperty MarkdownProperty = DependencyProperty.Register(
@@ -260,6 +413,11 @@ public sealed partial class MarkdownDocumentView : UserControl
             () =>
             {
                 _renderQueued = false;
+                if (_visualHandlersReleased)
+                {
+                    return;
+                }
+
                 if (_renderInvalidated &&
                     _isLoaded &&
                     Visibility == Visibility.Visible)
@@ -379,6 +537,7 @@ public sealed partial class MarkdownDocumentView : UserControl
             $"reason={_renderInvalidationReason} " +
             $"length={source.Length} format={ContentFormat} width={ActualWidth:F1}");
         UpdateForegrounds();
+        ReleaseDynamicInlineElements();
         _documentText.Blocks.Clear();
         _taskListIndex = 0;
         WasTruncated = false;
@@ -391,7 +550,7 @@ public sealed partial class MarkdownDocumentView : UserControl
         if (ContentFormat == TextContentFormat.PlainText)
         {
             var paragraph = CreateParagraph(BaseFontSize, FontWeights.Normal);
-            AppendText(paragraph.Inlines, source);
+            AppendPlainTextWithAutoLinks(paragraph.Inlines, source);
             _documentText.Blocks.Add(paragraph);
             RestoreScrollOffset(source, verticalOffset);
             CompleteRender();
@@ -420,13 +579,17 @@ public sealed partial class MarkdownDocumentView : UserControl
             return;
         }
 
-        if (generation != _renderParseGeneration ||
+        if (_visualHandlersReleased ||
+            generation != _renderParseGeneration ||
             !_isLoaded ||
             Visibility != Visibility.Visible)
         {
             return;
         }
 
+        ReleaseDynamicInlineElements();
+        _documentText.Blocks.Clear();
+        _taskListIndex = 0;
         WasTruncated = document.WasTruncated;
         foreach (MdBlock block in document.Document)
         {
@@ -452,15 +615,37 @@ public sealed partial class MarkdownDocumentView : UserControl
         QueueShadowSnapshot();
     }
 
+    private bool CanRenderShadowMirror() =>
+        !_visualHandlersReleased &&
+        _isLoaded &&
+        XamlRoot?.Content is UIElement &&
+        Visibility == Visibility.Visible &&
+        ActualWidth > 0 &&
+        ActualHeight > 0 &&
+        _documentText.Blocks.Count > 0 &&
+        WidgetTextShadow.IsActiveFor(_shadowMirror);
+
+    private void ClearShadowMirrorSnapshot()
+    {
+        ++_shadowSnapshotGeneration;
+        _shadowMirror.Source = null;
+    }
+
     private void QueueShadowSnapshot()
     {
+        if (!CanRenderShadowMirror())
+        {
+            ClearShadowMirrorSnapshot();
+            return;
+        }
+
         int generation = ++_shadowSnapshotGeneration;
         _ = UpdateShadowMirrorAsync(generation);
     }
 
     private async Task UpdateShadowMirrorAsync(int generation)
     {
-        if (!WidgetTextShadow.IsEnabled)
+        if (!CanRenderShadowMirror())
         {
             _shadowMirror.Source = null;
             return;
@@ -470,17 +655,22 @@ public sealed partial class MarkdownDocumentView : UserControl
         // measuring and capturing; width-driven re-renders are already
         // debounced on top of this.
         await Task.Delay(80);
-        if (generation != _shadowSnapshotGeneration || !_isLoaded)
+        if (generation != _shadowSnapshotGeneration ||
+            !CanRenderShadowMirror())
         {
+            _shadowMirror.Source = null;
             return;
         }
 
         double width = _documentText.ActualWidth;
         double height = _documentText.ActualHeight;
-        if (width < 1 || height < 1 || width > 4096 || height > 4096)
+        if (width < 1 ||
+            height < 1 ||
+            width > MaxShadowMirrorRenderWidth ||
+            height > MaxShadowMirrorRenderHeight)
         {
-            // RenderTargetBitmap's surface cap: very tall documents keep
-            // rendering without a body shadow instead of truncating.
+            // Cap offscreen RenderTargetBitmap height to viewport-sized notes
+            // so tall documents never allocate large full-document surfaces.
             _shadowMirror.Source = null;
             return;
         }
@@ -497,7 +687,8 @@ public sealed partial class MarkdownDocumentView : UserControl
         {
             var bitmap = new RenderTargetBitmap();
             await bitmap.RenderAsync(_documentText);
-            if (generation != _shadowSnapshotGeneration)
+            if (generation != _shadowSnapshotGeneration ||
+                !CanRenderShadowMirror())
             {
                 return;
             }
@@ -642,10 +833,20 @@ public sealed partial class MarkdownDocumentView : UserControl
 
     private void RestoreScrollOffset(string renderedSource, double verticalOffset)
     {
+        if (_visualHandlersReleased)
+        {
+            return;
+        }
+
         DispatcherQueue.TryEnqueue(
             Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
             () =>
             {
+                if (_visualHandlersReleased)
+                {
+                    return;
+                }
+
                 if (string.Equals(renderedSource, Markdown, StringComparison.Ordinal))
                 {
                     _scrollViewer.ChangeView(null, verticalOffset, null, disableAnimation: true);
@@ -790,6 +991,7 @@ public sealed partial class MarkdownDocumentView : UserControl
                 });
             }
 
+            int taskContentStartIndex = paragraph.Inlines.Count;
             if (firstContent is LeafBlock leaf && leaf.Inline is { } inline)
             {
                 UseInlineContentLineHeightWhenNeeded(paragraph, inline);
@@ -806,6 +1008,10 @@ public sealed partial class MarkdownDocumentView : UserControl
             {
                 if (ReferenceEquals(child, firstContent))
                 {
+                    if (taskState == true)
+                    {
+                        ApplyCompletedTaskInlineStyle(paragraph, taskContentStartIndex);
+                    }
                     continue;
                 }
 
@@ -843,7 +1049,7 @@ public sealed partial class MarkdownDocumentView : UserControl
             CornerRadius = new CornerRadius(5),
             Child = codeText
         };
-        paragraph.Inlines.Add(new InlineUIContainer { Child = codeSurface });
+        paragraph.Inlines.Add(new InlineUIContainer { Child = CreateEnhancedCodeContainer(codeSurface, codeText.Text) });
         _documentText.Blocks.Add(paragraph);
     }
 
@@ -1083,6 +1289,17 @@ public sealed partial class MarkdownDocumentView : UserControl
         }
     }
 
+    private void ApplyCompletedTaskInlineStyle(Paragraph paragraph, int startInlineIndex)
+    {
+        Brush completedForeground = BrushResource("TextFillColorSecondaryBrush");
+        for (int i = startInlineIndex; i < paragraph.Inlines.Count; i++)
+        {
+            Microsoft.UI.Xaml.Documents.Inline inline = paragraph.Inlines[i];
+            inline.TextDecorations = Windows.UI.Text.TextDecorations.Strikethrough;
+            inline.Foreground = completedForeground;
+        }
+    }
+
     private CheckBox CreateTaskMarker(bool isChecked)
     {
         var marker = new CheckBox
@@ -1094,12 +1311,18 @@ public sealed partial class MarkdownDocumentView : UserControl
             Padding = new Thickness(0),
             Margin = new Thickness(0, 0, 2, 0),
             VerticalAlignment = VerticalAlignment.Center,
-            RenderTransform = new TranslateTransform { Y = 6 },
-            Tag = _taskListIndex++
+            RenderTransform = new TranslateTransform { Y = 4 },
+            Tag = _taskListIndex++,
+            Style = Application.Current?.Resources is { } appResources &&
+                    appResources.TryGetValue("WidgetCompactStepCheckBoxStyle", out object? styleObj) &&
+                    styleObj is Style compactStyle
+                ? compactStyle
+                : null
         };
         if (AreTaskListsInteractive)
         {
             marker.Click += TaskMarker_Click;
+            _inlineTaskMarkers.Add(marker);
         }
         return marker;
     }
@@ -1199,7 +1422,14 @@ public sealed partial class MarkdownDocumentView : UserControl
             // full source bitmap in the XAML image surface.
             DecodePixelWidth = 960
         };
-        bitmap.UriSource = uri;
+        if (uri is { IsFile: true })
+        {
+            _ = GlanceImageStreamLoader.LoadAsync(bitmap, uri.LocalPath);
+        }
+        else
+        {
+            bitmap.UriSource = uri;
+        }
         var image = new Image
         {
             Source = bitmap,
@@ -1212,6 +1442,7 @@ public sealed partial class MarkdownDocumentView : UserControl
         };
         image.ImageOpened += InlineImage_ImageOpened;
         image.ImageFailed += InlineImage_ImageFailed;
+        _inlineImages.Add(image);
         AutomationProperties.SetName(
             image,
             string.IsNullOrWhiteSpace(link.Title) ? "Markdown image" : link.Title);
@@ -1266,9 +1497,13 @@ public sealed partial class MarkdownDocumentView : UserControl
         {
             var attachmentLink = CreateHyperlink();
             AppendContainer(attachmentLink.Inlines, link);
-            attachmentLink.Click += (_, _) => AttachmentOpenRequested?.Invoke(
-                this,
-                new MarkdownAttachmentRequestedEventArgs(attachmentId!));
+            string resolvedAttachmentId = attachmentId!;
+            Windows.Foundation.TypedEventHandler<Hyperlink, HyperlinkClickEventArgs> handler = (_, _) =>
+                AttachmentOpenRequested?.Invoke(
+                    this,
+                    new MarkdownAttachmentRequestedEventArgs(resolvedAttachmentId));
+            attachmentLink.Click += handler;
+            _inlineAttachmentLinks.Add((attachmentLink, handler));
             destination.Add(attachmentLink);
             return;
         }

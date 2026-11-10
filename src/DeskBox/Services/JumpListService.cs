@@ -23,10 +23,26 @@ public static class JumpListService
     /// </summary>
     public static void RegisterAppUserModelId()
     {
+        if (AppDistributionService.Current.IsMicrosoftStore ||
+            AppDistributionService.Current.IsPackaged)
+        {
+            // Packaged (MSIX / Microsoft Store) processes already carry their
+            // native PackageFamilyName!App identity; overriding it splits
+            // pinned Store taskbar icons when --settings spawns.
+            return;
+        }
+
         try
         {
-            JumpListNativeMethods.SetCurrentProcessExplicitAppUserModelID(AppUserModelId);
-            App.LogVerbose($"[JumpList] AUMID registered: {AppUserModelId}");
+            int hr = JumpListNativeMethods.SetCurrentProcessExplicitAppUserModelID(AppUserModelId);
+            if (hr >= 0)
+            {
+                App.LogVerbose($"[JumpList] AUMID registered: {AppUserModelId}");
+            }
+            else
+            {
+                App.Log($"[JumpList] SetCurrentProcessExplicitAppUserModelID failed hr=0x{hr:X8}");
+            }
         }
         catch (Exception ex)
         {
@@ -47,10 +63,23 @@ public static class JumpListService
     /// </summary>
     public static void RegisterProcessAppUserModelIdOnly()
     {
+        if (AppDistributionService.Current.IsMicrosoftStore ||
+            AppDistributionService.Current.IsPackaged)
+        {
+            return;
+        }
+
         try
         {
-            JumpListNativeMethods.SetCurrentProcessExplicitAppUserModelID(AppUserModelId);
-            App.LogVerbose($"[JumpList] Process AUMID registered: {AppUserModelId}");
+            int hr = JumpListNativeMethods.SetCurrentProcessExplicitAppUserModelID(AppUserModelId);
+            if (hr >= 0)
+            {
+                App.LogVerbose($"[JumpList] Process AUMID registered: {AppUserModelId}");
+            }
+            else
+            {
+                App.Log($"[JumpList] Process SetCurrentProcessExplicitAppUserModelID failed hr=0x{hr:X8}");
+            }
         }
         catch (Exception ex)
         {

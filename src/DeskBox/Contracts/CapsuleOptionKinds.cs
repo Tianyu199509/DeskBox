@@ -54,6 +54,10 @@ public static class CapsuleOptionKinds
     public static bool IsCollapseSmart(string? value) =>
         NormalizeCollapseBehavior(value) == CollapseSmart;
 
+    /// <summary>True when the value denotes the always-Expanded collapse behavior.</summary>
+    public static bool IsCollapseExpanded(string? value) =>
+        NormalizeCollapseBehavior(value) == CollapseExpanded;
+
     // --- Compact width mode ---
     public const string WidthModeAligned = "Aligned";
     public const string WidthModeIndependent = "Independent";

@@ -1,5 +1,6 @@
 using DeskBox.Controls.WidgetContents;
 using DeskBox.Services;
+using Microsoft.UI.Xaml;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
@@ -215,6 +216,8 @@ public sealed class MusicWidgetContentLayoutTests
     {
         string musicXaml = File.ReadAllText(TestPaths.FromRepository(
             "src/DeskBox/Controls/WidgetContents/MusicWidgetContent.xaml"));
+        string musicCode = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Controls/WidgetContents/MusicWidgetContent.xaml.cs"));
         string shellXaml = File.ReadAllText(TestPaths.FromRepository(
             "src/DeskBox/Controls/WidgetShell.xaml"));
         string shellCode = File.ReadAllText(TestPaths.FromRepository(
@@ -234,7 +237,9 @@ public sealed class MusicWidgetContentLayoutTests
         Assert.DoesNotContain("Glyph=\"&#xE893;\"", musicXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("x:Name=\"MinimalPreviousButton\"", musicXaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"MinimalControlPanel\"", musicXaml, StringComparison.Ordinal);
-        Assert.Contains("Background=\"{ThemeResource SystemControlAcrylicElementBrush}\"", musicXaml, StringComparison.Ordinal);
+        Assert.Contains("Background=\"{ThemeResource MusicFrostedBarScrimBrush}\"", musicXaml, StringComparison.Ordinal);
+        Assert.Contains("Background=\"{ThemeResource MusicLyricsCoverContrastBrush}\"", musicXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("SystemControlAcrylicElementBrush", musicXaml, StringComparison.Ordinal);
         Assert.Contains("MinHeight=\"40\"", musicXaml, StringComparison.Ordinal);
         Assert.Contains("Padding=\"6,5\"", musicXaml, StringComparison.Ordinal);
         Assert.Contains("TextAlignment=\"Left\"", musicXaml, StringComparison.Ordinal);
@@ -242,7 +247,10 @@ public sealed class MusicWidgetContentLayoutTests
         Assert.Contains("<Setter Property=\"FontSize\" Value=\"14\" />", musicXaml, StringComparison.Ordinal);
         Assert.Contains("Background=\"{ThemeResource SubtleFillColorSecondaryBrush}\"", musicXaml, StringComparison.Ordinal);
         Assert.Contains("Background=\"{ThemeResource SubtleFillColorTertiaryBrush}\"", musicXaml, StringComparison.Ordinal);
-        Assert.Contains("<Setter Property=\"CornerRadius\" Value=\"4\" />", musicXaml, StringComparison.Ordinal);
+        Assert.Contains("<Setter Property=\"CornerRadius\" Value=\"6\" />", musicXaml, StringComparison.Ordinal);
+        Assert.Contains("<Setter Property=\"CornerRadius\" Value=\"8\" />", musicXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("<Setter Property=\"CornerRadius\" Value=\"18\" />", musicXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("size / 2.0", musicCode, StringComparison.Ordinal);
         Assert.DoesNotContain("MusicPlayVectorIconStyle", musicXaml, StringComparison.Ordinal);
 
         Assert.Equal(3, CountOccurrences(shellXaml, "<widgetContents:MusicTransportIcon"));
@@ -283,10 +291,10 @@ public sealed class MusicWidgetContentLayoutTests
             .Order(StringComparer.Ordinal)
             .ToArray();
 
-        // 36 paths: the system volume slider's accessible name binds
-        // SystemVolumeLabel, and the timeline row hides through
-        // TimelineRowVisibility — both registered in the AOT bindable list.
-        Assert.Equal(36, dataContextPaths.Length);
+        // 35 paths: SystemVolumeLabel and TimelineRowVisibility are bound in XAML,
+        // while InlineSystemVolumeSlider.Value is synchronized imperatively after
+        // reading the OS audio snapshot so opening the panel never pushes default 0.5.
+        Assert.Equal(35, dataContextPaths.Length);
         Assert.Contains("[WinRT.GeneratedBindableCustomProperty([", bindableSource, StringComparison.Ordinal);
         Assert.Contains("public sealed partial class MusicWidgetViewModel", bindableSource, StringComparison.Ordinal);
         foreach (string path in dataContextPaths)
@@ -314,6 +322,264 @@ public sealed class MusicWidgetContentLayoutTests
         Assert.Contains("nameof(TitleTextSize)", contentWindow, StringComparison.Ordinal);
         Assert.Contains("ContentWidgetShell.DataContext = _titleViewModel", contentWindow, StringComparison.Ordinal);
         Assert.Contains("_titleViewModel.RefreshDisplayName()", commands, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LyricsPresentation_ExistsAcrossAllStylesAndRespectsMasterToggle()
+    {
+        string musicXaml = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Controls/WidgetContents/MusicWidgetContent.xaml"));
+        string musicCode = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Controls/WidgetContents/MusicWidgetContent.xaml.cs"));
+        string contentWindow = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Views/ContentWidgetWindow.xaml.cs"));
+        string settingsXaml = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Views/SettingsWindow.xaml"));
+
+        // Redundant lyrics icon buttons are removed from all four layouts;
+        // entering the frosted lyrics overlay happens directly by tapping the
+        // inline lyric row or album/vinyl artwork.
+        Assert.DoesNotContain("MinimalLyricsButton", musicXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("LyricsToggleButton", musicXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("RecordLyricsButton", musicXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("RecordHorizontalLyricsButton", musicXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("LyricsToggleButton_Click", musicXaml, StringComparison.Ordinal);
+
+        // Cover / MinimalLayout: left-aligned lyric floats over the cover scrim outside MinimalControlPanel
+        int lyricRowIndex = musicXaml.IndexOf("x:Name=\"MinimalLyricRow\"", StringComparison.Ordinal);
+        int controlPanelIndex = musicXaml.IndexOf("x:Name=\"MinimalControlPanel\"", StringComparison.Ordinal);
+        Assert.True(lyricRowIndex > 0 && lyricRowIndex < controlPanelIndex);
+        Assert.Contains("x:Name=\"MinimalCoverLyricScrim\"", musicXaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"MinimalLyricMarqueeHost\"", musicXaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"MinimalLyricText\"", musicXaml, StringComparison.Ordinal);
+
+        // Controls / Standard ContentGrid
+        Assert.Contains("x:Name=\"ControlsLyricRow\"", musicXaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"ControlsLyricMarqueeHost\"", musicXaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"SubtitleTextBlock\"", musicXaml, StringComparison.Ordinal);
+
+        // RecordVertical / RecordLayout
+        Assert.Contains("x:Name=\"RecordLyricRow\"", musicXaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"RecordLyricMarqueeHost\"", musicXaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"RecordLyricText\"", musicXaml, StringComparison.Ordinal);
+
+        // RecordHorizontal / RecordHorizontalLayout
+        Assert.Contains("x:Name=\"RecordHorizontalLyricRow\"", musicXaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"RecordHorizontalLyricMarqueeHost\"", musicXaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"RecordHorizontalLyricText\"", musicXaml, StringComparison.Ordinal);
+
+        // Compositor marquee for overflowing single-line lyrics + pure native-material poster lyrics mode
+        Assert.Contains("UpdateLyricMarquee", musicCode, StringComparison.Ordinal);
+        Assert.Contains("ApplyActivePlayerLayoutVisibility", musicCode, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"LyricsOverlayPanel\"", musicXaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"LyricsOverlayClipHost\"", musicXaml, StringComparison.Ordinal);
+        Assert.Contains("Tapped=\"LyricsOverlayPanel_Tapped\"", musicXaml, StringComparison.Ordinal);
+        Assert.Contains("DoubleTapped=\"LyricLineItem_DoubleTapped\"", musicXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("BlurredThumbnailImage", musicXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("LyricsOffsetPill", musicXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("LyricsCloseButton_Click", musicXaml, StringComparison.Ordinal);
+        Assert.Equal(8, CountOccurrences(musicXaml, "Tapped=\"ArtworkLyricsTrigger_Tapped\""));
+        Assert.Equal(4, CountOccurrences(musicXaml, "Visibility=\"{x:Bind ViewModel.InlineLyricVisibility, Mode=OneWay}\""));
+
+        // Capsule compact mode gates on ShowLyrics && ShowCapsuleLyrics
+        Assert.Contains("music.ViewModel.ShowLyrics &&", contentWindow, StringComparison.Ordinal);
+        Assert.Contains("music.ViewModel.ShowCapsuleLyrics &&", contentWindow, StringComparison.Ordinal);
+
+        // Settings master switch is prominently placed in MusicSettingsSection
+        Assert.Contains("svc:Localized.HeaderKey=\"Settings.Music.ShowLyrics.Title\"", settingsXaml, StringComparison.Ordinal);
+        Assert.Contains("IsOn=\"{x:Bind ShowLyrics, Mode=TwoWay}\"", settingsXaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Win11NativeVisualPolish_UsesFrostedAcrylicLyricsCenteredLinesAndCoordinatedVolumeBubble()
+    {
+        string musicXaml = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Controls/WidgetContents/MusicWidgetContent.xaml"));
+        string musicCode = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Controls/WidgetContents/MusicWidgetContent.xaml.cs"));
+        string viewModelCode = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/ViewModels/MusicWidgetViewModel.cs"));
+
+        // Frosted glass mask on fullscreen lyrics + centered alignment + edge fade
+        Assert.Contains("x:Key=\"MusicLyricsCoverContrastBrush\"", musicXaml, StringComparison.Ordinal);
+        Assert.Contains("<AcrylicBrush", musicXaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"LyricsOverlayFrostLayer\"", musicXaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"LyricsOverlayAmbientWash\"", musicXaml, StringComparison.Ordinal);
+        Assert.Contains("TextAlignment=\"Center\"", musicXaml, StringComparison.Ordinal);
+        Assert.Contains("UpdateLyricsViewportEdgeAttenuation", musicCode, StringComparison.Ordinal);
+
+        // Win11 native volume bubble: acrylic surface, mute toggle button + centered slider + clean integer
+        Assert.Contains("x:Key=\"MusicVolumeBubbleAcrylicBrush\"", musicXaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"InlineSystemMuteButton\"", musicXaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"InlineSessionMuteButton\"", musicXaml, StringComparison.Ordinal);
+        Assert.Contains("Click=\"SystemMuteButton_Click\"", musicXaml, StringComparison.Ordinal);
+        Assert.Contains("SyncInlineVolumeSliderAccent", musicCode, StringComparison.Ordinal);
+
+        // Elevated inline lyric typography above secondary artist text
+        Assert.Contains("LyricTextSize => Math.Min(SettingsService.MaxTextSize + 1.5, TextSize + 0.5);", viewModelCode, StringComparison.Ordinal);
+        Assert.Contains("MinimalLyricTextSize => Math.Min(SettingsService.MaxTextSize + 1.5, TextSize + 0.5);", viewModelCode, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("QQMusic.exe", "QQ音乐", "QQMusic.exe")]
+    [InlineData("Tencent.QQMusic", "QQ音乐", "QQMusic.exe")]
+    [InlineData("com.netease.cloudmusic", "网易云音乐", "cloudmusic.exe")]
+    [InlineData("SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify", "Spotify", "Spotify.exe")]
+    [InlineData("Brave", "Brave", "brave.exe")]
+    [InlineData("Chrome", "Google Chrome", "chrome.exe")]
+    [InlineData("MSEdge", "Microsoft Edge", "msedge.exe")]
+    [InlineData("308046B0AF4A39CB", "Mozilla Firefox", "firefox.exe")]
+    public void MusicSourceAppIconResolver_ResolvesExpectedCandidateExecutableNames(
+        string aumid,
+        string displayName,
+        string expectedExe)
+    {
+        IReadOnlyList<string> candidates = MusicSourceAppIconResolver.GetCandidateExecutableNames(aumid, displayName);
+        Assert.Contains(candidates, item => string.Equals(item, expectedExe, StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void SourceChip_DisplaysSourceAppIconAndStealsZeroDedicatedRowsAcrossLayouts()
+    {
+        string musicXaml = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Controls/WidgetContents/MusicWidgetContent.xaml"));
+        string musicCode = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Controls/WidgetContents/MusicWidgetContent.xaml.cs"));
+
+        // Source app icon bound in all 4 layouts + fallback icon preserved
+        Assert.Equal(4, CountOccurrences(musicXaml, "Source=\"{x:Bind ViewModel.SourceAppIcon, Mode=OneWay}\""));
+        Assert.Equal(4, CountOccurrences(musicXaml, "Visibility=\"{x:Bind ViewModel.SourceAppIconVisibility, Mode=OneWay}\""));
+        Assert.Equal(4, CountOccurrences(musicXaml, "Visibility=\"{x:Bind ViewModel.SourceFallbackIconVisibility, Mode=OneWay}\""));
+        Assert.Equal(4, CountOccurrences(musicXaml, "<local:MusicSourceIcon"));
+        Assert.Contains("PopulateSourceFlyoutItemIconAsync", musicCode, StringComparison.Ordinal);
+
+        // Dedicated full-width source header rows removed so cover/vinyl/text never shrink for the source chip
+        Assert.DoesNotContain("ControlsSourceHeaderRow", musicXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("RecordSourceHeaderRow", musicXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("RecordHorizontalSourceHeaderRow", musicXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("sourceHeaderHeight", musicCode, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void InlineVolumePanel_StaysOpenDuringClicksAndSliderDrags()
+    {
+        string musicXaml = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Controls/WidgetContents/MusicWidgetContent.xaml"));
+        string musicCode = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Controls/WidgetContents/MusicWidgetContent.xaml.cs"));
+
+        Assert.Contains("InlineVolumePanel.AddHandler(", musicCode, StringComparison.Ordinal);
+        Assert.Contains("IsPointerPointInside(e, InlineVolumePanel)", musicCode, StringComparison.Ordinal);
+        Assert.Contains("ReferenceEquals(current, target) || Equals(current, target)", musicCode, StringComparison.Ordinal);
+        Assert.Contains("InlineSystemVolumeSlider?.PointerCaptures is { Count: > 0 }", musicCode, StringComparison.Ordinal);
+        Assert.DoesNotContain("<ThemeShadow", musicXaml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void InlineVolumePanel_NeverPushesDefaultVolumeBeforeSnapshotAndLayoutReady()
+    {
+        string musicXaml = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Controls/WidgetContents/MusicWidgetContent.xaml"));
+        string sessionCode = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Services/MusicSessionService.cs"));
+
+        int panelStart = musicXaml.IndexOf("x:Name=\"InlineVolumePanel\"", StringComparison.Ordinal);
+        Assert.True(panelStart >= 0);
+        int panelTagEnd = musicXaml.IndexOf('>', panelStart);
+        Assert.True(panelTagEnd > panelStart);
+        string panelTag = musicXaml[panelStart..panelTagEnd];
+        Assert.Contains("Visibility=\"Collapsed\"", panelTag, StringComparison.Ordinal);
+
+        int systemSliderStart = musicXaml.IndexOf("x:Name=\"InlineSystemVolumeSlider\"", StringComparison.Ordinal);
+        Assert.True(systemSliderStart >= 0);
+        int systemSliderEnd = musicXaml.IndexOf("/>", systemSliderStart, StringComparison.Ordinal);
+        Assert.True(systemSliderEnd > systemSliderStart);
+        string systemSliderTag = musicXaml[systemSliderStart..systemSliderEnd];
+        Assert.DoesNotContain("Value=", systemSliderTag, StringComparison.Ordinal);
+
+        Assert.False(MusicWidgetContent.ShouldApplyInlineVolumeSliderChange(
+            isRefreshing: true,
+            isReadyForUserInput: true,
+            isPanelOpen: true,
+            Visibility.Visible,
+            hasViewModel: true));
+        Assert.False(MusicWidgetContent.ShouldApplyInlineVolumeSliderChange(
+            isRefreshing: false,
+            isReadyForUserInput: false,
+            isPanelOpen: true,
+            Visibility.Visible,
+            hasViewModel: true));
+        Assert.False(MusicWidgetContent.ShouldApplyInlineVolumeSliderChange(
+            isRefreshing: false,
+            isReadyForUserInput: true,
+            isPanelOpen: true,
+            Visibility.Collapsed,
+            hasViewModel: true));
+        Assert.True(MusicWidgetContent.ShouldApplyInlineVolumeSliderChange(
+            isRefreshing: false,
+            isReadyForUserInput: true,
+            isPanelOpen: true,
+            Visibility.Visible,
+            hasViewModel: true));
+
+        // All WinRT SMTC TypedEventHandlers must be rooted in instance fields so aggressive GC never collects them.
+        Assert.Contains("private readonly Windows.Foundation.TypedEventHandler<GlobalSystemMediaTransportControlsSessionManager, SessionsChangedEventArgs> _sessionsChangedHandler;", sessionCode, StringComparison.Ordinal);
+        Assert.Contains("private readonly Windows.Foundation.TypedEventHandler<GlobalSystemMediaTransportControlsSessionManager, CurrentSessionChangedEventArgs> _currentSessionChangedHandler;", sessionCode, StringComparison.Ordinal);
+        Assert.Contains("private readonly Windows.Foundation.TypedEventHandler<GlobalSystemMediaTransportControlsSession, PlaybackInfoChangedEventArgs> _sessionPlaybackInfoChangedHandler;", sessionCode, StringComparison.Ordinal);
+        Assert.Contains("private readonly Windows.Foundation.TypedEventHandler<GlobalSystemMediaTransportControlsSession, MediaPropertiesChangedEventArgs> _sessionMediaPropertiesChangedHandler;", sessionCode, StringComparison.Ordinal);
+        Assert.Contains("private readonly Windows.Foundation.TypedEventHandler<GlobalSystemMediaTransportControlsSession, TimelinePropertiesChangedEventArgs> _sessionTimelinePropertiesChangedHandler;", sessionCode, StringComparison.Ordinal);
+        Assert.Contains("private readonly Windows.Foundation.TypedEventHandler<GlobalSystemMediaTransportControlsSession, PlaybackInfoChangedEventArgs> _observedPlaybackInfoChangedHandler;", sessionCode, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void InlineLyricMarquee_UsesStretchGridVerticalCenteringAndNonLinearCubicBezierGlide()
+    {
+        string musicXaml = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Controls/WidgetContents/MusicWidgetContent.xaml"));
+        string musicCode = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Controls/WidgetContents/MusicWidgetContent.xaml.cs"));
+
+        // Never bind marquee track Height to ActualHeight (non-notifying DP in WinUI 3 causes 0-height vertical half-clipping).
+        Assert.DoesNotContain("Height=\"{Binding ActualHeight", musicXaml, StringComparison.Ordinal);
+        Assert.Equal(6, CountOccurrences(musicXaml, "Rect=\"0,-12,4096,128\""));
+        Assert.Contains("CreateHorizontalViewportClipRect(", musicCode, StringComparison.Ordinal);
+
+        // Overflowing lyrics glide to -travel with a non-linear CubicBezier S-curve and hold at sentence end.
+        int updateLyricStart = musicCode.IndexOf("private void UpdateLyricMarquee(", StringComparison.Ordinal);
+        Assert.True(updateLyricStart >= 0);
+        int stopLyricStart = musicCode.IndexOf("private void StopLyricMarquee(", updateLyricStart, StringComparison.Ordinal);
+        Assert.True(stopLyricStart > updateLyricStart);
+        string updateLyricBody = musicCode[updateLyricStart..stopLyricStart];
+
+        Assert.Contains("CreateCubicBezierEasingFunction(", updateLyricBody, StringComparison.Ordinal);
+        Assert.Contains("new Vector2(0.42f, 0.0f)", updateLyricBody, StringComparison.Ordinal);
+        Assert.Contains("new Vector2(0.18f, 1.0f)", updateLyricBody, StringComparison.Ordinal);
+        Assert.Contains("elements.Clone.Visibility = Visibility.Collapsed;", updateLyricBody, StringComparison.Ordinal);
+        Assert.Contains("AnimationStopBehavior.LeaveCurrentValue", updateLyricBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("elements.Canvas.Translation = new Vector3(", updateLyricBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("CreateLinearEasingFunction", updateLyricBody, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SpectrumAndAudioContracts_ReleaseTransientTimersAndSupportConsoleEndpointFallback()
+    {
+        string spectrumCode = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Controls/WidgetContents/MusicSpectrumControl.cs"));
+        string volumeCode = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Services/MusicVolumeService.cs"));
+        string nativeVolumeCode = File.ReadAllText(TestPaths.FromRepository(
+            "native/deskbox-native/src/music_volume.rs"));
+        string musicCode = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Controls/WidgetContents/MusicWidgetContent.xaml.cs"));
+
+        Assert.Contains("UnregisterPropertyChangedCallback(VisibilityProperty, _visibilityCallbackToken)", spectrumCode, StringComparison.Ordinal);
+        Assert.Contains("timer.Tick -= FrameTimer_Tick;", spectrumCode, StringComparison.Ordinal);
+        Assert.Contains("PerformanceLogger.RecordTransientUiTimerCreated();", spectrumCode, StringComparison.Ordinal);
+        Assert.Contains("PerformanceLogger.RecordTransientUiTimerReleased();", spectrumCode, StringComparison.Ordinal);
+
+        Assert.Contains("ERole.Console", volumeCode, StringComparison.Ordinal);
+        Assert.Contains("eConsole", nativeVolumeCode, StringComparison.Ordinal);
+        Assert.Contains("RefreshInlineVolumeForActiveSourceAsync", musicCode, StringComparison.Ordinal);
     }
 
     private static int CountOccurrences(string source, string value) =>

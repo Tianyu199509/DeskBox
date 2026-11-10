@@ -92,4 +92,70 @@ internal static class DesktopOrganizationAbandonDialog
 
         return builder.ToString().TrimEnd();
     }
+
+    public static string BuildCompactStuckSummary(
+        LocalizationService localization,
+        OrganizationHistoryEntry? history)
+    {
+        if (history is null)
+        {
+            return string.Empty;
+        }
+
+        List<OrganizationHistoryItem> stuck = history.Items.Where(item => !item.IsRestored).ToList();
+        if (stuck.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        const int shownLimit = 4;
+        IEnumerable<string> preview = stuck
+            .Take(shownLimit)
+            .Select(item => $"{item.Name}（{localization.T(DesktopOrganizationTransaction.GetUndoBlockReasonKey(item))}）");
+        string suffix = stuck.Count > shownLimit
+            ? $" +{stuck.Count - shownLimit}"
+            : string.Empty;
+        return "\n" + string.Join("；", preview) + suffix;
+    }
+
+    public static string BuildRecoveryItemDetails(
+        LocalizationService localization,
+        DesktopOrganizationRecoveryJournal? journal)
+    {
+        if (journal is null || journal.Items.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        List<DesktopOrganizationRecoveryItem> items = journal.Items
+            .Where(item =>
+                item.Completed ||
+                File.Exists(item.DestinationPath) ||
+                Directory.Exists(item.DestinationPath))
+            .ToList();
+        if (items.Count == 0)
+        {
+            items = journal.Items.ToList();
+        }
+
+        var builder = new StringBuilder();
+        builder.AppendLine(localization.Format("DesktopOrganization.Public.AbandonListHeader", items.Count));
+        const int shownLimit = 8;
+        for (int index = 0; index < Math.Min(items.Count, shownLimit); index++)
+        {
+            DesktopOrganizationRecoveryItem item = items[index];
+            string displayName = Path.GetFileName(
+                !string.IsNullOrWhiteSpace(item.DestinationPath) ? item.DestinationPath : item.SourcePath);
+            builder.Append("• ").AppendLine(displayName);
+            builder.AppendLine("  " + localization.Format("DesktopOrganization.Public.AbandonItemSource", item.SourcePath));
+            builder.AppendLine("  " + localization.Format("DesktopOrganization.Public.AbandonItemDestination", item.DestinationPath));
+        }
+
+        if (items.Count > shownLimit)
+        {
+            builder.AppendLine(localization.Format("DesktopOrganization.Public.AbandonMoreItems", items.Count - shownLimit));
+        }
+
+        return builder.ToString().TrimEnd();
+    }
 }

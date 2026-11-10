@@ -1,0 +1,438 @@
+{
+  "schemaVersion": 1,
+  "id": "deskbox.pomodoro",
+  "name": "番茄专注 & 久坐提醒",
+  "version": "5.0.0",
+  "author": "DeskBox",
+  "description": "双模节律：\uD83C\uDF45 番茄专注呼吸圆环 + \uD83E\uDE91 久坐护眼守护，键鼠空闲自动重置久坐计时，到点微动作提醒支持一键推迟。",
+  "icon": "\uE916",
+  "minSize": {
+    "width": 248,
+    "height": 292
+  },
+  "defaultSize": {
+    "width": 276,
+    "height": 312
+  },
+  "settings": [
+    {
+      "key": "rhythmMode",
+      "type": "choice",
+      "label": "${$i18n.setRhythmMode}",
+      "default": "pomodoro",
+      "options": [
+        {
+          "value": "pomodoro",
+          "label": "${$i18n.optRhythmPomodoro}"
+        },
+        {
+          "value": "sedentary",
+          "label": "${$i18n.optRhythmSedentary}"
+        }
+      ]
+    },
+    {
+      "key": "modules",
+      "type": "moduleList",
+      "label": "${$i18n.setModules}",
+      "default": "timer:1,task:0,goal:0,history:0,health:0",
+      "options": [
+        {
+          "value": "timer",
+          "label": "${$i18n.modTimer}"
+        },
+        {
+          "value": "task",
+          "label": "${$i18n.modTask}"
+        },
+        {
+          "value": "goal",
+          "label": "${$i18n.modGoal}"
+        },
+        {
+          "value": "history",
+          "label": "${$i18n.modHistory}"
+        },
+        {
+          "value": "health",
+          "label": "${$i18n.modHealth}"
+        }
+      ]
+    },
+    {
+      "key": "focusMinutes",
+      "type": "choice",
+      "label": "${$i18n.setFocusMin}",
+      "default": "25",
+      "options": [
+        {
+          "value": "15",
+          "label": "${$i18n.optFocus15}"
+        },
+        {
+          "value": "25",
+          "label": "${$i18n.optFocus25}"
+        },
+        {
+          "value": "35",
+          "label": "${$i18n.optFocus35}"
+        },
+        {
+          "value": "45",
+          "label": "${$i18n.optFocus45}"
+        },
+        {
+          "value": "60",
+          "label": "${$i18n.optFocus60}"
+        }
+      ]
+    },
+    {
+      "key": "breakPreset",
+      "type": "choice",
+      "label": "${$i18n.setBreakPreset}",
+      "default": "5,15",
+      "options": [
+        {
+          "value": "3,10",
+          "label": "${$i18n.optBreak3_10}"
+        },
+        {
+          "value": "5,15",
+          "label": "${$i18n.optBreak5_15}"
+        },
+        {
+          "value": "5,20",
+          "label": "${$i18n.optBreak5_20}"
+        },
+        {
+          "value": "10,25",
+          "label": "${$i18n.optBreak10_25}"
+        }
+      ]
+    },
+    {
+      "key": "dailyGoal",
+      "type": "choice",
+      "label": "${$i18n.setDailyGoal}",
+      "default": "8",
+      "options": [
+        {
+          "value": "4",
+          "label": "${$i18n.optGoal4}"
+        },
+        {
+          "value": "6",
+          "label": "${$i18n.optGoal6}"
+        },
+        {
+          "value": "8",
+          "label": "${$i18n.optGoal8}"
+        },
+        {
+          "value": "10",
+          "label": "${$i18n.optGoal10}"
+        },
+        {
+          "value": "12",
+          "label": "${$i18n.optGoal12}"
+        }
+      ]
+    },
+    {
+      "key": "flowMode",
+      "type": "choice",
+      "label": "${$i18n.setFlowMode}",
+      "default": "semi",
+      "options": [
+        {
+          "value": "semi",
+          "label": "${$i18n.optFlowSemi}"
+        },
+        {
+          "value": "manual",
+          "label": "${$i18n.optFlowManual}"
+        },
+        {
+          "value": "auto",
+          "label": "${$i18n.optFlowAuto}"
+        }
+      ]
+    },
+    {
+      "key": "notifyMode",
+      "type": "choice",
+      "label": "${$i18n.setNotifyMode}",
+      "default": "toast_sound",
+      "options": [
+        {
+          "value": "toast_sound",
+          "label": "${$i18n.optNotifySound}"
+        },
+        {
+          "value": "toast_silent",
+          "label": "${$i18n.optNotifySilent}"
+        },
+        {
+          "value": "none",
+          "label": "${$i18n.optNotifyNone}"
+        }
+      ]
+    },
+    {
+      "key": "sedentaryIntervalMin",
+      "type": "choice",
+      "label": "${$i18n.setSedentaryInterval}",
+      "default": "50",
+      "options": [
+        {
+          "value": "40",
+          "label": "${$i18n.optSed40}"
+        },
+        {
+          "value": "50",
+          "label": "${$i18n.optSed50}"
+        },
+        {
+          "value": "60",
+          "label": "${$i18n.optSed60}"
+        },
+        {
+          "value": "90",
+          "label": "${$i18n.optSed90}"
+        }
+      ]
+    },
+    {
+      "key": "idleAutoResetMin",
+      "type": "choice",
+      "label": "${$i18n.setIdleReset}",
+      "default": "5",
+      "options": [
+        {
+          "value": "0",
+          "label": "${$i18n.optIdleOff}"
+        },
+        {
+          "value": "5",
+          "label": "${$i18n.optIdle5}"
+        },
+        {
+          "value": "10",
+          "label": "${$i18n.optIdle10}"
+        }
+      ]
+    }
+  ],
+  "state": {
+    "currentTask": ""
+  },
+  "collections": {
+    "sessions": {
+      "maxItems": 100,
+      "sort": "newestFirst"
+    }
+  },
+  "sources": [
+    {
+      "type": "pomodoro",
+      "intervalMs": 1000
+    }
+  ],
+  "capsule": {
+    "title": "${$pomodoro.capsuleTitle}",
+    "summary": "${$pomodoro.capsuleSummary}",
+    "glyph": "${$pomodoro.glyph}",
+    "badge": "${$pomodoro.capsuleBadge}",
+    "badgeIsWarning": "${$pomodoro.isDue}",
+    "progress": "${$pomodoro.progressPercent}",
+    "enableBounceOnUpdate": false
+  },
+  "view": {
+    "type": "ModuleStack",
+    "bind": "settings.modules",
+    "spacing": 10,
+    "padding": "12,6,12,12",
+    "children": [
+      {
+        "id": "timer",
+        "type": "PomodoroCard"
+      },
+      {
+        "id": "task",
+        "type": "Input",
+        "when": "${$pomodoro.mode == 'pomodoro'}",
+        "placeholder": "${$i18n.taskPlaceholder}",
+        "bind": "state.currentTask"
+      },
+      {
+        "id": "goal",
+        "type": "Stack",
+        "when": "${$pomodoro.mode == 'pomodoro'}",
+        "spacing": 6,
+        "children": [
+          {
+            "type": "Divider"
+          },
+          {
+            "type": "Grid",
+            "columns": "1*,Auto",
+            "children": [
+              {
+                "type": "Text",
+                "column": 0,
+                "text": "${$i18n.todayFocusedPrefix}${$pomodoro.todayDurationText}",
+                "style": "bodyStrong"
+              },
+              {
+                "type": "Text",
+                "column": 1,
+                "text": "${$pomodoro.streakBadge} · ${$pomodoro.todayCompleted}/${$pomodoro.dailyGoal}${$i18n.roundsSuffix}",
+                "style": "caption",
+                "color": "secondary",
+                "verticalAlignment": "center"
+              }
+            ]
+          },
+          {
+            "type": "ProgressBar",
+            "progress": "${$pomodoro.goalPercent}",
+            "color": "accent",
+            "warningThreshold": 999,
+            "dangerThreshold": 999
+          }
+        ]
+      },
+      {
+        "id": "history",
+        "type": "Stack",
+        "when": "${$pomodoro.mode == 'pomodoro'}",
+        "spacing": 6,
+        "children": [
+          {
+            "type": "Divider"
+          },
+          {
+            "type": "Grid",
+            "columns": "1*,Auto",
+            "children": [
+              {
+                "type": "Text",
+                "column": 0,
+                "text": "${$i18n.todayLogTitle}",
+                "style": "caption",
+                "color": "secondary",
+                "verticalAlignment": "center"
+              },
+              {
+                "type": "Button",
+                "column": 1,
+                "icon": "\uE8C8",
+                "text": "${$i18n.copyReviewBtn}",
+                "variant": "ghost",
+                "tooltip": "${$i18n.copyReviewTooltip}",
+                "onClick": {
+                  "type": "collection.exportMarkdown",
+                  "collection": "sessions"
+                }
+              }
+            ]
+          },
+          {
+            "type": "List",
+            "items": "sessions",
+            "maxLines": 5,
+            "filter": "${$item.date == $pomodoro.todayDate}",
+            "emptyState": {
+              "icon": "\uE823",
+              "title": "${$i18n.emptySessionsTitle}",
+              "subtitle": "${$i18n.emptySessionsSub}"
+            },
+            "hoverActions": [
+              {
+                "type": "Button",
+                "icon": "\uE74D",
+                "variant": "ghost",
+                "tooltip": "${$i18n.deleteSessionTooltip}",
+                "onClick": {
+                  "type": "collection.remove",
+                  "collection": "sessions",
+                  "targetId": "${$item.id}"
+                }
+              }
+            ],
+            "itemTemplate": {
+              "type": "Grid",
+              "columns": "Auto,1*,Auto",
+              "spacing": 8,
+              "children": [
+                {
+                  "type": "Text",
+                  "column": 0,
+                  "text": "${$item.timeText}",
+                  "style": "caption",
+                  "color": "muted",
+                  "verticalAlignment": "center"
+                },
+                {
+                  "type": "Text",
+                  "column": 1,
+                  "text": "${$item.task}",
+                  "style": "body",
+                  "maxLines": 1,
+                  "verticalAlignment": "center"
+                },
+                {
+                  "type": "Text",
+                  "column": 2,
+                  "text": "${$item.duration}",
+                  "style": "caption",
+                  "color": "secondary",
+                  "verticalAlignment": "center"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "id": "health",
+        "type": "Stack",
+        "when": "${$pomodoro.mode == 'sedentary'}",
+        "spacing": 6,
+        "children": [
+          {
+            "type": "Divider"
+          },
+          {
+            "type": "Grid",
+            "columns": "1*,Auto",
+            "children": [
+              {
+                "type": "Text",
+                "column": 0,
+                "text": "${$pomodoro.healthSummary}",
+                "style": "bodyStrong",
+                "verticalAlignment": "center"
+              },
+              {
+                "type": "Text",
+                "column": 1,
+                "text": "${$pomodoro.intervalMin}m",
+                "style": "caption",
+                "color": "secondary",
+                "verticalAlignment": "center"
+              }
+            ]
+          },
+          {
+            "type": "Text",
+            "text": "${$i18n.nextMicroPrefix}${$pomodoro.microAction}",
+            "style": "caption",
+            "color": "secondary"
+          }
+        ]
+      }
+    ]
+  }
+}

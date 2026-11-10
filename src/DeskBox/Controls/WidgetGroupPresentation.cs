@@ -39,6 +39,8 @@ public sealed class WidgetGroupMemberEventArgs(
 
     public WidgetGroupSwitchOrigin Origin { get; } = origin;
 
+    public bool? PreferredForward { get; init; }
+
     internal long? TabSelectionRequestVersion { get; init; }
 }
 

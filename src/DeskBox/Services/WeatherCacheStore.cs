@@ -155,7 +155,17 @@ internal sealed class WeatherCacheStore
             state.SchemaVersion = WeatherCacheState.CurrentSchemaVersion;
             await ResilientJsonStore.SaveAsync(
                 _storePath,
-                WeatherService.SerializeCacheState(state));
+                async tempPath =>
+                {
+                    await using var stream = new FileStream(
+                        tempPath,
+                        FileMode.Create,
+                        FileAccess.Write,
+                        FileShare.None,
+                        bufferSize: 4096,
+                        FileOptions.Asynchronous | FileOptions.SequentialScan);
+                    await WeatherService.SerializeCacheStateAsync(stream, state).ConfigureAwait(false);
+                });
             return true;
         }
         catch (Exception ex)
@@ -173,6 +183,29 @@ internal sealed class WeatherCacheStore
     {
         try
         {
+            if (File.Exists(_storePath))
+            {
+                try
+                {
+                    await using var stream = new FileStream(
+                        _storePath,
+                        FileMode.Open,
+                        FileAccess.Read,
+                        FileShare.ReadWrite | FileShare.Delete,
+                        bufferSize: 4096,
+                        FileOptions.Asynchronous | FileOptions.SequentialScan);
+                    WeatherCacheState? loaded = await WeatherService
+                        .DeserializeCacheStateAsync(stream)
+                        .ConfigureAwait(false);
+                    return Normalize(loaded ?? new WeatherCacheState());
+                }
+                catch
+                {
+                    // Fall back to ResilientJsonStore for corrupt-primary quarantine
+                    // and backup restoration.
+                }
+            }
+
             WeatherCacheState state = await ResilientJsonStore.LoadAsync(
                 _storePath,
                 static json => WeatherService.DeserializeCacheState(json) ?? new WeatherCacheState(),

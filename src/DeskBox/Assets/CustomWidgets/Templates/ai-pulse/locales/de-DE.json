@@ -1,0 +1,16 @@
+{
+  "modFocus": "Fokussierte Kontingentkarte",
+  "modRadar": "Multi-Provider-Radar",
+  "modTokens": "Lokale Token- & Cache-Analyse",
+  "modTrend": "14-Tage-Nutzungstrend",
+  "optQuotaRem": "Verbleibende Prozent anzeigen (z. B. 85 % frei)",
+  "optQuotaUsed": "Genutzte Prozent anzeigen (z. B. 15 % genutzt)",
+  "optRef15m": "Alle 15 Minuten",
+  "optRef1m": "Jede Minute (Empfohlen)",
+  "optRef5m": "Alle 5 Minuten",
+  "setModules": "Sichtbare Module & Reihenfolge",
+  "setQuotaMode": "Kontingentanzeige im Zeitfenster",
+  "setRefresh": "Automatisches Abfrageintervall",
+  "widgetDescription": "Rate-Limit-Fenster von Claude Code & Codex sowie Kontoguthaben von Zhipu GLM, DeepSeek, Kimi und OpenRouter überwachen.",
+  "widgetName": "KI-Monitor"
+}

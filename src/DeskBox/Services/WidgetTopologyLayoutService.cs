@@ -1,4 +1,4 @@
-﻿using System.Runtime.InteropServices;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using DeskBox.Helpers;
@@ -24,6 +24,49 @@ internal sealed class WidgetTopologyLayoutService
         return Activate(settings, topology);
     }
 
+    public bool RecalibrateCurrentTopology(AppSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        WidgetDisplayTopologySnapshot topology = CaptureCurrentTopology();
+        return Recalibrate(settings, topology);
+    }
+
+    internal bool Recalibrate(AppSettings settings, WidgetDisplayTopologySnapshot topology)
+    {
+        settings.WidgetLayout.WidgetTopologyLayouts ??= [];
+        if (topology.Monitors.Count == 0 || string.IsNullOrWhiteSpace(topology.Key))
+        {
+            return false;
+        }
+
+        if (!string.Equals(settings.WidgetLayout.ActiveWidgetTopologyKey, topology.Key, StringComparison.Ordinal) ||
+            !settings.WidgetLayout.WidgetTopologyLayouts.TryGetValue(topology.Key, out WidgetTopologyLayoutProfile? targetProfile))
+        {
+            bool activated = Activate(settings, topology);
+            if (settings.WidgetLayout.WidgetTopologyLayouts.TryGetValue(topology.Key, out targetProfile))
+            {
+                ApplyProfile(settings, targetProfile);
+                return true;
+            }
+
+            return activated;
+        }
+
+        List<WidgetTopologyMonitorProfile> savedMonitors = CloneMonitors(targetProfile.Monitors);
+        if (!HaveSameProjectionMetadata(savedMonitors, topology.Monitors))
+        {
+            ReprojectSurfaces(targetProfile, savedMonitors, topology.Monitors);
+        }
+
+        targetProfile.Version = WidgetTopologyLayoutProfile.CurrentVersion;
+        targetProfile.Monitors = CloneMonitors(topology.Monitors);
+        targetProfile.LastUsedAtUtc = DateTimeOffset.UtcNow;
+        _ = EnsureMissingSurfaces(settings, null, targetProfile);
+        ApplyProfile(settings, targetProfile);
+        _ = RemoveStaleSurfaces(settings);
+        return true;
+    }
+
     public bool CaptureCurrentSurface(AppSettings settings, WidgetConfig member)
     {
         ArgumentNullException.ThrowIfNull(settings);
@@ -45,7 +88,7 @@ internal sealed class WidgetTopologyLayoutService
         // A capture here means the user placed the surface by hand (drag
         // persist / explicit move): the profile is no longer provisional.
         PromoteProvisionalProfile(topology.Key);
-        Dictionary<WidgetTopologyMonitorProfile, ElasticDisplayPlan> plans = BuildDisplayPlans(settings, profile);
+        Dictionary<DisplayPlanKey, ElasticDisplayPlan> plans = BuildDisplayPlans(settings, profile);
         WidgetGroupConfig? group = WidgetGroupSettings.FindByMember(settings, member.Id);
         if (group is not null)
         {
@@ -55,7 +98,8 @@ internal sealed class WidgetTopologyLayoutService
                 CaptureGroupLayout(group, profile.Monitors),
                 profile.Monitors,
                 plans,
-                IsFixedContentSurface(settings, member, group));
+                IsFixedContentSurface(settings, member, group),
+                IsSizeLockedSurface(member, group));
         }
         else
         {
@@ -64,7 +108,8 @@ internal sealed class WidgetTopologyLayoutService
                 CaptureWidgetLayout(member, profile.Monitors),
                 profile.Monitors,
                 plans,
-                IsFixedContentSurface(settings, member, null));
+                IsFixedContentSurface(settings, member, null),
+                IsSizeLockedSurface(member, null));
         }
 
         return true;
@@ -74,8 +119,9 @@ internal sealed class WidgetTopologyLayoutService
         WidgetSurfaceLayoutProfile? existing,
         WidgetSurfaceLayoutProfile captured,
         IReadOnlyList<WidgetTopologyMonitorProfile> monitors,
-        IReadOnlyDictionary<WidgetTopologyMonitorProfile, ElasticDisplayPlan> plans,
-        bool fixedContent)
+        IReadOnlyDictionary<DisplayPlanKey, ElasticDisplayPlan> plans,
+        bool fixedContent,
+        bool sizeLocked)
     {
         captured = PreserveAuthority(existing, captured);
         if (existing?.Reference is { } reference && ProjectionMatches(existing, captured))
@@ -85,11 +131,26 @@ internal sealed class WidgetTopologyLayoutService
         }
 
         WidgetTopologyMonitorProfile? monitor = ResolveRealizationMonitor(captured, monitors);
+        ElasticDisplayPlan? plan = null;
+        if (monitor is not null)
+        {
+            if (existing?.Reference is { } existingRef)
+            {
+                plans.TryGetValue(PlanKey(monitor, existingRef.FrameWidth, existingRef.FrameHeight), out plan);
+            }
+            else
+            {
+                (double width, double height) = EffectiveWorkArea(monitor);
+                plans.TryGetValue(PlanKey(monitor, width, height), out plan);
+            }
+        }
+
         captured.Reference = InvertProjection(
             captured,
             monitor,
-            monitor is not null && plans.TryGetValue(monitor, out ElasticDisplayPlan? plan) ? plan : null,
-            fixedContent);
+            plan,
+            fixedContent,
+            sizeLocked);
         return captured;
     }
 
@@ -699,7 +760,9 @@ internal sealed class WidgetTopologyLayoutService
         // it (the capture may even live in a pruned profile) — seed from
         // the live config instead. Cross-display entries keep their
         // projected intent; only the same-display lineage defers.
-        if (group is null && ConfigPlacementOutranksEntry(config, src))
+        if (group is null &&
+            ConfigPlacementOutranksEntry(config, src) &&
+            SameEntryDisplayAsConfig(src, config, srcProfile))
         {
             src = FallbackCurrent();
             srcProfile = targetProfile;
@@ -883,7 +946,7 @@ internal sealed class WidgetTopologyLayoutService
         WidgetTopologyLayoutProfile profile,
         bool initialAuthoritative = false)
     {
-        Dictionary<WidgetTopologyMonitorProfile, ElasticDisplayPlan> plans = initialAuthoritative
+        Dictionary<DisplayPlanKey, ElasticDisplayPlan> plans = initialAuthoritative
             ? []
             : BuildDisplayPlans(settings, profile);
         foreach ((string surfaceId, WidgetConfig config, WidgetGroupConfig? group) in EnumerateSurfaces(settings))
@@ -904,7 +967,8 @@ internal sealed class WidgetTopologyLayoutService
                     captured,
                     profile.Monitors,
                     plans,
-                    IsFixedContentSurface(settings, config, group));
+                    IsFixedContentSurface(settings, config, group),
+                    IsSizeLockedSurface(config, group));
             }
 
             profile.Surfaces[surfaceId] = captured;
@@ -912,6 +976,17 @@ internal sealed class WidgetTopologyLayoutService
 
         profile.LastUsedAtUtc = DateTimeOffset.UtcNow;
     }
+
+    private readonly record struct DisplayPlanKey(
+        WidgetTopologyMonitorProfile Monitor,
+        long FrameWidth,
+        long FrameHeight);
+
+    private static DisplayPlanKey PlanKey(
+        WidgetTopologyMonitorProfile monitor,
+        double frameWidth,
+        double frameHeight) =>
+        new(monitor, (long)Math.Round(frameWidth), (long)Math.Round(frameHeight));
 
     private static void ApplyProfile(AppSettings settings, WidgetTopologyLayoutProfile profile)
     {
@@ -946,14 +1021,24 @@ internal sealed class WidgetTopologyLayoutService
                 profile);
         }
 
-        Dictionary<WidgetTopologyMonitorProfile, ElasticDisplayPlan> plans = BuildDisplayPlans(settings, profile);
+        Dictionary<DisplayPlanKey, ElasticDisplayPlan> plans = BuildDisplayPlans(settings, profile);
+        List<(string SurfaceId, WidgetConfig Config, WidgetGroupConfig? Group, WidgetSurfaceLayoutProfile Layout, bool IsBorrowedFallback)> realized = [];
         foreach ((string surfaceId, WidgetConfig config, WidgetGroupConfig? group) in surfaces)
         {
             WidgetSurfaceLayoutProfile layout = RealizeEntry(
                 profile.Surfaces[surfaceId],
                 profile.Monitors,
                 plans,
-                IsFixedContentSurface(settings, config, group));
+                IsFixedContentSurface(settings, config, group),
+                IsSizeLockedSurface(config, group));
+            bool isBorrowedFallback = !config.IsDisabled && IsBorrowedFallbackSurface(config, group, profile);
+            realized.Add((surfaceId, config, group, layout, isBorrowedFallback));
+        }
+
+        AvoidBorrowedFallbackCollisions(realized, profile.Monitors);
+
+        foreach ((string surfaceId, WidgetConfig config, WidgetGroupConfig? group, WidgetSurfaceLayoutProfile layout, _) in realized)
+        {
             profile.Surfaces[surfaceId] = layout;
             if (group is null)
             {
@@ -974,11 +1059,212 @@ internal sealed class WidgetTopologyLayoutService
         }
     }
 
-    private static Dictionary<WidgetTopologyMonitorProfile, ElasticDisplayPlan> BuildDisplayPlans(
+    private static bool IsBorrowedFallbackSurface(
+        WidgetConfig config,
+        WidgetGroupConfig? group,
+        WidgetTopologyLayoutProfile profile)
+    {
+        DisplayPlacementIntent intent = SurfaceIntent(config, group);
+        return intent.Mode == WidgetScreenBindingMode.Pinned &&
+            !string.IsNullOrWhiteSpace(intent.HomeId) &&
+            FindMonitor(profile, intent.HomeId) is null;
+    }
+
+    private static void AvoidBorrowedFallbackCollisions(
+        List<(string SurfaceId, WidgetConfig Config, WidgetGroupConfig? Group, WidgetSurfaceLayoutProfile Layout, bool IsBorrowedFallback)> surfaces,
+        IReadOnlyList<WidgetTopologyMonitorProfile> monitors)
+    {
+        if (monitors.Count == 0 || !surfaces.Any(item => item.IsBorrowedFallback))
+        {
+            return;
+        }
+
+        Dictionary<WidgetTopologyMonitorProfile, List<ElasticRect>> occupiedByMonitor = [];
+        foreach (var item in surfaces.Where(candidate => !candidate.Config.IsDisabled && !candidate.IsBorrowedFallback))
+        {
+            if (ResolveRealizationMonitor(item.Layout, monitors) is not { } monitor)
+            {
+                continue;
+            }
+
+            (double workWidth, double workHeight) = EffectiveWorkArea(monitor);
+            if (!occupiedByMonitor.TryGetValue(monitor, out List<ElasticRect>? list))
+            {
+                occupiedByMonitor[monitor] = list = [];
+            }
+
+            list.Add(PlaceLayoutRect(item.Layout, workWidth, workHeight));
+        }
+
+        foreach (var item in surfaces.Where(candidate => !candidate.Config.IsDisabled && candidate.IsBorrowedFallback))
+        {
+            if (ResolveRealizationMonitor(item.Layout, monitors) is not { } monitor)
+            {
+                continue;
+            }
+
+            if (!occupiedByMonitor.TryGetValue(monitor, out List<ElasticRect>? occupied))
+            {
+                occupiedByMonitor[monitor] = occupied = [];
+            }
+
+            (double workWidth, double workHeight) = EffectiveWorkArea(monitor);
+            ElasticRect preferred = PlaceLayoutRect(item.Layout, workWidth, workHeight);
+            if (occupied.Count == 0 || MaxOverlapRatio(preferred, occupied) <= 0.35)
+            {
+                occupied.Add(preferred);
+                continue;
+            }
+
+            ElasticRect chosen = FindNonOverlappingFallbackSlot(preferred, workWidth, workHeight, occupied);
+            bool anchorRight = IsFarAnchorX(item.Layout.PositionAnchor);
+            bool anchorBottom = IsFarAnchorY(item.Layout.PositionAnchor);
+            if (!IsCornerAnchor(item.Layout.PositionAnchor))
+            {
+                item.Layout.PositionAnchor = WidgetPositionAnchors.LeftTop;
+            }
+
+            item.Layout.PositionMarginX = Math.Max(0, anchorRight ? workWidth - chosen.Right : chosen.Left);
+            item.Layout.PositionMarginY = Math.Max(0, anchorBottom ? workHeight - chosen.Bottom : chosen.Top);
+            item.Layout.IsAuthoritative = false;
+            item.Layout.AuthoredAtUtc = null;
+            RealizeEntryPhysicalCache(item.Layout, monitors);
+            occupied.Add(chosen);
+        }
+    }
+
+    private static ElasticRect PlaceLayoutRect(
+        WidgetSurfaceLayoutProfile layout,
+        double workWidth,
+        double workHeight)
+    {
+        double w = Math.Clamp(layout.Width, WidgetElasticLayout.AbsoluteMinWidgetSizeDips, Math.Max(WidgetElasticLayout.AbsoluteMinWidgetSizeDips, workWidth));
+        double h = Math.Clamp(layout.Height, WidgetElasticLayout.AbsoluteMinWidgetSizeDips, Math.Max(WidgetElasticLayout.AbsoluteMinWidgetSizeDips, workHeight));
+        double left = IsFarAnchorX(layout.PositionAnchor)
+            ? workWidth - layout.PositionMarginX - w
+            : layout.PositionMarginX;
+        double top = IsFarAnchorY(layout.PositionAnchor)
+            ? workHeight - layout.PositionMarginY - h
+            : layout.PositionMarginY;
+        left = Math.Clamp(left, 0, Math.Max(0, workWidth - w));
+        top = Math.Clamp(top, 0, Math.Max(0, workHeight - h));
+        return new ElasticRect(left, top, left + w, top + h);
+    }
+
+    private static double MaxOverlapRatio(ElasticRect candidate, IReadOnlyList<ElasticRect> occupied)
+    {
+        double candidateArea = Math.Max(1.0, (candidate.Right - candidate.Left) * (candidate.Bottom - candidate.Top));
+        double maxRatio = 0;
+        foreach (ElasticRect other in occupied)
+        {
+            double interW = Math.Min(candidate.Right, other.Right) - Math.Max(candidate.Left, other.Left);
+            double interH = Math.Min(candidate.Bottom, other.Bottom) - Math.Max(candidate.Top, other.Top);
+            if (interW <= 0 || interH <= 0)
+            {
+                continue;
+            }
+
+            double otherArea = Math.Max(1.0, (other.Right - other.Left) * (other.Bottom - other.Top));
+            double ratio = (interW * interH) / Math.Min(candidateArea, otherArea);
+            if (ratio > maxRatio)
+            {
+                maxRatio = ratio;
+            }
+        }
+
+        return maxRatio;
+    }
+
+    private static ElasticRect FindNonOverlappingFallbackSlot(
+        ElasticRect preferred,
+        double workWidth,
+        double workHeight,
+        IReadOnlyList<ElasticRect> occupied)
+    {
+        double w = preferred.Right - preferred.Left;
+        double h = preferred.Bottom - preferred.Top;
+        double maxLeft = Math.Max(0, workWidth - w);
+        double maxTop = Math.Max(0, workHeight - h);
+        const double gap = 16.0;
+        const double edgeMargin = 24.0;
+
+        List<(double Left, double Top)> candidates = [];
+        foreach (ElasticRect other in occupied)
+        {
+            candidates.Add((other.Left - w - gap, preferred.Top));
+            candidates.Add((other.Right + gap, preferred.Top));
+            candidates.Add((preferred.Left, other.Bottom + gap));
+            candidates.Add((preferred.Left, other.Top - h - gap));
+            candidates.Add((other.Left - w - gap, other.Top));
+            candidates.Add((other.Right + gap, other.Top));
+            candidates.Add((other.Left, other.Bottom + gap));
+            candidates.Add((other.Left, other.Top - h - gap));
+        }
+
+        double stepX = Math.Max(80.0, Math.Min(w + gap, 240.0));
+        double stepY = Math.Max(80.0, Math.Min(h + gap, 180.0));
+        for (double y = edgeMargin; y <= maxTop + 0.5; y += stepY)
+        {
+            for (double x = edgeMargin; x <= maxLeft + 0.5; x += stepX)
+            {
+                candidates.Add((Math.Min(x, maxLeft), Math.Min(y, maxTop)));
+            }
+        }
+
+        for (int step = 1; step <= 6; step++)
+        {
+            candidates.Add((preferred.Left + 36.0 * step, preferred.Top + 36.0 * step));
+            candidates.Add((preferred.Left - 36.0 * step, preferred.Top + 36.0 * step));
+        }
+
+        ElasticRect? bestClean = null;
+        double bestCleanDistSq = double.PositiveInfinity;
+        ElasticRect bestFallback = preferred;
+        double bestFallbackOverlap = MaxOverlapRatio(preferred, occupied);
+
+        foreach ((double rawLeft, double rawTop) in candidates)
+        {
+            if (rawLeft < -0.5 || rawTop < -0.5 || rawLeft > maxLeft + 0.5 || rawTop > maxTop + 0.5)
+            {
+                continue;
+            }
+
+            double left = Math.Clamp(rawLeft, 0, maxLeft);
+            double top = Math.Clamp(rawTop, 0, maxTop);
+            var rect = new ElasticRect(left, top, left + w, top + h);
+            double overlap = MaxOverlapRatio(rect, occupied);
+            double dx = left - preferred.Left;
+            double dy = top - preferred.Top;
+            double distSq = dx * dx + dy * dy;
+
+            if (overlap <= 0.10)
+            {
+                if (distSq < bestCleanDistSq)
+                {
+                    bestCleanDistSq = distSq;
+                    bestClean = rect;
+                }
+            }
+            else if (overlap < bestFallbackOverlap - 0.01)
+            {
+                bestFallbackOverlap = overlap;
+                bestFallback = rect;
+            }
+        }
+
+        return bestClean ?? bestFallback;
+    }
+
+    private static Dictionary<DisplayPlanKey, ElasticDisplayPlan> BuildDisplayPlans(
         AppSettings settings,
         WidgetTopologyLayoutProfile profile)
     {
-        Dictionary<WidgetTopologyMonitorProfile, List<(WidgetSurfaceLayoutReference Reference, bool Occupies)>> placements = [];
+        bool allowGrow = string.Equals(
+            SettingsService.NormalizeWidgetDisplayScalingMode(settings.WidgetLayout.WidgetDisplayScalingMode),
+            SettingsService.WidgetDisplayScalingElasticScale,
+            StringComparison.Ordinal);
+
+        Dictionary<DisplayPlanKey, List<(WidgetSurfaceLayoutReference Reference, bool Occupies)>> placements = [];
         foreach ((string surfaceId, WidgetConfig config, WidgetGroupConfig? _) in EnumerateSurfaces(settings))
         {
             if (!profile.Surfaces.TryGetValue(surfaceId, out WidgetSurfaceLayoutProfile? entry) ||
@@ -989,40 +1275,51 @@ internal sealed class WidgetTopologyLayoutService
                 continue;
             }
 
-            if (!placements.TryGetValue(monitor, out var list))
+            DisplayPlanKey key = PlanKey(monitor, reference.FrameWidth, reference.FrameHeight);
+            if (!placements.TryGetValue(key, out var list))
             {
-                placements[monitor] = list = [];
+                placements[key] = list = [];
             }
 
             list.Add((reference, !config.IsDisabled));
         }
 
-        // Keyed by monitor instance rather than token: degenerate monitors can
-        // share their geo:WxH token while still needing separate plans (e.g.
-        // different DPI), and every lookup resolves through the same
-        // profile.Monitors list instances.
-        Dictionary<WidgetTopologyMonitorProfile, ElasticDisplayPlan> plans = [];
+        // Keyed by (monitor instance, reference frame WxH): native surfaces whose
+        // reference frame already matches this monitor stay on an identity plan
+        // even when disconnected displays lend foreign-frame widgets onto the
+        // same monitor, while borrowed cohorts from another resolution still
+        // compress cleanly into this monitor's work area.
+        Dictionary<DisplayPlanKey, ElasticDisplayPlan> plans = [];
         foreach (WidgetTopologyMonitorProfile monitor in profile.Monitors)
         {
             (double width, double height) = EffectiveWorkArea(monitor);
-            List<(WidgetSurfaceLayoutReference Reference, bool Occupies)> items =
-                placements.GetValueOrDefault(monitor) ?? [];
-            (double frameWidth, double frameHeight) = items.Count == 0
-                ? (width, height)
-                : items
-                    .GroupBy(item => (Math.Round(item.Reference.FrameWidth), Math.Round(item.Reference.FrameHeight)))
-                    .OrderByDescending(frame => frame.Count())
-                    .ThenBy(frame => Math.Abs(frame.Key.Item1 - width) + Math.Abs(frame.Key.Item2 - height))
-                    .Select(frame => (frame.First().Reference.FrameWidth, frame.First().Reference.FrameHeight))
-                    .First();
-            plans[monitor] = ElasticDisplayPlan.Create(
+            DisplayPlanKey nativeKey = PlanKey(monitor, width, height);
+            if (!placements.ContainsKey(nativeKey))
+            {
+                plans[nativeKey] = ElasticDisplayPlan.Create(
+                    width,
+                    height,
+                    width,
+                    height,
+                    [],
+                    allowGrow: allowGrow);
+            }
+        }
+
+        foreach ((DisplayPlanKey key, List<(WidgetSurfaceLayoutReference Reference, bool Occupies)> items) in placements)
+        {
+            (double width, double height) = EffectiveWorkArea(key.Monitor);
+            double frameWidth = items[0].Reference.FrameWidth;
+            double frameHeight = items[0].Reference.FrameHeight;
+            plans[key] = ElasticDisplayPlan.Create(
                 frameWidth,
                 frameHeight,
                 width,
                 height,
                 [.. items
                     .Where(item => item.Occupies)
-                    .Select(item => PlaceRect(item.Reference, frameWidth, frameHeight))]);
+                    .Select(item => PlaceRect(item.Reference, frameWidth, frameHeight))],
+                allowGrow: allowGrow);
         }
 
         return plans;
@@ -1031,16 +1328,21 @@ internal sealed class WidgetTopologyLayoutService
     private static WidgetSurfaceLayoutProfile RealizeEntry(
         WidgetSurfaceLayoutProfile entry,
         IReadOnlyList<WidgetTopologyMonitorProfile> monitors,
-        IReadOnlyDictionary<WidgetTopologyMonitorProfile, ElasticDisplayPlan> plans,
-        bool fixedContent)
+        IReadOnlyDictionary<DisplayPlanKey, ElasticDisplayPlan> plans,
+        bool fixedContent,
+        bool sizeLocked)
     {
         WidgetSurfaceLayoutProfile realized = CloneLayout(entry);
         if (ResolveRealizationMonitor(entry, monitors) is { } monitor &&
             UsableReference(entry, monitor) is { } reference &&
-            plans.TryGetValue(monitor, out ElasticDisplayPlan? plan))
+            plans.TryGetValue(PlanKey(monitor, reference.FrameWidth, reference.FrameHeight), out ElasticDisplayPlan? plan))
         {
             realized.Reference = reference.Clone();
-            double maxGrow = fixedContent ? WidgetElasticLayout.FixedContentMaxGrowScale : double.PositiveInfinity;
+            double maxGrow = sizeLocked
+                ? 1.0
+                : fixedContent
+                    ? WidgetElasticLayout.FixedContentMaxGrowScale
+                    : double.PositiveInfinity;
             ElasticRect rect = PlaceRect(reference, plan.FrameWidth, plan.FrameHeight);
             realized.PositionAnchor = reference.PositionAnchor;
             (realized.PositionMarginX, realized.Width) = ProjectAxis(
@@ -1051,7 +1353,8 @@ internal sealed class WidgetTopologyLayoutService
                 reference.PositionMarginX,
                 reference.Width,
                 maxGrow,
-                plan.AdaptiveMinimumWidth);
+                plan.AdaptiveMinimumWidth,
+                sizeLocked);
             (realized.PositionMarginY, realized.Height) = ProjectAxis(
                 plan.Y,
                 rect.Top,
@@ -1060,7 +1363,8 @@ internal sealed class WidgetTopologyLayoutService
                 reference.PositionMarginY,
                 reference.Height,
                 maxGrow,
-                plan.AdaptiveMinimumHeight);
+                plan.AdaptiveMinimumHeight,
+                sizeLocked);
             if (realized.CompactPlacement is { } compact &&
                 reference.CompactPositionAnchor is { } compactAnchor &&
                 reference.CompactPositionMarginX is { } compactMarginX &&
@@ -1084,18 +1388,26 @@ internal sealed class WidgetTopologyLayoutService
         double margin,
         double length,
         double maxGrow,
-        double minimumLength)
+        double minimumLength,
+        bool sizeLocked)
     {
         if (axis.IsIdentity)
         {
-            return (margin, length);
+            double clampedLength = Math.Clamp(
+                length,
+                Math.Min(WidgetElasticLayout.AbsoluteMinWidgetSizeDips, axis.TargetLength),
+                axis.TargetLength);
+            double clampedMargin = Math.Clamp(margin, 0, Math.Max(0, axis.TargetLength - clampedLength));
+            return (clampedMargin, clampedLength);
         }
 
         (double mappedStart, double mappedEnd) = axis.MapItem(start, end, anchorFar, maxGrow);
-        double mappedLength = Math.Clamp(
-            mappedEnd - mappedStart,
-            Math.Min(minimumLength, axis.TargetLength),
-            axis.TargetLength);
+        double mappedLength = sizeLocked
+            ? Math.Clamp(length, Math.Min(minimumLength, axis.TargetLength), axis.TargetLength)
+            : Math.Clamp(
+                mappedEnd - mappedStart,
+                Math.Min(minimumLength, axis.TargetLength),
+                axis.TargetLength);
         double mappedMargin = anchorFar ? axis.TargetLength - mappedEnd : mappedStart;
         return (Math.Clamp(mappedMargin, 0, Math.Max(0, axis.TargetLength - mappedLength)), mappedLength);
     }
@@ -1115,7 +1427,8 @@ internal sealed class WidgetTopologyLayoutService
         WidgetSurfaceLayoutProfile projection,
         WidgetTopologyMonitorProfile? monitor,
         ElasticDisplayPlan? plan,
-        bool fixedContent)
+        bool fixedContent,
+        bool sizeLocked)
     {
         WidgetSurfaceLayoutReference? projected = DeriveReference(projection, monitor);
         if (projected is null || plan is null)
@@ -1123,27 +1436,35 @@ internal sealed class WidgetTopologyLayoutService
             return projected;
         }
 
-        double maxGrow = fixedContent ? WidgetElasticLayout.FixedContentMaxGrowScale : double.PositiveInfinity;
+        double maxGrow = sizeLocked
+            ? 1.0
+            : fixedContent
+                ? WidgetElasticLayout.FixedContentMaxGrowScale
+                : double.PositiveInfinity;
         ElasticRect rect = PlaceRect(projected, plan.TargetWidth, plan.TargetHeight);
         WidgetSurfaceLayoutReference reference = projected.Clone();
-        reference.FrameWidth = plan.FrameWidth;
-        reference.FrameHeight = plan.FrameHeight;
-        (reference.PositionMarginX, reference.Width) = UnprojectAxis(
-            plan.X,
-            rect.Left,
-            rect.Right,
-            IsFarAnchorX(projected.PositionAnchor),
-            projected.PositionMarginX,
-            projected.Width,
-            maxGrow);
-        (reference.PositionMarginY, reference.Height) = UnprojectAxis(
-            plan.Y,
-            rect.Top,
-            rect.Bottom,
-            IsFarAnchorY(projected.PositionAnchor),
-            projected.PositionMarginY,
-            projected.Height,
-            maxGrow);
+        reference.FrameWidth = plan.X.IsIdentity ? projected.FrameWidth : plan.FrameWidth;
+        reference.FrameHeight = plan.Y.IsIdentity ? projected.FrameHeight : plan.FrameHeight;
+        (reference.PositionMarginX, reference.Width) = sizeLocked
+            ? (UnprojectPoint(plan.X, IsFarAnchorX(projected.PositionAnchor), projected.PositionMarginX), projected.Width)
+            : UnprojectAxis(
+                plan.X,
+                rect.Left,
+                rect.Right,
+                IsFarAnchorX(projected.PositionAnchor),
+                projected.PositionMarginX,
+                projected.Width,
+                maxGrow);
+        (reference.PositionMarginY, reference.Height) = sizeLocked
+            ? (UnprojectPoint(plan.Y, IsFarAnchorY(projected.PositionAnchor), projected.PositionMarginY), projected.Height)
+            : UnprojectAxis(
+                plan.Y,
+                rect.Top,
+                rect.Bottom,
+                IsFarAnchorY(projected.PositionAnchor),
+                projected.PositionMarginY,
+                projected.Height,
+                maxGrow);
         if (projected.CompactPositionAnchor is { } compactAnchor &&
             projected.CompactPositionMarginX is { } compactMarginX &&
             projected.CompactPositionMarginY is { } compactMarginY)
@@ -1154,6 +1475,9 @@ internal sealed class WidgetTopologyLayoutService
 
         return reference;
     }
+
+    private static bool IsSizeLockedSurface(WidgetConfig config, WidgetGroupConfig? group) =>
+        group?.IsSizeLocked ?? config.IsSizeLocked;
 
     private static (double Margin, double Length) UnprojectAxis(
         ElasticAxisPlan axis,

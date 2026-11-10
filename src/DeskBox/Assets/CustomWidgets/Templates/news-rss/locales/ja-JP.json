@@ -1,0 +1,21 @@
+{
+  "defaultFeedTitle": "テックニュース",
+  "defaultTopHeadline": "右上の「更新」をクリックして最新記事を取得",
+  "emptySubtitle": "右上の「更新」を押すか、設定から配信元を切り替えてください",
+  "emptyTitle": "フィード同期を待機中",
+  "feedCustom": "カスタム RSS URL（下で指定）",
+  "feedIthome": "IT之家",
+  "feedSspai": "SSPai (少数派)",
+  "openArticleTooltip": "記事を開く",
+  "optDensityCompact": "コンパクト（見出しのみ）",
+  "optDensitySummary": "標準（見出し + 要約）",
+  "refreshBtn": "更新",
+  "refreshTooltip": "最新フィードを今すぐ取得",
+  "setDensity": "表示密度",
+  "setFeedUrl": "カスタム RSS / Atom URL (https://)",
+  "setPresetFeed": "プリセット配信元",
+  "syncing": "最新記事を同期中…",
+  "updatedPrefix": "更新 ",
+  "widgetDescription": "Hacker News・GitHub Blog・V2EX・カスタム RSS を自動取得。オフラインキャッシュで高速表示。",
+  "widgetName": "RSS ニュース購読"
+}

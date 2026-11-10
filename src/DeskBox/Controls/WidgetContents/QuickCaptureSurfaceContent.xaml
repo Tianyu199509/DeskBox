@@ -52,6 +52,7 @@
         DragOver="Root_DragOver"
         Drop="Root_Drop"
         Padding="{Binding RootPadding}"
+        PointerWheelChanged="ResponsiveContentGrid_PointerWheelChanged"
         SizeChanged="ResponsiveContentGrid_SizeChanged">
         <Grid.ColumnDefinitions>
             <ColumnDefinition x:Name="MasterColumn" Width="*" />
@@ -61,6 +62,7 @@
 
         <Grid x:Name="ListPage" Grid.Column="0" RowSpacing="5">
             <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
@@ -86,9 +88,6 @@
                     </toolkit:SegmentedItem>
                     <toolkit:SegmentedItem AllowDrop="True" DragOver="QuickCaptureTab_DragOver" Drop="QuickCaptureTab_Drop" Tag="Pinned" Visibility="{Binding PinnedTabVisibility}">
                         <TextBlock FontSize="{Binding SegmentTextSize}" MaxLines="1" Text="{Binding PinnedTabText}" TextAlignment="Center" TextTrimming="CharacterEllipsis" />
-                    </toolkit:SegmentedItem>
-                    <toolkit:SegmentedItem Tag="Recent" Visibility="{Binding RecentTabVisibility}">
-                        <TextBlock FontSize="{Binding SegmentTextSize}" MaxLines="1" Text="{Binding RecentTabText}" TextAlignment="Center" TextTrimming="CharacterEllipsis" />
                     </toolkit:SegmentedItem>
                 </toolkit:Segmented>
                 <Button
@@ -131,41 +130,141 @@
                 </Button>
             </Grid>
 
-            <Button
+            <ScrollViewer
+                x:Name="FilterChipScrollViewer"
                 Grid.Row="1"
-                MinHeight="42"
-                Padding="8,5"
-                HorizontalAlignment="Stretch"
-                HorizontalContentAlignment="Stretch"
-                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                BorderBrush="Transparent"
-                BorderThickness="0"
-                Click="AddNoteCardButton_Click"
-                CornerRadius="{StaticResource WidgetCornerRadiusSmall}"
-                Visibility="{Binding InputAreaVisibility}">
-                <Grid ColumnSpacing="6">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="26" />
-                        <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
-                    <FontIcon HorizontalAlignment="Center" FontSize="14" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Glyph="&#xE710;" />
-                    <TextBlock Grid.Column="1" VerticalAlignment="Center" FontSize="{Binding TextSize}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{Binding AddNoteText}" />
-                </Grid>
-            </Button>
+                HorizontalScrollBarVisibility="Hidden"
+                HorizontalScrollMode="Enabled"
+                VerticalScrollBarVisibility="Disabled"
+                VerticalScrollMode="Disabled"
+                Visibility="Collapsed">
+                <StackPanel
+                    x:Name="FilterChipPanel"
+                    Orientation="Horizontal"
+                    Spacing="4" />
+            </ScrollViewer>
 
             <Grid Grid.Row="2">
+                <Grid x:Name="AddNoteButtonHost">
+                    <Button
+                        x:Name="AddNoteCardButton"
+                        MinHeight="42"
+                        Padding="8,5"
+                        HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Stretch"
+                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="Transparent"
+                        BorderThickness="0"
+                        Click="AddNoteCardButton_Click"
+                        CornerRadius="{StaticResource WidgetCornerRadiusSmall}"
+                        Visibility="{Binding InputAreaVisibility}">
+                        <Grid ColumnSpacing="6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="26" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon HorizontalAlignment="Center" FontSize="14" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Glyph="&#xE710;" />
+                            <TextBlock Grid.Column="1" VerticalAlignment="Center" FontSize="{Binding TextSize}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{Binding AddNoteText}" />
+                        </Grid>
+                    </Button>
+                </Grid>
+
+                <Border
+                    x:Name="InlineComposerCard"
+                    Padding="8,6"
+                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="{StaticResource WidgetCornerRadiusSmall}"
+                    Visibility="Collapsed">
+                    <Grid RowSpacing="4">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <TextBox
+                            x:Name="InlineComposerTextBox"
+                            MinHeight="62"
+                            MaxHeight="200"
+                            Padding="4,2"
+                            AcceptsReturn="True"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            FontFamily="Segoe UI Variable Text, Microsoft YaHei UI"
+                            PreviewKeyDown="InlineComposerTextBox_PreviewKeyDown"
+                            Paste="InlineComposerTextBox_Paste"
+                            ScrollViewer.VerticalScrollBarVisibility="Auto"
+                            TextWrapping="Wrap" />
+                        <controls:AttachmentTileStrip
+                            x:Name="InlineComposerAttachmentStrip"
+                            Grid.Row="1"
+                            OpenRequested="DetailAttachmentStrip_OpenRequested"
+                            RemoveRequested="InlineComposerAttachmentStrip_RemoveRequested"
+                            Visibility="Collapsed" />
+                        <Grid Grid.Row="2" ColumnSpacing="4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Orientation="Horizontal" Spacing="2">
+                                <Button
+                                    x:Name="InlineComposerAttachButton"
+                                    Click="InlineComposerAttachButton_Click"
+                                    Style="{StaticResource QuickCaptureSharedAttachmentActionButtonStyle}">
+                                    <FontIcon FontSize="11.5" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Glyph="&#xE723;" />
+                                </Button>
+                                <Button
+                                    x:Name="InlineComposerExpandButton"
+                                    Click="InlineComposerExpandButton_Click"
+                                    Style="{StaticResource QuickCaptureSharedAttachmentActionButtonStyle}">
+                                    <FontIcon FontSize="11.5" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Glyph="&#xE8A7;" />
+                                </Button>
+                            </StackPanel>
+                            <TextBlock
+                                x:Name="InlineComposerHintText"
+                                Grid.Column="1"
+                                Margin="2,0"
+                                VerticalAlignment="Center"
+                                FontSize="11"
+                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                MaxLines="1"
+                                TextTrimming="CharacterEllipsis" />
+                            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="2">
+                                <Button
+                                    x:Name="InlineComposerCancelButton"
+                                    Click="InlineComposerCancelButton_Click"
+                                    Style="{StaticResource QuickCaptureSharedAttachmentActionButtonStyle}">
+                                    <FontIcon FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Glyph="&#xE711;" />
+                                </Button>
+                                <Button
+                                    x:Name="InlineComposerSaveButton"
+                                    Click="InlineComposerSaveButton_Click"
+                                    Style="{StaticResource QuickCaptureSharedAttachmentActionButtonStyle}">
+                                    <FontIcon FontSize="11.5" Foreground="{ThemeResource TextFillColorPrimaryBrush}" Glyph="&#xE73E;" />
+                                </Button>
+                            </StackPanel>
+                        </Grid>
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <Grid Grid.Row="3">
                 <ListView
                     x:Name="ItemsList"
                     AllowDrop="True"
                     Background="Transparent"
                     CanDragItems="True"
                     CanReorderItems="False"
+                    ContainerContentChanging="ItemsList_ContainerContentChanging"
                     DragItemsCompleted="ItemsList_DragItemsCompleted"
                     DragItemsStarting="ItemsList_DragItemsStarting"
                     IsItemClickEnabled="True"
                     ItemClick="ItemsList_ItemClick"
                     ItemsSource="{Binding VisibleItemsSource}"
                     KeyDown="ItemsList_KeyDown"
+                    SelectionChanged="ItemsList_SelectionChanged"
                     SelectionMode="Extended"
                     Visibility="{Binding ListVisibility}">
                     <ListView.ItemContainerTransitions>
@@ -191,6 +290,7 @@
                                 BorderThickness="0"
                                 CornerRadius="{StaticResource WidgetCornerRadiusSmall}"
                                 DataContextChanged="QuickCaptureItem_DataContextChanged"
+                                DoubleTapped="QuickCaptureItem_DoubleTapped"
                                 DragLeave="QuickCaptureItem_DragLeave"
                                 DragOver="QuickCaptureItem_DragOver"
                                 Drop="QuickCaptureItem_Drop"
@@ -246,7 +346,7 @@
                                                         <Image
                                                             AutomationProperties.AccessibilityView="Raw"
                                                             Source="{x:Bind Thumbnail, Mode=OneWay}"
-                                                            Stretch="Uniform"
+                                                            Stretch="UniformToFill"
                                                             Visibility="{x:Bind ThumbnailVisibility, Mode=OneWay}" />
                                                     </Grid>
                                                 </Border>
@@ -254,11 +354,13 @@
                                         </ContentControl.ContentTemplate>
                                     </ContentControl>
                                     <StackPanel
+                                        x:Name="QuickCaptureItemTextStack"
                                         Grid.Column="1"
                                         MinWidth="0"
                                         VerticalAlignment="Center"
                                         Spacing="2">
                                         <TextBlock
+                                            x:Name="ItemTitleTextBlock"
                                             helpers:WidgetTextShadow.Cast="True"
                                             FontSize="{Binding TextSize}"
                                             MaxLines="{Binding ElementName=ItemsList, Path=DataContext.ItemPreviewLineCount}"
@@ -267,11 +369,51 @@
                                             TextWrapping="Wrap"
                                             Visibility="{Binding TextPreviewVisibility}" />
                                         <TextBlock
+                                            x:Name="ItemSummaryTextBlock"
                                             helpers:WidgetTextShadow.Cast="True"
-                                            FontSize="{Binding SecondaryTextSize}"
                                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                            Text="{Binding CreatedAtText}"
-                                            Visibility="{Binding ElementName=ItemsList, Path=DataContext.CreatedTimeVisibility}" />
+                                            MaxLines="2"
+                                            TextTrimming="CharacterEllipsis"
+                                            TextWrapping="Wrap"
+                                            Visibility="Collapsed" />
+                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                            <FontIcon
+                                                x:Name="ItemPinnedBadgeIcon"
+                                                VerticalAlignment="Center"
+                                                FontSize="10"
+                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                Glyph="&#xE718;"
+                                                Opacity="0.72"
+                                                Visibility="Collapsed" />
+                                            <TextBlock
+                                                x:Name="ItemTimestampTextBlock"
+                                                helpers:WidgetTextShadow.Cast="True"
+                                                VerticalAlignment="Center"
+                                                FontSize="{Binding SecondaryTextSize}"
+                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                Text="{Binding CreatedAtText}"
+                                                Visibility="{Binding ElementName=ItemsList, Path=DataContext.CreatedTimeVisibility}" />
+                                            <TextBlock
+                                                x:Name="ItemChecklistBadgeTextBlock"
+                                                helpers:WidgetTextShadow.Cast="True"
+                                                VerticalAlignment="Center"
+                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                Visibility="Collapsed" />
+                                            <TextBlock
+                                                x:Name="ItemAttachmentBadgeTextBlock"
+                                                helpers:WidgetTextShadow.Cast="True"
+                                                VerticalAlignment="Center"
+                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                Visibility="Collapsed" />
+                                            <TextBlock
+                                                x:Name="ItemTagsTextBlock"
+                                                helpers:WidgetTextShadow.Cast="True"
+                                                VerticalAlignment="Center"
+                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                MaxLines="1"
+                                                TextTrimming="CharacterEllipsis"
+                                                Visibility="Collapsed" />
+                                        </StackPanel>
                                     </StackPanel>
                                     <Border
                                         Grid.ColumnSpan="2"
@@ -284,7 +426,24 @@
                                         IsHitTestVisible="False"
                                         Opacity="0"
                                         Canvas.ZIndex="2">
+                                        <Border.OpacityTransition>
+                                            <ScalarTransition Duration="0:0:0.12" />
+                                        </Border.OpacityTransition>
                                         <StackPanel Orientation="Horizontal" Spacing="1">
+                                            <Button
+                                                x:Name="QuickCapturePopoutItemButton"
+                                                Width="26"
+                                                Height="26"
+                                                MinWidth="26"
+                                                MinHeight="26"
+                                                AutomationProperties.Name="{Binding ElementName=ItemsList, Path=DataContext.DetailPopoutText}"
+                                                Click="PopoutItemButton_Click"
+                                                IsTabStop="False"
+                                                Style="{StaticResource WidgetCompactIconButtonStyle}"
+                                                Tag="{Binding}"
+                                                ToolTipService.ToolTip="{Binding ElementName=ItemsList, Path=DataContext.DetailPopoutText}">
+                                                <FontIcon FontSize="11" Glyph="&#xE8A7;" Opacity="0.82" />
+                                            </Button>
                                             <Button
                                                 x:Name="QuickCaptureCopyItemButton"
                                                 Width="26"
@@ -315,8 +474,8 @@
                                             </Button>
                                         </StackPanel>
                                     </Border>
-                                    <Border Grid.ColumnSpan="2" Margin="-8,-6" Background="{ThemeResource SubtleFillColorSecondaryBrush}" CornerRadius="{StaticResource WidgetCornerRadiusSmall}" Opacity="0.10" IsHitTestVisible="False" Visibility="{Binding DetailSelectionVisibility}" />
-                                    <Border Grid.ColumnSpan="2" Width="2" Margin="-8,-6" HorizontalAlignment="Left" Background="{ThemeResource ControlStrongStrokeColorDefaultBrush}" CornerRadius="1" IsHitTestVisible="False" Visibility="{Binding DetailSelectionVisibility}" />
+                                    <Border x:Name="QuickCaptureItemSelectionWash" Grid.ColumnSpan="2" Margin="-8,-6" Background="{ThemeResource SubtleFillColorSecondaryBrush}" CornerRadius="{StaticResource WidgetCornerRadiusSmall}" Opacity="0.10" IsHitTestVisible="False" Visibility="{Binding DetailSelectionVisibility}" />
+                                    <Border x:Name="QuickCaptureItemSelectionAccentBar" Grid.ColumnSpan="2" Width="2" Margin="-8,-6" HorizontalAlignment="Left" Background="{ThemeResource ControlStrongStrokeColorDefaultBrush}" CornerRadius="1" IsHitTestVisible="False" Visibility="{Binding DetailSelectionVisibility}" />
                                 </Grid>
                             </Border>
                         </DataTemplate>
@@ -402,9 +561,11 @@
                         HorizontalAlignment="Right"
                         Orientation="Horizontal"
                         Spacing="2">
+                        <Button x:Name="DetailPopoutButton" Click="DetailPopoutButton_Click" Style="{StaticResource QuickCaptureSharedDetailIconButtonStyle}"><FontIcon FontSize="{StaticResource QuickCaptureDetailActionIconSize}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Glyph="&#xE8A7;" /></Button>
                         <Button AutomationProperties.Name="{Binding DetailPinText}" x:Name="DetailPinButton" Click="DetailPinButton_Click" Style="{StaticResource QuickCaptureSharedDetailIconButtonStyle}" ToolTipService.ToolTip="{Binding DetailPinText}"><controls:PinStateIcon x:Name="DetailPinIcon" Width="13" Height="13" Foreground="{ThemeResource TextFillColorSecondaryBrush}" /></Button>
                         <Button AutomationProperties.Name="{Binding DetailCopyText}" x:Name="DetailCopyButton" Click="DetailCopyButton_Click" Style="{StaticResource QuickCaptureSharedDetailIconButtonStyle}" ToolTipService.ToolTip="{Binding DetailCopyText}"><FontIcon FontSize="{StaticResource QuickCaptureDetailActionIconSize}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Glyph="&#xE8C8;" /></Button>
                         <Button AutomationProperties.Name="{Binding DetailDeleteText}" x:Name="DetailDeleteButton" Click="DetailDeleteButton_Click" Style="{StaticResource QuickCaptureSharedDetailIconButtonStyle}" ToolTipService.ToolTip="{Binding DetailDeleteText}"><FontIcon FontSize="{StaticResource QuickCaptureDetailActionIconSize}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Glyph="&#xE74D;" /></Button>
+                        <Button x:Name="DetailMoreButton" Click="DetailMoreButton_Click" Style="{StaticResource QuickCaptureSharedDetailIconButtonStyle}"><FontIcon FontSize="{StaticResource QuickCaptureDetailActionIconSize}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Glyph="&#xE712;" /></Button>
                     </StackPanel>
                     </Grid>
                 </Grid>
@@ -500,6 +661,7 @@
                                 Visibility="Collapsed" />
                             <controls:MarkdownSourceEditor
                                 x:Name="DetailMarkdownEditor"
+                                x:Load="False"
                                 Grid.Row="1"
                                 MinHeight="80"
                                 EditorFontSize="{Binding ContentTextSize}"
@@ -512,11 +674,11 @@
                 </Border>
                 <StackPanel x:Name="DetailMaterialPalette" Grid.Row="1" Margin="2,0,0,0" Orientation="Horizontal" Spacing="5" Visibility="Collapsed">
                     <Button AutomationProperties.Name="{Binding MaterialDefaultText}" x:Name="DefaultMaterialButton" Click="DetailMaterialButton_Click" Style="{StaticResource QuickCaptureSharedMaterialButtonStyle}" Tag="Default" ToolTipService.ToolTip="{Binding MaterialDefaultText}"><Border Width="18" Height="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="3" /></Button>
-                    <Button AutomationProperties.Name="{Binding MaterialPaperText}" x:Name="PaperMaterialButton" Click="DetailMaterialButton_Click" Style="{StaticResource QuickCaptureSharedMaterialButtonStyle}" Tag="Paper" ToolTipService.ToolTip="{Binding MaterialPaperText}"><Border Width="18" Height="12" Background="#FFF4EEE2" CornerRadius="3" /></Button>
-                    <Button AutomationProperties.Name="{Binding MaterialYellowText}" x:Name="YellowMaterialButton" Click="DetailMaterialButton_Click" Style="{StaticResource QuickCaptureSharedMaterialButtonStyle}" Tag="StickyYellow" ToolTipService.ToolTip="{Binding MaterialYellowText}"><Border Width="18" Height="12" Background="#FFFFD96A" CornerRadius="3" /></Button>
-                    <Button AutomationProperties.Name="{Binding MaterialRoseText}" x:Name="RoseMaterialButton" Click="DetailMaterialButton_Click" Style="{StaticResource QuickCaptureSharedMaterialButtonStyle}" Tag="Rose" ToolTipService.ToolTip="{Binding MaterialRoseText}"><Border Width="18" Height="12" Background="#FFF2A7B8" CornerRadius="3" /></Button>
-                    <Button AutomationProperties.Name="{Binding MaterialMintText}" x:Name="MintMaterialButton" Click="DetailMaterialButton_Click" Style="{StaticResource QuickCaptureSharedMaterialButtonStyle}" Tag="Mint" ToolTipService.ToolTip="{Binding MaterialMintText}"><Border Width="18" Height="12" Background="#FFA8D8B5" CornerRadius="3" /></Button>
-                    <Button AutomationProperties.Name="{Binding MaterialBlueText}" x:Name="BlueMaterialButton" Click="DetailMaterialButton_Click" Style="{StaticResource QuickCaptureSharedMaterialButtonStyle}" Tag="MistBlue" ToolTipService.ToolTip="{Binding MaterialBlueText}"><Border Width="18" Height="12" Background="#FFA9C7E8" CornerRadius="3" /></Button>
+                    <Button AutomationProperties.Name="{Binding MaterialPaperText}" x:Name="PaperMaterialButton" Click="DetailMaterialButton_Click" Style="{StaticResource QuickCaptureSharedMaterialButtonStyle}" Tag="Paper" ToolTipService.ToolTip="{Binding MaterialPaperText}"><Border x:Name="PaperMaterialSwatch" Width="18" Height="12" Background="#FFF4EEE2" CornerRadius="3" /></Button>
+                    <Button AutomationProperties.Name="{Binding MaterialYellowText}" x:Name="YellowMaterialButton" Click="DetailMaterialButton_Click" Style="{StaticResource QuickCaptureSharedMaterialButtonStyle}" Tag="StickyYellow" ToolTipService.ToolTip="{Binding MaterialYellowText}"><Border x:Name="YellowMaterialSwatch" Width="18" Height="12" Background="#FFFFD96A" CornerRadius="3" /></Button>
+                    <Button AutomationProperties.Name="{Binding MaterialRoseText}" x:Name="RoseMaterialButton" Click="DetailMaterialButton_Click" Style="{StaticResource QuickCaptureSharedMaterialButtonStyle}" Tag="Rose" ToolTipService.ToolTip="{Binding MaterialRoseText}"><Border x:Name="RoseMaterialSwatch" Width="18" Height="12" Background="#FFF2A7B8" CornerRadius="3" /></Button>
+                    <Button AutomationProperties.Name="{Binding MaterialMintText}" x:Name="MintMaterialButton" Click="DetailMaterialButton_Click" Style="{StaticResource QuickCaptureSharedMaterialButtonStyle}" Tag="Mint" ToolTipService.ToolTip="{Binding MaterialMintText}"><Border x:Name="MintMaterialSwatch" Width="18" Height="12" Background="#FFA8D8B5" CornerRadius="3" /></Button>
+                    <Button AutomationProperties.Name="{Binding MaterialBlueText}" x:Name="BlueMaterialButton" Click="DetailMaterialButton_Click" Style="{StaticResource QuickCaptureSharedMaterialButtonStyle}" Tag="MistBlue" ToolTipService.ToolTip="{Binding MaterialBlueText}"><Border x:Name="BlueMaterialSwatch" Width="18" Height="12" Background="#FFA9C7E8" CornerRadius="3" /></Button>
                 </StackPanel>
                 <TextBlock
                     x:Name="DetailTimestampText"

@@ -129,11 +129,11 @@ public sealed class AotStage5B4B2C2BContractTests
             viewModel,
             StringComparison.Ordinal);
         Assert.Contains(
-            "DailyForecastItemsSource => DailyForecast.Cast<object>().ToArray()",
+            "public object[] DailyForecastItemsSource => _cachedDailyForecastItemsSource;",
             viewModel,
             StringComparison.Ordinal);
         Assert.Contains(
-            "HourlyForecastItemsSource => HourlyForecast.Cast<object>().ToArray()",
+            "public object[] HourlyForecastItemsSource => _cachedHourlyForecastItemsSource;",
             viewModel,
             StringComparison.Ordinal);
         Assert.True(CountOccurrences(

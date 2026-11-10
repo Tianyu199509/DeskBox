@@ -291,6 +291,40 @@ public sealed class WidgetCompactPerformancePolicyTests
     private static long MillisecondsToStopwatchTicks(double milliseconds) =>
         Math.Max(1, (long)Math.Round(milliseconds * Stopwatch.Frequency / 1000d));
 
+    [Fact]
+    public void ColdStartWarmup_HoldsHiddenRenderCommitAndFreezesExpandedTitleBarBeforeClockStart()
+    {
+        string shell = File.ReadAllText(TestPaths.FromRepository("src/DeskBox/Controls/WidgetShell.xaml.cs"));
+        string collapse = File.ReadAllText(TestPaths.FromRepository("src/DeskBox/Views/WidgetWindowBase.Collapse.cs"));
+        string bounds = File.ReadAllText(TestPaths.FromRepository("src/DeskBox/Views/WidgetWindowBase.Bounds.cs"));
+        string todoAdapter = File.ReadAllText(TestPaths.FromRepository("src/DeskBox/Controls/WidgetContents/TodoWidgetContentAdapter.cs"));
+
+        // Cold-start warmup holds the expanded visual subtree at 0 GPU opacity across
+        // two rendered frames so Loaded, DirectWrite, and DComp realize at idle.
+        Assert.Contains("BeginCompactExpansionRenderWarmup(", shell, StringComparison.Ordinal);
+        Assert.Contains("EndCompactExpansionRenderWarmup()", shell, StringComparison.Ordinal);
+        Assert.Contains("WaitForCompactExpansionRenderWarmupFramesAsync(", collapse, StringComparison.Ordinal);
+        Assert.Contains("WidgetShellControl.ShellContent is DependencyObject bodyRoot", collapse, StringComparison.Ordinal);
+        Assert.Contains("OnCompactStateChanged(bool collapsed)", todoAdapter, StringComparison.Ordinal);
+
+        // Expansion freezes TitleBarGrid after ApplyChromeMode makes it visible, and
+        // completes UpdateLayout before Composition and HWND clocks start.
+        int prepareStart = shell.IndexOf("public bool PrepareCompactTransition(", StringComparison.Ordinal);
+        int applyChrome = shell.IndexOf("ApplyChromeMode();", prepareStart, StringComparison.Ordinal);
+        int freezeAfterChrome = shell.IndexOf("FreezeTransitionContentLayout(", applyChrome, StringComparison.Ordinal);
+        int updateLayoutBeforeComp = shell.IndexOf("UpdateLayout();", freezeAfterChrome, StringComparison.Ordinal);
+        int startComposition = shell.IndexOf("StartCompactCompositionTransition(collapsed)", updateLayoutBeforeComp, StringComparison.Ordinal);
+        Assert.True(prepareStart >= 0 && applyChrome > prepareStart);
+        Assert.True(freezeAfterChrome > applyChrome);
+        Assert.True(updateLayoutBeforeComp > freezeAfterChrome);
+        Assert.True(startComposition > updateLayoutBeforeComp);
+
+        // Window corner DWM attribute is cached per HWND, and post-collapse layer
+        // restore defers while any sibling bounds transition is active.
+        Assert.Contains("_lastAppliedWindowCornerPreference == cornerPreference", bounds, StringComparison.Ordinal);
+        Assert.Contains("WidgetCompactAnimationCoordinator.ActiveBoundsTransitionCount > 0", collapse, StringComparison.Ordinal);
+    }
+
     private static WidgetCompactLayerRestoreDecision DecideLayerRestore(
         int committedFrames)
     {

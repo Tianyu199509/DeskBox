@@ -1,0 +1,21 @@
+{
+  "defaultFeedTitle": "तकनीकी समाचार",
+  "defaultTopHeadline": "नवीनतम खबरों के लिए ऊपर दाईं ओर रिफ़्रेश दबाएँ",
+  "emptySubtitle": "ऊपर रिफ़्रेश दबाएँ, या सेटिंग्स में प्रीसेट स्रोत बदलें",
+  "emptyTitle": "फ़ीड सिंक की प्रतीक्षा",
+  "feedCustom": "कस्टम RSS URL (नीचे)",
+  "feedIthome": "IT之家",
+  "feedSspai": "SSPai (少数派)",
+  "openArticleTooltip": "आर्टिकल खोलें",
+  "optDensityCompact": "कॉम्पैक्ट (केवल शीर्षक)",
+  "optDensitySummary": "मानक (शीर्षक + सारांश)",
+  "refreshBtn": "रिफ़्रेश",
+  "refreshTooltip": "अभी नवीनतम फ़ीड आइटम लाएँ",
+  "setDensity": "प्रदर्शन घनत्व",
+  "setFeedUrl": "कस्टम RSS / Atom URL (https://)",
+  "setPresetFeed": "प्रीसेट समाचार स्रोत",
+  "syncing": "नवीनतम खबरें सिंक हो रही हैं…",
+  "updatedPrefix": "अपडेटेड ",
+  "widgetDescription": "Hacker News, GitHub Blog, V2EX या किसी भी कस्टम HTTPS RSS फ़ीड को ऑफ़लाइन कैश के साथ ऑटो-सिंक करें।",
+  "widgetName": "RSS न्यूज़ रीडर"
+}

@@ -1,4 +1,4 @@
-; Messages for the direct uninstaller: the persistent managed-storage desktop
+﻿; Messages for the direct uninstaller: the persistent managed-storage desktop
 ; shortcut and the Microsoft Store edition coexistence warnings. Keep
 ; placeholders aligned across every installer locale.
 

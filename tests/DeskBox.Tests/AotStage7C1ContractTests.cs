@@ -1,4 +1,4 @@
-﻿namespace DeskBox.Tests;
+namespace DeskBox.Tests;
 
 public sealed class AotStage7C1ContractTests
 {
@@ -61,29 +61,34 @@ public sealed class AotStage7C1ContractTests
     }
 
     [Fact]
-    public void ReleaseGates_RequireEverythingSdkAndLicenseInEveryPayload()
+    public void ReleaseGates_ForbidExternalEverythingSdkDllAndEnforceUniversalPeVcCrtAudit()
     {
         string retail = Read("scripts/publish-aot-retail.ps1");
         string stage7c1 = Read("scripts/build-stage-7c1-distribution.ps1");
         string storeAudit = Read("scripts/audit-store-native-aot-package.ps1");
 
-        foreach (string script in new[] { retail, stage7c1, storeAudit })
-        {
-            Assert.Contains("EverythingSdk.dll", script, StringComparison.Ordinal);
-            Assert.Contains("ThirdParty/Everything/LICENSE.txt", script, StringComparison.Ordinal);
-        }
-
-        // The retail gate must list the SDK twice: once in required files and
-        // once in the PE architecture check.
-        Assert.True(
-            retail.Split("EverythingSdk.dll").Length - 1 >= 2,
-            "publish-aot-retail.ps1 must gate EverythingSdk.dll in requiredFiles and the PE list.");
+        Assert.DoesNotContain("EverythingSdk.dll", retail, StringComparison.Ordinal);
+        Assert.DoesNotContain("EverythingSdk.dll", stage7c1, StringComparison.Ordinal);
+        Assert.Contains("EverythingSdk\\.dll", retail, StringComparison.Ordinal);
+        Assert.Contains("H\\.NotifyIcon", retail, StringComparison.Ordinal);
+        Assert.Contains("Strings\\zh-CN.json", retail, StringComparison.Ordinal);
+        Assert.Contains("Strings\\en-US.json", retail, StringComparison.Ordinal);
+        Assert.Contains("'(^|/)EverythingSdk\\.dll$'", stage7c1, StringComparison.Ordinal);
+        Assert.Contains("'(^|/)H\\.NotifyIcon(?:\\.WinUI)?\\.dll$'", stage7c1, StringComparison.Ordinal);
+        Assert.Contains("\"Strings/zh-CN.json\"", stage7c1, StringComparison.Ordinal);
+        Assert.Contains("run-aot-agent-clipboard-companion-smoke.ps1", stage7c1, StringComparison.Ordinal);
+        Assert.Contains("'(^|/)H\\.NotifyIcon(?:\\.WinUI)?\\.dll$'", storeAudit, StringComparison.Ordinal);
+        Assert.Contains("\"Strings/zh-CN.json\"", storeAudit, StringComparison.Ordinal);
         Assert.Contains(
-            "$everythingSdkMachine = Get-PeMachine",
-            stage7c1,
+            "'(^|/)EverythingSdk\\.dll$'",
+            storeAudit,
             StringComparison.Ordinal);
         Assert.Contains(
-            "$everythingSdkPe = Get-PeFacts",
+            "$packagedPeFiles = @(",
+            storeAudit,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "imports non-inbox VC++ runtime DLLs",
             storeAudit,
             StringComparison.Ordinal);
     }
@@ -131,6 +136,7 @@ public sealed class AotStage7C1ContractTests
                      "DeskBox\\.runtimeconfig\\.json",
                      "deskbox_search_core",
                      "DeskBox\\.Updater",
+                     "DeskBox\\.Settings",
                      "HasClrHeader",
                      "publishPayloadHashesMatch",
                      "DeskBox.pdb",
@@ -152,7 +158,7 @@ public sealed class AotStage7C1ContractTests
                 System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 
         Assert.True(minimumVersionMatch.Success, "Store audit must enforce a Windows App Runtime minimum version.");
-        Assert.Equal(new Version(2, 5, 1, 0), Version.Parse(minimumVersionMatch.Groups["version"].Value));
+        Assert.Equal(new Version(2, 6, 5, 0), Version.Parse(minimumVersionMatch.Groups["version"].Value));
     }
 
     [Fact]
@@ -189,7 +195,7 @@ public sealed class AotStage7C1ContractTests
             Assert.Contains("#if DeskBoxNativeAot", dependencies, StringComparison.Ordinal);
             Assert.Contains("ShouldInstallDotNetRuntime := False", dependencies, StringComparison.Ordinal);
             Assert.Contains(
-                "ShouldInstallWindowsAppRuntime := not IsWindowsAppRuntime25Installed",
+                "ShouldInstallWindowsAppRuntime := not IsWindowsAppRuntime26Installed",
                 dependencies,
                 StringComparison.Ordinal);
         }
@@ -199,14 +205,14 @@ public sealed class AotStage7C1ContractTests
     [InlineData(
         "installer/DeskBox.Dependencies.iss",
         "X64",
-        "https://aka.ms/windowsappsdk/2.5/2.5.1/windowsappruntimeinstall-x64.exe",
-        "https://download.microsoft.com/download/de664922-b046-432f-bb2a-54aec3c5f1f6/WindowsAppRuntimeInstall-x64.exe")]
+        "https://aka.ms/windowsappsdk/2.6/2.6.5/windowsappruntimeinstall-x64.exe",
+        "https://download.microsoft.com/download/81f35163-9c63-4b4d-a293-6dcf1b32320a/WindowsAppRuntimeInstall-x64.exe")]
     [InlineData(
         "installer/DeskBox.Dependencies.arm64.iss",
         "ARM64",
-        "https://aka.ms/windowsappsdk/2.5/2.5.1/windowsappruntimeinstall-arm64.exe",
-        "https://download.microsoft.com/download/83fdef97-1ca8-491d-80f3-a94b5adc5b1c/WindowsAppRuntimeInstall-arm64.exe")]
-    public void DirectInstaller_RequiresWindowsAppRuntime25ForMatchingArchitecture(
+        "https://aka.ms/windowsappsdk/2.6/2.6.5/windowsappruntimeinstall-arm64.exe",
+        "https://download.microsoft.com/download/1346f044-de9e-4d14-826c-98215cf54e6e/WindowsAppRuntimeInstall-arm64.exe")]
+    public void DirectInstaller_RequiresWindowsAppRuntime26ForMatchingArchitecture(
         string relativePath,
         string architecture,
         string primaryUrl,
@@ -214,8 +220,8 @@ public sealed class AotStage7C1ContractTests
     {
         string dependencies = Read(relativePath);
 
-        Assert.Contains("function IsWindowsAppRuntime25Installed: Boolean;", dependencies, StringComparison.Ordinal);
-        Assert.DoesNotContain("IsWindowsAppRuntime22Installed", dependencies, StringComparison.Ordinal);
+        Assert.Contains("function IsWindowsAppRuntime26Installed: Boolean;", dependencies, StringComparison.Ordinal);
+        Assert.DoesNotContain("IsWindowsAppRuntime25Installed", dependencies, StringComparison.Ordinal);
         Assert.Contains($"WindowsAppRuntimeUrl = '{primaryUrl}';", dependencies, StringComparison.Ordinal);
         Assert.Contains($"WindowsAppRuntimeFallbackUrl = '{fallbackUrl}';", dependencies, StringComparison.Ordinal);
 
@@ -229,9 +235,9 @@ public sealed class AotStage7C1ContractTests
         foreach (System.Text.RegularExpressions.Match match in minimumVersionMatches)
         {
             Version minimumVersion = Version.Parse(match.Groups["version"].Value);
-            Assert.Equal(new Version(2, 5, 1, 0), minimumVersion);
-            Assert.True(new Version(2, 4, 0, 0) < minimumVersion, "Windows App Runtime 2.4 must not satisfy the 2.5.1 app contract.");
-            Assert.True(new Version(2, 5, 1, 0) >= minimumVersion, "Windows App Runtime 2.5.1 must satisfy the app contract.");
+            Assert.Equal(new Version(2, 6, 5, 0), minimumVersion);
+            Assert.True(new Version(2, 5, 1, 0) < minimumVersion, "Windows App Runtime 2.5 must not satisfy the 2.6.5 app contract.");
+            Assert.True(new Version(2, 6, 5, 0) >= minimumVersion, "Windows App Runtime 2.6.5 must satisfy the app contract.");
         }
 
         Assert.Equal(

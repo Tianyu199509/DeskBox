@@ -1,21 +1,22 @@
 using DeskBox.Contracts;
+using DeskBox.Features.Appearance;
 using DeskBox.Features.FeatureWidgets;
+using DeskBox.Features.FileDisplay;
 using DeskBox.Features.FileStack;
 using DeskBox.Features.Interaction;
+using DeskBox.Features.ManagedStorage;
+using DeskBox.Helpers;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 
 namespace DeskBox.Views.SettingsSections;
 
 /// <summary>
-/// The file-widget overview page. Its compiled bindings span three
-/// feature domains, so instead of one shell-facade dependency property the
-/// control carries three typed editor dependencies (batch 45, the
-/// blueprint-approved x:Bind bridge-free exception): the open-mode combo
-/// and its summary read the file-stack editor, the folder-open combo reads
-/// the feature-widgets editor, and the file-item context-menu toggle reads
-/// the interaction editor. Each editor owns its persisted projection and
-/// writes through its coordinator.
+/// Unified "文件与整理" settings page combining embedded desktop-organization
+/// rules (upper section) and file-widget storage, drag-and-drop, appearance,
+/// stacking, and open/menu settings (lower section). All dynamic bindings in
+/// XAML use compiled <c>{x:Bind}</c> against typed editor DependencyProperties.
 /// </summary>
 public sealed partial class FileWidgetSettingsSection : UserControl
 {
@@ -40,22 +41,47 @@ public sealed partial class FileWidgetSettingsSection : UserControl
             typeof(FileWidgetSettingsSection),
             new PropertyMetadata(null));
 
+    public static readonly DependencyProperty ManagedStorageProperty =
+        DependencyProperty.Register(
+            nameof(ManagedStorage),
+            typeof(ManagedStorageSettingsViewModel),
+            typeof(FileWidgetSettingsSection),
+            new PropertyMetadata(null));
+
+    public static readonly DependencyProperty FileDisplayProperty =
+        DependencyProperty.Register(
+            nameof(FileDisplay),
+            typeof(FileDisplaySettingsViewModel),
+            typeof(FileWidgetSettingsSection),
+            new PropertyMetadata(null));
+
+    public static readonly DependencyProperty AppearanceProperty =
+        DependencyProperty.Register(
+            nameof(Appearance),
+            typeof(AppearanceSettingsViewModel),
+            typeof(FileWidgetSettingsSection),
+            new PropertyMetadata(null));
+
+    private bool _isSyncingQuickAccessToggle;
+    private bool _isSyncingDesktopShortcutToggle;
+
     public FileWidgetSettingsSection()
     {
         InitializeComponent();
+        DesktopOrganizationPart.SubPageChanged += OnDesktopOrganizationSubPageChanged;
     }
+
+    public DesktopOrganizationSettingsSection OrganizationSection => DesktopOrganizationPart;
+
+    public bool IsFileDisplaySubPageOpen => FileDisplaySubPagePanel.Visibility == Visibility.Visible;
+
+    public bool IsDetailSubPageOpen => DesktopOrganizationPart.IsDetailSubPageOpen || IsFileDisplaySubPageOpen;
 
     public FileStackSettingsViewModel? FileStack
     {
         get => (FileStackSettingsViewModel?)GetValue(FileStackProperty);
         set => SetValue(FileStackProperty, value);
     }
-
-    /// <summary>
-    /// Host app actions for the desktop-organization opener; injected by the
-    /// settings window alongside the editor properties.
-    /// </summary>
-    public ISettingsAppActions? AppActions { get; set; }
 
     public FeatureWidgetsSettingsViewModel? FeatureWidgets
     {
@@ -69,51 +95,274 @@ public sealed partial class FileWidgetSettingsSection : UserControl
         set => SetValue(InteractionProperty, value);
     }
 
-    /// <summary>
-    /// Mounts the managed-storage (收纳与路径) section inside the overview
-    /// card stack — directly below the 桌面整理 entry card (index 0) and
-    /// above 文件显示: storage path card → drag-behavior expander. The
-    /// desktop-shortcut card rides in the same section template but moves to
-    /// the very bottom of this stack, below the 桌面原版右键菜单 card, so the
-    /// entry-point toggle reads as the page's closing item instead of sitting
-    /// between the storage cards.
-    /// </summary>
-    private const int ManagedStorageSectionIndex = 1;
+    public ManagedStorageSettingsViewModel? ManagedStorage
+    {
+        get => (ManagedStorageSettingsViewModel?)GetValue(ManagedStorageProperty);
+        set => SetValue(ManagedStorageProperty, value);
+    }
 
+    public FileDisplaySettingsViewModel? FileDisplay
+    {
+        get => (FileDisplaySettingsViewModel?)GetValue(FileDisplayProperty);
+        set => SetValue(FileDisplayProperty, value);
+    }
+
+    public AppearanceSettingsViewModel? Appearance
+    {
+        get => (AppearanceSettingsViewModel?)GetValue(AppearanceProperty);
+        set => SetValue(AppearanceProperty, value);
+    }
+
+    /// <summary>
+    /// Host app actions for the desktop-organization opener; injected by the
+    /// settings window alongside the editor properties.
+    /// </summary>
+    public ISettingsAppActions? AppActions { get; set; }
+
+    public event EventHandler<SettingsSectionNavigationRequestedEventArgs>? NavigationRequested;
+    public event EventHandler? SubPageChanged;
+    public event EventHandler<RoutedEventArgs>? OpenStoragePathRequested;
+    public event EventHandler<RoutedEventArgs>? ChangeStoragePathRequested;
+    public event EventHandler<bool>? QuickAccessToggled;
+    public event EventHandler<bool>? DesktopShortcutToggled;
+    public event EventHandler<RoutedEventArgs>? ManageOrphanFoldersRequested;
+    public event EventHandler? SliderDragStarted;
+    public event EventHandler? SliderDragCompleted;
+
+    public void SetQuickAccessState(bool isPinned, bool isEnabled)
+    {
+        _isSyncingQuickAccessToggle = true;
+        try
+        {
+            ManagedStorageQuickAccessToggle.IsOn = isPinned;
+            ManagedStorageQuickAccessToggle.IsEnabled = isEnabled;
+        }
+        finally
+        {
+            _isSyncingQuickAccessToggle = false;
+        }
+    }
+
+    public void SetDesktopShortcutState(bool isOn, bool isEnabled = true)
+    {
+        _isSyncingDesktopShortcutToggle = true;
+        try
+        {
+            ManagedStorageDesktopShortcutToggle.IsOn = isOn;
+            ManagedStorageDesktopShortcutToggle.IsEnabled = isEnabled;
+        }
+        finally
+        {
+            _isSyncingDesktopShortcutToggle = false;
+        }
+    }
+
+    public void SetStoragePathWarning(
+        bool isOpen,
+        InfoBarSeverity severity,
+        string? title,
+        string? message)
+    {
+        Visibility visibility = isOpen
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        ManagedStorageWarningInfoBar.Severity = severity;
+        ManagedStorageWarningInfoBar.Title = title ?? string.Empty;
+        ManagedStorageWarningInfoBar.Message = message ?? string.Empty;
+        ManagedStorageWarningInfoBar.IsOpen = isOpen;
+        ManagedStorageWarningInfoBar.Visibility = visibility;
+        ManagedStorageWarningCard.Visibility = visibility;
+    }
+
+    public void SetOrphanFoldersSummary(int count, string summary)
+    {
+        OrphanManagedStorageCard.Description = summary;
+        ManageOrphanFoldersButton.IsEnabled = count > 0;
+        ManageOrphanFoldersButton.Visibility = count > 0
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+    }
+
+    public void SetOrphanFoldersState(int count, string summaryText, string buttonText)
+    {
+        OrphanManagedStorageCard.Description = summaryText;
+        if (!string.IsNullOrEmpty(buttonText))
+        {
+            ManageOrphanFoldersButton.Content = buttonText;
+        }
+
+        ManageOrphanFoldersButton.IsEnabled = count > 0;
+        ManageOrphanFoldersButton.Visibility = count > 0
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+    }
+
+    public void SetDragOutWin10State(bool modifiersReachExternalTargets, string dragOutDescription)
+    {
+        DragOutActionCard.Description = dragOutDescription;
+        DragOutModifierTipToggle.IsEnabled = modifiersReachExternalTargets;
+    }
+
+    /// <summary>
+    /// Backward-compatibility shim while the legacy storage template is being
+    /// retired in SettingsWindow; detaches the desktop-shortcut card if passed.
+    /// </summary>
     public void AttachManagedStorageSection(FrameworkElement section)
     {
-        int index = Math.Min(ManagedStorageSectionIndex, SectionCardsPanel.Children.Count);
-        SectionCardsPanel.Children.Insert(index, section);
-
-        // The lookup stays inside the mounted section's own XAML namescope,
-        // so the card keeps its window-side wiring (toggle handler and state
-        // refresh resolve it by name) even after moving into this panel.
-        // WinUI's UIElementCollection.Add does not reparent: the card must be
-        // removed from the storage panel first or the append throws
-        // 0x800F1000 and aborts the whole first navigation into this page.
         if (section.FindName("ManagedStorageDesktopShortcutCard") is FrameworkElement shortcutCard &&
             shortcutCard.Parent is Panel storagePanel)
         {
             storagePanel.Children.Remove(shortcutCard);
-            SectionCardsPanel.Children.Add(shortcutCard);
         }
     }
 
-    public event EventHandler<SettingsSectionNavigationRequestedEventArgs>? NavigationRequested;
+    private void OnDesktopOrganizationSubPageChanged(object? sender, EventArgs e)
+    {
+        if (DesktopOrganizationPart.IsDetailSubPageOpen && IsFileDisplaySubPageOpen)
+        {
+            FileDisplaySubPagePanel.Visibility = Visibility.Collapsed;
+        }
+
+        SyncSubPageVisibility();
+        SubPageChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void FileDisplayEntryCard_Click(object sender, RoutedEventArgs e)
+    {
+        OpenFileDisplaySubPage(animate: true);
+    }
+
+    public void OpenFileDisplaySubPage(bool animate = true)
+    {
+        bool wasAlreadyOpen = IsFileDisplaySubPageOpen;
+        DesktopOrganizationPart.CloseAllSubPages(animate: false);
+        FileDisplaySubPagePanel.Visibility = Visibility.Visible;
+        SyncSubPageVisibility();
+        ResetHostScrollToTop();
+        SubPageChanged?.Invoke(this, EventArgs.Empty);
+        if (animate && !wasAlreadyOpen && IsLoaded)
+        {
+            FileDisplaySubPagePanel.UpdateLayout();
+            DetailPageTransitionHelper.PlayNavigationEnter(FileDisplaySubPagePanel, 40f);
+        }
+    }
+
+    public void CloseFileDisplaySubPage(bool animate = true)
+    {
+        if (!IsFileDisplaySubPageOpen)
+        {
+            return;
+        }
+
+        FileDisplaySubPagePanel.Visibility = Visibility.Collapsed;
+        SyncSubPageVisibility();
+        ResetHostScrollToTop();
+        SubPageChanged?.Invoke(this, EventArgs.Empty);
+        if (animate && IsLoaded)
+        {
+            FileWidgetSettingsLowerPanel.UpdateLayout();
+            DetailPageTransitionHelper.PlayNavigationEnter(FileWidgetSettingsLowerPanel, -40f);
+        }
+    }
+
+    public void CloseAllSubPages(bool animate = false)
+    {
+        bool hadFileDisplay = IsFileDisplaySubPageOpen;
+        FileDisplaySubPagePanel.Visibility = Visibility.Collapsed;
+        DesktopOrganizationPart.CloseAllSubPages(animate: animate);
+        SyncSubPageVisibility();
+        if (hadFileDisplay)
+        {
+            SubPageChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    public bool TryNavigateBack()
+    {
+        if (IsFileDisplaySubPageOpen)
+        {
+            CloseFileDisplaySubPage(animate: true);
+            return true;
+        }
+
+        return DesktopOrganizationPart.TryNavigateBack();
+    }
+
+    private void SyncSubPageVisibility()
+    {
+        if (IsFileDisplaySubPageOpen)
+        {
+            PageTitleText.Visibility = Visibility.Collapsed;
+            DesktopOrganizationPart.Visibility = Visibility.Collapsed;
+            FileWidgetSettingsLowerPanel.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        bool isOrgSubPageOpen = DesktopOrganizationPart.IsDetailSubPageOpen;
+        PageTitleText.Visibility = isOrgSubPageOpen ? Visibility.Collapsed : Visibility.Visible;
+        DesktopOrganizationPart.Visibility = Visibility.Visible;
+        FileWidgetSettingsLowerPanel.Visibility = isOrgSubPageOpen ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private void ResetHostScrollToTop()
+    {
+        DependencyObject ancestor = this;
+        while (ancestor is not null)
+        {
+            if (ancestor is ScrollViewer scroller)
+            {
+                scroller.ChangeView(null, 0, null, disableAnimation: true);
+                return;
+            }
+            ancestor = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(ancestor);
+        }
+    }
 
     private void NestedSettingsButton_Click(object sender, RoutedEventArgs e)
     {
-        // Drill-down rows are Buttons, but the 文件显示-style entry cards are
-        // toolkit SettingsCards (ButtonBase, not Button); match the shell's
-        // FrameworkElement guard so both navigate.
         if (sender is FrameworkElement { Tag: string sectionTag })
         {
             NavigationRequested?.Invoke(this, new SettingsSectionNavigationRequestedEventArgs(sectionTag));
         }
     }
 
-    private void OrganizeDesktopButton_Click(object sender, RoutedEventArgs e)
+    private void OpenManagedStoragePathButton_Click(object sender, RoutedEventArgs e) =>
+        OpenStoragePathRequested?.Invoke(sender, e);
+
+    private void ChangeManagedStoragePathButton_Click(object sender, RoutedEventArgs e) =>
+        ChangeStoragePathRequested?.Invoke(sender, e);
+
+    private void ManagedStorageQuickAccessToggle_Toggled(object sender, RoutedEventArgs e)
     {
-        AppActions?.ShowDesktopOrganizationWindow();
+        if (!_isSyncingQuickAccessToggle)
+        {
+            QuickAccessToggled?.Invoke(this, ManagedStorageQuickAccessToggle.IsOn);
+        }
     }
+
+    private void ManagedStorageDesktopShortcutToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (!_isSyncingDesktopShortcutToggle)
+        {
+            DesktopShortcutToggled?.Invoke(this, ManagedStorageDesktopShortcutToggle.IsOn);
+        }
+    }
+
+    private void ManageOrphanFoldersButton_Click(object sender, RoutedEventArgs e) =>
+        ManageOrphanFoldersRequested?.Invoke(sender, e);
+
+    private void AppearanceSlider_ManipulationStarted(object sender, ManipulationStartedRoutedEventArgs e) =>
+        SliderDragStarted?.Invoke(this, EventArgs.Empty);
+
+    private void AppearanceSlider_ManipulationCompleted(object sender, ManipulationCompletedRoutedEventArgs e) =>
+        SliderDragCompleted?.Invoke(this, EventArgs.Empty);
+
+    private void AppearanceSlider_PointerPressed(object sender, PointerRoutedEventArgs e) =>
+        SliderDragStarted?.Invoke(this, EventArgs.Empty);
+
+    private void AppearanceSlider_PointerReleased(object sender, PointerRoutedEventArgs e) =>
+        SliderDragCompleted?.Invoke(this, EventArgs.Empty);
+
+    private void AppearanceSlider_LostFocus(object sender, RoutedEventArgs e) =>
+        SliderDragCompleted?.Invoke(this, EventArgs.Empty);
 }

@@ -11,6 +11,7 @@ using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Hosting;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Shapes;
 using Windows.Foundation;
 
 namespace DeskBox.Helpers;
@@ -57,19 +58,29 @@ namespace DeskBox.Helpers;
 /// follows the text's actual foreground (see <see cref="TextShadowPalette"/>),
 /// which covers palette modes and custom colors without extra settings.
 ///
-/// While the setting is off nothing is inserted and no composition object
-/// exists; opted-in TextBlocks are only remembered weakly so that turning
-/// the setting on can reach the ones already on screen.
+/// While the setting is off or any ancestor up to the scoped window root is
+/// collapsed, nothing is inserted and no composition object exists; opted-in
+/// elements stay dormant until both enabled and genuinely visible, and tear
+/// down their host and composition objects immediately when collapsed.
 /// </summary>
 public static class WidgetTextShadow
 {
     // Plain layout wrappers crossed between a text and its host panel.
     private const int MaxPassThroughDepth = 4;
 
+    // Bounded climb to the scoped window root so collapsed outer containers
+    // keep descendant shadows dormant without full-tree walks.
+    private const int MaxVisibilityDepth = 48;
+
     // Background opacity above which a crossed element counts as a plate.
     private const double MaxSeeThroughAlpha = 0.5;
 
+    // Effective card opacity at or above which solid/tinted plates provide full
+    // contrast without per-glyph DropShadow composition objects.
+    public const double OpaquePlateThreshold = 0.85;
+
     private static readonly ConditionalWeakTable<FrameworkElement, ShadowAttachment> Attachments = new();
+    private static readonly ConditionalWeakTable<FrameworkElement, DeferredTextPin> DeferredPins = new();
     private static readonly List<WeakReference<ShadowAttachment>> KnownAttachments = [];
     private static readonly List<WeakReference<FrameworkElement>> PendingTexts = [];
     private static int _pendingCompactionThreshold = 64;
@@ -134,6 +145,95 @@ public static class WidgetTextShadow
     public static void SetScope(DependencyObject obj, bool value) => obj.SetValue(ScopeProperty, value);
 
     /// <summary>
+    /// Marks a scoped window root whose card plate is currently opaque enough
+    /// that per-glyph shadows are invisible overhead. Toggling back to false
+    /// adopts deferred texts and restores shadows live.
+    /// </summary>
+    public static readonly DependencyProperty PlateOpaqueProperty =
+        DependencyProperty.RegisterAttached(
+            "PlateOpaque",
+            typeof(bool),
+            typeof(WidgetTextShadow),
+            new PropertyMetadata(false, OnPlateOpaqueChanged));
+
+    public static bool GetPlateOpaque(DependencyObject obj) =>
+        (bool)obj.GetValue(PlateOpaqueProperty);
+
+    public static void SetPlateOpaque(DependencyObject obj, bool value) =>
+        obj.SetValue(PlateOpaqueProperty, value);
+
+    public static bool ShouldSuppressForOpaquePlate(
+        double effectiveWidgetOpacity,
+        string? materialType,
+        bool hasImageBackground = false)
+    {
+        if (hasImageBackground ||
+            string.Equals(materialType, "None", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return double.IsFinite(effectiveWidgetOpacity) &&
+               effectiveWidgetOpacity >= OpaquePlateThreshold;
+    }
+
+    public static bool IsActiveFor(FrameworkElement element)
+    {
+        if (!_isActive)
+        {
+            return false;
+        }
+
+        if (!element.IsLoaded)
+        {
+            return true;
+        }
+
+        return element.XamlRoot?.Content is UIElement root &&
+               GetScope(root) &&
+               !GetPlateOpaque(root);
+    }
+
+    private static bool IsScopePlateOpaque(FrameworkElement text) =>
+        text.IsLoaded &&
+        text.XamlRoot?.Content is UIElement root &&
+        GetPlateOpaque(root);
+
+    private static void OnPlateOpaqueChanged(
+        DependencyObject d,
+        DependencyPropertyChangedEventArgs e)
+    {
+        if (d is not UIElement root || !GetScope(root))
+        {
+            return;
+        }
+
+        bool isPlateOpaque = (bool)e.NewValue;
+        if (!isPlateOpaque && _isActive)
+        {
+            AdoptPendingTexts();
+        }
+
+        for (int index = KnownAttachments.Count - 1; index >= 0; index--)
+        {
+            if (KnownAttachments[index].TryGetTarget(out ShadowAttachment? attachment))
+            {
+                if (!attachment.Element.IsLoaded ||
+                    ReferenceEquals(attachment.Element.XamlRoot?.Content, root))
+                {
+                    Sync(attachment);
+                }
+            }
+            else
+            {
+                KnownAttachments.RemoveAt(index);
+            }
+        }
+
+        ShadowSettingChanged?.Invoke();
+    }
+
+    /// <summary>
     /// Whether a text element casts the widget text shadow. Set by the
     /// app-level implicit TextBlock style (a local <c>False</c> opts a text
     /// out) or, for elements without their own glyph mask, by the surface
@@ -179,7 +279,7 @@ public static class WidgetTextShadow
 
     private static void OnCastChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
-        if (d is not (TextBlock or Image))
+        if (d is not (TextBlock or Shape or Image))
         {
             return;
         }
@@ -191,7 +291,7 @@ public static class WidgetTextShadow
         }
         else if ((bool)e.NewValue)
         {
-            if (_isActive)
+            if (_isActive && !IsScopePlateOpaque(text))
             {
                 Adopt(text);
             }
@@ -200,38 +300,110 @@ public static class WidgetTextShadow
                 Defer(text);
             }
         }
+        else
+        {
+            ReleaseDeferredPin(text);
+        }
     }
 
     private static void Defer(FrameworkElement text)
     {
+        if (text.IsLoaded &&
+            !(text.XamlRoot?.Content is UIElement root && GetScope(root)))
+        {
+            return;
+        }
+
+        if (DeferredPins.TryGetValue(text, out _))
+        {
+            return;
+        }
+
+        var pin = new DeferredTextPin(text);
+        DeferredPins.Add(text, pin);
+        text.Loaded += pin.LoadedHandler;
+
         PendingTexts.Add(new WeakReference<FrameworkElement>(text));
         if (PendingTexts.Count < _pendingCompactionThreshold)
         {
             return;
         }
 
-        PendingTexts.RemoveAll(static reference => !reference.TryGetTarget(out _));
+        PendingTexts.RemoveAll(ShouldPrunePendingReference);
         _pendingCompactionThreshold = Math.Max(64, PendingTexts.Count * 2);
+    }
+
+    private static bool ShouldPrunePendingReference(WeakReference<FrameworkElement> reference)
+    {
+        if (!reference.TryGetTarget(out FrameworkElement? text))
+        {
+            return true;
+        }
+
+        if (text.IsLoaded && !(text.XamlRoot?.Content is UIElement root && GetScope(root)))
+        {
+            ReleaseDeferredPin(text);
+            return true;
+        }
+
+        return false;
+    }
+
+    private static void ReleaseDeferredPin(FrameworkElement text)
+    {
+        if (DeferredPins.TryGetValue(text, out DeferredTextPin? pin))
+        {
+            text.Loaded -= pin.LoadedHandler;
+            DeferredPins.Remove(text);
+        }
+    }
+
+    public static void CompactTrackedReferences()
+    {
+        PendingTexts.RemoveAll(ShouldPrunePendingReference);
+        PendingTexts.TrimExcess();
+        _pendingCompactionThreshold = Math.Max(64, PendingTexts.Count * 2);
+
+        KnownAttachments.RemoveAll(static reference =>
+            !reference.TryGetTarget(out ShadowAttachment? attachment) ||
+            attachment.IsOutOfScope);
+        KnownAttachments.TrimExcess();
+        _knownCompactionThreshold = Math.Max(256, KnownAttachments.Count * 2);
     }
 
     private static void AdoptPendingTexts()
     {
-        foreach (WeakReference<FrameworkElement> reference in PendingTexts)
+        for (int index = PendingTexts.Count - 1; index >= 0; index--)
         {
-            if (reference.TryGetTarget(out FrameworkElement? text) &&
-                GetCast(text) &&
-                !Attachments.TryGetValue(text, out _))
+            if (!PendingTexts[index].TryGetTarget(out FrameworkElement? text))
+            {
+                PendingTexts.RemoveAt(index);
+                continue;
+            }
+
+            if (IsScopePlateOpaque(text))
+            {
+                continue;
+            }
+
+            if (GetCast(text) && !Attachments.TryGetValue(text, out _))
             {
                 Adopt(text);
             }
+            else
+            {
+                ReleaseDeferredPin(text);
+            }
+
+            PendingTexts.RemoveAt(index);
         }
 
-        PendingTexts.Clear();
-        _pendingCompactionThreshold = 64;
+        _pendingCompactionThreshold = Math.Max(64, PendingTexts.Count * 2);
     }
 
     private static void Adopt(FrameworkElement text)
     {
+        ReleaseDeferredPin(text);
         var attachment = new ShadowAttachment(text);
         Attachments.AddOrUpdate(text, attachment);
         // Loaded and Unloaded can arrive out of order when an element is
@@ -267,39 +439,50 @@ public static class WidgetTextShadow
                 attachment.IsOutOfScope = true;
                 text.Loaded -= attachment.LoadedHandler;
                 text.Unloaded -= attachment.LoadedHandler;
+                UnwatchVisibility(attachment);
+                Deactivate(attachment, deferred: false);
                 return;
             }
         }
 
-        if (_isActive && GetCast(text) && text.IsLoaded)
+        bool plateOpaque = IsScopePlateOpaque(text);
+        if (!_isActive || plateOpaque || !GetCast(text) || !text.IsLoaded)
         {
-            Activate(attachment);
+            UnwatchVisibility(attachment);
+            Deactivate(attachment, deferred: text.IsLoaded == false);
             return;
         }
 
-        ReleaseComposition(attachment);
-        // Keep the host while the whole subtree is merely unloading (window
-        // hidden, content swapped out) and the text still sits where it was;
-        // the next Loaded reuses it. Otherwise take it out of the panel.
-        if (_isActive && GetCast(text) && IsHostStillInPlace(attachment))
+        if (!TryResolvePlacement(text, out Panel? panel, out List<UIElement>? chain))
         {
+            UnwatchVisibility(attachment);
+            Deactivate(attachment, deferred: false);
             return;
         }
 
-        RemoveHost(attachment, deferred: text.IsLoaded == false);
+        List<UIElement> visibilityChain = EnsureVisibilityWatch(attachment);
+        if (!IsAncestorChainVisible(visibilityChain))
+        {
+            Deactivate(attachment, deferred: false);
+            return;
+        }
+
+        Activate(attachment, panel, chain);
     }
 
-    private static void Activate(ShadowAttachment attachment)
+    private static void Activate(
+        ShadowAttachment attachment,
+        Panel panel,
+        List<UIElement> chain)
     {
         if (attachment.Sprite is not null)
         {
-            return;
-        }
+            if (IsHostStillInPlace(attachment))
+            {
+                return;
+            }
 
-        if (!TryResolvePlacement(attachment.Element, out Panel? panel, out List<UIElement>? chain))
-        {
-            RemoveHost(attachment, deferred: false);
-            return;
+            Deactivate(attachment, deferred: false);
         }
 
         try
@@ -358,14 +541,12 @@ public static class WidgetTextShadow
 
             WatchText(attachment);
             ApplyEdge(attachment);
-            UpdateVisibility(attachment);
             ElementCompositionPreview.SetElementChildVisual(host, attachment.Sprite);
         }
         catch (Exception ex)
         {
             App.LogVerbose($"[TextShadow] Shadow attach failed: {ex.Message}");
-            ReleaseComposition(attachment);
-            RemoveHost(attachment, deferred: false);
+            Deactivate(attachment, deferred: false);
             // Composition objects can be momentarily closed while a reloaded
             // subtree settles (group tab switch reparents the whole page);
             // retry once on the dispatcher so a transient failure does not
@@ -576,11 +757,18 @@ public static class WidgetTextShadow
         }
     }
 
+    private static void Deactivate(ShadowAttachment attachment, bool deferred)
+    {
+        ReleaseComposition(attachment);
+        RemoveHost(attachment, deferred);
+    }
+
     private static void ReleaseComposition(ShadowAttachment attachment)
     {
         UnwatchText(attachment);
         if (attachment.Sprite is null && attachment.Shadow is null)
         {
+            attachment.Mask = null;
             return;
         }
 
@@ -604,6 +792,7 @@ public static class WidgetTextShadow
             attachment.OpacityBinding?.Dispose();
             attachment.Sprite = null;
             attachment.Shadow = null;
+            attachment.Mask = null;
             attachment.OffsetBinding = null;
             attachment.SizeBinding = null;
             attachment.OpacityBinding = null;
@@ -611,9 +800,126 @@ public static class WidgetTextShadow
         }
     }
 
+    private static List<UIElement> EnsureVisibilityWatch(ShadowAttachment attachment)
+    {
+        FrameworkElement text = attachment.Element;
+        if (attachment.VisibilityChain is List<UIElement> existing &&
+            IsSameVisibilityChain(existing, text))
+        {
+            return existing;
+        }
+
+        UnwatchVisibility(attachment);
+        List<UIElement> visibilityChain = BuildVisibilityChain(text);
+        long[] tokens = new long[visibilityChain.Count];
+        WeakReference<ShadowAttachment> weak = attachment.Weak;
+        DependencyPropertyChangedCallback callback = (_, _) =>
+        {
+            if (weak.TryGetTarget(out ShadowAttachment? target))
+            {
+                Sync(target);
+            }
+        };
+
+        for (int index = 0; index < visibilityChain.Count; index++)
+        {
+            tokens[index] = visibilityChain[index].RegisterPropertyChangedCallback(
+                UIElement.VisibilityProperty,
+                callback);
+        }
+
+        attachment.VisibilityChain = visibilityChain;
+        attachment.VisibilityTokens = tokens;
+        return visibilityChain;
+    }
+
+    private static void UnwatchVisibility(ShadowAttachment attachment)
+    {
+        if (attachment.VisibilityChain is List<UIElement> chain &&
+            attachment.VisibilityTokens is long[] tokens)
+        {
+            for (int index = 0; index < chain.Count && index < tokens.Length; index++)
+            {
+                chain[index].UnregisterPropertyChangedCallback(
+                    UIElement.VisibilityProperty,
+                    tokens[index]);
+            }
+        }
+
+        attachment.VisibilityChain = null;
+        attachment.VisibilityTokens = null;
+    }
+
+    private static List<UIElement> BuildVisibilityChain(FrameworkElement text)
+    {
+        UIElement? scopeRoot = text.XamlRoot?.Content as UIElement;
+        List<UIElement> visibilityChain = [text];
+        DependencyObject? current = text;
+        for (int depth = 0; depth < MaxVisibilityDepth && !ReferenceEquals(current, scopeRoot); depth++)
+        {
+            current = VisualTreeHelper.GetParent(current);
+            if (current is null)
+            {
+                break;
+            }
+
+            if (current is UIElement uiElement)
+            {
+                visibilityChain.Add(uiElement);
+            }
+        }
+
+        return visibilityChain;
+    }
+
+    private static bool IsSameVisibilityChain(List<UIElement> existing, FrameworkElement text)
+    {
+        if (existing.Count == 0 || !ReferenceEquals(existing[0], text))
+        {
+            return false;
+        }
+
+        UIElement? scopeRoot = text.XamlRoot?.Content as UIElement;
+        int index = 1;
+        DependencyObject? current = text;
+        for (int depth = 0; depth < MaxVisibilityDepth && !ReferenceEquals(current, scopeRoot); depth++)
+        {
+            current = VisualTreeHelper.GetParent(current);
+            if (current is null)
+            {
+                break;
+            }
+
+            if (current is UIElement uiElement)
+            {
+                if (index >= existing.Count || !ReferenceEquals(existing[index], uiElement))
+                {
+                    return false;
+                }
+
+                index++;
+            }
+        }
+
+        return index == existing.Count;
+    }
+
+    private static bool IsAncestorChainVisible(List<UIElement> chain)
+    {
+        for (int index = 0; index < chain.Count; index++)
+        {
+            if (chain[index].Visibility != Visibility.Visible)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private static void WatchText(ShadowAttachment attachment)
     {
-        if (attachment.IsWatching || attachment.Chain is not List<UIElement> chain)
+        if (attachment.IsWatching)
         {
             return;
         }
@@ -626,18 +932,17 @@ public static class WidgetTextShadow
                 TextBlock.ForegroundProperty,
                 (_, _) => ApplyEdge(attachment));
         }
+        else if (text is Shape shape)
+        {
+            attachment.ForegroundToken = shape.RegisterPropertyChangedCallback(
+                Shape.FillProperty,
+                (_, _) => ApplyEdge(attachment));
+        }
 
         // Inherited foregrounds re-resolve on a theme flip without a local
         // property change on the text itself.
         attachment.ThemeChangedHandler ??= (_, _) => ApplyEdge(attachment);
         text.ActualThemeChanged += attachment.ThemeChangedHandler;
-        attachment.VisibilityTokens = new long[chain.Count];
-        for (int index = 0; index < chain.Count; index++)
-        {
-            attachment.VisibilityTokens[index] = chain[index].RegisterPropertyChangedCallback(
-                UIElement.VisibilityProperty,
-                (_, _) => UpdateVisibility(attachment));
-        }
     }
 
     private static void UnwatchText(ShadowAttachment attachment)
@@ -655,37 +960,16 @@ public static class WidgetTextShadow
             textBlock.UnregisterPropertyChangedCallback(
                 TextBlock.ForegroundProperty, attachment.ForegroundToken);
         }
+        else if (text is Shape shape)
+        {
+            shape.UnregisterPropertyChangedCallback(
+                Shape.FillProperty, attachment.ForegroundToken);
+        }
 
         if (attachment.ThemeChangedHandler is not null)
         {
             text.ActualThemeChanged -= attachment.ThemeChangedHandler;
         }
-
-        if (attachment.Chain is List<UIElement> chain && attachment.VisibilityTokens is long[] tokens)
-        {
-            for (int index = 0; index < chain.Count && index < tokens.Length; index++)
-            {
-                chain[index].UnregisterPropertyChangedCallback(UIElement.VisibilityProperty, tokens[index]);
-            }
-        }
-
-        attachment.VisibilityTokens = null;
-    }
-
-    private static void UpdateVisibility(ShadowAttachment attachment)
-    {
-        if (attachment.Sprite is not SpriteVisual sprite || attachment.Chain is not List<UIElement> chain)
-        {
-            return;
-        }
-
-        bool visible = true;
-        foreach (UIElement element in chain)
-        {
-            visible &= element.Visibility == Visibility.Visible;
-        }
-
-        sprite.IsVisible = visible;
     }
 
     /// <summary>
@@ -743,6 +1027,7 @@ public static class WidgetTextShadow
         SolidColorBrush? brush = element switch
         {
             TextBlock text => text.Foreground as SolidColorBrush,
+            Shape shape => (shape.Fill ?? shape.Stroke) as SolidColorBrush,
             // The markdown mirror Image has no foreground of its own; its
             // owner keeps the override in sync with the document's semantic
             // foreground.
@@ -779,12 +1064,13 @@ public static class WidgetTextShadow
         shadow.StartAnimation("Opacity", opacity);
     }
 
-    // TextBlock and the markdown mirror's Image are the two glyph-mask
+    // TextBlock, Shape, and the markdown mirror's Image are the glyph-mask
     // sources; RichTextBlock has no GetAlphaMask, which is why the markdown
     // body shadows through the snapshot mirror instead of its own element.
     private static CompositionBrush? TryGetElementMask(FrameworkElement element) => element switch
     {
         TextBlock text => text.GetAlphaMask(),
+        Shape shape => shape.GetAlphaMask(),
         Image image => image.GetAlphaMask(),
         _ => null
     };
@@ -815,6 +1101,8 @@ public static class WidgetTextShadow
 
         public List<UIElement>? Chain { get; set; }
 
+        public List<UIElement>? VisibilityChain { get; set; }
+
         public SpriteVisual? Sprite { get; set; }
 
         public DropShadow? Shadow { get; set; }
@@ -840,5 +1128,41 @@ public static class WidgetTextShadow
         public SolidColorBrush? WatchedBrush { get; set; }
 
         public long BrushToken { get; set; }
+    }
+
+    /// <summary>
+    /// Pins a dormant template-expanded <see cref="FrameworkElement"/> RCW to its
+    /// native XAML lifetime via <c>Loaded</c> so <see cref="PendingTexts"/> survives
+    /// managed GCs while shadows are disabled or suppressed, while shedding
+    /// non-widget windows immediately on first load.
+    /// </summary>
+    private sealed class DeferredTextPin
+    {
+        public DeferredTextPin(FrameworkElement element)
+        {
+            Element = element;
+            LoadedHandler = OnLoaded;
+        }
+
+        public FrameworkElement Element { get; }
+
+        public RoutedEventHandler LoadedHandler { get; }
+
+        private void OnLoaded(object sender, RoutedEventArgs e)
+        {
+            if (!(Element.XamlRoot?.Content is UIElement root && GetScope(root)))
+            {
+                ReleaseDeferredPin(Element);
+                return;
+            }
+
+            if (_isActive &&
+                !GetPlateOpaque(root) &&
+                GetCast(Element) &&
+                !Attachments.TryGetValue(Element, out _))
+            {
+                Adopt(Element);
+            }
+        }
     }
 }

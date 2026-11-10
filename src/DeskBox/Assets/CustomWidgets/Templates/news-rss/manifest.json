@@ -1,0 +1,216 @@
+{
+  "schemaVersion": 1,
+  "id": "custom.news-rss",
+  "name": "热点资讯订阅",
+  "version": "2.0.0",
+  "author": "DeskBox",
+  "description": "自动拉取少数派、IT之家、V2EX、Hacker News 或自定义 RSS 订阅，离线缓存秒开，点击直达原文。",
+  "icon": "\uD83D\uDCF0",
+  "minSize": {
+    "width": 300,
+    "height": 320
+  },
+  "defaultSize": {
+    "width": 352,
+    "height": 428
+  },
+  "settings": [
+    {
+      "key": "presetFeed",
+      "type": "choice",
+      "label": "${$i18n.setPresetFeed}",
+      "default": "https://sspai.com/feed",
+      "options": [
+        {
+          "value": "https://sspai.com/feed",
+          "label": "${$i18n.feedSspai}"
+        },
+        {
+          "value": "https://www.ithome.com/rss/",
+          "label": "${$i18n.feedIthome}"
+        },
+        {
+          "value": "https://www.v2ex.com/index.xml",
+          "label": "V2EX"
+        },
+        {
+          "value": "https://hnrss.org/frontpage",
+          "label": "Hacker News"
+        },
+        {
+          "value": "https://github.blog/feed/",
+          "label": "GitHub Blog"
+        },
+        {
+          "value": "custom",
+          "label": "${$i18n.feedCustom}"
+        }
+      ]
+    },
+    {
+      "key": "feedUrl",
+      "type": "text",
+      "label": "${$i18n.setFeedUrl}",
+      "default": "https://sspai.com/feed"
+    },
+    {
+      "key": "viewDensity",
+      "type": "choice",
+      "label": "${$i18n.setDensity}",
+      "default": "summary",
+      "options": [
+        {
+          "value": "summary",
+          "label": "${$i18n.optDensitySummary}"
+        },
+        {
+          "value": "compact",
+          "label": "${$i18n.optDensityCompact}"
+        }
+      ]
+    }
+  ],
+  "state": {
+    "feedTitle": "",
+    "feedCount": "0",
+    "topHeadline": "",
+    "sourceStatus": "idle",
+    "sourceUpdatedAt": "--:--"
+  },
+  "collections": {
+    "articles": {
+      "maxItems": 20,
+      "sort": "newestFirst"
+    }
+  },
+  "sources": [
+    {
+      "id": "mainFeed",
+      "type": "rss",
+      "url": "${$settings.presetFeed == 'custom' ? $settings.feedUrl : $settings.presetFeed}",
+      "targetCollection": "articles",
+      "intervalMs": 900000,
+      "maxItems": 15
+    }
+  ],
+  "capsule": {
+    "title": "${state.feedTitle != '' ? state.feedTitle : $i18n.defaultFeedTitle}",
+    "summary": "${collections.articles.latest.title ?? (state.topHeadline != '' ? state.topHeadline : $i18n.defaultTopHeadline)}",
+    "glyph": "\uD83D\uDCF0",
+    "badge": "${collections.articles.count}"
+  },
+  "view": {
+    "type": "Stack",
+    "spacing": 8,
+    "padding": "12,8,12,12",
+    "children": [
+      {
+        "type": "Grid",
+        "columns": "1*,Auto",
+        "spacing": 8,
+        "children": [
+          {
+            "type": "Stack",
+            "column": 0,
+            "spacing": 2,
+            "children": [
+              {
+                "type": "Text",
+                "text": "${state.feedTitle != '' ? state.feedTitle : $i18n.defaultFeedTitle}",
+                "style": "bodyStrong",
+                "maxLines": 1
+              },
+              {
+                "type": "Text",
+                "text": "${state.sourceStatus == 'loading' ? $i18n.syncing : $i18n.updatedPrefix}${state.sourceStatus == 'loading' ? '' : (state.sourceUpdatedAt ?? '--:--')}",
+                "style": "caption",
+                "color": "muted",
+                "maxLines": 1
+              }
+            ]
+          },
+          {
+            "type": "Button",
+            "column": 1,
+            "icon": "\uE72C",
+            "text": "${$i18n.refreshBtn}",
+            "variant": "subtle",
+            "tooltip": "${$i18n.refreshTooltip}",
+            "onClick": {
+              "type": "source.refresh",
+              "targetId": "mainFeed"
+            }
+          }
+        ]
+      },
+      {
+        "type": "List",
+        "items": "articles",
+        "emptyState": {
+          "icon": "\uD83D\uDCF0",
+          "title": "${$i18n.emptyTitle}",
+          "subtitle": "${$i18n.emptySubtitle}"
+        },
+        "hoverActions": [
+          {
+            "type": "Button",
+            "icon": "\uE8A7",
+            "variant": "ghost",
+            "tooltip": "${$i18n.openArticleTooltip}",
+            "onClick": {
+              "type": "url.open",
+              "url": "${$item.url}"
+            }
+          }
+        ],
+        "itemTemplate": {
+          "type": "Card",
+          "tone": "subtle",
+          "padding": "9,7,9,7",
+          "onClick": {
+            "type": "url.open",
+            "url": "${$item.url}"
+          },
+          "children": [
+            {
+              "type": "Stack",
+              "spacing": 3,
+              "children": [
+                {
+                  "type": "Text",
+                  "text": "${$item.title}",
+                  "style": "bodyStrong",
+                  "maxLines": 2
+                },
+                {
+                  "type": "Grid",
+                  "columns": "1*,Auto",
+                  "spacing": 6,
+                  "children": [
+                    {
+                      "type": "Text",
+                      "column": 0,
+                      "visible": "${$settings.viewDensity != 'compact'}",
+                      "text": "${$item.summary}",
+                      "style": "caption",
+                      "color": "secondary",
+                      "maxLines": 1
+                    },
+                    {
+                      "type": "Text",
+                      "column": 1,
+                      "text": "${$item.publishedAt}",
+                      "style": "caption",
+                      "color": "muted",
+                      "maxLines": 1
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

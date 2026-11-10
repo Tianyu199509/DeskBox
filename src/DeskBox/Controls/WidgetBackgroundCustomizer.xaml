@@ -39,7 +39,31 @@
                 Grid.Column="1"
                 VerticalAlignment="Center"
                 Spacing="2">
-                <TextBlock x:Name="TitleText" FontWeight="SemiBold" />
+                <Grid ColumnSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock
+                        x:Name="TitleText"
+                        VerticalAlignment="Center"
+                        FontWeight="SemiBold" />
+                    <Button
+                        x:Name="CloseButton"
+                        Grid.Column="1"
+                        Width="26"
+                        Height="26"
+                        MinWidth="26"
+                        MinHeight="26"
+                        Padding="0"
+                        CornerRadius="4"
+                        Style="{StaticResource SubtleButtonStyle}">
+                        <FontIcon
+                            FontSize="10"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Glyph="&#xE711;" />
+                    </Button>
+                </Grid>
                 <TextBlock
                     x:Name="SubtitleText"
                     FontSize="11"

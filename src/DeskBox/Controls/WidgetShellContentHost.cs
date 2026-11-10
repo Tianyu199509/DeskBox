@@ -15,6 +15,8 @@ public sealed class WidgetShellContentHost
     private readonly Action _completeTransition;
     private readonly Action<IWidgetContent> _rollbackTransition;
     private readonly Func<IWidgetContent, bool>? _retainContent;
+    private readonly Func<bool>? _hibernateContentView;
+    private readonly Func<bool>? _ensureContentViewAttached;
     private readonly System.Runtime.CompilerServices.ConditionalWeakTable<
         IWidgetContent,
         object> _disposedContents = new();
@@ -49,6 +51,8 @@ public sealed class WidgetShellContentHost
         _beginTransition = shell.BeginContentTransition;
         _completeTransition = shell.CompleteContentTransition;
         _rollbackTransition = shell.RollbackContentTransition;
+        _hibernateContentView = shell.HibernateHostedContentView;
+        _ensureContentViewAttached = shell.EnsureHostedContentViewAttached;
         _retainContent = retainContent;
     }
 
@@ -332,6 +336,63 @@ public sealed class WidgetShellContentHost
     }
 
     internal int WindowRevealGeneration => _windowRevealGeneration;
+
+    internal bool IsCurrentContentHibernated =>
+        CurrentContent is DeskBox.Controls.WidgetContents.WidgetContentAdapterBase
+        {
+            HasMaterializedView: false
+        };
+
+    internal bool TryHibernateCurrentContentView()
+    {
+        if (_isDisposed ||
+            _activeTransition is not null ||
+            _pendingContent is not null ||
+            CurrentContent is null)
+        {
+            return false;
+        }
+
+        return _hibernateContentView?.Invoke() == true;
+    }
+
+    internal bool EnsureCurrentContentViewAttached()
+    {
+        if (_isDisposed || CurrentContent is not { } content)
+        {
+            return false;
+        }
+
+        if (_ensureContentViewAttached?.Invoke() != true)
+        {
+            return false;
+        }
+
+        if (content is DeskBox.Controls.WidgetContents.GlanceWidgetContentAdapter glanceAdapter)
+        {
+            glanceAdapter.SetShellCustomBackgroundActive(
+                WidgetBackgroundCustomization.HasCustomBackground(content.Config));
+        }
+        else if (content is not DeskBox.Controls.WidgetContents.WidgetContentAdapterBase &&
+                 content.View is DeskBox.Controls.WidgetContents.GlanceWidgetContent glanceView)
+        {
+            glanceView.SetShellCustomBackgroundActive(
+                WidgetBackgroundCustomization.HasCustomBackground(content.Config));
+        }
+
+        content.ApplyAppearance();
+        content.OnWindowVisibilityChanged(_isWindowVisible);
+        if (_isWindowVisible && _isWindowRevealCompleted)
+        {
+            content.OnWindowRevealCompleted();
+        }
+        if (_isActivated)
+        {
+            content.OnActivated();
+        }
+
+        return true;
+    }
 
     public void DisposeContent()
     {

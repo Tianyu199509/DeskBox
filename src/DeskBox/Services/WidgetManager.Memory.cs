@@ -1,3 +1,4 @@
+using DeskBox.Contracts;
 using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Platform;
@@ -18,10 +19,176 @@ internal readonly record struct LongHiddenWidgetMaintenanceResult(
 
 internal readonly record struct LongHiddenWidgetResourceReleaseResult(
     int ContentHostCount,
-    int CachedContentCount);
+    int CachedContentCount,
+    int EvictedHostCount = 0);
 
 public sealed partial class WidgetManager
 {
+    private static readonly HashSet<IntPtr> s_emptyMonitorSet = [];
+    private IReadOnlySet<IntPtr> _occludedMonitors = s_emptyMonitorSet;
+    private readonly HashSet<IntPtr> _occludedSuspendedWindowHandles = [];
+    private Action? _refreshMonitorOcclusionAction;
+    private bool _isRefreshingMonitorOcclusion;
+
+    internal void AttachMonitorOcclusionRefresh(Action? refreshAction)
+    {
+        _refreshMonitorOcclusionAction = refreshAction;
+    }
+
+    internal bool HasVisibleCollapsedWidgets
+    {
+        get
+        {
+            foreach (IDesktopWidgetWindow window in GetLoadedDesktopWindows())
+            {
+                if (!window.IsCompactArrangementActive)
+                {
+                    continue;
+                }
+
+                if (window.Visible ||
+                    (window.WindowHandle != IntPtr.Zero &&
+                     Win32Helper.IsWindowVisible(window.WindowHandle)))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+    }
+
+    internal bool HasUnoccludedVisibleWidgets
+    {
+        get
+        {
+            foreach (IDesktopWidgetWindow window in GetLoadedDesktopWindows())
+            {
+                bool isVisible =
+                    window.Visible ||
+                    (window.WindowHandle != IntPtr.Zero &&
+                     Win32Helper.IsWindowVisible(window.WindowHandle));
+                if (!isVisible)
+                {
+                    continue;
+                }
+
+                bool isAtDesktopLayer =
+                    !window.IsRaisedAboveDesktopLayer &&
+                    _expandedWidgetLayerLease.WindowHandle != window.WindowHandle &&
+                    !_widgetsRaisedFromTray &&
+                    !WidgetLayerService.UsesQuickRevealMode();
+                if (!isAtDesktopLayer || _occludedMonitors.Count == 0)
+                {
+                    return true;
+                }
+
+                IntPtr hMonitor = MonitorOcclusionTracker.GetMonitorFromWindow(window.WindowHandle);
+                if (hMonitor == IntPtr.Zero || !_occludedMonitors.Contains(hMonitor))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+    }
+
+    internal void ApplyMonitorOcclusionState(IReadOnlySet<IntPtr>? occludedMonitors = null)
+    {
+        if (!HasUiThreadAccess())
+        {
+            IReadOnlySet<IntPtr>? captured = occludedMonitors;
+            UiDispatch.RunOrDefer(() => ApplyMonitorOcclusionState(captured));
+            return;
+        }
+
+        if (occludedMonitors is not null)
+        {
+            _occludedMonitors = occludedMonitors;
+        }
+        else if (_refreshMonitorOcclusionAction is { } refreshAction && !_isRefreshingMonitorOcclusion)
+        {
+            _isRefreshingMonitorOcclusion = true;
+            try
+            {
+                refreshAction();
+            }
+            finally
+            {
+                _isRefreshingMonitorOcclusion = false;
+            }
+        }
+
+        if (App.IsShuttingDown)
+        {
+            _occludedSuspendedWindowHandles.Clear();
+            return;
+        }
+
+        var liveWindowsByHandle = new Dictionary<IntPtr, ContentWidgetWindow>();
+        foreach (ContentWidgetWindow window in GetLoadedDesktopWindows().OfType<ContentWidgetWindow>())
+        {
+            if (window.WindowHandle != IntPtr.Zero)
+            {
+                liveWindowsByHandle.TryAdd(window.WindowHandle, window);
+            }
+        }
+
+        if (_occludedSuspendedWindowHandles.Count > 0)
+        {
+            _occludedSuspendedWindowHandles.RemoveWhere(
+                handle => !liveWindowsByHandle.ContainsKey(handle));
+        }
+
+        foreach ((IntPtr handle, ContentWidgetWindow window) in liveWindowsByHandle)
+        {
+            bool isVisibleAtDesktopLayer =
+                window.Visible &&
+                !window.IsClosing &&
+                !window.IsRaisedAboveDesktopLayer &&
+                _expandedWidgetLayerLease.WindowHandle != handle &&
+                !_widgetsRaisedFromTray &&
+                !WidgetLayerService.UsesQuickRevealMode();
+
+            bool shouldSuspend =
+                isVisibleAtDesktopLayer &&
+                _occludedMonitors.Count > 0 &&
+                _occludedMonitors.Contains(MonitorOcclusionTracker.GetMonitorFromWindow(handle));
+
+            if (shouldSuspend)
+            {
+                if (_occludedSuspendedWindowHandles.Add(handle))
+                {
+                    try
+                    {
+                        window.SuspendContentForMonitorOcclusion();
+                    }
+                    catch (Exception ex)
+                    {
+                        App.Log($"[Occlusion] Failed suspending occluded widget '{window.Config.Id}': {ex.Message}");
+                    }
+                }
+            }
+            else if (_occludedSuspendedWindowHandles.Remove(handle))
+            {
+                if (window.Visible &&
+                    !window.IsClosing &&
+                    Win32Helper.IsWindowVisible(handle))
+                {
+                    try
+                    {
+                        window.ResumeContentFromMonitorOcclusion();
+                    }
+                    catch (Exception ex)
+                    {
+                        App.Log($"[Occlusion] Failed resuming unoccluded widget '{window.Config.Id}': {ex.Message}");
+                    }
+                }
+            }
+        }
+    }
+
     internal Task WaitForTrayAnimationsIdleAsync() =>
         _trayBatchAnimationDriver.WaitForIdleAsync();
 
@@ -45,15 +212,22 @@ public sealed partial class WidgetManager
         var cached = new SortedDictionary<string, int>(StringComparer.Ordinal);
         foreach (ContentWidgetWindow window in GetLoadedDesktopWindows().OfType<ContentWidgetWindow>())
         {
-            if (window.CurrentContent is { } current)
+            if (window.CurrentContent is { } current &&
+                (current is not DeskBox.Controls.WidgetContents.WidgetContentAdapterBase adapter ||
+                 adapter.HasMaterializedView))
             {
                 Increment(materialized, current.WidgetKind);
             }
 
-            foreach (WidgetKind kind in window.CachedGroupContentKinds)
+            foreach (IWidgetContent cachedContent in window.CachedGroupContents)
             {
-                Increment(materialized, kind);
-                Increment(cached, kind);
+                if (cachedContent is not DeskBox.Controls.WidgetContents.WidgetContentAdapterBase cachedAdapter ||
+                    cachedAdapter.HasMaterializedView)
+                {
+                    Increment(materialized, cachedContent.WidgetKind);
+                }
+
+                Increment(cached, cachedContent.WidgetKind);
             }
         }
 
@@ -78,14 +252,20 @@ public sealed partial class WidgetManager
         foreach (var window in _contentWidgets.Values
                      .DistinctBy(window => window.WindowHandle))
         {
-            if (window.WindowHandle != IntPtr.Zero &&
-                Win32Helper.IsWindowVisible(window.WindowHandle))
+            if (window.Visible ||
+                (window.WindowHandle != IntPtr.Zero &&
+                 Win32Helper.IsWindowVisible(window.WindowHandle)))
             {
                 continue;
             }
 
             contentHostCount++;
             window.RunLongHiddenNoRebuildMaintenance();
+        }
+
+        if (contentHostCount > 0)
+        {
+            Views.WidgetWindowBase.TrimAllIdleSharedBackdropControllers();
         }
 
         return new LongHiddenWidgetMaintenanceResult(contentHostCount);
@@ -97,10 +277,12 @@ public sealed partial class WidgetManager
         int contentHostCount = 0;
         int cachedContentCount = 0;
         foreach (var window in _contentWidgets.Values
-                     .DistinctBy(window => window.WindowHandle))
+                     .DistinctBy(window => window.WindowHandle)
+                     .ToArray())
         {
-            if (window.WindowHandle != IntPtr.Zero &&
-                Win32Helper.IsWindowVisible(window.WindowHandle))
+            if (window.Visible ||
+                (window.WindowHandle != IntPtr.Zero &&
+                 Win32Helper.IsWindowVisible(window.WindowHandle)))
             {
                 continue;
             }
@@ -109,9 +291,110 @@ public sealed partial class WidgetManager
             cachedContentCount += window.ReleaseLongHiddenContentResources();
         }
 
+        int evictedHostCount = EvictExcessLongHiddenContentHosts();
         return new LongHiddenWidgetResourceReleaseResult(
             contentHostCount,
-            cachedContentCount);
+            cachedContentCount,
+            evictedHostCount);
     }
 
+    private int EvictExcessLongHiddenContentHosts()
+    {
+        if (App.IsShuttingDown ||
+            _settingsService.Settings.Performance.KeepCapsuleContentWarm ||
+            _trayBatchAnimationDriver.IsRunning ||
+            WidgetCompactAnimationCoordinator.HasActiveAnimations)
+        {
+            return 0;
+        }
+
+        IReadOnlyList<IDesktopWidgetWindow> loadedWindows = GetLoadedDesktopWindows();
+        if (loadedWindows.Count <= ContentWidgetWindowPool.MinRetainedHiddenWindowCount)
+        {
+            return 0;
+        }
+
+        EffectivePerformanceSettings performance =
+            PerformanceSettingsPolicy.Resolve(_settingsService.Settings);
+        ContentWidgetWindow[] distinctHosts = _contentWidgets.Values
+            .DistinctBy(window => window.WindowHandle)
+            .ToArray();
+        List<HiddenContentHostCandidate> candidates = new(distinctHosts.Length);
+        foreach (ContentWidgetWindow host in distinctHosts)
+        {
+            string widgetId = host.Config.Id;
+            bool isGroupMember = WidgetGroupSettings.FindByMember(
+                _settingsService.Settings,
+                widgetId) is not null;
+            bool hasWatcherObligation =
+                host.Config.WidgetKind == WidgetKind.File ||
+                _fileWidgets.ContainsKey(widgetId) ||
+                host.CurrentContent is DeskBox.Controls.WidgetContents.FileWidgetContentAdapter;
+            bool isNativeVisible =
+                host.WindowHandle != IntPtr.Zero &&
+                Win32Helper.IsWindowVisible(host.WindowHandle);
+            candidates.Add(new HiddenContentHostCandidate(
+                widgetId,
+                host.Config.WidgetKind,
+                host.Visible,
+                isNativeVisible,
+                host.IsClosing,
+                host.IsBoundsTransitionActive || host.IsTitleBarDragTransitionActive,
+                isGroupMember,
+                hasWatcherObligation));
+        }
+
+        IReadOnlyList<string> selectedIds =
+            ContentWidgetWindowPool.SelectExcessHiddenHostsToEvict(
+                candidates,
+                loadedWindows.Count,
+                performance.HiddenCacheCleanupScope,
+                performance.CacheBudget);
+        if (selectedIds.Count == 0)
+        {
+            return 0;
+        }
+
+        int evicted = 0;
+        foreach (string widgetId in selectedIds)
+        {
+            if (!_contentWidgets.TryGetValue(widgetId, out ContentWidgetWindow? window) ||
+                window.Visible ||
+                window.IsClosing ||
+                GetLoadedDesktopWindows().Count <=
+                    ContentWidgetWindowPool.MinRetainedHiddenWindowCount)
+            {
+                continue;
+            }
+
+            CaptureWidgetGroupTransientState(
+                widgetId,
+                window.CurrentContent as IWidgetTransientStateContent);
+            _suppressClosedVisibilityPersistence.Add(widgetId);
+            try
+            {
+                window.CloseWindow();
+                evicted++;
+            }
+            catch (Exception ex)
+            {
+                App.Log(
+                    $"[Memory] Failed to close excess long-hidden host '{widgetId}': {ex.Message}");
+            }
+            finally
+            {
+                _suppressClosedVisibilityPersistence.Remove(widgetId);
+            }
+        }
+
+        if (evicted > 0)
+        {
+            EnsureXamlLoopLifelineAction?.Invoke();
+            App.Log(
+                $"[Memory] Evicted excess long-hidden widget hosts count={evicted} " +
+                $"remainingLoaded={GetLoadedDesktopWindows().Count}");
+        }
+
+        return evicted;
+    }
 }

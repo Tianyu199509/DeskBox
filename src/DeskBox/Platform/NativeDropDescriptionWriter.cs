@@ -20,6 +20,7 @@ internal static partial class NativeDropDescriptionWriter
     private const uint GmemZeroInit = 0x0040;
     private const uint WmUser = 0x0400;
     private const uint DdwmUpdateWindow = WmUser + 3;
+    private const uint SpiGetDragFullWindows = 0x0026;
     private const int MaxPath = 260;
     private const int DropImageInvalid = -1;
     private const int DropImageNone = 0;
@@ -64,6 +65,41 @@ internal static partial class NativeDropDescriptionWriter
         uint message,
         nuint wParam,
         nint lParam);
+
+    [LibraryImport("user32.dll", EntryPoint = "SystemParametersInfoW", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool SystemParametersInfoW(
+        uint uiAction,
+        uint uiParam,
+        out int pvParam,
+        uint fWinIni);
+
+    [LibraryImport("user32.dll", EntryPoint = "IsWindow")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool IsWindow(nint hWnd);
+
+    internal static bool IsDragFullWindowsEnabled() =>
+        !SystemParametersInfoW(SpiGetDragFullWindows, 0, out int enabled, 0) ||
+        enabled != 0;
+
+    internal static bool HasDragWindow(nint dataObjectPointer)
+    {
+        if (dataObjectPointer == 0 || !IsDragFullWindowsEnabled())
+        {
+            return false;
+        }
+
+        try
+        {
+            nint dragWindow = TryGetDragWindowHandle(
+                new NativeOleDataObject(dataObjectPointer));
+            return dragWindow != 0 && IsWindow(dragWindow);
+        }
+        catch
+        {
+            return false;
+        }
+    }
 
     internal static bool TryApply(
         nint dataObjectPointer,
@@ -191,6 +227,19 @@ internal static partial class NativeDropDescriptionWriter
 
     private static void NotifyDragWindow(NativeOleDataObject dataObject)
     {
+        nint dragWindow = TryGetDragWindowHandle(dataObject);
+        if (dragWindow != 0)
+        {
+            _ = PostMessageW(
+                dragWindow,
+                DdwmUpdateWindow,
+                0,
+                0);
+        }
+    }
+
+    private static nint TryGetDragWindowHandle(NativeOleDataObject dataObject)
+    {
         var format = new NativeFormatEtc
         {
             ClipboardFormat = s_dragWindowFormat,
@@ -201,7 +250,7 @@ internal static partial class NativeDropDescriptionWriter
         };
         if (dataObject.GetData(ref format, out NativeStorageMedium medium) < 0)
         {
-            return;
+            return 0;
         }
 
         try
@@ -210,33 +259,23 @@ internal static partial class NativeDropDescriptionWriter
                 medium.Content == 0 ||
                 GlobalSize(medium.Content) < sizeof(uint))
             {
-                return;
+                return 0;
             }
 
             nint payload = GlobalLock(medium.Content);
             if (payload == 0)
             {
-                return;
+                return 0;
             }
 
-            nint dragWindow;
             try
             {
-                dragWindow = new IntPtr(
+                return new IntPtr(
                     unchecked((long)(uint)Marshal.ReadInt32(payload)));
             }
             finally
             {
                 _ = GlobalUnlock(medium.Content);
-            }
-
-            if (dragWindow != 0)
-            {
-                _ = PostMessageW(
-                    dragWindow,
-                    DdwmUpdateWindow,
-                    0,
-                    0);
             }
         }
         finally

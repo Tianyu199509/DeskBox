@@ -24,6 +24,8 @@ namespace DeskBox.Views;
 public abstract partial class WidgetWindowBase
 {
     private bool _desktopPinnedInputActivationInProgress;
+    private IntPtr _lastCornerPreferenceHwnd;
+    private int _lastAppliedWindowCornerPreference = -1;
 
     // WM_MOUSEACTIVATE suppression runs before the same click is routed to
     // XAML, so without this stamp one suppressed click would run the bottom
@@ -31,6 +33,7 @@ public abstract partial class WidgetWindowBase
     // only needs to cover the native-message → XAML-dispatch hop of a single
     // click; anything older is a genuinely new click.
     private long _desktopPinnedNativeSuppressionTimestamp;
+    private long _lastDirectMouseActivateTick;
     private static readonly long DesktopPinnedNativeSuppressionWindowTicks =
         TimeSpan.FromMilliseconds(150).Ticks;
 
@@ -77,29 +80,39 @@ public abstract partial class WidgetWindowBase
             (int)Math.Round(config.Y),
             (int)Math.Round(config.Width),
             (int)Math.Round(config.Height));
-        var initCenter = new PointInt32(
-            initBounds.X + Math.Max(1, initBounds.Width) / 2,
-            initBounds.Y + Math.Max(1, initBounds.Height) / 2);
+
+
+
         // The display-area lookup can come back empty while the topology is in
         // flux; falling back to the configured bounds keeps the widget instead
         // of failing its construction.
-        var workArea = DisplayArea.GetFromPoint(
-            initCenter,
-            DisplayAreaFallback.Nearest)?.WorkArea;
-        var bounds = workArea is { } resolvedWorkArea
-            ? WidgetPositioningService.ResolveBounds(
-                config,
-                resolvedWorkArea,
-                WidgetPositioningService.GetAvailableWorkAreas())
-            : initBounds;
+
+
+
+        bool placementFellBack = false;
+        RectInt32 bounds;
+        try
+        {
+            bounds = WidgetPositioningService.ResolveBoundsForCurrentTopology(config, out placementFellBack);
+        }
+        catch
+        {
+            bounds = initBounds;
+            placementFellBack = true;
+        }
+
+
+
+
+
         bounds = ExpandContentBoundsToHost(bounds);
-        ApplyWindowBounds(bounds.X, bounds.Y, bounds.Width, bounds.Height, persist: false);
+        ApplyWindowBounds(bounds.X, bounds.Y, bounds.Width, bounds.Height, persist: false, updateConfig: !placementFellBack);
 
         ApplyDwmBorderStyle(RootElement.ActualTheme == ElementTheme.Dark);
         ApplyWindowCornerPreference();
         ApplyWidgetForegroundAppearance();
         Win32Helper.EnsureSystemDispatcherQueue();
-        Win32Helper.ApplyFullWindowFrame(HWnd);
+        Win32Helper.DisableWindowFrameShadow(HWnd);
         ApplyBackdropPreference();
         InitializeWidgetCollapse();
         InitializeWidgetGrouping();
@@ -109,11 +122,12 @@ public abstract partial class WidgetWindowBase
         RootElement.Loaded += (_, _) =>
         {
             AttachXamlRootScaleWatcher();
+            _ = TryRestoreBoundsForCurrentTopology(allowHidden: true, updateConfig: false);
             OnRootElementLoaded();
             SettleCompactBoundsAfterHostShown();
             ApplyWidgetForegroundAppearance();
             ApplyBackdropPreference();
-            Win32Helper.ApplyFullWindowFrame(HWnd);
+            Win32Helper.DisableWindowFrameShadow(HWnd);
             if (SupportsBackdropRefresh)
             {
                 QueueBackdropRefresh();
@@ -170,8 +184,12 @@ public abstract partial class WidgetWindowBase
             handledEventsToo: true);
         RootElement.GotFocus -= RootElement_GotFocusForDesktopPinnedLayer;
         RootElement.GotFocus += RootElement_GotFocusForDesktopPinnedLayer;
+        Microsoft.UI.Xaml.Input.FocusManager.GotFocus -= FocusManager_GotFocusForDesktopPinnedLayer;
+        Microsoft.UI.Xaml.Input.FocusManager.GotFocus += FocusManager_GotFocusForDesktopPinnedLayer;
         Activated -= WidgetWindowBase_ActivatedForDesktopPinnedLayer;
         Activated += WidgetWindowBase_ActivatedForDesktopPinnedLayer;
+        Activated -= WidgetWindowBase_ActivatedForCompactFocusSync;
+        Activated += WidgetWindowBase_ActivatedForCompactFocusSync;
     }
 
     private void RemoveDesktopPinnedPointerRouting()
@@ -185,23 +203,31 @@ public abstract partial class WidgetWindowBase
         }
 
         RootElement.GotFocus -= RootElement_GotFocusForDesktopPinnedLayer;
+        Microsoft.UI.Xaml.Input.FocusManager.GotFocus -= FocusManager_GotFocusForDesktopPinnedLayer;
         Activated -= WidgetWindowBase_ActivatedForDesktopPinnedLayer;
+        Activated -= WidgetWindowBase_ActivatedForCompactFocusSync;
     }
 
     private void RootElement_PointerPressedForDesktopPinnedLayer(
         object sender,
         PointerRoutedEventArgs args)
     {
+        App.NotifyMemoryCleanupActivity();
         if (!WidgetLayerService.UsesDesktopPinnedMode())
         {
             return;
         }
+
+        DeskBox.Controls.WidgetContents.FileSurfaceContent
+            .DismissActiveStackPopoverFromDesktopPinnedClick(HWnd, args.OriginalSource);
+        WidgetEditorPopoverWindow.DismissActiveFromDesktopPinnedClick(HWnd, args.OriginalSource);
 
         bool isKeyboardInput = IsKeyboardInputTarget(args.OriginalSource);
         bool allowActivation;
         string reason;
         if (isKeyboardInput)
         {
+            _lastDesktopPinnedKeyboardRequestTick = Environment.TickCount64;
             WidgetLayerService.PrepareForDesktopPinnedKeyboardInput(HWnd);
             allowActivation = true;
             reason = "routed-keyboard-input";
@@ -251,6 +277,7 @@ public abstract partial class WidgetWindowBase
 
         // Buttons that open an editor focus it programmatically after their
         // click event. That focus request is also an explicit text-entry action.
+        _lastDesktopPinnedKeyboardRequestTick = Environment.TickCount64;
         WidgetLayerService.PrepareForDesktopPinnedKeyboardInput(HWnd);
         DeferDesktopPinnedActivation("keyboard-focus");
     }
@@ -264,7 +291,10 @@ public abstract partial class WidgetWindowBase
                 RichEditBox or
                 PasswordBox or
                 AutoSuggestBox or
-                NumberBox)
+                NumberBox or
+                ComboBox or
+                CalendarDatePicker or
+                TimePicker)
             {
                 return true;
             }
@@ -282,6 +312,7 @@ public abstract partial class WidgetWindowBase
             return;
         }
 
+        bool isKeyboardReason = IsDesktopPinnedKeyboardActivationReason(reason);
         _desktopPinnedInputActivationInProgress = true;
         try
         {
@@ -300,12 +331,26 @@ public abstract partial class WidgetWindowBase
                     IsDesktopShellRootWindow(foreground);
                 if (!pointerOriginOnDesktopForeground)
                 {
+                    if (isKeyboardReason)
+                    {
+                        WidgetLayerService.PrepareForDesktopPinnedKeyboardInput(HWnd);
+                        _ = Win32Helper.AllowSetForegroundWindow((uint)Environment.ProcessId);
+                    }
+
                     // Activation is retained for keyboard-oriented controls, but
                     // the HWND is returned to the desktop bottom before this input
                     // dispatch completes, so activation never creates a layer lease.
                     base.Activate();
                     _ = Win32Helper.SetForegroundWindow(HWnd);
+                    if (isKeyboardReason)
+                    {
+                        TransientInputFocusGuard.SetActiveAndFocusIsland(HWnd);
+                    }
                 }
+            }
+            else if (isKeyboardReason)
+            {
+                TransientInputFocusGuard.FocusContentIsland(HWnd);
             }
         }
         finally
@@ -320,6 +365,10 @@ public abstract partial class WidgetWindowBase
         App.Current.WidgetManager?.RebedPinnedSiblingsAfterActivation(
             HWnd,
             $"{reason}-siblings");
+        if (isKeyboardReason)
+        {
+            TransientInputFocusGuard.FocusContentIslandIfForeground(HWnd);
+        }
     }
 
     private static bool IsDesktopShellRootWindow(IntPtr windowHandle)
@@ -329,23 +378,9 @@ public abstract partial class WidgetWindowBase
             return false;
         }
 
-        IntPtr current = windowHandle;
-        while (current != IntPtr.Zero)
-        {
-            var className = new System.Text.StringBuilder(256);
-            int length = Win32Helper.GetClassName(current, className, className.Capacity);
-            if (length > 0 &&
-                (string.Equals(className.ToString(), "Progman", StringComparison.Ordinal) ||
-                 string.Equals(className.ToString(), "WorkerW", StringComparison.Ordinal) ||
-                 string.Equals(className.ToString(), "SHELLDLL_DefView", StringComparison.Ordinal)))
-            {
-                return true;
-            }
-
-            current = Win32Helper.GetParent(current);
-        }
-
-        return false;
+        return DesktopBlankHitTest.IsVerifiedDesktopShellWindow(
+            windowHandle,
+            allowDefView: true);
     }
 
     private void WidgetWindowBase_ActivatedForDesktopPinnedLayer(
@@ -414,7 +449,9 @@ public abstract partial class WidgetWindowBase
             }
 
             IntPtr foregroundNow = Win32Helper.GetForegroundWindow();
-            if (foregroundNow != HWnd && foregroundNow != foregroundAtEnqueue)
+            if (foregroundNow != HWnd &&
+                foregroundNow != foregroundAtEnqueue &&
+                !CanProceedAfterTransientMenuForegroundChange(reason, foregroundAtEnqueue, foregroundNow))
             {
                 App.LogVerbose(
                     $"[ZOrder] {LogPrefix} deferred activation dropped " +
@@ -455,7 +492,18 @@ public abstract partial class WidgetWindowBase
         {
             // The expanded capsule owns the top of the desktop band until its
             // collapse re-beds the window; a bottom reassert here would bury
-            // it beneath sibling widgets mid-use.
+            // it beneath sibling widgets mid-use. In DesktopPinned mode,
+            // re-apply WS_EX_NOACTIVATE while keeping acquired keyboard focus
+            // and re-anchor below any covering foreign window if needed.
+            if (WidgetLayerService.UsesDesktopPinnedMode())
+            {
+                WidgetLayerService.ApplyDesktopPinnedRestingActivationStyle(HWnd);
+                if (WidgetLayerService.FindForeignWindowBelow(HWnd) != IntPtr.Zero)
+                {
+                    _ = WidgetLayerService.TryBringAbovePeerWidgetsAtDesktopLayer(HWnd);
+                }
+            }
+
             return;
         }
 
@@ -483,12 +531,6 @@ public abstract partial class WidgetWindowBase
         KeepRaisedUntilDeactivate = false;
         RestoreDesktopLayerWhenIdle = false;
         TopMostSafetyTimer?.Stop();
-        // HWND_BOTTOM also places this widget below every sibling, which
-        // breaks the shadow-safe peer order. Queue a normalization so the
-        // repair cannot leave the group misordered until an unrelated
-        // trigger happens to fix it.
-        App.Current.WidgetManager?.QueueIdleWidgetZOrderNormalization(
-            $"{LogPrefix}-pinned-bottom-reasserted");
         App.LogVerbose(
             $"[ZOrder] {LogPrefix} fixed-layer bottom reasserted reason={reason} " +
             $"hwnd=0x{HWnd.ToInt64():X}");
@@ -516,8 +558,11 @@ public abstract partial class WidgetWindowBase
             _desktopPinnedNativeSuppressionTimestamp = DateTime.UtcNow.Ticks;
             UiDispatch.PostAfterCallback(() =>
             {
+                NativeTrayIconHost.DismissActiveMenuIfOpen();
+                TrayContextMenuWindow.DismissActiveIfOpen();
                 if (Win32Helper.IsWindowInCurrentProcess(hWnd) &&
-                    !(IsDragging && HasMovedTitleBarDrag))
+                    !(IsDragging && HasMovedTitleBarDrag) &&
+                    Environment.TickCount64 - _lastDesktopPinnedKeyboardRequestTick >= 150)
                 {
                     RestoreDesktopPinnedBottomState("native-pointer-suppressed");
                 }
@@ -525,16 +570,40 @@ public abstract partial class WidgetWindowBase
             return new IntPtr(Win32Helper.MA_NOACTIVATE);
         }
 
-        if (message == Win32Helper.WM_MOUSEACTIVATE &&
-            WidgetLayerService.ShouldPreserveQuickRevealActivatingClick())
+        if (message == Win32Helper.WM_MOUSEACTIVATE)
         {
-            // Quick Reveal activates only the highest widget. Explicitly keep
-            // the activating mouse message for every other revealed HWND so a
-            // stack, button, or item responds to the first click.
-            return new IntPtr(Win32Helper.MA_ACTIVATE);
+            _lastDirectMouseActivateTick = Environment.TickCount64;
+            WidgetLayerService.RecordWidgetMouseActivate();
+            if (WidgetLayerService.ShouldPreserveQuickRevealActivatingClick())
+            {
+                // Quick Reveal activates only the highest widget. Explicitly keep
+                // the activating mouse message for every other revealed HWND so a
+                // stack, button, or item responds to the first click.
+                return new IntPtr(Win32Helper.MA_ACTIVATE);
+            }
         }
 
-        return Win32Helper.DefSubclassProc(hWnd, message, wParam, lParam);
+        if (message == Win32Helper.WM_WINDOWPOSCHANGING &&
+            Win32Helper.TryReadWindowPos(lParam, out Win32Helper.WINDOWPOS windowPos) &&
+            WidgetLayerService.ShouldSuppressUnsolicitedZOrderChange(
+                hWnd,
+                windowPos.hwndInsertAfter,
+                windowPos.flags,
+                IsAtDesktopLayer,
+                _expandedWidgetLayerLeaseGeneration != 0,
+                IsDragging || IsResizing || IsBoundsTransitionActive,
+                App.Current?.WidgetManager?.WidgetsRaisedFromTray == true,
+                _lastDirectMouseActivateTick,
+                out bool mayBeDynamicDesktopClick))
+        {
+            Win32Helper.SuppressWindowPosZOrder(lParam, windowPos);
+            if (mayBeDynamicDesktopClick && Win32Helper.GetCursorPos(out Win32Helper.POINT clickPt))
+            {
+                App.Current?.WidgetManager?.NotifyPotentialDynamicDesktopClick(clickPt);
+            }
+        }
+
+        return Win32Helper.DefSubclassProc(hWnd, CreateObservedCompactSubclassMessage(hWnd, message), wParam, lParam);
     }
 
     // ── Bounds management ──────────────────────────────────────
@@ -845,7 +914,8 @@ public abstract partial class WidgetWindowBase
         // Panorama backgrounds sample the slice under the window, so they
         // must follow drags and resizes in real time — this runs before the
         // drag/resize config guards below on purpose.
-        if (args.DidPositionChange || args.DidSizeChange)
+        if ((args.DidPositionChange || args.DidSizeChange) &&
+            !_isCollapseAnimationRendering)
         {
             UpdateCustomPanoramaViewport();
         }
@@ -871,16 +941,30 @@ public abstract partial class WidgetWindowBase
 
     protected void ApplyWindowCornerPreference()
     {
-        string effectivePreference = WindowsCompatibilityService.ResolveEffectiveWidgetCornerPreference(
-            SettingsService.Settings.WidgetCornerPreference);
-        int cornerPreference = effectivePreference switch
+        if (HWnd == IntPtr.Zero)
         {
-            SettingsService.WidgetCornerPreferenceSquare => Win32Helper.DWMWCP_DONOTROUND,
-            SettingsService.WidgetCornerPreferenceSmall => Win32Helper.DWMWCP_ROUNDSMALL,
-            _ => Win32Helper.DWMWCP_ROUND
-        };
+            return;
+        }
 
-        Win32Helper.TrySetDwmWindowAttribute(HWnd, Win32Helper.DWMWA_WINDOW_CORNER_PREFERENCE, ref cornerPreference);
+        // Keep the effective corner policy resolved here for parity contracts;
+        // visual rounding is rendered by XAML/SystemBackdropElement so the outer
+        // HWND always disables DWM rounding and DWM frame shadow.
+        _ = WindowsCompatibilityService.ResolveEffectiveWidgetCornerPreference(
+            SettingsService.Settings.WidgetCornerPreference);
+        int cornerPreference = Win32Helper.DWMWCP_DONOTROUND;
+
+        Win32Helper.DisableWindowFrameShadow(HWnd);
+        if (_lastCornerPreferenceHwnd == HWnd &&
+            _lastAppliedWindowCornerPreference == cornerPreference)
+        {
+            return;
+        }
+
+        if (Win32Helper.TrySetDwmWindowAttribute(HWnd, Win32Helper.DWMWA_WINDOW_CORNER_PREFERENCE, ref cornerPreference) == 0)
+        {
+            _lastCornerPreferenceHwnd = HWnd;
+            _lastAppliedWindowCornerPreference = cornerPreference;
+        }
     }
 
     protected void ApplyDwmBorderStyle(bool isDark)
@@ -911,6 +995,139 @@ public abstract partial class WidgetWindowBase
                 WindowsCompatibilityService.ResolveEffectiveWidgetCornerPreference(
                     SettingsService.Settings.WidgetCornerPreference))
             : GetCornerRadiusFromPreference();
+    }
+
+    private long _lastDesktopPinnedKeyboardRequestTick = -10_000;
+
+    internal static void TryActivateOwnerForKeyboardInput(
+        DependencyObject? element,
+        string reason = "explicit-keyboard-input")
+    {
+        if (element is FrameworkElement fe)
+        {
+            IntPtr ownerHwnd = WidgetEditorPopoverWindow.ResolveOwnerWindowHandle(fe);
+            if (ownerHwnd != IntPtr.Zero &&
+                App.Current?.WidgetManager?.FindWidgetWindowByHandle(ownerHwnd) is WidgetWindowBase widgetWindow)
+            {
+                widgetWindow.ActivateForKeyboardInput(reason);
+            }
+        }
+    }
+
+    internal static bool IsOwnerWindowKeyboardFocused(DependencyObject? element)
+    {
+        if (element is not FrameworkElement fe)
+        {
+            return true;
+        }
+
+        IntPtr ownerHwnd = WidgetEditorPopoverWindow.ResolveOwnerWindowHandle(fe);
+        if (ownerHwnd == IntPtr.Zero || !Win32Helper.IsWindow(ownerHwnd))
+        {
+            return true;
+        }
+
+        IntPtr foreground = Win32Helper.GetForegroundWindow();
+        if (foreground == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        if (foreground == ownerHwnd ||
+            TransientInputFocusGuard.IsCurrentProcessPopupBridge(foreground) ||
+            TransientInputFocusGuard.IsWindowsTextInputExperienceWindow(foreground))
+        {
+            return true;
+        }
+
+        return Win32Helper.GetAncestor(foreground, Win32Helper.GA_ROOTOWNER) == ownerHwnd;
+    }
+
+    internal void ActivateForKeyboardInput(string reason = "explicit-keyboard-input")
+    {
+        if (HWnd == IntPtr.Zero || !Win32Helper.IsWindow(HWnd))
+        {
+            return;
+        }
+
+        _lastDesktopPinnedKeyboardRequestTick = Environment.TickCount64;
+        _ = Win32Helper.AllowSetForegroundWindow((uint)Environment.ProcessId);
+        if (WidgetLayerService.UsesDesktopPinnedMode())
+        {
+            WidgetLayerService.PrepareForDesktopPinnedKeyboardInput(HWnd);
+            DeferDesktopPinnedActivation(reason);
+            return;
+        }
+
+        TransientInputFocusGuard.ActivateWindowAndFocusIsland(this, HWnd, clearNoActivate: false);
+    }
+
+    private void FocusManager_GotFocusForDesktopPinnedLayer(
+        object? sender,
+        Microsoft.UI.Xaml.Input.FocusManagerGotFocusEventArgs args)
+    {
+        if (!WidgetLayerService.UsesDesktopPinnedMode() ||
+            _desktopPinnedInputActivationInProgress ||
+            args.NewFocusedElement is not UIElement focusedElement ||
+            focusedElement.XamlRoot is null ||
+            RootElement.XamlRoot is null ||
+            focusedElement.XamlRoot != RootElement.XamlRoot ||
+            !IsKeyboardInputTarget(focusedElement))
+        {
+            return;
+        }
+
+        _lastDesktopPinnedKeyboardRequestTick = Environment.TickCount64;
+        WidgetLayerService.PrepareForDesktopPinnedKeyboardInput(HWnd);
+        DeferDesktopPinnedActivation("popup-keyboard-focus");
+    }
+
+    private void WidgetWindowBase_ActivatedForCompactFocusSync(
+        object sender,
+        WindowActivatedEventArgs args)
+    {
+        if (args.WindowActivationState == WindowActivationState.Deactivated)
+        {
+            UiDispatch.PostAfterCallback(() =>
+            {
+                if (!IsClosing && Win32Helper.IsWindowInCurrentProcess(HWnd))
+                {
+                    UpdateCompactViewState();
+                }
+            });
+        }
+    }
+
+    private static bool IsDesktopPinnedKeyboardActivationReason(string reason) =>
+        string.Equals(reason, "routed-keyboard-input", StringComparison.Ordinal) ||
+        string.Equals(reason, "keyboard-focus", StringComparison.Ordinal) ||
+        string.Equals(reason, "popup-keyboard-focus", StringComparison.Ordinal) ||
+        string.Equals(reason, "explicit-keyboard-input", StringComparison.Ordinal);
+
+    private static bool CanProceedAfterTransientMenuForegroundChange(
+        string reason,
+        IntPtr foregroundAtEnqueue,
+        IntPtr foregroundNow)
+    {
+        if (!IsDesktopPinnedKeyboardActivationReason(reason))
+        {
+            return false;
+        }
+
+        bool enqueueWasTransientOrDeskBox =
+            foregroundAtEnqueue == IntPtr.Zero ||
+            !Win32Helper.IsWindow(foregroundAtEnqueue) ||
+            !Win32Helper.IsWindowVisible(foregroundAtEnqueue) ||
+            App.Current?.IsDeskBoxOrTextInputExperienceWindow(foregroundAtEnqueue) == true ||
+            ShellContextMenuProxy.IsMenuRoundInFlight;
+        if (!enqueueWasTransientOrDeskBox)
+        {
+            return false;
+        }
+
+        return foregroundNow == IntPtr.Zero ||
+               IsDesktopShellRootWindow(foregroundNow) ||
+               App.Current?.IsDeskBoxOrTextInputExperienceWindow(foregroundNow) == true;
     }
 
     // ── Backdrop preference ────────────────────────────────────

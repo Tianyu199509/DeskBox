@@ -39,7 +39,8 @@ public sealed class RemoteBackupSettings : IBackupSettings
                 string.Empty, string.Empty, string.Empty, string.Empty,
                 false, false, false, 0, 0, 0, 0, 0,
                 new BackupEndpoint(string.Empty, string.Empty, string.Empty, string.Empty),
-                HasEndpoint: false);
+                HasEndpoint: false,
+                CloudCustomWidgetsEnabled: false);
     }
 
     public void Update(BackupSettingsChange change) =>

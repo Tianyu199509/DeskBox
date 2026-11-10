@@ -1,4 +1,4 @@
-[Code]
+﻿[Code]
 const
   DeskBoxAppCompatLayersKey = 'Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers';
 
@@ -74,10 +74,14 @@ var
   ExePath: string;
 begin
   ExePath := AddBackslash(NormalizeDirPath(InstallPath)) + DeskBoxLegacyExeName;
+  DeleteAppCompatLayerValue(HKEY_CURRENT_USER, AddBackslash(NormalizeDirPath(InstallPath)) + 'DeskBox.Settings.exe');
   DeleteAppCompatLayerValue(HKEY_CURRENT_USER, ExePath);
 
   if IsAdminInstallMode then
+  begin
     DeleteAppCompatLayerValue(HKEY_LOCAL_MACHINE, ExePath);
+    DeleteAppCompatLayerValue(HKEY_LOCAL_MACHINE, AddBackslash(NormalizeDirPath(InstallPath)) + 'DeskBox.Settings.exe');
+  end;
 end;
 
 function InitializeSetup: Boolean;

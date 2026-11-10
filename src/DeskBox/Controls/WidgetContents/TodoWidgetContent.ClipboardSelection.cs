@@ -223,7 +223,7 @@ public sealed partial class TodoWidgetContent
                 continue;
             }
 
-            var target = FindVisualChild<Grid>(container, "TodoItemRoot") ?? container as FrameworkElement;
+            var target = FindVisualChild<Border>(container, "TodoItemRoot") ?? container as FrameworkElement;
             if (target is null || target.ActualWidth <= 0 || target.ActualHeight <= 0)
             {
                 continue;
@@ -356,7 +356,106 @@ public sealed partial class TodoWidgetContent
             .ToList();
     }
 
-        private Task PickCustomDueDateAsync(TodoItemViewModel? item)
+    private TodoItemViewModel? GetPrimarySelectedOrDetailTodoItem()
+    {
+        if (ViewModel is null)
+        {
+            return null;
+        }
+
+        if (ViewModel.IsDetailPageOpen &&
+            !ViewModel.IsCreatingDetailItem &&
+            ViewModel.SelectedDetailItem is { } detailItem)
+        {
+            return detailItem;
+        }
+
+        IReadOnlyList<TodoItemViewModel> selected = GetSelectedCopyItemsInVisibleOrder();
+        return selected.Count > 0 ? selected[0] : null;
+    }
+
+    internal async Task<bool> PasteIntoTodoFromClipboardAsync()
+    {
+        if (_isDisposed || ViewModel is null)
+        {
+            return false;
+        }
+
+        DataPackageView dataView;
+        try
+        {
+            dataView = Clipboard.GetContent();
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[Todo] Clipboard.GetContent failed: {ex.Message}");
+            return false;
+        }
+
+        if (dataView is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            if (dataView.Contains(StandardDataFormats.StorageItems) ||
+                dataView.Contains(StandardDataFormats.Bitmap))
+            {
+                using DroppedFileBatch batch = await DeskBoxDragData.TryGetDroppedFilesAsync(dataView);
+                if (batch.Files.Count > 0 && ViewModel is not null)
+                {
+                    TodoItemViewModel? targetItem = GetPrimarySelectedOrDetailTodoItem();
+                    bool createdNew = false;
+                    if (targetItem is null)
+                    {
+                        targetItem = await ViewModel.AddItemAsync(BuildDroppedTodoTitle(batch.Files));
+                        createdNew = targetItem is not null;
+                    }
+
+                    if (targetItem is null)
+                    {
+                        return false;
+                    }
+
+                    int addedCount = await ViewModel.AddDroppedAttachmentsAsync(targetItem.Id, batch.Files);
+                    if (addedCount > 0 || createdNew)
+                    {
+                        TodoListView?.ScrollIntoView(targetItem);
+                        ShowTodoStatus("Todo.Dropped");
+                        return true;
+                    }
+                }
+            }
+
+            if (dataView.Contains(StandardDataFormats.Text))
+            {
+                string text = await dataView.GetTextAsync();
+                if (!string.IsNullOrWhiteSpace(text) && ViewModel is not null)
+                {
+                    IReadOnlyList<TodoItemViewModel> createdItems = await ViewModel.AddPastedTextItemsWithUndoAsync(text);
+                    if (createdItems.Count > 0)
+                    {
+                        var localization = App.Current.LocalizationService;
+                        ShowUndoToast(
+                            localization.T("Todo.Dropped"),
+                            localization.T("Common.Undo"),
+                            clearUndoOnHide: false);
+                        TodoListView?.ScrollIntoView(createdItems[0]);
+                        return true;
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[Todo] Clipboard paste failed: {ex}");
+        }
+
+        return false;
+    }
+
+    private Task PickCustomDueDateAsync(TodoItemViewModel? item)
     {
         if (ViewModel is null)
         {
@@ -364,16 +463,28 @@ public sealed partial class TodoWidgetContent
         }
 
         CloseTodoEdit();
+        if (!EnsureCustomDueDateOverlayRealized())
+        {
+            return Task.CompletedTask;
+        }
+
         _customDueDateItem = item;
         _customDueDateItemIds = null;
         DateTimeOffset dueDate = item?.DueDate ?? ViewModel.DraftDueDate ?? GetDefaultCustomDueDate();
-        CustomDueDatePicker.MinDate = DateTimeOffset.Now.Date;
-        CustomDueDatePicker.Date = dueDate;
-        SetCustomDueTime(dueDate);
+        bool includeTime = item is not null
+            ? item.HasDueTime
+            : ViewModel.DraftHasDueTime;
+        if (CustomDueDatePicker is not null)
+        {
+            CustomDueDatePicker.MinDate = DateTimeOffset.Now.Date;
+            CustomDueDatePicker.Date = dueDate;
+        }
+
+        ConfigureCustomDueTimeState(dueDate, includeTime);
         ApplyLocalizedText();
         ApplyEditorVisualStyle();
-        CustomDueDateOverlay.Visibility = Visibility.Visible;
-        CustomDueDatePicker.Focus(FocusState.Programmatic);
+        CustomDueDateOverlay!.Visibility = Visibility.Visible;
+        CustomDueDatePicker?.Focus(FocusState.Programmatic);
         return Task.CompletedTask;
     }
 }

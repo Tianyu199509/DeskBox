@@ -77,6 +77,11 @@ public sealed partial class TodoWidgetContent
 
     private void ColorFilterButton_PointerPressed(object sender, PointerRoutedEventArgs e)
     {
+        if (DragDropPermissionService.IsCurrentProcessElevatedCached())
+        {
+            return;
+        }
+
         if (sender is Button button &&
             e.GetCurrentPoint(button).Properties.IsLeftButtonPressed)
         {
@@ -84,6 +89,9 @@ public sealed partial class TodoWidgetContent
             _colorFilterDragStartPoint = e.GetCurrentPoint(RootGrid).Position;
         }
     }
+
+    private PointerEventHandler? _colorFilterPointerPressedHandler;
+    private PointerEventHandler? _colorFilterPointerMovedHandler;
 
     private void RegisterColorFilterHandledEvents()
     {
@@ -93,6 +101,8 @@ public sealed partial class TodoWidgetContent
         }
 
         _colorFilterHandledEventsRegistered = true;
+        _colorFilterPointerPressedHandler ??= new PointerEventHandler(ColorFilterButton_PointerPressed);
+        _colorFilterPointerMovedHandler ??= new PointerEventHandler(ColorFilterButton_PointerMoved);
         foreach (Button button in new[]
                  {
                      RedColorFilterButton,
@@ -107,18 +117,58 @@ public sealed partial class TodoWidgetContent
         {
             button.AddHandler(
                 UIElement.PointerPressedEvent,
-                new PointerEventHandler(ColorFilterButton_PointerPressed),
+                _colorFilterPointerPressedHandler,
                 handledEventsToo: true);
             button.AddHandler(
                 UIElement.PointerMovedEvent,
-                new PointerEventHandler(ColorFilterButton_PointerMoved),
+                _colorFilterPointerMovedHandler,
                 handledEventsToo: true);
         }
+    }
+
+    private void UnregisterColorFilterHandledEvents()
+    {
+        if (!_colorFilterHandledEventsRegistered)
+        {
+            return;
+        }
+
+        _colorFilterHandledEventsRegistered = false;
+        foreach (Button button in new[]
+                 {
+                     RedColorFilterButton,
+                     OrangeColorFilterButton,
+                     YellowColorFilterButton,
+                     GreenColorFilterButton,
+                     BlueColorFilterButton,
+                     PurpleColorFilterButton,
+                     TealColorFilterButton,
+                     PinkColorFilterButton
+                 })
+        {
+            if (_colorFilterPointerPressedHandler is not null)
+            {
+                button.RemoveHandler(
+                    UIElement.PointerPressedEvent,
+                    _colorFilterPointerPressedHandler);
+            }
+
+            if (_colorFilterPointerMovedHandler is not null)
+            {
+                button.RemoveHandler(
+                    UIElement.PointerMovedEvent,
+                    _colorFilterPointerMovedHandler);
+            }
+        }
+
+        _colorFilterPointerPressedHandler = null;
+        _colorFilterPointerMovedHandler = null;
     }
 
     private async void ColorFilterButton_PointerMoved(object sender, PointerRoutedEventArgs e)
     {
         if (_isStartingColorFilterDrag ||
+            DragDropPermissionService.IsCurrentProcessElevatedCached() ||
             sender is not Button button ||
             !ReferenceEquals(button, _pressedColorFilterButton))
         {
@@ -386,33 +436,12 @@ public sealed partial class TodoWidgetContent
         ApplyColorFilterButtonState(PinkColorFilterButton, ViewModel.SelectedColorFilter == TodoColorFilter.Pink);
     }
 
-    private TodoFilter GetSelectedSegmentFilter()
-    {
-        return TodoFilterSegmented?.SelectedIndex switch
-        {
-            1 => TodoFilter.Active,
-            2 => TodoFilter.Today,
-            3 => TodoFilter.ThisWeek,
-            4 => TodoFilter.ThisMonth,
-            5 => TodoFilter.Important,
-            6 => TodoFilter.Completed,
-            _ => TodoFilter.All
-        };
-    }
+    private TodoFilter GetSelectedSegmentFilter() =>
+        DeskBox.Controls.Todo.TodoFilterBarController.GetFilterFromSegmentIndex(
+            TodoFilterSegmented?.SelectedIndex);
 
-    private static int GetFilterSegmentIndex(TodoFilter filter)
-    {
-        return filter switch
-        {
-            TodoFilter.Active => 1,
-            TodoFilter.Today => 2,
-            TodoFilter.ThisWeek => 3,
-            TodoFilter.ThisMonth => 4,
-            TodoFilter.Important => 5,
-            TodoFilter.Completed => 6,
-            _ => 0
-        };
-    }
+    private static int GetFilterSegmentIndex(TodoFilter filter) =>
+        DeskBox.Controls.Todo.TodoFilterBarController.GetSegmentIndex(filter);
 
     private void ApplyColorFilterButtonState(Button button, bool isSelected)
     {
@@ -502,6 +531,9 @@ public sealed partial class TodoWidgetContent
                 return;
             }
 
+            DeskBoxDragData.SetTodoDragItems(
+                e.Data,
+                selectedItems.Select(item => TodoWidgetStore.CloneItem(item.Item)).ToArray());
             DeskBoxDragData.SetText(e.Data, text, DeskBoxDragData.SourceTodo);
             // Export drags are copy-only: advertising Move would let a Win10
             // Explorer drop move backing files (and still prompts the picker).
@@ -523,6 +555,9 @@ public sealed partial class TodoWidgetContent
             // native reordering disabled and persist the row-drop position in
             // TodoItem_Drop instead.
             TodoListView.CanReorderItems = false;
+            DeskBoxDragData.SetTodoDragItems(
+                e.Data,
+                [TodoWidgetStore.CloneItem(draggedItem.Item)]);
             DeskBoxDragData.SetText(
                 e.Data,
                 TodoClipboardFormatter.FormatSingle(draggedItem, App.Current.LocalizationService),
@@ -554,13 +589,8 @@ public sealed partial class TodoWidgetContent
             DeskBoxDragData.ResolveInternalMetadataOperation(
                 e.AllowedOperations);
         e.DragUIOverride.IsGlyphVisible = true;
-        e.DragUIOverride.Caption = App.Current.LocalizationService.T(target switch
-        {
-            TodoFilter.Active => "Todo.DropTab.Active",
-            TodoFilter.Today => "Todo.DropTab.Today",
-            TodoFilter.Important => "Todo.DropTab.Important",
-            _ => "Todo.DropTab.Completed"
-        });
+        e.DragUIOverride.Caption = App.Current.LocalizationService.T(
+            DeskBox.Controls.Todo.TodoFilterBarController.GetTabDropCaptionKey(target));
     }
 
     private async void TodoTab_Drop(object sender, DragEventArgs e)
@@ -597,28 +627,20 @@ public sealed partial class TodoWidgetContent
         }
     }
 
-    private static bool TryGetTodoTabDropTarget(string tag, out TodoFilter target)
-    {
-        target = tag switch
-        {
-            "Active" => TodoFilter.Active,
-            "Today" => TodoFilter.Today,
-            "Important" => TodoFilter.Important,
-            "Completed" => TodoFilter.Completed,
-            _ => TodoFilter.All
-        };
-        return target is TodoFilter.Active or TodoFilter.Today or TodoFilter.Important or TodoFilter.Completed;
-    }
+    private static bool TryGetTodoTabDropTarget(string tag, out TodoFilter target) =>
+        DeskBox.Controls.Todo.TodoFilterBarController.TryGetTabDropTarget(tag, out target);
+
+    private void ClearSubscribedTodoRows() =>
+        _rowVisuals.ClearSubscribedRows(TodoItem_PropertyChanged);
 
     private void TodoItem_DataContextChanged(FrameworkElement sender, DataContextChangedEventArgs args)
     {
-        if (sender.DataContext is not TodoItemViewModel item)
+        if (!_rowVisuals.AttachRow(sender, TodoItem_PropertyChanged, out TodoItemViewModel? item) ||
+            item is null)
         {
             return;
         }
 
-        item.PropertyChanged -= TodoItem_PropertyChanged;
-        item.PropertyChanged += TodoItem_PropertyChanged;
         SetTodoItemHoverState(sender, false);
         if (sender is Border border)
         {
@@ -627,10 +649,19 @@ public sealed partial class TodoWidgetContent
                 active: false,
                 insertAfter: false);
         }
-        if (FindVisualChild<CheckBox>(sender, "TodoCompletionCheckBox") is { } checkBox)
+
+        var parts = _rowVisuals.GetOrResolveParts(
+            sender,
+            static root => new DeskBox.Controls.Todo.TodoRowVisualController.RowVisualParts(
+                FindVisualChild<Border>(root, "TodoItemHoverBackground"),
+                FindVisualChild<Border>(root, "TodoItemActionHost"),
+                FindVisualChild<CheckBox>(root, "TodoCompletionCheckBox")));
+        if ((parts.CompletionCheckBox ?? FindVisualChild<CheckBox>(sender, "TodoCompletionCheckBox")) is { } checkBox)
         {
             checkBox.IsChecked = item.IsCompleted;
         }
+
+        ApplyHostFocusSelectionVisualToRow(sender);
     }
 
     private async Task DropTodoItemAtRowAsync(
@@ -690,51 +721,11 @@ public sealed partial class TodoWidgetContent
     private void ApplyTodoReorderDropState(
         Border border,
         bool active,
-        bool insertAfter)
-    {
-        if (active &&
-            _todoReorderDropTarget is { } previousBorder &&
-            !ReferenceEquals(previousBorder, border))
-        {
-            ResetTodoReorderDropBorder(previousBorder);
-        }
+        bool insertAfter) =>
+        _rowVisuals.ApplyReorderDropState(border, active, insertAfter);
 
-        if (active)
-        {
-            // Insertion position is a drag state, so it draws the neutral
-            // interaction line rather than the accent.
-            border.BorderBrush = new SolidColorBrush(
-                NeutralInteractionBrush.Line(border));
-            border.BorderThickness = insertAfter
-                ? new Thickness(0, 0, 0, 2)
-                : new Thickness(0, 2, 0, 0);
-            _todoReorderDropTarget = border;
-            return;
-        }
-
-        ResetTodoReorderDropBorder(border);
-        if (ReferenceEquals(_todoReorderDropTarget, border))
-        {
-            _todoReorderDropTarget = null;
-        }
-    }
-
-    private void ClearTodoReorderDropState()
-    {
-        if (_todoReorderDropTarget is not { } border)
-        {
-            return;
-        }
-
-        _todoReorderDropTarget = null;
-        ResetTodoReorderDropBorder(border);
-    }
-
-    private static void ResetTodoReorderDropBorder(Border border)
-    {
-        border.BorderBrush = new SolidColorBrush(Colors.Transparent);
-        border.BorderThickness = new Thickness(0);
-    }
+    private void ClearTodoReorderDropState() =>
+        _rowVisuals.ClearReorderDropState();
 
     private void TodoListView_DragItemsCompleted(
         ListViewBase sender,
@@ -780,19 +771,23 @@ public sealed partial class TodoWidgetContent
             return;
         }
 
+        bool hasQuickCaptureItems =
+            DeskBoxDragData.TryGetQuickCaptureDragItems(e.DataView) is { Count: > 0 };
+        bool hasDroppedFiles = !hasQuickCaptureItems && DeskBoxDragData.HasDroppedFiles(e.DataView);
         bool supported =
-            DeskBoxDragData.HasDroppedFiles(e.DataView) ||
+            hasQuickCaptureItems ||
+            hasDroppedFiles ||
             e.DataView.Contains(DeskBoxDragData.TextFormat) ||
             e.DataView.Contains(StandardDataFormats.Text) ||
             e.DataView.Contains(StandardDataFormats.WebLink);
         e.AcceptedOperation = supported
-            ? DeskBoxDragData.HasDroppedFiles(e.DataView)
+            ? hasDroppedFiles
                 ? DeskBoxDragData.GetFileAssociationOperation(
                     e.DataView,
                     e.AllowedOperations)
                 : DataPackageOperation.Copy
             : DataPackageOperation.None;
-        if (DeskBoxDragData.HasDroppedFiles(e.DataView))
+        if (hasDroppedFiles)
         {
             ApplyFileAssociationDragFeedback(e);
         }
@@ -832,11 +827,13 @@ public sealed partial class TodoWidgetContent
             return;
         }
 
+        e.Handled = true;
         var deferral = e.GetDeferral();
         try
         {
+            bool wasQuickCaptureDrag = DeskBoxDragData.TryGetQuickCaptureDragItems(e.DataView) is { Count: > 0 };
             e.AcceptedOperation = await ImportExternalDropAsync(e.DataView)
-                ? DeskBoxDragData.HasDroppedFiles(e.DataView)
+                ? !wasQuickCaptureDrag && DeskBoxDragData.HasDroppedFiles(e.DataView)
                     ? DeskBoxDragData.GetFileAssociationOperation(e.DataView)
                     : DataPackageOperation.Copy
                 : DataPackageOperation.None;
@@ -848,9 +845,19 @@ public sealed partial class TodoWidgetContent
         }
     }
 
+    internal static bool CanImportExternalDropData(DataPackageView dataView)
+    {
+        return DeskBoxDragData.TryGetQuickCaptureDragItems(dataView) is { Count: > 0 } ||
+               DeskBoxDragData.HasDroppedFiles(dataView) ||
+               dataView.Contains(DeskBoxDragData.TextFormat) ||
+               dataView.Contains(StandardDataFormats.Text) ||
+               dataView.Contains(StandardDataFormats.WebLink);
+    }
+
     internal bool CanImportExternalDrop(DataPackageView dataView)
     {
-        return DeskBoxDragData.HasDroppedFiles(dataView) ||
+        return DeskBoxDragData.TryGetQuickCaptureDragItems(dataView) is { Count: > 0 } ||
+               DeskBoxDragData.HasDroppedFiles(dataView) ||
                dataView.Contains(DeskBoxDragData.TextFormat) ||
                dataView.Contains(StandardDataFormats.Text) ||
                dataView.Contains(StandardDataFormats.WebLink);
@@ -860,6 +867,27 @@ public sealed partial class TodoWidgetContent
     {
         try
         {
+            if (DeskBoxDragData.TryGetQuickCaptureDragItems(dataView) is { Count: > 0 } qcItems)
+            {
+                if (ViewModel is null)
+                {
+                    return false;
+                }
+
+                int importedCount = await ViewModel.ImportQuickCaptureItemsAsync(qcItems);
+                if (importedCount > 0)
+                {
+                    if (!ViewModel.CanUndoLastAction)
+                    {
+                        ShowUndoToast(
+                            App.Current.LocalizationService.T("Todo.Dropped"),
+                            clearUndoOnHide: false);
+                    }
+
+                    return true;
+                }
+            }
+
             if (DeskBoxDragData.HasDroppedFiles(dataView))
             {
                 using DroppedFileBatch batch = await DeskBoxDragData.TryGetDroppedFilesAsync(dataView);
@@ -963,7 +991,7 @@ public sealed partial class TodoWidgetContent
         }
     }
 
-    private static async Task<string?> TryGetDroppedTodoTextAsync(DataPackageView dataView)
+    internal static async Task<string?> TryGetDroppedTodoTextAsync(DataPackageView dataView)
     {
         if (dataView.Contains(StandardDataFormats.StorageItems))
         {
@@ -976,13 +1004,14 @@ public sealed partial class TodoWidgetContent
             return null;
         }
 
+        const int maxDroppedTodoTextCharacters = 64 * 1024;
         text = text.Trim();
-        return text.Length <= QuickCaptureClipboardService.MaxClipboardTextCharacters
+        return text.Length <= maxDroppedTodoTextCharacters
             ? text
-            : text[..QuickCaptureClipboardService.MaxClipboardTextCharacters].Trim();
+            : text[..maxDroppedTodoTextCharacters].Trim();
     }
 
-    private static string BuildDroppedTodoTitle(IReadOnlyList<DroppedFilePath> files)
+    internal static string BuildDroppedTodoTitle(IReadOnlyList<DroppedFilePath> files)
     {
         string title = files.Count == 1
             ? System.IO.Path.GetFileNameWithoutExtension(files[0].DisplayName)

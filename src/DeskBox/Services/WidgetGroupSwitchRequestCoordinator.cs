@@ -16,7 +16,8 @@ internal sealed class WidgetGroupSwitchRequestCoordinator
     public WidgetGroupSwitchRequest Begin(
         string groupId,
         string targetWidgetId,
-        WidgetGroupSwitchOrigin origin = WidgetGroupSwitchOrigin.Programmatic)
+        WidgetGroupSwitchOrigin origin = WidgetGroupSwitchOrigin.Programmatic,
+        bool? preferredForward = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(groupId);
         ArgumentException.ThrowIfNullOrWhiteSpace(targetWidgetId);
@@ -26,7 +27,11 @@ internal sealed class WidgetGroupSwitchRequestCoordinator
         lock (_gate)
         {
             _currentRequests.Remove(groupId, out previous);
-            request = new WidgetGroupSwitchRequest(groupId, targetWidgetId, origin);
+            request = new WidgetGroupSwitchRequest(
+                groupId,
+                targetWidgetId,
+                origin,
+                preferredForward);
             _currentRequests[groupId] = request;
         }
 
@@ -126,11 +131,13 @@ internal sealed class WidgetGroupSwitchRequest : IDisposable
     public WidgetGroupSwitchRequest(
         string groupId,
         string targetWidgetId,
-        WidgetGroupSwitchOrigin origin)
+        WidgetGroupSwitchOrigin origin,
+        bool? preferredForward = null)
     {
         GroupId = groupId;
         TargetWidgetId = targetWidgetId;
         Origin = origin;
+        PreferredForward = preferredForward;
         CancellationToken = _cancellationSource.Token;
     }
 
@@ -138,6 +145,7 @@ internal sealed class WidgetGroupSwitchRequest : IDisposable
 
     public string TargetWidgetId { get; }
     public WidgetGroupSwitchOrigin Origin { get; }
+    public bool? PreferredForward { get; }
 
 
     public CancellationToken CancellationToken { get; }

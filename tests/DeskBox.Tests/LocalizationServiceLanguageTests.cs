@@ -130,6 +130,38 @@ public sealed class LocalizationServiceLanguageTests
         Assert.Equal(expected, LocalizationService.IsTraditionalChineseCulture(cultureName));
     }
 
+    [Fact]
+    public void InstallLanguageResolver_PrefersPerUserKeyAndFallsBackToMachineDirectInstall()
+    {
+        var values = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+        {
+            [@"HKEY_LOCAL_MACHINE\Software\DeskBox\DirectInstall"] = SettingsService.LanguageEnglish
+        };
+
+        Assert.Equal(
+            SettingsService.LanguageEnglish,
+            LocalizationService.TryResolveSupportedInstallLanguage((key, _) =>
+                values.GetValueOrDefault(key)));
+
+        values[@"HKEY_CURRENT_USER\Software\DeskBox\DirectInstall"] = SettingsService.LanguageJapanese;
+        Assert.Equal(
+            SettingsService.LanguageJapanese,
+            LocalizationService.TryResolveSupportedInstallLanguage((key, _) =>
+                values.GetValueOrDefault(key)));
+
+        values[@"HKEY_CURRENT_USER\Software\DeskBox"] = SettingsService.LanguageKorean;
+        Assert.Equal(
+            SettingsService.LanguageKorean,
+            LocalizationService.TryResolveSupportedInstallLanguage((key, _) =>
+                values.GetValueOrDefault(key)));
+
+        values[@"HKEY_CURRENT_USER\Software\DeskBox"] = "unsupported-locale";
+        Assert.Equal(
+            SettingsService.LanguageJapanese,
+            LocalizationService.TryResolveSupportedInstallLanguage((key, _) =>
+                values.GetValueOrDefault(key)));
+    }
+
     private static IReadOnlyDictionary<string, string> GetResourceTable(string propertyName)
     {
         var property = typeof(LocalizationService).GetProperty(

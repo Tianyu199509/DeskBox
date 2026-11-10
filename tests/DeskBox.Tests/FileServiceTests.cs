@@ -1599,7 +1599,7 @@ public sealed class FileServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task TransferItemsWithResultAsync_MovesDeepDirectoryToAvailableNameWhenDestinationExists()
+    public async Task TransferItemsWithResultAsync_MergesDeepDirectoryWhenDestinationDirectoryExists()
     {
         var service = new FileService();
         string sourceRoot = Directory.CreateDirectory(Path.Combine(_tempRoot, "source")).FullName;
@@ -1607,17 +1607,17 @@ public sealed class FileServiceTests : IDisposable
         string sourceDirectory = Directory.CreateDirectory(Path.Combine(sourceRoot, "project")).FullName;
         string nestedDirectory = Directory.CreateDirectory(Path.Combine(sourceDirectory, "nested", "child")).FullName;
         File.WriteAllText(Path.Combine(nestedDirectory, "file.txt"), "content");
-        Directory.CreateDirectory(Path.Combine(destinationRoot, "project"));
+        string existingDestination = Directory.CreateDirectory(Path.Combine(destinationRoot, "project")).FullName;
+        File.WriteAllText(Path.Combine(existingDestination, "existing.txt"), "existing");
 
         var results = await service.TransferItemsWithResultAsync([sourceDirectory], destinationRoot, move: true);
 
         var result = Assert.Single(results);
-        string expectedDestination = Path.Combine(destinationRoot, "project (2)");
-        Assert.Equal(expectedDestination, result.DestinationPath);
+        Assert.Equal(existingDestination, result.DestinationPath);
         Assert.False(Directory.Exists(sourceDirectory));
-        Assert.True(Directory.Exists(Path.Combine(destinationRoot, "project")));
-        Assert.Equal("content", File.ReadAllText(Path.Combine(expectedDestination, "nested", "child", "file.txt")));
-        Assert.Single(Directory.EnumerateFiles(expectedDestination, "*", SearchOption.AllDirectories));
+        Assert.False(Directory.Exists(Path.Combine(destinationRoot, "project (2)")));
+        Assert.Equal("existing", File.ReadAllText(Path.Combine(existingDestination, "existing.txt")));
+        Assert.Equal("content", File.ReadAllText(Path.Combine(existingDestination, "nested", "child", "file.txt")));
     }
 
     [Fact]

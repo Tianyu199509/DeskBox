@@ -24,6 +24,19 @@ public static class AccentResourceScope
             resources,
             "SystemAccentColorLight2Brush",
             Color.FromArgb(0x44, accent.R, accent.G, accent.B));
+
+        bool isDark = target.RequestedTheme switch
+        {
+            ElementTheme.Dark => true,
+            ElementTheme.Light => false,
+            _ => NeutralInteractionBrush.IsDarkTheme(target)
+        };
+        AccentCheckPalette checkPalette = AccentColorHelper.BuildTonedCheckPalette(accent, isDark);
+        SetBrush(resources, "DeskBoxCheckFillCheckedBrush", checkPalette.FillChecked);
+        SetBrush(resources, "DeskBoxCheckFillCheckedPointerOverBrush", checkPalette.FillCheckedPointerOver);
+        SetBrush(resources, "DeskBoxCheckFillCheckedPressedBrush", checkPalette.FillCheckedPressed);
+        SetBrush(resources, "DeskBoxCheckStrokePointerOverBrush", checkPalette.StrokePointerOver);
+        SetBrush(resources, "DeskBoxCheckGlyphBrush", checkPalette.GlyphForeground);
     }
 
     private static void SetBrush(

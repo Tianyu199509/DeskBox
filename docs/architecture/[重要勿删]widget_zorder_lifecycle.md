@@ -321,3 +321,20 @@ SetWindowPos(hwnd, HWND_NOTOPMOST, ..., SWP_NOACTIVATE | SWP_SHOWWINDOW);
 | P3 | `ZOrder.cs`/测试 | 归一化 reason 在 `QueueIdleWidgetZOrderNormalization` 入口截断 96 字符（防链式后缀无界膨胀）；`NoDisplacementRestore` 钉改行尾无关的顺序断言（原多行字面量在 CRLF 检出上永不匹配=空钉）；格式修复 |
 
 契约钉随批加固：F1 接线钉（`ForceRestoreDesktopLayerFromManager→EndExpandedWidgetLayerLease` 先于强制回落）、撕裂门先于治愈出口的顺序钉、④守卫极性钉（`!IsForegroundDeskBoxWindow()`）、看门狗豁免刷新先于 elapsed 的顺序钉、内联挂起计数钉（每表面各≥2）、#553 跳过先于激活的顺序钉。
+
+---
+
+## 11. 2026-10-31 三模式体验细化与第一阶段阴影重排止闪批
+
+1. **动态层级（`Dynamic`）点击抬升范围可选 + 桌面单击解耦**：
+   - 新增设置 `DynamicClickRaiseScope`（`Single` 默认仅抬升当前格子 / `Group` 点击格子任意区域整组一起浮出）。`Single` 模式点击标题栏或内容区前预先解除 `SHELLDLL_DefView` Owner 绑定（`DetachSingleDynamicWidgetForInteraction`），并在激活后将仍静置的同伴沉回桌面层（`RebedDynamicPassiveSiblingsAfterSingleActivation`）；`Group` 模式在点击内容区激活时通过 `BringGroupToNormalBandWithoutActivation` 将同伴提升至普通带紧随当前激活格子，离开 DeskBox 时由 `_temporaryRaiseLease` 一次性原子回落整组（DeskBox 仍持有前台期间不再提前清空租约）。
+   - 通过 `WM_WINDOWPOSCHANGING` 授权深度标记（`Win32Helper.IsAuthorizedZOrderChangeInProgress`）+ `ShouldSuppressUnsolicitedZOrderChange` 拦截系统因点选/框选桌面普通图标而连带拉起 `SHELLDLL_DefView` Owner 带的非授权 Z-order 抬升（第 0 帧即追加 `SWP_NOZORDER`）；真正的“单击桌面空白处”由 `DesktopDoubleClickActivationService`（排除框选拖拽）单独回调 `PromoteWidgetsFromDynamicBlankDesktopClick` 抬升整组。
+2. **桌面固定层（`DesktopPinned`）防串层与未获焦点选中态弱化**：
+   - 同样由 `WM_WINDOWPOSCHANGING` 同步拦截非授权 Owner 带串层；`MoveToDesktopBottom` 改为返回 `bool`（已落底快速短路返回 `false`），消除 `MA_NOACTIVATE` 点击后无意义的 120ms 延迟整理。
+   - 当格子宿主未持有 Win32 键盘焦点（`FileSurfaceContent.IsSurfaceWindowKeyboardFocused() == false`）时，`FileItemSurfaceStyleCache` 隐藏选中描边环并降级为低透明度柔和底色，`SelectedNameExpansionPolicy` 同时禁用长文件名展开浮层与慢速二次点击重命名，避免误导用户在外部前台窗口内按快捷键。
+3. **快捷唤起层（`QuickReveal`）支持从背后窗口拖入内容**：
+   - 采样器在 `QuickReveal` 会话下切为 16ms 步进，经 `QuickRevealOutsideInteractionState` 跟踪外部按下/拖拽：外部按下期间挂起前台离开收起（`ShouldHoldForegroundDismiss`）；未超 `SM_CXDRAG`/`SM_CYDRAG` 松手按外部点击收起；跨阈值拖入 DeskBox 格子松手保持面板打开，拖到外部松手则收起。
+4. **第一阶段阴影重排止闪（100% 保留原生圆角、Mica/Acrylic 与原生 DWM 阴影）**：
+   - `RestoreGroupToDesktopBottomAtomically` 将整组回落桌面底层合并为单次 `DeferWindowPos` 原子提交（以最低外部窗口为锚点直接写入目标同伴顺序，消除旧版 $N$ 次 `SetWindowToBottom` + 120ms 二次重排的双阶段跳变）；
+   - `ClearTopMostOnly` 与 `RestoreDesktopPinnedBottomState` 在回落同帧执行 `ApplyImmediateRestingPeerOrderAfterRestore`；
+   - `NormalizeIdleWidgetZOrder` 新增 `IdleWidgetZOrderPolicy.HasAnyShadowOverlapRisk`（88px 物理阴影半径检测），互不靠近的独立格子直接跳过同伴重排。

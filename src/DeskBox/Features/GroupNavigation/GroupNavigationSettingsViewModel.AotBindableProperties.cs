@@ -15,6 +15,7 @@ namespace DeskBox.Features.GroupNavigation;
     nameof(ExistingGroups),
     nameof(HasExistingGroups),
     nameof(HoverSwitchEnabled),
+    nameof(IsDefaultHoverSwitchApplicable),
     nameof(ShowExistingGroupsEmpty),
     nameof(WheelSwitchEnabled)
 ], [])]

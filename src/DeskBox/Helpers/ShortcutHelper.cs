@@ -323,9 +323,16 @@ public static class ShortcutHelper
         string shortcutPath,
         ShortcutNativeCallResult result)
     {
-        App.Log(
+        string message =
             $"[ShortcutNative] Explicit Rust {operation} failed for '{shortcutPath}': " +
-            $"{result.Failure}; {result.Detail}");
+            $"{result.Failure}; {result.Detail}";
+        if (result.IsExpectedPidlOnlyOutcome)
+        {
+            App.LogVerbose(message);
+            return;
+        }
+
+        App.Log(message);
     }
 
 #if !DESKBOX_NATIVE_AOT
@@ -701,6 +708,61 @@ public static class ShortcutHelper
         }
     }
 #endif
+
+    internal static bool TryCreateShortcutFromRawPidl(
+        string shortcutPath,
+        ReadOnlySpan<byte> rawPidlBytes,
+        string? description = null)
+    {
+        if (!ShellLinkVtableInterop.TryCreateShortcutFromPidlBytes(
+                shortcutPath,
+                rawPidlBytes,
+                description))
+        {
+            return false;
+        }
+
+        InvalidateStoredMetadataCache(shortcutPath);
+        return true;
+    }
+
+    /// <summary>
+    /// Rebases any moved <c>.lnk</c> files in <paramref name="movedPairs"/>
+    /// whose target, working directory, or icon location moved in the same
+    /// batch (or relied on a relative path from the shortcut's old folder).
+    /// Returns the destination paths of shortcuts rewritten on disk.
+    /// </summary>
+    internal static IReadOnlySet<string> RebaseMovedShortcuts(
+        IReadOnlyList<(string SourcePath, string DestinationPath)> movedPairs)
+    {
+        var rewrittenShortcuts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (movedPairs.Count == 0)
+        {
+            return rewrittenShortcuts;
+        }
+
+        foreach ((string sourcePath, string destinationPath) in movedPairs)
+        {
+            if (!IsShellLinkPath(destinationPath) || !File.Exists(destinationPath))
+            {
+                continue;
+            }
+
+            if (ShellLinkVtableInterop.TryRebaseShortcutPathsInPlace(
+                    destinationPath,
+                    sourcePath,
+                    movedPairs))
+            {
+                InvalidateStoredMetadataCache(sourcePath);
+                InvalidateStoredMetadataCache(destinationPath);
+                IconHelper.ClearIconCache(sourcePath);
+                IconHelper.ClearIconCache(destinationPath);
+                rewrittenShortcuts.Add(destinationPath);
+            }
+        }
+
+        return rewrittenShortcuts;
+    }
 
     internal static void InvalidateStoredMetadataCache(string shortcutPath)
     {

@@ -1,4 +1,5 @@
-﻿using System.Diagnostics;
+using System.Buffers;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 using DeskBox.Helpers;
@@ -65,10 +66,12 @@ public sealed partial class FileService
             IProgress<FileTransferProgress>? progress,
             CancellationToken cancellationToken,
             Func<FileTransferItemError, Task<FileTransferItemAction>>? onItemError = null,
-            ICollection<FileTransferSkippedItem>? skippedItems = null)
+            ICollection<FileTransferSkippedItem>? skippedItems = null,
+            Action<FileTransferResult>? itemCompleted = null)
     {
         var reporter = new TransferProgressReporter(progress, operations.Count);
         var completedOperations = new List<TransferOperation>(operations.Count);
+        var completedResults = new List<FileTransferResult>(operations.Count);
         try
         {
             reporter.Report(FileTransferPhase.Preparing, force: true);
@@ -97,9 +100,10 @@ public sealed partial class FileService
                 {
                     try
                     {
+                        IReadOnlyList<FileTransferResult>? mergedLeafResults = null;
                         if (move)
                         {
-                            await MoveEntryWithProgressAsync(
+                            mergedLeafResults = await MoveEntryWithProgressAsync(
                                 operation.SourcePath,
                                 operation.DestinationPath,
                                 estimate,
@@ -115,7 +119,15 @@ public sealed partial class FileService
                                 cancellationToken);
                         }
 
+                        var transferResult = new FileTransferResult(
+                            operation.SourcePath,
+                            operation.DestinationPath)
+                        {
+                            MergedLeafResults = mergedLeafResults
+                        };
                         completedOperations.Add(operation);
+                        completedResults.Add(transferResult);
+                        itemCompleted?.Invoke(transferResult);
                         break;
                     }
                     catch (Exception itemException) when (
@@ -183,11 +195,7 @@ public sealed partial class FileService
                 $"elapsedMs={reporter.ElapsedMilliseconds}");
             NotifyShellDirectoriesUpdated(completedOperations, move);
 
-            return completedOperations
-                .Select(operation => new FileTransferResult(
-                    operation.SourcePath,
-                    operation.DestinationPath))
-                .ToList();
+            return completedResults;
         }
         catch (OperationCanceledException exception)
         {
@@ -214,11 +222,7 @@ public sealed partial class FileService
             // directory window: copy done, source not yet deleted) used to be
             // re-wrapped WITHOUT them — mirroring the failure path's merge
             // keeps that carefully constructed receipt alive.
-            var cancelSnapshot = completedOperations
-                .Select(operation => new FileTransferResult(
-                    operation.SourcePath,
-                    operation.DestinationPath))
-                .ToList();
+            var cancelSnapshot = completedResults.ToList();
             if (exception is IFileTransferWithCompletedResults itemLevelCancelResults)
             {
                 cancelSnapshot.AddRange(itemLevelCancelResults.CompletedResults);
@@ -235,11 +239,7 @@ public sealed partial class FileService
             // failed after the copy completed) keeps them in the wrapper:
             // the data did physically move.
             reporter.Report(FileTransferPhase.Failed, force: true);
-            var completedSnapshot = completedOperations
-                .Select(operation => new FileTransferResult(
-                    operation.SourcePath,
-                    operation.DestinationPath))
-                .ToList();
+            var completedSnapshot = completedResults.ToList();
             if (exception is IFileTransferWithCompletedResults itemLevelResults)
             {
                 completedSnapshot.AddRange(itemLevelResults.CompletedResults);
@@ -370,7 +370,7 @@ public sealed partial class FileService
         }
     }
 
-    private static async Task MoveEntryWithProgressAsync(
+    private static async Task<IReadOnlyList<FileTransferResult>?> MoveEntryWithProgressAsync(
         string sourcePath,
         string destinationPath,
         TransferWorkEstimate? estimate,
@@ -385,18 +385,20 @@ public sealed partial class FileService
                 destinationPath,
                 reporter,
                 cancellationToken);
-            return;
+            return null;
         }
 
         if (Directory.Exists(sourcePath))
         {
-            await MoveDirectoryWithProgressAsync(
+            return await MoveDirectoryWithProgressAsync(
                 sourcePath,
                 destinationPath,
                 estimate,
                 reporter,
                 cancellationToken);
         }
+
+        return null;
     }
 
     /// <summary>
@@ -422,14 +424,31 @@ public sealed partial class FileService
         FileTransferSourceIdentity? destinationIdentity;
         try
         {
-            const int bufferSize = 256 * 1024;
-            await using var source = new FileStream(
+            SafeFileHandle sourceHandle = OpenSourceHandleRejectingLinks(
                 sourceFilePath,
-                FileMode.Open,
+                GenericReadAccess,
+                ShareRead | ShareWrite | ShareDelete,
+                FileFlagOverlapped | FileFlagSequentialScan,
+                out bool rejectedAsLink,
+                out int openError);
+            if (sourceHandle.IsInvalid)
+            {
+                if (rejectedAsLink)
+                {
+                    throw new InvalidOperationException(
+                        UnsafeFolderTransferFallbackMessage);
+                }
+
+                throw new IOException(
+                    $"The source '{sourceFilePath}' could not be opened for copying (win32={openError}).",
+                    openError);
+            }
+
+            await using var source = new FileStream(
+                sourceHandle,
                 FileAccess.Read,
-                FileShare.Read,
-                bufferSize,
-                FileOptions.Asynchronous | FileOptions.SequentialScan);
+                4096,
+                isAsync: true);
             sourceIdentity = IdentityFromHandle(source.SafeFileHandle);
             (destination, destinationIdentity) = await CopyFileCoreAsync(
                 source,
@@ -464,14 +483,17 @@ public sealed partial class FileService
         CancellationToken cancellationToken)
     {
         const int bufferSize = 256 * 1024;
-        FileStream destination = CreateTransferDestinationStream(destinationFilePath);
+        bool encryptDestination = (sourceInfo.Attributes & FileAttributes.Encrypted) != 0;
+        FileStream destination = CreateTransferDestinationStream(
+            destinationFilePath,
+            encryptDestination);
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(bufferSize);
         try
         {
-            byte[] buffer = new byte[bufferSize];
             while (true)
             {
                 int bytesRead = await source.ReadAsync(
-                    buffer.AsMemory(0, buffer.Length),
+                    buffer.AsMemory(0, bufferSize),
                     cancellationToken);
                 if (bytesRead == 0)
                 {
@@ -485,9 +507,13 @@ public sealed partial class FileService
             }
 
             await destination.FlushAsync(cancellationToken);
-            // Still exclusively held (ShareNone), so the path cannot point
-            // anywhere else while metadata is applied.
-            CopyFileMetadata(sourceInfo, destinationFilePath);
+            await StorageMigrationNativeMethods.CopyAlternateDataStreamsAsync(
+                sourceInfo.FullName,
+                destinationFilePath,
+                cancellationToken);
+            // Still exclusively held (ShareNone), so apply metadata directly
+            // through the open handle rather than reopening by path.
+            CopyFileMetadata(sourceInfo, destination.SafeFileHandle, destinationFilePath);
             return (destination, IdentityFromHandle(destination.SafeFileHandle));
         }
         catch
@@ -497,6 +523,10 @@ public sealed partial class FileService
             // someone else placed at the path.
             TryDisposeWithHandleDeletion(destination);
             throw;
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
         }
     }
 
@@ -577,11 +607,23 @@ public sealed partial class FileService
         }
     }
 
+    internal static Task MoveFileChunkedForTestAsync(
+        string sourceFilePath,
+        string destinationFilePath,
+        CancellationToken cancellationToken = default) =>
+        MoveFileWithProgressAsync(
+            sourceFilePath,
+            destinationFilePath,
+            new TransferProgressReporter(progress: null, totalItems: 1),
+            cancellationToken,
+            forceChunkedForTesting: true);
+
     private static async Task MoveFileWithProgressAsync(
         string sourceFilePath,
         string destinationFilePath,
         TransferProgressReporter reporter,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool forceChunkedForTesting = false)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(destinationFilePath)!);
         var sourceInfo = new FileInfo(sourceFilePath);
@@ -592,7 +634,7 @@ public sealed partial class FileService
         // incorrectly treated as a cross-volume move failure.
         long sourceLength = sourceInfo.Length;
 
-        bool canUseAtomicMove = CanUseAtomicMove(
+        bool canUseAtomicMove = !forceChunkedForTesting && CanUseAtomicMove(
             sourceFilePath,
             destinationFilePath);
         App.Log(
@@ -626,18 +668,25 @@ public sealed partial class FileService
         // reading only) spans the entire copy-to-commit sequence. Nobody can
         // write, rename, or delete the source mid-move, and the final
         // disposition deletes the exact object that was copied — no gap
-        // remains between validation and deletion.
-        SafeFileHandle sourceHandle = FileTransferNativeMethods.CreateFileW(
+        // remains between validation and deletion. Filesystem links are
+        // rejected atomically so a cross-volume move can never dereference a
+        // symbolic link and delete its external target.
+        SafeFileHandle sourceHandle = OpenSourceHandleRejectingLinks(
             sourceFilePath,
-            GenericReadAccess | DeleteAccess | FileWriteAttributesAccess,
+            GenericReadAccess | DeleteAccess,
             ShareRead,
-            IntPtr.Zero,
-            OpenExisting,
-            FileFlagOverlapped,
-            IntPtr.Zero);
+            FileFlagOverlapped | FileFlagSequentialScan,
+            out bool rejectedAsLink,
+            out int openError,
+            includeWriteAttributesWhenReadOnly: true);
         if (sourceHandle.IsInvalid)
         {
-            int openError = Marshal.GetLastWin32Error();
+            if (rejectedAsLink)
+            {
+                throw new InvalidOperationException(
+                    UnsafeFolderTransferFallbackMessage);
+            }
+
             // ERROR_SHARING_VIOLATION means another process is writing the
             // source: refuse the move rather than copy a moving target.
             // ERROR_ACCESS_DENIED (readable-but-not-deletable sources such as
@@ -658,9 +707,9 @@ public sealed partial class FileService
             await using var source = new FileStream(
                 sourceHandle,
                 FileAccess.Read,
-                256 * 1024,
+                4096,
                 isAsync: true);
-            if (IdentityFromHandle(sourceHandle) is null)
+            if (IdentityFromHandle(sourceHandle) is not { } sourceIdentity)
             {
                 // Nothing has been copied yet, so this is an ordinary move
                 // failure — it must not surface completed results or read as
@@ -688,21 +737,32 @@ public sealed partial class FileService
                         "The source file state could not be read before deletion."));
             }
 
-            if (!TrySetDispositionByHandle(sourceHandle, in sourceInformation, sourceFilePath))
-            {
-                // Copy complete, source retained: both copies stay.
-                throw new FileTransferSourceCleanupException(
-                    sourceFilePath,
-                    destinationFilePath,
-                    new IOException(
-                        $"The source '{sourceFilePath}' could not be deleted after the copy."));
-            }
+            bool disposedOnFirstHandle = TrySetDispositionByHandle(sourceHandle,
+                in sourceInformation,
+                sourceFilePath);
 
             // The source deletion completes when its handle closes: finish
             // the source transaction before releasing the destination's
             // exclusive hold, so at least one protected copy exists at every
             // instant of the commit.
             await source.DisposeAsync();
+
+            if (!disposedOnFirstHandle)
+            {
+                bool retriedReadOnlyDelete =
+                    (sourceInformation.FileAttributes & ReadOnlyAttribute) != 0 &&
+                    TryDeleteFileByIdentity(sourceFilePath, sourceIdentity);
+                if (!retriedReadOnlyDelete)
+                {
+                    // Copy complete, source retained: both copies stay.
+                    throw new FileTransferSourceCleanupException(
+                        sourceFilePath,
+                        destinationFilePath,
+                        new IOException(
+                            $"The source '{sourceFilePath}' could not be deleted after the copy."));
+                }
+            }
+
             TryDisposeQuietly(destination);
             destination = null;
         }
@@ -758,7 +818,7 @@ public sealed partial class FileService
         }
     }
 
-    private static string? GetComparableVolumeRoot(
+    internal static string? GetComparableVolumeRoot(
         string path,
         bool useParentPath)
     {
@@ -828,6 +888,12 @@ public sealed partial class FileService
         foreach (string filePath in Directory.EnumerateFiles(sourceDirectory))
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (IsFileSystemLink(filePath))
+            {
+                throw new InvalidOperationException(
+                    UnsafeFolderTransferFallbackMessage);
+            }
+
             string destinationFilePath = GetAvailableDestinationPath(
                 destinationDirectory,
                 Path.GetFileName(filePath));
@@ -853,7 +919,8 @@ public sealed partial class FileService
                 filePath,
                 sourceLength,
                 sourceLastWriteUtc,
-                sourceIdentity));
+                sourceIdentity,
+                destinationFilePath));
             copiedDestinationFiles?.Add(new CopiedDestinationFileRecord(
                 destinationFilePath,
                 destinationIdentity));
@@ -862,7 +929,7 @@ public sealed partial class FileService
         foreach (string subDirectory in Directory.EnumerateDirectories(sourceDirectory))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            string destinationSubDirectory = GetAvailableDestinationPath(
+            string destinationSubDirectory = ResolveNestedDirectoryDestinationPath(
                 destinationDirectory,
                 Path.GetFileName(subDirectory));
             await CopyDirectoryWithProgressAsync(
@@ -910,7 +977,8 @@ public sealed partial class FileService
     /// </summary>
     private static bool TryCreateOwnedDirectory(string path)
     {
-        if (Kernel32NativeMethods.CreateDirectory(path, IntPtr.Zero))
+        string extendedPath = StorageMigrationNativeMethods.Extended(Path.GetFullPath(path));
+        if (Kernel32NativeMethods.CreateDirectory(extendedPath, IntPtr.Zero))
         {
             return true;
         }
@@ -918,7 +986,14 @@ public sealed partial class FileService
         int error = Marshal.GetLastWin32Error();
         if (error == ErrorAlreadyExists)
         {
-            return false;
+            if (Directory.Exists(path) && !IsFileSystemLink(path))
+            {
+                return false;
+            }
+
+            throw new IOException(
+                $"Cannot create destination directory '{path}' because a file or link already exists at that path.",
+                new System.ComponentModel.Win32Exception(error));
         }
 
         throw new IOException(
@@ -926,7 +1001,7 @@ public sealed partial class FileService
             new System.ComponentModel.Win32Exception(error));
     }
 
-    private static async Task MoveDirectoryWithProgressAsync(
+    private static async Task<IReadOnlyList<FileTransferResult>?> MoveDirectoryWithProgressAsync(
         string sourceDirectory,
         string destinationDirectory,
         TransferWorkEstimate? estimate,
@@ -953,7 +1028,7 @@ public sealed partial class FileService
                     Path.GetFileName(sourceDirectory),
                     force: true);
                 Win32Helper.NotifyShellItemMoved(sourceDirectory, destinationDirectory);
-                return;
+                return null;
             }
         }
         catch (IOException)
@@ -1073,6 +1148,12 @@ public sealed partial class FileService
         }
 
         Win32Helper.NotifyShellItemMoved(sourceDirectory, destinationDirectory);
+        return destinationExistedBefore
+            ? copiedSourceFiles
+                .Where(static r => !string.IsNullOrWhiteSpace(r.DestinationFilePath))
+                .Select(static r => new FileTransferResult(r.SourceFilePath, r.DestinationFilePath))
+                .ToArray()
+            : null;
     }
 
     /// <summary>
@@ -1132,18 +1213,47 @@ public sealed partial class FileService
         return stranded;
     }
 
+    private const uint FileAttributeEncrypted = 0x00004000;
+    private const uint MutableBasicFileAttributeMask =
+        0x00000001 | // FILE_ATTRIBUTE_READONLY
+        0x00000002 | // FILE_ATTRIBUTE_HIDDEN
+        0x00000004 | // FILE_ATTRIBUTE_SYSTEM
+        0x00000020 | // FILE_ATTRIBUTE_ARCHIVE
+        0x00002000;  // FILE_ATTRIBUTE_NOT_CONTENT_INDEXED
+
     private static void CopyFileMetadata(
         FileInfo sourceInfo,
+        SafeFileHandle destinationHandle,
         string destinationFilePath)
     {
         try
         {
+            uint mutableAttributes =
+                ((uint)sourceInfo.Attributes) & MutableBasicFileAttributeMask;
+            var basic = new FileTransferNativeMethods.FileBasicInfo
+            {
+                CreationTime = sourceInfo.CreationTimeUtc.ToFileTimeUtc(),
+                LastAccessTime = 0,
+                LastWriteTime = sourceInfo.LastWriteTimeUtc.ToFileTimeUtc(),
+                ChangeTime = 0,
+                FileAttributes = mutableAttributes,
+            };
+            if (!destinationHandle.IsClosed &&
+                FileTransferNativeMethods.SetFileBasicInfoByHandle(
+                    destinationHandle,
+                    FileBasicInfoClass,
+                    ref basic,
+                    Marshal.SizeOf<FileTransferNativeMethods.FileBasicInfo>()))
+            {
+                return;
+            }
+
             File.SetCreationTimeUtc(destinationFilePath, sourceInfo.CreationTimeUtc);
             File.SetLastWriteTimeUtc(destinationFilePath, sourceInfo.LastWriteTimeUtc);
             File.SetAttributes(destinationFilePath, sourceInfo.Attributes);
         }
         catch (Exception ex) when (
-            ex is UnauthorizedAccessException or IOException)
+            ex is UnauthorizedAccessException or IOException or ArgumentOutOfRangeException)
         {
             App.Log(
                 $"[FileTransfer] Could not preserve metadata for " +
@@ -1152,27 +1262,28 @@ public sealed partial class FileService
     }
 
     /// <summary>
-    /// Removes a destination file this transfer created. When
-    /// <paramref name="expectedLength"/> is known (a completed copy), a file
-    /// that no longer carries that length is kept: it may have been replaced
-    /// by another process, and neither its attributes nor its content are
-    /// ours to touch.
-    /// </summary>
-    /// <summary>
     /// Creates the transfer destination stream: an overlapped CreateNew
     /// handle with write and delete access, shared with nobody. Returned
     /// still open — the caller owns the commit decision and the
-    /// handle-bound cleanup on failure.
+    /// handle-bound cleanup on failure. When <paramref name="encryptDestination"/>
+    /// is true, requests NTFS EFS encryption at creation time and refuses to
+    /// write plaintext if the destination volume silently ignored EFS.
     /// </summary>
-    internal static FileStream CreateTransferDestinationStream(string destinationFilePath)
+    internal static FileStream CreateTransferDestinationStream(
+        string destinationFilePath,
+        bool encryptDestination = false)
     {
+        string extendedDestination = StorageMigrationNativeMethods.Extended(
+            Path.GetFullPath(destinationFilePath));
+        uint flagsAndAttributes = FileFlagOverlapped |
+            (encryptDestination ? FileAttributeEncrypted : 0u);
         SafeFileHandle destinationHandle = FileTransferNativeMethods.CreateFileW(
-            destinationFilePath,
+            extendedDestination,
             GenericWriteAccess | DeleteAccess,
             ShareNone,
             IntPtr.Zero,
             CreateNewDisposition,
-            FileFlagOverlapped,
+            flagsAndAttributes,
             IntPtr.Zero);
         if (destinationHandle.IsInvalid)
         {
@@ -1183,10 +1294,38 @@ public sealed partial class FileService
                 Marshal.GetLastWin32Error());
         }
 
+        if (encryptDestination)
+        {
+            bool encryptedApplied =
+                FileTransferNativeMethods.GetFileInformationByHandle(
+                    destinationHandle,
+                    out FileTransferNativeMethods.ByHandleFileInformation destInfo) &&
+                (destInfo.FileAttributes & FileAttributeEncrypted) != 0;
+            if (!encryptedApplied)
+            {
+                try
+                {
+                    var disposition = new FileTransferNativeMethods.FileDispositionInfo { Delete = true };
+                    _ = FileTransferNativeMethods.SetFileInformationByHandle(
+                        destinationHandle,
+                        FileDispositionInfoClass,
+                        ref disposition,
+                        Marshal.SizeOf<FileTransferNativeMethods.FileDispositionInfo>());
+                }
+                finally
+                {
+                    destinationHandle.Dispose();
+                }
+
+                throw new IOException(
+                    $"Cannot copy encrypted file to '{destinationFilePath}' because the destination volume does not support NTFS EFS encryption.");
+            }
+        }
+
         return new FileStream(
             destinationHandle,
             FileAccess.Write,
-            256 * 1024,
+            4096,
             isAsync: true);
     }
 

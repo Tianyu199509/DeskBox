@@ -43,6 +43,65 @@ public partial class App
     /// </summary>
     internal bool IsSettingsHostVisible => IsSettingsHostRunning;
 
+    /// <summary>
+    /// Out-of-process settings lives in <c>DeskBox.Settings.exe</c> with its
+    /// own private heap and working set. Only block main-process memory
+    /// cleanup / working-set trim while the host is actively recording a
+    /// hotkey (hotkeys suspended on the main process).
+    /// </summary>
+    internal bool IsSettingsHostBlockingMemoryCleanup =>
+        IsSettingsHostRunning &&
+        (GlobalHotkeyService?.IsSuspendedForRecording == true ||
+         _searchHotkeyService?.IsSuspendedForRecording == true ||
+         _clipboardHotkeyService?.IsSuspendedForRecording == true);
+
+    internal bool IsInProcessDeskBoxWindow(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        Platform.Win32Helper.GetWindowThreadProcessId(hwnd, out uint processId);
+        if (processId == (uint)Environment.ProcessId)
+        {
+            return true;
+        }
+
+        if (BelongsToSettingsHostProcess(processId))
+        {
+            return false;
+        }
+
+        return IsDeskBoxWindow(hwnd);
+    }
+
+    internal bool BelongsToSettingsHostProcess(uint processId)
+    {
+        if (processId == 0)
+        {
+            return false;
+        }
+
+        try
+        {
+            if (_settingsHostProcess is { } host && (uint)host.Id == processId)
+            {
+                return true;
+            }
+
+            if (_exitingSettingsHost is { } dying && (uint)dying.Id == processId)
+            {
+                return true;
+            }
+        }
+        catch (InvalidOperationException)
+        {
+        }
+
+        return false;
+    }
+
     private void ShowSettingsViaHost(
         string? sectionTag,
         string? glanceWidgetId,
@@ -215,8 +274,23 @@ public partial class App
     {
         try
         {
-            string exePath = Environment.ProcessPath ??
-                Path.Combine(AppContext.BaseDirectory, "DeskBox.exe");
+            string dedicatedHostPath = Path.Combine(
+                AppContext.BaseDirectory,
+                "DeskBox.Settings.exe");
+#if !DESKBOX_AOT_SMOKE_HARNESS && !DESKBOX_STORE
+            if (!File.Exists(dedicatedHostPath))
+            {
+                Log($"[SettingsHost] Companion host missing at '{dedicatedHostPath}'; refusing self-spawn.");
+                NotifyMissingSettingsCompanionHost(dedicatedHostPath);
+                return;
+            }
+            string exePath = dedicatedHostPath;
+#else
+            string exePath = File.Exists(dedicatedHostPath)
+                ? dedicatedHostPath
+                : Environment.ProcessPath ??
+                  Path.Combine(AppContext.BaseDirectory, "DeskBox.exe");
+#endif
             var startInfo = new ProcessStartInfo(exePath)
             {
                 UseShellExecute = false,
@@ -225,6 +299,23 @@ public partial class App
             foreach (string argument in arguments)
             {
                 startInfo.ArgumentList.Add(argument);
+            }
+
+            Process? previousHost = Interlocked.Exchange(ref _settingsHostProcess, null);
+            if (previousHost is not null && !ReferenceEquals(previousHost, _exitingSettingsHost))
+            {
+                try { previousHost.Dispose(); } catch { }
+            }
+
+            if (_exitingSettingsHost is { } staleExiting)
+            {
+                bool hasExited = false;
+                try { hasExited = staleExiting.HasExited; } catch { hasExited = true; }
+                if (hasExited &&
+                    ReferenceEquals(Interlocked.CompareExchange(ref _exitingSettingsHost, null, staleExiting), staleExiting))
+                {
+                    try { staleExiting.Dispose(); } catch { }
+                }
             }
 
             _settingsHostProcess = Process.Start(startInfo);
@@ -243,9 +334,17 @@ public partial class App
                     if (sender is Process host)
                     {
                         host.Exited -= ExitHandler;
+                        OnSettingsHostProcessExited(generation);
+                        if (ReferenceEquals(Interlocked.CompareExchange(ref _settingsHostProcess, null, host), host) ||
+                            ReferenceEquals(Interlocked.CompareExchange(ref _exitingSettingsHost, null, host), host))
+                        {
+                            try { host.Dispose(); } catch { }
+                        }
                     }
-
-                    OnSettingsHostProcessExited(generation);
+                    else
+                    {
+                        OnSettingsHostProcessExited(generation);
+                    }
                 }
 
                 spawnedHost.Exited += ExitHandler;
@@ -278,27 +377,50 @@ public partial class App
                 return;
             }
 
-            if (GlobalHotkeyService is { IsSuspendedForRecording: true } hotkey)
+            if (GlobalHotkeyService?.IsSuspendedForRecording == true ||
+                _searchHotkeyService?.IsSuspendedForRecording == true ||
+                _clipboardHotkeyService?.IsSuspendedForRecording == true)
             {
                 Log("[SettingsHost] Host died while hotkeys suspended; resuming");
                 UiDispatcherQueue?.TryEnqueue(() =>
                 {
-                    hotkey.ResumeAfterRecording();
+                    GlobalHotkeyService?.ResumeAfterRecording();
                     // Deep review R13-2 (D10 audit): the recorder suspends
-                    // BOTH services (see InProcessSettingsHotkeyActions),
-                    // but this guard only ever resumed the global one — a
-                    // host death during a SEARCH hotkey recording left the
-                    // search hotkey suspended and unregistered with its
-                    // heartbeat gated, until the next host boot's
-                    // unconditional resume.
+                    // ALL active hotkey services (see InProcessSettingsHotkeyActions),
+                    // so resume search and clipboard hotkeys alongside main.
                     _searchHotkeyService?.ResumeAfterRecording();
+                    _clipboardHotkeyService?.ResumeAfterRecording();
                 });
             }
+
+            NotifySettingsHostClosedForMemoryCleanup();
         }
         catch (Exception ex)
         {
             Log($"[SettingsHost] Exit guard failed: {ex.Message}");
         }
+    }
+
+    private void NotifySettingsHostClosedForMemoryCleanup()
+    {
+        if (IsShuttingDown)
+        {
+            return;
+        }
+
+        UiDispatcherQueue?.TryEnqueue(() =>
+        {
+            if (IsShuttingDown || IsSettingsHostVisible)
+            {
+                return;
+            }
+
+            NotifyMemoryCleanupActivity();
+            if (WidgetManager?.CaptureMemoryCleanupVisibilitySnapshot().HasNativeVisibleWidgets == false)
+            {
+                ScheduleBackgroundMemoryCleanup("settings-host-closed");
+            }
+        });
     }
 
     /// <summary>
@@ -341,6 +463,7 @@ public partial class App
                     // time onto the OLD host's dying identity.
                     _exitingSettingsHostStartTime = TryGetStartTime(current);
                     Log("[SettingsHost] Farewell received; treating host as not running for show decisions");
+                    NotifySettingsHostClosedForMemoryCleanup();
                     return;
                 }
 
@@ -403,26 +526,69 @@ public partial class App
     private void ShutdownSettingsHost()
     {
         Process? host = _settingsHostProcess ?? _exitingSettingsHost;
-        if (host is null || host.HasExited)
+        if (host is null)
         {
             return;
         }
 
-        _ = PushSettingsIpcEventAsync(SettingsIpcMethods.HostShutdown, null);
+        bool alreadyExited = false;
+        try { alreadyExited = host.HasExited; } catch { alreadyExited = true; }
+        if (!alreadyExited)
+        {
+            _ = PushSettingsIpcEventAsync(SettingsIpcMethods.HostShutdown, null);
+            try
+            {
+                if (!host.WaitForExit(4000))
+                {
+                    host.Kill();
+                    host.WaitForExit(2000);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log($"[SettingsHost] Shutdown wait failed: {ex.Message}");
+            }
+        }
+
+        Process? p1 = Interlocked.Exchange(ref _settingsHostProcess, null);
+        Process? p2 = Interlocked.Exchange(ref _exitingSettingsHost, null);
+        try { p1?.Dispose(); } catch { }
+        if (!ReferenceEquals(p2, p1))
+        {
+            try { p2?.Dispose(); } catch { }
+        }
+    }
+
+    private void NotifyMissingSettingsCompanionHost(string dedicatedHostPath)
+    {
+        string title = "DeskBox";
+        string message = $"DeskBox.Settings.exe was not found ({dedicatedHostPath}). Please reinstall or repair DeskBox.";
+        if (_nativeNotificationService?.TryShow(title, message, arguments: null) == true)
+        {
+            return;
+        }
+
+        if (_trayHost is not { IsCreated: true })
+        {
+            return;
+        }
+
         try
         {
-            if (!host.WaitForExit(4000))
-            {
-                host.Kill();
-                host.WaitForExit(2000);
-            }
+            _trayHost.ShowNotification(
+                title,
+                message,
+                Platform.TrayBalloonIconKind.Warning,
+                customIconHandle: null,
+                largeIcon: false,
+                sound: false,
+                respectQuietTime: true,
+                realtime: false,
+                timeout: TimeSpan.FromSeconds(8));
         }
         catch (Exception ex)
         {
-            Log($"[SettingsHost] Shutdown wait failed: {ex.Message}");
+            Log($"[SettingsHost] Companion missing notification failed: {ex.Message}");
         }
-
-        _settingsHostProcess = null;
-        _exitingSettingsHost = null;
     }
 }

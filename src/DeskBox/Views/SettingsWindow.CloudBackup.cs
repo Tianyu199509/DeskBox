@@ -142,7 +142,7 @@ public sealed partial class SettingsWindow
         // skip the assignment if AOT returned a base-class RCW, recreating
         // the blank-list bug this code exists to fix.
         if (FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.ListView>(
-                "CloudBackupSettings", "CloudBackupSnapshotsList") is { } list)
+                "Maintenance", "CloudBackupSnapshotsList") is { } list)
         {
             list.ItemsSource = _backupSettingsViewModel.RemoteSnapshotItems.Count == 0
                 ? null
@@ -152,7 +152,7 @@ public sealed partial class SettingsWindow
         // Empty-state hint: an unexplained blank area reads as "still
         // loading" on first visit — say there is simply nothing remote yet.
         if (FindCreatedSectionElement<TextBlock>(
-                "CloudBackupSettings", "CloudBackupSnapshotsEmptyHint") is { } emptyHint)
+                "Maintenance", "CloudBackupSnapshotsEmptyHint") is { } emptyHint)
         {
             emptyHint.Visibility = _backupSettingsViewModel.RemoteSnapshotItems.Count == 0
                 ? Visibility.Visible
@@ -198,6 +198,7 @@ public sealed partial class SettingsWindow
             "todo-data" => "Settings.CloudBackup.TodoData.Title",
             "quick-capture-data" => "Settings.CloudBackup.QuickCaptureData.Title",
             "widget-style" => "Settings.CloudBackup.WidgetStyle.Title",
+            "custom-widgets" => "Settings.CloudBackup.CustomWidgets.Title",
             _ => manifestName
         };
         string title = titleKey.StartsWith("Settings.", StringComparison.Ordinal)
@@ -321,6 +322,11 @@ public sealed partial class SettingsWindow
                 IsChecked = true,
                 Content = _localizationService.T("Settings.CloudBackup.WidgetStyle.Title")
             };
+            var customWidgetsBox = new CheckBox
+            {
+                IsChecked = true,
+                Content = _localizationService.T("Settings.CloudBackup.CustomWidgets.Title")
+            };
             var domainDialog = new ContentDialog
             {
                 XamlRoot = SettingsRoot.XamlRoot,
@@ -342,7 +348,8 @@ public sealed partial class SettingsWindow
                         },
                         todoBox,
                         quickCaptureBox,
-                        widgetStyleBox
+                        widgetStyleBox,
+                        customWidgetsBox
                     }
                 }
             };
@@ -368,6 +375,11 @@ public sealed partial class SettingsWindow
             if (widgetStyleBox.IsChecked == true)
             {
                 scope |= CloudBackupDomain.WidgetStyle;
+            }
+
+            if (customWidgetsBox.IsChecked == true)
+            {
+                scope |= CloudBackupDomain.CustomWidgets;
             }
 
             if (scope == CloudBackupDomain.None)

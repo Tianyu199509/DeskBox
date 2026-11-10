@@ -1,0 +1,16 @@
+{
+  "modFocus": "মূল কোটা কার্ড",
+  "modRadar": "মাল্টি-প্রোভাইডার রাডার",
+  "modTokens": "লোকাল Token ও ক্যাশ অন্তর্দৃষ্টি",
+  "modTrend": "১৪ দিনের ব্যবহারের ট্রেন্ড",
+  "optQuotaRem": "অবশিষ্ট % দেখান (যেমন ৮৫% বাকি)",
+  "optQuotaUsed": "ব্যবহৃত % দেখান (যেমন ১৫% ব্যবহৃত)",
+  "optRef15m": "প্রতি ১৫ মিনিটে",
+  "optRef1m": "প্রতি ১ মিনিটে (প্রস্তাবিত)",
+  "optRef5m": "প্রতি ৫ মিনিটে",
+  "setModules": "দৃশ্যমান মডিউল ও ক্রম",
+  "setQuotaMode": "উইন্ডো কোটা প্রদর্শন",
+  "setRefresh": "স্বয়ংক্রিয় পোলিং বিরতি",
+  "widgetDescription": "Claude Code ও Codex সেশনের রেট-লিমিট উইন্ডোর পাশাপাশি Zhipu GLM, DeepSeek, Kimi ও OpenRouter অ্যাকাউন্ট ব্যালেন্স মনিটর করুন।",
+  "widgetName": "AI মনিটর"
+}

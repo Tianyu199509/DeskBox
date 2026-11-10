@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using DeskBox.Contracts;
 using DeskBox.Models;
@@ -202,7 +202,7 @@ public sealed class SettingsServiceTests : IDisposable
 
         Assert.Equal(SettingsLoadRecoveryState.Primary, service.LastLoadRecoveryState);
         Assert.Equal(SettingsMigrationPipeline.CurrentSchemaVersion, service.Settings.SchemaVersion);
-        Assert.Equal(15, service.Settings.SchemaVersion);
+        Assert.Equal(18, service.Settings.SchemaVersion);
 
         // Widgets survive the chain (and the layout-store adoption): both
         // instances keep their identity, kind, and legacy geometry — the 5→6
@@ -263,7 +263,7 @@ public sealed class SettingsServiceTests : IDisposable
         // The migrated profile is persisted back at the current schema.
         using JsonDocument persisted = JsonDocument.Parse(
             await File.ReadAllTextAsync(settingsPath));
-        Assert.Equal(15, persisted.RootElement.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal(18, persisted.RootElement.GetProperty("schemaVersion").GetInt32());
         Assert.True(persisted.RootElement.GetProperty("fileStacksEnabled").GetBoolean());
         Assert.False(persisted.RootElement.GetProperty("fileStackAutoStacking").GetBoolean());
 
@@ -272,7 +272,7 @@ public sealed class SettingsServiceTests : IDisposable
         var reloaded = new SettingsService(_settingsRoot);
         await reloaded.LoadAsync();
         Assert.Equal(SettingsLoadRecoveryState.Primary, reloaded.LastLoadRecoveryState);
-        Assert.Equal(15, reloaded.Settings.SchemaVersion);
+        Assert.Equal(18, reloaded.Settings.SchemaVersion);
         Assert.True(reloaded.Settings.FileStacksEnabled);
         Assert.False(reloaded.Settings.FileStackAutoStacking);
         Assert.Equal(2, reloaded.Settings.Widgets.Count);
@@ -297,6 +297,27 @@ public sealed class SettingsServiceTests : IDisposable
         var reloaded = new SettingsService(_settingsRoot);
         await reloaded.LoadAsync();
         Assert.True(Assert.Single(reloaded.Settings.Widgets).IsDisabled);
+    }
+
+    [Fact]
+    public async Task SaveAsync_PreservesDisabledStateForIndividualCustomWidgets()
+    {
+        var service = new SettingsService(_settingsRoot);
+        await service.LoadAsync();
+        service.Settings.WidgetLayout.Widgets.Add(new WidgetConfig
+        {
+            Name = "Agent Status",
+            WidgetKind = WidgetKind.Custom,
+            IsVisible = false,
+            IsDisabled = true
+        });
+
+        await service.SaveAsync();
+
+        Assert.True(Assert.Single(service.Settings.WidgetLayout.Widgets).IsDisabled);
+        var reloaded = new SettingsService(_settingsRoot);
+        await reloaded.LoadAsync();
+        Assert.True(Assert.Single(reloaded.Settings.WidgetLayout.Widgets).IsDisabled);
     }
 
     [Fact]
@@ -1146,18 +1167,23 @@ public sealed class SettingsServiceTests : IDisposable
     [Theory]
     [InlineData(
         SettingsService.WidgetAnimationEffectSlideLeftFade,
+        SettingsService.WidgetAnimationEffectSlideFade,
         SettingsService.WidgetAnimationSlideDirectionLeft)]
     [InlineData(
         SettingsService.WidgetAnimationEffectSlideRight,
+        SettingsService.WidgetAnimationEffectScreenEdgeSlide,
         SettingsService.WidgetAnimationSlideDirectionRight)]
     [InlineData(
         SettingsService.WidgetAnimationEffectSlideUpFade,
+        SettingsService.WidgetAnimationEffectSlideFade,
         SettingsService.WidgetAnimationSlideDirectionUp)]
     [InlineData(
         SettingsService.WidgetAnimationEffectSlideDown,
+        SettingsService.WidgetAnimationEffectScreenEdgeSlide,
         SettingsService.WidgetAnimationSlideDirectionDown)]
     public async Task LoadAsync_MigratesLegacyDirectionalAnimation(
         string legacyEffect,
+        string expectedEffect,
         string expectedDirection)
     {
         var settings = new AppSettings
@@ -1172,12 +1198,12 @@ public sealed class SettingsServiceTests : IDisposable
         var service = new SettingsService(_settingsRoot);
         await service.LoadAsync();
 
-        Assert.Equal(SettingsService.WidgetAnimationEffectSlideFade, service.Settings.WidgetAnimationEffect);
+        Assert.Equal(expectedEffect, service.Settings.WidgetAnimationEffect);
         Assert.Equal(expectedDirection, service.Settings.WidgetAnimationSlideDirection);
     }
 
     [Fact]
-    public async Task LoadAsync_SlideAnimationWithoutDirectionDefaultsToRight()
+    public async Task LoadAsync_SlideAnimationWithoutDirectionDefaultsToDown()
     {
         var settings = new AppSettings
         {
@@ -1192,24 +1218,24 @@ public sealed class SettingsServiceTests : IDisposable
         await service.LoadAsync();
 
         Assert.Equal(
-            SettingsService.WidgetAnimationSlideDirectionRight,
+            SettingsService.WidgetAnimationSlideDirectionDown,
             service.Settings.WidgetAnimationSlideDirection);
     }
 
     [Theory]
-    [InlineData(SettingsService.WidgetAnimationEffectEdgeScale)]
-    [InlineData(SettingsService.WidgetAnimationEffectTilt)]
-    [InlineData(SettingsService.WidgetAnimationEffectWipe)]
-    public async Task LoadAsync_PreservesDirectionalStationaryEffects(string effect)
+    [InlineData(SettingsService.WidgetAnimationEffectEdgeScale, SettingsService.WidgetAnimationEffectWipe, SettingsService.WidgetAnimationSlideDirectionUp)]
+    [InlineData(SettingsService.WidgetAnimationEffectTilt, SettingsService.WidgetAnimationEffectScaleFade, SettingsService.WidgetAnimationSlideDirectionNone)]
+    [InlineData(SettingsService.WidgetAnimationEffectZoom, SettingsService.WidgetAnimationEffectScaleFade, SettingsService.WidgetAnimationSlideDirectionNone)]
+    [InlineData(SettingsService.WidgetAnimationEffectWipe, SettingsService.WidgetAnimationEffectWipe, SettingsService.WidgetAnimationSlideDirectionUp)]
+    [InlineData(SettingsService.WidgetAnimationEffectScreenEdgeSlide, SettingsService.WidgetAnimationEffectScreenEdgeSlide, SettingsService.WidgetAnimationSlideDirectionUp)]
+    public async Task LoadAsync_NormalizesAndMigratesStoredEffects(
+        string storedEffect,
+        string expectedEffect,
+        string expectedDirection)
     {
-        // The persistence whitelist once knew only the four legacy effects
-        // and rewrote every new effect back to SlideFade on the next
-        // save/load cycle, which the user saw as "the effect drifts back to
-        // slide after a few toggles". These effects consume the direction
-        // too, so the stored direction must survive with them.
         var settings = new AppSettings
         {
-            WidgetAnimationEffect = effect,
+            WidgetAnimationEffect = storedEffect,
             WidgetAnimationSlideDirection = SettingsService.WidgetAnimationSlideDirectionUp
         };
         await File.WriteAllTextAsync(
@@ -1219,10 +1245,8 @@ public sealed class SettingsServiceTests : IDisposable
         var service = new SettingsService(_settingsRoot);
         await service.LoadAsync();
 
-        Assert.Equal(effect, service.Settings.WidgetAnimationEffect);
-        Assert.Equal(
-            SettingsService.WidgetAnimationSlideDirectionUp,
-            service.Settings.WidgetAnimationSlideDirection);
+        Assert.Equal(expectedEffect, service.Settings.WidgetAnimationEffect);
+        Assert.Equal(expectedDirection, service.Settings.WidgetAnimationSlideDirection);
     }
 
     [Fact]
@@ -1246,7 +1270,7 @@ public sealed class SettingsServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task LoadAsync_MigratesRemovedNoAnimationOptionToStandardSlideFade()
+    public async Task LoadAsync_PreservesExplicitNoAnimationSelectionAndNormalizesRemovedTiers()
     {
         var settings = new AppSettings
         {
@@ -1262,9 +1286,9 @@ public sealed class SettingsServiceTests : IDisposable
         var service = new SettingsService(_settingsRoot);
         await service.LoadAsync();
 
-        Assert.Equal(SettingsService.WidgetAnimationEffectSlideFade, service.Settings.WidgetAnimationEffect);
-        Assert.Equal(SettingsService.WidgetAnimationSpeedStandard, service.Settings.WidgetAnimationSpeed);
-        Assert.Equal(SettingsService.WidgetAnimationSlideDirectionRight, service.Settings.WidgetAnimationSlideDirection);
+        Assert.Equal(SettingsService.WidgetAnimationEffectNone, service.Settings.WidgetAnimationEffect);
+        Assert.Equal(SettingsService.WidgetAnimationSpeedRelaxed, service.Settings.WidgetAnimationSpeed);
+        Assert.Equal(SettingsService.WidgetAnimationSlideDirectionNone, service.Settings.WidgetAnimationSlideDirection);
         Assert.Equal(SettingsService.WidgetAnimationEasingStandard, service.Settings.WidgetAnimationEasingIntensity);
     }
 
@@ -1281,6 +1305,7 @@ public sealed class SettingsServiceTests : IDisposable
             TodoShowAllTab = false,
             TodoShowActiveTab = false,
             TodoShowTodayTab = false,
+            TodoShowOverdueTab = false,
             TodoShowThisWeekTab = false,
             TodoShowThisMonthTab = false,
             TodoShowImportantTab = false,
@@ -1309,6 +1334,7 @@ public sealed class SettingsServiceTests : IDisposable
             TodoDefaultFilter = filter,
             TodoShowAllTab = false,
             TodoShowTodayTab = false,
+            TodoShowOverdueTab = false,
             TodoShowImportantTab = false,
             TodoShowCompletedTab = false,
             TodoShowThisWeekTab = filter == SettingsService.TodoDefaultFilterThisWeek,
@@ -1373,7 +1399,7 @@ public sealed class SettingsServiceTests : IDisposable
 
         SettingsService.ApplyDefaultPreferences(restoredDefaults);
 
-        Assert.Equal(SettingsService.WidgetAnimationEffectSlideFade, newUserDefaults.WidgetAnimationEffect);
+        Assert.Equal(SettingsService.WidgetAnimationEffectScreenEdgeSlide, newUserDefaults.WidgetAnimationEffect);
         Assert.Equal(newUserDefaults.WidgetAnimationEffect, restoredDefaults.WidgetAnimationEffect);
         Assert.Null(newUserDefaults.LegacyWidgetCapsuleModeEnabled);
         Assert.Null(restoredDefaults.LegacyWidgetCapsuleModeEnabled);
@@ -1737,7 +1763,7 @@ public sealed class SettingsServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task LoadAsync_MigratesRemovedSystemCornerPreferenceToRound()
+    public async Task LoadAsync_MigratesRemovedSystemCornerPreferenceToLarge()
     {
         string settingsPath = Path.Combine(_settingsRoot, "settings.json");
         await File.WriteAllTextAsync(
@@ -1967,6 +1993,353 @@ public sealed class SettingsServiceTests : IDisposable
     private static string SerializeSettingValue(object? value, Type type)
     {
         return JsonSerializer.Serialize(value, type, s_jsonOptions);
+    }
+
+    [Fact]
+    public async Task LoadAsync_MigratesLegacyQuickCaptureClipboardEnabledToClipboardFeatureWidget()
+    {
+        await File.WriteAllTextAsync(
+            Path.Combine(_settingsRoot, "settings.json"),
+            """
+            {
+              "quickCaptureEnabled": true,
+              "quickCaptureClipboardEnabled": true,
+              "quickCaptureImageClipboardEnabled": true
+            }
+            """);
+
+        var service = new SettingsService(_settingsRoot);
+        await service.LoadAsync();
+
+        Assert.True(FeatureWidgetSettings.IsEnabled(service.Settings, WidgetKind.QuickCapture));
+        Assert.True(FeatureWidgetSettings.IsEnabled(service.Settings, WidgetKind.Clipboard));
+        Assert.False(service.Settings.QuickCaptureClipboardEnabled);
+        Assert.False(service.Settings.QuickCaptureImageClipboardEnabled);
+    }
+
+    [Fact]
+    public async Task LoadAsync_RetiresLegacySearchWidgetWithoutConvertingToFileWidget()
+    {
+        await File.WriteAllTextAsync(
+            Path.Combine(_settingsRoot, "settings.json"),
+            """
+            {
+              "schemaVersion": 10,
+              "featureWidgetEnabledStates": {
+                "Search": true,
+                "Todo": true
+              },
+              "widgetCapsuleBarOrder": ["file-1", "search-1", "todo-1"],
+              "widgets": [
+                {
+                  "id": "file-1",
+                  "name": "Files",
+                  "widgetKind": "File"
+                },
+                {
+                  "id": "search-1",
+                  "name": "Search",
+                  "widgetKind": "Search"
+                },
+                {
+                  "id": "todo-1",
+                  "name": "Todo",
+                  "widgetKind": "Todo"
+                }
+              ]
+            }
+            """);
+
+        var service = new SettingsService(_settingsRoot);
+        await service.LoadAsync();
+
+        Assert.Equal(["file-1", "todo-1"], service.Settings.Widgets.Select(w => w.Id));
+        Assert.DoesNotContain(service.Settings.Widgets, w => w.WidgetKind == WidgetKind.Search);
+        Assert.Equal(["file-1", "todo-1"], service.Settings.WidgetCapsuleBarOrder);
+        Assert.DoesNotContain("Search", service.Settings.FeatureWidgetEnabledStates.Keys);
+    }
+
+    [Fact]
+    public async Task LoadAsync_DissolvesTwoMemberGroupWithSearchAndTransfersSurfaceStateToSurvivor()
+    {
+        await File.WriteAllTextAsync(
+            Path.Combine(_settingsRoot, "settings.json"),
+            """
+            {
+              "schemaVersion": 10,
+              "widgetCapsuleBarOrder": ["search-1"],
+              "widgets": [
+                {
+                  "id": "file-1",
+                  "name": "Files",
+                  "widgetKind": "File",
+                  "x": 10,
+                  "y": 20,
+                  "width": 240,
+                  "height": 260,
+                  "isVisible": false
+                },
+                {
+                  "id": "search-1",
+                  "name": "Search",
+                  "widgetKind": "Search",
+                  "isVisible": true
+                }
+              ],
+              "widgetGroups": [
+                {
+                  "id": "grp-1",
+                  "surfaceId": "surf-grp-1",
+                  "memberIds": ["file-1", "search-1"],
+                  "activeMemberId": "search-1",
+                  "x": 420,
+                  "y": 180,
+                  "width": 520,
+                  "height": 460,
+                  "boundsCoordinateVersion": 1,
+                  "isVisible": true,
+                  "collapseBehavior": "Smart"
+                }
+              ],
+              "widgetTopologyLayouts": {
+                "single-primary": {
+                  "monitors": [
+                    {
+                      "stableId": "stable-1",
+                      "deviceName": "\\\\.\\DISPLAY1",
+                      "isPrimary": true,
+                      "monitorWidth": 1920,
+                      "monitorHeight": 1080,
+                      "workAreaWidth": 1920,
+                      "workAreaHeight": 1040,
+                      "dpiScale": 1.0
+                    }
+                  ],
+                  "surfaces": {
+                    "surf-grp-1": {
+                      "x": 420,
+                      "y": 180,
+                      "width": 520,
+                      "height": 460,
+                      "boundsCoordinateVersion": 1,
+                      "positionMonitorStableId": "stable-1"
+                    }
+                  }
+                }
+              }
+            }
+            """);
+
+        var service = new SettingsService(_settingsRoot);
+        await service.LoadAsync();
+
+        Assert.Empty(service.Settings.WidgetGroups);
+        WidgetConfig survivor = Assert.Single(service.Settings.Widgets);
+        Assert.Equal("file-1", survivor.Id);
+        Assert.Equal(WidgetKind.File, survivor.WidgetKind);
+        Assert.True(survivor.IsVisible);
+        Assert.Equal(420, survivor.X);
+        Assert.Equal(180, survivor.Y);
+        Assert.Equal(520, survivor.Width);
+        Assert.Equal(460, survivor.Height);
+        Assert.Equal(WidgetCollapseBehaviorNames.Smart, survivor.Metadata[WidgetCollapseBehaviorNames.MetadataKey]);
+        Assert.Equal(["file-1"], service.Settings.WidgetCapsuleBarOrder);
+        WidgetTopologyLayoutProfile topologyProfile = Assert.Single(service.Settings.WidgetTopologyLayouts.Values);
+        KeyValuePair<string, WidgetSurfaceLayoutProfile> surface = Assert.Single(topologyProfile.Surfaces);
+        Assert.Equal("file-1", surface.Key);
+        Assert.Equal(420, surface.Value.X);
+        Assert.Equal(180, surface.Value.Y);
+    }
+
+    [Fact]
+    public async Task LoadAsync_MigratesDormantSearchHotkeyWhenLegacySearchWidgetWasExplicitlyDisabled()
+    {
+        await File.WriteAllTextAsync(
+            Path.Combine(_settingsRoot, "settings.json"),
+            """
+            {
+              "schemaVersion": 10,
+              "searchHotkeyEnabled": true,
+              "featureWidgetEnabledStates": {
+                "Search": false
+              }
+            }
+            """);
+
+        var disabledLegacy = new SettingsService(_settingsRoot);
+        await disabledLegacy.LoadAsync();
+        Assert.False(disabledLegacy.Settings.SearchHotkeyEnabled);
+        Assert.DoesNotContain("Search", disabledLegacy.Settings.FeatureWidgetEnabledStates.Keys);
+
+        // Once the legacy "Search" widget entry is stripped, turning SearchHotkeyEnabled
+        // back on persists across reloads without requiring any widget.
+        disabledLegacy.Settings.SearchHotkeyEnabled = true;
+        await disabledLegacy.SaveAsync();
+
+        var reloaded = new SettingsService(_settingsRoot);
+        await reloaded.LoadAsync();
+        Assert.True(reloaded.Settings.SearchHotkeyEnabled);
+
+        // Existing users who had both Search widget and SearchHotkeyEnabled active keep it enabled.
+        string enabledRoot = Directory.CreateDirectory(Path.Combine(_tempRoot, "enabled-legacy")).FullName;
+        await File.WriteAllTextAsync(
+            Path.Combine(enabledRoot, "settings.json"),
+            """
+            {
+              "schemaVersion": 10,
+              "searchHotkeyEnabled": true,
+              "featureWidgetEnabledStates": {
+                "Search": true
+              }
+            }
+            """);
+
+        var enabledLegacy = new SettingsService(enabledRoot);
+        await enabledLegacy.LoadAsync();
+        Assert.True(enabledLegacy.Settings.SearchHotkeyEnabled);
+    }
+
+    [Fact]
+    public async Task LoadAsync_SplitFileV159Upgrade_PreservesClipboardEnablementFromQuickCapture()
+    {
+        string splitRoot = Directory.CreateDirectory(Path.Combine(_tempRoot, "split-v159-clipboard")).FullName;
+        await File.WriteAllTextAsync(
+            Path.Combine(splitRoot, "settings.json"),
+            """
+            {
+              "schemaVersion": 16,
+              "quickCaptureClipboardEnabled": true,
+              "featureWidgetEnabledStates": {
+                "QuickCapture": true
+              }
+            }
+            """);
+        await File.WriteAllTextAsync(
+            Path.Combine(splitRoot, "widget-layout.json"),
+            """
+            {
+              "schemaVersion": 1,
+              "layout": {
+                "featureWidgetEnabledStates": {
+                  "QuickCapture": true,
+                  "Todo": true
+                }
+              }
+            }
+            """);
+
+        var service = new SettingsService(splitRoot);
+        await service.LoadAsync();
+
+        Assert.True(FeatureWidgetSettings.IsEnabled(service.Settings, WidgetKind.Clipboard));
+        Assert.False(service.Settings.QuickCapture.QuickCaptureClipboardEnabled);
+        Assert.False(service.Settings.QuickCaptureClipboardEnabled);
+
+        await service.SaveAsync();
+
+        var reloaded = new SettingsService(splitRoot);
+        await reloaded.LoadAsync();
+        Assert.True(FeatureWidgetSettings.IsEnabled(reloaded.Settings, WidgetKind.Clipboard));
+        Assert.False(reloaded.Settings.QuickCapture.QuickCaptureClipboardEnabled);
+    }
+
+    [Fact]
+    public async Task Migration16To17_DisablesDefaultClipboardHotkey_WhenAltVConflictsWithGlobalOrSearchHotkey()
+    {
+        const int altModifier = (int)HotkeyModifierKeys.Alt;
+        const int vkV = 0x56;
+        const int vkSpace = 0x20;
+
+        string globalConflictRoot = Directory.CreateDirectory(Path.Combine(_tempRoot, "mig16-global-altv")).FullName;
+        await File.WriteAllTextAsync(
+            Path.Combine(globalConflictRoot, "settings.json"),
+            $$"""
+            {
+              "schemaVersion": 16,
+              "globalHotkeyEnabled": true,
+              "globalHotkeyActivationKind": "Chord",
+              "globalHotkeyModifiers": {{altModifier}},
+              "globalHotkeyKey": {{vkV}},
+              "searchHotkeyEnabled": false
+            }
+            """);
+
+        var globalConflict = new SettingsService(globalConflictRoot);
+        await globalConflict.LoadAsync();
+        Assert.Equal(SettingsMigrationPipeline.CurrentSchemaVersion, globalConflict.Settings.SchemaVersion);
+        Assert.False(globalConflict.Settings.ClipboardHotkeyEnabled);
+
+        string searchConflictRoot = Directory.CreateDirectory(Path.Combine(_tempRoot, "mig16-search-altv")).FullName;
+        await File.WriteAllTextAsync(
+            Path.Combine(searchConflictRoot, "settings.json"),
+            $$"""
+            {
+              "schemaVersion": 16,
+              "globalHotkeyEnabled": false,
+              "searchHotkeyEnabled": true,
+              "searchHotkeyActivationKind": "Chord",
+              "searchHotkeyModifiers": {{altModifier}},
+              "searchHotkeyKey": {{vkV}}
+            }
+            """);
+
+        var searchConflict = new SettingsService(searchConflictRoot);
+        await searchConflict.LoadAsync();
+        Assert.Equal(SettingsMigrationPipeline.CurrentSchemaVersion, searchConflict.Settings.SchemaVersion);
+        Assert.False(searchConflict.Settings.ClipboardHotkeyEnabled);
+
+        string controlRoot = Directory.CreateDirectory(Path.Combine(_tempRoot, "mig16-control-altspace")).FullName;
+        await File.WriteAllTextAsync(
+            Path.Combine(controlRoot, "settings.json"),
+            $$"""
+            {
+              "schemaVersion": 16,
+              "globalHotkeyEnabled": true,
+              "globalHotkeyActivationKind": "Chord",
+              "globalHotkeyModifiers": {{altModifier}},
+              "globalHotkeyKey": {{vkSpace}},
+              "searchHotkeyEnabled": false
+            }
+            """);
+
+        var control = new SettingsService(controlRoot);
+        await control.LoadAsync();
+        Assert.Equal(SettingsMigrationPipeline.CurrentSchemaVersion, control.Settings.SchemaVersion);
+        Assert.True(control.Settings.ClipboardHotkeyEnabled);
+    }
+
+    [Fact]
+    public async Task ApplyDefaultPreferences_PreservesClipboardExcludedAppsAndMachineLocalPaths()
+    {
+        string prefsRoot = Directory.CreateDirectory(Path.Combine(_tempRoot, "apply-default-prefs")).FullName;
+        var service = new SettingsService(prefsRoot);
+        await service.LoadAsync();
+
+        service.Settings.ClipboardExcludedApps = ["KeePass.exe", "1Password.exe"];
+        service.Settings.MusicLocalLyricsFolder = @"D:\Lyrics";
+        service.Settings.SearchEverythingExecutablePath = @"C:\Tools\Everything\Everything.exe";
+        service.Settings.ClipboardRetentionDays = 7;
+        service.Settings.SearchDefaultWebEngine = "invalid-engine";
+
+        SettingsService.ApplyDefaultPreferences(service.Settings);
+
+        Assert.Equal(["KeePass.exe", "1Password.exe"], service.Settings.ClipboardExcludedApps);
+        Assert.Equal(@"D:\Lyrics", service.Settings.MusicLocalLyricsFolder);
+        Assert.Equal(@"C:\Tools\Everything\Everything.exe", service.Settings.SearchEverythingExecutablePath);
+        Assert.Equal(new AppSettings().ClipboardRetentionDays, service.Settings.ClipboardRetentionDays);
+        Assert.Equal("bing", service.Settings.SearchDefaultWebEngine);
+
+        // Also verify unknown SearchDefaultWebEngine normalizes to "bing" during SettingsService normalization.
+        service.Settings.SearchDefaultWebEngine = "invalid-engine";
+        await service.SaveAsync();
+        Assert.Equal("bing", service.Settings.SearchDefaultWebEngine);
+
+        var reloaded = new SettingsService(prefsRoot);
+        await reloaded.LoadAsync();
+        Assert.Equal(["KeePass.exe", "1Password.exe"], reloaded.Settings.ClipboardExcludedApps);
+        Assert.Equal(@"D:\Lyrics", reloaded.Settings.MusicLocalLyricsFolder);
+        Assert.Equal(@"C:\Tools\Everything\Everything.exe", reloaded.Settings.SearchEverythingExecutablePath);
+        Assert.Equal("bing", reloaded.Settings.SearchDefaultWebEngine);
     }
 
     public void Dispose()

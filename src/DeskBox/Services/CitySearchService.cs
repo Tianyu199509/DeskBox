@@ -10,7 +10,7 @@ using DeskBox.Platform;
 namespace DeskBox.Services;
 
 /// <summary>
-/// Pre-defined city entry loaded from the embedded cities.json resource.
+/// Pre-defined city entry loaded from the external cities.json data file.
 /// </summary>
 internal sealed class PredefinedCity
 {
@@ -44,58 +44,143 @@ internal sealed class PredefinedCity
 
 /// <summary>
 /// Unified city search service that merges a local pre-defined city list
-/// (embedded in the assembly) with dynamic results from the Open-Meteo
-/// geocoding API. Supports location-based "nearby popular cities" by
-/// sorting the local list by haversine distance to the user's coordinates.
+/// with dynamic results from the Open-Meteo geocoding API. Supports
+/// location-based "nearby popular cities" by sorting the local list by
+/// haversine distance to the user's coordinates.
 /// </summary>
 public sealed class CitySearchService : IDisposable
 {
-    private static List<PredefinedCity>? s_predefined;
-    private static readonly object s_lock = new();
-
-    private static List<PredefinedCity> Predefined
+    private sealed class PreparedCityEntry(PredefinedCity city)
     {
-        get
+        public PredefinedCity City { get; } = city;
+        public string ZhNorm { get; } = NormalizeSearchText(city.Zh);
+        public string EnNorm { get; } = NormalizeSearchText(city.En);
+        public string PinyinNorm { get; } = NormalizeSearchText(city.Pinyin);
+        public string CountryZhNorm { get; } = NormalizeSearchText(city.CountryZh);
+        public string CountryEnNorm { get; } = NormalizeSearchText(city.CountryEn);
+        public string Admin1ZhNorm { get; } = NormalizeSearchText(city.Admin1Zh);
+        public string Admin1EnNorm { get; } = NormalizeSearchText(city.Admin1En);
+    }
+
+    private static readonly object s_instancesLock = new();
+    private static readonly List<WeakReference<CitySearchService>> s_liveInstances = [];
+
+    private static Stream? OpenCitiesDataStream()
+    {
+        string primaryPath = Path.Combine(AppContext.BaseDirectory, "Assets", "Cities", "cities.json");
+        if (File.Exists(primaryPath))
         {
-            if (s_predefined is not null)
+            return new FileStream(primaryPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        }
+
+        string? directory = AppContext.BaseDirectory;
+        for (int depth = 0; depth < 6 && !string.IsNullOrEmpty(directory); depth++)
+        {
+            string candidate = Path.Combine(directory, "Assets", "Cities", "cities.json");
+            if (File.Exists(candidate))
             {
-                return s_predefined;
+                return new FileStream(candidate, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
             }
 
-            lock (s_lock)
+            string repoCandidate = Path.Combine(directory, "src", "DeskBox", "Assets", "Cities", "cities.json");
+            if (File.Exists(repoCandidate))
             {
-                if (s_predefined is not null)
+                return new FileStream(repoCandidate, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            }
+
+            directory = Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(directory));
+        }
+
+        var assembly = Assembly.GetExecutingAssembly();
+        return assembly.GetManifestResourceStream("DeskBox.Assets.Cities.cities.json");
+    }
+
+    private static List<PredefinedCity> LoadPredefinedCities()
+    {
+        using Stream? stream = OpenCitiesDataStream();
+        if (stream is null)
+        {
+            App.Log("[CitySearchService] cities.json not found");
+            return [];
+        }
+
+        return JsonSerializer.Deserialize(
+            stream,
+            WeatherJsonContext.Default.PredefinedCityList) ?? [];
+    }
+
+    private static PreparedCityEntry[] BuildPreparedCities(IReadOnlyList<PredefinedCity> cities)
+    {
+        var entries = new PreparedCityEntry[cities.Count];
+        for (int i = 0; i < cities.Count; i++)
+        {
+            entries[i] = new PreparedCityEntry(cities[i]);
+        }
+
+        return entries;
+    }
+
+    public static void ReleaseIdleCache(bool force = false)
+    {
+        _ = force;
+        lock (s_instancesLock)
+        {
+            for (int i = s_liveInstances.Count - 1; i >= 0; i--)
+            {
+                if (!s_liveInstances[i].TryGetTarget(out CitySearchService? instance) || instance._isDisposed)
                 {
-                    return s_predefined;
+                    s_liveInstances.RemoveAt(i);
+                    continue;
                 }
 
-                var assembly = Assembly.GetExecutingAssembly();
-                var resourceName = "DeskBox.Assets.Cities.cities.json";
-
-                using var stream = assembly.GetManifestResourceStream(resourceName);
-                if (stream is null)
-                {
-                    App.Log("[CitySearchService] Embedded cities.json not found");
-                    s_predefined = [];
-                    return s_predefined;
-                }
-
-                using var reader = new StreamReader(stream);
-                var json = reader.ReadToEnd();
-                s_predefined = JsonSerializer.Deserialize(
-                    json,
-                    WeatherJsonContext.Default.PredefinedCityList) ?? [];
-                App.Log($"[CitySearchService] Loaded {s_predefined.Count} predefined cities");
-                return s_predefined;
+                Volatile.Write(ref instance._cachedCities, null);
             }
         }
     }
 
     private readonly WeatherService _weatherService;
+    private PreparedCityEntry[]? _cachedCities;
+    private volatile bool _isDisposed;
 
     public CitySearchService()
     {
         _weatherService = new WeatherService();
+        lock (s_instancesLock)
+        {
+            for (int i = s_liveInstances.Count - 1; i >= 0; i--)
+            {
+                if (!s_liveInstances[i].TryGetTarget(out CitySearchService? existing) || existing._isDisposed)
+                {
+                    s_liveInstances.RemoveAt(i);
+                }
+            }
+
+            s_liveInstances.Add(new WeakReference<CitySearchService>(this));
+        }
+    }
+
+    internal bool HasCachedCitiesForTesting => Volatile.Read(ref _cachedCities) is not null;
+
+    private PreparedCityEntry[] GetOrLoadPreparedCities()
+    {
+        if (_isDisposed)
+        {
+            return [];
+        }
+
+        PreparedCityEntry[]? cached = Volatile.Read(ref _cachedCities);
+        if (cached is not null)
+        {
+            return cached;
+        }
+
+        PreparedCityEntry[] loaded = BuildPreparedCities(LoadPredefinedCities());
+        if (!_isDisposed)
+        {
+            Volatile.Write(ref _cachedCities, loaded);
+        }
+
+        return loaded;
     }
 
     /// <summary>
@@ -111,7 +196,7 @@ public sealed class CitySearchService : IDisposable
         PredefinedCity? best = null;
         double bestDist = double.MaxValue;
 
-        foreach (var c in Predefined)
+        foreach (var c in LoadPredefinedCities())
         {
             double d = HaversineDistance(lat, lon, c.Lat, c.Lon);
             if (d < bestDist)
@@ -172,7 +257,8 @@ public sealed class CitySearchService : IDisposable
         bool useTraditional = LocalizationService.IsTraditionalChineseCulture(language);
 
         // 1. Search local predefined cities (instant, no network)
-        var localResults = SearchLocal(query, isEn, useTraditional);
+        PreparedCityEntry[] preparedCities = GetOrLoadPreparedCities();
+        var localResults = SearchLocal(preparedCities, query, isEn, useTraditional);
 
         // 2. Search via Open-Meteo API (parallel, with cancellation)
         List<WeatherGeocodingItem>? apiResults = null;
@@ -207,7 +293,7 @@ public sealed class CitySearchService : IDisposable
             {
                 merged.Add(new CitySearchCandidate(
                     r,
-                    GetLocalResultRelevance(r, query),
+                    GetLocalResultRelevance(preparedCities, r, query),
                     IsLocal: true,
                     Sequence: sequence++));
             }
@@ -277,17 +363,17 @@ public sealed class CitySearchService : IDisposable
         bool isEn = !IsChineseLanguage(language);
         bool useTraditional = LocalizationService.IsTraditionalChineseCulture(language);
 
-        IEnumerable<PredefinedCity> cities = Predefined;
+        IEnumerable<PreparedCityEntry> cities = GetOrLoadPreparedCities();
 
         if (lat.HasValue && lon.HasValue)
         {
             cities = cities
-                .OrderBy(c => HaversineDistance(lat.Value, lon.Value, c.Lat, c.Lon));
+                .OrderBy(c => HaversineDistance(lat.Value, lon.Value, c.City.Lat, c.City.Lon));
         }
 
         return cities
             .Take(maxCount)
-            .Select(c => ToSearchResult(c, isEn, useTraditional))
+            .Select(c => ToSearchResult(c.City, isEn, useTraditional))
             .ToList();
     }
 
@@ -302,19 +388,27 @@ public sealed class CitySearchService : IDisposable
         bool isEn = !IsChineseLanguage(language);
         bool useTraditional = LocalizationService.IsTraditionalChineseCulture(language);
 
+        PreparedCityEntry[] predefined = GetOrLoadPreparedCities();
         // Pick a spread of globally representative cities
         var indices = new[] { 0, 1, 2, 3, 4, 39, 53, 59, 78, 99, 113, 122, 139, 145, 153 };
 
         return indices
-            .Where(i => i < Predefined.Count)
+            .Where(i => i < predefined.Length)
             .Take(maxCount)
-            .Select(i => ToSearchResult(Predefined[i], isEn, useTraditional))
+            .Select(i => ToSearchResult(predefined[i].City, isEn, useTraditional))
             .ToList();
     }
 
     // ─── Private helpers ───
 
     internal static List<WeatherCitySearchResult> SearchLocal(
+        string query,
+        bool isEn,
+        bool useTraditional = false) =>
+        SearchLocal(BuildPreparedCities(LoadPredefinedCities()), query, isEn, useTraditional);
+
+    private static List<WeatherCitySearchResult> SearchLocal(
+        IReadOnlyList<PreparedCityEntry> predefined,
         string query,
         bool isEn,
         bool useTraditional = false)
@@ -326,90 +420,163 @@ public sealed class CitySearchService : IDisposable
         string normalizedQuery = NormalizeSearchText(matchingQuery);
         bool isPinyinInitials = lower.Length >= 2 && lower.All(c => c >= 'a' && c <= 'z');
 
-        var matches = Predefined
+        var matches = predefined
             .Where(c =>
             {
                 // Search across all name variants
-                return NormalizeSearchText(c.Zh).Contains(normalizedQuery, StringComparison.Ordinal)
-                    || NormalizeSearchText(c.En).Contains(normalizedQuery, StringComparison.Ordinal)
-                    || NormalizeSearchText(c.Pinyin).Contains(normalizedQuery, StringComparison.Ordinal)
-                    || NormalizeSearchText(c.CountryZh).Contains(normalizedQuery, StringComparison.Ordinal)
-                    || NormalizeSearchText(c.CountryEn).Contains(normalizedQuery, StringComparison.Ordinal)
-                    || NormalizeSearchText(c.Admin1Zh).Contains(normalizedQuery, StringComparison.Ordinal)
-                    || NormalizeSearchText(c.Admin1En).Contains(normalizedQuery, StringComparison.Ordinal)
-                    || (isPinyinInitials && MatchesPinyinInitials(c.Pinyin, lower));
+                return c.ZhNorm.Contains(normalizedQuery, StringComparison.Ordinal)
+                    || c.EnNorm.Contains(normalizedQuery, StringComparison.Ordinal)
+                    || c.PinyinNorm.Contains(normalizedQuery, StringComparison.Ordinal)
+                    || c.CountryZhNorm.Contains(normalizedQuery, StringComparison.Ordinal)
+                    || c.CountryEnNorm.Contains(normalizedQuery, StringComparison.Ordinal)
+                    || c.Admin1ZhNorm.Contains(normalizedQuery, StringComparison.Ordinal)
+                    || c.Admin1EnNorm.Contains(normalizedQuery, StringComparison.Ordinal)
+                    || (isPinyinInitials && MatchesPinyinInitials(c.PinyinNorm, lower));
             })
             .OrderByDescending(c => GetSearchRelevance(c, normalizedQuery))
             .Take(8)
-            .Select(c => ToSearchResult(c, isEn, useTraditional))
+            .Select(c => ToSearchResult(c.City, isEn, useTraditional))
             .ToList();
 
         return matches;
     }
 
     /// <summary>
-    /// Matches pinyin initials: "hz" matches "hangzhou", "bj" matches "beijing".
+    /// Matches pinyin initials: "hz" matches "hangzhou", "sjz" matches "shijiazhuang",
+    /// "heb" matches "harbin"/"haerbin", "wlmq" matches "wulumuqi".
     /// </summary>
-    private static bool MatchesPinyinInitials(string pinyin, string initials)
+    internal static bool MatchesPinyinInitials(string pinyin, string initials)
     {
-        if (string.IsNullOrWhiteSpace(pinyin) || initials.Length > pinyin.Length)
+        if (string.IsNullOrWhiteSpace(pinyin) || string.IsNullOrWhiteSpace(initials))
         {
             return false;
         }
 
-        // Check if the query matches the first letter of each syllable.
-        // Pinyin is stored as a single word (e.g. "hangzhou"), so we match
-        // the first N characters as a prefix OR try syllable-initial matching.
-        if (pinyin.StartsWith(initials, StringComparison.OrdinalIgnoreCase))
+        string normalizedPinyin = NormalizeSearchText(pinyin);
+        string normalizedInitials = NormalizeSearchText(initials);
+        if (normalizedPinyin.Length == 0 || normalizedInitials.Length == 0)
+        {
+            return false;
+        }
+
+        if (MatchesPinyinInitialsNormalized(normalizedPinyin, normalizedInitials))
         {
             return true;
         }
 
-        // Syllable initial matching: split pinyin into syllables by common
-        // boundaries and check if initials match first letters.
-        // For compound names like "hangzhou", try matching "h" + "z" = "hz".
-        if (initials.Length >= 2 && initials.Length <= 4)
+        string? alias = GetStandardPinyinAlias(normalizedPinyin);
+        return alias is not null && MatchesPinyinInitialsNormalized(alias, normalizedInitials);
+    }
+
+    private static bool MatchesPinyinInitialsNormalized(string pinyin, string initials)
+    {
+        if (initials.Length > pinyin.Length)
         {
-            // Simple heuristic: try splitting at each position and check
-            // if first letters of parts match the initials.
-            for (int splitLen = 1; splitLen < pinyin.Length - 1; splitLen++)
+            return false;
+        }
+
+        if (pinyin.StartsWith(initials, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (initials.Length is >= 2 and <= 6)
+        {
+            return MatchesSyllableInitials(pinyin.AsSpan(), initials.AsSpan());
+        }
+
+        return false;
+    }
+
+    private static string? GetStandardPinyinAlias(string normalizedPinyin) =>
+        normalizedPinyin switch
+        {
+            "harbin" => "haerbin",
+            "qiqihar" => "qiqihaer",
+            "urumqi" => "wulumuqi",
+            "hohhot" => "huhehaote",
+            _ => null
+        };
+
+    private static bool MatchesSyllableInitials(ReadOnlySpan<char> pinyin, ReadOnlySpan<char> initials)
+    {
+        if (initials.IsEmpty)
+        {
+            return pinyin.IsEmpty;
+        }
+
+        if (pinyin.Length < initials.Length || pinyin[0] != initials[0])
+        {
+            return false;
+        }
+
+        if (initials.Length == 1)
+        {
+            return IsPlausiblePinyinSyllable(pinyin);
+        }
+
+        int maxSyllableLen = Math.Min(6, pinyin.Length - (initials.Length - 1));
+        for (int len = 1; len <= maxSyllableLen; len++)
+        {
+            if (IsPlausiblePinyinSyllable(pinyin[..len]) &&
+                MatchesSyllableInitials(pinyin[len..], initials[1..]))
             {
-                if (pinyin.Length - splitLen < initials.Length - 1)
-                {
-                    break;
-                }
-
-                // Check if first char matches first initial
-                if (char.ToLowerInvariant(pinyin[0]) != initials[0])
-                {
-                    break;
-                }
-
-                // For 2-char initials like "hz": check if there's a 'z' later
-                if (initials.Length == 2)
-                {
-                    for (int j = splitLen; j < pinyin.Length; j++)
-                    {
-                        if (char.ToLowerInvariant(pinyin[j]) == initials[1])
-                        {
-                            return true;
-                        }
-                    }
-                }
+                return true;
             }
         }
 
         return false;
     }
 
+    private static bool IsPlausiblePinyinSyllable(ReadOnlySpan<char> part)
+    {
+        if (part.IsEmpty || part.Length > 6)
+        {
+            return false;
+        }
+
+        int idx = 0;
+        if (part.Length >= 2 &&
+            (part[0] is 'z' or 'c' or 's') &&
+            part[1] == 'h')
+        {
+            idx = 2;
+        }
+        else if (!IsPinyinVowel(part[0]))
+        {
+            idx = 1;
+        }
+
+        int vowelCount = 0;
+        while (idx < part.Length && IsPinyinVowel(part[idx]))
+        {
+            vowelCount++;
+            idx++;
+        }
+
+        if (vowelCount is < 1 or > 3)
+        {
+            return false;
+        }
+
+        ReadOnlySpan<char> coda = part[idx..];
+        return coda.IsEmpty ||
+               coda.SequenceEqual("n") ||
+               coda.SequenceEqual("ng") ||
+               coda.SequenceEqual("r");
+    }
+
+    private static bool IsPinyinVowel(char c) =>
+        c is 'a' or 'e' or 'i' or 'o' or 'u' or 'v';
+
     /// <summary>
     /// Scores search relevance: exact name match > prefix match > contains > pinyin.
     /// </summary>
-    private static int GetSearchRelevance(PredefinedCity city, string normalizedQuery)
+    private static int GetSearchRelevance(PreparedCityEntry city, string normalizedQuery)
     {
-        string zh = NormalizeSearchText(city.Zh);
-        string en = NormalizeSearchText(city.En);
-        string pinyin = NormalizeSearchText(city.Pinyin);
+        string zh = city.ZhNorm;
+        string en = city.EnNorm;
+        string pinyin = city.PinyinNorm;
 
         if (zh == normalizedQuery || en == normalizedQuery)
         {
@@ -462,11 +629,14 @@ public sealed class CitySearchService : IDisposable
         return displayName.Contains(normalizedQuery, StringComparison.Ordinal) ? 100 : 0;
     }
 
-    private static int GetLocalResultRelevance(WeatherCitySearchResult result, string query)
+    private static int GetLocalResultRelevance(
+        IReadOnlyList<PreparedCityEntry> predefined,
+        WeatherCitySearchResult result,
+        string query)
     {
-        PredefinedCity? city = Predefined.FirstOrDefault(candidate =>
-            Math.Abs(candidate.Lat - result.Latitude) < 0.0001 &&
-            Math.Abs(candidate.Lon - result.Longitude) < 0.0001);
+        PreparedCityEntry? city = predefined.FirstOrDefault(candidate =>
+            Math.Abs(candidate.City.Lat - result.Latitude) < 0.0001 &&
+            Math.Abs(candidate.City.Lon - result.Longitude) < 0.0001);
         return city is null
             ? GetResultRelevance(result, query)
             : GetSearchRelevance(city, NormalizeSearchText(query));
@@ -563,6 +733,21 @@ public sealed class CitySearchService : IDisposable
 
     public void Dispose()
     {
+        _isDisposed = true;
+        Volatile.Write(ref _cachedCities, null);
+        lock (s_instancesLock)
+        {
+            for (int i = s_liveInstances.Count - 1; i >= 0; i--)
+            {
+                if (!s_liveInstances[i].TryGetTarget(out CitySearchService? instance) ||
+                    ReferenceEquals(instance, this) ||
+                    instance._isDisposed)
+                {
+                    s_liveInstances.RemoveAt(i);
+                }
+            }
+        }
+
         _weatherService.Dispose();
     }
 }

@@ -138,7 +138,8 @@ public sealed partial class SettingsWindow
 
     private async void OpenUacSettingsButton_Click(object sender, RoutedEventArgs e)
     {
-        await Task.Run(() => Win32Helper.OpenFile("UserAccountControlSettings.exe"));
+        IntPtr ownerHwnd = _hWnd;
+        await Task.Run(() => DragDropPermissionService.OpenUserAccountControlSettings(ownerHwnd));
     }
 
     private async void ExportDataBackupButton_Click(object sender, RoutedEventArgs e)

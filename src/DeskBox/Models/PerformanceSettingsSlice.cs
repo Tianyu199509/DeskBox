@@ -12,7 +12,7 @@ public sealed class PerformanceSettingsSlice
     public int HiddenCacheCleanupDelaySeconds { get; set; } = 30;
 
     /// <summary>Hidden cleanup scope. Valid values: <c>Warm</c>, <c>AllRecreatable</c>.</summary>
-    public string HiddenCacheCleanupScope { get; set; } = "AllRecreatable";
+    public string HiddenCacheCleanupScope { get; set; } = "Warm";
 
     /// <summary>Finite delay before shrinking recreatable caches while visible widgets are inactive.</summary>
     public int VisibleIdleCacheCleanupDelaySeconds { get; set; } = 5 * 60;
@@ -54,4 +54,11 @@ public sealed class PerformanceSettingsSlice
 
     /// <summary>Whether capsule glow, particle, breathing, and indeterminate ambient effects may run.</summary>
     public bool EnableCompactAmbientAnimations { get; set; } = true;
+
+    /// <summary>
+    /// Pre-warm collapsed capsule views in the background, retain them across idle periods
+    /// without 90-second hibernation or blank-shell deferred expansion so every expansion
+    /// animates live content from frame zero unless disabled by the user to save memory.
+    /// </summary>
+    public bool KeepCapsuleContentWarm { get; set; } = true;
 }

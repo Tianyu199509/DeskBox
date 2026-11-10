@@ -16,7 +16,7 @@ public sealed class TodoSettingsCoordinator : ITodoSettings
     private readonly CancellationTokenSource _lifetime = new();
     private bool _updatingPreferences;
     private bool _stopped;
-    private (bool Enabled, bool Reminders, int Offset, string WidgetIds)?
+    private (bool Enabled, bool Reminders, int Offset, bool AllDayEnabled, int AllDayMinutes, string WidgetIds)?
         _lastReconciledReminderInputs;
     private Task? _stopTask;
 
@@ -39,7 +39,9 @@ public sealed class TodoSettingsCoordinator : ITodoSettings
         return new(
             FeatureWidgetSettings.IsEnabled(settings, WidgetKind.Todo),
             settings.Todo.TodoReminderEnabled,
-            SettingsService.NormalizeTodoReminderOffsetMinutes(settings.Todo.TodoDefaultReminderOffsetMinutes));
+            SettingsService.NormalizeTodoReminderOffsetMinutes(settings.Todo.TodoDefaultReminderOffsetMinutes),
+            settings.Todo.TodoAllDayReminderEnabled,
+            SettingsService.NormalizeTodoAllDayReminderTimeMinutes(settings.Todo.TodoAllDayReminderTimeMinutes));
     }
 
     public TodoLayoutSettings ReadLayout()
@@ -156,6 +158,7 @@ public sealed class TodoSettingsCoordinator : ITodoSettings
         todo.TodoShowAllTab = true;
         todo.TodoShowActiveTab = false;
         todo.TodoShowTodayTab = true;
+        todo.TodoShowOverdueTab = true;
         todo.TodoShowThisWeekTab = false;
         todo.TodoShowThisMonthTab = false;
         todo.TodoShowImportantTab = true;
@@ -193,11 +196,12 @@ public sealed class TodoSettingsCoordinator : ITodoSettings
         todo.TodoShowThisWeekTab,
         todo.TodoShowThisMonthTab,
         todo.TodoShowImportantTab,
-        todo.TodoShowCompletedTab);
+        todo.TodoShowCompletedTab,
+        todo.TodoShowOverdueTab);
 
     private static bool HasVisibleTab(TodoSettingsSlice todo) =>
         todo.TodoShowAllTab || todo.TodoShowActiveTab ||
-        todo.TodoShowTodayTab || todo.TodoShowThisWeekTab ||
+        todo.TodoShowTodayTab || todo.TodoShowOverdueTab || todo.TodoShowThisWeekTab ||
         todo.TodoShowThisMonthTab || todo.TodoShowImportantTab ||
         todo.TodoShowCompletedTab;
 
@@ -213,6 +217,9 @@ public sealed class TodoSettingsCoordinator : ITodoSettings
                 break;
             case SettingsService.TodoDefaultFilterToday:
                 todo.TodoShowTodayTab = visible;
+                break;
+            case SettingsService.TodoDefaultFilterOverdue:
+                todo.TodoShowOverdueTab = visible;
                 break;
             case SettingsService.TodoDefaultFilterThisWeek:
                 todo.TodoShowThisWeekTab = visible;
@@ -265,6 +272,34 @@ public sealed class TodoSettingsCoordinator : ITodoSettings
 
     public void SetContentTextSize(double size, bool scheduleSave = true) =>
         SetTextSize(size, list: false, scheduleSave: scheduleSave);
+
+    public bool HasCustomTextSizeOverride
+    {
+        get
+        {
+            TodoSettingsSlice todo = _settings.Settings.Todo;
+            return todo.TodoListTextSize > 0 ||
+                   todo.TodoContentTextSize > 0;
+        }
+    }
+
+    public void ResetTextSizesToGlobal(bool scheduleSave = true)
+    {
+        ObjectDisposedException.ThrowIf(_stopped, this);
+        TodoSettingsSlice todo = _settings.Settings.Todo;
+        if (todo.TodoListTextSize <= 0 && todo.TodoContentTextSize <= 0)
+        {
+            return;
+        }
+
+        todo.TodoListTextSize = 0;
+        todo.TodoContentTextSize = 0;
+        if (scheduleSave)
+        {
+            _settings.RequestAppearancePreview();
+            _settings.SaveDebounced(changeKind: SettingsChangeKind.Appearance);
+        }
+    }
 
     public void ResetPreviewLineCount(bool scheduleSave = true)
     {
@@ -467,14 +502,35 @@ public sealed class TodoSettingsCoordinator : ITodoSettings
         SavePreference(checkNow: false);
     }
 
+    public void SetAllDayRemindersEnabled(bool enabled)
+    {
+        ObjectDisposedException.ThrowIf(_stopped, this);
+        if (_settings.Settings.Todo.TodoAllDayReminderEnabled == enabled) return;
+        _settings.Settings.Todo.TodoAllDayReminderEnabled = enabled;
+        SavePreference(checkNow: enabled);
+    }
+
+    public void SetAllDayReminderTimeMinutes(int minutes)
+    {
+        ObjectDisposedException.ThrowIf(_stopped, this);
+        int normalized = SettingsService.NormalizeTodoAllDayReminderTimeMinutes(minutes);
+        if (_settings.Settings.Todo.TodoAllDayReminderTimeMinutes == normalized) return;
+        _settings.Settings.Todo.TodoAllDayReminderTimeMinutes = normalized;
+        SavePreference(checkNow: false);
+    }
+
     public void ResetReminderPreferences(bool scheduleSave = true)
     {
         ObjectDisposedException.ThrowIf(_stopped, this);
         TodoSettingsSlice todo = _settings.Settings.Todo;
         bool wasEnabled = todo.TodoReminderEnabled;
+        bool wasAllDayEnabled = todo.TodoAllDayReminderEnabled;
         if (wasEnabled &&
+            wasAllDayEnabled &&
             todo.TodoDefaultReminderOffsetMinutes ==
-                SettingsService.DefaultTodoReminderOffsetMinutes)
+                SettingsService.DefaultTodoReminderOffsetMinutes &&
+            todo.TodoAllDayReminderTimeMinutes ==
+                SettingsService.DefaultTodoAllDayReminderTimeMinutes)
         {
             return;
         }
@@ -482,7 +538,10 @@ public sealed class TodoSettingsCoordinator : ITodoSettings
         todo.TodoReminderEnabled = true;
         todo.TodoDefaultReminderOffsetMinutes =
             SettingsService.DefaultTodoReminderOffsetMinutes;
-        if (scheduleSave) SavePreference(checkNow: !wasEnabled);
+        todo.TodoAllDayReminderEnabled = true;
+        todo.TodoAllDayReminderTimeMinutes =
+            SettingsService.DefaultTodoAllDayReminderTimeMinutes;
+        if (scheduleSave) SavePreference(checkNow: !wasEnabled || !wasAllDayEnabled);
     }
 
     private void SavePreference(bool checkNow)
@@ -513,6 +572,8 @@ public sealed class TodoSettingsCoordinator : ITodoSettings
             todo.TodoEnabled,
             todo.TodoReminderEnabled,
             todo.TodoDefaultReminderOffsetMinutes,
+            todo.TodoAllDayReminderEnabled,
+            todo.TodoAllDayReminderTimeMinutes,
             WidgetIds: string.Join(',',
                 _settings.Settings.Widgets
                     .Where(widget => widget.WidgetKind == WidgetKind.Todo)

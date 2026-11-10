@@ -83,6 +83,9 @@ internal static class WidgetGroupMenuBuilder
             WidgetGroupNavigationStyles.Tabs,
             GetNavigationName(WidgetGroupNavigationStyles.Tabs));
         AddNavigationItem(
+            WidgetGroupNavigationStyles.EqualTabs,
+            GetNavigationName(WidgetGroupNavigationStyles.EqualTabs));
+        AddNavigationItem(
             WidgetGroupNavigationStyles.Stack,
             GetNavigationName(WidgetGroupNavigationStyles.Stack));
         groupControlMenu.Items.Add(navigationMenu);
@@ -248,6 +251,8 @@ internal static class WidgetGroupMenuBuilder
             {
                 WidgetGroupNavigationStyles.Tabs =>
                     localizationService.T("Widget.Group.Navigation.Tabs"),
+                WidgetGroupNavigationStyles.EqualTabs =>
+                    localizationService.T("Widget.Group.Navigation.EqualTabs"),
                 WidgetGroupNavigationStyles.Stack =>
                     localizationService.T("Widget.Group.Navigation.Stack"),
                 _ => localizationService.T("Widget.Group.Navigation.Stack")

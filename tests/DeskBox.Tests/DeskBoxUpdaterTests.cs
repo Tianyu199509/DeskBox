@@ -146,4 +146,23 @@ public sealed class DeskBoxUpdaterTests
     {
         Assert.Equal(expected, DeskBox.Updater.Program.GetIncompleteUpdateOutcome(exitCode));
     }
+
+    [Theory]
+    [InlineData(1, true, false, "cancelled")]
+    [InlineData(1, true, true, "failed")]
+    [InlineData(1, false, false, "failed")]
+    [InlineData(99, true, false, "failed")]
+    public void ElevationBootstrapCancellation_MapsToCancelledOnlyWhenInnerLogWasNeverOpened(
+        int exitCode,
+        bool elevationRequired,
+        bool installerLogWritten,
+        string expected)
+    {
+        Assert.Equal(
+            expected,
+            DeskBox.Updater.Program.GetIncompleteUpdateOutcome(
+                exitCode,
+                elevationRequired,
+                installerLogWritten));
+    }
 }

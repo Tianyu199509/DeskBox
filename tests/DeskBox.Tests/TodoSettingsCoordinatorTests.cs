@@ -1,4 +1,4 @@
-﻿using DeskBox.Contracts;
+using DeskBox.Contracts;
 using DeskBox.Features.Todo;
 using DeskBox.Models;
 using DeskBox.Services;
@@ -217,10 +217,24 @@ public sealed class TodoSettingsCoordinatorTests : IDisposable
         Assert.False(editor.Tabs.ShowTodayTab);
 
         editor.SetTabVisible(SettingsService.TodoDefaultFilterAll, false);
+        Assert.Equal(SettingsService.TodoDefaultFilterOverdue,
+            editor.DefaultFilter);
+        editor.SetTabVisible(SettingsService.TodoDefaultFilterOverdue, false);
         Assert.Equal(SettingsService.TodoDefaultFilterImportant,
             editor.DefaultFilter);
         editor.SetTabVisible(SettingsService.TodoDefaultFilterCompleted, false);
+        // ViewModel guards against hiding the last remaining visible tab so the
+        // settings chip stays selected on Important.
         editor.SetTabVisible(SettingsService.TodoDefaultFilterImportant, false);
+        Assert.True(editor.Tabs.ShowImportantTab);
+        Assert.False(editor.Tabs.ShowAllTab);
+        Assert.Equal(SettingsService.TodoDefaultFilterImportant,
+            editor.DefaultFilter);
+
+        // Coordinator directly still falls back to All when the last visible
+        // tab is hidden underneath the UI guard.
+        coordinator.SetTabVisible(SettingsService.TodoDefaultFilterImportant, false);
+        editor.Refresh();
         Assert.True(editor.Tabs.ShowAllTab);
         Assert.Equal(SettingsService.TodoDefaultFilterAll,
             editor.DefaultFilter);
@@ -280,6 +294,7 @@ public sealed class TodoSettingsCoordinatorTests : IDisposable
         settings.Settings.Todo.TodoShowAllTab = false;
         settings.Settings.Todo.TodoShowActiveTab = false;
         settings.Settings.Todo.TodoShowTodayTab = false;
+        settings.Settings.Todo.TodoShowOverdueTab = false;
         settings.Settings.Todo.TodoShowThisWeekTab = false;
         settings.Settings.Todo.TodoShowThisMonthTab = false;
         settings.Settings.Todo.TodoShowImportantTab = false;

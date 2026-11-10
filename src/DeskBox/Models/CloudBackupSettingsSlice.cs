@@ -29,6 +29,9 @@ public sealed class CloudBackupSettingsSlice
     /// <summary>Independent toggle: widget style projection (never layout/positions).</summary>
     public bool CloudBackupWidgetStyleEnabled { get; set; }
 
+    /// <summary>Independent toggle: custom widgets manifests + record stores (excludes binary attachments).</summary>
+    public bool CloudBackupCustomWidgetsEnabled { get; set; }
+
     /// <summary>How many remote snapshots to keep.</summary>
     public int CloudBackupRetentionCount { get; set; } = 5;
 
@@ -72,6 +75,7 @@ public sealed class CloudBackupSettingsSlice
         CloudBackupTodoDataEnabled = other.CloudBackupTodoDataEnabled;
         CloudBackupQuickCaptureDataEnabled = other.CloudBackupQuickCaptureDataEnabled;
         CloudBackupWidgetStyleEnabled = other.CloudBackupWidgetStyleEnabled;
+        CloudBackupCustomWidgetsEnabled = other.CloudBackupCustomWidgetsEnabled;
         CloudBackupRetentionCount = other.CloudBackupRetentionCount;
         CloudBackupIntervalMinutes = other.CloudBackupIntervalMinutes;
         CloudBackupLastSuccessUtcTicks = other.CloudBackupLastSuccessUtcTicks;

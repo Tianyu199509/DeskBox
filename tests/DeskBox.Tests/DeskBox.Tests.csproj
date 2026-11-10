@@ -18,6 +18,10 @@
     <DeskBoxNativeTestCargoTargetDir>$(DeskBoxNativeTestIntermediateDir)\cargo-target</DeskBoxNativeTestCargoTargetDir>
     <DeskBoxNativeTestDll>$(DeskBoxNativeTestIntermediateDir)\deskbox_native.dll</DeskBoxNativeTestDll>
     <DeskBoxNativeTestPdb>$(DeskBoxNativeTestIntermediateDir)\deskbox_native.pdb</DeskBoxNativeTestPdb>
+    <DeskBoxQjsTestIntermediateDir>$(MSBuildProjectDirectory)\obj\qjs-native\$(Configuration)\$(Platform)\$(RuntimeIdentifier)\$(DeskBoxRustCrtLinkage)</DeskBoxQjsTestIntermediateDir>
+    <DeskBoxQjsTestObjDir>$(DeskBoxQjsTestIntermediateDir)\c-obj</DeskBoxQjsTestObjDir>
+    <DeskBoxQjsTestDll>$(DeskBoxQjsTestIntermediateDir)\deskbox_qjs.dll</DeskBoxQjsTestDll>
+    <DeskBoxQjsTestPdb>$(DeskBoxQjsTestIntermediateDir)\deskbox_qjs.pdb</DeskBoxQjsTestPdb>
   </PropertyGroup>
 
   <ItemGroup>
@@ -30,6 +34,13 @@
     <DeskBoxNativeTestInput Include="$(MSBuildProjectDirectory)\..\..\scripts\build-rust-native.ps1" />
     <DeskBoxNativeTestInput Include="$(MSBuildProjectDirectory)\..\..\scripts\native-pe-contract.ps1" />
     <DeskBoxNativeTestInput Include="$(MSBuildProjectDirectory)\..\..\scripts\rust-arm64-msvc-environment.ps1" />
+    <DeskBoxQjsTestInput Include="$(MSBuildProjectDirectory)\..\..\native\include\deskbox_qjs.h" />
+    <DeskBoxQjsTestInput Include="$(MSBuildProjectDirectory)\..\..\native\deskbox-qjs\deskbox_qjs_bridge.c" />
+    <DeskBoxQjsTestInput Include="$(MSBuildProjectDirectory)\..\..\native\deskbox-qjs\vendor\quickjs.h" />
+    <DeskBoxQjsTestInput Include="$(MSBuildProjectDirectory)\..\..\native\deskbox-qjs\vendor\quickjs-amalgam.c" />
+    <DeskBoxQjsTestInput Include="$(MSBuildProjectDirectory)\..\..\scripts\build-qjs-native.ps1" />
+    <DeskBoxQjsTestInput Include="$(MSBuildProjectDirectory)\..\..\scripts\native-pe-contract.ps1" />
+    <DeskBoxQjsTestInput Include="$(MSBuildProjectDirectory)\..\..\scripts\rust-arm64-msvc-environment.ps1" />
   </ItemGroup>
 
   <ItemGroup>
@@ -40,7 +51,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\DeskBox\DeskBox.csproj" />
+    <ProjectReference Include="..\..\src\DeskBox\DeskBox.csproj">
+      <AdditionalProperties>DeskBoxBuildSettingsCompanion=false</AdditionalProperties>
+    </ProjectReference>
+    <ProjectReference Include="..\..\src\DeskBox.Settings\DeskBox.Settings.csproj" />
     <ProjectReference Include="..\..\src\DeskBox.Updater\DeskBox.Updater.csproj" />
   </ItemGroup>
 
@@ -67,6 +81,25 @@
     DependsOnTargets="BuildDeskBoxNativeTestModule">
     <Copy
       SourceFiles="$(DeskBoxNativeTestDll);$(DeskBoxNativeTestPdb)"
+      DestinationFolder="$(OutDir)"
+      SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target
+    Name="BuildDeskBoxQjsTestModule"
+    BeforeTargets="CoreCompile"
+    Inputs="@(DeskBoxQjsTestInput)"
+    Outputs="$(DeskBoxQjsTestDll);$(DeskBoxQjsTestPdb)">
+    <Exec
+      Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\..\scripts\build-qjs-native.ps1&quot; -Platform $(DeskBoxNativeTestPlatform) -Configuration $(Configuration) -CrtLinkage $(DeskBoxRustCrtLinkage) -OutputDirectory &quot;$(DeskBoxQjsTestIntermediateDir)&quot; -IntermediateDirectory &quot;$(DeskBoxQjsTestObjDir)&quot;" />
+  </Target>
+
+  <Target
+    Name="CopyDeskBoxQjsTestModule"
+    AfterTargets="Build"
+    DependsOnTargets="BuildDeskBoxQjsTestModule">
+    <Copy
+      SourceFiles="$(DeskBoxQjsTestDll);$(DeskBoxQjsTestPdb)"
       DestinationFolder="$(OutDir)"
       SkipUnchangedFiles="true" />
   </Target>

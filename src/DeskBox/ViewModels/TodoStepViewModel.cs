@@ -1,5 +1,6 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using DeskBox.Models;
+using Microsoft.UI.Xaml;
 
 namespace DeskBox.ViewModels;
 
@@ -30,6 +31,7 @@ public sealed partial class TodoStepViewModel : ObservableObject
                 _step.Text = value;
                 OnPropertyChanged(nameof(TextDecorations));
                 OnPropertyChanged(nameof(ContentOpacity));
+                OnPropertyChanged(nameof(StrikethroughVisibility));
             }
         }
     }
@@ -44,6 +46,7 @@ public sealed partial class TodoStepViewModel : ObservableObject
                 _step.IsCompleted = value;
                 OnPropertyChanged(nameof(TextDecorations));
                 OnPropertyChanged(nameof(ContentOpacity));
+                OnPropertyChanged(nameof(StrikethroughVisibility));
             }
         }
     }
@@ -66,4 +69,8 @@ public sealed partial class TodoStepViewModel : ObservableObject
         : Windows.UI.Text.TextDecorations.None;
 
     public double ContentOpacity => IsCompleted ? 0.58 : 1;
+
+    public Visibility StrikethroughVisibility => IsCompleted
+        ? Visibility.Visible
+        : Visibility.Collapsed;
 }

@@ -39,6 +39,52 @@ public sealed class FileItemSurfaceStyleCacheTests
         Assert.True(selectedHover.A > selected.A);
     }
 
+    [Theory]
+    [InlineData(false, (byte)0)]
+    [InlineData(true, (byte)255)]
+    public void UnfocusedSelection_UsesMutedStateLayersBelowFocusedSelection(
+        bool isDark,
+        byte expectedChannel)
+    {
+        Windows.UI.Color focusedSelected =
+            FileItemSurfaceStyleCache.GetNeutralStateLayer(
+                isDark,
+                FileItemSurfaceVisualState.Normal,
+                isSelected: true,
+                isWindowFocused: true);
+        Windows.UI.Color unfocusedSelected =
+            FileItemSurfaceStyleCache.GetNeutralStateLayer(
+                isDark,
+                FileItemSurfaceVisualState.Normal,
+                isSelected: true,
+                isWindowFocused: false);
+        Windows.UI.Color focusedSelectedHover =
+            FileItemSurfaceStyleCache.GetNeutralStateLayer(
+                isDark,
+                FileItemSurfaceVisualState.Hover,
+                isSelected: true,
+                isWindowFocused: true);
+        Windows.UI.Color unfocusedSelectedHover =
+            FileItemSurfaceStyleCache.GetNeutralStateLayer(
+                isDark,
+                FileItemSurfaceVisualState.Hover,
+                isSelected: true,
+                isWindowFocused: false);
+
+        Assert.All(
+            new[] { unfocusedSelected, unfocusedSelectedHover },
+            color =>
+            {
+                Assert.Equal(expectedChannel, color.R);
+                Assert.Equal(expectedChannel, color.G);
+                Assert.Equal(expectedChannel, color.B);
+            });
+        Assert.True(unfocusedSelected.A > 0);
+        Assert.True(unfocusedSelected.A < focusedSelected.A);
+        Assert.True(unfocusedSelectedHover.A > unfocusedSelected.A);
+        Assert.True(unfocusedSelectedHover.A < focusedSelectedHover.A);
+    }
+
     [Fact]
     public void DropTargets_UseTheNeutralHoverSurfaceWithoutAnAccentBorder()
     {
@@ -54,17 +100,19 @@ public sealed class FileItemSurfaceStyleCacheTests
             "src/DeskBox/Controls/WidgetContents/FileSurfaceContent.ItemVisuals.cs"));
 
         Assert.Contains("bool isDropTarget = false", cache, StringComparison.Ordinal);
+        Assert.Contains("bool isWindowFocused = true", cache, StringComparison.Ordinal);
         Assert.Contains("_hoverSurfaceBrush", cache, StringComparison.Ordinal);
         Assert.Contains("_selectedHoverSurfaceBrush", cache, StringComparison.Ordinal);
+        Assert.Contains("_unfocusedSelectedSurfaceBrush", cache, StringComparison.Ordinal);
+        Assert.Contains("_unfocusedSelectedHoverSurfaceBrush", cache, StringComparison.Ordinal);
         Assert.DoesNotContain("_dropTargetSurfaceBrush", cache, StringComparison.Ordinal);
         Assert.DoesNotContain("_dropTargetBorderBrush", cache, StringComparison.Ordinal);
-        // Selection now draws a constant 1px neutral ring (DeskBoxNeutralLine
-        // values); thickness never changes per state so batch selections do
-        // not re-measure. Drop targets still swap to the transparent border,
-        // and accent must not enter any border.
+        // Selection draws a constant 1px neutral ring only when the surface
+        // window holds keyboard focus; unfocused selection swaps to the
+        // transparent border so desktop-pinned clicks never imply keyboard focus.
         Assert.Contains("SelectedBorderThickness = new(1)", cache, StringComparison.Ordinal);
         Assert.Contains(
-            "border.BorderBrush = isSelected ? _selectedBorderBrush : _normalBorderBrush;",
+            "border.BorderBrush = isSelected && isWindowFocused ? _selectedBorderBrush : _normalBorderBrush;",
             cache,
             StringComparison.Ordinal);
         Assert.DoesNotContain("Accent", cache, StringComparison.Ordinal);
@@ -74,6 +122,10 @@ public sealed class FileItemSurfaceStyleCacheTests
         Assert.DoesNotContain("_stackDropBrushesInitialized", visuals, StringComparison.Ordinal);
         Assert.Contains(
             "isDropTarget: state == FileItemSurfaceVisualState.DropTarget",
+            visuals,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "isWindowFocused: IsSurfaceWindowKeyboardFocused()",
             visuals,
             StringComparison.Ordinal);
     }

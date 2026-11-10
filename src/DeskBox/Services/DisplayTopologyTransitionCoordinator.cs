@@ -44,7 +44,30 @@ internal sealed class DisplayTopologyTransitionCoordinator : IDisposable
         _timer = dispatcherQueue.CreateTimer();
         _timer.IsRepeating = false;
         _timer.Tick += Timer_Tick;
+        Gate.GateClosed += _ => OnGateClosed();
         Gate.GateOpened += _ => OnGateOpened();
+    }
+
+    private void OnGateClosed()
+    {
+        if (!_dispatcherQueue.HasThreadAccess)
+        {
+            _dispatcherQueue.TryEnqueue(OnGateClosed);
+            return;
+        }
+
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        _timer.Stop();
+        _verificationPending = false;
+        _stabilityTracker.Reset();
+        if (!string.IsNullOrEmpty(_pendingReasons) && Gate.IsClosed)
+        {
+            LogBlockedGateIfChanged();
+        }
     }
 
     private void OnGateOpened()
@@ -55,13 +78,23 @@ internal sealed class DisplayTopologyTransitionCoordinator : IDisposable
             return;
         }
 
-        if (_isDisposed || string.IsNullOrEmpty(_pendingReasons))
+        if (_isDisposed || Gate.IsClosed || string.IsNullOrEmpty(_pendingReasons))
         {
             return;
         }
 
         App.Log("[DisplayTopology] gate opened; resuming parked restore");
         RequestRestore("gate-open");
+    }
+
+    private void LogBlockedGateIfChanged()
+    {
+        string reasons = string.Join("|", Gate.ClosedReasons);
+        if (!string.Equals(reasons, _lastBlockedReasons, StringComparison.Ordinal))
+        {
+            App.Log($"[DisplayTopology] gate closed reason={reasons}; parking restore");
+            _lastBlockedReasons = reasons;
+        }
     }
 
     public void RequestRestore(string reason)
@@ -84,13 +117,7 @@ internal sealed class DisplayTopologyTransitionCoordinator : IDisposable
         _stabilityTracker.Reset();
         if (Gate.IsClosed)
         {
-            string reasons = string.Join("|", Gate.ClosedReasons);
-            if (!string.Equals(reasons, _lastBlockedReasons, StringComparison.Ordinal))
-            {
-                App.Log($"[DisplayTopology] gate closed reason={reasons}; parking restore");
-                _lastBlockedReasons = reasons;
-            }
-
+            LogBlockedGateIfChanged();
             return;
         }
 
@@ -101,7 +128,7 @@ internal sealed class DisplayTopologyTransitionCoordinator : IDisposable
     private async void Timer_Tick(DispatcherQueueTimer sender, object args)
     {
         _timer.Stop();
-        if (_isDisposed)
+        if (_isDisposed || Gate.IsClosed)
         {
             return;
         }
@@ -150,7 +177,7 @@ internal sealed class DisplayTopologyTransitionCoordinator : IDisposable
 
         // A newer native or polling signal owns the next pass. RequestRestore
         // has already reset the tracker and scheduled its observation timer.
-        if (_isDisposed || generation != _generation)
+        if (_isDisposed || generation != _generation || Gate.IsClosed)
         {
             return;
         }

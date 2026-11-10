@@ -1,4 +1,4 @@
-﻿using DeskBox.Contracts;
+using DeskBox.Contracts;
 using DeskBox.Controls;
 using DeskBox.Controls.WidgetContents;
 using DeskBox.Helpers;
@@ -54,7 +54,6 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
     private bool _isVisibleOnDesktop;
     private int _contentVisibilityGeneration;
     private int _queuedContentRevealGeneration = -1;
-    private SearchHistoryService? _subscribedSearchHistoryService;
 
     public ContentWidgetWindow(
         WidgetConfig config,
@@ -107,11 +106,18 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
 
     public override WidgetConfig Config => _config;
     protected override double WidgetOpacity => SettingsService.Settings.WidgetOpacity;
+    protected override bool IsWindowVisibleForBackdrop => Visible || IsHideAnimationRunning;
     protected override FrameworkElement RootElement => RootGrid;
     protected override WidgetShell WidgetShellControl => ContentWidgetShell;
     protected override string LogPrefix => "Content";
     protected override bool IsSizeLocked => _config.IsSizeLocked;
     protected override bool IsPositionLocked => _config.IsPositionLocked;
+    protected override bool IsCollapsedContentHibernated =>
+        _contentHost.IsCurrentContentHibernated;
+    protected override bool TryHibernateCollapsedContent() =>
+        _contentHost.TryHibernateCurrentContentView();
+    protected override bool EnsureCollapsedContentViewAttached() =>
+        _contentHost.EnsureCurrentContentViewAttached();
     protected override bool IsCompactExpansionWarmupContentReady =>
         _contentHost.CurrentContent is not null;
 
@@ -121,6 +127,12 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
         {
             IsStackPopoverBlockingSurfaceOpen: true
         };
+
+    protected override bool OwnsTransientForegroundWindow(IntPtr foregroundWindow) =>
+        base.OwnsTransientForegroundWindow(foregroundWindow) ||
+        (foregroundWindow != IntPtr.Zero &&
+         CurrentContent is FileWidgetContentAdapter file &&
+         file.ActiveStackPopoverWindowHandle == foregroundWindow);
 
     protected override void OnCompactBoundsTransitionActiveChanged(bool isActive)
     {
@@ -154,7 +166,8 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
             QuickCaptureWidgetContentAdapter quickCapture =>
                 CreateQuickCaptureCompactPresentation(quickCapture, contentMode),
             WeatherWidgetContentAdapter weather => CreateWeatherCompactPresentation(weather, contentMode),
-            SearchWidgetContentAdapter => CreateSearchCompactPresentation(contentMode, localization),
+            CustomWidgetContentAdapter custom => CreateCustomCompactPresentation(custom, contentMode, localization),
+            ClipboardWidgetContentAdapter clipboard => CreateClipboardCompactPresentation(clipboard, contentMode, localization),
             _ => new WidgetCompactPresentation(
                 _titleViewModel.DisplayName,
                 string.Empty,
@@ -163,6 +176,85 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
                 EnableMarquee: true,
                 LiveStateKey: _titleViewModel.DisplayName)
         };
+    }
+
+    private WidgetCompactPresentation CreateCustomCompactPresentation(
+        CustomWidgetContentAdapter custom,
+        string contentMode,
+        LocalizationService localization)
+    {
+        CustomWidgetViewModel viewModel = custom.ViewModel;
+        bool hideSensitive = SettingsService.Settings.WidgetShell.WidgetCompactHideSensitiveContent;
+        string title = string.IsNullOrWhiteSpace(viewModel.CapsuleTitle)
+            ? _titleViewModel.DisplayName
+            : viewModel.CapsuleTitle;
+        string summary = contentMode == SettingsService.WidgetCompactContentModeMinimal || hideSensitive
+            ? string.Empty
+            : viewModel.CapsuleSummary;
+        string badgeText = contentMode == SettingsService.WidgetCompactContentModeMinimal || hideSensitive
+            ? string.Empty
+            : viewModel.CapsuleBadge;
+        bool showPrimaryAction = contentMode != SettingsService.WidgetCompactContentModeMinimal &&
+            !hideSensitive &&
+            viewModel.CapsuleHasPrimaryAction;
+
+        string glyph = string.IsNullOrWhiteSpace(viewModel.CapsuleGlyph)
+            ? _descriptor.DefaultGlyph
+            : viewModel.CapsuleGlyph;
+        string dropHint = viewModel.AcceptsFileDrops
+            ? localization.T(viewModel.EffectiveDropMode == "copy"
+                ? "CustomWidget.DropHint.Copy"
+                : "CustomWidget.DropHint.Link")
+            : localization.T("Widget.Compact.DropHint");
+
+        return new WidgetCompactPresentation(
+            title,
+            summary,
+            glyph,
+            dropHint,
+            ShowPrimaryAction: showPrimaryAction,
+            PrimaryActionGlyph: viewModel.CapsulePrimaryActionGlyph,
+            PrimaryActionTooltip: viewModel.CapsulePrimaryActionTooltip,
+            UseStackedText: !string.IsNullOrWhiteSpace(summary),
+            EnableMarquee: true,
+            Progress: viewModel.CapsuleProgress,
+            IsAttention: viewModel.CapsuleBadgeIsWarning,
+            LiveStateKey: viewModel.LiveStateKey,
+            BadgeText: badgeText,
+            BadgeIsWarning: viewModel.CapsuleBadgeIsWarning,
+            EnableBounceOnUpdate: viewModel.CapsuleEnableBounce);
+    }
+
+    private WidgetCompactPresentation CreateClipboardCompactPresentation(
+        ClipboardWidgetContentAdapter clipboard,
+        string contentMode,
+        LocalizationService localization)
+    {
+        bool hidesSensitiveContent =
+            SettingsService.Settings.WidgetShell.WidgetCompactHideSensitiveContent;
+        (string primaryText, string countText) =
+            clipboard.ViewModel.BuildCapsuleSummary(hidesSensitiveContent);
+
+        string summary = contentMode switch
+        {
+            DeskBox.Services.SettingsService.WidgetCompactContentModeMinimal => string.Empty,
+            DeskBox.Services.SettingsService.WidgetCompactContentModeSmart when !hidesSensitiveContent =>
+                string.IsNullOrWhiteSpace(primaryText) ? countText : primaryText,
+            _ => countText
+        };
+
+        return new WidgetCompactPresentation(
+            _titleViewModel.DisplayName,
+            summary,
+            "\uE77F",
+            localization.T("Clipboard.Drop.AddToHistory"),
+            UseStackedText: !string.IsNullOrWhiteSpace(summary),
+            IsAttention: clipboard.ViewModel.IsPaused,
+            LiveStateKey: string.Join(
+                "|",
+                clipboard.ViewModel.CapsuleRevision,
+                clipboard.ViewModel.IsPaused,
+                summary));
     }
 
     private WidgetCompactPresentation CreateGlanceCompactPresentation(
@@ -202,7 +294,10 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
 
         string summary = string.Join(" · ", summaryParts);
         bool hasText = !string.IsNullOrWhiteSpace(title) || !string.IsNullOrWhiteSpace(summary);
-        ImageSource? backgroundImage = viewModel.HasVisibleCurrentImage
+        ImageSource? backgroundImage = viewModel.HasVisibleCurrentImage &&
+            Visible &&
+            (IsWidgetCollapsed || IsCompactTransitionActive)
+
             ? glance.GetCompactBackgroundImage(
                 ResolveGlanceCompactBackgroundDecodeWidth())
             : null;
@@ -249,46 +344,6 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
         return (int)Math.Clamp(Math.Ceiling(physicalWidth), 320, 1600);
     }
 
-    private WidgetCompactPresentation CreateSearchCompactPresentation(
-        string contentMode,
-        LocalizationService localization)
-    {
-        // Smart mode gets a dynamic subtitle so the search capsule matches the
-        // height/style of the weather/quick-capture capsules instead of looking
-        // bare. The subtitle shows the most recent query ("最近：xxx"); when there
-        // is no history (or history is disabled / sensitive content is hidden) it
-        // falls back to a static hint so the line never appears empty.
-        bool stacked = contentMode == SettingsService.WidgetCompactContentModeSmart;
-
-        string summary = string.Empty;
-        string recentKey = string.Empty;
-        if (stacked)
-        {
-            string? recent = null;
-            if (SettingsService.Settings.SearchSaveHistory &&
-                !SettingsService.Settings.WidgetCompactHideSensitiveContent)
-            {
-                recent = App.Current.SearchHistoryService?.RecentQueries.FirstOrDefault();
-            }
-
-            summary = string.IsNullOrWhiteSpace(recent)
-                ? localization.T("Search.Compact.Hint")
-                : localization.Format("Search.Compact.Recent", recent);
-            recentKey = recent ?? string.Empty;
-        }
-
-        return new WidgetCompactPresentation(
-            _titleViewModel.DisplayName,
-            summary,
-            _descriptor.DefaultGlyph,
-            localization.T("Widget.Compact.DropHint"),
-            ShowPrimaryAction: true,
-            PrimaryActionGlyph: "\uE721",
-            UseStackedText: stacked,
-            EnableMarquee: true,
-            LiveStateKey: string.Join("|", _titleViewModel.DisplayName, recentKey));
-    }
-
     private WidgetCompactPresentation CreateMusicCompactPresentation(
         MusicWidgetContentAdapter music,
         string contentMode)
@@ -303,7 +358,12 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
             ? string.Empty
             : hidesSensitiveContent
                 ? music.ViewModel.StatusText
-                : music.ViewModel.Artist;
+                : music.ViewModel.HasSession &&
+                  music.ViewModel.ShowLyrics &&
+                  music.ViewModel.ShowCapsuleLyrics &&
+                  !string.IsNullOrWhiteSpace(music.ViewModel.CurrentLyricLine)
+                    ? music.ViewModel.CurrentLyricLine
+                    : music.ViewModel.Artist;
 
         // Plain, determinate progress shown below the artist name inside the
         // capsule. Mirrors the EXPANDED music view: the track is always
@@ -405,10 +465,12 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
         }
 
         var nextItem = GetNextCompactTodoItem(todo);
-        int overdueCount = todo.ViewModel.Items.Count(item => item.IsOverdue);
+        DateTime today = DateTime.Today;
+        int overdueCount = todo.ViewModel.Items.Count(
+            item => item.IsOverdue && !TodoRecurrenceService.IsDeferredOccurrence(item.Item, today));
         string countSummary = localization.Format(
             "Widget.Compact.TodoSummary",
-            todo.ViewModel.TodayFilterCount,
+            todo.ViewModel.TodayDueOnlyCount,
             overdueCount);
 
         WidgetCompactPresentation presentation = contentMode switch
@@ -432,7 +494,7 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
                 localization.T("Widget.Compact.TodoDropHint"))
         };
 
-        int totalCount = todo.ViewModel.Items.Count;
+        int totalCount = todo.ViewModel.TotalCount;
         int completedCount = todo.ViewModel.CompletedCount;
 
         return presentation with
@@ -494,24 +556,31 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
         DateTime today = DateTime.Today;
         if (localDueDate.Date == today)
         {
-            return localization.Format("Todo.Due.TodayAt", localDueDate.ToString("HH:mm"));
+            return item.HasDueTime
+                ? localization.Format("Todo.Due.TodayAt", localDueDate.ToString("HH:mm"))
+                : localization.T("Todo.Due.Today");
         }
 
         if (localDueDate.Date == today.AddDays(1))
         {
-            return localization.Format("Todo.Due.TomorrowAt", localDueDate.ToString("HH:mm"));
+            return item.HasDueTime
+                ? localization.Format("Todo.Due.TomorrowAt", localDueDate.ToString("HH:mm"))
+                : localization.T("Todo.Due.Tomorrow");
         }
 
         return localDueDate.ToString("M/d");
     }
 
-    private static TodoItemViewModel? GetNextCompactTodoItem(TodoWidgetContentAdapter todo) =>
-        todo.ViewModel.Items
-            .Where(item => !item.IsCompleted)
+    private static TodoItemViewModel? GetNextCompactTodoItem(TodoWidgetContentAdapter todo)
+    {
+        DateTime today = DateTime.Today;
+        return todo.ViewModel.Items
+            .Where(item => !item.IsCompleted && !TodoRecurrenceService.IsDeferredOccurrence(item.Item, today))
             .OrderByDescending(item => item.IsOverdue)
             .ThenByDescending(item => item.IsImportant)
             .ThenBy(item => item.DueDate ?? DateTimeOffset.MaxValue)
             .FirstOrDefault();
+    }
 
     private static string BuildWeatherCompactSummary(
         WeatherWidgetContentAdapter weather,
@@ -536,9 +605,9 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
 
     protected override async Task OnCompactPrimaryActionRequestedAsync()
     {
-        if (CurrentContent is SearchWidgetContentAdapter)
+        if (CurrentContent is CustomWidgetContentAdapter custom)
         {
-            App.Current.OpenSearchPopup();
+            await custom.ViewModel.ExecuteCapsulePrimaryActionAsync();
             return;
         }
 
@@ -644,19 +713,33 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
                 isDark,
                 accentColor,
                 surfaceOpacity);
+            if (surfaceColor.A == 0)
+            {
+                // Preserve XAML/Win32 pointer hit-testing inside 0%-opacity cards
+                // while keeping pixels outside rounded corners at alpha 0.
+                surfaceColor = Windows.UI.Color.FromArgb(1, surfaceColor.R, surfaceColor.G, surfaceColor.B);
+            }
+
             ContentWidgetShell.BackgroundSurface.Background = GetOrUpdateSolidColorBrush(
                 ContentWidgetShell.BackgroundSurface.Background,
                 surfaceColor);
         }
-        else if (WindowsCompatibilityService.UsesLegacyWindowAcrylic &&
-            SettingsService.IsAcrylicMaterial(materialType))
+        else if (materialType is not SettingsService.WidgetMaterialTypeSolid &&
+            !MicaControllerAttached &&
+            !AcrylicControllerAttached &&
+            ContentWidgetShell.MaterialSurface.Visibility == Visibility.Collapsed)
         {
-            var overlayColor = WidgetMaterialVisualCalculator.BuildLegacyAcrylicSurfaceOverlayColor(
-                isDark,
-                accentColor,
-                materialType == SettingsService.WidgetMaterialTypeAcrylicBase,
-                surfaceOpacity,
-                SettingsService.Settings.WidgetMaterialIntensity);
+            var overlayColor = LegacyAccentBackdropActive
+                ? WidgetMaterialVisualCalculator.BuildLegacyAcrylicSurfaceOverlayColor(
+                    isDark,
+                    accentColor,
+                    materialType == SettingsService.WidgetMaterialTypeAcrylicBase,
+                    surfaceOpacity,
+                    SettingsService.Settings.WidgetMaterialIntensity)
+                : WidgetMaterialVisualCalculator.BuildContentSolidSurfaceColor(
+                    isDark,
+                    accentColor,
+                    Math.Clamp(Math.Max(surfaceOpacity, 0.72), 0.15, 0.96));
             ContentWidgetShell.BackgroundSurface.Background = GetOrUpdateSolidColorBrush(
                 ContentWidgetShell.BackgroundSurface.Background,
                 overlayColor);
@@ -675,11 +758,22 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
             accentColor.G,
             accentColor.B);
 
-        ContentWidgetShell.BackgroundSurface.BorderThickness = new Thickness(borderThickness);
-        ContentWidgetShell.BackgroundSurface.BorderBrush = GetOrUpdateSolidColorBrush(
-            ContentWidgetShell.BackgroundSurface.BorderBrush,
+        var zeroThickness = new Thickness(0);
+        if (ContentWidgetShell.BackgroundSurface.BorderThickness != zeroThickness)
+        {
+            ContentWidgetShell.BackgroundSurface.BorderThickness = zeroThickness;
+        }
+
+        ContentWidgetShell.OutlineSurface.BorderBrush = GetOrUpdateSolidColorBrush(
+            ContentWidgetShell.OutlineSurface.BorderBrush,
             borderColor);
-        ContentWidgetShell.BackgroundSurface.CornerRadius = new CornerRadius(GetCurrentSurfaceCornerRadius());
+        var desiredBorderThickness = new Thickness(borderThickness);
+        if (ContentWidgetShell.OutlineSurface.BorderThickness != desiredBorderThickness)
+        {
+            ContentWidgetShell.OutlineSurface.BorderThickness = desiredBorderThickness;
+        }
+        ContentWidgetShell.NotifyOutlineBorderChanged();
+        ContentWidgetShell.SetOuterSurfaceCornerRadius(GetCurrentSurfaceCornerRadius());
         ContentWidgetShell.Divider.Background = GetOrUpdateSolidColorBrush(
             ContentWidgetShell.Divider.Background,
             dividerColor);
@@ -687,6 +781,32 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
         ContentWidgetShell.TitleIconMode = SettingsService.Settings.WidgetTitleIconMode;
         ApplyCustomTitleIcon();
         ApplyCustomWidgetBackground();
+        bool hasImageBackground =
+            ContentWidgetShell.CustomBackgroundSource is not null ||
+            ContentWidgetShell.CustomBackgroundPanoramaSource is not null ||
+            Config.WidgetKind is WidgetKind.Glance or WidgetKind.Music ||
+            (Config.WidgetKind == WidgetKind.Weather &&
+             SettingsService.Settings.Weather.WeatherSkin == SettingsService.WeatherSkinRich);
+        double effectivePlateOpacity =
+            WidgetMaterialVisualCalculator.ResolveEffectivePlateOpacity(
+                materialType,
+                isDark,
+                surfaceOpacity,
+                SettingsService.Settings.WidgetMaterialIntensity,
+                acrylicControllerAttached: AcrylicController is { IsClosed: false } && AcrylicControllerAttached,
+                micaControllerAttached: MicaController is not null && MicaControllerAttached,
+                legacyAccentBackdropActive: LegacyAccentBackdropActive,
+                usesLegacyWindowAcrylic: WindowsCompatibilityService.UsesLegacyWindowAcrylic,
+                hasOpaqueCustomColor: ContentWidgetShell.CustomBackgroundSource is null &&
+                    ContentWidgetShell.CustomBackgroundPanoramaSource is null &&
+                    ContentWidgetShell.CustomBackgroundColorHex is { } customColorHex &&
+                    AccentColorHelper.TryParseHex(customColorHex, out _));
+        WidgetTextShadow.SetPlateOpaque(
+            RootGrid,
+            WidgetTextShadow.ShouldSuppressForOpaquePlate(
+                effectivePlateOpacity,
+                materialType,
+                hasImageBackground));
         WidgetTextShadow.SetEnabled(
             SettingsService.Settings.WidgetShell.WidgetTextShadowEnabled);
     }
@@ -700,7 +820,20 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
     protected override void OnCustomWidgetBackgroundChanged(bool active)
     {
         // User-set background wins over the Glance surface's own background
-        // image (per-widget customization rule).
+        // image (per-widget customization rule). Never touch .View on any
+        // WidgetContentAdapterBase here, or collapsed capsules materialize
+        // their expanded XAML tree eagerly during appearance updates.
+        if (CurrentContent is GlanceWidgetContentAdapter glanceAdapter)
+        {
+            glanceAdapter.SetShellCustomBackgroundActive(active);
+            return;
+        }
+
+        if (CurrentContent is DeskBox.Controls.WidgetContents.WidgetContentAdapterBase)
+        {
+            return;
+        }
+
         if (CurrentContent?.View is DeskBox.Controls.WidgetContents.GlanceWidgetContent glance)
         {
             glance.SetShellCustomBackgroundActive(active);
@@ -745,14 +878,25 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
         ApplyWindowCornerPreference();
         ApplyWidgetForegroundAppearance();
         ApplyBackdropPreference();
+        if (IsWidgetCollapsed && !IsCompactTransitionActive)
+        {
+            ApplyCompactSurfaceState();
+        }
         ContentWidgetShell.ShowHoverButtons = SettingsService.Settings.ShowHoverButtons;
         ApplyTitleBarLayout();
         _contentHost.ApplyAppearance(invalidate: invalidateContent);
     }
 
+    private bool _prepareAsSingleWidgetLifecycle;
+
     public void SetTrayAnimationOffsetOverride(double? offsetX, double? offsetY)
     {
         TrayAnimation.SetOffsetOverride(offsetX, offsetY);
+    }
+
+    public void SetTrayAnimationOptionsOverride(WidgetAnimationOptions? optionsOverride)
+    {
+        SetTrayAnimationOptionsOverrideCore(optionsOverride);
     }
 
     public void CancelTrayAnimationAndRestorePosition()
@@ -766,18 +910,36 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
         long animationGeneration = TrayAnimation.NextGeneration();
         TrayAnimation.Stop();
         SetTrayAnimationOffsetOverride(null, null);
+        SetTrayAnimationOptionsOverride(null);
         TrayAnimation.RestoreVisualState();
         TrayAnimation.RestoreWindowPosition();
         TrayAnimation.RevealWindowForTrayShow();
         SetTrayHideInputSuppressed(false);
         IsHideAnimationRunning = false;
         _isHidePrepared = false;
+        if (Visible)
+        {
+            NotifyVisibleContentRevealCompleted();
+        }
         LogTrayWindow($"CancelAnimationAndRestore gen={animationGeneration}");
     }
 
 public void PrepareTrayShowAnimation()
 {
 PrepareTrayShowAnimationCore(restoreBoundsForCurrentTopology: false);
+}
+
+public void PrepareSingleWidgetShowAnimation()
+{
+_prepareAsSingleWidgetLifecycle = true;
+try
+{
+    PrepareTrayShowAnimationCore(restoreBoundsForCurrentTopology: true);
+}
+finally
+{
+    _prepareAsSingleWidgetLifecycle = false;
+}
 }
 
 internal bool PrepareTrayShowAnimationForCurrentTopology()
@@ -804,11 +966,14 @@ private bool PrepareTrayShowAnimationCore(bool restoreBoundsForCurrentTopology)
             boundsRestored = !restoreBoundsForCurrentTopology ||
                 TryRestoreBoundsForCurrentTopology(allowHidden: true);
 
-            var profile = GetTrayAnimationProfile();
+            var options = GetEffectiveTrayAnimationOptions();
+            var profile = _prepareAsSingleWidgetLifecycle
+                ? GetSingleWidgetAnimationProfile(isShowing: true)
+                : GetTrayAnimationProfile(isShowing: true);
             LogTrayWindow(
                 $"PrepareShow gen={TrayAnimation.Generation} topologyRetarget={restoreBoundsForCurrentTopology} " +
-                $"boundsRestored={boundsRestored} effect={SettingsService.Settings.WidgetAnimationEffect} " +
-                $"speed={SettingsService.Settings.WidgetAnimationSpeed} enabled={profile.IsEnabled} durationMs={profile.DurationMs}");
+                $"boundsRestored={boundsRestored} effect={options.Effect} " +
+                $"speed={options.Speed} enabled={profile.IsEnabled} durationMs={profile.DurationMs}");
             TrayAnimation.PrepareVisualState(
                 profile.ShowOffsetX,
                 profile.ShowOffsetY,
@@ -861,7 +1026,7 @@ private bool PrepareTrayShowAnimationCore(bool restoreBoundsForCurrentTopology)
 
     public void RevealFromTray(bool autoRestore = true)
     {
-        PrepareTrayShowAnimation();
+        PrepareSingleWidgetShowAnimation();
         ShowPreparedRaisedFromTray();
         ActivateRaisedFromTrayBatch();
         PlayTrayShowAnimation();
@@ -923,6 +1088,11 @@ private bool PrepareTrayShowAnimationCore(bool restoreBoundsForCurrentTopology)
         {
             LogTrayWindow($"PrepareHide skipped visible={Visible} hideRunning={IsHideAnimationRunning}");
             return false;
+        }
+
+        if (CurrentContent is FileWidgetContentAdapter fileAdapter)
+        {
+            fileAdapter.CloseOpenStackPopover();
         }
 
         PrepareCompactHostForTrayHide();
@@ -1022,6 +1192,43 @@ IsHideAnimationRunning = true;
         _contentHost.OnDeactivated();
     }
 
+    public void PrepareForGroupDesktopRestoreFromManager()
+    {
+        if (!Visible)
+        {
+            return;
+        }
+
+        EndExpandedWidgetLayerLease();
+        CancelPendingDesktopLayerRestore();
+    }
+
+    public void CompleteGroupDesktopRestoreFromManager(bool placedAtDesktopLayer)
+    {
+        if (!Visible)
+        {
+            return;
+        }
+
+        if (placedAtDesktopLayer)
+        {
+            IsAtDesktopLayer = true;
+        }
+
+        ApplyBackdropPreference();
+        _contentHost.OnDeactivated();
+    }
+
+    public void MarkRaisedAboveDesktopLayerFromManager()
+    {
+        if (!Visible)
+        {
+            return;
+        }
+
+        IsAtDesktopLayer = false;
+    }
+
     public void HideWindow()
     {
         App.Current?.WidgetManager?.CancelWidgetSurfaceSwitch(_config.Id);
@@ -1037,6 +1244,8 @@ IsHideAnimationRunning = true;
         WidgetLayerService.ClearTopMost(HWnd);
         Win32Helper.ShowWindow(HWnd, Win32Helper.SW_HIDE);
         AppWindow.Hide();
+        SuspendBackdropTargetsForHiddenWindow();
+        ContentWidgetShell.ClearCompactBitmaps();
         WidgetShellControl.SuspendVisualActivity();
         NotifyCompactHostVisibilityChanged(false);
         TrayAnimation.RestoreVisualState();
@@ -1084,6 +1293,7 @@ IsHideAnimationRunning = true;
         AttachCompactPresentationSource(content);
         AttachFeedbackSource(content);
         AttachHostContextMenuSource(content);
+        ArmCollapsedContentHibernationIfSettled();
         RefreshCompactPresentation();
         ApplyTitleActionButtonConfiguration();
     }
@@ -1155,6 +1365,8 @@ IsHideAnimationRunning = true;
             MusicWidgetContentAdapter music => music.ViewModel,
             WeatherWidgetContentAdapter weather => weather.ViewModel,
             QuickCaptureWidgetContentAdapter quickCapture => quickCapture.ViewModel,
+            CustomWidgetContentAdapter custom => custom.ViewModel,
+            ClipboardWidgetContentAdapter clipboard => clipboard.ViewModel,
             _ => null
         };
 
@@ -1162,34 +1374,6 @@ IsHideAnimationRunning = true;
         {
             _compactPresentationSource.PropertyChanged += CompactPresentationSource_PropertyChanged;
         }
-
-        // The search capsule's dynamic subtitle ("最近：xxx") tracks the recent-query
-        // list, which has no INotifyPropertyChanged surface, so subscribe to the
-        // history service's change event to refresh the compact presentation live.
-        if (content is not SearchWidgetContentAdapter &&
-            _subscribedSearchHistoryService is { } previousHistoryService)
-        {
-            previousHistoryService.RecentQueriesChanged -= OnRecentQueriesChanged;
-            _subscribedSearchHistoryService = null;
-        }
-
-        if (content is SearchWidgetContentAdapter &&
-            App.Current.SearchHistoryService is { } historyService &&
-            !ReferenceEquals(_subscribedSearchHistoryService, historyService))
-        {
-            if (_subscribedSearchHistoryService is { } previousService)
-            {
-                previousService.RecentQueriesChanged -= OnRecentQueriesChanged;
-            }
-
-            historyService.RecentQueriesChanged += OnRecentQueriesChanged;
-            _subscribedSearchHistoryService = historyService;
-        }
-    }
-
-    private void OnRecentQueriesChanged()
-    {
-        QueueCompactPresentationRefresh();
     }
 
     private void CompactPresentationSource_PropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -1203,6 +1387,16 @@ IsHideAnimationRunning = true;
         {
             ContentWidgetShell.TitleGlyph = fileViewModel.IconGlyph;
             ContentWidgetShell.TitleIconKind = fileViewModel.TitleIconKind;
+        }
+        else if (sender is CustomWidgetViewModel customViewModel &&
+                 e.PropertyName is nameof(CustomWidgetViewModel.ManifestEmojiIcon)
+                     or nameof(CustomWidgetViewModel.TitleIconKind)
+                     or nameof(CustomWidgetViewModel.TitleGlyph))
+        {
+            ContentWidgetShell.TitleGlyph = customViewModel.TitleGlyph;
+            ContentWidgetShell.TitleIconKind = customViewModel.TitleIconKind;
+            SettingsService.UpdateWidget(Config, notifySubscribers: false);
+            ApplyCustomTitleIconAndGroupIdentity();
         }
 
         if (!IsCompactPresentationPropertyRelevant(Config.WidgetKind, e.PropertyName))
@@ -1228,7 +1422,7 @@ IsHideAnimationRunning = true;
             _compactPresentationRefreshQueued = false;
             if (!IsClosing && IsWidgetCollapsed)
             {
-                RefreshCompactPresentation();
+                RefreshCompactPresentation(reapplySurfaceState: false);
             }
         }))
         {
@@ -1261,6 +1455,9 @@ IsHideAnimationRunning = true;
             WidgetKind.Music => propertyName is
                 nameof(MusicWidgetViewModel.Title) or
                 nameof(MusicWidgetViewModel.Artist) or
+                nameof(MusicWidgetViewModel.CurrentLyricLine) or
+                nameof(MusicWidgetViewModel.ShowLyrics) or
+                nameof(MusicWidgetViewModel.ShowCapsuleLyrics) or
                 nameof(MusicWidgetViewModel.StatusText) or
                 nameof(MusicWidgetViewModel.ThumbnailImage) or
                 nameof(MusicWidgetViewModel.HasSession) or
@@ -1285,6 +1482,24 @@ IsHideAnimationRunning = true;
                 nameof(GlanceWidgetViewModel.ShowTime) or
                 nameof(GlanceWidgetViewModel.ShowDate) or
                 nameof(GlanceWidgetViewModel.ShowWeekday),
+            WidgetKind.Custom => propertyName is
+                nameof(CustomWidgetViewModel.CapsuleTitle) or
+                nameof(CustomWidgetViewModel.CapsuleSummary) or
+                nameof(CustomWidgetViewModel.CapsuleGlyph) or
+                nameof(CustomWidgetViewModel.CapsuleProgress) or
+                nameof(CustomWidgetViewModel.CapsuleBadge) or
+                nameof(CustomWidgetViewModel.CapsuleBadgeIsWarning) or
+                nameof(CustomWidgetViewModel.CapsuleEnableBounce) or
+                nameof(CustomWidgetViewModel.CapsuleHasPrimaryAction) or
+                nameof(CustomWidgetViewModel.CapsulePrimaryActionGlyph) or
+                nameof(CustomWidgetViewModel.CapsulePrimaryActionTooltip) or
+                nameof(CustomWidgetViewModel.LiveStateKey) or
+                nameof(CustomWidgetViewModel.AcceptsFileDrops) or
+                nameof(CustomWidgetViewModel.EffectiveDropMode),
+            WidgetKind.Clipboard => propertyName is
+                nameof(ClipboardWidgetViewModel.CapsuleRevision) or
+                nameof(ClipboardWidgetViewModel.TotalItemCount) or
+                nameof(ClipboardWidgetViewModel.IsPaused),
             _ => true
         };
     }
@@ -1350,18 +1565,24 @@ IsHideAnimationRunning = true;
             try { RemoveNativeFileDropBridge(); } catch (Exception ex) { App.Log($"[ContentWidget] Remove native file drop bridge failed during close: {ex.Message}"); }
             App.Current.LocalizationService.LanguageChanged -= OnLanguageChanged;
             SettingsService.SettingsChanged -= OnSettingsChanged;
+            Activated -= ContentWidgetWindow_Activated;
             AppWindow.Changed -= OnAppWindowChanged;
             ContentWidgetShell.RightTapped -= ContentWidgetShell_RightTapped;
             ContentWidgetShell.TitleDoubleTapped -= ContentWidgetShell_TitleDoubleTapped;
+            if (_feedbackSource is not null)
+            {
+                _feedbackSource.FeedbackRequested -= FeedbackSource_FeedbackRequested;
+                _feedbackSource = null;
+            }
+            if (_hostContextMenuSource is not null)
+            {
+                _hostContextMenuSource.HostContextMenuOpening -= HostContextMenuSource_HostContextMenuOpening;
+                _hostContextMenuSource = null;
+            }
             if (_compactPresentationSource is not null)
             {
                 _compactPresentationSource.PropertyChanged -= CompactPresentationSource_PropertyChanged;
                 _compactPresentationSource = null;
-            }
-            if (_subscribedSearchHistoryService is { } historyService)
-            {
-                historyService.RecentQueriesChanged -= OnRecentQueriesChanged;
-                _subscribedSearchHistoryService = null;
             }
             try { TrayAnimation.RevealWindowForTrayShow(); } catch { }
             try { CleanupBase(); } catch (Exception ex) { App.Log($"[ContentWidget] CleanupBase failed during close: {ex.Message}"); }
@@ -1380,6 +1601,10 @@ IsHideAnimationRunning = true;
             }
         };
     }
+
+    internal void DisposeHostedContentEarly() => _contentHost.DisposeContent();
+
+    internal void RefreshCompactPresentationFromHost() => RefreshCompactPresentation();
 
     private void OnSettingsChanged()
     {
@@ -1407,12 +1632,6 @@ IsHideAnimationRunning = true;
         ContentWidgetShell.ShowHoverButtons = SettingsService.Settings.ShowHoverButtons;
         _titleViewModel.RefreshMetrics();
         ApplyAppearancePreview();
-
-        // Search capsule subtitle depends on SearchSaveHistory / hide-sensitive flags.
-        if (CurrentContent is SearchWidgetContentAdapter)
-        {
-            RefreshCompactPresentation();
-        }
     }
 
     // ── Drag handlers (delegate to base) ───────────────────────
@@ -1459,7 +1678,8 @@ IsHideAnimationRunning = true;
                         WidgetKind.Tags => "Tags.Title",
                         WidgetKind.Music => "Music.Title",
                         WidgetKind.Glance => "Glance.Title",
-                        WidgetKind.Search => "Search.Title",
+                        WidgetKind.Custom => "CustomWidget.Title",
+                        WidgetKind.Clipboard => "Clipboard.Title",
                         WidgetKind.SystemMonitor => "SystemMonitor.Title",
                         _ => ""
                     };
@@ -1468,6 +1688,24 @@ IsHideAnimationRunning = true;
                         var localized = localization.T(key);
                         if (!string.IsNullOrEmpty(localized))
                             return localized;
+                    }
+                }
+
+                if (Config.WidgetKind == WidgetKind.Custom &&
+                    Config.Metadata.TryGetValue(CustomWidgetViewModel.TemplateMetadataKey, out string? tplId) &&
+                    CustomWidgetTemplates.MatchPresetOrNull(tplId) is { } matchedPreset &&
+                    (string.IsNullOrWhiteSpace(Config.Name) ||
+                     string.Equals(Config.Name, matchedPreset.DefaultTitle, StringComparison.Ordinal) ||
+                     LocalizationService.SupportedLanguageCodes.Any(code =>
+                         string.Equals(
+                             Config.Name,
+                             LocalizationService.TranslateForCulture(code, matchedPreset.NameKey),
+                             StringComparison.Ordinal))))
+                {
+                    string presetTitle = App.Current.LocalizationService.T(matchedPreset.NameKey);
+                    if (!string.IsNullOrWhiteSpace(presetTitle))
+                    {
+                        return presetTitle;
                     }
                 }
 

@@ -36,10 +36,7 @@ public sealed partial class QuickCaptureWidgetViewModel
         OnPropertyChanged(nameof(SelectedView));
         OnPropertyChanged(nameof(IsRecordsView));
         OnPropertyChanged(nameof(IsPinnedView));
-        OnPropertyChanged(nameof(IsRecentView));
         OnPropertyChanged(nameof(InputAreaVisibility));
-        OnPropertyChanged(nameof(RecentCaptureStatusVisibility));
-        OnPropertyChanged(nameof(RecentCaptureActionVisibility));
         OnPropertyChanged(nameof(CreatedTimeVisibility));
         await RefreshFromDataAsync(data);
         IsInitialized = true;
@@ -126,20 +123,17 @@ public sealed partial class QuickCaptureWidgetViewModel
         }
 
         bool addPinned = IsPinnedView;
+        long sequenceBeforeWrite = CurrentRefreshSequence;
         QuickCaptureWriteResult result = await _quickCaptureService.AddDetailedItemWithResultAsync(
             null,
             body,
             QuickCaptureAppearancePreset.Default,
             ResolveEditorContentFormat(),
             pin: addPinned);
-        if (SelectedView == QuickCaptureViewMode.Recent)
+        // Records and Pinned stay on their current view, so refresh it
+        // explicitly if Changed did not already trigger a live refresh.
+        if (CurrentRefreshSequence == sequenceBeforeWrite)
         {
-            SelectedView = QuickCaptureViewMode.Records;
-        }
-        else
-        {
-            // Records and Pinned stay on their current view, so refresh it
-            // explicitly to make the new item appear without a tab switch.
             RefreshVisibleItemsImmediately();
         }
 
@@ -172,17 +166,14 @@ public sealed partial class QuickCaptureWidgetViewModel
         }
 
         bool addPinned = IsPinnedView;
+        long sequenceBeforeWrite = CurrentRefreshSequence;
         QuickCaptureWriteResult result = await _quickCaptureService.AddDetailedItemWithResultAsync(
             title,
             body,
             appearancePreset,
             contentFormat ?? ResolveEditorContentFormat(),
             pin: addPinned);
-        if (SelectedView == QuickCaptureViewMode.Recent)
-        {
-            SelectedView = QuickCaptureViewMode.Records;
-        }
-        else
+        if (CurrentRefreshSequence == sequenceBeforeWrite)
         {
             RefreshVisibleItemsImmediately();
         }
@@ -199,11 +190,6 @@ public sealed partial class QuickCaptureWidgetViewModel
         if (item is null)
         {
             return null;
-        }
-
-        if (SelectedView == QuickCaptureViewMode.Recent)
-        {
-            SelectedView = QuickCaptureViewMode.Records;
         }
 
         await RefreshVisibleItemsAsync();
@@ -252,13 +238,15 @@ public sealed partial class QuickCaptureWidgetViewModel
                 copyToManagedStorage: true) ?? created;
         }
 
-        if (SelectedView == QuickCaptureViewMode.Recent)
-        {
-            SelectedView = QuickCaptureViewMode.Records;
-        }
-
         await RefreshVisibleItemsAsync();
-        return Items.FirstOrDefault(entry => string.Equals(entry.Id, created.Id, StringComparison.Ordinal));
+        return Items.FirstOrDefault(entry => string.Equals(entry.Id, created.Id, StringComparison.Ordinal))
+            ?? new QuickCaptureItemViewModel(
+                created,
+                _localizationService,
+                TextSize,
+                IconSize,
+                SearchText,
+                contentTextSize: ContentTextSize);
     }
 
     public async Task<QuickCaptureItemViewModel?> AddAttachmentsAsync(
@@ -341,10 +329,6 @@ public sealed partial class QuickCaptureWidgetViewModel
             ? null
             : QuickCaptureClipboardFormatter.FormatSingle(item, _localizationService);
         await WriteItemToClipboardWithRetryAsync(item, formattedText);
-        if (!string.IsNullOrWhiteSpace(formattedText))
-        {
-            _quickCaptureService.MarkClipboardTextWrittenByDeskBox(formattedText);
-        }
     }
 
     public Task CopyImageAsync(QuickCaptureItemViewModel item)
@@ -384,8 +368,8 @@ public sealed partial class QuickCaptureWidgetViewModel
         var dataPackage = new DataPackage();
         if (!string.IsNullOrWhiteSpace(recordText))
         {
-            dataPackage.SetText(recordText);
             DeskBoxClipboardWriteScope.MarkWrite(text: recordText);
+            dataPackage.SetText(recordText);
         }
         else if (item.Type == QuickCaptureItemType.Image)
         {
@@ -396,17 +380,15 @@ public sealed partial class QuickCaptureWidgetViewModel
                     item.ImagePath);
             }
 
+            DeskBoxClipboardWriteScope.MarkWrite(hasImage: true);
             var file = await Windows.Storage.StorageFile.GetFileFromPathAsync(item.ImagePath);
             dataPackage.SetBitmap(Windows.Storage.Streams.RandomAccessStreamReference.CreateFromFile(file));
-            DeskBoxClipboardWriteScope.MarkWrite(
-                hasImage: true,
-                paths: [item.ImagePath]);
         }
         else
         {
             string text = recordText ?? item.CopyText;
-            dataPackage.SetText(text);
             DeskBoxClipboardWriteScope.MarkWrite(text: text);
+            dataPackage.SetText(text);
         }
 
         Clipboard.SetContent(dataPackage);
@@ -423,7 +405,6 @@ public sealed partial class QuickCaptureWidgetViewModel
         return defaultView switch
         {
             SettingsService.QuickCaptureDefaultViewPinned => QuickCaptureViewMode.Pinned,
-            SettingsService.QuickCaptureDefaultViewRecent => QuickCaptureViewMode.Recent,
             _ => QuickCaptureViewMode.Records
         };
     }
@@ -486,8 +467,8 @@ public sealed partial class QuickCaptureWidgetViewModel
     {
         return target switch
         {
-            QuickCaptureViewMode.Records => item.IsRecent || item.IsPinned,
-            QuickCaptureViewMode.Pinned => item.IsRecent || !item.IsPinned,
+            QuickCaptureViewMode.Records => item.IsPinned,
+            QuickCaptureViewMode.Pinned => !item.IsPinned,
             _ => false
         };
     }
@@ -508,13 +489,6 @@ public sealed partial class QuickCaptureWidgetViewModel
             return false;
         }
 
-        if (item.IsRecent)
-        {
-            return await _quickCaptureService.SaveRecentItemToRecordsAsync(
-                item.Id,
-                pin: target == QuickCaptureViewMode.Pinned) is not null;
-        }
-
         return await _quickCaptureService.SetPinnedAsync(
             item.Id,
             isPinned: target == QuickCaptureViewMode.Pinned);
@@ -524,39 +498,19 @@ public sealed partial class QuickCaptureWidgetViewModel
         IReadOnlyList<QuickCaptureItemViewModel> items,
         QuickCaptureViewMode target)
     {
-        QuickCaptureItemViewModel[] actionableItems = items
+        string[] recordIds = items
             .Where(item => CanApplyTabDrop(item, target))
-            .GroupBy(item => item.Id, StringComparer.Ordinal)
-            .Select(group => group.First())
+            .Select(item => item.Id)
+            .Distinct(StringComparer.Ordinal)
             .ToArray();
-        if (actionableItems.Length == 0)
+        if (recordIds.Length == 0)
         {
             return 0;
         }
 
-        int changedCount = 0;
-        foreach (QuickCaptureItemViewModel recentItem in actionableItems.Where(item => item.IsRecent))
-        {
-            if (await _quickCaptureService.SaveRecentItemToRecordsAsync(
-                    recentItem.Id,
-                    pin: target == QuickCaptureViewMode.Pinned) is not null)
-            {
-                changedCount++;
-            }
-        }
-
-        string[] recordIds = actionableItems
-            .Where(item => !item.IsRecent)
-            .Select(item => item.Id)
-            .ToArray();
-        if (recordIds.Length > 0)
-        {
-            changedCount += await _quickCaptureService.SetPinnedAsync(
-                recordIds,
-                isPinned: target == QuickCaptureViewMode.Pinned);
-        }
-
-        return changedCount;
+        return await _quickCaptureService.SetPinnedAsync(
+            recordIds,
+            isPinned: target == QuickCaptureViewMode.Pinned);
     }
 
     public Task<bool> SetAppearanceAsync(
@@ -602,26 +556,27 @@ public sealed partial class QuickCaptureWidgetViewModel
             : Task.FromResult(false);
     }
 
-    public async Task<QuickCaptureDeletedItemSnapshot?> DeleteItemAsync(QuickCaptureItemViewModel item)
+    public Task<QuickCaptureDeletedItemSnapshot?> DeleteItemAsync(QuickCaptureItemViewModel item)
     {
-        if (item.IsRecent)
-        {
-            return await _quickCaptureService.DeleteRecentItemAsync(item.Id);
-        }
-
-        return await _quickCaptureService.DeleteItemAsync(item.Id);
+        return _quickCaptureService.DeleteItemAsync(item.Id);
     }
 
     public Task<IReadOnlyList<QuickCaptureDeletedItemSnapshot>> DeleteItemsAsync(
         IEnumerable<string> itemIds,
-        bool isRecent)
+        bool isRecent = false)
     {
-        return _quickCaptureService.DeleteItemsAsync(itemIds, isRecent);
+        return _quickCaptureService.DeleteItemsAsync(itemIds, isRecent: false);
     }
 
     public Task<bool> RestoreDeletedItemAsync(QuickCaptureDeletedItemSnapshot? snapshot)
     {
         return _quickCaptureService.RestoreDeletedItemAsync(snapshot);
+    }
+
+    public Task ReleaseDeletedItemSnapshotsAsync(
+        IEnumerable<QuickCaptureDeletedItemSnapshot>? snapshots)
+    {
+        return _quickCaptureService.ReleaseDeletedItemSnapshotsAsync(snapshots);
     }
 
     public Task CleanupUnusedImageCacheAsync()
@@ -634,25 +589,7 @@ public sealed partial class QuickCaptureWidgetViewModel
         return _quickCaptureService.GetOrCreateImageThumbnailPathAsync(item.ImagePath);
     }
 
-    public async Task SaveRecentItemAsync(QuickCaptureItemViewModel item)
-    {
-        if (!item.IsRecent)
-        {
-            return;
-        }
 
-        await _quickCaptureService.SaveRecentItemToRecordsAsync(item.Id, pin: false);
-    }
-
-    public async Task<bool> PinRecentItemAsync(QuickCaptureItemViewModel item)
-    {
-        if (!item.IsRecent)
-        {
-            return false;
-        }
-
-        return await _quickCaptureService.SaveRecentItemToRecordsAsync(item.Id, pin: true) is not null;
-    }
 
     public async Task ClearAsync()
     {

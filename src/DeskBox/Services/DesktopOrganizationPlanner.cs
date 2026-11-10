@@ -4,9 +4,9 @@ namespace DeskBox.Services;
 
 public sealed class DesktopOrganizationPlanner
 {
-    public const int MaxNewWidgetCount = 4;
+    public const int MaxNewWidgetCount = 5;
     public const int MinimumRecommendedItemCount = 5;
-    public const int MinimumStandaloneCategoryItemCount = 2;
+    public const int MinimumStandaloneCategoryItemCount = 1;
 
     private readonly DesktopOrganizationRuleResolver _ruleResolver;
 
@@ -116,23 +116,23 @@ public sealed class DesktopOrganizationPlanner
     private static void MergeSmallAndOverflowCategories(
         IDictionary<string, List<DesktopOrganizationFileSnapshot>> categories)
     {
+        foreach (string emptyKey in categories
+                     .Where(pair => pair.Value.Count == 0)
+                     .Select(pair => pair.Key)
+                     .ToList())
+        {
+            categories.Remove(emptyKey);
+        }
+
+        if (categories.Count <= MaxNewWidgetCount)
+        {
+            return;
+        }
+
         var other = categories.TryGetValue(DesktopOrganizationCategoryIds.Other, out var existingOther)
             ? existingOther
             : [];
         categories[DesktopOrganizationCategoryIds.Other] = other;
-
-        foreach (string categoryId in categories.Keys
-                     .Where(categoryId => categoryId != DesktopOrganizationCategoryIds.Other)
-                     .ToList())
-        {
-            if (categories[categoryId].Count >= MinimumStandaloneCategoryItemCount)
-            {
-                continue;
-            }
-
-            other.AddRange(categories[categoryId]);
-            categories.Remove(categoryId);
-        }
 
         while (categories.Count(pair => pair.Value.Count > 0) > MaxNewWidgetCount)
         {
@@ -141,7 +141,7 @@ public sealed class DesktopOrganizationPlanner
                     pair.Key != DesktopOrganizationCategoryIds.Other &&
                     pair.Value.Count > 0)
                 .OrderBy(pair => pair.Value.Count)
-                .ThenBy(pair => GetCategoryOrder(pair.Key))
+                .ThenByDescending(pair => GetCategoryOrder(pair.Key))
                 .First();
             other.AddRange(smallest.Value);
             categories.Remove(smallest.Key);

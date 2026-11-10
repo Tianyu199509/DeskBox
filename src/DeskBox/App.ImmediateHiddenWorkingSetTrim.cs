@@ -27,8 +27,7 @@ public partial class App
     private readonly HiddenWorkingSetTrimTracker _immediateHiddenWorkingSetTrimTracker = new();
 
     private bool IsImmediateHiddenWorkingSetTrimEnabled =>
-        SettingsService.Settings.IdleWorkingSetTrimEnabled &&
-        SettingsService.Settings.ImmediateHiddenWorkingSetTrimEnabled;
+        SettingsService.Settings.Performance.IdleWorkingSetTrimEnabled;
 
     internal void ObserveWidgetVisibilityForImmediateWorkingSetTrim(
         WidgetMemoryVisibilitySnapshot visibility,

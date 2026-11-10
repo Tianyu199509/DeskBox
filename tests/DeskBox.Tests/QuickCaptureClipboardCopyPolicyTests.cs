@@ -7,7 +7,7 @@ namespace DeskBox.Tests;
 public sealed class QuickCaptureClipboardCopyPolicyTests
 {
     [Fact]
-    public void ShouldCopyBitmap_OnlyForImageInReadOnlyClipboardHistory()
+    public void ShouldCopyBitmap_ForAnyImageQuickCaptureItem()
     {
         Assert.True(QuickCaptureClipboardCopyPolicy.ShouldCopyBitmap(CreateItem(
             QuickCaptureItemType.Image,
@@ -15,7 +15,7 @@ public sealed class QuickCaptureClipboardCopyPolicyTests
         Assert.False(QuickCaptureClipboardCopyPolicy.ShouldCopyBitmap(CreateItem(
             QuickCaptureItemType.Text,
             isRecent: true)));
-        Assert.False(QuickCaptureClipboardCopyPolicy.ShouldCopyBitmap(CreateItem(
+        Assert.True(QuickCaptureClipboardCopyPolicy.ShouldCopyBitmap(CreateItem(
             QuickCaptureItemType.Image,
             isRecent: false)));
     }

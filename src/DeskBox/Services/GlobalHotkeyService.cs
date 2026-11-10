@@ -24,11 +24,17 @@ public sealed class GlobalHotkeyService : IDisposable, IHookHealthProbeTarget, I
         HotkeyModifierKeys.Windows | HotkeyModifierKeys.Shift,
         (int)VirtualKey.F23);
 
+    public static GlobalHotkeyActivation DoubleSpaceActivation { get; } =
+        GlobalHotkeyActivation.FromDoubleTapChord(new GlobalHotkeyGesture(
+            HotkeyModifierKeys.None,
+            (int)VirtualKey.Space));
+
     private readonly SettingsService _settingsService;
     private readonly LocalizationService _localizationService;
     private readonly Func<Task> _invokeAsync;
     private readonly Win32Helper.SubclassProc _subclassProc;
     private readonly ReservedHotkeyHookService _reservedHotkeyHook = new();
+    private readonly DoubleTapChordGate _doubleTapChordGate = new();
     private IntPtr _windowHandle;
     private bool _isSubclassInstalled;
     private bool _isRegistered;
@@ -112,7 +118,7 @@ public sealed class GlobalHotkeyService : IDisposable, IHookHealthProbeTarget, I
 
     public void RefreshRegistration()
     {
-        RefreshRegistrationCore(quiet: false);
+        RefreshRegistrationCore(quiet: false, allowWhileSuspended: false);
     }
 
     /// <summary>
@@ -123,10 +129,21 @@ public sealed class GlobalHotkeyService : IDisposable, IHookHealthProbeTarget, I
     /// healthy periodic refresh neither floods the log nor re-renders the
     /// settings page.
     /// </summary>
-    private void RefreshRegistrationCore(bool quiet)
+    private void RefreshRegistrationCore(bool quiet, bool allowWhileSuspended = false)
     {
         Unregister(quiet);
         LastError = null;
+
+        if (_suspendedForRecording && !allowWhileSuspended)
+        {
+            if (!quiet)
+            {
+                App.Log("[GlobalHotkey] RefreshRegistration skipped: suspended for recording");
+                NotifyRegistrationChanged();
+            }
+
+            return;
+        }
 
         if (!quiet)
         {
@@ -265,8 +282,7 @@ public sealed class GlobalHotkeyService : IDisposable, IHookHealthProbeTarget, I
             return false;
         }
 
-        if (activation.Kind == HotkeyActivationKind.Chord &&
-            IsGestureOwnedBySearchHotkey(activation.Gesture))
+        if (IsActivationOwnedBySearchHotkey(activation))
         {
             // Deep review R15 (F6 audit): the ownership check used to apply
             // only to reserved system gestures — an asymmetric defense, since
@@ -274,6 +290,12 @@ public sealed class GlobalHotkeyService : IDisposable, IHookHealthProbeTarget, I
             // current preset reaches this branch with an unreserved gesture
             // (defense-in-depth), but the two services now mirror each other.
             error = _localizationService.T("Settings.GlobalHotkey.Status.SearchHotkeyConflict");
+            return false;
+        }
+
+        if (IsActivationOwnedByClipboardHotkey(activation))
+        {
+            error = _localizationService.T("Settings.Clipboard.Hotkey.Status.ClipboardHotkeyConflict");
             return false;
         }
 
@@ -292,7 +314,7 @@ public sealed class GlobalHotkeyService : IDisposable, IHookHealthProbeTarget, I
         {
             if (shouldBeActive && !IsRegistered)
             {
-                RefreshRegistration();
+                RefreshRegistrationCore(quiet: false, allowWhileSuspended: true);
                 if (!IsRegistered)
                 {
                     error = LastError ?? _localizationService.T("Settings.GlobalHotkey.Status.Unavailable");
@@ -316,7 +338,7 @@ public sealed class GlobalHotkeyService : IDisposable, IHookHealthProbeTarget, I
         // The real registration is the commit point. A probe can become stale
         // before the subsequent RegisterHotKey call, so register the requested
         // gesture first and roll back both settings and registration on failure.
-        RefreshRegistration();
+        RefreshRegistrationCore(quiet: false, allowWhileSuspended: true);
         if (IsRegistered)
         {
             _settingsService.SaveDebounced();
@@ -329,7 +351,7 @@ public sealed class GlobalHotkeyService : IDisposable, IHookHealthProbeTarget, I
         settings.GlobalHotkeyModifiers = previousModifiers;
         settings.GlobalHotkeyKey = previousVirtualKey;
         RefreshRegistration();
-        if (!IsRegistered)
+        if (!_suspendedForRecording && !IsRegistered)
         {
             App.Log(
                 $"[GlobalHotkey] Rollback registration failed previousActivation=" +
@@ -421,7 +443,7 @@ public sealed class GlobalHotkeyService : IDisposable, IHookHealthProbeTarget, I
 
         bool wasRegistered = IsRegistered;
         string? previousError = LastError;
-        RefreshRegistrationCore(quiet: true);
+        RefreshRegistrationCore(quiet: true, allowWhileSuspended: false);
         if (IsRegistered != wasRegistered ||
             !string.Equals(previousError, LastError, StringComparison.Ordinal))
         {
@@ -484,9 +506,12 @@ public sealed class GlobalHotkeyService : IDisposable, IHookHealthProbeTarget, I
         HotkeyActivationKind normalizedKind = Enum.IsDefined(kind)
             ? kind
             : HotkeyActivationKind.Chord;
+        int normalizedVirtualKey = normalizedKind == HotkeyActivationKind.DoubleTap && virtualKey < 0
+            ? 0
+            : virtualKey;
         return new GlobalHotkeyActivation(
             normalizedKind,
-            NormalizeGesture(modifiers, virtualKey));
+            NormalizeGesture(modifiers, normalizedVirtualKey));
     }
 
     public static bool IsReservedSystemGesture(GlobalHotkeyGesture gesture)
@@ -497,9 +522,133 @@ public sealed class GlobalHotkeyService : IDisposable, IHookHealthProbeTarget, I
                    HotkeyModifierKeys.Alt;
     }
 
-    internal static bool IsGestureOwnedBySearchHotkey(GlobalHotkeyGesture gesture)
+    public static bool IsWellKnownWindowsShortcut(GlobalHotkeyGesture gesture)
     {
-        return App.Current?.SearchHotkeyService?.CurrentGesture.Equals(gesture) == true;
+        if (gesture.Modifiers == (HotkeyModifierKeys.Windows | HotkeyModifierKeys.Shift) &&
+            gesture.VirtualKey == (int)VirtualKey.S)
+        {
+            return true;
+        }
+
+        if (gesture.Modifiers != HotkeyModifierKeys.Windows)
+        {
+            return false;
+        }
+
+        return gesture.VirtualKey is
+            (int)VirtualKey.A or
+            (int)VirtualKey.D or
+            (int)VirtualKey.E or
+            (int)VirtualKey.G or
+            (int)VirtualKey.H or
+            (int)VirtualKey.I or
+            (int)VirtualKey.K or
+            (int)VirtualKey.L or
+            (int)VirtualKey.M or
+            (int)VirtualKey.N or
+            (int)VirtualKey.P or
+            (int)VirtualKey.R or
+            (int)VirtualKey.S or
+            (int)VirtualKey.U or
+            (int)VirtualKey.V or
+            (int)VirtualKey.W or
+            (int)VirtualKey.X or
+            (int)VirtualKey.Z or
+            (int)VirtualKey.Tab;
+    }
+
+    public static bool AreEquivalentActivations(
+        GlobalHotkeyActivation first,
+        GlobalHotkeyActivation second)
+    {
+        if (TryGetStandaloneModifierKind(first, out HotkeyModifierKeys firstModifier, out bool firstIsDouble) &&
+            TryGetStandaloneModifierKind(second, out HotkeyModifierKeys secondModifier, out bool secondIsDouble))
+        {
+            return firstModifier == secondModifier && firstIsDouble == secondIsDouble;
+        }
+
+        return first.Kind == second.Kind && first.Gesture.Equals(second.Gesture);
+    }
+
+    public static bool DoActivationsConflict(
+        GlobalHotkeyActivation first,
+        GlobalHotkeyActivation second)
+    {
+        if (!IsValidActivation(first) || !IsValidActivation(second))
+        {
+            return false;
+        }
+
+        bool firstStandalone = TryGetStandaloneModifierKind(first, out HotkeyModifierKeys firstModifier, out _);
+        bool secondStandalone = TryGetStandaloneModifierKind(second, out HotkeyModifierKeys secondModifier, out _);
+        if (firstStandalone || secondStandalone)
+        {
+            return firstStandalone && secondStandalone && firstModifier == secondModifier;
+        }
+
+        return first.Gesture.Equals(second.Gesture);
+    }
+
+    private static bool TryGetStandaloneModifierKind(
+        GlobalHotkeyActivation activation,
+        out HotkeyModifierKeys modifier,
+        out bool isDoubleTap)
+    {
+        switch (activation.Kind)
+        {
+            case HotkeyActivationKind.DoubleControl:
+                modifier = HotkeyModifierKeys.Control;
+                isDoubleTap = true;
+                return true;
+            case HotkeyActivationKind.WindowsTap:
+                modifier = HotkeyModifierKeys.Windows;
+                isDoubleTap = false;
+                return true;
+            case HotkeyActivationKind.DoubleTap when activation.IsModifierOnlyDoubleTap:
+                modifier = activation.DoubleTapModifier;
+                isDoubleTap = true;
+                return true;
+            default:
+                modifier = HotkeyModifierKeys.None;
+                isDoubleTap = false;
+                return false;
+        }
+    }
+
+    internal bool IsActivationOwnedBySearchHotkey(GlobalHotkeyActivation activation)
+    {
+        if (!_settingsService.Settings.Search.SearchHotkeyEnabled)
+        {
+            return false;
+        }
+
+        GlobalHotkeyActivation searchActivation = App.Current?.SearchHotkeyService?.CurrentActivation
+            ?? NormalizeActivation(
+                _settingsService.Settings.Search.SearchHotkeyActivationKind,
+                _settingsService.Settings.Search.SearchHotkeyModifiers,
+                _settingsService.Settings.Search.SearchHotkeyKey);
+        return DoActivationsConflict(activation, searchActivation);
+    }
+
+    internal bool IsGestureOwnedBySearchHotkey(GlobalHotkeyGesture gesture)
+    {
+        return IsActivationOwnedBySearchHotkey(GlobalHotkeyActivation.FromChord(gesture));
+    }
+
+    internal bool IsActivationOwnedByClipboardHotkey(GlobalHotkeyActivation activation)
+    {
+        var settings = _settingsService.Settings;
+        if (!FeatureWidgetSettings.IsEnabled(settings, WidgetKind.Clipboard) ||
+            !settings.Clipboard.ClipboardHotkeyEnabled)
+        {
+            return false;
+        }
+
+        GlobalHotkeyActivation clipboardActivation = NormalizeActivation(
+            settings.Clipboard.ClipboardHotkeyActivationKind,
+            settings.Clipboard.ClipboardHotkeyModifiers,
+            settings.Clipboard.ClipboardHotkeyKey);
+        return DoActivationsConflict(activation, clipboardActivation);
     }
 
     public static bool IsValidActivation(GlobalHotkeyActivation activation)
@@ -509,8 +658,16 @@ public sealed class GlobalHotkeyService : IDisposable, IHookHealthProbeTarget, I
             return false;
         }
 
-        return activation.Kind != HotkeyActivationKind.Chord ||
-               IsValidGesture(activation.Gesture);
+        return activation.Kind switch
+        {
+            HotkeyActivationKind.DoubleControl => true,
+            HotkeyActivationKind.WindowsTap => true,
+            HotkeyActivationKind.Chord => IsValidGesture(activation.Gesture),
+            HotkeyActivationKind.DoubleTap => activation.Gesture.VirtualKey <= 0
+                ? GlobalHotkeyActivation.IsSingleModifierFlag(activation.Gesture.Modifiers)
+                : activation.IsStandaloneSpaceDoubleTap || IsValidGesture(activation.Gesture),
+            _ => false
+        };
     }
 
     public static bool IsValidGesture(GlobalHotkeyGesture gesture)
@@ -540,6 +697,18 @@ public sealed class GlobalHotkeyService : IDisposable, IHookHealthProbeTarget, I
                    (int)VirtualKey.F12;
     }
 
+    public static string FormatModifier(HotkeyModifierKeys modifier)
+    {
+        return modifier switch
+        {
+            HotkeyModifierKeys.Windows => "Win",
+            HotkeyModifierKeys.Control => "Ctrl",
+            HotkeyModifierKeys.Alt => "Alt",
+            HotkeyModifierKeys.Shift => "Shift",
+            _ => modifier.ToString()
+        };
+    }
+
     public static string FormatActivation(
         GlobalHotkeyActivation activation,
         LocalizationService localization)
@@ -550,6 +719,16 @@ public sealed class GlobalHotkeyService : IDisposable, IHookHealthProbeTarget, I
                 localization.T("Settings.GlobalHotkey.Preset.DoubleControl"),
             HotkeyActivationKind.WindowsTap =>
                 localization.T("Settings.GlobalHotkey.Preset.WindowsTap"),
+            HotkeyActivationKind.DoubleTap when activation.IsModifierOnlyDoubleTap =>
+                activation.DoubleTapModifier == HotkeyModifierKeys.Control
+                    ? localization.T("Settings.GlobalHotkey.Preset.DoubleControl")
+                    : string.Format(
+                        localization.T("Settings.GlobalHotkey.DoubleTapFormat"),
+                        FormatModifier(activation.DoubleTapModifier)),
+            HotkeyActivationKind.DoubleTap =>
+                string.Format(
+                    localization.T("Settings.GlobalHotkey.DoubleTapFormat"),
+                    FormatGesture(activation.Gesture, localization)),
             _ => FormatGesture(activation.Gesture, localization)
         };
     }
@@ -617,9 +796,18 @@ public sealed class GlobalHotkeyService : IDisposable, IHookHealthProbeTarget, I
     private void QueueHotkeyInvocation(string source, bool releaseStandardModifiers)
     {
         long receivedId = Interlocked.Increment(ref _receivedSequence);
+        GlobalHotkeyActivation currentActivation = CurrentActivation;
         App.LogVerbose(
             $"[GlobalHotkey] Received id={receivedId} source={source} " +
             $"gesture={CurrentGestureText}");
+
+        if (currentActivation.Kind == HotkeyActivationKind.DoubleTap &&
+            !currentActivation.IsModifierOnlyDoubleTap &&
+            !currentActivation.IsStandaloneSpaceDoubleTap &&
+            !_doubleTapChordGate.RecordPressAndShouldTrigger(currentActivation.Gesture, Environment.TickCount64))
+        {
+            return;
+        }
 
         if (releaseStandardModifiers)
         {
@@ -711,6 +899,8 @@ public sealed class GlobalHotkeyService : IDisposable, IHookHealthProbeTarget, I
 
     private void Unregister(bool quiet = false)
     {
+        _doubleTapChordGate.Reset();
+
         if (_usesReservedHook || _reservedHotkeyHook.IsActive)
         {
             try
@@ -755,6 +945,13 @@ public sealed class GlobalHotkeyService : IDisposable, IHookHealthProbeTarget, I
         return registered;
     }
 
+    internal static bool TryResolveReservedHookMode(
+        GlobalHotkeyActivation activation,
+        out ReservedHotkeyMode mode)
+    {
+        return TryGetReservedHookMode(activation, out mode);
+    }
+
     private static bool TryGetReservedHookMode(
         GlobalHotkeyActivation activation,
         out ReservedHotkeyMode mode)
@@ -771,7 +968,33 @@ public sealed class GlobalHotkeyService : IDisposable, IHookHealthProbeTarget, I
             return true;
         }
 
-        if (activation.Kind == HotkeyActivationKind.Chord &&
+        if (activation.Kind == HotkeyActivationKind.DoubleTap &&
+            activation.IsModifierOnlyDoubleTap)
+        {
+            switch (activation.DoubleTapModifier)
+            {
+                case HotkeyModifierKeys.Control:
+                    mode = ReservedHotkeyMode.DoubleControl;
+                    return true;
+                case HotkeyModifierKeys.Shift:
+                    mode = ReservedHotkeyMode.DoubleShift;
+                    return true;
+                case HotkeyModifierKeys.Alt:
+                    mode = ReservedHotkeyMode.DoubleAlt;
+                    return true;
+                case HotkeyModifierKeys.Windows:
+                    mode = ReservedHotkeyMode.DoubleWindows;
+                    return true;
+            }
+        }
+
+        if (activation.IsStandaloneSpaceDoubleTap)
+        {
+            mode = ReservedHotkeyMode.DoubleSpace;
+            return true;
+        }
+
+        if (activation.Kind is HotkeyActivationKind.Chord or HotkeyActivationKind.DoubleTap &&
             activation.Gesture.VirtualKey == (int)VirtualKey.Space)
         {
             if (activation.Gesture.Modifiers == HotkeyModifierKeys.Windows)
@@ -829,6 +1052,7 @@ public sealed class GlobalHotkeyService : IDisposable, IHookHealthProbeTarget, I
         return IsLetterKey(virtualKey) ||
                IsDigitKey(virtualKey) ||
                IsFunctionKey(virtualKey) ||
+               IsOemPunctuationKey(virtualKey) ||
                virtualKey is
                    (int)VirtualKey.Space or
                    (int)VirtualKey.Tab or
@@ -838,6 +1062,22 @@ public sealed class GlobalHotkeyService : IDisposable, IHookHealthProbeTarget, I
                    (int)VirtualKey.End or
                    (int)VirtualKey.PageUp or
                    (int)VirtualKey.PageDown;
+    }
+
+    private static bool IsOemPunctuationKey(int virtualKey)
+    {
+        return virtualKey is
+            0xBA or // ;:
+            0xBB or // =+
+            0xBC or // ,<
+            0xBD or // -_
+            0xBE or // .>
+            0xBF or // /?
+            0xC0 or // `~
+            0xDB or // [{
+            0xDC or // \|
+            0xDD or // ]}
+            0xDE;   // '"
     }
 
     private static bool IsLetterKey(int virtualKey)
@@ -878,16 +1118,27 @@ public sealed class GlobalHotkeyService : IDisposable, IHookHealthProbeTarget, I
             return $"F{virtualKey - (int)VirtualKey.F1 + 1}";
         }
 
-        return ((VirtualKey)virtualKey) switch
+        return virtualKey switch
         {
-            VirtualKey.Space => "Space",
-            VirtualKey.Tab => "Tab",
-            VirtualKey.Insert => "Insert",
-            VirtualKey.Delete => "Delete",
-            VirtualKey.Home => "Home",
-            VirtualKey.End => "End",
-            VirtualKey.PageUp => "Page Up",
-            VirtualKey.PageDown => "Page Down",
+            (int)VirtualKey.Space => "Space",
+            (int)VirtualKey.Tab => "Tab",
+            (int)VirtualKey.Insert => "Insert",
+            (int)VirtualKey.Delete => "Delete",
+            (int)VirtualKey.Home => "Home",
+            (int)VirtualKey.End => "End",
+            (int)VirtualKey.PageUp => "Page Up",
+            (int)VirtualKey.PageDown => "Page Down",
+            0xBA => ";",
+            0xBB => "=",
+            0xBC => ",",
+            0xBD => "-",
+            0xBE => ".",
+            0xBF => "/",
+            0xC0 => "`",
+            0xDB => "[",
+            0xDC => "\\",
+            0xDD => "]",
+            0xDE => "'",
             _ => ((VirtualKey)virtualKey).ToString()
         };
     }

@@ -15,15 +15,16 @@ namespace DeskBox.ViewModels;
 public partial class WidgetViewModel : ObservableObject, IDisposable
 {
     private const int IconHydrationBatchSize = 8;
-    private const int IconHydrationRetryCount = 3;
+    private const int IconHydrationRetryCount = 4;
     /// <summary>Collapsed stack tiles preview exactly four member icons
     /// (PreviewOne..Four), so those members count as displayed.</summary>
     private const int StackPreviewMemberKeepCount = 4;
     private static readonly TimeSpan[] s_iconHydrationRetryDelays =
     [
-        TimeSpan.FromMilliseconds(450),
-        TimeSpan.FromMilliseconds(1200),
-        TimeSpan.FromMilliseconds(2600)
+        TimeSpan.FromMilliseconds(400),
+        TimeSpan.FromMilliseconds(1100),
+        TimeSpan.FromMilliseconds(2500),
+        TimeSpan.FromMilliseconds(5000)
     ];
     private const int FolderCountHydrationBatchSize = 8;
     private const int ShortcutTargetHydrationBatchSize = 4;
@@ -31,11 +32,14 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
     private const int FolderCountHydrationYieldMs = 24;
     private const int CompactTransitionHydrationPausePollMilliseconds = 33;
 
-    private readonly DispatcherQueue _dispatcherQueue;
+    private readonly DispatcherQueue? _dispatcherQueue;
     private readonly FileService _fileService;
     private readonly OrganizerService _organizerService;
-    private readonly FolderWatcherService _folderWatcher;
-    private readonly FolderWatcherService _publicFolderWatcher;
+    private static readonly FolderWatcherHealthSnapshot s_stoppedWatcherHealthSnapshot =
+        new(null, Services.FolderWatcherHealth.Stopped, false, false, false, 0, null, null);
+
+    private FolderWatcherService? _folderWatcher;
+    private FolderWatcherService? _publicFolderWatcher;
     private readonly SettingsService _settingsService;
     private readonly LocalizationService _localizationService;
     private readonly SemaphoreSlim _folderRefreshGate = new(1, 1);
@@ -129,9 +133,14 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
 
     public bool IsInitialized { get; private set; }
 
-    public FolderWatcherHealthSnapshot FolderWatcherHealth => _folderWatcher.Health;
+    public FolderWatcherHealthSnapshot FolderWatcherHealth =>
+        _folderWatcher?.Health ?? s_stoppedWatcherHealthSnapshot;
 
-    public FolderWatcherHealthSnapshot PublicFolderWatcherHealth => _publicFolderWatcher.Health;
+    public FolderWatcherHealthSnapshot PublicFolderWatcherHealth =>
+        _publicFolderWatcher?.Health ?? s_stoppedWatcherHealthSnapshot;
+
+    internal bool HasAllocatedPrimaryFolderWatcher => _folderWatcher is not null;
+    internal bool HasAllocatedPublicFolderWatcher => _publicFolderWatcher is not null;
 
     public string? MappedFolderPath
     {
@@ -370,7 +379,7 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
         OrganizerService organizerService,
         SettingsService settingsService,
         LocalizationService? localizationService,
-        DispatcherQueue dispatcherQueue)
+        DispatcherQueue? dispatcherQueue)
     {
         _dispatcherQueue = dispatcherQueue;
         _fileService = fileService;
@@ -404,13 +413,9 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
         ApplyLayoutSettings();
         UpdateDependentProperties();
 
-        _folderWatcher = new FolderWatcherService(dispatcherQueue);
-        _folderWatcher.FolderChanged += OnFolderChanged;
-        _folderWatcher.FolderIconChanged += OnFolderIconChanged;
-
-        _publicFolderWatcher = new FolderWatcherService(dispatcherQueue);
-        _publicFolderWatcher.FolderChanged += OnFolderChanged;
-        _publicFolderWatcher.FolderIconChanged += OnFolderIconChanged;
+        // Watchers and their DispatcherQueueTimers are created lazily in
+        // ConfigureFolderWatchersAsync so cold-boot hibernated widgets and
+        // non-Desktop File widgets never pay for unused watcher instances.
 
         _settingsService.SettingsChanged += OnSettingsChanged;
         _localizationService.LanguageChanged += OnLanguageChanged;
@@ -423,7 +428,7 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
         FileService fileService,
         OrganizerService organizerService,
         SettingsService settingsService,
-        DispatcherQueue dispatcherQueue)
+        DispatcherQueue? dispatcherQueue)
         : this(config, fileService, organizerService, settingsService, null, dispatcherQueue)
     {
     }
@@ -445,12 +450,21 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
                 ref _itemHydrationCancellation,
                 null));
         CleanupStacks();
-        _folderWatcher.FolderChanged -= OnFolderChanged;
-        _folderWatcher.FolderIconChanged -= OnFolderIconChanged;
-        _publicFolderWatcher.FolderChanged -= OnFolderChanged;
-        _publicFolderWatcher.FolderIconChanged -= OnFolderIconChanged;
-        _folderWatcher.Dispose();
-        _publicFolderWatcher.Dispose();
+        if (_folderWatcher is not null)
+        {
+            _folderWatcher.FolderChanged -= OnFolderChanged;
+            _folderWatcher.FolderIconChanged -= OnFolderIconChanged;
+            _folderWatcher.Dispose();
+            _folderWatcher = null;
+        }
+
+        if (_publicFolderWatcher is not null)
+        {
+            _publicFolderWatcher.FolderChanged -= OnFolderChanged;
+            _publicFolderWatcher.FolderIconChanged -= OnFolderIconChanged;
+            _publicFolderWatcher.Dispose();
+            _publicFolderWatcher = null;
+        }
         // A debounced file-system callback may already be waiting on this gate.
         // Do not dispose it underneath that continuation; the view-model is
         // short-lived after this point and the waiter exits via _isDisposed.

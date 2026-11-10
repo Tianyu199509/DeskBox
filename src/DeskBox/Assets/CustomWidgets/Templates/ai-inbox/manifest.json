@@ -1,0 +1,475 @@
+{
+  "schemaVersion": 1,
+  "id": "custom.ai-inbox",
+  "name": "AI 随手译与润色",
+  "version": "2.0.0",
+  "author": "DeskBox",
+  "description": "一键读取剪贴板、输入文本或拖入文档，AI 秒级完成双语互译、地道润色、摘要提炼与术语解释。",
+  "icon": "⚡",
+  "minSize": {
+    "width": 296,
+    "height": 330
+  },
+  "defaultSize": {
+    "width": 352,
+    "height": 436
+  },
+  "settings": [
+    {
+      "key": "defaultMode",
+      "type": "choice",
+      "label": "${$i18n.setDefaultMode}",
+      "default": "translate",
+      "options": [
+        {
+          "value": "translate",
+          "label": "${$i18n.modeTranslate}"
+        },
+        {
+          "value": "polish",
+          "label": "${$i18n.modePolish}"
+        },
+        {
+          "value": "summarize",
+          "label": "${$i18n.modeSummarize}"
+        },
+        {
+          "value": "explain",
+          "label": "${$i18n.modeExplain}"
+        }
+      ]
+    },
+    {
+      "key": "targetLang",
+      "type": "choice",
+      "label": "${$i18n.setTargetLang}",
+      "default": "auto",
+      "options": [
+        {
+          "value": "auto",
+          "label": "${$i18n.langAuto}"
+        },
+        {
+          "value": "zh-CN",
+          "label": "${$i18n.langZh}"
+        },
+        {
+          "value": "en-US",
+          "label": "${$i18n.langEn}"
+        },
+        {
+          "value": "ja-JP",
+          "label": "${$i18n.langJa}"
+        }
+      ]
+    },
+    {
+      "key": "toneStyle",
+      "type": "choice",
+      "label": "${$i18n.setTone}",
+      "default": "concise",
+      "options": [
+        {
+          "value": "concise",
+          "label": "${$i18n.toneConcise}"
+        },
+        {
+          "value": "professional",
+          "label": "${$i18n.tonePro}"
+        },
+        {
+          "value": "natural",
+          "label": "${$i18n.toneNatural}"
+        }
+      ]
+    },
+    {
+      "key": "showClipboardBar",
+      "type": "toggle",
+      "label": "${$i18n.setClipBar}",
+      "default": "true"
+    }
+  ],
+  "state": {
+    "draft": "",
+    "mode": "",
+    "resultText": "",
+    "resultTag": "",
+    "aiStatus": "idle",
+    "aiError": "",
+    "aiUpdatedAt": ""
+  },
+  "collections": {
+    "items": {
+      "maxItems": 100,
+      "sort": "newestFirst"
+    }
+  },
+  "sources": [
+    {
+      "type": "clipboard",
+      "intervalMs": 2000
+    }
+  ],
+  "onDrop": {
+    "storage": "reference",
+    "action": [
+      {
+        "type": "state.set",
+        "key": "draft",
+        "value": "${$drop.text != '' ? $drop.text : $drop.name}"
+      },
+      {
+        "type": "ai.run",
+        "guard": "${$drop.text != ''}",
+        "prompt": "${$i18n.aiPromptPrefix}\n[Mode=${state.mode != '' ? state.mode : $settings.defaultMode}, TargetLang=${$settings.targetLang}, Tone=${$settings.toneStyle}, File=${$drop.name}]\n<user_input>\n${$drop.text}\n</user_input>",
+        "stateMap": {
+          "resultText": "result",
+          "resultTag": "tag"
+        },
+        "then": [
+          {
+            "type": "collection.prepend",
+            "guard": "${state.resultText != ''}",
+            "collection": "items",
+            "item": {
+              "text": "${state.resultText}",
+              "tag": "${state.resultTag}"
+            }
+          },
+          {
+            "type": "state.set",
+            "key": "draft",
+            "value": ""
+          }
+        ]
+      }
+    ]
+  },
+  "capsule": {
+    "title": "${$i18n.capTitlePrefix}${collections.items.count}${$i18n.capTitleSuffix}",
+    "summary": "${state.resultText != '' ? state.resultText : (collections.items.latest.text ?? $i18n.capEmptySummary)}",
+    "glyph": "⚡",
+    "badge": "${collections.items.count}",
+    "enableBounceOnUpdate": true
+  },
+  "view": {
+    "type": "Stack",
+    "spacing": 8,
+    "padding": "12,8,12,12",
+    "children": [
+      {
+        "type": "Grid",
+        "columns": "1*,Auto",
+        "spacing": 6,
+        "children": [
+          {
+            "type": "Segmented",
+            "column": 0,
+            "bind": "state.mode",
+            "value": "${$settings.defaultMode}",
+            "options": [
+              {
+                "value": "translate",
+                "label": "${$i18n.modeTranslate}"
+              },
+              {
+                "value": "polish",
+                "label": "${$i18n.modePolish}"
+              },
+              {
+                "value": "summarize",
+                "label": "${$i18n.modeSummarize}"
+              },
+              {
+                "value": "explain",
+                "label": "${$i18n.modeExplain}"
+              }
+            ]
+          },
+          {
+            "type": "Button",
+            "column": 1,
+            "visible": "${$settings.showClipboardBar != 'false' && $clipboard.text != ''}",
+            "icon": "\uE77F",
+            "text": "${$i18n.clipPasteBtn}",
+            "tooltip": "${$i18n.clipPasteTooltip}",
+            "variant": "subtle",
+            "onClick": {
+              "type": "state.set",
+              "key": "draft",
+              "value": "${$clipboard.text}"
+            }
+          }
+        ]
+      },
+      {
+        "type": "Grid",
+        "columns": "1*,Auto",
+        "spacing": 6,
+        "children": [
+          {
+            "type": "Input",
+            "column": 0,
+            "placeholder": "${$i18n.inputPlaceholder}",
+            "bind": "state.draft",
+            "onSubmit": {
+              "type": "ai.run",
+              "guard": "${state.draft != ''}",
+              "prompt": "${$i18n.aiPromptPrefix}\n[Mode=${state.mode != '' ? state.mode : $settings.defaultMode}, TargetLang=${$settings.targetLang}, Tone=${$settings.toneStyle}]\n<user_input>\n${state.draft}\n</user_input>",
+              "stateMap": {
+                "resultText": "result",
+                "resultTag": "tag"
+              },
+              "then": [
+                {
+                  "type": "collection.prepend",
+                  "guard": "${state.resultText != ''}",
+                  "collection": "items",
+                  "item": {
+                    "text": "${state.resultText}",
+                    "tag": "${state.resultTag}"
+                  }
+                },
+                {
+                  "type": "state.set",
+                  "key": "draft",
+                  "value": ""
+                }
+              ]
+            }
+          },
+          {
+            "type": "Button",
+            "column": 1,
+            "icon": "⚡",
+            "text": "${state.aiStatus == 'running' ? $i18n.runningBadge : $i18n.runBtn}",
+            "tooltip": "${$i18n.runTooltip}",
+            "variant": "accent",
+            "onClick": {
+              "type": "ai.run",
+              "guard": "${state.draft != ''}",
+              "prompt": "${$i18n.aiPromptPrefix}\n[Mode=${state.mode != '' ? state.mode : $settings.defaultMode}, TargetLang=${$settings.targetLang}, Tone=${$settings.toneStyle}]\n<user_input>\n${state.draft}\n</user_input>",
+              "stateMap": {
+                "resultText": "result",
+                "resultTag": "tag"
+              },
+              "then": [
+                {
+                  "type": "collection.prepend",
+                  "guard": "${state.resultText != ''}",
+                  "collection": "items",
+                  "item": {
+                    "text": "${state.resultText}",
+                    "tag": "${state.resultTag}"
+                  }
+                },
+                {
+                  "type": "state.set",
+                  "key": "draft",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "type": "Grid",
+        "visible": "${state.aiStatus == 'running'}",
+        "columns": "Auto,1*",
+        "spacing": 8,
+        "children": [
+          {
+            "type": "ProgressRing",
+            "column": 0,
+            "size": 14,
+            "indeterminate": true
+          },
+          {
+            "type": "Text",
+            "column": 1,
+            "text": "${$i18n.runningBadge}",
+            "style": "caption",
+            "color": "accent",
+            "maxLines": 1
+          }
+        ]
+      },
+      {
+        "type": "Card",
+        "visible": "${state.aiStatus == 'error' && state.aiError != ''}",
+        "tone": "warning",
+        "padding": "9,6,9,6",
+        "children": [
+          {
+            "type": "Text",
+            "text": "${state.aiError}",
+            "style": "caption",
+            "color": "warning",
+            "maxLines": 2
+          }
+        ]
+      },
+      {
+        "type": "Card",
+        "visible": "${state.resultText != ''}",
+        "tone": "subtle",
+        "padding": "10,8,10,8",
+        "children": [
+          {
+            "type": "Grid",
+            "columns": "1*,Auto",
+            "spacing": 6,
+            "children": [
+              {
+                "type": "Stack",
+                "column": 0,
+                "spacing": 3,
+                "children": [
+                  {
+                    "type": "Stack",
+                    "orientation": "horizontal",
+                    "spacing": 6,
+                    "children": [
+                      {
+                        "type": "Badge",
+                        "visible": "${state.resultTag != ''}",
+                        "text": "${state.resultTag}",
+                        "tone": "accent"
+                      },
+                      {
+                        "type": "Text",
+                        "text": "${$i18n.resultLabel}${state.aiUpdatedAt != '' ? ' · ' : ''}${state.aiUpdatedAt}",
+                        "style": "caption",
+                        "color": "muted",
+                        "maxLines": 1
+                      }
+                    ]
+                  },
+                  {
+                    "type": "Text",
+                    "text": "${state.resultText}",
+                    "style": "body",
+                    "maxLines": 4
+                  }
+                ]
+              },
+              {
+                "type": "IconButton",
+                "column": 1,
+                "icon": "\uE8C8",
+                "size": 26,
+                "variant": "subtle",
+                "tooltip": "${$i18n.copyTooltip}",
+                "onClick": {
+                  "type": "clipboard.copy",
+                  "text": "${state.resultText}"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "Grid",
+        "columns": "1*,Auto",
+        "spacing": 6,
+        "children": [
+          {
+            "type": "Text",
+            "column": 0,
+            "text": "${$i18n.historyHeader}${collections.items.count})",
+            "style": "caption",
+            "color": "muted"
+          },
+          {
+            "type": "Button",
+            "column": 1,
+            "icon": "\uE74D",
+            "text": "${$i18n.clearBtn}",
+            "variant": "ghost",
+            "onClick": [
+              {
+                "type": "collection.clear",
+                "collection": "items"
+              },
+              {
+                "type": "state.set",
+                "key": "resultText",
+                "value": ""
+              },
+              {
+                "type": "state.set",
+                "key": "resultTag",
+                "value": ""
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "List",
+        "items": "items",
+        "emptyState": {
+          "icon": "⚡",
+          "title": "${$i18n.emptyTitle}",
+          "subtitle": "${$i18n.emptySubtitle}"
+        },
+        "hoverActions": [
+          {
+            "type": "IconButton",
+            "icon": "\uE8C8",
+            "size": 24,
+            "variant": "subtle",
+            "tooltip": "${$i18n.copyTooltip}",
+            "onClick": {
+              "type": "clipboard.copy",
+              "text": "${$item.text}"
+            }
+          },
+          {
+            "type": "IconButton",
+            "icon": "\uE74D",
+            "size": 24,
+            "variant": "subtle",
+            "tooltip": "${$i18n.removeTooltip}",
+            "onClick": {
+              "type": "collection.remove",
+              "collection": "items",
+              "targetId": "${$item.id}"
+            }
+          }
+        ],
+        "itemTemplate": {
+          "type": "Grid",
+          "columns": "Auto,1*,Auto",
+          "spacing": 7,
+          "children": [
+            {
+              "type": "Badge",
+              "column": 0,
+              "visible": "${$item.tag != ''}",
+              "text": "${$item.tag}",
+              "tone": "subtle"
+            },
+            {
+              "type": "Text",
+              "column": 1,
+              "text": "${$item.text}",
+              "style": "body",
+              "maxLines": 2
+            },
+            {
+              "type": "Text",
+              "column": 2,
+              "text": "${$item.timeText}",
+              "style": "caption",
+              "color": "muted"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

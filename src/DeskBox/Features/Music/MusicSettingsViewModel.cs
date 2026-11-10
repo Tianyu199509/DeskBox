@@ -6,7 +6,7 @@ namespace DeskBox.Features.Music;
 
 /// <summary>
 /// Music-section settings editor. Owns the section's XAML binding surface
-/// (display mode combo and the two presentation toggles): reads project
+/// (display mode combo, presentation toggles, and synchronized lyrics options): reads project
 /// through the read snapshot of <see cref="IFeatureWidgetsSettings"/>, user
 /// edits write through the same coordinator ports the legacy shell used,
 /// and external refresh paths (settings broadcasts, feature-card default
@@ -38,11 +38,37 @@ public sealed partial class MusicSettingsViewModel : ObservableObject
         "Settings.Music.DisplayMode.RecordHorizontal"
     ];
 
+    private static readonly string[] SpectrumStyles =
+    [
+        MusicSpectrumStyles.Auto,
+        MusicSpectrumStyles.SymmetricWave,
+        MusicSpectrumStyles.WaveformScrub,
+        MusicSpectrumStyles.PeakHoldBars,
+        MusicSpectrumStyles.AuroraSilk,
+        MusicSpectrumStyles.MatrixLed,
+        MusicSpectrumStyles.VinylRadialHalo,
+        MusicSpectrumStyles.Off
+    ];
+
+    private static readonly string[] SpectrumStyleNameKeys =
+    [
+        "Settings.Music.SpectrumStyle.Auto",
+        "Settings.Music.SpectrumStyle.SymmetricWave",
+        "Settings.Music.SpectrumStyle.WaveformScrub",
+        "Settings.Music.SpectrumStyle.PeakHoldBars",
+        "Settings.Music.SpectrumStyle.AuroraSilk",
+        "Settings.Music.SpectrumStyle.MatrixLed",
+        "Settings.Music.SpectrumStyle.VinylRadialHalo",
+        "Settings.Music.SpectrumStyle.Off"
+    ];
+
     private readonly IFeatureWidgetsSettings _settings;
     private readonly Func<string, string> _localize;
     private bool _isSyncingPresentation;
     private string[]? _cachedDisplayModeNames;
+    private string[]? _cachedSpectrumStyleNames;
     private string _displayMode = MusicDisplayModes.Auto;
+    private string _spectrumStyle = MusicSpectrumStyles.Auto;
 
     public MusicSettingsViewModel(
         IFeatureWidgetsSettings settings,
@@ -86,6 +112,48 @@ public sealed partial class MusicSettingsViewModel : ObservableObject
         }
     }
 
+    [ObservableProperty]
+    public partial bool ShowLyrics { get; set; } = true;
+
+    partial void OnShowLyricsChanged(bool value)
+    {
+        if (!_isSyncingPresentation)
+        {
+            _settings.SetMusicShowLyrics(value);
+        }
+    }
+
+    [ObservableProperty]
+    public partial bool ShowCapsuleLyrics { get; set; } = true;
+
+    partial void OnShowCapsuleLyricsChanged(bool value)
+    {
+        if (!_isSyncingPresentation)
+        {
+            _settings.SetMusicShowCapsuleLyrics(value);
+        }
+    }
+
+    [ObservableProperty]
+    public partial string LocalLyricsFolder { get; set; } = string.Empty;
+
+    partial void OnLocalLyricsFolderChanged(string value)
+    {
+        if (!_isSyncingPresentation)
+        {
+            _settings.SetMusicLocalLyricsFolder(value);
+        }
+
+        OnPropertyChanged(nameof(HasLocalLyricsFolder));
+        OnPropertyChanged(nameof(LocalLyricsFolderDisplayText));
+    }
+
+    public bool HasLocalLyricsFolder => !string.IsNullOrWhiteSpace(LocalLyricsFolder);
+
+    public string LocalLyricsFolderDisplayText => HasLocalLyricsFolder
+        ? LocalLyricsFolder
+        : _localize("Settings.Music.LocalLyricsFolder.Unset");
+
     public string DisplayMode
     {
         get => _displayMode;
@@ -124,6 +192,38 @@ public sealed partial class MusicSettingsViewModel : ObservableObject
         }
     }
 
+    public string SpectrumStyle
+    {
+        get => _spectrumStyle;
+        set
+        {
+            if (!SetProperty(ref _spectrumStyle, value))
+            {
+                return;
+            }
+
+            if (!_isSyncingPresentation)
+            {
+                _settings.SetMusicSpectrumStyle(value);
+            }
+        }
+    }
+
+    public IReadOnlyList<SettingsOption> AvailableSpectrumStyleOptions
+    {
+        get
+        {
+            _cachedSpectrumStyleNames ??= SpectrumStyleNameKeys.Select(key => _localize(key)).ToArray();
+            var options = new SettingsOption[SpectrumStyles.Length];
+            for (int index = 0; index < SpectrumStyles.Length; index++)
+            {
+                options[index] = new SettingsOption(SpectrumStyles[index], _cachedSpectrumStyleNames[index]);
+            }
+
+            return options;
+        }
+    }
+
     /// <summary>
     /// Re-projects the persisted music presentation state onto the binding
     /// surface without writing back. Called on construction, settings
@@ -138,12 +238,19 @@ public sealed partial class MusicSettingsViewModel : ObservableObject
             UseArtworkBackdrop = snapshot.UseArtworkBackdrop;
             EnableCoverHoverMotion = snapshot.EnableCoverHoverMotion;
             DisplayMode = snapshot.DisplayMode;
+            SpectrumStyle = snapshot.SpectrumStyle;
             HideTimelineWhenUnavailable = snapshot.HideTimelineWhenUnavailable;
+            ShowLyrics = snapshot.ShowLyrics;
+            ShowCapsuleLyrics = snapshot.ShowCapsuleLyrics;
+            LocalLyricsFolder = snapshot.LocalLyricsFolder ?? string.Empty;
         }
         finally
         {
             _isSyncingPresentation = false;
         }
+
+        OnPropertyChanged(nameof(HasLocalLyricsFolder));
+        OnPropertyChanged(nameof(LocalLyricsFolderDisplayText));
     }
 
     /// <summary>
@@ -153,6 +260,9 @@ public sealed partial class MusicSettingsViewModel : ObservableObject
     public void RefreshLocalization()
     {
         _cachedDisplayModeNames = null;
+        _cachedSpectrumStyleNames = null;
         OnPropertyChanged(nameof(AvailableDisplayModeOptions));
+        OnPropertyChanged(nameof(AvailableSpectrumStyleOptions));
+        OnPropertyChanged(nameof(LocalLyricsFolderDisplayText));
     }
 }

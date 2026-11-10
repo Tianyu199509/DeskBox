@@ -201,8 +201,9 @@ public static class ReorderDropIndexCalculator
         int firstVisibleIndex = int.MaxValue;
         int lastVisibleIndex = -1;
         int candidate = -1;
+        GetRealizedIndexWindow(list, out int startIndex, out int endIndex);
 
-        for (int index = 0; index < list.Items.Count; index++)
+        for (int index = startIndex; index <= endIndex; index++)
         {
             if (list.ContainerFromIndex(index) is not FrameworkElement container ||
                 container.ActualWidth <= 0 ||
@@ -325,14 +326,51 @@ public static class ReorderDropIndexCalculator
         return false;
     }
 
+    private static void GetRealizedIndexWindow(
+        ListViewBase list,
+        out int startIndex,
+        out int endIndex)
+    {
+        int count = list.Items.Count;
+        if (count <= 0)
+        {
+            startIndex = 0;
+            endIndex = -1;
+            return;
+        }
+
+        (int panelFirst, int panelLast) = list.ItemsPanelRoot switch
+        {
+            ItemsWrapGrid wrap when wrap.FirstVisibleIndex >= 0 && wrap.LastVisibleIndex >= wrap.FirstVisibleIndex
+                => (wrap.FirstVisibleIndex, wrap.LastVisibleIndex),
+            ItemsStackPanel stack when stack.FirstVisibleIndex >= 0 && stack.LastVisibleIndex >= stack.FirstVisibleIndex
+                => (stack.FirstVisibleIndex, stack.LastVisibleIndex),
+            _ => (0, count - 1)
+        };
+
+        // Include one buffer index on each side when available for smooth boundary transitions.
+        startIndex = Math.Max(0, panelFirst - 1);
+        endIndex = Math.Min(count - 1, panelLast + 1);
+    }
+
     private static FrameworkElement? FindNearestRealizedContainer(
         ListViewBase list,
         int insertionIndex)
     {
-        for (int offset = 0; offset < list.Items.Count; offset++)
+        GetRealizedIndexWindow(list, out int startIndex, out int endIndex);
+        if (endIndex < startIndex)
+        {
+            return null;
+        }
+
+        int maxOffset = Math.Max(
+            Math.Abs(insertionIndex - startIndex),
+            Math.Abs(endIndex - insertionIndex)) + 1;
+        for (int offset = 0; offset <= maxOffset; offset++)
         {
             int before = insertionIndex - 1 - offset;
-            if (before >= 0 &&
+            if (before >= startIndex &&
+                before < list.Items.Count &&
                 list.ContainerFromIndex(before) is FrameworkElement beforeContainer &&
                 beforeContainer.ActualWidth > 0 &&
                 beforeContainer.ActualHeight > 0)
@@ -341,7 +379,8 @@ public static class ReorderDropIndexCalculator
             }
 
             int after = insertionIndex + offset;
-            if (after < list.Items.Count &&
+            if (after >= startIndex &&
+                after <= endIndex &&
                 list.ContainerFromIndex(after) is FrameworkElement container &&
                 container.ActualWidth > 0 &&
                 container.ActualHeight > 0)

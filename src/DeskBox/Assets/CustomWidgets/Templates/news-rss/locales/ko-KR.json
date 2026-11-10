@@ -1,0 +1,21 @@
+{
+  "defaultFeedTitle": "테크 뉴스",
+  "defaultTopHeadline": "우측 상단 새로고침을 눌러 최신 글을 불러오세요",
+  "emptySubtitle": "새로고침을 누르거나 설정에서 채널 프리셋을 변경하세요",
+  "emptyTitle": "피드 동기화 대기 중",
+  "feedCustom": "사용자 지정 RSS 주소 (아래 입력)",
+  "feedIthome": "IT之家",
+  "feedSspai": "SSPai (少数派)",
+  "openArticleTooltip": "원문 열기",
+  "optDensityCompact": "컴팩트 (제목만 표시)",
+  "optDensitySummary": "표준 (제목 + 요약)",
+  "refreshBtn": "새로고침",
+  "refreshTooltip": "지금 최신 피드 가져오기",
+  "setDensity": "목록 표시 밀도",
+  "setFeedUrl": "사용자 지정 RSS / Atom 주소 (https://)",
+  "setPresetFeed": "프리셋 뉴스 채널",
+  "syncing": "최신 소식 동기화 중…",
+  "updatedPrefix": "업데이트 ",
+  "widgetDescription": "Hacker News, GitHub Blog, V2EX 및 사용자 지정 RSS 피드를 자동 동기화하고 오프라인 캐시를 지원합니다.",
+  "widgetName": "RSS 뉴스 구독"
+}

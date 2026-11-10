@@ -34,6 +34,7 @@ internal enum WidgetCompactWarmupSliceResult
 {
     Blocked,
     Progressed,
+    RenderCommitStarted,
     Ready
 }
 
@@ -66,6 +67,9 @@ public abstract partial class WidgetWindowBase
     private const int CompactExpansionPrimeNodeBudgetUrgent = 192;
     private const double CompactExpansionPrimeTimeBudgetUrgentMs = 16;
     private const int CompactHoverRecoveryProbeMs = 120;
+    internal const int PostCollapseSoftTrimDelayMs = 15_000;
+    internal const int PostCollapseHibernationDelayMs = 90_000;
+    private const int MaxPooledOneShotTimers = 12;
     private const int CompactDragSessionRecoveryProbeMs = 120;
     private const int CompactLayerRestoreFallbackMs = 120;
     private static readonly int[] CompactBoundsSettleDelaysMs = [80, 320, 900];
@@ -82,6 +86,13 @@ public abstract partial class WidgetWindowBase
     private OwnedOneShotDispatcherTimer? _compactExpansionReadinessDeadlineTimer;
     private OwnedOneShotDispatcherTimer? _compactExpansionReadyCallbackDeadlineTimer;
     private OwnedOneShotDispatcherTimer? _compactLayerRestoreFallbackTimer;
+    private OwnedOneShotDispatcherTimer? _deferredContentHydrationFallbackTimer;
+    private OwnedOneShotDispatcherTimer? _collapsedSoftTrimTimer;
+    private OwnedOneShotDispatcherTimer? _collapsedContentHibernationTimer;
+    private OneShotTimerPool<DispatcherQueueTimer>? _oneShotTimerPool;
+    private bool _isNativeCompactMouseTracking;
+    private bool _nativeCompactMouseActivityQueued;
+    private bool _nativeCompactMouseLeaveQueued;
     private DispatcherQueueTimer? _overlayDragCuePollTimer;
     private int _overlayDragCueOutsideStreak;
     private CancellationTokenSource? _compactExpansionWarmupCancellation;
@@ -102,6 +113,7 @@ public abstract partial class WidgetWindowBase
         SettingsService.WidgetCompactExpansionDirectionAuto;
     private long _collapseAnimationStarted;
     private int _collapseAnimationDurationMs;
+    private bool _collapseAnimationRedirectedMidFlight;
     private long _collapseAnimationGeneration;
     private long _compactLayerRestoreGeneration;
     private long _expandedWidgetLayerLeaseGeneration;
@@ -137,6 +149,29 @@ public abstract partial class WidgetWindowBase
     private long _compactExpansionRequestGeneration;
     private PendingCompactExpansion? _pendingCompactExpansion;
     private WidgetCompactAnimationFrameTracker? _compactAnimationFrameTracker;
+    private bool _perfWasWarmed;
+    private double _perfDeferredHoldMs;
+    private double _perfSetStateRefreshMs;
+    private double _perfSetStateRaiseMs;
+    private double _perfSetStateResolveMs;
+    private double _perfFreezeLayoutMs;
+    private double _perfBorderAndDpiMs;
+    private double _perfPrepareShellMs;
+    private double _perfPostClockStartMs;
+    private double _perfWorkingSetStartMB;
+    private int _perfXamlSizeChanges;
+    private int _perfXamlLayouts;
+    private int _perfPeakConcurrent;
+    private bool _perfLayoutHooksAttached;
+    private string? _pendingCompactPerfLine;
+    private double _compactWarmupRenderBeginElapsedMs;
+    private int _compactWarmupRenderFramesRemaining;
+    private TaskCompletionSource<bool>? _compactWarmupFramesCommitted;
+    private EventHandler<object>? _compactWarmupFrameHandler;
+    private EventHandler<object>? _deferredContentHydrationFrameHandler;
+    private long _deferredExpandedContentHydrationGeneration;
+    private bool _deferExpandedContentHydrationForActiveTransition;
+    private bool _isHoldingBoundsTransitionForDeferredHydration;
     private WidgetCompactTransitionVisualProfile _collapseAnimationVisualProfile =
         WidgetCompactTransitionVisualProfile.Resolve(
             SettingsService.WidgetCompactAnimationSmooth,
@@ -168,6 +203,7 @@ public abstract partial class WidgetWindowBase
     private bool _isCompactExpansionWarmed;
     private bool _isCompactExpansionVisualTreePrimed;
     private long _compactExpansionWarmupEpoch = -1;
+    private long _compactExpansionWorkingSetEpoch = -1;
     private long _hostedContentSwapTimestamp;
     private Queue<DependencyObject>? _compactExpansionPrimeQueue;
     private bool _isCompactHoverRecoveryRegistered;
@@ -192,10 +228,17 @@ public abstract partial class WidgetWindowBase
         long RequestedAtTimestamp);
 
     private bool IsCompactExpansionReady =>
+        !IsCollapsedContentHibernated &&
         WidgetCompactWarmupPolicy.IsExpansionReady(
             _isCompactExpansionWarmed,
             _compactExpansionWarmupEpoch,
             App.MemoryCleanupEpoch);
+
+    private bool IsWarmLiveContentExpansionReady =>
+        IsCompactExpansionReady &&
+        WidgetShellControl.ShellContent is not null &&
+        (IsKeepCapsuleContentWarmEnabled ||
+         _compactExpansionWorkingSetEpoch == App.WorkingSetTrimEpoch);
 
     /// <summary>
     /// True while compact bounds are active or transitioning. Derived windows use this
@@ -219,6 +262,11 @@ public abstract partial class WidgetWindowBase
     protected bool IsCompactArrangementDragActive { get; private set; }
 
     internal WidgetCompactViewState CurrentCompactViewState => _compactViewState;
+
+    internal bool IsSettledCollapsedCapsule =>
+        IsWidgetCollapsedBoundsActive &&
+        !IsCompactTransitionActive &&
+        _targetCollapsed;
 
     public bool IsCompactArrangementActive => _collapseInitialized && _targetCollapsed;
 
@@ -407,7 +455,7 @@ public abstract partial class WidgetWindowBase
         return true;
     }
 
-    protected void RefreshCompactPresentation()
+    protected void RefreshCompactPresentation(bool reapplySurfaceState = true)
     {
         if (!_collapseInitialized || IsClosing)
         {
@@ -415,10 +463,28 @@ public abstract partial class WidgetWindowBase
         }
 
         WidgetShellControl.SetCompactPresentation(CreateCompactPresentation());
+        if (!reapplySurfaceState)
+        {
+            return;
+        }
         if (_targetCollapsed)
         {
             ApplyCompactSurfaceState();
         }
+    }
+
+    protected void ExpandWidgetFromHost()
+    {
+        if (!_collapseInitialized || IsClosing || !_targetCollapsed)
+        {
+            return;
+        }
+
+        SetCollapsedState(
+            false,
+            persistManualState: false,
+            animate: true,
+            allowDuringInteraction: true);
     }
 
     protected void CollapseWidgetFromHost()
@@ -592,6 +658,9 @@ public abstract partial class WidgetWindowBase
         return new CompactInteractionLease(this, reason);
     }
 
+    internal IDisposable AcquirePopoverInteraction(string reason) =>
+        AcquireCompactInteraction(reason);
+
     protected void EndCompactInteraction()
     {
         _compactInteractionDepth = Math.Max(0, _compactInteractionDepth - 1);
@@ -764,6 +833,12 @@ public abstract partial class WidgetWindowBase
         CancelPendingCompactExpansion();
         CancelTimer(ref _compactExpansionReadyCallbackDeadlineTimer);
         CancelDeferredExpandedLayerRestore();
+        CancelDeferredExpandedContentHydration();
+        CancelCollapsedHibernationTimers();
+        _oneShotTimerPool?.DrainAll();
+        _isNativeCompactMouseTracking = false;
+        _nativeCompactMouseActivityQueued = false;
+        _nativeCompactMouseLeaveQueued = false;
         ReleaseExpandedWidgetLayerLease("compact-cleanup");
         StopCollapseAnimation();
         WidgetShellControl.CancelResponsiveLayoutTransition();
@@ -772,7 +847,7 @@ public abstract partial class WidgetWindowBase
         WidgetShellControl.CollapseRequested -= WidgetShellControl_CollapseRequested;
         WidgetShellControl.ExpandRequested -= WidgetShellControl_ExpandRequested;
         WidgetShellControl.OverlayDragCueArmRequested -= WidgetShellControl_OverlayDragCueArmRequested;
-        StopOverlayDragCuePoll();
+        ReleaseOverlayDragCuePollTimer();
         WidgetShellControl.CompactBodyExpandRequested -= WidgetShellControl_CompactBodyExpandRequested;
         WidgetShellControl.CompactPointerEntered -= WidgetShellControl_CompactPointerEntered;
         WidgetShellControl.CompactPointerMoved -= WidgetShellControl_CompactPointerMoved;
@@ -811,7 +886,161 @@ public abstract partial class WidgetWindowBase
         QueueCompactExpansionWarmup();
     }
 
-    private void QueueCompactExpansionWarmup(bool urgent = false)
+    internal bool IsTargetCollapsed => _targetCollapsed;
+
+    private bool IsKeepCapsuleContentWarmEnabled =>
+        SettingsService?.Settings.Performance.KeepCapsuleContentWarm == true;
+
+    internal void ReconcileCollapsedContentWarmthPreference()
+    {
+        if (!_collapseInitialized || !_targetCollapsed || IsClosing)
+        {
+            return;
+        }
+
+        if (IsKeepCapsuleContentWarmEnabled)
+        {
+            CancelTimer(ref _collapsedContentHibernationTimer);
+            QueueCompactExpansionWarmup();
+            return;
+        }
+
+        if (!HasUserCompactExpansionIntent() && !_isCompactExpansionWarmupUrgent)
+        {
+            CancelCompactExpansionWarmup();
+        }
+
+        ArmCollapsedContentHibernationTimer();
+    }
+
+    protected virtual bool IsCollapsedContentHibernated => false;
+
+    protected virtual bool TryHibernateCollapsedContent() => false;
+
+    protected virtual bool EnsureCollapsedContentViewAttached() => false;
+
+    protected virtual void OnCollapsedSoftTrim()
+    {
+        WidgetShellControl.TrimCollapsedTransientVisuals();
+    }
+
+    private void CancelCollapsedHibernationTimers()
+    {
+        CancelTimer(ref _collapsedSoftTrimTimer);
+        CancelTimer(ref _collapsedContentHibernationTimer);
+    }
+
+    protected void ArmCollapsedContentHibernationIfSettled()
+    {
+        if (_collapseInitialized && _targetCollapsed && !IsClosing)
+        {
+            ArmCollapsedContentHibernationTimer();
+            if (IsKeepCapsuleContentWarmEnabled)
+            {
+                QueueCompactExpansionWarmup();
+            }
+        }
+    }
+
+    private void ArmCollapsedContentHibernationTimer()
+    {
+        if (!_collapseInitialized ||
+            !_targetCollapsed ||
+            IsClosing ||
+            IsCollapsedContentHibernated ||
+            _isPointerOverWidget ||
+            _isCompactDragInside)
+        {
+            return;
+        }
+
+        if (_collapsedSoftTrimTimer is null)
+        {
+            ScheduleTimer(
+                ref _collapsedSoftTrimTimer,
+                PostCollapseSoftTrimDelayMs,
+                OnCollapsedSoftTrimTimerElapsed);
+        }
+
+        if (IsKeepCapsuleContentWarmEnabled)
+        {
+            CancelTimer(ref _collapsedContentHibernationTimer);
+            return;
+        }
+
+        if (_collapsedContentHibernationTimer is not null)
+        {
+            return;
+        }
+
+        ScheduleTimer(
+            ref _collapsedContentHibernationTimer,
+            PostCollapseHibernationDelayMs,
+            OnCollapsedContentHibernationTimerElapsed);
+    }
+
+    private void OnCollapsedSoftTrimTimerElapsed()
+    {
+        _collapsedSoftTrimTimer = null;
+        if (!_collapseInitialized ||
+            !_targetCollapsed ||
+            IsClosing ||
+            IsCollapsedContentHibernated ||
+            _isPointerOverWidget ||
+            _isCompactDragInside ||
+            _isCollapseAnimationRendering ||
+            _isShellTransitionActive ||
+            _isBoundsInteractionActive ||
+            _compactInteractionDepth > 0 ||
+            HasBlockingFlyoutOpen())
+        {
+            return;
+        }
+
+        OnCollapsedSoftTrim();
+    }
+
+    private void OnCollapsedContentHibernationTimerElapsed()
+    {
+        _collapsedContentHibernationTimer = null;
+        if (IsKeepCapsuleContentWarmEnabled)
+        {
+            return;
+        }
+        CancelTimer(ref _collapsedSoftTrimTimer);
+        if (!_collapseInitialized ||
+            !_targetCollapsed ||
+            IsClosing ||
+            IsCollapsedContentHibernated ||
+            _isPointerOverWidget ||
+            _isCompactDragInside ||
+            _isCollapseAnimationRendering ||
+            _isShellTransitionActive ||
+            _isBoundsInteractionActive ||
+            _compactInteractionDepth > 0 ||
+            HasBlockingFlyoutOpen())
+        {
+            return;
+        }
+
+        CancelCompactExpansionWarmup();
+        if (TryHibernateCollapsedContent())
+        {
+            InvalidateCompactExpansionReadiness();
+            App.LogVerbose(
+                $"[Compact] Hibernated collapsed content view kind={Config.WidgetKind} id={Config.Id}");
+        }
+    }
+
+    private bool HasUserCompactExpansionIntent(bool attachHibernated = false) =>
+        attachHibernated ||
+        _pendingCompactExpansion is not null ||
+        _isPointerOverCompactActions ||
+        _isPointerOverCompactMoveHandle ||
+        (_isPointerOverCompactExpansionZone && UsesSmartCollapseBehavior()) ||
+        _isPointerOverWidget;
+
+    private void QueueCompactExpansionWarmup(bool urgent = false, bool attachHibernated = false)
     {
         if (!_collapseInitialized ||
             !_targetCollapsed ||
@@ -819,6 +1048,51 @@ public abstract partial class WidgetWindowBase
             IsClosing)
         {
             return;
+        }
+
+        bool keepWarm = IsKeepCapsuleContentWarmEnabled;
+        bool hasUserIntent = HasUserCompactExpansionIntent(attachHibernated);
+        urgent = urgent && hasUserIntent;
+        bool hasPendingReadyCallbacks = _compactExpansionReadyCallbacks.Count > 0;
+        if (!urgent && !hasPendingReadyCallbacks && !keepWarm)
+        {
+            return;
+        }
+
+        if (!hasUserIntent && !keepWarm)
+        {
+            ArmCollapsedContentHibernationTimer();
+            return;
+        }
+
+        if (IsCollapsedContentHibernated && !attachHibernated)
+        {
+            if (!keepWarm || urgent)
+            {
+                // Keep hibernated/cold leaf views detached during hover and visibility
+                // wakeups: shell-first expansion morphs immediately at full frame rate
+                // and hydrates the leaf view on the stationary expanded panel instead
+                // of stalling the UI thread under a moving cursor.
+                return;
+            }
+        }
+
+        if (!keepWarm &&
+            urgent &&
+            _isPointerOverWidget &&
+            _pendingCompactExpansion is null &&
+            _compactExpansionWorkingSetEpoch != App.WorkingSetTrimEpoch)
+        {
+            // After an idle working-set trim, avoid faulting expanded visual pages
+            // under pointer hover; shell-first expansion animates smoothly first.
+            return;
+        }
+
+        CancelCollapsedHibernationTimers();
+        if ((urgent || attachHibernated || !IsCollapsedContentHibernated) &&
+            EnsureCollapsedContentViewAttached())
+        {
+            InvalidateCompactExpansionReadiness();
         }
 
         if (_compactExpansionWarmupCancellation is not null)
@@ -910,10 +1184,19 @@ public abstract partial class WidgetWindowBase
                         : await CompactExpansionWarmupGate.WaitAsync(0, token);
                     if (gateEntered && CanRunCompactExpansionWarmup(urgent))
                     {
+                        string warmupReason = urgent ? "visible-critical" : "background-idle";
                         result = await TryRunCompactExpansionWarmupSliceOnUiThreadAsync(
-                            urgent ? "visible-critical" : "background-idle",
+                            warmupReason,
                             token,
                             urgent);
+                        if (result == WidgetCompactWarmupSliceResult.RenderCommitStarted)
+                        {
+                            await WaitForCompactExpansionRenderWarmupFramesAsync(token);
+                            result = await CompleteCompactExpansionRenderWarmupOnUiThreadAsync(
+                                warmupReason,
+                                token,
+                                urgent);
+                        }
                     }
                 }
                 finally
@@ -1085,6 +1368,17 @@ public abstract partial class WidgetWindowBase
             return WidgetCompactWarmupSliceResult.Blocked;
         }
 
+        if (IsCollapsedContentHibernated)
+        {
+            if (!EnsureCollapsedContentViewAttached())
+            {
+                return WidgetCompactWarmupSliceResult.Blocked;
+            }
+
+            InvalidateCompactExpansionReadiness();
+            return WidgetCompactWarmupSliceResult.Progressed;
+        }
+
         if (!_isCompactExpansionVisualTreePrimed)
         {
             PrimeCompactExpansionVisualTree(reason, urgent);
@@ -1093,31 +1387,28 @@ public abstract partial class WidgetWindowBase
 
         _isCompactExpansionWarmupRunning = true;
         long started = Stopwatch.GetTimestamp();
+        bool renderCommitArmed = false;
         try
         {
             RectInt32 current = GetCurrentWindowBounds();
             RectInt32 compactBounds = GetStableCompactBounds(current);
             WidgetCompactExpansionLayout layout = ResolveCompactExpansionLayout(compactBounds);
             double dpiScale = Win32Helper.GetDpiScaleForWindow(HWnd, RootElement.XamlRoot);
-            string cornerPreference = WindowsCompatibilityService.ResolveEffectiveWidgetCornerPreference(
+            _ = WindowsCompatibilityService.ResolveEffectiveWidgetCornerPreference(
                 SettingsService.Settings.WidgetCornerPreference);
-            string mediaCornerMode = WindowsCompatibilityService.ResolveEffectiveWidgetCompactMediaCornerMode(
+            _ = WindowsCompatibilityService.ResolveEffectiveWidgetCompactMediaCornerMode(
                 SettingsService.Settings.WidgetCompactMediaCornerMode);
 
-            // Prime the small WinRT/accessibility setup work as well as the full
-            // expanded XAML layout. Neither call changes the native window bounds.
+            // Prime compact presentation, WinRT/accessibility setup, and hold the
+            // expanded subtree across a real DirectComposition render commit behind
+            // the opaque capsule chrome so Loaded, DirectWrite, and DComp visuals
+            // realize during idle instead of the first live expansion frame.
+            RefreshCompactPresentation();
             _ = ResolveCompactTransitionDuration(requestedDurationMs: null);
             ApplyCompactBorderVisuals();
-            bool warmed = WidgetShellControl.WarmCompactExpansionLayout(
+            bool warmed = WidgetShellControl.BeginCompactExpansionRenderWarmup(
                 layout.ExpandedBounds.Width / Math.Max(0.01, dpiScale),
                 layout.ExpandedBounds.Height / Math.Max(0.01, dpiScale),
-                GetCornerRadiusFromPreference(),
-                WidgetCompactBoundsCalculator.ResolveOuterCornerRadius(cornerPreference),
-                WidgetCompactBoundsCalculator.ResolveInnerCornerRadius(cornerPreference),
-                WidgetCompactBoundsCalculator.ResolveMediaCornerRadius(
-                    mediaCornerMode,
-                    cornerPreference),
-                SettingsService.Settings.WidgetCompactContentMode,
                 layout.Anchor);
             if (!warmed)
             {
@@ -1127,31 +1418,153 @@ public abstract partial class WidgetWindowBase
                 return WidgetCompactWarmupSliceResult.Blocked;
             }
 
-            _isCompactExpansionWarmed = true;
-            _compactExpansionWarmupEpoch = App.MemoryCleanupEpoch;
-            double elapsedMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
-            PerformanceLogger.Mark(
-                "CompactExpansionWarmup",
-                $"elapsedMs={elapsedMs:F1} reason={reason} kind={Config.WidgetKind} id={Config.Id}");
-            if (elapsedMs >= 16.7)
-            {
-                App.Log(
-                    $"[CompactWarmup] Slow layout kind={Config.WidgetKind} " +
-                    $"id={Config.Id} elapsedMs={elapsedMs:F1} reason={reason}");
-            }
-            DispatcherQueue.TryEnqueue(OnCompactExpansionReady);
-            return WidgetCompactWarmupSliceResult.Ready;
+            _compactWarmupRenderBeginElapsedMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+            AttachCompactExpansionRenderWarmupFrameHook();
+            renderCommitArmed = true;
+            return WidgetCompactWarmupSliceResult.RenderCommitStarted;
         }
         finally
         {
-            _isCompactExpansionWarmupRunning = false;
+            if (!renderCommitArmed)
+            {
+                _isCompactExpansionWarmupRunning = false;
+            }
         }
+    }
+
+    private void AttachCompactExpansionRenderWarmupFrameHook()
+    {
+        DetachCompactExpansionRenderWarmupFrameHook();
+        var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _compactWarmupFramesCommitted = tcs;
+        _compactWarmupRenderFramesRemaining = 2;
+        EventHandler<object>? handler = null;
+        handler = (_, _) =>
+        {
+            if (--_compactWarmupRenderFramesRemaining <= 0)
+            {
+                DetachCompactExpansionRenderWarmupFrameHook();
+                tcs.TrySetResult(true);
+            }
+        };
+        _compactWarmupFrameHandler = handler;
+        CompositionTarget.Rendering += handler;
+    }
+
+    private void DetachCompactExpansionRenderWarmupFrameHook()
+    {
+        if (_compactWarmupFrameHandler is { } handler)
+        {
+            CompositionTarget.Rendering -= handler;
+            _compactWarmupFrameHandler = null;
+        }
+
+        _compactWarmupFramesCommitted = null;
+        _compactWarmupRenderFramesRemaining = 0;
+    }
+
+    private async Task WaitForCompactExpansionRenderWarmupFramesAsync(
+        CancellationToken cancellationToken)
+    {
+        Task framesTask = _compactWarmupFramesCommitted?.Task ?? Task.CompletedTask;
+        if (framesTask.IsCompleted)
+        {
+            return;
+        }
+
+        var cancelSignal = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using CancellationTokenRegistration registration =
+            cancellationToken.Register(static state => ((TaskCompletionSource<bool>)state!).TrySetResult(true), cancelSignal);
+        await Task.WhenAny(framesTask, Task.Delay(96), cancelSignal.Task);
+    }
+
+    private Task<WidgetCompactWarmupSliceResult>
+        CompleteCompactExpansionRenderWarmupOnUiThreadAsync(
+        string reason,
+        CancellationToken cancellationToken,
+        bool urgent)
+    {
+        var completion = new TaskCompletionSource<WidgetCompactWarmupSliceResult>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        DispatcherQueuePriority priority = urgent
+            ? DispatcherQueuePriority.High
+            : DispatcherQueuePriority.Low;
+        if (!DispatcherQueue.TryEnqueue(priority, () =>
+            {
+                try
+                {
+                    WidgetCompactWarmupSliceResult result =
+                        CompleteCompactExpansionRenderWarmup(reason, cancellationToken.IsCancellationRequested);
+                    if (cancellationToken.IsCancellationRequested)
+                    {
+                        completion.TrySetCanceled(cancellationToken);
+                    }
+                    else
+                    {
+                        completion.TrySetResult(result);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    completion.TrySetException(ex);
+                }
+            }))
+        {
+            completion.TrySetResult(WidgetCompactWarmupSliceResult.Blocked);
+        }
+
+        return completion.Task;
+    }
+
+    private WidgetCompactWarmupSliceResult CompleteCompactExpansionRenderWarmup(
+        string reason,
+        bool cancelled)
+    {
+        long endStarted = Stopwatch.GetTimestamp();
+        DetachCompactExpansionRenderWarmupFrameHook();
+        bool committed = WidgetShellControl.EndCompactExpansionRenderWarmup();
+        _isCompactExpansionWarmupRunning = false;
+
+        if (!committed ||
+            cancelled ||
+            !_collapseInitialized ||
+            !_targetCollapsed ||
+            IsClosing)
+        {
+            return WidgetCompactWarmupSliceResult.Blocked;
+        }
+
+        _isCompactExpansionWarmed = true;
+        _compactExpansionWarmupEpoch = App.MemoryCleanupEpoch;
+        _compactExpansionWorkingSetEpoch = App.WorkingSetTrimEpoch;
+        double elapsedMs = _compactWarmupRenderBeginElapsedMs +
+            Stopwatch.GetElapsedTime(endStarted).TotalMilliseconds;
+        PerformanceLogger.Mark(
+            "CompactExpansionWarmup",
+            $"elapsedMs={elapsedMs:F1} reason={reason} kind={Config.WidgetKind} id={Config.Id}");
+        if (elapsedMs >= 16.7)
+        {
+            App.Log(
+                $"[CompactWarmup] Slow layout kind={Config.WidgetKind} " +
+                $"id={Config.Id} elapsedMs={elapsedMs:F1} reason={reason}");
+        }
+        ArmCollapsedContentHibernationTimer();
+        DispatcherQueue.TryEnqueue(OnCompactExpansionReady);
+        return WidgetCompactWarmupSliceResult.Ready;
     }
 
     private void PrimeCompactExpansionVisualTree(string reason, bool urgent)
     {
-        _compactExpansionPrimeQueue ??=
-            new Queue<DependencyObject>([WidgetShellControl]);
+        if (_compactExpansionPrimeQueue is null)
+        {
+            _compactExpansionPrimeQueue = new Queue<DependencyObject>();
+            _compactExpansionPrimeQueue.Enqueue(WidgetShellControl);
+            if (WidgetShellControl.ShellContent is DependencyObject bodyRoot &&
+                !ReferenceEquals(bodyRoot, WidgetShellControl))
+            {
+                _compactExpansionPrimeQueue.Enqueue(bodyRoot);
+            }
+        }
         long started = Stopwatch.GetTimestamp();
         int nodeBudget = urgent
             ? CompactExpansionPrimeNodeBudgetUrgent
@@ -1218,7 +1631,11 @@ public abstract partial class WidgetWindowBase
     protected void RunAfterCompactExpansionReady(Action callback)
     {
         ArgumentNullException.ThrowIfNull(callback);
-        if (!_collapseInitialized || !_targetCollapsed || IsCompactExpansionReady)
+        if (!_collapseInitialized ||
+            !_targetCollapsed ||
+            IsCompactExpansionReady ||
+            !HasUserCompactExpansionIntent() ||
+            (IsCollapsedContentHibernated && !_isPointerOverCompactExpansionZone))
         {
             DispatcherQueue.TryEnqueue(() => callback());
             return;
@@ -1436,6 +1853,10 @@ public abstract partial class WidgetWindowBase
         }
 
         WidgetShellControl.ResumeVisualActivity();
+        if (_targetCollapsed)
+        {
+            RefreshCompactPresentation();
+        }
 
         // Visibility notifications can be coalesced when AppWindow.Show and
         // ShowWindow(SW_SHOWNOACTIVATE) are used together. Always rebuild the
@@ -1544,7 +1965,7 @@ public abstract partial class WidgetWindowBase
             var timer = DispatcherQueue.CreateTimer();
             timer.IsRepeating = true;
             timer.Interval = TimeSpan.FromMilliseconds(OverlayDragCuePollIntervalMs);
-            timer.Tick += (_, _) => OverlayDragCuePollTimer_Tick();
+            timer.Tick += OverlayDragCuePollTimer_Tick;
             _overlayDragCuePollTimer = timer;
         }
 
@@ -1557,6 +1978,9 @@ public abstract partial class WidgetWindowBase
             "[DragCue] Poll started. " +
             $"cursor={cursor.X},{cursor.Y} zone={DescribeOverlayDragCueScreenZone()}");
     }
+
+    private void OverlayDragCuePollTimer_Tick(DispatcherQueueTimer sender, object args) =>
+        OverlayDragCuePollTimer_Tick();
 
     private void OverlayDragCuePollTimer_Tick()
     {
@@ -1592,6 +2016,18 @@ public abstract partial class WidgetWindowBase
         _overlayDragCueOutsideStreak = 0;
     }
 
+    private void ReleaseOverlayDragCuePollTimer()
+    {
+        StopOverlayDragCuePoll();
+        if (_overlayDragCuePollTimer is not { } timer)
+        {
+            return;
+        }
+
+        _overlayDragCuePollTimer = null;
+        timer.Tick -= OverlayDragCuePollTimer_Tick;
+    }
+
     private bool IsScreenPointWithinOverlayDragCueZone(Win32Helper.POINT cursor)
     {
         if (!TryGetOverlayDragCueScreenZone(out Windows.Foundation.Rect zone))
@@ -1616,8 +2052,8 @@ public abstract partial class WidgetWindowBase
     private bool TryGetOverlayDragCueScreenZone(out Windows.Foundation.Rect zone)
     {
         zone = default;
-        FrameworkElement handle = WidgetShellControl.OverlayDragHandleElement;
-        if (handle.Visibility != Visibility.Visible ||
+        if (WidgetShellControl.OverlayDragHandleElement is not { } handle ||
+            handle.Visibility != Visibility.Visible ||
             handle.ActualWidth <= 0 ||
             handle.ActualHeight <= 0 ||
             handle.XamlRoot is null)
@@ -1663,6 +2099,88 @@ public abstract partial class WidgetWindowBase
         }
     }
 
+    internal uint CreateObservedCompactSubclassMessage(IntPtr hWnd, uint message)
+    {
+        if (message is Win32Helper.WM_SETCURSOR or Win32Helper.WM_MOUSEMOVE)
+        {
+            if (_collapseInitialized &&
+                _targetCollapsed &&
+                !IsClosing &&
+                UsesSmartCollapseBehavior())
+            {
+                if (!_isNativeCompactMouseTracking && hWnd != IntPtr.Zero)
+                {
+                    _isNativeCompactMouseTracking = Win32Helper.TryTrackMouseLeave(hWnd);
+                }
+
+                if ((!_isPointerOverWidget || s_compactHoverRecoveryTimer is not { IsRunning: true }) &&
+                    !_nativeCompactMouseActivityQueued)
+                {
+                    _nativeCompactMouseActivityQueued = true;
+                    UiDispatch.PostAfterCallback(OnDeferredNativeCompactMouseActivity);
+                }
+            }
+        }
+        else if (message == Win32Helper.WM_MOUSELEAVE)
+        {
+            _isNativeCompactMouseTracking = false;
+            if (_collapseInitialized &&
+                _targetCollapsed &&
+                !IsClosing &&
+                UsesSmartCollapseBehavior() &&
+                !_nativeCompactMouseLeaveQueued)
+            {
+                _nativeCompactMouseLeaveQueued = true;
+                UiDispatch.PostAfterCallback(OnDeferredNativeCompactMouseLeave);
+            }
+        }
+
+        return message;
+    }
+
+    private void OnDeferredNativeCompactMouseActivity()
+    {
+        _nativeCompactMouseActivityQueued = false;
+        if (!_collapseInitialized || !_targetCollapsed || IsClosing || !UsesSmartCollapseBehavior())
+        {
+            return;
+        }
+
+        StartCompactHoverRecoveryProbe();
+        SynchronizeCompactHoverFromCurrentCursor();
+    }
+
+    private void OnDeferredNativeCompactMouseLeave()
+    {
+        _nativeCompactMouseLeaveQueued = false;
+        if (!_collapseInitialized || !_targetCollapsed || IsClosing || !UsesSmartCollapseBehavior())
+        {
+            return;
+        }
+
+        SynchronizeCompactHoverFromCurrentCursor();
+    }
+
+    private static bool HasActiveCompactHoverOrDragProbeTarget()
+    {
+        for (int i = 0; i < CompactHoverRecoveryTargets.Count; i++)
+        {
+            if (CompactHoverRecoveryTargets[i].TryGetTarget(out WidgetWindowBase? target) &&
+                target._isCompactHoverRecoveryRegistered &&
+                (target._isPointerOverWidget ||
+                 target._isCompactDragInside ||
+                 target._nativeCompactMouseActivityQueued ||
+                 target._nativeCompactMouseLeaveQueued ||
+                 target.IsDragging ||
+                 target.IsCompactArrangementDragActive))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private static void CompactHoverRecoveryTimer_Tick(DispatcherQueueTimer sender, object args)
     {
         if (!Win32Helper.GetCursorPos(out var cursor))
@@ -1682,6 +2200,10 @@ public abstract partial class WidgetWindowBase
         }
 
         PruneCompactHoverRecoveryTargets();
+        if (!HasActiveCompactHoverOrDragProbeTarget())
+        {
+            sender.Stop();
+        }
     }
 
     private static void PruneCompactHoverRecoveryTargets()
@@ -1763,7 +2285,21 @@ public abstract partial class WidgetWindowBase
                 nativeRootCanReceivePointer,
                 HasRecentCompactRoutedPointerAuthority()))
         {
-            ResetCompactPointerStateAfterPhysicalExit();
+            bool hadPointerState =
+                _isPointerOverWidget ||
+                _isPointerOverCompactExpansionZone ||
+                _isPointerOverCompactMoveHandle ||
+                _isPointerOverCompactActions;
+            if (hadPointerState)
+            {
+                ResetCompactPointerStateAfterPhysicalExit();
+            }
+            if (!hadPointerState &&
+                (IsCollapsedContentHibernated || _collapsedContentHibernationTimer is not null))
+            {
+                return;
+            }
+            ArmCollapsedContentHibernationTimer();
             return;
         }
 
@@ -1815,10 +2351,11 @@ public abstract partial class WidgetWindowBase
 
     private bool IsScreenPointInsideElement(
         Win32Helper.POINT cursor,
-        FrameworkElement element,
+        FrameworkElement? element,
         RectInt32 windowBounds)
     {
-        if (element.Visibility != Visibility.Visible ||
+        if (element is null ||
+            element.Visibility != Visibility.Visible ||
             element.XamlRoot is null ||
             element.ActualWidth <= 0 ||
             element.ActualHeight <= 0)
@@ -1912,11 +2449,7 @@ public abstract partial class WidgetWindowBase
         Microsoft.UI.Xaml.Controls.ToolTipService.SetToolTip(
             WidgetShellControl.CollapseActionButton,
             localization.T("Widget.Compact.Collapse"));
-        Microsoft.UI.Xaml.Controls.ToolTipService.SetToolTip(
-            WidgetShellControl.OverlayDragHandleElement,
-            localization.T(overlayDragHandleTooltipKey));
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(
-            WidgetShellControl.OverlayDragHandleElement,
+        WidgetShellControl.SetOverlayDragHandleLabel(
             localization.T(overlayDragHandleTooltipKey));
         _compactMoveHintText = localization.T(
             usesCapsuleBar ? "Widget.Compact.MoveBar" : "Widget.Compact.Move");
@@ -1924,20 +2457,10 @@ public abstract partial class WidgetWindowBase
         WidgetShellControl.SetCompactHintTexts(
             _compactMoveHintText,
             _compactExpandHintText);
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(
-            WidgetShellControl.CompactMoveHandleElement,
-            _compactMoveHintText);
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(
-            WidgetShellControl.CompactBodyElement,
-            _compactExpandHintText);
-        Microsoft.UI.Xaml.Controls.ToolTipService.SetToolTip(
-            WidgetShellControl.CompactReorderHandleElement,
-            localization.T("Widget.Compact.Reorder"));
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(
-            WidgetShellControl.CompactReorderHandleElement,
-            localization.T("Widget.Compact.Reorder"));
-        Microsoft.UI.Xaml.Controls.ToolTipService.SetToolTip(
-            WidgetShellControl.CompactExpandActionButton,
+        WidgetShellControl.SetCompactHostAccessibility(
+            _compactMoveHintText,
+            _compactExpandHintText,
+            localization.T("Widget.Compact.Reorder"),
             localization.T("Widget.Compact.Expand"));
     }
 
@@ -2336,6 +2859,14 @@ public abstract partial class WidgetWindowBase
             _compactState = WidgetCompactState.Collapsed;
         }
         UpdateCompactViewState();
+        if (_targetCollapsed)
+        {
+            ArmCollapsedContentHibernationTimer();
+            if (IsKeepCapsuleContentWarmEnabled)
+            {
+                QueueCompactExpansionWarmup();
+            }
+        }
         if (UsesSmartCollapseBehavior() && !_isCompactDragInside && !_isSmartPinnedOpen)
         {
             ScheduleSmartCollapse();
@@ -2358,6 +2889,8 @@ public abstract partial class WidgetWindowBase
         MarkCompactRoutedPointerActivity();
         _isPointerOverCompactActions = true;
         CancelTimer(ref _collapseHoverTimer);
+        WidgetCompactAnimationCoordinator.PreArmFrameClock(HWnd);
+        QueueCompactExpansionWarmup(urgent: true);
         UpdateCompactViewState();
         TryScheduleCompactHoverExpansion(
             allowInteractionRegionDwell: true);
@@ -2378,6 +2911,8 @@ public abstract partial class WidgetWindowBase
         if (_targetCollapsed)
         {
             _compactState = WidgetCompactState.Collapsed;
+            WidgetCompactAnimationCoordinator.PreArmFrameClock(HWnd);
+            QueueCompactExpansionWarmup(urgent: true);
         }
         UpdateCompactViewState();
         // The identity strip is drag-only. Hover expansion begins only after
@@ -2557,6 +3092,15 @@ public abstract partial class WidgetWindowBase
             (desktopOwnerRoot != IntPtr.Zero && pointerRootWindow == desktopOwnerRoot);
     }
 
+    protected void NotifyCompactDragEnteredFromHost() =>
+        WidgetShellControl_CompactDragEntered(this, EventArgs.Empty);
+
+    protected void NotifyCompactDragLeftFromHost() =>
+        WidgetShellControl_CompactDragLeft(this, EventArgs.Empty);
+
+    protected void NotifyCompactDropCompletedFromHost() =>
+        WidgetShellControl_CompactDropCompleted(this, EventArgs.Empty);
+
     private void WidgetShellControl_CompactDragEntered(object? sender, EventArgs e)
     {
         if (!SupportsCompactDropExpansion)
@@ -2588,7 +3132,9 @@ public abstract partial class WidgetWindowBase
 
     private void ReconcileCompactDragStateAfterPointerRelease()
     {
-        if (!WidgetShellControl.TryClearStaleShellDragSessionAfterPointerRelease())
+        bool clearedShellDrag = WidgetShellControl.TryClearStaleShellDragSessionAfterPointerRelease();
+        if (!clearedShellDrag &&
+            (!_isCompactDragInside || Win32Helper.IsAnyMouseButtonDown()))
         {
             return;
         }
@@ -2705,10 +3251,11 @@ public abstract partial class WidgetWindowBase
             return;
         }
 
-        if (!WidgetShellControl.TryClearStaleShellDragSessionAfterPointerRelease())
-        {
-            return;
-        }
+        // Host-driven drag expansion (Elevated pointer drag or Native OLE drop
+        // target) sets _isCompactDragInside without setting WidgetShellControl's
+        // XAML _isShellDragActive flag. Always clear _isCompactDragInside once
+        // all mouse buttons are up so smart auto-collapse never wedges open.
+        _ = WidgetShellControl.TryClearStaleShellDragSessionAfterPointerRelease();
 
         _isCompactDragInside = false;
         UpdateCompactViewState();
@@ -2913,18 +3460,34 @@ public abstract partial class WidgetWindowBase
 
     private void ApplyCollapsedStateImmediately(bool collapsed)
     {
+        CancelDeferredExpandedContentHydration();
         StopCollapseAnimation();
         WidgetShellControl.CancelResponsiveLayoutTransition();
         _targetCollapsed = collapsed;
         IsWidgetCollapsedBoundsActive = collapsed;
         _compactState = collapsed ? WidgetCompactState.Collapsed : WidgetCompactState.Expanded;
         UpdateCompactViewState();
+        if (!collapsed)
+        {
+            CancelCollapsedHibernationTimers();
+            EnsureCollapsedContentViewAttached();
+        }
+        else
+        {
+            ArmCollapsedContentHibernationTimer();
+        }
+
         WidgetShellControl.SetCollapsed(collapsed, SettingsService.Settings.WidgetCompactContentMode);
         OnCompactVisualStateChanged(collapsed);
+        if (IsKeepCapsuleContentWarmEnabled)
+        {
+            App.Current?.ReconcileQuiescenceWorkingSetTrimSchedule();
+        }
         RefreshCompactPresentation();
 
         if (!collapsed)
         {
+            WidgetShellControl.ClearCompactBitmaps();
             StopCompactHoverRecoveryProbe();
             if (UsesCompactExpansionGeometry())
             {
@@ -2961,6 +3524,10 @@ public abstract partial class WidgetWindowBase
         StartCompactBoundsSettlement();
         StartCompactHoverRecoveryProbe();
         SynchronizeCompactHoverFromCurrentCursor();
+        if (IsKeepCapsuleContentWarmEnabled)
+        {
+            QueueCompactExpansionWarmup();
+        }
     }
 
     private void StartCompactBoundsSettlement()
@@ -3065,7 +3632,18 @@ public abstract partial class WidgetWindowBase
 
         if (collapsed)
         {
+            CancelDeferredExpandedContentHydration();
             CancelPendingCompactExpansion();
+            if (!wasTargetCollapsed &&
+                !IsCollapsedContentHibernated &&
+                WidgetShellControl.ShellContent is not null &&
+                !WidgetShellControl.IsCompactDeferredContentPresentationActive)
+            {
+                _isCompactExpansionWarmed = true;
+                _compactExpansionWarmupEpoch = App.MemoryCleanupEpoch;
+                _compactExpansionWorkingSetEpoch = App.WorkingSetTrimEpoch;
+            }
+
             if (!_targetCollapsed && UsesCompactExpansionGeometry())
             {
                 // First collapse computes its bounds in place but never
@@ -3112,6 +3690,49 @@ public abstract partial class WidgetWindowBase
             bypassExpansionReadiness = true;
         }
 
+        int plannedExpandDurationMs = !collapsed && animate
+            ? ResolveCompactTransitionDuration(durationMs)
+            : 0;
+        bool willAnimateExpandMorph = !collapsed &&
+            _targetCollapsed &&
+            !restoresPersistedExpandedPlacement &&
+            plannedExpandDurationMs > 0 &&
+            WidgetCompactAnimationCoordinator.HasBoundsTransitionCapacity &&
+            WidgetCompactTransitionVisualProfile.Resolve(
+                SettingsService.Settings.WidgetCompactAnimationEffect,
+                plannedExpandDurationMs,
+                SystemAnimationsEnabled()).IsAnimated;
+        bool deferExpandedContentHydration =
+            willAnimateExpandMorph && !IsWarmLiveContentExpansionReady;
+
+        if (!collapsed)
+        {
+            CancelCollapsedHibernationTimers();
+            if (deferExpandedContentHydration)
+            {
+                // Shell-first expansion: never block or drop morph frames on cold
+                // XAML construction, first-pass layout, or post-trim page faults.
+                // The capsule shell expands immediately at full frame rate and
+                // hydrates + fades in leaf content once the panel settles.
+                CancelPendingCompactExpansion();
+                CancelCompactExpansionWarmup();
+                bypassExpansionReadiness = true;
+                _perfDeferredHoldMs = 0;
+            }
+            else
+            {
+                if (EnsureCollapsedContentViewAttached())
+                {
+                    InvalidateCompactExpansionReadiness();
+                }
+
+                if (!willAnimateExpandMorph)
+                {
+                    bypassExpansionReadiness = true;
+                }
+            }
+        }
+
         if (!collapsed &&
             _targetCollapsed &&
             !bypassExpansionReadiness &&
@@ -3142,8 +3763,15 @@ public abstract partial class WidgetWindowBase
             SynchronizeWidgetGroupLayout();
         }
 
+        if (!bypassExpansionReadiness)
+        {
+            _perfDeferredHoldMs = 0;
+        }
+        _perfWasWarmed = IsWarmLiveContentExpansionReady;
         string contentMode = SettingsService.Settings.WidgetCompactContentMode;
+        long perfRefreshStart = Stopwatch.GetTimestamp();
         RefreshCompactPresentation();
+        _perfSetStateRefreshMs = Stopwatch.GetElapsedTime(perfRefreshStart).TotalMilliseconds;
 
         if (collapsed == _targetCollapsed && !_isCollapseAnimationRendering)
         {
@@ -3201,15 +3829,19 @@ public abstract partial class WidgetWindowBase
         OnCompactVisualStateChanged(collapsed);
         _compactState = collapsed ? WidgetCompactState.Collapsing : WidgetCompactState.Expanding;
         UpdateCompactViewState();
+        _perfSetStateRaiseMs = 0;
         if (!collapsed)
         {
             StopCompactHoverRecoveryProbe();
             CancelTimer(ref _compactBoundsSettleTimer);
             if (!restoresPersistedExpandedPlacement)
             {
+                long perfRaiseStart = Stopwatch.GetTimestamp();
                 RaiseForExpandedState();
+                _perfSetStateRaiseMs = Stopwatch.GetElapsedTime(perfRaiseStart).TotalMilliseconds;
             }
         }
+        long perfResolveStart = Stopwatch.GetTimestamp();
         RectInt32 from = GetCurrentWindowBounds();
         RectInt32 to;
         WidgetCompactExpansionAnchor? transitionAnchor = null;
@@ -3267,13 +3899,15 @@ public abstract partial class WidgetWindowBase
             }
         }
 
+        _perfSetStateResolveMs = Stopwatch.GetElapsedTime(perfResolveStart).TotalMilliseconds;
         StartBoundsTransition(
             from,
             to,
             collapsed,
-            animate ? ResolveCompactTransitionDuration(durationMs) : 0,
+            animate ? (collapsed ? ResolveCompactTransitionDuration(durationMs) : plannedExpandDurationMs) : 0,
             transitionAnchor,
-            transitionPivot);
+            transitionPivot,
+            deferExpandedContentHydration);
     }
 
     private RectInt32 ResolvePersistedExpandedHostBounds()
@@ -3408,6 +4042,7 @@ public abstract partial class WidgetWindowBase
                 $"kind={Config.WidgetKind} id={Config.Id}");
         }
 
+        _perfDeferredHoldMs = Stopwatch.GetElapsedTime(request.RequestedAtTimestamp).TotalMilliseconds;
         CancelCompactExpansionWarmup();
         SetCollapsedState(
             false,
@@ -3425,6 +4060,7 @@ public abstract partial class WidgetWindowBase
     {
         _compactExpansionRequestGeneration++;
         _pendingCompactExpansion = null;
+        _perfDeferredHoldMs = 0;
         CancelTimer(ref _compactExpansionReadinessDeadlineTimer);
     }
 
@@ -3434,12 +4070,52 @@ public abstract partial class WidgetWindowBase
         bool collapsed,
         int durationMs,
         WidgetCompactExpansionAnchor? expansionAnchor = null,
-        PointInt32 expansionPivot = default)
+        PointInt32 expansionPivot = default,
+        bool deferContentHydration = false)
     {
+        bool redirectedMidFlight = _isCollapseAnimationRendering || _isShellTransitionActive;
+        double remainingShare = 1.0;
+        if (redirectedMidFlight)
+        {
+            double previousSpan = Math.Max(
+                Math.Abs(_collapseAnimationTo.Width - _collapseAnimationFrom.Width),
+                Math.Abs(_collapseAnimationTo.Height - _collapseAnimationFrom.Height));
+            double currentRemainingSpan = Math.Max(
+                Math.Abs(to.Width - from.Width),
+                Math.Abs(to.Height - from.Height));
+            if (previousSpan > 1)
+            {
+                remainingShare = Math.Clamp(
+                    currentRemainingSpan / previousSpan,
+                    WidgetCompactTransitionVisualProfile.MinTurnDurationFactor,
+                    1.0);
+            }
+        }
+
         CancelDeferredExpandedLayerRestore();
+        CancelDeferredExpandedContentHydration();
         StopCollapseAnimation();
+        if (collapsed)
+        {
+            RefreshCompactPresentation(reapplySurfaceState: false);
+        }
+
+        bool isInstantTransition =
+            durationMs <= 0 ||
+            BoundsEqual(from, to) ||
+            !WidgetCompactAnimationCoordinator.HasBoundsTransitionCapacity;
+        bool effectiveDeferContentHydration =
+            !collapsed && deferContentHydration && !isInstantTransition;
+        _deferExpandedContentHydrationForActiveTransition = effectiveDeferContentHydration;
+        if (!collapsed && deferContentHydration && !effectiveDeferContentHydration)
+        {
+            EnsureCollapsedContentViewAttached();
+        }
+
+        _perfWorkingSetStartMB = Environment.WorkingSet / (1024d * 1024d);
         _collapseAnimationAnchor = expansionAnchor;
         _collapseAnimationPivot = expansionPivot;
+        long perfFreezeStart = Stopwatch.GetTimestamp();
         double dpiScale = Win32Helper.GetDpiScaleForWindow(HWnd, RootElement.XamlRoot);
         WidgetShellControl.BeginResponsiveLayoutTransition(
             collapsed,
@@ -3447,12 +4123,13 @@ public abstract partial class WidgetWindowBase
             to.Height / Math.Max(0.01, dpiScale),
             expansionAnchor ?? WidgetCompactExpansionAnchor.LeftTop,
             frozenWindowWidth: (collapsed ? from.Width : to.Width) / Math.Max(0.01, dpiScale),
-            frozenWindowHeight: (collapsed ? from.Height : to.Height) / Math.Max(0.01, dpiScale));
+            frozenWindowHeight: (collapsed ? from.Height : to.Height) / Math.Max(0.01, dpiScale),
+            hasHorizontalMorph: Math.Abs(from.Width - to.Width) > 2,
+            deferContentPresentation: effectiveDeferContentHydration);
+        _perfFreezeLayoutMs = Stopwatch.GetElapsedTime(perfFreezeStart).TotalMilliseconds;
         long generation = ++_collapseAnimationGeneration;
 
-        if (durationMs <= 0 ||
-            BoundsEqual(from, to) ||
-            !WidgetCompactAnimationCoordinator.HasBoundsTransitionCapacity)
+        if (isInstantTransition)
         {
             // Instant transition: no rendering frames will fire, so apply
             // the backdrop synchronously (no animation to stutter).
@@ -3465,11 +4142,22 @@ public abstract partial class WidgetWindowBase
             return;
         }
 
+        WidgetCompactTransitionVisualProfile resolvedProfile =
+            WidgetCompactTransitionVisualProfile.Resolve(
+                SettingsService.Settings.WidgetCompactAnimationEffect,
+                durationMs,
+                SystemAnimationsEnabled());
+        int effectiveDurationMs = resolvedProfile.ResolveEffectiveDurationMilliseconds(
+            collapsed,
+            remainingShare);
+        int activeDurationMs = effectiveDurationMs > 0 ? effectiveDurationMs : durationMs;
+
         _collapseAnimationFrom = from;
         _collapseAnimationTo = to;
-        _collapseAnimationDurationMs = durationMs;
+        _collapseAnimationDurationMs = activeDurationMs;
+        _collapseAnimationRedirectedMidFlight = redirectedMidFlight;
         long transitionPrepStarted = Stopwatch.GetTimestamp();
-        int refreshRateHz = Win32Helper.GetDisplayRefreshRateForWindow(HWnd);
+        int refreshRateHz = WidgetAnimationDisplayTiming.GetRefreshRateHz(HWnd);
         _collapseAnimationLastCommittedBounds = from;
         _collapseAnimationPacing.Reset(
             0,
@@ -3479,10 +4167,12 @@ public abstract partial class WidgetWindowBase
         string mediaCornerMode = WindowsCompatibilityService.ResolveEffectiveWidgetCompactMediaCornerMode(
             SettingsService.Settings.WidgetCompactMediaCornerMode);
         ApplyCompactBorderVisuals();
-        _collapseAnimationVisualProfile = WidgetCompactTransitionVisualProfile.Resolve(
-            SettingsService.Settings.WidgetCompactAnimationEffect,
-            durationMs,
-            SystemAnimationsEnabled());
+        long perfShellPrepStart = Stopwatch.GetTimestamp();
+        _perfBorderAndDpiMs = Stopwatch.GetElapsedTime(transitionPrepStarted, perfShellPrepStart).TotalMilliseconds;
+        _collapseAnimationVisualProfile = resolvedProfile with
+        {
+            DurationMilliseconds = activeDurationMs
+        };
         _isShellTransitionActive = WidgetShellControl.PrepareCompactTransition(
             collapsed,
             GetCornerRadiusFromPreference(),
@@ -3491,19 +4181,26 @@ public abstract partial class WidgetWindowBase
             WidgetCompactBoundsCalculator.ResolveMediaCornerRadius(
                 mediaCornerMode,
                 cornerPreference),
-            _collapseAnimationVisualProfile);
+            _collapseAnimationVisualProfile,
+            deferContentPresentation: effectiveDeferContentHydration);
         // Anchor the animation clock after preparation: the refresh-rate
         // query, border visuals, and composition animation starts above used
         // to consume the opening progress, skipping the first eased frames.
         _collapseAnimationStarted = Stopwatch.GetTimestamp();
+        _perfPrepareShellMs = Stopwatch.GetElapsedTime(perfShellPrepStart, _collapseAnimationStarted).TotalMilliseconds;
         PerformanceLogger.Mark(
             "CompactBoundsTransitionPrep",
             $"prepMs={Stopwatch.GetElapsedTime(transitionPrepStarted, _collapseAnimationStarted).TotalMilliseconds:F1} " +
-            $"durationMs={durationMs} kind={Config.WidgetKind} id={Config.Id}");
+            $"durationMs={activeDurationMs} kind={Config.WidgetKind} id={Config.Id}");
         _compactAnimationFrameTracker = new WidgetCompactAnimationFrameTracker(
             _collapseAnimationStarted,
             refreshRateHz);
         _isCollapseAnimationRendering = true;
+        _perfXamlSizeChanges = 0;
+        _perfXamlLayouts = 0;
+        _perfPeakConcurrent = Math.Max(1, WidgetCompactAnimationCoordinator.ActiveBoundsTransitionCount + 1);
+        AttachCompactPerfLayoutHooks();
+        long perfPostClockStart = Stopwatch.GetTimestamp();
         _collapseAnimationFrameRegistration?.Dispose();
         _collapseAnimationFrameRegistration =
             WidgetCompactAnimationCoordinator.RegisterBoundsTransition(CollapseAnimationRendering, HWnd);
@@ -3511,8 +4208,9 @@ public abstract partial class WidgetWindowBase
         SimplifyBackdropForInteraction();
         ScheduleTimer(
             ref _collapseAnimationWatchdogTimer,
-            Math.Max(300, durationMs + 320),
+            Math.Max(300, activeDurationMs + 320),
             CompleteBoundsTransitionAfterTimeout);
+        _perfPostClockStartMs = Stopwatch.GetElapsedTime(perfPostClockStart).TotalMilliseconds;
     }
 
     private void CompleteBoundsTransitionAfterTimeout()
@@ -3524,8 +4222,13 @@ public abstract partial class WidgetWindowBase
 
         bool collapsed = _targetCollapsed;
         long generation = _collapseAnimationGeneration;
+        bool holdTransitionForDeferredHydration =
+            !collapsed && _deferExpandedContentHydrationForActiveTransition;
         App.Log($"[Compact] Bounds transition watchdog recovered generation={generation}");
-        StopCollapseAnimation(cancelShellTransition: false, completeMetrics: false);
+        StopCollapseAnimation(
+            cancelShellTransition: false,
+            completeMetrics: false,
+            keepBoundsTransitionActive: holdTransitionForDeferredHydration);
         CommitCollapseAnimationBounds(
             _collapseAnimationTo,
             Stopwatch.GetTimestamp(),
@@ -3546,6 +4249,9 @@ public abstract partial class WidgetWindowBase
     private void CollapseAnimationRendering()
     {
         long frameTimestamp = Stopwatch.GetTimestamp();
+        _perfPeakConcurrent = Math.Max(
+            _perfPeakConcurrent,
+            WidgetCompactAnimationCoordinator.ActiveBoundsTransitionCount);
         double frameBudgetMs = WidgetCompactAnimationCoordinator.GetFrameBudgetMilliseconds(HWnd);
         _compactAnimationFrameTracker?.RecordTick(frameTimestamp, frameBudgetMs);
         double elapsedMs = Stopwatch.GetElapsedTime(_collapseAnimationStarted, frameTimestamp).TotalMilliseconds;
@@ -3558,7 +4264,10 @@ public abstract partial class WidgetWindowBase
             return;
         }
 
-        double eased = _collapseAnimationVisualProfile.EaseProgress(progress);
+        double eased = _collapseAnimationVisualProfile.EaseSurfaceProgress(
+            _targetCollapsed,
+            progress,
+            _collapseAnimationRedirectedMidFlight);
         RectInt32 bounds = _collapseAnimationAnchor is { } expansionAnchor
             ? WidgetCompactExpansionCalculator.InterpolateAnchoredBounds(
                 _collapseAnimationFrom,
@@ -3567,7 +4276,7 @@ public abstract partial class WidgetWindowBase
                 expansionAnchor,
                 eased)
             : InterpolateBounds(_collapseAnimationFrom, _collapseAnimationTo, eased);
-        WidgetShellControl.SetCompactTransitionProgress(_targetCollapsed, eased);
+        WidgetShellControl.SetCompactTransitionProgress(_targetCollapsed, progress, eased);
 
         if (progress < 1)
         {
@@ -3577,7 +4286,12 @@ public abstract partial class WidgetWindowBase
 
         bool collapsed = _targetCollapsed;
         long generation = _collapseAnimationGeneration;
-        StopCollapseAnimation(cancelShellTransition: false, completeMetrics: false);
+        bool holdTransitionForDeferredHydration =
+            !collapsed && _deferExpandedContentHydrationForActiveTransition;
+        StopCollapseAnimation(
+            cancelShellTransition: false,
+            completeMetrics: false,
+            keepBoundsTransitionActive: holdTransitionForDeferredHydration);
         CommitCollapseAnimationBounds(
             _collapseAnimationTo,
             frameTimestamp,
@@ -3641,21 +4355,39 @@ public abstract partial class WidgetWindowBase
 
     private void FinishBoundsTransition(bool collapsed, long generation, string outcome = "completed")
     {
-        CompleteCompactAnimationMetrics(outcome);
+        DetachCompactPerfLayoutHooks();
+        CompleteCompactAnimationMetrics(outcome, deferPerfLog: true);
+        long completeStart = Stopwatch.GetTimestamp();
         CompleteBoundsTransition(collapsed, generation);
+        double completeMs = Stopwatch.GetElapsedTime(completeStart).TotalMilliseconds;
+        if (_pendingCompactPerfLine is { } perfLine)
+        {
+            _pendingCompactPerfLine = null;
+            App.Log($"[CompactPerf] {perfLine} completeMs={completeMs:F1}");
+        }
+        _perfDeferredHoldMs = 0;
     }
 
     private void CompleteBoundsTransition(bool collapsed, long generation)
     {
         RestoreBackdropAfterInteraction();
+        UpdateCustomPanoramaViewport();
         if (generation != _collapseAnimationGeneration || collapsed != _targetCollapsed)
         {
+            CancelDeferredExpandedContentHydration();
             return;
         }
 
+        bool deferContentHydration = !collapsed && _deferExpandedContentHydrationForActiveTransition;
+        _deferExpandedContentHydrationForActiveTransition = false;
+        bool anchorsBottom = _compactExpansionAnchor is
+            WidgetCompactExpansionAnchor.LeftBottom or
+            WidgetCompactExpansionAnchor.RightBottom;
+
         WidgetShellControl.CompleteCompactTransition(
             collapsed,
-            SettingsService.Settings.WidgetCompactContentMode);
+            SettingsService.Settings.WidgetCompactContentMode,
+            keepContentDeferred: deferContentHydration);
         WidgetShellControl.CompleteResponsiveLayoutTransition();
         _isShellTransitionActive = false;
         IsWidgetCollapsedBoundsActive = collapsed;
@@ -3673,30 +4405,168 @@ public abstract partial class WidgetWindowBase
                         : WidgetCompactState.Expanded;
         UpdateCompactViewState();
         ApplyWindowCornerPreference();
+        if (IsKeepCapsuleContentWarmEnabled)
+        {
+            App.Current?.ReconcileQuiescenceWorkingSetTrimSchedule();
+        }
         if (collapsed)
         {
             ApplyCompactSurfaceState();
             ScheduleExpandedLayerRestoreAfterFrameCommit(generation);
+            ArmCollapsedContentHibernationTimer();
             StartCompactHoverRecoveryProbe();
             SynchronizeCompactHoverFromCurrentCursor();
             QueueCompactExpansionWarmup();
         }
         else
         {
+            WidgetShellControl.ClearCompactBitmaps();
             StopCompactHoverRecoveryProbe();
-            _isCompactExpansionWarmed = true;
-            _compactExpansionWarmupEpoch = App.MemoryCleanupEpoch;
             ApplyBackdropPreference();
             if (UsesSmartCollapseBehavior() && !_isSmartPinnedOpen)
             {
                 ScheduleSmartCollapse(SmartCollapseProbeMs);
             }
+
+            if (deferContentHydration)
+            {
+                ScheduleDeferredExpandedContentHydration(generation, anchorsBottom);
+                return;
+            }
+
+            _isCompactExpansionWarmed = true;
+            _compactExpansionWarmupEpoch = App.MemoryCleanupEpoch;
+            _compactExpansionWorkingSetEpoch = App.WorkingSetTrimEpoch;
         }
 
         OnCompactExpansionReady();
     }
 
-    private void ApplyCompactSurfaceState()
+    private void ScheduleDeferredExpandedContentHydration(
+        long transitionGeneration,
+        bool anchorsBottom)
+    {
+        long hydrationGeneration = ++_deferredExpandedContentHydrationGeneration;
+        if (_deferredContentHydrationFrameHandler is { } previousHandler)
+        {
+            CompositionTarget.Rendering -= previousHandler;
+            _deferredContentHydrationFrameHandler = null;
+        }
+
+        CancelTimer(ref _deferredContentHydrationFallbackTimer);
+        EventHandler<object>? handler = null;
+        handler = (_, _) =>
+        {
+            CompositionTarget.Rendering -= handler;
+            if (ReferenceEquals(_deferredContentHydrationFrameHandler, handler))
+            {
+                _deferredContentHydrationFrameHandler = null;
+            }
+
+            HydrateDeferredExpandedContent(
+                hydrationGeneration,
+                transitionGeneration,
+                anchorsBottom);
+        };
+        _deferredContentHydrationFrameHandler = handler;
+        CompositionTarget.Rendering += handler;
+        ScheduleTimer(
+            ref _deferredContentHydrationFallbackTimer,
+            48,
+            () => HydrateDeferredExpandedContent(
+                hydrationGeneration,
+                transitionGeneration,
+                anchorsBottom));
+    }
+
+    private void HydrateDeferredExpandedContent(
+        long hydrationGeneration,
+        long transitionGeneration,
+        bool anchorsBottom)
+    {
+        if (hydrationGeneration != _deferredExpandedContentHydrationGeneration)
+        {
+            return;
+        }
+
+        _deferredExpandedContentHydrationGeneration++;
+        if (_deferredContentHydrationFrameHandler is { } handler)
+        {
+            CompositionTarget.Rendering -= handler;
+            _deferredContentHydrationFrameHandler = null;
+        }
+
+        CancelTimer(ref _deferredContentHydrationFallbackTimer);
+        bool releaseTransitionHold = _isHoldingBoundsTransitionForDeferredHydration;
+        _isHoldingBoundsTransitionForDeferredHydration = false;
+
+        if (IsClosing ||
+            !_collapseInitialized ||
+            _targetCollapsed ||
+            _isCollapseAnimationRendering ||
+            transitionGeneration != _collapseAnimationGeneration)
+        {
+            if (releaseTransitionHold)
+            {
+                OnCompactBoundsTransitionActiveChanged(false);
+            }
+
+            return;
+        }
+
+        long hydrateStarted = Stopwatch.GetTimestamp();
+        try
+        {
+            EnsureCollapsedContentViewAttached();
+            WidgetShellControl.RevealDeferredExpandedContent(
+                animate: SystemAnimationsEnabled(),
+                anchorsBottom: anchorsBottom);
+        }
+        finally
+        {
+            if (releaseTransitionHold)
+            {
+                OnCompactBoundsTransitionActiveChanged(false);
+            }
+        }
+
+        if (WidgetShellControl.ShellContent is not null)
+        {
+            _isCompactExpansionWarmed = true;
+            _compactExpansionWarmupEpoch = App.MemoryCleanupEpoch;
+            _compactExpansionWorkingSetEpoch = App.WorkingSetTrimEpoch;
+        }
+
+        double hydrateMs = Stopwatch.GetElapsedTime(hydrateStarted).TotalMilliseconds;
+        PerformanceLogger.Mark(
+            "CompactDeferredContentHydrated",
+            $"hydrateMs={hydrateMs:F1} hasContent={WidgetShellControl.ShellContent is not null} " +
+            $"kind={Config.WidgetKind} id={Config.Id}");
+        App.LogVerbose(
+            $"[CompactPerf] DeferredContentHydrated kind={Config.WidgetKind} id={Config.Id} " +
+            $"hydrateMs={hydrateMs:F1} hasContent={WidgetShellControl.ShellContent is not null}");
+        OnCompactExpansionReady();
+    }
+
+    private void CancelDeferredExpandedContentHydration()
+    {
+        _deferredExpandedContentHydrationGeneration++;
+        _deferExpandedContentHydrationForActiveTransition = false;
+        if (_deferredContentHydrationFrameHandler is { } handler)
+        {
+            CompositionTarget.Rendering -= handler;
+            _deferredContentHydrationFrameHandler = null;
+        }
+
+        CancelTimer(ref _deferredContentHydrationFallbackTimer);
+        if (_isHoldingBoundsTransitionForDeferredHydration)
+        {
+            _isHoldingBoundsTransitionForDeferredHydration = false;
+            OnCompactBoundsTransitionActiveChanged(false);
+        }
+    }
+
+    protected void ApplyCompactSurfaceState()
     {
         ApplyBackdropPreference();
         ApplyCompactBorderVisuals();
@@ -4314,8 +5184,48 @@ public abstract partial class WidgetWindowBase
         committed?.Invoke();
     }
 
-    private void StopCollapseAnimation(bool cancelShellTransition = true, bool completeMetrics = true)
+    private void AttachCompactPerfLayoutHooks()
     {
+        if (_perfLayoutHooksAttached)
+        {
+            return;
+        }
+
+        _perfLayoutHooksAttached = true;
+        RootElement.SizeChanged += HandleCompactPerfRootSizeChanged;
+        RootElement.LayoutUpdated += HandleCompactPerfRootLayoutUpdated;
+    }
+
+    private void DetachCompactPerfLayoutHooks()
+    {
+        if (!_perfLayoutHooksAttached)
+        {
+            return;
+        }
+
+        _perfLayoutHooksAttached = false;
+        RootElement.SizeChanged -= HandleCompactPerfRootSizeChanged;
+        RootElement.LayoutUpdated -= HandleCompactPerfRootLayoutUpdated;
+    }
+
+    private void HandleCompactPerfRootSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        _perfXamlSizeChanges++;
+    }
+
+    private void HandleCompactPerfRootLayoutUpdated(object? sender, object e)
+    {
+        _perfXamlLayouts++;
+    }
+
+    private void StopCollapseAnimation(
+        bool cancelShellTransition = true,
+        bool completeMetrics = true,
+        bool keepBoundsTransitionActive = false)
+    {
+        DetachCompactPerfLayoutHooks();
+        DetachCompactExpansionRenderWarmupFrameHook();
+        WidgetShellControl.AbortCompactExpansionRenderWarmup();
         CancelTimer(ref _collapseAnimationWatchdogTimer);
         if (completeMetrics)
         {
@@ -4323,11 +5233,31 @@ public abstract partial class WidgetWindowBase
         }
         if (!_isCollapseAnimationRendering && !_isShellTransitionActive)
         {
+            if (!keepBoundsTransitionActive && _isHoldingBoundsTransitionForDeferredHydration)
+            {
+                _isHoldingBoundsTransitionForDeferredHydration = false;
+                OnCompactBoundsTransitionActiveChanged(false);
+            }
+
+            if (cancelShellTransition)
+            {
+                _deferExpandedContentHydrationForActiveTransition = false;
+            }
+
             _collapseAnimationAnchor = null;
             return;
         }
 
-        OnCompactBoundsTransitionActiveChanged(false);
+        if (keepBoundsTransitionActive)
+        {
+            _isHoldingBoundsTransitionForDeferredHydration = true;
+        }
+        else
+        {
+            _isHoldingBoundsTransitionForDeferredHydration = false;
+            OnCompactBoundsTransitionActiveChanged(false);
+        }
+
         _isCollapseAnimationRendering = false;
         _collapseAnimationFrameRegistration?.Dispose();
         _collapseAnimationFrameRegistration = null;
@@ -4335,6 +5265,7 @@ public abstract partial class WidgetWindowBase
         {
             if (cancelShellTransition)
             {
+                _deferExpandedContentHydrationForActiveTransition = false;
                 WidgetShellControl.CancelCompactTransition();
             }
 
@@ -4343,7 +5274,7 @@ public abstract partial class WidgetWindowBase
         _collapseAnimationAnchor = null;
     }
 
-    private void CompleteCompactAnimationMetrics(string outcome = "cancelled")
+    private void CompleteCompactAnimationMetrics(string outcome = "cancelled", bool deferPerfLog = false)
     {
         WidgetCompactAnimationFrameTracker? tracker = _compactAnimationFrameTracker;
         if (tracker is null)
@@ -4352,7 +5283,32 @@ public abstract partial class WidgetWindowBase
         }
 
         _compactAnimationFrameTracker = null;
+        string tickSeries = tracker.FormatTickIntervals();
         WidgetCompactAnimationFrameSummary summary = tracker.Complete(Stopwatch.GetTimestamp());
+        double wsEndMB = Environment.WorkingSet / (1024d * 1024d);
+        string perfSummary =
+            $"kind={Config.WidgetKind} id={Config.Id} collapsed={_targetCollapsed} outcome={outcome} " +
+            $"concurrent={_perfPeakConcurrent} warmed={_perfWasWarmed} holdMs={_perfDeferredHoldMs:F1} " +
+            $"wsMB={_perfWorkingSetStartMB:F1}->{wsEndMB:F1} " +
+            $"preMs={_perfSetStateRefreshMs:F1}/{_perfSetStateRaiseMs:F1}/{_perfSetStateResolveMs:F1} " +
+            $"prepMs={_perfFreezeLayoutMs:F1}/{_perfBorderAndDpiMs:F1}/{_perfPrepareShellMs:F1}/{_perfPostClockStartMs:F1} " +
+            $"ticks={summary.FrameCount} boundsUpdates={summary.BoundsUpdateCount} missed={summary.EstimatedDroppedFrames} " +
+            $"firstTickMs={summary.FirstFrameIntervalMilliseconds:F1} " +
+            $"maxTickMs={summary.MaximumFrameIntervalMilliseconds:F1}@{summary.MaximumFrameIntervalIndex} " +
+            $"maxWorkMs={summary.MaximumSubmissionWorkMilliseconds:F1} " +
+            $"elapsedMs={summary.ElapsedMilliseconds:F1}/{_collapseAnimationDurationMs} " +
+            $"xaml={_perfXamlSizeChanges}/{_perfXamlLayouts} " +
+            $"tickMs=[{tickSeries}]";
+        if (deferPerfLog)
+        {
+            _pendingCompactPerfLine = perfSummary;
+        }
+        else
+        {
+            _pendingCompactPerfLine = null;
+            App.Log($"[CompactPerf] {perfSummary} completeMs=0.0");
+            _perfDeferredHoldMs = 0;
+        }
         string details =
             $"kind={Config.WidgetKind} id={Config.Id} collapsed={_targetCollapsed} " +
             $"outcome={outcome} initialRefreshHz={summary.RefreshRateHz} ticks={summary.FrameCount} " +
@@ -4596,18 +5552,29 @@ public abstract partial class WidgetWindowBase
 
     private void TryCompleteDeferredExpandedLayerRestore(bool deadlineElapsed)
     {
+        bool anyTransitionActive =
+            _isCollapseAnimationRendering ||
+            _isShellTransitionActive ||
+            WidgetCompactAnimationCoordinator.ActiveBoundsTransitionCount > 0;
         WidgetCompactLayerRestoreDecision decision =
             WidgetCompactLayerRestorePolicy.Decide(
                 IsClosing,
                 _collapseInitialized,
                 _targetCollapsed,
-                _isCollapseAnimationRendering || _isShellTransitionActive,
+                anyTransitionActive,
                 _collapseAnimationGeneration,
                 _compactLayerRestoreGeneration,
                 _compactLayerRestoreCommittedFrames,
                 deadlineElapsed);
         if (decision == WidgetCompactLayerRestoreDecision.WaitForFrameCommit)
         {
+            if (deadlineElapsed && anyTransitionActive)
+            {
+                ScheduleTimer(
+                    ref _compactLayerRestoreFallbackTimer,
+                    CompactLayerRestoreFallbackMs,
+                    () => TryCompleteDeferredExpandedLayerRestore(deadlineElapsed: true));
+            }
             return;
         }
 
@@ -4764,14 +5731,48 @@ public abstract partial class WidgetWindowBase
             cursor.Y < bounds.Y + bounds.Height;
     }
 
+    private OneShotTimerPool<DispatcherQueueTimer> GetOrCreateOneShotTimerPool()
+    {
+        return _oneShotTimerPool ??= new OneShotTimerPool<DispatcherQueueTimer>(
+            createTimer: () =>
+            {
+                DispatcherQueueTimer timer = DispatcherQueue.CreateTimer();
+                timer.IsRepeating = false;
+                PerformanceLogger.RecordTransientUiTimerCreated();
+                return timer;
+            },
+            releaseTimer: static timer =>
+            {
+                timer.Stop();
+                PerformanceLogger.RecordTransientUiTimerReleased();
+            },
+            maxRetained: MaxPooledOneShotTimers);
+    }
+
+    private void ReturnOneShotTimerToPool(DispatcherQueueTimer timer)
+    {
+        bool forceRelease = IsClosing || !_collapseInitialized;
+        if (_oneShotTimerPool is { } pool)
+        {
+            pool.Return(timer, forceRelease);
+        }
+        else
+        {
+            timer.Stop();
+            PerformanceLogger.RecordTransientUiTimerReleased();
+        }
+    }
+
     private void ScheduleTimer(
         ref OwnedOneShotDispatcherTimer? field,
         int delayMs,
         Action action)
     {
         CancelTimer(ref field);
+        DispatcherQueueTimer pooledTimer = GetOrCreateOneShotTimerPool().Rent();
         var timer = new OwnedOneShotDispatcherTimer(
-            DispatcherQueue,
+            pooledTimer,
+            ReturnOneShotTimerToPool,
             TimeSpan.FromMilliseconds(delayMs),
             action);
         field = timer;
@@ -4785,28 +5786,30 @@ public abstract partial class WidgetWindowBase
     }
 
     /// <summary>
-    /// Owns both sides of a one-shot DispatcherQueueTimer subscription.
+    /// Owns both sides of a pooled one-shot DispatcherQueueTimer subscription.
     /// Stopping a WinRT timer is not enough to release its managed event source;
-    /// the Tick handler must also be detached or every compact interaction leaves
-    /// another timer and COM wrapper rooted for the rest of the process.
+    /// the Tick handler is detached and the underlying timer is returned to the
+    /// window's bounded pool so transient compact interactions allocate 0 OS handles.
     /// </summary>
     private sealed class OwnedOneShotDispatcherTimer : IDisposable
     {
         private readonly DispatcherQueueTimer _timer;
+        private readonly Action<DispatcherQueueTimer> _returnTimer;
         private Action? _action;
         private bool _isDisposed;
 
         public OwnedOneShotDispatcherTimer(
-            DispatcherQueue dispatcherQueue,
+            DispatcherQueueTimer timer,
+            Action<DispatcherQueueTimer> returnTimer,
             TimeSpan interval,
             Action action)
         {
+            _timer = timer;
+            _returnTimer = returnTimer;
             _action = action;
-            _timer = dispatcherQueue.CreateTimer();
             _timer.IsRepeating = false;
             _timer.Interval = interval;
             _timer.Tick += Timer_Tick;
-            PerformanceLogger.RecordTransientUiTimerCreated();
         }
 
         public void Start()
@@ -4828,14 +5831,38 @@ public abstract partial class WidgetWindowBase
             _timer.Stop();
             _timer.Tick -= Timer_Tick;
             _action = null;
-            PerformanceLogger.RecordTransientUiTimerReleased();
+            _returnTimer(_timer);
         }
 
         private void Timer_Tick(DispatcherQueueTimer sender, object args)
         {
             Action? action = _action;
             Dispose();
-            action?.Invoke();
+            if (action is null)
+            {
+                return;
+            }
+
+            try
+            {
+                action();
+            }
+            catch (Exception ex)
+            {
+                // CoreMessagingXP bypasses Application.UnhandledException and
+                // fail-fasts with 0xc000027b before any log queue flush when a
+                // DispatcherQueueTimer.Tick handler throws.
+                if (Application.Current is App app)
+                {
+                    app.ReportUnhandledUiCallbackException(
+                        "WidgetWindowBase.OwnedOneShotDispatcherTimer",
+                        ex);
+                }
+                else
+                {
+                    throw;
+                }
+            }
         }
     }
 

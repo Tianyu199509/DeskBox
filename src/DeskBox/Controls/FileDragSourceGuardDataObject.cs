@@ -110,17 +110,13 @@ internal sealed unsafe partial class FileDragSourceGuardDataObject :
         }
     }
 
-    private static bool IsCompletionFormat(nint format)
-    {
-        if (format == 0)
-        {
-            return false;
-        }
-        ushort id = ((NativeFormatEtc*)format)->ClipboardFormat;
-        return id != 0 && (id == s_performedDropEffectFormat ||
+    private static bool IsCompletionFormatId(ushort id) =>
+        id != 0 && (id == s_performedDropEffectFormat ||
             id == s_logicalPerformedDropEffectFormat ||
             id == s_pasteSucceededFormat || id == s_targetClsidFormat);
-    }
+
+    private static bool IsCompletionFormat(nint format) =>
+        format != 0 && IsCompletionFormatId(((NativeFormatEtc*)format)->ClipboardFormat);
 
     private static bool IsPreferredFormat(nint format) =>
         format != 0 &&
@@ -305,9 +301,98 @@ internal sealed unsafe partial class FileDragSourceGuardDataObject :
         }
     }
 
-    public int EnumFormatEtc(uint direction, nint enumerator) =>
-        ((delegate* unmanaged[Stdcall]<nint, uint, nint, int>)Slot(EnumFormatEtcSlot))(
-            _inner, direction, enumerator);
+    public int EnumFormatEtc(uint direction, nint enumerator)
+    {
+        if (enumerator == 0)
+        {
+            return unchecked((int)0x80004003); // E_POINTER
+        }
+
+        const uint DataDirGet = 1;
+        if (direction != DataDirGet || !_hasPreferredDropEffect || s_preferredDropEffectFormat == 0)
+        {
+            return ((delegate* unmanaged[Stdcall]<nint, uint, nint, int>)Slot(EnumFormatEtcSlot))(
+                _inner, direction, enumerator);
+        }
+
+        nint innerEnumerator = 0;
+        int hr = ((delegate* unmanaged[Stdcall]<nint, uint, nint, int>)Slot(EnumFormatEtcSlot))(
+            _inner, direction, (nint)(&innerEnumerator));
+        if (hr < 0 || innerEnumerator == 0)
+        {
+            *(nint*)enumerator = innerEnumerator;
+            return hr;
+        }
+
+        var formats = new List<NativeFormatEtc>(16);
+        try
+        {
+            var nextFn = (delegate* unmanaged[Stdcall]<nint, uint, NativeFormatEtc*, uint*, int>)
+                (*(nint**)innerEnumerator)[3];
+            while (true)
+            {
+                NativeFormatEtc item = default;
+                uint fetched = 0;
+                int nextHr = nextFn(innerEnumerator, 1, &item, &fetched);
+                if (nextHr < 0 || fetched == 0)
+                {
+                    break;
+                }
+
+                if (IsCompletionFormatId(item.ClipboardFormat) ||
+                    (s_preferredDropEffectFormat != 0 &&
+                     item.ClipboardFormat == s_preferredDropEffectFormat))
+                {
+                    if (item.TargetDevice != 0)
+                    {
+                        ShellItemDragNativeMethods.CoTaskMemFree(item.TargetDevice);
+                    }
+
+                    continue;
+                }
+
+                formats.Add(item);
+            }
+
+            if (_hasPreferredDropEffect && s_preferredDropEffectFormat != 0)
+            {
+                formats.Add(new NativeFormatEtc
+                {
+                    ClipboardFormat = s_preferredDropEffectFormat,
+                    TargetDevice = 0,
+                    Aspect = 1, // DVASPECT_CONTENT
+                    Index = -1,
+                    MediumType = 1, // TYMED_HGLOBAL
+                });
+            }
+
+            ReadOnlySpan<NativeFormatEtc> span = CollectionsMarshal.AsSpan(formats);
+            NativeFormatEtc emptyPlaceholder = default;
+            fixed (NativeFormatEtc* pinned = span)
+            {
+                NativeFormatEtc* arrayPtr = span.Length > 0 ? pinned : &emptyPlaceholder;
+                int createHr = ShellItemDragNativeMethods.SHCreateStdEnumFmtEtc(
+                    (uint)span.Length,
+                    arrayPtr,
+                    out nint stdEnumerator);
+                *(nint*)enumerator = createHr >= 0 ? stdEnumerator : 0;
+                return createHr;
+            }
+        }
+        finally
+        {
+            foreach (NativeFormatEtc item in formats)
+            {
+                if (item.TargetDevice != 0)
+                {
+                    ShellItemDragNativeMethods.CoTaskMemFree(item.TargetDevice);
+                }
+            }
+
+            ((delegate* unmanaged[Stdcall]<nint, uint>)
+                (*(nint**)innerEnumerator)[ReleaseSlot])(innerEnumerator);
+        }
+    }
 
     public int DAdvise(nint format, uint flags, nint adviseSink, nint connection) =>
         ((delegate* unmanaged[Stdcall]<nint, nint, nint, nint, nint, int>)Slot(DAdviseSlot))(

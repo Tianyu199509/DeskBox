@@ -1,4 +1,4 @@
-﻿namespace DeskBox.Tests;
+namespace DeskBox.Tests;
 
 public sealed class AotStage5B1ContractTests
 {
@@ -73,7 +73,7 @@ public sealed class AotStage5B1ContractTests
             "File.WriteAllText(replacementPath",
             source,
             StringComparison.Ordinal);
-        Assert.Contains("WindowNative.GetWindowHandle(_trayWindow)", source, StringComparison.Ordinal);
+        Assert.Contains("nint ownerHwnd = TrayHostWindowHandle;", source, StringComparison.Ordinal);
         Assert.Contains("ownerHwnd == IntPtr.Zero", source, StringComparison.Ordinal);
         Assert.Contains(
             "ShortcutHelper.ResolveBrokenShortcutWithShellUi(",

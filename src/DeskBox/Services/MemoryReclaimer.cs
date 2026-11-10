@@ -47,10 +47,23 @@ internal static class MemoryReclaimer
 
     private static long s_lastCompletedTimestamp;
     private static int s_collectionRunning;
+    private static long s_completedReclaimEpoch;
+
+    internal static long CompletedReclaimEpoch =>
+        Interlocked.Read(ref s_completedReclaimEpoch);
+
+    internal static event Action? ReclaimCompleted;
+
+    internal static void NotifyReclaimCompletedForTesting()
+    {
+        Interlocked.Increment(ref s_completedReclaimEpoch);
+        RaiseReclaimCompleted();
+    }
 
     internal static MemoryReclaimResult TryCollect(
         string reason,
-        bool bypassCooldown = false)
+        bool bypassCooldown = false,
+        bool updateCooldown = true)
     {
         reason = string.IsNullOrWhiteSpace(reason)
             ? "unspecified"
@@ -95,19 +108,28 @@ internal static class MemoryReclaimer
             GC.WaitForPendingFinalizers();
 
             // A second pass reclaims objects that became unreachable when their
-            // finalizers released the native references.
+            // finalizers released the native references, compacts both LOH and
+            // SOH, and allows the runtime (with ConserveMemory=9 + DATAS) to
+            // decommit empty GC segment pages back to the OS.
+            System.Runtime.GCSettings.LargeObjectHeapCompactionMode =
+                System.Runtime.GCLargeObjectHeapCompactionMode.CompactOnce;
             GC.Collect(
                 GC.MaxGeneration,
-                GCCollectionMode.Forced,
+                GCCollectionMode.Aggressive,
                 blocking: true,
-                compacting: false);
+                compacting: true);
 
-            Volatile.Write(
-                ref s_lastCompletedTimestamp,
-                Stopwatch.GetTimestamp());
+            if (updateCooldown)
+            {
+                Volatile.Write(
+                    ref s_lastCompletedTimestamp,
+                    Stopwatch.GetTimestamp());
+            }
             int collectionsAfter = GC.CollectionCount(GC.MaxGeneration);
             long heapAfterBytes = GetHeapSizeBytes();
             long privateAfterBytes = GetPrivateBytes();
+            Interlocked.Increment(ref s_completedReclaimEpoch);
+            RaiseReclaimCompleted();
             return new MemoryReclaimResult(
                 MemoryReclaimStatus.Completed,
                 collectionsBefore,
@@ -135,6 +157,27 @@ internal static class MemoryReclaimer
         finally
         {
             Volatile.Write(ref s_collectionRunning, 0);
+        }
+    }
+
+    private static void RaiseReclaimCompleted()
+    {
+        Action? handlers = ReclaimCompleted;
+        if (handlers is null)
+        {
+            return;
+        }
+
+        foreach (Delegate subscriber in handlers.GetInvocationList())
+        {
+            try
+            {
+                ((Action)subscriber)();
+            }
+            catch (Exception ex)
+            {
+                App.LogVerbose($"[Memory] ReclaimCompleted listener failed: {ex.Message}");
+            }
         }
     }
 

@@ -1,0 +1,16 @@
+{
+  "modFocus": "焦点额度主卡",
+  "modRadar": "多平台速览列表",
+  "modTokens": "本地 Token 与缓存透视",
+  "modTrend": "近 14 日消耗柱状图",
+  "optQuotaRem": "显示剩余百分比（如 85% 剩余）",
+  "optQuotaUsed": "显示已用百分比（如 15% 已用）",
+  "optRef15m": "每 15 分钟",
+  "optRef1m": "每 1 分钟（推荐）",
+  "optRef5m": "每 5 分钟",
+  "setModules": "显示内容与顺序",
+  "setQuotaMode": "窗口配额百分比语义",
+  "setRefresh": "自动轮询刷新间隔",
+  "widgetDescription": "实时监控 Claude Code / Codex 本地会话窗口配额与智谱 GLM / DeepSeek / Kimi / OpenRouter 账户余额。",
+  "widgetName": "AI 监控"
+}

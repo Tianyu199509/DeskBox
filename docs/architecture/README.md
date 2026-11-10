@@ -34,6 +34,8 @@ current-state snapshot, then only the contract you are about to touch.
   — native context menu hosting rules.
 - [json-source-generation-baseline.md](json-source-generation-baseline.md)
   — System.Text.Json source-generation baseline (no reflection serializers).
+- [custom-widget-remote-catalog-workflow.md](custom-widget-remote-catalog-workflow.md)
+  — remote OTA workflow for publishing, hot-updating, or deprecating official Custom Widget templates and AI prompt packs across `deskbox.fun` and GitHub (`scripts/publish_widget_catalog.py`).
 
 ## Settled verdicts (do not reopen)
 

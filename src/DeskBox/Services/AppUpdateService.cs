@@ -14,12 +14,18 @@ public sealed partial class AppUpdateService : IAppUpdateService
 {
     public const string DefaultManifestUrl = "https://deskbox.fun/update/stable.json";
     public const string DefaultGitHubLatestReleaseApiUrl = "https://api.github.com/repos/Tianyu199509/DeskBox/releases/latest";
-    public const string DefaultManualDownloadUrl = "https://deskbox.fun/download";
+    public const string DefaultManualDownloadUrl = "https://deskbox.fun/download/";
+    private const string BlockedVersionsFileName = "blocked-versions.txt";
+
+    private static HashSet<string> s_sharedBlockedVersions = new(StringComparer.OrdinalIgnoreCase);
 
     private readonly HttpClient _httpClient;
     private readonly string _manifestUrl;
     private readonly string _githubLatestReleaseApiUrl;
     private readonly string _updateRootPath;
+    private readonly string _blockedVersionsPath;
+    private readonly object _blockedVersionsGate = new();
+    private HashSet<string>? _cachedBlockedVersions;
 
     // Display-only manifest fetches are static calls (no service instance on
     // surfaces like the release-notes window), so they share one client
@@ -56,6 +62,7 @@ public sealed partial class AppUpdateService : IAppUpdateService
         _updateRootPath = string.IsNullOrWhiteSpace(updateRootPath)
             ? DeskBoxDataPathService.Current.UpdatesDirectory
             : updateRootPath;
+        _blockedVersionsPath = Path.Combine(_updateRootPath, BlockedVersionsFileName);
     }
 
     public AppUpdateCheckResult? LastCheckResult { get; private set; }
@@ -127,6 +134,12 @@ public sealed partial class AppUpdateService : IAppUpdateService
     {
         try
         {
+            if (string.IsNullOrWhiteSpace(_updateRootPath) ||
+                !Directory.Exists(_updateRootPath))
+            {
+                return;
+            }
+
             string currentSegment = SanitizePathSegment(GetCurrentAppVersion());
             foreach (string directory in Directory.EnumerateDirectories(_updateRootPath))
             {
@@ -218,6 +231,11 @@ public sealed partial class AppUpdateService : IAppUpdateService
                 stream,
                 AppUpdateJsonContext.Default.UpdateManifest,
                 cancellationToken);
+            if (manifest is { SchemaVersion: 1 })
+            {
+                RecordBlockedVersions(manifest.BlockedVersions);
+            }
+
             if (manifest is null ||
                 !TrySelectInstallerForArchitecture(
                     manifest,
@@ -232,7 +250,13 @@ public sealed partial class AppUpdateService : IAppUpdateService
                     "The update manifest is missing installer metadata for this processor architecture.");
             }
 
-            return IsRemoteVersionNewer(currentVersion, manifest.Version)
+            bool shouldOfferUpdate =
+                !manifest.PushPaused &&
+                !manifest.IsVersionBlocked(manifest.Version) &&
+                !IsKnownBlockedVersion(manifest.Version) &&
+                IsRemoteVersionNewer(currentVersion, manifest.Version);
+
+            return shouldOfferUpdate
                 ? new AppUpdateCheckResult(AppUpdateCheckStatus.UpdateAvailable, currentVersion, manifest)
                 : new AppUpdateCheckResult(AppUpdateCheckStatus.UpToDate, currentVersion, manifest);
         }
@@ -262,6 +286,14 @@ public sealed partial class AppUpdateService : IAppUpdateService
                     currentVersion,
                     manifest,
                     "The GitHub release metadata is missing required fields.");
+            }
+
+            if (IsKnownBlockedVersion(manifest.Version))
+            {
+                return new AppUpdateCheckResult(
+                    AppUpdateCheckStatus.Failed,
+                    currentVersion,
+                    errorMessage: $"Release {manifest.Version} is blocked by server policy.");
             }
 
             return IsRemoteVersionNewer(currentVersion, manifest.Version)
@@ -467,7 +499,7 @@ public sealed partial class AppUpdateService : IAppUpdateService
         // retire (delete) the directory the armed installer lives in.
         _installerHelperArmed = true;
 
-        string? appPath = Environment.ProcessPath;
+        string? appPath = AppExecutablePath.ResolveMainExecutablePath();
         if (string.IsNullOrWhiteSpace(appPath) || !File.Exists(appPath))
         {
             appPath = Path.Combine(AppContext.BaseDirectory, "DeskBox.exe");
@@ -730,6 +762,12 @@ public sealed partial class AppUpdateService : IAppUpdateService
             stream,
             AppUpdateJsonContext.Default.UpdateManifest,
             cancellationToken);
+        if (manifest is { SchemaVersion: 1 } &&
+            string.Equals(manifestUrl, DefaultManifestUrl, StringComparison.OrdinalIgnoreCase))
+        {
+            UpdateSharedBlockedVersions(manifest.BlockedVersions);
+        }
+
         return IsContentManifestUsable(manifest) ? manifest : null;
     }
 
@@ -739,6 +777,92 @@ public sealed partial class AppUpdateService : IAppUpdateService
             manifest.SchemaVersion == 1 &&
             !string.IsNullOrWhiteSpace(manifest.Version) &&
             manifest.HasReleaseNotesOrUrl;
+    }
+
+    /// <summary>
+    /// Normalizes a server manifest before handing it to release-notes display
+    /// surfaces so an emergency push pause (sentinel version <c>1.0.0</c> with
+    /// <c>pushPaused: true</c>) or a rolled-back feed never pollutes the
+    /// release-notes header, version rail, or disk cache under <c>1.0.0</c>.
+    /// </summary>
+    public static AppUpdateManifest NormalizeManifestForReleaseNotes(
+        AppUpdateManifest? manifest,
+        string currentVersion)
+    {
+        string safeCurrent = string.IsNullOrWhiteSpace(currentVersion)
+            ? GetCurrentAppVersion()
+            : currentVersion.Trim();
+
+        if (manifest is null)
+        {
+            return CreateReleaseNotesOnlyManifest(safeCurrent);
+        }
+
+        List<string> blocked = manifest.BlockedVersions is { Count: > 0 }
+            ? [.. manifest.BlockedVersions]
+            : [];
+
+        bool isSentinelPause =
+            manifest.PushPaused ||
+            string.Equals(AppUpdateManifest.NormalizeVersionToken(manifest.Version), "1.0.0", StringComparison.OrdinalIgnoreCase);
+
+        if (isSentinelPause)
+        {
+            string candidatePublic = manifest.PublicVersion?.Trim() ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(candidatePublic) &&
+                !string.Equals(AppUpdateManifest.NormalizeVersionToken(candidatePublic), "1.0.0", StringComparison.OrdinalIgnoreCase) &&
+                !manifest.IsVersionBlocked(candidatePublic) &&
+                (!IsRemoteVersionNewer(candidatePublic, safeCurrent) || manifest.IsVersionBlocked(safeCurrent)))
+            {
+                return new AppUpdateManifest
+                {
+                    SchemaVersion = manifest.SchemaVersion,
+                    Channel = manifest.Channel,
+                    Version = AppUpdateManifest.NormalizeVersionToken(candidatePublic),
+                    ReleaseDate = manifest.ReleaseDate,
+                    ReleaseNotesUrl = manifest.ReleaseNotesUrl,
+                    Summary = new Dictionary<string, string>(manifest.Summary, StringComparer.OrdinalIgnoreCase),
+                    ReleaseNotes = new Dictionary<string, string>(manifest.ReleaseNotes, StringComparer.OrdinalIgnoreCase),
+                    BlockedVersions = blocked,
+                };
+            }
+
+            AppUpdateManifest fallback = CreateReleaseNotesOnlyManifest(safeCurrent);
+            fallback.BlockedVersions = blocked;
+            return fallback;
+        }
+
+        if (manifest.IsVersionBlocked(manifest.Version) ||
+            (IsRemoteVersionNewer(manifest.Version, safeCurrent) && !manifest.IsVersionBlocked(safeCurrent)))
+        {
+            AppUpdateManifest fallback = CreateReleaseNotesOnlyManifest(safeCurrent);
+            fallback.BlockedVersions = blocked;
+            return fallback;
+        }
+
+        return manifest;
+    }
+
+    public static bool IsVersionBlockedForReleaseNotes(string? version, AppUpdateManifest? activeManifest = null)
+    {
+        if (string.IsNullOrWhiteSpace(version))
+        {
+            return true;
+        }
+
+        string normalized = AppUpdateManifest.NormalizeVersionToken(version);
+        if (string.Equals(normalized, "1.0.0", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (activeManifest is not null && activeManifest.IsVersionBlocked(normalized))
+        {
+            return true;
+        }
+
+        HashSet<string> sharedBlocked = Volatile.Read(ref s_sharedBlockedVersions);
+        return sharedBlocked.Contains(normalized);
     }
 
     /// <summary>
@@ -913,7 +1037,9 @@ public sealed partial class AppUpdateService : IAppUpdateService
 
             ClearLastDownloadedInstaller();
         }
-        else if (result.Status == AppUpdateCheckStatus.UpToDate && _lastDownloadedInstallerPath is not null)
+        else if ((result.Status == AppUpdateCheckStatus.UpToDate ||
+                  (_lastDownloadedVersion is not null && IsKnownBlockedVersion(_lastDownloadedVersion))) &&
+                 _lastDownloadedInstallerPath is not null)
         {
             if (!_installerHelperArmed)
             {
@@ -925,6 +1051,106 @@ public sealed partial class AppUpdateService : IAppUpdateService
 
         CheckCompleted?.Invoke(result);
         return result;
+    }
+
+    private void RecordBlockedVersions(IReadOnlyCollection<string>? blockedVersions)
+    {
+        var next = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (blockedVersions is not null)
+        {
+            foreach (string raw in blockedVersions)
+            {
+                if (!string.IsNullOrWhiteSpace(raw))
+                {
+                    next.Add(AppUpdateManifest.NormalizeVersionToken(raw));
+                }
+            }
+        }
+
+        lock (_blockedVersionsGate)
+        {
+            _cachedBlockedVersions = next;
+            try
+            {
+                if (next.Count == 0)
+                {
+                    DeskBox.Platform.CustomWidgetStorageFileOps.DeleteFileIfExists(_blockedVersionsPath);
+                }
+                else
+                {
+                    Directory.CreateDirectory(_updateRootPath);
+                    DeskBox.Platform.CustomWidgetStorageFileOps.ReplaceTextFileAtomically(
+                        _blockedVersionsPath,
+                        string.Join(Environment.NewLine, next.OrderBy(v => v, StringComparer.OrdinalIgnoreCase)));
+                }
+            }
+            catch (Exception ex)
+            {
+                App.Log($"[Update] Failed to persist blocked versions: {ex.Message}");
+            }
+        }
+
+        if (string.Equals(
+                Path.GetFullPath(_updateRootPath),
+                Path.GetFullPath(DeskBoxDataPathService.Current.UpdatesDirectory),
+                StringComparison.OrdinalIgnoreCase))
+        {
+            UpdateSharedBlockedVersions(next);
+        }
+    }
+
+    internal bool IsKnownBlockedVersion(string? version)
+    {
+        if (string.IsNullOrWhiteSpace(version))
+        {
+            return false;
+        }
+
+        string normalized = AppUpdateManifest.NormalizeVersionToken(version);
+        lock (_blockedVersionsGate)
+        {
+            if (_cachedBlockedVersions is null)
+            {
+                var loaded = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                try
+                {
+                    if (File.Exists(_blockedVersionsPath))
+                    {
+                        foreach (string line in File.ReadAllLines(_blockedVersionsPath))
+                        {
+                            if (!string.IsNullOrWhiteSpace(line))
+                            {
+                                loaded.Add(AppUpdateManifest.NormalizeVersionToken(line));
+                            }
+                        }
+                    }
+                }
+                catch
+                {
+                }
+
+                _cachedBlockedVersions = loaded;
+            }
+
+            return _cachedBlockedVersions.Contains(normalized);
+        }
+    }
+
+    private static void UpdateSharedBlockedVersions(IEnumerable<string>? blockedVersions)
+    {
+        var next = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (blockedVersions is not null)
+        {
+            foreach (string raw in blockedVersions)
+            {
+                if (!string.IsNullOrWhiteSpace(raw))
+                {
+                    next.Add(AppUpdateManifest.NormalizeVersionToken(raw));
+                }
+            }
+        }
+
+        Volatile.Write(ref s_sharedBlockedVersions, next);
     }
 
     internal static string GetInstallerFileName(Uri downloadUri, string version)

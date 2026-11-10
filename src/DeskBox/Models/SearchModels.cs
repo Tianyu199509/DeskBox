@@ -19,7 +19,8 @@ public enum SearchResultKind
     Action,
     Folder,
     History,
-    Favorite
+    Favorite,
+    Clipboard
 }
 
 /// <summary>
@@ -146,9 +147,12 @@ public sealed class SearchResultItem
     public string? Glyph { get; init; }
     public string DisplayGlyph => !string.IsNullOrWhiteSpace(Glyph)
         ? Glyph
-        : Kind == SearchResultKind.Folder
-            ? "\uE8B7"
-            : "\uE8A5";
+        : Kind switch
+        {
+            SearchResultKind.Folder => "\uE8B7",
+            SearchResultKind.Clipboard => "\uE77F",
+            _ => "\uE8A5"
+        };
     public DateTimeOffset? ModifiedAt { get; set; }
     public double RelevanceScore { get; set; }
 
@@ -189,6 +193,11 @@ public sealed class SearchResultItem
     public string? QuickCaptureItemId { get; init; }
 
     /// <summary>
+    /// For Clipboard results: the clipboard history item ID.
+    /// </summary>
+    public string? ClipboardItemId { get; init; }
+
+    /// <summary>
     /// For Action results: the action identifier.
     /// </summary>
     public string? ActionId { get; init; }
@@ -197,6 +206,30 @@ public sealed class SearchResultItem
     /// For History/Favorite results: the query text to re-run when activated.
     /// </summary>
     public string? HistoryQuery { get; init; }
+
+    /// <summary>
+    /// Stable canonical identity key used by zero-input application recommendations
+    /// for deduplication, manual ordering, folder grouping, and hiding.
+    /// </summary>
+    public string? RecommendationKey { get; set; }
+
+    /// <summary>Optional multi-line preview text for notes, todos, clipboard items, calculator, or URLs.</summary>
+    public string? PreviewText { get; init; }
+
+    /// <summary>Optional local image path for thumbnail preview in the details pane (e.g., clipboard image).</summary>
+    public string? PreviewImagePath { get; init; }
+
+    /// <summary>Optional source application display name (e.g., clipboard capture source).</summary>
+    public string? PreviewSourceApp { get; init; }
+
+    /// <summary>Optional character count for text notes or clipboard payloads.</summary>
+    public int? PreviewCharCount { get; init; }
+
+    /// <summary>Optional line count for text notes or clipboard payloads.</summary>
+    public int? PreviewLineCount { get; init; }
+
+    /// <summary>Whether this action item is a low-priority fallback suggestion (such as fallback web search).</summary>
+    public bool IsFallback { get; init; }
 }
 
 /// <summary>
@@ -247,6 +280,12 @@ public sealed class SearchRecommendationItem
     /// For History/Favorite recommendations: the query text to re-run when activated.
     /// </summary>
     public string? HistoryQuery { get; init; }
+
+    /// <summary>
+    /// Pre-resolved deduplication identity carried from the engine to avoid re-reading
+    /// shortcut metadata on the cold-open path.
+    /// </summary>
+    internal Helpers.AppRecommendationIdentity.Keys? ResolvedIdentityKeys { get; init; }
 }
 
 /// <summary>
@@ -311,4 +350,63 @@ public sealed class SearchTabItem : INotifyPropertyChanged
     public event PropertyChangedEventHandler? PropertyChanged;
     private void OnPropertyChanged([CallerMemberName] string? name = null)
         => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+}
+
+/// <summary>
+/// Lightweight folder summary used when building recommendation context menus.
+/// </summary>
+public sealed record RecommendationFolderSummary(string FolderId, string Name);
+
+/// <summary>
+/// Immutable display model for one tile in the zero-input application recommendation grid:
+/// either a standalone application card or a Windows 11-style 2x2 preview folder card.
+/// </summary>
+public sealed class RecommendedGridEntry
+{
+    private RecommendedGridEntry(
+        string entryKey,
+        bool isFolder,
+        string label,
+        SearchResultItem? appItem,
+        string? folderId,
+        IReadOnlyList<SearchResultItem> folderItems)
+    {
+        EntryKey = entryKey;
+        IsFolder = isFolder;
+        Label = label;
+        AppItem = appItem;
+        FolderId = folderId;
+        FolderItems = folderItems;
+    }
+
+    public string EntryKey { get; }
+    public bool IsFolder { get; }
+    public string Label { get; }
+    public SearchResultItem? AppItem { get; }
+    public string? FolderId { get; }
+    public IReadOnlyList<SearchResultItem> FolderItems { get; }
+
+    public Visibility SingleIconVisibility => IsFolder ? Visibility.Collapsed : Visibility.Visible;
+    public Visibility FolderPreviewVisibility => IsFolder ? Visibility.Visible : Visibility.Collapsed;
+
+    public static RecommendedGridEntry CreateApp(string appKey, SearchResultItem item) =>
+        new(
+            entryKey: $"app:{appKey}",
+            isFolder: false,
+            label: item.AppDisplayName,
+            appItem: item,
+            folderId: null,
+            folderItems: []);
+
+    public static RecommendedGridEntry CreateFolder(
+        string folderId,
+        string folderName,
+        IReadOnlyList<SearchResultItem> items) =>
+        new(
+            entryKey: $"folder:{folderId}",
+            isFolder: true,
+            label: folderName,
+            appItem: null,
+            folderId: folderId,
+            folderItems: items);
 }

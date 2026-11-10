@@ -71,6 +71,9 @@ public class AppSettings
     [JsonIgnore]
     public SearchSettingsSlice Search { get; } = new();
 
+    [JsonIgnore]
+    public ClipboardSettingsSlice Clipboard { get; } = new();
+
     // ─── Serialization facade (wire contract, order-significant) ──
 
     /// <inheritdoc cref="CoreSettingsSlice.Theme"/>
@@ -141,6 +144,9 @@ public class AppSettings
 
     /// <inheritdoc cref="PerformanceSettingsSlice.EnableCompactAmbientAnimations"/>
     public bool EnableCompactAmbientAnimations { get => Performance.EnableCompactAmbientAnimations; set => Performance.EnableCompactAmbientAnimations = value; }
+
+    /// <inheritdoc cref="PerformanceSettingsSlice.KeepCapsuleContentWarm"/>
+    public bool KeepCapsuleContentWarm { get => Performance.KeepCapsuleContentWarm; set => Performance.KeepCapsuleContentWarm = value; }
 
     /// <inheritdoc cref="CoreSettingsSlice.AutoCheckForUpdates"/>
     public bool AutoCheckForUpdates { get => Core.AutoCheckForUpdates; set => Core.AutoCheckForUpdates = value; }
@@ -244,6 +250,9 @@ public class AppSettings
     /// <inheritdoc cref="TodoSettingsSlice.TodoShowTodayTab"/>
     public bool TodoShowTodayTab { get => Todo.TodoShowTodayTab; set => Todo.TodoShowTodayTab = value; }
 
+    /// <inheritdoc cref="TodoSettingsSlice.TodoShowOverdueTab"/>
+    public bool TodoShowOverdueTab { get => Todo.TodoShowOverdueTab; set => Todo.TodoShowOverdueTab = value; }
+
     /// <inheritdoc cref="TodoSettingsSlice.TodoShowThisWeekTab"/>
     public bool TodoShowThisWeekTab { get => Todo.TodoShowThisWeekTab; set => Todo.TodoShowThisWeekTab = value; }
 
@@ -286,6 +295,12 @@ public class AppSettings
     /// <inheritdoc cref="TodoSettingsSlice.TodoDefaultReminderOffsetMinutes"/>
     public int TodoDefaultReminderOffsetMinutes { get => Todo.TodoDefaultReminderOffsetMinutes; set => Todo.TodoDefaultReminderOffsetMinutes = value; }
 
+    /// <inheritdoc cref="TodoSettingsSlice.TodoAllDayReminderEnabled"/>
+    public bool TodoAllDayReminderEnabled { get => Todo.TodoAllDayReminderEnabled; set => Todo.TodoAllDayReminderEnabled = value; }
+
+    /// <inheritdoc cref="TodoSettingsSlice.TodoAllDayReminderTimeMinutes"/>
+    public int TodoAllDayReminderTimeMinutes { get => Todo.TodoAllDayReminderTimeMinutes; set => Todo.TodoAllDayReminderTimeMinutes = value; }
+
     /// <inheritdoc cref="TodoSettingsSlice.TodoUseWideDetailPane"/>
     public bool TodoUseWideDetailPane { get => Todo.TodoUseWideDetailPane; set => Todo.TodoUseWideDetailPane = value; }
 
@@ -306,6 +321,18 @@ public class AppSettings
 
     /// <inheritdoc cref="MusicSettingsSlice.MusicHideTimelineWhenUnavailable"/>
     public bool MusicHideTimelineWhenUnavailable { get => Music.MusicHideTimelineWhenUnavailable; set => Music.MusicHideTimelineWhenUnavailable = value; }
+
+    /// <inheritdoc cref="MusicSettingsSlice.MusicShowLyrics"/>
+    public bool MusicShowLyrics { get => Music.MusicShowLyrics; set => Music.MusicShowLyrics = value; }
+
+    /// <inheritdoc cref="MusicSettingsSlice.MusicShowCapsuleLyrics"/>
+    public bool MusicShowCapsuleLyrics { get => Music.MusicShowCapsuleLyrics; set => Music.MusicShowCapsuleLyrics = value; }
+
+    /// <inheritdoc cref="MusicSettingsSlice.MusicLocalLyricsFolder"/>
+    public string MusicLocalLyricsFolder { get => Music.MusicLocalLyricsFolder; set => Music.MusicLocalLyricsFolder = value; }
+
+    /// <inheritdoc cref="MusicSettingsSlice.MusicSpectrumStyle"/>
+    public string MusicSpectrumStyle { get => Music.MusicSpectrumStyle; set => Music.MusicSpectrumStyle = value; }
 
     /// <inheritdoc cref="QuickCaptureSettingsSlice.LastQuickCaptureFileWidgetId"/>
     public string LastQuickCaptureFileWidgetId { get => QuickCapture.LastQuickCaptureFileWidgetId; set => QuickCapture.LastQuickCaptureFileWidgetId = value; }
@@ -410,6 +437,9 @@ public class AppSettings
 
     /// <inheritdoc cref="WidgetShellSettingsSlice.WidgetLayerMode"/>
     public string WidgetLayerMode { get => WidgetShell.WidgetLayerMode; set => WidgetShell.WidgetLayerMode = value; }
+
+    /// <inheritdoc cref="WidgetShellSettingsSlice.DynamicClickRaiseScope"/>
+    public string DynamicClickRaiseScope { get => WidgetShell.DynamicClickRaiseScope; set => WidgetShell.DynamicClickRaiseScope = value; }
 
     /// <inheritdoc cref="WidgetShellSettingsSlice.KeepWidgetsVisibleOnShowDesktop"/>
     public bool KeepWidgetsVisibleOnShowDesktop { get => WidgetShell.KeepWidgetsVisibleOnShowDesktop; set => WidgetShell.KeepWidgetsVisibleOnShowDesktop = value; }
@@ -647,6 +677,13 @@ public class AppSettings
         set => WidgetLayout.WidgetDisplayDisconnectBehavior = value;
     }
 
+    /// <inheritdoc cref="WidgetLayoutSettingsSlice.WidgetDisplayScalingMode"/>
+    public string WidgetDisplayScalingMode
+    {
+        get => WidgetLayout.WidgetDisplayScalingMode;
+        set => WidgetLayout.WidgetDisplayScalingMode = value;
+    }
+
     /// <inheritdoc cref="WidgetLayoutSettingsSlice.WidgetGroups"/>
     public List<WidgetGroupConfig> WidgetGroups { get => WidgetLayout.WidgetGroups; set => WidgetLayout.WidgetGroups = value; }
 
@@ -739,6 +776,9 @@ public class AppSettings
     /// <inheritdoc cref="SearchSettingsSlice.SearchHotkeyEnabled"/>
     public bool SearchHotkeyEnabled { get => Search.SearchHotkeyEnabled; set => Search.SearchHotkeyEnabled = value; }
 
+    /// <inheritdoc cref="SearchSettingsSlice.SearchHotkeyActivationKind"/>
+    public HotkeyActivationKind SearchHotkeyActivationKind { get => Search.SearchHotkeyActivationKind; set => Search.SearchHotkeyActivationKind = value; }
+
     /// <inheritdoc cref="SearchSettingsSlice.SearchHotkeyModifiers"/>
     public int SearchHotkeyModifiers { get => Search.SearchHotkeyModifiers; set => Search.SearchHotkeyModifiers = value; }
 
@@ -787,6 +827,48 @@ public class AppSettings
     /// <inheritdoc cref="SearchSettingsSlice.SearchPopupCustomHeight"/>
     public int? SearchPopupCustomHeight { get => Search.SearchPopupCustomHeight; set => Search.SearchPopupCustomHeight = value; }
 
+    /// <inheritdoc cref="SearchSettingsSlice.SearchCategoryBarMode"/>
+    public string SearchCategoryBarMode { get => Search.SearchCategoryBarMode; set => Search.SearchCategoryBarMode = value; }
+
+    /// <inheritdoc cref="SearchSettingsSlice.SearchShowSortHeader"/>
+    public bool SearchShowSortHeader { get => Search.SearchShowSortHeader; set => Search.SearchShowSortHeader = value; }
+
+    /// <inheritdoc cref="SearchSettingsSlice.SearchDefaultSortColumn"/>
+    public string SearchDefaultSortColumn { get => Search.SearchDefaultSortColumn; set => Search.SearchDefaultSortColumn = value; }
+
+    /// <inheritdoc cref="SearchSettingsSlice.SearchIncludeClipboard"/>
+    public bool SearchIncludeClipboard { get => Search.SearchIncludeClipboard; set => Search.SearchIncludeClipboard = value; }
+
+    /// <inheritdoc cref="SearchSettingsSlice.SearchIncludeCalculator"/>
+    public bool SearchIncludeCalculator { get => Search.SearchIncludeCalculator; set => Search.SearchIncludeCalculator = value; }
+
+    /// <inheritdoc cref="SearchSettingsSlice.SearchShowDetailsPane"/>
+    public bool SearchShowDetailsPane { get => Search.SearchShowDetailsPane; set => Search.SearchShowDetailsPane = value; }
+
+    /// <inheritdoc cref="SearchSettingsSlice.SearchIncludeWebFallback"/>
+    public bool SearchIncludeWebFallback { get => Search.SearchIncludeWebFallback; set => Search.SearchIncludeWebFallback = value; }
+
+    /// <inheritdoc cref="SearchSettingsSlice.SearchDefaultWebEngine"/>
+    public string SearchDefaultWebEngine { get => Search.SearchDefaultWebEngine; set => Search.SearchDefaultWebEngine = value; }
+
+    /// <inheritdoc cref="SearchSettingsSlice.SearchCustomWebUrl"/>
+    public string SearchCustomWebUrl { get => Search.SearchCustomWebUrl; set => Search.SearchCustomWebUrl = value; }
+
+    /// <inheritdoc cref="SearchSettingsSlice.SearchQuickCreateTodoEnabled"/>
+    public bool SearchQuickCreateTodoEnabled { get => Search.SearchQuickCreateTodoEnabled; set => Search.SearchQuickCreateTodoEnabled = value; }
+
+    /// <inheritdoc cref="SearchSettingsSlice.SearchQuickCreateNoteEnabled"/>
+    public bool SearchQuickCreateNoteEnabled { get => Search.SearchQuickCreateNoteEnabled; set => Search.SearchQuickCreateNoteEnabled = value; }
+
+    /// <inheritdoc cref="SearchSettingsSlice.SearchQuickCreateDisplayMode"/>
+    public string SearchQuickCreateDisplayMode { get => Search.SearchQuickCreateDisplayMode; set => Search.SearchQuickCreateDisplayMode = value; }
+
+    /// <inheritdoc cref="SearchSettingsSlice.SearchQuickCreateDefaultTarget"/>
+    public string SearchQuickCreateDefaultTarget { get => Search.SearchQuickCreateDefaultTarget; set => Search.SearchQuickCreateDefaultTarget = value; }
+
+    /// <inheritdoc cref="SearchSettingsSlice.SearchQuickCreateShowHud"/>
+    public bool SearchQuickCreateShowHud { get => Search.SearchQuickCreateShowHud; set => Search.SearchQuickCreateShowHud = value; }
+
     // ─── Cloud Backup (roadmap §10 — non-secret provider config only) ───
 
     /// <inheritdoc cref="CloudBackupSettingsSlice.CloudBackupProvider"/>
@@ -810,6 +892,9 @@ public class AppSettings
     /// <inheritdoc cref="CloudBackupSettingsSlice.CloudBackupWidgetStyleEnabled"/>
     public bool CloudBackupWidgetStyleEnabled { get => CloudBackup.CloudBackupWidgetStyleEnabled; set => CloudBackup.CloudBackupWidgetStyleEnabled = value; }
 
+    /// <inheritdoc cref="CloudBackupSettingsSlice.CloudBackupCustomWidgetsEnabled"/>
+    public bool CloudBackupCustomWidgetsEnabled { get => CloudBackup.CloudBackupCustomWidgetsEnabled; set => CloudBackup.CloudBackupCustomWidgetsEnabled = value; }
+
     /// <inheritdoc cref="CloudBackupSettingsSlice.CloudBackupRetentionCount"/>
     public int CloudBackupRetentionCount { get => CloudBackup.CloudBackupRetentionCount; set => CloudBackup.CloudBackupRetentionCount = value; }
 
@@ -824,4 +909,75 @@ public class AppSettings
 
     /// <inheritdoc cref="CloudBackupSettingsSlice.CloudBackupLastUnverifiedUtcTicks"/>
     public long CloudBackupLastUnverifiedUtcTicks { get => CloudBackup.CloudBackupLastUnverifiedUtcTicks; set => CloudBackup.CloudBackupLastUnverifiedUtcTicks = value; }
+
+    // ─── Clipboard Feature Widget ───────────────────────────────────
+
+    /// <inheritdoc cref="ClipboardSettingsSlice.ClipboardCaptureText"/>
+    public bool ClipboardCaptureText { get => Clipboard.ClipboardCaptureText; set => Clipboard.ClipboardCaptureText = value; }
+
+    /// <inheritdoc cref="ClipboardSettingsSlice.ClipboardCaptureImages"/>
+    public bool ClipboardCaptureImages { get => Clipboard.ClipboardCaptureImages; set => Clipboard.ClipboardCaptureImages = value; }
+
+    /// <inheritdoc cref="ClipboardSettingsSlice.ClipboardCaptureFiles"/>
+    public bool ClipboardCaptureFiles { get => Clipboard.ClipboardCaptureFiles; set => Clipboard.ClipboardCaptureFiles = value; }
+
+    /// <inheritdoc cref="ClipboardSettingsSlice.ClipboardMaxImageSizeMb"/>
+    public int ClipboardMaxImageSizeMb { get => Clipboard.ClipboardMaxImageSizeMb; set => Clipboard.ClipboardMaxImageSizeMb = value; }
+
+    /// <inheritdoc cref="ClipboardSettingsSlice.ClipboardMaxTextSizeMb"/>
+    public int ClipboardMaxTextSizeMb { get => Clipboard.ClipboardMaxTextSizeMb; set => Clipboard.ClipboardMaxTextSizeMb = value; }
+
+    /// <inheritdoc cref="ClipboardSettingsSlice.ClipboardClickBehavior"/>
+    public string ClipboardClickBehavior { get => Clipboard.ClipboardClickBehavior; set => Clipboard.ClipboardClickBehavior = value; }
+
+    /// <inheritdoc cref="ClipboardSettingsSlice.ClipboardDefaultPastePlainText"/>
+    public bool ClipboardDefaultPastePlainText { get => Clipboard.ClipboardDefaultPastePlainText; set => Clipboard.ClipboardDefaultPastePlainText = value; }
+
+    /// <inheritdoc cref="ClipboardSettingsSlice.ClipboardMoveToTopOnReuse"/>
+    public bool ClipboardMoveToTopOnReuse { get => Clipboard.ClipboardMoveToTopOnReuse; set => Clipboard.ClipboardMoveToTopOnReuse = value; }
+
+    /// <inheritdoc cref="ClipboardSettingsSlice.ClipboardViewMode"/>
+    public string ClipboardViewMode { get => Clipboard.ClipboardViewMode; set => Clipboard.ClipboardViewMode = value; }
+
+    /// <inheritdoc cref="ClipboardSettingsSlice.ClipboardTabDisplayMode"/>
+    public string ClipboardTabDisplayMode { get => Clipboard.ClipboardTabDisplayMode; set => Clipboard.ClipboardTabDisplayMode = value; }
+
+    /// <inheritdoc cref="ClipboardSettingsSlice.ClipboardCardDensity"/>
+    public string ClipboardCardDensity { get => Clipboard.ClipboardCardDensity; set => Clipboard.ClipboardCardDensity = value; }
+
+    /// <inheritdoc cref="ClipboardSettingsSlice.ClipboardShowSourceApp"/>
+    public bool ClipboardShowSourceApp { get => Clipboard.ClipboardShowSourceApp; set => Clipboard.ClipboardShowSourceApp = value; }
+
+    /// <inheritdoc cref="ClipboardSettingsSlice.ClipboardIgnoreSystemPrivacyFormats"/>
+    public bool ClipboardIgnoreSystemPrivacyFormats { get => Clipboard.ClipboardIgnoreSystemPrivacyFormats; set => Clipboard.ClipboardIgnoreSystemPrivacyFormats = value; }
+
+    /// <inheritdoc cref="ClipboardSettingsSlice.ClipboardSensitiveProtectionMode"/>
+    public string ClipboardSensitiveProtectionMode { get => Clipboard.ClipboardSensitiveProtectionMode; set => Clipboard.ClipboardSensitiveProtectionMode = value; }
+
+    /// <inheritdoc cref="ClipboardSettingsSlice.ClipboardExcludedApps"/>
+    public List<string> ClipboardExcludedApps { get => Clipboard.ClipboardExcludedApps; set => Clipboard.ClipboardExcludedApps = value; }
+
+    /// <inheritdoc cref="ClipboardSettingsSlice.ClipboardMaxItems"/>
+    public int ClipboardMaxItems { get => Clipboard.ClipboardMaxItems; set => Clipboard.ClipboardMaxItems = value; }
+
+    /// <inheritdoc cref="ClipboardSettingsSlice.ClipboardRetentionDays"/>
+    public int ClipboardRetentionDays { get => Clipboard.ClipboardRetentionDays; set => Clipboard.ClipboardRetentionDays = value; }
+
+    /// <inheritdoc cref="ClipboardSettingsSlice.ClipboardHotkeyEnabled"/>
+    public bool ClipboardHotkeyEnabled { get => Clipboard.ClipboardHotkeyEnabled; set => Clipboard.ClipboardHotkeyEnabled = value; }
+
+    /// <inheritdoc cref="ClipboardSettingsSlice.ClipboardHotkeyActivationKind"/>
+    public HotkeyActivationKind ClipboardHotkeyActivationKind { get => Clipboard.ClipboardHotkeyActivationKind; set => Clipboard.ClipboardHotkeyActivationKind = value; }
+
+    /// <inheritdoc cref="ClipboardSettingsSlice.ClipboardHotkeyModifiers"/>
+    public int ClipboardHotkeyModifiers { get => Clipboard.ClipboardHotkeyModifiers; set => Clipboard.ClipboardHotkeyModifiers = value; }
+
+    /// <inheritdoc cref="ClipboardSettingsSlice.ClipboardHotkeyKey"/>
+    public int ClipboardHotkeyKey { get => Clipboard.ClipboardHotkeyKey; set => Clipboard.ClipboardHotkeyKey = value; }
+
+    /// <inheritdoc cref="ClipboardSettingsSlice.ClipboardPopupPlacementMode"/>
+    public string ClipboardPopupPlacementMode { get => Clipboard.ClipboardPopupPlacementMode; set => Clipboard.ClipboardPopupPlacementMode = value; }
+
+    /// <inheritdoc cref="ClipboardSettingsSlice.ClipboardDoubleCopyAction"/>
+    public string ClipboardDoubleCopyAction { get => Clipboard.ClipboardDoubleCopyAction; set => Clipboard.ClipboardDoubleCopyAction = value; }
 }

@@ -13,11 +13,9 @@
                 <ResourceDictionary Source="ms-appx:///Styles/SettingsOverviewResources.xaml" />
             </ResourceDictionary.MergedDictionaries>
             <controls:SettingsBoolToVisibilityConverter x:Key="SettingsBoolToVisibilityConverter" />
-            <!-- Slider metric styles copied from SettingsWindow.xaml so the
-                 in-expander slider cards resolve the same page-level look. -->
             <Style x:Key="InlineMetricSliderStyle" TargetType="Slider" BasedOn="{StaticResource DefaultSliderStyle}">
-                <Setter Property="Width" Value="300" />
-                <Setter Property="MinWidth" Value="220" />
+                <Setter Property="Width" Value="200" />
+                <Setter Property="MinWidth" Value="160" />
                 <Setter Property="VerticalAlignment" Value="Center" />
                 <Setter Property="IsThumbToolTipEnabled" Value="False" />
             </Style>
@@ -26,39 +24,35 @@
                 <Setter Property="TextAlignment" Value="Right" />
                 <Setter Property="VerticalAlignment" Value="Center" />
             </Style>
-            <Style x:Key="CapsuleGroupTitleStyle" TargetType="TextBlock" BasedOn="{StaticResource SettingTitleTextStyle}">
-                <Setter Property="FontSize" Value="15" />
-                <Setter Property="FontWeight" Value="SemiBold" />
-                <Setter Property="Margin" Value="4,14,4,4" />
-            </Style>
         </ResourceDictionary>
     </UserControl.Resources>
 
-    <StackPanel Style="{StaticResource SectionPanelStyle}">
-        <TextBlock Style="{StaticResource SectionTitleTextStyle}" AutomationProperties.HeadingLevel="Level1" svc:Localized.Key="Settings.Section.CapsuleMode" />
-        <StackPanel Margin="0,8,0,0" Spacing="4">
-                <toolkit:SettingsCard
-                    HorizontalContentAlignment="Right"
-                    svc:Localized.DescriptionKey="Settings.CollapseBehavior.Description"
-                    svc:Localized.HeaderKey="Settings.CollapseBehavior.Title">
-                    <toolkit:SettingsCard.HeaderIcon>
-                        <FontIcon Glyph="&#xE73F;" />
-                    </toolkit:SettingsCard.HeaderIcon>
-                    <ComboBox svc:Localized.AutomationNameKey="Settings.CollapseBehavior.Title"
-                        MinWidth="{StaticResource SettingsControlMinWidth}"
-                        ItemsSource="{Binding AvailableCollapseBehaviorOptions}"
-                        controls:SettingsComboBox.Value="{Binding CollapseBehavior, Mode=TwoWay}" />
-                </toolkit:SettingsCard>
+    <StackPanel Spacing="4">
+        <toolkit:SettingsCard
+            HorizontalContentAlignment="Right"
+            Description="{Binding CollapseSummaryText}"
+            svc:Localized.HeaderKey="Settings.CollapseBehavior.Title">
+            <toolkit:SettingsCard.HeaderIcon>
+                <FontIcon Glyph="&#xE73F;" />
+            </toolkit:SettingsCard.HeaderIcon>
+            <ComboBox svc:Localized.AutomationNameKey="Settings.CollapseBehavior.Title"
+                MinWidth="{StaticResource SettingsControlMinWidth}"
+                ItemsSource="{Binding AvailableCollapseBehaviorOptions}"
+                controls:SettingsComboBox.Value="{Binding CollapseBehavior, Mode=TwoWay}" />
+        </toolkit:SettingsCard>
 
-            <TextBlock Style="{StaticResource CapsuleGroupTitleStyle}" svc:Localized.Key="Settings.Capsule.Group.Common" />
+        <StackPanel Style="{StaticResource SettingsSubsectionHeaderStyle}">
+            <TextBlock
+                Style="{StaticResource SettingsSubsectionTitleTextStyle}"
+                AutomationProperties.HeadingLevel="Level2"
+                svc:Localized.Key="Settings.Capsule.Group.SizeAndContent" />
+        </StackPanel>
 
             <toolkit:SettingsCard
                 HorizontalContentAlignment="Right"
+                IsEnabled="{Binding IsCapsuleActive}"
                 svc:Localized.DescriptionKey="Settings.Capsule.WidthMode.Description"
                 svc:Localized.HeaderKey="Settings.Capsule.WidthMode.Title">
-                <toolkit:SettingsCard.HeaderIcon>
-                    <FontIcon Glyph="&#xE8A7;" />
-                </toolkit:SettingsCard.HeaderIcon>
                 <StackPanel Orientation="Horizontal" Spacing="8">
                     <Button svc:Localized.AutomationNameKey="Settings.Capsule.Overrides.ResetWidth"
                         Command="{x:Bind ViewModel.ResetCapsuleWidthOverridesCommand, Mode=OneWay}"
@@ -76,11 +70,9 @@
 
             <toolkit:SettingsCard
                 HorizontalContentAlignment="Right"
+                IsEnabled="{Binding IsCapsuleActive}"
                 svc:Localized.DescriptionKey="Settings.Capsule.ExpansionDirection.Description"
                 svc:Localized.HeaderKey="Settings.Capsule.ExpansionDirection.Title">
-                <toolkit:SettingsCard.HeaderIcon>
-                    <FontIcon Glyph="&#xE8CB;" />
-                </toolkit:SettingsCard.HeaderIcon>
                 <ComboBox svc:Localized.AutomationNameKey="Settings.Capsule.ExpansionDirection.Title"
                     MinWidth="{StaticResource SettingsControlMinWidth}"
                     ItemsSource="{Binding AvailableExpansionDirectionOptions}"
@@ -89,134 +81,146 @@
 
             <toolkit:SettingsCard
                 HorizontalContentAlignment="Right"
+                IsEnabled="{Binding IsCapsuleActive}"
                 svc:Localized.DescriptionKey="Settings.CompactContent.Description"
                 svc:Localized.HeaderKey="Settings.CompactContent.Title">
-                <toolkit:SettingsCard.HeaderIcon>
-                    <FontIcon Glyph="&#xE8A5;" />
-                </toolkit:SettingsCard.HeaderIcon>
                 <ComboBox svc:Localized.AutomationNameKey="Settings.CompactContent.Title"
                     MinWidth="{StaticResource SettingsControlMinWidth}"
                     ItemsSource="{Binding AvailableContentModeOptions}"
                     controls:SettingsComboBox.Value="{Binding ContentMode, Mode=TwoWay}" />
             </toolkit:SettingsCard>
 
-            <toolkit:SettingsExpander
-                IsExpanded="False"
+        <StackPanel Style="{StaticResource SettingsSubsectionHeaderStyle}">
+            <TextBlock
+                Style="{StaticResource SettingsSubsectionTitleTextStyle}"
+                AutomationProperties.HeadingLevel="Level2"
+                svc:Localized.Key="Settings.Capsule.Group.Arrangement" />
+        </StackPanel>
+
+            <toolkit:SettingsCard
+                HorizontalContentAlignment="Right"
+                IsEnabled="{Binding IsCapsuleActive}"
                 svc:Localized.DescriptionKey="Settings.Capsule.Arrangement.Description"
                 svc:Localized.HeaderKey="Settings.Capsule.Arrangement.Title">
-                <toolkit:SettingsExpander.HeaderIcon>
-                    <FontIcon Glyph="&#xE8FD;" />
-                </toolkit:SettingsExpander.HeaderIcon>
-                <ComboBox svc:Localized.AutomationNameKey="Settings.Capsule.Arrangement.Title"
-                    MinWidth="{StaticResource SettingsControlMinWidth}"
-                    ItemsSource="{Binding AvailableArrangementOptions}"
-                    controls:SettingsComboBox.Value="{Binding ArrangementMode, Mode=TwoWay}" />
-                <toolkit:SettingsExpander.Items>
-                    <toolkit:SettingsCard
-                        Description="{Binding ArrangementDetailsSummary}"
-                        HorizontalContentAlignment="Right"
-                        Visibility="{Binding ShowArrangementEntry, Converter={StaticResource SettingsBoolToVisibilityConverter}}"
-                        svc:Localized.HeaderKey="Settings.Capsule.ArrangementDetails.Title">
-                        <toolkit:SettingsCard.HeaderIcon>
-                            <FontIcon Glyph="&#xE707;" />
-                        </toolkit:SettingsCard.HeaderIcon>
-                        <ComboBox svc:Localized.AutomationNameKey="Settings.Capsule.ArrangementDetails.Title"
-                            MinWidth="{StaticResource SettingsControlMinWidth}"
-                            IsEnabled="{Binding IsBarEnabled}"
-                            ItemsSource="{Binding AvailableBarPlacementOptions}"
-                            controls:SettingsComboBox.Value="{Binding BarPlacement, Mode=TwoWay}" />
-                    </toolkit:SettingsCard>
-                    <toolkit:SettingsCard
-                        HorizontalContentAlignment="Right"
-                        IsEnabled="{Binding IsBarSpacingEnabled}"
-                        svc:Localized.DescriptionKey="Settings.Capsule.Spacing.Description"
-                        svc:Localized.HeaderKey="Settings.Capsule.Spacing.Title">
-                        <StackPanel VerticalAlignment="Center" Orientation="Horizontal" Spacing="8">
-                            <TextBlock Style="{StaticResource SliderSettingValueTextStyle}" Text="{Binding BarSpacingText}" />
-                            <Slider svc:Localized.AutomationNameKey="Settings.Capsule.Spacing.Title" Maximum="32" Minimum="0" StepFrequency="1" Style="{StaticResource InlineMetricSliderStyle}" Value="{Binding BarSpacing, Mode=TwoWay}" />
-                        </StackPanel>
-                    </toolkit:SettingsCard>
-                    <toolkit:SettingsCard
-                        HorizontalContentAlignment="Right"
-                        IsEnabled="{Binding IsBarEnabled}"
-                        svc:Localized.DescriptionKey="Settings.Capsule.Direction.Description"
-                        svc:Localized.HeaderKey="Settings.Capsule.Direction.Title">
-                        <toolkit:SettingsCard.HeaderIcon><FontIcon Glyph="&#xE72A;" /></toolkit:SettingsCard.HeaderIcon>
-                        <ComboBox svc:Localized.AutomationNameKey="Settings.Capsule.Direction.Title" MinWidth="{StaticResource SettingsControlMinWidth}" ItemsSource="{Binding AvailableBarDirectionOptions}" controls:SettingsComboBox.Value="{Binding BarDirection, Mode=TwoWay}" />
-                    </toolkit:SettingsCard>
-                </toolkit:SettingsExpander.Items>
-            </toolkit:SettingsExpander>
+                <toolkit:Segmented svc:Localized.AutomationNameKey="Settings.Capsule.Arrangement.Title"
+                    SelectionMode="Single"
+                    controls:SettingsSegmented.Options="{Binding AvailableArrangementOptions}"
+                    controls:SettingsSegmented.Value="{Binding ArrangementMode, Mode=TwoWay}" />
+            </toolkit:SettingsCard>
 
-            <toolkit:SettingsExpander
-                IsExpanded="False"
+            <toolkit:SettingsCard
+                Description="{Binding ArrangementDetailsSummary}"
+                HorizontalContentAlignment="Right"
+                IsEnabled="{Binding IsCapsuleActive}"
+                Visibility="{Binding ShowArrangementEntry, Converter={StaticResource SettingsBoolToVisibilityConverter}}"
+                svc:Localized.HeaderKey="Settings.Capsule.Placement.Title">
+                <ComboBox svc:Localized.AutomationNameKey="Settings.Capsule.Placement.Title"
+                    MinWidth="{StaticResource SettingsControlMinWidth}"
+                    IsEnabled="{Binding IsBarEnabled}"
+                    ItemsSource="{Binding AvailableBarPlacementOptions}"
+                    controls:SettingsComboBox.Value="{Binding BarPlacement, Mode=TwoWay}" />
+            </toolkit:SettingsCard>
+
+            <toolkit:SettingsCard
+                HorizontalContentAlignment="Right"
+                IsEnabled="{Binding IsBarEnabled}"
+                Visibility="{Binding ShowArrangementEntry, Converter={StaticResource SettingsBoolToVisibilityConverter}}"
+                svc:Localized.DescriptionKey="Settings.Capsule.Direction.Description"
+                svc:Localized.HeaderKey="Settings.Capsule.Direction.Title">
+                <ComboBox svc:Localized.AutomationNameKey="Settings.Capsule.Direction.Title"
+                    MinWidth="{StaticResource SettingsControlMinWidth}"
+                    ItemsSource="{Binding AvailableBarDirectionOptions}"
+                    controls:SettingsComboBox.Value="{Binding BarDirection, Mode=TwoWay}" />
+            </toolkit:SettingsCard>
+
+            <toolkit:SettingsCard
+                HorizontalContentAlignment="Right"
+                IsEnabled="{Binding IsBarSpacingEnabled}"
+                Visibility="{Binding ShowArrangementEntry, Converter={StaticResource SettingsBoolToVisibilityConverter}}"
+                svc:Localized.DescriptionKey="Settings.Capsule.Spacing.Description"
+                svc:Localized.HeaderKey="Settings.Capsule.Spacing.Title">
+                <StackPanel VerticalAlignment="Center" Orientation="Horizontal" Spacing="8">
+                    <TextBlock Style="{StaticResource SliderSettingValueTextStyle}" Text="{Binding BarSpacingText}" />
+                    <Slider svc:Localized.AutomationNameKey="Settings.Capsule.Spacing.Title" Maximum="32" Minimum="0" StepFrequency="1" Style="{StaticResource InlineMetricSliderStyle}" Value="{Binding BarSpacing, Mode=TwoWay}" />
+                </StackPanel>
+            </toolkit:SettingsCard>
+
+        <StackPanel Style="{StaticResource SettingsSubsectionHeaderStyle}">
+            <TextBlock
+                Style="{StaticResource SettingsSubsectionTitleTextStyle}"
+                AutomationProperties.HeadingLevel="Level2"
+                svc:Localized.Key="Settings.Capsule.Group.HoverAndAnimation" />
+        </StackPanel>
+
+            <toolkit:SettingsCard
+                HorizontalContentAlignment="Right"
                 Visibility="{Binding ShowHoverResponseEntry, Converter={StaticResource SettingsBoolToVisibilityConverter}}"
                 svc:Localized.DescriptionKey="Settings.Capsule.HoverResponse.Description"
                 svc:Localized.HeaderKey="Settings.Capsule.HoverResponse.Title">
-                <toolkit:SettingsExpander.HeaderIcon>
-                    <FontIcon Glyph="&#xE823;" />
-                </toolkit:SettingsExpander.HeaderIcon>
                 <ComboBox svc:Localized.AutomationNameKey="Settings.Capsule.HoverResponse.Title"
                     MinWidth="{StaticResource SettingsControlMinWidth}"
                     ItemsSource="{Binding AvailableHoverResponseOptions}"
                     controls:SettingsComboBox.Value="{Binding HoverResponse, Mode=TwoWay}" />
-                <toolkit:SettingsExpander.Items>
-                    <toolkit:SettingsCard
-                        IsEnabled="{Binding ShowHoverResponseCustom}"
-                        HorizontalContentAlignment="Right"
-                        svc:Localized.DescriptionKey="Settings.Capsule.ExpandDelay.Description"
-                        svc:Localized.HeaderKey="Settings.Capsule.ExpandDelay.Title">
-                        <StackPanel VerticalAlignment="Center" Orientation="Horizontal" Spacing="8">
-                            <TextBlock Style="{StaticResource SliderSettingValueTextStyle}" Text="{Binding ExpandDelayText}" />
-                            <Slider svc:Localized.AutomationNameKey="Settings.Capsule.ExpandDelay.Title" Maximum="1000" Minimum="100" StepFrequency="10" Style="{StaticResource InlineMetricSliderStyle}" Value="{Binding ExpandDelayMs, Mode=TwoWay}" />
-                        </StackPanel>
-                    </toolkit:SettingsCard>
-                    <toolkit:SettingsCard
-                        IsEnabled="{Binding ShowHoverResponseCustom}"
-                        HorizontalContentAlignment="Right"
-                        svc:Localized.DescriptionKey="Settings.Capsule.CollapseDelay.Description"
-                        svc:Localized.HeaderKey="Settings.Capsule.CollapseDelay.Title">
-                        <StackPanel VerticalAlignment="Center" Orientation="Horizontal" Spacing="8">
-                            <TextBlock Style="{StaticResource SliderSettingValueTextStyle}" Text="{Binding CollapseDelayText}" />
-                            <Slider svc:Localized.AutomationNameKey="Settings.Capsule.CollapseDelay.Title" Maximum="1500" Minimum="200" StepFrequency="20" Style="{StaticResource InlineMetricSliderStyle}" Value="{Binding CollapseDelayMs, Mode=TwoWay}" />
-                        </StackPanel>
-                    </toolkit:SettingsCard>
-                </toolkit:SettingsExpander.Items>
-            </toolkit:SettingsExpander>
+            </toolkit:SettingsCard>
 
-            <toolkit:SettingsExpander
-                IsExpanded="False"
+            <toolkit:SettingsCard
+                HorizontalContentAlignment="Right"
+                Visibility="{Binding ShowHoverResponseCustom, Converter={StaticResource SettingsBoolToVisibilityConverter}}"
+                svc:Localized.DescriptionKey="Settings.Capsule.ExpandDelay.Description"
+                svc:Localized.HeaderKey="Settings.Capsule.ExpandDelay.Title">
+                <StackPanel VerticalAlignment="Center" Orientation="Horizontal" Spacing="8">
+                    <TextBlock Style="{StaticResource SliderSettingValueTextStyle}" Text="{Binding ExpandDelayText}" />
+                    <Slider svc:Localized.AutomationNameKey="Settings.Capsule.ExpandDelay.Title" Maximum="1000" Minimum="100" StepFrequency="10" Style="{StaticResource InlineMetricSliderStyle}" Value="{Binding ExpandDelayMs, Mode=TwoWay}" />
+                </StackPanel>
+            </toolkit:SettingsCard>
+
+            <toolkit:SettingsCard
+                HorizontalContentAlignment="Right"
+                Visibility="{Binding ShowHoverResponseCustom, Converter={StaticResource SettingsBoolToVisibilityConverter}}"
+                svc:Localized.DescriptionKey="Settings.Capsule.CollapseDelay.Description"
+                svc:Localized.HeaderKey="Settings.Capsule.CollapseDelay.Title">
+                <StackPanel VerticalAlignment="Center" Orientation="Horizontal" Spacing="8">
+                    <TextBlock Style="{StaticResource SliderSettingValueTextStyle}" Text="{Binding CollapseDelayText}" />
+                    <Slider svc:Localized.AutomationNameKey="Settings.Capsule.CollapseDelay.Title" Maximum="1500" Minimum="200" StepFrequency="20" Style="{StaticResource InlineMetricSliderStyle}" Value="{Binding CollapseDelayMs, Mode=TwoWay}" />
+                </StackPanel>
+            </toolkit:SettingsCard>
+
+            <toolkit:SettingsCard
+                HorizontalContentAlignment="Right"
+                IsEnabled="{Binding IsCapsuleActive}"
                 svc:Localized.DescriptionKey="Settings.Capsule.Animation.Description"
                 svc:Localized.HeaderKey="Settings.Capsule.Animation.Title">
-                <toolkit:SettingsExpander.HeaderIcon>
-                    <FontIcon Glyph="&#xE7B5;" />
-                </toolkit:SettingsExpander.HeaderIcon>
                 <ComboBox svc:Localized.AutomationNameKey="Settings.Capsule.Animation.Title"
                     MinWidth="{StaticResource SettingsControlMinWidth}"
                     ItemsSource="{Binding AvailableAnimationEffectOptions}"
                     controls:SettingsComboBox.Value="{Binding AnimationEffect, Mode=TwoWay}" />
-                <toolkit:SettingsExpander.Items>
-                    <toolkit:SettingsCard
-                        IsEnabled="{Binding ShowAnimationCustom}"
-                        HorizontalContentAlignment="Right"
-                        svc:Localized.DescriptionKey="Settings.Capsule.AnimationDuration.Description"
-                        svc:Localized.HeaderKey="Settings.Capsule.AnimationDuration.Title">
-                        <StackPanel VerticalAlignment="Center" Orientation="Horizontal" Spacing="8">
-                            <TextBlock Style="{StaticResource SliderSettingValueTextStyle}" Text="{Binding AnimationDurationText}" />
-                            <Slider svc:Localized.AutomationNameKey="Settings.Capsule.AnimationDuration.Title" Maximum="400" Minimum="120" StepFrequency="10" Style="{StaticResource InlineMetricSliderStyle}" Value="{Binding AnimationDurationMs, Mode=TwoWay}" />
-                        </StackPanel>
-                    </toolkit:SettingsCard>
-                </toolkit:SettingsExpander.Items>
-            </toolkit:SettingsExpander>
+            </toolkit:SettingsCard>
 
             <toolkit:SettingsCard
                 HorizontalContentAlignment="Right"
+                Visibility="{Binding ShowAnimationCustom, Converter={StaticResource SettingsBoolToVisibilityConverter}}"
+                svc:Localized.DescriptionKey="Settings.Capsule.AnimationDuration.Description"
+                svc:Localized.HeaderKey="Settings.Capsule.AnimationDuration.Title">
+                <StackPanel VerticalAlignment="Center" Orientation="Horizontal" Spacing="8">
+                    <TextBlock Style="{StaticResource SliderSettingValueTextStyle}" Text="{Binding AnimationDurationText}" />
+                    <Slider svc:Localized.AutomationNameKey="Settings.Capsule.AnimationDuration.Title" Maximum="400" Minimum="120" StepFrequency="10" Style="{StaticResource InlineMetricSliderStyle}" Value="{Binding AnimationDurationMs, Mode=TwoWay}" />
+                </StackPanel>
+            </toolkit:SettingsCard>
+
+        <StackPanel Style="{StaticResource SettingsSubsectionHeaderStyle}">
+            <TextBlock
+                Style="{StaticResource SettingsSubsectionTitleTextStyle}"
+                AutomationProperties.HeadingLevel="Level2"
+                svc:Localized.Key="Settings.Capsule.Group.Advanced" />
+        </StackPanel>
+
+            <toolkit:SettingsCard
+                HorizontalContentAlignment="Right"
+                IsEnabled="{Binding IsCapsuleActive}"
                 svc:Localized.DescriptionKey="Settings.CompactPrivacy.Description"
                 svc:Localized.HeaderKey="Settings.CompactPrivacy.Title"
                 svc:InfoTip.TitleKey="Settings.CompactPrivacy.InfoTip.Title"
                 svc:InfoTip.BodyKey="Settings.CompactPrivacy.InfoTip.Description">
-                <toolkit:SettingsCard.HeaderIcon>
-                    <FontIcon Glyph="&#xE72E;" />
-                </toolkit:SettingsCard.HeaderIcon>
                 <ToggleSwitch svc:Localized.AutomationNameKey="Settings.CompactPrivacy.Title"
                     MinWidth="0"
                     OffContent=""
@@ -225,16 +229,67 @@
             </toolkit:SettingsCard>
 
             <toolkit:SettingsCard
-                Click="NestedSettingsButton_Click"
-                Description="{Binding OverrideSummaryText}"
-                IsClickEnabled="True"
-                Tag="CapsuleOverridesSettings"
-                Visibility="{Binding ShowOverridesEntry, Converter={StaticResource SettingsBoolToVisibilityConverter}}"
-                svc:Localized.HeaderKey="Settings.Capsule.Overrides.Title">
-                <toolkit:SettingsCard.HeaderIcon>
-                    <FontIcon Glyph="&#xE713;" />
-                </toolkit:SettingsCard.HeaderIcon>
+                HorizontalContentAlignment="Right"
+                IsEnabled="{Binding IsCapsuleActive}"
+                svc:Localized.DescriptionKey="Settings.Capsule.KeepWarm.Description"
+                svc:Localized.HeaderKey="Settings.Capsule.KeepWarm.Title"
+                svc:InfoTip.TitleKey="Settings.Performance.KeepCapsuleContentWarm.InfoTip.Title"
+                svc:InfoTip.BodyKey="Settings.Performance.KeepCapsuleContentWarm.InfoTip.Description">
+                <ToggleSwitch svc:Localized.AutomationNameKey="Settings.Capsule.KeepWarm.Title"
+                    MinWidth="0"
+                    OffContent=""
+                    OnContent=""
+                    IsOn="{x:Bind Performance.KeepCapsuleContentWarm, Mode=TwoWay}" />
             </toolkit:SettingsCard>
-        </StackPanel>
+
+            <StackPanel
+                Margin="0,12,0,0"
+                Spacing="4"
+                Visibility="{Binding ShowOverridesList, Converter={StaticResource SettingsBoolToVisibilityConverter}}">
+                <toolkit:SettingsCard
+                    Description="{Binding OverrideSummaryText}"
+                    HorizontalContentAlignment="Right"
+                    svc:Localized.HeaderKey="Settings.Capsule.Overrides.Title">
+                    <toolkit:SettingsCard.HeaderIcon>
+                        <FontIcon Glyph="&#xE8A9;" />
+                    </toolkit:SettingsCard.HeaderIcon>
+                    <Button Command="{x:Bind ViewModel.ResetAllCapsuleOverridesCommand, Mode=OneWay}" Style="{StaticResource ActionButtonStyle}">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <FontIcon FontSize="14" Glyph="&#xE777;" />
+                            <TextBlock svc:Localized.Key="Settings.Capsule.Overrides.ResetAll.Action" />
+                        </StackPanel>
+                    </Button>
+                </toolkit:SettingsCard>
+
+                <ItemsControl ItemsSource="{Binding OverrideItems}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <StackPanel Spacing="4" />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <toolkit:SettingsCard
+                                Header="{Binding DisplayName}"
+                                Description="{Binding Summary}"
+                                HorizontalContentAlignment="Right">
+                                <toolkit:SettingsCard.HeaderIcon>
+                                    <ImageIcon
+                                        Width="20"
+                                        Height="20"
+                                        Loaded="CapsuleOverrideIcon_Loaded"
+                                        DataContextChanged="CapsuleOverrideIcon_DataContextChanged" />
+                                </toolkit:SettingsCard.HeaderIcon>
+                                <Button
+                                    Click="ResetCapsuleWidgetOverrideButton_Click"
+                                    Style="{StaticResource ActionButtonStyle}"
+                                    Tag="{Binding WidgetId}">
+                                    <TextBlock svc:Localized.Key="Settings.Capsule.Overrides.FollowGlobal" />
+                                </Button>
+                            </toolkit:SettingsCard>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
     </StackPanel>
 </UserControl>

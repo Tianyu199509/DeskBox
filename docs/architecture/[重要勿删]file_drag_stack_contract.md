@@ -103,7 +103,7 @@ DeskBox 的文件拖拽分为两类，绝不能混为一套操作：
 
 - `AllowedOperations`：**按 OS 分档**。Windows 11 为 `Copy | Move`（Explorer 执行原生移动、修饰键生效、冲突对话框原生处理，第三方按 `Copy` 也能收）。**Windows 10 必须收敛为单值**（`ResolveDragOutAllowedOperations`：移动 → `Move`；跟随/未知 → `Copy`；复制 → `Copy`。2026-10-14 勘误：原文写"移动/跟随 → Move"，与代码及测试相反——feedback 500 实测 Win10 单值 `Move` 会被 IM 式接收方解析成 Move 并自删原件入回收站，跟随档因此保守公告 `Copy`，代价是跟随档拖出到 Explorer 默认变复制；`FileItemMultiDragTests.ResolveDragOutAllowedOperations_Win10DefaultNeverOffersMove` 钉死此行为）——2026-10-01 真机实测，Win10 的 Explorer 对任何公告多效果的非 Shell 源拖放一律弹"复制/移动/取消"选择框（代理到达的拖放不含按键状态，Shell 无法确认唯一默认操作）；只有"单值效果且等于目标默认"才静默执行。偏好值在 Win10 不生效。
 - `RequestedOperation`：偏好的唯一载体，只对 Windows 11 有意义（跟随 → `None`，移动 → `Move`，复制 → `Copy`）。早期"None 使 Win10 不弹菜单"的说法已于 2026-10-01 实测证伪：弹菜单的判定在允许集，不在偏好位。
-- XAML 把 `Copy|Move|Link` 三者全选视为"无偏好"而跳过写入，因此 `Link` 目前不对外公告；Alt 拖出创建快捷方式与任务栏固定暂不支持。
+- XAML 把 `RequestedOperation = Copy|Move|Link` 三者全选视为"无偏好"而跳过写入；因此在 Windows 11 的 `FollowWindows` 档（`RequestedOperation = None` 本就无偏好）对外安全公告完整 `Copy | Move | Link`（支持 Alt 拖出创建快捷方式与任务栏/开始菜单固定），而在显式 `Move` 档保持 `AllowedOperations = Copy | Move` + `RequestedOperation = Move` 单值偏好。Windows 10 的 `FollowWindows` 档收敛为单值静默 `Copy` 并提供桌面/Explorer 落放一次性胶囊切换引导（`win10-default-copy-guide`）。
 
 `FileDragSourceGuardDataObject` 包装原生 Shell 对象：Preferred DropEffect 由包装层原样存储与回答（内层 Shell 对象不接受该格式的 `SetData`），Performed/Logical Performed DropEffect、Paste Succeeded、TargetCLSID 等完成回执被消费并仅记录日志，永不抵达内层对象。DeskBox 不根据 `DropResult` 或任何回执删除源文件；当目标按公告的 `Move` 自行执行移动时，由目标（如 Explorer）完成源端处理，这与从资源管理器拖出的原生语义一致。StorageItems 回退仍是 readOnly 语义（对外同样公告 `Copy | Move`，目标自己决定）。
 
@@ -150,7 +150,7 @@ DeskBox 私有文件载荷的移动/快捷方式意图由目标端自行执行�
 
 跨格传输由目标格子实际执行文件移动，并通过 `NotifyItemsMovedOutAsync` 告知源格子哪些路径成功。对于 DeskBox 自己的原生 Shell 载荷，再向源端返回 `Move` 会形成第二次源清理。因此 `ResolveSafeDropCompletionOperation` 在“DeskBox 来源 + 目标已完成真实移动”时返回 `None`；目标完成通知和后续磁盘协调才是事实依据。
 
-非 DeskBox 来源只有在请求移动数与实际完成数完全一致时才返回 `Move`。部分完成、取消或失败必须返回 `None`。
+非 DeskBox 来源由于目标格子已直接执行文件系统移动，只有在请求移动数与实际完成数完全一致时才降级返回 `Copy`（若源端未通告 `Copy` 则返回 `None`），绝不返回 `Move` 触发源端二次清理；部分完成、取消或失败必须返回 `None`。
 
 ### 5.3 多选拖动排序的整块提交语义（2026-10-14）
 
@@ -162,6 +162,14 @@ DeskBox 私有文件载荷的移动/快捷方式意图由目标端自行执行�
 - 内联展开叠放的成员：插入点落在本叠放成员区内 → 复用 `MoveStackMembersForReorder` 成员整块排序；落在区外 → 先批量解除成员关系（`DetachStackMembersForBlockReorder`，语义镜像 `RemoveItemsFromStack` 的解散/转手动分支）再作为散件入块；
 - 叠放卡片与文件混选拖动排序维持既有语义（锚点为叠放头时只重排叠放卡片，`GetSelectedItems` 本就剔除卡片）；
 - 重排施加的集合重建（投影与扁平两路）都会丢掉拖动用的多选；主表面与弹窗的重排成功路径都必须按路径重放选择（`ScheduleSurfaceReorderSelectionRestore` / `ScheduleStackPopoverReorderSelectionRestore`，低优先级延迟——弹窗侧需双跳以落在 `ApplyStackProjectionChange` 的延迟清选之后）。
+
+### 5.4 管理员提权会话下的指针拖拽豁免（Elevated Pointer Drag）
+
+当 DeskBox 运行在管理员提权进程（`IsCurrentProcessElevated`）中时，WinUI 3 的 XAML `CanDrag` / `StartDragAsync` 拖拽源在系统层面不可用，跨完整性级别（UIPI）的 OLE `DoDragDrop` 亦被常规权限的 Explorer/桌面目标拒绝。此场景启用独立受控的 `FileSurfaceContent.ElevatedPointerDrag` 路径：
+
+- **同格/跨格内部路由**：由指针命中与 `ContentWidgetWindow.ElevatedPointerDrag` 直接驱动，悬停阶段仅执行纯词法路径重叠校验（`FileService.IsLexicallyUnsafeDirectoryTransfer`），落点提交阶段在后台线程执行完整的重解析点校验（`FileService.IsUnsafeDirectoryTransfer`）。
+- **外部桌面 / Explorer 文件夹拖出**：此路径不经过 OLE `IDataObject` 回执协商，而是作为 §1「源端不主动改盘」规则的唯一显式架构豁免——由 DeskBox 在释放落点后，通过后台单飞 STA `IShellWindows` 解析出的真实文件系统目录，直接调用 `FileService.TransferItemsWithResultAsync` 执行复制/移动/创建快捷方式（桌面目标随后经 `IFolderView::SelectAndPositionItems` 对齐光标落点），并基于返回的 `CompletedPairs` 精确协调源集合，绝不盲目按意图删除未传输成功的源文件。
+- **第三方非 Explorer 窗口**：跨 UIPI 无法直接投递 OLE 拖放时，自动将选中文件写入系统文件剪贴板（`StageElevatedOutboundClipboardAsync`）并提示用户粘贴，不执行任何源文件移动或删除。
 
 ## 6. 事件链与状态清理
 

@@ -1,0 +1,16 @@
+{
+  "modFocus": "Tarjeta de cuota destacada",
+  "modRadar": "Radar multiproveedor",
+  "modTokens": "Análisis de tokens y caché locales",
+  "modTrend": "Tendencia de uso de 14 días",
+  "optQuotaRem": "Mostrar el % restante (p. ej., queda 85 %)",
+  "optQuotaUsed": "Mostrar el % usado (p. ej., 15 % usado)",
+  "optRef15m": "Cada 15 minutos",
+  "optRef1m": "Cada 1 minuto (recomendado)",
+  "optRef5m": "Cada 5 minutos",
+  "setModules": "Módulos visibles y orden",
+  "setQuotaMode": "Visualización de cuota de ventana",
+  "setRefresh": "Intervalo de sondeo automático",
+  "widgetDescription": "Supervisa las ventanas de límite de uso de las sesiones de Claude Code y Codex, junto con los saldos de Zhipu GLM, DeepSeek, Kimi y OpenRouter.",
+  "widgetName": "Monitor de IA"
+}

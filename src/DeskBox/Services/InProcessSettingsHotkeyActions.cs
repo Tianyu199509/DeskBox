@@ -14,6 +14,7 @@ public sealed class InProcessSettingsHotkeyActions : ISettingsHotkeyActions
     private readonly GlobalHotkeyService? _hotkeyService;
     private readonly SearchHotkeyService? _searchHotkeyService;
     private readonly Func<SearchHotkeyService?>? _searchHotkeyProvider;
+    private readonly Func<ClipboardHotkeyService?>? _clipboardHotkeyProvider;
     private readonly DesktopDoubleClickActivationService? _doubleClickService;
     private readonly SettingsService _settingsService;
 
@@ -22,11 +23,13 @@ public sealed class InProcessSettingsHotkeyActions : ISettingsHotkeyActions
         SearchHotkeyService? searchHotkeyService,
         DesktopDoubleClickActivationService? doubleClickService,
         SettingsService settingsService,
-        Func<SearchHotkeyService?>? searchHotkeyProvider = null)
+        Func<SearchHotkeyService?>? searchHotkeyProvider = null,
+        Func<ClipboardHotkeyService?>? clipboardHotkeyProvider = null)
     {
         _hotkeyService = hotkeyService;
         _searchHotkeyService = searchHotkeyService;
         _searchHotkeyProvider = searchHotkeyProvider;
+        _clipboardHotkeyProvider = clipboardHotkeyProvider;
         _doubleClickService = doubleClickService;
         _settingsService = settingsService;
         // Subscribed eagerly for the facade's lifetime: the settings window
@@ -53,6 +56,9 @@ public sealed class InProcessSettingsHotkeyActions : ISettingsHotkeyActions
     private SearchHotkeyService? SearchHotkey =>
         _searchHotkeyProvider?.Invoke() ?? _searchHotkeyService;
 
+    private ClipboardHotkeyService? ClipboardHotkey =>
+        _clipboardHotkeyProvider?.Invoke();
+
     public Task<bool> IsSearchHotkeyRegisteredAsync() =>
         Task.FromResult(SearchHotkey?.IsRegistered == true);
 
@@ -70,8 +76,43 @@ public sealed class InProcessSettingsHotkeyActions : ISettingsHotkeyActions
         return search.TryApplyGesture(gesture, out error);
     }
 
+    public bool TryApplySearchHotkeyActivation(GlobalHotkeyActivation activation, out string? error)
+    {
+        if (SearchHotkey is not { } search)
+        {
+            error = "search hotkey service unavailable";
+            return false;
+        }
+
+        return search.TryApplyActivation(activation, out error);
+    }
+
     public void RefreshSearchHotkeyRegistration() =>
         SearchHotkey?.RefreshRegistration();
+
+    public Task<bool> IsClipboardHotkeyRegisteredAsync() =>
+        Task.FromResult(ClipboardHotkey?.IsRegistered == true);
+
+    public void SetClipboardHotkeyEnabled(bool enabled) =>
+        ClipboardHotkey?.SetEnabled(enabled);
+
+    public bool TryApplyClipboardHotkeyActivation(GlobalHotkeyActivation activation, out string? error)
+    {
+        if (ClipboardHotkey is not { } clipboard)
+        {
+            error = null;
+            _settingsService.Settings.Clipboard.ClipboardHotkeyActivationKind = activation.Kind;
+            _settingsService.Settings.Clipboard.ClipboardHotkeyModifiers = (int)activation.Gesture.Modifiers;
+            _settingsService.Settings.Clipboard.ClipboardHotkeyKey = activation.Gesture.VirtualKey;
+            _settingsService.SaveDebounced();
+            return true;
+        }
+
+        return clipboard.TryApplyActivation(activation, out error);
+    }
+
+    public void RefreshClipboardHotkeyRegistration() =>
+        ClipboardHotkey?.RefreshRegistration();
 
     public GlobalHotkeyRuntimeState? GetRuntimeState()
     {
@@ -135,12 +176,14 @@ public sealed class InProcessSettingsHotkeyActions : ISettingsHotkeyActions
     public void SuspendHotkeysForRecording()
     {
         _hotkeyService?.SuspendForRecording();
-        _searchHotkeyService?.SuspendForRecording();
+        SearchHotkey?.SuspendForRecording();
+        ClipboardHotkey?.SuspendForRecording();
     }
 
     public void ResumeHotkeysAfterRecording()
     {
-        _searchHotkeyService?.ResumeAfterRecording();
+        ClipboardHotkey?.ResumeAfterRecording();
+        SearchHotkey?.ResumeAfterRecording();
         _hotkeyService?.ResumeAfterRecording();
     }
 }

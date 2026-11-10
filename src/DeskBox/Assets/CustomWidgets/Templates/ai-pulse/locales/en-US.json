@@ -1,0 +1,16 @@
+{
+  "modFocus": "Focused Quota Card",
+  "modRadar": "Multi-Provider Radar",
+  "modTokens": "Local Token & Cache Insights",
+  "modTrend": "14-Day Usage Trend",
+  "optQuotaRem": "Show remaining % (e.g., 85% left)",
+  "optQuotaUsed": "Show used % (e.g., 15% used)",
+  "optRef15m": "Every 15 minutes",
+  "optRef1m": "Every 1 minute (Recommended)",
+  "optRef5m": "Every 5 minutes",
+  "setModules": "Visible Modules & Order",
+  "setQuotaMode": "Window Quota Display",
+  "setRefresh": "Auto-Polling Interval",
+  "widgetDescription": "Monitor Claude Code & Codex session rate-limit windows alongside Zhipu GLM, DeepSeek, Kimi, and OpenRouter account balances.",
+  "widgetName": "AI Monitor"
+}

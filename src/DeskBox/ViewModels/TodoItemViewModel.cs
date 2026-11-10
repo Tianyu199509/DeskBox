@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
+using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Services;
 using Microsoft.UI;
@@ -12,11 +13,13 @@ public sealed partial class TodoItemViewModel : ObservableObject
 {
     private readonly TodoItem _item;
     private readonly LocalizationService? _localizationService;
+    private readonly Func<DateTimeOffset> _clock;
     private string _text;
     private bool _isCompleted;
     private bool _isImportant;
     private string? _colorMarker;
     private DateTimeOffset? _dueDate;
+    private bool _hasDueTime;
     private TodoRecurrence? _recurrence;
     private DateTimeOffset? _completedAt;
     private int? _reminderOffsetMinutes;
@@ -29,23 +32,48 @@ public sealed partial class TodoItemViewModel : ObservableObject
     private bool _isRecurringHistoryExpanded;
     private int _recurringHistoryItemCount;
     private bool _isDetailSelected;
+    private bool _isFirstTodayGroupItem;
+    private bool _isStepsExpanded;
+    private string? _primaryUrl;
+    private object[]? _cachedStepItemsSource;
+    private object[]? _cachedInlineStepsSource;
+    private object[]? _cachedAttachmentItemsSource;
 
-    public TodoItemViewModel(TodoItem item, LocalizationService? localizationService = null)
+    public TodoItemViewModel(
+        TodoItem item,
+        LocalizationService? localizationService = null,
+        string previewCacheScope = TodoAttachmentViewModel.TodoPreviewCacheScope,
+        Func<DateTimeOffset>? clock = null)
     {
         _item = item;
         _localizationService = localizationService;
+        _clock = clock ?? (() => DateTimeOffset.Now);
         _text = item.Text;
+        _primaryUrl = ExtractPrimaryHttpUrl(item.Text);
         _isCompleted = item.IsCompleted;
         _isImportant = item.IsImportant;
         _colorMarker = TodoItem.NormalizeColorMarker(item.ColorMarker);
         item.ColorMarker = _colorMarker;
         _dueDate = item.DueDate;
-        _recurrence = TodoRecurrence.Normalize(item.Recurrence, item.DueDate);
+        _hasDueTime = _dueDate is not null && item.HasDueTime;
+        item.HasDueTime = _hasDueTime;
+        if (_dueDate is { } initialDueDate && !_hasDueTime)
+        {
+            _dueDate = TodoWidgetStore.NormalizeAllDayDueDate(initialDueDate);
+            item.DueDate = _dueDate;
+        }
+        _recurrence = TodoRecurrence.Normalize(item.Recurrence, _dueDate);
         item.Recurrence = _recurrence;
         _completedAt = item.CompletedAt;
         _reminderOffsetMinutes = TodoReminderOptions.NormalizeOffsetMinutes(item.ReminderOffsetMinutes);
         item.ReminderOffsetMinutes = _reminderOffsetMinutes;
         _snoozedUntil = item.SnoozedUntil;
+        Steps.CollectionChanged += (_, _) =>
+        {
+            _cachedStepItemsSource = null;
+            _cachedInlineStepsSource = null;
+        };
+        Attachments.CollectionChanged += (_, _) => _cachedAttachmentItemsSource = null;
         item.Steps ??= [];
         item.Attachments ??= [];
         foreach (TodoStep step in item.Steps.OrderBy(step => step.SortOrder))
@@ -55,7 +83,7 @@ public sealed partial class TodoItemViewModel : ObservableObject
 
         foreach (TodoAttachment attachment in item.Attachments)
         {
-            Attachments.Add(new TodoAttachmentViewModel(attachment));
+            Attachments.Add(new TodoAttachmentViewModel(attachment, previewCacheScope));
         }
     }
 
@@ -83,16 +111,46 @@ public sealed partial class TodoItemViewModel : ObservableObject
     // ItemsSource crosses the WinRT object-valued dependency-property ABI.
     // Keep the typed collection for product logic and expose a concrete object
     // array only at the UI boundary so populated steps remain Native AOT safe.
-    public object[] StepItemsSource => Steps.Cast<object>().ToArray();
+    public object[] StepItemsSource => _cachedStepItemsSource ??= Steps.Cast<object>().ToArray();
+
+    public object[] InlineStepsSource => _cachedInlineStepsSource ??= Steps.Cast<object>().ToArray();
 
     public ObservableCollection<TodoAttachmentViewModel> Attachments { get; } = [];
 
     // AttachmentTileStrip.ItemsSource is object-valued and therefore crosses
     // the WinRT ABI. Keep the typed collection for product logic, but expose a
     // concrete object array at the UI boundary just like populated Todo steps.
-    public object[] AttachmentItemsSource => Attachments.Cast<object>().ToArray();
+    public object[] AttachmentItemsSource => _cachedAttachmentItemsSource ??= Attachments.Cast<object>().ToArray();
 
     public string Notes => _item.Notes ?? string.Empty;
+
+    public int TotalStepCount => Steps.Count;
+
+    public bool HasSteps => TotalStepCount > 0;
+
+    public bool IsStepsExpanded
+    {
+        get => _isStepsExpanded;
+        set
+        {
+            if (SetProperty(ref _isStepsExpanded, value))
+            {
+                OnPropertyChanged(nameof(StepsExpandChevronGlyph));
+                OnPropertyChanged(nameof(ExpandedStepsVisibility));
+                OnPropertyChanged(nameof(StepsExpandTooltipText));
+            }
+        }
+    }
+
+    public string StepsExpandChevronGlyph => IsStepsExpanded ? "\uE70E" : "\uE70D";
+
+    public Visibility ExpandedStepsVisibility => HasSteps && IsStepsExpanded
+        ? Visibility.Visible
+        : Visibility.Collapsed;
+
+    public string StepsExpandTooltipText => Format(
+        IsStepsExpanded ? "Todo.Steps.Collapse" : "Todo.Steps.Expand",
+        TotalStepCount);
 
     public int CompletedStepCount => Steps.Count(step => step.IsCompleted);
 
@@ -107,6 +165,15 @@ public sealed partial class TodoItemViewModel : ObservableObject
     public Visibility NotesPlaceholderVisibility => string.IsNullOrWhiteSpace(Notes)
         ? Visibility.Visible
         : Visibility.Collapsed;
+
+    public Visibility NotesIndicatorVisibility => string.IsNullOrWhiteSpace(Notes)
+        ? Visibility.Collapsed
+        : Visibility.Visible;
+
+    public Visibility CardMetadataRowVisibility =>
+        DueDate is not null || Steps.Count > 0 || Attachments.Count > 0 || !string.IsNullOrWhiteSpace(Notes)
+            ? Visibility.Visible
+            : Visibility.Collapsed;
 
     public string CreatedText => Format("Todo.Detail.Created", CreatedAt.ToLocalTime().ToString("yyyy/M/d HH:mm"));
 
@@ -131,9 +198,22 @@ public sealed partial class TodoItemViewModel : ObservableObject
             if (SetProperty(ref _text, value))
             {
                 _item.Text = value;
+                UpdatePrimaryUrl(value);
             }
         }
     }
+
+    public string? PrimaryUrl => _primaryUrl;
+
+    public bool HasPrimaryUrl => !string.IsNullOrEmpty(_primaryUrl);
+
+    public Visibility PrimaryUrlVisibility => HasPrimaryUrl
+        ? Visibility.Visible
+        : Visibility.Collapsed;
+
+    public string PrimaryUrlTooltipText => HasPrimaryUrl
+        ? $"{LocalizedText("Common.Open")}: {_primaryUrl}"
+        : string.Empty;
 
     public bool IsCompleted
     {
@@ -155,6 +235,7 @@ public sealed partial class TodoItemViewModel : ObservableObject
                 OnPropertyChanged(nameof(TextDecorations));
                 OnPropertyChanged(nameof(HasActiveSnooze));
                 OnPropertyChanged(nameof(ReminderMetadataVisibility));
+                OnPropertyChanged(nameof(RecurrenceMetadataVisibility));
             }
         }
     }
@@ -175,6 +256,7 @@ public sealed partial class TodoItemViewModel : ObservableObject
                 _item.IsImportant = value;
                 OnPropertyChanged(nameof(ImportantGlyph));
                 OnPropertyChanged(nameof(ImportantToggleText));
+                OnPropertyChanged(nameof(ImportantBadgeVisibility));
             }
         }
     }
@@ -192,7 +274,6 @@ public sealed partial class TodoItemViewModel : ObservableObject
                 OnPropertyChanged(nameof(HasColorMarker));
                 OnPropertyChanged(nameof(ColorMarkerVisibility));
                 OnPropertyChanged(nameof(ColorMarkerBrush));
-                OnPropertyChanged(nameof(MarkerGlyph));
                 OnPropertyChanged(nameof(MetadataColorText));
             }
         }
@@ -206,6 +287,12 @@ public sealed partial class TodoItemViewModel : ObservableObject
             if (SetProperty(ref _dueDate, value))
             {
                 _item.DueDate = value;
+                if (value is null && _hasDueTime)
+                {
+                    _hasDueTime = false;
+                    _item.HasDueTime = false;
+                    OnPropertyChanged(nameof(HasDueTime));
+                }
                 OnPropertyChanged(nameof(DueStatusText));
                 OnPropertyChanged(nameof(HasDueDate));
                                 OnPropertyChanged(nameof(DueStatusVisibility));
@@ -217,6 +304,25 @@ public sealed partial class TodoItemViewModel : ObservableObject
                 OnPropertyChanged(nameof(ReminderMetadataVisibility));
                 OnPropertyChanged(nameof(RecurrenceMetadataVisibility));
                 OnPropertyChanged(nameof(ReminderSetVisibility));
+                OnPropertyChanged(nameof(CardMetadataRowVisibility));
+            }
+        }
+    }
+
+    public bool HasDueTime
+    {
+        get => _dueDate is not null && _hasDueTime;
+        internal set
+        {
+            bool effectiveValue = _dueDate is not null && value;
+            if (SetProperty(ref _hasDueTime, effectiveValue))
+            {
+                _item.HasDueTime = effectiveValue;
+                OnPropertyChanged(nameof(DueStatusText));
+                OnPropertyChanged(nameof(IsOverdue));
+                OnPropertyChanged(nameof(DueStatusNormalVisibility));
+                OnPropertyChanged(nameof(DueStatusOverdueVisibility));
+                OnPropertyChanged(nameof(MetadataDueDateText));
             }
         }
     }
@@ -253,6 +359,7 @@ public sealed partial class TodoItemViewModel : ObservableObject
             if (SetProperty(ref _completedAt, value))
             {
                 _item.CompletedAt = value;
+                OnPropertyChanged(nameof(DueStatusText));
             }
         }
     }
@@ -289,26 +396,13 @@ public sealed partial class TodoItemViewModel : ObservableObject
     public bool IsEditing
     {
         get => _isEditing;
-        internal set
-        {
-            if (SetProperty(ref _isEditing, value))
-            {
-                OnPropertyChanged(nameof(TextVisibility));
-                OnPropertyChanged(nameof(EditVisibility));
-            }
-        }
+        internal set => SetProperty(ref _isEditing, value);
     }
 
     public bool IsExpanded
     {
         get => _isExpanded;
-        internal set
-        {
-            if (SetProperty(ref _isExpanded, value))
-            {
-                OnPropertyChanged(nameof(ExpandedVisibility));
-            }
-        }
+        internal set => SetProperty(ref _isExpanded, value);
     }
 
     public string EditText
@@ -355,15 +449,25 @@ public sealed partial class TodoItemViewModel : ObservableObject
 
     public string ImportantGlyph => IsImportant ? "\uE735" : "\uE734";
 
+    public Visibility ImportantBadgeVisibility => IsImportant
+        ? Visibility.Visible
+        : Visibility.Collapsed;
+
+    public bool IsFirstTodayGroupItem => _isFirstTodayGroupItem;
+
+    public Visibility TodayGroupDividerVisibility => _isFirstTodayGroupItem
+        ? Visibility.Visible
+        : Visibility.Collapsed;
+
+    public string TodayGroupHeaderText => LocalizedText("Todo.Today.SectionHeader");
+
     public bool HasRedMarker => string.Equals(ColorMarker, TodoItem.RedColorMarker, StringComparison.Ordinal);
 
     public bool HasColorMarker => ColorMarker is not null;
 
     public Visibility ColorMarkerVisibility => HasColorMarker ? Visibility.Visible : Visibility.Collapsed;
 
-    public Brush ColorMarkerBrush => new SolidColorBrush(ParseColor(TodoItem.GetColorMarkerHex(ColorMarker)));
-
-    public string MarkerGlyph => HasRedMarker ? "\uE915" : "\uE915";
+    public Brush ColorMarkerBrush => SharedBrushCache.GetOrCreate(ParseColor(TodoItem.GetColorMarkerHex(ColorMarker)));
 
     public string CompletionGlyph => IsCompleted ? "\uE73E" : string.Empty;
 
@@ -387,9 +491,22 @@ public sealed partial class TodoItemViewModel : ObservableObject
         ? Windows.UI.Text.TextDecorations.Strikethrough
         : Windows.UI.Text.TextDecorations.None;
 
-    public bool IsOverdue => DueDate is { } dueDate &&
-                             dueDate.ToLocalTime() < DateTimeOffset.Now &&
-                             !IsCompleted;
+    public bool IsOverdue
+    {
+        get
+        {
+            if (DueDate is not { } dueDate || IsCompleted)
+            {
+                return false;
+            }
+
+            DateTimeOffset localDue = dueDate.ToLocalTime();
+            DateTimeOffset nowLocal = _clock().ToLocalTime();
+            return HasDueTime
+                ? localDue < nowLocal
+                : localDue.Date < nowLocal.Date;
+        }
+    }
 
     public bool HasRecurrence => Recurrence is not null &&
                                  !string.Equals(RecurrenceMode, TodoRecurrenceMode.None, StringComparison.Ordinal);
@@ -414,23 +531,65 @@ public sealed partial class TodoItemViewModel : ObservableObject
             }
 
             DateTimeOffset localDueDate = dueDate.ToLocalTime();
-            var today = DateTimeOffset.Now.Date;
+            var today = _clock().ToLocalTime().Date;
+            if (IsCompleted &&
+                HasRecurrence &&
+                CompletedAt is { } completedAt &&
+                completedAt.ToLocalTime().Date == today &&
+                !string.IsNullOrWhiteSpace(_item.GeneratedNextItemId) &&
+                TodoRecurrenceService.TryGetNextDueDate(_item, completedAt, out DateTimeOffset nextDueDate))
+            {
+                DateTimeOffset localNextDue = nextDueDate.ToLocalTime();
+                if (localNextDue.Date == today.AddDays(1))
+                {
+                    return Format("Todo.Recurrence.CompletedTodayTomorrow", RecurrenceSummaryText);
+                }
+
+                if (localNextDue.Date > today.AddDays(1))
+                {
+                    string formattedNextDate = localNextDue.Date.Year == today.Year
+                        ? localNextDue.ToString("M/d")
+                        : localNextDue.ToString("yyyy/M/d");
+                    return Format("Todo.Recurrence.CompletedTodayNextDate", RecurrenceSummaryText, formattedNextDate);
+                }
+            }
             var due = localDueDate.Date;
-            string formattedDue = FormatDueDateTime(localDueDate);
-            string formattedTime = FormatDueTime(localDueDate);
             string statusText;
 
-            if (due == today)
+            if (HasDueTime)
             {
-                statusText = Format("Todo.Due.TodayAt", formattedTime);
-            }
-            else if (due == today.AddDays(1))
-            {
-                statusText = Format("Todo.Due.TomorrowAt", formattedTime);
+                string formattedDue = FormatDueDateTime(localDueDate);
+                string formattedTime = FormatDueTime(localDueDate);
+                if (due == today)
+                {
+                    statusText = Format("Todo.Due.TodayAt", formattedTime);
+                }
+                else if (due == today.AddDays(1))
+                {
+                    statusText = Format("Todo.Due.TomorrowAt", formattedTime);
+                }
+                else
+                {
+                    statusText = Format("Todo.Due.Date", formattedDue);
+                }
             }
             else
             {
-                statusText = Format("Todo.Due.Date", formattedDue);
+                if (due == today)
+                {
+                    statusText = LocalizedText("Todo.Due.Today");
+                }
+                else if (due == today.AddDays(1))
+                {
+                    statusText = LocalizedText("Todo.Due.Tomorrow");
+                }
+                else
+                {
+                    string formattedDate = due.Year == today.Year
+                        ? localDueDate.ToString("M/d")
+                        : localDueDate.ToString("yyyy/M/d");
+                    statusText = Format("Todo.Due.Date", formattedDate);
+                }
             }
 
             if (HasRecurrence)
@@ -461,12 +620,6 @@ public sealed partial class TodoItemViewModel : ObservableObject
 
     public Visibility CopySelectionVisibility => IsCopySelected ? Visibility.Visible : Visibility.Collapsed;
 
-        public Visibility TextVisibility => IsEditing ? Visibility.Collapsed : Visibility.Visible;
-
-    public Visibility EditVisibility => IsEditing ? Visibility.Visible : Visibility.Collapsed;
-
-    public Visibility ExpandedVisibility => IsExpanded ? Visibility.Visible : Visibility.Collapsed;
-
     public string MetadataDueDateText
     {
         get
@@ -477,23 +630,31 @@ public sealed partial class TodoItemViewModel : ObservableObject
             }
 
             DateTimeOffset local = dueDate.ToLocalTime();
-            var today = DateTimeOffset.Now.Date;
+            var today = _clock().ToLocalTime().Date;
             var due = local.Date;
 
             if (due == today)
             {
-                return LocalizedText("Todo.Due.Today");
+                return HasDueTime
+                    ? Format("Todo.Due.TodayAt", local.ToString("HH:mm"))
+                    : LocalizedText("Todo.Due.Today");
             }
 
             if (due == today.AddDays(1))
             {
-                return LocalizedText("Todo.Due.Tomorrow");
+                return HasDueTime
+                    ? Format("Todo.Due.TomorrowAt", local.ToString("HH:mm"))
+                    : LocalizedText("Todo.Due.Tomorrow");
             }
 
-            bool isEndOfDay = local.Hour == 23 && local.Minute == 59;
-            return isEndOfDay
-                ? $"{local.Month}/{local.Day}"
-                : $"{local.Month}/{local.Day} {local.Hour:00}:{local.Minute:00}";
+            if (!HasDueTime)
+            {
+                return due.Year == today.Year
+                    ? $"{local.Month}/{local.Day}"
+                    : $"{local.Year}/{local.Month}/{local.Day}";
+            }
+
+            return $"{local.Month}/{local.Day} {local.Hour:00}:{local.Minute:00}";
         }
     }
 
@@ -531,7 +692,7 @@ public sealed partial class TodoItemViewModel : ObservableObject
         ? Visibility.Visible
         : Visibility.Collapsed;
 
-    public Visibility RecurrenceMetadataVisibility => DueDate is not null && !IsCompleted
+    public Visibility RecurrenceMetadataVisibility => !IsCompleted
         ? Visibility.Visible
         : Visibility.Collapsed;
 
@@ -588,19 +749,58 @@ public sealed partial class TodoItemViewModel : ObservableObject
         OnPropertyChanged(nameof(CreatedText));
         OnPropertyChanged(nameof(CompletionToggleText));
         OnPropertyChanged(nameof(ImportantToggleText));
+        OnPropertyChanged(nameof(TodayGroupHeaderText));
+        OnPropertyChanged(nameof(StepsExpandTooltipText));
+        OnPropertyChanged(nameof(PrimaryUrlTooltipText));
+    }
+
+    internal void RefreshDateDependentProperties()
+    {
+        OnPropertyChanged(nameof(IsOverdue));
+        OnPropertyChanged(nameof(DueStatusText));
+        OnPropertyChanged(nameof(DueStatusNormalVisibility));
+        OnPropertyChanged(nameof(DueStatusOverdueVisibility));
+        OnPropertyChanged(nameof(MetadataDueDateText));
     }
 
     internal void RefreshDetailProperties()
     {
+        _cachedStepItemsSource = null;
+        _cachedInlineStepsSource = null;
+        _cachedAttachmentItemsSource = null;
+        if (!HasSteps && _isStepsExpanded)
+        {
+            _isStepsExpanded = false;
+            OnPropertyChanged(nameof(IsStepsExpanded));
+            OnPropertyChanged(nameof(StepsExpandChevronGlyph));
+        }
+
         OnPropertyChanged(nameof(Notes));
         OnPropertyChanged(nameof(NotesPlaceholderVisibility));
+        OnPropertyChanged(nameof(NotesIndicatorVisibility));
         OnPropertyChanged(nameof(StepItemsSource));
+        OnPropertyChanged(nameof(InlineStepsSource));
         OnPropertyChanged(nameof(AttachmentItemsSource));
+        OnPropertyChanged(nameof(TotalStepCount));
+        OnPropertyChanged(nameof(HasSteps));
+        OnPropertyChanged(nameof(ExpandedStepsVisibility));
+        OnPropertyChanged(nameof(StepsExpandTooltipText));
         OnPropertyChanged(nameof(CompletedStepCount));
         OnPropertyChanged(nameof(StepProgressText));
         OnPropertyChanged(nameof(StepProgressVisibility));
         OnPropertyChanged(nameof(AttachmentSummaryText));
         OnPropertyChanged(nameof(AttachmentSummaryVisibility));
+        OnPropertyChanged(nameof(CardMetadataRowVisibility));
+    }
+
+    internal void UpdateTodayGroupHeaderState(bool isFirstTodayItem)
+    {
+        if (_isFirstTodayGroupItem != isFirstTodayItem)
+        {
+            _isFirstTodayGroupItem = isFirstTodayItem;
+            OnPropertyChanged(nameof(IsFirstTodayGroupItem));
+            OnPropertyChanged(nameof(TodayGroupDividerVisibility));
+        }
     }
 
     internal void UpdateRecurringHistoryState(bool isLead, bool isExpanded, int itemCount)
@@ -662,7 +862,7 @@ public sealed partial class TodoItemViewModel : ObservableObject
 
     private string FormatSnoozeDateTime(DateTimeOffset snoozedUntil)
     {
-        DateTime today = DateTimeOffset.Now.Date;
+        DateTime today = _clock().ToLocalTime().Date;
         string time = FormatDueTime(snoozedUntil);
         if (snoozedUntil.Date == today)
         {
@@ -691,6 +891,107 @@ public sealed partial class TodoItemViewModel : ObservableObject
         }
 
         return ColorHelper.FromArgb(0xFF, red, green, blue);
+    }
+
+    public void ReleaseAttachmentThumbnails()
+    {
+        foreach (TodoAttachmentViewModel attachment in Attachments)
+        {
+            attachment.ReleaseThumbnail();
+        }
+    }
+
+    private void UpdatePrimaryUrl(string? text)
+    {
+        string? extracted = ExtractPrimaryHttpUrl(text);
+        if (!string.Equals(_primaryUrl, extracted, StringComparison.Ordinal))
+        {
+            _primaryUrl = extracted;
+            OnPropertyChanged(nameof(PrimaryUrl));
+            OnPropertyChanged(nameof(HasPrimaryUrl));
+            OnPropertyChanged(nameof(PrimaryUrlVisibility));
+            OnPropertyChanged(nameof(PrimaryUrlTooltipText));
+        }
+    }
+
+    internal static string? ExtractPrimaryHttpUrl(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return null;
+        }
+
+        ReadOnlySpan<char> span = text.AsSpan();
+        int searchStart = 0;
+        while (searchStart < span.Length)
+        {
+            int httpIdx = span[searchStart..].IndexOf("http", StringComparison.OrdinalIgnoreCase);
+            if (httpIdx < 0)
+            {
+                break;
+            }
+
+            int start = searchStart + httpIdx;
+            ReadOnlySpan<char> rest = span[start..];
+            bool isHttp = rest.StartsWith("http://", StringComparison.OrdinalIgnoreCase);
+            bool isHttps = !isHttp && rest.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
+            if (!isHttp && !isHttps)
+            {
+                searchStart = start + 4;
+                continue;
+            }
+
+            int end = start + (isHttps ? 8 : 7);
+            while (end < span.Length &&
+                   !char.IsWhiteSpace(span[end]) &&
+                   span[end] is not ('<' or '>' or '"' or '\'' or '`' or '）' or '】' or '》'))
+            {
+                end++;
+            }
+
+            ReadOnlySpan<char> candidateSpan = span[start..end];
+            while (!candidateSpan.IsEmpty)
+            {
+                char tail = candidateSpan[^1];
+                if (tail is '.' or ',' or ';' or ':' or '!' or '?' or ']' or '}' or '，' or '。' or '；' or '！' or '？')
+                {
+                    candidateSpan = candidateSpan[..^1];
+                    continue;
+                }
+
+                if (tail == ')')
+                {
+                    int opens = 0;
+                    int closes = 0;
+                    foreach (char ch in candidateSpan)
+                    {
+                        if (ch == '(') opens++;
+                        else if (ch == ')') closes++;
+                    }
+
+                    if (closes > opens)
+                    {
+                        candidateSpan = candidateSpan[..^1];
+                        continue;
+                    }
+                }
+
+                break;
+            }
+
+            string candidate = candidateSpan.ToString();
+            if (Uri.TryCreate(candidate, UriKind.Absolute, out Uri? uri) &&
+                (string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)) &&
+                !string.IsNullOrWhiteSpace(uri.Host))
+            {
+                return uri.AbsoluteUri;
+            }
+
+            searchStart = end;
+        }
+
+        return null;
     }
 
     private static bool AreRecurrenceEqual(TodoRecurrence? left, TodoRecurrence? right)

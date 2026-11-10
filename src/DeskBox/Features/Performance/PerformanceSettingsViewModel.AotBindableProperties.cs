@@ -1,13 +1,13 @@
 #if DESKBOX_NATIVE_AOT
 namespace DeskBox.Features.Performance;
 
-// The performance section keeps its runtime {Binding} surface and binds
-// through a section-level DataContext switch (batch 50); the General
-// section's inline preset combo resolves against this editor as well
-// through an element-level DataContext. Expose only the properties used by
-// those XAML surfaces in NativeAOT builds, mirroring the
-// GlanceWidgetViewModel bridge pattern.
+// The performance expander keeps its runtime {Binding} surface and binds
+// through an element-level DataContext switch on GeneralSection.
 [WinRT.GeneratedBindableCustomProperty([
+    nameof(AllowCompactAmbient),
+    nameof(AllowGlanceRotation),
+    nameof(AllowTextMarquee),
+    nameof(AllowVinylRotation),
     nameof(AvailableHiddenCacheCleanupDelayOptions),
     nameof(AvailableHiddenCacheCleanupScopeOptions),
     nameof(AvailablePerformanceCacheBudgetOptions),
@@ -15,8 +15,8 @@ namespace DeskBox.Features.Performance;
     nameof(AvailableVisibleIdleCacheCleanupDelayOptions),
     nameof(ContinuousDecorativeAnimationsSummaryText),
     nameof(IdleWorkingSetTrimEnabled),
-    nameof(ImmediateHiddenWorkingSetTrimEnabled),
-    nameof(QuiescenceWorkingSetTrimEnabled),
+    nameof(KeepCapsuleContentWarm),
+    nameof(KeepWarmCacheWhenHidden),
     nameof(SelectedHiddenCacheCleanupDelaySeconds),
     nameof(SelectedHiddenCacheCleanupScope),
     nameof(SelectedPerformanceCacheBudget),

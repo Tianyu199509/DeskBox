@@ -1,4 +1,4 @@
-﻿
+
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
@@ -9,6 +9,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DeskBox", "src\DeskBox\Desk
 	EndProjectSection
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DeskBox.Updater", "src\DeskBox.Updater\DeskBox.Updater.csproj", "{5F11E064-D145-414C-9F7D-7F86F206B170}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DeskBox.Settings", "src\DeskBox.Settings\DeskBox.Settings.csproj", "{7D2C8E91-4B3A-4E1C-9A82-1F2E3D4C5B6A}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{9B4FA3FD-08FD-4A97-8340-0416A90A4C3C}"
 EndProject
@@ -38,6 +40,14 @@ Global
 		{5F11E064-D145-414C-9F7D-7F86F206B170}.Release|x64.Build.0 = Release|x64
 		{5F11E064-D145-414C-9F7D-7F86F206B170}.Release|ARM64.ActiveCfg = Release|ARM64
 		{5F11E064-D145-414C-9F7D-7F86F206B170}.Release|ARM64.Build.0 = Release|ARM64
+		{7D2C8E91-4B3A-4E1C-9A82-1F2E3D4C5B6A}.Debug|x64.ActiveCfg = Debug|x64
+		{7D2C8E91-4B3A-4E1C-9A82-1F2E3D4C5B6A}.Debug|x64.Build.0 = Debug|x64
+		{7D2C8E91-4B3A-4E1C-9A82-1F2E3D4C5B6A}.Debug|ARM64.ActiveCfg = Debug|ARM64
+		{7D2C8E91-4B3A-4E1C-9A82-1F2E3D4C5B6A}.Debug|ARM64.Build.0 = Debug|ARM64
+		{7D2C8E91-4B3A-4E1C-9A82-1F2E3D4C5B6A}.Release|x64.ActiveCfg = Release|x64
+		{7D2C8E91-4B3A-4E1C-9A82-1F2E3D4C5B6A}.Release|x64.Build.0 = Release|x64
+		{7D2C8E91-4B3A-4E1C-9A82-1F2E3D4C5B6A}.Release|ARM64.ActiveCfg = Release|ARM64
+		{7D2C8E91-4B3A-4E1C-9A82-1F2E3D4C5B6A}.Release|ARM64.Build.0 = Release|ARM64
 		{C55DB014-39AB-442B-BF03-CE3E1BFE1ADE}.Debug|x64.ActiveCfg = Debug|Any CPU
 		{C55DB014-39AB-442B-BF03-CE3E1BFE1ADE}.Debug|x64.Build.0 = Debug|Any CPU
 		{C55DB014-39AB-442B-BF03-CE3E1BFE1ADE}.Debug|ARM64.ActiveCfg = Debug|Any CPU

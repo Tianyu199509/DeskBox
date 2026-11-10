@@ -1,4 +1,4 @@
-﻿using DeskBox.Controls;
+using DeskBox.Controls;
 using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Platform;
@@ -44,6 +44,13 @@ public sealed partial class SearchPopupWindow : Window
     private readonly SpacePreviewBroker _spacePreviewService = new();
     private readonly ThemeService? _themeService;
     private DispatcherTimer? _searchDebounceTimer;
+    private DispatcherTimer? _heightMorphTimer;
+    private long _heightSpringLastTimestamp;
+    private double _heightSpringCurrentLogical;
+    private double _heightSpringVelocity;
+    private bool _heightSpringExpanding;
+    private double _heightMorphTargetLogical;
+    private RectInt32 _heightMorphPendingBounds;
     private CancellationTokenSource? _skeletonDelayCancellation;
     private bool _suppressPanelEntranceAnimation;
 
@@ -53,12 +60,17 @@ public sealed partial class SearchPopupWindow : Window
     // virtualized elements. The flag carries the configured style index.
     private int? _pendingEntranceStyle;
     private DispatcherTimer? _entranceGuardTimer;
+    private DispatcherQueueTimer? _coldHiddenCleanupTimer;
+    private DispatcherQueueTimer? _unfocusedAutoHideTimer;
+    private bool _isPopupInputActive;
     private AppWindow? _appWindow;
     private IntPtr _hwnd;
 
     // Native backdrop controllers (same approach as desktop widgets).
     private MicaController? _micaController;
     private DesktopAcrylicController? _acrylicController;
+    private SolidTintSystemBackdrop? _transparentWindowBackdrop;
+    private ElementBackdropTargetBridge? _materialBackdropBridge;
     private SystemBackdropConfiguration? _backdropConfiguration;
     private ICompositionSupportsSystemBackdrop? _backdropTarget;
     private bool _micaControllerAttached;
@@ -76,8 +88,10 @@ public sealed partial class SearchPopupWindow : Window
     private const uint WmClose = 0x0010;
     private const uint WmDestroy = 0x0002;
     private static readonly UIntPtr PopupCloseWatcherSubclassId = new(0x5E4C);
+    private static readonly SolidColorBrush s_transparentCardBrush = new(Colors.Transparent);
     private readonly Win32Helper.SubclassProc _popupCloseWatcherProc;
     private bool _isPopupCloseWatcherInstalled;
+    private bool _isWindowClosed;
 
     // The popup uses the same pointer-capture interaction model as widget windows,
     // avoiding the visible native WS_THICKFRAME border.
@@ -97,6 +111,66 @@ public sealed partial class SearchPopupWindow : Window
     // Recommended-apps selection: tracks the currently highlighted app card.
     private int _selectedAppIndex = -1;
     private Grid? _selectedAppCard;
+    private Grid? _hoveredAppCard;
+
+    // Recommendation grid drag/merge, batch edit mode, and centered overlay state.
+    private Grid? _recPointerCard;
+    private RecommendedGridEntry? _recPressedEntry;
+    private Point _recPointerStartInPanel;
+    private bool _recIsDragging;
+    private bool _recWasCtrlPressedOnDown;
+    private bool _recAutoEnteredEditModeOnDown;
+    private bool _isRecommendationEditMode;
+    private readonly HashSet<string> _recMultiSelectedKeys = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _recRubberBandBaseKeys = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, Rect> _recRubberBandKnownTileRects = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<string> _recDraggedAppKeys = [];
+    private readonly HashSet<string> _recDraggedEntryKeys = new(StringComparer.OrdinalIgnoreCase);
+    // Live reflow preview: translation-free base rects (snapshot per drag so
+    // applying translations never corrupts decisions or metrics) and the
+    // translations currently applied, so only touched tiles are cleared.
+    // Decisions MUST come from these base rects — live rects include the
+    // reflow translations, which fed pointer→decision→reflow→pointer
+    // oscillation (2026-11-06 evening report: flicker + unreachable folder
+    // merge zone).
+    private readonly Dictionary<string, Rect> _recTileBaseRects = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, System.Numerics.Vector3> _recReflowTranslations = new(StringComparer.OrdinalIgnoreCase);
+    // Drop-decision hysteresis: once a decision lands, the pointer owns its
+    // anchor region (matched tile / append band, inflated) and the decision
+    // is not re-evaluated until the pointer leaves it.
+    private RecommendedDropDecision _recLastDropDecision = new(false, null, null, -1, default, default, default);
+    private Rect _recDropAnchorRect;
+    private bool _recHasDropAnchor;
+    private string? _recLastDecisionSummary;
+    private bool _recExternalDragAttempted;
+    private bool _recHasCachedReflowState;
+    private bool _recCachedReflowActive;
+    private int _recCachedReflowTargetIndex = -1;
+    private int _recCachedReflowRealizedCount = -1;
+    private int _recCachedReflowEntriesCount = -1;
+    private bool _isRecRubberBanding;
+    private Point _recRubberBandStart;
+    private Point _recRubberBandCurrent;
+    private Point _recRubberBandPointerInViewport;
+    private DispatcherTimer? _recRubberBandAutoScrollTimer;
+    private FrameworkElement? _recMergeHoveredCard;
+    private string? _lastEditFolderClickKey;
+    private long _lastEditFolderClickTickMs;
+    private bool _lastEditFolderSelectedBeforeClick;
+    private const long EditFolderDoubleClickThresholdMs = 450;
+    private int _overlayAnimationGeneration;
+    private bool _isOverlayClosing;
+    private Grid? _hoveredOverlayCard;
+    private Grid? _overlayPointerCard;
+    private SearchResultItem? _overlayPressedItem;
+    private Point _overlayPointerStartInHost;
+    private bool _overlayIsDragging;
+    private bool _overlayPressedInFolder;
+    private bool _overlayExternalDragAttempted;
+    private string? _openFolderId;
+    private bool _isEditingFolderTitle;
+    private bool _suppressFolderTitleBlurCommit;
+    private readonly System.Collections.ObjectModel.ObservableCollection<SearchResultItem> _folderOverlayItems = [];
 
     // True after the user presses Up/Down in the search box to navigate results.
     // While navigating, plain Space triggers QuickLook preview instead of typing.
@@ -104,13 +178,28 @@ public sealed partial class SearchPopupWindow : Window
     private bool _isNavigatingResults;
 
     // Drag state for result rows: distinguishes a click (execute) from a drag
-    // (export the file/folder path to another app or widget).
-    // Drag is initiated only from the icon column, not the entire row.
-    private SearchResultItem? _dragCandidate;
-    private SearchResultRowControl? _dragSourceRow;
+    // (export the file/folder path to another app or widget) from anywhere on
+    // a file/folder row. The candidate is pointer-bound (the model the grid's
+    // manual drag uses, FileSurfaceContent.ElevatedPointerDrag): armed only
+    // for a physical left-button press with panel pointer capture, re-checked
+    // for button contact on every move, disarmed by release, capture loss,
+    // right-tap, or popup hide. While a drag-out session is in flight the
+    // flag blocks re-arming.
+    private readonly record struct SearchDragOutCandidate(
+        uint PointerId,
+        SearchResultItem Item,
+        SearchResultRowControl Row,
+        Point StartPoint);
+    private SearchDragOutCandidate? _dragOutCandidate;
     private SearchResultItem? _pressedItem;
-    private Windows.Foundation.Point _dragStartPoint;
-    private bool _dragOccurred;
+    private SearchResultItem? _pendingCtrlToggleOffOnRelease;
+    private bool _dragOutInProgress;
+    private string[]? _activeDragOutPaths;
+    private bool _isExternalFileDragActive;
+    private bool _externalDragLeftPopupOnce;
+    private bool _hasEnteredPlatformDragLoop;
+    private bool _externalDragPassthroughApplied;
+    private DispatcherQueueTimer? _externalDragFadeTimer;
     private bool _restoreResultFocusAfterFlyout;
 
     private static bool? s_isProcessElevatedForDrag;
@@ -167,9 +256,17 @@ public sealed partial class SearchPopupWindow : Window
         _viewModel.ActionRequested += OnViewModelActionRequested;
         _viewModel.ContentRequested += OnViewModelContentRequested;
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
+        _viewModel.CurrentResults.CollectionChanged += OnCurrentResultsCollectionChanged;
         ResultsRepeater.ElementPrepared += OnResultsElementPrepared;
+        ResultsRepeater.ElementClearing += OnResultsElementClearing;
         RecommendedAppsRepeater.ElementPrepared += OnRecommendedAppsElementPrepared;
+        RecommendedAppsRepeater.ElementClearing += OnRecommendedAppsElementClearing;
+        FolderAppsRepeater.ElementPrepared += OnOverlayAppsElementPrepared;
+        FolderAppsRepeater.ElementClearing += OnOverlayAppsElementClearing;
+        HiddenAppsRepeater.ElementPrepared += OnOverlayAppsElementPrepared;
+        HiddenAppsRepeater.ElementClearing += OnOverlayAppsElementClearing;
         _viewModel.RecommendationIconsResolved += OnRecommendationIconsResolved;
+        _viewModel.RecommendationLayoutUpdated += OnRecommendationLayoutUpdated;
         _settingsService.SettingsChanged += OnAppearanceSettingsChanged;
         _settingsService.AppearancePreviewChanged += OnAppearanceSettingsChanged;
         _localizationService.LanguageChanged += OnLanguageChanged;
@@ -205,13 +302,45 @@ public sealed partial class SearchPopupWindow : Window
         else if (message == WmDestroy)
         {
             App.Log($"[Search] Popup WM_DESTROY hwnd=0x{hWnd.ToInt64():X}");
+            IntPtr destroyResult = Win32Helper.DefSubclassProc(hWnd, message, wParam, lParam);
+            RemovePopupCloseWatcherSubclass();
+            return destroyResult;
         }
 
         return Win32Helper.DefSubclassProc(hWnd, message, wParam, lParam);
     }
 
+    private void RemovePopupCloseWatcherSubclass()
+    {
+        if (!_isPopupCloseWatcherInstalled || _hwnd == IntPtr.Zero)
+        {
+            return;
+        }
+
+        _isPopupCloseWatcherInstalled = false;
+        try
+        {
+            Win32Helper.RemoveWindowSubclass(
+                _hwnd,
+                _popupCloseWatcherProc,
+                PopupCloseWatcherSubclassId);
+        }
+        catch
+        {
+        }
+    }
+
     public IntPtr WindowHandle => _hwnd;
     public bool IsPopupVisible { get; private set; }
+
+    /// <summary>
+    /// True only while the popup is actively focused, hovered, or mid-gesture.
+    /// When the user clicks another window and leaves the popup covered underneath,
+    /// it stops blocking background/idle memory compression immediately.
+    /// </summary>
+    internal bool IsBlockingMemoryCleanup =>
+        IsPopupVisible &&
+        (_isPopupInputActive || HasActivePopupInteraction() || IsPointerOverPopupWindow());
 
     /// <summary>
     /// Raised when an action needs to be handled by the app (e.g., open settings).
@@ -223,6 +352,8 @@ public sealed partial class SearchPopupWindow : Window
     public event EventHandler? PopupShown;
 
     public event EventHandler? PopupHidden;
+
+    public event EventHandler? PopupDeactivated;
 
     /// <summary>
     /// Shows the popup at the correct position and focuses the search box.
@@ -242,13 +373,30 @@ public sealed partial class SearchPopupWindow : Window
 
     private async Task ShowPopupCoreAsync(string? initialQuery)
     {
+        if (_isWindowClosed)
+        {
+            return;
+        }
+
+        CancelColdHiddenCleanupTimer();
+        CancelUnfocusedAutoHideTimer();
         if (IsPopupVisible)
         {
             ActivateSearchInput();
             if (!string.IsNullOrWhiteSpace(initialQuery))
             {
-                SearchTextBox.Text = initialQuery;
-                _viewModel.Query = initialQuery;
+                _latchedInlineScope = SearchInlineScope.None;
+                _suppressScopeLatchTextChange = true;
+                try
+                {
+                    SearchTextBox.Text = initialQuery;
+                }
+                finally
+                {
+                    _suppressScopeLatchTextChange = false;
+                }
+                TryLatchInlineScopeFromInput(SearchTextBox.Text);
+                _viewModel.Query = GetEffectivePopupQuery();
                 UpdatePanelVisibility();
             }
 
@@ -265,18 +413,34 @@ public sealed partial class SearchPopupWindow : Window
         // Appearance settings may have changed while the popup was hidden.
         ApplyMaterialFromSettings();
 
-        // Restore the user's custom position/size if one was persisted (drag/resize
-        // is remembered across shows); otherwise fall back to the mode-based default
-        // dimensions and centered placement.
-        if (!TryApplyCustomBounds())
+        // Sync initial query and dynamic capsule/anchored downward bounds before showing
+        // so the first rendered frame already matches the exact capsule or recommendation height.
+        _latchedInlineScope = SearchInlineScope.None;
+        _suppressScopeLatchTextChange = true;
+        try
         {
-            _appWindow?.Resize(new SizeInt32(PopupWidth, PopupHeight));
-            PositionOnScreen();
+            SearchTextBox.Text = initialQuery ?? string.Empty;
         }
+        finally
+        {
+            _suppressScopeLatchTextChange = false;
+        }
+        TryLatchInlineScopeFromInput(SearchTextBox.Text);
+        UpdateScopePrefixBadge(SearchTextBox.Text);
+        string effectiveInitialQuery = GetEffectivePopupQuery();
+        if (!string.IsNullOrWhiteSpace(effectiveInitialQuery))
+        {
+            _viewModel.Query = effectiveInitialQuery;
+        }
+        UpdatePanelVisibility(forceBoundsWhenOpening: true);
+
         RootGrid.Opacity = AreSystemAnimationsEnabled() ? 0 : 1;
-        PopupTranslateTransform.Y = AreSystemAnimationsEnabled() ? 4 : 0;
+        PopupTranslateTransform.Y = 0;
+        PopupScaleTransform.ScaleX = AreSystemAnimationsEnabled() ? 0.985 : 1;
+        PopupScaleTransform.ScaleY = AreSystemAnimationsEnabled() ? 0.985 : 1;
         _appWindow?.Show();
         IsPopupVisible = true;
+        _isPopupInputActive = true;
         PopupShown?.Invoke(this, EventArgs.Empty);
 
         // Bring the popup above all windows (including desktop-level widgets) at the
@@ -291,8 +455,7 @@ public sealed partial class SearchPopupWindow : Window
 
         // This is an interactive search window, so it must be activatable again after
         // the user works in another app.
-        Activate();
-        Win32Helper.SetForegroundWindow(_hwnd);
+        DeskBox.Helpers.TransientInputFocusGuard.ActivateWindowAndFocusIsland(this, _hwnd);
 
         // Fluent entrance: quick scale + fade + rise, matching the Windows 11
         // menu/popup transition language.
@@ -303,7 +466,7 @@ public sealed partial class SearchPopupWindow : Window
 
         // Focus immediately; recommendations can continue loading without making the
         // freshly shown window feel inert.
-        SearchTextBox.Text = initialQuery ?? string.Empty;
+        DeskBox.Helpers.ImeCompositionGuard.AttachAncestors(SearchTextBox);
         SearchTextBox.Focus(FocusState.Programmatic);
 
         // Yield before recommendations, icons, or an idle-unloaded index do any work.
@@ -323,6 +486,9 @@ public sealed partial class SearchPopupWindow : Window
         {
             // When opened with a pre-filled query, skip the empty-state recommendations
             // and directly trigger the search.
+            _viewModel.UpdateEverythingPromptState();
+            _ = _viewModel.EnsureEverythingConnectionProbedAsync();
+            UpdateEverythingPromptBanner();
             _viewModel.Query = initialQuery;
             UpdatePanelVisibility();
         }
@@ -335,7 +501,20 @@ public sealed partial class SearchPopupWindow : Window
                 && !hadRecommendationCache;
             if (showSkeleton)
             {
-                _skeletonDelayCancellation?.Cancel();
+                if (_heightMorphTimer is { } morphTimer)
+        {
+            _heightMorphTimer = null;
+            morphTimer.Tick -= OnHeightMorphTimerTick;
+            try
+            {
+                morphTimer.Stop();
+            }
+            catch
+            {
+            }
+        }
+
+        _skeletonDelayCancellation?.Cancel();
                 _skeletonDelayCancellation?.Dispose();
                 _skeletonDelayCancellation = new CancellationTokenSource();
                 _ = ShowAppsSkeletonAfterDelayAsync(
@@ -387,14 +566,20 @@ public sealed partial class SearchPopupWindow : Window
     /// </summary>
     public void ActivateSearchInput()
     {
+        CancelColdHiddenCleanupTimer();
+        CancelUnfocusedAutoHideTimer();
+        _isPopupInputActive = true;
         PopupHideStoryboard.Stop();
         PopupHideStoryboard.Completed -= OnPopupHideCompleted;
+        PopupShowStoryboard.Stop();
+        RootGrid.Opacity = 1.0;
+        PopupScaleTransform.ScaleX = 1.0;
+        PopupScaleTransform.ScaleY = 1.0;
         _appWindow?.Show();
         App.Current.WidgetManager?.BringAuxiliaryWindowToFront(
             _hwnd,
             "search-popup-reactivated");
-        Activate();
-        Win32Helper.SetForegroundWindow(_hwnd);
+        DeskBox.Helpers.TransientInputFocusGuard.ActivateWindowAndFocusIsland(this, _hwnd);
         SearchTextBox.Focus(FocusState.Programmatic);
     }
 
@@ -409,29 +594,57 @@ public sealed partial class SearchPopupWindow : Window
         }
 
         App.Log("[Search] Popup hidden");
+        CancelUnfocusedAutoHideTimer();
+        DisarmDragOutCandidate();
+        StopExternalDragFadeTimer(restoreOpacity: false);
+        StopHeightMorphTimer();
+        _isPopupInputActive = false;
         IsPopupVisible = false;
+        CancelRecommendedDrag();
+        SetRecommendationEditMode(false);
+        CloseRecommendationOverlays(immediate: true);
+        if (_isCmdBarFlyoutOpen)
+        {
+            CmdBarActionsFlyout.Hide();
+        }
+        _detailsUpdateCoalesceTimer?.Stop();
+        ResetSearchSessionVisualFlags();
+        _displayedDetailsItem = null;
+        ResetLatchedScopeState();
+        ClearSelectedResultRow();
+        ClearRecommendedAppSelection();
+        ClearHoveredRecommendedCard();
+        ClearHoveredOverlayCard();
+        ResetEditFolderDoubleClickTracking();
+        ClearAllResultRowTransientStates();
+        ClearMultiSelection();
         _viewModel.OnPopupHidden();
         _searchDebounceTimer?.Stop();
         _skeletonDelayCancellation?.Cancel();
         _skeletonDelayCancellation?.Dispose();
         _skeletonDelayCancellation = null;
         HideAppsSkeleton();
+        SearchProgressBar.IsIndeterminate = false;
+        LoadingRing.IsActive = false;
         SearchFeedbackPresenter.Clear();
-        _entranceGuardTimer?.Stop();
+        StopAndClearEntranceGuardTimer();
         PopupHidden?.Invoke(this, EventArgs.Empty);
 
         // Fluent exit: fast shrink + fade, then remove the window from view once the
-        // animation completes. The window stays interactive-looking for ~150ms, which
-        // is imperceptible but gives the dismissal a physical feel.
+        // animation completes. Skip the From="1" storyboard when the popup was already
+        // faded (e.g., auto-hiding at 0.20 opacity after an external drag-out drop) so
+        // dismissal never flashes back to 100% opacity.
+        double currentOpacity = RootGrid.Opacity;
         PopupShowStoryboard.Stop();
         PopupHideStoryboard.Completed -= OnPopupHideCompleted;
-        if (AreSystemAnimationsEnabled())
+        if (AreSystemAnimationsEnabled() && currentOpacity >= 0.5)
         {
             PopupHideStoryboard.Completed += OnPopupHideCompleted;
             PopupHideStoryboard.Begin();
         }
         else
         {
+            RootGrid.Opacity = 0;
             OnPopupHideCompleted(null, EventArgs.Empty);
         }
     }
@@ -444,6 +657,9 @@ public sealed partial class SearchPopupWindow : Window
         // already stopped and this completion is stale; never hide a visible popup.
         if (!IsPopupVisible)
         {
+            SearchProgressBar.IsIndeterminate = false;
+            LoadingRing.IsActive = false;
+            App.Current.WidgetManager?.RestoreForegroundToRaisedWidgetBeforeAuxiliaryHide(_hwnd);
             _appWindow?.Hide();
             // Leave the quick-reveal raised band at the actual hide moment, not at
             // the hide request: releasing earlier would sink the fading window
@@ -451,10 +667,224 @@ public sealed partial class SearchPopupWindow : Window
             App.Current.WidgetManager?.ReleaseRaisedBandGuest(
                 _hwnd,
                 "search-popup-hidden");
-            // Keep the initialized XAML shell and its material controllers warm.
-            // Recreating these resources on the next hotkey press shifts memory
-            // savings into a visible input delay and a transient material flash.
+            // Dispose DWM backdrop controllers immediately while hidden, then close
+            // the cold-hidden popup window after the retention delay to reclaim its
+            // DXGI SwapChain.
+            DisposeMicaController();
+            DisposeAcrylicController();
+            ClearTransparentWindowBackdrop();
+            ArmColdHiddenCleanupTimer();
         }
+    }
+
+    private void ArmColdHiddenCleanupTimer()
+    {
+        int delaySeconds = PerformanceSettingsPolicy
+            .Resolve(_settingsService.Settings)
+            .TransientWindowReleaseDelaySeconds;
+        if (delaySeconds <= 0)
+        {
+            CancelColdHiddenCleanupTimer();
+            return;
+        }
+
+        DispatcherQueue? queue = DispatcherQueue;
+        if (queue is null)
+        {
+            return;
+        }
+
+        TimeSpan interval = TimeSpan.FromSeconds(delaySeconds);
+        if (_coldHiddenCleanupTimer is null)
+        {
+            DispatcherQueueTimer timer = queue.CreateTimer();
+            timer.IsRepeating = false;
+            timer.Interval = interval;
+            timer.Tick += ColdHiddenCleanupTimer_Tick;
+            _coldHiddenCleanupTimer = timer;
+            PerformanceLogger.RecordTransientUiTimerCreated();
+        }
+        else
+        {
+            _coldHiddenCleanupTimer.Stop();
+            _coldHiddenCleanupTimer.Interval = interval;
+        }
+
+        _coldHiddenCleanupTimer.Start();
+    }
+
+    private void CancelColdHiddenCleanupTimer()
+    {
+        _coldHiddenCleanupTimer?.Stop();
+    }
+
+    private void DisposeColdHiddenCleanupTimer()
+    {
+        if (_coldHiddenCleanupTimer is not { } timer)
+        {
+            return;
+        }
+
+        _coldHiddenCleanupTimer = null;
+        timer.Tick -= ColdHiddenCleanupTimer_Tick;
+        try
+        {
+            timer.Stop();
+        }
+        catch
+        {
+        }
+        PerformanceLogger.RecordTransientUiTimerReleased();
+    }
+
+    private bool HasActivePopupInteraction() =>
+        _isWindowDragging ||
+        _isWindowResizing ||
+        _recIsDragging ||
+        _overlayIsDragging ||
+        _isRubberBanding ||
+        _isRecRubberBanding ||
+        _isEditingFolderTitle ||
+        _isExternalFileDragActive ||
+        _isCmdBarFlyoutOpen ||
+        _dragOutCandidate is not null ||
+        _dragOutInProgress ||
+        (RootGrid.XamlRoot is { } xamlRoot &&
+         VisualTreeHelper.GetOpenPopupsForXamlRoot(xamlRoot).Count > 0);
+
+    private bool IsPointerOverPopupWindow()
+    {
+        if (_hwnd == IntPtr.Zero ||
+            !Win32Helper.GetCursorPos(out var cursor) ||
+            !Win32Helper.GetWindowRect(_hwnd, out var rect))
+        {
+            return false;
+        }
+
+        if (cursor.X < rect.Left || cursor.X >= rect.Right ||
+            cursor.Y < rect.Top || cursor.Y >= rect.Bottom)
+        {
+            return false;
+        }
+
+        IntPtr hit = Win32Helper.WindowFromPoint(cursor);
+        if (hit == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        IntPtr root = Win32Helper.GetAncestor(hit, Win32Helper.GA_ROOT);
+        return (root != IntPtr.Zero ? root : hit) == _hwnd;
+    }
+
+    private void ArmUnfocusedAutoHideTimer()
+    {
+        if (!IsPopupVisible || _isWindowClosed)
+        {
+            CancelUnfocusedAutoHideTimer();
+            return;
+        }
+
+        int releaseDelaySeconds = PerformanceSettingsPolicy
+            .Resolve(_settingsService.Settings)
+            .TransientWindowReleaseDelaySeconds;
+        int autoHideSeconds = releaseDelaySeconds <= 0
+            ? 60
+            : Math.Clamp(releaseDelaySeconds, 60, 180);
+
+        DispatcherQueue? queue = DispatcherQueue;
+        if (queue is null)
+        {
+            return;
+        }
+
+        TimeSpan interval = TimeSpan.FromSeconds(autoHideSeconds);
+        if (_unfocusedAutoHideTimer is null)
+        {
+            DispatcherQueueTimer timer = queue.CreateTimer();
+            timer.IsRepeating = false;
+            timer.Interval = interval;
+            timer.Tick += UnfocusedAutoHideTimer_Tick;
+            _unfocusedAutoHideTimer = timer;
+            PerformanceLogger.RecordTransientUiTimerCreated();
+        }
+        else
+        {
+            _unfocusedAutoHideTimer.Stop();
+            _unfocusedAutoHideTimer.Interval = interval;
+        }
+
+        _unfocusedAutoHideTimer.Start();
+    }
+
+    private void CancelUnfocusedAutoHideTimer()
+    {
+        _unfocusedAutoHideTimer?.Stop();
+    }
+
+    private void DisposeUnfocusedAutoHideTimer()
+    {
+        if (_unfocusedAutoHideTimer is not { } timer)
+        {
+            return;
+        }
+
+        _unfocusedAutoHideTimer = null;
+        timer.Tick -= UnfocusedAutoHideTimer_Tick;
+        try
+        {
+            timer.Stop();
+        }
+        catch
+        {
+        }
+        PerformanceLogger.RecordTransientUiTimerReleased();
+    }
+
+    private void UnfocusedAutoHideTimer_Tick(DispatcherQueueTimer sender, object args)
+    {
+        sender.Stop();
+        if (!IsPopupVisible || _isWindowClosed)
+        {
+            return;
+        }
+
+        if (_isPopupInputActive ||
+            Win32Helper.GetForegroundWindow() == _hwnd ||
+            HasActivePopupInteraction() ||
+            IsPointerOverPopupWindow())
+        {
+            ArmUnfocusedAutoHideTimer();
+            return;
+        }
+
+        App.Log("[Search] Unfocused popup auto-hiding after idle timeout");
+        HidePopup();
+    }
+
+    private void ColdHiddenCleanupTimer_Tick(DispatcherQueueTimer sender, object args)
+    {
+        sender.Stop();
+        if (IsPopupVisible || _isWindowClosed)
+        {
+            return;
+        }
+
+        SetRecommendationEditMode(false);
+        ClearSelectedResultRow();
+        ClearRecommendedAppSelection();
+        ClearHoveredRecommendedCard();
+        ClearHoveredOverlayCard();
+        ResetEditFolderDoubleClickTracking();
+        ClearAllResultRowTransientStates();
+        ClearMultiSelection();
+        ClearRealizedRepeaterVisuals();
+        int releasedIcons = _viewModel.ReleaseColdHiddenCaches();
+        SearchEngineService.ReleaseActiveColdHiddenCaches();
+        App.Log(
+            $"[Search] Cold-hidden popup closing to reclaim swapchain icons={releasedIcons}");
+        App.Current.EnsureXamlLoopLifelineIfNoOtherWindows();
+        Close();
     }
 
     /// <summary>
@@ -469,6 +899,132 @@ public sealed partial class SearchPopupWindow : Window
         else
         {
             ShowPopup();
+        }
+    }
+
+    private void ClearSelectedResultRow()
+    {
+        if (_selectedRow is not null)
+        {
+            _selectedRow.IsSelected = false;
+            _selectedRow.IsTabStop = false;
+            _selectedRow = null;
+        }
+    }
+
+    private void ClearRealizedRepeaterVisuals()
+    {
+        int resultChildCount = VisualTreeHelper.GetChildrenCount(ResultsRepeater);
+        for (int i = 0; i < resultChildCount; i++)
+        {
+            if (VisualTreeHelper.GetChild(ResultsRepeater, i) is SearchResultRowControl row)
+            {
+                row.PrimaryActionRequested -= OnRowPrimaryActionRequested;
+                row.OpenLocationRequested -= OnRowOpenLocationRequested;
+                row.MoreActionsRequested -= OnRowMoreActionsRequested;
+                row.IsSelected = false;
+                row.IsMultiSelected = false;
+                row.IsTabStop = false;
+                row.PrepareItem(null);
+                row.RefreshIconVisuals();
+                row.DataContext = null;
+            }
+        }
+
+        int appChildCount = VisualTreeHelper.GetChildrenCount(RecommendedAppsRepeater);
+        for (int i = 0; i < appChildCount; i++)
+        {
+            if (VisualTreeHelper.GetChild(RecommendedAppsRepeater, i) is FrameworkElement card)
+            {
+                ClearRecommendedCardVisuals(card);
+            }
+        }
+
+        ClearOverlayRepeaterVisuals(FolderAppsRepeater);
+        ClearOverlayRepeaterVisuals(HiddenAppsRepeater);
+    }
+
+    private static void ClearRecommendedCardVisuals(FrameworkElement card)
+    {
+        DetachImplicitOffsetAnimation(card);
+        if (card is Grid grid)
+        {
+            grid.Background = s_transparentCardBrush;
+        }
+
+        card.Opacity = 1;
+        if (FindVisualChild<FrameworkElement>(card, "CardContentHost") is { } contentHost)
+        {
+            ResetCardContentHostVisual(contentHost);
+        }
+
+        if (FindVisualChild<Border>(card, "CardEditSlotPlate") is { } editSlotPlate)
+        {
+            editSlotPlate.Visibility = Visibility.Collapsed;
+        }
+
+        if (FindVisualChild<Border>(card, "CardSelectionPlate") is { } selectionPlate)
+        {
+            selectionPlate.Visibility = Visibility.Collapsed;
+        }
+
+        if (FindVisualChild<FrameworkElement>(card, "CardSelectionCheckBox") is { } selectionCheckBox)
+        {
+            selectionCheckBox.Visibility = Visibility.Collapsed;
+            if (FindVisualChild<Border>(selectionCheckBox, "CardSelectionCheckedBox") is { } checkedBox)
+            {
+                checkedBox.Visibility = Visibility.Collapsed;
+            }
+            if (FindVisualChild<Border>(selectionCheckBox, "CardSelectionUncheckedBox") is { } uncheckedBox)
+            {
+                uncheckedBox.Visibility = Visibility.Visible;
+                uncheckedBox.Opacity = 1;
+            }
+        }
+
+        if (FindVisualChild<Button>(card, "CardQuickHideButton") is { } quickHideButton)
+        {
+            quickHideButton.Visibility = Visibility.Collapsed;
+            quickHideButton.Opacity = 1;
+        }
+
+        if (FindVisualChild<Image>(card, "SingleAppIcon") is { } singleImage)
+        {
+            singleImage.Source = null;
+        }
+
+        for (int slot = 0; slot < 4; slot++)
+        {
+            if (FindVisualChild<Image>(card, $"FolderMiniIcon{slot}") is { } miniImage)
+            {
+                miniImage.Source = null;
+            }
+        }
+
+        card.DataContext = null;
+    }
+
+    private static void ClearOverlayRepeaterVisuals(ItemsRepeater repeater)
+    {
+        int childCount = VisualTreeHelper.GetChildrenCount(repeater);
+        for (int i = 0; i < childCount; i++)
+        {
+            if (VisualTreeHelper.GetChild(repeater, i) is FrameworkElement card)
+            {
+                DetachImplicitOffsetAnimation(card);
+                if (card is Grid grid)
+                {
+                    grid.Background = s_transparentCardBrush;
+                }
+
+                card.Opacity = 1;
+                if (FindDescendant<Image>(card) is { } iconImage)
+                {
+                    iconImage.Source = null;
+                }
+
+                card.DataContext = null;
+            }
         }
     }
 
@@ -501,12 +1057,11 @@ public sealed partial class SearchPopupWindow : Window
             Win32Helper.SWP_NOMOVE | Win32Helper.SWP_NOSIZE |
             Win32Helper.SWP_NOACTIVATE | Win32Helper.SWP_FRAMECHANGED);
 
-        // Kill the DWM-drawn border (the thick light edge that otherwise rings the
-        // backdrop) and extend the frame edge-to-edge so the material reaches the corners.
-        Win32Helper.SetWindowBorderColor(_hwnd, unchecked((int)0xFFFFFFFE));
-        Win32Helper.ApplyFullWindowFrame(_hwnd);
+        // Disable DWM border, rounding, and shadow so XAML/SystemBackdropElement owns
+        // exact corner curvature with per-pixel alpha transparency.
+        Win32Helper.DisableWindowFrameShadow(_hwnd);
 
-        // Apply corner preference from settings (Default/Square/Small/Round).
+        // Apply corner preference from settings (Square/Small/Round/Large).
         ApplyWindowCornerPreference();
 
     }
@@ -519,6 +1074,8 @@ public sealed partial class SearchPopupWindow : Window
             if (IsPopupVisible)
             {
                 ApplyMaterialFromSettings();
+                UpdatePanelVisibility();
+                RefreshPreparedResultRows();
             }
             UpdateHotkeyHint();
         }
@@ -555,6 +1112,13 @@ public sealed partial class SearchPopupWindow : Window
             theme = Win32Helper.IsSystemDarkMode() ? ElementTheme.Dark : ElementTheme.Light;
 
         RootGrid.RequestedTheme = theme;
+        SyncEditRecommendationsButtonVisuals();
+        if (_isRecommendationEditMode)
+        {
+            RefreshAllRecommendedCardEditVisuals();
+        }
+
+        ApplySearchInputWellVisuals();
 
         // A pre-warmed hidden shell intentionally owns no backdrop controller.
         // The current material is applied immediately before the next native show.
@@ -566,15 +1130,29 @@ public sealed partial class SearchPopupWindow : Window
 
     private void OnWindowActivated(object sender, WindowActivatedEventArgs args)
     {
+        bool isActive = args.WindowActivationState != WindowActivationState.Deactivated;
+        _isPopupInputActive = isActive;
         if (_backdropConfiguration is not null)
         {
-            _backdropConfiguration.IsInputActive =
-                args.WindowActivationState != WindowActivationState.Deactivated;
+            _backdropConfiguration.IsInputActive = isActive;
         }
 
-        if (args.WindowActivationState != WindowActivationState.Deactivated)
+        if (isActive)
         {
+            CancelUnfocusedAutoHideTimer();
             UpdateSelectionActions();
+        }
+        else if (IsPopupVisible && !_isWindowClosed)
+        {
+            if (!IsPointerOverPopupWindow())
+            {
+                ClearHoveredRecommendedCard();
+                ClearHoveredOverlayCard();
+                ClearAllResultRowTransientStates();
+            }
+
+            ArmUnfocusedAutoHideTimer();
+            PopupDeactivated?.Invoke(this, EventArgs.Empty);
         }
     }
 
@@ -587,10 +1165,10 @@ public sealed partial class SearchPopupWindow : Window
             return;
         }
 
-        _settingsService.Settings.SearchPopupCustomX = rect.Left;
-        _settingsService.Settings.SearchPopupCustomY = rect.Top;
-        _settingsService.Settings.SearchPopupCustomWidth = rect.Right - rect.Left;
-        _settingsService.Settings.SearchPopupCustomHeight = rect.Bottom - rect.Top;
+        _settingsService.Settings.Search.SearchPopupCustomX = rect.Left;
+        _settingsService.Settings.Search.SearchPopupCustomY = rect.Top;
+        _settingsService.Settings.Search.SearchPopupCustomWidth = null;
+        _settingsService.Settings.Search.SearchPopupCustomHeight = null;
         // Persist without raising SettingsChanged. Raising it here re-triggers
         // OnAppearanceSettingsChanged -> ApplyMaterialFromSettings, which re-applies the
         // DWM backdrop and causes the window to flash on every drag release.
@@ -599,14 +1177,13 @@ public sealed partial class SearchPopupWindow : Window
 
     private void ResetToDefaultBounds()
     {
-        _settingsService.Settings.SearchPopupCustomX = null;
-        _settingsService.Settings.SearchPopupCustomY = null;
-        _settingsService.Settings.SearchPopupCustomWidth = null;
-        _settingsService.Settings.SearchPopupCustomHeight = null;
+        _settingsService.Settings.Search.SearchPopupCustomX = null;
+        _settingsService.Settings.Search.SearchPopupCustomY = null;
+        _settingsService.Settings.Search.SearchPopupCustomWidth = null;
+        _settingsService.Settings.Search.SearchPopupCustomHeight = null;
         _settingsService.SaveDebounced();
 
-        _appWindow?.Resize(new SizeInt32(PopupWidth, PopupHeight));
-        PositionOnScreen();
+        UpdatePopupDynamicBounds(forceWhenOpening: true);
     }
 
     private static int ToPhysicalPixels(int logicalPixels, double scale)
@@ -617,16 +1194,11 @@ public sealed partial class SearchPopupWindow : Window
 
     private void TopDragHotZone_PointerEntered(object sender, PointerRoutedEventArgs e)
     {
-        TopDragHandle.Opacity = 1;
         SetPointerCursor(TopDragHotZone, InputSystemCursorShape.SizeAll);
     }
 
     private void TopDragHotZone_PointerExited(object sender, PointerRoutedEventArgs e)
     {
-        if (!_isWindowDragging)
-        {
-            TopDragHandle.Opacity = 0;
-        }
     }
 
     private void TopDragHotZone_PointerPressed(object sender, PointerRoutedEventArgs e)
@@ -637,13 +1209,13 @@ public sealed partial class SearchPopupWindow : Window
             return;
         }
 
+        SnapHeightMorphToTarget();
         if (!TryBeginWindowInteraction(element, e))
         {
             return;
         }
 
         _isWindowDragging = true;
-        TopDragHandle.Opacity = 1;
         e.Handled = true;
     }
 
@@ -789,7 +1361,6 @@ public sealed partial class SearchPopupWindow : Window
         _isWindowResizing = false;
         _resizeDirection = string.Empty;
         captureElement?.ReleasePointerCapture(pointer);
-        TopDragHandle.Opacity = 0;
         if (persist)
         {
             PersistCustomBounds();
@@ -820,30 +1391,114 @@ public sealed partial class SearchPopupWindow : Window
     }
 
     /// <summary>
-    /// Applies the native DWM corner style from the widget appearance settings.
+    /// Applies the XAML/SystemBackdropElement corner style from the widget appearance
+    /// settings while keeping the outer HWND unrounded and shadowless.
     /// </summary>
     private void ApplyWindowCornerPreference()
     {
         string effectivePreference = WindowsCompatibilityService.ResolveEffectiveWidgetCornerPreference(
-            _settingsService.Settings.WidgetCornerPreference);
-        int cornerPreference = effectivePreference switch
-        {
-            SettingsService.WidgetCornerPreferenceSquare => Win32Helper.DWMWCP_DONOTROUND,
-            SettingsService.WidgetCornerPreferenceSmall => Win32Helper.DWMWCP_ROUNDSMALL,
-            _ => Win32Helper.DWMWCP_ROUND
-        };
+            SettingsService.WidgetCornerPreferenceLarge);
+        int cornerPreference = Win32Helper.DWMWCP_DONOTROUND;
 
+        Win32Helper.DisableWindowFrameShadow(_hwnd);
         Win32Helper.TrySetDwmWindowAttribute(
             _hwnd, Win32Helper.DWMWA_WINDOW_CORNER_PREFERENCE,
             ref cornerPreference);
 
-        // Keep the XAML border overlay corner radius in sync with the native corner.
-        PopupBorderOverlay.CornerRadius = cornerPreference switch
+        double radius = Math.Max(
+            SearchPopupSurfacePolicy.OuterCornerRadius,
+            WidgetCompactBoundsCalculator.ResolveOuterCornerRadius(effectivePreference));
+        var outerCornerRadius = new CornerRadius(radius);
+        var bottomCornerRadius = new CornerRadius(0, 0, radius, radius);
+        if (RootGrid.CornerRadius != default)
         {
-            Win32Helper.DWMWCP_DONOTROUND => new CornerRadius(0),
-            Win32Helper.DWMWCP_ROUNDSMALL => new CornerRadius(4),
-            _ => new CornerRadius(8)
-        };
+            RootGrid.CornerRadius = default;
+        }
+
+        if (PopupMaterialSurface.CornerRadius != default)
+        {
+            PopupMaterialSurface.CornerRadius = default;
+        }
+
+        PopupSurfacePlate.CornerRadius = outerCornerRadius;
+        PopupBorderOverlay.CornerRadius = outerCornerRadius;
+        FolderOverlayScrim.CornerRadius = bottomCornerRadius;
+        HiddenAppsOverlayScrim.CornerRadius = bottomCornerRadius;
+        FooterAcrylicSurface.CornerRadius = bottomCornerRadius;
+        _materialBackdropBridge?.SetCornerRadius(radius);
+    }
+
+    private void EnsureTransparentWindowBackdrop()
+    {
+        Win32Helper.EnableTransparentWindowHost(_hwnd);
+        if (_transparentWindowBackdrop is null)
+        {
+            _transparentWindowBackdrop = new SolidTintSystemBackdrop(Colors.Transparent);
+        }
+
+        if (!ReferenceEquals(SystemBackdrop, _transparentWindowBackdrop))
+        {
+            SystemBackdrop = _transparentWindowBackdrop;
+        }
+    }
+
+    private void ClearTransparentWindowBackdrop()
+    {
+        if (_transparentWindowBackdrop is not null)
+        {
+            if (ReferenceEquals(SystemBackdrop, _transparentWindowBackdrop))
+            {
+                SystemBackdrop = null;
+            }
+
+            _transparentWindowBackdrop.Dispose();
+            _transparentWindowBackdrop = null;
+        }
+
+        Win32Helper.DisableTransparentWindowHost(_hwnd);
+    }
+
+    private ElementBackdropTargetBridge EnsurePopupMaterialBackdropBridge()
+    {
+        if (_materialBackdropBridge is null)
+        {
+            _materialBackdropBridge = new ElementBackdropTargetBridge(
+                onTargetChanged: OnPopupMaterialBackdropTargetChanged,
+                onTargetDisconnecting: OnPopupMaterialBackdropTargetDisconnecting);
+        }
+
+        _materialBackdropBridge.SetCornerRadius(PopupSurfacePlate.CornerRadius.TopLeft);
+        if (!ReferenceEquals(PopupMaterialSurface.SystemBackdrop, _materialBackdropBridge))
+        {
+            PopupMaterialSurface.SystemBackdrop = _materialBackdropBridge;
+        }
+
+        _backdropTarget = _materialBackdropBridge.Target;
+        return _materialBackdropBridge;
+    }
+
+    private void OnPopupMaterialBackdropTargetChanged()
+    {
+        if (_isWindowClosed)
+        {
+            return;
+        }
+
+        _backdropTarget = _materialBackdropBridge?.Target;
+        if (_backdropTarget is not null && IsPopupVisible)
+        {
+            ApplyMaterialFromSettings();
+        }
+    }
+
+    private void OnPopupMaterialBackdropTargetDisconnecting(ICompositionSupportsSystemBackdrop target)
+    {
+        if (ReferenceEquals(_backdropTarget, target))
+        {
+            DetachAcrylicControllerTarget();
+            DetachMicaControllerTarget();
+            _backdropTarget = null;
+        }
     }
 
     private void ApplyMaterialFromSettings()
@@ -857,78 +1512,121 @@ public sealed partial class SearchPopupWindow : Window
         var accentColor = (App.Current as App)?.ThemeService?.GetEffectiveAccentColor()
                           ?? AccentColorHelper.DefaultAccentColor;
 
+        var shell = _settingsService.Settings.WidgetShell;
         string materialType = WindowsCompatibilityService.ResolveWidgetMaterialType(
-            _settingsService.Settings.WidgetMaterialType);
-        double surfaceOpacity = Math.Clamp(_settingsService.Settings.WidgetOpacity, 0.0, 1.0);
-        double materialIntensity = Math.Clamp(_settingsService.Settings.WidgetMaterialIntensity, 0.0, 1.0);
+            shell.WidgetMaterialType);
+        double surfaceOpacity = Math.Clamp(shell.WidgetOpacity, 0.0, 1.0);
+        double materialIntensity = Math.Clamp(shell.WidgetMaterialIntensity, 0.0, 1.0);
+        SearchPopupMaterialResolution materialResolution = SearchPopupSurfacePolicy.ResolveMaterial(
+            materialType,
+            surfaceOpacity,
+            materialIntensity,
+            isDark,
+            accentColor);
+        double effectiveCornerRadius = materialResolution.OuterCornerRadius;
 
         try
         {
             Win32Helper.SetWindowTheme(_hwnd, isDark);
-            Win32Helper.ApplyFullWindowFrame(_hwnd);
+            Win32Helper.DisableWindowFrameShadow(_hwnd);
+            ApplyWindowCornerPreference();
+            RootGrid.Background = s_transparentCardBrush;
 
             int backdropType;
             bool controllerApplied = false;
+            bool awaitingElementTarget = false;
 
-            if (SettingsService.IsMicaMaterial(materialType))
+            if (materialType is SettingsService.WidgetMaterialTypeSolid)
             {
-                controllerApplied = ApplyMicaController(
-                    isDark,
-                    BuildNativeBackdropTintColor(isDark, accentColor, materialIntensity),
-                    materialType == SettingsService.WidgetMaterialTypeMicaAlt);
-            }
-
-            if (!controllerApplied && SettingsService.IsAcrylicMaterial(materialType))
-            {
-                controllerApplied = ApplyAcrylicController(
-                    isDark,
-                    BuildNativeBackdropTintColor(isDark, accentColor, materialIntensity),
-                    surfaceOpacity,
-                    materialType == SettingsService.WidgetMaterialTypeAcrylicBase);
-            }
-
-            if (controllerApplied)
-            {
-                backdropType = Win32Helper.DWMSBT_NONE;
-                Win32Helper.TrySetDwmWindowAttribute(_hwnd, Win32Helper.DWMWA_SYSTEMBACKDROP_TYPE, ref backdropType);
-                Win32Helper.DisableAccentPolicy(_hwnd);
-                // Keep the XAML surface transparent so the native backdrop shows through.
-                RootGrid.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x01, 0x00, 0x00, 0x00));
-            }
-            else if (materialType is SettingsService.WidgetMaterialTypeSolid)
-            {
+                EnsureTransparentWindowBackdrop();
+                PopupMaterialSurface.Visibility = Visibility.Collapsed;
                 DetachAcrylicControllerTarget();
                 DetachMicaControllerTarget();
                 backdropType = Win32Helper.DWMSBT_NONE;
                 Win32Helper.TrySetDwmWindowAttribute(_hwnd, Win32Helper.DWMWA_SYSTEMBACKDROP_TYPE, ref backdropType);
                 Win32Helper.DisableAccentPolicy(_hwnd);
-                // The popup floats above other windows, so its solid material is
-                // fully opaque regardless of the widget surface opacity: a
-                // translucent surface here only reveals the black window
-                // surface underneath.
-                RootGrid.Background = new SolidColorBrush(
-                    BuildOpaquePopupSurfaceColor(isDark, accentColor, materialIntensity));
+                var opaqueBase = BuildOpaquePopupSurfaceColor(isDark, accentColor, materialIntensity);
+                PopupSurfacePlate.Background = new SolidColorBrush(
+                    Windows.UI.Color.FromArgb(
+                        materialResolution.SurfacePlateColor.A,
+                        opaqueBase.R,
+                        opaqueBase.G,
+                        opaqueBase.B));
             }
             else
             {
-                // Fallback: use legacy accent blur.
-                backdropType = Win32Helper.DWMSBT_TRANSIENTWINDOW;
-                Win32Helper.TrySetDwmWindowAttribute(_hwnd, Win32Helper.DWMWA_SYSTEMBACKDROP_TYPE, ref backdropType);
-                DetachAcrylicControllerTarget();
-                DetachMicaControllerTarget();
-                double accentOpacity = WindowsCompatibilityService.UsesLegacyWindowAcrylic &&
-                    SettingsService.IsAcrylicMaterial(materialType)
-                        ? WidgetMaterialVisualCalculator.CalculateLegacyAcrylicOpacity(
-                            materialType == SettingsService.WidgetMaterialTypeAcrylicBase,
-                            surfaceOpacity,
-                            materialIntensity)
-                        : Math.Min(surfaceOpacity, 0.52);
-                Win32Helper.ApplyAccentBlur(
-                    _hwnd,
-                    BuildNativeBackdropTintColor(isDark, accentColor, materialIntensity),
-                    accentOpacity,
-                    true);
-                RootGrid.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x01, 0x00, 0x00, 0x00));
+                EnsureTransparentWindowBackdrop();
+                PopupMaterialSurface.Visibility = Visibility.Visible;
+                ElementBackdropTargetBridge bridge = EnsurePopupMaterialBackdropBridge();
+                if (bridge.Target is null)
+                {
+                    awaitingElementTarget = true;
+                }
+                else
+                {
+                    if (SettingsService.IsMicaMaterial(materialType))
+                    {
+                        controllerApplied = ApplyMicaController(
+                            isDark,
+                            BuildNativeBackdropTintColor(isDark, accentColor, materialIntensity),
+                            materialType == SettingsService.WidgetMaterialTypeMicaAlt);
+                    }
+
+                    if (!controllerApplied && SettingsService.IsAcrylicMaterial(materialType))
+                    {
+                        controllerApplied = ApplyAcrylicController(
+                            isDark,
+                            BuildNativeBackdropTintColor(isDark, accentColor, materialIntensity),
+                            materialResolution.EffectiveAcrylicSurfaceOpacity,
+                            materialType == SettingsService.WidgetMaterialTypeAcrylicBase);
+                    }
+                }
+
+                if (awaitingElementTarget)
+                {
+                    backdropType = Win32Helper.DWMSBT_NONE;
+                    Win32Helper.TrySetDwmWindowAttribute(_hwnd, Win32Helper.DWMWA_SYSTEMBACKDROP_TYPE, ref backdropType);
+                    Win32Helper.DisableAccentPolicy(_hwnd);
+                    PopupSurfacePlate.Background = new SolidColorBrush(materialResolution.SurfacePlateColor);
+                }
+                else if (controllerApplied)
+                {
+                    backdropType = Win32Helper.DWMSBT_NONE;
+                    Win32Helper.TrySetDwmWindowAttribute(_hwnd, Win32Helper.DWMWA_SYSTEMBACKDROP_TYPE, ref backdropType);
+                    Win32Helper.DisableAccentPolicy(_hwnd);
+                    PopupSurfacePlate.Background = new SolidColorBrush(materialResolution.SurfacePlateColor);
+                }
+                else if (effectiveCornerRadius <= 0)
+                {
+                    PopupMaterialSurface.Visibility = Visibility.Collapsed;
+                    ClearTransparentWindowBackdrop();
+                    backdropType = Win32Helper.DWMSBT_TRANSIENTWINDOW;
+                    Win32Helper.TrySetDwmWindowAttribute(_hwnd, Win32Helper.DWMWA_SYSTEMBACKDROP_TYPE, ref backdropType);
+                    DetachAcrylicControllerTarget();
+                    DetachMicaControllerTarget();
+                    double accentOpacity = WindowsCompatibilityService.UsesLegacyWindowAcrylic &&
+                        SettingsService.IsAcrylicMaterial(materialType)
+                            ? WidgetMaterialVisualCalculator.CalculateLegacyAcrylicOpacity(
+                                materialType == SettingsService.WidgetMaterialTypeAcrylicBase,
+                                surfaceOpacity,
+                                materialIntensity)
+                            : Math.Min(surfaceOpacity, 0.52);
+                    Win32Helper.ApplyAccentBlur(
+                        _hwnd,
+                        BuildNativeBackdropTintColor(isDark, accentColor, materialIntensity),
+                        accentOpacity,
+                        true);
+                    PopupSurfacePlate.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x01, 0x00, 0x00, 0x00));
+                }
+                else
+                {
+                    PopupMaterialSurface.Visibility = Visibility.Collapsed;
+                    backdropType = Win32Helper.DWMSBT_NONE;
+                    Win32Helper.TrySetDwmWindowAttribute(_hwnd, Win32Helper.DWMWA_SYSTEMBACKDROP_TYPE, ref backdropType);
+                    Win32Helper.DisableAccentPolicy(_hwnd);
+                    PopupSurfacePlate.Background = new SolidColorBrush(
+                        BuildOpaquePopupSurfaceColor(isDark, accentColor, materialIntensity));
+                }
             }
         }
         catch (Exception ex)
@@ -936,25 +1634,39 @@ public sealed partial class SearchPopupWindow : Window
             App.Log($"[SearchPopup] ApplyMaterialFromSettings fallback: {ex.Message}");
             DisposeAcrylicController();
             DisposeMicaController();
-            double fallbackOpacity = WindowsCompatibilityService.UsesLegacyWindowAcrylic
-                ? WidgetMaterialVisualCalculator.CalculateLegacyAcrylicOpacity(
-                    materialType == SettingsService.WidgetMaterialTypeAcrylicBase,
-                    surfaceOpacity,
-                    materialIntensity)
-                : Math.Min(surfaceOpacity, 0.52);
-            Win32Helper.ApplyAccentBlur(
-                _hwnd,
-                BuildNativeBackdropTintColor(isDark, accentColor, materialIntensity),
-                fallbackOpacity,
-                true);
+            EnsureTransparentWindowBackdrop();
+            PopupMaterialSurface.Visibility = Visibility.Collapsed;
+            Win32Helper.DisableAccentPolicy(_hwnd);
+            PopupSurfacePlate.Background = new SolidColorBrush(
+                BuildOpaquePopupSurfaceColor(isDark, accentColor, materialIntensity));
         }
 
         var (thickness, borderColor) = GetPopupBorderVisuals(isDark, accentColor);
+        PopupBorderOverlay.BorderBrush = new SolidColorBrush(
+            borderColor.A == 0 ? Colors.Transparent : borderColor);
         PopupBorderOverlay.BorderThickness = new Thickness(thickness);
-        PopupBorderOverlay.BorderBrush = borderColor.A == 0
-            ? null
-            : new SolidColorBrush(borderColor);
+        ApplySearchInputWellVisuals();
+    }
 
+    private void ApplySearchInputWellVisuals()
+    {
+        bool isDark = RootGrid.ActualTheme == ElementTheme.Dark;
+        bool isExpanded = BodyContentRow.Visibility == Visibility.Visible ||
+                          TabsAndFilterRow.Visibility == Visibility.Visible ||
+                          EverythingPromptBanner.Visibility == Visibility.Visible ||
+                          FooterBar.Visibility == Visibility.Visible;
+        SearchPopupInputWellVisuals visuals = SearchPopupSurfacePolicy.ResolveInputWellVisuals(
+            isExpanded,
+            isDark);
+        SearchBoxBorder.Background = visuals.BackgroundColor.A == 0
+            ? s_transparentCardBrush
+            : new SolidColorBrush(visuals.BackgroundColor);
+        SearchBoxBorder.BorderBrush = visuals.BorderColor.A == 0
+            ? s_transparentCardBrush
+            : new SolidColorBrush(visuals.BorderColor);
+        HeaderBottomDivider.Visibility = visuals.ShowHeaderBottomDivider
+            ? Visibility.Visible
+            : Visibility.Collapsed;
     }
 
     /// <summary>
@@ -982,7 +1694,11 @@ public sealed partial class SearchPopupWindow : Window
             return false;
         }
 
-        _backdropTarget ??= this.As<ICompositionSupportsSystemBackdrop>();
+        _backdropTarget = EnsurePopupMaterialBackdropBridge().Target;
+        if (_backdropTarget is null)
+        {
+            return false;
+        }
         _backdropConfiguration ??= new SystemBackdropConfiguration();
         _backdropConfiguration.IsInputActive = true;
         _backdropConfiguration.Theme = isDark ? SystemBackdropTheme.Dark : SystemBackdropTheme.Light;
@@ -1040,7 +1756,11 @@ public sealed partial class SearchPopupWindow : Window
             return false;
         }
 
-        _backdropTarget ??= this.As<ICompositionSupportsSystemBackdrop>();
+        _backdropTarget = EnsurePopupMaterialBackdropBridge().Target;
+        if (_backdropTarget is null)
+        {
+            return false;
+        }
         _backdropConfiguration ??= new SystemBackdropConfiguration();
         _backdropConfiguration.IsInputActive = true;
         _backdropConfiguration.Theme = isDark ? SystemBackdropTheme.Dark : SystemBackdropTheme.Light;
@@ -1192,9 +1912,11 @@ public sealed partial class SearchPopupWindow : Window
             _ => (0.8d, (byte)0x18)
         };
 
-        if (colorMode == SettingsService.WidgetBorderColorModeNone)
+        if (thickness <= 0 || colorMode == SettingsService.WidgetBorderColorModeNone)
         {
-            return (0d, Windows.UI.Color.FromArgb(0, 0, 0, 0));
+            byte fallbackChannel = isDark ? (byte)0xFF : (byte)0x00;
+            byte fallbackAlpha = isDark ? (byte)0x20 : (byte)0x16;
+            return (0.8d, Windows.UI.Color.FromArgb(fallbackAlpha, fallbackChannel, fallbackChannel, fallbackChannel));
         }
 
         bool useAccent = colorMode == SettingsService.WidgetBorderColorModeAccent;
@@ -1248,7 +1970,7 @@ public sealed partial class SearchPopupWindow : Window
             return false;
         }
 
-        var settings = _settingsService.Settings;
+        var settings = _settingsService.Settings.Search;
         if (settings.SearchPopupCustomX is not int x ||
             settings.SearchPopupCustomY is not int y ||
             settings.SearchPopupCustomWidth is not int width ||
@@ -1310,26 +2032,44 @@ public sealed partial class SearchPopupWindow : Window
 
         OpenSettingsLabel.Text = _localizationService.T("Search.Action.OpenSettings");
 
+        ToolTipService.SetToolTip(ClearQueryButton, _localizationService.T("Common.Close"));
         SortNameLabel.Text = _localizationService.T("Search.Sort.Name");
         SortTypeLabel.Text = _localizationService.T("Search.Sort.Type");
         SortSizeLabel.Text = _localizationService.T("Search.Sort.Size");
         SortDateLabel.Text = _localizationService.T("Search.Sort.Date");
-        ResultFilterLabel.Text = _localizationService.T("Search.Filter.Label");
-        FilterAllItem.Content = _localizationService.T("Search.Filter.All");
-        FilterFilesItem.Content = _localizationService.T("Search.Filter.Files");
-        FilterAppsItem.Content = _localizationService.T("Search.Filter.Apps");
-        FilterImagesItem.Content = _localizationService.T("Search.Filter.Images");
-        FilterDocumentsItem.Content = _localizationService.T("Search.Filter.Documents");
-        FilterDeskBoxItem.Content = _localizationService.T("Search.Filter.DeskBox");
         OpenSelectedLabel.Text = _localizationService.T("Search.Menu.Open");
         OpenLocationLabel.Text = _localizationService.T("Search.Menu.OpenLocation");
         AttachSelectedLabel.Text = _localizationService.T("Search.Menu.AttachToTodo");
         SaveSelectedLabel.Text = _localizationService.T("Search.Menu.SaveToNote");
 
+        AllRecommendedHiddenHintText.Text = _localizationService.T("Search.Recommend.AllHiddenHint");
+        HiddenOverlayTitleText.Text = _localizationService.T("Search.Recommend.HiddenTitle");
+        HiddenOverlaySubtitleText.Text = _localizationService.T("Search.Recommend.HiddenHint");
+        UnhideAllButtonText.Text = _localizationService.T("Search.Recommend.UnhideAll");
+        ToolTipService.SetToolTip(
+            HiddenAppsEntryButton,
+            _localizationService.T("Search.Recommend.HiddenTitle"));
+        ToolTipService.SetToolTip(
+            EverythingDismissButton,
+            _localizationService.T("Search.EverythingBanner.DontRemind"));
+        ToolTipService.SetToolTip(
+            FolderOverlayTitleButton,
+            _localizationService.T("Search.Recommend.RenameFolder"));
+        ToolTipService.SetToolTip(
+            CloseHiddenOverlayButton,
+            _localizationService.T("Common.Close"));
+        SyncEditRecommendationsButtonVisuals();
+        ApplyLocalizedCommandPaletteStrings();
+        UpdateRecommendationOverlayResponsiveBounds();
+
         TabsList.ItemsSource = _viewModel.Tabs;
         ResultsRepeater.ItemsSource = _viewModel.CurrentResults;
-        RecommendedAppsRepeater.ItemsSource = _viewModel.CurrentResults;
+        RecommendedAppsRepeater.ItemsSource = _viewModel.RecommendedEntries;
+        FolderAppsRepeater.ItemsSource = _folderOverlayItems;
+        HiddenAppsRepeater.ItemsSource = _viewModel.HiddenRecommendations;
 
+        UpdateEverythingPromptBanner();
+        UpdateRecommendationHeaderState();
         UpdatePanelVisibility();
         UpdateSortHeaders();
     }
@@ -1338,15 +2078,30 @@ public sealed partial class SearchPopupWindow : Window
     {
         string hint = _viewModel.HotkeyHint;
         HotkeyHintText.Text = hint;
-        HotkeyHintBadge.Visibility = string.IsNullOrWhiteSpace(hint)
-            ? Visibility.Collapsed
-            : Visibility.Visible;
+        bool hasText = !string.IsNullOrEmpty(SearchTextBox.Text);
+        ClearQueryButton.Visibility = hasText
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        HotkeyHintBadge.Visibility = !hasText &&
+                                     _latchedInlineScope == SearchInlineScope.None &&
+                                     !string.IsNullOrWhiteSpace(hint)
+            ? Visibility.Visible
+            : Visibility.Collapsed;
     }
 
     private void RootGrid_PreviewKeyDown(object sender, KeyRoutedEventArgs e)
     {
-        if (e.Handled)
+        if (e.Handled || _isCmdBarFlyoutOpen ||
+            DeskBox.Helpers.ImeCompositionGuard.IsImeCompositionKeyEvent(e))
         {
+            return;
+        }
+
+        if (!IsAnyRecommendationOverlayOpen() &&
+            !_isEditingFolderTitle &&
+            HandleCommandPaletteShortcutKeys(e))
+        {
+            e.Handled = true;
             return;
         }
 
@@ -1362,7 +2117,38 @@ public sealed partial class SearchPopupWindow : Window
             return;
         }
 
+        if (!IsAnyRecommendationOverlayOpen() &&
+            !_isEditingFolderTitle &&
+            RecommendedAppsPanel.Visibility == Visibility.Visible &&
+            string.IsNullOrEmpty(SearchTextBox.Text))
+        {
+            bool plainArrowKey =
+                e.Key is Windows.System.VirtualKey.Up
+                    or Windows.System.VirtualKey.Down
+                    or Windows.System.VirtualKey.Left
+                    or Windows.System.VirtualKey.Right &&
+                !Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control) &&
+                !Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Menu) &&
+                !Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Shift);
+            bool routeToRecommend =
+                plainArrowKey ||
+                (_isRecommendationEditMode &&
+                 ((e.Key == Windows.System.VirtualKey.Delete && _recMultiSelectedKeys.Count > 0) ||
+                  (e.Key == Windows.System.VirtualKey.A &&
+                   Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control))));
+            if (routeToRecommend && HandleRecommendedAppsKey(e))
+            {
+                e.Handled = true;
+                return;
+            }
+        }
+
         if (e.Key is not (Windows.System.VirtualKey.Up or Windows.System.VirtualKey.Down))
+        {
+            return;
+        }
+
+        if (IsAnyRecommendationOverlayOpen())
         {
             return;
         }
@@ -1384,14 +2170,58 @@ public sealed partial class SearchPopupWindow : Window
 
     private void RootGrid_KeyDown(object sender, KeyRoutedEventArgs e)
     {
-        // ── Recommended apps panel takes priority when visible ──
-        bool recommendedVisible = RecommendedAppsPanel.Visibility == Visibility.Visible;
+        if (DeskBox.Helpers.ImeCompositionGuard.IsImeCompositionKeyEvent(e))
+        {
+            return;
+        }
 
-        // Escape: clear recommended app selection first, then hand focus back
-        // from a sort header to the search box (same tier as the results
-        // panel's Escape), then hide popup.
+        // ── Recommended apps panel takes priority when visible ──
+        bool recommendedVisible =
+            RecommendedAppsPanel.Visibility == Visibility.Visible &&
+            !IsAnyRecommendationOverlayOpen();
+
+        // Escape: close active folder/hidden overlays first, then clear recommended
+        // app selection, then hand focus back from a sort header to the search box,
+        // then hide popup.
         if (e.Key == Windows.System.VirtualKey.Escape)
         {
+            if (_isEditingFolderTitle)
+            {
+                CancelFolderTitleEdit();
+                e.Handled = true;
+                return;
+            }
+            if (IsAnyRecommendationOverlayOpen())
+            {
+                CloseRecommendationOverlays();
+                SearchTextBox.Focus(FocusState.Programmatic);
+                e.Handled = true;
+                return;
+            }
+            if (_isRecommendationEditMode)
+            {
+                if (_recMultiSelectedKeys.Count > 0)
+                {
+                    _recMultiSelectedKeys.Clear();
+                    RefreshAllRecommendedCardEditVisuals();
+                    UpdateRecommendationEditStatusHint();
+                }
+                else
+                {
+                    SetRecommendationEditMode(false);
+                }
+
+                SearchTextBox.Focus(FocusState.Programmatic);
+                e.Handled = true;
+                return;
+            }
+            if (_multiSelectedItems.Count > 0)
+            {
+                ClearMultiSelection();
+                SearchTextBox.Focus(FocusState.Programmatic);
+                e.Handled = true;
+                return;
+            }
             if (_selectedAppIndex >= 0)
             {
                 ClearRecommendedAppSelection();
@@ -1402,6 +2232,12 @@ public sealed partial class SearchPopupWindow : Window
             if (FocusManager.GetFocusedElement() is Button focusedHeader && IsSortHeaderButton(focusedHeader))
             {
                 SearchTextBox.Focus(FocusState.Programmatic);
+                e.Handled = true;
+                return;
+            }
+            if (_latchedInlineScope != SearchInlineScope.None)
+            {
+                ExitLatchedScope();
                 e.Handled = true;
                 return;
             }
@@ -1457,19 +2293,25 @@ public sealed partial class SearchPopupWindow : Window
             }
         }
 
-        // Sort headers joined the tab chain: printable keys falling through
-        // from a focused header must keep flowing into the query, mirroring
-        // the results panel's redirect (ResultsPanel_KeyDown default branch).
-        // Modifier chords stay untouched — Ctrl+A/C/V must not insert
-        // literal characters into the query.
+        // Printable keys falling through from non-editable controls (sort
+        // headers, scroll viewers, recommendation chrome) flow into the query
+        // so the user can always start typing immediately. Modifier chords
+        // stay untouched — Ctrl+A/C/V must not insert literal characters.
         if (!Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control) &&
             !Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Menu) &&
-            FocusManager.GetFocusedElement() is Button focusedControl &&
-            IsSortHeaderButton(focusedControl))
+            !_isEditingFolderTitle &&
+            !IsAnyRecommendationOverlayOpen())
         {
-            if (TryRedirectCharToSearchBox(e.Key))
+            object? focused = FocusManager.GetFocusedElement();
+            if (focused is not TextBox and not ComboBox &&
+                (focused is not Button focusedBtn ||
+                 IsSortHeaderButton(focusedBtn) ||
+                 RecommendedAppsPanel.Visibility == Visibility.Visible))
             {
-                e.Handled = true;
+                if (TryRedirectCharToSearchBox(e.Key))
+                {
+                    e.Handled = true;
+                }
             }
         }
     }
@@ -1502,12 +2344,6 @@ public sealed partial class SearchPopupWindow : Window
             return false;
         }
 
-        if (focusedObject is not null &&
-            IsVisualDescendantOf(focusedObject, ResultFilterComboBox))
-        {
-            // The filter picker owns its arrow keys while it is focused.
-            return false;
-        }
 
         SearchResultItem? previousSelection = _viewModel.SelectedItem;
         if (key == Windows.System.VirtualKey.Up)
@@ -1585,29 +2421,19 @@ public sealed partial class SearchPopupWindow : Window
     /// </summary>
     private void OnRecommendedAppsElementPrepared(ItemsRepeater sender, ItemsRepeaterElementPreparedEventArgs args)
     {
-        // The card template binds through x:Bind, which ItemsRepeater wires
-        // without assigning an inherited DataContext, so every DataContext-
-        // based card handler (select, double-tap open, keyboard selection,
-        // icon patch) silently no-ops unless the item is assigned explicitly
-        // from the repeater index — the same resolution the result rows use.
-        if (args.Element is FrameworkElement card &&
-            RecommendedAppsRepeater.ItemsSource is System.Collections.IList items &&
-            args.Index >= 0 &&
-            args.Index < items.Count)
+        if (args.Element is FrameworkElement card)
         {
-            card.DataContext = items[args.Index];
-        }
-
-        if (args.Element is FrameworkElement { DataContext: SearchResultItem item } preparedCard &&
-            item.Icon is not null)
-        {
-            // The card template binds Icon one-time, so a container realized
-            // before enrichment finished needs its Image patched explicitly.
-            var image = FindDescendant<Image>(preparedCard);
-            if (image is not null && image.Source != item.Icon)
-            {
-                image.Source = item.Icon;
-            }
+            ElementCompositionPreview.SetIsTranslationEnabled(card, true);
+            _recHasCachedReflowState = false;
+            DetachImplicitOffsetAnimation(card);
+            RecommendedGridEntry? resolvedEntry =
+                RecommendedAppsRepeater.ItemsSource is System.Collections.IList items &&
+                args.Index >= 0 &&
+                args.Index < items.Count
+                    ? items[args.Index] as RecommendedGridEntry
+                    : card.DataContext as RecommendedGridEntry;
+            SyncRecommendedCardContent(card, resolvedEntry);
+            ArmImplicitOffsetAnimationAfterLayout(card);
         }
 
         // If an entrance animation is pending, animate this freshly realized card
@@ -1616,17 +2442,187 @@ public sealed partial class SearchPopupWindow : Window
         if (_pendingEntranceStyle is int style && args.Element is FrameworkElement element)
         {
             AnimateSingleAppCard(element, args.Index, style);
-            // Once every element in the source has been prepared, the entrance is
-            // complete; drop the flag so later re-realizations (scroll/recycle) are
-            // not re-animated.
             if (RecommendedAppsRepeater.ItemsSource is System.Collections.ICollection coll &&
                 args.Index >= coll.Count - 1)
             {
                 _pendingEntranceStyle = null;
-                _entranceGuardTimer?.Stop();
-                _entranceGuardTimer = null;
+                StopAndClearEntranceGuardTimer();
             }
         }
+    }
+
+    private void SyncRecommendedCardContent(FrameworkElement card, RecommendedGridEntry? entry)
+    {
+        card.DataContext = entry;
+        card.Opacity = _recIsDragging &&
+                       entry is not null &&
+                       _recDraggedEntryKeys.Contains(entry.EntryKey)
+            ? 0.36
+            : 1;
+
+        if (card is Grid grid)
+        {
+            bool showHoverMask = ReferenceEquals(grid, _hoveredAppCard) &&
+                                 !_recIsDragging &&
+                                 !_isRecRubberBanding;
+            grid.Background = showHoverMask
+                ? ResolveThemeBrush("SubtleFillColorSecondaryBrush")
+                : s_transparentCardBrush;
+        }
+
+        if (FindVisualChild<TextBlock>(card, "CardLabelTextBlock") is { } labelBlock)
+        {
+            labelBlock.Text = entry?.Label ?? string.Empty;
+        }
+
+        if (FindVisualChild<FrameworkElement>(card, "SingleIconHost") is { } singleIconHost)
+        {
+            singleIconHost.Visibility = entry?.SingleIconVisibility ?? Visibility.Collapsed;
+        }
+
+        if (FindVisualChild<FrameworkElement>(card, "FolderPreviewPlate") is { } folderPreviewPlate)
+        {
+            folderPreviewPlate.Visibility = entry?.FolderPreviewVisibility ?? Visibility.Collapsed;
+        }
+
+        // Always assign image.Source (even when Icon is null) so recycled
+        // containers never flash a previous app's icon while async icons load.
+        if (FindVisualChild<Image>(card, "SingleAppIcon") is { } image)
+        {
+            if (entry is { IsFolder: false, AppItem: { } item })
+            {
+                image.Source = item.Icon;
+            }
+            else
+            {
+                image.Source = null;
+            }
+        }
+
+        PopulateFolderPreviewIcons(card, entry);
+        ApplyRecommendedCardEditVisuals(card, entry);
+    }
+
+    private void OnRecommendedAppsElementClearing(ItemsRepeater sender, ItemsRepeaterElementClearingEventArgs args)
+    {
+        if (args.Element is not FrameworkElement card)
+        {
+            return;
+        }
+
+        if (ReferenceEquals(_selectedAppCard, card))
+        {
+            _selectedAppCard = null;
+            _selectedAppIndex = -1;
+        }
+
+        if (ReferenceEquals(_hoveredAppCard, card))
+        {
+            _hoveredAppCard = null;
+        }
+
+        // A recycled card must not carry a live-reflow translation into its
+        // next incarnation.
+        _recHasCachedReflowState = false;
+        if (card.DataContext is RecommendedGridEntry clearingEntry)
+        {
+            _recTileBaseRects.Remove(clearingEntry.EntryKey);
+            _recReflowTranslations.Remove(clearingEntry.EntryKey);
+        }
+
+        ElementCompositionPreview.SetIsTranslationEnabled(card, true);
+        if (ElementCompositionPreview.GetElementVisual(card) is { } clearingVisual)
+        {
+            clearingVisual.StopAnimation("Translation");
+            // Translation is animatable but not a settable CLR property in
+            // the WinUI 3 projection; it lives in the property store.
+            clearingVisual.Properties.InsertVector3(
+                "Translation",
+                System.Numerics.Vector3.Zero);
+        }
+
+        ClearRecommendedCardVisuals(card);
+    }
+
+    private static void PopulateFolderPreviewIcons(FrameworkElement card, RecommendedGridEntry? entry)
+    {
+        for (int slot = 0; slot < 4; slot++)
+        {
+            if (FindVisualChild<Image>(card, $"FolderMiniIcon{slot}") is not { } miniImage)
+            {
+                continue;
+            }
+
+            if (entry is { IsFolder: true } && slot < entry.FolderItems.Count)
+            {
+                ImageSource? memberIcon = entry.FolderItems[slot].Icon;
+                miniImage.Source = memberIcon;
+                miniImage.Visibility = memberIcon is not null ? Visibility.Visible : Visibility.Collapsed;
+            }
+            else
+            {
+                miniImage.Source = null;
+                miniImage.Visibility = Visibility.Collapsed;
+            }
+        }
+    }
+
+    private void OnOverlayAppsElementPrepared(ItemsRepeater sender, ItemsRepeaterElementPreparedEventArgs args)
+    {
+        if (args.Element is not FrameworkElement card)
+        {
+            return;
+        }
+
+        DetachImplicitOffsetAnimation(card);
+        SearchResultItem? resolvedItem =
+            sender.ItemsSource is System.Collections.IList items &&
+            args.Index >= 0 &&
+            args.Index < items.Count
+                ? items[args.Index] as SearchResultItem
+                : card.DataContext as SearchResultItem;
+        card.DataContext = resolvedItem;
+        card.Opacity = 1;
+
+        if (card is Grid grid)
+        {
+            grid.Background = s_transparentCardBrush;
+        }
+
+        if (FindDescendant<Image>(card) is { } overlayImage)
+        {
+            ImageSource? resolvedIcon = resolvedItem?.Icon;
+            overlayImage.Source = resolvedIcon;
+        }
+
+        ArmImplicitOffsetAnimationAfterLayout(card);
+    }
+
+    private void OnOverlayAppsElementClearing(ItemsRepeater sender, ItemsRepeaterElementClearingEventArgs args)
+    {
+        if (args.Element is not FrameworkElement card)
+        {
+            return;
+        }
+
+        if (ReferenceEquals(_hoveredOverlayCard, card))
+        {
+            _hoveredOverlayCard = null;
+        }
+
+        DetachImplicitOffsetAnimation(card);
+        if (card is Grid grid)
+        {
+            grid.Background = s_transparentCardBrush;
+        }
+
+        card.Opacity = 1;
+        if (FindDescendant<Image>(card) is { } overlayImage)
+        {
+            overlayImage.Source = null;
+        }
+
+        card.DataContext = null;
     }
 
     /// <summary>
@@ -1659,28 +2655,54 @@ public sealed partial class SearchPopupWindow : Window
     /// </summary>
     private void RefreshRecommendedAppIcons()
     {
-        int index = 0;
-        var itemsSource = RecommendedAppsRepeater.ItemsSource as System.Collections.IEnumerable
-            ?? Array.Empty<object>();
-        foreach (var dataItem in itemsSource)
+        int childCount = VisualTreeHelper.GetChildrenCount(RecommendedAppsRepeater);
+        for (int i = 0; i < childCount; i++)
         {
-            if (dataItem is SearchResultItem item && item.Icon is not null &&
-                RecommendedAppsRepeater.TryGetElement(index) is FrameworkElement card)
+            if (VisualTreeHelper.GetChild(RecommendedAppsRepeater, i) is not FrameworkElement card ||
+                card.DataContext is not RecommendedGridEntry entry)
             {
-                var image = FindDescendant<Image>(card);
-                if (image is not null && image.Source != item.Icon)
+                continue;
+            }
+
+            if (!entry.IsFolder && entry.AppItem is { } item)
+            {
+                var image = FindVisualChild<Image>(card, "SingleAppIcon");
+                if (image is not null && !ReferenceEquals(image.Source, item.Icon))
                 {
                     image.Source = item.Icon;
                 }
             }
-            index++;
+            else if (entry.IsFolder)
+            {
+                PopulateFolderPreviewIcons(card, entry);
+            }
+        }
+
+        RefreshOverlayRepeaterIcons(FolderAppsRepeater);
+        RefreshOverlayRepeaterIcons(HiddenAppsRepeater);
+    }
+
+    private static void RefreshOverlayRepeaterIcons(ItemsRepeater repeater)
+    {
+        int childCount = VisualTreeHelper.GetChildrenCount(repeater);
+        for (int i = 0; i < childCount; i++)
+        {
+            if (VisualTreeHelper.GetChild(repeater, i) is FrameworkElement card &&
+                card.DataContext is SearchResultItem entryItem &&
+                FindDescendant<Image>(card) is { } overlayImage)
+            {
+                ImageSource? resolvedIcon = entryItem.Icon;
+                if (!ReferenceEquals(overlayImage.Source, resolvedIcon))
+                {
+                    overlayImage.Source = resolvedIcon;
+                }
+            }
         }
     }
 
     private void OnRecommendationIconsResolved()
     {
-        if (!IsPopupVisible ||
-            RecommendedAppsPanel.Visibility != Visibility.Visible)
+        if (!IsPopupVisible)
         {
             return;
         }
@@ -1688,23 +2710,139 @@ public sealed partial class SearchPopupWindow : Window
         RefreshRecommendedAppIcons();
     }
 
-    private void UpdatePanelVisibility()
+    private void OnRecommendationLayoutUpdated()
+    {
+        if (!IsPopupVisible)
+        {
+            return;
+        }
+
+        PruneStaleMultiSelectedRecommendationKeys();
+        UpdateRecommendationHeaderState();
+        SyncOpenFolderOverlayWithViewModel();
+        RefreshAllRecommendedCardEditVisuals();
+        UpdateRecommendationEditStatusHint();
+        RefreshRecommendedAppIcons();
+
+        DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
+        {
+            if (_isWindowClosed || !IsPopupVisible)
+            {
+                return;
+            }
+
+            RefreshAllRecommendedCardEditVisuals();
+            RefreshRecommendedAppIcons();
+        });
+    }
+
+    private void UpdateEverythingPromptBanner()
     {
         bool hasQuery = !string.IsNullOrWhiteSpace(SearchTextBox.Text);
+        bool allowBanner = hasQuery || _settingsService.Settings.Search.SearchShowRecommendations;
+        EverythingPromptBanner.Visibility = allowBanner && _viewModel.IsEverythingPromptVisible
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        EverythingPromptTextBlock.Text = _viewModel.EverythingPromptText;
+        EverythingConnectButtonText.Text = _viewModel.EverythingPromptActionText;
+        EverythingPromptIcon.Glyph = _viewModel.IsEverythingPromptWarning
+            ? "\uE7BA"
+            : "\uE946";
+    }
+
+    private void EverythingConnectButton_Click(object sender, RoutedEventArgs e)
+    {
+        _viewModel.InvokeAction("open-settings");
+    }
+
+    private void EverythingDismissButton_Click(object sender, RoutedEventArgs e)
+    {
+        _viewModel.DismissEverythingPrompt();
+        UpdatePanelVisibility();
+    }
+
+    private void UpdateRecommendationHeaderState()
+    {
+        bool homeVisible = string.IsNullOrWhiteSpace(SearchTextBox.Text) &&
+                           RecommendedAppsPanel.Visibility == Visibility.Visible;
+        bool hasHidden = _viewModel.HasHiddenRecommendations;
+        bool hasEntries = _viewModel.HasRecommendedEntries;
+
+        HiddenAppsEntryButton.Visibility = homeVisible && hasHidden
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        if (hasHidden)
+        {
+            HiddenAppsEntryLabel.Text = string.Format(
+                _localizationService.T("Search.Recommend.HiddenEntryFormat"),
+                _viewModel.HiddenRecommendationCount);
+        }
+
+        EditRecommendationsButton.Visibility = homeVisible && hasEntries
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        if (!hasEntries && _isRecommendationEditMode)
+        {
+            SetRecommendationEditMode(false);
+        }
+
+        RecommendedAppsScrollViewer.Visibility = hasEntries
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        AllRecommendedHiddenHintPanel.Visibility =
+            !hasEntries && hasHidden
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+
+        if (!hasHidden && HiddenAppsOverlayHost.Visibility == Visibility.Visible)
+        {
+            CloseRecommendationOverlays();
+        }
+    }
+
+    private void UpdateScopePrefixBadge(string? rawQuery)
+    {
+        SyncScopeHeaderVisuals(rawQuery);
+    }
+
+    private void UpdatePanelVisibility() => UpdatePanelVisibility(forceBoundsWhenOpening: false);
+
+    private void UpdatePanelVisibility(bool forceBoundsWhenOpening)
+    {
+        bool wasResultsVisible = ResultsPanel.Visibility == Visibility.Visible;
+        bool hasQuery = HasActiveSearchOrScope;
+        if (!hasQuery)
+        {
+            ResetSearchSessionVisualFlags();
+        }
         bool searching = _viewModel.IsSearching;
         bool hasResults = _viewModel.HasResults;
         bool tabHasItems = _viewModel.HasCurrentResults;
         bool tabSelected = _viewModel.SelectedTab is not null;
+        bool recommendationsEnabled = _settingsService.Settings.Search.SearchShowRecommendations;
+
+        UpdateEverythingPromptBanner();
+        UpdateScopePrefixBadge(SearchTextBox.Text);
+        UpdateHotkeyHint();
 
         // A ready resident index answers normal keystrokes directly. Avoid flashing a
         // progress animation for the short cancellable query window; indexing state
         // remains available in Settings for first-build and rebuild diagnostics.
+        SearchProgressBar.IsIndeterminate = false;
         SearchProgressBar.Visibility = Visibility.Collapsed;
+        LoadingRing.IsActive = false;
         LoadingStatusText.Text = _localizationService.T("Search.Status.Searching");
         LoadingPanel.Visibility = Visibility.Collapsed;
-        TabsList.Visibility = hasQuery ? Visibility.Visible : Visibility.Collapsed;
 
-        NoResultsPanel.Visibility = hasQuery && !searching && !hasResults
+        bool showResults = hasQuery && hasResults && tabHasItems;
+        bool showNoResults = hasQuery && !searching && !hasResults;
+        bool showResultChrome = hasQuery && hasResults && tabSelected;
+
+        bool showCategoryBar = showResultChrome && _viewModel.ShouldShowCategoryBar;
+        TabsList.Visibility = showCategoryBar ? Visibility.Visible : Visibility.Collapsed;
+        TabsAndFilterRow.Visibility = showCategoryBar ? Visibility.Visible : Visibility.Collapsed;
+
+        NoResultsPanel.Visibility = showNoResults
             ? Visibility.Visible
             : Visibility.Collapsed;
 
@@ -1718,20 +2856,23 @@ public sealed partial class SearchPopupWindow : Window
                 ? Visibility.Visible
                 : Visibility.Collapsed;
 
-        bool showResults = hasQuery && hasResults && tabHasItems;
         ResultsPanel.Visibility = showResults ? Visibility.Visible : Visibility.Collapsed;
-        bool showResultChrome = hasQuery && hasResults && tabSelected;
+        UpdateDetailsSplitLayout(showResults);
+        UpdateCommandBarForSelectedItem();
 
-        bool showRecommendedApps = !hasQuery && tabHasItems;
+        bool showRecommendedApps = !hasQuery &&
+            recommendationsEnabled &&
+            (tabHasItems ||
+             _viewModel.HasRecommendedEntries ||
+             _viewModel.HasHiddenRecommendations ||
+             AppsSkeletonPanel.Visibility == Visibility.Visible);
         if (showRecommendedApps)
         {
             bool wasHidden = RecommendedAppsPanel.Visibility != Visibility.Visible;
             RecommendedAppsPanel.Visibility = Visibility.Visible;
+            UpdateRecommendationHeaderState();
             RefreshRecommendedAppIcons();
 
-            // When the home tab re-appears after a query, replay the configured
-            // per-icon entrance. Popup opening owns its own single playback and
-            // temporarily suppresses this property-change path.
             if (wasHidden && !_suppressPanelEntranceAnimation)
             {
                 AnimateAppIconsEntrance();
@@ -1740,37 +2881,379 @@ public sealed partial class SearchPopupWindow : Window
         else
         {
             RecommendedAppsPanel.Visibility = Visibility.Collapsed;
+            SetRecommendationEditMode(false);
+            UpdateRecommendationHeaderState();
+            CancelRecommendedDrag();
+            CloseRecommendationOverlays(immediate: true);
             ClearRecommendedAppSelection();
+            ClearHoveredRecommendedCard();
         }
 
-        // Sortable header only for file-style tabs (All / extension tabs / File / Folder).
+        UpdateRecommendationEditStatusHint();
+
+        // Optional sortable header: hidden by default unless enabled in Search Settings.
         bool fileSortTab = _viewModel.SelectedTab?.SupportsFileSort == true;
-        SortHeaderRow.Visibility = showResultChrome && fileSortTab
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-        ResultFilterBar.Visibility = showResultChrome && _viewModel.SelectedTab?.Id == "all"
+        bool showSortHeader = showResultChrome &&
+                              fileSortTab &&
+                              _settingsService.Settings.Search.SearchShowSortHeader;
+        SortHeaderRow.Visibility = showSortHeader
             ? Visibility.Visible
             : Visibility.Collapsed;
 
-        EmptyTabHintPanel.Visibility = !searching && !showResults && !showRecommendedApps && tabSelected
-                                       && !(hasQuery && !hasResults)
+        bool showEmptySelectedTab = hasQuery && !searching && hasResults && !tabHasItems && tabSelected;
+        EmptyTabHintPanel.Visibility = showEmptySelectedTab
             ? Visibility.Visible
             : Visibility.Collapsed;
+
+        BodyContentRow.Visibility =
+            (showResults || showNoResults || showRecommendedApps || showEmptySelectedTab ||
+             AppsSkeletonPanel.Visibility == Visibility.Visible)
+                ? Visibility.Visible
+                : Visibility.Collapsed;
 
         UpdateSelectionActions();
+        ApplySearchInputWellVisuals();
+
+        if (!wasResultsVisible &&
+            !_hasExpandedResultsInQuerySession &&
+            showResults &&
+            !forceBoundsWhenOpening &&
+            !_viewModel.IsApplyingBackgroundResultRefresh)
+        {
+            _hasExpandedResultsInQuerySession = true;
+            AnimateResultsFirstExpand();
+        }
+        else if (showResults)
+        {
+            _hasExpandedResultsInQuerySession = true;
+        }
+        else if (!showResults)
+        {
+            ResultsPanel.Opacity = 1;
+            ResultsTranslateTransform.Y = 0;
+        }
+
+        UpdatePopupDynamicBounds(forceBoundsWhenOpening);
+    }
+
+    private void UpdatePopupDynamicBounds(bool forceWhenOpening = false)
+    {
+        if (_appWindow is null || _isWindowClosed || _isWindowDragging || _isWindowResizing)
+        {
+            return;
+        }
+
+        if (!IsPopupVisible && !forceWhenOpening)
+        {
+            return;
+        }
+
+        double scale = Win32Helper.GetDpiScaleForWindow(_hwnd, Content?.XamlRoot);
+        if (!double.IsFinite(scale) || scale <= 0)
+        {
+            scale = 1.0;
+        }
+
+        var searchSlice = _settingsService.Settings.Search;
+        int? customX = searchSlice.SearchPopupCustomX;
+        int? customY = searchSlice.SearchPopupCustomY;
+
+        DisplayArea displayArea = customX is int savedX && customY is int savedY
+            ? DisplayArea.GetFromPoint(new PointInt32(savedX, savedY), DisplayAreaFallback.Nearest)
+            : DisplayArea.GetFromWindowId(_appWindow.Id, DisplayAreaFallback.Primary);
+        RectInt32 workAreaPhysical = displayArea.WorkArea;
+        int workAreaLogicalHeight = Math.Max(320, (int)Math.Round(workAreaPhysical.Height / scale));
+
+        bool hasQuery = HasActiveSearchOrScope;
+        bool showDetailsPane = DetailsPaneCard.Visibility == Visibility.Visible;
+        bool showNoResultsOrEmptyTab = NoResultsPanel.Visibility == Visibility.Visible ||
+                                       EmptyTabHintPanel.Visibility == Visibility.Visible;
+
+        // When the very first keystroke triggers an async query, hold the current window
+        // geometry steady during the few milliseconds before ApplySearchResponse arrives
+        // instead of collapsing downward toward 56px and immediately bouncing back out.
+        if (!forceWhenOpening &&
+            hasQuery &&
+            _viewModel.IsSearching &&
+            !_viewModel.HasResults &&
+            !showNoResultsOrEmptyTab)
+        {
+            return;
+        }
+
+        bool showRecommendations = RecommendedAppsPanel.Visibility == Visibility.Visible ||
+                                   AppsSkeletonPanel.Visibility == Visibility.Visible;
+        int recCount = AppsSkeletonPanel.Visibility == Visibility.Visible
+            ? Math.Max(6, _viewModel.RecommendedEntries.Count)
+            : _viewModel.RecommendedEntries.Count;
+
+        var layoutState = new SearchPopupLayoutState(
+            HasQuery: hasQuery,
+            IsSearching: _viewModel.IsSearching,
+            ResultCount: ResultsPanel.Visibility == Visibility.Visible ? _viewModel.CurrentResults.Count : 0,
+            ShowFilterBar: TabsAndFilterRow.Visibility == Visibility.Visible,
+            ShowSortHeader: SortHeaderRow.Visibility == Visibility.Visible,
+            ShowEverythingBanner: EverythingPromptBanner.Visibility == Visibility.Visible,
+            ShowRecommendations: showRecommendations,
+            RecommendationEntryCount: recCount,
+            ShowAllHiddenRecommendationsHint: AllRecommendedHiddenHintPanel.Visibility == Visibility.Visible,
+            ShowNoResults: showNoResultsOrEmptyTab,
+            ShowFooter: FooterBar.Visibility == Visibility.Visible,
+            ShowDetailsPane: showDetailsPane);
+
+        int maxLogicalHeight = SearchPopupSurfacePolicy.ComputeMaxLogicalHeight(workAreaLogicalHeight);
+        int desiredLogicalHeight = SearchPopupSurfacePolicy.ComputeDesiredLogicalHeight(
+            layoutState,
+            workAreaLogicalHeight);
+
+        // Suppress scrollbar unless content genuinely hits the max-height ceiling or pages more results.
+        ResultsPanel.VerticalScrollBarVisibility =
+            (ResultsPanel.Visibility == Visibility.Visible &&
+             (desiredLogicalHeight >= maxLogicalHeight || _viewModel.HasMoreResults))
+                ? ScrollBarVisibility.Auto
+                : ScrollBarVisibility.Hidden;
+
+        int? minOverlayHeightPhysical = IsAnyRecommendationOverlayOpen()
+            ? SearchPopupSurfacePolicy.ToPhysicalPixels(420, scale)
+            : null;
+
+        // Keep split-pane width locked throughout an active query session whenever
+        // SearchShowDetailsPane is enabled so typing never snaps horizontally 780 <-> 660.
+        bool useDetailsSplitWidth = showDetailsPane ||
+                                    (hasQuery && searchSlice.SearchShowDetailsPane);
+        int desiredLogicalWidth = useDetailsSplitWidth
+            ? SearchPopupSurfacePolicy.ExpandedWithDetailsWidthLogical
+            : SearchPopupSurfacePolicy.DefaultPopupWidthLogical;
+
+        RectInt32 targetBounds = SearchPopupSurfacePolicy.ResolveAnchoredWindowBounds(
+            workAreaPhysical,
+            scale,
+            desiredLogicalHeight,
+            customX,
+            customY,
+            minOverlayHeightPhysical,
+            desiredLogicalWidth);
+
+        double targetLogicalHeight = Math.Max(
+            SearchPopupSurfacePolicy.CapsuleOnlyHeightLogical,
+            Math.Round(targetBounds.Height / scale, 2));
+
+        bool animateMorph = !forceWhenOpening &&
+                            IsPopupVisible &&
+                            AreSystemAnimationsEnabled() &&
+                            !IsAnyRecommendationOverlayOpen() &&
+                            double.IsFinite(RootGrid.Height) &&
+                            RootGrid.Height > 0;
+
+        if (!animateMorph)
+        {
+            StopHeightMorphTimer();
+            _heightSpringCurrentLogical = targetLogicalHeight;
+            _heightSpringVelocity = 0;
+            RootGrid.Height = targetLogicalHeight;
+            PointInt32 currentPos = _appWindow.Position;
+            SizeInt32 currentSize = _appWindow.Size;
+            if (currentPos.X != targetBounds.X ||
+                currentPos.Y != targetBounds.Y ||
+                currentSize.Width != targetBounds.Width ||
+                currentSize.Height != targetBounds.Height)
+            {
+                _appWindow.MoveAndResize(targetBounds);
+            }
+            return;
+        }
+
+        bool isSpringRunning = _heightMorphTimer is { IsEnabled: true };
+        if (!isSpringRunning || !double.IsFinite(_heightSpringCurrentLogical) || _heightSpringCurrentLogical <= 0)
+        {
+            _heightSpringCurrentLogical = RootGrid.Height;
+            _heightSpringVelocity = 0;
+        }
+
+        if (Math.Abs(targetLogicalHeight - _heightSpringCurrentLogical) < 0.5 &&
+            Math.Abs(_heightSpringVelocity) < 3.0)
+        {
+            StopHeightMorphTimer();
+            _heightSpringCurrentLogical = targetLogicalHeight;
+            _heightSpringVelocity = 0;
+            RootGrid.Height = targetLogicalHeight;
+            PointInt32 pos = _appWindow.Position;
+            SizeInt32 size = _appWindow.Size;
+            if (pos.X != targetBounds.X ||
+                pos.Y != targetBounds.Y ||
+                size.Width != targetBounds.Width ||
+                size.Height != targetBounds.Height)
+            {
+                _appWindow.MoveAndResize(targetBounds);
+            }
+            return;
+        }
+
+        PointInt32 livePos = _appWindow.Position;
+        SizeInt32 liveSize = _appWindow.Size;
+        int headroomPhysical = SearchPopupSurfacePolicy.ToPhysicalPixels(
+            SearchPopupSurfacePolicy.SpringHeadroomLogical,
+            scale);
+        int maxDownwardPhysical = Math.Max(
+            targetBounds.Height,
+            (workAreaPhysical.Y + workAreaPhysical.Height - 8) - targetBounds.Y);
+        int immediatePhysicalHeight = Math.Min(
+            maxDownwardPhysical,
+            Math.Max(liveSize.Height, targetBounds.Height + headroomPhysical));
+
+        if (livePos.X != targetBounds.X ||
+            livePos.Y != targetBounds.Y ||
+            liveSize.Width != targetBounds.Width ||
+            liveSize.Height != immediatePhysicalHeight)
+        {
+            _appWindow.MoveAndResize(new RectInt32(
+                targetBounds.X,
+                targetBounds.Y,
+                targetBounds.Width,
+                immediatePhysicalHeight));
+        }
+
+        _heightSpringExpanding = targetLogicalHeight >= _heightSpringCurrentLogical;
+        _heightMorphTargetLogical = targetLogicalHeight;
+        _heightMorphPendingBounds = targetBounds;
+
+        _heightMorphTimer ??= CreateHeightMorphTimer();
+        if (!_heightMorphTimer.IsEnabled)
+        {
+            _heightSpringLastTimestamp = Stopwatch.GetTimestamp();
+            _heightMorphTimer.Start();
+        }
+    }
+
+    private DispatcherTimer CreateHeightMorphTimer()
+    {
+        var timer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(12)
+        };
+        timer.Tick += OnHeightMorphTimerTick;
+        return timer;
+    }
+
+    private void OnHeightMorphTimerTick(object? sender, object e)
+    {
+        if (!IsPopupVisible || _isWindowClosed || _appWindow is null)
+        {
+            StopHeightMorphTimer();
+            return;
+        }
+
+        long nowTimestamp = Stopwatch.GetTimestamp();
+        double dtSeconds = _heightSpringLastTimestamp > 0
+            ? Stopwatch.GetElapsedTime(_heightSpringLastTimestamp, nowTimestamp).TotalSeconds
+            : 0.014;
+        _heightSpringLastTimestamp = nowTimestamp;
+
+        SearchPopupHeightSpringStep step = SearchPopupSurfacePolicy.StepHeightSpring(
+            _heightSpringCurrentLogical,
+            _heightSpringVelocity,
+            _heightMorphTargetLogical,
+            dtSeconds,
+            _heightSpringExpanding);
+
+        _heightSpringCurrentLogical = step.Height;
+        _heightSpringVelocity = step.Velocity;
+
+        if (step.IsSettled)
+        {
+            StopHeightMorphTimer();
+            RootGrid.Height = _heightMorphTargetLogical;
+            PointInt32 pos = _appWindow.Position;
+            SizeInt32 size = _appWindow.Size;
+            if (pos.X != _heightMorphPendingBounds.X ||
+                pos.Y != _heightMorphPendingBounds.Y ||
+                size.Width != _heightMorphPendingBounds.Width ||
+                size.Height != _heightMorphPendingBounds.Height)
+            {
+                _appWindow.MoveAndResize(_heightMorphPendingBounds);
+            }
+            return;
+        }
+
+        RootGrid.Height = step.Height;
+    }
+
+    private void StopHeightMorphTimer()
+    {
+        _heightMorphTimer?.Stop();
+        _heightSpringVelocity = 0;
+        _heightSpringLastTimestamp = 0;
+    }
+
+    private void SnapHeightMorphToTarget()
+    {
+        if (_heightMorphTimer is not { IsEnabled: true } || _appWindow is null)
+        {
+            return;
+        }
+
+        StopHeightMorphTimer();
+        _heightSpringCurrentLogical = _heightMorphTargetLogical;
+        RootGrid.Height = _heightMorphTargetLogical;
+        _appWindow.MoveAndResize(_heightMorphPendingBounds);
+    }
+
+    private void SearchTextBox_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (FindVisualChild<Button>(SearchTextBox, "DeleteButton") is { } nativeDeleteButton)
+        {
+            nativeDeleteButton.MaxWidth = 0;
+            nativeDeleteButton.MaxHeight = 0;
+            nativeDeleteButton.Opacity = 0;
+            nativeDeleteButton.IsHitTestVisible = false;
+        }
+    }
+
+    private void ClearQueryButton_Click(object sender, RoutedEventArgs e)
+    {
+        SearchTextBox.Text = string.Empty;
+        if (_latchedInlineScope != SearchInlineScope.None)
+        {
+            _viewModel.Query = GetEffectivePopupQuery();
+        }
+        else
+        {
+            _viewModel.ClearSearch();
+        }
+        UpdatePanelVisibility();
+        SearchTextBox.Focus(FocusState.Programmatic);
     }
 
     private void SearchTextBox_TextChanged(object sender, TextChangedEventArgs e)
     {
+        if (_suppressScopeLatchTextChange)
+        {
+            return;
+        }
+
+        TryLatchInlineScopeFromInput(SearchTextBox.Text);
+
         // Typing a new query clears any recommended-app selection so that
         // Space/arrow keys switch back to result-list navigation.
         ClearRecommendedAppSelection();
         _isNavigatingResults = false;
         ClearMultiSelection();
         bool hasText = !string.IsNullOrEmpty(SearchTextBox.Text);
-        HotkeyHintBadge.Visibility = hasText
-            ? Visibility.Collapsed
-            : Visibility.Visible;
+        if (HasActiveSearchOrScope)
+        {
+            SetRecommendationEditMode(false);
+            CancelRecommendedDrag();
+            CloseRecommendationOverlays(immediate: true);
+        }
+        ClearQueryButton.Visibility = hasText
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        HotkeyHintBadge.Visibility = !hasText &&
+                                     _latchedInlineScope == SearchInlineScope.None &&
+                                     !string.IsNullOrWhiteSpace(_viewModel.HotkeyHint)
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        UpdateScopePrefixBadge(SearchTextBox.Text);
 
         // Keep only a short coalescing window. Native queries are cancellable and the
         // resident catalog is the sole file provider, so a long visual debounce is
@@ -1784,36 +3267,74 @@ public sealed partial class SearchPopupWindow : Window
 
     private void SearchTextBox_GotFocus(object sender, RoutedEventArgs e)
     {
-        HotkeyHintBadge.Opacity = 0.45;
-        // Focus is an input state, so the ring follows the inline-rename
-        // precedent and stays neutral.
-        SearchBoxBorder.BorderBrush = new SolidColorBrush(
-            NeutralInteractionBrush.Line(SearchBoxBorder));
+        HotkeyHintBadge.Opacity = 0.50;
+        ApplySearchInputWellVisuals();
     }
 
     private void SearchTextBox_LostFocus(object sender, RoutedEventArgs e)
     {
-        HotkeyHintBadge.Opacity = 1;
-        SearchBoxBorder.BorderBrush =
-            ResolveThemeBrush("ControlStrokeColorDefaultBrush");
+        HotkeyHintBadge.Opacity = 0.68;
+        ApplySearchInputWellVisuals();
     }
 
     private void OnSearchDebounceTick(object? sender, object e)
     {
         _searchDebounceTimer?.Stop();
-        _viewModel.Query = SearchTextBox.Text;
+        _viewModel.Query = GetEffectivePopupQuery();
         UpdatePanelVisibility();
     }
 
     private void SearchTextBox_KeyDown(object sender, KeyRoutedEventArgs e)
     {
+        if (DeskBox.Helpers.ImeCompositionGuard.IsImeCompositionKeyEvent(e))
+        {
+            return;
+        }
+
         switch (e.Key)
         {
             case Windows.System.VirtualKey.Escape:
-                if (!string.IsNullOrEmpty(SearchTextBox.Text))
+                if (_isEditingFolderTitle)
+                {
+                    CancelFolderTitleEdit();
+                }
+                else if (IsAnyRecommendationOverlayOpen())
+                {
+                    CloseRecommendationOverlays();
+                }
+                else if (_isRecommendationEditMode)
+                {
+                    if (_recMultiSelectedKeys.Count > 0)
+                    {
+                        _recMultiSelectedKeys.Clear();
+                        RefreshAllRecommendedCardEditVisuals();
+                        UpdateRecommendationEditStatusHint();
+                    }
+                    else
+                    {
+                        SetRecommendationEditMode(false);
+                    }
+                }
+                else if (_multiSelectedItems.Count > 0)
+                {
+                    ClearMultiSelection();
+                }
+                else if (!string.IsNullOrEmpty(SearchTextBox.Text))
                 {
                     SearchTextBox.Text = string.Empty;
-                    _viewModel.ClearSearch();
+                    if (_latchedInlineScope != SearchInlineScope.None)
+                    {
+                        _viewModel.Query = GetEffectivePopupQuery();
+                        UpdatePanelVisibility();
+                    }
+                    else
+                    {
+                        _viewModel.ClearSearch();
+                    }
+                }
+                else if (_latchedInlineScope != SearchInlineScope.None)
+                {
+                    ExitLatchedScope();
                 }
                 else
                 {
@@ -1831,9 +3352,65 @@ public sealed partial class SearchPopupWindow : Window
                 break;
 
             case Windows.System.VirtualKey.Enter:
+                if (IsAnyRecommendationOverlayOpen())
+                {
+                    e.Handled = true;
+                    break;
+                }
+
                 bool controlPressed = Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control);
+                if (_isRecommendationEditMode &&
+                    !HasActiveSearchOrScope &&
+                    RecommendedAppsPanel.Visibility == Visibility.Visible)
+                {
+                    if (_selectedAppIndex >= 0 &&
+                        RecommendedAppsRepeater.ItemsSource is System.Collections.IList editRecEntries &&
+                        _selectedAppIndex < editRecEntries.Count &&
+                        editRecEntries[_selectedAppIndex] is RecommendedGridEntry editSelectedEntry)
+                    {
+                        if (!_recMultiSelectedKeys.Add(editSelectedEntry.EntryKey))
+                        {
+                            _recMultiSelectedKeys.Remove(editSelectedEntry.EntryKey);
+                        }
+
+                        RefreshAllRecommendedCardEditVisuals();
+                        UpdateRecommendationEditStatusHint();
+                    }
+
+                    e.Handled = true;
+                    break;
+                }
+
+                if (!HasActiveSearchOrScope &&
+                    RecommendedAppsPanel.Visibility == Visibility.Visible &&
+                    _selectedAppIndex >= 0 &&
+                    RecommendedAppsRepeater.ItemsSource is System.Collections.IList recEntries &&
+                    _selectedAppIndex < recEntries.Count &&
+                    recEntries[_selectedAppIndex] is RecommendedGridEntry selectedEntry)
+                {
+                    if (selectedEntry.IsFolder)
+                    {
+                        OpenFolderOverlay(selectedEntry);
+                    }
+                    else if (selectedEntry.AppItem is { } recApp)
+                    {
+                        if (controlPressed && !string.IsNullOrWhiteSpace(recApp.DetailPath))
+                        {
+                            Win32Helper.ShowInExplorer(recApp.DetailPath);
+                            HidePopup();
+                        }
+                        else if (_viewModel.ExecuteItem(recApp))
+                        {
+                            HidePopup();
+                        }
+                    }
+
+                    e.Handled = true;
+                    break;
+                }
+
                 bool executed = controlPressed
-                    ? _viewModel.OpenSelectedLocation()
+                    ? ExecuteSecondaryCommandForSelectedItem()
                     : _viewModel.ExecuteSelectedItem();
                 if (executed)
                 {
@@ -1883,6 +3460,10 @@ public sealed partial class SearchPopupWindow : Window
         switch (e.Key)
         {
             case Windows.System.VirtualKey.Escape:
+                if (_multiSelectedItems.Count > 0)
+                {
+                    ClearMultiSelection();
+                }
                 SearchTextBox.Focus(FocusState.Programmatic);
                 e.Handled = true;
                 break;
@@ -1897,7 +3478,7 @@ public sealed partial class SearchPopupWindow : Window
 
             case Windows.System.VirtualKey.Enter:
                 bool opened = Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control)
-                    ? _viewModel.OpenSelectedLocation()
+                    ? ExecuteSecondaryCommandForSelectedItem()
                     : _viewModel.ExecuteSelectedItem();
                 if (opened)
                 {
@@ -1993,41 +3574,2892 @@ public sealed partial class SearchPopupWindow : Window
         _viewModel.InvokeAction("open-settings");
     }
 
-    // ── Recommended apps: single-click select, double-click open, keyboard nav ──
+    // ── Recommended apps: Win11 Start Menu single-click open, drag reorder, folder grouping & batch edit mode ──
+
+    private const double RecommendationDragThreshold = 6.0;
+
+    private readonly record struct RecommendedDropDecision(
+        bool IsMerge,
+        RecommendedGridEntry? MergeTarget,
+        FrameworkElement? MergeTargetElement,
+        int ReorderTargetIndex,
+        Rect HighlightRect,
+        Point InsertBarPosition,
+        Rect AnchorRect);
+
+    private void EditRecommendationsButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (IsAnyRecommendationOverlayOpen())
+        {
+            CloseRecommendationOverlays();
+        }
+
+        SetRecommendationEditMode(!_isRecommendationEditMode);
+    }
+
+    private void SetRecommendationEditMode(bool enabled)
+    {
+        if (enabled && !_viewModel.HasRecommendedEntries)
+        {
+            enabled = false;
+        }
+
+        if (_isRecommendationEditMode == enabled &&
+            (enabled || (_recMultiSelectedKeys.Count == 0 && !_isRecRubberBanding)))
+        {
+            SyncEditRecommendationsButtonVisuals();
+            UpdateRecommendationEditStatusHint();
+            return;
+        }
+
+        _isRecommendationEditMode = enabled;
+        ResetEditFolderDoubleClickTracking();
+        if (!enabled)
+        {
+            _recMultiSelectedKeys.Clear();
+            _recRubberBandBaseKeys.Clear();
+            _recRubberBandKnownTileRects.Clear();
+            EndRecommendationRubberBand();
+        }
+
+        ClearRecommendedAppSelection();
+        SyncEditRecommendationsButtonVisuals();
+        RefreshAllRecommendedCardEditVisuals();
+        UpdateRecommendationEditStatusHint();
+    }
+
+    private void SyncEditRecommendationsButtonVisuals()
+    {
+        EditRecommendationsIcon.Glyph = _isRecommendationEditMode ? "\uE73E" : "\uE70F";
+        string label = _localizationService.T(
+            _isRecommendationEditMode
+                ? "Search.Recommend.EditDone"
+                : "Search.Recommend.Edit");
+        EditRecommendationsLabel.Text = label;
+        ToolTipService.SetToolTip(EditRecommendationsButton, label);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(EditRecommendationsButton, label);
+        EditRecommendationsButton.Background = ResolveThemeBrush(
+            _isRecommendationEditMode
+                ? "ControlFillColorSecondaryBrush"
+                : "ControlFillColorDefaultBrush");
+        EditRecommendationsButton.BorderBrush = ResolveThemeBrush(
+            _isRecommendationEditMode
+                ? "ControlStrokeColorDefaultBrush"
+                : "CardStrokeColorDefaultBrush");
+    }
+
+    private void UpdateRecommendationEditStatusHint()
+    {
+        bool showHint = string.IsNullOrWhiteSpace(SearchTextBox.Text) &&
+                        RecommendedAppsPanel.Visibility == Visibility.Visible &&
+                        _isRecommendationEditMode &&
+                        _recMultiSelectedKeys.Count > 0;
+        if (showHint)
+        {
+            string batchHideLabel = string.Format(
+                _localizationService.T("Search.Recommend.BatchHideFormat"),
+                _recMultiSelectedKeys.Count);
+            BatchHideSelectedLabel.Text = batchHideLabel;
+            ToolTipService.SetToolTip(BatchHideSelectedButton, batchHideLabel);
+            BatchHideSelectedButton.Visibility = Visibility.Visible;
+
+            StatusTextBlock.Text = string.Format(
+                _localizationService.T("Search.Recommend.EditSelectionHint"),
+                _recMultiSelectedKeys.Count);
+            StatusBar.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            BatchHideSelectedButton.Visibility = Visibility.Collapsed;
+            StatusBar.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private void BatchHideSelectedButton_Click(object sender, RoutedEventArgs e)
+    {
+        HideSelectedRecommendations();
+    }
+
+    private void HideSelectedRecommendations()
+    {
+        if (_recMultiSelectedKeys.Count == 0)
+        {
+            return;
+        }
+
+        var selectedItems = new List<SearchResultItem>();
+        foreach (RecommendedGridEntry entry in _viewModel.RecommendedEntries)
+        {
+            if (!_recMultiSelectedKeys.Contains(entry.EntryKey))
+            {
+                continue;
+            }
+
+            if (entry.IsFolder)
+            {
+                selectedItems.AddRange(entry.FolderItems);
+            }
+            else if (entry.AppItem is { } appItem)
+            {
+                selectedItems.Add(appItem);
+            }
+        }
+
+        _recMultiSelectedKeys.Clear();
+        if (selectedItems.Count > 0)
+        {
+            _viewModel.HideRecommendations(selectedItems);
+        }
+
+        RefreshAllRecommendedCardEditVisuals();
+        UpdateRecommendationEditStatusHint();
+    }
+
+    private void PruneStaleMultiSelectedRecommendationKeys()
+    {
+        if (_recMultiSelectedKeys.Count == 0)
+        {
+            return;
+        }
+
+        var validEntryKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (RecommendedGridEntry entry in _viewModel.RecommendedEntries)
+        {
+            validEntryKeys.Add(entry.EntryKey);
+        }
+
+        _recMultiSelectedKeys.RemoveWhere(key => !validEntryKeys.Contains(key));
+    }
+
+    private void ResetEditFolderDoubleClickTracking()
+    {
+        _lastEditFolderClickKey = null;
+        _lastEditFolderClickTickMs = 0;
+        _lastEditFolderSelectedBeforeClick = false;
+    }
+
+    private void ClearHoveredRecommendedCard()
+    {
+        if (_hoveredAppCard is not null)
+        {
+            Grid prev = _hoveredAppCard;
+            _hoveredAppCard = null;
+            prev.Background = s_transparentCardBrush;
+            if (_isRecommendationEditMode)
+            {
+                ApplyRecommendedCardEditVisuals(
+                    prev,
+                    prev.DataContext as RecommendedGridEntry,
+                    isPointerOver: false);
+            }
+        }
+    }
+
+    private void RefreshAllRecommendedCardEditVisuals()
+    {
+        int childCount = VisualTreeHelper.GetChildrenCount(RecommendedAppsRepeater);
+        for (int i = 0; i < childCount; i++)
+        {
+            if (VisualTreeHelper.GetChild(RecommendedAppsRepeater, i) is FrameworkElement card)
+            {
+                bool isHovered = ReferenceEquals(card, _hoveredAppCard) &&
+                                 !_recIsDragging &&
+                                 !_isRecRubberBanding;
+                if (card is Grid grid)
+                {
+                    grid.Background = isHovered
+                        ? ResolveThemeBrush("SubtleFillColorSecondaryBrush")
+                        : s_transparentCardBrush;
+                }
+
+                ApplyRecommendedCardEditVisuals(
+                    card,
+                    card.DataContext as RecommendedGridEntry,
+                    isPointerOver: isHovered);
+            }
+        }
+    }
+
+    private void ApplyRecommendedCardEditVisuals(
+        FrameworkElement card,
+        RecommendedGridEntry? entry,
+        bool isPointerOver = false)
+    {
+        bool isEditActive = _isRecommendationEditMode && entry is not null;
+        bool isQuickHideEligible = isEditActive && !entry!.IsFolder;
+        bool isSelected = isEditActive && _recMultiSelectedKeys.Contains(entry!.EntryKey);
+
+        // Tile background/plate masks are strictly hover-only (via card.Background on
+        // PointerEntered/Exited); neither idle tiles nor selected tiles show a mask.
+        if (FindVisualChild<Border>(card, "CardEditSlotPlate") is { } editSlotPlate)
+        {
+            editSlotPlate.Visibility = Visibility.Collapsed;
+        }
+
+        if (FindVisualChild<Border>(card, "CardSelectionPlate") is { } selectionPlate)
+        {
+            selectionPlate.Visibility = Visibility.Collapsed;
+        }
+
+        if (FindVisualChild<FrameworkElement>(card, "CardSelectionCheckBox") is { } selectionCheckBox)
+        {
+            selectionCheckBox.Visibility = isEditActive
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+
+            if (FindVisualChild<Border>(selectionCheckBox, "CardSelectionCheckedBox") is { } checkedBox)
+            {
+                checkedBox.Visibility = isSelected
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+            }
+
+            if (FindVisualChild<Border>(selectionCheckBox, "CardSelectionUncheckedBox") is { } uncheckedBox)
+            {
+                uncheckedBox.Visibility = isEditActive && !isSelected
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+                if (isEditActive && !isSelected)
+                {
+                    uncheckedBox.Opacity = isPointerOver ? 1.0 : 0.68;
+                    uncheckedBox.BorderBrush = ResolveThemeBrush(
+                        isPointerOver
+                            ? "ControlStrongStrokeColorDefaultBrush"
+                            : "ControlStrongStrokeColorDisabledBrush");
+                }
+            }
+        }
+
+        if (FindVisualChild<Button>(card, "CardQuickHideButton") is { } quickHideButton)
+        {
+            quickHideButton.Visibility = isQuickHideEligible
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+            quickHideButton.Opacity = (isPointerOver || isSelected) ? 0.96 : 0.62;
+        }
+    }
+
+    private static void ResetCardContentHostVisual(FrameworkElement contentHost)
+    {
+        var visual = ElementCompositionPreview.GetElementVisual(contentHost);
+        if (visual is null)
+        {
+            return;
+        }
+
+        visual.StopAnimation("Scale.X");
+        visual.StopAnimation("Scale.Y");
+        visual.Scale = System.Numerics.Vector3.One;
+    }
+
+    private void ArmImplicitOffsetAnimationAfterLayout(FrameworkElement card)
+    {
+        if (!AreSystemAnimationsEnabled())
+        {
+            return;
+        }
+
+        DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
+        {
+            if (_isWindowClosed || !IsPopupVisible || card.DataContext is null || !AreSystemAnimationsEnabled())
+            {
+                return;
+            }
+
+            var visual = ElementCompositionPreview.GetElementVisual(card);
+            if (visual is null || visual.ImplicitAnimations is not null)
+            {
+                return;
+            }
+
+            var compositor = visual.Compositor;
+            var decel = compositor.CreateCubicBezierEasingFunction(
+                new System.Numerics.Vector2(0.0f, 0.0f),
+                new System.Numerics.Vector2(0.1f, 1.0f));
+            var offsetAnim = compositor.CreateVector3KeyFrameAnimation();
+            offsetAnim.Target = "Offset";
+            offsetAnim.InsertExpressionKeyFrame(1.0f, "this.FinalValue", decel);
+            offsetAnim.Duration = TimeSpan.FromMilliseconds(190);
+
+            var implicitCollection = compositor.CreateImplicitAnimationCollection();
+            implicitCollection["Offset"] = offsetAnim;
+            visual.ImplicitAnimations = implicitCollection;
+        });
+    }
+
+    private static void DetachImplicitOffsetAnimation(FrameworkElement card)
+    {
+        var visual = ElementCompositionPreview.GetElementVisual(card);
+        if (visual is not null)
+        {
+            visual.ImplicitAnimations = null;
+        }
+    }
+
+    private void CardQuickHideButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (FindDataContext<RecommendedGridEntry>(sender as DependencyObject) is
+            { IsFolder: false, AppItem: { } appItem } entry)
+        {
+            _recMultiSelectedKeys.Remove(entry.EntryKey);
+            _viewModel.HideRecommendation(appItem);
+            UpdateRecommendationEditStatusHint();
+        }
+    }
+
+    private void RecommendedAppsScrollViewer_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        RecommendedAppsSurface.MinHeight = Math.Max(
+            0,
+            e.NewSize.Height - RecommendedAppsScrollViewer.Padding.Top - RecommendedAppsScrollViewer.Padding.Bottom);
+    }
+
+    private void RecommendedAppsSurface_PointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        if (_recIsDragging || IsAnyRecommendationOverlayOpen())
+        {
+            return;
+        }
+
+        var point = e.GetCurrentPoint(RecommendedAppsSurface);
+        if (!point.Properties.IsLeftButtonPressed)
+        {
+            return;
+        }
+
+        bool isCtrlPressed = Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control);
+        if (!_isRecommendationEditMode)
+        {
+            if (!isCtrlPressed)
+            {
+                ClearRecommendedAppSelection();
+                SearchTextBox.Focus(FocusState.Programmatic);
+                return;
+            }
+
+            SetRecommendationEditMode(true);
+        }
+
+        StartRecommendationRubberBand(e, isAdditive: isCtrlPressed);
+        e.Handled = true;
+    }
+
+    private void RecommendedAppsSurface_PointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_isRecRubberBanding)
+        {
+            return;
+        }
+
+        _recRubberBandPointerInViewport = e.GetCurrentPoint(RecommendedAppsScrollViewer).Position;
+        UpdateRecommendationRubberBand(e.GetCurrentPoint(RecommendedAppsSurface).Position);
+        e.Handled = true;
+    }
+
+    private void RecommendedAppsSurface_PointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_isRecRubberBanding)
+        {
+            return;
+        }
+
+        EndRecommendationRubberBand();
+        e.Handled = true;
+    }
+
+    private void RecommendedAppsSurface_PointerCaptureLost(object sender, PointerRoutedEventArgs e)
+    {
+        if (_isRecRubberBanding)
+        {
+            EndRecommendationRubberBand();
+        }
+    }
+
+    private void StartRecommendationRubberBand(PointerRoutedEventArgs e, bool isAdditive)
+    {
+        ClearHoveredRecommendedCard();
+        _isRecRubberBanding = true;
+        _recRubberBandBaseKeys.Clear();
+        _recRubberBandKnownTileRects.Clear();
+        if (isAdditive)
+        {
+            _recRubberBandBaseKeys.UnionWith(_recMultiSelectedKeys);
+        }
+        else if (_recMultiSelectedKeys.Count > 0)
+        {
+            _recMultiSelectedKeys.Clear();
+            RefreshAllRecommendedCardEditVisuals();
+            UpdateRecommendationEditStatusHint();
+        }
+
+        Point pos = e.GetCurrentPoint(RecommendedAppsSurface).Position;
+        _recRubberBandStart = pos;
+        _recRubberBandCurrent = pos;
+        _recRubberBandPointerInViewport = e.GetCurrentPoint(RecommendedAppsScrollViewer).Position;
+        UpdateRecommendationRubberBandRect(pos, pos);
+        RecRubberBandRect.Visibility = Visibility.Visible;
+        RecommendedAppsSurface.CapturePointer(e.Pointer);
+        EnsureRecommendationRubberBandAutoScrollTimer();
+        _recRubberBandAutoScrollTimer!.Start();
+    }
+
+    private void UpdateRecommendationRubberBand(Point currentInSurface)
+    {
+        _recRubberBandCurrent = currentInSurface;
+        UpdateRecommendationRubberBandRect(_recRubberBandStart, currentInSurface);
+
+        var rubberRect = new Rect(
+            Math.Min(_recRubberBandStart.X, currentInSurface.X),
+            Math.Min(_recRubberBandStart.Y, currentInSurface.Y),
+            Math.Abs(currentInSurface.X - _recRubberBandStart.X),
+            Math.Abs(currentInSurface.Y - _recRubberBandStart.Y));
+
+        if (rubberRect.Width < 3 && rubberRect.Height < 3)
+        {
+            return;
+        }
+
+        int childCount = VisualTreeHelper.GetChildrenCount(RecommendedAppsRepeater);
+        for (int i = 0; i < childCount; i++)
+        {
+            if (VisualTreeHelper.GetChild(RecommendedAppsRepeater, i) is not FrameworkElement tile ||
+                tile.Visibility != Visibility.Visible ||
+                tile.ActualWidth <= 0 ||
+                tile.ActualHeight <= 0 ||
+                tile.DataContext is not RecommendedGridEntry entry)
+            {
+                continue;
+            }
+
+            var tileRect = new Rect(
+                tile.TransformToVisual(RecommendedAppsSurface).TransformPoint(new Point(0, 0)),
+                new Size(tile.ActualWidth, tile.ActualHeight));
+            _recRubberBandKnownTileRects[entry.EntryKey] = tileRect;
+        }
+
+        _recMultiSelectedKeys.Clear();
+        _recMultiSelectedKeys.UnionWith(_recRubberBandBaseKeys);
+
+        foreach (RecommendedGridEntry entry in _viewModel.RecommendedEntries)
+        {
+            if (_recRubberBandKnownTileRects.TryGetValue(entry.EntryKey, out Rect tileRect) &&
+                Intersects(rubberRect, tileRect))
+            {
+                _recMultiSelectedKeys.Add(entry.EntryKey);
+            }
+        }
+
+        RefreshAllRecommendedCardEditVisuals();
+        UpdateRecommendationEditStatusHint();
+    }
+
+    private void UpdateRecommendationRubberBandRect(Point start, Point end)
+    {
+        double x = Math.Min(start.X, end.X);
+        double y = Math.Min(start.Y, end.Y);
+        RecRubberBandRect.Width = Math.Abs(end.X - start.X);
+        RecRubberBandRect.Height = Math.Abs(end.Y - start.Y);
+        RecRubberBandTransform.X = x;
+        RecRubberBandTransform.Y = y;
+    }
+
+    private void EndRecommendationRubberBand()
+    {
+        if (!_isRecRubberBanding && RecRubberBandRect.Visibility != Visibility.Visible)
+        {
+            return;
+        }
+
+        _isRecRubberBanding = false;
+        _recRubberBandAutoScrollTimer?.Stop();
+        _recRubberBandBaseKeys.Clear();
+        _recRubberBandKnownTileRects.Clear();
+        RecRubberBandRect.Visibility = Visibility.Collapsed;
+        RecommendedAppsSurface.ReleasePointerCaptures();
+    }
+
+    private void EnsureRecommendationRubberBandAutoScrollTimer()
+    {
+        if (_recRubberBandAutoScrollTimer is not null)
+        {
+            return;
+        }
+
+        _recRubberBandAutoScrollTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(32)
+        };
+        _recRubberBandAutoScrollTimer.Tick += OnRecommendationRubberBandAutoScrollTick;
+    }
+
+    private void OnRecommendationRubberBandAutoScrollTick(object? sender, object e)
+    {
+        if (!_isRecRubberBanding)
+        {
+            _recRubberBandAutoScrollTimer?.Stop();
+            return;
+        }
+
+        double delta = SearchResultSelectionPolicy.GetAutoScrollDelta(
+            _recRubberBandPointerInViewport.Y,
+            RecommendedAppsScrollViewer.ViewportHeight);
+        if (Math.Abs(delta) < 0.1)
+        {
+            return;
+        }
+
+        double previousOffset = RecommendedAppsScrollViewer.VerticalOffset;
+        double targetOffset = Math.Clamp(
+            previousOffset + delta,
+            0,
+            RecommendedAppsScrollViewer.ScrollableHeight);
+        if (Math.Abs(targetOffset - previousOffset) < 0.1)
+        {
+            return;
+        }
+
+        RecommendedAppsScrollViewer.ChangeView(null, targetOffset, null, disableAnimation: true);
+        _recRubberBandCurrent = new Point(
+            _recRubberBandCurrent.X,
+            _recRubberBandCurrent.Y + targetOffset - previousOffset);
+        UpdateRecommendationRubberBand(_recRubberBandCurrent);
+    }
 
     private void RecommendedApp_PointerPressed(object sender, PointerRoutedEventArgs e)
     {
-        // Marking the press handled here would suppress the DoubleTapped
-        // gesture, so the card could never be opened with the mouse.
-        if (sender is Grid card && card.DataContext is SearchResultItem item)
+        if (sender is not Grid card || card.DataContext is not RecommendedGridEntry entry)
         {
-            SelectRecommendedApp(card, item);
+            return;
+        }
+
+        if (FindVisualAncestor<Button>(e.OriginalSource as DependencyObject) is
+            { Name: "CardQuickHideButton" })
+        {
+            return;
+        }
+
+        var pointInPanel = e.GetCurrentPoint(RecommendedAppsPanel);
+        if (!pointInPanel.Properties.IsLeftButtonPressed)
+        {
+            return;
+        }
+
+        _recWasCtrlPressedOnDown = Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control);
+        _recAutoEnteredEditModeOnDown = false;
+
+        if (!_isRecommendationEditMode && _recWasCtrlPressedOnDown)
+        {
+            _recAutoEnteredEditModeOnDown = true;
+            SetRecommendationEditMode(true);
+            _recMultiSelectedKeys.Add(entry.EntryKey);
+            RefreshAllRecommendedCardEditVisuals();
+            UpdateRecommendationEditStatusHint();
+        }
+        else if (!_isRecommendationEditMode)
+        {
+            SelectRecommendedEntry(card, entry);
+        }
+
+        _recPointerCard = card;
+        _recPressedEntry = entry;
+        _recPointerStartInPanel = pointInPanel.Position;
+        _recIsDragging = false;
+        _recExternalDragAttempted = false;
+        card.CapturePointer(e.Pointer);
+        e.Handled = true;
+    }
+
+    private void RecommendedApp_PointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if (_recPressedEntry is null ||
+            _recPointerCard is null ||
+            !ReferenceEquals(sender, _recPointerCard))
+        {
+            return;
+        }
+
+        var pointInPanel = e.GetCurrentPoint(RecommendedAppsPanel);
+        if (!pointInPanel.Properties.IsLeftButtonPressed)
+        {
+            CancelRecommendedDrag();
+            return;
+        }
+
+        double dx = pointInPanel.Position.X - _recPointerStartInPanel.X;
+        double dy = pointInPanel.Position.Y - _recPointerStartInPanel.Y;
+        if (!_recIsDragging)
+        {
+            if ((dx * dx) + (dy * dy) < RecommendationDragThreshold * RecommendationDragThreshold)
+            {
+                return;
+            }
+
+            ClearHoveredRecommendedCard();
+            ResetEditFolderDoubleClickTracking();
+            _recPointerCard.Background = s_transparentCardBrush;
+            _recIsDragging = true;
+            PrepareRecommendedDragPayload(_recPressedEntry);
+            // Freeze the grid geometry this gesture decides against: every
+            // later decision and reflow projection anchors to these rects,
+            // immune to the translations the preview itself applies.
+            SnapshotRecommendedTileBaseRects();
+            ResetRecommendedDropAnchor();
+            App.Log(
+                $"[RecDrag] start mode={(_isRecommendationEditMode ? "edit" : "normal")} " +
+                $"dragged={_recDraggedEntryKeys.Count} apps={_recDraggedAppKeys.Count} " +
+                $"selection={_recMultiSelectedKeys.Count}");
+            SetDraggedRecommendedTilesOpacity(0.36);
+
+            RecDragGhostTitle.Text = _recPressedEntry.Label;
+            if (_recPressedEntry.IsFolder)
+            {
+                RecDragGhostImage.Source = null;
+                RecDragGhostImage.Visibility = Visibility.Collapsed;
+                RecDragGhostFolderGlyph.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                ImageSource? ghostIcon = _recPressedEntry.AppItem?.Icon;
+                RecDragGhostImage.Source = ghostIcon;
+                RecDragGhostImage.Visibility = ghostIcon is not null
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+                RecDragGhostFolderGlyph.Visibility = ghostIcon is null
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+            }
+
+            if (_recDraggedEntryKeys.Count > 1)
+            {
+                RecDragGhostCountText.Text = _recDraggedEntryKeys.Count.ToString();
+                RecDragGhostCountBadge.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                RecDragGhostCountBadge.Visibility = Visibility.Collapsed;
+            }
+
+            RecDragGhostBorder.Visibility = Visibility.Visible;
+            AnimateDragGhostPickup(RecDragGhostBorder);
+        }
+
+        Point pointInRoot = e.GetCurrentPoint(RootGrid).Position;
+        double rootWidth = RootGrid.ActualWidth;
+        double rootHeight = RootGrid.ActualHeight;
+        if (IsPointLeavingPopupDragBounds(pointInRoot, rootWidth, rootHeight))
+        {
+            if (!_recExternalDragAttempted)
+            {
+                _recExternalDragAttempted = true;
+                Grid dragCard = _recPointerCard;
+                List<string> candidatePaths = CollectDraggedRecommendationFilePaths(_recPressedEntry);
+                if (TryStartRecommendedExternalDragOut(
+                        dragCard,
+                        e,
+                        candidatePaths,
+                        "recommend-grid",
+                        SuspendRecommendedDragForExternalHandoff))
+                {
+                    e.Handled = true;
+                    return;
+                }
+            }
+
+            if (pointInRoot.X < 0 ||
+                pointInRoot.Y < 0 ||
+                pointInRoot.X > rootWidth ||
+                pointInRoot.Y > rootHeight)
+            {
+                RecDragGhostTransform.X = pointInPanel.Position.X - (RecDragGhostBorder.Width / 2);
+                RecDragGhostTransform.Y = pointInPanel.Position.Y - (RecDragGhostBorder.Height / 2);
+                ResetRecommendedDropAnchor();
+                ClearRecommendedReflowPreview();
+                HideRecommendedDropVisuals();
+                e.Handled = true;
+                return;
+            }
+        }
+        else
+        {
+            _recExternalDragAttempted = false;
+        }
+
+        RecDragGhostTransform.X = pointInPanel.Position.X - (RecDragGhostBorder.Width / 2);
+        RecDragGhostTransform.Y = pointInPanel.Position.Y - (RecDragGhostBorder.Height / 2);
+
+        AutoScrollScrollViewerOnDrag(
+            RecommendedAppsScrollViewer,
+            e.GetCurrentPoint(RecommendedAppsScrollViewer).Position);
+
+        Point pointInSurface = e.GetCurrentPoint(RecommendedAppsSurface).Position;
+        RecommendedDropDecision decision = ResolveRecommendedDropDecision(pointInSurface);
+        bool reflowActive = ApplyRecommendedReflowPreview(decision);
+        ApplyRecommendedDropVisuals(decision, suppressInsertBar: reflowActive);
+        e.Handled = true;
+    }
+
+    private List<string> CollectDraggedRecommendationFilePaths(RecommendedGridEntry pressedEntry)
+    {
+        var paths = new List<string>();
+        if (_recDraggedEntryKeys.Count > 0)
+        {
+            foreach (RecommendedGridEntry entry in _viewModel.RecommendedEntries)
+            {
+                if (!_recDraggedEntryKeys.Contains(entry.EntryKey))
+                {
+                    continue;
+                }
+
+                AppendEntryFilePaths(entry, paths);
+            }
+        }
+
+        if (paths.Count == 0)
+        {
+            AppendEntryFilePaths(pressedEntry, paths);
+        }
+
+        return paths;
+    }
+
+    private static void AppendEntryFilePaths(RecommendedGridEntry entry, List<string> target)
+    {
+        if (entry.IsFolder)
+        {
+            foreach (SearchResultItem member in entry.FolderItems)
+            {
+                if (!string.IsNullOrWhiteSpace(member.DetailPath))
+                {
+                    target.Add(member.DetailPath);
+                }
+            }
+        }
+        else if (!string.IsNullOrWhiteSpace(entry.AppItem?.DetailPath))
+        {
+            target.Add(entry.AppItem.DetailPath);
+        }
+    }
+
+    private void PrepareRecommendedDragPayload(RecommendedGridEntry pressedEntry)
+    {
+        _recDraggedAppKeys.Clear();
+        _recDraggedEntryKeys.Clear();
+
+        if (_isRecommendationEditMode)
+        {
+            bool pressedWasSelected = _recMultiSelectedKeys.Contains(pressedEntry.EntryKey);
+            if (!pressedWasSelected && _recWasCtrlPressedOnDown)
+            {
+                _recMultiSelectedKeys.Add(pressedEntry.EntryKey);
+                pressedWasSelected = true;
+                RefreshAllRecommendedCardEditVisuals();
+                UpdateRecommendationEditStatusHint();
+            }
+            else if (!pressedWasSelected && _recMultiSelectedKeys.Count > 0)
+            {
+                // Dragging an unselected tile without Ctrl acts on just that
+                // tile instead of leaving a sticky checkbox selection behind.
+                _recMultiSelectedKeys.Clear();
+                RefreshAllRecommendedCardEditVisuals();
+                UpdateRecommendationEditStatusHint();
+            }
+
+            if (pressedWasSelected && _recMultiSelectedKeys.Count > 0)
+            {
+                foreach (RecommendedGridEntry entry in _viewModel.RecommendedEntries)
+                {
+                    if (!_recMultiSelectedKeys.Contains(entry.EntryKey))
+                    {
+                        continue;
+                    }
+
+                    _recDraggedEntryKeys.Add(entry.EntryKey);
+                    if (!entry.IsFolder && entry.AppItem is { } selectedApp)
+                    {
+                        _recDraggedAppKeys.Add(Helpers.AppRecommendationIdentity.GetCanonicalKey(selectedApp));
+                    }
+                }
+
+                if (_recDraggedEntryKeys.Count > 0)
+                {
+                    return;
+                }
+            }
+        }
+
+        if (!pressedEntry.IsFolder && pressedEntry.AppItem is { } singleApp)
+        {
+            _recDraggedAppKeys.Add(Helpers.AppRecommendationIdentity.GetCanonicalKey(singleApp));
+        }
+
+        _recDraggedEntryKeys.Add(pressedEntry.EntryKey);
+    }
+
+    private void SetDraggedRecommendedTilesOpacity(double opacity)
+    {
+        int childCount = VisualTreeHelper.GetChildrenCount(RecommendedAppsRepeater);
+        for (int i = 0; i < childCount; i++)
+        {
+            if (VisualTreeHelper.GetChild(RecommendedAppsRepeater, i) is FrameworkElement tile &&
+                tile.DataContext is RecommendedGridEntry entry &&
+                _recDraggedEntryKeys.Contains(entry.EntryKey))
+            {
+                tile.Opacity = opacity;
+            }
+        }
+    }
+
+    private void RecommendedApp_PointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        if (_recPressedEntry is not { } pressedEntry ||
+            _recPointerCard is not { } pressedCard ||
+            !ReferenceEquals(sender, pressedCard))
+        {
+            return;
+        }
+
+        // Snapshot all gesture state BEFORE ReleasePointerCapture: releasing
+        // capture synchronously raises RecommendedApp_PointerCaptureLost ->
+        // CancelRecommendedDrag(), which clears _recLastDropDecision,
+        // _recDraggedAppKeys, and _recDraggedEntryKeys.
+        bool wasDragging = _recIsDragging;
+        bool autoEnteredOnDown = _recAutoEnteredEditModeOnDown;
+        RecommendedDropDecision decision = _recLastDropDecision;
+        string? lastDecisionSummary = _recLastDecisionSummary;
+        List<string> draggedApps = wasDragging ? _recDraggedAppKeys.ToList() : [];
+        List<string> draggedEntries = wasDragging ? _recDraggedEntryKeys.ToList() : [];
+        Point pointInCard = e.GetCurrentPoint(pressedCard).Position;
+        var cardBounds = new Rect(0, 0, pressedCard.ActualWidth, pressedCard.ActualHeight);
+        pressedCard.ReleasePointerCapture(e.Pointer);
+
+        if (wasDragging)
+        {
+            // Commit the anchored decision the pointer last owned — a fresh
+            // evaluation here could disagree with the preview the user just
+            // acted on.
+            CancelRecommendedDrag();
+
+            if (decision.IsMerge &&
+                decision.MergeTarget is { } mergeTarget &&
+                draggedApps.Count > 0)
+            {
+                _recMultiSelectedKeys.Clear();
+                string? mergeFolderId = _viewModel.MergeRecommendationsIntoFolder(
+                    draggedApps,
+                    mergeTarget.EntryKey);
+                App.Log(
+                    $"[RecDrag] release merge target={mergeTarget.EntryKey} " +
+                    $"apps={draggedApps.Count} folderId={(mergeFolderId is null ? "null" : "ok")}");
+                RefreshAllRecommendedCardEditVisuals();
+                UpdateRecommendationEditStatusHint();
+            }
+            else if (decision.ReorderTargetIndex >= 0)
+            {
+                bool moved;
+                if (draggedEntries.Count > 1)
+                {
+                    moved = _viewModel.MoveRecommendationEntries(
+                        draggedEntries,
+                        decision.ReorderTargetIndex);
+                }
+                else
+                {
+                    moved = _viewModel.MoveRecommendationEntry(
+                        pressedEntry.EntryKey,
+                        decision.ReorderTargetIndex);
+                }
+
+                App.Log(
+                    $"[RecDrag] release reorder index={decision.ReorderTargetIndex} " +
+                    $"entries={draggedEntries.Count} moved={moved}");
+                RefreshAllRecommendedCardEditVisuals();
+                UpdateRecommendationEditStatusHint();
+            }
+            else
+            {
+                App.Log(
+                    $"[RecDrag] release none entries={draggedEntries.Count} " +
+                    $"summary={lastDecisionSummary ?? "none"}");
+            }
+
+            e.Handled = true;
+            return;
+        }
+
+        CancelRecommendedDrag();
+        if (cardBounds.Contains(pointInCard))
+        {
+            if (_isRecommendationEditMode)
+            {
+                if (!autoEnteredOnDown)
+                {
+                    long nowMs = Environment.TickCount64;
+                    if (pressedEntry.IsFolder &&
+                        string.Equals(_lastEditFolderClickKey, pressedEntry.EntryKey, StringComparison.OrdinalIgnoreCase) &&
+                        nowMs - _lastEditFolderClickTickMs <= EditFolderDoubleClickThresholdMs)
+                    {
+                        bool restoreSelected = _lastEditFolderSelectedBeforeClick;
+                        ResetEditFolderDoubleClickTracking();
+                        if (restoreSelected)
+                        {
+                            _recMultiSelectedKeys.Add(pressedEntry.EntryKey);
+                        }
+                        else
+                        {
+                            _recMultiSelectedKeys.Remove(pressedEntry.EntryKey);
+                        }
+
+                        RefreshAllRecommendedCardEditVisuals();
+                        UpdateRecommendationEditStatusHint();
+                        OpenFolderOverlay(pressedEntry);
+                    }
+                    else
+                    {
+                        bool wasSelectedBeforeClick = _recMultiSelectedKeys.Contains(pressedEntry.EntryKey);
+                        if (!wasSelectedBeforeClick)
+                        {
+                            _recMultiSelectedKeys.Add(pressedEntry.EntryKey);
+                        }
+                        else
+                        {
+                            _recMultiSelectedKeys.Remove(pressedEntry.EntryKey);
+                        }
+
+                        if (pressedEntry.IsFolder)
+                        {
+                            _lastEditFolderClickKey = pressedEntry.EntryKey;
+                            _lastEditFolderClickTickMs = nowMs;
+                            _lastEditFolderSelectedBeforeClick = wasSelectedBeforeClick;
+                        }
+                        else
+                        {
+                            ResetEditFolderDoubleClickTracking();
+                        }
+
+                        RefreshAllRecommendedCardEditVisuals();
+                        UpdateRecommendationEditStatusHint();
+                    }
+                }
+            }
+            else if (pressedEntry.IsFolder)
+            {
+                OpenFolderOverlay(pressedEntry);
+            }
+            else if (pressedEntry.AppItem is { } appItem)
+            {
+                _viewModel.ExecuteItem(appItem);
+            }
+        }
+        else
+        {
+            ClearHoveredRecommendedCard();
+        }
+
+        e.Handled = true;
+    }
+
+    private void RecommendedApp_PointerCaptureLost(object sender, PointerRoutedEventArgs e)
+    {
+        if (_recPointerCard is not null && ReferenceEquals(sender, _recPointerCard))
+        {
+            CancelRecommendedDrag();
         }
     }
 
     private void RecommendedApp_PointerEntered(object sender, PointerRoutedEventArgs e)
     {
-        if (sender is Grid card && !ReferenceEquals(card, _selectedAppCard))
+        if (_recIsDragging || _isRecRubberBanding || _dragOutInProgress || sender is not Grid card)
         {
-            card.Background = ResolveThemeBrush("SubtleFillColorSecondaryBrush");
+            return;
+        }
+
+        if (_hoveredAppCard is not null && !ReferenceEquals(_hoveredAppCard, card))
+        {
+            _hoveredAppCard.Background = s_transparentCardBrush;
+        }
+
+        _hoveredAppCard = card;
+        card.Background = ResolveThemeBrush("SubtleFillColorSecondaryBrush");
+
+        if (_isRecommendationEditMode && card.DataContext is RecommendedGridEntry editEntry)
+        {
+            ApplyRecommendedCardEditVisuals(card, editEntry, isPointerOver: true);
         }
     }
 
     private void RecommendedApp_PointerExited(object sender, PointerRoutedEventArgs e)
     {
-        if (sender is Grid card && !ReferenceEquals(card, _selectedAppCard))
+        if (sender is not Grid card)
         {
-            card.Background = null;
+            return;
+        }
+
+        if (ReferenceEquals(_hoveredAppCard, card))
+        {
+            _hoveredAppCard = null;
+        }
+
+        card.Background = s_transparentCardBrush;
+
+        if (_isRecommendationEditMode)
+        {
+            ApplyRecommendedCardEditVisuals(
+                card,
+                card.DataContext as RecommendedGridEntry,
+                isPointerOver: false);
         }
     }
 
-    private void RecommendedApp_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
+    private void SuspendRecommendedDragForExternalHandoff()
     {
-        if (sender is Grid { DataContext: SearchResultItem item })
+        SetDraggedRecommendedTilesOpacity(1.0);
+        if (_recPointerCard is not null)
         {
-            _viewModel.ExecuteItem(item);
+            _recPointerCard.Opacity = 1;
+            _recPointerCard.Background = s_transparentCardBrush;
+            _recPointerCard = null;
         }
+
+        _recPressedEntry = null;
+        _recIsDragging = false;
+        _recExternalDragAttempted = false;
+        _recWasCtrlPressedOnDown = false;
+        _recAutoEnteredEditModeOnDown = false;
+        _recDraggedAppKeys.Clear();
+        _recDraggedEntryKeys.Clear();
+        ClearRecommendedReflowPreview();
+        _recTileBaseRects.Clear();
+        ResetRecommendedDropAnchor();
+        RecDragGhostBorder.Visibility = Visibility.Collapsed;
+        RecDragGhostCountBadge.Visibility = Visibility.Collapsed;
+        RecDragGhostImage.Source = null;
+        HideRecommendedDropVisuals();
+    }
+
+    private void CancelRecommendedDrag()
+    {
+        SetDraggedRecommendedTilesOpacity(1.0);
+        if (_recPointerCard is not null)
+        {
+            _recPointerCard.Opacity = 1;
+            _recPointerCard.ReleasePointerCaptures();
+            _recPointerCard = null;
+        }
+
+        _recPressedEntry = null;
+        _recIsDragging = false;
+        _recExternalDragAttempted = false;
+        _recWasCtrlPressedOnDown = false;
+        _recAutoEnteredEditModeOnDown = false;
+        _recDraggedAppKeys.Clear();
+        _recDraggedEntryKeys.Clear();
+        // Unwinds the live-reflow translations with the same curve the commit
+        // path relies on: for a committed drop they cancel against the layout
+        // Offset animation started by the collection change in the same
+        // frame; for a cancelled drag they simply close the gap.
+        ClearRecommendedReflowPreview();
+        _recTileBaseRects.Clear();
+        ResetRecommendedDropAnchor();
+        RecDragGhostBorder.Visibility = Visibility.Collapsed;
+        RecDragGhostCountBadge.Visibility = Visibility.Collapsed;
+        RecDragGhostImage.Source = null;
+        HideRecommendedDropVisuals();
+        CancelOverlayDrag();
+    }
+
+    private void HideRecommendedDropVisuals()
+    {
+        SetHoveredMergeTargetCard(null);
+        RecMergeTargetHighlight.Visibility = Visibility.Collapsed;
+        RecDropInsertIndicator.Visibility = Visibility.Collapsed;
+    }
+
+    private void ApplyRecommendedDropVisuals(
+        RecommendedDropDecision decision,
+        bool suppressInsertBar = false)
+    {
+        if (decision.IsMerge && decision.MergeTarget is not null)
+        {
+            SetHoveredMergeTargetCard(decision.MergeTargetElement);
+            if (RecDropInsertIndicator.Visibility != Visibility.Collapsed)
+            {
+                RecDropInsertIndicator.Visibility = Visibility.Collapsed;
+            }
+            if (Math.Abs(RecMergeTargetHighlight.Width - decision.HighlightRect.Width) > 0.01)
+            {
+                RecMergeTargetHighlight.Width = decision.HighlightRect.Width;
+            }
+            if (Math.Abs(RecMergeTargetHighlight.Height - decision.HighlightRect.Height) > 0.01)
+            {
+                RecMergeTargetHighlight.Height = decision.HighlightRect.Height;
+            }
+            if (Math.Abs(RecMergeTargetTransform.X - decision.HighlightRect.X) > 0.01)
+            {
+                RecMergeTargetTransform.X = decision.HighlightRect.X;
+            }
+            if (Math.Abs(RecMergeTargetTransform.Y - decision.HighlightRect.Y) > 0.01)
+            {
+                RecMergeTargetTransform.Y = decision.HighlightRect.Y;
+            }
+            if (RecMergeTargetHighlight.Visibility != Visibility.Visible)
+            {
+                RecMergeTargetHighlight.Visibility = Visibility.Visible;
+            }
+            return;
+        }
+
+        SetHoveredMergeTargetCard(null);
+        if (RecMergeTargetHighlight.Visibility != Visibility.Collapsed)
+        {
+            RecMergeTargetHighlight.Visibility = Visibility.Collapsed;
+        }
+        // When the live reflow preview is active the opened gap IS the
+        // affordance; the insert bar only shows as the reduced-motion
+        // fallback.
+        if (decision.ReorderTargetIndex >= 0 && !suppressInsertBar)
+        {
+            if (Math.Abs(RecDropInsertTransform.X - decision.InsertBarPosition.X) > 0.01)
+            {
+                RecDropInsertTransform.X = decision.InsertBarPosition.X;
+            }
+            if (Math.Abs(RecDropInsertTransform.Y - decision.InsertBarPosition.Y) > 0.01)
+            {
+                RecDropInsertTransform.Y = decision.InsertBarPosition.Y;
+            }
+            if (RecDropInsertIndicator.Visibility != Visibility.Visible)
+            {
+                RecDropInsertIndicator.Visibility = Visibility.Visible;
+            }
+        }
+        else if (RecDropInsertIndicator.Visibility != Visibility.Collapsed)
+        {
+            RecDropInsertIndicator.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    /// <summary>
+    /// Live reflow preview: projects the order a drop would commit and shifts
+    /// tiles to their projected slots via Translation animations, so the grid
+    /// opens the landing gap while the pointer is still down. The dragged
+    /// tiles move to their projected slot too (still dimmed) — the ghost
+    /// stays the pointer representation. Returns whether the preview engaged
+    /// (used to suppress the static insert bar).
+    /// </summary>
+    private bool ApplyRecommendedReflowPreview(RecommendedDropDecision decision)
+    {
+        if (!AreSystemAnimationsEnabled() ||
+            decision.IsMerge ||
+            decision.ReorderTargetIndex < 0)
+        {
+            ClearRecommendedReflowPreview();
+            return false;
+        }
+
+        var entries = _viewModel.RecommendedEntries;
+        int realizedChildCount = VisualTreeHelper.GetChildrenCount(RecommendedAppsRepeater);
+        if (_recHasCachedReflowState &&
+            _recCachedReflowTargetIndex == decision.ReorderTargetIndex &&
+            _recCachedReflowRealizedCount == realizedChildCount &&
+            _recCachedReflowEntriesCount == entries.Count)
+        {
+            return _recCachedReflowActive;
+        }
+        // EvaluateRecommendedDropTarget reports the remaining-list index for
+        // single drags but the full-list slot for batch drags (the two Move
+        // overloads' conventions); normalize to the remaining-list index.
+        int insertIndex = decision.ReorderTargetIndex;
+        if (_recDraggedEntryKeys.Count > 1)
+        {
+            int slot = Math.Clamp(decision.ReorderTargetIndex, 0, entries.Count);
+            int draggedBeforeSlot = 0;
+            for (int i = 0; i < slot; i++)
+            {
+                if (_recDraggedEntryKeys.Contains(entries[i].EntryKey))
+                {
+                    draggedBeforeSlot++;
+                }
+            }
+
+            insertIndex = slot - draggedBeforeSlot;
+        }
+
+        List<string> projected = ProjectReorderedEntryKeys(
+            entries,
+            _recDraggedEntryKeys,
+            insertIndex);
+        if (projected.Count != entries.Count)
+        {
+            ClearRecommendedReflowPreview();
+            return false;
+        }
+
+        var projectedSlotByKey = new Dictionary<string, int>(
+            projected.Count,
+            StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < projected.Count; i++)
+        {
+            projectedSlotByKey[projected[i]] = i;
+        }
+
+        var tileBases = CollectReflowTileBases();
+        if (tileBases.Count == 0 ||
+            !TryResolveReflowGridMetrics(
+                tileBases,
+                out double pitchX,
+                out double pitchY,
+                out int capacity,
+                out Point origin))
+        {
+            ClearRecommendedReflowPreview();
+            return false;
+        }
+
+        var desired = new Dictionary<string, (FrameworkElement Tile, System.Numerics.Vector3 Delta)>(
+            StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, tile, baseRect) in tileBases)
+        {
+            if (!projectedSlotByKey.TryGetValue(key, out int slot))
+            {
+                continue;
+            }
+
+            double targetX = origin.X + ((capacity > 0 ? slot % capacity : 0) * pitchX);
+            double targetY = origin.Y + ((capacity > 0 ? slot / capacity : 0) * pitchY);
+            double dx = targetX - baseRect.X;
+            double dy = targetY - baseRect.Y;
+            if (Math.Abs(dx) >= 0.5 || Math.Abs(dy) >= 0.5)
+            {
+                desired[key] = (tile, new System.Numerics.Vector3((float)dx, (float)dy, 0f));
+            }
+        }
+
+        foreach (var (key, shift) in desired)
+        {
+            if (_recReflowTranslations.TryGetValue(key, out System.Numerics.Vector3 applied) &&
+                Math.Abs(applied.X - shift.Delta.X) < 0.5 &&
+                Math.Abs(applied.Y - shift.Delta.Y) < 0.5)
+            {
+                continue;
+            }
+
+            AnimateReflowTranslation(shift.Tile, shift.Delta);
+            _recReflowTranslations[key] = shift.Delta;
+        }
+
+        foreach (string key in _recReflowTranslations.Keys.ToList())
+        {
+            if (desired.ContainsKey(key))
+            {
+                continue;
+            }
+
+            // Tile no longer needs a shift; unwind it.
+            foreach (var (staleKey, staleTile, _) in tileBases)
+            {
+                if (string.Equals(staleKey, key, StringComparison.OrdinalIgnoreCase))
+                {
+                    AnimateReflowTranslation(staleTile, System.Numerics.Vector3.Zero);
+                    break;
+                }
+            }
+
+            _recReflowTranslations.Remove(key);
+        }
+
+        _recHasCachedReflowState = true;
+        _recCachedReflowActive = _recReflowTranslations.Count > 0;
+        _recCachedReflowTargetIndex = decision.ReorderTargetIndex;
+        _recCachedReflowRealizedCount = realizedChildCount;
+        _recCachedReflowEntriesCount = entries.Count;
+        return _recCachedReflowActive;
+    }
+
+    private void ClearRecommendedReflowPreview()
+    {
+        _recHasCachedReflowState = false;
+        _recCachedReflowActive = false;
+        _recCachedReflowTargetIndex = -1;
+        _recCachedReflowRealizedCount = -1;
+        _recCachedReflowEntriesCount = -1;
+        if (_recReflowTranslations.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var (key, tile, _) in CollectReflowTileBases())
+        {
+            if (_recReflowTranslations.ContainsKey(key))
+            {
+                AnimateReflowTranslation(tile, System.Numerics.Vector3.Zero);
+            }
+        }
+
+        _recReflowTranslations.Clear();
+    }
+
+    private List<(string Key, FrameworkElement Tile, Rect Base)> CollectReflowTileBases()
+    {
+        var tileBases = new List<(string, FrameworkElement, Rect)>();
+        int childCount = VisualTreeHelper.GetChildrenCount(RecommendedAppsRepeater);
+        for (int c = 0; c < childCount; c++)
+        {
+            if (VisualTreeHelper.GetChild(RecommendedAppsRepeater, c) is not FrameworkElement tile ||
+                tile.Visibility != Visibility.Visible ||
+                tile.ActualWidth <= 0 ||
+                tile.ActualHeight <= 0 ||
+                tile.DataContext is not RecommendedGridEntry tileEntry)
+            {
+                continue;
+            }
+
+            tileBases.Add((tileEntry.EntryKey, tile, GetTileBaseRect(tile, tileEntry.EntryKey)));
+        }
+
+        return tileBases;
+    }
+
+    private static bool TryResolveReflowGridMetrics(
+        List<(string Key, FrameworkElement Tile, Rect Base)> tileBases,
+        out double pitchX,
+        out double pitchY,
+        out int capacity,
+        out Point origin)
+    {
+        pitchX = 0;
+        pitchY = 0;
+        capacity = 0;
+        origin = new Point(double.PositiveInfinity, double.PositiveInfinity);
+
+        if (tileBases.Count == 0)
+        {
+            return false;
+        }
+
+        // Rows keyed by Y rounded to 0.1px (sub-pixel drift tolerance).
+        var rows = new SortedDictionary<double, List<(double X, double Y, Size Size)>>();
+        foreach (var (_, _, baseRect) in tileBases)
+        {
+            double rowKey = Math.Round(baseRect.Y, 1);
+            if (!rows.TryGetValue(rowKey, out var rowTiles))
+            {
+                rowTiles = [];
+                rows[rowKey] = rowTiles;
+            }
+
+            rowTiles.Add((baseRect.X, baseRect.Y, new Size(baseRect.Width, baseRect.Height)));
+            origin.X = Math.Min(origin.X, baseRect.X);
+            origin.Y = Math.Min(origin.Y, baseRect.Y);
+        }
+
+        capacity = rows.Values.Max(static row => row.Count);
+        List<(double X, double Y, Size Size)> firstRow =
+            rows.First().Value.OrderBy(static tile => tile.X).ToList();
+        Size cellSize = firstRow[0].Size;
+        // Fallback pitch uses the UniformGridLayout 6px spacing declared in
+        // the XAML (single-column rows / single-row grids have no neighbour
+        // to measure from).
+        pitchX = firstRow.Count >= 2
+            ? firstRow[1].X - firstRow[0].X
+            : cellSize.Width + 6;
+        pitchY = rows.Count >= 2
+            ? rows.Keys.Skip(1).First() - rows.Keys.First()
+            : cellSize.Height + 6;
+        return pitchX > 0 && pitchY > 0 && capacity > 0;
+    }
+
+    private static void AnimateReflowTranslation(
+        FrameworkElement tile,
+        System.Numerics.Vector3 target)
+    {
+        ElementCompositionPreview.SetIsTranslationEnabled(tile, true);
+        var visual = ElementCompositionPreview.GetElementVisual(tile);
+        if (visual is null)
+        {
+            return;
+        }
+
+        if (!AreSystemAnimationsEnabled())
+        {
+            visual.StopAnimation("Translation");
+            // Translation is animatable but not a settable CLR property in
+            // the WinUI 3 projection; it lives in the property store.
+            visual.Properties.InsertVector3("Translation", target);
+            return;
+        }
+
+        // Same curve and duration as the implicit Offset animation: when the
+        // commit reorders the collection, the layout Offset animation and
+        // this translation unwind cancel each other — no visual jump between
+        // preview and settled state.
+        var compositor = visual.Compositor;
+        var decel = compositor.CreateCubicBezierEasingFunction(
+            new System.Numerics.Vector2(0.0f, 0.0f),
+            new System.Numerics.Vector2(0.1f, 1.0f));
+        var anim = compositor.CreateVector3KeyFrameAnimation();
+        anim.Target = "Translation";
+        anim.InsertKeyFrame(1.0f, target, decel);
+        anim.Duration = TimeSpan.FromMilliseconds(190);
+        visual.StartAnimation("Translation", anim);
+    }
+
+    private void SetHoveredMergeTargetCard(FrameworkElement? targetCard)
+    {
+        if (ReferenceEquals(_recMergeHoveredCard, targetCard))
+        {
+            return;
+        }
+
+        if (_recMergeHoveredCard is { } previousCard &&
+            FindVisualChild<FrameworkElement>(previousCard, "CardContentHost") is { } prevHost)
+        {
+            AnimateMergeTargetScale(prevHost, 1.0f, 120);
+        }
+
+        _recMergeHoveredCard = targetCard;
+        if (targetCard is not null &&
+            FindVisualChild<FrameworkElement>(targetCard, "CardContentHost") is { } nextHost)
+        {
+            AnimateMergeTargetScale(nextHost, 1.07f, 140);
+        }
+    }
+
+    private static void AnimateMergeTargetScale(FrameworkElement host, float targetScale, int durationMs)
+    {
+        var visual = ElementCompositionPreview.GetElementVisual(host);
+        if (visual is null)
+        {
+            return;
+        }
+
+        if (!AreSystemAnimationsEnabled())
+        {
+            visual.Scale = new System.Numerics.Vector3(targetScale, targetScale, 1f);
+            return;
+        }
+
+        float cx = visual.Size.X > 0
+            ? visual.Size.X / 2f
+            : (float)(host.ActualWidth > 0 ? host.ActualWidth : 86) / 2f;
+        float cy = visual.Size.Y > 0
+            ? visual.Size.Y / 2f
+            : (float)(host.ActualHeight > 0 ? host.ActualHeight : 78) / 2f;
+        visual.CenterPoint = new System.Numerics.Vector3(cx, cy, 0f);
+
+        var compositor = visual.Compositor;
+        var decel = compositor.CreateCubicBezierEasingFunction(
+            new System.Numerics.Vector2(0.0f, 0.0f),
+            new System.Numerics.Vector2(0.1f, 1.0f));
+        var scaleAnim = compositor.CreateScalarKeyFrameAnimation();
+        scaleAnim.InsertKeyFrame(1.0f, targetScale, decel);
+        scaleAnim.Duration = TimeSpan.FromMilliseconds(durationMs);
+        visual.StartAnimation("Scale.X", scaleAnim);
+        visual.StartAnimation("Scale.Y", scaleAnim);
+    }
+
+    private static void AnimateDragGhostPickup(FrameworkElement ghostElement)
+    {
+        var visual = ElementCompositionPreview.GetElementVisual(ghostElement);
+        if (visual is null)
+        {
+            return;
+        }
+
+        if (!AreSystemAnimationsEnabled())
+        {
+            visual.Scale = System.Numerics.Vector3.One;
+            return;
+        }
+
+        float cx = (float)(ghostElement.Width > 0 && !double.IsNaN(ghostElement.Width)
+            ? ghostElement.Width
+            : 100) / 2f;
+        float cy = (float)(ghostElement.Height > 0 && !double.IsNaN(ghostElement.Height)
+            ? ghostElement.Height
+            : 88) / 2f;
+        visual.CenterPoint = new System.Numerics.Vector3(cx, cy, 0f);
+
+        var compositor = visual.Compositor;
+        var decel = compositor.CreateCubicBezierEasingFunction(
+            new System.Numerics.Vector2(0.0f, 0.0f),
+            new System.Numerics.Vector2(0.1f, 1.0f));
+        var anim = compositor.CreateScalarKeyFrameAnimation();
+        anim.InsertKeyFrame(0.0f, 0.91f);
+        anim.InsertKeyFrame(1.0f, 1.04f, decel);
+        anim.Duration = TimeSpan.FromMilliseconds(140);
+        visual.StartAnimation("Scale.X", anim);
+        visual.StartAnimation("Scale.Y", anim);
+    }
+
+    private Rect GetTileBaseRect(FrameworkElement tile, string entryKey)
+    {
+        if (_recTileBaseRects.TryGetValue(entryKey, out Rect cached))
+        {
+            return cached;
+        }
+
+        Point position = tile.TransformToVisual(RecommendedAppsSurface)
+            .TransformPoint(new Point(0, 0));
+        if (_recReflowTranslations.TryGetValue(entryKey, out System.Numerics.Vector3 applied))
+        {
+            position.X -= applied.X;
+            position.Y -= applied.Y;
+        }
+
+        // A gesture starting within the previous gesture's 190ms unwind can
+        // capture a residual offset here; it decays to zero by the next
+        // snapshot and never accumulates.
+        var rect = new Rect(position, new Size(tile.ActualWidth, tile.ActualHeight));
+        _recTileBaseRects[entryKey] = rect;
+        return rect;
+    }
+
+    private void SnapshotRecommendedTileBaseRects()
+    {
+        _recTileBaseRects.Clear();
+        int childCount = VisualTreeHelper.GetChildrenCount(RecommendedAppsRepeater);
+        for (int c = 0; c < childCount; c++)
+        {
+            if (VisualTreeHelper.GetChild(RecommendedAppsRepeater, c) is not FrameworkElement tile ||
+                tile.Visibility != Visibility.Visible ||
+                tile.ActualWidth <= 0 ||
+                tile.ActualHeight <= 0 ||
+                tile.DataContext is not RecommendedGridEntry tileEntry)
+            {
+                continue;
+            }
+
+            _recTileBaseRects[tileEntry.EntryKey] = new Rect(
+                tile.TransformToVisual(RecommendedAppsSurface).TransformPoint(new Point(0, 0)),
+                new Size(tile.ActualWidth, tile.ActualHeight));
+        }
+    }
+
+    internal const double DropAnchorDeadband = 4.0;
+    internal const double PopupExternalDragEdgeInset = 1.5;
+
+    /// <summary>
+    /// Drop decision with sub-zone hysteresis: once a decision lands, the
+    /// pointer owns that decision's specific sub-zone (merge center, left/right
+    /// insertion strip, or trailing space) inflated by a small anti-jitter
+    /// deadband. Leaving that sub-zone re-evaluates cleanly without locking out
+    /// adjacent merge or insertion zones.
+    /// </summary>
+    private RecommendedDropDecision ResolveRecommendedDropDecision(Point pointInSurface)
+    {
+        if (_recHasDropAnchor && _recDropAnchorRect.Contains(pointInSurface))
+        {
+            return _recLastDropDecision;
+        }
+
+        if (_recPressedEntry is null)
+        {
+            return new RecommendedDropDecision(false, null, null, -1, default, default, default);
+        }
+
+        RecommendedDropDecision decision = EvaluateRecommendedDropTarget(
+            pointInSurface,
+            _recPressedEntry);
+        if (decision.IsMerge || decision.ReorderTargetIndex >= 0)
+        {
+            _recDropAnchorRect = InflateDropAnchorRect(decision.AnchorRect, DropAnchorDeadband);
+            _recHasDropAnchor = true;
+        }
+        else
+        {
+            _recHasDropAnchor = false;
+        }
+
+        _recLastDropDecision = decision;
+        LogRecDragDecision(decision);
+        return decision;
+    }
+
+    internal static Rect InflateDropAnchorRect(Rect anchor, double margin) =>
+        new(
+            anchor.X - margin,
+            anchor.Y - margin,
+            Math.Max(0, anchor.Width + (2 * margin)),
+            Math.Max(0, anchor.Height + (2 * margin)));
+
+    internal static Rect ComputeTileMergeAnchorRect(Rect tileRect, bool targetIsFolder)
+    {
+        double minX = targetIsFolder ? 0.16 : 0.34;
+        double maxX = targetIsFolder ? 0.84 : 0.66;
+        double minY = targetIsFolder ? 0.12 : 0.20;
+        double maxY = targetIsFolder ? 0.88 : 0.80;
+        return new Rect(
+            tileRect.X + (tileRect.Width * minX),
+            tileRect.Y + (tileRect.Height * minY),
+            tileRect.Width * (maxX - minX),
+            tileRect.Height * (maxY - minY));
+    }
+
+    internal static Rect ComputeTileReorderAnchorRect(
+        Rect tileRect,
+        double relX,
+        double relY,
+        bool beforeTile,
+        bool canMergeOntoTarget,
+        bool targetIsFolder)
+    {
+        double halfWidth = tileRect.Width * 0.5;
+        double halfX = beforeTile ? tileRect.X : tileRect.X + halfWidth;
+
+        if (!canMergeOntoTarget)
+        {
+            return new Rect(halfX, tileRect.Y, halfWidth, tileRect.Height);
+        }
+
+        double mergeMinX = targetIsFolder ? 0.16 : 0.34;
+        double mergeMaxX = targetIsFolder ? 0.84 : 0.66;
+        double mergeMinY = targetIsFolder ? 0.12 : 0.20;
+        double mergeMaxY = targetIsFolder ? 0.88 : 0.80;
+
+        if (beforeTile && relX < mergeMinX)
+        {
+            return new Rect(tileRect.X, tileRect.Y, tileRect.Width * mergeMinX, tileRect.Height);
+        }
+
+        if (!beforeTile && relX > mergeMaxX)
+        {
+            double stripX = tileRect.X + (tileRect.Width * mergeMaxX);
+            return new Rect(stripX, tileRect.Y, Math.Max(1.0, tileRect.Right - stripX), tileRect.Height);
+        }
+
+        if (relY < mergeMinY)
+        {
+            return new Rect(halfX, tileRect.Y, halfWidth, tileRect.Height * mergeMinY);
+        }
+
+        if (relY > mergeMaxY)
+        {
+            double stripY = tileRect.Y + (tileRect.Height * mergeMaxY);
+            return new Rect(halfX, stripY, halfWidth, Math.Max(1.0, tileRect.Bottom - stripY));
+        }
+
+        return new Rect(halfX, tileRect.Y, halfWidth, tileRect.Height);
+    }
+
+    internal static Rect ComputeTrailingAppendAnchorRect(
+        Point pointInSurface,
+        Rect lastTileRect,
+        double surfaceWidth,
+        double surfaceHeight)
+    {
+        if (pointInSurface.Y > lastTileRect.Bottom + DropAnchorDeadband)
+        {
+            double startY = lastTileRect.Bottom + DropAnchorDeadband + 1.0;
+            return new Rect(
+                0,
+                startY,
+                Math.Max(16.0, Math.Max(surfaceWidth, lastTileRect.Right)),
+                Math.Max(16.0, surfaceHeight - startY));
+        }
+
+        double startX = lastTileRect.Right + DropAnchorDeadband + 1.0;
+        return new Rect(
+            startX,
+            lastTileRect.Y,
+            Math.Max(16.0, surfaceWidth - startX),
+            Math.Max(16.0, surfaceHeight - lastTileRect.Y));
+    }
+
+    internal static bool IsPointLeavingPopupDragBounds(
+        Point pointInRoot,
+        double rootWidth,
+        double rootHeight) =>
+        rootWidth > (2 * PopupExternalDragEdgeInset) &&
+        rootHeight > (2 * PopupExternalDragEdgeInset) &&
+        (pointInRoot.X <= PopupExternalDragEdgeInset ||
+         pointInRoot.Y <= PopupExternalDragEdgeInset ||
+         pointInRoot.X >= rootWidth - PopupExternalDragEdgeInset ||
+         pointInRoot.Y >= rootHeight - PopupExternalDragEdgeInset);
+
+    private void LogRecDragDecision(RecommendedDropDecision decision)
+    {
+        string summary = decision.IsMerge && decision.MergeTarget is { } mergeTarget
+            ? $"merge:{mergeTarget.EntryKey}"
+            : decision.ReorderTargetIndex >= 0
+                ? $"insert:{decision.ReorderTargetIndex}"
+                : "none";
+        if (string.Equals(summary, _recLastDecisionSummary, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _recLastDecisionSummary = summary;
+        App.Log(
+            $"[RecDrag] decision {summary} " +
+            $"dragged={_recDraggedEntryKeys.Count} apps={_recDraggedAppKeys.Count} " +
+            $"batch={_recDraggedEntryKeys.Count > 1}");
+    }
+
+    private void ResetRecommendedDropAnchor()
+    {
+        _recLastDropDecision = new RecommendedDropDecision(false, null, null, -1, default, default, default);
+        _recHasDropAnchor = false;
+        _recLastDecisionSummary = null;
+        _recHasCachedReflowState = false;
+    }
+
+    private RecommendedDropDecision EvaluateRecommendedDropTarget(
+        Point pointInSurface,
+        RecommendedGridEntry draggedEntry)
+    {
+        var entries = _viewModel.RecommendedEntries;
+        int count = entries.Count;
+        if (count <= 1)
+        {
+            return new RecommendedDropDecision(false, null, null, -1, default, default, default);
+        }
+
+        var indexByKey = new Dictionary<string, int>(count, StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < count; i++)
+        {
+            indexByKey[entries[i].EntryKey] = i;
+        }
+
+        if (!indexByKey.TryGetValue(draggedEntry.EntryKey, out int sourceIndex))
+        {
+            return new RecommendedDropDecision(false, null, null, -1, default, default, default);
+        }
+
+        bool isBatchDrag = _recDraggedEntryKeys.Count > 1;
+        bool anyDraggedIsFolder = draggedEntry.IsFolder;
+        if (!anyDraggedIsFolder && isBatchDrag)
+        {
+            foreach (string key in _recDraggedEntryKeys)
+            {
+                if (key.StartsWith("folder:", StringComparison.OrdinalIgnoreCase))
+                {
+                    anyDraggedIsFolder = true;
+                    break;
+                }
+            }
+        }
+
+        var realizedTiles = new List<(int EntryIndex, RecommendedGridEntry Entry, FrameworkElement Tile, Rect Rect)>();
+        int childCount = VisualTreeHelper.GetChildrenCount(RecommendedAppsRepeater);
+        for (int c = 0; c < childCount; c++)
+        {
+            if (VisualTreeHelper.GetChild(RecommendedAppsRepeater, c) is not FrameworkElement tile ||
+                tile.Visibility != Visibility.Visible ||
+                tile.ActualWidth <= 0 ||
+                tile.ActualHeight <= 0 ||
+                tile.DataContext is not RecommendedGridEntry tileEntry ||
+                !indexByKey.TryGetValue(tileEntry.EntryKey, out int entryIndex))
+            {
+                continue;
+            }
+
+            // Base rects, never live transforms: live rects include the
+            // reflow translations and would feed decision→reflow→decision
+            // oscillation. New tiles realized mid-drag capture lazily.
+            var rect = GetTileBaseRect(tile, tileEntry.EntryKey);
+            realizedTiles.Add((entryIndex, entries[entryIndex], tile, rect));
+        }
+
+        if (realizedTiles.Count == 0)
+        {
+            return new RecommendedDropDecision(false, null, null, -1, default, default, default);
+        }
+
+        realizedTiles.Sort(static (left, right) => left.EntryIndex.CompareTo(right.EntryIndex));
+
+        int matchedTileIdx = -1;
+        double bestCenterDistanceSq = double.MaxValue;
+        for (int t = 0; t < realizedTiles.Count; t++)
+        {
+            Rect rect = realizedTiles[t].Rect;
+            // Expand by half the UniformGridLayout 6px spacing (+2px overlap) so inter-tile gaps never become dead zones.
+            var hitRect = new Rect(rect.X - 5, rect.Y - 5, rect.Width + 10, rect.Height + 10);
+            if (!hitRect.Contains(pointInSurface))
+            {
+                continue;
+            }
+
+            double cx = rect.X + (rect.Width * 0.5);
+            double cy = rect.Y + (rect.Height * 0.5);
+            double distSq = ((pointInSurface.X - cx) * (pointInSurface.X - cx)) +
+                            ((pointInSurface.Y - cy) * (pointInSurface.Y - cy));
+            if (distSq < bestCenterDistanceSq)
+            {
+                bestCenterDistanceSq = distSq;
+                matchedTileIdx = t;
+            }
+        }
+
+        if (matchedTileIdx >= 0)
+        {
+            var (i, targetEntry, tile, rect) = realizedTiles[matchedTileIdx];
+            if (i == sourceIndex)
+            {
+                return new RecommendedDropDecision(false, null, null, -1, default, default, default);
+            }
+
+            double relX = Math.Clamp((pointInSurface.X - rect.X) / Math.Max(1.0, rect.Width), 0.0, 1.0);
+            double relY = Math.Clamp((pointInSurface.Y - rect.Y) / Math.Max(1.0, rect.Height), 0.0, 1.0);
+
+            // Deliberate center zone merges dragged apps into a folder:
+            // - Disabled whenever any dragged item is itself a folder.
+            // - In batch drag, only merge onto an existing folder so multi-select drag onto app slots reliably reorders.
+            bool canMergeOntoTarget =
+                !anyDraggedIsFolder &&
+                !_recDraggedEntryKeys.Contains(targetEntry.EntryKey) &&
+                (!isBatchDrag || targetEntry.IsFolder);
+            if (canMergeOntoTarget &&
+                ShouldMergeOntoTile(relX, relY, targetEntry.IsFolder, isBatchDrag))
+            {
+                return new RecommendedDropDecision(
+                    IsMerge: true,
+                    MergeTarget: targetEntry,
+                    MergeTargetElement: tile,
+                    ReorderTargetIndex: -1,
+                    HighlightRect: rect,
+                    InsertBarPosition: default,
+                    AnchorRect: ComputeTileMergeAnchorRect(rect, targetEntry.IsFolder));
+            }
+
+            bool beforeTile = relX < 0.5;
+            int slotIndex = beforeTile ? i : i + 1;
+            if (!isBatchDrag)
+            {
+                if (slotIndex == sourceIndex || slotIndex == sourceIndex + 1)
+                {
+                    return new RecommendedDropDecision(false, null, null, -1, default, default, default);
+                }
+            }
+            else if (!WouldBatchReorderChangeOrder(entries, _recDraggedEntryKeys, slotIndex))
+            {
+                return new RecommendedDropDecision(false, null, null, -1, default, default, default);
+            }
+
+            int targetIndex = isBatchDrag
+                ? slotIndex
+                : (slotIndex > sourceIndex ? slotIndex - 1 : slotIndex);
+            double barX = beforeTile ? Math.Max(1, rect.X - 4) : rect.Right + 2;
+            double barY = rect.Y + ((rect.Height - RecDropInsertIndicator.Height) / 2);
+            Rect reorderAnchor = ComputeTileReorderAnchorRect(
+                rect,
+                relX,
+                relY,
+                beforeTile,
+                canMergeOntoTarget,
+                targetEntry.IsFolder);
+            return new RecommendedDropDecision(
+                IsMerge: false,
+                MergeTarget: null,
+                MergeTargetElement: null,
+                ReorderTargetIndex: targetIndex,
+                HighlightRect: default,
+                InsertBarPosition: new Point(barX, barY),
+                AnchorRect: reorderAnchor);
+        }
+
+        // Trailing blank space after the last realized tile appends to the end.
+        var lastTileInfo = realizedTiles[^1];
+        Rect lastRect = lastTileInfo.Rect;
+        if ((pointInSurface.Y > lastRect.Bottom - 8 ||
+             (pointInSurface.Y >= lastRect.Y - 5 && pointInSurface.X >= lastRect.Right)) &&
+            (isBatchDrag
+                ? WouldBatchReorderChangeOrder(entries, _recDraggedEntryKeys, count)
+                : sourceIndex < count - 1))
+        {
+            double barX = lastRect.Right + 2;
+            double barY = lastRect.Y + ((lastRect.Height - RecDropInsertIndicator.Height) / 2);
+            Rect appendAnchor = ComputeTrailingAppendAnchorRect(
+                pointInSurface,
+                lastRect,
+                RecommendedAppsSurface.ActualWidth,
+                RecommendedAppsSurface.ActualHeight);
+            return new RecommendedDropDecision(
+                IsMerge: false,
+                MergeTarget: null,
+                MergeTargetElement: null,
+                ReorderTargetIndex: isBatchDrag ? count : count - 1,
+                HighlightRect: default,
+                InsertBarPosition: new Point(barX, barY),
+                AnchorRect: appendAnchor);
+        }
+
+        return new RecommendedDropDecision(false, null, null, -1, default, default, default);
+    }
+
+    internal static bool WouldBatchReorderChangeOrder(
+        IReadOnlyList<RecommendedGridEntry> entries,
+        IReadOnlySet<string> draggedEntryKeys,
+        int targetVisibleIndex)
+    {
+        int count = entries.Count;
+        if (count <= 1 || draggedEntryKeys.Count == 0)
+        {
+            return false;
+        }
+
+        int clampedSlot = Math.Clamp(targetVisibleIndex, 0, count);
+        int draggedBeforeSlot = 0;
+        for (int i = 0; i < clampedSlot; i++)
+        {
+            if (draggedEntryKeys.Contains(entries[i].EntryKey))
+            {
+                draggedBeforeSlot++;
+            }
+        }
+
+        List<string> projected = ProjectReorderedEntryKeys(
+            entries,
+            draggedEntryKeys,
+            clampedSlot - draggedBeforeSlot);
+        for (int i = 0; i < count; i++)
+        {
+            if (!string.Equals(projected[i], entries[i].EntryKey, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Projects the entry-key order a reorder commit produces: the dragged
+    /// block (kept in current order) removed and re-inserted at
+    /// <paramref name="insertIndexInRemaining"/> of the remaining entries.
+    /// Shared by the drop gate (no-op detection above) and the live reflow
+    /// preview below, so both always agree on what a commit would do.
+    /// Returns an empty list for degenerate inputs (nothing to move).
+    /// </summary>
+    internal static List<string> ProjectReorderedEntryKeys(
+        IReadOnlyList<RecommendedGridEntry> entries,
+        IReadOnlySet<string> draggedEntryKeys,
+        int insertIndexInRemaining)
+    {
+        int count = entries.Count;
+        if (count <= 1 || draggedEntryKeys.Count == 0)
+        {
+            return [];
+        }
+
+        var movingKeys = new List<string>(draggedEntryKeys.Count);
+        var remainingKeys = new List<string>(count);
+        for (int i = 0; i < count; i++)
+        {
+            string entryKey = entries[i].EntryKey;
+            if (draggedEntryKeys.Contains(entryKey))
+            {
+                movingKeys.Add(entryKey);
+            }
+            else
+            {
+                remainingKeys.Add(entryKey);
+            }
+        }
+
+        if (movingKeys.Count == 0)
+        {
+            return [];
+        }
+
+        remainingKeys.InsertRange(
+            Math.Clamp(insertIndexInRemaining, 0, remainingKeys.Count),
+            movingKeys);
+        return remainingKeys;
+    }
+
+    /// <summary>
+    /// Merge-zone geometry for drop targets. Folder tiles accept across most
+    /// of the card — the launcher convention where dropping onto a folder
+    /// enters it — while the narrow edge strips keep insert-here reachable.
+    /// App tiles keep the small centre band so folders are only created
+    /// deliberately, and batch selections never merge onto single apps.
+    /// </summary>
+    internal static bool ShouldMergeOntoTile(
+        double relX,
+        double relY,
+        bool targetIsFolder,
+        bool isBatchDrag) =>
+        targetIsFolder
+            ? relX >= 0.16 && relX <= 0.84 && relY >= 0.12 && relY <= 0.88
+            : !isBatchDrag && relX >= 0.34 && relX <= 0.66 && relY >= 0.20 && relY <= 0.80;
+
+    private static void AutoScrollScrollViewerOnDrag(ScrollViewer viewer, Point pointInViewer)
+    {
+        if (viewer.ScrollableHeight <= 0 || viewer.ActualHeight <= 0)
+        {
+            return;
+        }
+
+        const double edgeZone = 26.0;
+        const double step = 12.0;
+        if (pointInViewer.Y < edgeZone && viewer.VerticalOffset > 0)
+        {
+            viewer.ChangeView(null, Math.Max(0, viewer.VerticalOffset - step), null, disableAnimation: true);
+        }
+        else if (pointInViewer.Y > viewer.ActualHeight - edgeZone &&
+                 viewer.VerticalOffset < viewer.ScrollableHeight)
+        {
+            viewer.ChangeView(
+                null,
+                Math.Min(viewer.ScrollableHeight, viewer.VerticalOffset + step),
+                null,
+                disableAnimation: true);
+        }
+    }
+
+    // ── Centered frosted overlays (Win11 folder & hidden items) ──────────────
+
+    private void RecommendationOverlaysLayer_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        UpdateRecommendationOverlayResponsiveBounds();
+    }
+
+    private void UpdateRecommendationOverlayResponsiveBounds()
+    {
+        double hostWidth = RootGrid.ActualWidth > 0
+            ? RootGrid.ActualWidth
+            : (RecommendationOverlaysLayer.ActualWidth > 0
+                ? RecommendationOverlaysLayer.ActualWidth
+                : PopupWidth);
+        double searchRowHeight = SearchBoxRow.ActualHeight > 0 ? SearchBoxRow.ActualHeight : 60;
+        double hostHeight = RecommendationOverlaysLayer.ActualHeight > 0
+            ? RecommendationOverlaysLayer.ActualHeight
+            : Math.Max(
+                220,
+                (RootGrid.ActualHeight > 0 ? RootGrid.ActualHeight : PopupHeight) - searchRowHeight);
+
+        double cardWidth = Math.Min(448, Math.Max(200, hostWidth - 28));
+        double cardMaxHeight = Math.Clamp(hostHeight - 20, 180, 368);
+        double cardMinHeight = Math.Min(196, cardMaxHeight);
+        double maxTitleWidth = Math.Max(120, cardWidth - 68);
+
+        FolderOverlayCard.Width = cardWidth;
+        FolderOverlayCard.MinHeight = cardMinHeight;
+        FolderOverlayCard.MaxHeight = cardMaxHeight;
+        FolderOverlayTitleText.MaxWidth = maxTitleWidth;
+        FolderOverlayTitleEditor.MaxWidth = maxTitleWidth;
+        FolderOverlayTitleEditor.MinWidth = Math.Min(160, maxTitleWidth);
+
+        HiddenAppsOverlayCard.Width = cardWidth;
+        HiddenAppsOverlayCard.MinHeight = cardMinHeight;
+        HiddenAppsOverlayCard.MaxHeight = cardMaxHeight;
+    }
+
+    private bool IsAnyRecommendationOverlayOpen() =>
+        !_isOverlayClosing &&
+        RecommendationOverlaysLayer.Visibility == Visibility.Visible &&
+        (FolderOverlayHost.Visibility == Visibility.Visible ||
+         HiddenAppsOverlayHost.Visibility == Visibility.Visible);
+
+    private void OpenFolderOverlay(RecommendedGridEntry folderEntry, bool startRename = false)
+    {
+        if (!folderEntry.IsFolder || string.IsNullOrWhiteSpace(folderEntry.FolderId))
+        {
+            return;
+        }
+
+        CancelRecommendedDrag();
+        CancelFolderTitleEdit();
+        EndRecommendationRubberBand();
+        UpdateRecommendationOverlayResponsiveBounds();
+        _openFolderId = folderEntry.FolderId;
+        FolderOverlayTitleText.Text = folderEntry.Label;
+
+        _folderOverlayItems.Clear();
+        foreach (SearchResultItem member in folderEntry.FolderItems)
+        {
+            _folderOverlayItems.Add(member);
+        }
+
+        HiddenAppsOverlayHost.Visibility = Visibility.Collapsed;
+        FolderOverlayHost.Visibility = Visibility.Visible;
+        RecommendationOverlaysLayer.Visibility = Visibility.Visible;
+        UpdatePopupDynamicBounds();
+        FolderOverlayScrollViewer.ChangeView(null, 0, null, disableAnimation: true);
+        RefreshOverlayRepeaterIcons(FolderAppsRepeater);
+        AnimateRecommendationOverlayOpen(FolderOverlayScrim, FolderOverlayCard);
+
+        if (startRename)
+        {
+            DispatcherQueue.TryEnqueue(BeginFolderTitleEdit);
+        }
+    }
+
+    private void OpenHiddenAppsOverlay()
+    {
+        if (!_viewModel.HasHiddenRecommendations)
+        {
+            return;
+        }
+
+        CancelRecommendedDrag();
+        CancelFolderTitleEdit();
+        EndRecommendationRubberBand();
+        UpdateRecommendationOverlayResponsiveBounds();
+        _openFolderId = null;
+
+        FolderOverlayHost.Visibility = Visibility.Collapsed;
+        HiddenAppsOverlayHost.Visibility = Visibility.Visible;
+        RecommendationOverlaysLayer.Visibility = Visibility.Visible;
+        UpdatePopupDynamicBounds();
+        HiddenOverlayScrollViewer.ChangeView(null, 0, null, disableAnimation: true);
+        RefreshOverlayRepeaterIcons(HiddenAppsRepeater);
+        AnimateRecommendationOverlayOpen(HiddenAppsOverlayScrim, HiddenAppsOverlayCard);
+    }
+
+    private void CloseRecommendationOverlays(bool immediate = false)
+    {
+        ClearHoveredOverlayCard();
+        CancelOverlayDrag();
+        CancelFolderTitleEdit();
+        _openFolderId = null;
+
+        bool anyVisible = RecommendationOverlaysLayer.Visibility == Visibility.Visible &&
+                          (FolderOverlayHost.Visibility == Visibility.Visible ||
+                           HiddenAppsOverlayHost.Visibility == Visibility.Visible);
+        if (!anyVisible)
+        {
+            _isOverlayClosing = false;
+            FolderOverlayHost.Visibility = Visibility.Collapsed;
+            HiddenAppsOverlayHost.Visibility = Visibility.Collapsed;
+            RecommendationOverlaysLayer.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        if (immediate || !AreSystemAnimationsEnabled())
+        {
+            ++_overlayAnimationGeneration;
+            _isOverlayClosing = false;
+            ResetRecommendationOverlayVisuals();
+            FolderOverlayHost.Visibility = Visibility.Collapsed;
+            HiddenAppsOverlayHost.Visibility = Visibility.Collapsed;
+            RecommendationOverlaysLayer.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        if (_isOverlayClosing)
+        {
+            return;
+        }
+
+        _isOverlayClosing = true;
+        int generation = ++_overlayAnimationGeneration;
+        bool closingFolder = FolderOverlayHost.Visibility == Visibility.Visible;
+        Border scrim = closingFolder ? FolderOverlayScrim : HiddenAppsOverlayScrim;
+        Border card = closingFolder ? FolderOverlayCard : HiddenAppsOverlayCard;
+
+        ElementCompositionPreview.SetIsTranslationEnabled(card, true);
+        var scrimVisual = ElementCompositionPreview.GetElementVisual(scrim);
+        var cardVisual = ElementCompositionPreview.GetElementVisual(card);
+        var compositor = cardVisual.Compositor;
+
+        float cx = (float)(card.ActualWidth > 0
+            ? card.ActualWidth
+            : (!double.IsNaN(card.Width) && card.Width > 0 ? card.Width : 380)) / 2f;
+        float cy = (float)(card.ActualHeight > 0 ? card.ActualHeight : 250) / 2f;
+        cardVisual.CenterPoint = new System.Numerics.Vector3(cx, cy, 0f);
+
+        var easeIn = compositor.CreateCubicBezierEasingFunction(
+            new System.Numerics.Vector2(0.4f, 0.0f),
+            new System.Numerics.Vector2(1.0f, 1.0f));
+
+        var batch = compositor.CreateScopedBatch(CompositionBatchTypes.Animation);
+
+        StartScalarAnim(compositor, scrimVisual, "Opacity", TimeSpan.Zero, 125, easeIn, scrimVisual.Opacity, 0f);
+        StartScalarAnim(compositor, cardVisual, "Opacity", TimeSpan.Zero, 125, easeIn, cardVisual.Opacity, 0f);
+        StartScalarAnim(compositor, cardVisual, "Scale.X", TimeSpan.Zero, 135, easeIn, 1.0f, 0.94f);
+        StartScalarAnim(compositor, cardVisual, "Scale.Y", TimeSpan.Zero, 135, easeIn, 1.0f, 0.94f);
+        StartScalarAnim(compositor, cardVisual, "Translation.Y", TimeSpan.Zero, 135, easeIn, 0f, 6f);
+
+        batch.Completed += (_, _) =>
+        {
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (generation != _overlayAnimationGeneration)
+                {
+                    return;
+                }
+
+                _isOverlayClosing = false;
+                FolderOverlayHost.Visibility = Visibility.Collapsed;
+                HiddenAppsOverlayHost.Visibility = Visibility.Collapsed;
+                RecommendationOverlaysLayer.Visibility = Visibility.Collapsed;
+                ResetRecommendationOverlayVisuals();
+                UpdatePopupDynamicBounds();
+            });
+        };
+        batch.End();
+    }
+
+    private void AnimateRecommendationOverlayOpen(Border scrim, Border card)
+    {
+        ++_overlayAnimationGeneration;
+        _isOverlayClosing = false;
+        ElementCompositionPreview.SetIsTranslationEnabled(card, true);
+        var scrimVisual = ElementCompositionPreview.GetElementVisual(scrim);
+        var cardVisual = ElementCompositionPreview.GetElementVisual(card);
+
+        scrimVisual.StopAnimation("Opacity");
+        cardVisual.StopAnimation("Opacity");
+        cardVisual.StopAnimation("Scale.X");
+        cardVisual.StopAnimation("Scale.Y");
+        cardVisual.StopAnimation("Translation.Y");
+
+        if (!AreSystemAnimationsEnabled())
+        {
+            scrimVisual.Opacity = 1f;
+            cardVisual.Opacity = 1f;
+            cardVisual.Scale = System.Numerics.Vector3.One;
+            return;
+        }
+
+        float cx = (float)(!double.IsNaN(card.Width) && card.Width > 0
+            ? card.Width
+            : (card.ActualWidth > 0 ? card.ActualWidth : 380)) / 2f;
+        float cy = (float)(card.ActualHeight > 0 ? card.ActualHeight : 250) / 2f;
+        cardVisual.CenterPoint = new System.Numerics.Vector3(cx, cy, 0f);
+
+        var compositor = cardVisual.Compositor;
+        var decel = compositor.CreateCubicBezierEasingFunction(
+            new System.Numerics.Vector2(0.0f, 0.0f),
+            new System.Numerics.Vector2(0.1f, 1.0f));
+
+        scrimVisual.Opacity = 0f;
+        cardVisual.Opacity = 0f;
+        StartScalarAnim(compositor, scrimVisual, "Opacity", TimeSpan.Zero, 150, decel, 0f, 1f);
+        StartScalarAnim(compositor, cardVisual, "Opacity", TimeSpan.Zero, 155, decel, 0f, 1f);
+        StartScalarAnim(compositor, cardVisual, "Scale.X", TimeSpan.Zero, 200, decel, 0.93f, 1.0f);
+        StartScalarAnim(compositor, cardVisual, "Scale.Y", TimeSpan.Zero, 200, decel, 0.93f, 1.0f);
+        StartScalarAnim(compositor, cardVisual, "Translation.Y", TimeSpan.Zero, 200, decel, 10f, 0f);
+    }
+
+    private void ResetRecommendationOverlayVisuals()
+    {
+        ResetSingleOverlayVisualPair(FolderOverlayScrim, FolderOverlayCard);
+        ResetSingleOverlayVisualPair(HiddenAppsOverlayScrim, HiddenAppsOverlayCard);
+    }
+
+    private static void ResetSingleOverlayVisualPair(Border scrim, Border card)
+    {
+        var scrimVisual = ElementCompositionPreview.GetElementVisual(scrim);
+        if (scrimVisual is not null)
+        {
+            scrimVisual.StopAnimation("Opacity");
+            scrimVisual.Opacity = 1f;
+        }
+
+        ElementCompositionPreview.SetIsTranslationEnabled(card, true);
+        var cardVisual = ElementCompositionPreview.GetElementVisual(card);
+        if (cardVisual is not null)
+        {
+            cardVisual.StopAnimation("Opacity");
+            cardVisual.StopAnimation("Scale.X");
+            cardVisual.StopAnimation("Scale.Y");
+            cardVisual.StopAnimation("Translation.Y");
+            cardVisual.Opacity = 1f;
+            cardVisual.Scale = System.Numerics.Vector3.One;
+        }
+    }
+
+    private void SyncOpenFolderOverlayWithViewModel()
+    {
+        if (FolderOverlayHost.Visibility != Visibility.Visible ||
+            string.IsNullOrWhiteSpace(_openFolderId))
+        {
+            return;
+        }
+
+        RecommendedGridEntry? refreshedFolder = _viewModel.FindRecommendedFolder(_openFolderId);
+        if (refreshedFolder is null || refreshedFolder.FolderItems.Count == 0)
+        {
+            CloseRecommendationOverlays();
+            return;
+        }
+
+        if (!_isEditingFolderTitle)
+        {
+            FolderOverlayTitleText.Text = refreshedFolder.Label;
+        }
+
+        _folderOverlayItems.Clear();
+        foreach (SearchResultItem member in refreshedFolder.FolderItems)
+        {
+            _folderOverlayItems.Add(member);
+        }
+
+        RefreshOverlayRepeaterIcons(FolderAppsRepeater);
+    }
+
+    private void BeginFolderTitleEdit()
+    {
+        if (FolderOverlayHost.Visibility != Visibility.Visible ||
+            string.IsNullOrWhiteSpace(_openFolderId))
+        {
+            return;
+        }
+
+        _isEditingFolderTitle = true;
+        _suppressFolderTitleBlurCommit = false;
+        _folderTitleEditOpenedAtTick = Environment.TickCount64;
+        FolderOverlayTitleEditor.Text = FolderOverlayTitleText.Text;
+        FolderOverlayTitleButton.Visibility = Visibility.Collapsed;
+        FolderOverlayTitleEditor.Visibility = Visibility.Visible;
+        DeskBox.Helpers.ImeCompositionGuard.AttachAncestors(FolderOverlayTitleEditor);
+        FolderOverlayTitleEditor.Focus(FocusState.Programmatic);
+        FolderOverlayTitleEditor.SelectAll();
+    }
+
+    private void CommitFolderTitleEdit()
+    {
+        if (!_isEditingFolderTitle)
+        {
+            return;
+        }
+
+        string? folderId = _openFolderId;
+        string updatedTitle = FolderOverlayTitleEditor.Text;
+        _isEditingFolderTitle = false;
+        _suppressFolderTitleBlurCommit = true;
+        FolderOverlayTitleEditor.Visibility = Visibility.Collapsed;
+        FolderOverlayTitleButton.Visibility = Visibility.Visible;
+        _suppressFolderTitleBlurCommit = false;
+
+        if (!string.IsNullOrWhiteSpace(folderId))
+        {
+            _viewModel.RenameRecommendationFolder(folderId, updatedTitle);
+            if (_viewModel.FindRecommendedFolder(folderId) is { } folder)
+            {
+                FolderOverlayTitleText.Text = folder.Label;
+            }
+        }
+    }
+
+    private void CancelFolderTitleEdit()
+    {
+        if (!_isEditingFolderTitle)
+        {
+            return;
+        }
+
+        _isEditingFolderTitle = false;
+        _suppressFolderTitleBlurCommit = true;
+        FolderOverlayTitleEditor.Visibility = Visibility.Collapsed;
+        FolderOverlayTitleButton.Visibility = Visibility.Visible;
+        _suppressFolderTitleBlurCommit = false;
+    }
+
+    private void HiddenAppsEntryButton_Click(object sender, RoutedEventArgs e)
+    {
+        OpenHiddenAppsOverlay();
+    }
+
+    private void FolderOverlayScrim_PointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        if (_isEditingFolderTitle)
+        {
+            CommitFolderTitleEdit();
+        }
+
+        CloseRecommendationOverlays();
         e.Handled = true;
+    }
+
+    private void FolderOverlayTitleButton_Click(object sender, RoutedEventArgs e)
+    {
+        BeginFolderTitleEdit();
+    }
+
+    private long _folderTitleEditOpenedAtTick;
+
+    private void FolderOverlayTitleEditor_KeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (DeskBox.Helpers.ImeCompositionGuard.IsImeCompositionKeyEvent(e))
+        {
+            return;
+        }
+
+        if (e.Key == Windows.System.VirtualKey.Enter)
+        {
+            CommitFolderTitleEdit();
+            SearchTextBox.Focus(FocusState.Programmatic);
+            e.Handled = true;
+        }
+        else if (e.Key == Windows.System.VirtualKey.Escape)
+        {
+            CancelFolderTitleEdit();
+            SearchTextBox.Focus(FocusState.Programmatic);
+            e.Handled = true;
+        }
+    }
+
+    private void FolderOverlayTitleEditor_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (_suppressFolderTitleBlurCommit || !_isEditingFolderTitle)
+        {
+            return;
+        }
+
+        if (DeskBox.Helpers.TransientInputFocusGuard.ShouldDeferInlineEditorBlurCommit(
+                FolderOverlayTitleEditor,
+                _folderTitleEditOpenedAtTick,
+                _hwnd,
+                () => _isEditingFolderTitle,
+                () =>
+                {
+                    CommitFolderTitleEdit();
+                    return Task.CompletedTask;
+                }))
+        {
+            return;
+        }
+
+        CommitFolderTitleEdit();
+    }
+
+    private void HiddenAppsOverlayScrim_PointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        CloseRecommendationOverlays();
+        e.Handled = true;
+    }
+
+    private void UnhideAllButton_Click(object sender, RoutedEventArgs e)
+    {
+        _viewModel.UnhideAllRecommendations();
+        CloseRecommendationOverlays();
+    }
+
+    private void CloseHiddenOverlayButton_Click(object sender, RoutedEventArgs e)
+    {
+        CloseRecommendationOverlays();
+    }
+
+    // ── Overlay tile interactions (folder app launch/drag & hidden app unhide) ──
+
+    private void OverlayAppCard_PointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        if (sender is not Grid card || card.DataContext is not SearchResultItem item)
+        {
+            return;
+        }
+
+        bool inFolderOverlay = FolderOverlayHost.Visibility == Visibility.Visible &&
+                               IsVisualDescendantOf(card, FolderOverlayHost);
+        UIElement hostElement = inFolderOverlay ? FolderOverlayHost : HiddenAppsOverlayHost;
+        var pointInHost = e.GetCurrentPoint(hostElement);
+        if (!pointInHost.Properties.IsLeftButtonPressed)
+        {
+            return;
+        }
+
+        if (_isEditingFolderTitle)
+        {
+            CommitFolderTitleEdit();
+        }
+
+        _overlayPointerCard = card;
+        _overlayPressedItem = item;
+        _overlayPointerStartInHost = pointInHost.Position;
+        _overlayIsDragging = false;
+        _overlayPressedInFolder = inFolderOverlay;
+        _overlayExternalDragAttempted = false;
+        card.CapturePointer(e.Pointer);
+        e.Handled = true;
+    }
+
+    private void OverlayAppCard_PointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if (_overlayPressedItem is null ||
+            _overlayPointerCard is null ||
+            !ReferenceEquals(sender, _overlayPointerCard))
+        {
+            return;
+        }
+
+        UIElement hostElement = _overlayPressedInFolder ? FolderOverlayHost : HiddenAppsOverlayHost;
+        var pointInHost = e.GetCurrentPoint(hostElement);
+        if (!pointInHost.Properties.IsLeftButtonPressed)
+        {
+            CancelOverlayDrag();
+            return;
+        }
+
+        double dx = pointInHost.Position.X - _overlayPointerStartInHost.X;
+        double dy = pointInHost.Position.Y - _overlayPointerStartInHost.Y;
+        if (!_overlayIsDragging)
+        {
+            if ((dx * dx) + (dy * dy) < RecommendationDragThreshold * RecommendationDragThreshold)
+            {
+                return;
+            }
+
+            ClearHoveredOverlayCard();
+            _overlayIsDragging = true;
+            _overlayPointerCard.Background = s_transparentCardBrush;
+            _overlayPointerCard.Opacity = 0.36;
+            if (_overlayPressedInFolder)
+            {
+                FolderDragGhostTitle.Text = _overlayPressedItem.AppDisplayName;
+                FolderDragGhostImage.Source = _overlayPressedItem.Icon;
+                FolderDragGhostBorder.Visibility = Visibility.Visible;
+                AnimateDragGhostPickup(FolderDragGhostBorder);
+            }
+        }
+
+        Point pointInRoot = e.GetCurrentPoint(RootGrid).Position;
+        double rootWidth = RootGrid.ActualWidth;
+        double rootHeight = RootGrid.ActualHeight;
+        if (IsPointLeavingPopupDragBounds(pointInRoot, rootWidth, rootHeight))
+        {
+            if (!_overlayExternalDragAttempted)
+            {
+                _overlayExternalDragAttempted = true;
+                Grid dragCard = _overlayPointerCard;
+                string? detailPath = _overlayPressedItem.DetailPath;
+                string originTag = _overlayPressedInFolder ? "folder-overlay" : "hidden-overlay";
+                if (!string.IsNullOrWhiteSpace(detailPath) &&
+                    TryStartRecommendedExternalDragOut(
+                        dragCard,
+                        e,
+                        [detailPath],
+                        originTag,
+                        SuspendOverlayDragForExternalHandoff))
+                {
+                    e.Handled = true;
+                    return;
+                }
+            }
+
+            if (pointInRoot.X < 0 ||
+                pointInRoot.Y < 0 ||
+                pointInRoot.X > rootWidth ||
+                pointInRoot.Y > rootHeight)
+            {
+                if (_overlayPressedInFolder)
+                {
+                    FolderDragGhostTransform.X = pointInHost.Position.X - (FolderDragGhostBorder.Width / 2);
+                    FolderDragGhostTransform.Y = pointInHost.Position.Y - (FolderDragGhostBorder.Height / 2);
+                    FolderDropInsertIndicator.Visibility = Visibility.Collapsed;
+                }
+
+                e.Handled = true;
+                return;
+            }
+        }
+        else
+        {
+            _overlayExternalDragAttempted = false;
+        }
+
+        if (!_overlayPressedInFolder)
+        {
+            e.Handled = true;
+            return;
+        }
+
+        FolderDragGhostTransform.X = pointInHost.Position.X - (FolderDragGhostBorder.Width / 2);
+        FolderDragGhostTransform.Y = pointInHost.Position.Y - (FolderDragGhostBorder.Height / 2);
+
+        Point pointInCard = e.GetCurrentPoint(FolderOverlayCard).Position;
+        var folderCardBounds = new Rect(0, 0, FolderOverlayCard.ActualWidth, FolderOverlayCard.ActualHeight);
+        if (!folderCardBounds.Contains(pointInCard))
+        {
+            // Dragging outside the folder card (within the popup) extracts the app back to the main grid on release.
+            FolderDropInsertIndicator.Visibility = Visibility.Collapsed;
+            e.Handled = true;
+            return;
+        }
+
+        AutoScrollScrollViewerOnDrag(
+            FolderOverlayScrollViewer,
+            e.GetCurrentPoint(FolderOverlayScrollViewer).Position);
+
+        (int reorderIndex, Point barPos) = EvaluateOverlayFolderReorderIndex(
+            e.GetCurrentPoint(FolderOverlaySurface).Position,
+            _overlayPressedItem);
+        if (reorderIndex >= 0)
+        {
+            FolderDropInsertTransform.X = barPos.X;
+            FolderDropInsertTransform.Y = barPos.Y;
+            FolderDropInsertIndicator.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            FolderDropInsertIndicator.Visibility = Visibility.Collapsed;
+        }
+
+        e.Handled = true;
+    }
+
+    private void OverlayAppCard_PointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        if (_overlayPressedItem is not { } pressedItem ||
+            _overlayPointerCard is not { } pressedCard ||
+            !ReferenceEquals(sender, pressedCard))
+        {
+            return;
+        }
+
+        // Snapshot gesture state before ReleasePointerCapture synchronously
+        // fires OverlayAppCard_PointerCaptureLost -> CancelOverlayDrag().
+        bool wasDragging = _overlayIsDragging;
+        bool inFolder = _overlayPressedInFolder;
+        string? openFolderId = _openFolderId;
+        Point pointInRoot = e.GetCurrentPoint(RootGrid).Position;
+        var popupBounds = new Rect(0, 0, RootGrid.ActualWidth, RootGrid.ActualHeight);
+        Point pointInTile = e.GetCurrentPoint(pressedCard).Position;
+        var tileBounds = new Rect(0, 0, pressedCard.ActualWidth, pressedCard.ActualHeight);
+        Point pointInFolderCard = inFolder
+            ? e.GetCurrentPoint(FolderOverlayCard).Position
+            : default;
+        Point pointInFolderSurface = inFolder
+            ? e.GetCurrentPoint(FolderOverlaySurface).Position
+            : default;
+        int reorderIndex = wasDragging && inFolder && !string.IsNullOrWhiteSpace(openFolderId)
+            ? EvaluateOverlayFolderReorderIndex(pointInFolderSurface, pressedItem).TargetIndex
+            : -1;
+        pressedCard.ReleasePointerCapture(e.Pointer);
+
+        if (wasDragging && inFolder && !string.IsNullOrWhiteSpace(openFolderId))
+        {
+            var folderBounds = new Rect(0, 0, FolderOverlayCard.ActualWidth, FolderOverlayCard.ActualHeight);
+            CancelOverlayDrag();
+
+            if (!folderBounds.Contains(pointInFolderCard) && popupBounds.Contains(pointInRoot))
+            {
+                bool removed = _viewModel.RemoveRecommendationFromFolder(
+                    openFolderId,
+                    pressedItem,
+                    out bool folderStillExists);
+                App.Log(
+                    $"[RecDrag] drag-out folder={openFolderId} removed={removed} " +
+                    $"folderStillExists={folderStillExists}");
+                // Any successful extraction closes the overlay: the folder
+                // card blocks the main grid, hiding where the app landed.
+                // (Previously it closed only when the folder dissolved.)
+                if (removed || !folderStillExists)
+                {
+                    CloseRecommendationOverlays();
+                }
+            }
+            else if (folderBounds.Contains(pointInFolderCard) && reorderIndex >= 0)
+            {
+                string draggedKey = Helpers.AppRecommendationIdentity.GetCanonicalKey(pressedItem);
+                _viewModel.ReorderFolderRecommendation(openFolderId, draggedKey, reorderIndex);
+            }
+
+            e.Handled = true;
+            return;
+        }
+
+        CancelOverlayDrag();
+        if (!wasDragging && tileBounds.Contains(pointInTile))
+        {
+            if (inFolder)
+            {
+                if (!_isRecommendationEditMode)
+                {
+                    _viewModel.ExecuteItem(pressedItem);
+                }
+            }
+            else
+            {
+                _viewModel.UnhideRecommendation(pressedItem);
+                if (!_viewModel.HasHiddenRecommendations)
+                {
+                    CloseRecommendationOverlays();
+                }
+            }
+        }
+        else if (!wasDragging)
+        {
+            ClearHoveredOverlayCard();
+        }
+
+        e.Handled = true;
+    }
+
+    private void OverlayAppCard_PointerCaptureLost(object sender, PointerRoutedEventArgs e)
+    {
+        if (_overlayPointerCard is not null && ReferenceEquals(sender, _overlayPointerCard))
+        {
+            CancelOverlayDrag();
+        }
+    }
+
+    private void ClearHoveredOverlayCard()
+    {
+        if (_hoveredOverlayCard is not null)
+        {
+            _hoveredOverlayCard.Background = s_transparentCardBrush;
+            _hoveredOverlayCard = null;
+        }
+    }
+
+    private void OverlayAppCard_PointerEntered(object sender, PointerRoutedEventArgs e)
+    {
+        if (_overlayIsDragging || _dragOutInProgress || sender is not Grid card)
+        {
+            return;
+        }
+
+        if (_hoveredOverlayCard is not null && !ReferenceEquals(_hoveredOverlayCard, card))
+        {
+            _hoveredOverlayCard.Background = s_transparentCardBrush;
+        }
+
+        _hoveredOverlayCard = card;
+        card.Background = ResolveThemeBrush("SubtleFillColorSecondaryBrush");
+    }
+
+    private void OverlayAppCard_PointerExited(object sender, PointerRoutedEventArgs e)
+    {
+        if (sender is not Grid card)
+        {
+            return;
+        }
+
+        if (ReferenceEquals(_hoveredOverlayCard, card))
+        {
+            _hoveredOverlayCard = null;
+        }
+
+        card.Background = s_transparentCardBrush;
+    }
+
+    private void SuspendOverlayDragForExternalHandoff()
+    {
+        if (_overlayPointerCard is not null)
+        {
+            _overlayPointerCard.Opacity = 1;
+            _overlayPointerCard.Background = s_transparentCardBrush;
+            _overlayPointerCard = null;
+        }
+
+        _overlayPressedItem = null;
+        _overlayIsDragging = false;
+        _overlayPressedInFolder = false;
+        _overlayExternalDragAttempted = false;
+        FolderDragGhostBorder.Visibility = Visibility.Collapsed;
+        FolderDragGhostImage.Source = null;
+        FolderDropInsertIndicator.Visibility = Visibility.Collapsed;
+    }
+
+    private void CancelOverlayDrag()
+    {
+        if (_overlayPointerCard is not null)
+        {
+            _overlayPointerCard.Opacity = 1;
+            _overlayPointerCard.ReleasePointerCaptures();
+            _overlayPointerCard = null;
+        }
+
+        _overlayPressedItem = null;
+        _overlayIsDragging = false;
+        _overlayPressedInFolder = false;
+        _overlayExternalDragAttempted = false;
+        FolderDragGhostBorder.Visibility = Visibility.Collapsed;
+        FolderDragGhostImage.Source = null;
+        FolderDropInsertIndicator.Visibility = Visibility.Collapsed;
+    }
+
+    private (int TargetIndex, Point BarPosition) EvaluateOverlayFolderReorderIndex(
+        Point pointInSurface,
+        SearchResultItem draggedItem)
+    {
+        int count = _folderOverlayItems.Count;
+        if (count <= 1)
+        {
+            return (-1, default);
+        }
+
+        string draggedKey = Helpers.AppRecommendationIdentity.GetCanonicalKey(draggedItem);
+        int sourceIndex = -1;
+        for (int i = 0; i < count; i++)
+        {
+            if (string.Equals(
+                    Helpers.AppRecommendationIdentity.GetCanonicalKey(_folderOverlayItems[i]),
+                    draggedKey,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                sourceIndex = i;
+                break;
+            }
+        }
+
+        if (sourceIndex < 0)
+        {
+            return (-1, default);
+        }
+
+        FrameworkElement? lastTile = null;
+        Rect lastRect = default;
+        int matchedIndex = -1;
+        Rect matchedRect = default;
+        double bestCenterDistanceSq = double.MaxValue;
+        for (int i = 0; i < count; i++)
+        {
+            if (FolderAppsRepeater.TryGetElement(i) is not FrameworkElement tile ||
+                tile.ActualWidth <= 0 ||
+                tile.ActualHeight <= 0)
+            {
+                continue;
+            }
+
+            var rect = new Rect(
+                tile.TransformToVisual(FolderOverlaySurface).TransformPoint(new Point(0, 0)),
+                new Size(tile.ActualWidth, tile.ActualHeight));
+            lastTile = tile;
+            lastRect = rect;
+
+            // Expand by half the 6px inter-tile spacing (+2px overlap) so gaps never blink off.
+            var hitRect = new Rect(rect.X - 5, rect.Y - 5, rect.Width + 10, rect.Height + 10);
+            if (!hitRect.Contains(pointInSurface))
+            {
+                continue;
+            }
+
+            double cx = rect.X + (rect.Width * 0.5);
+            double cy = rect.Y + (rect.Height * 0.5);
+            double distSq = ((pointInSurface.X - cx) * (pointInSurface.X - cx)) +
+                            ((pointInSurface.Y - cy) * (pointInSurface.Y - cy));
+            if (distSq < bestCenterDistanceSq)
+            {
+                bestCenterDistanceSq = distSq;
+                matchedIndex = i;
+                matchedRect = rect;
+            }
+        }
+
+        if (matchedIndex >= 0)
+        {
+            if (matchedIndex == sourceIndex)
+            {
+                return (-1, default);
+            }
+
+            bool beforeTile = (pointInSurface.X - matchedRect.X) < (matchedRect.Width * 0.5);
+            int slotIndex = beforeTile ? matchedIndex : matchedIndex + 1;
+            if (slotIndex == sourceIndex || slotIndex == sourceIndex + 1)
+            {
+                return (-1, default);
+            }
+
+            int targetIndex = slotIndex > sourceIndex ? slotIndex - 1 : slotIndex;
+            double barX = beforeTile ? Math.Max(0, matchedRect.X - 4.5) : matchedRect.Right + 1.5;
+            double barY = matchedRect.Y + ((matchedRect.Height - FolderDropInsertIndicator.Height) / 2);
+            return (targetIndex, new Point(barX, barY));
+        }
+
+        if (lastTile is not null &&
+            sourceIndex < count - 1 &&
+            (pointInSurface.Y > lastRect.Bottom - 8 ||
+             (pointInSurface.Y >= lastRect.Y - 4 && pointInSurface.X >= lastRect.Right)))
+        {
+            double barX = lastRect.Right + 2;
+            double barY = lastRect.Y + ((lastRect.Height - FolderDropInsertIndicator.Height) / 2);
+            return (count - 1, new Point(barX, barY));
+        }
+
+        return (-1, default);
     }
 
     /// <summary>
@@ -2054,8 +6486,7 @@ public sealed partial class SearchPopupWindow : Window
                 }
                 else
                 {
-                    int columns = Math.Max(1,
-                        (int)Math.Floor((double)RecommendedAppsPanel.ActualWidth / 110));
+                    int columns = ComputeRecommendedAppsColumnCount();
                     int newIndex = e.Key switch
                     {
                         Windows.System.VirtualKey.Left => Math.Max(0, _selectedAppIndex - 1),
@@ -2072,51 +6503,133 @@ public sealed partial class SearchPopupWindow : Window
                 return true;
 
             case Windows.System.VirtualKey.Enter:
-                if (_selectedAppIndex >= 0 && _selectedAppIndex < count &&
-                    itemsSource[_selectedAppIndex] is SearchResultItem selected)
+                if (_isRecommendationEditMode)
                 {
-                    _viewModel.ExecuteItem(selected);
+                    if (_selectedAppIndex >= 0 && _selectedAppIndex < count &&
+                        itemsSource[_selectedAppIndex] is RecommendedGridEntry editSelected)
+                    {
+                        if (!_recMultiSelectedKeys.Add(editSelected.EntryKey))
+                        {
+                            _recMultiSelectedKeys.Remove(editSelected.EntryKey);
+                        }
+
+                        RefreshAllRecommendedCardEditVisuals();
+                        UpdateRecommendationEditStatusHint();
+                    }
+
                     return true;
                 }
-                return false; // No selection → let Enter fall through to execute first result.
+
+                if (_selectedAppIndex >= 0 && _selectedAppIndex < count &&
+                    itemsSource[_selectedAppIndex] is RecommendedGridEntry selected)
+                {
+                    if (selected.IsFolder)
+                    {
+                        OpenFolderOverlay(selected);
+                        return true;
+                    }
+
+                    if (selected.AppItem is { } appItem)
+                    {
+                        _viewModel.ExecuteItem(appItem);
+                        return true;
+                    }
+                }
+                return false; // No selection -> let Enter fall through to execute first result.
 
             case Windows.System.VirtualKey.Space:
-                if (_selectedAppIndex >= 0)
+                if (_isRecommendationEditMode &&
+                    _selectedAppIndex >= 0 &&
+                    _selectedAppIndex < count &&
+                    itemsSource[_selectedAppIndex] is RecommendedGridEntry editSpaceEntry)
                 {
-                    TryPreviewSelectedItem();
+                    if (!_recMultiSelectedKeys.Add(editSpaceEntry.EntryKey))
+                    {
+                        _recMultiSelectedKeys.Remove(editSpaceEntry.EntryKey);
+                    }
+
+                    RefreshAllRecommendedCardEditVisuals();
+                    UpdateRecommendationEditStatusHint();
+                    return true;
+                }
+
+                if (_selectedAppIndex >= 0 && _selectedAppIndex < count &&
+                    itemsSource[_selectedAppIndex] is RecommendedGridEntry spaceEntry)
+                {
+                    if (spaceEntry.IsFolder)
+                    {
+                        OpenFolderOverlay(spaceEntry);
+                    }
+                    else
+                    {
+                        TryPreviewSelectedItem();
+                    }
                 }
                 return true; // Always consume Space when panel is visible.
+
+            case Windows.System.VirtualKey.Delete when _isRecommendationEditMode && _recMultiSelectedKeys.Count > 0:
+                HideSelectedRecommendations();
+                return true;
+
+            case Windows.System.VirtualKey.A when _isRecommendationEditMode &&
+                                                  Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control):
+                _recMultiSelectedKeys.Clear();
+                foreach (RecommendedGridEntry entry in _viewModel.RecommendedEntries)
+                {
+                    _recMultiSelectedKeys.Add(entry.EntryKey);
+                }
+                RefreshAllRecommendedCardEditVisuals();
+                UpdateRecommendationEditStatusHint();
+                return true;
         }
         return false;
     }
 
-    private void SelectRecommendedApp(Grid card, SearchResultItem item)
+    private void SelectRecommendedEntry(Grid card, RecommendedGridEntry entry)
     {
         ClearRecommendedAppSelection();
         _selectedAppCard = card;
-        card.Background = ResolveThemeBrush("ControlFillColorSecondaryBrush");
 
-        // Sync ViewModel selection for preview/action bar.
-        _viewModel.SelectedItem = item;
+        // Sync ViewModel selection for preview/action bar when an app tile is active.
+        // Card background stays transparent until hovered (hover-only highlight policy).
+        _viewModel.SelectedItem = entry.IsFolder
+            ? entry.FolderItems.FirstOrDefault()
+            : entry.AppItem;
 
-        // Find the index for keyboard navigation.
         var itemsSource = RecommendedAppsRepeater.ItemsSource as System.Collections.IList;
         if (itemsSource is not null)
         {
-            _selectedAppIndex = itemsSource.IndexOf(item);
+            _selectedAppIndex = itemsSource.IndexOf(entry);
         }
     }
 
     private void SelectRecommendedAppByIndex(int index)
     {
         var itemsSource = RecommendedAppsRepeater.ItemsSource as System.Collections.IList;
-        if (itemsSource is null || index < 0 || index >= itemsSource.Count) return;
-
-        if (RecommendedAppsRepeater.TryGetElement(index) is Grid card &&
-            card.DataContext is SearchResultItem item)
+        if (itemsSource is null || index < 0 || index >= itemsSource.Count ||
+            itemsSource[index] is not RecommendedGridEntry targetEntry)
         {
-            SelectRecommendedApp(card, item);
-            card.StartBringIntoView();
+            return;
+        }
+
+        Grid? matchedCard = null;
+        int childCount = VisualTreeHelper.GetChildrenCount(RecommendedAppsRepeater);
+        for (int i = 0; i < childCount; i++)
+        {
+            if (VisualTreeHelper.GetChild(RecommendedAppsRepeater, i) is Grid candidate &&
+                candidate.DataContext is RecommendedGridEntry candidateEntry &&
+                string.Equals(candidateEntry.EntryKey, targetEntry.EntryKey, StringComparison.OrdinalIgnoreCase))
+            {
+                matchedCard = candidate;
+                break;
+            }
+        }
+
+        matchedCard ??= RecommendedAppsRepeater.GetOrCreateElement(index) as Grid;
+        if (matchedCard is not null)
+        {
+            SelectRecommendedEntry(matchedCard, targetEntry);
+            matchedCard.StartBringIntoView();
         }
     }
 
@@ -2124,7 +6637,11 @@ public sealed partial class SearchPopupWindow : Window
     {
         if (_selectedAppCard is not null)
         {
-            _selectedAppCard.Background = null;
+            if (!ReferenceEquals(_selectedAppCard, _hoveredAppCard))
+            {
+                _selectedAppCard.Background = s_transparentCardBrush;
+            }
+
             _selectedAppCard = null;
         }
         _selectedAppIndex = -1;
@@ -2182,6 +6699,7 @@ public sealed partial class SearchPopupWindow : Window
         ElementCompositionPreview
             .GetElementVisual(AppsSkeletonPanel)
             .StopAnimation("Opacity");
+        AppsSkeletonRepeater.ItemsSource = null;
         AppsSkeletonPanel.Visibility = Visibility.Collapsed;
         AppsSkeletonPanel.Opacity = 1;
     }
@@ -2221,7 +6739,7 @@ public sealed partial class SearchPopupWindow : Window
         // Safety net: clear the pending flag shortly after the longest possible
         // entrance window so a late/aborted realization can never leave a card
         // stuck at opacity 0. Covers the worst-case stagger + duration.
-        _entranceGuardTimer?.Stop();
+        StopAndClearEntranceGuardTimer();
         _entranceGuardTimer = new DispatcherTimer
         {
             Interval = TimeSpan.FromMilliseconds(1200)
@@ -2245,10 +6763,27 @@ public sealed partial class SearchPopupWindow : Window
         }
     }
 
+    private void StopAndClearEntranceGuardTimer()
+    {
+        if (_entranceGuardTimer is not { } timer)
+        {
+            return;
+        }
+
+        _entranceGuardTimer = null;
+        timer.Tick -= OnEntranceGuardTick;
+        try
+        {
+            timer.Stop();
+        }
+        catch
+        {
+        }
+    }
+
     private void OnEntranceGuardTick(object? sender, object e)
     {
-        _entranceGuardTimer?.Stop();
-        _entranceGuardTimer = null;
+        StopAndClearEntranceGuardTimer();
         _pendingEntranceStyle = null;
     }
 
@@ -2276,26 +6811,24 @@ public sealed partial class SearchPopupWindow : Window
             new System.Numerics.Vector2(0.34f, 1.56f),
             new System.Numerics.Vector2(0.64f, 1.0f));
 
-        int staggerMs = style switch
-        {
-            0 => 30,
-            1 => 30,
-            2 => 0,
-            3 => 30,
-            _ => 30
-        };
-        var delay = TimeSpan.FromMilliseconds(index * staggerMs);
+        int columnsForStagger = Math.Max(1, ComputeRecommendedAppsColumnCount());
+        int staggerRow = index / columnsForStagger;
+        int staggerCol = index % columnsForStagger;
+        int delayMs = style == 2
+            ? 0
+            : Math.Min(160, (staggerRow * 20) + (staggerCol * 12));
+        var delay = TimeSpan.FromMilliseconds(delayMs);
 
         var opacityAnim = compositor.CreateScalarKeyFrameAnimation();
         opacityAnim.InsertKeyFrame(0f, 0f);
         opacityAnim.InsertKeyFrame(1f, 1f, decel);
         opacityAnim.Duration = TimeSpan.FromMilliseconds(style switch
         {
-            0 => 280,
-            1 => 320,
-            2 => 360,
-            3 => 260,
-            _ => 280
+            0 => 200,
+            1 => 220,
+            2 => 260,
+            3 => 200,
+            _ => 200
         });
         opacityAnim.DelayTime = delay;
         visual.Opacity = 0f;
@@ -2441,12 +6974,16 @@ public sealed partial class SearchPopupWindow : Window
 
     private int ComputeRecommendedAppsColumnCount()
     {
-        double width = RecommendedAppsPanel.ActualWidth;
+        double width = RecommendedAppsScrollViewer.ActualWidth > 0
+            ? RecommendedAppsScrollViewer.ActualWidth
+                - RecommendedAppsScrollViewer.Padding.Left
+                - RecommendedAppsScrollViewer.Padding.Right
+            : RecommendedAppsPanel.ActualWidth;
         if (width <= 0)
         {
             return 1;
         }
-        return Math.Max(1, (int)Math.Floor(width / 110));
+        return Math.Max(1, (int)Math.Floor((width + 6) / 104));
     }
 
     private Microsoft.UI.Xaml.Media.Brush? ResolveThemeBrush(string key) =>
@@ -2454,15 +6991,403 @@ public sealed partial class SearchPopupWindow : Window
 
     private void RecommendedAppsPanel_RightTapped(object sender, RightTappedRoutedEventArgs e)
     {
-        var item = FindDataContext<SearchResultItem>(e.OriginalSource as DependencyObject);
+        CancelRecommendedDrag();
+        var source = e.OriginalSource as DependencyObject;
+        var entry = FindDataContext<RecommendedGridEntry>(source);
+        bool showBatchMenu =
+            _isRecommendationEditMode &&
+            _recMultiSelectedKeys.Count > 1 &&
+            (entry is null || _recMultiSelectedKeys.Contains(entry.EntryKey));
+        if (showBatchMenu)
+        {
+            UIElement batchAnchor = (UIElement?)FindVisualAncestor<Grid>(source) ?? RecommendedAppsScrollViewer;
+            MenuFlyout batchFlyout = BuildBatchRecommendedAppsContextMenu();
+            if (batchFlyout.Items.Count > 0)
+            {
+                batchFlyout.Closed += (_, _) => ClearHoveredRecommendedCard();
+                batchFlyout.ShowAt(batchAnchor, e.GetPosition(batchAnchor));
+                e.Handled = true;
+            }
+
+            return;
+        }
+
+        if (entry is null)
+        {
+            return;
+        }
+
+        UIElement anchor = (UIElement?)FindVisualAncestor<Grid>(source) ?? RecommendedAppsScrollViewer;
+        MenuFlyout flyout = entry.IsFolder
+            ? BuildRecommendedFolderContextMenu(entry)
+            : BuildRecommendedAppContextMenu(entry);
+        if (flyout.Items.Count > 0)
+        {
+            flyout.Closed += (_, _) => ClearHoveredRecommendedCard();
+            flyout.ShowAt(anchor, e.GetPosition(anchor));
+            e.Handled = true;
+        }
+    }
+
+    private MenuFlyout BuildBatchRecommendedAppsContextMenu()
+    {
+        var flyout = new MenuFlyout();
+        var selectedEntries = _viewModel.RecommendedEntries
+            .Where(entry => _recMultiSelectedKeys.Contains(entry.EntryKey))
+            .ToList();
+        if (selectedEntries.Count < 2)
+        {
+            return flyout;
+        }
+
+        bool hasSelectedFolder = selectedEntries.Any(entry => entry.IsFolder);
+        var selectedApps = selectedEntries
+            .Where(entry => !entry.IsFolder && entry.AppItem is not null)
+            .Select(entry => entry.AppItem!)
+            .ToList();
+        var allHideableItems = new List<SearchResultItem>();
+        foreach (RecommendedGridEntry entry in selectedEntries)
+        {
+            if (entry.IsFolder)
+            {
+                allHideableItems.AddRange(entry.FolderItems);
+            }
+            else if (entry.AppItem is { } appItem)
+            {
+                allHideableItems.Add(appItem);
+            }
+        }
+
+        if (!hasSelectedFolder && selectedApps.Count >= 2)
+        {
+            var moveSubItem = new MenuFlyoutSubItem
+            {
+                Text = _localizationService.T("Search.Recommend.MoveToFolder"),
+                Icon = new FontIcon { Glyph = "\uE8F4" }
+            };
+
+            var newFolderItem = new MenuFlyoutItem
+            {
+                Text = _localizationService.T("Search.Recommend.NewFolder"),
+                Icon = new FontIcon { Glyph = "\uE8F4" }
+            };
+            newFolderItem.Click += (_, _) =>
+            {
+                string targetEntryKey = $"app:{Helpers.AppRecommendationIdentity.GetCanonicalKey(selectedApps[0])}";
+                var remainingKeys = selectedApps
+                    .Skip(1)
+                    .Select(Helpers.AppRecommendationIdentity.GetCanonicalKey)
+                    .ToList();
+                _recMultiSelectedKeys.Clear();
+                string? createdFolderId = _viewModel.MergeRecommendationsIntoFolder(remainingKeys, targetEntryKey);
+                RefreshAllRecommendedCardEditVisuals();
+                UpdateRecommendationEditStatusHint();
+                if (_viewModel.FindRecommendedFolder(createdFolderId) is { } createdFolder)
+                {
+                    OpenFolderOverlay(createdFolder, startRename: true);
+                }
+            };
+            moveSubItem.Items.Add(newFolderItem);
+
+            IReadOnlyList<RecommendationFolderSummary> existingFolders = _viewModel.GetRecommendationFolders();
+            if (existingFolders.Count > 0)
+            {
+                moveSubItem.Items.Add(new MenuFlyoutSeparator());
+                var selectedKeys = selectedApps
+                    .Select(Helpers.AppRecommendationIdentity.GetCanonicalKey)
+                    .ToList();
+                foreach (RecommendationFolderSummary folder in existingFolders)
+                {
+                    string targetFolderId = folder.FolderId;
+                    var targetItem = new MenuFlyoutItem
+                    {
+                        Text = folder.Name,
+                        Icon = new FontIcon { Glyph = "\uE8B7" }
+                    };
+                    targetItem.Click += (_, _) =>
+                    {
+                        _recMultiSelectedKeys.Clear();
+                        _viewModel.MergeRecommendationsIntoFolder(selectedKeys, $"folder:{targetFolderId}");
+                        RefreshAllRecommendedCardEditVisuals();
+                        UpdateRecommendationEditStatusHint();
+                    };
+                    moveSubItem.Items.Add(targetItem);
+                }
+            }
+
+            flyout.Items.Add(moveSubItem);
+        }
+
+        if (allHideableItems.Count > 0)
+        {
+            var hideItem = new MenuFlyoutItem
+            {
+                Text = _localizationService.T("Search.Recommend.Hide"),
+                Icon = new FontIcon { Glyph = "\uED1A" }
+            };
+            hideItem.Click += (_, _) =>
+            {
+                _recMultiSelectedKeys.Clear();
+                _viewModel.HideRecommendations(allHideableItems);
+                RefreshAllRecommendedCardEditVisuals();
+                UpdateRecommendationEditStatusHint();
+            };
+            flyout.Items.Add(hideItem);
+        }
+
+        return flyout;
+    }
+
+    private void FolderOverlayScrollViewer_RightTapped(object sender, RightTappedRoutedEventArgs e)
+    {
+        CancelOverlayDrag();
+        var source = e.OriginalSource as DependencyObject;
+        var item = FindDataContext<SearchResultItem>(source);
+        if (item is null || string.IsNullOrWhiteSpace(_openFolderId))
+        {
+            return;
+        }
+
+        string folderId = _openFolderId;
+        UIElement anchor = (UIElement?)FindVisualAncestor<Grid>(source) ?? FolderOverlayScrollViewer;
+        MenuFlyout flyout = BuildFolderOverlayItemContextMenu(folderId, item);
+        if (flyout.Items.Count > 0)
+        {
+            flyout.Closed += (_, _) => ClearHoveredOverlayCard();
+            flyout.ShowAt(anchor, e.GetPosition(anchor));
+            e.Handled = true;
+        }
+    }
+
+    private void HiddenOverlayScrollViewer_RightTapped(object sender, RightTappedRoutedEventArgs e)
+    {
+        var source = e.OriginalSource as DependencyObject;
+        var item = FindDataContext<SearchResultItem>(source);
         if (item is null)
         {
             return;
         }
 
-        var anchor = (UIElement?)FindItemRow(e.OriginalSource as DependencyObject) ?? RecommendedAppsPanel;
-        ShowResultFlyout(item, anchor, e.GetPosition(anchor));
-        e.Handled = true;
+        UIElement anchor = (UIElement?)FindVisualAncestor<Grid>(source) ?? HiddenOverlayScrollViewer;
+        MenuFlyout flyout = BuildHiddenOverlayItemContextMenu(item);
+        if (flyout.Items.Count > 0)
+        {
+            flyout.Closed += (_, _) => ClearHoveredOverlayCard();
+            flyout.ShowAt(anchor, e.GetPosition(anchor));
+            e.Handled = true;
+        }
+    }
+
+    private MenuFlyout BuildRecommendedFolderContextMenu(RecommendedGridEntry folderEntry)
+    {
+        var flyout = new MenuFlyout();
+        if (!folderEntry.IsFolder || string.IsNullOrWhiteSpace(folderEntry.FolderId))
+        {
+            return flyout;
+        }
+
+        string folderId = folderEntry.FolderId;
+
+        var openFolderItem = new MenuFlyoutItem
+        {
+            Text = _localizationService.T("Search.Menu.Open"),
+            Icon = new FontIcon { Glyph = "\uE8B7" }
+        };
+        openFolderItem.Click += (_, _) => OpenFolderOverlay(folderEntry);
+        flyout.Items.Add(openFolderItem);
+
+        var renameFolderItem = new MenuFlyoutItem
+        {
+            Text = _localizationService.T("Search.Recommend.RenameFolder"),
+            Icon = new FontIcon { Glyph = "\uE8AC" }
+        };
+        renameFolderItem.Click += (_, _) => OpenFolderOverlay(folderEntry, startRename: true);
+        flyout.Items.Add(renameFolderItem);
+
+        flyout.Items.Add(new MenuFlyoutSeparator());
+
+        var dissolveItem = new MenuFlyoutItem
+        {
+            Text = _localizationService.T("Search.Recommend.DissolveFolder"),
+            Icon = new FontIcon { Glyph = "\uE8F1" }
+        };
+        dissolveItem.Click += (_, _) => _viewModel.DissolveRecommendationFolder(folderId);
+        flyout.Items.Add(dissolveItem);
+
+        return flyout;
+    }
+
+    private MenuFlyout BuildRecommendedAppContextMenu(RecommendedGridEntry appEntry)
+    {
+        var flyout = new MenuFlyout();
+        if (appEntry.AppItem is not { } item)
+        {
+            return flyout;
+        }
+
+        AppendCommonRecommendedAppActions(flyout, item);
+        flyout.Items.Add(new MenuFlyoutSeparator());
+
+        var moveSubItem = new MenuFlyoutSubItem
+        {
+            Text = _localizationService.T("Search.Recommend.MoveToFolder"),
+            Icon = new FontIcon { Glyph = "\uE8F4" }
+        };
+
+        var newFolderItem = new MenuFlyoutItem
+        {
+            Text = _localizationService.T("Search.Recommend.NewFolder"),
+            Icon = new FontIcon { Glyph = "\uE8F4" }
+        };
+        newFolderItem.Click += (_, _) =>
+        {
+            string? createdFolderId = _viewModel.CreateFolderFromRecommendation(item);
+            if (_viewModel.FindRecommendedFolder(createdFolderId) is { } createdFolder)
+            {
+                OpenFolderOverlay(createdFolder, startRename: true);
+            }
+        };
+        moveSubItem.Items.Add(newFolderItem);
+
+        IReadOnlyList<RecommendationFolderSummary> existingFolders = _viewModel.GetRecommendationFolders();
+        if (existingFolders.Count > 0)
+        {
+            moveSubItem.Items.Add(new MenuFlyoutSeparator());
+            string appKey = Helpers.AppRecommendationIdentity.GetCanonicalKey(item);
+            foreach (RecommendationFolderSummary folder in existingFolders)
+            {
+                string targetFolderId = folder.FolderId;
+                var targetItem = new MenuFlyoutItem
+                {
+                    Text = folder.Name,
+                    Icon = new FontIcon { Glyph = "\uE8B7" }
+                };
+                targetItem.Click += (_, _) =>
+                    _viewModel.MergeRecommendationIntoFolder(appKey, $"folder:{targetFolderId}");
+                moveSubItem.Items.Add(targetItem);
+            }
+        }
+
+        flyout.Items.Add(moveSubItem);
+
+        var hideItem = new MenuFlyoutItem
+        {
+            Text = _localizationService.T("Search.Recommend.Hide"),
+            Icon = new FontIcon { Glyph = "\uED1A" }
+        };
+        hideItem.Click += (_, _) => _viewModel.HideRecommendation(item);
+        flyout.Items.Add(hideItem);
+
+        return flyout;
+    }
+
+    private MenuFlyout BuildFolderOverlayItemContextMenu(string folderId, SearchResultItem item)
+    {
+        var flyout = new MenuFlyout();
+        AppendCommonRecommendedAppActions(flyout, item);
+        flyout.Items.Add(new MenuFlyoutSeparator());
+
+        var removeFromFolderItem = new MenuFlyoutItem
+        {
+            Text = _localizationService.T("Search.Recommend.RemoveFromFolder"),
+            Icon = new FontIcon { Glyph = "\uE8F1" }
+        };
+        removeFromFolderItem.Click += (_, _) =>
+        {
+            _viewModel.RemoveRecommendationFromFolder(folderId, item, out bool stillExists);
+            if (!stillExists)
+            {
+                CloseRecommendationOverlays();
+            }
+        };
+        flyout.Items.Add(removeFromFolderItem);
+
+        var hideItem = new MenuFlyoutItem
+        {
+            Text = _localizationService.T("Search.Recommend.Hide"),
+            Icon = new FontIcon { Glyph = "\uED1A" }
+        };
+        hideItem.Click += (_, _) => _viewModel.HideRecommendation(item);
+        flyout.Items.Add(hideItem);
+
+        return flyout;
+    }
+
+    private MenuFlyout BuildHiddenOverlayItemContextMenu(SearchResultItem item)
+    {
+        var flyout = new MenuFlyout();
+
+        var unhideItem = new MenuFlyoutItem
+        {
+            Text = _localizationService.T("Search.Recommend.Unhide"),
+            Icon = new FontIcon { Glyph = "\uE7B3" }
+        };
+        unhideItem.Click += (_, _) =>
+        {
+            _viewModel.UnhideRecommendation(item);
+            if (!_viewModel.HasHiddenRecommendations)
+            {
+                CloseRecommendationOverlays();
+            }
+        };
+        flyout.Items.Add(unhideItem);
+
+        flyout.Items.Add(new MenuFlyoutSeparator());
+        AppendCommonRecommendedAppActions(flyout, item);
+        return flyout;
+    }
+
+    private void AppendCommonRecommendedAppActions(MenuFlyout flyout, SearchResultItem item)
+    {
+        var openItem = new MenuFlyoutItem
+        {
+            Text = _localizationService.T("Search.Menu.Open"),
+            Icon = new FontIcon { Glyph = "\uE8E5" }
+        };
+        openItem.Click += (_, _) => _viewModel.ExecuteItem(item);
+        flyout.Items.Add(openItem);
+
+        bool hasExistingPath = !string.IsNullOrWhiteSpace(item.DetailPath) &&
+                               (File.Exists(item.DetailPath) || Directory.Exists(item.DetailPath));
+        if (!hasExistingPath)
+        {
+            return;
+        }
+
+        if (ElevatedFileLauncher.CanRunAsAdministrator(item.DetailPath!))
+        {
+            var runAsAdminItem = new MenuFlyoutItem
+            {
+                Text = _localizationService.T("Widget.RunAsAdministrator"),
+                Icon = new FontIcon { Glyph = "\uE7EF" }
+            };
+            runAsAdminItem.Click += (_, _) =>
+            {
+                ElevatedFileLaunchResult result =
+                    ElevatedFileLauncher.RunAsAdministrator(_hwnd, item.DetailPath!);
+                if (result.Status is not (ElevatedFileLaunchStatus.Launched
+                    or ElevatedFileLaunchStatus.Cancelled))
+                {
+                    ShowTransientStatus(_localizationService.T(
+                        result.Status == ElevatedFileLaunchStatus.AlreadyRunningUnelevated
+                            ? "Widget.RunAsAdministrator.AlreadyRunning"
+                            : "Widget.Error.OperationIncomplete"));
+                }
+            };
+            flyout.Items.Add(runAsAdminItem);
+        }
+
+        var openLocationItem = new MenuFlyoutItem
+        {
+            Text = _localizationService.T("Search.Menu.OpenLocation"),
+            Icon = new FontIcon { Glyph = "\uE838" }
+        };
+        openLocationItem.Click += (_, _) =>
+        {
+            Win32Helper.ShowInExplorer(item.DetailPath!);
+            HidePopup();
+        };
+        flyout.Items.Add(openLocationItem);
     }
 
     private void OnAppIcon_ImageOpened(object sender, RoutedEventArgs e)
@@ -2507,17 +7432,6 @@ public sealed partial class SearchPopupWindow : Window
         ClearMultiSelection();
     }
 
-    private void SyncResultFilterCombo()
-    {
-        int index = (int)_viewModel.ResultFilter;
-        if (ResultFilterComboBox.SelectedIndex != index)
-        {
-            // Assigning the same value the view model already holds would
-            // re-enter SelectionChanged without changing state.
-            ResultFilterComboBox.SelectedIndex = index;
-        }
-    }
-
     // ── Sort headers ────────────────────────────────────────────────────────
 
     private void SortNameHeader_Click(object sender, RoutedEventArgs e)
@@ -2540,15 +7454,6 @@ public sealed partial class SearchPopupWindow : Window
         _viewModel.ToggleSort(ResultSortColumn.Date);
     }
 
-    private void ResultFilterComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (ResultFilterComboBox.SelectedItem is ComboBoxItem { Tag: string tag } &&
-            Enum.TryParse(tag, ignoreCase: true, out SearchResultFilter filter))
-        {
-            _viewModel.ResultFilter = filter;
-        }
-    }
-
     private void UpdateSortHeaders()
     {
         var column = _viewModel.SortColumn;
@@ -2567,10 +7472,13 @@ public sealed partial class SearchPopupWindow : Window
     {
         icon.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
         icon.Glyph = ascending ? "\uE74A" : "\uE74B";
+        label.FontWeight = active
+            ? Microsoft.UI.Text.FontWeights.SemiBold
+            : Microsoft.UI.Text.FontWeights.Normal;
         label.Foreground = NeutralInteractionBrush.ResolveThemedResource(
             active
                 ? "TextFillColorPrimaryBrush"
-                : "TextFillColorSecondaryBrush",
+                : "TextFillColorTertiaryBrush",
             label);
     }
 
@@ -2584,35 +7492,68 @@ public sealed partial class SearchPopupWindow : Window
         var item = ResolveResultItem(source);
         _pressedItem = null;
 
+        if (row is not null && row.IsElementInsideActionButtons(source))
+        {
+            DisarmDragOutCandidate();
+            return;
+        }
+
         bool isCtrlPressed = Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control);
         bool isShiftPressed = Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Shift);
         bool isLeft = point.Properties.IsLeftButtonPressed;
 
-        // Ctrl-click / Shift-click on a row: modify the multi-selection while
-        // keeping an explicit range anchor independent from keyboard focus.
-        if (item is not null && isLeft)
+        // Ctrl-click / Shift-click on a row: modify or preserve multi-selection
+        // WITHOUT returning early before _dragOutCandidate is armed so Ctrl+Drag
+        // (Copy) and Shift+Drag (Move) work just like Windows Explorer.
+        _pendingCtrlToggleOffOnRelease = null;
+        bool modifierHandledSelection = false;
+        if (item is not null && isLeft && (isCtrlPressed || isShiftPressed))
         {
-            if (isCtrlPressed)
+            int anchorIndex = _selectionAnchorIndex >= 0
+                ? _selectionAnchorIndex
+                : _viewModel.SelectedIndex;
+            var modDecision = EvaluateSearchRowModifierPress(
+                isCtrlPressed,
+                isShiftPressed,
+                _multiSelectedItems.Contains(item),
+                ReferenceEquals(_viewModel.SelectedItem, item),
+                anchorIndex >= 0);
+
+            if (modDecision.DeferToggleOffToRelease)
+            {
+                // Keep the clicked item in _multiSelectedItems while dragging;
+                // only toggle it off on PointerReleased when no drag started.
+                _pendingCtrlToggleOffOnRelease = item;
+                SelectResultItem(item, row);
+                _selectionAnchorIndex = _viewModel.CurrentResults.IndexOf(item);
+                modifierHandledSelection = true;
+                e.Handled = true;
+            }
+            else if (isCtrlPressed)
             {
                 SelectResultItem(item, row);
                 _selectionAnchorIndex = _viewModel.CurrentResults.IndexOf(item);
                 ToggleMultiSelectionItem(item);
+                modifierHandledSelection = true;
                 e.Handled = true;
-                return;
             }
-
-            if (isShiftPressed)
+            else if (modDecision.PreserveExistingSelection)
             {
-                int anchorIndex = _selectionAnchorIndex >= 0
-                    ? _selectionAnchorIndex
-                    : _viewModel.SelectedIndex;
-                if (anchorIndex >= 0)
+                if (!_multiSelectedItems.Contains(item))
                 {
-                    _selectionAnchorIndex = anchorIndex;
-                    RangeSelectItems(anchorIndex, item);
-                    e.Handled = true;
-                    return;
+                    ToggleMultiSelectionItem(item);
                 }
+
+                SelectResultItem(item, row);
+                modifierHandledSelection = true;
+                e.Handled = true;
+            }
+            else if (modDecision.RangeSelect && anchorIndex >= 0)
+            {
+                _selectionAnchorIndex = anchorIndex;
+                RangeSelectItems(anchorIndex, item);
+                modifierHandledSelection = true;
+                e.Handled = true;
             }
         }
 
@@ -2625,8 +7566,7 @@ public sealed partial class SearchPopupWindow : Window
                 isShiftPressed))
         {
             _pressedItem = null;
-            _dragCandidate = null;
-            _dragSourceRow = null;
+            DisarmDragOutCandidate();
             StartRubberBand(e);
             e.Handled = true;
             return;
@@ -2635,7 +7575,9 @@ public sealed partial class SearchPopupWindow : Window
         bool pointerIsOnDragHandle =
             item is not null &&
             row is not null &&
-            IsPointerOnIcon(source, row);
+            !row.IsElementInsideActionButtons(source) &&
+            item.Kind is SearchResultKind.File or SearchResultKind.Folder &&
+            !string.IsNullOrWhiteSpace(item.DetailPath);
         bool preserveSelectionForDrag =
             item is not null &&
             SearchResultSelectionPolicy.ShouldPreserveSelectionForDrag(
@@ -2643,7 +7585,7 @@ public sealed partial class SearchPopupWindow : Window
                 _multiSelectedItems.Count,
                 pointerIsOnDragHandle);
 
-        if (item is not null && isLeft)
+        if (item is not null && isLeft && !modifierHandledSelection)
         {
             if (!preserveSelectionForDrag)
             {
@@ -2656,36 +7598,64 @@ public sealed partial class SearchPopupWindow : Window
         if (!point.Properties.IsLeftButtonPressed)
         {
             _pressedItem = null;
-            _dragCandidate = null;
-            _dragSourceRow = null;
-            _dragOccurred = false;
+            DisarmDragOutCandidate();
             return;
         }
 
-        // Keep click-to-open independent from drag detection. Only the icon can
-        // start a drag, while every non-blank result cell keeps its click action.
         _pressedItem = item;
 
-        // Drag is initiated only from the icon column, not the entire row —
-        // and never in an elevated process (see
-        // IsCurrentProcessElevatedForDrag). The icon keeps its click-open
-        // behavior either way.
+        // Allow dragging file/folder results from anywhere on the row
+        // (excluding inline quick-action buttons), never in an elevated
+        // process, and only from a physical-button pointer: touch/pen contact
+        // reports IsLeftButtonPressed too but has never carried this mouse
+        // drag pipeline's semantics (the grid's manual drag filters them the
+        // same way). Capturing the panel pointer is part of arming — without
+        // it a release outside the panel never reaches us and the stale
+        // candidate would arm a phantom drag on the next hover move.
+        PointerPoint pressedPoint = e.GetCurrentPoint(ResultsPanel);
         if (item is not null && row is not null && pointerIsOnDragHandle &&
-            !IsCurrentProcessElevatedForDrag())
+            !IsCurrentProcessElevatedForDrag() &&
+            pressedPoint.PointerDeviceType is
+                PointerDeviceType.Mouse or PointerDeviceType.Touchpad &&
+            ResultsPanel.CapturePointer(e.Pointer))
         {
-            _dragCandidate = item;
-            _dragSourceRow = row;
-            _dragStartPoint = e.GetCurrentPoint(null).Position;
+            _dragOutCandidate = new SearchDragOutCandidate(
+                e.Pointer.PointerId,
+                item,
+                row,
+                pressedPoint.Position);
         }
         else
         {
-            _dragCandidate = null;
-            _dragSourceRow = null;
+            DisarmDragOutCandidate();
         }
-        _dragOccurred = false;
     }
 
-    private async void ResultsPanel_PointerMoved(object sender, PointerRoutedEventArgs e)
+    private void DisarmDragOutCandidate(PointerRoutedEventArgs? pointerArgs = null)
+    {
+        if (_dragOutCandidate is not { } candidate)
+        {
+            return;
+        }
+
+        _dragOutCandidate = null;
+        if (pointerArgs is not null &&
+            new Rect(0, 0, candidate.Row.ActualWidth, candidate.Row.ActualHeight)
+                .Contains(pointerArgs.GetCurrentPoint(candidate.Row).Position))
+        {
+            candidate.Row.ClearPressedState();
+        }
+        else
+        {
+            candidate.Row.ClearTransientPointerStates();
+        }
+
+        // Releasing our own capture re-enters ResultsPanel_PointerCaptureLost,
+        // which finds no candidate and stays a no-op.
+        ResultsPanel.ReleasePointerCaptures();
+    }
+
+    private void ResultsPanel_PointerMoved(object sender, PointerRoutedEventArgs e)
     {
         // Update rubber-band selection if active.
         if (_isRubberBanding)
@@ -2696,30 +7666,81 @@ public sealed partial class SearchPopupWindow : Window
             return;
         }
 
-        if (_dragCandidate is null || _dragSourceRow is null || _dragOccurred ||
-            string.IsNullOrWhiteSpace(_dragCandidate.DetailPath))
+        if (_dragOutCandidate is not { } candidate)
         {
             return;
         }
 
-        var current = e.GetCurrentPoint(null).Position;
-        double dx = current.X - _dragStartPoint.X;
-        double dy = current.Y - _dragStartPoint.Y;
-        if (Math.Sqrt(dx * dx + dy * dy) < 10)
+        PointerPoint current = e.GetCurrentPoint(ResultsPanel);
+        var decision = SearchResultSelectionPolicy.EvaluateDragOutMove(
+            candidateArmed: true,
+            samePointer: e.Pointer.PointerId == candidate.PointerId,
+            leftButtonPressed: current.Properties.IsLeftButtonPressed,
+            distanceUnits: Math.Sqrt(
+                Math.Pow(current.Position.X - candidate.StartPoint.X, 2) +
+                Math.Pow(current.Position.Y - candidate.StartPoint.Y, 2)));
+        if (decision == SearchResultSelectionPolicy.DragOutMoveDecision.Disarm)
+        {
+            DisarmDragOutCandidate();
+            return;
+        }
+        if (decision != SearchResultSelectionPolicy.DragOutMoveDecision.Start ||
+            string.IsNullOrWhiteSpace(candidate.Item.DetailPath))
         {
             return;
         }
 
-        // Begin a drag operation carrying the file/folder payload.
-        _dragOccurred = true;
-        var item = _dragCandidate;
-        var row = _dragSourceRow;
+        // The gesture is consumed: the panel pointer capture hands control to
+        // the platform drag loop, and the in-flight flag blocks re-arming
+        // until the session completes.
+        _dragOutCandidate = null;
+        ResultsPanel.ReleasePointerCaptures();
+        _dragOutInProgress = true;
+
+        StartDragOut(candidate, e);
+    }
+
+    internal static (bool DeferToggleOffToRelease, bool RangeSelect, bool PreserveExistingSelection) EvaluateSearchRowModifierPress(
+        bool ctrlDown,
+        bool shiftDown,
+        bool itemAlreadyMultiSelected,
+        bool itemIsPrimarySelected,
+        bool hasValidAnchor)
+    {
+        if (ctrlDown)
+        {
+            return (DeferToggleOffToRelease: itemAlreadyMultiSelected, RangeSelect: false, PreserveExistingSelection: false);
+        }
+
+        if (shiftDown)
+        {
+            if (itemAlreadyMultiSelected || itemIsPrimarySelected)
+            {
+                return (DeferToggleOffToRelease: false, RangeSelect: false, PreserveExistingSelection: true);
+            }
+
+            if (hasValidAnchor)
+            {
+                return (DeferToggleOffToRelease: false, RangeSelect: true, PreserveExistingSelection: false);
+            }
+        }
+
+        return (false, false, false);
+    }
+
+    private void StartDragOut(SearchDragOutCandidate candidate, PointerRoutedEventArgs e)
+    {
+        _pendingCtrlToggleOffOnRelease = null;
         IReadOnlyList<SearchResultItem> draggedItems =
             SearchResultSelectionPolicy.ResolveDraggedItems(
-                item,
+                candidate.Item,
                 _viewModel.CurrentResults
                     .Where(_multiSelectedItems.Contains)
                     .ToList());
+        // Same rule as the grid pipeline: members that no longer exist drop
+        // out silently, but whatever remains must all make it into the
+        // payload (TryPreparePaths cancels otherwise) — never a text ghost
+        // of a deleted file, never a silent collapse to a single item.
         string[] draggedPaths = draggedItems
             .Select(result => result.DetailPath)
             .Where(path =>
@@ -2727,60 +7748,424 @@ public sealed partial class SearchPopupWindow : Window
                 (File.Exists(path) || Directory.Exists(path)))
             .Select(path => path!)
             .ToArray();
-        if (draggedPaths.Length != draggedItems.Count)
+        if (draggedPaths.Length == 0)
         {
-            draggedItems = [item];
-            draggedPaths = [item.DetailPath!];
+            candidate.Row.ClearTransientPointerStates();
+            _dragOutInProgress = false;
+            App.Log(
+                $"[SearchDragOut] canceled reason=no-existing-paths " +
+                $"items={draggedItems.Count}");
+            return;
         }
 
-        // The icon itself is the drag source, so the shell drag visual remains
-        // compact and the rest of the row never becomes a wide drag surface.
-        UIElement dragSource = FindIconDragSource(row) ?? row;
+        candidate.Row.ClearTransientPointerStates();
+        UIElement dragSource = candidate.Row;
+        _activeDragOutPaths = draggedPaths;
+        dragSource.DragStarting += ResultsRow_DragStarting;
+        StartExternalDragFadeTimer();
+        App.SafeFireAndForget(
+            () => RunDragOutAsync(candidate, draggedItems.Count, dragSource, e),
+            nameof(RunDragOutAsync));
+    }
 
-        Windows.Foundation.TypedEventHandler<UIElement, DragStartingEventArgs> handler = null!;
-        handler = async (_, args) =>
-        {
-            var deferral = args.GetDeferral();
-            try
-            {
-                args.Data.Properties.Title = draggedPaths.Length == 1
-                    ? item.Title
-                    : draggedPaths.Length.ToString();
-                // AllowedOperations carries the capability set; keeping
-                // RequestedOperation at None means no preferred-operation
-                // flag reaches Explorer, which is what made Windows 10 show
-                // an operation picker on every drop. The payload is broker
-                // StorageItems (not the native Shell object), so Copy stays
-                // the ceiling — Move could authorize source deletion.
-                args.AllowedOperations = DataPackageOperation.Copy;
-                args.Data.RequestedOperation = DataPackageOperation.None;
-                if (draggedPaths.Length == 1)
-                {
-                    await SetDragPayloadAsync(args.Data, draggedPaths[0]);
-                }
-                else
-                {
-                    await SetDragPayloadAsync(args.Data, draggedPaths.ToList());
-                }
-            }
-            finally
-            {
-                deferral.Complete();
-                dragSource.DragStarting -= handler;
-            }
-        };
-        dragSource.DragStarting += handler;
-
+    private async Task RunDragOutAsync(
+        SearchDragOutCandidate candidate,
+        int draggedItemCount,
+        UIElement dragSource,
+        PointerRoutedEventArgs e)
+    {
+        DataPackageOperation dropResult = DataPackageOperation.None;
+        bool shouldAutoHide = false;
         try
         {
-            await dragSource.StartDragAsync(e.GetCurrentPoint(dragSource));
+            dropResult = await dragSource.StartDragAsync(
+                e.GetCurrentPoint(dragSource));
+            shouldAutoHide = dropResult != DataPackageOperation.None &&
+                             !Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Menu);
+        }
+        catch (Exception ex)
+        {
+            // StartDragAsync has known throw paths (elevated processes at the
+            // very least), and an exception escaping this async boundary
+            // fail-fasts the process through DispatcherQueue — the boundary
+            // always catches and attributes.
+            App.Log(
+                $"[SearchDragOut] StartDragAsync failed " +
+                $"hresult=0x{ex.HResult:X8} type={ex.GetType().Name} " +
+                $"item='{candidate.Item.DetailPath}'");
         }
         finally
         {
-            dragSource.DragStarting -= handler;
-            _dragCandidate = null;
-            _dragSourceRow = null;
+            StopExternalDragFadeTimer(restoreOpacity: !shouldAutoHide);
+            dragSource.DragStarting -= ResultsRow_DragStarting;
+            candidate.Row.ClearTransientPointerStates();
+            ClearAllResultRowTransientStates();
+            _dragOutInProgress = false;
+            _activeDragOutPaths = null;
         }
+
+        App.Log(
+            $"[SearchDragOut] completed drop={dropResult} items={draggedItemCount}");
+
+        // Default auto-collapse after a successful file drag-out drop (hold Alt to keep open).
+        if (shouldAutoHide)
+        {
+            HidePopup();
+        }
+    }
+
+    private void ResultsRow_DragStarting(UIElement sender, DragStartingEventArgs args)
+    {
+        string[] paths = _activeDragOutPaths ?? [];
+        if (paths.Length == 0 || IsCurrentProcessElevatedForDrag())
+        {
+            args.Cancel = true;
+            App.Log(
+                $"[SearchDragOut] canceled " +
+                $"reason={(paths.Length == 0 ? "no-paths" : "elevated")}");
+            return;
+        }
+
+        // Same payload pipeline as the grid's file drag-out: a native Shell
+        // IDataObject when attachable (Explorer-identical formats; .lnk
+        // results are no longer degraded to text), a complete StorageItems
+        // payload otherwise, never a partial one. Search drags deliberately
+        // skip the DeskBox origin stamps — receivers must treat them as
+        // plain external file transfers, not widget-internal associations.
+        var fileService = (App.Current as App)?.FileService;
+        bool prepared = FileItemDragPackage.TryPreparePaths(
+            args.Data,
+            paths,
+            candidatePaths => fileService?.GetStorageItems(candidatePaths) ?? [],
+            list => list.Count == 1
+                ? Path.GetFileName(list[0])
+                : list.Count.ToString(),
+            "search",
+            out FileItemDragPackageResult result);
+        if (!prepared)
+        {
+            args.Cancel = true;
+            return;
+        }
+
+        // Visuals and capability flags are set before the handler returns —
+        // DragUI setters are only legal before the drag starts. With this
+        // handler fully synchronous that ordering is structural rather than
+        // discipline: the 2026-11-06 fail-fast crashes were an await-ordered
+        // SetContentFromDataPackage call (0x800710DD once the deferral let
+        // the drag start mid-handler).
+        _hasEnteredPlatformDragLoop = true;
+        // Decision 1A: global search results span arbitrary disk/USB/UNC paths
+        // rather than managed file-box slots, so decouple search drag-out from
+        // FileWidget.ManagedDragOutAction == Move and protect external/system
+        // paths as Copy-only.
+        bool forceCopyOnly = Platform.DriveMediaInterop.ContainsProtectedInboundCopySource(
+            result.SourcePaths);
+        if (forceCopyOnly)
+        {
+            args.AllowedOperations = Services.WindowsCompatibilityService.IsWindows11OrLater
+                ? FileItemDragPackage.ProtectedWin11Operations
+                : DataPackageOperation.Copy;
+            args.Data.RequestedOperation = DataPackageOperation.Copy;
+        }
+        else
+        {
+            args.AllowedOperations =
+                FileItemDragPackage.ResolveDragOutAllowedOperations(
+                    Services.SettingsService.ManagedDragOutActionFollowWindows,
+                    sourcePaths: result.SourcePaths);
+            args.Data.RequestedOperation =
+                FileItemDragPackage.ResolveDragOutPreferredOperation(
+                    Services.SettingsService.ManagedDragOutActionFollowWindows,
+                    sourcePaths: result.SourcePaths);
+        }
+        args.DragUI.SetContentFromDataPackage();
+        App.Log(
+            $"[SearchDragOut] prepared paths={result.SourcePaths.Count} " +
+            $"native={result.UsesNativeShellDataObject} " +
+            $"allowed={args.AllowedOperations}");
+    }
+
+    private bool TryStartRecommendedExternalDragOut(
+        UIElement dragSource,
+        PointerRoutedEventArgs e,
+        IReadOnlyList<string> candidatePaths,
+        string originTag,
+        Action suspendInternalDrag)
+    {
+        if (_dragOutInProgress ||
+            IsCurrentProcessElevatedForDrag() ||
+            e.Pointer.PointerDeviceType is not (PointerDeviceType.Mouse or PointerDeviceType.Touchpad))
+        {
+            return false;
+        }
+
+        string[] existingPaths = candidatePaths
+            .Where(static path =>
+                !string.IsNullOrWhiteSpace(path) &&
+                (File.Exists(path) || Directory.Exists(path)))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (existingPaths.Length == 0)
+        {
+            return false;
+        }
+
+        // Sample the pointer point on dragSource BEFORE suspending internal drag
+        // state, and keep pointer capture on dragSource until StartDragAsync
+        // enters the platform drag loop so fast flicks across the window edge
+        // never drop the XAML pointer contact.
+        PointerPoint dragPoint = e.GetCurrentPoint(dragSource);
+        suspendInternalDrag();
+        _dragOutInProgress = true;
+        _activeDragOutPaths = existingPaths;
+        dragSource.DragStarting += RecommendedApp_DragStarting;
+        StartExternalDragFadeTimer();
+        App.Log(
+            $"[SearchDragOut] handoff source={originTag} paths={existingPaths.Length}");
+        App.SafeFireAndForget(
+            () => RunRecommendedDragOutAsync(dragSource, dragPoint, existingPaths, originTag),
+            nameof(RunRecommendedDragOutAsync));
+        return true;
+    }
+
+    private async Task RunRecommendedDragOutAsync(
+        UIElement dragSource,
+        PointerPoint dragPoint,
+        string[] draggedPaths,
+        string originTag)
+    {
+        DataPackageOperation dropResult = DataPackageOperation.None;
+        bool shouldAutoHide = false;
+        try
+        {
+            dropResult = await dragSource.StartDragAsync(dragPoint);
+            shouldAutoHide = dropResult != DataPackageOperation.None &&
+                             !_isRecommendationEditMode &&
+                             !Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Menu);
+        }
+        catch (Exception ex)
+        {
+            App.Log(
+                $"[SearchDragOut] StartDragAsync failed " +
+                $"hresult=0x{ex.HResult:X8} type={ex.GetType().Name} " +
+                $"source={originTag} item='{draggedPaths[0]}'");
+        }
+        finally
+        {
+            StopExternalDragFadeTimer(restoreOpacity: !shouldAutoHide);
+            dragSource.DragStarting -= RecommendedApp_DragStarting;
+            dragSource.ReleasePointerCaptures();
+            _dragOutInProgress = false;
+            _activeDragOutPaths = null;
+        }
+
+        App.Log(
+            $"[SearchDragOut] completed source={originTag} drop={dropResult} items={draggedPaths.Length}");
+
+        // Keep edit mode open so batch-organizing users can continue dragging
+        // icons; in normal mode auto-collapse after drop unless Alt is held.
+        if (shouldAutoHide)
+        {
+            HidePopup();
+        }
+    }
+
+    private void RecommendedApp_DragStarting(UIElement sender, DragStartingEventArgs args)
+    {
+        string[] paths = _activeDragOutPaths ?? [];
+        if (paths.Length == 0 || IsCurrentProcessElevatedForDrag())
+        {
+            args.Cancel = true;
+            App.Log(
+                $"[SearchDragOut] canceled source=recommend " +
+                $"reason={(paths.Length == 0 ? "no-paths" : "elevated")}");
+            return;
+        }
+
+        var fileService = (App.Current as App)?.FileService;
+        bool prepared = FileItemDragPackage.TryPreparePaths(
+            args.Data,
+            paths,
+            candidatePaths => fileService?.GetStorageItems(candidatePaths) ?? [],
+            list => list.Count == 1
+                ? Path.GetFileNameWithoutExtension(list[0])
+                : list.Count.ToString(),
+            "search-recommend",
+            out FileItemDragPackageResult result);
+        if (!prepared)
+        {
+            args.Cancel = true;
+            return;
+        }
+
+        // Launcher shortcuts always advertise Copy so dropping into a widget or
+        // onto Desktop copies/references the shortcut instead of moving it out
+        // of Start Menu or another widget.
+        _hasEnteredPlatformDragLoop = true;
+        args.AllowedOperations = Services.WindowsCompatibilityService.IsWindows11OrLater
+            ? FileItemDragPackage.ProtectedWin11Operations
+            : DataPackageOperation.Copy;
+        args.Data.RequestedOperation = DataPackageOperation.Copy;
+        args.DragUI.SetContentFromDataPackage();
+        App.Log(
+            $"[SearchDragOut] prepared source=recommend paths={result.SourcePaths.Count} " +
+            $"native={result.UsesNativeShellDataObject} " +
+            $"allowed={args.AllowedOperations}");
+    }
+
+    private void StartExternalDragFadeTimer()
+    {
+        // Release PopupShowStoryboard's HoldEnd animation lock on RootGrid.Opacity
+        // and lock the local baseline at 1.0 so the fade timer can drive Opacity
+        // down to 0.20 once the pointer leaves the popup bounds.
+        PopupShowStoryboard.Stop();
+        RootGrid.Opacity = 1.0;
+        PopupScaleTransform.ScaleX = 1.0;
+        PopupScaleTransform.ScaleY = 1.0;
+
+        _isExternalFileDragActive = true;
+        _externalDragLeftPopupOnce = false;
+        _hasEnteredPlatformDragLoop = false;
+        DispatcherQueue? queue = DispatcherQueue;
+        if (queue is null)
+        {
+            return;
+        }
+
+        if (_externalDragFadeTimer is null)
+        {
+            DispatcherQueueTimer timer = queue.CreateTimer();
+            timer.IsRepeating = true;
+            timer.Interval = TimeSpan.FromMilliseconds(40);
+            timer.Tick += ExternalDragFadeTimer_Tick;
+            _externalDragFadeTimer = timer;
+            PerformanceLogger.RecordTransientUiTimerCreated();
+        }
+
+        _externalDragFadeTimer.Start();
+    }
+
+    private void ExternalDragFadeTimer_Tick(DispatcherQueueTimer sender, object args)
+    {
+        if (!_isExternalFileDragActive || !IsPopupVisible || _isWindowClosed || _hwnd == IntPtr.Zero)
+        {
+            return;
+        }
+
+        if (Win32Helper.GetCursorPos(out var cursor) &&
+            Win32Helper.GetWindowRect(_hwnd, out var rect))
+        {
+            bool insidePopup = cursor.X >= rect.Left && cursor.X < rect.Right &&
+                               cursor.Y >= rect.Top && cursor.Y < rect.Bottom;
+            if (!insidePopup)
+            {
+                _externalDragLeftPopupOnce = true;
+            }
+
+            // Once the drag has left the popup bounds, keep the popup faded and
+            // drop-through (WS_EX_TRANSPARENT) for the rest of the drag session
+            // so widgets positioned behind SearchPopupWindow remain visible and
+            // directly accept OLE drops without popup hit-test interference.
+            bool passthrough = _externalDragLeftPopupOnce && _hasEnteredPlatformDragLoop;
+            SetExternalDragWindowPassthrough(passthrough);
+
+            double targetOpacity = (_externalDragLeftPopupOnce || !insidePopup) ? 0.20 : 1.0;
+            if (Math.Abs(RootGrid.Opacity - targetOpacity) > 0.01)
+            {
+                RootGrid.Opacity = targetOpacity;
+            }
+        }
+    }
+
+    private void SetExternalDragWindowPassthrough(bool enabled)
+    {
+        if (_externalDragPassthroughApplied == enabled || _hwnd == IntPtr.Zero || _isWindowClosed)
+        {
+            return;
+        }
+
+        int extendedStyle = Win32Helper.GetWindowLong(_hwnd, Win32Helper.GWL_EXSTYLE);
+        if (enabled)
+        {
+            if ((extendedStyle & Win32Helper.WS_EX_TRANSPARENT) == 0)
+            {
+                _ = Win32Helper.SetWindowLong(
+                    _hwnd,
+                    Win32Helper.GWL_EXSTYLE,
+                    extendedStyle | Win32Helper.WS_EX_TRANSPARENT);
+                _ = Win32Helper.SetWindowPos(
+                    _hwnd,
+                    IntPtr.Zero,
+                    0,
+                    0,
+                    0,
+                    0,
+                    Win32Helper.SWP_NOMOVE |
+                    Win32Helper.SWP_NOSIZE |
+                    Win32Helper.SWP_NOZORDER |
+                    Win32Helper.SWP_NOACTIVATE |
+                    Win32Helper.SWP_FRAMECHANGED);
+            }
+
+            _externalDragPassthroughApplied = true;
+        }
+        else
+        {
+            _ = Win32Helper.SetWindowLong(
+                _hwnd,
+                Win32Helper.GWL_EXSTYLE,
+                extendedStyle & ~Win32Helper.WS_EX_TRANSPARENT);
+            _ = Win32Helper.SetWindowPos(
+                _hwnd,
+                IntPtr.Zero,
+                0,
+                0,
+                0,
+                0,
+                Win32Helper.SWP_NOMOVE |
+                Win32Helper.SWP_NOSIZE |
+                Win32Helper.SWP_NOZORDER |
+                Win32Helper.SWP_NOACTIVATE |
+                Win32Helper.SWP_FRAMECHANGED);
+            _externalDragPassthroughApplied = false;
+        }
+    }
+
+    private void StopExternalDragFadeTimer(bool restoreOpacity)
+    {
+        _isExternalFileDragActive = false;
+        _externalDragLeftPopupOnce = false;
+        _hasEnteredPlatformDragLoop = false;
+        _externalDragFadeTimer?.Stop();
+        SetExternalDragWindowPassthrough(false);
+        if (restoreOpacity && IsPopupVisible && !_isWindowClosed)
+        {
+            RootGrid.Opacity = 1.0;
+        }
+    }
+
+    private void DisposeExternalDragFadeTimer()
+    {
+        _isExternalFileDragActive = false;
+        _externalDragLeftPopupOnce = false;
+        _hasEnteredPlatformDragLoop = false;
+        SetExternalDragWindowPassthrough(false);
+        if (_externalDragFadeTimer is not { } timer)
+        {
+            return;
+        }
+
+        _externalDragFadeTimer = null;
+        timer.Tick -= ExternalDragFadeTimer_Tick;
+        try
+        {
+            timer.Stop();
+        }
+        catch
+        {
+        }
+        PerformanceLogger.RecordTransientUiTimerReleased();
     }
 
     /// <summary>
@@ -2831,14 +8216,29 @@ public sealed partial class SearchPopupWindow : Window
         // intentionally reserved for DoubleTapped or Enter, matching Explorer and
         // Everything and preventing the first click of a double-click from hiding
         // the popup before the second click arrives.
+        if (_pendingCtrlToggleOffOnRelease is { } pendingToggleOff && !_dragOutInProgress)
+        {
+            _pendingCtrlToggleOffOnRelease = null;
+            ToggleMultiSelectionItem(pendingToggleOff);
+        }
+        else
+        {
+            _pendingCtrlToggleOffOnRelease = null;
+        }
+
         _pressedItem = null;
-        _dragCandidate = null;
-        _dragSourceRow = null;
-        _dragOccurred = false;
+        DisarmDragOutCandidate(e);
     }
 
     private void ResultsPanel_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
     {
+        var source = e.OriginalSource as DependencyObject;
+        var pressedRow = FindItemRow(source);
+        if (pressedRow is not null && pressedRow.IsElementInsideActionButtons(source))
+        {
+            return;
+        }
+
         var item = ResolveResultItem(e.OriginalSource as DependencyObject);
         if (item is null)
         {
@@ -2869,6 +8269,16 @@ public sealed partial class SearchPopupWindow : Window
         }
     }
 
+    private void OnCurrentResultsCollectionChanged(
+        object? sender,
+        System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+    {
+        if (IsPopupVisible && !_isWindowClosed)
+        {
+            UpdatePopupDynamicBounds();
+        }
+    }
+
     private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
         switch (e.PropertyName)
@@ -2876,6 +8286,18 @@ public sealed partial class SearchPopupWindow : Window
             case nameof(SearchPopupViewModel.SelectedItem):
                 UpdateSelectionHighlight();
                 UpdateSelectionActions();
+                break;
+
+            case nameof(SearchPopupViewModel.ActiveScopeBadgeText):
+                UpdateScopePrefixBadge(SearchTextBox.Text);
+                break;
+
+            case nameof(SearchPopupViewModel.EffectiveHighlightQuery):
+                RefreshPreparedResultRows();
+                break;
+
+            case nameof(SearchPopupViewModel.ShouldShowCategoryBar):
+                UpdatePanelVisibility();
                 break;
 
             case nameof(SearchPopupViewModel.IsSearching):
@@ -2889,37 +8311,40 @@ public sealed partial class SearchPopupWindow : Window
                     {
                         ResultsPanel.Opacity = 1;
                     }
-                    else
-                    {
-                        AnimateResultsRefresh();
-                    }
                 }
                 break;
 
             case nameof(SearchPopupViewModel.SelectedTab):
-                // Tab switches reconcile the results in place, which preserves
-                // the previous vertical offset; return to the top so the
-                // default first-row selection is visible where expected.
                 ResultsPanel.ChangeView(null, 0, null, disableAnimation: true);
                 _measuredResultRowHeight = null;
                 SyncTabSelection();
                 RefreshPreparedResultRows();
                 UpdatePanelVisibility();
-                // SelectedItem can remain the same object across All/File-style
-                // tabs, so its property notification is not guaranteed. Re-run
-                // selection synchronization explicitly, then repeat it after the
-                // ItemsRepeater has processed its collection changes.
                 UpdateSelectionHighlight();
                 QueueTabSelectionRefreshAndFocus();
                 break;
 
             case nameof(SearchPopupViewModel.ResultFilter):
-                SyncResultFilterCombo();
+                UpdatePanelVisibility();
                 break;
 
             case nameof(SearchPopupViewModel.SortColumn):
             case nameof(SearchPopupViewModel.SortAscending):
                 UpdateSortHeaders();
+                break;
+
+            case nameof(SearchPopupViewModel.HasRecommendedEntries):
+            case nameof(SearchPopupViewModel.HasHiddenRecommendations):
+            case nameof(SearchPopupViewModel.HiddenRecommendationCount):
+                UpdateRecommendationHeaderState();
+                UpdatePanelVisibility();
+                break;
+
+            case nameof(SearchPopupViewModel.IsEverythingPromptVisible):
+            case nameof(SearchPopupViewModel.EverythingPromptText):
+            case nameof(SearchPopupViewModel.EverythingPromptActionText):
+            case nameof(SearchPopupViewModel.IsEverythingPromptWarning):
+                UpdateEverythingPromptBanner();
                 break;
 
             case nameof(SearchPopupViewModel.StatusText):
@@ -2962,6 +8387,7 @@ public sealed partial class SearchPopupWindow : Window
 
         if (_viewModel.SelectedItem is not { } selected)
         {
+            ScheduleSelectedItemDetailsRefresh();
             return;
         }
 
@@ -2978,6 +8404,8 @@ public sealed partial class SearchPopupWindow : Window
             ScrollToSelectedIndex();
             ScheduleSelectedRowHighlight();
         }
+
+        ScheduleSelectedItemDetailsRefresh();
     }
 
     private void EnsureSelectedRowVisible(SearchResultRowControl row)
@@ -3119,13 +8547,29 @@ public sealed partial class SearchPopupWindow : Window
                                          args.Index < _viewModel.CurrentResults.Count
             ? _viewModel.CurrentResults[args.Index]
             : row.DataContext as SearchResultItem;
+        row.PrimaryActionRequested -= OnRowPrimaryActionRequested;
+        row.OpenLocationRequested -= OnRowOpenLocationRequested;
+        row.MoreActionsRequested -= OnRowMoreActionsRequested;
+        row.PrimaryActionRequested += OnRowPrimaryActionRequested;
+        row.OpenLocationRequested += OnRowOpenLocationRequested;
+        row.MoreActionsRequested += OnRowMoreActionsRequested;
+
+        bool isCopyItem = preparedItem?.Kind == SearchResultKind.Clipboard ||
+                          (preparedItem?.Kind == SearchResultKind.Action &&
+                           preparedItem.ActionId?.StartsWith("copy-calc:", StringComparison.Ordinal) == true);
+        row.DataContext = preparedItem;
         row.PrepareItem(preparedItem);
+        row.ConfigureRowPresentation(
+            _viewModel.EffectiveHighlightQuery,
+            openTooltip: _localizationService.T(isCopyItem ? "Common.Copy" : "Search.Menu.Open"),
+            openLocationTooltip: _localizationService.T("Search.Menu.OpenLocation"),
+            moreTooltip: _localizationService.T("Search.Row.MoreActions"));
 
         // Lazy shell icon: show the real icon once resolved, otherwise the glyph block.
         // Recycled rows can be re-bound to the same item instance (no DataContextChanged),
         // so this must run on every prepare.
         row.RefreshIconVisuals();
-        row.SetFileColumnsVisible(_viewModel.SelectedTab?.SupportsFileSort == true);
+        row.SetFileColumnsVisible(AreFileColumnsVisible());
         if (row.Item is { IconResolved: false } item)
         {
             _ = EnrichPreparedResultRowAsync(row, item);
@@ -3155,6 +8599,64 @@ public sealed partial class SearchPopupWindow : Window
         row.IsMultiSelected = row.Item is { } rowItem && _multiSelectedItems.Contains(rowItem);
     }
 
+    private void OnResultsElementClearing(ItemsRepeater sender, ItemsRepeaterElementClearingEventArgs args)
+    {
+        if (args.Element is not SearchResultRowControl row)
+        {
+            return;
+        }
+
+        if (ReferenceEquals(_selectedRow, row))
+        {
+            _selectedRow = null;
+        }
+
+        if (_dragOutCandidate is { } dragCandidate &&
+            ReferenceEquals(dragCandidate.Row, row))
+        {
+            DisarmDragOutCandidate();
+        }
+
+        row.PrimaryActionRequested -= OnRowPrimaryActionRequested;
+        row.OpenLocationRequested -= OnRowOpenLocationRequested;
+        row.MoreActionsRequested -= OnRowMoreActionsRequested;
+        row.IsSelected = false;
+        row.IsMultiSelected = false;
+        row.IsTabStop = false;
+        row.PrepareItem(null);
+        row.RefreshIconVisuals();
+        row.DataContext = null;
+    }
+
+    private void OnRowPrimaryActionRequested(SearchResultRowControl row, SearchResultItem item)
+    {
+        SelectResultItem(item, row);
+        if (_viewModel.ExecuteItem(item))
+        {
+            HidePopup();
+        }
+    }
+
+    private void OnRowOpenLocationRequested(SearchResultRowControl row, SearchResultItem item)
+    {
+        SelectResultItem(item, row);
+        if (_viewModel.OpenSelectedLocation())
+        {
+            HidePopup();
+        }
+    }
+
+    private void OnRowMoreActionsRequested(
+        SearchResultRowControl row,
+        SearchResultItem item,
+        FrameworkElement anchorButton)
+    {
+        ClearMultiSelection();
+        SelectResultItem(item, row);
+        _selectionAnchorIndex = _viewModel.CurrentResults.IndexOf(item);
+        ShowResultFlyout(item, anchorButton, new Windows.Foundation.Point(0, anchorButton.ActualHeight));
+    }
+
     private async Task EnrichPreparedResultRowAsync(
         SearchResultRowControl row,
         SearchResultItem item)
@@ -3169,7 +8671,7 @@ public sealed partial class SearchPopupWindow : Window
         RefreshPreparedResultRow(row, item);
     }
 
-    private static void RefreshPreparedResultRow(
+    private void RefreshPreparedResultRow(
         SearchResultRowControl row,
         SearchResultItem item)
     {
@@ -3177,13 +8679,17 @@ public sealed partial class SearchPopupWindow : Window
         {
             row.RefreshIconVisuals();
         }
+
+        if (ReferenceEquals(_displayedDetailsItem, item) &&
+            DetailsPaneCard.Visibility == Visibility.Visible)
+        {
+            PopulateDetailsPane(item, immediate: true);
+        }
     }
 
     private void ResultsPanel_RightTapped(object sender, RightTappedRoutedEventArgs e)
     {
-        _dragCandidate = null;
-        _dragSourceRow = null;
-        _dragOccurred = false;
+        DisarmDragOutCandidate();
 
         var item = ResolveResultItem(e.OriginalSource as DependencyObject);
         if (item is null)
@@ -3239,8 +8745,21 @@ public sealed partial class SearchPopupWindow : Window
 
     // ── Rubber-band multi-selection ──
 
+    private void ClearAllResultRowTransientStates()
+    {
+        int childCount = VisualTreeHelper.GetChildrenCount(ResultsRepeater);
+        for (int i = 0; i < childCount; i++)
+        {
+            if (VisualTreeHelper.GetChild(ResultsRepeater, i) is SearchResultRowControl row)
+            {
+                row.ClearTransientPointerStates();
+            }
+        }
+    }
+
     private void StartRubberBand(PointerRoutedEventArgs e)
     {
+        ClearAllResultRowTransientStates();
         _isRubberBanding = true;
         bool isAdditive = Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control);
         _rubberBandBaseSelection.Clear();
@@ -3285,6 +8804,10 @@ public sealed partial class SearchPopupWindow : Window
 
     private void ResultsPanel_PointerCaptureLost(object sender, PointerRoutedEventArgs e)
     {
+        // Losing the panel capture ends the armed drag gesture: whatever took
+        // the pointer owns it now, and a later move must not start a drag.
+        DisarmDragOutCandidate();
+
         if (!_isRubberBanding)
         {
             return;
@@ -3518,7 +9041,11 @@ public sealed partial class SearchPopupWindow : Window
             return;
         }
         _restoreResultFocusAfterFlyout = true;
-        flyout.Closed += (_, _) => _restoreResultFocusAfterFlyout = false;
+        flyout.Closed += (_, _) =>
+        {
+            ClearAllResultRowTransientStates();
+            _restoreResultFocusAfterFlyout = false;
+        };
         flyout.ShowAt(anchor, point);
     }
 
@@ -3622,12 +9149,21 @@ public sealed partial class SearchPopupWindow : Window
 
         try
         {
-            var data = new DataPackage { RequestedOperation = operation };
-            await SetDragPayloadAsync(data, paths);
-            Clipboard.SetContent(data);
-            Clipboard.Flush();
+            bool cut = operation == DataPackageOperation.Move &&
+                !Platform.DriveMediaInterop.IsProtectedDragOutSource(paths);
+            if (!ShellClipboardHelper.TrySetFileDropList(paths, cut))
+            {
+                var data = new DataPackage
+                {
+                    RequestedOperation = cut ? DataPackageOperation.Move : DataPackageOperation.Copy
+                };
+                await SetDragPayloadAsync(data, paths);
+                Clipboard.SetContent(data);
+                Clipboard.Flush();
+            }
+
             ShowTransientStatus(_localizationService.T(
-                operation == DataPackageOperation.Move
+                cut
                     ? "Search.Action.CutReady"
                     : "Search.Action.CopyReady"));
         }
@@ -3721,6 +9257,7 @@ public sealed partial class SearchPopupWindow : Window
         _restoreResultFocusAfterFlyout = true;
         flyout.Closed += (_, _) =>
         {
+            ClearAllResultRowTransientStates();
             if (_restoreResultFocusAfterFlyout && IsPopupVisible && _viewModel.SelectedItem is not null)
             {
                 DispatcherQueue.TryEnqueue(() => FocusSelectedResult());
@@ -3738,16 +9275,57 @@ public sealed partial class SearchPopupWindow : Window
     {
         var flyout = new MenuFlyout();
 
+        bool isCopyAction = item.Kind == SearchResultKind.Clipboard ||
+                            (item.Kind == SearchResultKind.Action &&
+                             item.ActionId?.StartsWith("copy-calc:", StringComparison.Ordinal) == true);
+        ImageSource? nativeSvg = Controls.SearchResultRowControl.ResolveNativeWidgetSvgIcon(item);
         var openItem = new MenuFlyoutItem
         {
-            Text = _localizationService.T("Search.Menu.Open"),
-            Icon = new FontIcon { Glyph = "\uE8E5" }
+            Text = isCopyAction ? _localizationService.T("Common.Copy") : ResolvePrimaryActionVerb(item),
+            Icon = nativeSvg is not null
+                ? new ImageIcon { Source = nativeSvg }
+                : new FontIcon { Glyph = isCopyAction ? "\uE8C8" : "\uE8E5" }
         };
         openItem.Click += (_, _) =>
         {
-            _viewModel.ExecuteItem(item);
+            if (_viewModel.ExecuteItem(item))
+            {
+                HidePopup();
+            }
         };
         flyout.Items.Add(openItem);
+
+        if (IsQuickTodoCreateAction(item, out string ctxTodoText))
+        {
+            var openAfterSaveTodoItem = new MenuFlyoutItem
+            {
+                Text = _localizationService.T("Search.QuickCreate.CmdSaveAndOpenTodo"),
+                Icon = new ImageIcon { Source = Controls.SearchResultRowControl.GetTodoSvgIcon() }
+            };
+            openAfterSaveTodoItem.Click += (_, _) =>
+            {
+                _viewModel.InvokeAction($"quick-todo-open:{ctxTodoText}");
+                HidePopup();
+            };
+            flyout.Items.Add(openAfterSaveTodoItem);
+            return flyout;
+        }
+
+        if (IsQuickNoteCreateAction(item, out string ctxNoteText))
+        {
+            var openAfterSaveNoteItem = new MenuFlyoutItem
+            {
+                Text = _localizationService.T("Search.QuickCreate.CmdSaveAndOpenNote"),
+                Icon = new ImageIcon { Source = Controls.SearchResultRowControl.GetQuickCaptureSvgIcon() }
+            };
+            openAfterSaveNoteItem.Click += (_, _) =>
+            {
+                _viewModel.InvokeAction($"quick-note-open:{ctxNoteText}");
+                HidePopup();
+            };
+            flyout.Items.Add(openAfterSaveNoteItem);
+            return flyout;
+        }
 
         bool isFileSystemItem = item.Kind is SearchResultKind.File or SearchResultKind.Folder &&
                                 !string.IsNullOrWhiteSpace(item.DetailPath) &&
@@ -3755,6 +9333,32 @@ public sealed partial class SearchPopupWindow : Window
         if (!isFileSystemItem)
         {
             return flyout;
+        }
+
+        if (CanAttachItem(item) || CanSaveItem(item))
+        {
+            flyout.Items.Add(new MenuFlyoutSeparator());
+            if (CanAttachItem(item))
+            {
+                var attachTodoItem = new MenuFlyoutItem
+                {
+                    Text = _localizationService.T("Search.Menu.AttachToTodo"),
+                    Icon = new ImageIcon { Source = Controls.SearchResultRowControl.GetTodoSvgIcon() }
+                };
+                attachTodoItem.Click += async (_, _) => await AttachItemToTodoAsync(item);
+                flyout.Items.Add(attachTodoItem);
+            }
+
+            if (CanSaveItem(item))
+            {
+                var saveNoteItem = new MenuFlyoutItem
+                {
+                    Text = _localizationService.T("Search.Menu.SaveToNote"),
+                    Icon = new ImageIcon { Source = Controls.SearchResultRowControl.GetQuickCaptureSvgIcon() }
+                };
+                saveNoteItem.Click += async (_, _) => await SaveItemToNoteAsync(item);
+                flyout.Items.Add(saveNoteItem);
+            }
         }
 
         // Executables and administrator-requiring shortcuts keep the same
@@ -3871,12 +9475,21 @@ public sealed partial class SearchPopupWindow : Window
 
         try
         {
-            var data = new DataPackage { RequestedOperation = operation };
-            await SetDragPayloadAsync(data, item.DetailPath);
-            Clipboard.SetContent(data);
-            Clipboard.Flush();
+            bool cut = operation == DataPackageOperation.Move &&
+                !Platform.DriveMediaInterop.IsProtectedDragOutSource([item.DetailPath]);
+            if (!ShellClipboardHelper.TrySetFileDropList([item.DetailPath], cut))
+            {
+                var data = new DataPackage
+                {
+                    RequestedOperation = cut ? DataPackageOperation.Move : DataPackageOperation.Copy
+                };
+                await SetDragPayloadAsync(data, item.DetailPath);
+                Clipboard.SetContent(data);
+                Clipboard.Flush();
+            }
+
             ShowTransientStatus(_localizationService.T(
-                operation == DataPackageOperation.Move
+                cut
                     ? "Search.Action.CutReady"
                     : "Search.Action.CopyReady"));
         }
@@ -3895,13 +9508,14 @@ public sealed partial class SearchPopupWindow : Window
             return;
         }
 
+        string initialName = Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        bool isDirectory = Directory.Exists(path);
         var nameBox = new TextBox
         {
-            Text = Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)),
-            MinWidth = 320,
-            SelectionStart = 0
+            Text = initialName,
+            MinWidth = 320
         };
-        nameBox.SelectionLength = nameBox.Text.Length;
+        DeskBox.Helpers.ImeCompositionGuard.AttachAncestors(nameBox);
 
         var dialog = new ContentDialog
         {
@@ -3911,6 +9525,27 @@ public sealed partial class SearchPopupWindow : Window
             PrimaryButtonText = _localizationService.T("Common.Rename"),
             CloseButtonText = _localizationService.T("Common.Cancel"),
             DefaultButton = ContentDialogButton.Primary
+        };
+        dialog.Opened += (_, _) =>
+        {
+            DeskBox.Helpers.InlineEditorFocus.FocusWhenLoaded(
+                nameBox,
+                tb =>
+                {
+                    int stemLength = !isDirectory && Path.GetFileNameWithoutExtension(tb.Text) is { Length: > 0 } stem
+                        ? stem.Length
+                        : tb.Text.Length;
+                    tb.Select(0, stemLength);
+                },
+                DispatcherQueue,
+                "SearchRenameDialog");
+        };
+        dialog.Closing += (_, args) =>
+        {
+            if (DeskBox.Helpers.ImeCompositionGuard.IsComposingOrWithinGrace())
+            {
+                args.Cancel = true;
+            }
         };
 
         if (await dialog.ShowAsync() != ContentDialogResult.Primary)
@@ -4001,12 +9636,17 @@ public sealed partial class SearchPopupWindow : Window
         await _viewModel.RefreshSearchAsync();
     }
 
-    private static bool CanAttachItem(SearchResultItem item) =>
+    private bool CanAttachItem(SearchResultItem item) =>
+        FeatureWidgetSettings.IsEnabled(_settingsService.Settings, WidgetKind.Todo) &&
         item.Kind == SearchResultKind.File &&
         !string.IsNullOrWhiteSpace(item.DetailPath) &&
         File.Exists(item.DetailPath);
 
-    private static bool CanSaveItem(SearchResultItem item) => CanAttachItem(item);
+    private bool CanSaveItem(SearchResultItem item) =>
+        FeatureWidgetSettings.IsEnabled(_settingsService.Settings, WidgetKind.QuickCapture) &&
+        item.Kind == SearchResultKind.File &&
+        !string.IsNullOrWhiteSpace(item.DetailPath) &&
+        File.Exists(item.DetailPath);
 
     private void TryPreviewSelectedItem()
     {
@@ -4033,28 +9673,43 @@ public sealed partial class SearchPopupWindow : Window
 
     private async Task AttachItemToTodoAsync(SearchResultItem item)
     {
-        var actionService = (App.Current as App)?.SearchActionService;
+        var app = App.Current as App;
+        var actionService = app?.SearchActionService;
         if (actionService is null)
         {
             return;
         }
 
-        bool ok = await actionService.AttachFileToTodoAsync(item.DetailPath);
+        var result = await actionService.AttachFileToTodoWithResultAsync(item.DetailPath);
         ShowTransientStatus(_localizationService.T(
-            ok ? "Search.Action.AttachedToTodo" : "Search.Action.AttachFailed"));
+            result.Succeeded ? "Search.Action.AttachedToTodo" : "Search.Action.AttachFailed"));
+        if (result.Succeeded && app is not null)
+        {
+            app.TryShowSearchQuickCreateHudForTodo(
+                result.FileName,
+                result.WidgetId,
+                result.ItemId);
+        }
     }
 
     private async Task SaveItemToNoteAsync(SearchResultItem item)
     {
-        var actionService = (App.Current as App)?.SearchActionService;
+        var app = App.Current as App;
+        var actionService = app?.SearchActionService;
         if (actionService is null)
         {
             return;
         }
 
-        bool ok = await actionService.SaveFileToNoteAsync(item.DetailPath);
+        var result = await actionService.SaveFileToNoteWithResultAsync(item.DetailPath);
         ShowTransientStatus(_localizationService.T(
-            ok ? "Search.Action.SavedToNote" : "Search.Action.SaveFailed"));
+            result.Succeeded ? "Search.Action.SavedToNote" : "Search.Action.SaveFailed"));
+        if (result.Succeeded && app is not null)
+        {
+            app.TryShowSearchQuickCreateHudForNote(
+                result.FileName,
+                result.ItemId);
+        }
     }
 
     private void CopyPathToClipboard(SearchResultItem item)
@@ -4090,25 +9745,41 @@ public sealed partial class SearchPopupWindow : Window
             "search-status"));
     }
 
-    private void AnimateResultsRefresh()
+    private void AnimateResultsFirstExpand()
     {
         if (!AreSystemAnimationsEnabled() ||
             ResultsPanel.Visibility != Visibility.Visible)
         {
             ResultsPanel.Opacity = 1;
+            ResultsTranslateTransform.Y = 0;
             return;
         }
 
+        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
         var storyboard = new Storyboard();
-        var animation = new DoubleAnimation
+
+        var opacityAnim = new DoubleAnimation
         {
-            From = 0.72,
-            To = 1,
-            Duration = TimeSpan.FromMilliseconds(83)
+            From = 0.0,
+            To = 1.0,
+            Duration = TimeSpan.FromMilliseconds(135),
+            EasingFunction = ease
         };
-        Storyboard.SetTarget(animation, ResultsPanel);
-        Storyboard.SetTargetProperty(animation, "Opacity");
-        storyboard.Children.Add(animation);
+        Storyboard.SetTarget(opacityAnim, ResultsPanel);
+        Storyboard.SetTargetProperty(opacityAnim, "Opacity");
+
+        var slideAnim = new DoubleAnimation
+        {
+            From = -5.0,
+            To = 0.0,
+            Duration = TimeSpan.FromMilliseconds(145),
+            EasingFunction = ease
+        };
+        Storyboard.SetTarget(slideAnim, ResultsTranslateTransform);
+        Storyboard.SetTargetProperty(slideAnim, "Y");
+
+        storyboard.Children.Add(opacityAnim);
+        storyboard.Children.Add(slideAnim);
         storyboard.Begin();
     }
 
@@ -4245,6 +9916,10 @@ public sealed partial class SearchPopupWindow : Window
         ActionRequested?.Invoke(this, actionId);
     }
 
+    private bool AreFileColumnsVisible() =>
+        _viewModel.SelectedTab?.SupportsFileSort == true &&
+        _settingsService.Settings.Search.SearchShowSortHeader;
+
     private void RefreshPreparedResultRows()
     {
         RefreshPreparedResultRows(ResultsRepeater);
@@ -4258,7 +9933,8 @@ public sealed partial class SearchPopupWindow : Window
             var child = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(root, index);
             if (child is SearchResultRowControl row)
             {
-                row.SetFileColumnsVisible(_viewModel.SelectedTab?.SupportsFileSort == true);
+                row.SetFileColumnsVisible(AreFileColumnsVisible());
+                row.ApplyQueryHighlight(_viewModel.EffectiveHighlightQuery);
             }
 
             RefreshPreparedResultRows(child);
@@ -4267,24 +9943,40 @@ public sealed partial class SearchPopupWindow : Window
 
     private void UpdateSelectionActions()
     {
-        var item = _viewModel.SelectedItem;
         bool hasMulti = _multiSelectedItems.Count > 0;
-        bool show = (item is not null || hasMulti) &&
-                    ResultsPanel.Visibility == Visibility.Visible &&
-                    StatusBar.Visibility != Visibility.Visible;
-        SelectionActionBar.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
-        if (!show)
+        bool showBatchBar = hasMulti &&
+                            ResultsPanel.Visibility == Visibility.Visible &&
+                            StatusBar.Visibility != Visibility.Visible;
+        SelectionActionBar.Visibility = showBatchBar ? Visibility.Visible : Visibility.Collapsed;
+
+        bool showSingleResultCmdBar = !showBatchBar &&
+                                      StatusBar.Visibility != Visibility.Visible &&
+                                      ResultsPanel.Visibility == Visibility.Visible &&
+                                      _viewModel.SelectedItem is not null;
+        CmdPalResultFooterGrid.Visibility = showSingleResultCmdBar
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        RecommendationFooterRightPanel.Visibility = showSingleResultCmdBar
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        if (showSingleResultCmdBar)
         {
-            return;
+            UpdateCommandBarForSelectedItem();
         }
 
-        // Batch action buttons only visible when multiple items are selected.
-        CopySelectedButton.Visibility = hasMulti ? Visibility.Visible : Visibility.Collapsed;
-        CutSelectedButton.Visibility = hasMulti ? Visibility.Visible : Visibility.Collapsed;
-        DeleteSelectedButton.Visibility = hasMulti ? Visibility.Visible : Visibility.Collapsed;
+        bool showFooter = RecommendedAppsPanel.Visibility == Visibility.Visible ||
+                          showBatchBar ||
+                          StatusBar.Visibility == Visibility.Visible ||
+                          showSingleResultCmdBar;
+        Visibility targetFooterVisibility = showFooter ? Visibility.Visible : Visibility.Collapsed;
+        bool footerChanged = FooterBar.Visibility != targetFooterVisibility;
+        FooterBar.Visibility = targetFooterVisibility;
 
-        if (hasMulti)
+        if (showBatchBar)
         {
+            CopySelectedButton.Visibility = Visibility.Visible;
+            CutSelectedButton.Visibility = Visibility.Visible;
+            DeleteSelectedButton.Visibility = Visibility.Visible;
             CopySelectedLabel.Text = _localizationService.T("Common.Copy");
             CutSelectedLabel.Text = _localizationService.T("Common.Cut");
             DeleteSelectedLabel.Text = _localizationService.T("Search.Delete.Action");
@@ -4292,21 +9984,12 @@ public sealed partial class SearchPopupWindow : Window
             OpenLocationButton.Visibility = Visibility.Collapsed;
             AttachSelectedButton.Visibility = Visibility.Collapsed;
             SaveSelectedButton.Visibility = Visibility.Collapsed;
-            return;
         }
 
-        if (item is null)
+        if (footerChanged && IsPopupVisible && !_isWindowClosed)
         {
-            return;
+            UpdatePopupDynamicBounds();
         }
-
-        // Single-selection mode: show the standard action buttons.
-        OpenSelectedButton.Visibility = Visibility.Visible;
-        bool isFileSystemItem = item.Kind is SearchResultKind.File or SearchResultKind.Folder &&
-                                !string.IsNullOrWhiteSpace(item.DetailPath);
-        OpenLocationButton.Visibility = isFileSystemItem ? Visibility.Visible : Visibility.Collapsed;
-        AttachSelectedButton.Visibility = CanAttachItem(item) ? Visibility.Visible : Visibility.Collapsed;
-        SaveSelectedButton.Visibility = CanSaveItem(item) ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void OpenSelectedButton_Click(object sender, RoutedEventArgs e)
@@ -4349,34 +10032,124 @@ public sealed partial class SearchPopupWindow : Window
 
     private void OnWindowClosed(object sender, WindowEventArgs args)
     {
+        if (_isWindowClosed)
+        {
+            return;
+        }
+
+        _isWindowClosed = true;
+        IsPopupVisible = false;
         App.Log(
             $"[Search] Popup window closed visible={IsPopupVisible} " +
             $"hwnd=0x{_hwnd.ToInt64():X}");
+        RemovePopupCloseWatcherSubclass();
+        Closed -= OnWindowClosed;
         _viewModel.ActionRequested -= OnViewModelActionRequested;
         _viewModel.ContentRequested -= OnViewModelContentRequested;
         _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
+        _viewModel.CurrentResults.CollectionChanged -= OnCurrentResultsCollectionChanged;
         ResultsRepeater.ElementPrepared -= OnResultsElementPrepared;
+        ResultsRepeater.ElementClearing -= OnResultsElementClearing;
         RecommendedAppsRepeater.ElementPrepared -= OnRecommendedAppsElementPrepared;
+        RecommendedAppsRepeater.ElementClearing -= OnRecommendedAppsElementClearing;
+        FolderAppsRepeater.ElementPrepared -= OnOverlayAppsElementPrepared;
+        FolderAppsRepeater.ElementClearing -= OnOverlayAppsElementClearing;
+        HiddenAppsRepeater.ElementPrepared -= OnOverlayAppsElementPrepared;
+        HiddenAppsRepeater.ElementClearing -= OnOverlayAppsElementClearing;
         _viewModel.RecommendationIconsResolved -= OnRecommendationIconsResolved;
+        _viewModel.RecommendationLayoutUpdated -= OnRecommendationLayoutUpdated;
         _settingsService.SettingsChanged -= OnAppearanceSettingsChanged;
         _settingsService.AppearancePreviewChanged -= OnAppearanceSettingsChanged;
         _localizationService.LanguageChanged -= OnLanguageChanged;
         if (_themeService is not null)
             _themeService.AppearanceChanged -= OnThemeServiceAppearanceChanged;
         Activated -= OnWindowActivated;
-        PopupHideStoryboard.Stop();
+        try
+        {
+            PopupShowStoryboard.Stop();
+            PopupHideStoryboard.Stop();
+        }
+        catch
+        {
+        }
         PopupHideStoryboard.Completed -= OnPopupHideCompleted;
-        _searchDebounceTimer?.Stop();
+        if (_searchDebounceTimer is { } debounceTimer)
+        {
+            _searchDebounceTimer = null;
+            debounceTimer.Tick -= OnSearchDebounceTick;
+            try
+            {
+                debounceTimer.Stop();
+            }
+            catch
+            {
+            }
+        }
+
         _skeletonDelayCancellation?.Cancel();
         _skeletonDelayCancellation?.Dispose();
+        _skeletonDelayCancellation = null;
         SearchFeedbackPresenter.Clear();
-        _entranceGuardTimer?.Stop();
-        _rubberBandAutoScrollTimer?.Stop();
+        StopAndClearEntranceGuardTimer();
+        if (_rubberBandAutoScrollTimer is { } autoScrollTimer)
+        {
+            _rubberBandAutoScrollTimer = null;
+            autoScrollTimer.Tick -= OnRubberBandAutoScrollTick;
+            try
+            {
+                autoScrollTimer.Stop();
+            }
+            catch
+            {
+            }
+        }
+
+        if (_recRubberBandAutoScrollTimer is { } recAutoScrollTimer)
+        {
+            _recRubberBandAutoScrollTimer = null;
+            recAutoScrollTimer.Tick -= OnRecommendationRubberBandAutoScrollTick;
+            try
+            {
+                recAutoScrollTimer.Stop();
+            }
+            catch
+            {
+            }
+        }
+
+        DisposeUnfocusedAutoHideTimer();
+        DisposeColdHiddenCleanupTimer();
+        DisposeExternalDragFadeTimer();
+        _detailsUpdateCoalesceTimer?.Stop();
+        _detailsUpdateCoalesceTimer = null;
+        CancelRecommendedDrag();
+        EndRecommendationRubberBand();
+        _isRecommendationEditMode = false;
+        _recMultiSelectedKeys.Clear();
+        _recRubberBandBaseKeys.Clear();
+        CloseRecommendationOverlays(immediate: true);
+        ClearSelectedResultRow();
+        ClearRecommendedAppSelection();
+        _multiSelectedItems.Clear();
+        _rubberBandBaseSelection.Clear();
+        ClearRealizedRepeaterVisuals();
         ResultsRepeater.ItemsSource = null;
         RecommendedAppsRepeater.ItemsSource = null;
+        FolderAppsRepeater.ItemsSource = null;
+        HiddenAppsRepeater.ItemsSource = null;
+        _folderOverlayItems.Clear();
+        AppsSkeletonRepeater.ItemsSource = null;
         TabsList.ItemsSource = null;
         DisposeAcrylicController();
         DisposeMicaController();
+        ClearTransparentWindowBackdrop();
+        _materialBackdropBridge?.Dispose();
+        _materialBackdropBridge = null;
+        ActionRequested = null;
+        ContentRequested = null;
+        PopupShown = null;
+        PopupHidden = null;
+        SearchEngineService.ReleaseActiveColdHiddenCaches();
         _viewModel.Dispose();
     }
 

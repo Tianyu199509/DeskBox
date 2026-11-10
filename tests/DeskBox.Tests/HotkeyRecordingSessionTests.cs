@@ -68,6 +68,30 @@ public sealed class HotkeyRecordingSessionTests
     }
 
     [Fact]
+    public void FreshModifierHoldAfterCommittedChord_ClearsPriorPrimaryKeyForLivePreview()
+    {
+        var session = new HotkeyRecordingSession();
+
+        session.ProcessKey(LeftControl, isKeyDown: true);
+        session.ProcessKey((uint)VirtualKey.A, isKeyDown: true);
+        session.ProcessKey((uint)VirtualKey.A, isKeyDown: false);
+        session.ProcessKey(LeftControl, isKeyDown: false);
+        Assert.True(session.HasGesture);
+
+        // Starting a brand-new modifier hold from idle clears the prior chord
+        // so live keycap preview shows only Shift instead of stale Ctrl+A.
+        session.ProcessKey(LeftShift, isKeyDown: true);
+        Assert.False(session.HasGesture);
+        Assert.Equal(HotkeyModifierKeys.Shift, session.HeldModifiers);
+
+        // Releasing without pressing a primary key surfaces Shift as a standalone modifier.
+        session.ProcessKey(LeftShift, isKeyDown: false);
+        Assert.False(session.HasGesture);
+        Assert.True(session.HasStandaloneModifier);
+        Assert.Equal(HotkeyModifierKeys.Shift, session.LastStandaloneModifier);
+    }
+
+    [Fact]
     public void SecondNonModifierKey_RecapturesWithCurrentModifiers()
     {
         var session = new HotkeyRecordingSession();
@@ -97,18 +121,22 @@ public sealed class HotkeyRecordingSessionTests
     }
 
     [Fact]
-    public void EscapeRequestsCancel()
+    public void EscapeRequestsCancelOnlyWhenNoModifiersAreHeld()
     {
-        var session = new HotkeyRecordingSession();
+        var modified = new HotkeyRecordingSession();
+        modified.ProcessKey(LeftControl, isKeyDown: true);
+        modified.ProcessKey(LeftShift, isKeyDown: true);
+        modified.ProcessKey(Escape, isKeyDown: true);
+        Assert.False(modified.CancelRequested);
 
-        session.ProcessKey(Escape, isKeyDown: true);
-
-        Assert.True(session.CancelRequested);
-        Assert.False(session.HasGesture);
+        var bare = new HotkeyRecordingSession();
+        bare.ProcessKey(Escape, isKeyDown: true);
+        Assert.True(bare.CancelRequested);
+        Assert.False(bare.HasGesture);
     }
 
     [Fact]
-    public void TabAndInjectedMaskKey_AreIgnored()
+    public void BareTabAndInjectedMaskKey_AreIgnored_WhileModifiedTabCaptures()
     {
         var session = new HotkeyRecordingSession();
 
@@ -117,6 +145,13 @@ public sealed class HotkeyRecordingSessionTests
 
         Assert.False(session.HasGesture);
         Assert.False(session.CancelRequested);
+
+        session.ProcessKey(LeftMenu, isKeyDown: true);
+        session.ProcessKey(Tab, isKeyDown: true);
+        Assert.True(session.HasGesture);
+        Assert.Equal(
+            new GlobalHotkeyGesture(HotkeyModifierKeys.Alt, (int)Tab),
+            session.Gesture);
     }
 
     [Fact]
@@ -134,15 +169,17 @@ public sealed class HotkeyRecordingSessionTests
     }
 
     [Fact]
-    public void Clear_DropsTheCapturedChord()
+    public void Clear_DropsTheCapturedChordAndStandaloneModifier()
     {
         var session = new HotkeyRecordingSession();
 
-        session.ProcessKey(LeftControl, isKeyDown: true);
-        session.ProcessKey((uint)VirtualKey.F7, isKeyDown: true);
-        session.Clear();
+        session.ProcessKey(LeftShift, isKeyDown: true);
+        session.ProcessKey(LeftShift, isKeyDown: false);
+        Assert.True(session.HasStandaloneModifier);
 
+        session.Clear();
         Assert.False(session.HasGesture);
+        Assert.False(session.HasStandaloneModifier);
     }
 
     [Fact]

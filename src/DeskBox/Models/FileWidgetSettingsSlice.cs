@@ -64,7 +64,7 @@ public sealed class FileWidgetSettingsSlice
     /// How clicking a stack reveals its members. Valid values are
     /// <c>"Inline"</c> and <c>"Popover"</c>.
     /// </summary>
-    public string FileStackOpenMode { get; set; } = "Inline";
+    public string FileStackOpenMode { get; set; } = "Popover";
 
     /// <summary>
     /// Grid shape of the stack popover: <c>"Adaptive"</c>, <c>"Grid3"</c>

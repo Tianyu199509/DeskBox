@@ -71,6 +71,7 @@ public sealed class TodoRecurrenceServiceTests
         Assert.True(created);
         Assert.NotNull(nextItem);
         Assert.False(nextItem.IsCompleted);
+        Assert.True(nextItem.IsGeneratedOccurrence);
         Assert.Equal(item.Text, nextItem.Text);
         Assert.Equal(TodoRecurrenceMode.Weekly, nextItem.Recurrence?.Mode);
         Assert.Equal(item.Recurrence?.AnchorDueDate, nextItem.Recurrence?.AnchorDueDate);
@@ -92,6 +93,41 @@ public sealed class TodoRecurrenceServiceTests
                 Assert.Equal("second", step.Text);
                 Assert.False(step.IsCompleted);
             });
+    }
+
+    [Fact]
+    public void TryGetNextDueDate_OverdueAllDayAndTimedDailyItemsAdvanceToTomorrow()
+    {
+        var allDayYesterday = new DateTimeOffset(new DateTime(2026, 11, 8, 0, 0, 0, DateTimeKind.Local));
+        var completedTodayMorning = new DateTimeOffset(new DateTime(2026, 11, 9, 10, 0, 0, DateTimeKind.Local));
+        var allDayItem = CreateRecurringItem(TodoRecurrenceMode.Daily, allDayYesterday);
+        allDayItem.HasDueTime = false;
+
+        Assert.True(TodoRecurrenceService.TryGetNextDueDate(allDayItem, completedTodayMorning, out DateTimeOffset nextAllDay));
+        Assert.Equal(new DateTime(2026, 11, 10, 0, 0, 0), nextAllDay.LocalDateTime);
+
+        var timedYesterdayEvening = new DateTimeOffset(new DateTime(2026, 11, 8, 18, 0, 0, DateTimeKind.Local));
+        var timedItem = CreateRecurringItem(TodoRecurrenceMode.Daily, timedYesterdayEvening);
+        timedItem.HasDueTime = true;
+
+        Assert.True(TodoRecurrenceService.TryGetNextDueDate(timedItem, completedTodayMorning, out DateTimeOffset nextTimed));
+        Assert.Equal(new DateTime(2026, 11, 10, 18, 0, 0), nextTimed.LocalDateTime);
+    }
+
+    [Fact]
+    public void IsDeferredOccurrence_DistinguishesGeneratedFutureFromTodayAndManualFuture()
+    {
+        var today = new DateTime(2026, 11, 9);
+        var tomorrowDue = new DateTimeOffset(new DateTime(2026, 11, 10, 9, 0, 0, DateTimeKind.Local));
+        var generatedFuture = CreateRecurringItem(TodoRecurrenceMode.Daily, tomorrowDue);
+        generatedFuture.IsGeneratedOccurrence = true;
+
+        Assert.True(TodoRecurrenceService.IsDeferredOccurrence(generatedFuture, today));
+        Assert.False(TodoRecurrenceService.IsDeferredOccurrence(generatedFuture, new DateTime(2026, 11, 10)));
+
+        var manualFuture = CreateRecurringItem(TodoRecurrenceMode.Daily, tomorrowDue);
+        manualFuture.IsGeneratedOccurrence = false;
+        Assert.False(TodoRecurrenceService.IsDeferredOccurrence(manualFuture, today));
     }
 
     private static TodoItem CreateRecurringItem(string recurrenceMode, DateTimeOffset dueDate, DateTimeOffset? anchorDueDate = null)

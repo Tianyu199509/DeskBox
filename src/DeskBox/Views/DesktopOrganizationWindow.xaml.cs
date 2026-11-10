@@ -2,11 +2,10 @@ using DeskBox.Helpers;
 using DeskBox.Platform;
 using DeskBox.Services;
 using Microsoft.UI;
-using Microsoft.UI.Composition.SystemBackdrops;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
-using Microsoft.UI.Xaml.Media;
 using System.Runtime.InteropServices;
 using Windows.Graphics;
 using Windows.System;
@@ -16,10 +15,10 @@ namespace DeskBox.Views;
 
 public sealed partial class DesktopOrganizationWindow : Window
 {
-    private const int DesiredWidth = 900;
+    private const int DesiredWidth = 960;
     private const int DesiredHeight = 680;
-    private const int MinimumWidth = 600;
-    private const int MinimumHeight = 500;
+    private const int MinimumWidth = 720;
+    private const int MinimumHeight = 520;
     private const int WorkAreaMargin = 64;
     private const uint WmGetMinMaxInfo = 0x0024;
     private const uint WmNcDestroy = 0x0082;
@@ -30,6 +29,7 @@ public sealed partial class DesktopOrganizationWindow : Window
     private readonly Win32Helper.SubclassProc _windowSubclassProc;
     private bool _hasStarted;
     private bool _allowClose;
+    private bool _isConfirmingEscapeDiscard;
     private IntPtr _ownerHwnd;
     private bool _isSubclassInstalled;
 
@@ -178,9 +178,14 @@ public sealed partial class DesktopOrganizationWindow : Window
     private void TaskView_OrganizationUndone(object? sender, EventArgs e) =>
         OrganizationUndone?.Invoke(this, EventArgs.Empty);
 
-    private void RootGrid_KeyDown(object sender, KeyRoutedEventArgs e)
+    private async void RootGrid_KeyDown(object sender, KeyRoutedEventArgs e)
     {
-        if (e.Key != VirtualKey.Escape)
+        if (DeskBox.Helpers.ImeCompositionGuard.IsImeCompositionKeyEvent(e))
+        {
+            return;
+        }
+
+        if (e.Key != VirtualKey.Escape || _isConfirmingEscapeDiscard)
         {
             return;
         }
@@ -189,12 +194,44 @@ public sealed partial class DesktopOrganizationWindow : Window
         if (TaskView.IsExecutionRunning)
         {
             TaskView.CancelExecutionAndCloseWhenSafe();
+            return;
         }
-        else
+
+        if (TaskView.HasActiveUserCustomizations && RootGrid.XamlRoot is not null)
         {
-            _allowClose = true;
-            Close();
+            _isConfirmingEscapeDiscard = true;
+            try
+            {
+                LocalizationService loc = App.Current.LocalizationService;
+                var dialog = new ContentDialog
+                {
+                    XamlRoot = RootGrid.XamlRoot,
+                    RequestedTheme = App.Current.ThemeService.CurrentTheme,
+                    Title = loc.T("DesktopOrganization.Layout.DiscardChangesTitle"),
+                    Content = loc.T("DesktopOrganization.Layout.DiscardChangesBody"),
+                    PrimaryButtonText = loc.T("DesktopOrganization.Layout.DiscardAndClose"),
+                    CloseButtonText = loc.T("DesktopOrganization.Layout.KeepEditing"),
+                    DefaultButton = ContentDialogButton.Close
+                };
+                if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+                {
+                    return;
+                }
+            }
+            catch
+            {
+                // Another ContentDialog is already open (e.g. abandon dialog);
+                // let that dialog handle Escape instead of closing the window.
+                return;
+            }
+            finally
+            {
+                _isConfirmingEscapeDiscard = false;
+            }
         }
+
+        _allowClose = true;
+        Close();
     }
 
     private void AppTitleBar_ActualThemeChanged(FrameworkElement sender, object args) =>

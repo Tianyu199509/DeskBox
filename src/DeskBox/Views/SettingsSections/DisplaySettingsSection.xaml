@@ -14,98 +14,179 @@
         </ResourceDictionary>
     </UserControl.Resources>
 
-    <!-- Stage-4 layout (spec 6.3): header + Identify, arrangement preview,
-         selected display card with "把所有格子移到这里", "新格子出现在",
-         "多显示器" expander with the disconnect behavior, per-widget rows.
-         Selection styling stays in code-behind (accent fill per R8). -->
     <StackPanel Style="{StaticResource SectionPanelStyle}">
         <InfoBar
             x:Name="DisplaysStatusInfo"
             IsClosable="True"
             IsOpen="False" />
 
-        <toolkit:SettingsCard
-            x:Name="DisplaysOverviewCard"
-            HorizontalContentAlignment="Right"
-            svc:Localized.DescriptionKey="Settings.Displays.Description"
-            svc:Localized.HeaderKey="Settings.Displays.Title"
-            svc:InfoTip.TitleKey="Settings.Displays.BindingInfoTip.Title"
-            svc:InfoTip.BodyKey="Settings.Displays.BindingInfoTip.Description">
-            <toolkit:SettingsCard.HeaderIcon>
-                <FontIcon Glyph="&#xE7F4;" />
-            </toolkit:SettingsCard.HeaderIcon>
-            <Button svc:Localized.AutomationNameKey="Settings.Displays.Identify"
-                x:Name="IdentifyButton"
-                Style="{StaticResource ActionButtonStyle}"
-                Click="IdentifyButton_Click"
-                svc:Localized.Key="Settings.Displays.Identify" />
-        </toolkit:SettingsCard>
+        <Border
+            x:Name="PreviewArea"
+            Style="{StaticResource SettingsGroupStyle}"
+            CornerRadius="6">
+            <StackPanel>
+                <Border Padding="20,18,20,18">
+                    <Viewbox
+                        x:Name="PreviewViewbox"
+                        MaxHeight="260"
+                        HorizontalAlignment="Stretch"
+                        Stretch="Uniform">
+                        <Canvas x:Name="DisplayPreviewCanvas" />
+                    </Viewbox>
+                </Border>
 
-        <StackPanel x:Name="PreviewArea" Spacing="8">
-            <TextBlock
-                x:Name="PreviewHintText"
-                FontSize="12"
-                svc:Localized.Key="Settings.Displays.PreviewHint" />
-            <Viewbox
-                x:Name="PreviewViewbox"
-                MaxHeight="280"
-                HorizontalAlignment="Stretch"
-                Stretch="Uniform">
-                <Canvas x:Name="DisplayPreviewCanvas" />
-            </Viewbox>
-        </StackPanel>
+                <Border
+                    x:Name="WorkspaceFooterDivider"
+                    Height="1" />
+
+                <Grid
+                    x:Name="ScreenDetailBar"
+                    MinHeight="56"
+                    Padding="16,10"
+                    ColumnSpacing="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <Grid Grid.Column="0" VerticalAlignment="Center">
+                        <TextBlock
+                            x:Name="SelectPromptText"
+                            Style="{StaticResource SettingDescriptionTextStyle}"
+                            Visibility="Collapsed"
+                            svc:Localized.Key="Settings.Displays.SelectPrompt" />
+
+                        <Grid
+                            x:Name="SelectedScreenInfoPanel"
+                            ColumnSpacing="14"
+                            Visibility="Collapsed">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <FontIcon
+                                x:Name="SelectedScreenIcon"
+                                Grid.Column="0"
+                                VerticalAlignment="Center"
+                                FontSize="16"
+                                Glyph="&#xE7F4;" />
+                            <StackPanel
+                                Grid.Column="1"
+                                VerticalAlignment="Center"
+                                Spacing="2">
+                                <TextBlock
+                                    x:Name="SelectedScreenTitleText"
+                                    Style="{StaticResource SettingTitleTextStyle}" />
+                                <TextBlock
+                                    x:Name="SelectedScreenDescriptionText"
+                                    Style="{StaticResource SettingDescriptionTextStyle}" />
+                            </StackPanel>
+                        </Grid>
+                    </Grid>
+
+                    <StackPanel
+                        Grid.Column="1"
+                        VerticalAlignment="Center"
+                        Orientation="Horizontal"
+                        Spacing="8">
+                        <Button
+                            x:Name="MoveAllWidgetsButton"
+                            Style="{StaticResource ActionButtonStyle}"
+                            Click="MoveAllWidgetsButton_Click"
+                            Visibility="Collapsed"
+                            svc:Localized.AutomationNameKey="Settings.Displays.MoveAll"
+                            svc:Localized.Key="Settings.Displays.MoveAll" />
+                        <Button
+                            x:Name="IdentifyMonitorsButton"
+                            Style="{StaticResource ActionButtonStyle}"
+                            Click="IdentifyButton_Click"
+                            svc:Localized.AutomationNameKey="Settings.Displays.Identify"
+                            svc:Localized.Key="Settings.Displays.Identify" />
+                    </StackPanel>
+                </Grid>
+            </StackPanel>
+        </Border>
 
         <toolkit:SettingsCard
-            x:Name="ScreenDetailCard"
-            HorizontalContentAlignment="Right"
-            Visibility="Collapsed">
-            <toolkit:SettingsCard.HeaderIcon>
-                <FontIcon Glyph="&#xE7F4;" />
-            </toolkit:SettingsCard.HeaderIcon>
-            <Button svc:Localized.AutomationNameKey="Settings.Displays.MoveAll"
-                x:Name="MoveAllWidgetsButton"
-                Style="{StaticResource ActionButtonStyle}"
-                Click="MoveAllWidgetsButton_Click"
-                svc:Localized.Key="Settings.Displays.MoveAll" />
-        </toolkit:SettingsCard>
-
-        <toolkit:SettingsCard
+            x:Name="NewWidgetsCard"
             HorizontalContentAlignment="Right"
             svc:Localized.DescriptionKey="Settings.Displays.NewWidgets.Description"
             svc:Localized.HeaderKey="Settings.Displays.NewWidgets.Header">
             <toolkit:SettingsCard.HeaderIcon>
-                <FontIcon Glyph="&#xE710;" />
+                <FontIcon Glyph="&#xE740;" />
             </toolkit:SettingsCard.HeaderIcon>
-            <ComboBox svc:Localized.AutomationNameKey="Settings.Displays.NewWidgets.Header"
+            <ComboBox
                 x:Name="NewPlacementCombo"
-                MinWidth="240"
-                SelectionChanged="NewPlacementCombo_SelectionChanged" />
+                MinWidth="{StaticResource SettingsControlMinWidth}"
+                SelectionChanged="NewPlacementCombo_SelectionChanged"
+                svc:Localized.AutomationNameKey="Settings.Displays.NewWidgets.Header" />
         </toolkit:SettingsCard>
 
         <toolkit:SettingsExpander
+            x:Name="PolicyExpander"
             HorizontalContentAlignment="Stretch"
-            svc:Localized.HeaderKey="Settings.Displays.MultipleDisplays.Header">
+            IsExpanded="False"
+            svc:Localized.DescriptionKey="Settings.Displays.PolicyExpander.Description"
+            svc:Localized.HeaderKey="Settings.Displays.PolicyExpander.Title"
+            svc:InfoTip.TitleKey="Settings.Displays.BindingInfoTip.Title"
+            svc:InfoTip.BodyKey="Settings.Displays.BindingInfoTip.Description">
             <toolkit:SettingsExpander.HeaderIcon>
-                <FontIcon Glyph="&#xE7F4;" />
+                <FontIcon Glyph="&#xE80A;" />
             </toolkit:SettingsExpander.HeaderIcon>
             <toolkit:SettingsExpander.Items>
                 <toolkit:SettingsCard
                     HorizontalContentAlignment="Right"
+                    svc:Localized.DescriptionKey="Settings.Displays.ScalingMode.Description"
+                    svc:Localized.HeaderKey="Settings.Displays.ScalingMode.Header">
+                    <ComboBox
+                        x:Name="ScalingModeCombo"
+                        MinWidth="{StaticResource SettingsControlMinWidth}"
+                        SelectionChanged="ScalingModeCombo_SelectionChanged"
+                        svc:Localized.AutomationNameKey="Settings.Displays.ScalingMode.Header" />
+                </toolkit:SettingsCard>
+                <toolkit:SettingsCard
+                    HorizontalContentAlignment="Right"
                     svc:Localized.DescriptionKey="Settings.Displays.Disconnect.Description"
                     svc:Localized.HeaderKey="Settings.Displays.Disconnect.Header">
-                    <ComboBox svc:Localized.AutomationNameKey="Settings.Displays.Disconnect.Header"
+                    <ComboBox
                         x:Name="DisconnectBehaviorCombo"
-                        MinWidth="240"
-                        SelectionChanged="DisconnectBehaviorCombo_SelectionChanged" />
+                        MinWidth="{StaticResource SettingsControlMinWidth}"
+                        SelectionChanged="DisconnectBehaviorCombo_SelectionChanged"
+                        svc:Localized.AutomationNameKey="Settings.Displays.Disconnect.Header" />
+                </toolkit:SettingsCard>
+                <toolkit:SettingsCard
+                    HorizontalContentAlignment="Right"
+                    svc:Localized.DescriptionKey="Settings.Displays.Recalibrate.Description"
+                    svc:Localized.HeaderKey="Settings.Displays.Recalibrate">
+                    <Button
+                        x:Name="RecalibrateLayoutButton"
+                        Style="{StaticResource ActionButtonStyle}"
+                        Click="RecalibrateLayoutButton_Click"
+                        svc:Localized.AutomationNameKey="Settings.Displays.Recalibrate"
+                        svc:Localized.Key="Settings.Displays.Recalibrate" />
                 </toolkit:SettingsCard>
             </toolkit:SettingsExpander.Items>
         </toolkit:SettingsExpander>
 
         <StackPanel x:Name="WidgetListPanel" Spacing="6">
-            <TextBlock
-                Style="{StaticResource SettingsSubsectionTitleTextStyle}" AutomationProperties.HeadingLevel="Level2"
-                VerticalAlignment="Center"
-                svc:Localized.Key="Settings.Displays.Widgets.SectionTitle" />
+            <Grid ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock
+                    Grid.Column="0"
+                    VerticalAlignment="Center"
+                    AutomationProperties.HeadingLevel="Level2"
+                    Style="{StaticResource SettingsSubsectionTitleTextStyle}"
+                    svc:Localized.Key="Settings.Displays.Widgets.SectionTitle" />
+                <ComboBox
+                    x:Name="WidgetFilterCombo"
+                    Grid.Column="1"
+                    MinWidth="{StaticResource SettingsControlMinWidth}"
+                    SelectionChanged="WidgetFilterCombo_SelectionChanged"
+                    svc:Localized.AutomationNameKey="Settings.Displays.Widgets.SectionTitle" />
+            </Grid>
             <StackPanel x:Name="WidgetBindingCards" Spacing="4" />
         </StackPanel>
     </StackPanel>

@@ -96,6 +96,8 @@
         <!-- Mini: one open hero, with no nested cards or metric pills. -->
         <Grid
             x:Name="MiniLayout"
+            x:Load="{x:Bind IsMiniLayoutLoaded}"
+            Loaded="SubtreeLayout_Loaded"
             Padding="10,7"
             RowSpacing="2"
             Visibility="{Binding MiniLayoutVisibility}">
@@ -196,6 +198,8 @@
         <!-- Compact: open hero plus a single typographic metric band. -->
         <Grid
             x:Name="CompactLayout"
+            x:Load="{x:Bind IsCompactLayoutLoaded}"
+            Loaded="SubtreeLayout_Loaded"
             Padding="11,8"
             RowSpacing="4"
             Visibility="{Binding CompactLayoutVisibility}">
@@ -364,6 +368,8 @@
         <!-- Expanded: one continuous hierarchy instead of a dashboard of cards. -->
         <Grid
             x:Name="ExpandedLayout"
+            x:Load="{x:Bind IsExpandedLayoutLoaded}"
+            Loaded="ExpandedLayout_Loaded"
             Padding="14,9"
             RowSpacing="5"
             Visibility="{Binding ExpandedLayoutVisibility}">
@@ -728,7 +734,7 @@
                             </ItemsPanelTemplate>
                         </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
-                            <DataTemplate x:DataType="viewModels:WeatherHourViewModel">
+                            <DataTemplate>
                                 <Grid
                                     Width="{Binding DataContext.HourlyCardWidth, ElementName=ExpandedLayout}"
                                     Height="{Binding DataContext.ExpandedHourlyCardHeight, ElementName=ExpandedLayout}">
@@ -745,7 +751,7 @@
                                             x:Name="HourlyHourText"
                                             Grid.Row="0"
                                             HorizontalAlignment="Center"
-                                            FontSize="{x:Bind ForecastHourTextSize, Mode=OneWay}"
+                                            FontSize="{Binding ForecastHourTextSize}"
                                             Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                                             Text="{Binding HourLabel}" />
                                         <Image
@@ -769,7 +775,7 @@
                                             helpers:WidgetTextShadow.Cast="True"
                                             Grid.Row="3"
                                             HorizontalAlignment="Center"
-                                            FontSize="{x:Bind ForecastHourTextSize, Mode=OneWay}"
+                                            FontSize="{Binding ForecastHourTextSize}"
                                             Foreground="{StaticResource WeatherAccentBrush}"
                                             Text="{Binding PrecipitationText}"
                                             Visibility="{Binding DataContext.ExpandedHourlyPrecipVisibility, ElementName=ExpandedLayout}" />
@@ -901,10 +907,12 @@
             BorderThickness="1"
             CornerRadius="{StaticResource WidgetCornerRadiusMedium}"
             Visibility="Collapsed">
-            <TextBlock
-                FontSize="{x:Bind ViewModel.CaptionTextSize, Mode=OneWay}"
-                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                Text="{Binding RefreshStatusText}" />
+            <Grid>
+                <TextBlock
+                    FontSize="{x:Bind ViewModel.CaptionTextSize, Mode=OneWay}"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Text="{Binding RefreshStatusText}" />
+            </Grid>
         </Border>
 
         <Grid
@@ -919,7 +927,7 @@
                 <ProgressRing
                     Width="24"
                     Height="24"
-                    IsActive="True" />
+                    IsActive="{x:Bind IsLoadingActive(ViewModel.LoadingVisibility), Mode=OneWay}" />
                 <TextBlock
                     HorizontalAlignment="Center"
                     FontSize="{x:Bind ViewModel.BodyTextSize, Mode=OneWay}"

@@ -1,0 +1,16 @@
+{
+  "modFocus": "Carte de quota principale",
+  "modRadar": "Radar multi-fournisseurs",
+  "modTokens": "Analyse locale des tokens et du cache",
+  "modTrend": "Tendance d’utilisation sur 14 jours",
+  "optQuotaRem": "Afficher le pourcentage restant (ex. 85 % restant)",
+  "optQuotaUsed": "Afficher le pourcentage utilisé (ex. 15 % utilisé)",
+  "optRef15m": "Toutes les 15 minutes",
+  "optRef1m": "Chaque minute (recommandé)",
+  "optRef5m": "Toutes les 5 minutes",
+  "setModules": "Modules visibles et ordre",
+  "setQuotaMode": "Affichage du quota de fenêtre",
+  "setRefresh": "Intervalle d’interrogation automatique",
+  "widgetDescription": "Surveillez les fenêtres de quota de session Claude Code et Codex, ainsi que les soldes Zhipu GLM, DeepSeek, Kimi et OpenRouter.",
+  "widgetName": "Moniteur IA"
+}

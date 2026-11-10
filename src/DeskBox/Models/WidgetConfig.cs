@@ -281,14 +281,20 @@ public enum WidgetKind
     /// <summary>Reserved for a future system monitor widget.</summary>
     SystemMonitor,
 
-    /// <summary>Global search widget that provides unified file and content search.</summary>
+    /// <summary>Legacy value kept only for migrating old settings files (Search is now standalone).</summary>
     Search,
 
     /// <summary>Legacy value kept only for migrating old settings files.</summary>
     Productivity,
 
     /// <summary>At-a-glance background, time and date widget.</summary>
-    Glance
+    Glance,
+
+    /// <summary>Declarative native WinUI 3 custom widget.</summary>
+    Custom,
+
+    /// <summary>First-party clipboard history and snippet shelf widget.</summary>
+    Clipboard
 }
 
 /// <summary>

@@ -72,7 +72,12 @@ public partial class WidgetViewModel
             ? _localizationService.T("Widget.Empty.ManagedTitle")
             : _localizationService.T("Widget.Empty.MappedTitle");
         EmptyStateText = isManagedStorage
-            ? _localizationService.Format("Widget.Empty.ManagedText", managedAction, mappedFolderName)
+            ? string.Equals(
+                _settingsService.Settings.ManagedDropAction,
+                SettingsService.ManagedDropActionFollowWindows,
+                StringComparison.Ordinal)
+                ? _localizationService.Format("Widget.Empty.ManagedTextFollowWindows", mappedFolderName)
+                : _localizationService.Format("Widget.Empty.ManagedText", managedAction, mappedFolderName)
             : _localizationService.Format("Widget.Empty.MappedText", mappedFolderName);
         OnPropertyChanged(nameof(SortModeLabel));
         UpdateFolderNavigationPresentation();
@@ -94,7 +99,14 @@ public partial class WidgetViewModel
         IEnumerable<string>? sourcePaths = null,
         string? destinationFolderPath = null)
     {
-        string action = _settingsService.Settings.ManagedDropAction;
+        string[]? materializedSources = sourcePaths?.ToArray();
+        if (materializedSources is { Length: > 0 } &&
+            Platform.PathOriginClassifier.ClassifySources(materializedSources).IsProtectedCopyByDefault)
+        {
+            return false;
+        }
+
+        string action = _settingsService.Settings.FileWidget.ManagedDropAction;
         if (string.Equals(
                 action,
                 SettingsService.ManagedDropActionMove,
@@ -107,7 +119,7 @@ public partial class WidgetViewModel
                 action,
                 SettingsService.ManagedDropActionFollowWindows,
                 StringComparison.Ordinal) ||
-            sourcePaths is null ||
+            materializedSources is null ||
             string.IsNullOrWhiteSpace(destinationFolderPath))
         {
             return false;
@@ -116,8 +128,8 @@ public partial class WidgetViewModel
         // Explorer moves within one volume and copies across volumes. If a
         // provider exposes an unknown root, AreAllOnSameVolume deliberately
         // returns false so the safer copy path is selected.
-        return FileDropIntentPolicy.AreAllOnSameVolume(
-            sourcePaths,
+        return Platform.PathOriginClassifier.AreAllOnSameVolume(
+            materializedSources,
             destinationFolderPath);
     }
 
@@ -246,7 +258,7 @@ public partial class WidgetViewModel
     {
         bool appearanceOnly =
             _settingsService.LastNotifiedChangeKind == SettingsChangeKind.Appearance;
-        if (_dispatcherQueue.HasThreadAccess)
+        if (_dispatcherQueue is null || _dispatcherQueue.HasThreadAccess)
         {
             ApplySettingsChanges(appearanceOnly);
             return;
@@ -273,7 +285,7 @@ public partial class WidgetViewModel
 
     private void OnLanguageChanged()
     {
-        if (_dispatcherQueue.HasThreadAccess)
+        if (_dispatcherQueue is null || _dispatcherQueue.HasThreadAccess)
         {
             UpdateDependentProperties();
             RebuildStackDisplayItems();

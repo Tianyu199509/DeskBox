@@ -23,6 +23,7 @@
                     <SolidColorBrush x:Key="WidgetOverlayStrokeBrush" Color="#24000000" />
                     <SolidColorBrush x:Key="WidgetLayerFillSecondaryBrush" Color="#70FFFFFF" />
                     <SolidColorBrush x:Key="WidgetLayerStrokeBrush" Color="#16000000" />
+                    <SolidColorBrush x:Key="WidgetGroupTabStripBorderBrush" Color="{ThemeResource TextFillColorPrimary}" Opacity="0.10" />
                     <!-- Code-resolved neutral interaction tones. WinUI's themed
                          tokens cannot be resolved by element theme from code
                          (an application-scope lookup follows the system theme,
@@ -35,6 +36,15 @@
                     <SolidColorBrush x:Key="DeskBoxNeutralFillTertiaryBrush" Color="#06000000" />
                     <SolidColorBrush x:Key="DeskBoxNeutralLineBrush" Color="#72000000" />
                     <SolidColorBrush x:Key="DeskBoxNeutralTextPrimaryBrush" Color="#E4000000" />
+                    <SolidColorBrush x:Key="DeskBoxCheckFillUncheckedBrush" Color="#0C000000" />
+                    <SolidColorBrush x:Key="DeskBoxCheckFillUncheckedPointerOverBrush" Color="#16000000" />
+                    <SolidColorBrush x:Key="DeskBoxCheckStrokeUncheckedBrush" Color="#3C000000" />
+                    <SolidColorBrush x:Key="DeskBoxCheckStrokePointerOverBrush" Color="#B83B6EA5" />
+                    <SolidColorBrush x:Key="DeskBoxCheckFillCheckedBrush" Color="#2C6CB0" />
+                    <SolidColorBrush x:Key="DeskBoxCheckFillCheckedPointerOverBrush" Color="#3F7ABC" />
+                    <SolidColorBrush x:Key="DeskBoxCheckFillCheckedPressedBrush" Color="#245B96" />
+                    <SolidColorBrush x:Key="DeskBoxCheckGlyphBrush" Color="#F8FAFC" />
+                    <Color x:Key="SolidBackgroundFillColorBase">#F3F3F3</Color>
                     <CornerRadius x:Key="OverlayCornerRadius">8</CornerRadius>
                     <CornerRadius x:Key="ComboBoxItemCornerRadius">6</CornerRadius>
                     <CornerRadius x:Key="ComboBoxHiglightBorderCornerRadius">8</CornerRadius>
@@ -50,10 +60,20 @@
                     <SolidColorBrush x:Key="WidgetOverlayStrokeBrush" Color="#52FFFFFF" />
                     <SolidColorBrush x:Key="WidgetLayerFillSecondaryBrush" Color="#0DFFFFFF" />
                     <SolidColorBrush x:Key="WidgetLayerStrokeBrush" Color="#20FFFFFF" />
+                    <SolidColorBrush x:Key="WidgetGroupTabStripBorderBrush" Color="{ThemeResource TextFillColorPrimary}" Opacity="0.10" />
                     <SolidColorBrush x:Key="DeskBoxNeutralFillSecondaryBrush" Color="#0FFFFFFF" />
                     <SolidColorBrush x:Key="DeskBoxNeutralFillTertiaryBrush" Color="#0AFFFFFF" />
                     <SolidColorBrush x:Key="DeskBoxNeutralLineBrush" Color="#8BFFFFFF" />
                     <SolidColorBrush x:Key="DeskBoxNeutralTextPrimaryBrush" Color="#FFFFFFFF" />
+                    <SolidColorBrush x:Key="DeskBoxCheckFillUncheckedBrush" Color="#14FFFFFF" />
+                    <SolidColorBrush x:Key="DeskBoxCheckFillUncheckedPointerOverBrush" Color="#22FFFFFF" />
+                    <SolidColorBrush x:Key="DeskBoxCheckStrokeUncheckedBrush" Color="#48FFFFFF" />
+                    <SolidColorBrush x:Key="DeskBoxCheckStrokePointerOverBrush" Color="#CC5882B4" />
+                    <SolidColorBrush x:Key="DeskBoxCheckFillCheckedBrush" Color="#2F6CA8" />
+                    <SolidColorBrush x:Key="DeskBoxCheckFillCheckedPointerOverBrush" Color="#457CB3" />
+                    <SolidColorBrush x:Key="DeskBoxCheckFillCheckedPressedBrush" Color="#295B8E" />
+                    <SolidColorBrush x:Key="DeskBoxCheckGlyphBrush" Color="#F8FAFC" />
+                    <Color x:Key="SolidBackgroundFillColorBase">#202020</Color>
                     <CornerRadius x:Key="OverlayCornerRadius">8</CornerRadius>
                     <CornerRadius x:Key="ComboBoxItemCornerRadius">6</CornerRadius>
                     <CornerRadius x:Key="ComboBoxHiglightBorderCornerRadius">8</CornerRadius>
@@ -73,10 +93,20 @@
                     <SolidColorBrush x:Key="WidgetOverlayStrokeBrush" Color="#52FFFFFF" />
                     <SolidColorBrush x:Key="WidgetLayerFillSecondaryBrush" Color="#0DFFFFFF" />
                     <SolidColorBrush x:Key="WidgetLayerStrokeBrush" Color="#20FFFFFF" />
+                    <SolidColorBrush x:Key="WidgetGroupTabStripBorderBrush" Color="{ThemeResource TextFillColorPrimary}" Opacity="0.10" />
                     <SolidColorBrush x:Key="DeskBoxNeutralFillSecondaryBrush" Color="#0FFFFFFF" />
                     <SolidColorBrush x:Key="DeskBoxNeutralFillTertiaryBrush" Color="#0AFFFFFF" />
                     <SolidColorBrush x:Key="DeskBoxNeutralLineBrush" Color="#8BFFFFFF" />
                     <SolidColorBrush x:Key="DeskBoxNeutralTextPrimaryBrush" Color="#FFFFFFFF" />
+                    <SolidColorBrush x:Key="DeskBoxCheckFillUncheckedBrush" Color="#14FFFFFF" />
+                    <SolidColorBrush x:Key="DeskBoxCheckFillUncheckedPointerOverBrush" Color="#22FFFFFF" />
+                    <SolidColorBrush x:Key="DeskBoxCheckStrokeUncheckedBrush" Color="#48FFFFFF" />
+                    <SolidColorBrush x:Key="DeskBoxCheckStrokePointerOverBrush" Color="#CC5882B4" />
+                    <SolidColorBrush x:Key="DeskBoxCheckFillCheckedBrush" Color="#2F6CA8" />
+                    <SolidColorBrush x:Key="DeskBoxCheckFillCheckedPointerOverBrush" Color="#457CB3" />
+                    <SolidColorBrush x:Key="DeskBoxCheckFillCheckedPressedBrush" Color="#295B8E" />
+                    <SolidColorBrush x:Key="DeskBoxCheckGlyphBrush" Color="#F8FAFC" />
+                    <Color x:Key="SolidBackgroundFillColorBase">#202020</Color>
                     <CornerRadius x:Key="OverlayCornerRadius">8</CornerRadius>
                     <CornerRadius x:Key="ComboBoxItemCornerRadius">6</CornerRadius>
                     <CornerRadius x:Key="ComboBoxHiglightBorderCornerRadius">8</CornerRadius>
@@ -106,10 +136,20 @@
                     <SolidColorBrush x:Key="WidgetOverlayStrokeBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
                     <SolidColorBrush x:Key="WidgetLayerFillSecondaryBrush" Color="{ThemeResource SystemColorWindowColor}" />
                     <SolidColorBrush x:Key="WidgetLayerStrokeBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+                    <SolidColorBrush x:Key="WidgetGroupTabStripBorderBrush" Color="{ThemeResource SystemColorHighlightColor}" />
                     <SolidColorBrush x:Key="DeskBoxNeutralFillSecondaryBrush" Color="Transparent" />
                     <SolidColorBrush x:Key="DeskBoxNeutralFillTertiaryBrush" Color="Transparent" />
                     <SolidColorBrush x:Key="DeskBoxNeutralLineBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
                     <SolidColorBrush x:Key="DeskBoxNeutralTextPrimaryBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+                    <SolidColorBrush x:Key="DeskBoxCheckFillUncheckedBrush" Color="Transparent" />
+                    <SolidColorBrush x:Key="DeskBoxCheckFillUncheckedPointerOverBrush" Color="Transparent" />
+                    <SolidColorBrush x:Key="DeskBoxCheckStrokeUncheckedBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+                    <SolidColorBrush x:Key="DeskBoxCheckStrokePointerOverBrush" Color="{ThemeResource SystemColorHighlightColor}" />
+                    <SolidColorBrush x:Key="DeskBoxCheckFillCheckedBrush" Color="{ThemeResource SystemColorHighlightColor}" />
+                    <SolidColorBrush x:Key="DeskBoxCheckFillCheckedPointerOverBrush" Color="{ThemeResource SystemColorHighlightColor}" />
+                    <SolidColorBrush x:Key="DeskBoxCheckFillCheckedPressedBrush" Color="{ThemeResource SystemColorHighlightColor}" />
+                    <SolidColorBrush x:Key="DeskBoxCheckGlyphBrush" Color="{ThemeResource SystemColorHighlightTextColor}" />
+                    <Color x:Key="SolidBackgroundFillColorBase">#000000</Color>
                     <CornerRadius x:Key="OverlayCornerRadius">8</CornerRadius>
                     <CornerRadius x:Key="ComboBoxItemCornerRadius">6</CornerRadius>
                     <CornerRadius x:Key="ComboBoxHiglightBorderCornerRadius">8</CornerRadius>
@@ -237,6 +277,7 @@
                 <Setter Property="TextAlignment" Value="Center" />
                 <Setter Property="TextTrimming" Value="CharacterEllipsis" />
                 <Setter Property="TextWrapping" Value="Wrap" />
+                <Setter Property="helpers:WidgetTextShadow.Cast" Value="True" />
             </Style>
 
             <Style x:Key="WidgetEmptyStateDescriptionTextStyle" TargetType="TextBlock">
@@ -246,22 +287,27 @@
                 <Setter Property="TextAlignment" Value="Center" />
                 <Setter Property="TextTrimming" Value="CharacterEllipsis" />
                 <Setter Property="TextWrapping" Value="Wrap" />
+                <Setter Property="helpers:WidgetTextShadow.Cast" Value="True" />
+            </Style>
+
+            <Style TargetType="FlyoutPresenter" BasedOn="{StaticResource DefaultFlyoutPresenterStyle}">
+                <Setter Property="CornerRadius" Value="{StaticResource OverlayCornerRadius}" />
             </Style>
 
             <Style TargetType="MenuFlyoutPresenter" BasedOn="{StaticResource DefaultMenuFlyoutPresenterStyle}">
                 <Setter Property="FontFamily" Value="{StaticResource DeskBoxMenuFontFamily}" />
                 <Setter Property="Padding" Value="{StaticResource DeskBoxMenuPresenterPadding}" />
-                <!-- Direct acrylic: the explicit DesktopAcrylicBackdrop (the
-                     default SystemBackdrop is null, which reads as solid)
-                     plus the platform's own default menu background, which
-                     is a near-transparent tint designed to sit on a
-                     backdrop. No first-paint solid override — the retired
-                     two-stage fade was removed by choice (2026-10-21); if
-                     first-frame bare text ever shows up, the lever is a
-                     constant low-alpha Background here, not an animation. -->
                 <Setter Property="SystemBackdrop">
                     <Setter.Value>
-                        <media:DesktopAcrylicBackdrop />
+                        <helpers:ThemedMenuAcrylicBackdrop />
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <Style TargetType="primitives:CommandBarFlyoutCommandBar" BasedOn="{StaticResource DefaultCommandBarFlyoutCommandBarStyle}">
+                <Setter Property="SystemBackdrop">
+                    <Setter.Value>
+                        <helpers:ThemedMenuAcrylicBackdrop />
                     </Setter.Value>
                 </Setter>
             </Style>
@@ -447,6 +493,142 @@
                 keyed base-Control template keeps the native resize behavior
                 while avoiding the incompatible implicit style.
             -->
+            <!-- Compact 14x14 micro-squircle CheckBox for Todo sub-steps and QuickCapture Markdown tasks -->
+            <Style x:Key="WidgetCompactStepCheckBoxStyle" TargetType="CheckBox" BasedOn="{StaticResource DefaultCheckBoxStyle}">
+                <Setter Property="Width" Value="20" />
+                <Setter Property="Height" Value="20" />
+                <Setter Property="MinWidth" Value="20" />
+                <Setter Property="MinHeight" Value="20" />
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="Margin" Value="0" />
+                <Setter Property="HorizontalAlignment" Value="Center" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+                <Setter Property="UseSystemFocusVisuals" Value="True" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="CheckBox">
+                            <Grid x:Name="RootGrid" Width="20" Height="20" Background="Transparent">
+                                <VisualStateManager.VisualStateGroups>
+                                    <VisualStateGroup x:Name="CombinedStates">
+                                        <VisualState x:Name="Unchecked" />
+                                        <VisualState x:Name="UncheckedPointerOver">
+                                            <VisualState.Setters>
+                                                <Setter Target="SelectionBox.Background" Value="{ThemeResource DeskBoxCheckFillUncheckedPointerOverBrush}" />
+                                                <Setter Target="SelectionBox.BorderBrush" Value="{ThemeResource DeskBoxCheckStrokePointerOverBrush}" />
+                                                <Setter Target="CheckIcon.Visibility" Value="Visible" />
+                                                <Setter Target="CheckIcon.Opacity" Value="0.26" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                        <VisualState x:Name="UncheckedPressed">
+                                            <VisualState.Setters>
+                                                <Setter Target="SelectionBox.Background" Value="{ThemeResource DeskBoxCheckFillUncheckedPointerOverBrush}" />
+                                                <Setter Target="SelectionBox.BorderBrush" Value="{ThemeResource DeskBoxCheckStrokePointerOverBrush}" />
+                                                <Setter Target="CheckIcon.Visibility" Value="Visible" />
+                                                <Setter Target="CheckIcon.Opacity" Value="0.45" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                        <VisualState x:Name="UncheckedDisabled">
+                                            <VisualState.Setters>
+                                                <Setter Target="RootGrid.Opacity" Value="0.4" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                        <VisualState x:Name="Checked">
+                                            <VisualState.Setters>
+                                                <Setter Target="SelectionBox.Background" Value="{ThemeResource DeskBoxCheckFillCheckedBrush}" />
+                                                <Setter Target="SelectionBox.BorderThickness" Value="0" />
+                                                <Setter Target="CheckIcon.Visibility" Value="Visible" />
+                                                <Setter Target="CheckIcon.Opacity" Value="1" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                        <VisualState x:Name="CheckedPointerOver">
+                                            <VisualState.Setters>
+                                                <Setter Target="SelectionBox.Background" Value="{ThemeResource DeskBoxCheckFillCheckedPointerOverBrush}" />
+                                                <Setter Target="SelectionBox.BorderThickness" Value="0" />
+                                                <Setter Target="CheckIcon.Visibility" Value="Visible" />
+                                                <Setter Target="CheckIcon.Opacity" Value="1" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                        <VisualState x:Name="CheckedPressed">
+                                            <VisualState.Setters>
+                                                <Setter Target="SelectionBox.Background" Value="{ThemeResource DeskBoxCheckFillCheckedPressedBrush}" />
+                                                <Setter Target="SelectionBox.BorderThickness" Value="0" />
+                                                <Setter Target="CheckIcon.Visibility" Value="Visible" />
+                                                <Setter Target="CheckIcon.Opacity" Value="0.95" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                        <VisualState x:Name="CheckedDisabled">
+                                            <VisualState.Setters>
+                                                <Setter Target="RootGrid.Opacity" Value="0.4" />
+                                                <Setter Target="SelectionBox.Background" Value="{ThemeResource DeskBoxCheckFillCheckedBrush}" />
+                                                <Setter Target="SelectionBox.BorderThickness" Value="0" />
+                                                <Setter Target="CheckIcon.Visibility" Value="Visible" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                        <VisualState x:Name="Indeterminate">
+                                            <VisualState.Setters>
+                                                <Setter Target="SelectionBox.Background" Value="{ThemeResource DeskBoxCheckFillCheckedBrush}" />
+                                                <Setter Target="SelectionBox.BorderThickness" Value="0" />
+                                                <Setter Target="CheckIcon.Visibility" Value="Visible" />
+                                                <Setter Target="CheckIcon.Opacity" Value="0.65" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                        <VisualState x:Name="IndeterminatePointerOver">
+                                            <VisualState.Setters>
+                                                <Setter Target="SelectionBox.Background" Value="{ThemeResource DeskBoxCheckFillCheckedPointerOverBrush}" />
+                                                <Setter Target="SelectionBox.BorderThickness" Value="0" />
+                                                <Setter Target="CheckIcon.Visibility" Value="Visible" />
+                                                <Setter Target="CheckIcon.Opacity" Value="0.8" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                        <VisualState x:Name="IndeterminatePressed">
+                                            <VisualState.Setters>
+                                                <Setter Target="SelectionBox.Background" Value="{ThemeResource DeskBoxCheckFillCheckedPressedBrush}" />
+                                                <Setter Target="SelectionBox.BorderThickness" Value="0" />
+                                                <Setter Target="CheckIcon.Visibility" Value="Visible" />
+                                                <Setter Target="CheckIcon.Opacity" Value="0.65" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                        <VisualState x:Name="IndeterminateDisabled">
+                                            <VisualState.Setters>
+                                                <Setter Target="RootGrid.Opacity" Value="0.4" />
+                                                <Setter Target="SelectionBox.Background" Value="{ThemeResource DeskBoxCheckFillCheckedBrush}" />
+                                                <Setter Target="SelectionBox.BorderThickness" Value="0" />
+                                                <Setter Target="CheckIcon.Visibility" Value="Visible" />
+                                                <Setter Target="CheckIcon.Opacity" Value="0.65" />
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                    </VisualStateGroup>
+                                </VisualStateManager.VisualStateGroups>
+                                <Border
+                                    x:Name="SelectionBox"
+                                    Width="14"
+                                    Height="14"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Background="{ThemeResource DeskBoxCheckFillUncheckedBrush}"
+                                    BorderBrush="{ThemeResource DeskBoxCheckStrokeUncheckedBrush}"
+                                    BorderThickness="1.2"
+                                    CornerRadius="4">
+                                    <Path
+                                        x:Name="CheckIcon"
+                                        Width="14"
+                                        Height="14"
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Center"
+                                        Data="M 3.6,7.2 L 6.1,9.7 L 10.6,4.5"
+                                        Stroke="{ThemeResource DeskBoxCheckGlyphBrush}"
+                                        StrokeEndLineCap="Round"
+                                        StrokeLineJoin="Round"
+                                        StrokeStartLineCap="Round"
+                                        StrokeThickness="1.65"
+                                        Visibility="Collapsed" />
+                                </Border>
+                            </Grid>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
             <Style x:Key="WidgetMasterDetailSplitterStyle" TargetType="Control">
                 <Setter Property="IsTabStop" Value="True" />
                 <Setter Property="UseSystemFocusVisuals" Value="True" />

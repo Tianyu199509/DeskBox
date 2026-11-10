@@ -6,6 +6,7 @@ public static class DesktopOrganizationCategoryIds
 {
     public const string Shortcuts = "Shortcuts";
     public const string Documents = "Documents";
+    public const string Design = "Design";
     public const string Images = "Images";
     public const string Media = "Media";
     public const string Packages = "Packages";
@@ -15,6 +16,7 @@ public static class DesktopOrganizationCategoryIds
     [
         Shortcuts,
         Documents,
+        Design,
         Images,
         Media,
         Packages,
@@ -281,6 +283,9 @@ public sealed class DesktopOrganizationRecoveryItem
     public string TargetWidgetId { get; set; } = string.Empty;
 
     public bool Completed { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool ShortcutRebaseInProgress { get; set; }
 
     public DesktopOrganizationDestinationIdentity? DestinationIdentity { get; set; }
 }

@@ -1,5 +1,6 @@
 using System.Xml.Linq;
 using DeskBox.Helpers;
+using DeskBox.Services;
 using Windows.UI;
 
 namespace DeskBox.Tests;
@@ -71,6 +72,18 @@ public sealed class WidgetTextShadowContractTests
     }
 
     [Fact]
+    public void CollapsedOrDisabledElements_StayDormantAndTearDownCompositionAndHost()
+    {
+        string helper = ReadHelper();
+        Assert.Contains("if (!_isActive || plateOpaque || !GetCast(text) || !text.IsLoaded)", helper, StringComparison.Ordinal);
+        Assert.Contains("if (!IsAncestorChainVisible(visibilityChain))", helper, StringComparison.Ordinal);
+        Assert.Contains("Deactivate(attachment, deferred: false);", helper, StringComparison.Ordinal);
+        Assert.Contains("UIElement.VisibilityProperty", helper, StringComparison.Ordinal);
+        Assert.DoesNotContain("sprite.IsVisible =", helper, StringComparison.Ordinal);
+        Assert.Contains("Shape shape => shape.GetAlphaMask()", helper, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void EveryWidgetTextBlock_OptsInThroughTheAppImplicitStyle()
     {
         // Template-expanded text only sees implicit styles from the
@@ -101,7 +114,7 @@ public sealed class WidgetTextShadowContractTests
         // in locally; icon glyphs drawn through TextBlocks opt out.
         string todo = File.ReadAllText(TestPaths.FromRepository(
             "src/DeskBox/Controls/WidgetContents/TodoWidgetContent.xaml"));
-        Assert.Equal(7, CountOccurrences(todo, "helpers:WidgetTextShadow.Cast=\"True\""));
+        Assert.True(CountOccurrences(todo, "helpers:WidgetTextShadow.Cast=\"True\"") >= 1);
         string titleIcon = File.ReadAllText(TestPaths.FromRepository(
             "src/DeskBox/Controls/WidgetTitleIcon.xaml"));
         Assert.Equal(2, CountOccurrences(titleIcon, "helpers:WidgetTextShadow.Cast=\"False\""));
@@ -193,7 +206,7 @@ public sealed class WidgetTextShadowContractTests
     public void Setting_TogglesThroughTheSchemaAndBothWindows()
     {
         Assert.Contains(
-            "CurrentSchemaVersion = 15",
+            "CurrentSchemaVersion = 18",
             File.ReadAllText(TestPaths.FromRepository(
                 "src/DeskBox/Services/SettingsMigrationService.cs")),
             StringComparison.Ordinal);
@@ -210,7 +223,7 @@ public sealed class WidgetTextShadowContractTests
             StringComparison.Ordinal);
 
         string settingsXaml = File.ReadAllText(TestPaths.FromRepository(
-            "src/DeskBox/Views/SettingsWindow.xaml"));
+            "src/DeskBox/Views/SettingsSections/AppearanceSettingsSection.xaml"));
         Assert.Contains(
             "{Binding WidgetTextShadowEnabled, Mode=TwoWay}",
             settingsXaml,
@@ -245,21 +258,197 @@ public sealed class WidgetTextShadowContractTests
         Assert.Contains("RenderTargetBitmap", view, StringComparison.Ordinal);
         Assert.Contains("WidgetTextShadow.SetEdgeColor(", view, StringComparison.Ordinal);
 
-        // The explicitly-styled inline-editor titles must opt in through the
-        // keyed style: an explicit Style bypasses the implicit Cast style
-        // entirely (the two known misses were WidgetInlineEditor's title and
-        // the custom-due-date overlay title).
+        // The explicitly-styled inline-editor and empty-state titles must opt
+        // in through their keyed styles: an explicit Style bypasses the
+        // implicit Cast style entirely.
         string app = File.ReadAllText(TestPaths.FromRepository("src/DeskBox/App.xaml"));
-        int styleStart = app.IndexOf(
+        foreach (string styleKey in new[]
+        {
             "WidgetInlineEditorTitleTextStyle",
-            StringComparison.Ordinal);
-        Assert.True(styleStart > 0, "WidgetInlineEditorTitleTextStyle missing from App.xaml");
-        int styleEnd = app.IndexOf("</Style>", styleStart, StringComparison.Ordinal);
-        Assert.True(styleEnd > styleStart, "WidgetInlineEditorTitleTextStyle style end missing");
-        Assert.Contains(
-            "helpers:WidgetTextShadow.Cast",
-            app[styleStart..styleEnd],
-            StringComparison.Ordinal);
+            "WidgetEmptyStateTitleTextStyle",
+            "WidgetEmptyStateDescriptionTextStyle"
+        })
+        {
+            int styleStart = app.IndexOf(styleKey, StringComparison.Ordinal);
+            Assert.True(styleStart > 0, $"{styleKey} missing from App.xaml");
+            int styleEnd = app.IndexOf("</Style>", styleStart, StringComparison.Ordinal);
+            Assert.True(styleEnd > styleStart, $"{styleKey} style end missing");
+            Assert.Contains(
+                "helpers:WidgetTextShadow.Cast",
+                app[styleStart..styleEnd],
+                StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void ReadableWidgetSurfaces_OptInToTextShadowsAcrossTemplatesAndStackPopover()
+    {
+        string popover = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Views/StackPopoverHostWindow.cs"));
+        Assert.Contains("WidgetTextShadow.SetScope(_hostRoot, true)", popover, StringComparison.Ordinal);
+
+        static void AssertAllMatchingTextBlocksCastShadow(
+            string relativePath,
+            Func<XElement, bool> predicate,
+            int minimumCount = 1)
+        {
+            XNamespace p = "http://schemas.microsoft.com/winfx/2006/xaml/presentation";
+            XDocument doc = XDocument.Load(TestPaths.FromRepository(relativePath));
+            XElement[] matches = doc.Descendants(p + "TextBlock")
+                .Where(predicate)
+                .ToArray();
+            Assert.True(
+                matches.Length >= minimumCount,
+                $"{relativePath}: expected at least {minimumCount} matching TextBlocks, found {matches.Length}");
+            foreach (XElement text in matches)
+            {
+                string? cast = text.Attributes()
+                    .FirstOrDefault(static a => a.Name.LocalName == "WidgetTextShadow.Cast")
+                    ?.Value;
+                Assert.Equal("True", cast);
+            }
+        }
+
+        AssertAllMatchingTextBlocksCastShadow(
+            "src/DeskBox/Controls/FileItemSurface.xaml",
+            static e => e.Ancestors().Any(static a => a.Name.LocalName == "DataTemplate"),
+            minimumCount: 3);
+
+        AssertAllMatchingTextBlocksCastShadow(
+            "src/DeskBox/Controls/WidgetContents/FileSurfaceContent.xaml",
+            static e => e.Attribute("Tag")?.Value == "StackName",
+            minimumCount: 2);
+
+        AssertAllMatchingTextBlocksCastShadow(
+            "src/DeskBox/Controls/WidgetContents/ClipboardWidgetContent.xaml",
+            static e => e.Ancestors().Any(static a => a.Name.LocalName == "DataTemplate"),
+            minimumCount: 3);
+
+        AssertAllMatchingTextBlocksCastShadow(
+            "src/DeskBox/Controls/WidgetContents/WeatherWidgetContent.xaml",
+            static e => e.Ancestors().Any(static a => a.Name.LocalName == "DataTemplate"),
+            minimumCount: 6);
+
+        AssertAllMatchingTextBlocksCastShadow(
+            "src/DeskBox/Controls/WidgetContents/TodoWidgetContent.xaml",
+            static e => e.Ancestors().Any(static a => a.Name.LocalName == "DataTemplate"),
+            minimumCount: 7);
+
+        AssertAllMatchingTextBlocksCastShadow(
+            "src/DeskBox/Controls/WidgetContents/QuickCaptureSurfaceContent.xaml",
+            static e => e.Ancestors().Any(static a => a.Name.LocalName == "DataTemplate"),
+            minimumCount: 6);
+
+        AssertAllMatchingTextBlocksCastShadow(
+            "src/DeskBox/Controls/WidgetContents/MusicWidgetContent.xaml",
+            static e => e.Ancestors().Any(static a => a.Name.LocalName == "DataTemplate"),
+            minimumCount: 2);
+    }
+
+    [Fact]
+    public void TranslucentAcrylicAndMicaPlates_DoNotSuppressTextShadowEvenAtFullOpacitySlider()
+    {
+        // Reproduces the Windows 10 diagnostics state (Acrylic resolved from Mica,
+        // WidgetOpacity = 1.0, WidgetMaterialIntensity = 0.0) as well as max-slider
+        // Thin Acrylic: translucent glass must keep text shadows active.
+        foreach (bool isDark in new[] { false, true })
+        {
+            double win10DiagOpacity = WidgetMaterialVisualCalculator.ResolveEffectivePlateOpacity(
+                SettingsService.WidgetMaterialTypeAcrylic,
+                isDark,
+                surfaceOpacity: 1.0,
+                materialIntensity: 0.0,
+                acrylicControllerAttached: true,
+                micaControllerAttached: false,
+                legacyAccentBackdropActive: false,
+                usesLegacyWindowAcrylic: true);
+            Assert.True(win10DiagOpacity < WidgetTextShadow.OpaquePlateThreshold);
+            Assert.False(WidgetTextShadow.ShouldSuppressForOpaquePlate(
+                win10DiagOpacity,
+                SettingsService.WidgetMaterialTypeAcrylic));
+
+            double maxThinAcrylicOpacity = WidgetMaterialVisualCalculator.ResolveEffectivePlateOpacity(
+                SettingsService.WidgetMaterialTypeAcrylic,
+                isDark,
+                surfaceOpacity: 1.0,
+                materialIntensity: 1.0,
+                acrylicControllerAttached: true,
+                micaControllerAttached: false,
+                legacyAccentBackdropActive: false,
+                usesLegacyWindowAcrylic: true);
+            Assert.True(maxThinAcrylicOpacity < WidgetTextShadow.OpaquePlateThreshold);
+            Assert.False(WidgetTextShadow.ShouldSuppressForOpaquePlate(
+                maxThinAcrylicOpacity,
+                SettingsService.WidgetMaterialTypeAcrylic));
+
+            double legacyAccentOpacity = WidgetMaterialVisualCalculator.ResolveEffectivePlateOpacity(
+                SettingsService.WidgetMaterialTypeAcrylic,
+                isDark,
+                surfaceOpacity: 1.0,
+                materialIntensity: 1.0,
+                acrylicControllerAttached: false,
+                micaControllerAttached: false,
+                legacyAccentBackdropActive: true,
+                usesLegacyWindowAcrylic: true);
+            Assert.True(legacyAccentOpacity < WidgetTextShadow.OpaquePlateThreshold);
+
+            double micaOpacity = WidgetMaterialVisualCalculator.ResolveEffectivePlateOpacity(
+                SettingsService.WidgetMaterialTypeMica,
+                isDark,
+                surfaceOpacity: 1.0,
+                materialIntensity: 0.5,
+                acrylicControllerAttached: false,
+                micaControllerAttached: true,
+                legacyAccentBackdropActive: false);
+            Assert.False(WidgetTextShadow.ShouldSuppressForOpaquePlate(
+                micaOpacity,
+                SettingsService.WidgetMaterialTypeMica));
+        }
+
+        // Solid plates at >= 0.85 and opaque per-widget custom colors still suppress
+        // per-glyph composition overhead when no image background is active.
+        double solidOpaque = WidgetMaterialVisualCalculator.ResolveEffectivePlateOpacity(
+            SettingsService.WidgetMaterialTypeSolid,
+            isDark: false,
+            surfaceOpacity: 0.90,
+            materialIntensity: 0.5,
+            acrylicControllerAttached: false,
+            micaControllerAttached: false,
+            legacyAccentBackdropActive: false);
+        Assert.True(WidgetTextShadow.ShouldSuppressForOpaquePlate(
+            solidOpaque,
+            SettingsService.WidgetMaterialTypeSolid));
+
+        double customColorOpaque = WidgetMaterialVisualCalculator.ResolveEffectivePlateOpacity(
+            SettingsService.WidgetMaterialTypeAcrylic,
+            isDark: true,
+            surfaceOpacity: 0.30,
+            materialIntensity: 0.2,
+            acrylicControllerAttached: true,
+            micaControllerAttached: false,
+            legacyAccentBackdropActive: false,
+            hasOpaqueCustomColor: true);
+        Assert.Equal(1.0, customColorOpaque);
+        Assert.True(WidgetTextShadow.ShouldSuppressForOpaquePlate(
+            customColorOpaque,
+            SettingsService.WidgetMaterialTypeAcrylic));
+    }
+
+    [Fact]
+    public void DeferredTemplateTexts_StayPinnedToNativeLifetimeUntilAdoptedOrOutOfScope()
+    {
+        string helper = ReadHelper();
+        string contentWindow = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Views/ContentWidgetWindow.xaml.cs"));
+        string app = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/App.xaml.cs"));
+
+        Assert.Contains("DeferredPins", helper, StringComparison.Ordinal);
+        Assert.Contains("text.Loaded += pin.LoadedHandler;", helper, StringComparison.Ordinal);
+        Assert.Contains("text.Loaded -= pin.LoadedHandler;", helper, StringComparison.Ordinal);
+        Assert.Contains("ReleaseDeferredPin(text);", helper, StringComparison.Ordinal);
+        Assert.Contains("WidgetMaterialVisualCalculator.ResolveEffectivePlateOpacity(", contentWindow, StringComparison.Ordinal);
+        Assert.Contains("WidgetTextShadow.SetEnabled(SettingsService.Settings.WidgetShell.WidgetTextShadowEnabled);", app, StringComparison.Ordinal);
     }
 
     private static string ReadHelper() => File.ReadAllText(TestPaths.FromRepository(

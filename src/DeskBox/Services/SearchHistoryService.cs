@@ -13,9 +13,13 @@ public sealed partial class SearchHistoryService
 {
     private const int MaxHistoryEntries = 20;
     private const int MaxRecentResultEntries = 12;
+    private const int MaxFrecencyPoolEntries = 48;
 
     private readonly string _storePath;
     private readonly object _gate = new();
+    private readonly SemaphoreSlim _writeGate = new(1, 1);
+    private long _saveVersion;
+    private long _flushedVersion;
     private PersistedData _data = new();
 
     public SearchHistoryService()
@@ -53,9 +57,67 @@ public sealed partial class SearchHistoryService
         {
             lock (_gate)
             {
-                return _data.RecentResults.Select(item => item.ToRecommendation()).ToList();
+                return _data.RecentResults
+                    .Take(MaxRecentResultEntries)
+                    .Select(item => item.ToRecommendation())
+                    .ToList();
             }
         }
+    }
+
+    /// <summary>
+    /// Computes a lightweight Frecency (frequency × recency) score boost (0..32)
+    /// for a candidate result identity based on user launches in this workspace.
+    /// </summary>
+    public double GetFrecencyBoost(string? identityKey) =>
+        GetFrecencyBoost(identityKey, DateTimeOffset.UtcNow);
+
+    internal double GetFrecencyBoost(string? identityKey, DateTimeOffset nowUtc)
+    {
+        if (string.IsNullOrWhiteSpace(identityKey))
+        {
+            return 0;
+        }
+
+        int useCount;
+        long lastUsedUtcTicks;
+        int rankIndex;
+        lock (_gate)
+        {
+            rankIndex = _data.RecentResults.FindIndex(existing =>
+                string.Equals(existing.Identity, identityKey, StringComparison.OrdinalIgnoreCase));
+            if (rankIndex < 0)
+            {
+                return 0;
+            }
+
+            PersistedResult matched = _data.RecentResults[rankIndex];
+            useCount = Math.Max(1, matched.UseCount);
+            lastUsedUtcTicks = matched.LastUsedUtcTicks;
+        }
+
+        double frequencyFactor = Math.Min(16.0, 5.0 + (Math.Log2(useCount) * 4.5));
+        double recencyMultiplier;
+        if (lastUsedUtcTicks > 0)
+        {
+            double ageHours = Math.Max(0, (nowUtc.UtcTicks - lastUsedUtcTicks) / (double)TimeSpan.TicksPerHour);
+            recencyMultiplier = ageHours switch
+            {
+                <= 4.0 => 2.0,
+                <= 24.0 => 1.65,
+                <= 72.0 => 1.35,
+                <= 168.0 => 1.1,
+                <= 720.0 => 0.8,
+                _ => 0.5
+            };
+        }
+        else
+        {
+            // Legacy records without timestamps fall back to ordinal position decay.
+            recencyMultiplier = Math.Max(0.6, 1.5 - (rankIndex * 0.08));
+        }
+
+        return Math.Clamp(frequencyFactor * recencyMultiplier, 0.0, 32.0);
     }
 
     /// <summary>
@@ -97,25 +159,40 @@ public sealed partial class SearchHistoryService
     /// <summary>
     /// Records a result only after the user executes it. File modification time is not
     /// treated as usage; this keeps the empty state free of downloads and cache churn.
+    /// Clipboard items are excluded so copied secrets or transient text never leak into search-history.json.
     /// </summary>
     public void RecordResult(SearchResultItem? item)
     {
-        if (item is null || item.Kind is SearchResultKind.Action or SearchResultKind.History or SearchResultKind.Favorite)
+        if (item is null ||
+            item.Kind is SearchResultKind.Action or
+                         SearchResultKind.History or
+                         SearchResultKind.Favorite or
+                         SearchResultKind.Clipboard)
         {
             return;
         }
 
         var stored = PersistedResult.From(item);
+        long nowTicks = DateTimeOffset.UtcNow.UtcTicks;
         lock (_gate)
         {
-            _data.RecentResults.RemoveAll(existing =>
+            int existingIndex = _data.RecentResults.FindIndex(existing =>
                 string.Equals(existing.Identity, stored.Identity, StringComparison.OrdinalIgnoreCase));
+            int nextUseCount = 1;
+            if (existingIndex >= 0)
+            {
+                nextUseCount = Math.Min(10_000, Math.Max(1, _data.RecentResults[existingIndex].UseCount) + 1);
+                _data.RecentResults.RemoveAt(existingIndex);
+            }
+
+            stored.UseCount = nextUseCount;
+            stored.LastUsedUtcTicks = nowTicks;
             _data.RecentResults.Insert(0, stored);
-            if (_data.RecentResults.Count > MaxRecentResultEntries)
+            if (_data.RecentResults.Count > MaxFrecencyPoolEntries)
             {
                 _data.RecentResults.RemoveRange(
-                    MaxRecentResultEntries,
-                    _data.RecentResults.Count - MaxRecentResultEntries);
+                    MaxFrecencyPoolEntries,
+                    _data.RecentResults.Count - MaxFrecencyPoolEntries);
             }
         }
 
@@ -238,9 +315,13 @@ public sealed partial class SearchHistoryService
                 return;
             }
 
-            string json = File.ReadAllText(_storePath);
+            using var stream = new FileStream(
+                _storePath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete);
             PersistedData? data = JsonSerializer.Deserialize(
-                json,
+                stream,
                 SearchHistoryJsonContext.Default.PersistedData);
             if (data is not null)
             {
@@ -258,33 +339,123 @@ public sealed partial class SearchHistoryService
 
     private void Save()
     {
+        long version = Interlocked.Increment(ref _saveVersion);
+        if (TryShouldOffloadSaveFromUiThread())
+        {
+            _ = Task.Run(() => FlushPendingSaveAsync(version));
+            return;
+        }
+
+        _writeGate.Wait();
         try
         {
-            PersistedData snapshot;
-            lock (_gate)
+            if (version < Volatile.Read(ref _flushedVersion))
             {
-                snapshot = new PersistedData
-                {
-                    Recent = [.. _data.Recent],
-                    Favorites = [.. _data.Favorites],
-                    RecentResults = [.. _data.RecentResults]
-                };
+                return;
             }
 
-            string? directory = Path.GetDirectoryName(_storePath);
-            if (!string.IsNullOrWhiteSpace(directory))
-            {
-                Directory.CreateDirectory(directory);
-            }
-
-            string json = JsonSerializer.Serialize(
-                snapshot,
-                SearchHistoryJsonContext.Default.PersistedData);
-            File.WriteAllText(_storePath, json);
+            long latestVersion = Volatile.Read(ref _saveVersion);
+            PersistHistoryToDisk(CaptureSnapshot());
+            Volatile.Write(ref _flushedVersion, latestVersion);
         }
         catch (Exception ex)
         {
             App.Log($"[SearchHistory] Failed to save history: {ex.Message}");
+        }
+        finally
+        {
+            _writeGate.Release();
+        }
+    }
+
+    private static bool TryShouldOffloadSaveFromUiThread()
+    {
+        try
+        {
+            return Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread() is not null;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private async Task FlushPendingSaveAsync(long requestedVersion)
+    {
+        await _writeGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            if (requestedVersion <= Volatile.Read(ref _flushedVersion))
+            {
+                return;
+            }
+
+            long latestVersion = Volatile.Read(ref _saveVersion);
+            PersistHistoryToDisk(CaptureSnapshot());
+            Volatile.Write(ref _flushedVersion, latestVersion);
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[SearchHistory] Failed to save history: {ex.Message}");
+        }
+        finally
+        {
+            _writeGate.Release();
+        }
+    }
+
+    private PersistedData CaptureSnapshot()
+    {
+        lock (_gate)
+        {
+            return new PersistedData
+            {
+                Recent = [.. _data.Recent],
+                Favorites = [.. _data.Favorites],
+                RecentResults = [.. _data.RecentResults]
+            };
+        }
+    }
+
+    private void PersistHistoryToDisk(PersistedData snapshot)
+    {
+        string? directory = Path.GetDirectoryName(_storePath);
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        string tempPath = $"{_storePath}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            using (var stream = new FileStream(
+                       tempPath,
+                       FileMode.Create,
+                       FileAccess.Write,
+                       FileShare.None,
+                       bufferSize: 4096,
+                       FileOptions.SequentialScan))
+            {
+                JsonSerializer.Serialize(
+                    stream,
+                    snapshot,
+                    SearchHistoryJsonContext.Default.PersistedData);
+            }
+
+            DeskBox.Platform.SearchHistoryFileOps.ReplaceStoreFileAtomically(tempPath, _storePath);
+        }
+        finally
+        {
+            try
+            {
+                if (File.Exists(tempPath))
+                {
+                    DeskBox.Platform.SearchHistoryFileOps.TryDeleteTempFile(tempPath);
+                }
+            }
+            catch
+            {
+            }
         }
     }
 
@@ -306,6 +477,8 @@ public sealed partial class SearchHistoryService
         public string? TodoWidgetId { get; set; }
         public string? TodoItemId { get; set; }
         public string? QuickCaptureItemId { get; set; }
+        public int UseCount { get; set; } = 1;
+        public long LastUsedUtcTicks { get; set; }
 
         public static PersistedResult From(SearchResultItem item) => new()
         {

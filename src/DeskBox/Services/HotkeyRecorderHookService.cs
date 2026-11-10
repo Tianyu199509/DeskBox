@@ -1,6 +1,7 @@
 // Copyright (c) DeskBox. All rights reserved.
 
 using System.Runtime.InteropServices;
+using DeskBox.Models;
 using DeskBox.Platform;
 
 namespace DeskBox.Services;
@@ -9,9 +10,10 @@ namespace DeskBox.Services;
 /// Low-level keyboard hook used by the hotkey recorder dialog. While active it
 /// reports every real key event on the UI dispatcher and swallows the input so
 /// the OS cannot steal chords like Win+V or Alt+Space mid-recording — the same
-/// approach PowerToys uses for its shortcut editor. Tab passes through so the
-/// dialog remains keyboard-navigable, and Space/Enter pass through while a
-/// preset button owns focus so presets stay operable from the keyboard.
+/// approach PowerToys uses for its shortcut editor. Bare Tab passes through so
+/// the dialog remains keyboard-navigable, and bare Space/Enter pass through
+/// while a dialog button owns focus so buttons stay operable from the keyboard
+/// without breaking Alt+Space / Win+Space / Ctrl+Space chord capture.
 /// Lifecycle mirrors <see cref="ReservedHotkeyHookService"/>: the hook lives on
 /// a dedicated message-pump thread.
 /// </summary>
@@ -31,6 +33,8 @@ internal sealed class HotkeyRecorderHookService : IDisposable
     private readonly object _sync = new();
     private readonly Microsoft.UI.Dispatching.DispatcherQueue _uiDispatcherQueue;
     private readonly Win32Helper.LowLevelKeyboardProc _keyboardHookProc;
+    // Accessed exclusively on the dedicated hook thread.
+    private readonly HashSet<uint> _swallowedDownKeys = [];
     private Thread? _thread;
     private uint _threadId;
     private IntPtr _hookHandle;
@@ -61,8 +65,8 @@ internal sealed class HotkeyRecorderHookService : IDisposable
     }
 
     /// <summary>
-    /// When a preset button owns focus, Space and Enter must reach it instead
-    /// of being recorded, so the preset list stays keyboard-operable.
+    /// When a dialog button owns focus, bare Space and Enter must reach it
+    /// instead of being recorded, so controls stay keyboard-operable.
     /// </summary>
     public bool PassthroughRequested
     {
@@ -235,6 +239,7 @@ internal sealed class HotkeyRecorderHookService : IDisposable
                 }
             }
 
+            _swallowedDownKeys.Clear();
             uint threadId = Win32Helper.GetCurrentThreadId();
             Win32Helper.PeekMessage(
                 out _,
@@ -296,6 +301,7 @@ internal sealed class HotkeyRecorderHookService : IDisposable
                 Win32Helper.UnhookWindowsHookEx(installedHook);
             }
 
+            _swallowedDownKeys.Clear();
             lock (_sync)
             {
                 if (ReferenceEquals(_thread, Thread.CurrentThread))
@@ -334,18 +340,51 @@ internal sealed class HotkeyRecorderHookService : IDisposable
             return Win32Helper.CallNextHookEx(hookHandle, nCode, wParam, lParam);
         }
 
-        // Tab keeps dialog navigation working; Space/Enter reach a focused
-        // preset button instead of being recorded as a chord.
-        if (data.vkCode == VirtualKeyTab ||
-            (_passthroughRequested &&
-             data.vkCode is VirtualKeyReturn or VirtualKeySpace))
+        // Never swallow a key-up for a key whose key-down occurred before the
+        // hook was installed or was passed through to the dialog.
+        if (isKeyUp && !_swallowedDownKeys.Contains(data.vkCode))
         {
             return Win32Helper.CallNextHookEx(hookHandle, nCode, wParam, lParam);
+        }
+
+        bool hasSwallowedModifiers = HasSwallowedModifiers();
+
+        // Bare Tab keeps dialog navigation working; bare Space/Enter reach a
+        // focused dialog button instead of being recorded, while modifier+Space,
+        // modifier+Enter, and modifier+Tab are always captured as chords.
+        if (!hasSwallowedModifiers &&
+            (data.vkCode == VirtualKeyTab ||
+             (_passthroughRequested &&
+              data.vkCode is VirtualKeyReturn or VirtualKeySpace)))
+        {
+            return Win32Helper.CallNextHookEx(hookHandle, nCode, wParam, lParam);
+        }
+
+        if (isKeyDown)
+        {
+            _swallowedDownKeys.Add(data.vkCode);
+        }
+        else
+        {
+            _swallowedDownKeys.Remove(data.vkCode);
         }
 
         var captured = new RecordedKeyEvent(data.vkCode, isKeyDown);
         _uiDispatcherQueue.TryEnqueue(() => KeyCaptured?.Invoke(captured));
         return (IntPtr)1;
+    }
+
+    private bool HasSwallowedModifiers()
+    {
+        foreach (uint vkCode in _swallowedDownKeys)
+        {
+            if (HotkeyRecordingSession.TryGetModifierFlag(vkCode, out _))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private void RecordLastWin32Error()
