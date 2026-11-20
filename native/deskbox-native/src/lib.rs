@@ -1433,8 +1433,9 @@ pub unsafe extern "C" fn deskbox_recycle_bin_v1(
 mod tests {
     use super::*;
     use std::{
+        ffi::OsString,
         fs,
-        os::windows::ffi::OsStrExt,
+        os::windows::ffi::{OsStrExt, OsStringExt},
         path::{Path, PathBuf},
         ptr::{null, null_mut},
         sync::atomic::{AtomicU64, Ordering},
@@ -1443,6 +1444,7 @@ mod tests {
     use windows::{
         Win32::{
             Foundation::RPC_E_CHANGED_MODE,
+            Storage::FileSystem::GetLongPathNameW,
             System::Com::{
                 CLSCTX_INPROC_SERVER, COINIT, COINIT_APARTMENTTHREADED, COINIT_MULTITHREADED,
                 CoCreateInstance, CoInitializeEx, CoUninitialize, IPersistFile,
@@ -1503,11 +1505,14 @@ mod tests {
 
         fn new_with_optional_fields(arguments: &str, include_optional_fields: bool) -> Self {
             let id = NEXT_FIXTURE_ID.fetch_add(1, Ordering::Relaxed);
-            let root = std::env::temp_dir().join(format!(
+            let raw_root = std::env::temp_dir().join(format!(
                 "deskbox-native-shortcut-{}-{id}",
                 std::process::id()
             ));
-            fs::create_dir_all(&root).expect("create shortcut fixture root");
+            fs::create_dir_all(&raw_root).expect("create shortcut fixture root");
+            // Windows CI runners often expose %TEMP% as an 8.3 short path (e.g. RUNNER~1),
+            // whereas IShellLinkW::SetPath/GetPath returns the canonical long target path.
+            let root = expand_long_path(&raw_root);
 
             let target_path = root.join("目标 application.exe");
             let working_directory = root.join("工作 目录");
@@ -1642,6 +1647,22 @@ mod tests {
 
     fn nul_terminated_path(path: &Path) -> Vec<u16> {
         path.as_os_str().encode_wide().chain([0]).collect()
+    }
+
+    fn expand_long_path(path: &Path) -> PathBuf {
+        let input = nul_terminated_path(path);
+        // SAFETY: `input` is NUL-terminated; passing `None` queries the required buffer size.
+        let required = unsafe { GetLongPathNameW(PCWSTR(input.as_ptr()), None) };
+        if required == 0 {
+            return path.to_path_buf();
+        }
+        let mut buffer = vec![0_u16; required as usize];
+        // SAFETY: `buffer` has the exact length reported by the size query above.
+        let written = unsafe { GetLongPathNameW(PCWSTR(input.as_ptr()), Some(&mut buffer)) };
+        if written == 0 || (written as usize) >= buffer.len() {
+            return path.to_path_buf();
+        }
+        PathBuf::from(OsString::from_wide(&buffer[..written as usize]))
     }
 
     fn nul_terminated_text(value: &str) -> Vec<u16> {
