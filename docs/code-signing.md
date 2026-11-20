@@ -1,44 +1,27 @@
-# Code signing policy
+# Code Signing and Integrity Verification Policy
 
-DeskBox direct installers (`DeskBox_Setup_<version>_x64.exe` and `DeskBox_Setup_<version>_arm64.exe`) are built by GitHub Actions and signed in the same workflow run via SignPath.
+DeskBox distributes builds through two channels with different signing and verification flows:
 
-Free code signing provided by [SignPath.io](https://signpath.io), certificate by the [SignPath Foundation](https://signpath.org).
+- **Microsoft Store (`MSIX`)**: Signed by Microsoft Partner Center during Store ingestion and publishing.
+- **Direct Installers (`DeskBox_Setup_<version>_x64.exe` and `DeskBox_Setup_<version>_arm64.exe`)**: Built in GitHub Actions (Native AOT Distribution Gate) and published to GitHub Releases alongside matching `.sha256` sidecars.
 
-## What is signed
+## Current Direct-Installer Policy
 
-- Direct installers published to GitHub Releases: Authenticode signatures with an RFC 3161 timestamp.
-- The Microsoft Store package is re-signed by Partner Center and is not covered by this policy.
+Because DeskBox adopts a dual-licensing model (`GPL-3.0-only` + Commercial License, see [LICENSING.md](../LICENSING.md)), direct installers do not use third-party OSS-only foundation signing services.
 
-## Status
+- **Current releases**: Direct installers are unsigned binaries accompanied by per-installer `.sha256` sidecars (`Get-FileHash`) and published over HTTPS on GitHub Releases and `deskbox.fun`. Verify the SHA-256 hash before running an unsigned installer.
+- **Future commercial Authenticode signing**: When a self-managed commercial Authenticode code-signing certificate is provisioned for direct builds, releases will carry Authenticode signatures with an RFC 3161 timestamp, and the CI distribution gate (`verify-signature` job with `verify-authenticode=true`) enforces signature validity before artifacts are accepted.
 
-- CI signing with the SignPath test certificate has been verified end to end (2026-10-08).
-- The production certificate is issued by the SignPath Foundation after their review. Installers published before the production certificate takes effect are unsigned; verify the `.sha256` sidecar in that case.
-- From the first release published after the production certificate is imported, all direct installers are signed.
-
-## How to verify
+## How to Verify
 
 ```powershell
-# Signature (signed builds)
-Get-AuthenticodeSignature .\DeskBox_Setup_x.y.z_x64.exe | Format-List Status, SignerCertificate, TimeStamperCertificate
-
-# Hash (any build)
+# SHA-256 checksum (any release)
 Get-FileHash .\DeskBox_Setup_x.y.z_x64.exe -Algorithm SHA256
+
+# Authenticode signature (when commercial code signing is active)
+Get-AuthenticodeSignature .\DeskBox_Setup_x.y.z_x64.exe | Format-List Status, SignerCertificate, TimeStamperCertificate
 ```
 
-The CI distribution gate also runs an automated signature check (`verify-signature` job) on every signing run before the artifacts are accepted.
+## Privacy Statement
 
-## Team roles
-
-DeskBox is a single-maintainer project. All three roles are held by the same person:
-
-- Committer: Tianyu Zhu (Simon)
-- Reviewer: Tianyu Zhu (Simon)
-- Approver: Tianyu Zhu (Simon)
-
-Builds must originate from GitHub Actions on GitHub-hosted runners (a SignPath Foundation requirement for origin verification).
-
-## Privacy statement
-
-This program will not transfer any information to other networked systems unless specifically requested by the user or installer/operator.
-
-Feedback reports and diagnostic packages are only uploaded when the user explicitly submits them from the app.
+DeskBox is a local-first desktop application and will not transfer user information to external networked systems unless explicitly requested by the user or operator (such as weather queries, user-configured WebDAV backups, update checks, or explicitly submitted feedback/diagnostic packages).

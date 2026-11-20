@@ -31,6 +31,17 @@ jobs:
             exit 1
           }
 
+      - name: Internal docs and ops scripts leak check
+        shell: pwsh
+        run: |
+          $pattern = '^(AGENTS\.md|CLAUDE\.md|docs/(architecture|acceptance|requirements|press-kit|baselines|audit|analysis|archive|wechat)(/|$)|docs/seo-content\.md$|scripts/([^/]*-protocol\.md|publish_widget_catalog\.py|store-[^/]*\.py)$|deskbox-site/|store-assets(-html)?/|store-listing/)'
+          $leaked = @(git -c core.quotepath=false ls-files | Where-Object { $_ -match $pattern })
+          if ($leaked.Count -gt 0) {
+            Write-Host 'Forbidden internal documentation or local ops scripts are tracked in Git:'
+            $leaked | ForEach-Object { Write-Host "  - $_" }
+            exit 1
+          }
+
       - name: AI widget contract gates
         shell: pwsh
         # 契约 / 本地化 / 暂存协议门禁。脚本存在但没接 CI，等于没有门禁：
@@ -48,10 +59,17 @@ jobs:
             exit 1
           }
 
+      - name: Rust native unit tests
+        run: cargo test --manifest-path native/Cargo.toml --locked
+
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 10.0.x
+          dotnet-version: 10.0.404
+
+      - name: Verify release version consistency
+        shell: pwsh
+        run: .\scripts\Test-DeskBoxDirectReleaseConsistency.ps1
 
       - name: Restore
         shell: pwsh
@@ -63,7 +81,13 @@ jobs:
 
       - name: Test
         timeout-minutes: 10
-        run: dotnet test .\tests\DeskBox.Tests\DeskBox.Tests.csproj --configuration Release --no-restore -p:Platform=x64 -p:RuntimeIdentifier=win-x64 -p:WindowsAppSdkBootstrapInitialize=false --blame-hang --blame-hang-timeout 5m --logger "trx;LogFileName=test-results.trx" -v:minimal
+        run: dotnet test .\tests\DeskBox.Tests\DeskBox.Tests.csproj --configuration Release --no-restore -p:Platform=x64 -p:RuntimeIdentifier=win-x64 --blame-hang --blame-hang-timeout 5m --logger "trx;LogFileName=test-results.trx" -v:minimal
+
+      - name: Verify Store channel compilation
+        run: dotnet build .\src\DeskBox\DeskBox.csproj -t:PrepareForBuild,ResolveReferences,PrepareResources,Compile --configuration Release --no-restore --no-dependencies -p:Platform=x64 -p:RuntimeIdentifier=win-x64 -p:DeskBoxDistribution=Store -p:IntermediateOutputPath=obj\x64\Release-Store\net10.0-windows10.0.22621.0\win-x64\ -v:minimal
+
+      - name: Verify Native AOT smoke harness compilation
+        run: dotnet build .\src\DeskBox\DeskBox.csproj -t:PrepareForBuild,ResolveReferences,PrepareResources,Compile --configuration Release --no-restore --no-dependencies -p:Platform=x64 -p:RuntimeIdentifier=win-x64 -p:DeskBoxAotSmokeHarness=true -p:DefineConstants="DISABLE_XAML_GENERATED_MAIN%3BDESKBOX_NATIVE_AOT%3BDESKBOX_AOT_SMOKE_HARNESS" -p:IntermediateOutputPath=obj\x64\Release-AotSmoke\net10.0-windows10.0.22621.0\win-x64\ -v:minimal
 
       - name: Upload test results
         if: always()

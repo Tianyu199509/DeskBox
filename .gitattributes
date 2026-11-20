@@ -1,1 +1,2 @@
 .githooks/** text eol=lf
+*.mibc binary
