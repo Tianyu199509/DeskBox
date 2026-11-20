@@ -81,7 +81,7 @@ jobs:
 
       - name: Test
         timeout-minutes: 10
-        run: dotnet test .\tests\DeskBox.Tests\DeskBox.Tests.csproj --configuration Release --no-restore -p:Platform=x64 -p:RuntimeIdentifier=win-x64 --blame-hang --blame-hang-timeout 5m --logger "trx;LogFileName=test-results.trx" -v:minimal
+        run: dotnet test .\tests\DeskBox.Tests\DeskBox.Tests.csproj --configuration Release --no-restore -p:Platform=x64 -p:RuntimeIdentifier=win-x64 -p:WindowsAppSdkBootstrapInitialize=false --blame-hang --blame-hang-timeout 5m --logger "trx;LogFileName=test-results.trx" -v:minimal
 
       - name: Verify Store channel compilation
         run: dotnet build .\src\DeskBox\DeskBox.csproj -t:PrepareForBuild,ResolveReferences,PrepareResources,Compile --configuration Release --no-restore --no-dependencies -p:Platform=x64 -p:RuntimeIdentifier=win-x64 -p:DeskBoxDistribution=Store -p:IntermediateOutputPath=obj\x64\Release-Store\net10.0-windows10.0.22621.0\win-x64\ -v:minimal

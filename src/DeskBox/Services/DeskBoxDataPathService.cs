@@ -12,12 +12,56 @@ public sealed class DeskBoxDataPathService
     internal const string StoreDurableRecoverySubdirectoryName = ".appdata-recovery";
     private const string ProductionInstanceScope = "7F3A9B2E";
 
+    private static readonly object s_currentGate = new();
+    private static string? s_testRootOverride;
+    private static DeskBoxDataPathService? s_current;
+
     private readonly string _recoveryDirectory;
     private readonly string _legacyLocalAppDataRoot;
     private readonly string _legacyRecoveryRoot;
     private readonly bool _isMicrosoftStore;
 
-    public static DeskBoxDataPathService Current { get; } = new(ResolveConfiguredRoot(), deferStoreMigration: true);
+    /// <summary>
+    /// Test seam: isolates <see cref="Current"/> under a throwaway root in both
+    /// Debug and Release test hosts without opening environment-variable
+    /// overrides in shipped Release binaries.
+    /// </summary>
+    internal static string? TestRootOverride
+    {
+        get => Volatile.Read(ref s_testRootOverride);
+        set
+        {
+            lock (s_currentGate)
+            {
+                Volatile.Write(ref s_testRootOverride, value);
+                Volatile.Write(ref s_current, null);
+            }
+        }
+    }
+
+    public static DeskBoxDataPathService Current
+    {
+        get
+        {
+            DeskBoxDataPathService? existing = Volatile.Read(ref s_current);
+            if (existing is not null)
+            {
+                return existing;
+            }
+
+            lock (s_currentGate)
+            {
+                existing = s_current;
+                if (existing is null)
+                {
+                    existing = new(ResolveConfiguredRoot(), deferStoreMigration: true);
+                    Volatile.Write(ref s_current, existing);
+                }
+
+                return existing;
+            }
+        }
+    }
 
     public DeskBoxDataPathService(string? rootPath = null)
         : this(rootPath, deferStoreMigration: false)
@@ -156,6 +200,12 @@ public sealed class DeskBoxDataPathService
 
     private static string? ResolveConfiguredRoot()
     {
+        string? testOverride = Volatile.Read(ref s_testRootOverride);
+        if (!string.IsNullOrWhiteSpace(testOverride))
+        {
+            return testOverride;
+        }
+
 #if DEBUG
         return Environment.GetEnvironmentVariable(DevelopmentRootEnvironmentVariable);
 #elif DESKBOX_AOT_SMOKE_HARNESS || DESKBOX_PGO_INSTRUMENTATION

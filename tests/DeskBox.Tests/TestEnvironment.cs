@@ -24,13 +24,17 @@ internal static class TestEnvironment
     {
         string? existingRoot = Environment.GetEnvironmentVariable(
             DeskBoxDataPathService.DevelopmentRootEnvironmentVariable);
+        string effectiveRoot = string.IsNullOrWhiteSpace(existingRoot)
+            ? IsolatedDataRoot
+            : existingRoot;
         if (string.IsNullOrWhiteSpace(existingRoot))
         {
             Environment.SetEnvironmentVariable(
                 DeskBoxDataPathService.DevelopmentRootEnvironmentVariable,
-                IsolatedDataRoot);
+                effectiveRoot);
         }
 
+        DeskBoxDataPathService.TestRootOverride = effectiveRoot;
         DeviceIdentity.DataRootOverride = Path.Combine(
             Path.GetTempPath(), "deskbox-tests", "device-root");
         DeskBox.App.TestLogFilePathOverride = Path.Combine(
