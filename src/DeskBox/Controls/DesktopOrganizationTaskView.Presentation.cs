@@ -3,9 +3,11 @@ using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Services;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
-using Windows.ApplicationModel.DataTransfer;
+using Windows.System;
 
 namespace DeskBox.Controls;
 
@@ -13,66 +15,54 @@ public sealed partial class DesktopOrganizationTaskView
 {
     private readonly List<DesktopOrganizationPreviewCard> _targetCards = [];
     private readonly List<DesktopOrganizationPreviewCard> _completedCards = [];
-    private readonly Dictionary<string, DesktopOrganizationTargetSelection> _targetSelections = new(StringComparer.Ordinal);
     private readonly Dictionary<string, OrganizationHistoryItem> _completedItems = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, OrganizationHistoryItem> _restoredItems = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, string> _reassignedItemBuckets = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, string> _customBoxTitles = new(StringComparer.Ordinal);
-    private readonly List<(string BucketId, string DisplayName)> _customBoxes = [];
-    private int _customBoxCounter;
     private bool _isPreviewReady;
     private FrameworkElement? _newBoxGhostCard;
     private Action<bool>? _setGhostBoxHighlight;
+    private string? _pendingEmptyCustomBoxRenameId;
 
-    internal bool HasBoxCustomizations =>
-        _reassignedItemBuckets.Count > 0 || _customBoxTitles.Count > 0 || _customBoxes.Count > 0;
-
-    internal void ClearBoxCustomizations()
+    private void WirePointerDragController()
     {
-        _reassignedItemBuckets.Clear();
-        _customBoxTitles.Clear();
-        _customBoxes.Clear();
-        _customBoxCounter = 0;
-        DesktopOrganizationPreviewCard.ClearActiveTileSelection();
+        _dragController.DragStarted += OnPointerDragStarted;
+        _dragController.DragMoved += OnPointerDragMoved;
+        _dragController.DragCompleted += OnPointerDragCompleted;
+        _dragController.DragCanceled += OnPointerDragCanceled;
+    }
+
+    private void UnwirePointerDragController()
+    {
+        _dragController.DragStarted -= OnPointerDragStarted;
+        _dragController.DragMoved -= OnPointerDragMoved;
+        _dragController.DragCompleted -= OnPointerDragCompleted;
+        _dragController.DragCanceled -= OnPointerDragCanceled;
     }
 
     private void ReleasePreviewCards()
     {
         _isPreviewReady = false;
         ExecuteButton.IsEnabled = false;
-        DesktopOrganizationPreviewCard.DragSessionStateChanged -= OnDragSessionStateChanged;
-        DesktopOrganizationPreviewCard.PointerDragMoved -= OnPointerDragMoved;
-        DesktopOrganizationPreviewCard.PointerDragReleased -= OnPointerDragReleased;
-        PointerDragOverlayCanvas.Visibility = Visibility.Collapsed;
+        ResetDropVisuals();
         _newBoxGhostCard = null;
         _setGhostBoxHighlight = null;
         foreach (var card in _targetCards)
         {
             card.Dispose();
         }
+
         _targetCards.Clear();
         TargetRows.Children.Clear();
     }
 
-    private void OnDragSessionStateChanged(object? sender, bool isDragging)
+    private void ResetDropVisuals()
     {
-        if (!isDragging)
+        PointerDragOverlayCanvas.Visibility = Visibility.Collapsed;
+        StayOnDesktopTrayBorder.BorderBrush =
+            NeutralInteractionBrush.ResolveThemedResource("CardStrokeColorDefaultBrush", this);
+        _setGhostBoxHighlight?.Invoke(false);
+        foreach (var card in _targetCards)
         {
-            PointerDragOverlayCanvas.Visibility = Visibility.Collapsed;
-            StayOnDesktopTrayBorder.BorderBrush =
-                NeutralInteractionBrush.ResolveThemedResource("CardStrokeColorDefaultBrush", this);
-            _setGhostBoxHighlight?.Invoke(false);
-            foreach (var card in _targetCards)
-            {
-                card.SetDropTargetHighlight(false);
-            }
-        }
-
-        if (_newBoxGhostCard is not null && !_hasCompletedExecution)
-        {
-            _newBoxGhostCard.Visibility = HasAnyActiveScopeItems(_plan)
-                ? Visibility.Visible
-                : Visibility.Collapsed;
+            card.SetDropTargetHighlight(false);
         }
     }
 
@@ -85,39 +75,45 @@ public sealed partial class DesktopOrganizationTaskView
 
         return plan.SourceItems.Any(item => DesktopOrganizationPreviewSummary.IncludesSource(plan, item)) ||
                plan.Targets.Any(t => t.Items.Any(item => DesktopOrganizationPreviewSummary.IncludesSource(plan, item))) ||
-               _customBoxes.Count > 0;
+               plan.Targets.Count > 0;
     }
 
-    private void OnPointerDragMoved(object? sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+    private void OnPointerDragStarted(object? sender, DesktopOrganizationDragStartedEventArgs e)
     {
-        if (_isScanning || _isExecuting || _hasCompletedExecution)
+        UpdatePointerDragVisuals(e.Origin, e.SourceBucketKey, e.SourcePaths, e.RootPosition);
+    }
+
+    private void OnPointerDragMoved(object? sender, DesktopOrganizationDragMovedEventArgs e)
+    {
+        UpdatePointerDragVisuals(e.Origin, e.SourceBucketKey, e.SourcePaths, e.RootPosition);
+    }
+
+    private void UpdatePointerDragVisuals(
+        DesktopOrganizationDragOrigin origin,
+        string sourceBucketKey,
+        IReadOnlyList<string> draggedPaths,
+        Windows.Foundation.Point rootPosition)
+    {
+        if (_isScanning || _isExecuting || _hasCompletedExecution || draggedPaths.Count == 0)
         {
+            ResetDropVisuals();
             return;
         }
 
-        IReadOnlyList<string> draggedPaths = DesktopOrganizationPreviewCard.ActiveDraggedSourcePaths;
-        if (draggedPaths.Count == 0 && !string.IsNullOrWhiteSpace(DesktopOrganizationPreviewCard.ActiveDraggedSourcePath))
-        {
-            draggedPaths = [DesktopOrganizationPreviewCard.ActiveDraggedSourcePath!];
-        }
-
-        if (draggedPaths.Count == 0)
-        {
-            PointerDragOverlayCanvas.Visibility = Visibility.Collapsed;
-            return;
-        }
-
-        Windows.Foundation.Point pt = e.GetCurrentPoint(this).Position;
         string itemSummary = draggedPaths.Count == 1
             ? Path.GetFileName(draggedPaths[0])
             : Format("DesktopOrganization.Layout.MoveCount", draggedPaths.Count);
 
-        bool overTray = IsPointOverElement(pt, StayOnDesktopTrayBorder);
-        bool overNewBox = !overTray && IsPointOverElement(pt, _newBoxGhostCard);
+        bool overTray = origin != DesktopOrganizationDragOrigin.StayOnDesktopTray &&
+                        IsPointOverElement(rootPosition, StayOnDesktopTrayBorder);
+        bool overNewBox = !overTray && IsPointOverElement(rootPosition, _newBoxGhostCard);
         DesktopOrganizationPreviewCard? hoveredCard = null;
         if (!overTray && !overNewBox)
         {
-            hoveredCard = _targetCards.FirstOrDefault(c => IsPointOverElement(pt, c));
+            hoveredCard = _targetCards.FirstOrDefault(c =>
+                (origin != DesktopOrganizationDragOrigin.PreviewCard ||
+                 !string.Equals(c.BucketKey, sourceBucketKey, StringComparison.Ordinal)) &&
+                IsPointOverElement(rootPosition, c));
         }
 
         StayOnDesktopTrayBorder.BorderBrush = NeutralInteractionBrush.ResolveThemedResource(
@@ -129,77 +125,101 @@ public sealed partial class DesktopOrganizationTaskView
             card.SetDropTargetHighlight(ReferenceEquals(card, hoveredCard));
         }
 
-        string targetSuffix = overTray
-            ? " → " + T("DesktopOrganization.Layout.KeptTitle")
+        PointerDragBadgeIcon.Glyph = overTray
+            ? "\uE7F8"
             : overNewBox
-                ? " → " + T("DesktopOrganization.Layout.RouteBadgeNew")
+                ? "\uE710"
+                : "\uE8DE";
+
+        string targetSuffix = overTray
+            ? " \u2192 " + T("DesktopOrganization.Layout.KeptTitle")
+            : overNewBox
+                ? " \u2192 " + T("DesktopOrganization.Layout.RouteBadgeNew")
                 : hoveredCard is not null
-                    ? " → " + hoveredCard.EffectiveBoxTitle
+                    ? " \u2192 " + hoveredCard.EffectiveBoxTitle
                     : string.Empty;
 
         PointerDragBadgeText.Text = itemSummary + targetSuffix;
         PointerDragOverlayCanvas.Visibility = Visibility.Visible;
-        double badgeX = Math.Clamp(pt.X + 14, 4, Math.Max(4, ActualWidth - 220));
-        double badgeY = Math.Clamp(pt.Y + 14, 4, Math.Max(4, ActualHeight - 40));
+
+        PointerDragBadge.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
+        double badgeW = PointerDragBadge.ActualWidth > 0 ? PointerDragBadge.ActualWidth : PointerDragBadge.DesiredSize.Width;
+        double badgeH = PointerDragBadge.ActualHeight > 0 ? PointerDragBadge.ActualHeight : PointerDragBadge.DesiredSize.Height;
+        double canvasW = PointerDragOverlayCanvas.ActualWidth > 0 ? PointerDragOverlayCanvas.ActualWidth : WorkspaceRootGrid.ActualWidth;
+        double canvasH = PointerDragOverlayCanvas.ActualHeight > 0 ? PointerDragOverlayCanvas.ActualHeight : WorkspaceRootGrid.ActualHeight;
+
+        Windows.Foundation.Point ptInCanvas = rootPosition;
+        try
+        {
+            GeneralTransform toCanvas = WorkspaceRootGrid.TransformToVisual(PointerDragOverlayCanvas);
+            ptInCanvas = toCanvas.TransformPoint(rootPosition);
+        }
+        catch
+        {
+            // Fall back to rootPosition if transform is transiently unavailable.
+        }
+
+        double rawX = ptInCanvas.X + 14;
+        if (rawX + badgeW > canvasW - 4 && ptInCanvas.X - badgeW - 14 >= 4)
+        {
+            rawX = ptInCanvas.X - badgeW - 14;
+        }
+
+        double rawY = ptInCanvas.Y + 14;
+        if (rawY + badgeH > canvasH - 4 && ptInCanvas.Y - badgeH - 14 >= 4)
+        {
+            rawY = ptInCanvas.Y - badgeH - 14;
+        }
+
+        double badgeX = Math.Clamp(rawX, 4, Math.Max(4, canvasW - badgeW - 4));
+        double badgeY = Math.Clamp(rawY, 4, Math.Max(4, canvasH - badgeH - 4));
         Canvas.SetLeft(PointerDragBadge, badgeX);
         Canvas.SetTop(PointerDragBadge, badgeY);
     }
 
-    private void OnPointerDragReleased(object? sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+    private void OnPointerDragCompleted(object? sender, DesktopOrganizationDragCompletedEventArgs e)
     {
-        PointerDragOverlayCanvas.Visibility = Visibility.Collapsed;
-        StayOnDesktopTrayBorder.BorderBrush =
-            NeutralInteractionBrush.ResolveThemedResource("CardStrokeColorDefaultBrush", this);
-        _setGhostBoxHighlight?.Invoke(false);
-        foreach (var card in _targetCards)
-        {
-            card.SetDropTargetHighlight(false);
-        }
+        ResetDropVisuals();
 
-        List<string> droppedPaths = DesktopOrganizationPreviewCard.ActiveDraggedSourcePaths.Count > 0
-            ? DesktopOrganizationPreviewCard.ActiveDraggedSourcePaths.ToList()
-            : !string.IsNullOrWhiteSpace(DesktopOrganizationPreviewCard.ActiveDraggedSourcePath)
-                ? [DesktopOrganizationPreviewCard.ActiveDraggedSourcePath!]
-                : [];
-
-        DesktopOrganizationPreviewCard.ActiveDraggedSourcePath = null;
-        DesktopOrganizationPreviewCard.ActiveDraggedSourcePaths = [];
-        DesktopOrganizationPreviewCard.NotifyDragSessionState(false);
-
-        if (_isScanning || _isExecuting || _hasCompletedExecution || _plan is null || droppedPaths.Count == 0)
+        if (_isScanning || _isExecuting || _hasCompletedExecution ||
+            Session.EffectivePlan is null || e.SourcePaths.Count == 0)
         {
             return;
         }
 
-        Windows.Foundation.Point pt = e.GetCurrentPoint(this).Position;
-        if (IsPointOverElement(pt, StayOnDesktopTrayBorder))
+        if (e.Origin != DesktopOrganizationDragOrigin.StayOnDesktopTray &&
+            IsPointOverElement(e.RootPosition, StayOnDesktopTrayBorder))
         {
-            foreach (string path in droppedPaths)
+            DesktopOrganizationWorkbenchSession.MoveResult moveResult = Session.ExcludeItems(e.SourcePaths);
+            if (moveResult.MovedCount > 0)
             {
-                _excludedSourcePaths.Add(path);
+                RenderSessionPlan();
             }
 
-            DesktopOrganizationPreviewCard.ClearActiveTileSelection();
-            RenderPlan(_plan);
             return;
         }
 
-        if (IsPointOverElement(pt, _newBoxGhostCard))
+        if (IsPointOverElement(e.RootPosition, _newBoxGhostCard))
         {
-            CreateNewBoxWithFiles(droppedPaths);
+            CreateNewBoxWithFiles(e.SourcePaths);
             return;
         }
 
-        var targetCard = _targetCards.FirstOrDefault(c => IsPointOverElement(pt, c));
+        DesktopOrganizationPreviewCard? targetCard = _targetCards.FirstOrDefault(c => IsPointOverElement(e.RootPosition, c));
         if (targetCard is not null &&
-            (sender is not DesktopOrganizationPreviewCard sourceCard ||
-             !ReferenceEquals(sourceCard, targetCard)))
+            (e.Origin != DesktopOrganizationDragOrigin.PreviewCard ||
+             !string.Equals(targetCard.BucketKey, e.SourceBucketKey, StringComparison.Ordinal)))
         {
-            MoveItemsToBox(droppedPaths, targetCard.SourceBucketId);
+            MoveItemsToBox(e.SourcePaths, targetCard.BucketKey);
         }
     }
 
-    private bool IsPointOverElement(Windows.Foundation.Point ptInTaskView, FrameworkElement? element)
+    private void OnPointerDragCanceled(object? sender, EventArgs e)
+    {
+        ResetDropVisuals();
+    }
+
+    private bool IsPointOverElement(Windows.Foundation.Point ptInRoot, FrameworkElement? element)
     {
         if (element is null ||
             element.Visibility != Visibility.Visible ||
@@ -211,8 +231,8 @@ public sealed partial class DesktopOrganizationTaskView
 
         try
         {
-            GeneralTransform transform = TransformToVisual(element);
-            Windows.Foundation.Point localPt = transform.TransformPoint(ptInTaskView);
+            GeneralTransform transform = WorkspaceRootGrid.TransformToVisual(element);
+            Windows.Foundation.Point localPt = transform.TransformPoint(ptInRoot);
             return localPt.X >= 0 &&
                    localPt.Y >= 0 &&
                    localPt.X <= element.ActualWidth &&
@@ -224,222 +244,93 @@ public sealed partial class DesktopOrganizationTaskView
         }
     }
 
-    private void ApplyUserBoxCustomizations(DesktopOrganizationPlan plan)
+    private void RenderSessionPlan(string? renameBucketIdAfterRender = null)
     {
-        foreach ((string bucketId, string displayName) in _customBoxes)
+        DesktopOrganizationPlan? plan = Session.EffectivePlan;
+        if (plan is null)
         {
-            if (plan.Targets.All(t => !string.Equals(t.SourceBucketId, bucketId, StringComparison.Ordinal)))
-            {
-                string title = _customBoxTitles.GetValueOrDefault(bucketId, displayName);
-                plan.Targets.Add(new DesktopOrganizationTargetPlan
-                {
-                    SourceBucketId = bucketId,
-                    CategoryId = DesktopOrganizationCategoryIds.Other,
-                    TargetWidgetId = bucketId,
-                    SuggestedDisplayName = title,
-                    TargetDirectoryPath = Path.Combine(plan.StorageRootPath, title),
-                    CreatesWidget = true,
-                    Items = []
-                });
-            }
+            return;
         }
 
-        if (_reassignedItemBuckets.Count > 0)
-        {
-            var allSnapshots = plan.Targets
-                .SelectMany(t => t.Items)
-                .Concat(plan.SourceItems)
-                .GroupBy(i => i.SourcePath, StringComparer.OrdinalIgnoreCase)
-                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
-
-            foreach ((string sourcePath, string targetBucketId) in _reassignedItemBuckets.ToList())
-            {
-                var destTarget = plan.Targets.FirstOrDefault(t =>
-                    string.Equals(t.SourceBucketId, targetBucketId, StringComparison.Ordinal));
-                if (destTarget is null || !allSnapshots.TryGetValue(sourcePath, out var snapshot))
-                {
-                    continue;
-                }
-
-                foreach (var target in plan.Targets)
-                {
-                    target.Items.RemoveAll(i =>
-                        string.Equals(i.SourcePath, sourcePath, StringComparison.OrdinalIgnoreCase));
-                }
-
-                var eligibleSnapshot = snapshot with
-                {
-                    ExclusionReason = DesktopOrganizationExclusionReason.None
-                };
-                destTarget.Items.Add(eligibleSnapshot);
-            }
-        }
-
-        foreach ((string bucketId, string customTitle) in _customBoxTitles)
-        {
-            int index = plan.Targets.FindIndex(t =>
-                string.Equals(t.SourceBucketId, bucketId, StringComparison.Ordinal));
-            if (index < 0)
-            {
-                continue;
-            }
-
-            var target = plan.Targets[index];
-            plan.Targets[index] = new DesktopOrganizationTargetPlan
-            {
-                SourceBucketId = target.SourceBucketId,
-                CategoryId = target.CategoryId,
-                TargetWidgetId = target.TargetWidgetId,
-                SuggestedDisplayName = customTitle,
-                TargetDirectoryPath = Path.Combine(plan.StorageRootPath, customTitle),
-                CreatesWidget = true,
-                Items = target.Items
-            };
-        }
-
-        HashSet<string> customBucketIds = _customBoxes
-            .Select(b => b.BucketId)
-            .ToHashSet(StringComparer.Ordinal);
-
-        var primaryByDestKey = new Dictionary<string, DesktopOrganizationTargetPlan>(StringComparer.OrdinalIgnoreCase);
-        foreach (var target in plan.Targets.ToList())
-        {
-            bool isCustom = customBucketIds.Contains(target.SourceBucketId);
-            bool hasVisibleItems = target.Items.Any(i => !_excludedSourcePaths.Contains(i.SourcePath));
-            if (!hasVisibleItems && !isCustom)
-            {
-                continue;
-            }
-
-            string destKey = GetTargetEffectiveDestinationKey(target);
-            if (primaryByDestKey.TryGetValue(destKey, out var primary))
-            {
-                foreach (var item in target.Items.ToList())
-                {
-                    if (primary.Items.All(existing =>
-                            !string.Equals(existing.SourcePath, item.SourcePath, StringComparison.OrdinalIgnoreCase)))
-                    {
-                        primary.Items.Add(item);
-                    }
-
-                    _reassignedItemBuckets[item.SourcePath] = primary.SourceBucketId;
-                }
-
-                target.Items.Clear();
-                _customBoxes.RemoveAll(b => string.Equals(b.BucketId, target.SourceBucketId, StringComparison.Ordinal));
-                customBucketIds.Remove(target.SourceBucketId);
-                _targetSelections.Remove(target.SourceBucketId);
-            }
-            else
-            {
-                primaryByDestKey[destKey] = target;
-            }
-        }
-
-        plan.Targets.RemoveAll(t => t.Items.Count == 0 && !customBucketIds.Contains(t.SourceBucketId));
-    }
-
-    private string GetTargetEffectiveDestinationKey(DesktopOrganizationTargetPlan target)
-    {
-        if (_targetSelections.TryGetValue(target.SourceBucketId, out var selection))
-        {
-            if (selection.DestinationMode == DesktopOrganizationDestinationMode.ExistingWidget &&
-                !string.IsNullOrWhiteSpace(selection.ExistingWidgetId))
-            {
-                return "existing:" + selection.ExistingWidgetId;
-            }
-
-            return "new:" + target.SuggestedDisplayName.Trim();
-        }
-
-        if (!target.CreatesWidget && !string.IsNullOrWhiteSpace(target.TargetWidgetId))
-        {
-            return "existing:" + target.TargetWidgetId;
-        }
-
-        return "new:" + target.SuggestedDisplayName.Trim();
-    }
-
-    private void RenderPlan(DesktopOrganizationPlan plan, string? renameBucketIdAfterRender = null)
-    {
         double offset = PreviewScrollViewer.VerticalOffset;
-        ApplyUserBoxCustomizations(plan);
         ReleasePreviewCards();
         UpdateStorageLocationDisplay(plan.StorageRootPath);
         RenderSources(plan);
-        var destinations = CreateDestinationOptions();
+        IReadOnlyList<DesktopOrganizationDestinationOption> destinations = CreateDestinationOptions();
         DesktopOrganizationPreviewCard? cardToRename = null;
 
-        foreach (var target in plan.Targets)
+        foreach (DesktopOrganizationTargetPlan target in plan.Targets)
         {
-            if (!_targetSelections.TryGetValue(target.SourceBucketId, out var selection))
-            {
-                selection = new DesktopOrganizationTargetSelection
-                {
-                    SourceBucketId = target.SourceBucketId,
-                    IsSelected = true,
-                    DestinationMode = target.CreatesWidget
-                        ? DesktopOrganizationDestinationMode.Dynamic
-                        : DesktopOrganizationDestinationMode.ExistingWidget,
-                    ExistingWidgetId = target.CreatesWidget ? null : target.TargetWidgetId
-                };
-                _targetSelections[target.SourceBucketId] = selection;
-            }
-            if (selection.DestinationMode == DesktopOrganizationDestinationMode.ExistingWidget &&
-                !destinations.Any(item => item.Id == selection.ExistingWidgetId))
-            {
-                selection.DestinationMode = target.CreatesWidget
-                    ? DesktopOrganizationDestinationMode.Dynamic
-                    : DesktopOrganizationDestinationMode.ExistingWidget;
-                selection.ExistingWidgetId = target.CreatesWidget ? null : target.TargetWidgetId;
-                _excludedSourcePaths.UnionWith(target.Items.Select(item => item.SourcePath));
-                ShowSelectionFeedback(T("DesktopOrganization.Layout.DestinationReset"), showPendingLink: false);
-            }
-            bool isCustomBox = _customBoxes.Any(b =>
-                string.Equals(b.BucketId, target.SourceBucketId, StringComparison.Ordinal));
-            selection.IsSelected = isCustomBox || target.Items.Any(item => !_excludedSourcePaths.Contains(item.SourcePath));
             var card = new DesktopOrganizationPreviewCard(
                 target,
-                selection,
-                _excludedSourcePaths,
-                destinations,
-                DesktopOrganizationItemViewMode.CompactGrid)
+                Session,
+                _dragController,
+                destinations)
             {
                 HorizontalAlignment = HorizontalAlignment.Left,
-                VerticalAlignment = VerticalAlignment.Top,
-                Visibility = selection.IsSelected ? Visibility.Visible : Visibility.Collapsed
+                VerticalAlignment = VerticalAlignment.Top
             };
-            card.SetNewItems(_newPaths);
-            card.SelectionChanged += (_, _) =>
+
+            card.ExcludeItemsRequested += (_, paths) =>
             {
-                if (!selection.IsSelected && isCustomBox)
+                if (paths.Count == 0)
                 {
-                    _customBoxes.RemoveAll(b =>
-                        string.Equals(b.BucketId, target.SourceBucketId, StringComparison.Ordinal));
-                    _customBoxTitles.Remove(target.SourceBucketId);
-                    _targetSelections.Remove(target.SourceBucketId);
+                    if (string.Equals(_pendingEmptyCustomBoxRenameId, card.BucketKey, StringComparison.Ordinal))
+                    {
+                        _pendingEmptyCustomBoxRenameId = null;
+                    }
+
+                    Session.RemoveEmptyCustomBox(card.BucketKey);
+                    RenderSessionPlan();
+                    return;
                 }
 
-                card.Visibility = selection.IsSelected ? Visibility.Visible : Visibility.Collapsed;
-                UpdateSummary(_plan);
-                UpdateDestinationPaths();
-                if (_plan is not null)
+                if (Session.ExcludeItems(paths).MovedCount > 0)
                 {
-                    RenderExcludedItems(_plan);
+                    RenderSessionPlan();
                 }
-                UpdateSectionVisibility();
             };
-            card.DestinationRouteChanged += (_, _) =>
+
+            card.BoxTitleRenamed += (_, newTitle) =>
             {
-                if (_plan is not null)
+                _pendingEmptyCustomBoxRenameId = null;
+                if (Session.RenameBox(card.BucketKey, newTitle))
                 {
-                    RenderPlan(_plan);
+                    RenderSessionPlan();
                 }
             };
-            card.FilesDroppedIntoCard += (_, sourcePaths) => MoveItemsToBox(sourcePaths, target.SourceBucketId);
-            card.BoxTitleRenamed += (_, newTitle) => RenameBox(target.SourceBucketId, newTitle);
+
+            card.InlineRenameCanceled += (_, _) =>
+            {
+                if (string.Equals(_pendingEmptyCustomBoxRenameId, card.BucketKey, StringComparison.Ordinal) &&
+                    card.TargetPlan.Items.Count == 0)
+                {
+                    _pendingEmptyCustomBoxRenameId = null;
+                    Session.RemoveEmptyCustomBox(card.BucketKey);
+                    RenderSessionPlan();
+                }
+            };
+
+            card.DestinationRouteSelected += (_, selection) =>
+            {
+                _pendingEmptyCustomBoxRenameId = null;
+                Session.SetTargetDestinationSelection(card.BucketKey, selection);
+                RenderSessionPlan();
+            };
+
+            card.TileSelectionChanged += (_, _) =>
+            {
+                foreach (var other in _targetCards)
+                {
+                    if (!ReferenceEquals(other, card))
+                    {
+                        other.RefreshSelectionVisuals();
+                    }
+                }
+            };
+
             if (!string.IsNullOrWhiteSpace(renameBucketIdAfterRender) &&
-                string.Equals(target.SourceBucketId, renameBucketIdAfterRender, StringComparison.Ordinal))
+                string.Equals(card.BucketKey, renameBucketIdAfterRender, StringComparison.Ordinal))
             {
                 cardToRename = card;
             }
@@ -453,17 +344,13 @@ public sealed partial class DesktopOrganizationTaskView
             _newBoxGhostCard = CreateNewBoxDropCard();
             _newBoxGhostCard.Visibility = Visibility.Visible;
             TargetRows.Children.Add(_newBoxGhostCard);
-            DesktopOrganizationPreviewCard.DragSessionStateChanged += OnDragSessionStateChanged;
-            DesktopOrganizationPreviewCard.PointerDragMoved += OnPointerDragMoved;
-            DesktopOrganizationPreviewCard.PointerDragReleased += OnPointerDragReleased;
         }
 
-        UpdateSummary(plan);
         RenderExcludedItems(plan);
         UpdateSectionVisibility();
         UpdateDestinationPaths();
         _isPreviewReady = true;
-        UpdateSummary(plan);
+        UpdateSummary();
         DispatcherQueue.TryEnqueue(() =>
         {
             if (IsLoaded)
@@ -479,7 +366,7 @@ public sealed partial class DesktopOrganizationTaskView
         AppSettings appSettings = App.Current.SettingsService.Settings;
         double cornerRadius = WidgetCompactBoundsCalculator.ResolveOuterCornerRadius(
             WindowsCompatibilityService.ResolveEffectiveWidgetCornerPreference(
-                appSettings.WidgetCornerPreference));
+                appSettings.WidgetShell.WidgetCornerPreference));
         Brush secondaryBrush = NeutralInteractionBrush.ResolveThemedResource("TextFillColorSecondaryBrush", this)
             ?? new SolidColorBrush(Windows.UI.Color.FromArgb(0xB0, 0x9E, 0x9E, 0x9E));
         Brush defaultStroke = NeutralInteractionBrush.ResolveThemedResource("CardStrokeColorDefaultBrush", this)
@@ -505,9 +392,10 @@ public sealed partial class DesktopOrganizationTaskView
             HorizontalAlignment = HorizontalAlignment.Center,
             Foreground = secondaryBrush
         };
+        string newBoxLabel = T("DesktopOrganization.Preview.DynamicDestination");
         var labelText = new TextBlock
         {
-            Text = T("DesktopOrganization.Preview.DynamicDestination"),
+            Text = newBoxLabel,
             FontSize = 12.5,
             HorizontalAlignment = HorizontalAlignment.Center,
             Foreground = secondaryBrush
@@ -526,15 +414,26 @@ public sealed partial class DesktopOrganizationTaskView
             ?? new SolidColorBrush(Windows.UI.Color.FromArgb(0x14, 0xFF, 0xFF, 0xFF));
         Brush transparentFill = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
 
-        var dropCard = new Grid
+        var innerGrid = new Grid
         {
             Width = DesktopOrganizationPreviewCard.FixedBoxWidth,
             Height = DesktopOrganizationPreviewCard.FixedBoxHeight,
-            Background = transparentFill,
-            AllowDrop = true
+            Background = transparentFill
         };
-        dropCard.Children.Add(dashedOutline);
-        dropCard.Children.Add(stack);
+        innerGrid.Children.Add(dashedOutline);
+        innerGrid.Children.Add(stack);
+
+        var dropCardHost = new ContentControl
+        {
+            Content = innerGrid,
+            Width = DesktopOrganizationPreviewCard.FixedBoxWidth,
+            Height = DesktopOrganizationPreviewCard.FixedBoxHeight,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            VerticalContentAlignment = VerticalAlignment.Stretch,
+            IsTabStop = true,
+            UseSystemFocusVisuals = true
+        };
+        AutomationProperties.SetName(dropCardHost, newBoxLabel);
 
         _setGhostBoxHighlight = highlighted =>
         {
@@ -544,210 +443,85 @@ public sealed partial class DesktopOrganizationTaskView
             labelText.Foreground = highlighted ? accentStroke : secondaryBrush;
         };
 
-        dropCard.PointerEntered += (_, _) =>
+        dropCardHost.PointerEntered += (_, _) =>
         {
-            if (DesktopOrganizationPreviewCard.ActiveDraggedSourcePaths.Count == 0 &&
-                string.IsNullOrWhiteSpace(DesktopOrganizationPreviewCard.ActiveDraggedSourcePath))
+            if (!_dragController.IsDragging)
             {
                 dashedOutline.Fill = hoverFill;
-                plusIcon.Foreground = NeutralInteractionBrush.ResolveThemedResource("TextFillColorPrimaryBrush", this) ?? secondaryBrush;
-                labelText.Foreground = NeutralInteractionBrush.ResolveThemedResource("TextFillColorPrimaryBrush", this) ?? secondaryBrush;
+                Brush hoverText = NeutralInteractionBrush.ResolveThemedResource("TextFillColorPrimaryBrush", this) ?? secondaryBrush;
+                plusIcon.Foreground = hoverText;
+                labelText.Foreground = hoverText;
             }
         };
-        dropCard.PointerExited += (_, _) =>
+        dropCardHost.PointerExited += (_, _) =>
         {
-            if (DesktopOrganizationPreviewCard.ActiveDraggedSourcePaths.Count == 0 &&
-                string.IsNullOrWhiteSpace(DesktopOrganizationPreviewCard.ActiveDraggedSourcePath))
+            if (!_dragController.IsDragging)
             {
                 dashedOutline.Fill = transparentFill;
                 plusIcon.Foreground = secondaryBrush;
                 labelText.Foreground = secondaryBrush;
             }
         };
-        dropCard.Tapped += (_, _) => CreateEmptyNewBox();
-
-        dropCard.DragOver += (_, e) =>
+        dropCardHost.Tapped += (_, _) => CreateEmptyNewBox();
+        dropCardHost.KeyDown += (_, e) =>
         {
-            if (DeskBoxDragData.HasDroppedFiles(e.DataView))
+            if (e.Key is VirtualKey.Enter or VirtualKey.Space)
             {
-                e.AcceptedOperation = DataPackageOperation.None;
-                return;
-            }
-
-            if (_isExecuting || _isScanning || _hasCompletedExecution ||
-                (DesktopOrganizationPreviewCard.ActiveDraggedSourcePaths.Count == 0 &&
-                 string.IsNullOrWhiteSpace(DesktopOrganizationPreviewCard.ActiveDraggedSourcePath)))
-            {
-                return;
-            }
-
-            e.AcceptedOperation = DataPackageOperation.Move;
-            e.DragUIOverride.Caption = T("DesktopOrganization.Layout.RouteBadgeNew");
-            e.DragUIOverride.IsCaptionVisible = true;
-            dashedOutline.Stroke = accentStroke;
-            plusIcon.Foreground = accentStroke;
-            labelText.Foreground = accentStroke;
-        };
-        dropCard.DragLeave += (_, _) =>
-        {
-            dashedOutline.Stroke = defaultStroke;
-            plusIcon.Foreground = secondaryBrush;
-            labelText.Foreground = secondaryBrush;
-        };
-        dropCard.Drop += async (_, e) =>
-        {
-            dashedOutline.Stroke = defaultStroke;
-            plusIcon.Foreground = secondaryBrush;
-            labelText.Foreground = secondaryBrush;
-
-            if (_isExecuting || _isScanning || _hasCompletedExecution ||
-                DeskBoxDragData.HasDroppedFiles(e.DataView))
-            {
-                e.AcceptedOperation = DataPackageOperation.None;
-                return;
-            }
-
-            List<string> droppedPaths = DesktopOrganizationPreviewCard.ActiveDraggedSourcePaths.Count > 0
-                ? DesktopOrganizationPreviewCard.ActiveDraggedSourcePaths.ToList()
-                : !string.IsNullOrWhiteSpace(DesktopOrganizationPreviewCard.ActiveDraggedSourcePath)
-                    ? [DesktopOrganizationPreviewCard.ActiveDraggedSourcePath!]
-                    : [];
-
-            if (droppedPaths.Count == 0 && e.DataView.Contains(StandardDataFormats.Text))
-            {
-                try
-                {
-                    string raw = await e.DataView.GetTextAsync();
-                    droppedPaths = raw.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
-                }
-                catch
-                {
-                    droppedPaths = [];
-                }
-            }
-
-            DesktopOrganizationPreviewCard.ActiveDraggedSourcePath = null;
-            DesktopOrganizationPreviewCard.ActiveDraggedSourcePaths = [];
-            DesktopOrganizationPreviewCard.NotifyDragSessionState(false);
-
-            if (droppedPaths.Count > 0)
-            {
-                CreateNewBoxWithFiles(droppedPaths);
+                e.Handled = true;
+                CreateEmptyNewBox();
             }
         };
 
-        return dropCard;
+        return dropCardHost;
     }
 
-    private void MoveItemsToBox(IReadOnlyList<string> sourcePaths, string targetBucketId)
+    private void MoveItemsToBox(IReadOnlyList<string> sourcePaths, string targetBucketKey)
     {
-        if (_isScanning || _isExecuting || _hasCompletedExecution || _basePlan is null || _plan is null ||
+        if (_isScanning || _isExecuting || _hasCompletedExecution || Session.BasePlan is null ||
             sourcePaths.Count == 0)
         {
             return;
         }
 
-        foreach (string sourcePath in sourcePaths)
+        if (Session.MoveItemsToBucket(sourcePaths, targetBucketKey).MovedCount > 0)
         {
-            EnsureSourcePathIncludedInPlan(sourcePath);
-            _excludedSourcePaths.Remove(sourcePath);
-            _reassignedItemBuckets[sourcePath] = targetBucketId;
-        }
+            if (string.Equals(_pendingEmptyCustomBoxRenameId, targetBucketKey, StringComparison.Ordinal))
+            {
+                _pendingEmptyCustomBoxRenameId = null;
+            }
 
-        DesktopOrganizationPreviewCard.ClearActiveTileSelection();
-        if (_targetSelections.TryGetValue(targetBucketId, out var selection))
-        {
-            selection.IsSelected = true;
+            RenderSessionPlan();
         }
-
-        RenderPlan(_plan);
     }
 
     private void CreateEmptyNewBox()
     {
-        if (_isScanning || _isExecuting || _hasCompletedExecution || _plan is null)
+        if (_isScanning || _isExecuting || _hasCompletedExecution || Session.BasePlan is null)
         {
             return;
         }
 
-        string bucketId = $"custom-box-{++_customBoxCounter}";
-        string defaultTitle = $"{T("DesktopOrganization.Preview.DynamicDestination")} {_customBoxCounter}";
-        _customBoxes.Add((bucketId, defaultTitle));
-        DesktopOrganizationPreviewCard.ClearActiveTileSelection();
-        _targetSelections[bucketId] = new DesktopOrganizationTargetSelection
-        {
-            SourceBucketId = bucketId,
-            IsSelected = true,
-            DestinationMode = DesktopOrganizationDestinationMode.Dynamic
-        };
-
-        RenderPlan(_plan, renameBucketIdAfterRender: bucketId);
+        _dragController.CancelActiveDrag();
+        DesktopOrganizationWorkbenchSession.CustomBoxDefinition created =
+            Session.CreateEmptyCustomBox(T("DesktopOrganization.Layout.New"));
+        _pendingEmptyCustomBoxRenameId = created.WidgetId;
+        RenderSessionPlan(renameBucketIdAfterRender: created.WidgetId);
     }
 
     private void CreateNewBoxWithFiles(IReadOnlyList<string> sourcePaths)
     {
-        if (_isScanning || _isExecuting || _hasCompletedExecution || _basePlan is null || _plan is null ||
+        if (_isScanning || _isExecuting || _hasCompletedExecution || Session.BasePlan is null ||
             sourcePaths.Count == 0)
         {
             return;
         }
 
-        string bucketId = $"custom-box-{++_customBoxCounter}";
-        string defaultTitle = $"{T("DesktopOrganization.Preview.DynamicDestination")} {_customBoxCounter}";
-        _customBoxes.Add((bucketId, defaultTitle));
-
-        foreach (string sourcePath in sourcePaths)
+        DesktopOrganizationWorkbenchSession.CustomBoxDefinition? created =
+            Session.CreateCustomBox(sourcePaths, defaultTitlePrefix: T("DesktopOrganization.Layout.New"));
+        if (created is not null)
         {
-            EnsureSourcePathIncludedInPlan(sourcePath);
-            _excludedSourcePaths.Remove(sourcePath);
-            _reassignedItemBuckets[sourcePath] = bucketId;
-        }
-
-        DesktopOrganizationPreviewCard.ClearActiveTileSelection();
-        _targetSelections[bucketId] = new DesktopOrganizationTargetSelection
-        {
-            SourceBucketId = bucketId,
-            IsSelected = true,
-            DestinationMode = DesktopOrganizationDestinationMode.Dynamic
-        };
-
-        RenderPlan(_plan, renameBucketIdAfterRender: bucketId);
-    }
-
-    private void RenameBox(string bucketId, string newTitle)
-    {
-        if (_isScanning || _isExecuting || _hasCompletedExecution || _plan is null ||
-            string.IsNullOrWhiteSpace(newTitle))
-        {
-            return;
-        }
-
-        _customBoxTitles[bucketId] = newTitle.Trim();
-        if (_targetSelections.TryGetValue(bucketId, out var selection))
-        {
-            selection.DestinationMode = DesktopOrganizationDestinationMode.Dynamic;
-            selection.ExistingWidgetId = null;
-        }
-
-        RenderPlan(_plan);
-    }
-
-    private void EnsureSourcePathIncludedInPlan(string sourcePath)
-    {
-        if (_basePlan is null || _plan is null)
-        {
-            return;
-        }
-
-        var snapshot = _plan.SourceItems.FirstOrDefault(i =>
-            string.Equals(i.SourcePath, sourcePath, StringComparison.OrdinalIgnoreCase));
-        if (snapshot is { CanOptIn: true } && _optionalIncludedPaths.Add(sourcePath))
-        {
-            _plan = Coordinator.CreatePreviewPlanWithOptionalItems(
-                _basePlan,
-                _optionalIncludedPaths,
-                _plan.IncludePersonalDesktop,
-                _plan.IncludePublicDesktop);
+            _pendingEmptyCustomBoxRenameId = null;
+            RenderSessionPlan(renameBucketIdAfterRender: created.WidgetId);
         }
     }
 
@@ -757,87 +531,40 @@ public sealed partial class DesktopOrganizationTaskView
         catch { return []; }
     }
 
-    private IReadOnlyList<DesktopOrganizationFileSnapshot> GetRetainedPreviewItems()
-    {
-        if (_hasCompletedExecution && _lastExecutionPlan is not null)
-            return _lastExecutionPlan.ExcludedItems.Where(item =>
-                DesktopOrganizationPreviewSummary.IncludesSource(_lastExecutionPlan, item)).ToList();
-        if (_plan is null) return [];
-        var sources = _plan.SourceItems.Count > 0 ? _plan.SourceItems
-            : _plan.Targets.SelectMany(target => target.Items).Concat(_plan.ExcludedItems).ToList();
-        var selected = _plan.Targets.Where(target =>
-                !_targetSelections.TryGetValue(target.SourceBucketId, out var selection) || selection.IsSelected)
-            .SelectMany(target => target.Items)
-            .Where(item => !_excludedSourcePaths.Contains(item.SourcePath))
-            .Select(item => item.SourcePath).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        return sources.Where(item => DesktopOrganizationPreviewSummary.IncludesSource(_plan, item) &&
-            !selected.Contains(item.SourcePath)).Select(item =>
-        {
-            return item.IsEligible || _optionalIncludedPaths.Contains(item.SourcePath)
-                ? item with { ExclusionReason = DesktopOrganizationExclusionReason.UserChoice } : item;
-        }).DistinctBy(item => item.SourcePath, StringComparer.OrdinalIgnoreCase).ToList();
-    }
-
-    private void PreviewSections_SelectionChanged(SelectorBar sender, SelectorBarSelectionChangedEventArgs args)
-    {
-        if (_plan is null) return;
-        SelectSection(sender.SelectedItem == ExcludedItemsButton);
-    }
-
-    private void SelectSection(bool retained)
-    {
-        UpdateSectionVisibility();
-        UpdateSummary(_plan);
-    }
-
     private void UpdateSectionVisibility()
     {
-        bool hasDesktopItems = HasAnyActiveScopeItems(_plan);
+        DesktopOrganizationPlan? plan = Session.EffectivePlan;
+        bool hasDesktopItems = HasAnyActiveScopeItems(plan);
         TargetSelectionHost.Visibility = !_hasCompletedExecution && hasDesktopItems
             ? Visibility.Visible
             : Visibility.Collapsed;
-        RetainedItemsPanel.Visibility = Visibility.Collapsed;
         CompletedViewPanel.Visibility = _hasCompletedExecution
             ? Visibility.Visible
             : Visibility.Collapsed;
         EmptyPreviewCard.Visibility = !_hasCompletedExecution && !hasDesktopItems
             ? Visibility.Visible
             : Visibility.Collapsed;
-        EmptyPreviewText.Text = T(_plan is { IncludePersonalDesktop: false, IncludePublicDesktop: false }
+        EmptyPreviewText.Text = T(plan is { IncludePersonalDesktop: false, IncludePublicDesktop: false }
             ? "DesktopOrganization.Layout.NoSource"
             : "DesktopOrganization.Preview.NothingAction");
         StayOnDesktopTrayBorder.Visibility = !_hasCompletedExecution && hasDesktopItems
             ? Visibility.Visible
             : Visibility.Collapsed;
-        PreviewSections.SelectedItem = SummaryTitle;
         ExecuteButton.Visibility = !_hasCompletedExecution ? Visibility.Visible : Visibility.Collapsed;
         ResetSelectionMenuItem.IsEnabled = !_hasCompletedExecution && !_isExecuting && !_isScanning;
     }
 
-    private void UpdateSummary(DesktopOrganizationPlan? plan)
+    private void UpdateSummary()
     {
+        DesktopOrganizationPlan? plan = Session.EffectivePlan;
         if (plan is null)
         {
-            PageHeaderTitleText.Text = T("DesktopOrganization.Window.Title");
             FooterSummaryText.Text = string.Empty;
             FooterSafetyHintText.Visibility = Visibility.Collapsed;
             return;
         }
 
-        var summary = DesktopOrganizationPreviewSummary.Calculate(plan, _targetSelections, _excludedSourcePaths);
-        int count = _hasCompletedExecution ? _completedItems.Count : summary.SelectedCount;
-        int retainedCount = _hasCompletedExecution
-            ? GetRetainedPreviewItems().Count + _runtimeRetainedItems.Count
-            : summary.RetainedCount;
-
-        PageHeaderTitleText.Text = T(_hasCompletedExecution
-            ? "DesktopOrganization.Result.SuccessTitle"
-            : "DesktopOrganization.Window.Title");
-        SummaryTitle.Text = Format(
-            _hasCompletedExecution ? "DesktopOrganization.Layout.CompletedCount" : "DesktopOrganization.Layout.MoveCount",
-            count);
-        SummaryDescription.Text = Format("DesktopOrganization.Layout.TotalCount", summary.TotalCount);
-        ExcludedItemsButton.Text = Format("DesktopOrganization.Layout.RetainedCount", Math.Max(0, retainedCount));
+        DesktopOrganizationPreviewSummary summary = Session.CalculateSummary();
 
         if (_hasCompletedExecution)
         {
@@ -864,8 +591,8 @@ public sealed partial class DesktopOrganizationTaskView
             string sizeText = DesktopOrganizationPreviewSummary.FormatBytes(
                 summary.SelectedBytes,
                 App.Current.LocalizationService);
-            FooterSummaryText.Text = $"{Format("DesktopOrganization.Layout.MoveCount", summary.SelectedCount)} · {sizeText}";
-            FooterSafetyHintText.Text = "· " + Format(
+            FooterSummaryText.Text = $"{Format("DesktopOrganization.Layout.MoveCount", summary.SelectedCount)} \u00b7 {sizeText}";
+            FooterSafetyHintText.Text = "\u00b7 " + Format(
                 "DesktopOrganization.Layout.TargetSummary",
                 summary.DestinationCount,
                 summary.NewDestinationCount);
@@ -903,20 +630,35 @@ public sealed partial class DesktopOrganizationTaskView
                 _restoredItems.Remove(item.SourcePath);
             }
         }
+
         ReleaseCompletedCards();
         foreach (var group in _completedItems.Values.GroupBy(item => item.TargetWidgetId))
         {
             var items = group.Select(item => FindPreviewSnapshot(item.SourcePath, item.Name, item.SourceScope) with
-            { SourcePath = item.DestinationPath, Name = Path.GetFileName(item.DestinationPath) }).ToList();
+            {
+                SourcePath = item.DestinationPath,
+                Name = Path.GetFileName(item.DestinationPath)
+            }).ToList();
+
+            var completedTarget = new DesktopOrganizationTargetPlan
+            {
+                SourceBucketId = group.Key,
+                CategoryId = DesktopOrganizationCategoryIds.Other,
+                TargetWidgetId = group.Key,
+                SuggestedDisplayName = group.First().TargetWidgetName,
+                TargetDirectoryPath = group.First().TargetWidgetName,
+                CreatesWidget = false,
+                AutoBindCategoryRule = false,
+                Items = items
+            };
+
             var card = new DesktopOrganizationPreviewCard(
-                group.Key,
-                group.First().TargetWidgetName,
-                string.Empty,
-                items,
+                completedTarget,
+                Session,
+                _dragController,
                 [],
-                false,
-                item => item.SourcePath,
-                DesktopOrganizationItemViewMode.CompactGrid)
+                itemDescription: item => item.SourcePath,
+                readOnlyMode: true)
             {
                 HorizontalAlignment = HorizontalAlignment.Left,
                 VerticalAlignment = VerticalAlignment.Top
@@ -925,8 +667,9 @@ public sealed partial class DesktopOrganizationTaskView
             CompletedItemsPanel.Children.Add(card);
         }
 
-        string storageRoot = (_lastExecutionPlan ?? _plan)?.StorageRootPath ?? StoragePathText.Text;
-        int untouchedCount = GetRetainedPreviewItems().Count + _runtimeRetainedItems.Count;
+        DesktopOrganizationPlan? executionOrPreview = _lastExecutionPlan ?? Session.EffectivePlan;
+        string storageRoot = executionOrPreview?.StorageRootPath ?? StoragePathText.Text;
+        int untouchedCount = GetRetainedPreviewItems(executionOrPreview).Count + _runtimeRetainedItems.Count;
         CompletedHeroTitleText.Text = Format("DesktopOrganization.Layout.CompletedCount", _completedItems.Count);
         CompletedHeroBodyText.Text = Format(
             "DesktopOrganization.Layout.CompletedCardBody",
@@ -937,8 +680,8 @@ public sealed partial class DesktopOrganizationTaskView
             : Visibility.Collapsed;
 
         ReleasePreviewCards();
-        RenderExcludedItems(_lastExecutionPlan ?? _plan!);
-        UpdateSummary(_plan);
+        RenderExcludedItems(executionOrPreview);
+        UpdateSummary();
         UpdateSectionVisibility();
         UpdateDestinationPaths();
     }
@@ -961,26 +704,25 @@ public sealed partial class DesktopOrganizationTaskView
 
     private void ViewPendingButton_Click(object sender, RoutedEventArgs e)
     {
-        SelectSection(false);
+        UpdateSectionVisibility();
+        UpdateSummary();
         SelectionFeedbackInfo.IsOpen = false;
     }
 
     private void UpdateDestinationPaths()
     {
         DestinationPathsPanel.Children.Clear();
-        if (_plan is null) return;
-        var destinations = CreateDestinationOptions();
+        DesktopOrganizationPlan? activePlan = _hasCompletedExecution ? _lastExecutionPlan : Session.EffectivePlan;
+        if (activePlan is null) return;
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var target in (_hasCompletedExecution ? _lastExecutionPlan : _plan)?.Targets ?? [])
+        foreach (var target in activePlan.Targets)
         {
-            _targetSelections.TryGetValue(target.SourceBucketId, out var selection);
-            var destination = !_hasCompletedExecution && selection?.DestinationMode == DesktopOrganizationDestinationMode.ExistingWidget
-                ? destinations.FirstOrDefault(item => item.Id == selection.ExistingWidgetId) : null;
-            string path = destination?.DirectoryPath ?? target.TargetDirectoryPath;
-            if (!seen.Add(path)) continue;
+            if (target.Items.Count == 0) continue;
+            string path = target.TargetDirectoryPath;
+            if (string.IsNullOrWhiteSpace(path) || !seen.Add(path)) continue;
             DestinationPathsPanel.Children.Add(new TextBlock
             {
-                Text = (destination?.DisplayName ?? target.SuggestedDisplayName) + "\n" + path,
+                Text = target.SuggestedDisplayName + "\n" + path,
                 Style = (Style)Resources["DesktopOrganizationSecondaryTextStyle"],
                 FontSize = 12,
                 TextWrapping = TextWrapping.Wrap,

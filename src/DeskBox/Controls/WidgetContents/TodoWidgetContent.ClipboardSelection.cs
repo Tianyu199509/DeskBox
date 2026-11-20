@@ -476,8 +476,7 @@ public sealed partial class TodoWidgetContent
             : ViewModel.DraftHasDueTime;
         if (CustomDueDatePicker is not null)
         {
-            CustomDueDatePicker.MinDate = DateTimeOffset.Now.Date;
-            CustomDueDatePicker.Date = dueDate;
+            ConfigureCustomDueDatePicker(CustomDueDatePicker, dueDate);
         }
 
         ConfigureCustomDueTimeState(dueDate, includeTime);

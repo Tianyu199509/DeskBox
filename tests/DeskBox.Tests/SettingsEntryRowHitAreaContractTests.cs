@@ -97,22 +97,18 @@ public sealed class SettingsEntryRowHitAreaContractTests
     [Fact]
     public void DesktopOrganizationRuleRows_StayClickableWithoutAManualChevron()
     {
+        string xaml = ReadRepositoryFile(
+            "src/DeskBox/Views/SettingsSections/DesktopOrganizationSettingsSection.xaml");
         string code = ReadRepositoryFile(
             "src/DeskBox/Views/SettingsSections/DesktopOrganizationSettingsSection.xaml.cs");
 
-        // The rows are code-built SettingsCards: the template's own action
-        // chevron is the only arrow, and the click handler must accept the
-        // SettingsCard sender. The v3.1 conversion shipped both regressions
-        // at once — a leftover manual chevron (double arrows) and a
-        // `is not Button` guard that swallowed every click.
-        Assert.Contains("IsClickEnabled = true", code, StringComparison.Ordinal);
-        Assert.Contains("card.Click += WidgetRuleButton_Click;", code, StringComparison.Ordinal);
+        // Auto-organization opens directly into its 2nd-level rules page (zero 3rd-level hops)
+        // via a native clickable SettingsCard, and rules use SelectorBar + ComboBox/ToggleButton pills
+        // without manual chevron hacks.
+        Assert.Contains("x:Name=\"AutoOrganizationEntryCard\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("IsClickEnabled=\"True\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"RulesViewSelectorBar\"", xaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Glyph = \"\\uE76C\"", code, StringComparison.Ordinal);
-        Assert.DoesNotContain("is not Button { Tag: string widgetId }", code, StringComparison.Ordinal);
-        Assert.Contains(
-            "sender is not CommunityToolkit.WinUI.Controls.SettingsCard { Tag: string widgetId }",
-            code,
-            StringComparison.Ordinal);
     }
 
     [Theory]
@@ -149,8 +145,9 @@ public sealed class SettingsEntryRowHitAreaContractTests
 
         Assert.Contains("Style=\"{StaticResource SettingsSubsectionTitleTextStyle}\"", orgXaml, StringComparison.Ordinal);
         Assert.Contains("svc:Localized.Key=\"DesktopOrganization.Settings.Title\"", orgXaml, StringComparison.Ordinal);
-        Assert.Contains("x:Name=\"AutoToggleExpander\"", orgXaml, StringComparison.Ordinal);
-        Assert.Contains("IsExpanded=\"False\"", orgXaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"OrganizeNowCard\"", orgXaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"AutoOrganizationEntryCard\"", orgXaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"AutoOrganizationSubPagePanel\"", orgXaml, StringComparison.Ordinal);
         Assert.Contains("Style=\"{StaticResource SectionTitleTextStyle}\"", fileWidgetXaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"DesktopOrganizationPart\"", fileWidgetXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("FileGridSiblingSegmented", windowXaml, StringComparison.Ordinal);

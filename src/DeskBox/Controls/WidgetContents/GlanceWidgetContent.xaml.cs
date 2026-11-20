@@ -100,7 +100,8 @@ public sealed partial class GlanceWidgetContent : UserControl, IDisposable
     public GlanceWidgetViewModel ViewModel => _viewModel;
 
     private bool ShouldKeepWarmWhileCollapsed =>
-        (_viewModel.SettingsService ?? App.Current?.SettingsService)?.Settings.Performance.KeepCapsuleContentWarm == true;
+        (_viewModel.SettingsService ?? App.Current?.SettingsService) is { } settingsService &&
+        PerformanceSettingsPolicy.ResolveEffectiveKeepCapsuleContentWarm(settingsService.Settings);
 
     private bool ShouldKeepWarmWhileHidden
     {
@@ -856,7 +857,7 @@ public sealed partial class GlanceWidgetContent : UserControl, IDisposable
         _calendarWeekdayLabels = null;
         _calendarCellVisuals = null;
         _weekCells = null;
-        Bindings.Update();
+        Bindings?.StopTracking();
         StopAndClearTransitionStoryboard();
         DataContext = null;
         Content = null;

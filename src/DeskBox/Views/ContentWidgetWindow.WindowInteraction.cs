@@ -31,8 +31,16 @@ public sealed partial class ContentWidgetWindow
     private readonly Dictionary<string, (DateTime LastWriteUtc, bool Accepts)>
         _customMemberFileDropCache = new(StringComparer.Ordinal);
 
+    private static bool IsSelfWidgetDrag(DataPackageView dataView, string targetWidgetId)
+    {
+        string? sourceWidgetId = DeskBoxDragData.TryGetSourceWidgetId(dataView);
+        return !string.IsNullOrWhiteSpace(sourceWidgetId) &&
+            string.Equals(sourceWidgetId, targetWidgetId, StringComparison.Ordinal);
+    }
+
     private void RootGrid_DragOver(object sender, DragEventArgs e)
     {
+        bool overActiveGroupTitleTab = false;
         Windows.Foundation.Point rootPoint = e.GetPosition(RootGrid);
         if (WidgetShellControl.IsPointOverGroupTitleBar(RootGrid, rootPoint))
         {
@@ -56,6 +64,15 @@ public sealed partial class ContentWidgetWindow
                 e.Handled = true;
                 return;
             }
+
+            if (IsSelfWidgetDrag(e.DataView, tabId))
+            {
+                e.AcceptedOperation = DataPackageOperation.None;
+                e.Handled = true;
+                return;
+            }
+
+            overActiveGroupTitleTab = true;
         }
 
         if (CurrentContent is FileWidgetContentAdapter file)
@@ -68,7 +85,7 @@ public sealed partial class ContentWidgetWindow
             return;
         }
 
-        if (!IsCompactBoundsStateActive)
+        if (!IsCompactBoundsStateActive && !overActiveGroupTitleTab)
         {
             return;
         }
@@ -140,6 +157,7 @@ public sealed partial class ContentWidgetWindow
 
     private async void RootGrid_Drop(object sender, DragEventArgs e)
     {
+        bool overActiveGroupTitleTab = false;
         Windows.Foundation.Point rootPoint = e.GetPosition(RootGrid);
         if (WidgetShellControl.IsPointOverGroupTitleBar(RootGrid, rootPoint))
         {
@@ -157,14 +175,38 @@ public sealed partial class ContentWidgetWindow
 
             if (!string.Equals(CurrentContent?.WidgetId, tabId, StringComparison.Ordinal))
             {
-                await HandleInactiveGroupTabRoutedDropAsync(tabId, e);
+                try
+                {
+                    await HandleInactiveGroupTabRoutedDropAsync(tabId, e);
+                }
+                catch (Exception ex)
+                {
+                    App.Log($"[ContentWidgetWindow] Inactive group tab drop failed: {ex}");
+                    e.AcceptedOperation = DataPackageOperation.None;
+                }
                 return;
             }
+
+            if (IsSelfWidgetDrag(e.DataView, tabId))
+            {
+                e.AcceptedOperation = DataPackageOperation.None;
+                e.Handled = true;
+                return;
+            }
+
+            overActiveGroupTitleTab = true;
         }
 
         if (CurrentContent is FileWidgetContentAdapter file)
         {
-            file.HandleHostEdgeDrop(e);
+            if (overActiveGroupTitleTab)
+            {
+                file.HandleHostHeaderDrop(e);
+            }
+            else
+            {
+                file.HandleHostEdgeDrop(e);
+            }
             if (e.Handled)
             {
                 MarkXamlDropClaimed(e.DataView);
@@ -172,7 +214,7 @@ public sealed partial class ContentWidgetWindow
             return;
         }
 
-        if (!IsCompactBoundsStateActive)
+        if (!IsCompactBoundsStateActive && !overActiveGroupTitleTab)
         {
             return;
         }
@@ -187,7 +229,7 @@ public sealed partial class ContentWidgetWindow
                 MarkXamlDropClaimed(e.DataView);
                 e.AcceptedOperation = await todo.ImportExternalDropAsync(e.DataView)
                     ? DeskBoxDragData.HasDroppedFiles(e.DataView)
-                        ? DeskBoxDragData.GetFileAssociationOperation(e.DataView, allowedOperations)
+                        ? DeskBoxDragData.GetFileAssociationDropCompletionOperation(e.DataView, allowedOperations, Config.Id)
                         : DataPackageOperation.Copy
                     : DataPackageOperation.None;
             }
@@ -196,7 +238,7 @@ public sealed partial class ContentWidgetWindow
                 e.Handled = true;
                 MarkXamlDropClaimed(e.DataView);
                 e.AcceptedOperation = await custom.ImportExternalDropAsync(e.DataView)
-                    ? DeskBoxDragData.GetFileAssociationOperation(e.DataView, allowedOperations)
+                    ? DeskBoxDragData.GetFileAssociationDropCompletionOperation(e.DataView, allowedOperations, Config.Id)
                     : DataPackageOperation.None;
             }
             else if (CurrentContent is ClipboardWidgetContentAdapter clipboard)
@@ -205,7 +247,7 @@ public sealed partial class ContentWidgetWindow
                 MarkXamlDropClaimed(e.DataView);
                 e.AcceptedOperation = await clipboard.ImportExternalDropAsync(e.DataView)
                     ? DeskBoxDragData.HasDroppedFiles(e.DataView)
-                        ? DeskBoxDragData.GetFileAssociationOperation(e.DataView, allowedOperations)
+                        ? DeskBoxDragData.GetFileAssociationDropCompletionOperation(e.DataView, allowedOperations, Config.Id)
                         : DataPackageOperation.Copy
                     : DataPackageOperation.None;
             }
@@ -215,10 +257,15 @@ public sealed partial class ContentWidgetWindow
                 MarkXamlDropClaimed(e.DataView);
                 e.AcceptedOperation = await quickCapture.ImportExternalDropAsync(e.DataView)
                     ? DeskBoxDragData.HasDroppedFiles(e.DataView)
-                        ? DeskBoxDragData.GetFileAssociationOperation(e.DataView, allowedOperations)
+                        ? DeskBoxDragData.GetFileAssociationDropCompletionOperation(e.DataView, allowedOperations, Config.Id)
                         : DataPackageOperation.Copy
                     : DataPackageOperation.None;
             }
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[ContentWidgetWindow] RootGrid_Drop failed: {ex}");
+            e.AcceptedOperation = DataPackageOperation.None;
         }
         finally
         {
@@ -355,13 +402,21 @@ public sealed partial class ContentWidgetWindow
     private DataPackageOperation ResolvePendingGroupTabDragOperation(
         string memberWidgetId,
         DataPackageView dataView,
-        DataPackageOperation allowedOperations)
+        DataPackageOperation allowedOperations,
+        bool? controlDownOverride = null,
+        bool? shiftDownOverride = null,
+        bool? altDownOverride = null)
     {
         if (!DeskBoxDragData.HasDroppedFiles(dataView))
         {
             return allowedOperations.HasFlag(DataPackageOperation.Copy)
                 ? DataPackageOperation.Copy
                 : DataPackageOperation.None;
+        }
+
+        if (IsSelfWidgetDrag(dataView, memberWidgetId))
+        {
+            return DataPackageOperation.None;
         }
 
         WidgetConfig? memberConfig = SettingsService.Settings.WidgetLayout.Widgets
@@ -407,9 +462,9 @@ public sealed partial class ContentWidgetWindow
                 HasShellApplicationOrNamespaceData: false,
                 ForceCopy: false,
                 HasMappedFolder: hasMapped,
-                ControlDown: Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control),
-                ShiftDown: Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Shift),
-                AltDown: Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Menu),
+                ControlDown: controlDownOverride ?? Win32Helper.IsAsyncKeyPressed(Windows.System.VirtualKey.Control),
+                ShiftDown: shiftDownOverride ?? Win32Helper.IsAsyncKeyPressed(Windows.System.VirtualKey.Shift),
+                AltDown: altDownOverride ?? Win32Helper.IsAsyncKeyPressed(Windows.System.VirtualKey.Menu),
                 AllowedEffects: ToNativeAllowedEffects(supported),
                 NoOperationMetadata: noOperationMetadata,
                 DefaultMove: string.Equals(
@@ -446,10 +501,25 @@ public sealed partial class ContentWidgetWindow
 
     private async Task HandleInactiveGroupTabRoutedDropAsync(string targetMemberId, DragEventArgs e)
     {
+        if (IsSelfWidgetDrag(e.DataView, targetMemberId))
+        {
+            e.AcceptedOperation = DataPackageOperation.None;
+            e.Handled = true;
+            return;
+        }
+
         DataPackageOperation allowedOperations = e.AllowedOperations;
         bool ctrlDown = Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control);
         bool shiftDown = Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Shift);
         bool altDown = Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Menu);
+        string? sourceWidgetId = DeskBoxDragData.TryGetSourceWidgetId(e.DataView);
+        DataPackageOperation preSwitchPendingOp = ResolvePendingGroupTabDragOperation(
+            targetMemberId,
+            e.DataView,
+            allowedOperations,
+            ctrlDown,
+            shiftDown,
+            altDown);
         e.Handled = true;
         MarkXamlDropClaimed(e.DataView);
         var deferral = e.GetDeferral();
@@ -503,23 +573,30 @@ public sealed partial class ContentWidgetWindow
                     targetItem: null,
                     forcedIntent: forcedIntent,
                     allowedEffects: effects,
-                    itemOrigins: origins);
+                    itemOrigins: origins,
+                    sourceWidgetIdOverride: sourceWidgetId);
                 bool isInternalDrag = DeskBoxDragData.IsInternalFileDrag(e.DataView);
                 int nonTempCount = batch.Files.Count(static f => !f.IsProviderTemporary);
-                DataPackageOperation pendingOp = imported
-                    ? ResolvePendingGroupTabDragOperation(targetMemberId, e.DataView, allowedOperations)
-                    : DataPackageOperation.None;
+                DataPackageOperation pendingOp = forcedIntent switch
+                {
+                    FileDropIntent.Copy => DataPackageOperation.Copy,
+                    FileDropIntent.Move => DataPackageOperation.Move,
+                    FileDropIntent.Shortcut or FileDropIntent.Reference => DataPackageOperation.Link,
+                    _ => preSwitchPendingOp,
+                };
+                int completedMoveCount = Math.Min(nonTempCount, file.LastImportCompletedItemCount);
                 e.AcceptedOperation = imported
                     ? FileSurfaceContent.ResolveSafeDropCompletionOperation(
                         pendingOp,
                         isInternalDrag,
                         requestedMoveCount: nonTempCount,
-                        completedMoveCount: nonTempCount,
+                        completedMoveCount: completedMoveCount,
                         canReportCopy: allowedOperations.HasFlag(DataPackageOperation.Copy))
                     : DataPackageOperation.None;
-                e.AcceptedOperation = DeskBoxDragData.ResolveFileDragFeedbackOperation(
+                e.AcceptedOperation = DeskBoxDragData.ResolveFileDropCompletionFeedbackOperation(
                     e.DataView,
-                    e.AcceptedOperation);
+                    e.AcceptedOperation,
+                    allowedOperations);
                 return;
             }
 
@@ -527,7 +604,7 @@ public sealed partial class ContentWidgetWindow
             {
                 e.AcceptedOperation = await todo.ImportExternalDropAsync(e.DataView)
                     ? DeskBoxDragData.HasDroppedFiles(e.DataView)
-                        ? DeskBoxDragData.GetFileAssociationOperation(e.DataView, allowedOperations)
+                        ? DeskBoxDragData.GetFileAssociationDropCompletionOperation(e.DataView, allowedOperations, Config.Id)
                         : DataPackageOperation.Copy
                     : DataPackageOperation.None;
                 return;
@@ -536,7 +613,7 @@ public sealed partial class ContentWidgetWindow
             if (CurrentContent is CustomWidgetContentAdapter custom)
             {
                 e.AcceptedOperation = await custom.ImportExternalDropAsync(e.DataView)
-                    ? DeskBoxDragData.GetFileAssociationOperation(e.DataView, allowedOperations)
+                    ? DeskBoxDragData.GetFileAssociationDropCompletionOperation(e.DataView, allowedOperations, Config.Id)
                     : DataPackageOperation.None;
                 return;
             }
@@ -545,7 +622,7 @@ public sealed partial class ContentWidgetWindow
             {
                 e.AcceptedOperation = await clipboard.ImportExternalDropAsync(e.DataView)
                     ? DeskBoxDragData.HasDroppedFiles(e.DataView)
-                        ? DeskBoxDragData.GetFileAssociationOperation(e.DataView, allowedOperations)
+                        ? DeskBoxDragData.GetFileAssociationDropCompletionOperation(e.DataView, allowedOperations, Config.Id)
                         : DataPackageOperation.Copy
                     : DataPackageOperation.None;
                 return;
@@ -555,7 +632,7 @@ public sealed partial class ContentWidgetWindow
             {
                 e.AcceptedOperation = await quickCapture.ImportExternalDropAsync(e.DataView)
                     ? DeskBoxDragData.HasDroppedFiles(e.DataView)
-                        ? DeskBoxDragData.GetFileAssociationOperation(e.DataView, allowedOperations)
+                        ? DeskBoxDragData.GetFileAssociationDropCompletionOperation(e.DataView, allowedOperations, Config.Id)
                         : DataPackageOperation.Copy
                     : DataPackageOperation.None;
                 return;
@@ -579,6 +656,12 @@ public sealed partial class ContentWidgetWindow
 
         if (e.Key != Windows.System.VirtualKey.Tab ||
             !Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control))
+        {
+            return;
+        }
+
+        if (e.OriginalSource is DependencyObject focusedInputSource &&
+            TransientInputFocusGuard.IsInsideTextInputControl(focusedInputSource))
         {
             return;
         }
@@ -704,6 +787,7 @@ public sealed partial class ContentWidgetWindow
                !IsWithin(source, ContentWidgetShell.PositionLockActionButton) &&
                !IsWithin(source, ContentWidgetShell.SizeLockActionButton) &&
                !IsWithin(source, ContentWidgetShell.AddActionButton) &&
+               !IsWithin(source, ContentWidgetShell.QuickSettingsActionButton) &&
                !IsWithin(source, ContentWidgetShell.MoreActionButton) &&
                !IsWithin(source, ContentWidgetShell.CloseActionButton) &&
                !HasAncestorOfType<TextBox>(source);
@@ -863,6 +947,11 @@ public sealed partial class ContentWidgetWindow
             return;
         }
 
+        if (_isSuspendedForMonitorOcclusion && Visible && !IsClosing)
+        {
+            ResumeContentFromMonitorOcclusion();
+        }
+
         _contentHost.OnActivated();
         // A long-hidden release dropped the decoded custom background; the
         // surface is cheap to rebuild from disk on the way back in.
@@ -948,7 +1037,15 @@ public sealed partial class ContentWidgetWindow
     private void ShowWithoutActivation(bool persistVisibility)
     {
         Visible = true;
-        AppWindow.Show();
+        SuppressAppWindowCompactVisibilityNotification = true;
+        try
+        {
+            AppWindow.Show();
+        }
+        finally
+        {
+            SuppressAppWindowCompactVisibilityNotification = false;
+        }
         Win32Helper.ShowWindow(HWnd, Win32Helper.SW_SHOWNOACTIVATE);
         UpdatePersistedVisibility(isVisible: true, persistVisibility);
 
@@ -957,25 +1054,68 @@ public sealed partial class ContentWidgetWindow
         QueueVisibleContentResume();
     }
 
+    private bool _isSuspendedForMonitorOcclusion;
+    private bool _deferredTrayShowContentResume;
+    private long _hiddenSinceTickMs = Environment.TickCount64;
+    internal bool IsSuspendedForMonitorOcclusion => _isSuspendedForMonitorOcclusion;
+    internal long HiddenSinceTickMs => Visible ? 0 : _hiddenSinceTickMs;
+    internal event Action<ContentWidgetWindow>? LongHiddenCleanupElapsed;
+
     private void QueueVisibleContentResume()
     {
+        _isSuspendedForMonitorOcclusion = false;
+        _hiddenSinceTickMs = 0;
+        bool shouldRearmReveal = _queuedContentRevealGeneration == _contentVisibilityGeneration;
         int generation = ++_contentVisibilityGeneration;
         if (!Visible || generation != _contentVisibilityGeneration || IsClosing)
         {
             return;
         }
 
+        if (!IsTargetCollapsed && _contentHost.IsCurrentContentHibernated)
+        {
+            _contentHost.EnsureCurrentContentViewAttached();
+        }
+
+        if (IsTrayShowAnimationInFlight)
+        {
+            _deferredTrayShowContentResume = true;
+            return;
+        }
+
+        _deferredTrayShowContentResume = false;
         _contentHost.OnWindowVisibilityChanged(true);
         PerformanceLogger.Mark(
             "WidgetVisibleContentFirstFrameReady",
             $"kind={_config.WidgetKind} id={_config.Id}");
+        if (shouldRearmReveal)
+        {
+            NotifyVisibleContentRevealCompleted();
+        }
     }
 
     private void NotifyVisibleContentRevealCompleted()
     {
+        bool wasTrayShowInFlight = IsTrayShowAnimationInFlight;
+        IsTrayShowAnimationInFlight = false;
         if (!Visible || IsClosing)
         {
+            _deferredTrayShowContentResume = false;
             return;
+        }
+
+        if (_deferredTrayShowContentResume)
+        {
+            _deferredTrayShowContentResume = false;
+            _contentHost.OnWindowVisibilityChanged(true);
+            PerformanceLogger.Mark(
+                "WidgetVisibleContentFirstFrameReady",
+                $"kind={_config.WidgetKind} id={_config.Id}");
+        }
+
+        if (wasTrayShowInFlight)
+        {
+            CompleteDeferredCompactHostShow();
         }
 
         int generation = _contentVisibilityGeneration;
@@ -1007,22 +1147,80 @@ public sealed partial class ContentWidgetWindow
 
     private void NotifyVisibleContentSuspended()
     {
+        IsTrayShowAnimationInFlight = false;
+        _deferredTrayShowContentResume = false;
         if (HWnd != IntPtr.Zero)
         {
             WidgetEditorPopoverWindow.ClosePopoversForOwner(HWnd);
         }
 
-        _contentVisibilityGeneration++;
+        int generation = ++_contentVisibilityGeneration;
         _contentHost.OnWindowVisibilityChanged(false);
+        if (!Visible && !_isSuspendedForMonitorOcclusion && !IsClosing)
+        {
+            _hiddenSinceTickMs = Environment.TickCount64;
+            _ = SchedulePerWindowHiddenCleanupAsync(generation);
+        }
+    }
+
+    private async Task SchedulePerWindowHiddenCleanupAsync(int generation)
+    {
+        try
+        {
+            EffectivePerformanceSettings initialPerf =
+                PerformanceSettingsPolicy.Resolve(SettingsService.Settings);
+            int delaySeconds = Math.Max(30, initialPerf.HiddenCacheCleanupDelaySeconds);
+            await Task.Delay(TimeSpan.FromSeconds(delaySeconds));
+            if (Visible ||
+                IsClosing ||
+                _isSuspendedForMonitorOcclusion ||
+                generation != _contentVisibilityGeneration)
+            {
+                return;
+            }
+
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (Visible ||
+                    IsClosing ||
+                    _isSuspendedForMonitorOcclusion ||
+                    generation != _contentVisibilityGeneration)
+                {
+                    return;
+                }
+
+                EffectivePerformanceSettings perf =
+                    PerformanceSettingsPolicy.Resolve(SettingsService.Settings);
+                if (string.Equals(
+                        perf.HiddenCacheCleanupScope,
+                        PerformanceSettingsPolicy.HiddenCacheCleanupScopeAllRecreatable,
+                        StringComparison.Ordinal))
+                {
+                    _ = ReleaseLongHiddenContentResources();
+                    LongHiddenCleanupElapsed?.Invoke(this);
+                }
+                else
+                {
+                    RunLongHiddenNoRebuildMaintenance();
+                    _ = HibernateDetachedInactiveGroupContents(evictIdleAdapters: false);
+                }
+            });
+        }
+        catch
+        {
+            // Ignore shutdown/dispatcher races on delayed hidden cleanup.
+        }
     }
 
     internal void SuspendContentForMonitorOcclusion()
     {
+        _isSuspendedForMonitorOcclusion = true;
         NotifyVisibleContentSuspended();
     }
 
     internal void ResumeContentFromMonitorOcclusion()
     {
+        _isSuspendedForMonitorOcclusion = false;
         if (!Visible || IsClosing)
         {
             return;

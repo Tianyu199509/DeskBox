@@ -6,80 +6,17 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     x:Name="Root"
-    Width="26"
-    Height="26"
+    FontSize="14"
     IsHitTestVisible="False"
     UseLayoutRounding="True"
     mc:Ignorable="d">
 
-    <!-- Pixel-fitted 26 px geometry derived from the supplied filled SVG assets. -->
-    <Grid Width="26" Height="26">
-        <Canvas
-            x:Name="PreviousSurface"
-            Width="26"
-            Height="26"
-            Visibility="Collapsed">
-            <Rectangle
-                Canvas.Left="6"
-                Canvas.Top="6"
-                Width="2"
-                Height="14"
-                Fill="{x:Bind Foreground, Mode=OneWay}"
-                RadiusX="0.75"
-                RadiusY="0.75" />
-            <Path
-                Data="M9.5 14.5L17.75 19.25C19.25 20.125 20.25 19.375 20.25 17.75L20.25 8.25C20.25 6.625 19.25 5.875 17.75 6.75L9.5 11.5C8.25 12.25 8.25 13.75 9.5 14.5Z"
-                Fill="{x:Bind Foreground, Mode=OneWay}" />
-        </Canvas>
-
-        <Canvas
-            x:Name="PlaySurface"
-            Width="26"
-            Height="26">
-            <Path
-                Data="M20 14.5L9 20.75C7.5 21.625 6.25 20.875 6.25 19.25L6.25 6.75C6.25 5.125 7.5 4.375 9 5.25L20 11.5C21.5 12.375 21.5 13.625 20 14.5Z"
-                Fill="{x:Bind Foreground, Mode=OneWay}" />
-        </Canvas>
-
-        <Canvas
-            x:Name="PauseSurface"
-            Width="26"
-            Height="26"
-            Visibility="Collapsed">
-            <Rectangle
-                Canvas.Left="6"
-                Canvas.Top="6"
-                Width="5"
-                Height="14"
-                Fill="{x:Bind Foreground, Mode=OneWay}"
-                RadiusX="1"
-                RadiusY="1" />
-            <Rectangle
-                Canvas.Left="15"
-                Canvas.Top="6"
-                Width="5"
-                Height="14"
-                Fill="{x:Bind Foreground, Mode=OneWay}"
-                RadiusX="1"
-                RadiusY="1" />
-        </Canvas>
-
-        <Canvas
-            x:Name="NextSurface"
-            Width="26"
-            Height="26"
-            Visibility="Collapsed">
-            <Rectangle
-                Canvas.Left="18"
-                Canvas.Top="6"
-                Width="2"
-                Height="14"
-                Fill="{x:Bind Foreground, Mode=OneWay}"
-                RadiusX="0.75"
-                RadiusY="0.75" />
-            <Path
-                Data="M16.25 14.5L8.125 19.25C6.625 20.125 5.5 19.375 5.5 17.75L5.5 8.25C5.5 6.625 6.625 5.875 8.125 6.75L16.25 11.5C17.5 12.25 17.5 13.75 16.25 14.5Z"
-                Fill="{x:Bind Foreground, Mode=OneWay}" />
-        </Canvas>
-    </Grid>
+    <FontIcon
+        x:Name="TransportGlyphIcon"
+        HorizontalAlignment="Center"
+        VerticalAlignment="Center"
+        FontFamily="{ThemeResource SymbolThemeFontFamily}"
+        FontSize="{x:Bind FontSize, Mode=OneWay}"
+        Foreground="{x:Bind Foreground, Mode=OneWay}"
+        Glyph="&#xF5B0;" />
 </UserControl>

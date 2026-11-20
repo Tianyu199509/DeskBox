@@ -70,7 +70,12 @@ public sealed partial class TodoWidgetContent
         // 无 deferral 的 await 曾致丢/挂），且拖过桌面时会被 shell 逐格式
         // 探测（0x8000FFFF 崩溃向量）。镜像 _draggedTodoItemId 先例。
         _draggedColorMarker = colorMarker;
+        e.AllowedOperations = DataPackageOperation.Link;
         e.Data.RequestedOperation = DataPackageOperation.Link;
+        if (ViewModel is { WidgetId.Length: > 0 })
+        {
+            e.Data.Properties[DeskBoxDragData.SourceWidgetIdProperty] = ViewModel.WidgetId;
+        }
         e.Data.Properties.Title = App.Current.LocalizationService.T(
             TodoItem.GetColorMarkerLocalizationKey(colorMarker));
     }
@@ -357,13 +362,14 @@ public sealed partial class TodoWidgetContent
 
         e.Handled = true;
         SetTodoItemHoverState(border, false);
+        DataPackageOperation allowedOperations = e.AllowedOperations;
         var deferral = e.GetDeferral();
         try
         {
             using DroppedFileBatch batch = await DeskBoxDragData.TryGetDroppedFilesAsync(e.DataView);
             int addedCount = await ViewModel.AddDroppedAttachmentsAsync(item.Id, batch.Files);
             e.AcceptedOperation = addedCount > 0
-                ? DeskBoxDragData.GetFileAssociationOperation(e.DataView)
+                ? DeskBoxDragData.GetFileAssociationDropCompletionOperation(e.DataView, allowedOperations, ViewModel.WidgetId)
                 : DataPackageOperation.None;
         }
         catch (Exception ex)
@@ -535,6 +541,10 @@ public sealed partial class TodoWidgetContent
                 e.Data,
                 selectedItems.Select(item => TodoWidgetStore.CloneItem(item.Item)).ToArray());
             DeskBoxDragData.SetText(e.Data, text, DeskBoxDragData.SourceTodo);
+            if (ViewModel is { WidgetId.Length: > 0 })
+            {
+                e.Data.Properties[DeskBoxDragData.SourceWidgetIdProperty] = ViewModel.WidgetId;
+            }
             // Export drags are copy-only: advertising Move would let a Win10
             // Explorer drop move backing files (and still prompts the picker).
             e.Data.RequestedOperation = DataPackageOperation.Copy;
@@ -562,6 +572,10 @@ public sealed partial class TodoWidgetContent
                 e.Data,
                 TodoClipboardFormatter.FormatSingle(draggedItem, App.Current.LocalizationService),
                 DeskBoxDragData.SourceTodo);
+            if (ViewModel is { WidgetId.Length: > 0 })
+            {
+                e.Data.Properties[DeskBoxDragData.SourceWidgetIdProperty] = ViewModel.WidgetId;
+            }
             e.Data.RequestedOperation = DataPackageOperation.Copy;
         }
         else
@@ -606,12 +620,13 @@ public sealed partial class TodoWidgetContent
         }
 
         e.Handled = true;
+        DataPackageOperation allowedOperations = e.AllowedOperations;
         var deferral = e.GetDeferral();
         try
         {
             int changedCount = await ViewModel.ApplyTabDropAsync(_draggedTodoItemIds.ToArray(), target);
             e.AcceptedOperation = changedCount > 0
-                ? DataPackageOperation.Move
+                ? DeskBoxDragData.ResolveInternalMetadataOperation(allowedOperations)
                 : DataPackageOperation.None;
             if (changedCount > 0)
             {
@@ -620,6 +635,11 @@ public sealed partial class TodoWidgetContent
                     App.Current.LocalizationService.Format("Todo.DropTab.Applied", changedCount),
                     clearUndoOnHide: false);
             }
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[Todo] Tab drop failed: {ex}");
+            e.AcceptedOperation = DataPackageOperation.None;
         }
         finally
         {
@@ -689,6 +709,7 @@ public sealed partial class TodoWidgetContent
         }
 
         e.Handled = true;
+        DataPackageOperation allowedOperations = e.AllowedOperations;
         ApplyTodoReorderDropState(
             border,
             active: false,
@@ -700,7 +721,7 @@ public sealed partial class TodoWidgetContent
                 draggedItemId,
                 targetIndex);
             e.AcceptedOperation = persisted
-                ? DataPackageOperation.Move
+                ? DeskBoxDragData.ResolveInternalMetadataOperation(allowedOperations)
                 : DataPackageOperation.None;
         }
         catch (Exception ex)
@@ -828,15 +849,21 @@ public sealed partial class TodoWidgetContent
         }
 
         e.Handled = true;
+        DataPackageOperation allowedOperations = e.AllowedOperations;
         var deferral = e.GetDeferral();
         try
         {
             bool wasQuickCaptureDrag = DeskBoxDragData.TryGetQuickCaptureDragItems(e.DataView) is { Count: > 0 };
             e.AcceptedOperation = await ImportExternalDropAsync(e.DataView)
                 ? !wasQuickCaptureDrag && DeskBoxDragData.HasDroppedFiles(e.DataView)
-                    ? DeskBoxDragData.GetFileAssociationOperation(e.DataView)
+                    ? DeskBoxDragData.GetFileAssociationDropCompletionOperation(e.DataView, allowedOperations, ViewModel?.WidgetId)
                     : DataPackageOperation.Copy
                 : DataPackageOperation.None;
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[Todo] RootGrid_Drop failed: {ex}");
+            e.AcceptedOperation = DataPackageOperation.None;
         }
         finally
         {
@@ -903,15 +930,23 @@ public sealed partial class TodoWidgetContent
                     return true;
                 }
 
+                DroppedFilePath[] attachableFiles = batch.Files
+                    .Where(static f => !string.IsNullOrWhiteSpace(f.Path) && File.Exists(f.Path))
+                    .ToArray();
+                if (attachableFiles.Length == 0)
+                {
+                    return false;
+                }
+
                 TodoItemViewModel? targetItem = ViewModel.IsDetailPageOpen
                     ? ViewModel.SelectedDetailItem
-                    : await ViewModel.AddItemAsync(BuildDroppedTodoTitle(batch.Files));
+                    : await ViewModel.AddItemAsync(BuildDroppedTodoTitle(attachableFiles));
                 if (targetItem is null)
                 {
                     return false;
                 }
 
-                int addedCount = await ViewModel.AddDroppedAttachmentsAsync(targetItem.Id, batch.Files);
+                int addedCount = await ViewModel.AddDroppedAttachmentsAsync(targetItem.Id, attachableFiles);
                 if (addedCount > 0)
                 {
                     ShowUndoToast(
@@ -959,10 +994,18 @@ public sealed partial class TodoWidgetContent
 
         try
         {
+            DroppedFilePath[] attachableFiles = files
+                .Where(static f => !string.IsNullOrWhiteSpace(f.Path) && File.Exists(f.Path))
+                .ToArray();
+            if (attachableFiles.Length == 0)
+            {
+                return false;
+            }
+
             TodoItemViewModel? item = targetItem ??
                 (ViewModel.IsDetailPageOpen
                     ? ViewModel.SelectedDetailItem
-                    : await ViewModel.AddItemAsync(BuildDroppedTodoTitle(files)));
+                    : await ViewModel.AddItemAsync(BuildDroppedTodoTitle(attachableFiles)));
             if (item is null)
             {
                 return false;
@@ -970,7 +1013,7 @@ public sealed partial class TodoWidgetContent
 
             int addedCount = await ViewModel.AddDroppedAttachmentsAsync(
                 item.Id,
-                files);
+                attachableFiles);
             if (addedCount <= 0)
             {
                 return false;

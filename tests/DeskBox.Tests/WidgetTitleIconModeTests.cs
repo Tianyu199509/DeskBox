@@ -62,7 +62,7 @@ public sealed class WidgetTitleIconModeTests
     }
 
     [Fact]
-    public void OfficialCustomPresets_UseFluentTitleIconFamiliesAndMigrateLegacyEmojisOnce()
+    public void OfficialCustomPresets_UseFluentTitleIconFamiliesAndPreserveExplicitEmojiOverrides()
     {
         Assert.Equal(WidgetTitleIconKindNames.SystemMonitor, WidgetTitleIconKindNames.FromCustomTemplateId("sys-pulse"));
         Assert.Equal(WidgetTitleIconKindNames.Pomodoro, WidgetTitleIconKindNames.FromCustomTemplateId("deskbox.pomodoro"));
@@ -81,8 +81,7 @@ public sealed class WidgetTitleIconModeTests
             Assert.Contains("width=\"20\" height=\"20\" viewBox=\"0 0 20 20\"", svg, StringComparison.Ordinal);
         }
 
-        // Legacy auto-seeded default emoji ("🍅") is cleared once so global TitleIconMode applies,
-        // while subsequent manual emoji overrides by the user are preserved.
+        // Valid explicit emoji overrides are preserved while malformed non-emoji strings are cleared.
         var pomoConfig = new WidgetConfig
         {
             Id = "pomo-1",
@@ -94,11 +93,11 @@ public sealed class WidgetTitleIconModeTests
             }
         };
         Assert.Equal(WidgetTitleIconKindNames.Pomodoro, WidgetTitleIconKindNames.FromWidgetConfig(pomoConfig));
-        Assert.True(WidgetTitleIconCustomization.NormalizeOverrides(pomoConfig));
-        Assert.Null(WidgetTitleIconCustomization.GetEmojiOverride(pomoConfig));
-
-        WidgetTitleIconCustomization.SetEmojiOverride(pomoConfig, "🍅");
         Assert.False(WidgetTitleIconCustomization.NormalizeOverrides(pomoConfig));
         Assert.Equal("🍅", WidgetTitleIconCustomization.GetEmojiOverride(pomoConfig));
+
+        pomoConfig.Metadata[WidgetTitleIconCustomization.EmojiMetadataKey] = "not-an-emoji";
+        Assert.True(WidgetTitleIconCustomization.NormalizeOverrides(pomoConfig));
+        Assert.Null(WidgetTitleIconCustomization.GetEmojiOverride(pomoConfig));
     }
 }

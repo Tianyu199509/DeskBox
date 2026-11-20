@@ -30,6 +30,8 @@ public partial class WidgetViewModel
     private bool _deferredStackRebuildPending;
     private bool _legacyStackMigrationQueued;
     private DispatcherQueueTimer? _stackDateBoundaryTimer;
+    private const int MaxDepartedStackSnapshots = 32;
+    private readonly List<DepartedStackSnapshot> _departedStackSnapshots = [];
     private HashSet<string> _disabledStacks = new(StringComparer.Ordinal);
     private Dictionary<string, string> _stackNameOverrides = new(StringComparer.Ordinal);
     private List<string> _stackOrder = [];
@@ -467,9 +469,14 @@ public partial class WidgetViewModel
             return PrepareStackMemberReorder(item);
         }
 
-        if (item is WidgetStackItem ||
-            !_stackDisplayItems.Any(candidate =>
-                ReferenceEquals(candidate, item)))
+        if (!_stackDisplayItems.Any(candidate =>
+                ReferenceEquals(candidate, item) ||
+                (item is WidgetStackItem stack &&
+                 candidate is WidgetStackItem candidateStack &&
+                 string.Equals(
+                     candidateStack.StackKey,
+                     stack.StackKey,
+                     StringComparison.Ordinal))))
         {
             return false;
         }
@@ -687,6 +694,7 @@ public partial class WidgetViewModel
         int memberInsertionIndex,
         out string resolvedStackKey)
     {
+        using var _ = BeginInlineLayoutUndoScope();
         resolvedStackKey = stackKey;
         if (!UsesStackProjection ||
             string.IsNullOrWhiteSpace(stackKey) ||
@@ -746,6 +754,7 @@ public partial class WidgetViewModel
         WidgetItem item,
         int visibleInsertionIndex)
     {
+        using var _ = BeginInlineLayoutUndoScope();
         if (!UsesStackProjection)
         {
             return false;
@@ -832,7 +841,7 @@ public partial class WidgetViewModel
 
         return PrepareVisibleItemReorder(item) &&
             MoveDisplayUnitForReorder(
-                GetLooseItemOrderKey(item),
+                GetDisplayUnitOrderKey(item),
                 visibleInsertionIndex);
     }
 
@@ -851,6 +860,7 @@ public partial class WidgetViewModel
         IReadOnlyList<WidgetItem> draggedItems,
         int visibleInsertionIndex)
     {
+        using var _ = BeginInlineLayoutUndoScope();
         if (!UsesStackProjection || draggedItems.Count == 0)
         {
             return false;
@@ -859,8 +869,16 @@ public partial class WidgetViewModel
         HashSet<WidgetItem> draggedSet = new(
             draggedItems,
             ReferenceEqualityComparer.Instance);
+        HashSet<string> draggedStackKeys = draggedItems
+            .OfType<WidgetStackItem>()
+            .Select(static stack => stack.StackKey)
+            .Where(static key => !string.IsNullOrWhiteSpace(key))
+            .ToHashSet(StringComparer.Ordinal);
         List<WidgetItem> block = _stackDisplayItems
-            .Where(draggedSet.Contains)
+            .Where(item =>
+                draggedSet.Contains(item) ||
+                (item is WidgetStackItem stack &&
+                 draggedStackKeys.Contains(stack.StackKey)))
             .ToList();
         if (block.Count == 0)
         {
@@ -881,6 +899,9 @@ public partial class WidgetViewModel
 
         // Classify before mutating anything: the insertion index is only
         // valid against the display list this drag started from.
+        HashSet<WidgetStackItem> movingStacks = new(
+            block.OfType<WidgetStackItem>(),
+            ReferenceEqualityComparer.Instance);
         Dictionary<WidgetStackItem, List<WidgetItem>> memberMoves = new(
             ReferenceEqualityComparer.Instance);
         List<WidgetItem> looseOrDetached = [];
@@ -888,6 +909,7 @@ public partial class WidgetViewModel
         {
             if (item is WidgetStackItem)
             {
+                looseOrDetached.Add(item);
                 continue;
             }
 
@@ -898,7 +920,7 @@ public partial class WidgetViewModel
             }
 
             WidgetStackItem? containingStack = FindContainingStack(item);
-            if (containingStack is null)
+            if (containingStack is null || movingStacks.Contains(containingStack))
             {
                 continue;
             }
@@ -931,7 +953,7 @@ public partial class WidgetViewModel
         // top-level units stay ahead of the block". Later phases (member
         // reorder, detach rebuild) can shift raw indices but not this count.
         HashSet<string> movingKeys = looseOrDetached
-            .Select(GetLooseItemOrderKey)
+            .Select(GetDisplayUnitOrderKey)
             .ToHashSet(StringComparer.Ordinal);
         int targetTopLevelPosition = 0;
         for (int index = 0; index < cappedIndex; index++)
@@ -983,7 +1005,7 @@ public partial class WidgetViewModel
         {
             List<string> currentOrder = GetCurrentDisplayUnitOrder();
             List<string> orderedMovingKeys = looseOrDetached
-                .Select(GetLooseItemOrderKey)
+                .Select(GetDisplayUnitOrderKey)
                 .Distinct(StringComparer.Ordinal)
                 .ToList();
             bool orderChanged = TryMoveDisplayUnitOverrides(
@@ -1203,6 +1225,7 @@ public partial class WidgetViewModel
 
     public void SetStackDisabled(string stackKey, bool disabled)
     {
+        using var _ = BeginInlineLayoutUndoScope();
         if (disabled)
         {
             _disabledStacks.Add(stackKey);
@@ -1218,6 +1241,7 @@ public partial class WidgetViewModel
 
     public void SetStackNameOverride(string stackKey, string? name)
     {
+        using var _ = BeginInlineLayoutUndoScope();
         if (string.IsNullOrWhiteSpace(name))
         {
             _stackNameOverrides.Remove(stackKey);
@@ -1272,8 +1296,10 @@ public partial class WidgetViewModel
     }
 
     public bool CreateManualStack(
-        IEnumerable<WidgetItem> selectedItems)
+        IEnumerable<WidgetItem> selectedItems,
+        WidgetItem? anchorTargetItem = null)
     {
+        using var _ = BeginInlineLayoutUndoScope();
         bool projectionWasEnabled = UsesStackProjection;
         List<WidgetItem> members =
             NormalizeStackMembers(selectedItems);
@@ -1284,6 +1310,7 @@ public partial class WidgetViewModel
 
         IReadOnlyList<string> activeOrder = GetActiveFolderDisplayOrder();
         bool maintainExplicitOrder =
+            anchorTargetItem is not null ||
             EffectiveSortMode == WidgetSortMode.Manual ||
             activeOrder.Count > 0;
         List<string> visibleOrder = maintainExplicitOrder
@@ -1296,6 +1323,16 @@ public partial class WidgetViewModel
                 visibleOrder,
                 members)
             : 0;
+        if (maintainExplicitOrder &&
+            anchorTargetItem is not null &&
+            !string.IsNullOrWhiteSpace(anchorTargetItem.Path))
+        {
+            int anchorIndex = visibleOrder.IndexOf(GetLooseItemOrderKey(anchorTargetItem));
+            if (anchorIndex >= 0)
+            {
+                insertionIndex = anchorIndex;
+            }
+        }
         if (maintainExplicitOrder)
         {
             SetActiveFolderDisplayOrder(
@@ -1392,6 +1429,7 @@ public partial class WidgetViewModel
         IEnumerable<WidgetItem> draggedItems,
         out string resolvedStackKey)
     {
+        using var _ = BeginInlineLayoutUndoScope();
         resolvedStackKey = stackKey;
         LastResolvedStackKey = stackKey;
         if (!UsesStackProjection ||
@@ -1473,6 +1511,7 @@ public partial class WidgetViewModel
         string stackKey,
         IEnumerable<WidgetItem> selectedItems)
     {
+        using var _ = BeginInlineLayoutUndoScope();
         if (!UsesStackProjection ||
             string.IsNullOrWhiteSpace(stackKey) ||
             !_stackItems.TryGetValue(
@@ -1576,6 +1615,7 @@ public partial class WidgetViewModel
 
     public bool RemoveItemFromStack(WidgetItem item)
     {
+        using var _ = BeginInlineLayoutUndoScope();
         WidgetStackItem? stack = FindContainingStack(item);
         if (stack is null)
         {
@@ -1646,6 +1686,7 @@ public partial class WidgetViewModel
 
     public bool DissolveStack(WidgetStackItem stack)
     {
+        using var _ = BeginInlineLayoutUndoScope();
         if (!stack.IsManual)
         {
             SetStackDisabled(stack.StackKey, disabled: true);
@@ -1944,6 +1985,7 @@ public partial class WidgetViewModel
 
     public void MoveStackUp(string stackKey)
     {
+        using var _ = BeginInlineLayoutUndoScope();
         List<string> visibleOrder = GetCurrentDisplayUnitOrder();
         int idx = visibleOrder.IndexOf(stackKey);
         if (idx <= 0) return;
@@ -1957,6 +1999,7 @@ public partial class WidgetViewModel
 
     public void MoveStackDown(string stackKey)
     {
+        using var _ = BeginInlineLayoutUndoScope();
         List<string> visibleOrder = GetCurrentDisplayUnitOrder();
         int idx = visibleOrder.IndexOf(stackKey);
         if (idx < 0 || idx >= visibleOrder.Count - 1) return;
@@ -1976,6 +2019,7 @@ public partial class WidgetViewModel
         string stackKey,
         int visibleInsertionIndex)
     {
+        using var _ = BeginInlineLayoutUndoScope();
         if (!UsesStackProjection ||
             string.IsNullOrWhiteSpace(stackKey))
         {
@@ -3065,7 +3109,14 @@ public partial class WidgetViewModel
                     NormalizeStackMemberPath(path)));
             if (_stackMemberOverrides[stackKey].Count == 0)
             {
-                _stackMemberOverrides.Remove(stackKey);
+                if (stackKey.StartsWith(ManualStackKeyPrefix, StringComparison.Ordinal))
+                {
+                    RemoveManualStackCustomization(stackKey);
+                }
+                else
+                {
+                    _stackMemberOverrides.Remove(stackKey);
+                }
             }
             else if (stackKey.StartsWith(
                          ManualStackKeyPrefix,
@@ -3352,6 +3403,7 @@ public partial class WidgetViewModel
             return;
         }
 
+        CaptureDepartedStackSnapshots(normalizedPaths);
         bool projectionWasEnabled = UsesStackProjection;
         int entryCount = _stackMemberOverrides.Count;
         int pathCount = _stackMemberOverrides.Values
@@ -3368,6 +3420,277 @@ public partial class WidgetViewModel
             }
         }
     }
+
+    public bool RestoreDepartedStackMemberships(
+        IEnumerable<string> restoredPaths,
+        IReadOnlyDictionary<string, string>? sourceToRestoredPathMap = null)
+    {
+        if ((restoredPaths is null && sourceToRestoredPathMap is null) ||
+            _departedStackSnapshots.Count == 0)
+        {
+            return false;
+        }
+
+        Dictionary<string, string>? normalizedRemap = null;
+        if (sourceToRestoredPathMap is { Count: > 0 })
+        {
+            normalizedRemap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach ((string sourcePath, string restoredPath) in sourceToRestoredPathMap)
+            {
+                if (string.IsNullOrWhiteSpace(sourcePath) || string.IsNullOrWhiteSpace(restoredPath))
+                {
+                    continue;
+                }
+
+                normalizedRemap[NormalizeStackMemberPath(sourcePath)] =
+                    NormalizeStackMemberPath(restoredPath);
+            }
+        }
+
+        HashSet<string> restoredSet = new(StringComparer.OrdinalIgnoreCase);
+        if (restoredPaths is not null)
+        {
+            foreach (string path in restoredPaths)
+            {
+                if (!string.IsNullOrWhiteSpace(path))
+                {
+                    restoredSet.Add(NormalizeStackMemberPath(path));
+                }
+            }
+        }
+
+        if (normalizedRemap is not null)
+        {
+            foreach (string remappedPath in normalizedRemap.Values)
+            {
+                restoredSet.Add(remappedPath);
+            }
+        }
+
+        if (restoredSet.Count == 0)
+        {
+            return false;
+        }
+
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        PruneExpiredDepartedStackSnapshots(now);
+        if (_departedStackSnapshots.Count == 0)
+        {
+            return false;
+        }
+
+        HashSet<string> existingItemPaths = Items
+            .Where(static item => !string.IsNullOrWhiteSpace(item.Path))
+            .Select(item => NormalizeStackMemberPath(item.Path))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (existingItemPaths.Count == 0)
+        {
+            return false;
+        }
+
+        string? currentScopeKey = GetCurrentFolderScopeKey();
+        bool projectionWasEnabled = UsesStackProjection;
+        bool changed = false;
+
+        for (int i = _departedStackSnapshots.Count - 1; i >= 0; i--)
+        {
+            DepartedStackSnapshot snapshot = _departedStackSnapshots[i];
+            if (!ScopeKeysMatch(snapshot.ScopeKey, currentScopeKey))
+            {
+                continue;
+            }
+
+            List<string> resolvedMembers = snapshot.MemberPaths
+                .Select(path => ResolveRestoredSnapshotMemberPath(path, normalizedRemap))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (!resolvedMembers.Any(path =>
+                    restoredSet.Contains(path) && existingItemPaths.Contains(path)))
+            {
+                continue;
+            }
+
+            List<string> presentMembers = resolvedMembers
+                .Where(path =>
+                    existingItemPaths.Contains(path) &&
+                    !IsAssignedToDifferentStack(path, snapshot.StackKey))
+                .ToList();
+            if (_stackMemberOverrides.TryGetValue(snapshot.StackKey, out List<string>? currentMembers))
+            {
+                foreach (string current in currentMembers)
+                {
+                    string normalized = NormalizeStackMemberPath(current);
+                    if (existingItemPaths.Contains(normalized) &&
+                        !presentMembers.Contains(normalized, StringComparer.OrdinalIgnoreCase))
+                    {
+                        presentMembers.Add(normalized);
+                    }
+                }
+            }
+
+            bool isManual = snapshot.StackKey.StartsWith(
+                ManualStackKeyPrefix,
+                StringComparison.Ordinal);
+            if ((isManual && presentMembers.Count < 2) || presentMembers.Count == 0)
+            {
+                continue;
+            }
+
+            _stackMemberOverrides[snapshot.StackKey] = presentMembers;
+            if (!string.IsNullOrWhiteSpace(snapshot.CustomName) &&
+                !_stackNameOverrides.ContainsKey(snapshot.StackKey))
+            {
+                _stackNameOverrides[snapshot.StackKey] = snapshot.CustomName;
+            }
+
+            List<string> scopedOrder;
+            if (!string.IsNullOrWhiteSpace(snapshot.ScopeKey))
+            {
+                if (!_subfolderDisplayOrders.TryGetValue(snapshot.ScopeKey, out List<string>? subOrder))
+                {
+                    subOrder = [];
+                    _subfolderDisplayOrders[snapshot.ScopeKey] = subOrder;
+                }
+
+                scopedOrder = subOrder;
+            }
+            else
+            {
+                scopedOrder = _stackOrder;
+            }
+
+            if (!scopedOrder.Contains(snapshot.StackKey, StringComparer.Ordinal))
+            {
+                int insertAt = snapshot.StackOrderIndex >= 0
+                    ? Math.Min(snapshot.StackOrderIndex, scopedOrder.Count)
+                    : scopedOrder.Count;
+                scopedOrder.Insert(insertAt, snapshot.StackKey);
+            }
+
+            if (resolvedMembers.All(path => existingItemPaths.Contains(path)))
+            {
+                _departedStackSnapshots.RemoveAt(i);
+            }
+            else if (normalizedRemap is not null)
+            {
+                _departedStackSnapshots[i] = snapshot with { MemberPaths = resolvedMembers };
+            }
+
+            changed = true;
+        }
+
+        if (!changed)
+        {
+            return false;
+        }
+
+        PersistStackCustomizations();
+        RebuildStackDisplayItems();
+        if (projectionWasEnabled != UsesStackProjection)
+        {
+            OnPropertyChanged(nameof(VisibleItems));
+        }
+
+        return true;
+    }
+
+    private static string ResolveRestoredSnapshotMemberPath(
+        string memberPath,
+        IReadOnlyDictionary<string, string>? normalizedRemap) =>
+        normalizedRemap is not null && normalizedRemap.TryGetValue(memberPath, out string? mapped)
+            ? mapped
+            : memberPath;
+
+    private void CaptureDepartedStackSnapshots(IReadOnlySet<string> departingPaths)
+    {
+        if (departingPaths.Count == 0 || _stackMemberOverrides.Count == 0)
+        {
+            return;
+        }
+
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        PruneExpiredDepartedStackSnapshots(now);
+        string? scopeKey = GetCurrentFolderScopeKey();
+
+        foreach ((string stackKey, List<string> members) in _stackMemberOverrides)
+        {
+            if (members.Count == 0 ||
+                !members.Any(path => departingPaths.Contains(NormalizeStackMemberPath(path))))
+            {
+                continue;
+            }
+
+            DepartedStackSnapshot? existingSnapshot = _departedStackSnapshots.FirstOrDefault(
+                snapshot =>
+                    string.Equals(snapshot.StackKey, stackKey, StringComparison.Ordinal) &&
+                    ScopeKeysMatch(snapshot.ScopeKey, scopeKey));
+            List<string> mergedMembers = [];
+            if (existingSnapshot is not null)
+            {
+                mergedMembers.AddRange(existingSnapshot.MemberPaths);
+            }
+
+            foreach (string path in members)
+            {
+                string normalized = NormalizeStackMemberPath(path);
+                if (!mergedMembers.Contains(normalized, StringComparer.OrdinalIgnoreCase))
+                {
+                    mergedMembers.Add(normalized);
+                }
+            }
+
+            string? customName = _stackNameOverrides.TryGetValue(stackKey, out string? existingName) &&
+                !string.IsNullOrWhiteSpace(existingName)
+                ? existingName
+                : existingSnapshot?.CustomName;
+            List<string> activeScopeOrder = !string.IsNullOrWhiteSpace(scopeKey)
+                ? (_subfolderDisplayOrders.TryGetValue(scopeKey, out List<string>? subOrder) ? subOrder : [])
+                : _stackOrder;
+            int orderIndex = activeScopeOrder.IndexOf(stackKey);
+            if (orderIndex < 0 && existingSnapshot is not null)
+            {
+                orderIndex = existingSnapshot.StackOrderIndex;
+            }
+
+            _departedStackSnapshots.RemoveAll(snapshot =>
+                string.Equals(snapshot.StackKey, stackKey, StringComparison.Ordinal) &&
+                ScopeKeysMatch(snapshot.ScopeKey, scopeKey));
+            _departedStackSnapshots.Add(new DepartedStackSnapshot(
+                stackKey,
+                scopeKey,
+                mergedMembers,
+                customName,
+                orderIndex,
+                now));
+        }
+
+        if (_departedStackSnapshots.Count > MaxDepartedStackSnapshots)
+        {
+            _departedStackSnapshots.RemoveRange(
+                0,
+                _departedStackSnapshots.Count - MaxDepartedStackSnapshots);
+        }
+    }
+
+    private bool IsAssignedToDifferentStack(string normalizedPath, string targetStackKey) =>
+        _stackMemberOverrides.Any(entry =>
+            !string.Equals(entry.Key, targetStackKey, StringComparison.Ordinal) &&
+            entry.Value.Any(member => string.Equals(
+                NormalizeStackMemberPath(member),
+                normalizedPath,
+                StringComparison.OrdinalIgnoreCase)));
+
+    private void PruneExpiredDepartedStackSnapshots(DateTimeOffset nowUtc) =>
+        _departedStackSnapshots.RemoveAll(snapshot =>
+            nowUtc - snapshot.CapturedAtUtc > TimeSpan.FromMinutes(30));
+
+    private sealed record DepartedStackSnapshot(
+        string StackKey,
+        string? ScopeKey,
+        List<string> MemberPaths,
+        string? CustomName,
+        int StackOrderIndex,
+        DateTimeOffset CapturedAtUtc);
 
     private static string NormalizeStackMemberPath(
         string path)

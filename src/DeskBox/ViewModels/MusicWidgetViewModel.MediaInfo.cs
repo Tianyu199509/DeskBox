@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using DeskBox.Helpers;
 using DeskBox.Services;
 using DeskBox.Services.Lyrics;
+using DeskBox.Services.Media;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.Graphics.Imaging;
@@ -79,16 +80,27 @@ public sealed partial class MusicWidgetViewModel
             return;
         }
 
+        bool preserveMetadataOnTransientBlankRead =
+            _hasCurrentMediaInfo &&
+            string.Equals(_placeholderCoverSessionId, info.SessionId, StringComparison.Ordinal) &&
+            string.IsNullOrWhiteSpace(info.Title) &&
+            string.IsNullOrWhiteSpace(info.Artist) &&
+            info.PlaybackState != MusicPlaybackState.Stopped &&
+            !string.IsNullOrWhiteSpace(_title);
+        string effectiveTitle = preserveMetadataOnTransientBlankRead ? _title : info.Title;
+        string effectiveArtist = preserveMetadataOnTransientBlankRead ? _artist : info.Artist;
+        string effectiveAlbum = preserveMetadataOnTransientBlankRead ? _album : info.Album;
+
         _hasCurrentMediaInfo = true;
-        Title = info.Title;
-        Artist = info.Artist;
-        Album = info.Album;
+        Title = effectiveTitle;
+        Artist = effectiveArtist;
+        Album = effectiveAlbum;
         _sourceAppUserModelId = info.SourceAppUserModelId;
         SourceDisplayName = info.SourceDisplayName;
         RefreshSourceAppIcon(info.SourceAppUserModelId, info.SourceDisplayName);
 
         DateTimeOffset nowUtc = DateTimeOffset.UtcNow;
-        string trackIdentitySig = $"{info.SourceAppUserModelId}\u001F{info.Title.Trim()}\u001F{info.Artist.Trim()}";
+        string trackIdentitySig = $"{info.SourceAppUserModelId}\u001F{effectiveTitle.Trim()}\u001F{effectiveArtist.Trim()}";
         bool trackIdentityChanged = !string.Equals(_lastTrackIdentitySignature, trackIdentitySig, StringComparison.Ordinal);
         if (trackIdentityChanged)
         {
@@ -116,8 +128,8 @@ public sealed partial class MusicWidgetViewModel
             nowUtc);
         (TimeSpan extrapolatedPos, TimeSpan effectiveDur) = _timelineExtrapolator.ApplyFullSnapshot(
             info.SourceAppUserModelId,
-            info.Title,
-            info.Artist,
+            effectiveTitle,
+            effectiveArtist,
             effectivePlaybackState,
             info.Position,
             info.Duration,
@@ -168,7 +180,7 @@ public sealed partial class MusicWidgetViewModel
             _hasAppliedCoverForCurrentTrack = false;
         }
 
-        string coverSig = $"{info.SessionId}\u001E{info.Title}\u001E{info.Artist}\u001E{info.Album}";
+        string coverSig = $"{info.SessionId}\u001E{effectiveTitle}\u001E{effectiveArtist}\u001E{effectiveAlbum}";
         if (!string.Equals(_currentTrackCoverSignature, coverSig, StringComparison.Ordinal))
         {
             _previousTrackFinalCoverFingerprint = _hasAppliedCoverForCurrentTrack ? _lastCoverFingerprint : 0;
@@ -181,7 +193,10 @@ public sealed partial class MusicWidgetViewModel
 
         bool coverChanged = !string.Equals(_lastCoverSignature, coverSig, StringComparison.Ordinal);
 
-        if (info.Thumbnail is null)
+        bool hasThumbnailData = info.ThumbnailBytes is { Length: > 0 } ||
+            (info.ThumbnailUnchanged && info.ThumbnailFingerprint != 0);
+
+        if (!hasThumbnailData)
         {
             if (!string.Equals(_confirmedEmptyCoverSignature, coverSig, StringComparison.Ordinal) &&
                 !(string.Equals(_lastCoverSignature, coverSig, StringComparison.Ordinal) && _hasAppliedCover) &&
@@ -203,18 +218,10 @@ public sealed partial class MusicWidgetViewModel
         else
         {
             _confirmedEmptyCoverSignature = null;
-            byte[]? thumbnailBytes = await ReadThumbnailBytesAsync(info.Thumbnail);
-            if (_isDisposed || !string.Equals(_currentTrackCoverSignature, coverSig, StringComparison.Ordinal))
-            {
-                if (!_isDisposed && !CanRunWindowMediaRefresh())
-                {
-                    Interlocked.Exchange(ref _hiddenMediaStateDirty, 1);
-                }
-
-                return;
-            }
-
-            ulong fingerprint = ComputeThumbnailFingerprint(thumbnailBytes);
+            byte[]? thumbnailBytes = info.ThumbnailBytes;
+            ulong fingerprint = info.ThumbnailFingerprint != 0
+                ? info.ThumbnailFingerprint
+                : ComputeThumbnailFingerprint(thumbnailBytes);
             if (fingerprint == 0)
             {
                 if (!(string.Equals(_lastCoverSignature, coverSig, StringComparison.Ordinal) && _hasAppliedCover) &&
@@ -279,6 +286,13 @@ public sealed partial class MusicWidgetViewModel
                         {
                             ++_lateCoverProbeGeneration;
                         }
+                    }
+                    else if (thumbnailBytes is null || thumbnailBytes.Length == 0)
+                    {
+                        int gen = ++_coverGeneration;
+                        _lastCoverSignature = null;
+                        _lastCoverFingerprint = 0;
+                        _ = ScheduleCoverRetry(coverSig, gen);
                     }
                     else if (coverChanged || !_hasAppliedCover || fingerprint != _lastCoverFingerprint)
                     {
@@ -726,7 +740,7 @@ public sealed partial class MusicWidgetViewModel
     {
         try
         {
-            return Application.Current?.RequestedTheme == ApplicationTheme.Light;
+            return !NeutralInteractionBrush.IsDarkTheme(null);
         }
         catch
         {
@@ -745,51 +759,6 @@ public sealed partial class MusicWidgetViewModel
     private const int MaxCoverDecodedDimension = 512;
     private const int DominantColorSampleMaxDimension = 32;
     private const int MaxCoverRetryCount = 3;
-    private const ulong MaxCoverStreamBytes = 32UL * 1024 * 1024;
-
-    private static async Task<byte[]?> ReadThumbnailBytesAsync(IRandomAccessStreamReference? thumbnail)
-    {
-        if (thumbnail is null)
-        {
-            return null;
-        }
-
-        try
-        {
-            using IRandomAccessStreamWithContentType stream = await thumbnail.OpenReadAsync();
-            ulong rawSize = stream.Size;
-            if (rawSize == 0 || rawSize > MaxCoverStreamBytes)
-            {
-                return null;
-            }
-
-            byte[] bytes = new byte[(int)rawSize];
-            using (var reader = new DataReader(stream.GetInputStreamAt(0)))
-            {
-                uint loaded = await reader.LoadAsync((uint)bytes.Length);
-                if (loaded == 0)
-                {
-                    reader.DetachStream();
-                    return null;
-                }
-
-                if (loaded < bytes.Length)
-                {
-                    Array.Resize(ref bytes, (int)loaded);
-                }
-
-                reader.ReadBytes(bytes);
-                reader.DetachStream();
-            }
-
-            return bytes;
-        }
-        catch (Exception ex)
-        {
-            App.Log($"[MusicWidget] Failed to read thumbnail stream: {ex.Message}");
-            return null;
-        }
-    }
 
     internal static ulong ComputeThumbnailFingerprint(ReadOnlySpan<byte> bytes)
     {
@@ -936,8 +905,8 @@ public sealed partial class MusicWidgetViewModel
                 return;
             }
 
-            IRandomAccessStreamReference? latestThumbnail =
-                await _musicSessionService.GetCurrentThumbnailAsync(_preferredSessionId);
+            MusicThumbnailSnapshot? latestThumbnail =
+                await _musicSessionService.GetCurrentThumbnailAsync(_preferredSessionId, _lastCoverFingerprint);
             if (_isDisposed ||
                 probeGeneration != _lateCoverProbeGeneration ||
                 !CanRunWindowMediaRefresh() ||
@@ -946,16 +915,14 @@ public sealed partial class MusicWidgetViewModel
                 return;
             }
 
-            byte[]? bytes = await ReadThumbnailBytesAsync(latestThumbnail);
-            if (_isDisposed ||
-                probeGeneration != _lateCoverProbeGeneration ||
-                !CanRunWindowMediaRefresh() ||
-                !string.Equals(_currentTrackCoverSignature, coverSignature, StringComparison.Ordinal))
+            if (latestThumbnail is null)
             {
-                return;
+                continue;
             }
 
-            ulong fp = ComputeThumbnailFingerprint(bytes);
+            ulong fp = latestThumbnail.Fingerprint != 0
+                ? latestThumbnail.Fingerprint
+                : ComputeThumbnailFingerprint(latestThumbnail.Bytes);
             if (fp == 0)
             {
                 continue;

@@ -4,6 +4,9 @@ fn main() {
 }
 
 #[cfg(windows)]
+mod media_session;
+
+#[cfg(windows)]
 mod windows_proxy {
     use std::{
         cell::RefCell,
@@ -45,7 +48,8 @@ mod windows_proxy {
                 Shell::{
                     CMF_EXPLORE, CMF_ITEMMENU, CMF_NORMAL, CMIC_MASK_CONTROL_DOWN,
                     CMIC_MASK_PTINVOKE, CMIC_MASK_SHIFT_DOWN, CMINVOKECOMMANDINFOEX,
-                    Common::ITEMIDLIST, GCS_VERBW, IContextMenu, IContextMenu2, IContextMenu3,
+                    Common::ITEMIDLIST, GCS_VERBA, GCS_VERBW, IContextMenu, IContextMenu2,
+                    IContextMenu3,
                     IShellFolder, IShellItemImageFactory, SHBindToParent,
                     SHCreateItemFromParsingName, SHFILEINFOW, SHGFI_ADDOVERLAYS, SHGFI_ICON,
                     SHGFI_LARGEICON, SHGFI_OVERLAYINDEX, SHGFI_SYSICONINDEX, SHGetFileInfoW,
@@ -54,9 +58,11 @@ mod windows_proxy {
                 },
                 WindowsAndMessaging::{
                     AppendMenuW, CallNextHookEx, CreatePopupMenu, CreateWindowExW, DefWindowProcW,
-                    DestroyIcon, DestroyMenu, DestroyWindow, DispatchMessageW, GetClassNameW,
+                    DeleteMenu, DestroyIcon, DestroyMenu, DestroyWindow, DispatchMessageW,
+                    GetClassNameW,
                     GetIconInfo, GetMenuItemCount, GetMenuItemInfoW, GetMessageW, HICON, HMENU,
-                    ICONINFO, InsertMenuItemW, MENUITEMINFOW, MF_SEPARATOR, MFT_SEPARATOR,
+                    ICONINFO, InsertMenuItemW, MENUITEMINFOW, MF_BYPOSITION, MF_SEPARATOR,
+                    MFT_SEPARATOR,
                     MFT_STRING, MIIM_FTYPE, MIIM_ID, MIIM_STRING, MSG, MSLLHOOKSTRUCT, PM_REMOVE,
                     PeekMessageW, PostMessageW, PostThreadMessageW, RegisterClassW, SW_SHOWNORMAL,
                     SetForegroundWindow, SetWindowsHookExW, TPM_RETURNCMD, TrackPopupMenuEx,
@@ -137,6 +143,8 @@ mod windows_proxy {
     thread_local! {
         static ACTIVE_CONTEXT_MENU: RefCell<Option<ContextMenuMessageHandler>> =
             const { RefCell::new(None) };
+        static LAST_INVOKE_FAILURE_VERB: RefCell<Option<String>> =
+            const { RefCell::new(None) };
     }
 
     /// Owner window of the menu that is currently on screen (0 when none).
@@ -210,6 +218,7 @@ mod windows_proxy {
         ContextMenuServer {
             dark: bool,
         },
+        MediaSessionServer,
     }
 
     #[derive(Clone)]
@@ -630,6 +639,7 @@ mod windows_proxy {
                 }
             }
             ProxyRequest::ContextMenuServer { dark } => run_context_menu_server(dark),
+            ProxyRequest::MediaSessionServer => crate::media_session::run_media_session_server(),
         }
     }
 
@@ -660,6 +670,12 @@ mod windows_proxy {
                 return Err("unexpected extra arguments".to_string());
             }
             return Ok(ProxyRequest::ContextMenuServer { dark });
+        }
+        if first == "--media-session-server" {
+            if arguments.next().is_some() {
+                return Err("unexpected extra arguments".to_string());
+            }
+            return Ok(ProxyRequest::MediaSessionServer);
         }
         if first == "--extract-batch" {
             if arguments.next().is_some() {
@@ -1643,8 +1659,10 @@ mod windows_proxy {
         query_result
             .ok()
             .map_err(|error| format!("Shell menu population failed: {error}"))?;
+        remove_unsupported_non_explorer_items(&context_menu, menu.0);
         insert_host_rename_item(&context_menu, menu.0, rename_label)?;
         LAST_INVOKE_FAILURE_HR.store(0, Ordering::Relaxed);
+        LAST_INVOKE_FAILURE_VERB.with(|slot| *slot.borrow_mut() = None);
 
         ACTIVE_CONTEXT_MENU.with(|active| {
             *active.borrow_mut() = message_handler;
@@ -1761,6 +1779,7 @@ mod windows_proxy {
                 y: screen_y,
             },
         };
+        let selected_verb = shell_menu_item_verb(&context_menu, selected);
         // SAFETY: CMINVOKECOMMANDINFOEX is ABI-compatible with the
         // CMINVOKECOMMANDINFO prefix the interface expects; numeric lpVerb
         // offsets are the documented IContextMenu ABI and the structure lives
@@ -1774,7 +1793,17 @@ mod windows_proxy {
             // HRESULT rides along in the server result line.
             let hresult = error.code().0 as u32;
             LAST_INVOKE_FAILURE_HR.store(hresult, Ordering::Relaxed);
-            eprintln!("Shell command invocation failed: {error} (hr=0x{hresult:08X})");
+            let sanitized_verb = selected_verb
+                .as_deref()
+                .and_then(sanitize_protocol_token);
+            LAST_INVOKE_FAILURE_VERB.with(|slot| *slot.borrow_mut() = sanitized_verb.clone());
+            if let Some(verb) = sanitized_verb.as_deref() {
+                eprintln!(
+                    "Shell command invocation failed: {error} (hr=0x{hresult:08X} verb={verb})"
+                );
+            } else {
+                eprintln!("Shell command invocation failed: {error} (hr=0x{hresult:08X})");
+            }
             return Ok(classify_invoke_failure(hresult));
         }
 
@@ -1800,37 +1829,182 @@ mod windows_proxy {
         })
     }
 
-    /// Verb probe for a populated Shell menu command id. GCS_VERBW is the
-    /// documented wide-verb query and works on every shell that implements
-    /// IContextMenu; handlers that do not implement it simply fail, which the
-    /// caller treats as "unknown item".
+    /// Verb probe for a populated Shell menu command id. GCS_VERBW is queried
+    /// first; handlers that only implement the legacy ANSI variant fall back
+    /// to GCS_VERBA. Handlers that implement neither fail, which the caller
+    /// treats as "unknown item".
     fn shell_menu_item_verb(context_menu: &IContextMenu, command_id: u32) -> Option<String> {
         if !(CONTEXT_MENU_FIRST_COMMAND_ID..=CONTEXT_MENU_LAST_COMMAND_ID).contains(&command_id) {
             return None;
         }
 
-        let mut buffer = [0u16; 64];
+        let offset = (command_id - CONTEXT_MENU_FIRST_COMMAND_ID) as usize;
+        let mut wide_buffer = [0u16; 64];
         // SAFETY: The buffer outlives the call; GCS_VERBW writes wide
         // characters through the byte-typed parameter, which is the documented
         // ABI for the wide variant.
-        let queried = unsafe {
+        let wide_queried = unsafe {
             context_menu.GetCommandString(
-                (command_id - CONTEXT_MENU_FIRST_COMMAND_ID) as usize,
+                offset,
                 GCS_VERBW,
                 None,
-                PSTR(buffer.as_mut_ptr().cast()),
-                buffer.len() as u32,
+                PSTR(wide_buffer.as_mut_ptr().cast()),
+                wide_buffer.len() as u32,
             )
         };
-        if queried.is_err() {
+        if wide_queried.is_ok() {
+            let length = wide_buffer
+                .iter()
+                .position(|&wide| wide == 0)
+                .unwrap_or(wide_buffer.len());
+            if length > 0 {
+                return Some(String::from_utf16_lossy(&wide_buffer[..length]));
+            }
+        }
+
+        let mut ansi_buffer = [0u8; 128];
+        // SAFETY: The buffer outlives the call; GCS_VERBA writes a
+        // NUL-terminated ANSI verb string up to cchMax bytes.
+        let ansi_queried = unsafe {
+            context_menu.GetCommandString(
+                offset,
+                GCS_VERBA,
+                None,
+                PSTR(ansi_buffer.as_mut_ptr()),
+                ansi_buffer.len() as u32,
+            )
+        };
+        if ansi_queried.is_err() {
             return None;
         }
 
-        let length = buffer
+        let length = ansi_buffer
             .iter()
-            .position(|&wide| wide == 0)
-            .unwrap_or(buffer.len());
-        Some(String::from_utf16_lossy(&buffer[..length]))
+            .position(|&byte| byte == 0)
+            .unwrap_or(ansi_buffer.len());
+        if length == 0 {
+            return None;
+        }
+
+        Some(String::from_utf8_lossy(&ansi_buffer[..length]).into_owned())
+    }
+
+    /// Shell verbs that Windows 10 1909+ and Windows 11 restrict exclusively
+    /// to explorer.exe; invoking them from any third-party host always fails
+    /// with E_ACCESSDENIED (0x80070005), even when running elevated.
+    fn is_unsupported_non_explorer_shell_verb(verb: &str) -> bool {
+        let trimmed = verb.trim();
+        matches!(
+            trimmed.to_ascii_lowercase().as_str(),
+            "pintostartscreen"
+                | "windows.pintostartscreen"
+                | "startpin"
+                | "startunpin"
+                | "unpinfromstartscreen"
+                | "taskbarpin"
+                | "taskbarunpin"
+        )
+    }
+
+    fn sanitize_protocol_token(raw: &str) -> Option<String> {
+        let cleaned: String = raw
+            .trim()
+            .chars()
+            .filter(|ch| ch.is_ascii_graphic() && !ch.is_whitespace())
+            .take(64)
+            .collect();
+        (!cleaned.is_empty()).then_some(cleaned)
+    }
+
+    /// Removes top-level Shell menu items whose canonical verb is known to be
+    /// restricted to explorer.exe and cleans up any orphaned separators left
+    /// behind by the removal.
+    fn remove_unsupported_non_explorer_items(context_menu: &IContextMenu, menu: HMENU) {
+        remove_unsupported_non_explorer_items_with_verb_probe(menu, |command_id| {
+            shell_menu_item_verb(context_menu, command_id)
+        });
+    }
+
+    fn remove_unsupported_non_explorer_items_with_verb_probe(
+        menu: HMENU,
+        verb_of_command_id: impl Fn(u32) -> Option<String>,
+    ) {
+        let count = unsafe { GetMenuItemCount(Some(menu)) };
+        if count <= 0 {
+            return;
+        }
+
+        let mut removed_any = false;
+        for index in (0..count as u32).rev() {
+            let mut info = MENUITEMINFOW {
+                cbSize: size_of::<MENUITEMINFOW>() as u32,
+                fMask: MIIM_ID | MIIM_FTYPE,
+                ..Default::default()
+            };
+            // SAFETY: Read-only query over a valid index of this menu.
+            if unsafe { GetMenuItemInfoW(menu, index, true, &mut info) }.is_err() {
+                continue;
+            }
+            if info.fType == MFT_SEPARATOR {
+                continue;
+            }
+            if !(CONTEXT_MENU_FIRST_COMMAND_ID..=CONTEXT_MENU_LAST_COMMAND_ID).contains(&info.wID) {
+                continue;
+            }
+
+            let is_unsupported = verb_of_command_id(info.wID)
+                .is_some_and(|verb| is_unsupported_non_explorer_shell_verb(&verb));
+            if is_unsupported {
+                // SAFETY: index is within the current menu item range and
+                // iterating in reverse keeps lower indexes stable.
+                if unsafe { DeleteMenu(menu, index, MF_BYPOSITION) }.is_ok() {
+                    removed_any = true;
+                }
+            }
+        }
+
+        if removed_any {
+            prune_redundant_separators(menu);
+        }
+    }
+
+    fn prune_redundant_separators(menu: HMENU) {
+        let mut index: u32 = 0;
+        let mut previous_was_separator = true;
+        loop {
+            let count = unsafe { GetMenuItemCount(Some(menu)) };
+            if count <= 0 || index >= count as u32 {
+                break;
+            }
+
+            if menu_item_is_separator(menu, index) {
+                if previous_was_separator {
+                    // SAFETY: index < count for this menu.
+                    let _ = unsafe { DeleteMenu(menu, index, MF_BYPOSITION) };
+                    continue;
+                }
+                previous_was_separator = true;
+            } else {
+                previous_was_separator = false;
+            }
+
+            index += 1;
+        }
+
+        loop {
+            let count = unsafe { GetMenuItemCount(Some(menu)) };
+            if count <= 0 {
+                break;
+            }
+            let last = (count - 1) as u32;
+            if !menu_item_is_separator(menu, last) {
+                break;
+            }
+            // SAFETY: last == count - 1 is valid because count > 0.
+            if unsafe { DeleteMenu(menu, last, MF_BYPOSITION) }.is_err() {
+                break;
+            }
+        }
     }
 
     fn insert_host_rename_item_with_verb_probe(
@@ -2017,7 +2191,10 @@ mod windows_proxy {
             loop {
                 let mut line = String::new();
                 match lines.read_line(&mut line) {
-                    Ok(0) | Err(_) => break,
+                    Ok(0) | Err(_) => {
+                        dismiss_open_menu(owner_raw);
+                        break;
+                    }
                     Ok(_) => {
                         let command = normalize_command_line(&line);
                         if command == "cancel" {
@@ -2111,6 +2288,11 @@ mod windows_proxy {
             if invoke_hr != 0 {
                 detail.push_str(&format!(" hr=0x{invoke_hr:08X}"));
             }
+            LAST_INVOKE_FAILURE_VERB.with(|slot| {
+                if let Some(verb) = slot.borrow().as_deref() {
+                    detail.push_str(&format!(" verb={verb}"));
+                }
+            });
             // The host reads this with a line reader; without the terminating
             // newline the round stalls until the pipe EOFs or the 10-minute
             // interaction budget expires, swallowing every later right-click.
@@ -2984,6 +3166,116 @@ mod windows_proxy {
                 classify_invoke_failure(0x8007_02E4),
                 CONTEXT_MENU_EXIT_FAILED_ACCESS_DENIED
             );
+        }
+
+        #[test]
+        fn unsupported_non_explorer_pin_verbs_are_matched_case_insensitively() {
+            for verb in [
+                "pintostartscreen",
+                "PinToStartScreen",
+                "Windows.pintostartscreen",
+                "  startpin ",
+                "startunpin",
+                "unpinfromstartscreen",
+                "taskbarpin",
+                "TaskbarUnpin",
+            ] {
+                assert!(
+                    is_unsupported_non_explorer_shell_verb(verb),
+                    "expected verb '{verb}' to be filtered as explorer-only"
+                );
+            }
+
+            for allowed in ["open", "properties", "cut", "copy", "delete", "runas", ""] {
+                assert!(
+                    !is_unsupported_non_explorer_shell_verb(allowed),
+                    "expected verb '{allowed}' to remain visible"
+                );
+            }
+        }
+
+        #[test]
+        fn non_explorer_pin_items_are_removed_and_redundant_separators_are_pruned() {
+            let menu = MenuGuard(unsafe { CreatePopupMenu() }.expect("popup menu"));
+            let push_item = |label: &str, id: u32| {
+                let wide: Vec<u16> = label.encode_utf16().chain(std::iter::once(0)).collect();
+                unsafe {
+                    AppendMenuW(
+                        menu.0,
+                        Default::default(),
+                        id as usize,
+                        PCWSTR(wide.as_ptr()),
+                    )
+                }
+                .expect("seed item");
+            };
+            let push_sep = || {
+                unsafe { AppendMenuW(menu.0, MF_SEPARATOR, 0, PCWSTR::null()) }
+                    .expect("seed separator");
+            };
+
+            // Leading pin item followed by separator, middle pin group between
+            // two separators, normal edit/properties items, and trailing pin.
+            push_item("Pin to Start", 1);
+            push_sep();
+            push_item("Open", 2);
+            push_sep();
+            push_item("Pin to taskbar", 3);
+            push_item("Unpin from Start", 4);
+            push_sep();
+            push_item("Properties", 5);
+            push_sep();
+            push_item("Windows Pin", 6);
+
+            let verb_of = |command_id: u32| -> Option<String> {
+                match command_id {
+                    1 => Some("pintostartscreen".to_string()),
+                    2 => Some("open".to_string()),
+                    3 => Some("taskbarpin".to_string()),
+                    4 => Some("unpinfromstartscreen".to_string()),
+                    5 => Some("properties".to_string()),
+                    6 => Some("Windows.pintostartscreen".to_string()),
+                    _ => None,
+                }
+            };
+
+            remove_unsupported_non_explorer_items_with_verb_probe(menu.0, &verb_of);
+            insert_host_rename_item_with_verb_probe(menu.0, Some("Rename"), &verb_of)
+                .expect("rename inserted");
+
+            // Expected layout: [Open (2), Rename (0x7001), SEP, Properties (5)]
+            let count = unsafe { GetMenuItemCount(Some(menu.0)) };
+            assert_eq!(count, 4, "all pin verbs and redundant separators removed");
+
+            let read_entry = |index: u32| -> (u32, bool) {
+                let mut info = MENUITEMINFOW {
+                    cbSize: size_of::<MENUITEMINFOW>() as u32,
+                    fMask: MIIM_ID | MIIM_FTYPE,
+                    ..Default::default()
+                };
+                unsafe { GetMenuItemInfoW(menu.0, index, true, &mut info) }.expect("menu entry");
+                (info.wID, info.fType == MFT_SEPARATOR)
+            };
+
+            assert_eq!(read_entry(0), (2, false));
+            assert_eq!(read_entry(1), (CONTEXT_MENU_CUSTOM_RENAME_COMMAND_ID, false));
+            assert_eq!(read_entry(2).1, true);
+            assert_eq!(read_entry(3), (5, false));
+        }
+
+        #[test]
+        fn media_session_server_request_parses_without_extra_arguments() {
+            let parsed = parse_request_from(["--media-session-server"].into_iter().map(OsString::from))
+                .expect("media session server request");
+            assert!(matches!(parsed, ProxyRequest::MediaSessionServer));
+
+            let rejected = parse_request_from(
+                ["--media-session-server", "extra"]
+                    .into_iter()
+                    .map(OsString::from),
+            )
+            .expect_err("extra arguments must be rejected");
+            assert!(rejected.contains("unexpected extra arguments"));
         }
     }
 }

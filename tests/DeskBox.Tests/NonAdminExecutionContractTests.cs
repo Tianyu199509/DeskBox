@@ -23,16 +23,18 @@ public sealed class NonAdminExecutionContractTests
     }
 
     [Fact]
-    public void DirectStartupTask_UsesInboxClientWithoutShellOrElevation()
+    public void DirectStartupTask_UsesDirectComWithoutShellOrElevation()
     {
         string source = File.ReadAllText(TestPaths.FromRepository(
             "src/DeskBox/Services/DirectStartupTaskBackend.cs"));
 
-        Assert.Contains("Environment.SystemDirectory", source, StringComparison.Ordinal);
-        Assert.Contains("UseShellExecute = false", source, StringComparison.Ordinal);
-        Assert.Contains("CreateNoWindow = true", source, StringComparison.Ordinal);
+        Assert.Contains("DirectStartupTaskXmlReader.Register(", source, StringComparison.Ordinal);
+        Assert.Contains("DirectStartupTaskXmlReader.Read(", source, StringComparison.Ordinal);
+        Assert.Contains("DirectStartupTaskXmlReader.Delete(", source, StringComparison.Ordinal);
         Assert.Contains("InteractiveToken", source, StringComparison.Ordinal);
         Assert.Contains("LeastPrivilege", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("schtasks.exe", source, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Process.Start", source, StringComparison.Ordinal);
         Assert.DoesNotContain("HighestAvailable", source, StringComparison.Ordinal);
         Assert.DoesNotContain("runas", source, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("cmd.exe", source, StringComparison.OrdinalIgnoreCase);

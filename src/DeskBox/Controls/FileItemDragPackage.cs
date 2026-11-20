@@ -1,6 +1,8 @@
+using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Platform;
 using DeskBox.Services;
+using DeskBox.Services.DragDrop;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Storage;
 
@@ -9,7 +11,8 @@ namespace DeskBox.Controls;
 public readonly record struct FileItemDragPackageResult(
     IReadOnlyList<string> SourcePaths,
     bool HasStorageItems,
-    bool UsesNativeShellDataObject);
+    bool UsesNativeShellDataObject,
+    IReadOnlyList<string>? PhysicalPaths = null);
 
 /// <summary>
 /// Creates the common file-item drag payload. Hosts remain responsible for
@@ -56,16 +59,40 @@ public static class FileItemDragPackage
     internal static DataPackageOperation ResolveDragOutPreferredOperation(
         string? action,
         IEnumerable<string>? sourcePaths = null,
-        bool? isProtectedCopyOnly = null)
+        bool? isProtectedCopyOnly = null,
+        Func<string, bool>? appExecLinkProbe = null,
+        bool? isDefaultCopySpecialMedia = null,
+        bool controlPressed = false,
+        bool oneShotCopyFallback = false)
     {
+        // AppExecutionAlias (IO_REPARSE_TAG_APPEXECLINK in WindowsApps\*.exe) is a
+        // 0-byte reparse stub whose raw copy fails with 0x80070780; prefer Link so
+        // Explorer creates a shortcut instead of showing an OS copy error dialog.
+        if (ContainsAppExecutionAliasSource(sourcePaths, appExecLinkProbe))
+        {
+            return DataPackageOperation.Link;
+        }
+
         if (isProtectedCopyOnly ?? IsProtectedCopyOnlySource(sourcePaths))
+        {
+            return DataPackageOperation.Copy;
+        }
+
+        // D3: special media (USB/removable drives, network/UNC shares, IM chat
+        // caches, unhydrated cloud placeholders) default to Copy on drag-out so
+        // mapped folders over external or cloud storage never lose originals on a
+        // plain drag, while keeping Copy|Move available when Shift is held.
+        if (isDefaultCopySpecialMedia ?? IsDefaultCopySpecialMediaSource(sourcePaths))
         {
             return DataPackageOperation.Copy;
         }
 
         return action switch
         {
-            SettingsService.ManagedDragOutActionMove => DataPackageOperation.Move,
+            SettingsService.ManagedDragOutActionMove =>
+                (controlPressed || oneShotCopyFallback)
+                    ? DataPackageOperation.Copy
+                    : DataPackageOperation.Move,
             SettingsService.ManagedDragOutActionCopy => DataPackageOperation.Copy,
             _ => DataPackageOperation.None
         };
@@ -162,29 +189,91 @@ public static class FileItemDragPackage
         return false;
     }
 
+    internal static bool ContainsAppExecutionAliasSource(
+        IEnumerable<string>? sourcePaths,
+        Func<string, bool>? appExecLinkProbe = null)
+    {
+        if (sourcePaths is null)
+        {
+            return false;
+        }
+
+        Func<string, bool> probe = appExecLinkProbe ??
+            StorageMigrationNativeMethods.IsAppExecutionAliasReparsePoint;
+        foreach (string rawPath in sourcePaths)
+        {
+            if (string.IsNullOrWhiteSpace(rawPath) ||
+                !string.Equals(Path.GetExtension(rawPath), ".exe", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (appExecLinkProbe is null &&
+                DesktopOutboundDropCoordinator.IsFastNetworkCandidatePath(rawPath))
+            {
+                continue;
+            }
+
+            try
+            {
+                if (probe(rawPath))
+                {
+                    return true;
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        return false;
+    }
+
     internal static bool IsProtectedCopyOnlySource(IEnumerable<string>? sourcePaths) =>
         IsStartMenuShortcutSource(sourcePaths) ||
-        DriveMediaInterop.IsProtectedDragOutSource(sourcePaths);
+        DriveMediaInterop.IsProtectedDragOutSource(sourcePaths) ||
+        StoreVirtualizedPathPolicy.IsCopyOnlyVirtualizedSource(sourcePaths);
+
+    internal static bool IsProtectedCopyOnlySource(FileItemDragPackageResult result) =>
+        IsProtectedCopyOnlySource(result.SourcePaths) ||
+        (result.PhysicalPaths is { Count: > 0 } physicalPaths &&
+         IsProtectedCopyOnlySource(physicalPaths));
+
+    internal static bool IsDefaultCopySpecialMediaSource(IEnumerable<string>? sourcePaths) =>
+        sourcePaths is not null &&
+        DriveMediaInterop.ClassifyInboundDropSources(sourcePaths) ==
+            InboundSourceProtectionKind.ExternalRemovableOrNetwork;
+
+    internal static bool IsDefaultCopySpecialMediaSource(FileItemDragPackageResult result) =>
+        IsDefaultCopySpecialMediaSource(result.SourcePaths) ||
+        (result.PhysicalPaths is { Count: > 0 } physicalPaths &&
+         IsDefaultCopySpecialMediaSource(physicalPaths));
 
     internal static DataPackageOperation ResolveDragOutAllowedOperations(
         string? action,
         bool? isWindows11OrLater = null,
         IEnumerable<string>? sourcePaths = null,
-        bool? isProtectedCopyOnly = null)
+        bool? isProtectedCopyOnly = null,
+        Func<string, bool>? appExecLinkProbe = null,
+        bool controlPressed = false,
+        bool oneShotCopyFallback = false,
+        bool? isDefaultCopySpecialMedia = null)
     {
         bool win11OrLater = isWindows11OrLater ??
             Services.WindowsCompatibilityService.IsWindows11OrLater;
 
-        // Explicit Copy-only mode strictly advertises single-bit Copy on both
-        // Win11 and Win10. Protected launcher/system directories (Start Menu,
-        // Public Desktop, Program Files, Windows) forbid Move on every OS,
-        // while offering Copy | Link (0x5 != 0x7) on Win11 so Taskbar / Start Menu
-        // pinning and Alt+Drag shortcut creation work seamlessly.
-        if (string.Equals(action, SettingsService.ManagedDragOutActionCopy, StringComparison.Ordinal))
+        // AppExecutionAlias stubs cannot be copied (0x80070780) or moved; offer
+        // single-bit Link (0x4 != 0x7 sentinel) on both Win10 and Win11 so Ctrl+Drag
+        // or copy-only targets never attempt to copy a 0-byte reparse stub.
+        if (ContainsAppExecutionAliasSource(sourcePaths, appExecLinkProbe))
         {
-            return DataPackageOperation.Copy;
+            return DataPackageOperation.Link;
         }
 
+        // Protected launcher/system directories (Start Menu, Public Desktop,
+        // Program Files, Windows, AppCache) forbid Move on every OS, while
+        // offering Copy | Link (0x5 != 0x7) on Win11 so Taskbar / Start Menu
+        // pinning and Alt+Drag shortcut creation work seamlessly.
         if (isProtectedCopyOnly ?? IsProtectedCopyOnlySource(sourcePaths))
         {
             return win11OrLater
@@ -192,13 +281,44 @@ public static class FileItemDragPackage
                 : DataPackageOperation.Copy;
         }
 
+        // D3: special media (USB/removable drives, UNC/network shares, IM chat
+        // caches, unhydrated cloud placeholders) default to Copy. On Win11,
+        // Preferred DropEffect = Copy governs plain drags while Copy | Move keeps
+        // Shift+Drag available; on Win10, Explorer ignores Preferred DropEffect
+        // and obeys single-bit AllowedOperations, so collapse to single-bit Copy
+        // to prevent deleting originals on external, network, chat, or cloud media.
+        if (!win11OrLater &&
+            (isDefaultCopySpecialMedia ?? IsDefaultCopySpecialMediaSource(sourcePaths)))
+        {
+            return DataPackageOperation.Copy;
+        }
+
+        if (string.Equals(action, SettingsService.ManagedDragOutActionCopy, StringComparison.Ordinal))
+        {
+            // Decision 1B: on Win11, Preferred DropEffect = Copy makes Explorer
+            // default to Copy (even on same-volume drops) while SupportedOperations
+            // (Copy | Move = 0x3 != 0x7) allows holding Shift to temporarily
+            // override to Move. Win10 ignores Preferred DropEffect and requires
+            // single-bit Copy to avoid Explorer's #32768 multi-effect menu.
+            return win11OrLater
+                ? SupportedOperations
+                : DataPackageOperation.Copy;
+        }
+
         if (string.Equals(action, SettingsService.ManagedDragOutActionMove, StringComparison.Ordinal))
         {
             // Win11 honors Preferred DropEffect = Move while keeping Copy as a
             // fallback for copy-only drop targets (browsers, editors); Win10
-            // requires single-bit Move to avoid Explorer's multi-effect menu.
-            return win11OrLater
-                ? SupportedOperations
+            // requires single-bit Move to avoid Explorer's multi-effect menu,
+            // except when the user holds Ctrl at drag start or retries a batch
+            // that a copy-only app just rejected (one-shot Copy promotion).
+            if (win11OrLater)
+            {
+                return SupportedOperations;
+            }
+
+            return (controlPressed || oneShotCopyFallback)
+                ? DataPackageOperation.Copy
                 : DataPackageOperation.Move;
         }
 
@@ -306,6 +426,33 @@ public static class FileItemDragPackage
             return false;
         }
 
+        bool networkReachabilityVerified = false;
+        if (sourcePaths.Any(DesktopOutboundDropCoordinator.MightTouchNetworkPath))
+        {
+            DesktopOutboundDropCoordinator.BoundedSourcePathProbeResult networkProbe =
+                DesktopOutboundDropCoordinator.FilterExistingPathsWithBoundedNetworkProbe(
+                    sourcePaths,
+                    timeoutMs: 650);
+            if (networkProbe.TimedOut)
+            {
+                App.Log(
+                    $"[DragStart] Canceled network file drag because bounded " +
+                    $"network probe timed out paths={sourcePaths.Length} source={logSource}");
+                return false;
+            }
+
+            sourcePaths = networkProbe.ExistingPaths;
+            if (sourcePaths.Length == 0)
+            {
+                App.Log(
+                    $"[DragStart] Canceled file drag because no source paths " +
+                    $"exist after network probe source={logSource}");
+                return false;
+            }
+
+            networkReachabilityVerified = true;
+        }
+
         // Prefer a native Shell IDataObject for every file drag. It is what
         // Explorer itself produces, so external targets see the same formats
         // and Explorer owns the desktop drop position. It also sidesteps the
@@ -314,10 +461,13 @@ public static class FileItemDragPackage
         // event would otherwise have to wait on synchronously. The guard
         // wrapper consumes completion receipts so a receiver's Move or Paste
         // Succeeded reply can never ask the Shell object to clean its source.
+        string[] attachedPhysicalPaths = [];
         bool usesNativeShellDataObject =
             allowNativeShellDataObject && NativeShellFileDragProvider.TryAttach(
                 dataPackage,
-                sourcePaths);
+                sourcePaths,
+                out attachedPhysicalPaths,
+                networkReachabilityVerified);
         IReadOnlyList<IStorageItem> storageItems = [];
         if (!usesNativeShellDataObject)
         {
@@ -363,7 +513,10 @@ public static class FileItemDragPackage
         result = new FileItemDragPackageResult(
             sourcePaths,
             storageItems.Count > 0 || usesNativeShellDataObject,
-            usesNativeShellDataObject);
+            usesNativeShellDataObject,
+            usesNativeShellDataObject && attachedPhysicalPaths.Length > 0
+                ? attachedPhysicalPaths
+                : null);
         return true;
     }
 }

@@ -24,6 +24,7 @@ internal sealed class StaOperationWatchdog
     private readonly Func<long> _clockMilliseconds;
     private readonly TimeSpan _pollInterval;
     private long _lastActivityMilliseconds;
+    private int _waitingForUser;
 
     /// <param name="inactivityTimeout">
     /// How long without a single <see cref="Pulse"/> the operation may run
@@ -84,6 +85,14 @@ internal sealed class StaOperationWatchdog
             _clockMilliseconds());
     }
 
+    internal void PauseForUser() => Interlocked.Exchange(ref _waitingForUser, 1);
+
+    internal void ResumeAfterUser()
+    {
+        Pulse();
+        Volatile.Write(ref _waitingForUser, 0);
+    }
+
     /// <param name="workerThread">
     /// The STA thread running the operation. A thread that is administratively
     /// suspended shows no progress but is not dead — abandoning it would be
@@ -98,7 +107,8 @@ internal sealed class StaOperationWatchdog
         long idleMilliseconds = nowMilliseconds - lastActivity;
         idleDuration = TimeSpan.FromMilliseconds(
             Math.Max(0, idleMilliseconds));
-        if (idleMilliseconds < _inactivityTimeoutMilliseconds)
+        if (Volatile.Read(ref _waitingForUser) != 0 ||
+            idleMilliseconds < _inactivityTimeoutMilliseconds)
         {
             return false;
         }

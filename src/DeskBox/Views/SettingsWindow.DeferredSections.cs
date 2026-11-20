@@ -25,7 +25,6 @@ public sealed partial class SettingsWindow
             AppearanceDetailSection.OrganizationSection.Refresh();
             RefreshManagedStoragePathWarning();
             RefreshManagedStorageDesktopShortcutState();
-            RefreshDragOutWin10State();
             SyncManagedStorageQuickAccessToggleState();
             _ = ViewModel.RefreshQuickAccessStateAsync();
             _ = RefreshOrphanFoldersSummaryAsync();
@@ -248,13 +247,9 @@ public sealed partial class SettingsWindow
             SyncMaintenanceEntryCards();
         }
 
-        if (sectionTag == "About" && AboutDiagnosticsExpander is { } aboutDiag)
+        if (sectionTag == "About" && AboutDiagnosticsSubPagePanel is { } aboutDiagSubPage)
         {
-            aboutDiag.DataContext = _backupSettingsViewModel;
-            foreach (FrameworkElement item in aboutDiag.Items.OfType<FrameworkElement>())
-            {
-                item.DataContext = _backupSettingsViewModel;
-            }
+            aboutDiagSubPage.DataContext = _backupSettingsViewModel;
         }
 
         if (sectionTag == "FileStackSettings")
@@ -269,25 +264,14 @@ public sealed partial class SettingsWindow
 
         if (sectionTag == "AppearanceDetail")
         {
-            _managedStorageSettingsViewModel.PropertyChanged -= ManagedStorageSettingsViewModel_DragOutPropertyChanged;
-            _managedStorageSettingsViewModel.PropertyChanged += ManagedStorageSettingsViewModel_DragOutPropertyChanged;
             RefreshManagedStoragePathWarning();
             RefreshManagedStorageDesktopShortcutState();
-            RefreshDragOutWin10State();
             SyncManagedStorageQuickAccessToggleState();
         }
 
         if (sectionTag == "WidgetGroups")
         {
             section.DataContext = _groupNavigationSettingsViewModel;
-        }
-
-        if (sectionTag == "FeatureWidgets")
-        {
-            Segmented hubSegmented = FeatureWidgetsHubSegmented;
-            WidgetSegmentedStyleHelper.ApplyNeutralPointerStates(hubSegmented);
-            hubSegmented.Loaded += (_, _) => WidgetSegmentedStyleHelper.ApplyNeutralPointerStates(hubSegmented);
-            hubSegmented.ActualThemeChanged += (_, _) => WidgetSegmentedStyleHelper.ApplyNeutralPointerStates(hubSegmented);
         }
 
         section.Loaded += DeferredSettingsSection_Loaded;
@@ -314,7 +298,6 @@ public sealed partial class SettingsWindow
         }
         section.Loaded -= DeferredSettingsSection_Loaded;
         ApplyToggleSwitchContentVisibility();
-        ApplySegmentedNeutralStates(section);
         CollectResponsiveRows(SettingsRoot);
         UpdateResponsiveLayout(GetWindowWidth());
     }
@@ -322,8 +305,18 @@ public sealed partial class SettingsWindow
     private static FrameworkElement? FindSettingsSearchTarget(
         DependencyObject root,
         string headerKey,
-        HashSet<DependencyObject> visited)
+        HashSet<DependencyObject> visited) =>
+        FindSettingsSearchTargetWithLocation(root, headerKey, visited, out _, out _);
+
+    private static FrameworkElement? FindSettingsSearchTargetWithLocation(
+        DependencyObject root,
+        string headerKey,
+        HashSet<DependencyObject> visited,
+        out SettingsExpander? owningExpander,
+        out int expanderItemIndex)
     {
+        owningExpander = null;
+        expanderItemIndex = -1;
         if (!visited.Add(root))
         {
             return null;
@@ -339,23 +332,51 @@ public sealed partial class SettingsWindow
         // branch so search can reveal a setting without opening every group.
         if (root is SettingsExpander expander)
         {
-            foreach (DependencyObject item in expander.Items.OfType<DependencyObject>())
+            for (int i = 0; i < expander.Items.Count; i++)
             {
-                if (FindSettingsSearchTarget(item, headerKey, visited) is { } target)
+                if (expander.Items[i] is DependencyObject item &&
+                    FindSettingsSearchTargetWithLocation(
+                        item,
+                        headerKey,
+                        visited,
+                        out SettingsExpander? nestedExpander,
+                        out int nestedIndex) is { } target)
                 {
                     expander.IsExpanded = true;
+                    owningExpander = nestedExpander ?? expander;
+                    expanderItemIndex = nestedExpander is not null ? nestedIndex : i;
                     return target;
                 }
             }
         }
         if (root is Expander { Content: DependencyObject expanderContent } nativeExpander &&
-            FindSettingsSearchTarget(expanderContent, headerKey, visited) is { } expanderTarget)
+            FindSettingsSearchTargetWithLocation(
+                expanderContent,
+                headerKey,
+                visited,
+                out owningExpander,
+                out expanderItemIndex) is { } expanderTarget)
         {
             nativeExpander.IsExpanded = true;
             return expanderTarget;
         }
+        if (root is UserControl { Content: DependencyObject userControlContent } &&
+            FindSettingsSearchTargetWithLocation(
+                userControlContent,
+                headerKey,
+                visited,
+                out owningExpander,
+                out expanderItemIndex) is { } userControlTarget)
+        {
+            return userControlTarget;
+        }
         if (root is ContentControl { Content: DependencyObject content } &&
-            FindSettingsSearchTarget(content, headerKey, visited) is { } contentTarget)
+            FindSettingsSearchTargetWithLocation(
+                content,
+                headerKey,
+                visited,
+                out owningExpander,
+                out expanderItemIndex) is { } contentTarget)
         {
             return contentTarget;
         }
@@ -363,7 +384,12 @@ public sealed partial class SettingsWindow
         {
             foreach (UIElement child in panel.Children)
             {
-                if (FindSettingsSearchTarget(child, headerKey, visited) is { } target)
+                if (FindSettingsSearchTargetWithLocation(
+                        child,
+                        headerKey,
+                        visited,
+                        out owningExpander,
+                        out expanderItemIndex) is { } target)
                 {
                     return target;
                 }
@@ -372,7 +398,12 @@ public sealed partial class SettingsWindow
         int childCount = VisualTreeHelper.GetChildrenCount(root);
         for (int index = 0; index < childCount; index++)
         {
-            if (FindSettingsSearchTarget(VisualTreeHelper.GetChild(root, index), headerKey, visited) is { } target)
+            if (FindSettingsSearchTargetWithLocation(
+                    VisualTreeHelper.GetChild(root, index),
+                    headerKey,
+                    visited,
+                    out owningExpander,
+                    out expanderItemIndex) is { } target)
             {
                 return target;
             }
@@ -407,7 +438,7 @@ public sealed partial class SettingsWindow
         try
         {
             Directory.CreateDirectory(folderPath);
-            Win32Helper.ShowInExplorer(folderPath);
+            Services.ShellLaunchService.FireAndForgetRevealInExplorer(folderPath);
         }
         catch (Exception ex)
         {

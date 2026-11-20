@@ -16,6 +16,7 @@ namespace DeskBox.Features.ManagedStorage;
     nameof(DragOutModifierTipEnabled),
     nameof(DragOutResultHintEnabled),
     nameof(DropAction),
+    nameof(IsDragOutCustomized),
     nameof(PinQuickAccessButtonText),
     nameof(PinQuickAccessToolTipText),
     nameof(QuickAccessStatusText),

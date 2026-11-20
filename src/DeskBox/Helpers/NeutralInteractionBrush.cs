@@ -51,6 +51,15 @@ public static class NeutralInteractionBrush
         ResolveElementTheme(scope) == ElementTheme.Dark;
 
     /// <summary>
+    /// Returns the explicit <see cref="ElementTheme.Light"/> or
+    /// <see cref="ElementTheme.Dark"/> effective theme for <paramref name="scope"/>,
+    /// suitable for synchronizing popup-hosted surfaces (<c>ContentDialog</c>,
+    /// <c>TeachingTip</c>, <c>Flyout</c>) that live under <c>PopupRoot</c>.
+    /// </summary>
+    public static ElementTheme ResolveEffectiveElementTheme(DependencyObject? scope) =>
+        ResolveElementTheme(scope);
+
+    /// <summary>
     /// Resolves a themed resource — a <see cref="Brush"/>, or a
     /// <see cref="Color"/> wrapped as a brush — for the scope element's
     /// effective theme. Lookup order mirrors element-scope XAML resolution:

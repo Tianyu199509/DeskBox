@@ -29,6 +29,11 @@ public interface IBackupSettings
 {
     BackupSettingsSnapshot Read();
     void Update(BackupSettingsChange change);
+    Task UpdateAsync(BackupSettingsChange change, CancellationToken cancellationToken = default)
+    {
+        Update(change);
+        return Task.CompletedTask;
+    }
     bool IsValidLocalDirectory(string path, out string? rejectionReasonKey);
     Task SaveAsync();
     Task<bool> HasCredentialAsync(BackupEndpoint endpoint, CancellationToken cancellationToken);

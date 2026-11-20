@@ -12,7 +12,7 @@ namespace DeskBox.ViewModels;
 /// <summary>
 /// ViewModel for a single desktop organizer widget.
 /// </summary>
-public partial class WidgetViewModel : ObservableObject, IDisposable
+public sealed partial class WidgetViewModel : ObservableObject, IDisposable
 {
     private const int IconHydrationBatchSize = 8;
     private const int IconHydrationRetryCount = 4;
@@ -71,8 +71,6 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
     private string _modeLabel = string.Empty;
     private string _modeDescription = string.Empty;
     private string _emptyStateTitle = string.Empty;
-    private string _emptyStateText = string.Empty;
-    private string _emptyStateGlyph = string.Empty;
     private bool _isPositionLocked;
     private bool _isSizeLocked;
     private double _iconTileWidth;
@@ -248,18 +246,6 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
     {
         get => _emptyStateTitle;
         set => SetProperty(ref _emptyStateTitle, value);
-    }
-
-    public string EmptyStateText
-    {
-        get => _emptyStateText;
-        set => SetProperty(ref _emptyStateText, value);
-    }
-
-    public string EmptyStateGlyph
-    {
-        get => _emptyStateGlyph;
-        set => SetProperty(ref _emptyStateGlyph, value);
     }
 
     public bool IsPositionLocked

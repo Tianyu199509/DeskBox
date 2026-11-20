@@ -1,3 +1,4 @@
+using DeskBox.Helpers;
 using DeskBox.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -211,6 +212,7 @@ public sealed partial class SettingsWindow
         {
             XamlRoot = SettingsRoot.XamlRoot,
             Title = T("Feedback.Dialog.Title"),
+            RequestedTheme = NeutralInteractionBrush.ResolveEffectiveElementTheme(SettingsRoot),
             Content = dialogContent,
             PrimaryButtonText = T("Feedback.Dialog.Submit"),
             CloseButtonText = T("Common.Close"),
@@ -379,6 +381,7 @@ public sealed partial class SettingsWindow
         var dialog = new ContentDialog
         {
             XamlRoot = SettingsRoot.XamlRoot,
+            RequestedTheme = NeutralInteractionBrush.ResolveEffectiveElementTheme(SettingsRoot),
             Title = T("Feedback.My.Title"),
             CloseButtonText = T("Common.Close"),
             MinWidth = 520,
@@ -747,26 +750,12 @@ public sealed partial class SettingsWindow
         };
     }
 
-    private static Brush? TryAccentBrush()
-    {
-        if (Application.Current?.Resources.TryGetValue("AccentTextFillColorPrimaryBrush", out object brush) == true)
-        {
-            return brush as Brush;
-        }
-
-        return null;
-    }
+    private Brush? TryAccentBrush() =>
+        NeutralInteractionBrush.ResolveThemedResource("AccentTextFillColorPrimaryBrush", SettingsRoot);
 
     // Same lookups as the nested snapshot rows in SettingsWindow.xaml: the
     // notice/reply borders were declared with thickness+radius but no brushes,
     // so they never actually rendered a box.
-    private static Brush? TryThemeBrush(string key)
-    {
-        if (Application.Current?.Resources.TryGetValue(key, out object brush) == true)
-        {
-            return brush as Brush;
-        }
-
-        return null;
-    }
+    private Brush? TryThemeBrush(string key) =>
+        NeutralInteractionBrush.ResolveThemedResource(key, SettingsRoot);
 }

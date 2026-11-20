@@ -21,71 +21,141 @@ namespace DeskBox.Views;
 
 public sealed partial class SettingsWindow
 {
+    private bool _isStorageMigrationFlowOpen;
+    private bool _isStorageMigrationRunning;
+
     private async Task ChangeManagedStoragePathAsync()
     {
-        while (true)
+        if (_isStorageMigrationFlowOpen)
         {
-
-            if (SettingsRoot.XamlRoot is null)
-            {
-                return;
-            }
-
-            string? folderPath = await FolderPickerService.PickFolderAsync(_hWnd);
-            if (string.IsNullOrWhiteSpace(folderPath))
-            {
-                return;
-            }
-
-            string scopedPath = ManagedStoragePathService.ResolvePickedStorageRootPath(
-                folderPath,
-                ManagedStorageMigrationService.TemporaryFolderName);
-            string normalizedPath = SettingsService.NormalizeManagedStorageRootPath(scopedPath);
-            if (string.Equals(normalizedPath, ViewModel.ManagedStorageRootPath, StringComparison.OrdinalIgnoreCase))
-            {
-                return;
-            }
-
-            // The desktop organizer sweeps the desktop on every run; a
-            // storage root there (or containing Desktop) would re-ingest its
-            // own managed folders, so the choice is rejected before any
-            // migration is offered.
-            if (ManagedStoragePathService.OverlapsDesktop(normalizedPath))
-            {
-                await ShowManagedStorageDesktopOverlapDialogAsync();
-                continue;
-            }
-
-            if (!_widgetActions.IsHostAvailable) return;
-            var choice = await ManagedStorageMigrationDialog.ConfirmAsync(SettingsRoot.XamlRoot, _localizationService,
-                _widgetActions.GetDefaultManagedStorageWidgetCount(), ViewModel.ManagedStorageRootPath, normalizedPath,
-                token => _widgetActions.PreviewManagedStorageMigrationAsync(normalizedPath, token));
-            if (choice is null) return;
-            if (choice == StorageMigrationStartChoice.ChooseLocation)
-            {
-                continue;
-            }
-            var outcome = await ManagedStorageMigrationDialog.RunAsync(
-                SettingsRoot.XamlRoot, SettingsRoot.DispatcherQueue, _localizationService,
-                ViewModel.ManagedStorageRootPath, normalizedPath,
-                options => _widgetActions.UpdateDefaultManagedStorageRootAsync(normalizedPath, options),
-                restart: choice == StorageMigrationStartChoice.Restart);
-            if (outcome.ChooseLocation)
-            {
-                continue;
-            }
-            ManagedStorageMigrationResult? result = outcome.Migration;
-            if (result is not null)
-            {
-                ViewModel.UpdateManagedStorageRootPath(result.NewRootPath);
-                try { await _appActions.SyncManagedStorageDesktopShortcutAsync(result.OldRootPath); }
-                catch (Exception ex) { App.Log($"[ManagedStorageMigration] Desktop shortcut sync deferred: {ex.Message}"); }
-            }
-            RefreshManagedStoragePathWarning();
-            SyncManagedStorageQuickAccessToggleState();
-            _ = RefreshOrphanFoldersSummaryAsync();
             return;
         }
+
+        _isStorageMigrationFlowOpen = true;
+        try
+        {
+            while (true)
+            {
+                if (SettingsRoot.XamlRoot is null)
+                {
+                    return;
+                }
+
+                string? folderPath = await FolderPickerService.PickFolderAsync(_hWnd);
+                if (string.IsNullOrWhiteSpace(folderPath))
+                {
+                    return;
+                }
+
+                string scopedPath = ManagedStoragePathService.ResolvePickedStorageRootPath(
+                    folderPath,
+                    ManagedStorageMigrationService.TemporaryFolderName);
+                string normalizedPath = SettingsService.NormalizeManagedStorageRootPath(scopedPath);
+                if (string.Equals(normalizedPath, ViewModel.ManagedStorageRootPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+
+                // The desktop organizer sweeps the desktop on every run; a
+                // storage root there (or containing Desktop) would re-ingest its
+                // own managed folders, so the choice is rejected before any
+                // migration is offered.
+                if (ManagedStoragePathService.OverlapsDesktop(normalizedPath))
+                {
+                    await ShowManagedStorageDesktopOverlapDialogAsync();
+                    continue;
+                }
+
+                if (!_widgetActions.IsHostAvailable) return;
+
+                // Fast path: 0 files and no kept orphan folders → instant switch + concise notice.
+                try
+                {
+                    ManagedStorageMigrationResult? emptySwitch =
+                        await _widgetActions.TrySwitchEmptyManagedStorageRootAsync(normalizedPath, CancellationToken.None);
+                    if (emptySwitch is not null)
+                    {
+                        ViewModel.UpdateManagedStorageRootPath(emptySwitch.NewRootPath);
+                        RefreshManagedStoragePathWarning();
+                        _ = RefreshQuickAccessAndOrphansAfterMigrationAsync();
+                        if (SettingsRoot.XamlRoot is not null)
+                        {
+                            await ManagedStorageMigrationDialog.ShowEmptySwitchSuccessAsync(
+                                SettingsRoot.XamlRoot, _localizationService, emptySwitch.NewRootPath);
+                        }
+                        return;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // Let ConfirmAsync render the structured preview error card & exact blocking path.
+                    App.Log($"[ManagedStorageMigration] Empty-switch precheck fell through to confirm dialog: {ex.Message}");
+                }
+
+                var confirm = await ManagedStorageMigrationDialog.ConfirmAsync(
+                    SettingsRoot.XamlRoot,
+                    _localizationService,
+                    _widgetActions.GetDefaultManagedStorageWidgetCount(),
+                    ViewModel.ManagedStorageRootPath,
+                    normalizedPath,
+                    token => _widgetActions.PreviewManagedStorageMigrationAsync(normalizedPath, token),
+                    token => _widgetActions.CleanupInterruptedMigrationCopiesAsync(normalizedPath, token));
+                if (confirm is null) return;
+                if (confirm.Choice == StorageMigrationStartChoice.ChooseLocation)
+                {
+                    continue;
+                }
+
+                var outcome = await ManagedStorageMigrationDialog.RunAsync(
+                    SettingsRoot.XamlRoot,
+                    SettingsRoot.DispatcherQueue,
+                    _localizationService,
+                    ViewModel.ManagedStorageRootPath,
+                    normalizedPath,
+                    options => _widgetActions.UpdateDefaultManagedStorageRootAsync(normalizedPath, options),
+                    restart: confirm.Choice == StorageMigrationStartChoice.Restart,
+                    retainOriginals: confirm.RetainOriginals,
+                    includeOrphanFolders: confirm.IncludeOrphanFolders,
+                    retrySourceCleanup: token => _widgetActions.RetryManagedStorageSourceCleanupAsync(normalizedPath, token),
+                    cleanupInterruptedCopies: token => _widgetActions.CleanupInterruptedMigrationCopiesAsync(normalizedPath, token),
+                    onRunningStateChanged: running => _isStorageMigrationRunning = running);
+                if (outcome.ChooseLocation)
+                {
+                    continue;
+                }
+
+                ManagedStorageMigrationResult? result = outcome.Migration;
+                if (result is not null)
+                {
+                    ViewModel.UpdateManagedStorageRootPath(result.NewRootPath);
+                }
+
+                RefreshManagedStoragePathWarning();
+                _ = RefreshQuickAccessAndOrphansAfterMigrationAsync();
+                return;
+            }
+        }
+        finally
+        {
+            _isStorageMigrationRunning = false;
+            _isStorageMigrationFlowOpen = false;
+        }
+    }
+
+    private async Task RefreshQuickAccessAndOrphansAfterMigrationAsync()
+    {
+        try
+        {
+            await ViewModel.RefreshQuickAccessStateAsync();
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[ManagedStorageMigration] Quick Access state refresh deferred: {ex.Message}");
+        }
+
+        SyncManagedStorageQuickAccessToggleState();
+        RefreshManagedStorageDesktopShortcutState();
+        await RefreshOrphanFoldersSummaryAsync();
     }
 
     private async Task ShowManagedStorageDesktopOverlapDialogAsync()
@@ -98,6 +168,7 @@ public sealed partial class SettingsWindow
         var dialog = new ContentDialog
         {
             XamlRoot = SettingsRoot.XamlRoot,
+            RequestedTheme = NeutralInteractionBrush.ResolveEffectiveElementTheme(SettingsRoot),
             Title = _localizationService.T("Settings.ManagedPath.Error.DesktopOverlapTitle"),
             CloseButtonText = _localizationService.T("Common.Close"),
             DefaultButton = ContentDialogButton.Close,
@@ -155,45 +226,6 @@ public sealed partial class SettingsWindow
             InfoBarSeverity.Warning,
             null,
             string.Join(Environment.NewLine, warnings));
-    }
-
-    private void RefreshDragOutWin10State()
-    {
-        if (!_settingsSectionElements.TryGetValue("AppearanceDetail", out FrameworkElement? el) ||
-            el is not Views.SettingsSections.FileWidgetSettingsSection section)
-        {
-            return;
-        }
-
-        bool isWin11 = WindowsCompatibilityService.IsWindows11OrLater;
-        string dragOutAction = _managedStorageSettingsViewModel.DragOutAction;
-        bool isSingleEffectAdvertisement =
-            !isWin11 ||
-            string.Equals(dragOutAction, SettingsService.ManagedDragOutActionCopy, StringComparison.Ordinal);
-        bool modifiersReachExternalTargets = !isSingleEffectAdvertisement;
-
-        string description = _localizationService.T("Settings.DragOutAction.Description");
-        if (!isWin11)
-        {
-            description += "\n" + _localizationService.T("Settings.DragOutAction.Win10Note");
-            if (string.Equals(dragOutAction, SettingsService.ManagedDragOutActionMove, StringComparison.Ordinal))
-            {
-                description += "\n" + _localizationService.T("Settings.DragOutAction.Win10MoveRiskNote");
-            }
-        }
-
-        section.SetDragOutWin10State(modifiersReachExternalTargets, description);
-    }
-
-    private void ManagedStorageSettingsViewModel_DragOutPropertyChanged(
-        object? sender,
-        System.ComponentModel.PropertyChangedEventArgs e)
-    {
-        if (string.IsNullOrEmpty(e.PropertyName) ||
-            string.Equals(e.PropertyName, nameof(Features.ManagedStorage.ManagedStorageSettingsViewModel.DragOutAction), StringComparison.Ordinal))
-        {
-            RefreshDragOutWin10State();
-        }
     }
 
     private void RefreshManagedStorageDesktopShortcutState()
@@ -276,7 +308,7 @@ public sealed partial class SettingsWindow
         try
         {
             Directory.CreateDirectory(path);
-            Win32Helper.OpenFile(path);
+            Services.ShellLaunchService.FireAndForgetOpenPath(path);
         }
         catch (Exception ex)
         {
@@ -338,7 +370,7 @@ public sealed partial class SettingsWindow
 
     private void OpenWebsiteButton_Click(object sender, RoutedEventArgs e)
     {
-        Win32Helper.OpenFile(ViewModel.OfficialWebsiteLink);
+        Services.ShellLaunchService.FireAndForgetOpenPath(ViewModel.OfficialWebsiteLink);
     }
 
     private async void ShowStoreSupportDialogButton_Click(object sender, RoutedEventArgs e)
@@ -349,10 +381,31 @@ public sealed partial class SettingsWindow
             return;
         }
 
+#if !DESKBOX_STORE
+        if (WechatSupportQrContainer.Child is Image wechatQrImage && wechatQrImage.Source is null)
+        {
+            wechatQrImage.Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(
+                new Uri("ms-appx:///Assets/Support/support-wechat.png"));
+        }
+
+        if (AlipaySupportQrContainer.Child is Image alipayQrImage && alipayQrImage.Source is null)
+        {
+            alipayQrImage.Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(
+                new Uri("ms-appx:///Assets/Support/support-alipay.png"));
+        }
+#endif
+
         SupportDeskBoxDialog.XamlRoot = SettingsRoot.XamlRoot;
+        SupportDeskBoxDialog.RequestedTheme = NeutralInteractionBrush.ResolveEffectiveElementTheme(SettingsRoot);
         SupportDeskBoxDialog.Title = _localizationService.T("Settings.About.StoreSupportTitle");
         SupportDeskBoxDialog.CloseButtonText = _localizationService.T("Settings.Dialog.SupportClose");
-        await SupportDeskBoxDialog.ShowAsync();
+        try
+        {
+            await SupportDeskBoxDialog.ShowAsync();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException)
+        {
+        }
     }
 
     private async void OpenMicrosoftStoreButton_Click(object sender, RoutedEventArgs e)
@@ -370,7 +423,7 @@ public sealed partial class SettingsWindow
             App.Log($"[SettingsWindow] Failed to launch Microsoft Store app: {ex}");
         }
 
-        Win32Helper.OpenFile(ViewModel.MicrosoftStoreLink);
+        Services.ShellLaunchService.FireAndForgetOpenPath(ViewModel.MicrosoftStoreLink);
     }
 
     private async void OneClickUpdateButton_Click(object sender, RoutedEventArgs e)
@@ -589,7 +642,7 @@ public sealed partial class SettingsWindow
         string url = ViewModel.ManualUpdateDownloadUrl;
         if (AppUpdateManifest.IsSafeWebUrl(url))
         {
-            Win32Helper.OpenFile(url);
+            Services.ShellLaunchService.FireAndForgetOpenPath(url);
         }
     }
 

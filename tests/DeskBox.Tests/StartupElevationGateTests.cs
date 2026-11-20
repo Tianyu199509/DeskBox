@@ -98,7 +98,7 @@ public sealed class StartupElevationGateTests
                         out _));
                     Assert.False(secondModified);
 
-                    Assert.True(DragDropPermissionService.TryReadShortcutWithCSharp(
+                    Assert.True(Helpers.WindowsShellLinkTestOracle.TryReadShortcut(
                         lnkPath,
                         out string preservedTarget,
                         out string preservedArgs));
@@ -162,11 +162,11 @@ public sealed class StartupElevationGateTests
             ctorStart,
             StringComparison.Ordinal);
         int eventIndex = appSource.IndexOf(
-            "_activationEvent = new EventWaitHandle(",
+            "_activationEvent = SingleInstanceAndActivationInterop.CreateOrOpenActivationEvent(",
             ctorStart,
             StringComparison.Ordinal);
         int mutexIndex = appSource.IndexOf(
-            "_singleInstanceMutex = new Mutex(",
+            "(_singleInstanceMutex, bool createdNew) = SingleInstanceAndActivationInterop.CreateOrOpenSingleInstanceMutex(",
             ctorStart,
             StringComparison.Ordinal);
 

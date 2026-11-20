@@ -70,6 +70,12 @@ public sealed class QuickCaptureMarkdownMirrorService : IDisposable
             }
 
             string normalizedRoot = Path.GetFullPath(mirrorRoot.Trim());
+            if (DragDrop.StoreVirtualizedPathPolicy.IsWriteBlockedDestination(normalizedRoot))
+            {
+                App.Log($"[QuickCaptureMirror] Skipping mirror sync into Store-virtualized AppData path: '{normalizedRoot}'");
+                return 0;
+            }
+
             Directory.CreateDirectory(normalizedRoot);
 
             var activeItems = snapshot.Items
@@ -197,8 +203,8 @@ public sealed class QuickCaptureMarkdownMirrorService : IDisposable
                 sb.Append("title: ").AppendLine(EscapeYamlScalar(item.Title.Trim()));
             }
 
-            sb.Append("created: ").AppendLine(created.ToLocalTime().ToString("yyyy-MM-ddTHH:mm:sszzz"));
-            sb.Append("updated: ").AppendLine(updated.ToLocalTime().ToString("yyyy-MM-ddTHH:mm:sszzz"));
+            sb.Append("created: ").AppendLine(created.ToLocalTime().ToString("yyyy-MM-ddTHH:mm:sszzz", System.Globalization.CultureInfo.InvariantCulture));
+            sb.Append("updated: ").AppendLine(updated.ToLocalTime().ToString("yyyy-MM-ddTHH:mm:sszzz", System.Globalization.CultureInfo.InvariantCulture));
             if (item.IsPinned)
             {
                 sb.AppendLine("pinned: true");
@@ -392,10 +398,10 @@ public sealed class QuickCaptureMarkdownMirrorService : IDisposable
         return true;
     }
 
-    private static string BuildMirrorFileName(QuickCaptureItem item, string shortId)
+    internal static string BuildMirrorFileName(QuickCaptureItem item, string shortId)
     {
         DateTimeOffset created = item.CreatedAt == default ? DateTimeOffset.UtcNow : item.CreatedAt;
-        string fallback = created.ToLocalTime().ToString("yyyy-MM-dd_HHmm");
+        string fallback = created.ToLocalTime().ToString("yyyy-MM-dd_HHmm", System.Globalization.CultureInfo.InvariantCulture);
         string baseName = ResolveReadableBaseName(item, fallback);
         return $"{baseName}{MirrorFileTagMarker}{shortId}.md";
     }

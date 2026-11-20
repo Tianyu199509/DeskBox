@@ -1,6 +1,4 @@
-#if DESKBOX_AOT_SMOKE_HARNESS || DESKBOX_STORE
 using CommunityToolkit.WinUI.Controls;
-#endif
 using CommunityToolkit.WinUI;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
@@ -131,63 +129,27 @@ public static class InfoTip
         }
     }
 
-    private static Func<DependencyObject, bool>? s_externalCardPredicate;
-    private static Func<FrameworkElement, string?>? s_externalGetHeader;
-    private static Action<FrameworkElement, object>? s_externalSetHeader;
+    private static bool IsSettingsHeaderElement(DependencyObject d) =>
+        d is SettingsCard or SettingsExpander;
 
-    internal static void RegisterExternalCardAdapter(
-        Func<DependencyObject, bool> predicate,
-        Func<FrameworkElement, string?> getHeader,
-        Action<FrameworkElement, object> setHeader)
-    {
-        s_externalCardPredicate = predicate;
-        s_externalGetHeader = getHeader;
-        s_externalSetHeader = setHeader;
-    }
-
-    private static bool IsSettingsHeaderElement(DependencyObject d)
-    {
-#if DESKBOX_AOT_SMOKE_HARNESS || DESKBOX_STORE
-        if (d is SettingsCard or SettingsExpander)
+    private static string? TryGetSettingsElementHeaderText(FrameworkElement element) =>
+        element switch
         {
-            return true;
-        }
-#endif
-        return s_externalCardPredicate?.Invoke(d) == true;
-    }
-
-    private static string? TryGetSettingsElementHeaderText(FrameworkElement element)
-    {
-#if DESKBOX_AOT_SMOKE_HARNESS || DESKBOX_STORE
-        if (element is SettingsCard card)
-        {
-            return card.Header as string;
-        }
-
-        if (element is SettingsExpander expander)
-        {
-            return expander.Header as string;
-        }
-#endif
-        return s_externalGetHeader?.Invoke(element);
-    }
+            SettingsCard card => card.Header as string,
+            SettingsExpander expander => expander.Header as string,
+            _ => null,
+        };
 
     private static void TrySetSettingsElementHeader(FrameworkElement element, object composite)
     {
-#if DESKBOX_AOT_SMOKE_HARNESS || DESKBOX_STORE
         if (element is SettingsCard card)
         {
             card.Header = composite;
-            return;
         }
-
-        if (element is SettingsExpander expander)
+        else if (element is SettingsExpander expander)
         {
             expander.Header = composite;
-            return;
         }
-#endif
-        s_externalSetHeader?.Invoke(element, composite);
     }
 
     /// <summary>
@@ -289,7 +251,17 @@ public static class InfoTip
         FillBody(s_sharedBodyHost!, string.IsNullOrWhiteSpace(bodyKey) ? string.Empty : Localized.T(bodyKey!));
 
         // Reset per show: anchors can live in different windows/roots, and a
-        // stale XamlRoot from a closed settings window would break ShowAt.
+        // stale XamlRoot or startup-pinned PopupRoot theme would break ShowAt
+        // or invert colors on Win10 after a live theme switch.
+        ElementTheme effectiveTheme = DeskBox.Helpers.NeutralInteractionBrush.ResolveEffectiveElementTheme(button);
+        if (flyout.Content is FrameworkElement contentElement)
+        {
+            contentElement.RequestedTheme = effectiveTheme;
+        }
+
+        Style presenterStyle = new(typeof(FlyoutPresenter));
+        presenterStyle.Setters.Add(new Setter(FrameworkElement.RequestedThemeProperty, effectiveTheme));
+        flyout.FlyoutPresenterStyle = presenterStyle;
         flyout.XamlRoot = button.XamlRoot;
         flyout.ShowAt(button);
     }

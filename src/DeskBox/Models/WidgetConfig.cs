@@ -6,7 +6,7 @@ namespace DeskBox.Models;
 /// <summary>
 /// Represents the persisted configuration for a single desktop widget.
 /// </summary>
-public class WidgetConfig
+public sealed class WidgetConfig
 {
     public const int CurrentBoundsCoordinateVersion = 1;
 
@@ -55,6 +55,14 @@ public class WidgetConfig
     /// Null on legacy data: the profile entry then wins as before.
     /// </summary>
     public DateTimeOffset? LastUserPlacementUtc { get; set; }
+
+    /// <summary>
+    /// Active topology key when <see cref="LastUserPlacementUtc"/> was stamped.
+    /// Prevents a temporary room-making adjustment on a subset/fallback topology
+    /// from overwriting an already-authoritative placement in a fuller display set.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? LastUserPlacementTopologyKey { get; set; }
 
     /// <summary>Work area signature of the monitor where the widget was last positioned.</summary>
     public string? PositionMonitorKey { get; set; }
@@ -212,7 +220,7 @@ public sealed class WidgetCompactPlacement
 /// <summary>
 /// Persisted reference to a single item (file or shortcut) inside a widget.
 /// </summary>
-public class WidgetItemConfig
+public sealed class WidgetItemConfig
 {
     /// <summary>Absolute path to the file, folder, or shortcut.</summary>
     public string Path { get; set; } = string.Empty;

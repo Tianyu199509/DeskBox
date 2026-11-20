@@ -90,7 +90,8 @@ public partial class App
             // the dying one saying goodbye) may use the pipe. Deep review
             // R13 adds the spawn-time stamp so a recycled pid from an
             // unrelated process cannot pass the number check.
-            expectedClientIdentityProvider: () => SettingsHostPipeClientIdentity);
+            expectedClientIdentityProvider: () => SettingsHostPipeClientIdentity,
+            onClientDisconnected: router.CancelAllActiveMigrationsOnDisconnect);
 
         SettingsService.LocalPersistCompleted += OnSettingsIpcLocalPersistCompleted;
         SettingsService.LayoutPersistCompleted += OnSettingsIpcLayoutPersistCompleted;
@@ -104,6 +105,7 @@ public partial class App
         GlobalHotkeyService?.RegistrationChanged += OnSettingsIpcHotkeyRegistrationChanged;
         DisplayTopologyChanged += OnSettingsIpcDisplayTopologyChanged;
         ScreenHomeChanged += OnSettingsIpcScreenHomeChanged;
+        StartupService.StateChanged += OnSettingsIpcAutoStartStateChanged;
         CloudBackupService.BackupRunCompleted += OnSettingsIpcBackupRunCompleted;
         AppUpdateService.CheckCompleted += OnSettingsIpcUpdateCheckCompleted;
         AppUpdateService.DownloadProgressChanged += OnSettingsIpcUpdateDownloadProgress;
@@ -114,12 +116,62 @@ public partial class App
             _agentBridgeServer = new DeskBoxAgentBridgeServer(
                 DeskBoxDataPathService.Current.AgentBridgePipeName,
                 () => WidgetManager,
-                includeManifest => BuildStudioContextResponseJsonAsync(includeManifest));
+                includeManifest => BuildStudioContextResponseJsonAsync(includeManifest),
+                () =>
+                {
+                    AppSettings? s = SettingsService?.Settings;
+                    double rawW = s?.DefaultWidgetWidth ?? SettingsService.DefaultWidgetWidth;
+                    double rawH = s?.DefaultWidgetHeight ?? SettingsService.DefaultWidgetHeight;
+                    return (
+                        Math.Clamp((int)Math.Round(double.IsFinite(rawW) && rawW > 0 ? rawW : SettingsService.DefaultWidgetWidth), 180, 1200),
+                        Math.Clamp((int)Math.Round(double.IsFinite(rawH) && rawH > 0 ? rawH : SettingsService.DefaultWidgetHeight), 80, 1200));
+                },
+                async (requestedWidgetId, capsuleMode, timeout) =>
+                {
+                    if (!IsStudioHostRunning)
+                    {
+                        return null;
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(requestedWidgetId))
+                    {
+                        string? studioTargetId = TryGetStudioTargetWidgetIdForAgentUpsert();
+                        string? resolvedDesktopId = (await DeskBox.Platform.UiDispatch.RunAsync(
+                            () => Task.FromResult(WidgetManager?.ResolveCustomWidgetConfig(requestedWidgetId)?.Id)))
+                            ?? requestedWidgetId;
+                        if (!string.Equals(studioTargetId, resolvedDesktopId, StringComparison.OrdinalIgnoreCase))
+                        {
+                            return null;
+                        }
+                    }
+
+                    return await TryCaptureRemoteStudioPreviewAsync(capsuleMode, timeout);
+                });
             _agentBridgeServer.Start();
-            _ = CustomWidgetTemplates.EnsureAiAgentWorkspaceDocsAsync();
+            _ = SyncAgentWorkspaceDocsOnStartupAsync();
         }
 
         Log("[SettingsIpc] Server started");
+        StartStudioIpcServer();
+    }
+
+    private async Task SyncAgentWorkspaceDocsOnStartupAsync()
+    {
+        try
+        {
+            await CustomWidgetTemplates.EnsureAiAgentWorkspaceDocsAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Log($"[SettingsIpc] EnsureAiAgentWorkspaceDocsAsync failed: {ex.Message}");
+        }
+        finally
+        {
+            if (!IsStudioHostRunning)
+            {
+                CustomWidgetCapabilityRegistry.ReleaseIdleCache();
+            }
+        }
     }
 
     private bool HasConnectedSettingsIpcClient =>
@@ -127,6 +179,7 @@ public partial class App
 
     private void ShutdownSettingsIpcServer()
     {
+        ShutdownStudioIpcServer();
         if (_agentBridgeServer is { } agentBridge)
         {
             _agentBridgeServer = null;
@@ -143,6 +196,7 @@ public partial class App
         GlobalHotkeyService?.RegistrationChanged -= OnSettingsIpcHotkeyRegistrationChanged;
         DisplayTopologyChanged -= OnSettingsIpcDisplayTopologyChanged;
         ScreenHomeChanged -= OnSettingsIpcScreenHomeChanged;
+        StartupService.StateChanged -= OnSettingsIpcAutoStartStateChanged;
         CloudBackupService.BackupRunCompleted -= OnSettingsIpcBackupRunCompleted;
         if (_appUpdateService is { } appUpdate)
         {
@@ -257,6 +311,16 @@ public partial class App
         _ = PushSettingsIpcEventAsync(SettingsIpcMethods.AppScreenHomeChanged, null);
     }
 
+    private void OnSettingsIpcAutoStartStateChanged()
+    {
+        if (!HasConnectedSettingsIpcClient)
+        {
+            return;
+        }
+
+        _ = PushSettingsIpcEventAsync(SettingsIpcMethods.AppAutoStartStateChanged, null);
+    }
+
     private void OnSettingsIpcBackupRunCompleted(CloudBackupRunCompletedInfo info)
     {
         if (!HasConnectedSettingsIpcClient || info.Endpoint is not { } endpoint)
@@ -299,6 +363,32 @@ public partial class App
         }
 
         _ = PushSettingsIpcEventAsync(method, SettingsIpcPayload.Encode(payload, typeInfo));
+    }
+
+    private async Task SyncManagedStorageHostEntriesAfterMigrationAsync(string oldRootPath, string newRootPath)
+    {
+        try
+        {
+            await ManagedStorageDesktopShortcutService.SyncAsync(oldRootPath);
+        }
+        catch (Exception ex)
+        {
+            Log($"[ManagedStorageMigration] Desktop shortcut sync deferred: {ex.Message}");
+        }
+
+        try
+        {
+            var oldPinState = await DeskBox.Helpers.ExplorerQuickAccessHelper.GetQuickAccessPinStateAsync(oldRootPath);
+            if (oldPinState.State == DeskBox.Helpers.QuickAccessPinState.Pinned)
+            {
+                await DeskBox.Helpers.ExplorerQuickAccessHelper.TryUnpinFolderFromQuickAccessAsync(oldRootPath);
+                await DeskBox.Helpers.ExplorerQuickAccessHelper.TryPinFolderToQuickAccessAsync(newRootPath);
+            }
+        }
+        catch (Exception ex)
+        {
+            Log($"[ManagedStorageMigration] Quick Access pin migration deferred: {ex.Message}");
+        }
     }
 
     private async Task PushSettingsIpcEventAsync(string method, string? payload)

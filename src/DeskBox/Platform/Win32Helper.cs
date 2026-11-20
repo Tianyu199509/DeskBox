@@ -10,6 +10,13 @@ using Microsoft.Win32.SafeHandles;
 
 namespace DeskBox.Platform;
 
+internal enum ShellLaunchOutcome
+{
+    Launched,
+    UserCancelled,
+    Failed
+}
+
 /// <summary>
 /// P/Invoke helpers for Win32 window management and shell operations.
 /// </summary>
@@ -26,8 +33,7 @@ public static partial class Win32Helper
     public const int QueryUserNotificationStateRunningD3dFullScreen = 3;
     public const int QueryUserNotificationStatePresentationMode = 4;
 
-    [DllImport("shell32.dll", SetLastError = false)]
-    private static extern int SHQueryUserNotificationState(out int state);
+
 
     /// <summary>
     /// True while a fullscreen-exclusive app (game) or presentation mode owns
@@ -38,7 +44,7 @@ public static partial class Win32Helper
     {
         try
         {
-            return SHQueryUserNotificationState(out int state) == 0 && state == QueryUserNotificationStateRunningD3dFullScreen &&
+            return SHQueryUserNotificationState(out int state) == 0 &&
                    state is QueryUserNotificationStateBusy or
                        QueryUserNotificationStateRunningD3dFullScreen or
                        QueryUserNotificationStatePresentationMode;
@@ -56,23 +62,22 @@ public static partial class Win32Helper
     private const uint OpenExisting = 3;
     private const uint FileFlagBackupSemantics = 0x02000000;
 
-    [DllImport("dcomp.dll")]
-    private static extern int DCompositionBoostCompositorClock(
-        [MarshalAs(UnmanagedType.Bool)] bool enable);
 
-    [DllImport("winmm.dll", EntryPoint = "timeBeginPeriod")]
-    private static extern uint TimeBeginPeriod(uint periodMilliseconds);
-
-    [DllImport("winmm.dll", EntryPoint = "timeEndPeriod")]
-    private static extern uint TimeEndPeriod(uint periodMilliseconds);
 
     /// <summary>
     /// Requests the DirectComposition compositor clock to run at its active
     /// cadence while a short interactive animation is in progress. This is a
     /// best-effort Windows capability and safely falls back on older systems.
     /// </summary>
+    private static int s_compositorClockBoostUnavailable;
+
     public static bool TrySetCompositorClockBoost(bool enabled)
     {
+        if (Volatile.Read(ref s_compositorClockBoostUnavailable) != 0)
+        {
+            return false;
+        }
+
         try
         {
             return DCompositionBoostCompositorClock(enabled) >= 0;
@@ -80,6 +85,7 @@ public static partial class Win32Helper
         catch (Exception ex) when (
             ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException)
         {
+            Volatile.Write(ref s_compositorClockBoostUnavailable, 1);
             return false;
         }
     }
@@ -135,7 +141,7 @@ public static partial class Win32Helper
         try
         {
             using SafeFileHandle handle = CreateFileForFinalPath(
-                path,
+                StorageMigrationNativeMethods.Extended(path),
                 dwDesiredAccess: 0,
                 FileShareRead | FileShareWrite | FileShareDelete,
                 IntPtr.Zero,
@@ -305,6 +311,7 @@ public static partial class Win32Helper
         return ShowWindowWithAuthorizationScope(hWnd, nCmdShow);
     }
 
+    [return: MarshalAs(UnmanagedType.Bool)]
     public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
     [LibraryImport("user32.dll")]
@@ -320,12 +327,6 @@ public static partial class Win32Helper
 
     [LibraryImport("user32.dll")]
     public static partial uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
-
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
-
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    public static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
 
     [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -393,6 +394,9 @@ public static partial class Win32Helper
         GetWindowThreadProcessId(hWnd, out uint processId);
         return processId == (uint)Environment.ProcessId;
     }
+
+    [LibraryImport("user32.dll", EntryPoint = "FindWindowW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
+    public static partial IntPtr FindWindow(string? lpClassName, string? lpWindowName);
 
     [LibraryImport("user32.dll", EntryPoint = "FindWindowExW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
     public static partial IntPtr FindWindowEx(IntPtr hWndParent, IntPtr hWndChildAfter, string? lpszClass, string? lpszWindow);
@@ -518,8 +522,7 @@ public static partial class Win32Helper
     [LibraryImport("shell32.dll")]
     public static partial void DragAcceptFiles(IntPtr hWnd, [MarshalAs(UnmanagedType.Bool)] bool accept);
 
-    [DllImport("shell32.dll", EntryPoint = "DragQueryFileW", CharSet = CharSet.Unicode)]
-    public static extern uint DragQueryFile(IntPtr hDrop, uint fileIndex, StringBuilder? fileName, uint bufferSize);
+
 
     [LibraryImport("shell32.dll")]
     public static partial void DragFinish(IntPtr hDrop);
@@ -530,10 +533,20 @@ public static partial class Win32Helper
 
     public static void AllowShellDragDropMessages(IntPtr hWnd)
     {
+        AllowShellDragDropMessageFilterOnly(hWnd);
+        DragAcceptFiles(hWnd, true);
+    }
+
+    public static void AllowShellDragDropMessageFilterOnly(IntPtr hWnd)
+    {
+        if (hWnd == IntPtr.Zero)
+        {
+            return;
+        }
+
         AllowWindowMessage(hWnd, WM_DROPFILES, "WM_DROPFILES");
         AllowWindowMessage(hWnd, WM_COPYDATA, "WM_COPYDATA");
         AllowWindowMessage(hWnd, WM_COPYGLOBALDATA, "WM_COPYGLOBALDATA");
-        DragAcceptFiles(hWnd, true);
     }
 
     public static IReadOnlyList<string> GetDroppedFilePaths(IntPtr hDrop) =>
@@ -570,20 +583,13 @@ public static partial class Win32Helper
                 screenX = fallbackCursor.X;
                 screenY = fallbackCursor.Y;
             }
-            uint count = DragQueryFile(hDrop, 0xFFFFFFFF, null, 0);
+            uint count = ClipboardNativeMethods.QueryDroppedFileCount(hDrop);
             for (uint index = 0; index < count; index++)
             {
-                uint length = DragQueryFile(hDrop, index, null, 0);
-                if (length == 0)
+                string? path = ClipboardNativeMethods.TryQueryDroppedFilePath(hDrop, index);
+                if (!string.IsNullOrEmpty(path))
                 {
-                    continue;
-                }
-
-                var builder = new StringBuilder((int)length + 1);
-                uint copied = DragQueryFile(hDrop, index, builder, (uint)builder.Capacity);
-                if (copied > 0)
-                {
-                    paths.Add(builder.ToString());
+                    paths.Add(path);
                 }
             }
         }
@@ -617,7 +623,7 @@ public static partial class Win32Helper
     {
         public int Attribute;
         public IntPtr Data;
-        public int SizeOfData;
+        public nuint SizeOfData;
     }
 
     [LibraryImport("user32.dll", SetLastError = true)]
@@ -865,6 +871,33 @@ public static partial class Win32Helper
         return false;
     }
 
+    /// <summary>
+    /// Injects a single zero-delta <c>MOUSEEVENTF_MOVE</c> packet carrying no
+    /// button flags so both classic <c>QS_MOUSEMOVE</c> (<c>ole32!DoDragDrop</c>)
+    /// and <c>CoreInput</c> pointer routing (<c>DataExchange.dll</c> on Windows 10
+    /// and Windows 11) observe the current physical cursor position without
+    /// mouse-speed or pointer-acceleration scaling.
+    /// </summary>
+    public static unsafe bool TrySendZeroDeltaMouseMovePulse(IntPtr extraInfo, out int errorCode)
+    {
+        var tag = new UIntPtr(unchecked((ulong)extraInfo.ToInt64()));
+        INPUT input = CreateMouseMoveInput(0, 0, tag);
+        uint sent = SendInput(1, &input, sizeof(INPUT));
+        if (sent == 1)
+        {
+            errorCode = 0;
+            return true;
+        }
+
+        errorCode = Marshal.GetLastWin32Error();
+        if (errorCode == 0)
+        {
+            errorCode = 31; // ERROR_GEN_FAILURE
+        }
+
+        return false;
+    }
+
     private static INPUT CreateMouseMoveInput(int dx, int dy, UIntPtr extraInfo)
     {
         return new INPUT
@@ -961,11 +994,45 @@ public static partial class Win32Helper
                IsKeyDown(0x06);
     }
 
-    public static bool IsLeftMouseButtonDown()
+    public static bool IsLeftMouseButtonDown() => IsPrimaryMouseButtonDown();
+
+    public static bool IsPrimaryMouseButtonDown()
     {
         const int SM_SWAPBUTTON = 23;
         int primaryButtonVk = GetSystemMetrics(SM_SWAPBUTTON) != 0 ? 0x02 : 0x01;
         return IsKeyDown(primaryButtonVk);
+    }
+
+    public static bool IsSecondaryMouseButtonDown()
+    {
+        const int SM_SWAPBUTTON = 23;
+        int secondaryButtonVk = GetSystemMetrics(SM_SWAPBUTTON) != 0 ? 0x01 : 0x02;
+        return IsKeyDown(secondaryButtonVk);
+    }
+
+    public static (bool DragButtonDown, bool AbortButtonDown) EvaluateLogicalDragButtons(
+        bool useSecondaryDragButton,
+        bool swappedButtons,
+        bool vkLButtonDown,
+        bool vkRButtonDown)
+    {
+        bool primaryDown = swappedButtons ? vkRButtonDown : vkLButtonDown;
+        bool secondaryDown = swappedButtons ? vkLButtonDown : vkRButtonDown;
+        return useSecondaryDragButton
+            ? (DragButtonDown: secondaryDown, AbortButtonDown: primaryDown)
+            : (DragButtonDown: primaryDown, AbortButtonDown: secondaryDown);
+    }
+
+    public static (bool DragButtonDown, bool AbortButtonDown) QueryLogicalDragButtonState(
+        bool useSecondaryDragButton)
+    {
+        const int SM_SWAPBUTTON = 23;
+        bool swappedButtons = GetSystemMetrics(SM_SWAPBUTTON) != 0;
+        return EvaluateLogicalDragButtons(
+            useSecondaryDragButton,
+            swappedButtons,
+            IsKeyDown(0x01),
+            IsKeyDown(0x02));
     }
 
     private static bool HasAsyncKeyPressSinceLastQuery(int virtualKey)
@@ -1009,7 +1076,7 @@ public static partial class Win32Helper
 
     internal static bool IsAuthorizedZOrderChangeInProgress => t_authorizedZOrderDepth > 0;
 
-    internal static bool TryReadWindowPos(IntPtr lParam, out WINDOWPOS windowPos)
+    internal static unsafe bool TryReadWindowPos(IntPtr lParam, out WINDOWPOS windowPos)
     {
         if (lParam == IntPtr.Zero)
         {
@@ -1017,11 +1084,11 @@ public static partial class Win32Helper
             return false;
         }
 
-        windowPos = Marshal.PtrToStructure<WINDOWPOS>(lParam);
+        windowPos = *(WINDOWPOS*)lParam;
         return true;
     }
 
-    internal static void SuppressWindowPosZOrder(IntPtr lParam, WINDOWPOS windowPos)
+    internal static unsafe void SuppressWindowPosZOrder(IntPtr lParam, WINDOWPOS windowPos)
     {
         if (lParam == IntPtr.Zero)
         {
@@ -1029,7 +1096,7 @@ public static partial class Win32Helper
         }
 
         windowPos.flags |= SWP_NOZORDER;
-        Marshal.StructureToPtr(windowPos, lParam, fDeleteOld: false);
+        *(WINDOWPOS*)lParam = windowPos;
     }
 
     private static bool SetWindowPosWithAuthorizationScope(
@@ -1448,7 +1515,7 @@ public static partial class Win32Helper
                     module,
                     pathBuffer,
                     pathCapacityChars);
-                if (pathLength <= 0)
+                if (pathLength <= 0 || pathLength >= pathCapacityChars)
                 {
                     return string.Empty;
                 }
@@ -1473,20 +1540,20 @@ public static partial class Win32Helper
                             infoBuffer,
                             @"\VarFileInfo\Translation",
                             out IntPtr translation,
-                            out _))
+                            out int translationBytes))
                     {
                         return string.Empty;
                     }
 
-                    if (translation == IntPtr.Zero)
+                    if (translation == IntPtr.Zero || translationBytes < 4)
                     {
                         return string.Empty;
                     }
 
                     // The translation table carries the language/codepage the
                     // version strings are keyed under; read the first entry.
-                    short language = Marshal.ReadInt16(translation);
-                    short codePage = Marshal.ReadInt16(translation, 2);
+                    ushort language = unchecked((ushort)Marshal.ReadInt16(translation));
+                    ushort codePage = unchecked((ushort)Marshal.ReadInt16(translation, 2));
                     string versionBlock =
                         $@"\StringFileInfo\{language:X4}{codePage:X4}\ProductVersion";
                     if (VerQueryValue(infoBuffer, versionBlock, out IntPtr value, out _) &&
@@ -1522,15 +1589,45 @@ public static partial class Win32Helper
         string? lpDirectory,
         int nShowCmd);
 
-    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
-    private static extern int SHOpenWithDialog(IntPtr hwndParent, ref OpenAsInfo openAsInfo);
+    private static readonly Guid KnownFolderDownloadsGuid = new("374DE290-123F-4565-9164-39C4925E467B");
+    private static readonly Guid KnownFolderLocalAppDataLowGuid = new("A520A1A4-1780-4FF6-BD18-167343C5AF16");
 
-    [DllImport("shlwapi.dll", CharSet = CharSet.Unicode)]
-    private static extern int SHLoadIndirectString(
-        string source,
-        System.Text.StringBuilder outputBuffer,
-        uint outputBufferLength,
-        IntPtr reserved);
+    public static string? TryGetDownloadsKnownFolderPath() =>
+        TryGetKnownFolderPath(in KnownFolderDownloadsGuid);
+
+    public static string? TryGetLocalAppDataLowKnownFolderPath() =>
+        TryGetKnownFolderPath(in KnownFolderLocalAppDataLowGuid);
+
+    private const uint KF_FLAG_DONT_VERIFY = 0x00004000u;
+
+    private static string? TryGetKnownFolderPath(in Guid knownFolderId)
+    {
+        IntPtr ptr = IntPtr.Zero;
+        try
+        {
+            if (SHGetKnownFolderPath(in knownFolderId, KF_FLAG_DONT_VERIFY, IntPtr.Zero, out ptr) == 0 && ptr != IntPtr.Zero)
+            {
+                string? resolved = Marshal.PtrToStringUni(ptr);
+                if (!string.IsNullOrWhiteSpace(resolved))
+                {
+                    return resolved;
+                }
+            }
+        }
+        catch
+        {
+            // Fallback handled by caller.
+        }
+        finally
+        {
+            if (ptr != IntPtr.Zero)
+            {
+                Marshal.FreeCoTaskMem(ptr);
+            }
+        }
+
+        return null;
+    }
 
     /// <summary>
     /// Resolves an indirect resource string ("<c>@shell32.dll,-30318</c>")
@@ -1548,14 +1645,23 @@ public static partial class Win32Helper
         try
         {
             string expanded = Environment.ExpandEnvironmentVariables(value);
-            var buffer = new System.Text.StringBuilder(512);
-            int result = SHLoadIndirectString(expanded, buffer, 512, IntPtr.Zero);
-            if (result < 0 || buffer.Length == 0)
+            Span<char> buffer = stackalloc char[512];
+            int result;
+            unsafe
+            {
+                fixed (char* ptr = buffer)
+                {
+                    result = SHLoadIndirectString(expanded, ptr, (uint)buffer.Length, IntPtr.Zero);
+                }
+            }
+            if (result < 0)
             {
                 return null;
             }
 
-            return buffer.ToString();
+            int nullIndex = buffer.IndexOf('\0');
+            ReadOnlySpan<char> slice = nullIndex >= 0 ? buffer[..nullIndex] : buffer;
+            return slice.IsEmpty ? null : new string(slice);
         }
         catch
         {
@@ -1565,13 +1671,7 @@ public static partial class Win32Helper
 
     private const uint ShopFilePath = 0x01;
 
-    [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool SHObjectProperties(
-        IntPtr hwnd,
-        uint shopType,
-        string objectName,
-        string? propertyPageName);
+
 
     /// <summary>
     /// Opens the shell's Properties sheet for a file path — the same sheet
@@ -1680,11 +1780,17 @@ public static partial class Win32Helper
 
     /// <summary>
     /// Whether the association string (extension or ProgId) resolves a real
-    /// shell\open\command line. Windows answers S_OK with the generic
-    /// OpenWith.exe launcher for unknown extensions; that fallback IS the
-    /// picker, not an association.
+    /// command line for the Shell default verb (or explicit "open" verb).
+    /// Windows answers S_OK with the generic OpenWith.exe launcher for unknown
+    /// extensions; that fallback IS the picker, not an association.
     /// </summary>
     private static bool TryQueryOpenCommand(string assoc)
+    {
+        return TryQueryCommandForVerb(assoc, verb: null) ||
+               TryQueryCommandForVerb(assoc, verb: "open");
+    }
+
+    private static bool TryQueryCommandForVerb(string assoc, string? verb)
     {
         var buffer = new char[1024];
         uint length = (uint)buffer.Length;
@@ -1692,7 +1798,7 @@ public static partial class Win32Helper
             AssocfNone,
             AssocstrCommand,
             assoc,
-            "open",
+            verb,
             buffer,
             ref length);
         if (queryResult == HResultEPointer && length > (uint)buffer.Length)
@@ -1702,7 +1808,7 @@ public static partial class Win32Helper
                 AssocfNone,
                 AssocstrCommand,
                 assoc,
-                "open",
+                verb,
                 buffer,
                 ref length);
         }
@@ -1763,7 +1869,9 @@ public static partial class Win32Helper
                 0,
                 (int)Math.Min(length, (uint)buffer.Length))
             .TrimEnd('\0');
-        return !string.IsNullOrWhiteSpace(progId);
+        return !string.IsNullOrWhiteSpace(progId) &&
+               !progId.Equals("Unknown", StringComparison.OrdinalIgnoreCase) &&
+               !progId.Equals("Undecided", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -1788,12 +1896,22 @@ public static partial class Win32Helper
         }
     }
 
+    private const string OpenWithDelegateExecuteClsid = "{e44e9428-bdbc-4987-a099-40dc8fd255e7}";
+
     /// <summary>
-    /// Whether a ProgId registration carries a verb the Shell can execute —
-    /// a classic command line or a packaged DelegateExecute command.
+    /// Whether a ProgId registration carries a default/launchable verb the
+    /// Shell can execute — a classic command line, a packaged DelegateExecute
+    /// command, or a Shell DropTarget verb handler.
     /// </summary>
     private static bool ProgIdHasOpenVerb(string progId)
     {
+        if (string.IsNullOrWhiteSpace(progId) ||
+            progId.Equals("Unknown", StringComparison.OrdinalIgnoreCase) ||
+            progId.Equals("Undecided", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
         if (TryQueryOpenCommand(progId))
         {
             return true;
@@ -1809,23 +1927,34 @@ public static partial class Win32Helper
                 return false;
             }
 
+            if (shellKey.GetValue(null) is string configuredDefaults &&
+                !string.IsNullOrWhiteSpace(configuredDefaults))
+            {
+                foreach (string rawVerb in configuredDefaults.Split(
+                             ',',
+                             StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    if (!IsPassiveOrPickerShellVerb(rawVerb) &&
+                        IsExecutableShellVerbSubKey(shellKey, rawVerb))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            if (IsExecutableShellVerbSubKey(shellKey, "open"))
+            {
+                return true;
+            }
+
             foreach (string verb in shellKey.GetSubKeyNames())
             {
-                using Microsoft.Win32.RegistryKey? commandKey =
-                    shellKey.OpenSubKey(verb + "\\command");
-                if (commandKey is null)
+                if (IsPassiveOrPickerShellVerb(verb))
                 {
                     continue;
                 }
 
-                if (commandKey.GetValue(null) is string command &&
-                    !string.IsNullOrWhiteSpace(command))
-                {
-                    return true;
-                }
-
-                if (commandKey.GetValue("DelegateExecute") is string delegateExecute &&
-                    !string.IsNullOrWhiteSpace(delegateExecute))
+                if (IsExecutableShellVerbSubKey(shellKey, verb))
                 {
                     return true;
                 }
@@ -1837,6 +1966,61 @@ public static partial class Win32Helper
         {
             return false;
         }
+    }
+
+    private static bool IsPassiveOrPickerShellVerb(string verb)
+    {
+        return verb.Equals("print", StringComparison.OrdinalIgnoreCase) ||
+               verb.Equals("printto", StringComparison.OrdinalIgnoreCase) ||
+               verb.Equals("openas", StringComparison.OrdinalIgnoreCase) ||
+               verb.Equals("OpenWithSetDefaultOn", StringComparison.OrdinalIgnoreCase) ||
+               verb.Equals("InvokeDefaultVerbInOtherProcess", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsExecutableShellVerbSubKey(
+        Microsoft.Win32.RegistryKey shellKey,
+        string verb)
+    {
+        if (string.IsNullOrWhiteSpace(verb))
+        {
+            return false;
+        }
+
+        using (Microsoft.Win32.RegistryKey? commandKey =
+               shellKey.OpenSubKey(verb + "\\command"))
+        {
+            if (commandKey is not null)
+            {
+                if (commandKey.GetValue(null) is string command &&
+                    !string.IsNullOrWhiteSpace(command))
+                {
+                    return command.IndexOf(
+                               "OpenWith.exe",
+                               StringComparison.OrdinalIgnoreCase) < 0;
+                }
+
+                if (commandKey.GetValue("DelegateExecute") is string delegateExecute &&
+                    !string.IsNullOrWhiteSpace(delegateExecute) &&
+                    !delegateExecute.Equals(
+                        OpenWithDelegateExecuteClsid,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+
+        using (Microsoft.Win32.RegistryKey? dropTargetKey =
+               shellKey.OpenSubKey(verb + "\\DropTarget"))
+        {
+            if (dropTargetKey?.GetValue("CLSID") is string dropTargetClsid &&
+                !string.IsNullOrWhiteSpace(dropTargetClsid))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private const int ShcneRenameItem = 0x00000001;
@@ -1903,27 +2087,7 @@ public static partial class Win32Helper
         IntPtr hWnd,
         int id);
 
-    [DllImport("comctl32.dll", EntryPoint = "SetWindowSubclass", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool SetWindowSubclass(
-        IntPtr hWnd,
-        SubclassProc subclassProc,
-        UIntPtr uIdSubclass,
-        UIntPtr dwRefData);
 
-    [DllImport("comctl32.dll", EntryPoint = "RemoveWindowSubclass", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool RemoveWindowSubclass(
-        IntPtr hWnd,
-        SubclassProc subclassProc,
-        UIntPtr uIdSubclass);
-
-    [DllImport("comctl32.dll", EntryPoint = "DefSubclassProc", SetLastError = true)]
-    public static extern IntPtr DefSubclassProc(
-        IntPtr hWnd,
-        uint message,
-        UIntPtr wParam,
-        IntPtr lParam);
 
     // ── OLE apartment marshaling for the deferred virtual-drop worker ──
     // The native drop target hands its IDataObject to a dedicated MTA thread
@@ -2118,9 +2282,9 @@ public static partial class Win32Helper
                 return true;
             }
 
-            var className = new StringBuilder(64);
-            if (GetClassName(hWnd, className, 64) > 0 &&
-                className.ToString() == PopupWindowSiteBridgeClassName)
+            Span<char> className = stackalloc char[64];
+            int length = GetClassName(hWnd, className);
+            if (length > 0 && className[..length].SequenceEqual(PopupWindowSiteBridgeClassName))
             {
                 bridges.Add(hWnd);
             }
@@ -2203,16 +2367,16 @@ public static partial class Win32Helper
 
     private static string GetWindowTitle(IntPtr hWnd)
     {
-        var builder = new StringBuilder(256);
-        int length = GetWindowText(hWnd, builder, builder.Capacity);
-        return length > 0 ? builder.ToString(0, length) : string.Empty;
+        Span<char> buffer = stackalloc char[256];
+        int length = GetWindowText(hWnd, buffer);
+        return length > 0 ? new string(buffer[..length]) : string.Empty;
     }
 
     private static string GetWindowClassName(IntPtr hWnd)
     {
-        var builder = new StringBuilder(256);
-        int length = GetClassName(hWnd, builder, builder.Capacity);
-        return length > 0 ? builder.ToString(0, length) : string.Empty;
+        Span<char> buffer = stackalloc char[256];
+        int length = GetClassName(hWnd, buffer);
+        return length > 0 ? new string(buffer[..length]) : string.Empty;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -2272,6 +2436,38 @@ public static partial class Win32Helper
                 DWMWA_CLOAKED,
                 out int cloaked,
                 sizeof(int)) == 0 && cloaked != 0;
+        }
+        catch (Exception ex) when (
+            ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException)
+        {
+            return false;
+        }
+    }
+
+    internal const int DwmCloakedShell = 0x2;
+
+    /// <summary>
+    /// True when only the SHELL cloak bit is set. The HUD cloaks itself with
+    /// DWMWA_CLOAK for hide animation and monitor seeding (the APP bit), so a
+    /// plain non-zero test would flag a perfectly healthy window on the active
+    /// desktop; only the SHELL bit means "lives on another virtual desktop".
+    /// </summary>
+    internal static bool IsShellCloakBit(int rawCloakValue) =>
+        (rawCloakValue & DwmCloakedShell) != 0;
+
+    /// <summary>
+    /// Reports whether the window is stranded on a non-active virtual desktop
+    /// (shell cloak). Failed queries report false, matching <see cref="IsWindowCloaked"/>.
+    /// </summary>
+    public static bool IsWindowShellCloaked(IntPtr hwnd)
+    {
+        try
+        {
+            return DwmGetWindowAttribute(
+                hwnd,
+                DWMWA_CLOAKED,
+                out int cloaked,
+                sizeof(int)) == 0 && IsShellCloakBit(cloaked);
         }
         catch (Exception ex) when (
             ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException)
@@ -2544,57 +2740,56 @@ public static partial class Win32Helper
         UIntPtr uIdSubclass,
         UIntPtr dwRefData)
     {
-        switch (message)
+        try
         {
-            case WmEraseBkgnd:
-                if (wParam != UIntPtr.Zero &&
-                    MonitorAndBackdropInterop.GetClientRect(
-                        hWnd,
-                        out MonitorAndBackdropInterop.NativeRect clientRect) != 0)
-                {
-                    IntPtr blackBrush = MonitorAndBackdropInterop.GetStockObject(BlackBrushStockObject);
-                    if (blackBrush != IntPtr.Zero)
+            switch (message)
+            {
+                case WmEraseBkgnd:
+                    if (wParam != UIntPtr.Zero &&
+                        MonitorAndBackdropInterop.GetClientRect(
+                            hWnd,
+                            out MonitorAndBackdropInterop.NativeRect clientRect) != 0)
                     {
-                        _ = MonitorAndBackdropInterop.FillRect((nint)wParam, ref clientRect, blackBrush);
+                        IntPtr blackBrush = MonitorAndBackdropInterop.GetStockObject(BlackBrushStockObject);
+                        if (blackBrush != IntPtr.Zero)
+                        {
+                            _ = MonitorAndBackdropInterop.FillRect((nint)wParam, ref clientRect, blackBrush);
+                        }
                     }
-                }
 
-                return (IntPtr)1;
+                    return (IntPtr)1;
 
-            case WmDwmCompositionChanged:
-                IntPtr result = DefSubclassProc(hWnd, message, wParam, lParam);
-                if (IsTransparentWindowHostActive(hWnd))
-                {
-                    DisableWindowFrameShadowCore(hWnd);
-                    ApplyEmptyRegionBlurBehind(hWnd, enable: true);
-                }
+                case WmDwmCompositionChanged:
+                    IntPtr result = DefSubclassProc(hWnd, message, wParam, lParam);
+                    if (IsTransparentWindowHostActive(hWnd))
+                    {
+                        DisableWindowFrameShadowCore(hWnd);
+                        ApplyEmptyRegionBlurBehind(hWnd, enable: true);
+                    }
 
-                return result;
+                    return result;
 
-            case (uint)WM_NCDESTROY:
-                lock (s_transparentHostGate)
-                {
-                    s_transparentHostWindows.Remove(hWnd);
-                }
+                case (uint)WM_NCDESTROY:
+                    lock (s_transparentHostGate)
+                    {
+                        s_transparentHostWindows.Remove(hWnd);
+                    }
 
-                _ = RemoveWindowSubclass(
-                    hWnd,
-                    s_transparentWindowHostSubclassProc,
-                    TransparentWindowHostSubclassId);
-                return DefSubclassProc(hWnd, message, wParam, lParam);
+                    _ = RemoveWindowSubclass(
+                        hWnd,
+                        s_transparentWindowHostSubclassProc,
+                        TransparentWindowHostSubclassId);
+                    return DefSubclassProc(hWnd, message, wParam, lParam);
 
-            default:
-                return DefSubclassProc(hWnd, message, wParam, lParam);
+                default:
+                    return DefSubclassProc(hWnd, message, wParam, lParam);
+            }
+        }
+        catch
+        {
+            return DefSubclassProc(hWnd, message, wParam, lParam);
         }
     }
-
-    [DllImport("kernel32.dll")]
-    private static extern IntPtr GetCurrentProcess();
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool GetNamedPipeClientProcessId(
-        IntPtr hNamedPipe,
-        out uint lpClientProcessId);
 
     /// <summary>
     /// Identifies the process on the other end of a named-pipe server
@@ -2603,34 +2798,7 @@ public static partial class Win32Helper
     internal static bool GetNamedPipeClientProcessId(Microsoft.Win32.SafeHandles.SafePipeHandle pipeHandle, out uint clientPid) =>
         GetNamedPipeClientProcessId(pipeHandle.DangerousGetHandle(), out clientPid);
 
-    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-    private static extern bool ConvertStringSecurityDescriptorToSecurityDescriptorW(
-        string stringSecurityDescriptor,
-        uint stringSecurityDescriptorRevision,
-        out IntPtr securityDescriptor,
-        IntPtr securityDescriptorSize);
 
-    [DllImport("kernel32.dll")]
-    private static extern IntPtr LocalFree(IntPtr hMem);
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct SecurityAttributes
-    {
-        public nint Length;
-        public IntPtr SecurityDescriptor;
-        public IntPtr InheritHandle;
-    }
-
-    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-    private static extern Microsoft.Win32.SafeHandles.SafePipeHandle CreateNamedPipeW(
-        string pipeName,
-        uint openMode,
-        uint pipeMode,
-        uint maxInstances,
-        uint outBufferSize,
-        uint inBufferSize,
-        uint defaultTimeOut,
-        ref SecurityAttributes securityAttributes);
 
     private const uint PipeAccessDuplex = 0x00000003;
     // No FILE_FLAG_FIRST_PIPE_INSTANCE here on purpose: raw CreateNamedPipeW
@@ -2698,14 +2866,14 @@ public static partial class Win32Helper
         {
             var attributes = new SecurityAttributes
             {
-                Length = (nint)System.Runtime.InteropServices.Marshal.SizeOf<SecurityAttributes>(),
+                Length = (uint)System.Runtime.InteropServices.Marshal.SizeOf<SecurityAttributes>(),
                 SecurityDescriptor = descriptor,
-                InheritHandle = IntPtr.Zero,
+                InheritHandle = 0,
             };
             Microsoft.Win32.SafeHandles.SafePipeHandle handle = CreateNamedPipeW(
                 pipeName,
                 PipeAccessDuplex | FileFlagOverlapped,
-                PipeModeByteWaiting,
+                PipeModeByteWaiting | 0x00000008u, // PIPE_REJECT_REMOTE_CLIENTS
                 maxInstances: 1,
                 outBufferSize: (uint)bufferSize,
                 inBufferSize: (uint)bufferSize,
@@ -2727,14 +2895,7 @@ public static partial class Win32Helper
         }
     }
 
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool SetProcessWorkingSetSize(
-        IntPtr hProcess,
-        IntPtr dwMinWorkingSetSize,
-        IntPtr dwMaxWorkingSetSize);
 
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool TerminateProcess(IntPtr hProcess, uint uExitCode);
 
     private const int ProcessMemoryPriorityClass = 0;
     private const uint MemoryPriorityLow = 2;
@@ -2746,13 +2907,7 @@ public static partial class Win32Helper
         public uint MemoryPriority;
     }
 
-    [DllImport("kernel32.dll", EntryPoint = "SetProcessInformation", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool SetProcessMemoryPriorityInformation(
-        IntPtr hProcess,
-        int processInformationClass,
-        ref MemoryPriorityInformation processInformation,
-        uint processInformationSize);
+
 
     /// <summary>
     /// Lowers or restores OS page-priority for the current process so Windows
@@ -2804,6 +2959,43 @@ public static partial class Win32Helper
     /// regrowth gate. The immediate-hidden and visible-idle paths keep the
     /// old hidden-or-user-away contract.
     /// </summary>
+    private const int HeapOptimizeResources = 3;
+    private const uint HeapOptimizeResourcesCurrentVersion = 1;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct HEAP_OPTIMIZE_RESOURCES_INFORMATION
+    {
+        public uint Version;
+        public uint Flags;
+    }
+
+
+
+    /// <summary>
+    /// Decommits unused free pages across all Win32 NT/Segment/LFH heaps in the
+    /// current process (Windows 8.1+). Safe for Win10, Win11, MSIX Store, and NativeAOT.
+    /// </summary>
+    public static unsafe bool OptimizeProcessHeaps()
+    {
+        try
+        {
+            var info = new HEAP_OPTIMIZE_RESOURCES_INFORMATION
+            {
+                Version = HeapOptimizeResourcesCurrentVersion,
+                Flags = 0
+            };
+            return HeapSetInformationNative(
+                IntPtr.Zero,
+                HeapOptimizeResources,
+                &info,
+                (UIntPtr)sizeof(HEAP_OPTIMIZE_RESOURCES_INFORMATION));
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     public static bool TrimWorkingSet()
     {
         try
@@ -2880,30 +3072,7 @@ public static partial class Win32Helper
             AnimationId = 0
         };
 
-        int accentSize = Marshal.SizeOf<AccentPolicy>();
-        IntPtr accentPtr = Marshal.AllocHGlobal(accentSize);
-        try
-        {
-            Marshal.StructureToPtr(accent, accentPtr, false);
-            var data = new WindowCompositionAttributeData
-            {
-                Attribute = WCA_ACCENT_POLICY,
-                Data = accentPtr,
-                SizeOfData = accentSize
-            };
-
-            bool applied = SetWindowCompositionAttribute(hWnd, ref data);
-            int lastError = Marshal.GetLastWin32Error();
-            global::DeskBox.App.LogVerbose(
-                $"[Composition] hwnd=0x{hWnd.ToInt64():X} enabled={enabled} opacity={opacity:F3} " +
-                $"accentState={DescribeAccentState(accent.AccentState)} gradient=0x{accent.GradientColor:X8} " +
-                $"applied={applied} lastError={lastError}");
-            return applied;
-        }
-        finally
-        {
-            Marshal.FreeHGlobal(accentPtr);
-        }
+        return ApplyAccentPolicy(hWnd, accent, enabled, opacity);
     }
 
     public static void DisableAccentPolicy(IntPtr hWnd)
@@ -2916,7 +3085,7 @@ public static partial class Win32Helper
             AnimationId = 0
         };
 
-        ApplyAccentPolicy(hWnd, accent, enabled: false, opacity: 0.0);
+        _ = ApplyAccentPolicy(hWnd, accent, enabled: false, opacity: 0.0);
         if (IsTransparentWindowHostActive(hWnd))
         {
             DisableWindowFrameShadowCore(hWnd);
@@ -2924,31 +3093,22 @@ public static partial class Win32Helper
         }
     }
 
-    private static void ApplyAccentPolicy(IntPtr hWnd, AccentPolicy accent, bool enabled, double opacity)
+    private static unsafe bool ApplyAccentPolicy(IntPtr hWnd, AccentPolicy accent, bool enabled, double opacity)
     {
-        int accentSize = Marshal.SizeOf<AccentPolicy>();
-        IntPtr accentPtr = Marshal.AllocHGlobal(accentSize);
-        try
+        var data = new WindowCompositionAttributeData
         {
-            Marshal.StructureToPtr(accent, accentPtr, false);
-            var data = new WindowCompositionAttributeData
-            {
-                Attribute = WCA_ACCENT_POLICY,
-                Data = accentPtr,
-                SizeOfData = accentSize
-            };
+            Attribute = WCA_ACCENT_POLICY,
+            Data = (IntPtr)(&accent),
+            SizeOfData = (nuint)sizeof(AccentPolicy)
+        };
 
-            bool applied = SetWindowCompositionAttribute(hWnd, ref data);
-            int lastError = Marshal.GetLastWin32Error();
-            global::DeskBox.App.LogVerbose(
-                $"[Composition] hwnd=0x{hWnd.ToInt64():X} enabled={enabled} opacity={opacity:F3} " +
-                $"accentState={DescribeAccentState(accent.AccentState)} gradient=0x{accent.GradientColor:X8} " +
-                $"applied={applied} lastError={lastError}");
-        }
-        finally
-        {
-            Marshal.FreeHGlobal(accentPtr);
-        }
+        bool applied = SetWindowCompositionAttribute(hWnd, ref data);
+        int lastError = Marshal.GetLastPInvokeError();
+        global::DeskBox.App.LogVerbose(
+            $"[Composition] hwnd=0x{hWnd.ToInt64():X} enabled={enabled} opacity={opacity:F3} " +
+            $"accentState={DescribeAccentState(accent.AccentState)} gradient=0x{accent.GradientColor:X8} " +
+            $"applied={applied} lastError={lastError}");
+        return applied;
     }
 
     private static Windows.UI.Color ApplyAlpha(Windows.UI.Color color, double opacity)
@@ -3001,6 +3161,181 @@ public static partial class Win32Helper
         return (GetKeyState((int)key) & 0x8000) != 0;
     }
 
+    public static bool IsAsyncKeyPressed(Windows.System.VirtualKey key) => IsKeyDown((int)key);
+
+    private sealed record ProcessElevationSnapshot(bool IsElevated, int IntegrityRid);
+    private static ProcessElevationSnapshot? s_cachedCurrentProcessElevation;
+
+    /// <summary>
+    /// Returns true when the window's owning process runs at a higher elevation or
+    /// integrity level than the current process (e.g., Medium/MSIX dragging onto an
+    /// Admin window where UIPI silently rejects OLE/COM drops).
+    /// </summary>
+    public static bool IsWindowProcessElevatedAboveCurrent(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        _ = DragDropPermissionNativeMethods.GetWindowThreadProcessId(hwnd, out uint targetPid);
+        if (targetPid == 0 || targetPid == (uint)Environment.ProcessId)
+        {
+            return false;
+        }
+
+        ProcessElevationSnapshot? currentSnapshot = GetCurrentProcessElevationSnapshot();
+        bool currentElevated = currentSnapshot?.IsElevated == true;
+        int currentIntegrityRid = currentSnapshot?.IntegrityRid ?? 0;
+        const uint ProcessQueryLimitedInformation = 0x1000;
+        const int ErrorAccessDenied = 5;
+
+        IntPtr targetProcess = DragDropPermissionNativeMethods.OpenProcess(
+            ProcessQueryLimitedInformation,
+            false,
+            targetPid);
+        if (targetProcess == IntPtr.Zero)
+        {
+            int error = Marshal.GetLastWin32Error();
+            return error == ErrorAccessDenied && !currentElevated;
+        }
+
+        try
+        {
+            if (!TryReadProcessElevationSnapshot(
+                    targetProcess,
+                    out bool targetElevated,
+                    out int targetIntegrityRid,
+                    out int tokenError))
+            {
+                return tokenError == ErrorAccessDenied && !currentElevated;
+            }
+
+            if (targetElevated && !currentElevated)
+            {
+                return true;
+            }
+
+            return currentIntegrityRid > 0 &&
+                   targetIntegrityRid > currentIntegrityRid;
+        }
+        finally
+        {
+            DragDropPermissionNativeMethods.CloseHandle(targetProcess);
+        }
+    }
+
+    private static ProcessElevationSnapshot? GetCurrentProcessElevationSnapshot()
+    {
+        ProcessElevationSnapshot? cached = Volatile.Read(ref s_cachedCurrentProcessElevation);
+        if (cached is not null)
+        {
+            return cached;
+        }
+
+        if (!TryReadProcessElevationSnapshot(
+                DragDropPermissionNativeMethods.GetCurrentProcess(),
+                out bool isElevated,
+                out int integrityRid,
+                out _))
+        {
+            return null;
+        }
+
+        var snapshot = new ProcessElevationSnapshot(isElevated, integrityRid);
+        Volatile.Write(ref s_cachedCurrentProcessElevation, snapshot);
+        return snapshot;
+    }
+
+    private static bool TryReadProcessElevationSnapshot(
+        IntPtr processHandle,
+        out bool isElevated,
+        out int integrityRid,
+        out int win32Error)
+    {
+        isElevated = false;
+        integrityRid = 0;
+        win32Error = 0;
+
+        const uint TokenQuery = 0x0008;
+        if (!DragDropPermissionNativeMethods.OpenProcessToken(processHandle, TokenQuery, out IntPtr tokenHandle))
+        {
+            win32Error = Marshal.GetLastWin32Error();
+            return false;
+        }
+
+        try
+        {
+            int elevationSize = Marshal.SizeOf<DragDropPermissionNativeMethods.TokenElevation>();
+            IntPtr elevationBuffer = Marshal.AllocHGlobal(elevationSize);
+            try
+            {
+                if (!DragDropPermissionNativeMethods.GetTokenInformation(
+                        tokenHandle,
+                        DragDropPermissionNativeMethods.TokenInformationClass.TokenElevation,
+                        elevationBuffer,
+                        elevationSize,
+                        out _))
+                {
+                    win32Error = Marshal.GetLastWin32Error();
+                    return false;
+                }
+
+                var elevation = Marshal.PtrToStructure<DragDropPermissionNativeMethods.TokenElevation>(elevationBuffer);
+                isElevated = elevation.TokenIsElevated != 0;
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(elevationBuffer);
+            }
+
+            _ = DragDropPermissionNativeMethods.GetTokenInformation(
+                tokenHandle,
+                DragDropPermissionNativeMethods.TokenInformationClass.TokenIntegrityLevel,
+                IntPtr.Zero,
+                0,
+                out int labelLength);
+            if (labelLength > 0)
+            {
+                IntPtr labelBuffer = Marshal.AllocHGlobal(labelLength);
+                try
+                {
+                    if (DragDropPermissionNativeMethods.GetTokenInformation(
+                            tokenHandle,
+                            DragDropPermissionNativeMethods.TokenInformationClass.TokenIntegrityLevel,
+                            labelBuffer,
+                            labelLength,
+                            out _))
+                    {
+                        var label = Marshal.PtrToStructure<DragDropPermissionNativeMethods.TokenMandatoryLabel>(labelBuffer);
+                        IntPtr subCountPtr = DragDropPermissionNativeMethods.GetSidSubAuthorityCount(label.Label.Sid);
+                        if (subCountPtr != IntPtr.Zero)
+                        {
+                            byte count = Marshal.ReadByte(subCountPtr);
+                            if (count > 0)
+                            {
+                                IntPtr ridPtr = DragDropPermissionNativeMethods.GetSidSubAuthority(
+                                    label.Label.Sid,
+                                    (uint)(count - 1));
+                                integrityRid = Marshal.ReadInt32(ridPtr);
+                            }
+                        }
+                    }
+                }
+                finally
+                {
+                    Marshal.FreeHGlobal(labelBuffer);
+                }
+            }
+
+            return true;
+        }
+        finally
+        {
+            DragDropPermissionNativeMethods.CloseHandle(tokenHandle);
+        }
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     public struct POINT
     {
@@ -3051,6 +3386,25 @@ public static partial class Win32Helper
         out POINT screenPoint)
     {
         screenPoint = default;
+        if (relativeTo?.XamlRoot is { } pointerRoot &&
+            e.Pointer.PointerDeviceType is
+                Microsoft.UI.Input.PointerDeviceType.Touch or
+                Microsoft.UI.Input.PointerDeviceType.Pen)
+        {
+            Windows.Foundation.Point touchPos = e.GetCurrentPoint(null).Position;
+            double touchScale = GetDpiScaleForWindow(hWnd, pointerRoot);
+            var touchOrigin = default(POINT);
+            if (ClientToScreen(hWnd, ref touchOrigin))
+            {
+                screenPoint = new POINT
+                {
+                    X = touchOrigin.X + (int)Math.Round(touchPos.X * touchScale),
+                    Y = touchOrigin.Y + (int)Math.Round(touchPos.Y * touchScale),
+                };
+                return true;
+            }
+        }
+
         uint messagePos = GetMessagePos();
         if (messagePos != 0)
         {
@@ -3071,7 +3425,7 @@ public static partial class Win32Helper
             return false;
         }
 
-        Windows.Foundation.Point position = e.GetCurrentPoint(relativeTo).Position;
+        Windows.Foundation.Point position = e.GetCurrentPoint(null).Position;
         double scale = GetDpiScaleForWindow(hWnd, xamlRoot);
         var clientOrigin = default(POINT);
         if (!ClientToScreen(hWnd, ref clientOrigin))
@@ -3105,46 +3459,7 @@ public static partial class Win32Helper
         public uint dwFlags;
     }
 
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private struct MONITORINFOEX
-    {
-        public int cbSize;
-        public RECT rcMonitor;
-        public RECT rcWork;
-        public uint dwFlags;
 
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
-        public string szDevice;
-    }
-
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private struct DEVMODE
-    {
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
-        public string dmDeviceName;
-        public short dmSpecVersion;
-        public short dmDriverVersion;
-        public short dmSize;
-        public short dmDriverExtra;
-        public int dmFields;
-        public int dmPositionX;
-        public int dmPositionY;
-        public int dmDisplayOrientation;
-        public int dmDisplayFixedOutput;
-        public short dmColor;
-        public short dmDuplex;
-        public short dmYResolution;
-        public short dmTTOption;
-        public short dmCollate;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
-        public string dmFormName;
-        public short dmLogPixels;
-        public int dmBitsPerPel;
-        public int dmPelsWidth;
-        public int dmPelsHeight;
-        public int dmDisplayFlags;
-        public int dmDisplayFrequency;
-    }
 
     private const uint MonitorInfoPrimary = 0x00000001;
 
@@ -3156,28 +3471,7 @@ public static partial class Win32Helper
         double DpiScale,
         string StableId);
 
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private struct DISPLAY_DEVICEW
-    {
-        public int cb;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
-        public string DeviceName;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
-        public string DeviceString;
-        public uint StateFlags;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
-        public string DeviceID;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
-        public string DeviceKey;
-    }
 
-    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool EnumDisplayDevicesW(
-        string? lpDevice,
-        uint iDevNum,
-        ref DISPLAY_DEVICEW lpDisplayDevice,
-        uint dwFlags);
 
     /// <summary>
     /// Returns the display adapter (PNP device id and description) backing the
@@ -3201,15 +3495,15 @@ public static partial class Win32Helper
 
             var adapter = new DISPLAY_DEVICEW
             {
-                cb = Marshal.SizeOf<DISPLAY_DEVICEW>()
+                cb = DISPLAY_DEVICEW.SizeInBytes
             };
             if (!EnumDisplayDevicesW(monitor.DeviceName, 0, ref adapter, 0))
             {
                 return false;
             }
 
-            deviceId = adapter.DeviceID ?? string.Empty;
-            deviceString = adapter.DeviceString ?? string.Empty;
+            deviceId = adapter.GetDeviceId();
+            deviceString = adapter.GetDeviceString();
             return true;
         }
 
@@ -3230,12 +3524,7 @@ public static partial class Win32Helper
     [LibraryImport("user32.dll")]
     public static partial IntPtr MonitorFromWindow(IntPtr hWnd, uint dwFlags);
 
-    [DllImport("user32.dll", EntryPoint = "EnumDisplaySettingsW", CharSet = CharSet.Unicode)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool EnumDisplaySettings(
-        string lpszDeviceName,
-        int iModeNum,
-        ref DEVMODE lpDevMode);
+
 
     private enum MonitorDpiType
     {
@@ -3273,10 +3562,7 @@ public static partial class Win32Helper
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
 
-    [DllImport("user32.dll", EntryPoint = "GetMonitorInfoW", CharSet = CharSet.Unicode, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GetMonitorInfoEx(IntPtr hMonitor, ref MONITORINFOEX lpmi);
-
     public delegate bool MonitorEnumProc(IntPtr hMonitor, IntPtr hdcMonitor, ref RECT lprcMonitor, IntPtr dwData);
 
     [LibraryImport("user32.dll", SetLastError = true)]
@@ -3407,23 +3693,25 @@ public static partial class Win32Helper
 
             var monitorInfo = new MONITORINFOEX
             {
-                cbSize = Marshal.SizeOf<MONITORINFOEX>(),
-                szDevice = string.Empty
+                cbSize = MONITORINFOEX.SizeInBytes
             };
-            if (!GetMonitorInfoEx(monitor, ref monitorInfo) ||
-                string.IsNullOrWhiteSpace(monitorInfo.szDevice))
+            if (!GetMonitorInfoEx(monitor, ref monitorInfo))
+            {
+                return WidgetDisplayRefreshRatePolicy.DefaultRefreshRateHz;
+            }
+
+            string deviceName = monitorInfo.GetDeviceName();
+            if (string.IsNullOrWhiteSpace(deviceName))
             {
                 return WidgetDisplayRefreshRatePolicy.DefaultRefreshRateHz;
             }
 
             var mode = new DEVMODE
             {
-                dmDeviceName = string.Empty,
-                dmFormName = string.Empty,
-                dmSize = (short)Marshal.SizeOf<DEVMODE>()
+                dmSize = DEVMODE.SizeInBytes
             };
-            return EnumDisplaySettings(monitorInfo.szDevice, EnumCurrentSettings, ref mode)
-                ? WidgetDisplayRefreshRatePolicy.Normalize((uint)Math.Max(0, mode.dmDisplayFrequency))
+            return EnumDisplaySettings(deviceName, EnumCurrentSettings, ref mode)
+                ? WidgetDisplayRefreshRatePolicy.Normalize(mode.dmDisplayFrequency)
                 : WidgetDisplayRefreshRatePolicy.DefaultRefreshRateHz;
         }
         catch (Exception ex) when (
@@ -3473,12 +3761,11 @@ public static partial class Win32Helper
             {
                 var info = new MONITORINFOEX
                 {
-                    cbSize = Marshal.SizeOf<MONITORINFOEX>(),
-                    szDevice = string.Empty
+                    cbSize = MONITORINFOEX.SizeInBytes
                 };
                 if (GetMonitorInfoEx(hMonitor, ref info))
                 {
-                    string deviceName = info.szDevice ?? string.Empty;
+                    string deviceName = info.GetDeviceName();
                     areas.Add(new MonitorWorkAreaInfo(
                         info.rcMonitor,
                         info.rcWork,
@@ -3523,52 +3810,8 @@ public static partial class Win32Helper
     /// sleep, and display-mode switches, so persisted monitor references key
     /// on this value.
     /// </summary>
-    public static string ResolveStableMonitorId(string? deviceName)
-    {
-        string fallback = string.IsNullOrWhiteSpace(deviceName) ? "unknown-display" : deviceName.Trim();
-        if (string.IsNullOrWhiteSpace(deviceName))
-        {
-            return fallback;
-        }
-
-        try
-        {
-            var displayDevice = new DisplayDevice
-            {
-                Size = Marshal.SizeOf<DisplayDevice>(),
-                DeviceName = string.Empty,
-                DeviceString = string.Empty,
-                DeviceId = string.Empty,
-                DeviceKey = string.Empty
-            };
-            if (EnumDisplayDevices(
-                    deviceName,
-                    0,
-                    ref displayDevice,
-                    EddGetDeviceInterfaceName))
-            {
-                if (!string.IsNullOrWhiteSpace(displayDevice.DeviceId))
-                {
-                    return displayDevice.DeviceId.Trim();
-                }
-
-                if (!string.IsNullOrWhiteSpace(displayDevice.DeviceKey))
-                {
-                    return displayDevice.DeviceKey.Trim();
-                }
-            }
-        }
-        catch (Exception ex) when (
-            ex is DllNotFoundException or
-                EntryPointNotFoundException or
-                BadImageFormatException or
-                MarshalDirectiveException or
-                TypeLoadException)
-        {
-        }
-
-        return fallback;
-    }
+    public static string ResolveStableMonitorId(string? deviceName) =>
+        ResolveActiveMonitorStableId(deviceName);
 
     /// <summary>
     /// Open a file or URL using the default associated application.
@@ -3592,12 +3835,8 @@ public static partial class Win32Helper
         string directory = ResolveShellLaunchDirectory(path);
         // Which implementation and branch handled this open is the only way to
         // tell "Windows accepted it" from "the app actually started" after the
-        // fact; the release build only ever runs the Rust implementation.
-        string explorerBackend =
-            ExplorerShellLaunchBackendPolicy.Current ==
-                ExplorerShellLaunchBackendMode.Rust
-                ? "rust"
-                : "csharp";
+        // fact; all builds run the Rust implementation unconditionally.
+        string explorerBackend = "rust";
         if (ExplorerLaunchCircuitBreaker.ShouldBypassExplorerHostedLaunch())
         {
             // #455: RPC-class failures mean the Explorer desktop thread is
@@ -3611,7 +3850,7 @@ public static partial class Win32Helper
         else if (ExplorerShellLaunchService.TryOpen(
                 path,
                 directory,
-                "open",
+                string.Empty,
                 out string? explorerLaunchError,
                 out ExplorerShellLaunchNativeCallResult? explorerLaunchResult,
                 out int explorerLaunchHResult))
@@ -3635,25 +3874,41 @@ public static partial class Win32Helper
                 $"{explorerLaunchError ?? "unknown error"}. Falling back to local ShellExecuteEx.");
         }
 
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = path,
-            UseShellExecute = true,
-            WorkingDirectory = directory
-            // Deliberately no Verb (feedback 246): a NULL verb is the desktop
-            // double-click dispatch. An explicit "open" verb both forces
-            // default-verb classes (templates: feedback 366) open as regular
-            // documents and breaks when the OS-side "open" resolution alone
-            // is damaged — the same machine still double-clicks fine.
-        };
-
         using IDisposable? electronRunAsNodeScope = SuppressElectronRunAsNodeForChildLaunch();
         LocalShellExecuteCompletionMarker pendingLocalLaunch =
             WatchPendingLocalShellExecute(path);
 
         try
         {
-            Process.Start(startInfo);
+            // Deliberately pass a NULL verb (feedback 246): that is the desktop
+            // double-click dispatch. Forward ownerWindow + SEE_MASK_NOASYNC and
+            // grant foreground activation so UAC/SmartScreen prompts parent to
+            // the widget and launched apps activate without foreground-lock delay.
+            _ = AllowSetForegroundWindow(uint.MaxValue);
+            var executeInfo = new ElevatedLaunchNativeMethods.ShellExecuteInfo
+            {
+                Size = (uint)Marshal.SizeOf<ElevatedLaunchNativeMethods.ShellExecuteInfo>(),
+                Mask = 0x00000100u, // SEE_MASK_NOASYNC
+                OwnerWindow = ownerWindow,
+                Verb = null,
+                FileName = path,
+                Parameters = null,
+                Directory = string.IsNullOrWhiteSpace(directory) ? null : directory,
+                Show = 1 // SW_SHOWNORMAL
+            };
+            if (!ElevatedLaunchNativeMethods.ShellExecuteEx(ref executeInfo))
+            {
+                int errorCode = Marshal.GetLastWin32Error();
+                if (errorCode == 1223) // ERROR_CANCELLED (e.g. user dismissed UAC/SmartScreen)
+                {
+                    pendingLocalLaunch.MarkCompleted();
+                    App.Log($"[OpenFile] User cancelled launch (ERROR_CANCELLED) for '{path}'");
+                    return true;
+                }
+
+                throw new Win32Exception(errorCode);
+            }
+
             pendingLocalLaunch.MarkCompleted();
             App.Log(
                 $"[OpenFile] backend=local-shell-execute path='{path}'");
@@ -3688,45 +3943,70 @@ public static partial class Win32Helper
 
     /// <summary>
     /// Opens <paramref name="path"/> locally with the Shell's default verb — the
-    /// dispatch a desktop double-click performs — instead of the explicit "open"
-    /// verb, and without delegating to the Explorer desktop process. Used for the
-    /// classes where an explicit "open" verb is wrong or fragile: folder
-    /// shortcuts (#459, third-party file managers register as the Folder default
-    /// handler), template documents (feedback 366, the default "New" verb creates
-    /// a copy instead of opening — and enabling an overwrite of — the template),
-    /// and shortcuts to local files (feedback 246, the default verb is exactly
-    /// what the desktop dispatches and local failures throw instead of dying
-    /// silently in Explorer's fire-and-forget). Shares the local-launch pipeline
-    /// (environment scrub, pending observation) with the fallback in
-    /// <see cref="OpenFileOrChooseApp(IntPtr, string)"/>.
+    /// dispatch a desktop double-click performs — instead of an explicit verb,
+    /// and without delegating to the Explorer desktop process.
     /// </summary>
-    internal static bool OpenWithDefaultVerbLocally(string path, string workingDirectory)
-    {
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = path,
-            UseShellExecute = true,
-            WorkingDirectory = workingDirectory
-            // Deliberately no Verb: a NULL verb is the desktop double-click
-            // dispatch, which resolves the target's default handler.
-        };
+    internal static bool OpenWithDefaultVerbLocally(string path, string workingDirectory) =>
+        OpenWithDefaultVerbLocally(IntPtr.Zero, path, workingDirectory);
 
+    internal static bool OpenWithDefaultVerbLocally(
+        IntPtr ownerWindow,
+        string path,
+        string workingDirectory) =>
+        OpenWithDefaultVerbLocally(ownerWindow, path, workingDirectory, out _) != ShellLaunchOutcome.Failed;
+
+    internal static ShellLaunchOutcome OpenWithDefaultVerbLocally(
+        IntPtr ownerWindow,
+        string path,
+        string workingDirectory,
+        out ShellLaunchOutcome outcome)
+    {
         using IDisposable? electronRunAsNodeScope = SuppressElectronRunAsNodeForChildLaunch();
         LocalShellExecuteCompletionMarker pendingLocalLaunch =
             WatchPendingLocalShellExecute(path);
 
         try
         {
-            Process.Start(startInfo);
+            // Deliberately pass a NULL verb: that is the desktop double-click
+            // dispatch, resolving the target's default handler directly via
+            // ShellExecuteExW without SEE_MASK_NOCLOSEPROCESS handle waits.
+            _ = AllowSetForegroundWindow(uint.MaxValue);
+            var executeInfo = new ElevatedLaunchNativeMethods.ShellExecuteInfo
+            {
+                Size = (uint)Marshal.SizeOf<ElevatedLaunchNativeMethods.ShellExecuteInfo>(),
+                Mask = 0x00000100u, // SEE_MASK_NOASYNC
+                OwnerWindow = ownerWindow,
+                Verb = null,
+                FileName = path,
+                Parameters = null,
+                Directory = string.IsNullOrWhiteSpace(workingDirectory) ? null : workingDirectory,
+                Show = 1 // SW_SHOWNORMAL
+            };
+            if (!ElevatedLaunchNativeMethods.ShellExecuteEx(ref executeInfo))
+            {
+                int errorCode = Marshal.GetLastWin32Error();
+                if (errorCode == 1223) // ERROR_CANCELLED
+                {
+                    pendingLocalLaunch.MarkCompleted();
+                    App.Log($"[OpenFile] User cancelled default-verb launch (ERROR_CANCELLED) for '{path}'");
+                    outcome = ShellLaunchOutcome.UserCancelled;
+                    return outcome;
+                }
+
+                throw new Win32Exception(errorCode);
+            }
+
             pendingLocalLaunch.MarkCompleted();
             App.Log(
                 $"[OpenFile] backend=local-default-verb path='{path}'");
-            return true;
+            outcome = ShellLaunchOutcome.Launched;
+            return outcome;
         }
         catch (Exception ex)
         {
             App.Log($"[OpenFile] Failed to open '{path}' with the default verb: {ex.Message}");
-            return false;
+            outcome = ShellLaunchOutcome.Failed;
+            return outcome;
         }
     }
 
@@ -3743,31 +4023,7 @@ public static partial class Win32Helper
     /// </summary>
     private static IDisposable? SuppressElectronRunAsNodeForChildLaunch()
     {
-        string? savedElectronRunAsNode = Environment.GetEnvironmentVariable("ELECTRON_RUN_AS_NODE");
-        if (savedElectronRunAsNode is null)
-        {
-            return null;
-        }
-
-        Environment.SetEnvironmentVariable("ELECTRON_RUN_AS_NODE", null);
-        return new EnvironmentVariableRestoreScope("ELECTRON_RUN_AS_NODE", savedElectronRunAsNode);
-    }
-
-    private sealed class EnvironmentVariableRestoreScope : IDisposable
-    {
-        private readonly string _name;
-        private readonly string? _value;
-
-        internal EnvironmentVariableRestoreScope(string name, string? value)
-        {
-            _name = name;
-            _value = value;
-        }
-
-        public void Dispose()
-        {
-            Environment.SetEnvironmentVariable(_name, _value);
-        }
+        return DeskBox.Services.ProcessEnvironmentSyncService.AcquireChildLaunchContaminationScope();
     }
 
     private const int LocalShellExecutePendingLogSeconds = 15;
@@ -3817,20 +4073,24 @@ public static partial class Win32Helper
         }
     }
 
-    private static bool ShowOpenWithDialog(IntPtr ownerWindow, string path)
+    private static unsafe bool ShowOpenWithDialog(IntPtr ownerWindow, string path)
     {
         // Offer the system "Open With" dialog with the real owner window so
         // the user can pick an app instead of getting a silent no-op. A user
         // dismissal returns S_OK on current Windows, so it is reported as
         // handled: no reliable cancellation signal exists.
-        var openAsInfo = new OpenAsInfo
+        int hResult;
+        fixed (char* filePtr = path)
         {
-            File = path,
-            Class = null,
-            Flags = OpenAsInfoFlags.AllowRegistration | OpenAsInfoFlags.Execute
-        };
+            var openAsInfo = new OpenAsInfo
+            {
+                File = filePtr,
+                Class = null,
+                Flags = OpenAsInfoFlags.AllowRegistration | OpenAsInfoFlags.Execute
+            };
 
-        int hResult = SHOpenWithDialog(ownerWindow, ref openAsInfo);
+            hResult = SHOpenWithDialog(ownerWindow, ref openAsInfo);
+        }
         if (hResult < 0)
         {
             App.Log($"[OpenFile] Open With failed with HRESULT 0x{hResult:X8} for '{path}'");
@@ -3848,6 +4108,74 @@ public static partial class Win32Helper
         }
 
         return Path.GetDirectoryName(path) ?? string.Empty;
+    }
+
+    internal static bool OpenWithParametersLocally(
+        IntPtr ownerWindow,
+        string path,
+        string? parameters,
+        string workingDirectory,
+        string? verb = null) =>
+        OpenWithParametersLocally(
+            ownerWindow,
+            path,
+            parameters,
+            workingDirectory,
+            verb,
+            out _) != ShellLaunchOutcome.Failed;
+
+    internal static ShellLaunchOutcome OpenWithParametersLocally(
+        IntPtr ownerWindow,
+        string path,
+        string? parameters,
+        string workingDirectory,
+        string? verb,
+        out ShellLaunchOutcome outcome)
+    {
+        using IDisposable? electronRunAsNodeScope = SuppressElectronRunAsNodeForChildLaunch();
+        LocalShellExecuteCompletionMarker pendingLocalLaunch =
+            WatchPendingLocalShellExecute(path);
+
+        try
+        {
+            _ = AllowSetForegroundWindow(uint.MaxValue);
+            var executeInfo = new ElevatedLaunchNativeMethods.ShellExecuteInfo
+            {
+                Size = (uint)Marshal.SizeOf<ElevatedLaunchNativeMethods.ShellExecuteInfo>(),
+                Mask = 0x00000100u, // SEE_MASK_NOASYNC
+                OwnerWindow = ownerWindow,
+                Verb = string.IsNullOrWhiteSpace(verb) ? null : verb,
+                FileName = path,
+                Parameters = string.IsNullOrWhiteSpace(parameters) ? null : parameters,
+                Directory = string.IsNullOrWhiteSpace(workingDirectory) ? null : workingDirectory,
+                Show = 1 // SW_SHOWNORMAL
+            };
+            if (!ElevatedLaunchNativeMethods.ShellExecuteEx(ref executeInfo))
+            {
+                int errorCode = Marshal.GetLastWin32Error();
+                if (errorCode == 1223) // ERROR_CANCELLED
+                {
+                    pendingLocalLaunch.MarkCompleted();
+                    App.Log($"[OpenFile] User cancelled parameterized launch (ERROR_CANCELLED) for '{path}'");
+                    outcome = ShellLaunchOutcome.UserCancelled;
+                    return outcome;
+                }
+
+                throw new Win32Exception(errorCode);
+            }
+
+            pendingLocalLaunch.MarkCompleted();
+            App.Log(
+                $"[OpenFile] backend=local-parameterized-launch path='{path}'");
+            outcome = ShellLaunchOutcome.Launched;
+            return outcome;
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[OpenFile] Failed parameterized launch for '{path}': {ex.Message}");
+            outcome = ShellLaunchOutcome.Failed;
+            return outcome;
+        }
     }
 
     private static bool TryOpenUncWithExplorer(IntPtr ownerWindow, string path)
@@ -3904,17 +4232,7 @@ public static partial class Win32Helper
         Execute = 0x00000004
     }
 
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private struct OpenAsInfo
-    {
-        [MarshalAs(UnmanagedType.LPWStr)]
-        public string File;
 
-        [MarshalAs(UnmanagedType.LPWStr)]
-        public string? Class;
-
-        public OpenAsInfoFlags Flags;
-    }
 
     /// <summary>
     /// Open Windows Explorer with the specified file selected, resolving MSIX
@@ -3932,14 +4250,78 @@ public static partial class Win32Helper
         string arguments = selectTarget
             ? $"/select,\"{resolvedPath}\""
             : $"\"{resolvedPath}\"";
-        var result = ShellExecute(IntPtr.Zero, "open", "explorer.exe",
-            arguments, null, SW_SHOWNORMAL);
+        using IDisposable? electronRunAsNodeScope = SuppressElectronRunAsNodeForChildLaunch();
+        _ = AllowSetForegroundWindow(uint.MaxValue);
+        var result = ShellExecute(
+            IntPtr.Zero,
+            "open",
+            "explorer.exe",
+            arguments,
+            Environment.SystemDirectory,
+            SW_SHOWNORMAL);
 
         // ShellExecute returns an error code (<= 32) when it fails.
         if ((long)result <= 32)
         {
             App.Log($"[ShowInExplorer] ShellExecute failed for '{path}' (resolved '{resolvedPath}'), error code={(long)result}");
         }
+    }
+
+    internal static string ResolveUnvirtualizedPhysicalPath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return string.Empty;
+        }
+
+        string trimmed = path.Trim();
+        string candidate;
+        try
+        {
+            candidate = Path.GetFullPath(trimmed);
+        }
+        catch
+        {
+            return trimmed;
+        }
+
+        if (TryGetFinalPath(candidate, out string finalPath))
+        {
+            return finalPath;
+        }
+
+        var relativeSegments = new Stack<string>();
+        string? current = candidate;
+        while (!string.IsNullOrWhiteSpace(current))
+        {
+            string? parent = Path.GetDirectoryName(current);
+            if (string.IsNullOrWhiteSpace(parent) ||
+                string.Equals(parent, current, StringComparison.OrdinalIgnoreCase))
+            {
+                break;
+            }
+
+            string segment = Path.GetFileName(current);
+            if (!string.IsNullOrWhiteSpace(segment))
+            {
+                relativeSegments.Push(segment);
+            }
+
+            if (TryGetFinalPath(parent, out string ancestorFinal))
+            {
+                string combined = ancestorFinal;
+                while (relativeSegments.Count > 0)
+                {
+                    combined = Path.Combine(combined, relativeSegments.Pop());
+                }
+
+                return combined;
+            }
+
+            current = parent;
+        }
+
+        return candidate;
     }
 
     internal static (string TargetPath, bool SelectTarget) ResolveExplorerTarget(string path)
@@ -4002,12 +4384,24 @@ public static partial class Win32Helper
         public int apartmentType;
     }
 
+    public static void TrySetWindowCloaked(IntPtr hwnd, bool cloaked)
+    {
+        if (hwnd == IntPtr.Zero)
+        {
+            return;
+        }
+
+        int value = cloaked ? 1 : 0;
+        _ = DwmSetWindowAttribute(hwnd, DWMWA_CLOAK, ref value, sizeof(int));
+    }
+
     [LibraryImport("CoreMessaging.dll")]
     public static partial int CreateDispatcherQueueController(
         DispatcherQueueOptions options,
-        ref IntPtr dispatcherQueueController);
+        out IntPtr dispatcherQueueController);
 
-    private static IntPtr _dispatcherQueueController = IntPtr.Zero;
+    [ThreadStatic]
+    private static IntPtr t_dispatcherQueueController;
 
     /// <summary>
     /// Ensures that a UWP DispatcherQueue is initialized on the current thread.
@@ -4020,7 +4414,7 @@ public static partial class Win32Helper
             return;
         }
 
-        if (_dispatcherQueueController == IntPtr.Zero)
+        if (t_dispatcherQueueController == IntPtr.Zero)
         {
             DispatcherQueueOptions options = new DispatcherQueueOptions
             {
@@ -4029,7 +4423,7 @@ public static partial class Win32Helper
                 apartmentType = 2 // DQTAT_COM_STA
             };
 
-            CreateDispatcherQueueController(options, ref _dispatcherQueueController);
+            _ = CreateDispatcherQueueController(options, out t_dispatcherQueueController);
         }
     }
 }

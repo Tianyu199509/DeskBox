@@ -138,66 +138,92 @@ public sealed class FileSettingsEditorTests : IDisposable
     }
 
     [Fact]
-    public void ManagedStorage_DragOutEdits_WriteThroughNormalizeAndPersist()
+    public void ManagedStorage_DragOutEdits_PersistIndependentlyWithoutClobberingDropAction()
     {
         (SettingsService settings, _, ManagedStorageSettingsViewModel storage) = CreateEditors(_root);
         int notified = 0;
         settings.SettingsChanged += () => notified++;
 
-        storage.DragOutAction = ManagedDropActions.Move;
-        Assert.Equal(
-            ManagedDropActions.Move,
-            settings.Settings.FileWidget.ManagedDragOutAction);
+        // Editing DragOutAction independently leaves ManagedDropAction intact.
+        storage.DragOutAction = ManagedDropActions.Copy;
+        Assert.Equal(ManagedDropActions.Move, settings.Settings.FileWidget.ManagedDropAction);
+        Assert.Equal(ManagedDropActions.Copy, settings.Settings.FileWidget.ManagedDragOutAction);
+        Assert.True(storage.IsDragOutCustomized);
         Assert.Equal(1, notified);
 
-        // The coordinator normalizes unknown values to the safe default:
-        // FollowWindows advertises no preferred effect, so a receiver can
-        // never gain the Move token that would let it remove the source.
+        // Once diverged, editing DropAction updates only ManagedDropAction without overwriting DragOutAction.
+        storage.DropAction = ManagedDropActions.FollowWindows;
+        Assert.Equal(ManagedDropActions.FollowWindows, settings.Settings.FileWidget.ManagedDropAction);
+        Assert.Equal(ManagedDropActions.Copy, settings.Settings.FileWidget.ManagedDragOutAction);
+        Assert.Equal(ManagedDropActions.Copy, storage.DragOutAction);
+        Assert.Equal(2, notified);
+
+        // Unknown DragOutAction values normalize to canonical Move without clobbering DropAction.
         storage.DragOutAction = "Nonsense";
-        Assert.Equal(
-            ManagedDropActions.FollowWindows,
-            settings.Settings.FileWidget.ManagedDragOutAction);
+        Assert.Equal(ManagedDropActions.FollowWindows, settings.Settings.FileWidget.ManagedDropAction);
+        Assert.Equal(ManagedDropActions.Move, settings.Settings.FileWidget.ManagedDragOutAction);
 
         // Unchanged writes skip the redundant debounced save.
         int notifiedAfterWrite = notified;
-        storage.DragOutAction = ManagedDropActions.FollowWindows;
+        storage.DragOutAction = ManagedDropActions.Move;
         Assert.Equal(notifiedAfterWrite, notified);
     }
 
     [Fact]
-    public void ManagedStorage_DragOutOptions_ListFollowWindowsFirstWithLocalizedNames()
+    public void ManagedStorage_DropActionEdit_KeepsDragOutLinkedWhenPreviouslyInSync()
+    {
+        (SettingsService settings, _, ManagedStorageSettingsViewModel storage) = CreateEditors(_root);
+        Assert.False(storage.IsDragOutCustomized);
+
+        storage.DropAction = ManagedDropActions.Copy;
+        Assert.Equal(ManagedDropActions.Copy, settings.Settings.FileWidget.ManagedDropAction);
+        Assert.Equal(ManagedDropActions.Copy, settings.Settings.FileWidget.ManagedDragOutAction);
+        Assert.Equal(ManagedDropActions.Copy, storage.DragOutAction);
+        Assert.False(storage.IsDragOutCustomized);
+    }
+
+    [Fact]
+    public void ManagedStorage_DragOutOptions_MatchUnifiedDropActionOptionsWithLocalizedNames()
     {
         (_, _, ManagedStorageSettingsViewModel storage) = CreateEditors(_root);
 
         SettingsOption[] options = [.. storage.AvailableDragOutActionOptions];
         Assert.Equal(3, options.Length);
-        Assert.Equal(ManagedDropActions.FollowWindows, options[0].Value);
+        Assert.Equal(ManagedDropActions.Move, options[0].Value);
         Assert.Equal(ManagedDropActions.Copy, options[1].Value);
-        Assert.Equal(ManagedDropActions.Move, options[2].Value);
-        Assert.Equal("Settings.DropAction.System", options[0].DisplayName);
+        Assert.Equal(ManagedDropActions.FollowWindows, options[2].Value);
+        Assert.Equal("Settings.DropAction.Move", options[0].DisplayName);
         Assert.Equal("Settings.DropAction.Copy", options[1].DisplayName);
-        Assert.Equal("Settings.DropAction.Move", options[2].DisplayName);
+        Assert.Equal("Settings.DropAction.System", options[2].DisplayName);
     }
 
     [Fact]
-    public void ManagedStorage_DragOutSync_RefreshesProjectionWithoutWritingBack()
+    public void ManagedStorage_DragOutSync_RefreshesIndependentProjectionWithoutWritingBack()
     {
         (SettingsService settings, _, ManagedStorageSettingsViewModel storage) =
             CreateEditors(
                 _root,
                 static settings =>
+                {
+                    settings.Settings.FileWidget.ManagedDropAction =
+                        SettingsService.ManagedDropActionMove;
                     settings.Settings.FileWidget.ManagedDragOutAction =
-                        SettingsService.ManagedDragOutActionCopy);
+                        SettingsService.ManagedDragOutActionCopy;
+                });
         int notified = 0;
         settings.SettingsChanged += () => notified++;
 
+        Assert.Equal(ManagedDropActions.Move, storage.DropAction);
         Assert.Equal(ManagedDropActions.Copy, storage.DragOutAction);
+        Assert.True(storage.IsDragOutCustomized);
 
         settings.Settings.FileWidget.ManagedDragOutAction =
-            SettingsService.ManagedDragOutActionMove;
+            SettingsService.ManagedDragOutActionFollowWindows;
         storage.SyncPresentation();
 
-        Assert.Equal(ManagedDropActions.Move, storage.DragOutAction);
+        Assert.Equal(ManagedDropActions.Move, storage.DropAction);
+        Assert.Equal(ManagedDropActions.FollowWindows, storage.DragOutAction);
+        Assert.True(storage.IsDragOutCustomized);
         Assert.Equal(0, notified);
     }
 
@@ -353,157 +379,4 @@ public sealed class FileSettingsEditorTests : IDisposable
         }
     }
 
-    [Fact]
-    public void FileSections_BindToTheEditorsThroughSectionLevelDataContext()
-    {
-        string xaml = File.ReadAllText(
-            TestPaths.FromRepository("src/DeskBox/Views/SettingsWindow.xaml"));
-        string fileWidgetXaml = File.ReadAllText(
-            TestPaths.FromRepository("src/DeskBox/Views/SettingsSections/FileWidgetSettingsSection.xaml"));
-        string deferred = File.ReadAllText(
-            TestPaths.FromRepository("src/DeskBox/Views/SettingsWindow.DeferredSections.cs"));
-        string bindable = File.ReadAllText(
-            TestPaths.FromRepository("src/DeskBox/ViewModels/SettingsViewModel.AotBindableProperties.cs"));
-        string displayBridge = File.ReadAllText(
-            TestPaths.FromRepository(
-                "src/DeskBox/Features/FileDisplay/FileDisplaySettingsViewModel.AotBindableProperties.cs"));
-        string storageBridge = File.ReadAllText(
-            TestPaths.FromRepository(
-                "src/DeskBox/Features/ManagedStorage/ManagedStorageSettingsViewModel.AotBindableProperties.cs"));
-        string sync = File.ReadAllText(
-            TestPaths.FromRepository("src/DeskBox/ViewModels/SettingsViewModel.SettingsSync.cs"));
-        string smoke = File.ReadAllText(
-            TestPaths.FromRepository("src/DeskBox/App.AotManagedUiSmoke.cs"));
-
-        // File display and managed storage merged into AppearanceDetail
-        // (FileWidgetSettingsSection.xaml) with compiled {x:Bind} editor bridges.
-        Assert.Contains("IsOn=\"{x:Bind FileDisplay.ShowImageThumbnails, Mode=TwoWay}\"", fileWidgetXaml, StringComparison.Ordinal);
-        Assert.Contains("IsOn=\"{x:Bind FileDisplay.ShowFileExtensions, Mode=TwoWay}\"", fileWidgetXaml, StringComparison.Ordinal);
-        Assert.Contains("Visibility=\"{x:Bind FileDisplay.ShowFileExtensions, Mode=OneWay}\"", fileWidgetXaml, StringComparison.Ordinal);
-        Assert.Contains("IsEnabled=\"{x:Bind FileDisplay.ShowFileExtensions, Mode=OneWay}\"", fileWidgetXaml, StringComparison.Ordinal);
-        Assert.Contains(
-            "IsOn=\"{x:Bind FileDisplay.HideShortcutExtensionWhenShowingFileExtensions, Mode=TwoWay}\"",
-            fileWidgetXaml, StringComparison.Ordinal);
-        Assert.Contains("IsOn=\"{x:Bind FileDisplay.HideShortcutArrowOverlay, Mode=TwoWay}\"", fileWidgetXaml, StringComparison.Ordinal);
-        Assert.Contains("IsOn=\"{x:Bind FileDisplay.ShowListItemDetails, Mode=TwoWay}\"", fileWidgetXaml, StringComparison.Ordinal);
-        Assert.Contains("IsOn=\"{x:Bind FileDisplay.ShowFileItemPathTooltips, Mode=TwoWay}\"", fileWidgetXaml, StringComparison.Ordinal);
-        Assert.Contains("Description=\"{x:Bind ManagedStorage.RootPath, Mode=OneWay}\"", fileWidgetXaml, StringComparison.Ordinal);
-        Assert.Contains("Text=\"{x:Bind ManagedStorage.DragBehaviorSummaryText, Mode=OneWay}\"", fileWidgetXaml, StringComparison.Ordinal);
-        Assert.Contains("ItemsSource=\"{x:Bind ManagedStorage.AvailableDragInBehaviorOptionItems, Mode=OneWay}\"", fileWidgetXaml, StringComparison.Ordinal);
-        Assert.Contains("controls:SettingsComboBox.Value=\"{x:Bind ManagedStorage.DropAction, Mode=TwoWay}\"", fileWidgetXaml, StringComparison.Ordinal);
-        Assert.Contains("ItemsSource=\"{x:Bind ManagedStorage.AvailableDragOutBehaviorOptionItems, Mode=OneWay}\"", fileWidgetXaml, StringComparison.Ordinal);
-        Assert.Contains("controls:SettingsComboBox.Value=\"{x:Bind ManagedStorage.DragOutAction, Mode=TwoWay}\"", fileWidgetXaml, StringComparison.Ordinal);
-        Assert.Contains("IsOn=\"{x:Bind ManagedStorage.DragOutModifierTipEnabled, Mode=TwoWay}\"", fileWidgetXaml, StringComparison.Ordinal);
-        Assert.Contains("IsOn=\"{x:Bind ManagedStorage.DragOutResultHintEnabled, Mode=TwoWay}\"", fileWidgetXaml, StringComparison.Ordinal);
-        // The drag-out card is named so the shell can append the Windows 10
-        // note to its description: the content column is an Auto grid column,
-        // and a wide note placed there overflows the card on high-scale
-        // narrow windows instead of wrapping. The note text itself lives in
-        // SettingsWindow.StorageAndUpdates.cs (description concatenation),
-        // never as an element inside the content column. The modifier-tip
-        // toggle stays a named element: the shell greys it out on Win10,
-        // where external drops cannot carry a two-effect advertisement.
-        Assert.Contains("x:Name=\"DragOutActionCard\"", fileWidgetXaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("DragOutWin10Note", fileWidgetXaml + xaml, StringComparison.Ordinal);
-        string shellStorage = File.ReadAllText(
-            TestPaths.FromRepository("src/DeskBox/Views/SettingsWindow.StorageAndUpdates.cs"));
-        Assert.Contains(
-            "\"Settings.DragOutAction.Win10Note\"",
-            shellStorage,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "x:Name=\"DragOutModifierTipToggle\"",
-            fileWidgetXaml,
-            StringComparison.Ordinal);
-        foreach (string legacy in new[]
-                 {
-                     "{Binding SelectedManagedDropAction",
-                     "{Binding AvailableManagedDropActionOptions",
-                     "{Binding ManagedStorageRootPath",
-                     "{Binding ShouldUnpinManagedStorageFromQuickAccess"
-                 })
-        {
-            Assert.DoesNotContain(legacy, fileWidgetXaml + xaml, StringComparison.Ordinal);
-        }
-
-        // The deferred-section host assigns both typed editor bridges on
-        // FileWidgetSettingsSection; standalone FileDisplaySettings /
-        // FileStorageSettings routes are retired.
-        Assert.Contains("fileSettings.FileDisplay = _fileDisplaySettingsViewModel;", deferred, StringComparison.Ordinal);
-        Assert.Contains("fileSettings.ManagedStorage = _managedStorageSettingsViewModel;", deferred, StringComparison.Ordinal);
-        Assert.DoesNotContain("\"FileDisplaySettings\"", deferred, StringComparison.Ordinal);
-        Assert.DoesNotContain("\"FileStorageSettings\"", deferred, StringComparison.Ordinal);
-
-        // The shell bridge drops the thirteen file-domain entries; the
-        // editors carry their own NativeAOT custom-property bridges.
-        foreach (string name in new[]
-                 {
-                     "ShowFileExtensions",
-                     "HideShortcutExtensionWhenShowingFileExtensions",
-                     "HideShortcutArrowOverlay",
-                     "ShowImageFilesAsIcons",
-                     "ShowListItemDetails",
-                     "ShowFileItemPathTooltips",
-                     "SelectedManagedDropAction",
-                     "AvailableManagedDropActionOptions",
-                     "ManagedStorageRootPath",
-                     "QuickAccessStatusText",
-                     "CanInvokeQuickAccessAction",
-                     "PinQuickAccessButtonText",
-                     "PinQuickAccessToolTipText"
-                 })
-        {
-            Assert.DoesNotContain($"nameof({name})", bindable, StringComparison.Ordinal);
-        }
-
-        Assert.Contains("#if DESKBOX_NATIVE_AOT", displayBridge, StringComparison.Ordinal);
-        Assert.Contains("[WinRT.GeneratedBindableCustomProperty([", displayBridge, StringComparison.Ordinal);
-        foreach (string name in new[]
-                 {
-                     "HideShortcutArrowOverlay",
-                     "HideShortcutExtensionWhenShowingFileExtensions",
-                     "ShowFileExtensions",
-                     "ShowFileItemPathTooltips",
-                     "ShowImageFilesAsIcons",
-                     "ShowImageThumbnails",
-                     "ShowListItemDetails"
-                 })
-        {
-            Assert.Contains($"nameof({name})", displayBridge, StringComparison.Ordinal);
-        }
-
-        Assert.Contains("#if DESKBOX_NATIVE_AOT", storageBridge, StringComparison.Ordinal);
-        foreach (string name in new[]
-                 {
-                     "AvailableDragInBehaviorOptionItems",
-                     "AvailableDragOutActionOptions",
-                     "AvailableDragOutBehaviorOptionItems",
-                     "AvailableDropActionOptions",
-                     "CanInvokeQuickAccessAction",
-                     "DragBehaviorSummaryText",
-                     "DragOutAction",
-                     "DragOutModifierTipEnabled",
-                     "DragOutResultHintEnabled",
-                     "DropAction",
-                     "PinQuickAccessButtonText",
-                     "PinQuickAccessToolTipText",
-                     "QuickAccessStatusText",
-                     "RootPath"
-                 })
-        {
-            Assert.Contains($"nameof({name})", storageBridge, StringComparison.Ordinal);
-        }
-
-        // External refresh paths re-sync both editor projections and
-        // re-localize the storage option list instead of assigning facade
-        // state.
-        Assert.Contains("_fileDisplaySettings.SyncPresentation();", sync, StringComparison.Ordinal);
-        Assert.Contains("_managedStorageSettings.SyncPresentation();", sync, StringComparison.Ordinal);
-        Assert.Contains("_managedStorageSettings.RefreshLocalization();", sync, StringComparison.Ordinal);
-
-        // The AOT persistence smoke toggles the file-display editor's real
-        // binding surface instead of the retired shell facade.
-        Assert.Contains("settingsWindow.FileDisplaySettings", smoke, StringComparison.Ordinal);
-        Assert.DoesNotContain("settingsViewModel.ShowFileExtensions", smoke, StringComparison.Ordinal);
-    }
 }

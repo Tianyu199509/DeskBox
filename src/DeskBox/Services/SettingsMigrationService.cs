@@ -737,9 +737,10 @@ internal sealed class Migration_14_To_15 : ISettingsMigration
 }
 
 /// <summary>
-/// v16 adds ClipboardViewMode (Standard/Compact) and flips the default of
-/// ClipboardMoveToTopOnReuse to false so clicking an item inside the Clipboard
-/// widget copies it in place instead of jumping it to index 0.
+/// v16 adds ClipboardViewMode (Standard/Compact), flips the default of
+/// ClipboardMoveToTopOnReuse to false, and upgrades v1.5.9 drag-out defaults
+/// safely without clobbering conservative Copy overrides or Windows 10
+/// FollowWindows profiles.
 /// </summary>
 internal sealed class Migration_15_To_16 : ISettingsMigration
 {
@@ -751,6 +752,37 @@ internal sealed class Migration_15_To_16 : ISettingsMigration
         if (string.IsNullOrWhiteSpace(settings.Clipboard.ClipboardViewMode))
         {
             settings.Clipboard.ClipboardViewMode = ClipboardSettingsSlice.ViewModeStandard;
+        }
+
+        UpgradeLegacyDragOutAction(
+            settings.FileWidget,
+            WindowsCompatibilityService.IsWindows11OrLater);
+    }
+
+    internal static void UpgradeLegacyDragOutAction(
+        FileWidgetSettingsSlice fileWidget,
+        bool isWindows11OrLater)
+    {
+        if (string.IsNullOrWhiteSpace(fileWidget.ManagedDragOutAction) ||
+            (!string.Equals(fileWidget.ManagedDragOutAction, SettingsService.ManagedDragOutActionMove, StringComparison.Ordinal) &&
+             !string.Equals(fileWidget.ManagedDragOutAction, SettingsService.ManagedDragOutActionCopy, StringComparison.Ordinal) &&
+             !string.Equals(fileWidget.ManagedDragOutAction, SettingsService.ManagedDragOutActionFollowWindows, StringComparison.Ordinal)))
+        {
+            fileWidget.ManagedDragOutAction = SettingsService.ManagedDragOutActionMove;
+            return;
+        }
+
+        // In v1.5.9 the out-of-the-box pair was (Drop=Move, DragOut=FollowWindows).
+        // On Windows 11, OLE supports Copy|Move with Move preferred for Explorer
+        // and automatic Copy fallback for third-party apps, so smoothly align the
+        // v1.5.9 default pair to Move. Never overwrite explicit Copy choices on
+        // any OS, and never flip Windows 10 FollowWindows users into single-bit
+        // Move mode on upgrade.
+        if (isWindows11OrLater &&
+            string.Equals(fileWidget.ManagedDropAction, SettingsService.ManagedDropActionMove, StringComparison.Ordinal) &&
+            string.Equals(fileWidget.ManagedDragOutAction, SettingsService.ManagedDragOutActionFollowWindows, StringComparison.Ordinal))
+        {
+            fileWidget.ManagedDragOutAction = SettingsService.ManagedDragOutActionMove;
         }
     }
 }

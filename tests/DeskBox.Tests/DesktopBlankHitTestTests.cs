@@ -92,35 +92,33 @@ public sealed class DesktopBlankHitTestTests
     }
 
     [Fact]
-    public void IsShellDesktopListView_AcceptsTheRealDesktopListView()
+    public void IsShellDesktopListView_AcceptsMatchingShellProcessAndRealDesktopWhenAvailable()
     {
+        Assert.False(DesktopBlankHitTest.IsShellDesktopListViewForProcessIds(
+            IntPtr.Zero, new IntPtr(0x100), 1200, 1200));
+        Assert.True(DesktopBlankHitTest.IsShellDesktopListViewForProcessIds(
+            new IntPtr(0x200), IntPtr.Zero, 0, 4500));
+        Assert.True(DesktopBlankHitTest.IsShellDesktopListViewForProcessIds(
+            new IntPtr(0x200), new IntPtr(0x100), 1200, 1200));
+        Assert.False(DesktopBlankHitTest.IsShellDesktopListViewForProcessIds(
+            new IntPtr(0x200), new IntPtr(0x100), 1200, 9999));
+
         IntPtr shellWindow = Win32Helper.GetShellWindow();
-        if (shellWindow == IntPtr.Zero)
+        if (shellWindow != IntPtr.Zero)
         {
-            return;
+            IntPtr defView = Win32Helper.FindWindowEx(
+                shellWindow,
+                IntPtr.Zero,
+                "SHELLDLL_DefView",
+                null);
+            IntPtr listView = defView != IntPtr.Zero
+                ? Win32Helper.FindWindowEx(defView, IntPtr.Zero, "SysListView32", null)
+                : IntPtr.Zero;
+            if (listView != IntPtr.Zero)
+            {
+                Assert.True(DesktopBlankHitTest.IsShellDesktopListView(listView));
+            }
         }
-
-        IntPtr defView = Win32Helper.FindWindowEx(
-            shellWindow,
-            IntPtr.Zero,
-            "SHELLDLL_DefView",
-            null);
-        if (defView == IntPtr.Zero)
-        {
-            return;
-        }
-
-        IntPtr listView = Win32Helper.FindWindowEx(
-            defView,
-            IntPtr.Zero,
-            "SysListView32",
-            null);
-        if (listView == IntPtr.Zero)
-        {
-            return;
-        }
-
-        Assert.True(DesktopBlankHitTest.IsShellDesktopListView(listView));
     }
 
     [Theory]

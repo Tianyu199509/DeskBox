@@ -14,7 +14,6 @@ using DeskBox.Helpers;
 using DeskBox.Models;
 
 [assembly: InternalsVisibleTo("DeskBox.Tests")]
-[assembly: InternalsVisibleTo("DeskBox.Settings")]
 
 namespace DeskBox.Services;
 
@@ -763,7 +762,7 @@ settings.WeatherRefreshIntervalMinutes = 60;
         settings.TodoShowImportantTab = true;
         settings.TodoShowCompletedTab = true;
         settings.ManagedDropAction = ManagedDropActionMove;
-        settings.ManagedDragOutAction = ManagedDragOutActionFollowWindows;
+        settings.ManagedDragOutAction = ManagedDropActionMove;
         settings.DragOutModifierTipEnabled = true;
         settings.DragOutResultHintEnabled = true;
         settings.AutomaticBackupEnabled = DataBackupSettingsPolicy.DefaultEnabled;
@@ -868,13 +867,24 @@ settings.FocusClickedWidgetOnRaise = false;
         {
             await MigrateLegacySettingsIfNeededAsync();
 
+            bool loadedJsonHadAutoStartDefaultApplied = false;
             ResilientJsonLoadResult<AppSettings> loadResult =
                 await ResilientJsonStore.LoadWithResultAsync(
                     _settingsPath,
-                    json => JsonSerializer.Deserialize(
-                                json,
-                                SettingsJsonContext.Default.AppSettings) ??
-                            throw new InvalidDataException("DeskBox settings JSON is empty."),
+                    json =>
+                    {
+                        try
+                        {
+                            AppSettings parsed = JsonSerializer.Deserialize(json, SettingsJsonContext.Default.AppSettings)
+                                ?? throw new InvalidDataException("DeskBox settings JSON is empty.");
+                            loadedJsonHadAutoStartDefaultApplied = AutoStartDefaultPolicy.HasAutoStartDefaultAppliedProperty(json);
+                            return parsed;
+                        }
+                        catch (JsonException) when (ResilientJsonStore.TryReadSchemaVersion(json, out int rawVer) && rawVer > SettingsMigrationPipeline.CurrentSchemaVersion)
+                        {
+                            return new AppSettings { SchemaVersion = rawVer };
+                        }
+                    },
                     () => new AppSettings(),
                     "SettingsService");
             bool loadedFromDisk = loadResult.Source is
@@ -936,6 +946,10 @@ settings.FocusClickedWidgetOnRaise = false;
                 var migrationPipeline = new SettingsMigrationPipeline();
                 (_settings, bool migrationsApplied) = migrationPipeline.RunMigrationsOnCopy(_settings);
                 changed |= migrationsApplied;
+                changed |= AutoStartDefaultPolicy.TryPreserveLegacyOptOut(
+                    _settings,
+                    loadedFromDisk,
+                    loadedJsonHadAutoStartDefaultApplied);
 
                 // Schema migration treats every existing profile as having resolved
                 // the legacy default file-widget setup. Only a genuinely missing
@@ -1017,6 +1031,15 @@ settings.FocusClickedWidgetOnRaise = false;
                     // failure branch on purpose: an untrusted widget list
                     // must not make rule-deletion decisions.
                     changed |= NormalizeOrganizerSettings(_settings);
+                    if (!loadedFromDisk &&
+                        ManagedStoragePathService.TryInferUnanimousManagedStorageRoot(
+                            _settings.Widgets, _settings.DeletedWidgetIds, _settings.DefaultManagedStorageRootPath,
+                            AppDistributionService.Current.IsMicrosoftStore, requireExistingDirectory: false, out string recoveredRoot))
+                    {
+                        App.Log($"[SettingsService] Reconciled default managed storage root from surviving widget layout: '{_settings.DefaultManagedStorageRootPath}' -> '{recoveredRoot}'.");
+                        _settings.DefaultManagedStorageRootPath = recoveredRoot;
+                        changed = true;
+                    }
                     changed |= NormalizeDeletionSettings(_settings);
                     changed |= ClearRetiredQuickCaptureClipboardFlags(_settings);
                 }
@@ -1480,6 +1503,7 @@ settings.FocusClickedWidgetOnRaise = false;
         clipboard.ClipboardMoveToTopOnReuse = false;
         clipboard.ClipboardViewMode = ClipboardSettingsSlice.ViewModeStandard;
         clipboard.ClipboardTabDisplayMode = ClipboardSettingsSlice.TabDisplayIconAndText;
+        clipboard.ClipboardTabLayout = ClipboardSettingsSlice.DefaultTabLayout;
         clipboard.ClipboardCardDensity = ClipboardSettingsSlice.DensityStandard;
         clipboard.ClipboardShowSourceApp = true;
         clipboard.ClipboardIgnoreSystemPrivacyFormats = true;
@@ -2323,7 +2347,12 @@ settings.FocusClickedWidgetOnRaise = false;
         parsed.LastUpdateCheckAt = before.LastUpdateCheckAt;
         parsed.LastRunVersion = before.LastRunVersion;
         parsed.HasResolvedInitialFileWidgetSetup = before.HasResolvedInitialFileWidgetSetup;
-        parsed.AutoStartDefaultApplied = before.AutoStartDefaultApplied;
+        // Auto-start registration and its persisted mirror/mode are owned by
+        // the MAIN process (mutated only via ISettingsAppActions IPC commands),
+        // so host-side snapshot commits must never rewind them.
+        parsed.Core.AutoStart = before.Core.AutoStart;
+        parsed.Core.AutoStartMode = before.Core.AutoStartMode;
+        parsed.Core.AutoStartDefaultApplied = before.Core.AutoStartDefaultApplied;
         parsed.FullyElevatedNoticeAcknowledgedUtcTicks =
             before.FullyElevatedNoticeAcknowledgedUtcTicks;
         // Onboarding completion is authored by the MAIN process's
@@ -3740,6 +3769,8 @@ settings.FocusClickedWidgetOnRaise = false;
         member.PositionAnchor = group.PositionAnchor;
         member.PositionMarginX = group.PositionMarginX;
         member.PositionMarginY = group.PositionMarginY;
+        member.LastUserPlacementUtc = group.LastUserPlacementUtc;
+        member.LastUserPlacementTopologyKey = group.LastUserPlacementTopologyKey;
         member.PositionMonitorKey = group.PositionMonitorKey;
         member.PositionMonitorDeviceName = group.PositionMonitorDeviceName;
         member.PositionMonitorStableId = group.PositionMonitorStableId;
@@ -3987,19 +4018,15 @@ settings.FocusClickedWidgetOnRaise = false;
             changed = true;
         }
 
-        if (!string.Equals(settings.ManagedDropAction, ManagedDropActionMove, StringComparison.Ordinal) &&
-            !string.Equals(settings.ManagedDropAction, ManagedDropActionCopy, StringComparison.Ordinal) &&
-            !string.Equals(settings.ManagedDropAction, ManagedDropActionFollowWindows, StringComparison.Ordinal))
+        if (!Contracts.ManagedDropActions.IsValid(settings.ManagedDropAction))
         {
             settings.ManagedDropAction = ManagedDropActionMove;
             changed = true;
         }
 
-        if (!string.Equals(settings.ManagedDragOutAction, ManagedDragOutActionFollowWindows, StringComparison.Ordinal) &&
-            !string.Equals(settings.ManagedDragOutAction, ManagedDragOutActionMove, StringComparison.Ordinal) &&
-            !string.Equals(settings.ManagedDragOutAction, ManagedDragOutActionCopy, StringComparison.Ordinal))
+        if (!Contracts.ManagedDropActions.IsValid(settings.ManagedDragOutAction))
         {
-            settings.ManagedDragOutAction = ManagedDragOutActionFollowWindows;
+            settings.ManagedDragOutAction = ManagedDropActionMove;
             changed = true;
         }
 
@@ -4430,6 +4457,13 @@ settings.FocusClickedWidgetOnRaise = false;
         if (!string.Equals(clipboard.ClipboardTabDisplayMode, tabDisplayMode, StringComparison.Ordinal))
         {
             clipboard.ClipboardTabDisplayMode = tabDisplayMode;
+            changed = true;
+        }
+
+        string tabLayout = ClipboardSettingsSlice.NormalizeTabLayout(clipboard.ClipboardTabLayout);
+        if (!string.Equals(clipboard.ClipboardTabLayout, tabLayout, StringComparison.Ordinal))
+        {
+            clipboard.ClipboardTabLayout = tabLayout;
             changed = true;
         }
 

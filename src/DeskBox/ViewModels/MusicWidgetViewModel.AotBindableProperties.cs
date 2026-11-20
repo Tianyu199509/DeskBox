@@ -15,7 +15,6 @@ namespace DeskBox.ViewModels;
     nameof(CanGoNext),
     nameof(CanGoPrevious),
     nameof(CanPlayPause),
-    nameof(CaptionTextSize),
     nameof(DurationText),
     nameof(MinimalTitleTextSize),
     nameof(MusicAccentBrush),
@@ -28,7 +27,6 @@ namespace DeskBox.ViewModels;
     nameof(PlayPauseTooltip),
     nameof(PositionText),
     nameof(PreviousTooltip),
-    nameof(SecondaryTextSize),
     nameof(SubtitleText),
     nameof(SystemVolumeLabel),
     nameof(SystemVolumeText),
@@ -37,7 +35,6 @@ namespace DeskBox.ViewModels;
     nameof(ThumbnailVisibility),
     nameof(TimelineRowVisibility),
     nameof(Title),
-    nameof(TitleTextSize),
     nameof(VolumeTextSize),
     nameof(VolumeTooltip)
 ], [])]

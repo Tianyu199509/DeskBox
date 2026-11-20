@@ -188,12 +188,20 @@ public sealed class StartupResilienceContractTests
             "private Task<bool> StartTrayIconCreationWithRetry",
             "private bool IsTraySurfaceUsable()");
 
-        // The retry must be bounded: an unbounded loop would keep the startup
-        // gate waiting forever when the shell never comes up.
+        // The retry must be bounded with progressive backoff: fast checks right
+        // after logon (200ms -> 400ms -> 800ms -> 1500ms -> 2000ms) while still
+        // covering the early-logon window without waiting forever.
         Assert.Contains("TrayCreationMaxAttempts", retry, StringComparison.Ordinal);
-        Assert.Contains("await Task.Delay(TrayCreationRetryDelay);", retry, StringComparison.Ordinal);
+        Assert.Contains("await Task.Delay(GetTrayCreationRetryDelay(attempt));", retry, StringComparison.Ordinal);
         Assert.Contains("MarkStartupLifelineEstablished();", retry, StringComparison.Ordinal);
         Assert.Contains("_trayHost.TryCreateIcon()", retry, StringComparison.Ordinal);
+
+        Assert.Equal(TimeSpan.FromMilliseconds(200), App.GetTrayCreationRetryDelay(1));
+        Assert.Equal(TimeSpan.FromMilliseconds(400), App.GetTrayCreationRetryDelay(2));
+        Assert.Equal(TimeSpan.FromMilliseconds(800), App.GetTrayCreationRetryDelay(3));
+        Assert.Equal(TimeSpan.FromMilliseconds(1500), App.GetTrayCreationRetryDelay(4));
+        Assert.Equal(TimeSpan.FromMilliseconds(2000), App.GetTrayCreationRetryDelay(5));
+        Assert.Equal(TimeSpan.FromMilliseconds(2000), App.GetTrayCreationRetryDelay(18));
     }
 
     [Fact]

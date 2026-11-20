@@ -1187,6 +1187,7 @@ public static class WidgetLayerService
                     Win32Helper.GetWindowLongPtr(windowHandle, Win32Helper.GWLP_HWNDPARENT));
             }
 
+            int setError = 0;
             if (Win32Helper.GetWindowLongPtr(windowHandle, Win32Helper.GWLP_HWNDPARENT) != desktopIconView)
             {
                 Win32Helper.SetLastError(0);
@@ -1194,13 +1195,13 @@ public static class WidgetLayerService
                     windowHandle,
                     Win32Helper.GWLP_HWNDPARENT,
                     desktopIconView);
+                setError = Marshal.GetLastPInvokeError();
             }
 
             IntPtr actualOwner = Win32Helper.GetWindowLongPtr(windowHandle, Win32Helper.GWLP_HWNDPARENT);
             if (actualOwner != desktopIconView)
             {
-                int error = Marshal.GetLastWin32Error();
-                App.Log($"[WidgetLayer] DesktopPinned owner attach failed hwnd=0x{windowHandle.ToInt64():X} defView=0x{desktopIconView.ToInt64():X} actual=0x{actualOwner.ToInt64():X} error={error}");
+                App.Log($"[WidgetLayer] DesktopPinned owner attach failed hwnd=0x{windowHandle.ToInt64():X} defView=0x{desktopIconView.ToInt64():X} actual=0x{actualOwner.ToInt64():X} error={setError}");
                 RestoreOriginalOwner(windowHandle);
                 s_cachedDesktopIconView = IntPtr.Zero;
                 return false;
@@ -1465,19 +1466,27 @@ public static class WidgetLayerService
 
     private static IntPtr FindDesktopIconView()
     {
-        if (s_cachedDesktopIconView != IntPtr.Zero && Win32Helper.IsWindow(s_cachedDesktopIconView))
+        if (s_cachedDesktopIconView != IntPtr.Zero &&
+            Win32Helper.IsWindow(s_cachedDesktopIconView) &&
+            IsVerifiedDesktopIconView(s_cachedDesktopIconView))
         {
             return s_cachedDesktopIconView;
         }
 
         s_cachedDesktopIconView = IntPtr.Zero;
 
-        // Only use a SHELLDLL_DefView that Explorer has already created. Never
-        // force WorkerW creation here: doing so during login can race Explorer's
-        // icon-layout restoration and leave the user's desktop icons rearranged.
+        // Only use a SHELLDLL_DefView that Explorer has already created.
+        // Verify the parent is a real Progman/WorkerW desktop host (not a #32770
+        // file dialog or Explorer folder window) and never force WorkerW creation
+        // here: doing so during login can race Explorer's icon-layout restoration.
         IntPtr existingDefView = IntPtr.Zero;
         Win32Helper.EnumWindows((hWnd, _) =>
         {
+            if (!DesktopBlankHitTest.IsVerifiedDesktopShellWindow(hWnd, allowDefView: false))
+            {
+                return true;
+            }
+
             IntPtr defView = FindDesktopIconViewChild(hWnd);
             if (defView != IntPtr.Zero)
             {
@@ -1497,6 +1506,18 @@ public static class WidgetLayerService
         // The caller already has a bottom-of-desktop fallback and can retry on a
         // later layer operation after Explorer finishes initializing.
         return IntPtr.Zero;
+    }
+
+    internal static bool IsVerifiedDesktopIconView(IntPtr defViewHandle)
+    {
+        if (defViewHandle == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        IntPtr parent = Win32Helper.GetParent(defViewHandle);
+        return parent != IntPtr.Zero &&
+               DesktopBlankHitTest.IsVerifiedDesktopShellWindow(parent, allowDefView: false);
     }
 
     private static IntPtr FindHighestPeer(IReadOnlyCollection<IntPtr> handles)

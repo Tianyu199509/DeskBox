@@ -8,20 +8,29 @@ namespace DeskBox.Platform;
 /// and the AssocChanged notification used to invalidate icon caches). Logic
 /// and caching stay in the callers — this type only owns the native surface.
 /// </summary>
-internal static class ShellIconNativeMethods
+internal static partial class ShellIconNativeMethods
 {
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    internal struct SHFILEINFO
+    internal static unsafe uint ShFileInfoSize => (uint)sizeof(SHFILEINFO);
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe struct SHFILEINFO
     {
         public IntPtr hIcon;
         public int iIcon;
         public uint dwAttributes;
+        private fixed ushort _szDisplayName[260];
+        private fixed ushort _szTypeName[80];
 
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
-        public string szDisplayName;
-
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 80)]
-        public string szTypeName;
+        public readonly string GetTypeName()
+        {
+            fixed (ushort* ptr = _szTypeName)
+            {
+                ReadOnlySpan<char> chars = new(ptr, 80);
+                int nullIndex = chars.IndexOf('\0');
+                ReadOnlySpan<char> slice = nullIndex >= 0 ? chars[..nullIndex] : chars;
+                return slice.IsEmpty ? string.Empty : new string(slice);
+            }
+        }
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -82,8 +91,8 @@ internal static class ShellIconNativeMethods
     internal const uint DI_IMAGE = 0x0002;
     internal const uint DI_NORMAL = 0x0003;
 
-    [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    internal static extern IntPtr SHGetFileInfo(
+    [LibraryImport("shell32.dll", EntryPoint = "SHGetFileInfoW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
+    internal static partial IntPtr SHGetFileInfo(
         string pszPath,
         uint dwFileAttributes,
         ref SHFILEINFO psfi,
@@ -95,34 +104,34 @@ internal static class ShellIconNativeMethods
     /// (Recycle Bin, Control Panel). The Recycle Bin's icon is state-aware —
     /// the shell returns the empty or the full graphic for the same PIDL.
     /// </summary>
-    [DllImport("shell32.dll", EntryPoint = "SHGetFileInfoW", SetLastError = true)]
-    internal static extern IntPtr SHGetFileInfoPidl(
+    [LibraryImport("shell32.dll", EntryPoint = "SHGetFileInfoW", SetLastError = true)]
+    internal static partial IntPtr SHGetFileInfoPidl(
         IntPtr pszPath,
         uint dwFileAttributes,
         ref SHFILEINFO psfi,
         uint cbFileInfo,
         uint uFlags);
 
-    [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    internal static extern int SHParseDisplayName(
+    [LibraryImport("shell32.dll", EntryPoint = "SHParseDisplayName", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
+    internal static partial int SHParseDisplayName(
         string pszName,
         IntPtr pbc,
         out IntPtr ppidl,
         uint sfgaoIn,
         out uint psfgaoOut);
 
-    [DllImport("shell32.dll")]
-    internal static extern void ILFree(IntPtr pidl);
+    [LibraryImport("shell32.dll", EntryPoint = "ILFree")]
+    internal static partial void ILFree(IntPtr pidl);
 
-    [DllImport("user32.dll", EntryPoint = "DestroyIcon", ExactSpelling = true, SetLastError = true)]
+    [LibraryImport("user32.dll", EntryPoint = "DestroyIcon", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    internal static extern bool DestroyIcon(IntPtr hIcon);
+    internal static partial bool DestroyIcon(IntPtr hIcon);
 
-    [DllImport("user32.dll", EntryPoint = "GetIconInfo", ExactSpelling = true, SetLastError = true)]
-    internal static extern int GetIconInfo(IntPtr hIcon, out ICONINFO piconinfo);
+    [LibraryImport("user32.dll", EntryPoint = "GetIconInfo", SetLastError = true)]
+    internal static partial int GetIconInfo(IntPtr hIcon, out ICONINFO piconinfo);
 
-    [DllImport("user32.dll", EntryPoint = "DrawIconEx", ExactSpelling = true, SetLastError = true)]
-    internal static extern int DrawIconEx(
+    [LibraryImport("user32.dll", EntryPoint = "DrawIconEx", SetLastError = true)]
+    internal static partial int DrawIconEx(
         IntPtr hdc,
         int xLeft,
         int yTop,
@@ -133,11 +142,11 @@ internal static class ShellIconNativeMethods
         IntPtr hbrFlickerFreeDraw,
         uint diFlags);
 
-    [DllImport("gdi32.dll", EntryPoint = "GetObjectW", ExactSpelling = true, SetLastError = true)]
-    internal static extern int GetObjectBitmap(IntPtr h, int c, out BITMAP pv);
+    [LibraryImport("gdi32.dll", EntryPoint = "GetObjectW", SetLastError = true)]
+    internal static partial int GetObjectBitmap(IntPtr h, int c, out BITMAP pv);
 
-    [DllImport("gdi32.dll", EntryPoint = "GetDIBits", ExactSpelling = true, SetLastError = true)]
-    internal static extern int GetDIBits(
+    [LibraryImport("gdi32.dll", EntryPoint = "GetDIBits", SetLastError = true)]
+    internal static partial int GetDIBits(
         IntPtr hdc,
         IntPtr hbm,
         uint start,
@@ -146,20 +155,20 @@ internal static class ShellIconNativeMethods
         ref BITMAPINFO lpbmi,
         uint usage);
 
-    [DllImport("gdi32.dll", EntryPoint = "CreateCompatibleDC", ExactSpelling = true, SetLastError = true)]
-    internal static extern IntPtr CreateCompatibleDC(IntPtr hdc);
+    [LibraryImport("gdi32.dll", EntryPoint = "CreateCompatibleDC", SetLastError = true)]
+    internal static partial IntPtr CreateCompatibleDC(IntPtr hdc);
 
-    [DllImport("gdi32.dll", EntryPoint = "DeleteDC", ExactSpelling = true, SetLastError = true)]
-    internal static extern int DeleteDC(IntPtr hdc);
+    [LibraryImport("gdi32.dll", EntryPoint = "DeleteDC", SetLastError = true)]
+    internal static partial int DeleteDC(IntPtr hdc);
 
-    [DllImport("gdi32.dll", EntryPoint = "SelectObject", ExactSpelling = true, SetLastError = true)]
-    internal static extern IntPtr SelectObject(IntPtr hdc, IntPtr h);
+    [LibraryImport("gdi32.dll", EntryPoint = "SelectObject", SetLastError = true)]
+    internal static partial IntPtr SelectObject(IntPtr hdc, IntPtr h);
 
-    [DllImport("gdi32.dll", EntryPoint = "DeleteObject", ExactSpelling = true, SetLastError = true)]
-    internal static extern int DeleteObject(IntPtr ho);
+    [LibraryImport("gdi32.dll", EntryPoint = "DeleteObject", SetLastError = true)]
+    internal static partial int DeleteObject(IntPtr ho);
 
-    [DllImport("gdi32.dll", EntryPoint = "CreateDIBSection", ExactSpelling = true, SetLastError = true)]
-    internal static extern IntPtr CreateDIBSection(
+    [LibraryImport("gdi32.dll", EntryPoint = "CreateDIBSection", SetLastError = true)]
+    internal static partial IntPtr CreateDIBSection(
         IntPtr hdc,
         ref BITMAPINFO pbmi,
         uint usage,
@@ -167,25 +176,25 @@ internal static class ShellIconNativeMethods
         IntPtr hSection,
         uint offset);
 
-    [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    internal static extern int SHDefExtractIcon(
+    [LibraryImport("shell32.dll", EntryPoint = "SHDefExtractIconW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
+    internal static unsafe partial int SHDefExtractIcon(
         string pszIconFile,
         int iIcon,
         uint uFlags,
         out IntPtr phiconLarge,
-        out IntPtr phiconSmall,
-        uint nIconSize); // MAKELONG(cxSmall, cxLarge) — low word = small, high word = large
+        IntPtr* phiconSmall,
+        uint nIconSize); // MAKELPARAM(cxLarge, cxSmall) — low word = large, high word = small
 
-    [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    internal static extern uint ExtractIconEx(
+    [LibraryImport("shell32.dll", EntryPoint = "ExtractIconExW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
+    internal static partial uint ExtractIconEx(
         string lpszFile,
         int nIconIndex,
-        IntPtr[]? phiconLarge,
-        IntPtr[]? phiconSmall,
+        Span<IntPtr> phiconLarge,
+        Span<IntPtr> phiconSmall,
         uint nIcons);
 
-    [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    internal static extern int SHGetImageList(
+    [LibraryImport("shell32.dll", EntryPoint = "SHGetImageList", SetLastError = true)]
+    internal static partial int SHGetImageList(
         int iImageList,
         ref Guid riid,
         ref IntPtr ppv);
@@ -206,21 +215,17 @@ internal static class ShellIconNativeMethods
     // Draw(8), Remove(9), GetIcon(10) — so the RCW call landed on
     // SetOverlayImage's slot and this path silently fell to its null
     // fallback even on JIT.
-    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-    internal delegate int ImageListGetIconInvoker(
-        IntPtr self, int i, uint flags, ref IntPtr picon);
-
-    internal static int ImageListGetIcon(
+    internal static unsafe int ImageListGetIcon(
         IntPtr imageList,
         int iconIndex,
         uint flags,
         ref IntPtr iconHandle)
     {
-        return ComVtable.Slot<ImageListGetIconInvoker>(imageList, 10)(
-            imageList,
-            iconIndex,
-            flags,
-            ref iconHandle);
+        var getIcon = (delegate* unmanaged[Stdcall]<IntPtr, int, uint, IntPtr*, int>)ComVtable.SlotPointer(imageList, 10);
+        fixed (IntPtr* iconPtr = &iconHandle)
+        {
+            return getIcon(imageList, iconIndex, flags, iconPtr);
+        }
     }
 
     internal const uint ILD_TRANSPARENT = 0x00000001;
@@ -229,8 +234,8 @@ internal static class ShellIconNativeMethods
     internal const int SHCNE_ASSOCCHANGED = 0x08000000;
     internal const uint SHCNF_IDLIST = 0x0000;
 
-    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
-    internal static extern void SHChangeNotify(
+    [LibraryImport("shell32.dll", EntryPoint = "SHChangeNotify")]
+    internal static partial void SHChangeNotify(
         int wEventId,
         uint uFlags,
         IntPtr dwItem1,

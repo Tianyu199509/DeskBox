@@ -36,11 +36,13 @@ public sealed class FileWidgetContentAdapter :
     private Func<bool>? _hostHasActiveShellDragWindowProbe;
     private long _lastLaunchConsumedTicks;
     private int _hibernatedImportBusy;
+    private int _lastHibernatedImportCompletedCount;
     private IntPtr _hostWindowHandle;
     private bool _hasBeenWindowVisible;
     private bool _isWindowVisible = true;
     private bool _isWindowRevealCompleted;
     private bool _isCompactCollapsed;
+    private bool _rematerializeProgressively;
 
     public FileWidgetContentAdapter(
         WidgetConfig config,
@@ -155,6 +157,15 @@ public sealed class FileWidgetContentAdapter :
     internal long? ImportBusyElapsedMilliseconds =>
         Surface?.ImportBusyElapsedMilliseconds;
 
+    protected override void OnBeforeViewMaterializing(bool isRematerializingAfterHibernation)
+    {
+        if (_rematerializeProgressively || isRematerializingAfterHibernation)
+        {
+            _rematerializeProgressively = false;
+            ViewModel.BeginProgressiveRematerialization();
+        }
+    }
+
     protected override void OnViewMaterialized(FrameworkElement view)
     {
         if (view is FileSurfaceContent content)
@@ -201,6 +212,7 @@ public sealed class FileWidgetContentAdapter :
             content.ImportBusyChanged -= Content_ImportBusyChanged;
             content.OutboundDragCompleted -= Content_OutboundDragCompleted;
             content.DisposeLeafOnly();
+            _rematerializeProgressively = true;
             ViewModel.ReleaseAllItemIcons(resetRenderWindow: true);
         }
     }
@@ -627,6 +639,9 @@ public sealed class FileWidgetContentAdapter :
         Surface?.CloseOpenStackPopover();
     }
 
+    internal int LastImportCompletedItemCount =>
+        Surface?.LastImportCompletedItemCount ?? _lastHibernatedImportCompletedCount;
+
     internal Task<bool> ImportNativeDroppedFilesAsync(
         IReadOnlyList<string> paths,
         bool containsTemporaryFiles,
@@ -637,7 +652,10 @@ public sealed class FileWidgetContentAdapter :
         int? screenY = null,
         uint? allowedEffects = null,
         IReadOnlyList<DroppedItemOriginKind>? itemOrigins = null,
-        int? preferredStackMemberIndex = null)
+        int? preferredStackMemberIndex = null,
+        string? sourceWidgetIdOverride = null,
+        int preMaterializationSkippedCount = 0,
+        ActiveDeskBoxDragRegistry.MatchedDragEntry? capturedSelfDrag = null)
     {
         return MaterializedView is FileSurfaceContent content
             ? content.ImportNativeDroppedFilesAsync(
@@ -650,14 +668,18 @@ public sealed class FileWidgetContentAdapter :
                 screenY,
                 allowedEffects,
                 itemOrigins,
-                preferredStackMemberIndex)
+                preferredStackMemberIndex,
+                sourceWidgetIdOverride,
+                preMaterializationSkippedCount,
+                capturedSelfDrag)
             : ImportHibernatedNativeDroppedFilesAsync(
                 paths,
                 containsTemporaryFiles,
                 copyWhenMapped,
                 forcedIntent,
                 allowedEffects,
-                itemOrigins);
+                itemOrigins,
+                sourceWidgetIdOverride ?? capturedSelfDrag?.WidgetId);
     }
 
     private async Task<bool> ImportHibernatedNativeDroppedFilesAsync(
@@ -666,11 +688,29 @@ public sealed class FileWidgetContentAdapter :
         bool? copyWhenMapped,
         FileDropIntent? forcedIntent,
         uint? allowedEffects,
-        IReadOnlyList<DroppedItemOriginKind>? itemOrigins)
+        IReadOnlyList<DroppedItemOriginKind>? itemOrigins,
+        string? sourceWidgetIdOverride = null)
     {
+        _lastHibernatedImportCompletedCount = 0;
         if (paths.Count == 0 || IsDisposed)
         {
             return false;
+        }
+
+        string[] initialPathSnapshot = paths
+            .Where(static p => !string.IsNullOrWhiteSpace(p))
+            .ToArray();
+        string? preCapturedSourceWidgetId = sourceWidgetIdOverride;
+        bool preCapturedDeskBoxSource = !string.IsNullOrWhiteSpace(preCapturedSourceWidgetId);
+        if (!preCapturedDeskBoxSource &&
+            ActiveDeskBoxDragRegistry.TryMatch(
+                initialPathSnapshot,
+                out _,
+                out string registrySourceWidgetId,
+                out _))
+        {
+            preCapturedDeskBoxSource = true;
+            preCapturedSourceWidgetId = registrySourceWidgetId;
         }
 
         if (Interlocked.CompareExchange(ref _hibernatedImportBusy, 1, 0) != 0)
@@ -682,6 +722,10 @@ public sealed class FileWidgetContentAdapter :
             return false;
         }
 
+        bool? moveWhenMapped = null;
+        string? sourceWidgetId = preCapturedSourceWidgetId;
+        var movedSourcePaths = new List<string>();
+        int importedCount = 0;
         ImportBusyChanged?.Invoke(true);
         try
         {
@@ -765,11 +809,17 @@ public sealed class FileWidgetContentAdapter :
 
             bool allProviderTemporary = droppedFiles.All(static f => f.IsProviderTemporary);
             bool sameVolume = PathOriginClassifier.AreAllOnSameVolume(droppedPaths, destinationPath);
-            bool isDeskBoxOwnedSource = ActiveDeskBoxDragRegistry.TryMatch(
-                droppedPaths,
-                out _,
-                out string? sourceWidgetId,
-                out _);
+            bool isDeskBoxOwnedSource = preCapturedDeskBoxSource;
+            if (!isDeskBoxOwnedSource &&
+                ActiveDeskBoxDragRegistry.TryMatch(
+                    droppedPaths,
+                    out _,
+                    out string? matchedWidgetId,
+                    out _))
+            {
+                isDeskBoxOwnedSource = true;
+                sourceWidgetId = matchedWidgetId;
+            }
             if (!string.IsNullOrWhiteSpace(sourceWidgetId) &&
                 string.Equals(sourceWidgetId, WidgetId, StringComparison.Ordinal))
             {
@@ -778,10 +828,12 @@ public sealed class FileWidgetContentAdapter :
 
             SourceOriginSnapshot originSnapshot = PathOriginClassifier.ClassifySources(droppedPaths);
             bool protectDefaultMoveAsCopy = originSnapshot.IsProtectedCopyByDefault;
-            bool sourceCanCopy = allowedEffects is null ||
-                (allowedEffects & NativeDropEffectPolicy.Copy) != 0 ||
-                isDeskBoxOwnedSource;
+            bool sourceCanCopy = !originSnapshot.HasAppExecutionAliasSource &&
+                (allowedEffects is null ||
+                 (allowedEffects & NativeDropEffectPolicy.Copy) != 0 ||
+                 isDeskBoxOwnedSource);
             bool sourceCanMove = !allProviderTemporary &&
+                !originSnapshot.HasAppExecutionAliasSource &&
                 !originSnapshot.IsMoveProtectedSystemOrSharedSource &&
                 (isDeskBoxOwnedSource ||
                  allowedEffects is null ||
@@ -794,52 +846,33 @@ public sealed class FileWidgetContentAdapter :
             TransferDomain dropDomain = isDeskBoxOwnedSource
                 ? TransferDomain.InternalDeskBox
                 : TransferDomain.ExternalInbound;
+            bool defaultMove = copyWhenMapped.HasValue
+                ? !copyWhenMapped.Value
+                : string.Equals(
+                    _settingsService.Settings.FileWidget.ManagedDropAction,
+                    SettingsService.ManagedDropActionMove,
+                    StringComparison.Ordinal);
             FileDropIntent intent = forcedIntent ??
-                (followWindows
-                    ? FileDropIntentPolicy.ResolveMappedTransfer(
-                        hasMappedFolder: hasProspectiveFolder,
-                        forceCopy: allProviderTemporary,
-                        controlDown: Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control),
-                        shiftDown: Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Shift),
-                        defaultMove: true,
-                        canCopy: sourceCanCopy,
-                        canMove: sourceCanMove,
-                        altDown: Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Menu),
-                        followWindows: true,
-                        sameVolume: sameVolume,
-                        protectDefaultMoveAsCopy: protectDefaultMoveAsCopy,
-                        sourceOrigin: originSnapshot,
-                        domain: dropDomain)
-                    : copyWhenMapped switch
-                    {
-                        true => FileDropIntent.Copy,
-                        false => FileDropIntent.Move,
-                        _ => FileDropIntentPolicy.ResolveMappedTransfer(
-                            hasMappedFolder: hasProspectiveFolder,
-                            forceCopy: allProviderTemporary,
-                            controlDown: Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control),
-                            shiftDown: Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Shift),
-                            defaultMove: string.Equals(
-                                _settingsService.Settings.FileWidget.ManagedDropAction,
-                                SettingsService.ManagedDropActionMove,
-                                StringComparison.Ordinal),
-                            canCopy: sourceCanCopy,
-                            canMove: sourceCanMove,
-                            altDown: Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Menu),
-                            followWindows: false,
-                            sameVolume: sameVolume,
-                            protectDefaultMoveAsCopy: protectDefaultMoveAsCopy,
-                            sourceOrigin: originSnapshot,
-                            domain: dropDomain)
-                    });
+                FileDropIntentPolicy.ResolveMappedTransfer(
+                    hasMappedFolder: hasProspectiveFolder,
+                    forceCopy: allProviderTemporary,
+                    controlDown: Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control),
+                    shiftDown: Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Shift),
+                    defaultMove: followWindows || defaultMove,
+                    canCopy: sourceCanCopy,
+                    canMove: sourceCanMove,
+                    altDown: Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Menu),
+                    followWindows: followWindows,
+                    sameVolume: sameVolume,
+                    protectDefaultMoveAsCopy: protectDefaultMoveAsCopy,
+                    sourceOrigin: originSnapshot,
+                    domain: dropDomain);
             if (intent == FileDropIntent.None)
             {
                 return false;
             }
 
-            bool? moveWhenMapped = FileSurfaceContent.ResolveMoveWhenMapped(hasProspectiveFolder, intent);
-            var movedSourcePaths = new List<string>();
-            int importedCount = 0;
+            moveWhenMapped = FileSurfaceContent.ResolveMoveWhenMapped(hasProspectiveFolder, intent);
 
             string[] regularPaths = droppedFiles
                 .Where(static f => !f.ForceManagedCopy)
@@ -900,6 +933,7 @@ public sealed class FileWidgetContentAdapter :
                 importedCount += completed.Count;
             }
 
+            _lastHibernatedImportCompletedCount = importedCount;
             if (movedSourcePaths.Count > 0 &&
                 !string.IsNullOrWhiteSpace(sourceWidgetId) &&
                 !string.Equals(sourceWidgetId, WidgetId, StringComparison.Ordinal) &&
@@ -918,6 +952,45 @@ public sealed class FileWidgetContentAdapter :
                 WidgetFeedbackSeverity.Success,
                 "file-hibernated-drop");
             return true;
+        }
+        catch (FileService.FileTransferCanceledException canceledEx)
+        {
+            if (canceledEx.CompletedResults.Count > 0)
+            {
+                importedCount += canceledEx.CompletedResults.Count;
+                if (moveWhenMapped == true)
+                {
+                    movedSourcePaths.AddRange(
+                        canceledEx.CompletedResults
+                            .Where(static r =>
+                                !string.IsNullOrWhiteSpace(r.SourcePath) &&
+                                !File.Exists(r.SourcePath) &&
+                                !Directory.Exists(r.SourcePath))
+                            .Select(static r => r.SourcePath));
+                }
+            }
+
+            _lastHibernatedImportCompletedCount = importedCount;
+            if (movedSourcePaths.Count > 0 &&
+                !string.IsNullOrWhiteSpace(sourceWidgetId) &&
+                !string.Equals(sourceWidgetId, WidgetId, StringComparison.Ordinal) &&
+                App.Current?.WidgetManager is { } manager)
+            {
+                await manager.NotifyItemsMovedOutAsync(
+                    sourceWidgetId,
+                    movedSourcePaths.Distinct(StringComparer.OrdinalIgnoreCase).ToArray());
+            }
+
+            App.Log(
+                $"[WidgetSurface] Hibernated File drop canceled id={WidgetId} " +
+                $"completed={importedCount}");
+            return importedCount > 0;
+        }
+        catch (OperationCanceledException)
+        {
+            _lastHibernatedImportCompletedCount = importedCount;
+            App.Log($"[WidgetSurface] Hibernated File drop canceled id={WidgetId}");
+            return false;
         }
         catch (Exception ex)
         {
@@ -949,27 +1022,15 @@ public sealed class FileWidgetContentAdapter :
                     deduplicationKey)));
     }
 
-    internal void ApplyHostEdgeDragOverFeedback(DragEventArgs e)
+    private FileDropIntent EvaluateHibernatedHostDropIntent(
+        string[] sourcePaths,
+        DataPackageOperation supported,
+        bool isInternal,
+        bool forceCopy,
+        bool ctrlDown,
+        bool shiftDown,
+        bool altDown)
     {
-        if (Surface is { } content)
-        {
-            content.ApplyHostEdgeDragOverFeedback(e);
-            return;
-        }
-
-        if (!DeskBoxDragData.HasDroppedFiles(e.DataView))
-        {
-            e.AcceptedOperation = DataPackageOperation.None;
-            return;
-        }
-
-        DataPackageOperation supported = DeskBoxDragData.GetFileTransferOperations(
-            e.DataView,
-            e.AllowedOperations);
-        bool isInternal = DeskBoxDragData.IsInternalFileDrag(e.DataView);
-        string[] sourcePaths = isInternal
-            ? DeskBoxDragData.GetRawInternalSourcePaths(e.DataView).ToArray()
-            : [];
         string destination = TransferIntentEngine.ResolveProspectiveManagedDestination(
             CurrentFolderPath,
             ViewModel.MappedFolderPath,
@@ -989,17 +1050,17 @@ public sealed class FileWidgetContentAdapter :
             sourcePaths,
             TimeSpan.FromMilliseconds(80));
         uint allowedEffects = Views.ContentWidgetWindow.ToNativeAllowedEffects(supported);
-        FileDropIntent intent = TransferIntentEngine.Evaluate(new TransferIntentRequest(
+        return TransferIntentEngine.Evaluate(new TransferIntentRequest(
             Domain: isInternal ? TransferDomain.InternalDeskBox : TransferDomain.ExternalInbound,
             TargetKind: TransferTargetKind.DirectorySurface,
             HasFileData: true,
             HasVirtualFileData: false,
             HasShellApplicationOrNamespaceData: false,
-            ForceCopy: false,
+            ForceCopy: forceCopy,
             HasMappedFolder: !string.IsNullOrWhiteSpace(destination),
-            ControlDown: Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control),
-            ShiftDown: Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Shift),
-            AltDown: Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Menu),
+            ControlDown: ctrlDown,
+            ShiftDown: shiftDown,
+            AltDown: altDown,
             AllowedEffects: allowedEffects,
             NoOperationMetadata: supported == DataPackageOperation.None,
             DefaultMove: string.Equals(action, SettingsService.ManagedDropActionMove, StringComparison.Ordinal),
@@ -1007,6 +1068,46 @@ public sealed class FileWidgetContentAdapter :
             SameVolume: sameVolume,
             CanLink: true,
             SourceOrigin: origin)).Intent;
+    }
+
+    internal void ApplyHostEdgeDragOverFeedback(DragEventArgs e)
+    {
+        if (Surface is { } content)
+        {
+            content.ApplyHostEdgeDragOverFeedback(e);
+            return;
+        }
+
+        if (!DeskBoxDragData.HasDroppedFiles(e.DataView))
+        {
+            e.AcceptedOperation = DataPackageOperation.None;
+            return;
+        }
+
+        string? sourceWidgetId = DeskBoxDragData.TryGetSourceWidgetId(e.DataView);
+        if (!string.IsNullOrWhiteSpace(sourceWidgetId) &&
+            string.Equals(sourceWidgetId, WidgetId, StringComparison.Ordinal))
+        {
+            e.AcceptedOperation = DataPackageOperation.None;
+            e.Handled = true;
+            return;
+        }
+
+        DataPackageOperation supported = DeskBoxDragData.GetFileTransferOperations(
+            e.DataView,
+            e.AllowedOperations);
+        bool isInternal = DeskBoxDragData.IsInternalFileDrag(e.DataView);
+        string[] sourcePaths = isInternal
+            ? DeskBoxDragData.GetRawInternalSourcePaths(e.DataView).ToArray()
+            : [];
+        FileDropIntent intent = EvaluateHibernatedHostDropIntent(
+            sourcePaths,
+            supported,
+            isInternal,
+            forceCopy: false,
+            ctrlDown: Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control),
+            shiftDown: Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Shift),
+            altDown: Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Menu));
         DataPackageOperation resolved = intent switch
         {
             FileDropIntent.Copy => DataPackageOperation.Copy,
@@ -1024,7 +1125,7 @@ public sealed class FileWidgetContentAdapter :
         e.Handled = true;
     }
 
-    internal async void HandleHostEdgeDrop(DragEventArgs e)
+    internal void HandleHostEdgeDrop(DragEventArgs e)
     {
         if (Surface is { } content)
         {
@@ -1032,8 +1133,33 @@ public sealed class FileWidgetContentAdapter :
             return;
         }
 
+        HandleHibernatedHostDropAsync(e);
+    }
+
+    internal void HandleHostHeaderDrop(DragEventArgs e)
+    {
+        if (Surface is { } content)
+        {
+            content.HandleHostHeaderDrop(e);
+            return;
+        }
+
+        HandleHibernatedHostDropAsync(e);
+    }
+
+    private async void HandleHibernatedHostDropAsync(DragEventArgs e)
+    {
         if (!DeskBoxDragData.HasDroppedFiles(e.DataView))
         {
+            return;
+        }
+
+        string? sourceWidgetId = DeskBoxDragData.TryGetSourceWidgetId(e.DataView);
+        if (!string.IsNullOrWhiteSpace(sourceWidgetId) &&
+            string.Equals(sourceWidgetId, WidgetId, StringComparison.Ordinal))
+        {
+            e.AcceptedOperation = DataPackageOperation.None;
+            e.Handled = true;
             return;
         }
 
@@ -1068,34 +1194,48 @@ public sealed class FileWidgetContentAdapter :
                 effects,
                 allTemp,
                 paths);
+            FileDropIntent resolvedIntent = forcedIntent ?? EvaluateHibernatedHostDropIntent(
+                paths,
+                supported,
+                isInternal,
+                forceCopy: allTemp,
+                ctrlDown: ctrlDown,
+                shiftDown: shiftDown,
+                altDown: altDown);
             bool imported = await ImportHibernatedNativeDroppedFilesAsync(
                 paths,
                 anyTemp,
                 copyWhenMapped: null,
                 forcedIntent: forcedIntent,
                 allowedEffects: effects,
-                itemOrigins: origins);
+                itemOrigins: origins,
+                sourceWidgetIdOverride: sourceWidgetId);
             int nonTempCount = batch.Files.Count(static f => !f.IsProviderTemporary);
-            DataPackageOperation requested = forcedIntent switch
+            DataPackageOperation requested = resolvedIntent switch
             {
                 FileDropIntent.Copy => DataPackageOperation.Copy,
                 FileDropIntent.Move => DataPackageOperation.Move,
                 FileDropIntent.Shortcut or FileDropIntent.Reference => DataPackageOperation.Link,
-                _ => supported.HasFlag(DataPackageOperation.Copy)
-                    ? DataPackageOperation.Copy
-                    : DataPackageOperation.None,
+                _ => DataPackageOperation.None,
             };
+            int completedMoveCount = Math.Min(nonTempCount, _lastHibernatedImportCompletedCount);
             e.AcceptedOperation = imported
                 ? FileSurfaceContent.ResolveSafeDropCompletionOperation(
                     requested,
                     isInternal,
                     requestedMoveCount: nonTempCount,
-                    completedMoveCount: nonTempCount,
+                    completedMoveCount: completedMoveCount,
                     canReportCopy: allowedOperations.HasFlag(DataPackageOperation.Copy))
                 : DataPackageOperation.None;
-            e.AcceptedOperation = DeskBoxDragData.ResolveFileDragFeedbackOperation(
+            e.AcceptedOperation = DeskBoxDragData.ResolveFileDropCompletionFeedbackOperation(
                 e.DataView,
-                e.AcceptedOperation);
+                e.AcceptedOperation,
+                allowedOperations);
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[FileWidget] Hibernated host drop failed: {ex}");
+            e.AcceptedOperation = DataPackageOperation.None;
         }
         finally
         {

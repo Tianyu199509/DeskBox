@@ -13,7 +13,6 @@ public static class WidgetTitleIconCustomization
 {
     public const string EmojiMetadataKey = "TitleIconEmoji";
     public const string ImageMetadataKey = "TitleIconImage";
-    public const string PresetIconMigratedMetadataKey = "TitleIconPresetMigrated";
 
     /// <summary>Base name of the stored icon image, e.g. <c>title-icon.png</c>.</summary>
     public const string ImageFileStem = "title-icon";
@@ -119,17 +118,6 @@ public static class WidgetTitleIconCustomization
         if (config.Metadata.ContainsKey(EmojiMetadataKey) &&
             config.Metadata.Remove(ImageMetadataKey))
         {
-            changed = true;
-        }
-
-        if (config.WidgetKind == WidgetKind.Custom &&
-            !config.Metadata.ContainsKey(PresetIconMigratedMetadataKey) &&
-            WidgetTitleIconKindNames.TryGetCustomTemplateId(config.Metadata, out string templateId) &&
-            config.Metadata.TryGetValue(EmojiMetadataKey, out string? presetEmoji) &&
-            CustomWidgetTemplates.IsLegacyOfficialDefaultEmoji(templateId, presetEmoji))
-        {
-            config.Metadata.Remove(EmojiMetadataKey);
-            config.Metadata[PresetIconMigratedMetadataKey] = "1";
             changed = true;
         }
 

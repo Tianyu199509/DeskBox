@@ -20,9 +20,9 @@ namespace DeskBox.Services;
 /// </remarks>
 internal static class TemplateDocumentVerbPolicy
 {
-    private static readonly HashSet<string> TemplateExtensions =
-        new(StringComparer.OrdinalIgnoreCase)
-        {
+    private static readonly System.Collections.Frozen.FrozenSet<string> TemplateExtensions =
+        System.Collections.Frozen.FrozenSet.ToFrozenSet(
+        [
             // Office Open XML templates.
             ".xltx", ".xltm",
             ".dotx", ".dotm",
@@ -32,7 +32,8 @@ internal static class TemplateDocumentVerbPolicy
             ".xlt", ".dot",
             // OpenDocument templates.
             ".ots", ".ott"
-        };
+        ],
+        StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Whether <paramref name="path"/> names a template document that must be

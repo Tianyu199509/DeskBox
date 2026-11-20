@@ -34,8 +34,21 @@ internal static class ShellUnelevatedLaunch
     private const uint ProcessCreateProcess = 0x0080;
     private const uint ProcessQueryLimitedInformation = 0x1000;
     private const uint TokenQuery = 0x0008;
+    private const uint TokenDuplicate = 0x0002;
+    private const uint CreateUnicodeEnvironment = 0x00000400;
     private const uint ExtendedStartupInfoPresent = 0x00080000;
     private static readonly IntPtr ProcThreadAttributeParentProcess = new(0x00020000);
+
+    [DllImport("userenv.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CreateEnvironmentBlock(
+        out IntPtr lpEnvironment,
+        IntPtr hToken,
+        [MarshalAs(UnmanagedType.Bool)] bool bInherit);
+
+    [DllImport("userenv.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool DestroyEnvironmentBlock(IntPtr lpEnvironment);
 
     [DllImport("kernel32.dll")]
     private static extern IntPtr GetCurrentProcess();
@@ -85,25 +98,25 @@ internal static class ShellUnelevatedLaunch
 
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool InitializeProcThreadAttributeList(
+    internal static extern bool InitializeProcThreadAttributeList(
         IntPtr lpAttributeList,
-        int dwAttributeCount,
-        int dwFlags,
-        ref int lpSize);
+        uint dwAttributeCount,
+        uint dwFlags,
+        ref nuint lpSize);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool UpdateProcThreadAttribute(
+    internal static extern bool UpdateProcThreadAttribute(
         IntPtr lpAttributeList,
         uint dwFlags,
         IntPtr attribute,
-        ref IntPtr lpValue,
-        IntPtr cbSize,
+        IntPtr lpValue,
+        nuint cbSize,
         IntPtr lpPreviousValue,
         IntPtr lpReturnSize);
 
     [DllImport("kernel32.dll")]
-    private static extern void DeleteProcThreadAttributeList(IntPtr lpAttributeList);
+    internal static extern void DeleteProcThreadAttributeList(IntPtr lpAttributeList);
 
     [DllImport("advapi32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -112,11 +125,11 @@ internal static class ShellUnelevatedLaunch
         uint securityInformation,
         IntPtr securityDescriptor);
 
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool CreateProcess(
+    private static extern bool CreateProcessW(
         string? lpApplicationName,
-        string lpCommandLine,
+        IntPtr lpCommandLine,
         IntPtr lpProcessAttributes,
         IntPtr lpThreadAttributes,
         [MarshalAs(UnmanagedType.Bool)] bool bInheritHandles,
@@ -198,7 +211,7 @@ internal static class ShellUnelevatedLaunch
         }
 
         IntPtr processHandle = OpenProcess(
-            ProcessCreateProcess | ProcessQueryLimitedInformation,
+            ProcessQueryLimitedInformation,
             false,
             explorerProcessId);
         if (processHandle == IntPtr.Zero)
@@ -316,9 +329,17 @@ internal static class ShellUnelevatedLaunch
 
         try
         {
-            int attributeListSize = 0;
+            nuint attributeListSize = 0;
             _ = InitializeProcThreadAttributeList(IntPtr.Zero, 1, 0, ref attributeListSize);
-            IntPtr attributeList = Marshal.AllocHGlobal(attributeListSize);
+            if (attributeListSize == 0 || attributeListSize > int.MaxValue)
+            {
+                log?.Invoke("[ShellUnelevatedLaunch] InitializeProcThreadAttributeList returned invalid size");
+                return false;
+            }
+
+            IntPtr attributeList = Marshal.AllocHGlobal((nint)attributeListSize);
+            IntPtr parentProcessSlot = Marshal.AllocHGlobal(IntPtr.Size);
+            bool attributeListInitialized = false;
             try
             {
                 if (!InitializeProcThreadAttributeList(attributeList, 1, 0, ref attributeListSize))
@@ -327,13 +348,17 @@ internal static class ShellUnelevatedLaunch
                     return false;
                 }
 
-                IntPtr parentProcessValue = explorerHandle;
+                attributeListInitialized = true;
+                // UpdateProcThreadAttribute stores the lpValue pointer itself until
+                // DeleteProcThreadAttributeList runs, so keep the HANDLE value in
+                // unmanaged memory across CreateProcessW rather than on a temporary stack slot.
+                Marshal.WriteIntPtr(parentProcessSlot, explorerHandle);
                 if (!UpdateProcThreadAttribute(
                         attributeList,
                         0,
                         ProcThreadAttributeParentProcess,
-                        ref parentProcessValue,
-                        new IntPtr(IntPtr.Size),
+                        parentProcessSlot,
+                        (nuint)IntPtr.Size,
                         IntPtr.Zero,
                         IntPtr.Zero))
                 {
@@ -362,19 +387,19 @@ internal static class ShellUnelevatedLaunch
                 // label needs WRITE_OWNER, which the creator handle carries.
                 // Normalizing it to the child's Medium integrity makes the
                 // object indistinguishable from an explorer-launched process.
-                string? userSid;
+                string? explorerUserSid = TryGetProcessUserSid(explorerHandle);
+                string? currentUserSid;
                 try
                 {
-                    userSid = WindowsIdentity.GetCurrent().User?.Value;
+                    using var currentIdentity = WindowsIdentity.GetCurrent();
+                    currentUserSid = currentIdentity.User?.Value;
                 }
                 catch
                 {
-                    userSid = null;
+                    currentUserSid = null;
                 }
 
-                string sddl = "D:P(A;;GA;;;SY)(A;;GA;;;BA)" +
-                    (userSid is null ? string.Empty : $"(A;;GA;;;{userSid})") +
-                    "S:(ML;;NW;;;S-1-16-8192)";
+                string sddl = BuildProtectedProcessSddl(explorerUserSid, currentUserSid);
 
                 if (!ConvertStringSecurityDescriptorToSecurityDescriptor(
                         sddl,
@@ -398,17 +423,66 @@ internal static class ShellUnelevatedLaunch
                         ? $"\"{exePath}\""
                         : $"\"{exePath}\" {arguments.Trim()}";
 
-                    bool created = CreateProcess(
-                        null,
-                        commandLine,
-                        IntPtr.Zero,
-                        IntPtr.Zero,
-                        false,
-                        ExtendedStartupInfoPresent,
-                        IntPtr.Zero,
-                        Path.GetDirectoryName(exePath),
-                        ref startupInfo,
-                        out ProcessInformation processInformation);
+                    // CreateProcessW may mutate lpCommandLine in place; pass an
+                    // unmanaged writable UTF-16 buffer and bind lpApplicationName explicitly.
+                    // Under Over-the-Shoulder UAC (different Explorer user vs elevated admin),
+                    // build the target desktop user's environment block so %USERPROFILE%,
+                    // %LOCALAPPDATA%, and %TEMP% do not inherit the elevated admin's paths.
+                    IntPtr environmentBlock = IntPtr.Zero;
+                    uint creationFlags = ExtendedStartupInfoPresent;
+                    bool isCrossAccountElevation =
+                        !string.IsNullOrWhiteSpace(explorerUserSid) &&
+                        !string.IsNullOrWhiteSpace(currentUserSid) &&
+                        !string.Equals(explorerUserSid, currentUserSid, StringComparison.OrdinalIgnoreCase);
+                    if (isCrossAccountElevation &&
+                        OpenProcessToken(explorerHandle, TokenQuery | TokenDuplicate, out IntPtr explorerToken))
+                    {
+                        try
+                        {
+                            if (CreateEnvironmentBlock(out IntPtr createdEnv, explorerToken, false) &&
+                                createdEnv != IntPtr.Zero)
+                            {
+                                environmentBlock = createdEnv;
+                                creationFlags |= CreateUnicodeEnvironment;
+                            }
+                            else
+                            {
+                                log?.Invoke(
+                                    $"[ShellUnelevatedLaunch] CreateEnvironmentBlock failed error={Marshal.GetLastWin32Error()}; falling back to inherited environment");
+                            }
+                        }
+                        finally
+                        {
+                            CloseHandle(explorerToken);
+                        }
+                    }
+
+                    IntPtr commandLineBuffer = Marshal.StringToHGlobalUni(commandLine);
+                    bool created;
+                    ProcessInformation processInformation;
+                    try
+                    {
+                        created = CreateProcessW(
+                            exePath,
+                            commandLineBuffer,
+                            IntPtr.Zero,
+                            IntPtr.Zero,
+                            false,
+                            creationFlags,
+                            environmentBlock,
+                            Path.GetDirectoryName(exePath),
+                            ref startupInfo,
+                            out processInformation);
+                    }
+                    finally
+                    {
+                        Marshal.FreeHGlobal(commandLineBuffer);
+                        if (environmentBlock != IntPtr.Zero)
+                        {
+                            DestroyEnvironmentBlock(environmentBlock);
+                        }
+                    }
+
                     if (!created)
                     {
                         log?.Invoke($"[ShellUnelevatedLaunch] CreateProcess failed error={Marshal.GetLastWin32Error()}");
@@ -438,13 +512,60 @@ internal static class ShellUnelevatedLaunch
             }
             finally
             {
-                DeleteProcThreadAttributeList(attributeList);
+                if (attributeListInitialized)
+                {
+                    DeleteProcThreadAttributeList(attributeList);
+                }
+
+                Marshal.FreeHGlobal(parentProcessSlot);
                 Marshal.FreeHGlobal(attributeList);
             }
         }
         finally
         {
             CloseHandle(explorerHandle);
+        }
+    }
+
+    internal static string BuildProtectedProcessSddl(string? shellUserSid, string? currentUserSid)
+    {
+        var sb = new System.Text.StringBuilder("D:P(A;;GA;;;SY)(A;;GA;;;BA)");
+        if (!string.IsNullOrWhiteSpace(shellUserSid))
+        {
+            sb.Append("(A;;GA;;;").Append(shellUserSid).Append(')');
+        }
+
+        if (!string.IsNullOrWhiteSpace(currentUserSid) &&
+            !string.Equals(currentUserSid, shellUserSid, StringComparison.OrdinalIgnoreCase))
+        {
+            sb.Append("(A;;GA;;;").Append(currentUserSid).Append(')');
+        }
+
+        sb.Append("S:(ML;;NW;;;S-1-16-8192)");
+        return sb.ToString();
+    }
+
+    private static string? TryGetProcessUserSid(IntPtr processHandle)
+    {
+        if (processHandle == IntPtr.Zero ||
+            !OpenProcessToken(processHandle, TokenQuery, out IntPtr tokenHandle) ||
+            tokenHandle == IntPtr.Zero)
+        {
+            return null;
+        }
+
+        try
+        {
+            using var identity = new WindowsIdentity(tokenHandle);
+            return identity.User?.Value;
+        }
+        catch
+        {
+            return null;
+        }
+        finally
+        {
+            CloseHandle(tokenHandle);
         }
     }
 }

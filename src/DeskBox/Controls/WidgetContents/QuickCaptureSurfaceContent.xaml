@@ -191,7 +191,7 @@
                             AcceptsReturn="True"
                             Background="Transparent"
                             BorderThickness="0"
-                            FontFamily="Segoe UI Variable Text, Microsoft YaHei UI"
+                            FontFamily="Segoe UI Variable Text, Segoe UI, Microsoft YaHei UI"
                             PreviewKeyDown="InlineComposerTextBox_PreviewKeyDown"
                             Paste="InlineComposerTextBox_Paste"
                             ScrollViewer.VerticalScrollBarVisibility="Auto"

@@ -70,21 +70,31 @@ public sealed class Windows10InstallerCompatibilityContractTests
     public void Windows10Floor_IsDeclaredConsistentlyAcrossProjectsAndProbes()
     {
         // 19041 (Windows 10 2004) is the base build of the 19041-19045 servicing family;
-        // every declared floor must move together when the compatibility floor changes.
+        // centralized in root Directory.Build.props and chained through src/Directory.Build.props
+        // so every project and probe inherits the exact same compatibility floor.
+        string rootProps = File.ReadAllText(TestPaths.FromRepository("Directory.Build.props"));
+        Assert.Contains(
+            "<SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>",
+            rootProps,
+            StringComparison.Ordinal);
+
+        string srcProps = File.ReadAllText(TestPaths.FromRepository("src/Directory.Build.props"));
+        Assert.Contains(
+            "GetPathOfFileAbove('Directory.Build.props'",
+            srcProps,
+            StringComparison.Ordinal);
+
         foreach (string projectPath in new[]
                  {
                      "src/DeskBox/DeskBox.csproj",
-                     "src/DeskBox.Settings/DeskBox.Settings.csproj",
                      "src/DeskBox.Updater/DeskBox.Updater.csproj",
                      "tests/DeskBox.Tests/DeskBox.Tests.csproj",
-                     "tests/DeskBox.NotificationActivationProbe/DeskBox.NotificationActivationProbe.csproj"
+                     "tests/DeskBox.NotificationActivationProbe/DeskBox.NotificationActivationProbe.csproj",
+                     "tests/DeskBox.StartupUnicodeProbe/DeskBox.StartupUnicodeProbe.csproj"
                  })
         {
             string project = File.ReadAllText(TestPaths.FromRepository(projectPath));
-            Assert.Contains(
-                "<SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>",
-                project,
-                StringComparison.Ordinal);
+            Assert.DoesNotContain("<SupportedOSPlatformVersion>", project, StringComparison.Ordinal);
         }
 
         string mainProject = File.ReadAllText(TestPaths.FromRepository("src/DeskBox/DeskBox.csproj"));

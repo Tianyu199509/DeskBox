@@ -1,3 +1,4 @@
+using System.Buffers;
 using DeskBox.Models;
 
 namespace DeskBox.Services;
@@ -9,23 +10,29 @@ namespace DeskBox.Services;
 /// </summary>
 internal static class SearchResultRanker
 {
-    private static readonly string[] s_noisyDirectorySegments =
-    [
-        "\\AppData\\Local\\Temp\\",
-        "\\.git\\",
-        "\\node_modules\\",
-        "\\bin\\Debug\\",
-        "\\bin\\Release\\",
-        "\\obj\\Debug\\",
-        "\\obj\\Release\\",
-        "\\$Recycle.Bin\\",
-        "\\System Volume Information\\"
-    ];
+    private static readonly SearchValues<string> s_noisyPathSegments =
+        SearchValues.Create(
+        [
+            "\\AppData\\Local\\Temp\\",
+            "\\.git\\",
+            "\\node_modules\\",
+            "\\bin\\Debug\\",
+            "\\bin\\Release\\",
+            "\\obj\\Debug\\",
+            "\\obj\\Release\\",
+            "\\$Recycle.Bin\\",
+            "\\System Volume Information\\",
+            "\\Cache\\",
+            "\\Caches\\"
+        ],
+        StringComparison.OrdinalIgnoreCase);
 
-    private static readonly HashSet<string> s_partialExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".crdownload", ".download", ".partial", ".part", ".tmp"
-    };
+    private static readonly System.Collections.Frozen.FrozenSet<string> s_partialExtensions =
+        System.Collections.Frozen.FrozenSet.ToFrozenSet(
+        [
+            ".crdownload", ".download", ".partial", ".part", ".tmp"
+        ],
+        StringComparer.OrdinalIgnoreCase);
 
     public static IReadOnlyList<SearchResultItem> MergeAndRank(
         IEnumerable<SearchResultItem> results,
@@ -84,6 +91,18 @@ internal static class SearchResultRanker
 
     public static string GetIdentityKey(SearchResultItem item)
     {
+        if (item.CachedIdentityKey is { } cached)
+        {
+            return cached;
+        }
+
+        string computed = ComputeIdentityKey(item);
+        item.CachedIdentityKey = computed;
+        return computed;
+    }
+
+    private static string ComputeIdentityKey(SearchResultItem item)
+    {
         if (item.Kind is SearchResultKind.File or SearchResultKind.Folder &&
             !string.IsNullOrWhiteSpace(item.DetailPath))
         {
@@ -98,6 +117,11 @@ internal static class SearchResultRanker
         if (item.Kind == SearchResultKind.QuickCapture && !string.IsNullOrWhiteSpace(item.QuickCaptureItemId))
         {
             return $"note:{item.QuickCaptureItemId}";
+        }
+
+        if (item.Kind == SearchResultKind.CustomWidget && !string.IsNullOrWhiteSpace(item.CustomWidgetId))
+        {
+            return $"custom-widget:{item.CustomWidgetId}:{item.CustomWidgetItemId ?? "root"}";
         }
 
         if (item.Kind == SearchResultKind.Clipboard && !string.IsNullOrWhiteSpace(item.ClipboardItemId))
@@ -120,17 +144,36 @@ internal static class SearchResultRanker
             return false;
         }
 
-        string extension = Path.GetExtension(path);
-        if (s_partialExtensions.Contains(extension))
+        ReadOnlySpan<char> span = path.AsSpan();
+        ReadOnlySpan<char> extension = Path.GetExtension(span);
+        if (!extension.IsEmpty && s_partialExtensions.GetAlternateLookup<ReadOnlySpan<char>>().Contains(extension))
         {
             return true;
         }
 
-        string normalized = path.Replace('/', '\\');
-        return s_noisyDirectorySegments.Any(segment =>
-            normalized.Contains(segment, StringComparison.OrdinalIgnoreCase)) ||
-            normalized.Contains("\\Cache\\", StringComparison.OrdinalIgnoreCase) ||
-            normalized.Contains("\\Caches\\", StringComparison.OrdinalIgnoreCase);
+        if (span.IndexOf('/') < 0)
+        {
+            return span.ContainsAny(s_noisyPathSegments);
+        }
+
+        if (span.Length <= 512)
+        {
+            Span<char> normalized = stackalloc char[span.Length];
+            span.Replace(normalized, '/', '\\');
+            return normalized.ContainsAny(s_noisyPathSegments);
+        }
+
+        char[] rented = ArrayPool<char>.Shared.Rent(span.Length);
+        try
+        {
+            Span<char> normalized = rented.AsSpan(0, span.Length);
+            span.Replace(normalized, '/', '\\');
+            return normalized.ContainsAny(s_noisyPathSegments);
+        }
+        finally
+        {
+            ArrayPool<char>.Shared.Return(rented);
+        }
     }
 
     private static double AdjustScore(SearchResultItem item, string query)
@@ -141,6 +184,7 @@ internal static class SearchResultRanker
             SearchResultKind.Action => 6,
             SearchResultKind.Todo => 5,
             SearchResultKind.QuickCapture => 4,
+            SearchResultKind.CustomWidget => 4,
             SearchResultKind.Clipboard => 3,
             SearchResultKind.Folder => 1,
             _ => 0
@@ -184,6 +228,19 @@ internal static class SearchResultRanker
 
     private static string NormalizePath(string path)
     {
+        if (path.Length >= 3 &&
+            char.IsAsciiLetter(path[0]) &&
+            path[1] == ':' &&
+            path[2] == '\\' &&
+            path.IndexOf('/') < 0 &&
+            !path.Contains("\\.", StringComparison.Ordinal) &&
+            !path.Contains("\\\\", StringComparison.Ordinal) &&
+            !char.IsWhiteSpace(path[0]) &&
+            !char.IsWhiteSpace(path[^1]))
+        {
+            return path.TrimEnd('\\');
+        }
+
         try
         {
             return Path.GetFullPath(path)

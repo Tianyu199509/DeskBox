@@ -1015,7 +1015,7 @@ public sealed class CloudBackupScopedTests : IDisposable
 
         JsonObject layoutDom = JsonNode.Parse(
             await File.ReadAllTextAsync(layoutPath))!.AsObject();
-        Assert.Equal(1, layoutDom["schemaVersion"]!.GetValue<int>());
+        Assert.Equal(WidgetLayoutStore.CurrentSchemaVersion, layoutDom["schemaVersion"]!.GetValue<int>());
         Assert.Equal(
             "List",
             layoutDom["layout"]!["widgets"]![0]!["viewMode"]!.GetValue<string>());

@@ -81,6 +81,13 @@ public sealed partial class WidgetTitleIcon : UserControl
             typeof(WidgetTitleIcon),
             new PropertyMetadata(null, OnAppearancePropertyChanged));
 
+    public static readonly DependencyProperty PreferGlyphEmojiProperty =
+        DependencyProperty.Register(
+            nameof(PreferGlyphEmoji),
+            typeof(bool),
+            typeof(WidgetTitleIcon),
+            new PropertyMetadata(false, OnAppearancePropertyChanged));
+
     public WidgetTitleIcon()
     {
         InitializeComponent();
@@ -98,6 +105,12 @@ public sealed partial class WidgetTitleIcon : UserControl
     {
         get => (string)GetValue(IconKindProperty);
         set => SetValue(IconKindProperty, value);
+    }
+
+    public bool PreferGlyphEmoji
+    {
+        get => (bool)GetValue(PreferGlyphEmojiProperty);
+        set => SetValue(PreferGlyphEmojiProperty, value);
     }
 
     public string LabelText
@@ -216,9 +229,13 @@ public sealed partial class WidgetTitleIcon : UserControl
         IconSurface.Height = Math.Clamp(Math.Round(iconSize + 2), 15, 34);
         IconSurface.MinWidth = 0;
 
-        if (!string.IsNullOrEmpty(CustomEmoji))
+        if (PreferGlyphEmoji && CustomWidgetTemplates.IsEmojiIcon(Glyph))
         {
-            ApplyCustomEmoji(iconSize);
+            ApplyEmojiText(Glyph.Trim(), iconSize);
+        }
+        else if (!string.IsNullOrEmpty(CustomEmoji))
+        {
+            ApplyEmojiText(CustomEmoji, iconSize);
         }
         else if (CustomImageSource is { } customSource)
         {
@@ -283,13 +300,13 @@ public sealed partial class WidgetTitleIcon : UserControl
         ColorIcon.Visibility = Visibility.Visible;
     }
 
-    private void ApplyCustomEmoji(double iconSize)
+    private void ApplyEmojiText(string emojiText, double iconSize)
     {
         double surfaceSize = Math.Clamp(Math.Round(iconSize + 3), 18, 34);
         IconSurface.Width = surfaceSize;
         double emojiFontSize = Math.Clamp(Math.Round(iconSize * 0.85), 11, 22);
         IconSurface.Height = Math.Clamp(Math.Ceiling(emojiFontSize * 1.6), surfaceSize, 32);
-        CustomEmojiElement.Text = CustomEmoji;
+        CustomEmojiElement.Text = emojiText;
         CustomEmojiElement.FontSize = emojiFontSize;
         CustomEmojiElement.TextLineBounds = TextLineBounds.Full;
         CustomEmojiElement.Margin = new Thickness(0, -1, 0, 0);

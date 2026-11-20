@@ -261,7 +261,9 @@ public partial class SettingsViewModel
             if (IsCheckingForUpdates)
                 return _localizationService.T("Settings.Update.Status.Checking");
             if (IsDownloadingUpdate)
-                return _localizationService.Format("Settings.Update.Status.Downloading", _availableUpdateManifest?.Version ?? "");
+                return IsStoreUpdateDelivery
+                    ? _localizationService.T("Settings.Update.Status.StoreInstalling")
+                    : _localizationService.Format("Settings.Update.Status.Downloading", _availableUpdateManifest?.Version ?? "");
             if (IsUpdateDownloaded)
                 return _localizationService.T("Settings.Update.OneClick.Install");
             if (_lastUpdateDownloadFailed)
@@ -321,8 +323,10 @@ public partial class SettingsViewModel
         // Otherwise, check for updates first.
         await CheckForUpdatesAsync();
 
-        // If check found an update, auto-start download.
-        if (_availableUpdateManifest is not null && !IsUpdateDownloaded)
+        // If check found an update, auto-start download for direct installer delivery.
+        // Store delivery downloads and installs in a single OS step that closes the app,
+        // so let the user see the discovered version and click once more to confirm.
+        if (_availableUpdateManifest is not null && !IsUpdateDownloaded && !IsStoreUpdateDelivery)
         {
             return await DownloadAvailableUpdateAsync();
         }
@@ -338,7 +342,8 @@ public partial class SettingsViewModel
         }
 
         _updateOperationCts?.Cancel();
-        _updateOperationCts = new CancellationTokenSource();
+        var cts = new CancellationTokenSource();
+        _updateOperationCts = cts;
         IsCheckingForUpdates = true;
         UpdateStatusText = _localizationService.T("Settings.Update.Status.Checking");
         UpdateDetailText = _localizationService.T("Settings.Update.Detail.Checking");
@@ -346,17 +351,20 @@ public partial class SettingsViewModel
 
         try
         {
-            var result = await _appUpdateService.CheckForUpdatesAsync(AppVersion, _updateOperationCts.Token);
+            var result = await _appUpdateService.CheckForUpdatesAsync(AppVersion, cts.Token);
             // Record-keeping stamp only: the coordinator stores the
             // timestamp and schedules one silent debounced save (no
             // SettingsChanged pass), exactly as the direct write did.
             _maintenanceSettings.RecordUpdateCheck(DateTimeOffset.Now);
             ApplyUpdateCheckResult(result);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
         {
-            // A cancelled check returns to the idle status; the caller's
-            // next action re-arms the Checking text.
+            // Restore the previous cached state (or Ready when no check has
+            // completed yet) so a cancelled check never leaves "Checking..." stuck.
+            UpdateStatusText = _localizationService.T("Settings.Update.Status.Ready");
+            UpdateDetailText = GetReadyUpdateDetailText();
+            ApplyCachedUpdateResult();
         }
         catch (Exception ex)
         {
@@ -431,7 +439,8 @@ public partial class SettingsViewModel
         }
 
         _updateOperationCts?.Cancel();
-        _updateOperationCts = new CancellationTokenSource();
+        var cts = new CancellationTokenSource();
+        _updateOperationCts = cts;
         _lastUpdateDownloadFailed = false;
         IsDownloadingUpdate = true;
         UpdateProgressValue = 0;
@@ -457,7 +466,7 @@ public partial class SettingsViewModel
         try
         {
             _isVmDownloadInFlight = true;
-            var result = await _appUpdateService.DownloadUpdateAsync(_availableUpdateManifest, progress, _updateOperationCts.Token);
+            var result = await _appUpdateService.DownloadUpdateAsync(_availableUpdateManifest, progress, cts.Token);
             if (result.Success && IsStoreUpdateDelivery)
             {
                 _availableUpdateManifest = null;
@@ -481,6 +490,18 @@ public partial class SettingsViewModel
 
             ApplyDownloadFailure(result);
             return result;
+        }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
+        {
+            var cancelled = AppUpdateDownloadResult.Failed(AppUpdateDownloadFailureKind.Cancelled);
+            ApplyDownloadFailure(cancelled);
+            return cancelled;
+        }
+        catch (Exception ex)
+        {
+            var failed = AppUpdateDownloadResult.Failed(AppUpdateDownloadFailureKind.Network, ex.Message);
+            ApplyDownloadFailure(failed);
+            return failed;
         }
         finally
         {
@@ -651,7 +672,8 @@ public partial class SettingsViewModel
             return _localizationService.T("Settings.Update.Detail.AccessDenied");
         }
 
-        if (errorMessage.Contains("timed out", StringComparison.OrdinalIgnoreCase) ||
+        if (errorMessage.Contains("TIMEOUT", StringComparison.OrdinalIgnoreCase) ||
+            errorMessage.Contains("timed out", StringComparison.OrdinalIgnoreCase) ||
             errorMessage.Contains("timeout", StringComparison.OrdinalIgnoreCase) ||
             errorMessage.Contains("TaskCanceledException", StringComparison.OrdinalIgnoreCase) ||
             errorMessage.Contains("operation was canceled", StringComparison.OrdinalIgnoreCase))
@@ -659,7 +681,8 @@ public partial class SettingsViewModel
             return _localizationService.T("Settings.Update.Detail.Timeout");
         }
 
-        if (errorMessage.Contains("NameResolution", StringComparison.OrdinalIgnoreCase) ||
+        if (errorMessage.Contains("NETWORK_UNAVAILABLE", StringComparison.OrdinalIgnoreCase) ||
+            errorMessage.Contains("NameResolution", StringComparison.OrdinalIgnoreCase) ||
             errorMessage.Contains("No such host", StringComparison.OrdinalIgnoreCase) ||
             errorMessage.Contains("remote name could not be resolved", StringComparison.OrdinalIgnoreCase) ||
             errorMessage.Contains("无法解析", StringComparison.OrdinalIgnoreCase) ||
@@ -763,14 +786,14 @@ public partial class SettingsViewModel
         DateTime now = DateTime.Now;
         if (local.Date == now.Date)
         {
-            return local.ToString("HH:mm");
+            return local.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture);
         }
 
         if (local.Year == now.Year)
         {
-            return local.ToString("MM-dd HH:mm");
+            return local.ToString("MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture);
         }
 
-        return local.ToString("yyyy-MM-dd HH:mm");
+        return local.ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture);
     }
 }

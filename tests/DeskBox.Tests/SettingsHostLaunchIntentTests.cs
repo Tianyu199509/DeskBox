@@ -50,16 +50,13 @@ public sealed class SettingsHostLaunchIntentTests
         // process (sole writer + live Changed listeners).
         Assert.Contains("GlanceWidgetStore.SaveRelay =", host, StringComparison.Ordinal);
 
-        // Batch R9: the search section's hotkey card rides the search-hotkey
-        // commands (a null getHotkey rendered it permanently dead), and the
-        // autostart toggle executes in this process so the real backend must
-        // be configured (Store StartupTask vs Run key).
+        // The search section's hotkey card rides the search-hotkey commands,
+        // and auto-start operations are owned exclusively by the MAIN process
+        // via ISettingsAppActions IPC so the settings host never configures or
+        // mutates StartupService directly.
         Assert.Contains("new RemoteSearchHotkeyController(", host, StringComparison.Ordinal);
         Assert.DoesNotContain("getHotkey: () => null", host, StringComparison.Ordinal);
-        Assert.Contains(
-            "StartupService.Configure(StartupServiceFactory.Create(DistributionService, settings))",
-            host,
-            StringComparison.Ordinal);
+        Assert.DoesNotContain("StartupService.Configure(", host, StringComparison.Ordinal);
     }
 
     [Fact]

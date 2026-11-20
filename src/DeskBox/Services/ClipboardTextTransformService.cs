@@ -11,27 +11,33 @@ namespace DeskBox.Services;
 /// </summary>
 public static class ClipboardTextTransformService
 {
-    private static readonly HashSet<string> s_universalTrackingParams = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "fbclid", "gclid", "dclid", "msclkid", "twclid", "igshid", "yclid",
-        "mc_cid", "mc_eid", "_hsenc", "_hsmi", "mkt_tok", "vero_id",
-        "oly_anon_id", "oly_enc_id", "rb_clickid", "s_kwcid", "wickedid",
-        "spm", "spm_id_from", "from_spmid", "vd_source", "unique_k", "buvid", "is_story_h5",
-        "share_source", "share_medium", "share_plat", "share_session_id", "share_tag", "share_from",
-        "xsec_source", "xsec_token", "xhsshare", "appuid", "apptime",
-        "tt_from", "utm_campaign", "utm_source", "utm_medium", "utm_term", "utm_content", "utm_id"
-    };
+    private static readonly System.Collections.Frozen.FrozenSet<string> s_universalTrackingParams =
+        System.Collections.Frozen.FrozenSet.ToFrozenSet(
+        [
+            "fbclid", "gclid", "dclid", "msclkid", "twclid", "igshid", "yclid",
+            "mc_cid", "mc_eid", "_hsenc", "_hsmi", "mkt_tok", "vero_id",
+            "oly_anon_id", "oly_enc_id", "rb_clickid", "s_kwcid", "wickedid",
+            "spm", "spm_id_from", "from_spmid", "vd_source", "unique_k", "buvid", "is_story_h5",
+            "share_source", "share_medium", "share_plat", "share_session_id", "share_tag", "share_from",
+            "xsec_source", "xsec_token", "xhsshare", "appuid", "apptime",
+            "tt_from", "utm_campaign", "utm_source", "utm_medium", "utm_term", "utm_content", "utm_id"
+        ],
+        StringComparer.OrdinalIgnoreCase);
 
-    private static readonly HashSet<string> s_wechatRemovableParams = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "chksm", "mpshare", "scene", "srcid", "sharer_shareinfo", "sharer_shareinfo_first",
-        "ascene", "devicetype", "version", "nettype", "abtest_cookie", "wx_header", "poc_token"
-    };
+    private static readonly System.Collections.Frozen.FrozenSet<string> s_wechatRemovableParams =
+        System.Collections.Frozen.FrozenSet.ToFrozenSet(
+        [
+            "chksm", "mpshare", "scene", "srcid", "sharer_shareinfo", "sharer_shareinfo_first",
+            "ascene", "devicetype", "version", "nettype", "abtest_cookie", "wx_header", "poc_token"
+        ],
+        StringComparer.OrdinalIgnoreCase);
 
-    private static readonly HashSet<string> s_mediaShareRemovableParams = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "si", "pp", "feature"
-    };
+    private static readonly System.Collections.Frozen.FrozenSet<string> s_mediaShareRemovableParams =
+        System.Collections.Frozen.FrozenSet.ToFrozenSet(
+        [
+            "si", "pp", "feature"
+        ],
+        StringComparer.OrdinalIgnoreCase);
 
     public static bool CanMergePdfLineBreaks(string? text)
     {

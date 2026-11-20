@@ -73,7 +73,7 @@ public sealed class ClipboardWidgetTests
         ClipboardClassifier.ClassifyText("hello@deskbox.app", null, null, out ClipboardTextSubKind emailKind, out _);
         Assert.Equal(ClipboardTextSubKind.Email, emailKind);
 
-        ClipboardClassifier.ClassifyText(@"D:\project\wingezi\README.md", null, null, out ClipboardTextSubKind pathKind, out _);
+        ClipboardClassifier.ClassifyText(@"D:\workspace\project\README.md", null, null, out ClipboardTextSubKind pathKind, out _);
         Assert.Equal(ClipboardTextSubKind.Path, pathKind);
 
         ClipboardClassifier.ClassifyText("Rich paragraph\nSecond line", "<b>Rich</b>", null, out ClipboardTextSubKind htmlKind, out _);
@@ -1069,7 +1069,7 @@ public sealed class ClipboardWidgetTests
         Assert.Equal("DeskBox", ClipboardClassifier.NormalizeFriendlyAppDisplayName("DeskBox.ThumbnailProxy.exe"));
 
         Assert.True(ClipboardClassifier.IsGeneratedOrChatCacheImagePath(
-            @"C:\Users\simon\Documents\WeChat Files\wxid_123\FileStorage\MsgAttach\2026-11\e1934c2cd75f0d27c948492a208a393.png"));
+            @"C:\Users\alice\Documents\WeChat Files\wxid_123\FileStorage\MsgAttach\2026-11\e1934c2cd75f0d27c948492a208a393.png"));
         Assert.False(ClipboardClassifier.IsGeneratedOrChatCacheImagePath(
             @"D:\Design\HeroBanner.png"));
     }
@@ -2237,5 +2237,185 @@ public sealed class ClipboardWidgetTests
         string flyoutActivation = File.ReadAllText(TestPaths.FromRepository("src/DeskBox/Helpers/FlyoutTextInputActivation.cs"));
         Assert.Contains("IsInsideTextInputControl", flyoutActivation, StringComparison.Ordinal);
         Assert.Contains("bridges[i] == foregroundBefore", flyoutActivation, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TabLayout_ReordersTogglesProtectsLastVisibleTab_And_FallsBackActiveFilter()
+    {
+        Assert.Equal(ClipboardSettingsSlice.DefaultTabLayout, ClipboardSettingsSlice.NormalizeTabLayout(null));
+        Assert.Equal(ClipboardSettingsSlice.DefaultTabLayout, ClipboardSettingsSlice.NormalizeTabLayout("invalid,unknown"));
+        Assert.True(ClipboardSettingsSlice.IsDefaultTabLayout("all, text, images, links, files, pinned"));
+
+        // Reordering and partial list appends missing canonical tabs as enabled.
+        string partial = ClipboardSettingsSlice.NormalizeTabLayout("Pinned,-Links,Text");
+        Assert.Equal("Pinned,-Links,Text,All,Images,Files", partial);
+        Assert.False(ClipboardSettingsSlice.IsDefaultTabLayout(partial));
+
+        // MoveTab shifts items within bounds while preserving enabled states.
+        string movedUp = ClipboardSettingsSlice.MoveTab(partial, ClipboardSettingsSlice.TabText, -1);
+        Assert.Equal("Pinned,Text,-Links,All,Images,Files", movedUp);
+        Assert.Equal(movedUp, ClipboardSettingsSlice.MoveTab(movedUp, ClipboardSettingsSlice.TabPinned, -1));
+
+        // ReorderTabs preserves enabled states across drag-and-drop order changes.
+        string dragged = ClipboardSettingsSlice.ReorderTabs(
+            movedUp,
+            ["Text", "Pinned", "Images", "All", "Files", "Links"]);
+        Assert.Equal("Text,Pinned,Images,All,Files,-Links", dragged);
+
+        // Disabling down to 1 tab works, and disabling the last visible tab is prevented.
+        string current = ClipboardSettingsSlice.DefaultTabLayout;
+        foreach (string hideId in new[] { "All", "Images", "Links", "Files" })
+        {
+            current = ClipboardSettingsSlice.SetTabEnabled(current, hideId, enabled: false);
+        }
+
+        Assert.Equal("-All,Text,-Images,-Links,-Files,Pinned", current);
+        current = ClipboardSettingsSlice.SetTabEnabled(current, "Text", enabled: false);
+        Assert.Equal("-All,-Text,-Images,-Links,-Files,Pinned", current);
+
+        // Attempting to turn off the final visible tab ("Pinned") leaves it enabled.
+        string guarded = ClipboardSettingsSlice.SetTabEnabled(current, "Pinned", enabled: false);
+        Assert.Equal("-All,-Text,-Images,-Links,-Files,Pinned", guarded);
+
+        // All-disabled raw input promotes the first ordered tab so at least 1 tab is always visible.
+        Assert.Equal(
+            "Pinned,-All,-Text,-Images,-Links,-Files",
+            ClipboardSettingsSlice.NormalizeTabLayout("-Pinned,-All,-Text,-Images,-Links,-Files"));
+
+        string tempRoot = Path.Combine(Path.GetTempPath(), $"deskbox-clip-tablayout-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempRoot);
+        try
+        {
+            var settings = new SettingsService();
+            settings.Settings.Clipboard.ClipboardTabLayout = "Pinned,Text,-All,-Images,-Links,-Files";
+
+            var localization = TestServices.CreateLocalizationService("zh-CN");
+            Assert.Equal("自动记录剪贴板历史，支持快捷粘贴", localization.T("WidgetContent.Clipboard.StatusDescription"));
+
+            using var service = new ClipboardHistoryService(new ClipboardStore(tempRoot), settings);
+            var config = new WidgetConfig { Id = "clip-tab-order", WidgetKind = WidgetKind.Clipboard };
+            using var vm = new ClipboardWidgetViewModel(config, service, settings, localization);
+
+            // Starts on the first visible tab ("Pinned") when "All" is hidden.
+            Assert.Equal(ClipboardFilterKind.Pinned, vm.ActiveFilter);
+            Assert.False(vm.IsFilterTabVisible(ClipboardFilterKind.All));
+            Assert.True(vm.IsFilterTabVisible(ClipboardFilterKind.Text));
+
+            // Select "Text", reorder without hiding "Text" -> stays on "Text".
+            vm.ActiveFilter = ClipboardFilterKind.Text;
+            settings.Settings.Clipboard.ClipboardTabLayout = "Pinned,Images,Text,-All,-Links,-Files";
+            vm.ApplyAppearanceFromSettings();
+            Assert.Equal(ClipboardFilterKind.Text, vm.ActiveFilter);
+
+            // Hide the currently active "Text" tab -> automatically falls back to first visible ("Pinned").
+            settings.Settings.Clipboard.ClipboardTabLayout = "Pinned,Images,-Text,-All,-Links,-Files";
+            vm.ApplyAppearanceFromSettings();
+            Assert.Equal(ClipboardFilterKind.Pinned, vm.ActiveFilter);
+
+            // Reset preferences restores the canonical 6-tab default layout.
+            SettingsService.ApplyDefaultClipboardPreferences(settings.Settings.Clipboard);
+            Assert.Equal(ClipboardSettingsSlice.DefaultTabLayout, settings.Settings.Clipboard.ClipboardTabLayout);
+        }
+        finally
+        {
+            if (Directory.Exists(tempRoot))
+            {
+                Directory.Delete(tempRoot, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void PasteQueueBanner_And_QuickCaptureItem_RefreshLocalizedLabelsOnLiveLanguageSwitch()
+    {
+        string tempRoot = Path.Combine(Path.GetTempPath(), $"deskbox-clip-i18n-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempRoot);
+        try
+        {
+            var settings = new SettingsService();
+            settings.Settings.Language = SettingsService.LanguageChinese;
+            var localization = new LocalizationService(settings);
+
+            using var service = new ClipboardHistoryService(new ClipboardStore(tempRoot), settings);
+            service.StartLivePasteQueue();
+            var config = new WidgetConfig { Id = "clip-paste-queue-i18n", WidgetKind = WidgetKind.Clipboard };
+            using var vm = new ClipboardWidgetViewModel(config, service, settings, localization, uiDispatch: action => action());
+
+            var changedProps = new HashSet<string>(StringComparer.Ordinal);
+            vm.PropertyChanged += (_, e) =>
+            {
+                if (!string.IsNullOrEmpty(e.PropertyName))
+                {
+                    changedProps.Add(e.PropertyName);
+                }
+            };
+
+            Assert.Equal("直接粘贴", vm.PasteQueuePasteText);
+            Assert.Equal("直接粘贴", vm.PasteQueuePasteTooltip);
+            Assert.Equal("跳过", vm.PasteQueueSkipText);
+            Assert.Equal("退出顺序粘贴模式", vm.PasteQueueStopTooltip);
+
+            var qcItem = new QuickCaptureItemViewModel(
+                new QuickCaptureItem
+                {
+                    Id = "qc-1",
+                    Type = QuickCaptureItemType.Image,
+                    Body = "Image",
+                    IsPinned = true,
+                    CreatedAt = DateTimeOffset.UtcNow,
+                    UpdatedAt = DateTimeOffset.UtcNow
+                },
+                localization,
+                textSize: 13,
+                iconSize: 16,
+                searchText: null);
+            var qcChangedProps = new HashSet<string>(StringComparer.Ordinal);
+            qcItem.PropertyChanged += (_, e) =>
+            {
+                if (!string.IsNullOrEmpty(e.PropertyName))
+                {
+                    qcChangedProps.Add(e.PropertyName);
+                }
+            };
+            Assert.Equal("上移", qcItem.MoveUpTooltip);
+            Assert.Equal("下移", qcItem.MoveDownTooltip);
+            Assert.Equal("图片", qcItem.DisplayText);
+
+            settings.Settings.Language = SettingsService.LanguageEnglish;
+            localization.NotifyExternalLanguageChange();
+            qcItem.RefreshLocalization();
+
+            Assert.Contains(nameof(ClipboardWidgetViewModel.PasteQueuePasteText), changedProps);
+            Assert.Contains(nameof(ClipboardWidgetViewModel.PasteQueuePasteTooltip), changedProps);
+            Assert.Contains(nameof(ClipboardWidgetViewModel.PasteQueueSkipText), changedProps);
+            Assert.Contains(nameof(ClipboardWidgetViewModel.PasteQueueStopTooltip), changedProps);
+
+            Assert.Equal("Paste", vm.PasteQueuePasteText);
+            Assert.Equal("Paste to active window", vm.PasteQueuePasteTooltip);
+            Assert.Equal("Skip", vm.PasteQueueSkipText);
+            Assert.Equal("Exit Paste Queue", vm.PasteQueueStopTooltip);
+
+            Assert.Contains(nameof(QuickCaptureItemViewModel.MoveUpTooltip), qcChangedProps);
+            Assert.Contains(nameof(QuickCaptureItemViewModel.MoveDownTooltip), qcChangedProps);
+            Assert.Contains(nameof(QuickCaptureItemViewModel.DisplayText), qcChangedProps);
+            Assert.Contains(nameof(QuickCaptureItemViewModel.UpdatedAtText), qcChangedProps);
+            Assert.Contains(nameof(QuickCaptureItemViewModel.TimestampTooltipText), qcChangedProps);
+            Assert.Equal("Move up", qcItem.MoveUpTooltip);
+            Assert.Equal("Move down", qcItem.MoveDownTooltip);
+            Assert.Equal("Image", qcItem.DisplayText);
+
+            settings.Settings.Language = LocalizationService.LanguageGerman;
+            localization.NotifyExternalLanguageChange();
+            Assert.Equal("Einfügen", vm.PasteQueuePasteText);
+            Assert.Equal("Direkt einfügen", vm.PasteQueuePasteTooltip);
+            Assert.Equal("Überspringen", vm.PasteQueueSkipText);
+        }
+        finally
+        {
+            if (Directory.Exists(tempRoot))
+            {
+                Directory.Delete(tempRoot, recursive: true);
+            }
+        }
     }
 }

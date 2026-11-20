@@ -52,7 +52,7 @@
                 helpers:WidgetTextShadow.Cast="False"
                 HorizontalAlignment="Center"
                 VerticalAlignment="Center"
-                FontFamily="Segoe UI Emoji"
+                FontFamily="Segoe UI Emoji, Segoe UI Symbol, Segoe UI"
                 TextAlignment="Center"
                 Visibility="Collapsed" />
         </Grid>

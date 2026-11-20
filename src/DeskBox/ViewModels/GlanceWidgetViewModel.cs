@@ -537,7 +537,8 @@ public sealed partial class GlanceWidgetViewModel : ObservableObject, IDisposabl
 
     public async Task OpenPhotoInfoAsync()
     {
-        if (Uri.TryCreate(CurrentImage?.SourcePageUrl, UriKind.Absolute, out Uri? uri))
+        if (Uri.TryCreate(CurrentImage?.SourcePageUrl, UriKind.Absolute, out Uri? uri) &&
+            (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp))
         {
             await Launcher.LaunchUriAsync(uri);
         }
@@ -832,14 +833,29 @@ public sealed partial class GlanceWidgetViewModel : ObservableObject, IDisposabl
         OnPropertyChanged(nameof(CanPauseRotation));
     }
 
+    private DateOnly _lastFormattedCalendarDay;
+    private string? _lastFormattedCultureName;
+    private bool _lastFormattedShowYear;
+
     private void UpdateDateAndTime()
     {
         CultureInfo culture = GetCulture();
         DateTime now = DateTime.Now;
         TimeText = FormatTimeText(now, _settings.TimeFormat, culture, includeSeconds: ShowSeconds);
-        DateText = FormatDateText(now, culture, _settings.ShowYear);
-        CompactCalendarDateText = FormatCompactCalendarDateText(now, culture);
-        WeekdayText = now.ToString("dddd", culture);
+
+        DateOnly today = DateOnly.FromDateTime(now);
+        bool showYear = _settings.ShowYear;
+        if (today != _lastFormattedCalendarDay ||
+            _lastFormattedShowYear != showYear ||
+            !string.Equals(_lastFormattedCultureName, culture.Name, StringComparison.Ordinal))
+        {
+            _lastFormattedCalendarDay = today;
+            _lastFormattedShowYear = showYear;
+            _lastFormattedCultureName = culture.Name;
+            DateText = FormatDateText(now, culture, showYear);
+            CompactCalendarDateText = FormatCompactCalendarDateText(now, culture);
+            WeekdayText = now.ToString("dddd", culture);
+        }
     }
 
     internal static string FormatTimeText(
@@ -953,8 +969,9 @@ public sealed partial class GlanceWidgetViewModel : ObservableObject, IDisposabl
         CultureInfo culture)
     {
         ArgumentNullException.ThrowIfNull(culture);
-        string day = date.Day.ToString(culture);
-        return culture.TwoLetterISOLanguageName switch
+        CultureInfo gregorianCulture = LocalizationService.EnsureGregorianCalendar(culture);
+        string day = date.Day.ToString(gregorianCulture);
+        return gregorianCulture.TwoLetterISOLanguageName switch
         {
             "zh" or "ja" => $"{day}日",
             "ko" => $"{day}일",
@@ -962,27 +979,29 @@ public sealed partial class GlanceWidgetViewModel : ObservableObject, IDisposabl
         };
     }
 
+    [GeneratedRegex(@"(?<!d)d{3,4}(?!d)", RegexOptions.CultureInvariant)]
+    private static partial Regex WeekdayTokenStripRegex();
+
     internal static string FormatDateText(
         DateTime date,
         CultureInfo culture,
         bool includeYear)
     {
         ArgumentNullException.ThrowIfNull(culture);
+        CultureInfo gregorianCulture = LocalizationService.EnsureGregorianCalendar(culture);
         if (!includeYear)
         {
-            return date.ToString("M", culture);
+            return date.ToString("M", gregorianCulture);
         }
 
         // LongDatePattern already carries the locale's natural year/month/day
         // order. Remove its weekday token because weekday is an independent
         // Glance display option.
-        string pattern = Regex.Replace(
-            culture.DateTimeFormat.LongDatePattern,
-            @"(?<!d)d{3,4}(?!d)",
-            string.Empty,
-            RegexOptions.CultureInvariant);
+        string pattern = WeekdayTokenStripRegex().Replace(
+            gregorianCulture.DateTimeFormat.LongDatePattern,
+            string.Empty);
         pattern = pattern.Trim().Trim(',', '，', '،').Trim();
-        return date.ToString(pattern, culture);
+        return date.ToString(pattern, gregorianCulture);
     }
 
     private Task UpdateCalendarAsync() => RebuildCalendarDays();
@@ -1066,11 +1085,12 @@ public sealed partial class GlanceWidgetViewModel : ObservableObject, IDisposabl
     {
         try
         {
-            return CultureInfo.GetCultureInfo(_localizationService.CurrentCultureName);
+            return LocalizationService.EnsureGregorianCalendar(
+                CultureInfo.GetCultureInfo(_localizationService.CurrentCultureName));
         }
         catch
         {
-            return CultureInfo.CurrentCulture;
+            return LocalizationService.EnsureGregorianCalendar(CultureInfo.CurrentCulture);
         }
     }
 

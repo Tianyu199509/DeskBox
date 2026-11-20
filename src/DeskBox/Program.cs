@@ -15,6 +15,13 @@ internal static class DeskBoxMainProgram
             return cliExitCode;
         }
 
+#if DESKBOX_PGO_INSTRUMENTATION
+        if (PgoProfileSeedRunner.TryIntercept(args, out int pgoExitCode))
+        {
+            return pgoExitCode;
+        }
+#endif
+
         ComWrappersSupport.InitializeComWrappers();
         Application.Start(_params =>
         {

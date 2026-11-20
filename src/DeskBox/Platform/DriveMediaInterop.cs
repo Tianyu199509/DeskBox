@@ -36,9 +36,9 @@ internal enum StorageBusKind : uint
 /// Classifies drag-and-drop source paths by underlying storage medium and
 /// system folder protection so default Move-in / FollowWindows-out policies
 /// never delete originals from USB drives, external USB SSDs/HDDs, network
-/// shares, Public Desktop, Start Menu, or OS installation directories.
+/// shares, Start Menu, or OS installation directories.
 /// </summary>
-internal static class DriveMediaInterop
+internal static partial class DriveMediaInterop
 {
     private const uint FileShareReadWrite = 0x00000001u | 0x00000002u;
     private const uint OpenExisting = 3u;
@@ -100,8 +100,8 @@ internal static class DriveMediaInterop
         public uint AdditionalParameters;
     }
 
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern IntPtr CreateFileW(
+    [LibraryImport("kernel32.dll", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
+    private static partial IntPtr CreateFileW(
         string lpFileName,
         uint dwDesiredAccess,
         uint dwShareMode,
@@ -110,9 +110,9 @@ internal static class DriveMediaInterop
         uint dwFlagsAndAttributes,
         IntPtr hTemplateFile);
 
-    [DllImport("kernel32.dll", SetLastError = true)]
+    [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern unsafe bool DeviceIoControl(
+    private static unsafe partial bool DeviceIoControl(
         IntPtr hDevice,
         uint dwIoControlCode,
         ref StoragePropertyQuery lpInBuffer,
@@ -122,18 +122,18 @@ internal static class DriveMediaInterop
         out uint lpBytesReturned,
         IntPtr lpOverlapped);
 
-    [DllImport("kernel32.dll", SetLastError = true)]
+    [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool CloseHandle(IntPtr hObject);
+    private static partial bool CloseHandle(IntPtr hObject);
 
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern unsafe uint QueryDosDeviceW(
+    [LibraryImport("kernel32.dll", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
+    private static unsafe partial uint QueryDosDeviceW(
         string lpDeviceName,
         char* lpTargetPath,
         uint ucchMax);
 
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern uint GetFileAttributesW(string lpFileName);
+    [LibraryImport("kernel32.dll", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
+    private static partial uint GetFileAttributesW(string lpFileName);
 
     private const uint InvalidFileAttributes = 0xFFFFFFFFu;
     // Note: FILE_ATTRIBUTE_UNPINNED (0x00100000) is intentionally excluded —
@@ -173,12 +173,10 @@ internal static class DriveMediaInterop
             StorageBusKind.Virtual or
             StorageBusKind.FileBackedVirtual;
 
-    /// <summary>
-    /// Returns whether <paramref name="fullPath"/> sits inside a chat client's
-    /// received-file / message-attachment storage root (WeChat 3.x/4.x, WeCom,
-    /// QQ / NTQQ), where moving originals out breaks historical message links.
-    /// </summary>
-    internal static bool IsProtectedApplicationCachePath(string? fullPath)
+    internal static bool IsDeskBoxInternalDataOrRecoveryPath(
+        string? fullPath,
+        string? deskBoxDataDirectoryOverride = null,
+        string? deskBoxRecoveryDirectoryOverride = null)
     {
         if (string.IsNullOrWhiteSpace(fullPath))
         {
@@ -186,13 +184,62 @@ internal static class DriveMediaInterop
         }
 
         string normalized = StripExtendedPathPrefix(fullPath.Trim()).Replace('/', '\\');
+        string trimmed = normalized.TrimEnd('\\');
+        return IsPathInsideDirectoryLexical(
+                   normalized,
+                   deskBoxDataDirectoryOverride ?? Services.DeskBoxDataPathService.Current.RootPath) ||
+               IsPathInsideDirectoryLexical(
+                   normalized,
+                   deskBoxDataDirectoryOverride ?? Services.DeskBoxDataPathService.Current.DataDirectory) ||
+               IsPathInsideDirectoryLexical(
+                   normalized,
+                   deskBoxRecoveryDirectoryOverride ?? Services.DeskBoxDataPathService.Current.RecoveryDirectory) ||
+               normalized.Contains(@"\.appdata\", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.EndsWith(@"\.appdata", StringComparison.OrdinalIgnoreCase) ||
+               normalized.Contains(@"\.appdata-recovery\", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.EndsWith(@"\.appdata-recovery", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Returns whether <paramref name="fullPath"/> sits inside a chat client's
+    /// received-file / message-attachment storage root (WeChat 3.x/4.x, WeCom,
+    /// QQ / NTQQ), where moving originals out breaks historical message links.
+    /// </summary>
+    internal static bool IsProtectedApplicationCachePath(
+        string? fullPath,
+        string? deskBoxDataDirectoryOverride = null,
+        string? deskBoxRecoveryDirectoryOverride = null)
+    {
+        if (string.IsNullOrWhiteSpace(fullPath))
+        {
+            return false;
+        }
+
+        // Protect DeskBox's own internal application data & recovery roots
+        // (e.g. %LOCALAPPDATA%\DeskBox\data\..., %USERPROFILE%\DeskBox\.appdata\data\...,
+        // dev .appdata\data\...) so QuickCapture/Todo attachments, Clipboard image cache,
+        // and internal JSON state can never be physically moved/deleted by Search drag-out
+        // or inbound File Widget drops, while leaving user File Widget storage folders untouched.
+        if (IsDeskBoxInternalDataOrRecoveryPath(
+                fullPath,
+                deskBoxDataDirectoryOverride,
+                deskBoxRecoveryDirectoryOverride))
+        {
+            return true;
+        }
+
+        string normalized = StripExtendedPathPrefix(fullPath.Trim()).Replace('/', '\\');
+
         if (normalized.Contains(@"\xwechat_files\", StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }
 
         if (normalized.Contains(@"\WeChat Files\", StringComparison.OrdinalIgnoreCase) &&
-            normalized.Contains(@"\FileStorage\", StringComparison.OrdinalIgnoreCase))
+            (normalized.Contains(@"\FileStorage\", StringComparison.OrdinalIgnoreCase) ||
+             normalized.Contains(@"\Image\", StringComparison.OrdinalIgnoreCase) ||
+             normalized.Contains(@"\MsgAttach\", StringComparison.OrdinalIgnoreCase) ||
+             normalized.Contains(@"\Video\", StringComparison.OrdinalIgnoreCase)))
         {
             return true;
         }
@@ -246,6 +293,27 @@ internal static class DriveMediaInterop
         }
 
         return false;
+    }
+
+    private static bool IsPathInsideDirectoryLexical(string normalizedCandidatePath, string? directoryPath)
+    {
+        if (string.IsNullOrWhiteSpace(directoryPath))
+        {
+            return false;
+        }
+
+        string normalizedDir = StripExtendedPathPrefix(directoryPath.Trim())
+            .Replace('/', '\\')
+            .TrimEnd('\\');
+        if (normalizedDir.Length == 0)
+        {
+            return false;
+        }
+
+        return string.Equals(normalizedCandidatePath.TrimEnd('\\'), normalizedDir, StringComparison.OrdinalIgnoreCase) ||
+               (normalizedCandidatePath.Length > normalizedDir.Length + 1 &&
+                normalizedCandidatePath.StartsWith(normalizedDir, StringComparison.OrdinalIgnoreCase) &&
+                normalizedCandidatePath[normalizedDir.Length] == '\\');
     }
 
     internal static bool HasUnhydratedCloudFileAttributes(uint attributes) =>
@@ -315,6 +383,33 @@ internal static class DriveMediaInterop
         }
     }
 
+    /// <summary>
+    /// Pure disk-attribute probe for passive content readers (search preview,
+    /// in-process WIC fallback, direct PE icon extraction, drop-zone text peek)
+    /// that must never open a stream on an unhydrated cloud placeholder — even
+    /// when that placeholder sits on an OneDrive KFM personal Desktop.
+    /// </summary>
+    internal static bool HasUnhydratedCloudAttributesOnDisk(
+        string? fullPath,
+        Func<string, uint>? fileAttributesProbe = null)
+    {
+        if (string.IsNullOrWhiteSpace(fullPath))
+        {
+            return false;
+        }
+
+        string stripped = StripExtendedPathPrefix(fullPath.Trim());
+        if (stripped.Length < 2 || stripped.StartsWith(@"\\", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        uint attributes = fileAttributesProbe is not null
+            ? fileAttributesProbe(stripped)
+            : GetFileAttributesW(StorageMigrationNativeMethods.Extended(stripped));
+        return HasUnhydratedCloudFileAttributes(attributes);
+    }
+
     internal static bool IsUnhydratedCloudPlaceholderPath(
         string? fullPath,
         string? userDesktopOverride = null,
@@ -342,16 +437,58 @@ internal static class DriveMediaInterop
         uint attributes = fileAttributesProbe is not null
             ? fileAttributesProbe(stripped)
             : GetFileAttributesW(StorageMigrationNativeMethods.Extended(stripped));
-        return HasUnhydratedCloudFileAttributes(attributes);
+        if (HasUnhydratedCloudFileAttributes(attributes))
+        {
+            return true;
+        }
+
+        if (fileAttributesProbe is null &&
+            attributes != 0xFFFFFFFFu &&
+            (attributes & 0x10u) != 0 &&
+            StorageMigrationNativeMethods.HasCloudReparseTag(stripped))
+        {
+            try
+            {
+                const int MaxCloudDirectoryProbeChildren = 64;
+                int checkedCount = 0;
+                var options = new EnumerationOptions
+                {
+                    IgnoreInaccessible = true,
+                    RecurseSubdirectories = false,
+                    AttributesToSkip = 0,
+                };
+                foreach (string childPath in Directory.EnumerateFileSystemEntries(stripped, "*", options))
+                {
+                    uint childAttrs = GetFileAttributesW(StorageMigrationNativeMethods.Extended(childPath));
+                    if (HasUnhydratedCloudFileAttributes(childAttrs))
+                    {
+                        return true;
+                    }
+
+                    if (++checkedCount >= MaxCloudDirectoryProbeChildren)
+                    {
+                        break;
+                    }
+                }
+            }
+            catch
+            {
+                // Ignore enumeration errors on cloud folders.
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
     /// Returns whether any path in <paramref name="sourcePaths"/> lives under
-    /// Start Menu, Public Desktop, or OS/Program Files roots where advertising
+    /// Start Menu or OS/Program Files roots where advertising
     /// OLE <c>Move</c> on drag-out would remove shared/system shortcuts or
     /// trigger UAC failures.
     /// </summary>
-    internal static bool IsProtectedDragOutSource(IEnumerable<string>? sourcePaths)
+    internal static bool IsProtectedDragOutSource(
+        IEnumerable<string>? sourcePaths,
+        Func<string, bool>? appExecLinkProbe = null)
     {
         if (sourcePaths is null)
         {
@@ -373,9 +510,10 @@ internal static class DriveMediaInterop
                 continue;
             }
 
-            if (IsUnderAnyRoot(normalized, roots) ||
+            if (IsDeskBoxInternalDataOrRecoveryPath(normalized) ||
+                IsUnderAnyRoot(normalized, roots) ||
                 IsDriveProgramInstallPath(normalized) ||
-                IsMoveProtectedExecutableOrInstallPath(normalized))
+                IsMoveProtectedExecutableOrInstallPath(normalized, appExecLinkProbe))
             {
                 return true;
             }
@@ -387,13 +525,15 @@ internal static class DriveMediaInterop
     /// <summary>
     /// Classifies inbound drop sources so default <c>Move</c> mode can
     /// automatically preserve originals on external USB/SD/1394 drives,
-    /// network/UNC shares, optical media, Public Desktop, Start Menu, and OS
+    /// network/UNC shares, optical media, Start Menu, and OS
     /// installation directories unless the user explicitly overrides with Shift.
     /// </summary>
     internal static InboundSourceProtectionKind ClassifyInboundDropSources(
         IEnumerable<string>? sourcePaths,
         Func<char, DriveType>? driveTypeProbe = null,
-        Func<char, (StorageBusKind BusKind, bool RemovableMedia)>? busProbe = null)
+        Func<char, (StorageBusKind BusKind, bool RemovableMedia)>? busProbe = null,
+        Func<string, bool>? appExecLinkProbe = null,
+        bool skipCacheAndCloudChecks = false)
     {
         if (sourcePaths is null)
         {
@@ -440,18 +580,19 @@ internal static class DriveMediaInterop
 
             if (IsUnderAnyRoot(fullPath, systemRoots) ||
                 IsDriveProgramInstallPath(fullPath) ||
-                IsMoveProtectedExecutableOrInstallPath(fullPath))
+                IsMoveProtectedExecutableOrInstallPath(fullPath, appExecLinkProbe))
             {
                 return InboundSourceProtectionKind.SystemOrSharedProtected;
             }
 
-            if (IsProtectedApplicationCachePath(fullPath))
+            if (!skipCacheAndCloudChecks && IsProtectedApplicationCachePath(fullPath))
             {
                 result = InboundSourceProtectionKind.ExternalRemovableOrNetwork;
                 continue;
             }
 
-            if (driveTypeProbe is null &&
+            if (!skipCacheAndCloudChecks &&
+                driveTypeProbe is null &&
                 busProbe is null &&
                 IsUnhydratedCloudPlaceholderPath(fullPath))
             {
@@ -891,6 +1032,11 @@ internal static class DriveMediaInterop
             return true;
         }
 
+        if (DropStagingFileOps.IsAnyDeskBoxStagingPath(normalized))
+        {
+            return true;
+        }
+
         string tempPath = s_tempPathNormalized.Value;
         if (!string.IsNullOrEmpty(tempPath) &&
             (string.Equals(normalized, tempPath, StringComparison.OrdinalIgnoreCase) ||
@@ -911,7 +1057,7 @@ internal static class DriveMediaInterop
             Environment.SpecialFolder.MyDocuments,
             Environment.SpecialFolder.UserProfile,
         ];
-        var list = new List<string>(5);
+        var list = new List<string>(6);
         foreach (Environment.SpecialFolder sf in looseFolders)
         {
             string p = Environment.GetFolderPath(sf);
@@ -919,6 +1065,12 @@ internal static class DriveMediaInterop
             {
                 list.Add(Path.TrimEndingDirectorySeparator(p));
             }
+        }
+
+        string? downloads = Win32Helper.TryGetDownloadsKnownFolderPath();
+        if (!string.IsNullOrWhiteSpace(downloads))
+        {
+            list.Add(Path.TrimEndingDirectorySeparator(downloads));
         }
 
         string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
@@ -981,7 +1133,6 @@ internal static class DriveMediaInterop
             Environment.SpecialFolder.CommonStartMenu,
             Environment.SpecialFolder.Programs,
             Environment.SpecialFolder.CommonPrograms,
-            Environment.SpecialFolder.CommonDesktopDirectory,
             Environment.SpecialFolder.Windows,
             Environment.SpecialFolder.ProgramFiles,
             Environment.SpecialFolder.ProgramFilesX86,

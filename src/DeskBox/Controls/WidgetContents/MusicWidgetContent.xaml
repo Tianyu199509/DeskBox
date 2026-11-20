@@ -495,7 +495,7 @@
                         HorizontalAlignment="Stretch"
                         VerticalAlignment="Center"
                         FontSize="{x:Bind ViewModel.MinimalLyricTextSize, Mode=OneWay}"
-                        FontWeight="SemiBold"
+                        FontWeight="Normal"
                         Foreground="#FCFFFFFF"
                         MaxLines="1"
                         MinWidth="0"
@@ -514,7 +514,7 @@
                             HorizontalAlignment="Left"
                             VerticalAlignment="Center"
                             FontSize="{x:Bind ViewModel.MinimalLyricTextSize, Mode=OneWay}"
-                            FontWeight="SemiBold"
+                            FontWeight="Normal"
                             Foreground="#FCFFFFFF"
                             MaxLines="1"
                             Text="{x:Bind ViewModel.InlineLyricText, Mode=OneWay}"
@@ -525,7 +525,7 @@
                             HorizontalAlignment="Left"
                             VerticalAlignment="Center"
                             FontSize="{x:Bind ViewModel.MinimalLyricTextSize, Mode=OneWay}"
-                            FontWeight="SemiBold"
+                            FontWeight="Normal"
                             Foreground="#FCFFFFFF"
                             MaxLines="1"
                             Text="{x:Bind ViewModel.InlineLyricText, Mode=OneWay}"
@@ -540,7 +540,7 @@
                         <TextBlock
                             x:Name="MinimalLyricMeasureText"
                             FontSize="{x:Bind ViewModel.MinimalLyricTextSize, Mode=OneWay}"
-                            FontWeight="SemiBold"
+                            FontWeight="Normal"
                             helpers:WidgetTextShadow.Cast="False"
                             MaxLines="1"
                             Text="{x:Bind ViewModel.InlineLyricText, Mode=OneWay}"
@@ -552,7 +552,7 @@
 
             <local:MusicSpectrumControl
                 x:Name="MinimalSpectrumBar"
-                Margin="12,0,12,50"
+                Margin="0,0,0,50"
                 HorizontalAlignment="Stretch"
                 VerticalAlignment="Bottom"
                 AccentBrush="{x:Bind ViewModel.MusicAccentBrush, Mode=OneWay}"
@@ -592,20 +592,17 @@
                                 IsEnabled="{Binding CanPlayPause}"
                                 Style="{StaticResource MusicIconButtonStyle}"
                                 ToolTipService.ToolTip="{Binding PlayPauseTooltip}">
-                                <Grid Width="26" Height="26">
-                                    <Grid RenderTransformOrigin="0.5,0.5">
-                                        <Grid.RenderTransform>
-                                            <ScaleTransform ScaleX="1.06" ScaleY="1.06" />
-                                        </Grid.RenderTransform>
-                                        <local:MusicTransportIcon
-                                            Foreground="{Binding Foreground, ElementName=MinimalPlayPauseButton}"
-                                            Kind="Play"
-                                            Visibility="{Binding PlayIconVisibility}" />
-                                        <local:MusicTransportIcon
-                                            Foreground="{Binding Foreground, ElementName=MinimalPlayPauseButton}"
-                                            Kind="Pause"
-                                            Visibility="{Binding PauseIconVisibility}" />
-                                    </Grid>
+                                <Grid>
+                                    <local:MusicTransportIcon
+                                        FontSize="14.5"
+                                        Foreground="{x:Bind MinimalPlayPauseButton.Foreground, Mode=OneWay}"
+                                        Kind="Play"
+                                        Visibility="{Binding PlayIconVisibility}" />
+                                    <local:MusicTransportIcon
+                                        FontSize="14.5"
+                                        Foreground="{x:Bind MinimalPlayPauseButton.Foreground, Mode=OneWay}"
+                                        Kind="Pause"
+                                        Visibility="{Binding PauseIconVisibility}" />
                                 </Grid>
                             </Button>
                             <Button AutomationProperties.Name="{Binding NextTooltip}"
@@ -619,14 +616,10 @@
                                 IsEnabled="{Binding CanGoNext}"
                                 Style="{StaticResource MusicIconButtonStyle}"
                                 ToolTipService.ToolTip="{Binding NextTooltip}">
-                                <Grid RenderTransformOrigin="0.5,0.5">
-                                    <Grid.RenderTransform>
-                                        <ScaleTransform ScaleX="0.88" ScaleY="0.88" />
-                                    </Grid.RenderTransform>
-                                    <local:MusicTransportIcon
-                                        Foreground="{Binding Foreground, ElementName=MinimalNextButton}"
-                                        Kind="Next" />
-                                </Grid>
+                                <local:MusicTransportIcon
+                                    FontSize="13.5"
+                                    Foreground="{x:Bind MinimalNextButton.Foreground, Mode=OneWay}"
+                                    Kind="Next" />
                             </Button>
                         </StackPanel>
                         <Grid
@@ -747,304 +740,172 @@
 
         <Grid
             x:Name="ContentGrid" x:Load="{x:Bind IsStandardControlsLayoutLoaded}" Loaded="PlayerSubtree_Loaded"
-            Padding="12,10,12,11"
-            ColumnSpacing="14"
-            RowSpacing="6"
+            Padding="14,10,14,10"
+            RowSpacing="5"
             VerticalAlignment="Stretch">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition x:Name="AlbumColumn" Width="88" />
-                <ColumnDefinition Width="*" MinWidth="0" />
-            </Grid.ColumnDefinitions>
             <Grid.RowDefinitions>
-                <RowDefinition x:Name="TopRow" Height="*" MinHeight="60" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition x:Name="TopRow" Height="*" MinHeight="50" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
-            <Border
-                x:Name="AlbumArtShadow"
+            <Grid
+                x:Name="ControlsTopBar"
                 Grid.Row="0"
-                Grid.Column="0"
-                Width="88"
-                Height="88"
-                HorizontalAlignment="Left"
-                VerticalAlignment="Center"
-                Background="#66000000"
-                CornerRadius="{StaticResource WidgetCornerRadiusLarge}"
-                Opacity="0.22"
-                Translation="0,3,0"
-                Visibility="{Binding ThumbnailVisibility}" />
+                ColumnSpacing="8"
+                MinWidth="0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" MinWidth="0" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
 
-            <local:MusicSpectrumControl
-                x:Name="ControlsArtworkHalo"
-                Grid.Row="0"
-                Grid.Column="0"
-                HorizontalAlignment="Center"
-                VerticalAlignment="Center"
-                AccentBrush="{x:Bind ViewModel.MusicAccentBrush, Mode=OneWay}"
-                Visibility="Collapsed" />
+                <Button
+                    x:Name="SourceButton"
+                    Grid.Column="0"
+                    HorizontalAlignment="Left"
+                    VerticalAlignment="Center"
+                    Click="SourceButton_Click"
+                    Style="{StaticResource MusicSourcePillButtonStyle}">
+                    <StackPanel
+                        Orientation="Horizontal"
+                        Spacing="5"
+                        VerticalAlignment="Center">
+                        <Grid Width="15" Height="15">
+                            <Image
+                                Width="15"
+                                Height="15"
+                                Source="{x:Bind ViewModel.SourceAppIcon, Mode=OneWay}"
+                                Stretch="Uniform"
+                                Visibility="{x:Bind ViewModel.SourceAppIconVisibility, Mode=OneWay}" />
+                            <local:MusicSourceIcon
+                                Width="14"
+                                Height="14"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Visibility="{x:Bind ViewModel.SourceFallbackIconVisibility, Mode=OneWay}" />
+                        </Grid>
+                        <TextBlock
+                            x:Name="ControlsSourceButtonText"
+                            VerticalAlignment="Center"
+                            FontSize="12"
+                            FontWeight="Medium"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            MaxLines="1"
+                            Text="{x:Bind ViewModel.ControlsSourceHeaderText, Mode=OneWay}"
+                            TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                </Button>
 
-            <Border
-                x:Name="AlbumArtSurface"
-                Grid.Row="0"
-                Grid.Column="0"
-                Width="88"
-                Height="88"
-                HorizontalAlignment="Left"
-                VerticalAlignment="Center"
-                Background="{ThemeResource WidgetLayerFillSecondaryBrush}"
-                BorderBrush="{ThemeResource WidgetLayerStrokeBrush}"
-                BorderThickness="1"
-                CornerRadius="{StaticResource WidgetCornerRadiusLarge}"
-                PointerEntered="AlbumArtSurface_PointerEntered"
-                PointerExited="AlbumArtSurface_PointerExited"
-                PointerMoved="AlbumArtSurface_PointerMoved"
-                SizeChanged="AlbumArtSurface_SizeChanged"
-                Tapped="ArtworkLyricsTrigger_Tapped">
-                <Grid>
-                    <Image
-                        x:Name="AlbumArtworkImage"
-                        Source="{Binding ThumbnailImage}"
-                        Stretch="UniformToFill"
-                        Visibility="{Binding ThumbnailVisibility}" />
-                    <Border
-                        Margin="1"
-                        BorderBrush="#24FFFFFF"
-                        BorderThickness="1"
-                        CornerRadius="7"
-                        IsHitTestVisible="False"
-                        Visibility="{Binding ThumbnailVisibility}"
-                        x:Name="AlbumArtInnerBorder" />
-                    <Grid Visibility="{Binding ThumbnailPlaceholderVisibility}">
-                        <Border
-                            x:Name="AlbumArtPlaceholderBackground"
-                            Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}" />
+                <StackPanel
+                    Grid.Column="1"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Center"
+                    Orientation="Horizontal"
+                    Spacing="2">
+                    <Button AutomationProperties.Name="{Binding PlaybackModeTooltip}"
+                        x:Name="PlaybackModeButton"
+                        Width="26"
+                        Height="26"
+                        MinWidth="26"
+                        MinHeight="26"
+                        VerticalAlignment="Center"
+                        Click="PlaybackModeButton_Click"
+                        IsEnabled="{Binding CanChangePlaybackMode}"
+                        Opacity="{Binding PlaybackModeOpacity}"
+                        Style="{StaticResource MusicIconButtonStyle}"
+                        ToolTipService.ToolTip="{Binding PlaybackModeTooltip}"
+                        Visibility="{x:Bind ViewModel.PlaybackModeButtonVisibility, Mode=OneWay}">
                         <FontIcon
-                            FontSize="30"
-                            Glyph="&#xEC4F;"
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                    </Grid>
-                </Grid>
-            </Border>
+                            FontSize="13"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Glyph="{Binding PlaybackModeGlyph}"
+                            Style="{StaticResource MusicSecondaryFontIconStyle}" />
+                    </Button>
+
+                    <Button AutomationProperties.Name="{Binding VolumeTooltip}"
+                        x:Name="VolumeButton"
+                        Width="26"
+                        Height="26"
+                        MinWidth="26"
+                        MinHeight="26"
+                        VerticalAlignment="Center"
+                        Click="VolumeButton_Click"
+                        Style="{StaticResource MusicIconButtonStyle}"
+                        ToolTipService.ToolTip="{Binding VolumeTooltip}">
+                        <FontIcon
+                            FontSize="13.5"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Glyph="{x:Bind ViewModel.VolumeGlyph, Mode=OneWay}"
+                            Style="{StaticResource MusicSecondaryFontIconStyle}" />
+                    </Button>
+                </StackPanel>
+            </Grid>
 
             <Grid
-                x:Name="TrackInfoGrid"
-                Grid.Row="0"
-                Grid.Column="1"
+                x:Name="ControlsBodyGrid"
+                Grid.Row="1"
+                ColumnSpacing="12"
                 MinWidth="0"
-                RowSpacing="4"
                 VerticalAlignment="Center">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                </Grid.RowDefinitions>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" MinWidth="0" />
+                    <ColumnDefinition x:Name="AlbumColumn" Width="58" />
+                </Grid.ColumnDefinitions>
 
                 <Grid
-                    x:Name="TitleMarqueeHost"
-                    Grid.Row="0"
+                    x:Name="TrackInfoGrid"
+                    Grid.Column="0"
                     MinWidth="0"
-                    SizeChanged="TitleMarqueeHost_SizeChanged">
-                    <Grid.Clip>
-                        <RectangleGeometry x:Name="TitleMarqueeClip" Rect="0,-12,4096,128" />
-                    </Grid.Clip>
-                    <TextBlock
-                        x:Name="TitleStaticText"
-                        VerticalAlignment="Center"
-                        FontSize="{Binding TitleTextSize}"
-                        FontWeight="SemiBold"
-                        MaxLines="1"
-                        MinWidth="0"
-                        Text="{Binding Title}"
-                        TextTrimming="CharacterEllipsis"
-                        TextWrapping="NoWrap" />
-                    <Grid
-                        x:Name="TitleMarqueeCanvas"
-                        HorizontalAlignment="Left"
-                        VerticalAlignment="Stretch"
-                        IsHitTestVisible="False"
-                        Visibility="Collapsed">
-                        <TextBlock
-                            x:Name="TitleTextPrimary"
-                            HorizontalAlignment="Left"
-                            VerticalAlignment="Center"
-                            FontSize="{Binding TitleTextSize}"
-                            FontWeight="SemiBold"
-                            MaxLines="1"
-                            Text="{Binding Title}"
-                            TextTrimming="Clip"
-                            TextWrapping="NoWrap" />
-                        <TextBlock
-                            x:Name="TitleTextClone"
-                            HorizontalAlignment="Left"
-                            VerticalAlignment="Center"
-                            FontSize="{Binding TitleTextSize}"
-                            FontWeight="SemiBold"
-                            MaxLines="1"
-                            Text="{Binding Title}"
-                            TextTrimming="Clip"
-                            TextWrapping="NoWrap" />
-                    </Grid>
-                    <Canvas
-                        Width="0"
-                        Height="0"
-                        IsHitTestVisible="False"
-                        Opacity="0">
-                        <TextBlock
-                            x:Name="TitleMeasureText"
-                            FontSize="{Binding TitleTextSize}"
-                            FontWeight="SemiBold"
-                            helpers:WidgetTextShadow.Cast="False"
-                            MaxLines="1"
-                            Text="{Binding Title}"
-                            TextTrimming="Clip"
-                            TextWrapping="NoWrap" />
-                    </Canvas>
-                </Grid>
+                    RowSpacing="0"
+                    VerticalAlignment="Center">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
 
-                <Grid
-                    Grid.Row="1"
-                    ColumnSpacing="6"
-                    MinWidth="0">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" MinWidth="0" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <TextBlock
-                        Grid.Column="0"
-                        VerticalAlignment="Center"
-                        FontSize="{Binding SecondaryTextSize}"
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        MaxLines="1"
-                        MinWidth="0"
-                        Text="{Binding Artist}"
-                        TextTrimming="CharacterEllipsis" />
-                    <StackPanel
-                        Grid.Column="1"
-                        HorizontalAlignment="Right"
-                        VerticalAlignment="Center"
-                        Orientation="Horizontal"
-                        Spacing="6">
-                        <Button
-                            x:Name="SourceButton"
-                            HorizontalAlignment="Right"
-                            VerticalAlignment="Center"
-                            Click="SourceButton_Click"
-                            Style="{StaticResource MusicSourcePillButtonStyle}">
-                            <StackPanel
-                                Orientation="Horizontal"
-                                Spacing="4"
-                                VerticalAlignment="Center">
-                                <Grid Width="14" Height="14">
-                                    <Image
-                                        Width="14"
-                                        Height="14"
-                                        Source="{x:Bind ViewModel.SourceAppIcon, Mode=OneWay}"
-                                        Stretch="Uniform"
-                                        Visibility="{x:Bind ViewModel.SourceAppIconVisibility, Mode=OneWay}" />
-                                    <local:MusicSourceIcon
-                                        Width="13"
-                                        Height="13"
-                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                        Visibility="{x:Bind ViewModel.SourceFallbackIconVisibility, Mode=OneWay}" />
-                                </Grid>
-                                <TextBlock
-                                    x:Name="ControlsSourceButtonText"
-                                    VerticalAlignment="Center"
-                                    FontSize="11.5"
-                                    FontWeight="Medium"
-                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                    MaxLines="1"
-                                    Text="{x:Bind ViewModel.SourceBadgeText, Mode=OneWay}"
-                                    TextTrimming="CharacterEllipsis"
-                                    Visibility="{x:Bind ViewModel.SourceBadgeTextVisibility, Mode=OneWay}" />
-                            </StackPanel>
-                        </Button>
-                    </StackPanel>
-                </Grid>
-
-                <Grid
-                    x:Name="ControlsLyricRow"
-                    Grid.Row="2"
-                    MinHeight="23"
-                    Margin="0,2,0,0"
-                    MinWidth="0"
-                    Padding="0,1"
-                    Background="Transparent"
-                    PointerEntered="InlineLyricRow_PointerEntered"
-                    PointerExited="InlineLyricRow_PointerExited"
-                    Tapped="ArtworkLyricsTrigger_Tapped"
-                    Visibility="{x:Bind ViewModel.SubtitleVisibility, Mode=OneWay}">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="*" MinWidth="0" />
-                    </Grid.ColumnDefinitions>
-                    <Border
-                        Grid.ColumnSpan="2"
-                        Margin="-4,-1,-4,-1"
-                        Background="{ThemeResource MusicInlineLyricHoverBrush}"
-                        CornerRadius="4"
-                        IsHitTestVisible="False"
-                        Opacity="0"
-                        Tag="HoverPill" />
-                    <Border
-                        Grid.Column="0"
-                        Width="3"
-                        Height="14"
-                        Margin="0,0,7,0"
-                        VerticalAlignment="Center"
-                        Background="{x:Bind ViewModel.MusicAccentBrush, Mode=OneWay}"
-                        CornerRadius="1.5"
-                        IsHitTestVisible="False"
-                        Visibility="{x:Bind ViewModel.HasActiveSyncedLyricVisibility, Mode=OneWay}" />
                     <Grid
-                        x:Name="ControlsLyricMarqueeHost"
-                        Grid.Column="1"
+                        x:Name="TitleMarqueeHost"
+                        Grid.Row="0"
                         MinWidth="0"
-                        Opacity="{x:Bind ViewModel.SubtitleOpacity, Mode=OneWay}"
-                        SizeChanged="LyricMarqueeHost_SizeChanged"
-                        ToolTipService.ToolTip="{x:Bind ViewModel.InlineLyricTooltip, Mode=OneWay}">
+                        SizeChanged="TitleMarqueeHost_SizeChanged">
                         <Grid.Clip>
-                            <RectangleGeometry x:Name="ControlsLyricMarqueeClip" Rect="0,-12,4096,128" />
+                            <RectangleGeometry x:Name="TitleMarqueeClip" Rect="0,-12,4096,128" />
                         </Grid.Clip>
                         <TextBlock
-                            x:Name="SubtitleTextBlock"
+                            x:Name="TitleStaticText"
                             VerticalAlignment="Center"
-                            FontSize="{x:Bind ViewModel.LyricTextSize, Mode=OneWay}"
-                            FontWeight="Medium"
-                            Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                            FontSize="{x:Bind ViewModel.ControlsTitleTextSize, Mode=OneWay}"
+                            FontWeight="SemiBold"
                             MaxLines="1"
                             MinWidth="0"
-                            Text="{Binding SubtitleText}"
-                            TextAlignment="Left"
+                            Text="{Binding Title}"
                             TextTrimming="CharacterEllipsis"
                             TextWrapping="NoWrap" />
                         <Grid
-                            x:Name="ControlsLyricMarqueeCanvas"
+                            x:Name="TitleMarqueeCanvas"
                             HorizontalAlignment="Left"
                             VerticalAlignment="Stretch"
                             IsHitTestVisible="False"
                             Visibility="Collapsed">
                             <TextBlock
-                                x:Name="ControlsLyricTextPrimary"
+                                x:Name="TitleTextPrimary"
                                 HorizontalAlignment="Left"
                                 VerticalAlignment="Center"
-                                FontSize="{x:Bind ViewModel.LyricTextSize, Mode=OneWay}"
-                                FontWeight="Medium"
-                                Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                FontSize="{x:Bind ViewModel.ControlsTitleTextSize, Mode=OneWay}"
+                                FontWeight="SemiBold"
                                 MaxLines="1"
-                                Text="{x:Bind ViewModel.SubtitleText, Mode=OneWay}"
+                                Text="{Binding Title}"
                                 TextTrimming="Clip"
                                 TextWrapping="NoWrap" />
                             <TextBlock
-                                x:Name="ControlsLyricTextClone"
+                                x:Name="TitleTextClone"
                                 HorizontalAlignment="Left"
                                 VerticalAlignment="Center"
-                                FontSize="{x:Bind ViewModel.LyricTextSize, Mode=OneWay}"
-                                FontWeight="Medium"
-                                Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                FontSize="{x:Bind ViewModel.ControlsTitleTextSize, Mode=OneWay}"
+                                FontWeight="SemiBold"
                                 MaxLines="1"
-                                Text="{x:Bind ViewModel.SubtitleText, Mode=OneWay}"
+                                Text="{Binding Title}"
                                 TextTrimming="Clip"
                                 TextWrapping="NoWrap" />
                         </Grid>
@@ -1054,45 +915,222 @@
                             IsHitTestVisible="False"
                             Opacity="0">
                             <TextBlock
-                                x:Name="ControlsLyricMeasureText"
-                                FontSize="{x:Bind ViewModel.LyricTextSize, Mode=OneWay}"
-                                FontWeight="Medium"
+                                x:Name="TitleMeasureText"
+                                FontSize="{x:Bind ViewModel.ControlsTitleTextSize, Mode=OneWay}"
+                                FontWeight="SemiBold"
                                 helpers:WidgetTextShadow.Cast="False"
                                 MaxLines="1"
-                                Text="{x:Bind ViewModel.SubtitleText, Mode=OneWay}"
+                                Text="{Binding Title}"
                                 TextTrimming="Clip"
                                 TextWrapping="NoWrap" />
                         </Canvas>
                     </Grid>
+
+                    <Grid
+                        x:Name="ControlsArtistMarqueeHost"
+                        Grid.Row="1"
+                        Margin="0,2,0,0"
+                        MinWidth="0"
+                        SizeChanged="ArtistMarqueeHost_SizeChanged"
+                        Visibility="{x:Bind ViewModel.ControlsArtistVisibility, Mode=OneWay}">
+                        <Grid.Clip>
+                            <RectangleGeometry x:Name="ControlsArtistMarqueeClip" Rect="0,-12,4096,128" />
+                        </Grid.Clip>
+                        <TextBlock
+                            x:Name="ControlsArtistText"
+                            VerticalAlignment="Center"
+                            FontSize="{x:Bind ViewModel.ControlsSecondaryTextSize, Mode=OneWay}"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            MaxLines="1"
+                            MinWidth="0"
+                            Text="{x:Bind ViewModel.ControlsArtistText, Mode=OneWay}"
+                            TextTrimming="CharacterEllipsis"
+                            TextWrapping="NoWrap" />
+                        <Grid
+                            x:Name="ControlsArtistMarqueeCanvas"
+                            HorizontalAlignment="Left"
+                            VerticalAlignment="Stretch"
+                            IsHitTestVisible="False"
+                            Visibility="Collapsed">
+                            <TextBlock
+                                x:Name="ControlsArtistTextPrimary"
+                                HorizontalAlignment="Left"
+                                VerticalAlignment="Center"
+                                FontSize="{x:Bind ViewModel.ControlsSecondaryTextSize, Mode=OneWay}"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                MaxLines="1"
+                                Text="{x:Bind ViewModel.ControlsArtistText, Mode=OneWay}"
+                                TextTrimming="Clip"
+                                TextWrapping="NoWrap" />
+                        </Grid>
+                        <Canvas
+                            Width="0"
+                            Height="0"
+                            IsHitTestVisible="False"
+                            Opacity="0">
+                            <TextBlock
+                                x:Name="ControlsArtistMeasureText"
+                                FontSize="{x:Bind ViewModel.ControlsSecondaryTextSize, Mode=OneWay}"
+                                helpers:WidgetTextShadow.Cast="False"
+                                MaxLines="1"
+                                Text="{x:Bind ViewModel.ControlsArtistText, Mode=OneWay}"
+                                TextTrimming="Clip"
+                                TextWrapping="NoWrap" />
+                        </Canvas>
+                    </Grid>
+
+                    <Grid
+                        x:Name="ControlsLyricRow"
+                        Grid.Row="2"
+                        MinHeight="18"
+                        Margin="0,5,0,0"
+                        MinWidth="0"
+                        Padding="0,1"
+                        Background="Transparent"
+                        PointerEntered="InlineLyricRow_PointerEntered"
+                        PointerExited="InlineLyricRow_PointerExited"
+                        Tapped="ArtworkLyricsTrigger_Tapped"
+                        Visibility="{x:Bind ViewModel.SubtitleVisibility, Mode=OneWay}">
+                        <Border
+                            Margin="-4,-1,-4,-1"
+                            Background="{ThemeResource MusicInlineLyricHoverBrush}"
+                            CornerRadius="4"
+                            IsHitTestVisible="False"
+                            Opacity="0"
+                            Tag="HoverPill" />
+                        <Grid
+                            x:Name="ControlsLyricMarqueeHost"
+                            MinWidth="0"
+                            Opacity="{x:Bind ViewModel.SubtitleOpacity, Mode=OneWay}"
+                            SizeChanged="LyricMarqueeHost_SizeChanged"
+                            ToolTipService.ToolTip="{x:Bind ViewModel.InlineLyricTooltip, Mode=OneWay}">
+                            <Grid.Clip>
+                                <RectangleGeometry x:Name="ControlsLyricMarqueeClip" Rect="0,-12,4096,128" />
+                            </Grid.Clip>
+                            <TextBlock
+                                x:Name="SubtitleTextBlock"
+                                VerticalAlignment="Center"
+                                FontSize="{x:Bind ViewModel.ControlsSecondaryTextSize, Mode=OneWay}"
+                                FontWeight="Normal"
+                                Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                MaxLines="1"
+                                MinWidth="0"
+                                Text="{Binding SubtitleText}"
+                                TextAlignment="Left"
+                                TextTrimming="CharacterEllipsis"
+                                TextWrapping="NoWrap" />
+                            <Grid
+                                x:Name="ControlsLyricMarqueeCanvas"
+                                HorizontalAlignment="Left"
+                                VerticalAlignment="Stretch"
+                                IsHitTestVisible="False"
+                                Visibility="Collapsed">
+                                <TextBlock
+                                    x:Name="ControlsLyricTextPrimary"
+                                    HorizontalAlignment="Left"
+                                    VerticalAlignment="Center"
+                                    FontSize="{x:Bind ViewModel.ControlsSecondaryTextSize, Mode=OneWay}"
+                                    FontWeight="Normal"
+                                    Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                    MaxLines="1"
+                                    Text="{x:Bind ViewModel.SubtitleText, Mode=OneWay}"
+                                    TextTrimming="Clip"
+                                    TextWrapping="NoWrap" />
+                                <TextBlock
+                                    x:Name="ControlsLyricTextClone"
+                                    HorizontalAlignment="Left"
+                                    VerticalAlignment="Center"
+                                    FontSize="{x:Bind ViewModel.ControlsSecondaryTextSize, Mode=OneWay}"
+                                    FontWeight="Normal"
+                                    Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                    MaxLines="1"
+                                    Text="{x:Bind ViewModel.SubtitleText, Mode=OneWay}"
+                                    TextTrimming="Clip"
+                                    TextWrapping="NoWrap" />
+                            </Grid>
+                            <Canvas
+                                Width="0"
+                                Height="0"
+                                IsHitTestVisible="False"
+                                Opacity="0">
+                                <TextBlock
+                                    x:Name="ControlsLyricMeasureText"
+                                    FontSize="{x:Bind ViewModel.ControlsSecondaryTextSize, Mode=OneWay}"
+                                    FontWeight="Normal"
+                                    helpers:WidgetTextShadow.Cast="False"
+                                    MaxLines="1"
+                                    Text="{x:Bind ViewModel.SubtitleText, Mode=OneWay}"
+                                    TextTrimming="Clip"
+                                    TextWrapping="NoWrap" />
+                            </Canvas>
+                        </Grid>
+                    </Grid>
                 </Grid>
+
+                <Border
+                    x:Name="AlbumArtShadow"
+                    Grid.Column="1"
+                    Width="58"
+                    Height="58"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Center"
+                    Background="#66000000"
+                    CornerRadius="{StaticResource WidgetCornerRadiusLarge}"
+                    Opacity="0.18"
+                    Translation="0,2,0"
+                    Visibility="{Binding ThumbnailVisibility}" />
+
+                <local:MusicSpectrumControl
+                    x:Name="ControlsArtworkHalo"
+                    Grid.Column="1"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    AccentBrush="{x:Bind ViewModel.MusicAccentBrush, Mode=OneWay}"
+                    Visibility="Collapsed" />
+
+                <Border
+                    x:Name="AlbumArtSurface"
+                    Grid.Column="1"
+                    Width="58"
+                    Height="58"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Center"
+                    Background="{ThemeResource WidgetLayerFillSecondaryBrush}"
+                    BorderBrush="{ThemeResource WidgetLayerStrokeBrush}"
+                    BorderThickness="1"
+                    CornerRadius="{StaticResource WidgetCornerRadiusLarge}"
+                    PointerEntered="AlbumArtSurface_PointerEntered"
+                    PointerExited="AlbumArtSurface_PointerExited"
+                    PointerMoved="AlbumArtSurface_PointerMoved"
+                    SizeChanged="AlbumArtSurface_SizeChanged"
+                    Tapped="ArtworkLyricsTrigger_Tapped">
+                    <Grid x:Name="AlbumArtClipGrid">
+                        <Image
+                            x:Name="AlbumArtworkImage"
+                            Source="{Binding ThumbnailImage}"
+                            Stretch="UniformToFill"
+                            Visibility="{Binding ThumbnailVisibility}" />
+                        <Grid Visibility="{Binding ThumbnailPlaceholderVisibility}">
+                            <Border
+                                x:Name="AlbumArtPlaceholderBackground"
+                                Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}" />
+                            <FontIcon
+                                FontSize="22"
+                                Glyph="&#xEC4F;"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        </Grid>
+                    </Grid>
+                </Border>
             </Grid>
 
-            <Grid
+            <StackPanel
                 x:Name="ProgressRow"
-                Grid.Row="1"
-                Grid.ColumnSpan="2"
-                Margin="0,2,0,0"
-                ColumnSpacing="8"
+                Grid.Row="2"
+                Spacing="1"
                 Visibility="{Binding TimelineRowVisibility}">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition x:Name="PositionColumn" Width="Auto" MinWidth="34" />
-                    <ColumnDefinition Width="*" MinWidth="0" />
-                    <ColumnDefinition x:Name="DurationColumn" Width="Auto" MinWidth="34" />
-                </Grid.ColumnDefinitions>
-
-                <TextBlock
-                    Grid.Column="0"
-                    VerticalAlignment="Center"
-                    Typography.NumeralAlignment="Tabular"
-                    FontSize="{Binding CaptionTextSize}"
-                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                    Text="{Binding PositionText}"
-                    TextAlignment="Left" />
-
                 <Grid
                     x:Name="ProgressHost"
-                    Grid.Column="1"
-                    Height="24"
+                    Height="12"
                     MinWidth="44"
                     Background="Transparent"
                     HorizontalAlignment="Stretch"
@@ -1103,18 +1141,18 @@
                     PointerReleased="ProgressHost_PointerReleased">
                     <Border
                         x:Name="ProgressTrack"
-                        Height="4"
+                        Height="2.5"
                         VerticalAlignment="Center"
                         Background="{ThemeResource ControlStrongStrokeColorDefaultBrush}"
-                        CornerRadius="2"
-                        Opacity="0.34" />
+                        CornerRadius="1.25"
+                        Opacity="0.26" />
                     <Border
                         x:Name="ProgressFill"
-                        Height="4"
+                        Height="2.5"
                         HorizontalAlignment="Stretch"
                         VerticalAlignment="Center"
                         Background="{Binding MusicAccentBrush}"
-                        CornerRadius="2"
+                        CornerRadius="1.25"
                         RenderTransformOrigin="0,0.5">
                         <Border.RenderTransform>
                             <ScaleTransform x:Name="ProgressFillScale" ScaleX="0" />
@@ -1122,35 +1160,51 @@
                     </Border>
                     <Border
                         x:Name="ProgressThumb"
-                        Width="10"
-                        Height="10"
+                        Width="9"
+                        Height="9"
                         HorizontalAlignment="Left"
                         VerticalAlignment="Center"
                         Background="{Binding MusicAccentBrush}"
                         BorderBrush="#E6FFFFFF"
-                        BorderThickness="1.5"
-                        CornerRadius="3.5"
+                        BorderThickness="1.25"
+                        CornerRadius="4.5"
                         IsHitTestVisible="False"
                         Opacity="0"
-                        Translation="-5,0,0" />
+                        Translation="-4.5,0,0" />
                 </Grid>
 
-                <TextBlock
-                    Grid.Column="2"
-                    VerticalAlignment="Center"
-                    Typography.NumeralAlignment="Tabular"
-                    FontSize="{Binding CaptionTextSize}"
-                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                    Text="{Binding DurationText}"
-                    TextAlignment="Right" />
-            </Grid>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock
+                        x:Name="ControlsPositionText"
+                        Grid.Column="0"
+                        HorizontalAlignment="Left"
+                        VerticalAlignment="Center"
+                        Typography.NumeralAlignment="Tabular"
+                        FontSize="10"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Opacity="0.50"
+                        Text="{Binding PositionText}" />
+                    <TextBlock
+                        x:Name="ControlsDurationText"
+                        Grid.Column="1"
+                        HorizontalAlignment="Right"
+                        VerticalAlignment="Center"
+                        Typography.NumeralAlignment="Tabular"
+                        FontSize="10"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Opacity="0.50"
+                        Text="{Binding DurationText}" />
+                </Grid>
+            </StackPanel>
 
             <local:MusicSpectrumControl
                 x:Name="ControlsSpectrumBar"
                 Grid.Row="0"
-                Grid.RowSpan="3"
-                Grid.Column="0"
-                Grid.ColumnSpan="2"
+                Grid.RowSpan="4"
                 Margin="-2,0,-2,-8"
                 HorizontalAlignment="Stretch"
                 VerticalAlignment="Bottom"
@@ -1159,26 +1213,11 @@
 
             <StackPanel
                 x:Name="ControlsPanel"
-                Grid.Row="2"
-                Grid.ColumnSpan="2"
-                Margin="0,3,0,0"
+                Grid.Row="3"
                 HorizontalAlignment="Center"
                 Orientation="Horizontal"
-                Spacing="14"
+                Spacing="22"
                 VerticalAlignment="Bottom">
-                <Button AutomationProperties.Name="{Binding PlaybackModeTooltip}"
-                    x:Name="PlaybackModeButton"
-                    VerticalAlignment="Center"
-                    Click="PlaybackModeButton_Click"
-                    IsEnabled="{Binding CanChangePlaybackMode}"
-                    Opacity="{Binding PlaybackModeOpacity}"
-                    Style="{StaticResource MusicIconButtonStyle}"
-                    ToolTipService.ToolTip="{Binding PlaybackModeTooltip}">
-                    <FontIcon
-                        Glyph="{Binding PlaybackModeGlyph}"
-                        Style="{StaticResource MusicSecondaryFontIconStyle}" />
-                </Button>
-
                 <Button AutomationProperties.Name="{Binding PreviousTooltip}"
                     x:Name="PreviousButton"
                     VerticalAlignment="Center"
@@ -1186,14 +1225,10 @@
                     IsEnabled="{Binding CanGoPrevious}"
                     Style="{StaticResource MusicIconButtonStyle}"
                     ToolTipService.ToolTip="{Binding PreviousTooltip}">
-                    <Grid RenderTransformOrigin="0.5,0.5">
-                        <Grid.RenderTransform>
-                            <ScaleTransform ScaleX="0.90" ScaleY="0.90" />
-                        </Grid.RenderTransform>
-                        <local:MusicTransportIcon
-                            Foreground="{Binding Foreground, ElementName=PreviousButton}"
-                            Kind="Previous" />
-                    </Grid>
+                    <local:MusicTransportIcon
+                        FontSize="15"
+                        Foreground="{x:Bind PreviousButton.Foreground, Mode=OneWay}"
+                        Kind="Previous" />
                 </Button>
 
                 <Button AutomationProperties.Name="{Binding PlayPauseTooltip}"
@@ -1203,20 +1238,17 @@
                     IsEnabled="{Binding CanPlayPause}"
                     Style="{StaticResource MusicPrimaryTransportButtonStyle}"
                     ToolTipService.ToolTip="{Binding PlayPauseTooltip}">
-                    <Grid Width="26" Height="26">
-                        <Grid RenderTransformOrigin="0.5,0.5">
-                            <Grid.RenderTransform>
-                                <ScaleTransform ScaleX="1.18" ScaleY="1.18" />
-                            </Grid.RenderTransform>
-                            <local:MusicTransportIcon
-                                Foreground="{Binding Foreground, ElementName=PlayPauseButton}"
-                                Kind="Play"
-                                Visibility="{Binding PlayIconVisibility}" />
-                            <local:MusicTransportIcon
-                                Foreground="{Binding Foreground, ElementName=PlayPauseButton}"
-                                Kind="Pause"
-                                Visibility="{Binding PauseIconVisibility}" />
-                        </Grid>
+                    <Grid>
+                        <local:MusicTransportIcon
+                            FontSize="16.5"
+                            Foreground="{x:Bind PlayPauseButton.Foreground, Mode=OneWay}"
+                            Kind="Play"
+                            Visibility="{Binding PlayIconVisibility}" />
+                        <local:MusicTransportIcon
+                            FontSize="16.5"
+                            Foreground="{x:Bind PlayPauseButton.Foreground, Mode=OneWay}"
+                            Kind="Pause"
+                            Visibility="{Binding PauseIconVisibility}" />
                     </Grid>
                 </Button>
 
@@ -1227,25 +1259,10 @@
                     IsEnabled="{Binding CanGoNext}"
                     Style="{StaticResource MusicIconButtonStyle}"
                     ToolTipService.ToolTip="{Binding NextTooltip}">
-                    <Grid RenderTransformOrigin="0.5,0.5">
-                        <Grid.RenderTransform>
-                            <ScaleTransform ScaleX="0.90" ScaleY="0.90" />
-                        </Grid.RenderTransform>
-                        <local:MusicTransportIcon
-                            Foreground="{Binding Foreground, ElementName=NextButton}"
-                            Kind="Next" />
-                    </Grid>
-                </Button>
-
-                <Button AutomationProperties.Name="{Binding VolumeTooltip}"
-                    x:Name="VolumeButton"
-                    VerticalAlignment="Center"
-                    Click="VolumeButton_Click"
-                    Style="{StaticResource MusicIconButtonStyle}"
-                    ToolTipService.ToolTip="{Binding VolumeTooltip}">
-                    <FontIcon
-                        Glyph="{x:Bind ViewModel.VolumeGlyph, Mode=OneWay}"
-                        Style="{StaticResource MusicSecondaryFontIconStyle}" />
+                    <local:MusicTransportIcon
+                        FontSize="15"
+                        Foreground="{x:Bind NextButton.Foreground, Mode=OneWay}"
+                        Kind="Next" />
                 </Button>
             </StackPanel>
         </Grid>
@@ -1258,7 +1275,6 @@
             VerticalAlignment="Stretch">
             <Grid.RowDefinitions>
                 <RowDefinition Height="*" />
-                <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
@@ -1324,143 +1340,263 @@
                     ImageSource="{Binding ThumbnailImage}" />
             </Grid>
 
-            <!-- Tonearm overlaid on the vinyl (rotates between play/pause) -->
+            <!--
+                Tonearm overlaid on the vinyl (rotates between play/pause around the pivot).
+                Drawn in a 64x166 canvas where 1 unit = vinylSize / 200; the pivot sits at (44,22),
+                just outside the platter's upper-right edge. UpdateTonearmLayout keeps size, margin
+                and composition CenterPoint in sync with these coordinates.
+            -->
             <Grid
                 x:Name="RecordTonearm"
                 Grid.Row="0"
-                Width="67"
-                Height="80"
+                Width="51"
+                Height="133"
                 HorizontalAlignment="Center"
                 VerticalAlignment="Center"
                 IsHitTestVisible="False"
-                Margin="115,-48,0,0">
+                Margin="115,-30,0,0">
                 <Viewbox Stretch="Uniform">
-                    <Grid Width="100" Height="120">
-                        <Line
-                            X1="50" Y1="20" X2="57" Y2="7"
-                            Stroke="#9A9AA2"
-                            StrokeThickness="2.6"
-                            StrokeStartLineCap="Round"
-                            StrokeEndLineCap="Round" />
-                        <Ellipse
-                            Width="12" Height="12"
-                            HorizontalAlignment="Left" VerticalAlignment="Top"
-                            Margin="51,1,0,0"
-                            Stroke="#55555D"
-                            StrokeThickness="0.6">
-                            <Ellipse.Fill>
-                                <RadialGradientBrush GradientOrigin="0.32,0.28" Center="0.5,0.5" RadiusX="0.6" RadiusY="0.6">
-                                    <GradientStop Offset="0" Color="#FFEDEDF1" />
-                                    <GradientStop Offset="0.65" Color="#FF9C9CA4" />
-                                    <GradientStop Offset="1" Color="#FF6F6F77" />
-                                </RadialGradientBrush>
-                            </Ellipse.Fill>
-                        </Ellipse>
-                        <Path
-                            Data="M 50,20 C 45,46 39,70 33,92"
-                            Stroke="#D4D4DA"
-                            StrokeThickness="3.2"
-                            StrokeStartLineCap="Round"
-                            StrokeEndLineCap="Round" />
-                        <Path
-                            Data="M 49.2,20 C 44.2,46 38.2,70 32.2,92"
-                            Stroke="#FFFFFF"
-                            StrokeThickness="0.8"
-                            Opacity="0.55"
-                            StrokeStartLineCap="Round"
-                            StrokeEndLineCap="Round" />
-                        <Ellipse
-                            Width="17" Height="17"
-                            HorizontalAlignment="Left" VerticalAlignment="Top"
-                            Margin="41.5,11.5,0,0"
-                            Stroke="#66666E"
-                            StrokeThickness="0.6">
-                            <Ellipse.Fill>
-                                <RadialGradientBrush GradientOrigin="0.32,0.28" Center="0.5,0.5" RadiusX="0.62" RadiusY="0.62">
-                                    <GradientStop Offset="0" Color="#FFF6F6F9" />
-                                    <GradientStop Offset="0.6" Color="#FFC4C4CC" />
-                                    <GradientStop Offset="1" Color="#FF8F8F97" />
-                                </RadialGradientBrush>
-                            </Ellipse.Fill>
-                        </Ellipse>
-                        <Ellipse
-                            Width="6" Height="6"
-                            HorizontalAlignment="Left" VerticalAlignment="Top"
-                            Margin="47,17,0,0"
-                            Fill="#5A5A62" />
-                        <Border
-                            Width="9" Height="17"
-                            CornerRadius="4"
-                            HorizontalAlignment="Left" VerticalAlignment="Top"
-                            Margin="28.5,90,0,0"
-                            BorderBrush="#70707A"
-                            BorderThickness="0.6"
-                            RenderTransformOrigin="0.5,0.1">
-                            <Border.RenderTransform>
-                                <RotateTransform Angle="-15" />
-                            </Border.RenderTransform>
-                            <Border.Background>
-                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
-                                    <GradientStop Offset="0" Color="#FFEDEDF1" />
-                                    <GradientStop Offset="1" Color="#FFBEBEC6" />
-                                </LinearGradientBrush>
-                            </Border.Background>
-                        </Border>
-                        <Line
-                            X1="31" Y1="106" X2="27.5" Y2="111"
-                            Stroke="#55555D"
-                            StrokeThickness="1.3"
-                            StrokeEndLineCap="Round" />
-                    </Grid>
+                    <Canvas Width="64" Height="166">
+                        <!-- Whole arm assembly tilted 6 degrees so the stylus lands mid-groove when playing -->
+                        <Canvas>
+                            <Canvas.RenderTransform>
+                                <RotateTransform Angle="6" CenterX="44" CenterY="22" />
+                            </Canvas.RenderTransform>
+
+                            <!-- Cast shadow on the record -->
+                            <Canvas Opacity="0.34">
+                                <Canvas.RenderTransform>
+                                    <TranslateTransform X="2.4" Y="3.2" />
+                                </Canvas.RenderTransform>
+                                <Rectangle Canvas.Left="42.3" Canvas.Top="24" Width="3.4" Height="108" RadiusX="1.7" RadiusY="1.7" Fill="#FF000000" />
+                                <Canvas>
+                                    <Canvas.RenderTransform>
+                                        <RotateTransform Angle="16" CenterX="44" CenterY="130" />
+                                    </Canvas.RenderTransform>
+                                    <Path Fill="#FF000000" Data="M 40.2,128 L 47.8,128 L 49,135 L 49,149.5 Q 49,151 47.5,151 L 40.5,151 Q 39,151 39,149.5 L 39,135 Z" />
+                                </Canvas>
+                            </Canvas>
+
+                            <!-- Counterweight stub + machined weight -->
+                            <Rectangle Canvas.Left="42.9" Canvas.Top="6" Width="2.2" Height="10" Fill="#FF8D8E95" />
+                            <Rectangle Canvas.Left="37.5" Canvas.Top="0" Width="13" Height="9" RadiusX="2" RadiusY="2">
+                                <Rectangle.Fill>
+                                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                        <GradientStop Offset="0" Color="#FF35363C" />
+                                        <GradientStop Offset="0.28" Color="#FFB9BAC1" />
+                                        <GradientStop Offset="0.42" Color="#FFF4F5F8" />
+                                        <GradientStop Offset="0.7" Color="#FF85868D" />
+                                        <GradientStop Offset="1" Color="#FF2A2B30" />
+                                    </LinearGradientBrush>
+                                </Rectangle.Fill>
+                            </Rectangle>
+                            <Rectangle Canvas.Left="37.5" Canvas.Top="5.6" Width="13" Height="0.7" Fill="#55000000" />
+
+                            <!-- Chrome arm tube -->
+                            <Rectangle Canvas.Left="42.4" Canvas.Top="24" Width="3.2" Height="108" RadiusX="1.6" RadiusY="1.6">
+                                <Rectangle.Fill>
+                                    <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                        <GradientStop Offset="0" Color="#FF55565D" />
+                                        <GradientStop Offset="0.32" Color="#FFEFF0F3" />
+                                        <GradientStop Offset="0.52" Color="#FFCDCED4" />
+                                        <GradientStop Offset="0.8" Color="#FF8A8B92" />
+                                        <GradientStop Offset="1" Color="#FF45464C" />
+                                    </LinearGradientBrush>
+                                </Rectangle.Fill>
+                            </Rectangle>
+
+                            <!-- Headshell with offset angle, cartridge, finger lift and stylus -->
+                            <Canvas>
+                                <Canvas.RenderTransform>
+                                    <RotateTransform Angle="16" CenterX="44" CenterY="130" />
+                                </Canvas.RenderTransform>
+                                <Rectangle Canvas.Left="41.6" Canvas.Top="126.5" Width="4.8" Height="5" RadiusX="1" RadiusY="1">
+                                    <Rectangle.Fill>
+                                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                            <GradientStop Offset="0" Color="#FF5A5B62" />
+                                            <GradientStop Offset="0.35" Color="#FFF2F3F6" />
+                                            <GradientStop Offset="1" Color="#FF50515A" />
+                                        </LinearGradientBrush>
+                                    </Rectangle.Fill>
+                                </Rectangle>
+                                <Path
+                                    Data="M 40.2,131.5 L 47.8,131.5 L 49,134.5 L 49,149.5 Q 49,151 47.5,151 L 40.5,151 Q 39,151 39,149.5 L 39,134.5 Z"
+                                    Stroke="#3DFFFFFF"
+                                    StrokeThickness="0.45">
+                                    <Path.Fill>
+                                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                            <GradientStop Offset="0" Color="#FF3E3F46" />
+                                            <GradientStop Offset="0.4" Color="#FF2C2D33" />
+                                            <GradientStop Offset="1" Color="#FF18191D" />
+                                        </LinearGradientBrush>
+                                    </Path.Fill>
+                                </Path>
+                                <Rectangle Canvas.Left="40.9" Canvas.Top="139" Width="6.2" Height="11" RadiusX="0.8" RadiusY="0.8" Fill="#FF0D0E11" />
+                                <Rectangle
+                                    Canvas.Left="40.9"
+                                    Canvas.Top="139"
+                                    Width="6.2"
+                                    Height="1.3"
+                                    Fill="{x:Bind ViewModel.MusicAccentBrush, Mode=OneWay}" />
+                                <Path
+                                    Data="M 48.8,137 C 51.5,136.2 53.6,133.6 55.2,131.2"
+                                    Stroke="#FFD5D6DB"
+                                    StrokeThickness="1.2"
+                                    StrokeStartLineCap="Round"
+                                    StrokeEndLineCap="Round" />
+                                <Rectangle Canvas.Left="43.4" Canvas.Top="150" Width="1.2" Height="2.4" RadiusX="0.4" RadiusY="0.4" Fill="#FFB6B7BE" />
+                            </Canvas>
+
+                            <!-- Pivot: contact shadow, gunmetal base, chrome bearing, cap -->
+                            <Ellipse Canvas.Left="33.6" Canvas.Top="13.4" Width="23" Height="23" Fill="#40000000" />
+                            <Ellipse Canvas.Left="33" Canvas.Top="11" Width="22" Height="22" StrokeThickness="0.5">
+                                <Ellipse.Fill>
+                                    <RadialGradientBrush GradientOrigin="0.36,0.3" Center="0.5,0.5" RadiusX="0.6" RadiusY="0.6">
+                                        <GradientStop Offset="0" Color="#FF4A4B53" />
+                                        <GradientStop Offset="0.7" Color="#FF2A2B31" />
+                                        <GradientStop Offset="1" Color="#FF1A1B1F" />
+                                    </RadialGradientBrush>
+                                </Ellipse.Fill>
+                                <Ellipse.Stroke>
+                                    <LinearGradientBrush StartPoint="0.2,0.1" EndPoint="0.8,0.9">
+                                        <GradientStop Offset="0" Color="#40FFFFFF" />
+                                        <GradientStop Offset="1" Color="#0AFFFFFF" />
+                                    </LinearGradientBrush>
+                                </Ellipse.Stroke>
+                            </Ellipse>
+                            <Ellipse Canvas.Left="37.5" Canvas.Top="15.5" Width="13" Height="13" Stroke="#60000000" StrokeThickness="0.4">
+                                <Ellipse.Fill>
+                                    <RadialGradientBrush GradientOrigin="0.34,0.28" Center="0.5,0.5" RadiusX="0.62" RadiusY="0.62">
+                                        <GradientStop Offset="0" Color="#FFF7F7FA" />
+                                        <GradientStop Offset="0.55" Color="#FFB8B9C0" />
+                                        <GradientStop Offset="1" Color="#FF6A6B72" />
+                                    </RadialGradientBrush>
+                                </Ellipse.Fill>
+                            </Ellipse>
+                            <Ellipse Canvas.Left="41.5" Canvas.Top="19.5" Width="5" Height="5" Fill="#FF2C2D33" Stroke="#50FFFFFF" StrokeThickness="0.35" />
+                        </Canvas>
+                    </Canvas>
                 </Viewbox>
             </Grid>
 
-            <local:MusicSpectrumControl
-                x:Name="RecordSpectrumBar"
-                Grid.Row="1"
-                Margin="4,2,4,0"
-                HorizontalAlignment="Stretch"
-                AccentBrush="{x:Bind ViewModel.MusicAccentBrush, Mode=OneWay}"
-                BarCount="28"
-                BarSpacing="3"
-                BarWidth="3"
-                MaxBarHeight="18"
-                Mode="SymmetricWave"
-                Visibility="Collapsed" />
-
             <StackPanel
                 x:Name="RecordTitlePanel"
-                Grid.Row="2"
-                HorizontalAlignment="Center"
+                Grid.Row="1"
+                HorizontalAlignment="Stretch"
+                MinWidth="0"
                 Spacing="2"
                 Margin="0,4,0,0">
-                <TextBlock
-                    x:Name="RecordTitleText"
-                    MaxLines="1"
-                    HorizontalAlignment="Center"
-                    FontSize="16"
-                    FontWeight="SemiBold"
-                    Text="{Binding Title}"
-                    TextAlignment="Center"
-                    TextTrimming="CharacterEllipsis" />
-                <TextBlock
-                    x:Name="RecordArtistText"
-                    HorizontalAlignment="Center"
-                    VerticalAlignment="Center"
-                    MaxLines="1"
-                    FontSize="12.5"
-                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                    Text="{Binding Artist}"
-                    TextAlignment="Center"
-                    TextTrimming="CharacterEllipsis" />
+                <Grid
+                    x:Name="RecordTitleMarqueeHost"
+                    HorizontalAlignment="Stretch"
+                    MinWidth="0"
+                    SizeChanged="TitleMarqueeHost_SizeChanged">
+                    <Grid.Clip>
+                        <RectangleGeometry x:Name="RecordTitleMarqueeClip" Rect="0,-12,4096,128" />
+                    </Grid.Clip>
+                    <TextBlock
+                        x:Name="RecordTitleText"
+                        MaxLines="1"
+                        MinWidth="0"
+                        HorizontalAlignment="Stretch"
+                        FontSize="16"
+                        FontWeight="SemiBold"
+                        Text="{Binding Title}"
+                        TextAlignment="Center"
+                        TextTrimming="CharacterEllipsis"
+                        TextWrapping="NoWrap" />
+                    <Grid
+                        x:Name="RecordTitleMarqueeCanvas"
+                        HorizontalAlignment="Left"
+                        VerticalAlignment="Stretch"
+                        IsHitTestVisible="False"
+                        Visibility="Collapsed">
+                        <TextBlock
+                            x:Name="RecordTitleTextPrimary"
+                            HorizontalAlignment="Left"
+                            VerticalAlignment="Center"
+                            FontSize="16"
+                            FontWeight="SemiBold"
+                            MaxLines="1"
+                            Text="{x:Bind ViewModel.Title, Mode=OneWay}"
+                            TextTrimming="Clip"
+                            TextWrapping="NoWrap" />
+                    </Grid>
+                    <Canvas
+                        Width="0"
+                        Height="0"
+                        IsHitTestVisible="False"
+                        Opacity="0">
+                        <TextBlock
+                            x:Name="RecordTitleMeasureText"
+                            FontSize="16"
+                            FontWeight="SemiBold"
+                            helpers:WidgetTextShadow.Cast="False"
+                            MaxLines="1"
+                            Text="{x:Bind ViewModel.Title, Mode=OneWay}"
+                            TextTrimming="Clip"
+                            TextWrapping="NoWrap" />
+                    </Canvas>
+                </Grid>
+                <Grid
+                    x:Name="RecordArtistMarqueeHost"
+                    HorizontalAlignment="Stretch"
+                    MinWidth="0"
+                    SizeChanged="ArtistMarqueeHost_SizeChanged">
+                    <Grid.Clip>
+                        <RectangleGeometry x:Name="RecordArtistMarqueeClip" Rect="0,-12,4096,128" />
+                    </Grid.Clip>
+                    <TextBlock
+                        x:Name="RecordArtistText"
+                        HorizontalAlignment="Stretch"
+                        VerticalAlignment="Center"
+                        MaxLines="1"
+                        MinWidth="0"
+                        FontSize="12"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Text="{Binding Artist}"
+                        TextAlignment="Center"
+                        TextTrimming="CharacterEllipsis"
+                        TextWrapping="NoWrap" />
+                    <Grid
+                        x:Name="RecordArtistMarqueeCanvas"
+                        HorizontalAlignment="Left"
+                        VerticalAlignment="Stretch"
+                        IsHitTestVisible="False"
+                        Visibility="Collapsed">
+                        <TextBlock
+                            x:Name="RecordArtistTextPrimary"
+                            HorizontalAlignment="Left"
+                            VerticalAlignment="Center"
+                            FontSize="12"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            MaxLines="1"
+                            Text="{x:Bind ViewModel.Artist, Mode=OneWay}"
+                            TextTrimming="Clip"
+                            TextWrapping="NoWrap" />
+                    </Grid>
+                    <Canvas
+                        Width="0"
+                        Height="0"
+                        IsHitTestVisible="False"
+                        Opacity="0">
+                        <TextBlock
+                            x:Name="RecordArtistMeasureText"
+                            FontSize="12"
+                            helpers:WidgetTextShadow.Cast="False"
+                            MaxLines="1"
+                            Text="{x:Bind ViewModel.Artist, Mode=OneWay}"
+                            TextTrimming="Clip"
+                            TextWrapping="NoWrap" />
+                    </Canvas>
+                </Grid>
             </StackPanel>
 
             <Grid
                 x:Name="RecordLyricRow"
-                Grid.Row="3"
-                MinHeight="23"
-                MaxWidth="280"
-                Padding="6,1"
+                Grid.Row="2"
+                MinHeight="20"
+                Padding="4,1"
                 HorizontalAlignment="Stretch"
                 Background="Transparent"
                 PointerEntered="InlineLyricRow_PointerEntered"
@@ -1478,7 +1614,7 @@
                     x:Name="RecordLyricMarqueeHost"
                     MinWidth="0"
                     HorizontalAlignment="Stretch"
-                    Opacity="{x:Bind ViewModel.InlineLyricOpacity, Mode=OneWay}"
+                    Opacity="{x:Bind ViewModel.SubtitleOpacity, Mode=OneWay}"
                     SizeChanged="LyricMarqueeHost_SizeChanged"
                     ToolTipService.ToolTip="{x:Bind ViewModel.InlineLyricTooltip, Mode=OneWay}">
                     <Grid.Clip>
@@ -1488,8 +1624,8 @@
                         x:Name="RecordLyricText"
                         HorizontalAlignment="Stretch"
                         VerticalAlignment="Center"
-                        FontSize="{x:Bind ViewModel.LyricTextSize, Mode=OneWay}"
-                        FontWeight="Medium"
+                        FontSize="{x:Bind ViewModel.ControlsSecondaryTextSize, Mode=OneWay}"
+                        FontWeight="Normal"
                         Foreground="{ThemeResource TextFillColorPrimaryBrush}"
                         MaxLines="1"
                         MinWidth="0"
@@ -1507,8 +1643,8 @@
                             x:Name="RecordLyricTextPrimary"
                             HorizontalAlignment="Left"
                             VerticalAlignment="Center"
-                            FontSize="{x:Bind ViewModel.LyricTextSize, Mode=OneWay}"
-                            FontWeight="Medium"
+                            FontSize="{x:Bind ViewModel.ControlsSecondaryTextSize, Mode=OneWay}"
+                            FontWeight="Normal"
                             Foreground="{ThemeResource TextFillColorPrimaryBrush}"
                             MaxLines="1"
                             Text="{x:Bind ViewModel.InlineLyricText, Mode=OneWay}"
@@ -1518,8 +1654,8 @@
                             x:Name="RecordLyricTextClone"
                             HorizontalAlignment="Left"
                             VerticalAlignment="Center"
-                            FontSize="{x:Bind ViewModel.LyricTextSize, Mode=OneWay}"
-                            FontWeight="Medium"
+                            FontSize="{x:Bind ViewModel.ControlsSecondaryTextSize, Mode=OneWay}"
+                            FontWeight="Normal"
                             Foreground="{ThemeResource TextFillColorPrimaryBrush}"
                             MaxLines="1"
                             Text="{x:Bind ViewModel.InlineLyricText, Mode=OneWay}"
@@ -1533,8 +1669,8 @@
                         Opacity="0">
                         <TextBlock
                             x:Name="RecordLyricMeasureText"
-                            FontSize="{x:Bind ViewModel.LyricTextSize, Mode=OneWay}"
-                            FontWeight="Medium"
+                            FontSize="{x:Bind ViewModel.ControlsSecondaryTextSize, Mode=OneWay}"
+                            FontWeight="Normal"
                             helpers:WidgetTextShadow.Cast="False"
                             MaxLines="1"
                             Text="{x:Bind ViewModel.InlineLyricText, Mode=OneWay}"
@@ -1546,10 +1682,10 @@
 
             <Grid
                 x:Name="RecordProgressRow"
-                Grid.Row="4"
+                Grid.Row="3"
                 Margin="0,2,0,0"
                 HorizontalAlignment="Stretch"
-                MaxWidth="280"
+                MaxWidth="420"
                 ColumnSpacing="6"
                 Visibility="{Binding TimelineRowVisibility}">
                 <Grid.ColumnDefinitions>
@@ -1619,9 +1755,19 @@
                     TextAlignment="Right" />
             </Grid>
 
+            <local:MusicSpectrumControl
+                x:Name="RecordSpectrumBar"
+                Grid.Row="0"
+                Grid.RowSpan="5"
+                Margin="-2,0,-2,-8"
+                HorizontalAlignment="Stretch"
+                VerticalAlignment="Bottom"
+                AccentBrush="{x:Bind ViewModel.MusicAccentBrush, Mode=OneWay}"
+                Visibility="Collapsed" />
+
             <StackPanel
                 x:Name="RecordControlsPanel"
-                Grid.Row="5"
+                Grid.Row="4"
                 Margin="0,3,0,0"
                 HorizontalAlignment="Center"
                 Orientation="Horizontal"
@@ -1645,14 +1791,10 @@
                     IsEnabled="{Binding CanGoPrevious}"
                     Style="{StaticResource MusicIconButtonStyle}"
                     ToolTipService.ToolTip="{Binding PreviousTooltip}">
-                    <Grid RenderTransformOrigin="0.5,0.5">
-                        <Grid.RenderTransform>
-                            <ScaleTransform ScaleX="0.90" ScaleY="0.90" />
-                        </Grid.RenderTransform>
-                        <local:MusicTransportIcon
-                            Foreground="{Binding Foreground, ElementName=RecordPreviousButton}"
-                            Kind="Previous" />
-                    </Grid>
+                    <local:MusicTransportIcon
+                        FontSize="14.5"
+                        Foreground="{x:Bind RecordPreviousButton.Foreground, Mode=OneWay}"
+                        Kind="Previous" />
                 </Button>
                 <Button AutomationProperties.Name="{Binding PlayPauseTooltip}"
                     x:Name="RecordPlayPauseButton"
@@ -1661,20 +1803,17 @@
                     IsEnabled="{Binding CanPlayPause}"
                     Style="{StaticResource MusicPrimaryTransportButtonStyle}"
                     ToolTipService.ToolTip="{Binding PlayPauseTooltip}">
-                    <Grid Width="26" Height="26">
-                        <Grid RenderTransformOrigin="0.5,0.5">
-                            <Grid.RenderTransform>
-                                <ScaleTransform ScaleX="1.18" ScaleY="1.18" />
-                            </Grid.RenderTransform>
-                            <local:MusicTransportIcon
-                                Foreground="{Binding Foreground, ElementName=RecordPlayPauseButton}"
-                                Kind="Play"
-                                Visibility="{Binding PlayIconVisibility}" />
-                            <local:MusicTransportIcon
-                                Foreground="{Binding Foreground, ElementName=RecordPlayPauseButton}"
-                                Kind="Pause"
-                                Visibility="{Binding PauseIconVisibility}" />
-                        </Grid>
+                    <Grid>
+                        <local:MusicTransportIcon
+                            FontSize="16.5"
+                            Foreground="{x:Bind RecordPlayPauseButton.Foreground, Mode=OneWay}"
+                            Kind="Play"
+                            Visibility="{Binding PlayIconVisibility}" />
+                        <local:MusicTransportIcon
+                            FontSize="16.5"
+                            Foreground="{x:Bind RecordPlayPauseButton.Foreground, Mode=OneWay}"
+                            Kind="Pause"
+                            Visibility="{Binding PauseIconVisibility}" />
                     </Grid>
                 </Button>
                 <Button AutomationProperties.Name="{Binding NextTooltip}"
@@ -1684,14 +1823,10 @@
                     IsEnabled="{Binding CanGoNext}"
                     Style="{StaticResource MusicIconButtonStyle}"
                     ToolTipService.ToolTip="{Binding NextTooltip}">
-                    <Grid RenderTransformOrigin="0.5,0.5">
-                        <Grid.RenderTransform>
-                            <ScaleTransform ScaleX="0.90" ScaleY="0.90" />
-                        </Grid.RenderTransform>
-                        <local:MusicTransportIcon
-                            Foreground="{Binding Foreground, ElementName=RecordNextButton}"
-                            Kind="Next" />
-                    </Grid>
+                    <local:MusicTransportIcon
+                        FontSize="14.5"
+                        Foreground="{x:Bind RecordNextButton.Foreground, Mode=OneWay}"
+                        Kind="Next" />
                 </Button>
                 <Button AutomationProperties.Name="{Binding VolumeTooltip}"
                     x:Name="RecordVolumeButton"
@@ -1748,36 +1883,119 @@
                 AccentBrush="{x:Bind ViewModel.MusicAccentBrush, Mode=OneWay}"
                 Visibility="Collapsed" />
 
-            <Grid x:Name="RecordHorizontalRightPanel" Grid.Column="1" RowSpacing="4" VerticalAlignment="Center">
+            <Grid x:Name="RecordHorizontalRightPanel" Grid.Column="1" MinWidth="0" RowSpacing="4" VerticalAlignment="Center">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
-                <StackPanel Grid.Row="0" Spacing="2">
-                    <TextBlock
-                        x:Name="RecordHorizontalTitleText"
-                        MaxLines="1"
-                        FontSize="15"
-                        FontWeight="SemiBold"
-                        Text="{Binding Title}"
-                        TextTrimming="CharacterEllipsis" />
+                <StackPanel Grid.Row="0" MinWidth="0" Spacing="2">
+                    <Grid
+                        x:Name="RecordHorizontalTitleMarqueeHost"
+                        MinWidth="0"
+                        SizeChanged="TitleMarqueeHost_SizeChanged">
+                        <Grid.Clip>
+                            <RectangleGeometry x:Name="RecordHorizontalTitleMarqueeClip" Rect="0,-12,4096,128" />
+                        </Grid.Clip>
+                        <TextBlock
+                            x:Name="RecordHorizontalTitleText"
+                            MaxLines="1"
+                            MinWidth="0"
+                            FontSize="15"
+                            FontWeight="SemiBold"
+                            Text="{Binding Title}"
+                            TextTrimming="CharacterEllipsis"
+                            TextWrapping="NoWrap" />
+                        <Grid
+                            x:Name="RecordHorizontalTitleMarqueeCanvas"
+                            HorizontalAlignment="Left"
+                            VerticalAlignment="Stretch"
+                            IsHitTestVisible="False"
+                            Visibility="Collapsed">
+                            <TextBlock
+                                x:Name="RecordHorizontalTitleTextPrimary"
+                                HorizontalAlignment="Left"
+                                VerticalAlignment="Center"
+                                FontSize="15"
+                                FontWeight="SemiBold"
+                                MaxLines="1"
+                                Text="{x:Bind ViewModel.Title, Mode=OneWay}"
+                                TextTrimming="Clip"
+                                TextWrapping="NoWrap" />
+                        </Grid>
+                        <Canvas
+                            Width="0"
+                            Height="0"
+                            IsHitTestVisible="False"
+                            Opacity="0">
+                            <TextBlock
+                                x:Name="RecordHorizontalTitleMeasureText"
+                                FontSize="15"
+                                FontWeight="SemiBold"
+                                helpers:WidgetTextShadow.Cast="False"
+                                MaxLines="1"
+                                Text="{x:Bind ViewModel.Title, Mode=OneWay}"
+                                TextTrimming="Clip"
+                                TextWrapping="NoWrap" />
+                        </Canvas>
+                    </Grid>
                     <Grid ColumnSpacing="6" MinWidth="0">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" MinWidth="0" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <TextBlock
-                            x:Name="RecordHorizontalArtistText"
+                        <Grid
+                            x:Name="RecordHorizontalArtistMarqueeHost"
                             Grid.Column="0"
-                            VerticalAlignment="Center"
-                            MaxLines="1"
                             MinWidth="0"
-                            FontSize="12"
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            Text="{Binding Artist}"
-                            TextTrimming="CharacterEllipsis" />
+                            VerticalAlignment="Center"
+                            SizeChanged="ArtistMarqueeHost_SizeChanged">
+                            <Grid.Clip>
+                                <RectangleGeometry x:Name="RecordHorizontalArtistMarqueeClip" Rect="0,-12,4096,128" />
+                            </Grid.Clip>
+                            <TextBlock
+                                x:Name="RecordHorizontalArtistText"
+                                VerticalAlignment="Center"
+                                MaxLines="1"
+                                MinWidth="0"
+                                FontSize="12"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Text="{Binding Artist}"
+                                TextTrimming="CharacterEllipsis"
+                                TextWrapping="NoWrap" />
+                            <Grid
+                                x:Name="RecordHorizontalArtistMarqueeCanvas"
+                                HorizontalAlignment="Left"
+                                VerticalAlignment="Stretch"
+                                IsHitTestVisible="False"
+                                Visibility="Collapsed">
+                                <TextBlock
+                                    x:Name="RecordHorizontalArtistTextPrimary"
+                                    HorizontalAlignment="Left"
+                                    VerticalAlignment="Center"
+                                    FontSize="12"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    MaxLines="1"
+                                    Text="{x:Bind ViewModel.Artist, Mode=OneWay}"
+                                    TextTrimming="Clip"
+                                    TextWrapping="NoWrap" />
+                            </Grid>
+                            <Canvas
+                                Width="0"
+                                Height="0"
+                                IsHitTestVisible="False"
+                                Opacity="0">
+                                <TextBlock
+                                    x:Name="RecordHorizontalArtistMeasureText"
+                                    FontSize="12"
+                                    helpers:WidgetTextShadow.Cast="False"
+                                    MaxLines="1"
+                                    Text="{x:Bind ViewModel.Artist, Mode=OneWay}"
+                                    TextTrimming="Clip"
+                                    TextWrapping="NoWrap" />
+                            </Canvas>
+                        </Grid>
                         <StackPanel
                             Grid.Column="1"
                             HorizontalAlignment="Right"
@@ -1825,7 +2043,7 @@
                 <Grid
                     x:Name="RecordHorizontalLyricRow"
                     Grid.Row="1"
-                    MinHeight="23"
+                    MinHeight="19"
                     MinWidth="0"
                     Padding="0,1"
                     Background="Transparent"
@@ -1833,33 +2051,17 @@
                     PointerExited="InlineLyricRow_PointerExited"
                     Tapped="ArtworkLyricsTrigger_Tapped"
                     Visibility="{x:Bind ViewModel.InlineLyricVisibility, Mode=OneWay}">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="*" MinWidth="0" />
-                    </Grid.ColumnDefinitions>
                     <Border
-                        Grid.ColumnSpan="2"
                         Margin="-4,-1,-4,-1"
                         Background="{ThemeResource MusicInlineLyricHoverBrush}"
                         CornerRadius="4"
                         IsHitTestVisible="False"
                         Opacity="0"
                         Tag="HoverPill" />
-                    <Border
-                        Grid.Column="0"
-                        Width="3"
-                        Height="14"
-                        Margin="0,0,7,0"
-                        VerticalAlignment="Center"
-                        Background="{x:Bind ViewModel.MusicAccentBrush, Mode=OneWay}"
-                        CornerRadius="1.5"
-                        IsHitTestVisible="False"
-                        Visibility="{x:Bind ViewModel.HasActiveSyncedLyricVisibility, Mode=OneWay}" />
                     <Grid
                         x:Name="RecordHorizontalLyricMarqueeHost"
-                        Grid.Column="1"
                         MinWidth="0"
-                        Opacity="{x:Bind ViewModel.InlineLyricOpacity, Mode=OneWay}"
+                        Opacity="{x:Bind ViewModel.SubtitleOpacity, Mode=OneWay}"
                         SizeChanged="LyricMarqueeHost_SizeChanged"
                         ToolTipService.ToolTip="{x:Bind ViewModel.InlineLyricTooltip, Mode=OneWay}">
                         <Grid.Clip>
@@ -1868,8 +2070,8 @@
                         <TextBlock
                             x:Name="RecordHorizontalLyricText"
                             VerticalAlignment="Center"
-                            FontSize="{x:Bind ViewModel.LyricTextSize, Mode=OneWay}"
-                            FontWeight="Medium"
+                            FontSize="{x:Bind ViewModel.ControlsSecondaryTextSize, Mode=OneWay}"
+                            FontWeight="Normal"
                             Foreground="{ThemeResource TextFillColorPrimaryBrush}"
                             MaxLines="1"
                             MinWidth="0"
@@ -1887,8 +2089,8 @@
                                 x:Name="RecordHorizontalLyricTextPrimary"
                                 HorizontalAlignment="Left"
                                 VerticalAlignment="Center"
-                                FontSize="{x:Bind ViewModel.LyricTextSize, Mode=OneWay}"
-                                FontWeight="Medium"
+                                FontSize="{x:Bind ViewModel.ControlsSecondaryTextSize, Mode=OneWay}"
+                                FontWeight="Normal"
                                 Foreground="{ThemeResource TextFillColorPrimaryBrush}"
                                 MaxLines="1"
                                 Text="{x:Bind ViewModel.InlineLyricText, Mode=OneWay}"
@@ -1898,8 +2100,8 @@
                                 x:Name="RecordHorizontalLyricTextClone"
                                 HorizontalAlignment="Left"
                                 VerticalAlignment="Center"
-                                FontSize="{x:Bind ViewModel.LyricTextSize, Mode=OneWay}"
-                                FontWeight="Medium"
+                                FontSize="{x:Bind ViewModel.ControlsSecondaryTextSize, Mode=OneWay}"
+                                FontWeight="Normal"
                                 Foreground="{ThemeResource TextFillColorPrimaryBrush}"
                                 MaxLines="1"
                                 Text="{x:Bind ViewModel.InlineLyricText, Mode=OneWay}"
@@ -1913,8 +2115,8 @@
                             Opacity="0">
                             <TextBlock
                                 x:Name="RecordHorizontalLyricMeasureText"
-                                FontSize="{x:Bind ViewModel.LyricTextSize, Mode=OneWay}"
-                                FontWeight="Medium"
+                                FontSize="{x:Bind ViewModel.ControlsSecondaryTextSize, Mode=OneWay}"
+                                FontWeight="Normal"
                                 helpers:WidgetTextShadow.Cast="False"
                                 MaxLines="1"
                                 Text="{x:Bind ViewModel.InlineLyricText, Mode=OneWay}"
@@ -2019,14 +2221,10 @@
                         IsEnabled="{Binding CanGoPrevious}"
                         Style="{StaticResource MusicIconButtonStyle}"
                         ToolTipService.ToolTip="{Binding PreviousTooltip}">
-                        <Grid RenderTransformOrigin="0.5,0.5">
-                            <Grid.RenderTransform>
-                                <ScaleTransform ScaleX="0.90" ScaleY="0.90" />
-                            </Grid.RenderTransform>
-                            <local:MusicTransportIcon
-                                Foreground="{Binding Foreground, ElementName=RecordHorizontalPreviousButton}"
-                                Kind="Previous" />
-                        </Grid>
+                        <local:MusicTransportIcon
+                            FontSize="14.5"
+                            Foreground="{x:Bind RecordHorizontalPreviousButton.Foreground, Mode=OneWay}"
+                            Kind="Previous" />
                     </Button>
                     <Button AutomationProperties.Name="{Binding PlayPauseTooltip}"
                         x:Name="RecordHorizontalPlayPauseButton"
@@ -2035,20 +2233,17 @@
                         IsEnabled="{Binding CanPlayPause}"
                         Style="{StaticResource MusicPrimaryTransportButtonStyle}"
                         ToolTipService.ToolTip="{Binding PlayPauseTooltip}">
-                        <Grid Width="26" Height="26">
-                            <Grid RenderTransformOrigin="0.5,0.5">
-                                <Grid.RenderTransform>
-                                    <ScaleTransform ScaleX="1.18" ScaleY="1.18" />
-                                </Grid.RenderTransform>
-                                <local:MusicTransportIcon
-                                    Foreground="{Binding Foreground, ElementName=RecordHorizontalPlayPauseButton}"
-                                    Kind="Play"
-                                    Visibility="{Binding PlayIconVisibility}" />
-                                <local:MusicTransportIcon
-                                    Foreground="{Binding Foreground, ElementName=RecordHorizontalPlayPauseButton}"
-                                    Kind="Pause"
-                                    Visibility="{Binding PauseIconVisibility}" />
-                            </Grid>
+                        <Grid>
+                            <local:MusicTransportIcon
+                                FontSize="16.5"
+                                Foreground="{x:Bind RecordHorizontalPlayPauseButton.Foreground, Mode=OneWay}"
+                                Kind="Play"
+                                Visibility="{Binding PlayIconVisibility}" />
+                            <local:MusicTransportIcon
+                                FontSize="16.5"
+                                Foreground="{x:Bind RecordHorizontalPlayPauseButton.Foreground, Mode=OneWay}"
+                                Kind="Pause"
+                                Visibility="{Binding PauseIconVisibility}" />
                         </Grid>
                     </Button>
                     <Button AutomationProperties.Name="{Binding NextTooltip}"
@@ -2058,14 +2253,10 @@
                         IsEnabled="{Binding CanGoNext}"
                         Style="{StaticResource MusicIconButtonStyle}"
                         ToolTipService.ToolTip="{Binding NextTooltip}">
-                        <Grid RenderTransformOrigin="0.5,0.5">
-                            <Grid.RenderTransform>
-                                <ScaleTransform ScaleX="0.90" ScaleY="0.90" />
-                            </Grid.RenderTransform>
-                            <local:MusicTransportIcon
-                                Foreground="{Binding Foreground, ElementName=RecordHorizontalNextButton}"
-                                Kind="Next" />
-                        </Grid>
+                        <local:MusicTransportIcon
+                            FontSize="14.5"
+                            Foreground="{x:Bind RecordHorizontalNextButton.Foreground, Mode=OneWay}"
+                            Kind="Next" />
                     </Button>
                     <Button AutomationProperties.Name="{Binding VolumeTooltip}"
                         x:Name="RecordHorizontalVolumeButton"
@@ -2306,6 +2497,51 @@
                         TextAlignment="Right" />
                 </Grid>
             </StackPanel>
+        </Border>
+
+        <Border
+            x:Name="MediaServiceUnavailableBanner"
+            Margin="10"
+            Padding="10,6"
+            HorizontalAlignment="Center"
+            VerticalAlignment="Bottom"
+            Background="{ThemeResource MusicVolumeBubbleAcrylicBrush}"
+            BorderBrush="{ThemeResource MusicVolumeBubbleStrokeBrush}"
+            BorderThickness="1"
+            CornerRadius="12"
+            Visibility="{x:Bind ViewModel.MediaServiceUnavailableVisibility, Mode=OneWay}">
+            <Grid ColumnSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <FontIcon
+                    Grid.Column="0"
+                    VerticalAlignment="Center"
+                    FontSize="12"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Glyph="&#xE7BA;" />
+                <TextBlock
+                    Grid.Column="1"
+                    VerticalAlignment="Center"
+                    FontSize="12"
+                    Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                    MaxLines="1"
+                    Text="{x:Bind ViewModel.MediaServiceUnavailableText, Mode=OneWay}"
+                    TextTrimming="CharacterEllipsis"
+                    TextWrapping="NoWrap" />
+                <Button
+                    x:Name="MediaServiceRetryButton"
+                    Grid.Column="2"
+                    MinHeight="24"
+                    Padding="8,2"
+                    VerticalAlignment="Center"
+                    Command="{x:Bind ViewModel.RetryMediaServiceConnectionCommand, Mode=OneWay}"
+                    Content="{x:Bind ViewModel.RetryMediaServiceText, Mode=OneWay}"
+                    CornerRadius="6"
+                    FontSize="11" />
+            </Grid>
         </Border>
     </Grid>
 </UserControl>

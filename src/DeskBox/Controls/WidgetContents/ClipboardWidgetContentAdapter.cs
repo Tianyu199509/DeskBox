@@ -61,7 +61,7 @@ public sealed class ClipboardWidgetContentAdapter :
     }
 
     private bool ShouldKeepCollapsedViewWarm =>
-        _settingsService.Settings.Performance.KeepCapsuleContentWarm;
+        PerformanceSettingsPolicy.ResolveEffectiveKeepCapsuleContentWarm(_settingsService.Settings);
 
     public ClipboardWidgetViewModel ViewModel { get; }
 
@@ -78,6 +78,7 @@ public sealed class ClipboardWidgetContentAdapter :
         ViewModel.SetViewAttached(!_isCompactCollapsed || ShouldKeepCollapsedViewWarm);
         if (view is ClipboardWidgetContent content)
         {
+            content.OwnerWidgetId = WidgetId;
             content.FeedbackRequested += Content_FeedbackRequested;
             content.OnCompactStateChanged(_isCompactCollapsed);
             content.OnWindowVisibilityChanged(_isWindowVisible);
@@ -111,6 +112,10 @@ public sealed class ClipboardWidgetContentAdapter :
     public override void ApplyAppearance()
     {
         ViewModel.ApplyAppearanceFromSettings();
+        if (MaterializedView is ClipboardWidgetContent content)
+        {
+            content.ApplyAppearanceVisuals();
+        }
     }
 
     public override void OnCompactStateChanged(bool collapsed)

@@ -1046,7 +1046,7 @@ public sealed partial class WidgetManager
     }
 
     private static string FormatWorkAreaKey(RectInt32 workArea) =>
-        $"{workArea.X}:{workArea.Y}:{workArea.Width}:{workArea.Height}";
+        WidgetPositioningService.CreateMonitorKey(workArea);
 
     private static bool BoundsEqual(RectInt32 left, RectInt32 right) =>
         left.X == right.X &&

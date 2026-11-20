@@ -265,6 +265,7 @@ public sealed partial class QuickCaptureSurfaceContent :
     internal async void OnWindowVisibilityChanged(bool visible)
     {
         _isWindowVisible = visible;
+        UpdateRelativeTimestampTimerState(refreshNowIfActive: visible);
         if (!visible)
         {
             _isWindowRevealCompleted = false;
@@ -464,7 +465,7 @@ public sealed partial class QuickCaptureSurfaceContent :
                 _detailContentFormat == TextContentFormat.Markdown;
             DetailTimestampText.Text = _localizationService.Format(
                 "QuickCapture.Detail.Created",
-                DateTimeOffset.Now.ToString("yyyy/M/d HH:mm"));
+                DateTimeOffset.Now.ToString("yyyy/M/d HH:mm", System.Globalization.CultureInfo.InvariantCulture));
             RefreshDetailAttachments();
             ApplyDetailMaterialSurface();
             if (showInSinglePane)
@@ -838,12 +839,14 @@ public sealed partial class QuickCaptureSurfaceContent :
                 _isCompactCollapsed = true;
             }
 
+            UpdateRelativeTimestampTimerState();
             CancelSegmentedRestore();
             return;
         }
 
         _isCompactCollapsed = false;
         _wasDualPaneBeforeCollapse = false;
+        UpdateRelativeTimestampTimerState(refreshNowIfActive: true);
         if (double.IsFinite(_hostViewportWidth) && _hostViewportWidth > 0)
         {
             ApplyResponsiveLayout();
@@ -1101,9 +1104,14 @@ public sealed partial class QuickCaptureSurfaceContent :
         QueueSegmentedRestore();
     }
 
+    private int _segmentedPollBudgetRemaining;
+
     private void QueueSegmentedRestore()
     {
         if (!IsLoaded ||
+            _isDisposed ||
+            !_isWindowVisible ||
+            _isCompactCollapsed ||
             _isResponsiveLayoutTransitionActive ||
             QuickCaptureViewSegmented is null ||
             ViewModel.TabBarVisibility != Visibility.Visible ||
@@ -1115,6 +1123,7 @@ public sealed partial class QuickCaptureSurfaceContent :
         }
 
         _segmentedStableFrames = 0;
+        _segmentedPollBudgetRemaining = 45;
         _segmentedCandidateWidth = 0;
         _segmentedRestoreHandler = SegmentedRestore_Rendering;
         CompositionTarget.Rendering += _segmentedRestoreHandler;
@@ -1122,7 +1131,11 @@ public sealed partial class QuickCaptureSurfaceContent :
 
     private void SegmentedRestore_Rendering(object? sender, object e)
     {
-        if (ViewModel.TabBarVisibility != Visibility.Visible ||
+        if (_isDisposed ||
+            !IsLoaded ||
+            !_isWindowVisible ||
+            _isCompactCollapsed ||
+            ViewModel.TabBarVisibility != Visibility.Visible ||
             ListPage.Visibility != Visibility.Visible)
         {
             SuspendSegmented();
@@ -1132,6 +1145,12 @@ public sealed partial class QuickCaptureSurfaceContent :
         if (_isResponsiveLayoutTransitionActive)
         {
             _segmentedStableFrames = 0;
+            return;
+        }
+
+        if (--_segmentedPollBudgetRemaining <= 0)
+        {
+            CancelSegmentedRestore();
             return;
         }
 
@@ -1340,7 +1359,7 @@ public sealed partial class QuickCaptureSurfaceContent :
             _detailContentFormat == TextContentFormat.Markdown;
         DetailTimestampText.Text = _localizationService.Format(
             "QuickCapture.Detail.Created",
-            DateTimeOffset.Now.ToString("yyyy/M/d HH:mm"));
+            DateTimeOffset.Now.ToString("yyyy/M/d HH:mm", System.Globalization.CultureInfo.InvariantCulture));
         RefreshDetailAttachments();
         ApplyDetailMaterialSurface();
         ApplyResponsiveLayout();
@@ -1398,7 +1417,7 @@ public sealed partial class QuickCaptureSurfaceContent :
             _detailContentFormat == TextContentFormat.Markdown;
         DetailTimestampText.Text = _localizationService.Format(
             "QuickCapture.Detail.Created",
-            item.ToModel().CreatedAt.ToLocalTime().ToString("yyyy/M/d HH:mm"));
+            item.ToModel().CreatedAt.ToLocalTime().ToString("yyyy/M/d HH:mm", System.Globalization.CultureInfo.InvariantCulture));
         DetailPinIcon.IsPinned = item.IsPinned;
         RefreshDetailAttachments();
         ApplyDetailMaterialSurface();
@@ -1718,7 +1737,8 @@ public sealed partial class QuickCaptureSurfaceContent :
         sender.Stop();
         if (!_isCreatingDetail && _detailHasUnsavedChanges)
         {
-            await SaveDetailAsync(completeEditing: false);
+            try { await SaveDetailAsync(completeEditing: false); }
+            catch (Exception ex) { App.Log($"[QuickCapture] Detail auto-save failed: {ex.Message}"); }
         }
     }
 
@@ -2194,21 +2214,7 @@ public sealed partial class QuickCaptureSurfaceContent :
                 return;
             }
 
-            bool launched = false;
-            try
-            {
-                StorageFile file = await StorageFile.GetFileFromPathAsync(attachment.FilePath);
-                launched = await Windows.System.Launcher.LaunchFileAsync(file);
-            }
-            catch (Exception launchEx)
-            {
-                App.LogVerbose($"[QuickCapture] Launcher.LaunchFileAsync declined '{attachment.FilePath}': {launchEx.Message}");
-            }
-
-            if (!launched)
-            {
-                DeskBox.Platform.Win32Helper.OpenFileOrChooseApp(IntPtr.Zero, attachment.FilePath);
-            }
+            _ = await ShellLaunchService.OpenPathAsync(attachment.FilePath);
         }
         catch (Exception ex)
         {
@@ -2439,21 +2445,7 @@ public sealed partial class QuickCaptureSurfaceContent :
             string? path = ResolveDetailAttachmentPath(e.AttachmentId);
             if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
             {
-                bool launched = false;
-                try
-                {
-                    StorageFile file = await StorageFile.GetFileFromPathAsync(path);
-                    launched = await Windows.System.Launcher.LaunchFileAsync(file);
-                }
-                catch (Exception launchEx)
-                {
-                    App.LogVerbose($"[QuickCapture] Markdown Launcher.LaunchFileAsync declined '{path}': {launchEx.Message}");
-                }
-
-                if (!launched)
-                {
-                    DeskBox.Platform.Win32Helper.OpenFileOrChooseApp(IntPtr.Zero, path);
-                }
+                _ = await ShellLaunchService.OpenPathAsync(path);
             }
         }
         catch (Exception ex)
@@ -2810,30 +2802,43 @@ public sealed partial class QuickCaptureSurfaceContent :
             return;
         }
 
-        _draggedQuickCaptureItemIds.Clear();
-        _draggedQuickCaptureItemIds.AddRange(
-            draggedItems.Select(item => item.Id));
-        _draggedQuickCaptureItemId = canReorder ? draggedItem!.Id : null;
-        _isInternalQuickCaptureDrag = true;
-        _internalQuickCaptureDragCanReorder = canReorder;
-        _internalQuickCaptureDragView = canReorder
-            ? ViewModel.SelectedView
-            : null;
-        // VisibleItemsSource is an AOT-safe object[] projection. Keep native
-        // ListView reordering disabled because WinUI tries to mutate that
-        // fixed-size array before DragItemsCompleted is raised. Item-row drop
-        // handlers persist the requested position instead.
-        ItemsList.CanReorderItems = false;
-        // Export drags are copy-only: advertising Move would let a Win10
-        // Explorer drop physically move the backing attachment file out of
-        // quick-capture storage, and multi-effect offers prompt the picker.
-        e.Data.RequestedOperation = DataPackageOperation.Copy;
+        try
+        {
+            _draggedQuickCaptureItemIds.Clear();
+            _draggedQuickCaptureItemIds.AddRange(
+                draggedItems.Select(item => item.Id));
+            _draggedQuickCaptureItemId = canReorder ? draggedItem!.Id : null;
+            _isInternalQuickCaptureDrag = true;
+            _internalQuickCaptureDragCanReorder = canReorder;
+            _internalQuickCaptureDragView = canReorder
+                ? ViewModel.SelectedView
+                : null;
+            // VisibleItemsSource is an AOT-safe object[] projection. Keep native
+            // ListView reordering disabled because WinUI tries to mutate that
+            // fixed-size array before DragItemsCompleted is raised. Item-row drop
+            // handlers persist the requested position instead.
+            ItemsList.CanReorderItems = false;
+            if (!string.IsNullOrWhiteSpace(ViewModel.Config.Id))
+            {
+                e.Data.Properties[DeskBoxDragData.SourceWidgetIdProperty] = ViewModel.Config.Id;
+            }
+            // Export drags are copy-only: advertising Move would let a Win10
+            // Explorer drop physically move the backing attachment file out of
+            // quick-capture storage, and multi-effect offers prompt the picker.
+            e.Data.RequestedOperation = DataPackageOperation.Copy;
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[QuickCapture] DragStarting setup failed: {ex.Message}");
+            FileDragSourceGuardDataObject.ClearActiveManagedRoot();
+            e.Cancel = true;
+            ResetInternalQuickCaptureDrag();
+        }
     }
 
-    private void ItemsList_DragItemsCompleted(
-        ListViewBase sender,
-        DragItemsCompletedEventArgs args)
+    private void ItemsList_DragItemsCompleted(ListViewBase sender, DragItemsCompletedEventArgs args)
     {
+        FileDragSourceGuardDataObject.ClearActiveManagedRoot();
         ResetInternalQuickCaptureDrag();
     }
 
@@ -2878,6 +2883,7 @@ public sealed partial class QuickCaptureSurfaceContent :
                 DeskBoxDragData.TryGetTodoDragItems(e.DataView) is { Count: > 0 } todoItems)
             {
                 e.Handled = true;
+                DataPackageOperation extAllowedOperations = e.AllowedOperations;
                 var extDeferral = e.GetDeferral();
                 try
                 {
@@ -2885,9 +2891,9 @@ public sealed partial class QuickCaptureSurfaceContent :
                         todoItems,
                         forcePin: extTarget == QuickCaptureViewMode.Pinned);
                     e.AcceptedOperation = imported > 0
-                        ? (e.AllowedOperations.HasFlag(DataPackageOperation.Copy)
+                        ? (extAllowedOperations.HasFlag(DataPackageOperation.Copy)
                             ? DataPackageOperation.Copy
-                            : DeskBoxDragData.ResolveInternalMetadataOperation(e.AllowedOperations))
+                            : DeskBoxDragData.ResolveInternalMetadataOperation(extAllowedOperations))
                         : DataPackageOperation.None;
                     if (imported > 0)
                     {
@@ -2923,6 +2929,7 @@ public sealed partial class QuickCaptureSurfaceContent :
         }
 
         e.Handled = true;
+        DataPackageOperation allowedOperations = e.AllowedOperations;
         var deferral = e.GetDeferral();
         try
         {
@@ -2930,7 +2937,7 @@ public sealed partial class QuickCaptureSurfaceContent :
                 draggedItems,
                 target);
             e.AcceptedOperation = changedCount > 0
-                ? DataPackageOperation.Move
+                ? DeskBoxDragData.ResolveInternalMetadataOperation(allowedOperations)
                 : DataPackageOperation.None;
             if (changedCount > 0)
             {
@@ -3302,7 +3309,7 @@ public sealed partial class QuickCaptureSurfaceContent :
                 T("QuickCapture.Dropped"),
                 WidgetFeedbackSeverity.Success,
                 "quick-drop");
-            return DeskBoxDragData.GetFileAssociationOperation(dataView, allowedOperations);
+            return DeskBoxDragData.GetFileAssociationDropCompletionOperation(dataView, allowedOperations, WidgetId);
         }
 
         string? text = await DeskBoxDragData.TryGetTextAsync(dataView);
@@ -3539,16 +3546,15 @@ public sealed partial class QuickCaptureSurfaceContent :
 
         e.Handled = true;
         ApplyQuickCaptureItemDropState(border, active: false);
+        DataPackageOperation allowedOperations = e.AllowedOperations;
         var deferral = e.GetDeferral();
         try
         {
-            using DroppedFileBatch batch =
-                await DeskBoxDragData.TryGetDroppedFilesAsync(e.DataView);
-            QuickCaptureItemViewModel? updated =
-                await ViewModel.AddAttachmentsAsync(item, batch.Files);
+            using DroppedFileBatch batch = await DeskBoxDragData.TryGetDroppedFilesAsync(e.DataView);
+            QuickCaptureItemViewModel? updated = await ViewModel.AddAttachmentsAsync(item, batch.Files);
             e.AcceptedOperation = updated is null
                 ? DataPackageOperation.None
-                : DeskBoxDragData.GetFileAssociationOperation(e.DataView);
+                : DeskBoxDragData.GetFileAssociationDropCompletionOperation(e.DataView, allowedOperations, WidgetId);
             if (updated is not null)
             {
                 RaiseFeedback(
@@ -3603,6 +3609,7 @@ public sealed partial class QuickCaptureSurfaceContent :
         }
 
         e.Handled = true;
+        DataPackageOperation allowedOperations = e.AllowedOperations;
         ApplyQuickCaptureReorderDropState(
             border,
             active: false,
@@ -3623,7 +3630,7 @@ public sealed partial class QuickCaptureSurfaceContent :
                     : await ViewModel.MoveItemAsync(draggedItem, targetIndex));
             await ViewModel.RefreshItemsAsync();
             e.AcceptedOperation = persisted
-                ? DataPackageOperation.Move
+                ? DeskBoxDragData.ResolveInternalMetadataOperation(allowedOperations)
                 : DataPackageOperation.None;
         }
         catch (Exception ex)

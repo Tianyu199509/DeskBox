@@ -135,6 +135,7 @@ public partial class WidgetViewModel
 
     public void SetSortMode(WidgetSortMode mode)
     {
+        using var _ = BeginInlineLayoutUndoScope();
         (WidgetSortMode currentMode, bool currentDescending) = ResolveEffectiveFolderSortState();
         WidgetSortMode nextMode;
         bool nextDescending;
@@ -251,6 +252,7 @@ public partial class WidgetViewModel
         IReadOnlyList<WidgetItem> draggedItems,
         int targetIndex)
     {
+        using var _ = BeginInlineLayoutUndoScope();
         if (EffectiveSortMode != WidgetSortMode.Manual ||
             draggedItems.Count == 0)
         {

@@ -34,11 +34,16 @@ public abstract partial class WidgetWindowBase
             palette.Primary, palette.Secondary, palette.Disabled, highContrast);
     }
 
+    protected virtual void OnWidgetForegroundChanged()
+    {
+    }
+
     protected void SetWidgetForegroundModeOverride(string? mode)
     {
         WidgetForegroundSettings.SetModeOverride(Config, mode);
         SettingsService.UpdateWidget(Config);
         ApplyWidgetForegroundAppearance();
+        OnWidgetForegroundChanged();
     }
 
     /// <summary>
@@ -110,6 +115,7 @@ public abstract partial class WidgetWindowBase
                     WidgetForegroundSettings.ModeCustom);
                 SettingsService.UpdateWidget(Config);
                 ApplyWidgetForegroundAppearance();
+                OnWidgetForegroundChanged();
             }
             catch (Exception ex)
             {
@@ -167,7 +173,11 @@ public abstract partial class WidgetWindowBase
         AccessibilitySettings sender,
         object args)
     {
-        if (!DispatcherQueue.TryEnqueue(ApplyWidgetForegroundAppearance))
+        if (!DispatcherQueue.TryEnqueue(() =>
+            {
+                ApplyWidgetForegroundAppearance();
+                OnWidgetForegroundChanged();
+            }))
         {
             App.LogVerbose("[WidgetForeground] Could not queue high-contrast refresh.");
         }

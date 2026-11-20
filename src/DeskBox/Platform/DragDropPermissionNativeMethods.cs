@@ -9,83 +9,47 @@ namespace DeskBox.Platform;
 /// </summary>
 internal static partial class DragDropPermissionNativeMethods
 {
-    [DllImport("kernel32.dll")]
-    internal static extern IntPtr GetCurrentProcess();
+    [LibraryImport("kernel32.dll")]
+    internal static partial IntPtr GetCurrentProcess();
 
-    [DllImport("kernel32.dll", SetLastError = true)]
-    internal static extern IntPtr OpenProcess(uint desiredAccess, [MarshalAs(UnmanagedType.Bool)] bool inheritHandle, uint processId);
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    internal static partial IntPtr OpenProcess(uint desiredAccess, [MarshalAs(UnmanagedType.Bool)] bool inheritHandle, uint processId);
 
-    [DllImport("kernel32.dll", SetLastError = true)]
+    [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    internal static extern bool CloseHandle(IntPtr handle);
+    internal static partial bool CloseHandle(IntPtr handle);
 
-    [DllImport("kernel32.dll", EntryPoint = "GetExitCodeProcess", SetLastError = true)]
+    [LibraryImport("kernel32.dll", EntryPoint = "GetExitCodeProcess", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    internal static extern bool GetExitCodeProcess(IntPtr hProcess, out uint lpExitCode);
+    internal static partial bool GetExitCodeProcess(IntPtr hProcess, out uint lpExitCode);
 
-    [DllImport("kernel32.dll", EntryPoint = "WaitForSingleObject", SetLastError = true)]
-    internal static extern uint WaitForSingleObject(IntPtr hHandle, uint dwMilliseconds);
+    [LibraryImport("kernel32.dll", EntryPoint = "WaitForSingleObject", SetLastError = true)]
+    internal static partial uint WaitForSingleObject(IntPtr hHandle, uint dwMilliseconds);
 
-    [DllImport("advapi32.dll", SetLastError = true)]
+    [LibraryImport("advapi32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    internal static extern bool OpenProcessToken(IntPtr processHandle, uint desiredAccess, out IntPtr tokenHandle);
+    internal static partial bool OpenProcessToken(IntPtr processHandle, uint desiredAccess, out IntPtr tokenHandle);
 
-    [DllImport("advapi32.dll", SetLastError = true)]
+    [LibraryImport("advapi32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    internal static extern bool GetTokenInformation(
+    internal static partial bool GetTokenInformation(
         IntPtr tokenHandle,
         TokenInformationClass tokenInformationClass,
         IntPtr tokenInformation,
         int tokenInformationLength,
         out int returnLength);
 
-    [DllImport("advapi32.dll")]
-    internal static extern IntPtr GetSidSubAuthority(IntPtr sid, uint subAuthority);
+    [LibraryImport("advapi32.dll")]
+    internal static partial IntPtr GetSidSubAuthority(IntPtr sid, uint subAuthority);
 
-    [DllImport("advapi32.dll")]
-    internal static extern IntPtr GetSidSubAuthorityCount(IntPtr sid);
+    [LibraryImport("advapi32.dll")]
+    internal static partial IntPtr GetSidSubAuthorityCount(IntPtr sid);
 
-    [DllImport("user32.dll")]
-    internal static extern IntPtr GetShellWindow();
+    [LibraryImport("user32.dll")]
+    internal static partial IntPtr GetShellWindow();
 
-    [DllImport("user32.dll")]
-    internal static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    internal static extern bool InitializeProcThreadAttributeList(
-        IntPtr lpAttributeList,
-        int dwAttributeCount,
-        int dwFlags,
-        ref int lpSize);
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    internal static extern bool UpdateProcThreadAttribute(
-        IntPtr lpAttributeList,
-        uint dwFlags,
-        IntPtr attribute,
-        ref IntPtr lpValue,
-        IntPtr cbSize,
-        IntPtr lpPreviousValue,
-        IntPtr lpReturnSize);
-
-    [DllImport("kernel32.dll")]
-    internal static extern void DeleteProcThreadAttributeList(IntPtr lpAttributeList);
-
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    internal static extern bool CreateProcess(
-        string? lpApplicationName,
-        string lpCommandLine,
-        IntPtr lpProcessAttributes,
-        IntPtr lpThreadAttributes,
-        [MarshalAs(UnmanagedType.Bool)] bool bInheritHandles,
-        uint dwCreationFlags,
-        IntPtr lpEnvironment,
-        string? lpCurrentDirectory,
-        ref StartupInfo lpStartupInfo,
-        out ProcessInformation lpProcessInformation);
+    [LibraryImport("user32.dll")]
+    internal static partial uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
 
     internal enum TokenInformationClass
     {
@@ -110,39 +74,6 @@ internal static partial class DragDropPermissionNativeMethods
     {
         public IntPtr Sid;
         public int Attributes;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    internal struct StartupInfo
-    {
-        public int cb;
-        public string? lpReserved;
-        public string? lpDesktop;
-        public string? lpTitle;
-        public int dwX;
-        public int dwY;
-        public int dwXSize;
-        public int dwYSize;
-        public int dwXCountChars;
-        public int dwYCountChars;
-        public int dwFillAttribute;
-        public int dwFlags;
-        public short wShowWindow;
-        public short cbReserved2;
-        public IntPtr lpReserved2;
-        public IntPtr hStdInput;
-        public IntPtr hStdOutput;
-        public IntPtr hStdError;
-        public IntPtr lpAttributeList;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    internal struct ProcessInformation
-    {
-        public IntPtr hProcess;
-        public IntPtr hThread;
-        public int dwProcessId;
-        public int dwThreadId;
     }
 
     internal enum CrossIntegrityProcessWaitOutcome

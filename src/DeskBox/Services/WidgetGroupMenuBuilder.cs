@@ -155,7 +155,7 @@ internal static class WidgetGroupMenuBuilder
         var wheelMenu = new MenuFlyoutSubItem
         {
             Text = localizationService.T("Widget.Group.WheelSwitch"),
-            Icon = new FontIcon { Glyph = "\uE7C2" }
+            Icon = new FontIcon { Glyph = WindowsCompatibilityService.IsWindows11OrLater ? "\uE7C2" : "\uE8AB" }
         };
         AddWheelItem(
             value: null,

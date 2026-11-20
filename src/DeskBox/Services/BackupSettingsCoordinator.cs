@@ -158,13 +158,13 @@ public sealed class BackupSettingsCoordinator : IBackupSettings, IDisposable
     }
 
     public Task<bool> HasCredentialAsync(BackupEndpoint endpoint, CancellationToken cancellationToken) =>
-        _cloud.HasCredentialAsync(CurrentOptions(endpoint), cancellationToken);
+        _cloud.HasCredentialAsync(CurrentOptions(endpoint).WithEffectiveConnectionProvider(), cancellationToken);
 
     public Task SaveCredentialAsync(BackupEndpoint endpoint, string secret, CancellationToken cancellationToken) =>
-        _cloud.SaveCredentialAsync(CurrentOptions(endpoint), secret, cancellationToken);
+        _cloud.SaveCredentialAsync(CurrentOptions(endpoint).WithEffectiveConnectionProvider(), secret, cancellationToken);
 
     public Task ProbeAsync(BackupEndpoint endpoint, string? secretOverride, CancellationToken cancellationToken) =>
-        _cloud.ProbeConnectionAsync(CurrentOptions(endpoint), secretOverride, cancellationToken);
+        _cloud.ProbeConnectionAsync(CurrentOptions(endpoint).WithEffectiveConnectionProvider(), secretOverride, cancellationToken);
 
     /// <summary>
     /// Remote inventory routed through <see cref="BackupRestoreActions"/>:

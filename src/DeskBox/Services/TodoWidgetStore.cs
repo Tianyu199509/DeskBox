@@ -357,8 +357,15 @@ public sealed class TodoWidgetStore
             DateTimeOffset localDue = dueDate.ToLocalTime();
             if (localDue.Hour == 23 && localDue.Minute == 59 && localDue.Second == 0)
             {
+                DateTimeOffset legacyDueDate = dueDate;
+                DateTimeOffset normalizedDueDate = NormalizeAllDayDueDate(localDue);
                 item.HasDueTime = false;
-                item.DueDate = NormalizeAllDayDueDate(localDue);
+                item.DueDate = normalizedDueDate;
+                if (item.ReminderDismissedForDueDate is { } dismissedForDue &&
+                    DateTimeOffset.Equals(dismissedForDue, legacyDueDate))
+                {
+                    item.ReminderDismissedForDueDate = normalizedDueDate;
+                }
                 if (item.Recurrence?.AnchorDueDate is { } legacyAnchor)
                 {
                     DateTimeOffset localAnchor = legacyAnchor.ToLocalTime();

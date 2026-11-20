@@ -652,6 +652,9 @@ public sealed class FileSurfaceParityContractTests
         string source = File.ReadAllText(Path.Combine(
             root,
             "src/DeskBox/Controls/WidgetContents/FileSurfaceContent.xaml.cs"));
+        string win10ShellDrag = File.ReadAllText(Path.Combine(
+            root,
+            "src/DeskBox/Controls/WidgetContents/FileSurfaceContent.Win10ShellDrag.cs"));
         string itemVisuals = File.ReadAllText(Path.Combine(
             root,
             "src/DeskBox/Controls/WidgetContents/FileSurfaceContent.ItemVisuals.cs"));
@@ -1158,8 +1161,12 @@ public sealed class FileSurfaceParityContractTests
             source,
             StringComparison.Ordinal);
         Assert.Contains(
-            "ViewModel.RemoveItemsFromStack(",
+            "DetachStackItemsToSurfaceIndex(",
             source,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "ViewModel.RemoveItemsFromStack(",
+            win10ShellDrag,
             StringComparison.Ordinal);
         Assert.Contains(
             "ResolveInternalArrangementFeedbackOperation(",
@@ -1474,8 +1481,15 @@ public sealed class FileSurfaceParityContractTests
             source,
             StringComparison.Ordinal);
         Assert.Contains(
-            "SuppressDraggedArrivals",
+            "DesktopOutboundDropCoordinator.SuppressDesktopArrivals",
             source,
+            StringComparison.Ordinal);
+        string coordinatorSource = File.ReadAllText(Path.Combine(
+            FindRepositoryRoot(),
+            "src/DeskBox/Helpers/DesktopOutboundDropCoordinator.cs"));
+        Assert.Contains(
+            "SuppressDraggedArrivals",
+            coordinatorSource,
             StringComparison.Ordinal);
     }
 
@@ -2139,7 +2153,7 @@ public sealed class FileSurfaceParityContractTests
             completed,
             StringComparison.Ordinal);
         Assert.Contains(
-            "ShortcutFileLauncher.TryLaunchWithFiles(",
+            "ShortcutFileLauncher.LaunchWithFilesAsync(",
             launchOnCompletion,
             StringComparison.Ordinal);
         Assert.Contains(

@@ -151,6 +151,7 @@ private void OnLanguageChanged()
 
         RefreshSelectionProperties(refreshLocalizedOptions: false);
         RefreshGlobalHotkeyState();
+        RefreshAutoStartState();
         NotifyWidgetChromeOverrideCommandsChanged();
         OnPropertyChanged(nameof(FeatureWidgetEntries));
         ClipboardSettingsRefreshRequested?.Invoke();
@@ -180,7 +181,6 @@ private void OnLanguageChanged()
             }
         }
         OnPropertyChanged(nameof(AutoStartStatusText));
-        OnPropertyChanged(nameof(AvailableAutoStartModeOptions));
         // The global-hotkey card text lives on the interaction editor now;
         // the shell refreshes it through the editor push instead of shell
         // property notifications.

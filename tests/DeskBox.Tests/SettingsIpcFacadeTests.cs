@@ -39,6 +39,8 @@ public sealed class SettingsIpcFacadeTests : IDisposable
 
             await Task.Delay(20);
         }
+
+        Assert.True(condition(), $"Condition was not met within {timeoutMs}ms.");
     }
 
     private sealed class FakeHotkeyActions : ISettingsHotkeyActions
@@ -448,12 +450,18 @@ public sealed class SettingsIpcFacadeTests : IDisposable
         var server = loop.Server;
         var client = loop.Client;
         var remote = new RemoteSettingsHotkeyActions(client);
+        int invocationCount = 0;
         var raised = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        remote.RegistrationChanged += () => raised.TrySetResult();
+        remote.RegistrationChanged += () =>
+        {
+            Interlocked.Increment(ref invocationCount);
+            raised.TrySetResult();
+        };
         try
         {
             await server.SendEventAsync(SettingsIpcMethods.HotkeyRegistrationChanged, null);
             await raised.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(1, Volatile.Read(ref invocationCount));
         }
         finally
         {
@@ -637,6 +645,10 @@ public sealed class SettingsIpcFacadeTests : IDisposable
 
         public Func<string, CancellationToken, Task<ManagedStorageMigrationPreview>>? PreviewHandler;
         public Func<string, ManagedStorageMigrationOptions?, Task<ManagedStorageMigrationResult>>? MigrateHandler;
+        public Func<string, CancellationToken, Task<ManagedStorageMigrationResult?>>? EmptySwitchHandler;
+        public Func<string, CancellationToken, Task<ManagedStorageMigrationCleanupResult>>? RetrySourceCleanupHandler;
+        public Func<string, CancellationToken, Task<ManagedStorageMigrationCleanupResult>>? CleanupCopiesHandler;
+        public ManagedStorageMigrationOptions? LastMigrationOptions;
 
         public Task<ManagedStorageMigrationPreview> PreviewManagedStorageMigrationAsync(
             string newRootPath,
@@ -649,6 +661,7 @@ public sealed class SettingsIpcFacadeTests : IDisposable
             string newRootPath,
             ManagedStorageMigrationOptions? options)
         {
+            LastMigrationOptions = options;
             if (MigrateHandler is not null)
             {
                 return await MigrateHandler(newRootPath, options);
@@ -665,6 +678,27 @@ public sealed class SettingsIpcFacadeTests : IDisposable
             await Task.Delay(10);
             return MigrationResult;
         }
+
+        public Task<ManagedStorageMigrationResult?> TrySwitchEmptyManagedStorageRootAsync(
+            string newRootPath,
+            CancellationToken token) =>
+            EmptySwitchHandler is not null
+                ? EmptySwitchHandler(newRootPath, token)
+                : Task.FromResult<ManagedStorageMigrationResult?>(null);
+
+        public Task<ManagedStorageMigrationCleanupResult> RetryManagedStorageSourceCleanupAsync(
+            string newRootPath,
+            CancellationToken token) =>
+            RetrySourceCleanupHandler is not null
+                ? RetrySourceCleanupHandler(newRootPath, token)
+                : Task.FromResult(new ManagedStorageMigrationCleanupResult(2, 0, 1024, false));
+
+        public Task<ManagedStorageMigrationCleanupResult> CleanupInterruptedMigrationCopiesAsync(
+            string newRootPath,
+            CancellationToken token) =>
+            CleanupCopiesHandler is not null
+                ? CleanupCopiesHandler(newRootPath, token)
+                : Task.FromResult(new ManagedStorageMigrationCleanupResult(3, 0, 4096, false));
 
         public IReadOnlyList<GlanceWidgetInstanceInfo> GetGlanceWidgetInstances() => Glance;
 
@@ -806,7 +840,16 @@ public sealed class SettingsIpcFacadeTests : IDisposable
 
         public event Action? ScreenHomeChanged;
 
+        public event Action? AutoStartStateChanged;
+
+        public StartupOperationResult AutoStartStatus = new(
+            StartupRegistrationState.Enabled,
+            EffectiveMode: StartupMode.ScheduledTask);
+        public bool? LastSetAutoStartEnabled;
+
         public void RaiseDisplayTopologyChanged() => DisplayTopologyChanged?.Invoke();
+
+        public void RaiseAutoStartStateChanged() => AutoStartStateChanged?.Invoke();
 
         public Task ShutdownForRestartAsync()
         {
@@ -883,6 +926,20 @@ public sealed class SettingsIpcFacadeTests : IDisposable
         public AppRuntimeHealthSnapshot? GetRuntimeHealthSnapshot() => RuntimeHealth;
 
         public Task ForceExternalStateRecoveryAsync() => Task.CompletedTask;
+
+        public Task<StartupOperationResult> GetAutoStartStatusAsync() =>
+            Task.FromResult(AutoStartStatus);
+
+        public Task<StartupOperationResult> SetAutoStartEnabledAsync(bool enabled)
+        {
+            LastSetAutoStartEnabled = enabled;
+            AutoStartStatus = enabled
+                ? new StartupOperationResult(
+                    StartupRegistrationState.Enabled,
+                    EffectiveMode: StartupMode.ScheduledTask)
+                : new StartupOperationResult(StartupRegistrationState.NotRegistered);
+            return Task.FromResult(AutoStartStatus);
+        }
 
         public DragDropPermissionDiagnostic DiagnoseDragDropPermissions() => Diagnostic;
 
@@ -970,16 +1027,38 @@ public sealed class SettingsIpcFacadeTests : IDisposable
             ManagedStorageMigrationResult migration = await remote.UpdateDefaultManagedStorageRootAsync(
                 "C:\\new-root",
                 new ManagedStorageMigrationOptions(
-                    Progress: new Progress<ManagedStorageMigrationProgress>(progressReports.Add)));
+                    Progress: new Progress<ManagedStorageMigrationProgress>(progressReports.Add),
+                    RetainOriginals: true,
+                    IncludeOrphanFolders: true));
             Assert.Equal("C:\\new-root", loop.Widget.MigrationRoot);
+            Assert.True(loop.Widget.LastMigrationOptions?.RetainOriginals);
+            Assert.True(loop.Widget.LastMigrationOptions?.IncludeOrphanFolders);
             Assert.Equal(2, migration.AffectedWidgetCount);
             await Task.Delay(300);
             Assert.Contains(progressReports, report => report.Phase == ManagedStorageMigrationPhase.Copying);
 
-            // Structured preview problem & live Stop cancellation over WidgetMigrateCancel:
+            // Empty switch, retry source cleanup, and interrupted copy cleanup over IPC:
+            loop.Widget.EmptySwitchHandler = (path, _) => Task.FromResult<ManagedStorageMigrationResult?>(
+                new ManagedStorageMigrationResult(1, "C:\\old", path, 0, 0, false, Mode: ManagedStorageMigrationMode.EmptySwitch));
+            ManagedStorageMigrationResult? emptyResult =
+                await remote.TrySwitchEmptyManagedStorageRootAsync("D:\\DeskBox", CancellationToken.None);
+            Assert.NotNull(emptyResult);
+            Assert.Equal(ManagedStorageMigrationMode.EmptySwitch, emptyResult!.Mode);
+            loop.Widget.EmptySwitchHandler = null;
+
+            ManagedStorageMigrationCleanupResult sourceCleanup =
+                await remote.RetryManagedStorageSourceCleanupAsync("D:\\DeskBox", CancellationToken.None);
+            Assert.Equal(2, sourceCleanup.CleanedFileCount);
+
+            ManagedStorageMigrationCleanupResult copyCleanup =
+                await remote.CleanupInterruptedMigrationCopiesAsync("D:\\DeskBox", CancellationToken.None);
+            Assert.Equal(3, copyCleanup.CleanedFileCount);
+
+            // Structured preview problem (including BlockingPath) & live Stop cancellation over WidgetMigrateCancel:
             loop.Widget.PreviewHandler = (_, _) => throw new StorageMigrationException(
                 StorageMigrationProblem.RootsOverlap,
-                "Roots overlap")
+                "Roots overlap",
+                blockingPath: "C:\\overlap\\Box1")
             {
                 TemporaryBytes = 4096,
             };
@@ -987,6 +1066,7 @@ public sealed class SettingsIpcFacadeTests : IDisposable
                 () => remote.PreviewManagedStorageMigrationAsync("C:\\overlap", CancellationToken.None));
             Assert.Equal(StorageMigrationProblem.RootsOverlap, previewEx.Problem);
             Assert.Equal(4096, previewEx.TemporaryBytes);
+            Assert.Equal("C:\\overlap\\Box1", previewEx.BlockingPath);
             loop.Widget.PreviewHandler = null;
 
             var migrationStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -1048,6 +1128,9 @@ public sealed class SettingsIpcFacadeTests : IDisposable
 
             IReadOnlyList<GlanceWidgetInstanceInfo> glance = remote.GetGlanceWidgetInstances();
             Assert.Equal(2, glance.Count);
+            hostMirror.Settings.WidgetLayout.FeatureWidgetEnabledStates.Remove(nameof(WidgetKind.Glance));
+            Assert.True(remote.IsGlanceFeatureEnabled);
+            DeskBox.Services.FeatureWidgetSettings.SetEnabled(hostMirror.Settings, WidgetKind.Glance, true);
             Assert.True(remote.IsGlanceFeatureEnabled);
             GlanceWidgetInstanceInfo created = await remote.CreateGlanceWidgetAsync("g1");
             Assert.Equal("g1", created.Name);
@@ -1131,6 +1214,8 @@ public sealed class SettingsIpcFacadeTests : IDisposable
 
             var topologyChanged = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             remote.DisplayTopologyChanged += () => topologyChanged.TrySetResult();
+            var autoStartChanged = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            remote.AutoStartStateChanged += () => autoStartChanged.TrySetResult();
 
             await remote.ShutdownForRestartAsync();
             Assert.True(loop.AppActions.ShutdownForRestartCalled);
@@ -1172,6 +1257,23 @@ public sealed class SettingsIpcFacadeTests : IDisposable
             await UntilAsync(() => loop.AppActions.SnapSpacingArg == 12.5);
             Assert.Equal(12.5, loop.AppActions.SnapSpacingArg);
 
+            var prevCulture = System.Globalization.CultureInfo.CurrentCulture;
+            try
+            {
+                System.Globalization.CultureInfo.CurrentCulture = System.Globalization.CultureInfo.GetCultureInfo("de-DE");
+                var directRouter = new SettingsIpcMethodRouter(null, null, null, appActions: loop.AppActions);
+                (bool snapOk, _, _) = await directRouter.DispatchAsync(
+                    SettingsIpcMethods.AppSetSnapSpacing,
+                    "8.5",
+                    CancellationToken.None);
+                Assert.True(snapOk);
+                Assert.Equal(8.5, loop.AppActions.SnapSpacingArg);
+            }
+            finally
+            {
+                System.Globalization.CultureInfo.CurrentCulture = prevCulture;
+            }
+
             remote.BringSettingsWindowToRaisedBand(0x99, "shown");
             await UntilAsync(() => loop.AppActions.RaiseBand == ((nint)0x99, "shown"));
             Assert.Equal(((nint)0x99, "shown"), loop.AppActions.RaiseBand);
@@ -1197,8 +1299,22 @@ public sealed class SettingsIpcFacadeTests : IDisposable
             Assert.True(repair.Success);
             Assert.Equal(2, repair.RepairedCount);
 
+            StartupOperationResult initialAutoStart = await remote.GetAutoStartStatusAsync();
+            Assert.Equal(StartupRegistrationState.Enabled, initialAutoStart.State);
+            Assert.Equal(StartupMode.ScheduledTask, initialAutoStart.EffectiveMode);
+
+            StartupOperationResult disabledAutoStart = await remote.SetAutoStartEnabledAsync(false);
+            Assert.Equal(StartupRegistrationState.NotRegistered, disabledAutoStart.State);
+            Assert.False(loop.AppActions.LastSetAutoStartEnabled);
+
+            StartupOperationResult reenabledAutoStart = await remote.SetAutoStartEnabledAsync(true);
+            Assert.Equal(StartupRegistrationState.Enabled, reenabledAutoStart.State);
+            Assert.True(loop.AppActions.LastSetAutoStartEnabled);
+
             await loop.Server.SendEventAsync(SettingsIpcMethods.AppDisplayTopologyChanged, null);
             await topologyChanged.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await loop.Server.SendEventAsync(SettingsIpcMethods.AppAutoStartStateChanged, null);
+            await autoStartChanged.Task.WaitAsync(TimeSpan.FromSeconds(5));
         }
         finally
         {
@@ -1373,9 +1489,9 @@ public sealed class SettingsIpcFacadeTests : IDisposable
 
         public string ManifestUrl => InstallerUrlResult;
 
-        public AppUpdateDeliveryKind DeliveryKind => AppUpdateDeliveryKind.DirectInstaller;
+        public AppUpdateDeliveryKind DeliveryKind { get; set; } = AppUpdateDeliveryKind.DirectInstaller;
 
-        public string? LastDownloadedInstallerPath => "C:\\downloads\\setup.exe";
+        public string? LastDownloadedInstallerPath { get; set; } = "C:\\downloads\\setup.exe";
 
         public bool IsDownloadInProgress => false;
 
@@ -1520,6 +1636,50 @@ public sealed class SettingsIpcFacadeTests : IDisposable
                     SettingsIpcJsonContext.Default.AppUpdateCheckResult));
             DeskBox.Models.AppUpdateCheckResult pushed = await checkCompleted.Task.WaitAsync(TimeSpan.FromSeconds(5));
             Assert.Equal("1.5.9", pushed.CurrentVersion);
+        }
+        finally
+        {
+            await loop.Client.DisposeAsync();
+            await loop.Server.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task UpdateService_InStoreMode_RoutesCheckDownloadAndStateToInProcessStoreServiceWithoutIpc()
+    {
+        var settings = new SettingsService(_tempRoot);
+        var loop = await StartLoopbackAsync(PipeName(), settings);
+        try
+        {
+            var inProcessStore = new FakeUpdateService
+            {
+                DeliveryKind = AppUpdateDeliveryKind.MicrosoftStore,
+                InstallerUrlResult = string.Empty,
+                LastDownloadedInstallerPath = null,
+                CheckResult = new DeskBox.Models.AppUpdateCheckResult(
+                    DeskBox.Models.AppUpdateCheckStatus.UpdateAvailable,
+                    "1.6.0",
+                    new DeskBox.Models.AppUpdateManifest
+                    {
+                        Version = "1.6.1",
+                        DownloadUrl = StoreAppUpdateService.StoreUpdateUri
+                    })
+            };
+            var remote = new RemoteAppUpdateService(loop.Client, inProcessStore);
+
+            Assert.Equal(AppUpdateDeliveryKind.MicrosoftStore, remote.DeliveryKind);
+            Assert.Equal("1.6.1", remote.LastCheckResult?.Manifest?.Version);
+
+            DeskBox.Models.AppUpdateCheckResult check = await remote.CheckForUpdatesAsync("1.6.0");
+            Assert.Equal("1.6.0", inProcessStore.CheckVersionArg);
+            Assert.Null(loop.UpdateService.CheckVersionArg);
+            Assert.True(check.IsUpdateAvailable);
+
+            var manifest = check.Manifest!;
+            DeskBox.Models.AppUpdateDownloadResult download = await remote.DownloadUpdateAsync(manifest);
+            Assert.True(download.Success);
+            Assert.Same(manifest, inProcessStore.DownloadManifestArg);
+            Assert.Null(loop.UpdateService.DownloadManifestArg);
         }
         finally
         {

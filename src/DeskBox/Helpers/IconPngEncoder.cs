@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Buffers.Binary;
 using System.IO.Compression;
 using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
 using DeskBox.Platform;
 
 namespace DeskBox.Helpers;
@@ -249,18 +250,46 @@ internal static class IconPngEncoder
 
         for (int y = 0; y < bitmap.Height; y++)
         {
-            int rowOffset = y * rowStride;
-            for (int x = 0; x < bitmap.Width; x++)
+            ReadOnlySpan<byte> rowSpan = pixels.Slice(y * rowStride, rowStride);
+            if (!HasAnyNonZeroAlpha(rowSpan))
             {
-                if (pixels[rowOffset + (x * 4) + 3] == 0)
-                {
-                    continue;
-                }
+                continue;
+            }
 
-                if (x < left) left = x;
-                if (x > right) right = x;
-                if (y < top) top = y;
-                if (y > bottom) bottom = y;
+            if (y < top)
+            {
+                top = y;
+            }
+
+            bottom = y;
+
+            int leftScanLimit = Math.Min(bitmap.Width, left);
+            for (int x = 0; x < leftScanLimit; x++)
+            {
+                if (rowSpan[(x * 4) + 3] != 0)
+                {
+                    left = x;
+                    if (x > right)
+                    {
+                        right = x;
+                    }
+
+                    break;
+                }
+            }
+
+            for (int x = bitmap.Width - 1; x > right; x--)
+            {
+                if (rowSpan[(x * 4) + 3] != 0)
+                {
+                    right = x;
+                    if (x < left)
+                    {
+                        left = x;
+                    }
+
+                    break;
+                }
             }
         }
 
@@ -294,20 +323,13 @@ internal static class IconPngEncoder
                 int srcStride = bitmap.Width * 4;
                 rentedScanline[0] = 0; // Filter type 0 (None)
 
+                int rowByteLength = cropWidth * 4;
                 for (int y = 0; y < cropHeight; y++)
                 {
                     int srcRowOffset = ((cropY + y) * srcStride) + (cropX * 4);
-                    int dstOffset = 1;
-                    for (int x = 0; x < cropWidth; x++)
-                    {
-                        int p = srcRowOffset + (x * 4);
-                        rentedScanline[dstOffset] = src[p + 2];     // R
-                        rentedScanline[dstOffset + 1] = src[p + 1]; // G
-                        rentedScanline[dstOffset + 2] = src[p];     // B
-                        rentedScanline[dstOffset + 3] = src[p + 3]; // A
-                        dstOffset += 4;
-                    }
-
+                    SwizzleBgraToRgba(
+                        src.Slice(srcRowOffset, rowByteLength),
+                        rentedScanline.AsSpan(1, rowByteLength));
                     zlib.Write(rentedScanline, 0, scanlineByteLength);
                 }
             }
@@ -413,12 +435,9 @@ internal static class IconPngEncoder
             byte filter = scanline[0];
             UnfilterRgbaScanline(filter, scanline.AsSpan(1, rowPixelsBytes), prevRow, currRow);
 
-            for (int x = 0; x < width; x++)
+            if (HasAnyNonZeroAlpha(currRow))
             {
-                if (currRow[(x * 4) + 3] != 0)
-                {
-                    return true;
-                }
+                return true;
             }
 
             (prevRow, currRow) = (currRow, prevRow);
@@ -461,11 +480,213 @@ internal static class IconPngEncoder
         return pb <= pc ? b : c;
     }
 
-    private static bool HasAnyNonZeroAlpha(ReadOnlySpan<byte> bgra)
+    internal static void SwizzleBgraToRgba(
+        ReadOnlySpan<byte> srcBgra,
+        Span<byte> dstRgba,
+        bool forceOpaqueAlpha = false)
     {
-        for (int i = 3; i < bgra.Length; i += 4)
+        int byteLength = Math.Min(srcBgra.Length, dstRgba.Length) & ~3;
+        if (byteLength <= 0)
         {
-            if (bgra[i] != 0)
+            return;
+        }
+
+        ReadOnlySpan<byte> src = srcBgra[..byteLength];
+        Span<byte> dst = dstRgba[..byteLength];
+
+        if (Vector128.IsHardwareAccelerated)
+        {
+            if (byteLength >= Vector128<byte>.Count)
+            {
+                Vector128<byte> shuffleIndices = Vector128.Create(
+                    (byte)2, 1, 0, 3,
+                    6, 5, 4, 7,
+                    10, 9, 8, 11,
+                    14, 13, 12, 15);
+                Vector128<byte> opaqueAlphaMask = forceOpaqueAlpha
+                    ? Vector128.Create(
+                        (byte)0, 0, 0, 255,
+                        0, 0, 0, 255,
+                        0, 0, 0, 255,
+                        0, 0, 0, 255)
+                    : Vector128<byte>.Zero;
+
+                int tailOffset = byteLength - Vector128<byte>.Count;
+                Vector128<byte> srcEnd = Vector128.Create<byte>(src[tailOffset..]);
+                ReadOnlySpan<byte> srcRem = src;
+                Span<byte> dstRem = dst;
+
+                while (srcRem.Length >= Vector128<byte>.Count)
+                {
+                    (Vector128.Shuffle(Vector128.Create<byte>(srcRem), shuffleIndices) | opaqueAlphaMask)
+                        .CopyTo(dstRem);
+                    srcRem = srcRem[Vector128<byte>.Count..];
+                    dstRem = dstRem[Vector128<byte>.Count..];
+                }
+
+                if (!srcRem.IsEmpty)
+                {
+                    (Vector128.Shuffle(srcEnd, shuffleIndices) | opaqueAlphaMask)
+                        .CopyTo(dst[tailOffset..]);
+                }
+
+                return;
+            }
+
+            SwizzleBgraToRgbaScalar(src, dst, forceOpaqueAlpha);
+            return;
+        }
+
+        SwizzleBgraToRgbaScalar(src, dst, forceOpaqueAlpha);
+    }
+
+    private static void SwizzleBgraToRgbaScalar(
+        ReadOnlySpan<byte> src,
+        Span<byte> dst,
+        bool forceOpaqueAlpha)
+    {
+        for (int i = 0; i < src.Length; i += 4)
+        {
+            byte b = src[i];
+            byte g = src[i + 1];
+            byte r = src[i + 2];
+            byte a = forceOpaqueAlpha ? (byte)255 : src[i + 3];
+            dst[i] = r;
+            dst[i + 1] = g;
+            dst[i + 2] = b;
+            dst[i + 3] = a;
+        }
+    }
+
+    internal static void InspectBgraAlphaAndColor(
+        ReadOnlySpan<byte> bgra,
+        out bool hasAnyAlpha,
+        out bool hasAnyColor)
+    {
+        hasAnyAlpha = false;
+        hasAnyColor = false;
+        int byteLength = bgra.Length & ~3;
+        if (byteLength <= 0)
+        {
+            return;
+        }
+
+        ReadOnlySpan<byte> aligned = bgra[..byteLength];
+        if (Vector128.IsHardwareAccelerated)
+        {
+            if (byteLength >= Vector128<byte>.Count)
+            {
+                Vector128<byte> alphaMask = Vector128.Create(
+                    (byte)0, 0, 0, 255,
+                    0, 0, 0, 255,
+                    0, 0, 0, 255,
+                    0, 0, 0, 255);
+                Vector128<byte> colorOr = Vector128<byte>.Zero;
+                ReadOnlySpan<byte> rem = aligned;
+
+                while (rem.Length >= Vector128<byte>.Count)
+                {
+                    Vector128<byte> v = Vector128.Create<byte>(rem);
+                    if ((v & alphaMask) != Vector128<byte>.Zero)
+                    {
+                        hasAnyAlpha = true;
+                        return;
+                    }
+
+                    colorOr |= v;
+                    rem = rem[Vector128<byte>.Count..];
+                }
+
+                if (!rem.IsEmpty)
+                {
+                    Vector128<byte> tail = Vector128.Create<byte>(aligned[(byteLength - Vector128<byte>.Count)..]);
+                    if ((tail & alphaMask) != Vector128<byte>.Zero)
+                    {
+                        hasAnyAlpha = true;
+                        return;
+                    }
+
+                    colorOr |= tail;
+                }
+
+                hasAnyColor = colorOr != Vector128<byte>.Zero;
+                return;
+            }
+
+            InspectBgraAlphaAndColorScalar(aligned, out hasAnyAlpha, out hasAnyColor);
+            return;
+        }
+
+        InspectBgraAlphaAndColorScalar(aligned, out hasAnyAlpha, out hasAnyColor);
+    }
+
+    private static void InspectBgraAlphaAndColorScalar(
+        ReadOnlySpan<byte> aligned,
+        out bool hasAnyAlpha,
+        out bool hasAnyColor)
+    {
+        hasAnyAlpha = false;
+        hasAnyColor = false;
+        for (int i = 0; i < aligned.Length; i += 4)
+        {
+            if (aligned[i + 3] != 0)
+            {
+                hasAnyAlpha = true;
+                return;
+            }
+
+            if ((aligned[i] | aligned[i + 1] | aligned[i + 2]) != 0)
+            {
+                hasAnyColor = true;
+            }
+        }
+    }
+
+    internal static bool HasAnyNonZeroAlpha(ReadOnlySpan<byte> bgra)
+    {
+        int byteLength = bgra.Length & ~3;
+        if (byteLength <= 0)
+        {
+            return false;
+        }
+
+        ReadOnlySpan<byte> aligned = bgra[..byteLength];
+        if (Vector128.IsHardwareAccelerated)
+        {
+            if (byteLength >= Vector128<byte>.Count)
+            {
+                Vector128<byte> alphaMask = Vector128.Create(
+                    (byte)0, 0, 0, 255,
+                    0, 0, 0, 255,
+                    0, 0, 0, 255,
+                    0, 0, 0, 255);
+                ReadOnlySpan<byte> rem = aligned;
+
+                while (rem.Length >= Vector128<byte>.Count)
+                {
+                    if ((Vector128.Create<byte>(rem) & alphaMask) != Vector128<byte>.Zero)
+                    {
+                        return true;
+                    }
+
+                    rem = rem[Vector128<byte>.Count..];
+                }
+
+                return !rem.IsEmpty &&
+                       (Vector128.Create<byte>(aligned[(byteLength - Vector128<byte>.Count)..]) & alphaMask) != Vector128<byte>.Zero;
+            }
+
+            return HasAnyNonZeroAlphaScalar(aligned);
+        }
+
+        return HasAnyNonZeroAlphaScalar(aligned);
+    }
+
+    private static bool HasAnyNonZeroAlphaScalar(ReadOnlySpan<byte> aligned)
+    {
+        for (int i = 3; i < aligned.Length; i += 4)
+        {
+            if (aligned[i] != 0)
             {
                 return true;
             }

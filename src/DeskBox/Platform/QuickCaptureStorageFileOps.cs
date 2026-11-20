@@ -51,4 +51,62 @@ internal static class QuickCaptureStorageFileOps
         File.Delete(fullFile);
         return true;
     }
+
+    public static void TryCleanupTempPasteFiles(string tempRootDirectory, IEnumerable<string> paths)
+    {
+        string tempRoot;
+        try
+        {
+            tempRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(tempRootDirectory))
+                + Path.DirectorySeparatorChar;
+        }
+        catch
+        {
+            return;
+        }
+
+        foreach (string rawPath in paths)
+        {
+            if (string.IsNullOrWhiteSpace(rawPath))
+            {
+                continue;
+            }
+
+            try
+            {
+                string fullPath = Path.GetFullPath(rawPath);
+                if (fullPath.StartsWith(tempRoot, StringComparison.OrdinalIgnoreCase) &&
+                    File.Exists(fullPath))
+                {
+                    File.Delete(fullPath);
+                }
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    public static void TryPruneStaleTempPasteFiles(string tempDir, DateTime cutoffUtc)
+    {
+        try
+        {
+            foreach (string file in Directory.EnumerateFiles(tempDir, "Screenshot_*.png", SearchOption.TopDirectoryOnly))
+            {
+                try
+                {
+                    if (File.GetLastWriteTimeUtc(file) < cutoffUtc)
+                    {
+                        File.Delete(file);
+                    }
+                }
+                catch
+                {
+                }
+            }
+        }
+        catch
+        {
+        }
+    }
 }

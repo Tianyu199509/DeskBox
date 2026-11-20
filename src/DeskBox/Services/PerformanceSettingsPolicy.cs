@@ -14,7 +14,8 @@ public readonly record struct EffectivePerformanceSettings(
     int VisibleIdleCacheCleanupDelaySeconds,
     int TransientWindowReleaseDelaySeconds,
     string CacheBudget,
-    string HiddenCacheCleanupScope)
+    string HiddenCacheCleanupScope,
+    bool KeepCapsuleContentWarm = false)
 {
     public bool AllowContinuousDecorativeAnimations =>
         AllowTextMarqueeAnimations ||
@@ -70,7 +71,7 @@ public static class PerformanceSettingsPolicy
     public const int DefaultTransientWindowReleaseDelaySeconds = CleanupAfter2Minutes;
     public const string DefaultCacheBudget = CacheBudgetSmall;
     public const string DefaultHiddenCacheCleanupScope =
-        HiddenCacheCleanupScopeWarm;
+        HiddenCacheCleanupScopeAllRecreatable;
     public const bool DefaultIdleWorkingSetTrimEnabled = true;
     public const bool DefaultImmediateHiddenWorkingSetTrimEnabled = true;
     public const bool DefaultQuiescenceWorkingSetTrimEnabled = true;
@@ -79,7 +80,7 @@ public static class PerformanceSettingsPolicy
     public const bool DefaultVinylRotationAnimationsEnabled = true;
     public const bool DefaultGlanceImageAutoRotationEnabled = true;
     public const bool DefaultCompactAmbientAnimationsEnabled = true;
-    public const bool DefaultKeepCapsuleContentWarm = true;
+    public const bool DefaultKeepCapsuleContentWarm = false;
 
     private static readonly EffectivePerformanceSettings s_resourceSaverPreset = new(
         ModeResourceSaver,
@@ -92,7 +93,8 @@ public static class PerformanceSettingsPolicy
         CleanupAfter5Minutes,
         CleanupAfter2Minutes,
         CacheBudgetSmall,
-        HiddenCacheCleanupScopeWarm);
+        HiddenCacheCleanupScopeAllRecreatable,
+        KeepCapsuleContentWarm: false);
 
     private static readonly EffectivePerformanceSettings s_balancedPreset = new(
         ModeBalanced,
@@ -105,7 +107,8 @@ public static class PerformanceSettingsPolicy
         CleanupAfter10Minutes,
         CleanupAfter10Minutes,
         CacheBudgetBalanced,
-        HiddenCacheCleanupScopeWarm);
+        HiddenCacheCleanupScopeWarm,
+        KeepCapsuleContentWarm: true);
 
     public static string NormalizeMode(string? mode) =>
         PerformanceOptionKinds.NormalizeMode(mode);
@@ -162,6 +165,17 @@ public static class PerformanceSettingsPolicy
                 ? delaySeconds
                 : DefaultTransientWindowReleaseDelaySeconds;
 
+    public static bool ResolveEffectiveKeepCapsuleContentWarm(AppSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        return NormalizeMode(settings.Performance.PerformanceMode) switch
+        {
+            ModeResourceSaver => false,
+            ModeCustom => settings.Performance.KeepCapsuleContentWarm,
+            _ => true
+        };
+    }
+
     public static EffectivePerformanceSettings Resolve(AppSettings settings)
     {
         ArgumentNullException.ThrowIfNull(settings);
@@ -209,6 +223,7 @@ public static class PerformanceSettingsPolicy
             settings.EnableGlanceImageAutoRotation;
         bool allowCompactAmbientAnimations =
             settings.EnableCompactAmbientAnimations;
+        bool keepCapsuleWarm = settings.Performance.KeepCapsuleContentWarm;
 
         if (!string.Equals(mode, ModeCustom, StringComparison.Ordinal))
         {
@@ -218,6 +233,7 @@ public static class PerformanceSettingsPolicy
             transientWindowDelay = preset.TransientWindowReleaseDelaySeconds;
             cacheBudget = preset.CacheBudget;
             hiddenCleanupScope = preset.HiddenCacheCleanupScope;
+            keepCapsuleWarm = preset.KeepCapsuleContentWarm;
         }
 
         bool changed = false;
@@ -243,6 +259,10 @@ public static class PerformanceSettingsPolicy
             settings.HiddenCacheCleanupScope,
             hiddenCleanupScope,
             value => settings.HiddenCacheCleanupScope = value);
+        changed |= SetIfChanged(
+            settings.Performance.KeepCapsuleContentWarm,
+            keepCapsuleWarm,
+            value => settings.Performance.KeepCapsuleContentWarm = value);
         changed |= SetIfChanged(
             settings.EnableTextMarqueeAnimations,
             allowTextMarqueeAnimations,
@@ -313,6 +333,7 @@ public static class PerformanceSettingsPolicy
             preset.TransientWindowReleaseDelaySeconds;
         settings.PerformanceCacheBudget = preset.CacheBudget;
         settings.HiddenCacheCleanupScope = preset.HiddenCacheCleanupScope;
+        settings.Performance.KeepCapsuleContentWarm = preset.KeepCapsuleContentWarm;
         settings.EnableContinuousDecorativeAnimations =
             settings.EnableTextMarqueeAnimations &&
             settings.EnableVinylRotationAnimations &&
@@ -351,7 +372,8 @@ public static class PerformanceSettingsPolicy
                 settings.TransientWindowReleaseDelaySeconds),
             cacheBudget,
             NormalizeHiddenCacheCleanupScope(
-                settings.HiddenCacheCleanupScope));
+                settings.HiddenCacheCleanupScope),
+            settings.Performance.KeepCapsuleContentWarm);
     }
 
     private static bool SetIfChanged<T>(

@@ -385,6 +385,14 @@ public sealed partial class FileItemSurface : UserControl, INotifyPropertyChange
     {
         if (Mode == FileItemSurfaceMode.List)
         {
+            if (_iconLayout is not null)
+            {
+                DetachLayoutSubtree(_iconLayout);
+                _iconLayout = null;
+                _iconItemNameText = null;
+                _iconIconHost = null;
+            }
+
             if (_listLayout is null)
             {
                 (_listLayout, _listItemNameText, _listIconHost, _listTextHost) =
@@ -395,12 +403,30 @@ public sealed partial class FileItemSurface : UserControl, INotifyPropertyChange
                         "ListItemTextHost");
             }
         }
-        else if (_iconLayout is null)
+        else
         {
-            (_iconLayout, _iconItemNameText, _iconIconHost, _) = CreateLayout(
-                "IconItemLayoutTemplate", "IconItemNameText", "IconItemIconHost",
-                null);
+            if (_listLayout is not null)
+            {
+                DetachLayoutSubtree(_listLayout);
+                _listLayout = null;
+                _listItemNameText = null;
+                _listIconHost = null;
+                _listTextHost = null;
+            }
+
+            if (_iconLayout is null)
+            {
+                (_iconLayout, _iconItemNameText, _iconIconHost, _) = CreateLayout(
+                    "IconItemLayoutTemplate", "IconItemNameText", "IconItemIconHost",
+                    null);
+            }
         }
+    }
+
+    private void DetachLayoutSubtree(FrameworkElement layout)
+    {
+        Microsoft.UI.Xaml.Markup.XamlBindingHelper.GetDataTemplateComponent(layout)?.Recycle();
+        LayoutHost.Children.Remove(layout);
     }
 
     private (FrameworkElement Layout, TextBlock NameText, FrameworkElement IconHost, FrameworkElement? TextHost) CreateLayout(

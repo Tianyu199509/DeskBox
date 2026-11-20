@@ -9,13 +9,10 @@ namespace DeskBox.Controls;
 
 public sealed partial class DesktopOrganizationTaskView : UserControl
 {
-    private DesktopOrganizationPlan? _plan;
-    private DesktopOrganizationPlan? _basePlan;
+    private readonly DesktopOrganizationPointerDragController _dragController = new();
+    private DesktopOrganizationWorkbenchSession? _session;
     private DesktopOrganizationPlan? _lastExecutionPlan;
-    private readonly HashSet<string> _excludedSourcePaths = new(StringComparer.OrdinalIgnoreCase);
     private bool _updatingSources;
-    private readonly HashSet<string> _optionalIncludedPaths =
-        new(StringComparer.OrdinalIgnoreCase);
     private readonly List<DesktopOrganizationRetainedItem> _runtimeRetainedItems = [];
     private CancellationTokenSource? _scanCts;
     private CancellationTokenSource? _executionCts;
@@ -25,8 +22,6 @@ public sealed partial class DesktopOrganizationTaskView : UserControl
     private bool _closeAfterExecutionStops;
     private bool _hasCompletedExecution;
     private bool _isScanning;
-    private DesktopOrganizationItemViewMode _itemViewMode = DesktopOrganizationItemViewMode.CompactGrid;
-    private readonly HashSet<string> _newPaths = new(StringComparer.OrdinalIgnoreCase);
     private DesktopOrganizationCoordinator? _coordinator;
     private bool? _pendingRecovery;
 
@@ -34,10 +29,10 @@ public sealed partial class DesktopOrganizationTaskView : UserControl
     {
         InitializeComponent();
         ApplyStaticLocalization();
-        UpdateViewModeToggleVisuals();
+        WirePointerDragController();
         Loaded += TaskView_Loaded;
         Unloaded += TaskView_Unloaded;
-        ActualThemeChanged += (_, _) => QueueAppearanceRefresh();
+        ActualThemeChanged += TaskView_ActualThemeChanged;
     }
 
     public event EventHandler? CloseRequested;
@@ -48,46 +43,17 @@ public sealed partial class DesktopOrganizationTaskView : UserControl
 
     public bool IsExecutionRunning => _isExecuting;
 
-    public bool HasActiveUserCustomizations
-    {
-        get
-        {
-            if (_hasCompletedExecution || _isScanning || _isExecuting || _plan is null)
-            {
-                return false;
-            }
+    private DesktopOrganizationWorkbenchSession Session =>
+        _session ??= new DesktopOrganizationWorkbenchSession(
+            (basePlan, optionalPaths) => Coordinator.CreatePreviewPlanWithOptionalItems(basePlan, optionalPaths),
+            () => Coordinator.GetActiveFileWidgetsById());
 
-            if (_excludedSourcePaths.Count > 0 || _optionalIncludedPaths.Count > 0 || HasBoxCustomizations)
-            {
-                return true;
-            }
-
-            foreach (DesktopOrganizationTargetPlan target in _plan.Targets)
-            {
-                if (!_targetSelections.TryGetValue(target.SourceBucketId, out var selection))
-                {
-                    continue;
-                }
-
-                if (!selection.IsSelected)
-                {
-                    return true;
-                }
-
-                var defaultMode = target.CreatesWidget
-                    ? DesktopOrganizationDestinationMode.Dynamic
-                    : DesktopOrganizationDestinationMode.ExistingWidget;
-                string? defaultWidgetId = target.CreatesWidget ? null : target.TargetWidgetId;
-                if (selection.DestinationMode != defaultMode ||
-                    !string.Equals(selection.ExistingWidgetId, defaultWidgetId, StringComparison.Ordinal))
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-    }
+    public bool HasActiveUserCustomizations =>
+        !_hasCompletedExecution &&
+        !_isScanning &&
+        !_isExecuting &&
+        _session?.EffectivePlan is not null &&
+        _session.HasActiveUserCustomizations;
 
     public void BeginScan()
     {
@@ -99,8 +65,29 @@ public sealed partial class DesktopOrganizationTaskView : UserControl
 
     public void CancelPendingWork()
     {
+        _dragController.CancelActiveDrag();
         _scanCts?.Cancel();
         _executionCts?.Cancel();
+    }
+
+    internal bool TryCancelActiveInteraction()
+    {
+        if (_dragController.CancelActiveDrag())
+        {
+            return true;
+        }
+
+        if (_session?.ClearTileSelection() == true)
+        {
+            foreach (var card in _targetCards)
+            {
+                card.RefreshSelectionVisuals();
+            }
+
+            return true;
+        }
+
+        return false;
     }
 
     public void CancelExecutionAndCloseWhenSafe()
@@ -121,22 +108,21 @@ public sealed partial class DesktopOrganizationTaskView : UserControl
 
     private async Task ScanAsync(bool preserveSelection = false)
     {
+        _dragController.CancelActiveDrag();
         _scanCts?.Cancel();
         _scanCts?.Dispose();
         var cts = new CancellationTokenSource();
         _scanCts = cts;
         int generation = ++_scanGeneration;
 
-        var previous = preserveSelection && !_hasCompletedExecution ? _basePlan : null;
-        bool includePersonal = _plan?.IncludePersonalDesktop ?? true;
-        bool includePublic = _plan?.IncludePublicDesktop ?? false;
-        double scrollOffset = previous is not null ? PreviewScrollViewer.VerticalOffset : 0;
-        if (previous is null) ResetPreviewState();
+        bool shouldPreserve = preserveSelection && !_hasCompletedExecution && Session.BasePlan is not null;
+        bool includePersonal = Session.EffectivePlan?.IncludePersonalDesktop ?? true;
+        bool includePublic = Session.EffectivePlan?.IncludePublicDesktop ?? false;
+        double scrollOffset = shouldPreserve ? PreviewScrollViewer.VerticalOffset : 0;
+        if (!shouldPreserve) ResetPreviewState();
         _isScanning = true;
         SourceSelectionHost.IsEnabled = false;
         PreviewContent.IsEnabled = false;
-        PreviewSections.IsEnabled = false;
-        ViewModeButton.IsEnabled = false;
         MoreButton.IsEnabled = false;
         PreviewContent.Opacity = 0.24;
         ScanBusyPanel.Visibility = Visibility.Visible;
@@ -151,26 +137,31 @@ public sealed partial class DesktopOrganizationTaskView : UserControl
             var coordinator = Coordinator;
             DesktopOrganizationPlan scanned = await coordinator.BuildPlanAsync(false, cts.Token);
             if (cts.IsCancellationRequested || generation != _scanGeneration) return;
-            DesktopOrganizationPreviewReconciliation? changes = previous is null ? null :
-                DesktopOrganizationPreviewReconciliation.Calculate(previous.SourceItems, scanned.SourceItems,
-                    _excludedSourcePaths, _optionalIncludedPaths, _newPaths);
-            DesktopOrganizationPlan plan = coordinator.CreatePreviewPlanWithOptionalItems(scanned,
-                changes?.OptionalPaths ?? _optionalIncludedPaths, includePersonal,
-                includePublic && !scanned.PublicDesktopUnavailable);
-            if (changes is not null)
+
+            bool effectiveIncludePublic = includePublic && !scanned.PublicDesktopUnavailable;
+            if (includePersonal != scanned.IncludePersonalDesktop ||
+                effectiveIncludePublic != scanned.IncludePublicDesktop)
             {
-                _excludedSourcePaths.Clear();
-                _excludedSourcePaths.UnionWith(changes.ExcludedPaths);
-                _optionalIncludedPaths.Clear();
-                _optionalIncludedPaths.UnionWith(changes.OptionalPaths);
-                _newPaths.Clear();
-                _newPaths.UnionWith(changes.NewPaths);
-                ShowSelectionFeedback(Format("DesktopOrganization.Layout.RefreshChanges", changes.AddedCount,
-                    changes.RemovedCount), showPendingLink: false);
+                scanned = coordinator.CreatePreviewPlanWithOptionalItems(
+                    scanned,
+                    Array.Empty<string>(),
+                    includePersonal,
+                    effectiveIncludePublic);
             }
-            _basePlan = scanned;
-            _plan = plan;
-            RenderPlan(plan);
+
+            if (shouldPreserve)
+            {
+                DesktopOrganizationPreviewReconciliation changes = Session.ApplyRescanPlan(scanned);
+                ShowSelectionFeedback(
+                    Format("DesktopOrganization.Layout.RefreshChanges", changes.AddedCount, changes.RemovedCount),
+                    showPendingLink: false);
+            }
+            else
+            {
+                Session.SetInitialPlan(scanned);
+            }
+
+            RenderSessionPlan();
             DispatcherQueue.TryEnqueue(() =>
             {
                 if (generation == _scanGeneration && IsLoaded)
@@ -203,7 +194,7 @@ public sealed partial class DesktopOrganizationTaskView : UserControl
             if (generation != _scanGeneration) return;
             ResultInfo.Severity = InfoBarSeverity.Error;
             ResultInfo.Title = T("DesktopOrganization.Layout.ScanFailed");
-            ResultInfo.Message = T(previous is null ? "DesktopOrganization.Result.FailedBody" : "DesktopOrganization.Layout.ScanPreserved");
+            ResultInfo.Message = T(!shouldPreserve ? "DesktopOrganization.Result.FailedBody" : "DesktopOrganization.Layout.ScanPreserved");
             ResultInfo.IsOpen = true;
         }
         finally
@@ -213,8 +204,6 @@ public sealed partial class DesktopOrganizationTaskView : UserControl
                 _isScanning = false;
                 PreviewContent.Opacity = 1;
                 PreviewContent.IsEnabled = true;
-                PreviewSections.IsEnabled = true;
-                ViewModeButton.IsEnabled = true;
                 MoreButton.IsEnabled = true;
                 ScanBusyPanel.Visibility = Visibility.Collapsed;
                 RefreshButton.IsEnabled = true;
@@ -222,34 +211,29 @@ public sealed partial class DesktopOrganizationTaskView : UserControl
                 SourceSelectionHost.IsEnabled = true;
                 UndoButton.IsEnabled = true;
                 CompletedUndoButton.IsEnabled = true;
-                UpdateSummary(_plan);
+                UpdateSummary();
             }
         }
     }
 
     private void ResetPreviewState()
     {
-        _plan = _basePlan = _lastExecutionPlan = null;
+        _dragController.CancelActiveDrag();
+        _session?.SetInitialPlan(null);
+        _lastExecutionPlan = null;
+        _pendingEmptyCustomBoxRenameId = null;
         ReleasePreviewCards();
         ReleaseRetainedCards();
         ReleaseCompletedCards();
-        _retainedSelection.Clear();
         _completedItems.Clear();
         _restoredItems.Clear();
-        PreviewSections.SelectedItem = SummaryTitle;
         CompletedItemsPanel.Children.Clear();
         CompletedViewPanel.Visibility = Visibility.Collapsed;
-        RetainedItemsPanel.Visibility = Visibility.Collapsed;
         TargetSelectionHost.Visibility = Visibility.Visible;
         PreviewScrollViewer.ChangeView(null, 0, null, disableAnimation: true);
-        _excludedSourcePaths.Clear();
-        _newPaths.Clear();
-        _targetSelections.Clear();
-        ClearBoxCustomizations();
         SourceSelectionHost.IsEnabled = false;
         TargetSelectionHost.IsEnabled = true;
         RetryPublicButton.Visibility = Visibility.Collapsed;
-        _optionalIncludedPaths.Clear();
         _runtimeRetainedItems.Clear();
         _hasCompletedExecution = false;
         _lastHistoryId = null;
@@ -268,7 +252,7 @@ public sealed partial class DesktopOrganizationTaskView : UserControl
         ExecutionProgressBar.Value = 0;
         ExecutionProgressText.Text = string.Empty;
         string normalizedRoot = SettingsService.NormalizeManagedStorageRootPath(
-            App.Current.SettingsService.Settings.DefaultManagedStorageRootPath);
+            App.Current.SettingsService.Settings.FileWidget.DefaultManagedStorageRootPath);
         UpdateStorageLocationDisplay(normalizedRoot);
     }
 
@@ -333,18 +317,6 @@ public sealed partial class DesktopOrganizationTaskView : UserControl
         }
     }
 
-    private void UpdateViewModeToggleVisuals()
-    {
-        bool isTiles = _itemViewMode == DesktopOrganizationItemViewMode.Tiles;
-        // Show the icon/tooltip of the mode that clicking will switch into, or describe current view clearly.
-        ViewModeIcon.Glyph = isTiles ? "\uF0E2" : "\uE8FD";
-        string label = T(isTiles
-            ? "DesktopOrganization.Layout.ViewGrid"
-            : "DesktopOrganization.Layout.ViewTiles");
-        ToolTipService.SetToolTip(ViewModeButton, label);
-        AutomationProperties.SetName(ViewModeButton, label);
-    }
-
     private static DesktopOrganizationCoordinator CreateCoordinator()
     {
         App app = App.Current;
@@ -377,8 +349,6 @@ public sealed partial class DesktopOrganizationTaskView : UserControl
 
     private void ApplyStaticLocalization()
     {
-        PageHeaderTitleText.Text = T("DesktopOrganization.Window.Title");
-        PageHeaderSubtitleText.Text = T("DesktopOrganization.Layout.HeaderSubtitle");
         StoragePillPrefixText.Text = T("DesktopOrganization.Layout.StoragePillPrefix");
         PathTitleText.Text = T("DesktopOrganization.Path.Title");
         StorageSectionTitleText.Text = T("DesktopOrganization.Path.SectionTitle");

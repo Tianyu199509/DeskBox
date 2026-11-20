@@ -73,21 +73,43 @@ public sealed class LocalizationService
     /// Returns a 2-letter language code ("en", "zh", "ja", "de", "pt", "hi", "es", "fr", "ar", "bn", "ru", "ko")
     /// suitable for passing to weather and location APIs.
     /// </summary>
-    public string ApiLanguageCode => CurrentCultureName switch
+    public string ApiLanguageCode => ResolveApiLanguageCode(CurrentCultureName);
+
+    public static string ResolveApiLanguageCode(string? cultureName) =>
+        NormalizeCultureCode(cultureName) switch
+        {
+            LanguageChinese or LanguageChineseTraditional => "zh",
+            LanguageJapanese => "ja",
+            LanguageGerman => "de",
+            LanguagePortuguese => "pt",
+            LanguageHindi => "hi",
+            LanguageSpanish => "es",
+            LanguageFrench => "fr",
+            LanguageArabic => "ar",
+            LanguageBengali => "bn",
+            LanguageRussian => "ru",
+            LanguageKorean => "ko",
+            _ => "en"
+        };
+
+    public static CultureInfo EnsureGregorianCalendar(CultureInfo culture)
     {
-        LanguageChinese or LanguageChineseTraditional => "zh",
-        LanguageJapanese => "ja",
-        LanguageGerman => "de",
-        LanguagePortuguese => "pt",
-        LanguageHindi => "hi",
-        LanguageSpanish => "es",
-        LanguageFrench => "fr",
-        LanguageArabic => "ar",
-        LanguageBengali => "bn",
-        LanguageRussian => "ru",
-        LanguageKorean => "ko",
-        _ => "en"
-    };
+        ArgumentNullException.ThrowIfNull(culture);
+        if (culture.DateTimeFormat.Calendar is GregorianCalendar)
+        {
+            return culture;
+        }
+
+        var clone = (CultureInfo)culture.Clone();
+        GregorianCalendar? optionalGregorian = clone.OptionalCalendars
+            .OfType<GregorianCalendar>()
+            .FirstOrDefault();
+        clone.DateTimeFormat.Calendar = optionalGregorian ?? new GregorianCalendar();
+        return clone;
+    }
+
+    public static CultureInfo GetGregorianCulture(string? cultureName) =>
+        EnsureGregorianCalendar(CultureInfo.GetCultureInfo(NormalizeCultureCode(cultureName)));
 
     public static IReadOnlyList<string> SupportedLanguageCodes { get; } =
     [
@@ -212,11 +234,20 @@ public sealed class LocalizationService
 
     public static string ResolveAmbientCultureName() => ResolveDefaultLanguage();
 
+    public static string ResolveEffectiveCultureName(string? languageSetting)
+    {
+        string normalized = NormalizeLanguageSetting(languageSetting);
+        return normalized == LanguageSystem ? ResolveDefaultLanguage() : normalized;
+    }
+
     public static string ResolvePersistedOrAmbientCultureName()
     {
         try
         {
-            string settingsPath = Path.Combine(DeskBoxDataPathService.Current.RootPath, "settings.json");
+            string dataSettingsPath = Path.Combine(DeskBoxDataPathService.Current.DataDirectory, "settings.json");
+            string settingsPath = File.Exists(dataSettingsPath)
+                ? dataSettingsPath
+                : Path.Combine(DeskBoxDataPathService.Current.RootPath, "settings.json");
             if (File.Exists(settingsPath))
             {
                 using JsonDocument doc = JsonDocument.Parse(File.ReadAllBytes(settingsPath));
@@ -285,8 +316,18 @@ public sealed class LocalizationService
         return key;
     }
 
-    public static string FormatForCulture(string? cultureName, string key, params object[] args) =>
-        string.Format(CultureInfo.CurrentCulture, TranslateForCulture(cultureName, key), args);
+    public static string FormatForCulture(string? cultureName, string key, params object[] args)
+    {
+        string template = TranslateForCulture(cultureName, key);
+        try
+        {
+            return string.Format(GetGregorianCulture(cultureName), template, args);
+        }
+        catch (FormatException)
+        {
+            return template;
+        }
+    }
 
     public static string NormalizeCultureCode(string? cultureName)
     {

@@ -89,19 +89,104 @@ public sealed class FileTransferUndoIdentityPropertyTests : IDisposable
     }
 
     [Fact]
-    public void DeleteSourceTreeByManifest_PreservesDistinctCaseOnlySiblingEntriesInManifest()
+    public async Task FolderMergeMove_WithOverwrite_MarksCompletedMoveHistoryNonUndoable()
     {
-        string source = File.ReadAllText(TestPaths.FromRepository(
-            "src/DeskBox/Services/FileService.cs"));
+        string sourceRoot = Directory.CreateDirectory(Path.Combine(_tempRoot, "overwrite-source")).FullName;
+        string targetRoot = Directory.CreateDirectory(Path.Combine(_tempRoot, "overwrite-target")).FullName;
 
-        Assert.Contains(
-            "var exactManifest = new Dictionary<string, CopiedSourceFileRecord>(\n            StringComparer.Ordinal)",
-            source.Replace("\r\n", "\n"),
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "ambiguousCaseInsensitiveKeys",
-            source,
-            StringComparison.Ordinal);
+        string sourceFolder = Path.Combine(sourceRoot, "Project.v1");
+        string destFolder = Directory.CreateDirectory(Path.Combine(targetRoot, "Project.v1")).FullName;
+        string overwrittenLeaf = Path.Combine(destFolder, "config.json");
+        File.WriteAllText(overwrittenLeaf, "new-content");
+
+        var widget = new WidgetConfig
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Name = "Widget",
+            MappedFolderPath = targetRoot,
+            FollowsDefaultStoragePath = false
+        };
+
+        var preExistingSnapshots = new Dictionary<string, HashSet<string>?>(StringComparer.OrdinalIgnoreCase)
+        {
+            [sourceFolder] = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { overwrittenLeaf }
+        };
+
+        var results = new[]
+        {
+            new FileService.FileTransferResult(sourceFolder, destFolder)
+            {
+                MergedLeafResults =
+                [
+                    new FileService.FileTransferResult(
+                        Path.Combine(sourceFolder, "config.json"),
+                        overwrittenLeaf)
+                    {
+                        HadOverwrite = true
+                    }
+                ],
+                HadOverwrite = true
+            }
+        };
+
+        OrganizationHistoryEntry? entry = await _organizerService.RecordCompletedMoveHistoryAsync(
+            widget,
+            "Widget",
+            results,
+            preExistingSnapshots);
+
+        Assert.NotNull(entry);
+        Assert.False(entry!.CanUndo);
+        Assert.False(await _organizerService.UndoLatestAsync());
+        Assert.True(File.Exists(overwrittenLeaf));
+        Assert.Equal("new-content", File.ReadAllText(overwrittenLeaf));
+    }
+
+    [Fact]
+    public async Task FolderMergeMove_UnrelatedFilesAddedToRecreatedSourceFolder_SurviveUndo()
+    {
+        string sourceRoot = Directory.CreateDirectory(Path.Combine(_tempRoot, "recreated-src")).FullName;
+        string targetRoot = Directory.CreateDirectory(Path.Combine(_tempRoot, "recreated-dst")).FullName;
+
+        string sourceFolder = Directory.CreateDirectory(Path.Combine(sourceRoot, "Archive.2026")).FullName;
+        string movedLeaf = Path.Combine(sourceFolder, "alpha.txt");
+        File.WriteAllText(movedLeaf, "alpha-payload");
+
+        string targetFolder = Directory.CreateDirectory(Path.Combine(targetRoot, "Archive.2026")).FullName;
+        string preExistingTarget = Path.Combine(targetFolder, "keep.txt");
+        File.WriteAllText(preExistingTarget, "keep-payload");
+
+        var widget = new WidgetConfig
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Name = "Widget",
+            MappedFolderPath = targetRoot,
+            FollowsDefaultStoragePath = false
+        };
+
+        OrganizerOperationResult operation = await _organizerService.OrganizeDropAsync(
+            widget,
+            "Widget",
+            [sourceFolder],
+            move: true);
+
+        Assert.True(operation.History.CanUndo);
+        Assert.False(Directory.Exists(sourceFolder));
+
+        // User creates a brand-new sibling file inside a recreated source directory before pressing Undo.
+        Directory.CreateDirectory(sourceFolder);
+        string newSibling = Path.Combine(sourceFolder, "sibling.txt");
+        File.WriteAllText(newSibling, "user-created-after-move");
+
+        await _organizerService.UndoAsync(operation.History.Id);
+
+        Assert.True(operation.History.IsUndone);
+        Assert.True(File.Exists(movedLeaf));
+        Assert.Equal("alpha-payload", File.ReadAllText(movedLeaf));
+        Assert.True(File.Exists(newSibling));
+        Assert.Equal("user-created-after-move", File.ReadAllText(newSibling));
+        Assert.True(File.Exists(preExistingTarget));
+        Assert.Equal("keep-payload", File.ReadAllText(preExistingTarget));
     }
 
     public void Dispose()

@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [Parameter(Mandatory)]
     [string]$MsixPath,
@@ -243,9 +243,23 @@ Copy-Item -LiteralPath $manifestPath -Destination (Join-Path $OutputDirectory "A
 [xml]$manifest = Get-Content -LiteralPath $manifestPath -Raw
 $namespaceManager = [System.Xml.XmlNamespaceManager]::new($manifest.NameTable)
 $namespaceManager.AddNamespace("f", $manifest.DocumentElement.NamespaceURI)
+$namespaceManager.AddNamespace("uap", "http://schemas.microsoft.com/appx/manifest/uap/windows10")
 $namespaceManager.AddNamespace("uap5", "http://schemas.microsoft.com/appx/manifest/uap/windows10/5")
+$namespaceManager.AddNamespace("rescap", "http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities")
 $executionAlias = $manifest.SelectSingleNode(
     "/f:Package/f:Applications/f:Application/f:Extensions/uap5:Extension[@Category='windows.appExecutionAlias']/uap5:AppExecutionAlias/uap5:ExecutionAlias[@Alias='deskbox.exe']",
+    $namespaceManager)
+$protocolExtension = $manifest.SelectSingleNode(
+    "/f:Package/f:Applications/f:Application/f:Extensions/uap:Extension[@Category='windows.protocol']/uap:Protocol[@Name='deskbox']",
+    $namespaceManager)
+$fileTypeExtension = $manifest.SelectSingleNode(
+    "/f:Package/f:Applications/f:Application/f:Extensions/uap:Extension[@Category='windows.fileTypeAssociation']/uap:FileTypeAssociation/uap:SupportedFileTypes/uap:FileType[text()='.dbxwidget']",
+    $namespaceManager)
+$fullTrustCapability = $manifest.SelectSingleNode(
+    "/f:Package/f:Capabilities/rescap:Capability[@Name='runFullTrust']",
+    $namespaceManager)
+$internetCapability = $manifest.SelectSingleNode(
+    "/f:Package/f:Capabilities/f:Capability[@Name='internetClient']",
     $namespaceManager)
 $identity = $manifest.SelectSingleNode("/f:Package/f:Identity", $namespaceManager)
 $application = $manifest.SelectSingleNode("/f:Package/f:Applications/f:Application", $namespaceManager)
@@ -279,8 +293,17 @@ if ($null -eq $application -or $application.Executable -ne "DeskBox.exe") {
 if ($null -eq $executionAlias) {
     Add-AuditFailure "The package application does not declare the 'deskbox.exe' uap5:ExecutionAlias."
 }
+if ($null -eq $protocolExtension) {
+    Add-AuditFailure "The package application does not declare the 'deskbox' uap:Protocol."
+}
+if ($null -eq $fileTypeExtension) {
+    Add-AuditFailure "The package application does not declare the '.dbxwidget' uap:FileTypeAssociation."
+}
+if ($null -eq $fullTrustCapability -or $null -eq $internetCapability) {
+    Add-AuditFailure "The package manifest is missing required runFullTrust or internetClient capabilities."
+}
 if ($null -eq $frameworkDependency -or
-    [version]$frameworkDependency.MinVersion -lt [version]"2.6.5.0") {
+    [version]$frameworkDependency.MinVersion -lt [version]"2.7.0.0") {
     Add-AuditFailure "The Microsoft.WindowsAppRuntime.2 framework dependency is missing or too old."
 }
 
@@ -307,7 +330,21 @@ $requiredFiles = @(
     "Strings/pt-BR.json",
     "Strings/ru-RU.json",
     "Strings/zh-CN.json",
-    "Strings/zh-TW.json"
+    "Strings/zh-TW.json",
+    "Assets/CustomWidgets/Templates/agent-hud/manifest.json",
+    "Assets/CustomWidgets/Templates/ai-inbox/manifest.json",
+    "Assets/CustomWidgets/Templates/ai-pulse/manifest.json",
+    "Assets/CustomWidgets/Templates/countdown/manifest.json",
+    "Assets/CustomWidgets/Templates/dev-toolbox/manifest.json",
+    "Assets/CustomWidgets/Templates/focus-dial/manifest.json",
+    "Assets/CustomWidgets/Templates/hydration/manifest.json",
+    "Assets/CustomWidgets/Templates/news-rss/manifest.json",
+    "Assets/CustomWidgets/Templates/pomodoro/manifest.json",
+    "Assets/CustomWidgets/Templates/snippet-grid/manifest.json",
+    "Assets/CustomWidgets/Templates/sys-pulse/manifest.json",
+    "Assets/CustomWidgets/Templates/todo-agenda/manifest.json",
+    "Assets/CustomWidgets/Templates/weather-desk/manifest.json",
+    "Assets/CustomWidgets/Templates/world-clock/manifest.json"
 )
 $missingRequiredFiles = @($requiredFiles | Where-Object { $fileEntries -notcontains $_ })
 foreach ($missingFile in $missingRequiredFiles) {
@@ -375,6 +412,10 @@ if (Test-Path -LiteralPath $thumbnailProxyPath -PathType Leaf) {
     }
     if ($thumbnailProxyPe.HasClrHeader) {
         Add-AuditFailure "DeskBox.ThumbnailProxy.exe unexpectedly contains a CLR header."
+    }
+    $thumbnailProxyText = [System.Text.Encoding]::ASCII.GetString([System.IO.File]::ReadAllBytes($thumbnailProxyPath))
+    if (-not $thumbnailProxyText.Contains("PerMonitorV2") -or -not $thumbnailProxyText.Contains("DeskBox.ThumbnailProxy.app")) {
+        Add-AuditFailure "DeskBox.ThumbnailProxy.exe is missing its embedded PerMonitorV2 application manifest."
     }
 }
 

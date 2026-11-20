@@ -33,7 +33,7 @@ public sealed class QuickCaptureStore
                 "quick-capture"),
             DeskBoxDataPathService.Current.IsDevelopmentRoot
                 ? null
-                : Path.Combine(Path.GetTempPath(), "DeskBox", "QuickCaptureExports"))
+                : Path.Combine(DeskBox.Platform.DropStagingFileOps.GetStagingRootDirectory(), "QuickCaptureExports"))
     {
     }
 

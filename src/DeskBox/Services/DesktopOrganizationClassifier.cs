@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Text.RegularExpressions;
 using DeskBox.Models;
 
@@ -5,10 +6,10 @@ namespace DeskBox.Services;
 
 public sealed partial class DesktopOrganizationClassifier
 {
-    private static readonly HashSet<string> ShortcutExtensions =
+    private static readonly FrozenSet<string> ShortcutExtensions =
         CreateSet(".lnk", ".url", ".appref-ms");
 
-    private static readonly HashSet<string> DesignExtensions =
+    private static readonly FrozenSet<string> DesignExtensions =
         CreateSet(
             ".rp", ".rplib",
             ".xmind", ".mmap", ".emmx", ".pos",
@@ -18,28 +19,28 @@ public sealed partial class DesktopOrganizationClassifier
             ".dwg", ".dxf",
             ".blend", ".fbx", ".obj", ".stl", ".3ds", ".step", ".stp", ".iges", ".igs");
 
-    private static readonly HashSet<string> ImageExtensions =
+    private static readonly FrozenSet<string> ImageExtensions =
         CreateSet(
             ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".svg",
             ".heic", ".heif", ".tif", ".tiff", ".raw", ".avif", ".jxl",
             ".ico", ".icns", ".cr2", ".cr3", ".nef", ".arw", ".dng", ".orf", ".rw2");
 
-    private static readonly HashSet<string> AudioExtensions =
+    private static readonly FrozenSet<string> AudioExtensions =
         CreateSet(".mp3", ".wav", ".flac", ".aac", ".m4a", ".ogg", ".opus", ".wma", ".ape", ".alac", ".aiff");
 
-    private static readonly HashSet<string> VideoExtensions =
+    private static readonly FrozenSet<string> VideoExtensions =
         CreateSet(".mp4", ".mkv", ".mov", ".avi", ".wmv", ".webm", ".m4v", ".flv", ".ts", ".mts", ".m2ts", ".mpg", ".mpeg", ".3gp");
 
-    private static readonly HashSet<string> PackageExtensions =
+    private static readonly FrozenSet<string> PackageExtensions =
         CreateSet(
             ".zip", ".7z", ".rar", ".tar", ".gz", ".tgz", ".bz2", ".xz", ".zst", ".cab",
             ".iso", ".img", ".exe", ".msi", ".msix", ".appx", ".appxbundle", ".msixbundle");
 
-    private static readonly HashSet<string> ExtraDocumentExtensions =
+    private static readonly FrozenSet<string> ExtraDocumentExtensions =
         CreateSet(".epub", ".mobi", ".azw3", ".chm", ".one");
 
-    private static readonly Dictionary<string, string> DocumentSubtypeByExtension =
-        new(StringComparer.OrdinalIgnoreCase)
+    private static readonly FrozenDictionary<string, string> DocumentSubtypeByExtension =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             [".pdf"] = DesktopOrganizationSubtypeIds.Pdf,
             [".ofd"] = DesktopOrganizationSubtypeIds.Pdf,
@@ -81,7 +82,7 @@ public sealed partial class DesktopOrganizationClassifier
             [".cfg"] = DesktopOrganizationSubtypeIds.Text,
             [".conf"] = DesktopOrganizationSubtypeIds.Text,
             [".sql"] = DesktopOrganizationSubtypeIds.Text
-        };
+        }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 
     private static readonly string[] InstallerExecutableKeywords =
     [
@@ -218,8 +219,8 @@ public sealed partial class DesktopOrganizationClassifier
         return (trimmed.StartsWith('.') ? trimmed : $".{trimmed}").ToLowerInvariant();
     }
 
-    private static HashSet<string> CreateSet(params string[] extensions) =>
-        new(extensions, StringComparer.OrdinalIgnoreCase);
+    private static FrozenSet<string> CreateSet(params ReadOnlySpan<string> extensions) =>
+        FrozenSet.Create(StringComparer.OrdinalIgnoreCase, extensions);
 }
 
 public sealed record DesktopOrganizationClassification(

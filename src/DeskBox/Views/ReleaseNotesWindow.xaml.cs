@@ -62,7 +62,6 @@ public sealed partial class ReleaseNotesWindow : Window
         _releaseNotesService = new ReleaseNotesService();
 
         InitializeComponent();
-        WindowsCompatibilityService.ApplySafeBackdrop(this);
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
 
@@ -545,7 +544,7 @@ public sealed partial class ReleaseNotesWindow : Window
 
         if (AppUpdateManifest.IsSafeReleaseNotesUrl(manifest.ReleaseNotesUrl))
         {
-            Win32Helper.OpenFile(manifest.ReleaseNotesUrl);
+            Services.ShellLaunchService.FireAndForgetOpenPath(manifest.ReleaseNotesUrl);
         }
     }
 
@@ -584,19 +583,9 @@ public sealed partial class ReleaseNotesWindow : Window
 
     private void ApplyTitleBarColors()
     {
-        bool isDark = RootGrid.ActualTheme switch
-        {
-            ElementTheme.Dark => true,
-            ElementTheme.Light => false,
-            _ => Win32Helper.IsSystemDarkMode()
-        };
-        AppWindowTitleBar titleBar = _appWindow.TitleBar;
-        titleBar.ButtonBackgroundColor = Colors.Transparent;
-        titleBar.ButtonInactiveBackgroundColor = Colors.Transparent;
-        titleBar.ButtonForegroundColor = isDark ? Colors.White : Colors.Black;
-        titleBar.ButtonInactiveForegroundColor = isDark
-            ? Windows.UI.Color.FromArgb(0xA0, 0xFF, 0xFF, 0xFF)
-            : Windows.UI.Color.FromArgb(0xA0, 0x10, 0x10, 0x10);
+        bool isDark = NeutralInteractionBrush.IsDarkTheme(RootGrid);
+        Win32Helper.SetWindowTheme(_hWnd, isDark);
+        WindowShellState.TryApplyExtendedTitleBarButtonColors(_appWindow, isDark);
     }
 
     private void ResizeAndCenter(WindowId displayWindowId)
@@ -649,14 +638,16 @@ public sealed partial class ReleaseNotesWindow : Window
         UIntPtr subclassId,
         UIntPtr refData)
     {
-        if (message == WmGetMinMaxInfo)
+        if (message == WmGetMinMaxInfo && lParam != IntPtr.Zero)
         {
-            var minMaxInfo = Marshal.PtrToStructure<MinMaxInfo>(lParam);
-            double scale = Win32Helper.GetDpiScaleForWindow(_hWnd, RootGrid.XamlRoot);
-            minMaxInfo.MinTrackSize.X = Math.Max(minMaxInfo.MinTrackSize.X, ToPhysicalPixels(MinimumWidth, scale));
-            minMaxInfo.MinTrackSize.Y = Math.Max(minMaxInfo.MinTrackSize.Y, ToPhysicalPixels(MinimumHeight, scale));
-            Marshal.StructureToPtr(minMaxInfo, lParam, false);
-            return IntPtr.Zero;
+            return WindowShellState.ApplyMinTrackSizeWithWorkAreaClamp(
+                hWnd,
+                message,
+                wParam,
+                lParam,
+                Win32Helper.GetDpiScaleForWindow(_hWnd, RootGrid.XamlRoot),
+                MinimumWidth,
+                MinimumHeight);
         }
 
         if (message == WmNcDestroy)
@@ -676,6 +667,7 @@ public sealed partial class ReleaseNotesWindow : Window
 
         _isClosed = true;
         WindowsCompatibilityService.ReleaseTitleBarExtensions(this, _appWindow);
+        SystemBackdrop = null;
         _loadCts?.Cancel();
         _loadCts?.Dispose();
         _loadCts = null;
@@ -687,6 +679,8 @@ public sealed partial class ReleaseNotesWindow : Window
         AppTitleBar.ActualThemeChanged -= AppTitleBar_ActualThemeChanged;
         Closed -= ReleaseNotesWindow_Closed;
         RemoveMinimumSizeHook();
+        RootGrid.Children.Clear();
+        Content = null;
     }
 
     private Brush GetThemeBrush(string key)

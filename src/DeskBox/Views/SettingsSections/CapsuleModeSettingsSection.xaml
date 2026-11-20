@@ -13,17 +13,6 @@
                 <ResourceDictionary Source="ms-appx:///Styles/SettingsOverviewResources.xaml" />
             </ResourceDictionary.MergedDictionaries>
             <controls:SettingsBoolToVisibilityConverter x:Key="SettingsBoolToVisibilityConverter" />
-            <Style x:Key="InlineMetricSliderStyle" TargetType="Slider" BasedOn="{StaticResource DefaultSliderStyle}">
-                <Setter Property="Width" Value="200" />
-                <Setter Property="MinWidth" Value="160" />
-                <Setter Property="VerticalAlignment" Value="Center" />
-                <Setter Property="IsThumbToolTipEnabled" Value="False" />
-            </Style>
-            <Style x:Key="SliderSettingValueTextStyle" TargetType="TextBlock" BasedOn="{StaticResource SettingValueTextStyle}">
-                <Setter Property="MinWidth" Value="42" />
-                <Setter Property="TextAlignment" Value="Right" />
-                <Setter Property="VerticalAlignment" Value="Center" />
-            </Style>
         </ResourceDictionary>
     </UserControl.Resources>
 
@@ -37,6 +26,7 @@
             </toolkit:SettingsCard.HeaderIcon>
             <ComboBox svc:Localized.AutomationNameKey="Settings.CollapseBehavior.Title"
                 MinWidth="{StaticResource SettingsControlMinWidth}"
+                MaxWidth="{StaticResource SettingsControlMaxWidth}"
                 ItemsSource="{Binding AvailableCollapseBehaviorOptions}"
                 controls:SettingsComboBox.Value="{Binding CollapseBehavior, Mode=TwoWay}" />
         </toolkit:SettingsCard>
@@ -63,6 +53,7 @@
                     </Button>
                     <ComboBox svc:Localized.AutomationNameKey="Settings.Capsule.WidthMode.Title"
                         MinWidth="{StaticResource SettingsControlMinWidth}"
+                        MaxWidth="{StaticResource SettingsControlMaxWidth}"
                         ItemsSource="{Binding AvailableWidthModeOptions}"
                         controls:SettingsComboBox.Value="{Binding WidthMode, Mode=TwoWay}" />
                 </StackPanel>
@@ -75,6 +66,7 @@
                 svc:Localized.HeaderKey="Settings.Capsule.ExpansionDirection.Title">
                 <ComboBox svc:Localized.AutomationNameKey="Settings.Capsule.ExpansionDirection.Title"
                     MinWidth="{StaticResource SettingsControlMinWidth}"
+                    MaxWidth="{StaticResource SettingsControlMaxWidth}"
                     ItemsSource="{Binding AvailableExpansionDirectionOptions}"
                     controls:SettingsComboBox.Value="{Binding ExpansionDirection, Mode=TwoWay}" />
             </toolkit:SettingsCard>
@@ -86,6 +78,7 @@
                 svc:Localized.HeaderKey="Settings.CompactContent.Title">
                 <ComboBox svc:Localized.AutomationNameKey="Settings.CompactContent.Title"
                     MinWidth="{StaticResource SettingsControlMinWidth}"
+                    MaxWidth="{StaticResource SettingsControlMaxWidth}"
                     ItemsSource="{Binding AvailableContentModeOptions}"
                     controls:SettingsComboBox.Value="{Binding ContentMode, Mode=TwoWay}" />
             </toolkit:SettingsCard>
@@ -102,10 +95,11 @@
                 IsEnabled="{Binding IsCapsuleActive}"
                 svc:Localized.DescriptionKey="Settings.Capsule.Arrangement.Description"
                 svc:Localized.HeaderKey="Settings.Capsule.Arrangement.Title">
-                <toolkit:Segmented svc:Localized.AutomationNameKey="Settings.Capsule.Arrangement.Title"
-                    SelectionMode="Single"
-                    controls:SettingsSegmented.Options="{Binding AvailableArrangementOptions}"
-                    controls:SettingsSegmented.Value="{Binding ArrangementMode, Mode=TwoWay}" />
+                <ComboBox svc:Localized.AutomationNameKey="Settings.Capsule.Arrangement.Title"
+                    MinWidth="{StaticResource SettingsControlMinWidth}"
+                    MaxWidth="{StaticResource SettingsControlMaxWidth}"
+                    ItemsSource="{Binding AvailableArrangementOptions}"
+                    controls:SettingsComboBox.Value="{Binding ArrangementMode, Mode=TwoWay}" />
             </toolkit:SettingsCard>
 
             <toolkit:SettingsCard
@@ -116,6 +110,7 @@
                 svc:Localized.HeaderKey="Settings.Capsule.Placement.Title">
                 <ComboBox svc:Localized.AutomationNameKey="Settings.Capsule.Placement.Title"
                     MinWidth="{StaticResource SettingsControlMinWidth}"
+                    MaxWidth="{StaticResource SettingsControlMaxWidth}"
                     IsEnabled="{Binding IsBarEnabled}"
                     ItemsSource="{Binding AvailableBarPlacementOptions}"
                     controls:SettingsComboBox.Value="{Binding BarPlacement, Mode=TwoWay}" />
@@ -129,6 +124,7 @@
                 svc:Localized.HeaderKey="Settings.Capsule.Direction.Title">
                 <ComboBox svc:Localized.AutomationNameKey="Settings.Capsule.Direction.Title"
                     MinWidth="{StaticResource SettingsControlMinWidth}"
+                    MaxWidth="{StaticResource SettingsControlMaxWidth}"
                     ItemsSource="{Binding AvailableBarDirectionOptions}"
                     controls:SettingsComboBox.Value="{Binding BarDirection, Mode=TwoWay}" />
             </toolkit:SettingsCard>
@@ -159,6 +155,7 @@
                 svc:Localized.HeaderKey="Settings.Capsule.HoverResponse.Title">
                 <ComboBox svc:Localized.AutomationNameKey="Settings.Capsule.HoverResponse.Title"
                     MinWidth="{StaticResource SettingsControlMinWidth}"
+                    MaxWidth="{StaticResource SettingsControlMaxWidth}"
                     ItemsSource="{Binding AvailableHoverResponseOptions}"
                     controls:SettingsComboBox.Value="{Binding HoverResponse, Mode=TwoWay}" />
             </toolkit:SettingsCard>
@@ -192,6 +189,7 @@
                 svc:Localized.HeaderKey="Settings.Capsule.Animation.Title">
                 <ComboBox svc:Localized.AutomationNameKey="Settings.Capsule.Animation.Title"
                     MinWidth="{StaticResource SettingsControlMinWidth}"
+                    MaxWidth="{StaticResource SettingsControlMaxWidth}"
                     ItemsSource="{Binding AvailableAnimationEffectOptions}"
                     controls:SettingsComboBox.Value="{Binding AnimationEffect, Mode=TwoWay}" />
             </toolkit:SettingsCard>

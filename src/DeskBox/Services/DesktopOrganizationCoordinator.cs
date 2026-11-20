@@ -34,7 +34,8 @@ public sealed class DesktopOrganizationCoordinator
             fileService,
             widgetManager: widgetManager)
         {
-            AutoOrganizationSuppressions = organizerService.AutoOrganizationSuppressions
+            AutoOrganizationSuppressions = organizerService.AutoOrganizationSuppressions,
+            DesktopIconPositions = organizerService.DesktopIconPositions
         };
     }
 
@@ -70,12 +71,7 @@ public sealed class DesktopOrganizationCoordinator
         var selectionByBucket = selections
             .Where(selection => !string.IsNullOrWhiteSpace(selection.SourceBucketId))
             .ToDictionary(selection => selection.SourceBucketId, StringComparer.Ordinal);
-        var widgetsById = _settingsService.Settings.Widgets
-            .Where(widget =>
-                widget.WidgetKind == WidgetKind.File &&
-                !widget.IsDisabled &&
-                !string.IsNullOrWhiteSpace(widget.MappedFolderPath))
-            .ToDictionary(widget => widget.Id, StringComparer.Ordinal);
+        var widgetsById = GetActiveFileWidgetsById();
         var targetsByDestination = new Dictionary<string, DesktopOrganizationTargetPlan>(StringComparer.Ordinal);
         var retainedByChoice = new List<DesktopOrganizationFileSnapshot>();
 
@@ -190,18 +186,14 @@ public sealed class DesktopOrganizationCoordinator
             _settingsService.Settings.DesktopOrganizationRules,
             ResolveCategoryName,
             includePersonalDesktop ?? basePlan.IncludePersonalDesktop,
-            includePublicDesktop ?? basePlan.IncludePublicDesktop);
+            includePublicDesktop ?? basePlan.IncludePublicDesktop,
+            included);
         AssignNonOverlappingBounds(plan);
         return plan;
     }
 
-    public IReadOnlyList<DesktopOrganizationDestinationOption> GetDestinationOptions()
-    {
-        return _settingsService.Settings.Widgets
-            .Where(widget =>
-                widget.WidgetKind == WidgetKind.File &&
-                !widget.IsDisabled &&
-                !string.IsNullOrWhiteSpace(widget.MappedFolderPath))
+    public IReadOnlyList<DesktopOrganizationDestinationOption> GetDestinationOptions() =>
+        GetActiveFileWidgetsById().Values
             .OrderBy(widget => widget.Name, StringComparer.CurrentCultureIgnoreCase)
             .Select(widget => new DesktopOrganizationDestinationOption(
                 widget.Id,
@@ -209,7 +201,14 @@ public sealed class DesktopOrganizationCoordinator
                 Path.GetFullPath(widget.MappedFolderPath!),
                 IsDynamic: false))
             .ToList();
-    }
+
+    internal IReadOnlyDictionary<string, WidgetConfig> GetActiveFileWidgetsById() =>
+        _settingsService.Settings.WidgetLayout.Widgets
+            .Where(widget =>
+                widget.WidgetKind == WidgetKind.File &&
+                !widget.IsDisabled &&
+                !string.IsNullOrWhiteSpace(widget.MappedFolderPath))
+            .ToDictionary(widget => widget.Id, StringComparer.Ordinal);
 
     public async Task<DesktopOrganizationExecutionResult> ExecuteAsync(
         DesktopOrganizationPlan plan,

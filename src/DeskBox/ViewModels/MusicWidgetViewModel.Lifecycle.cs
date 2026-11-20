@@ -23,8 +23,15 @@ public sealed partial class MusicWidgetViewModel
             return;
         }
 
+        if (_isWindowVisible && !_isWindowRevealCompleted)
+        {
+            OnWindowRevealCompleted();
+            return;
+        }
+
         if (_isWindowRevealCompleted)
         {
+            _consecutiveEmptyIdleProbes = 0;
             UpdateProgressTimerState();
             UpdateLyricActiveLineAndScheduleTimer();
             _ = RefreshAsync();
@@ -45,6 +52,11 @@ public sealed partial class MusicWidgetViewModel
         if (_isDisposed)
         {
             return;
+        }
+
+        if (visible)
+        {
+            _consecutiveEmptyIdleProbes = 0;
         }
 
         bool visibilityChanged = _isWindowVisible != visible;

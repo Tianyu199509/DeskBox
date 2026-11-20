@@ -307,6 +307,22 @@ internal sealed class ElevatedItemDragGhostWindow : IDisposable
                 heightPx,
                 workArea);
             MoveAndShowNoLock(bounds);
+
+            double windowScale = Math.Max(
+                0.75,
+                Win32Helper.GetDpiScaleForWindow(_hWnd, xamlRoot: null));
+            if (Math.Abs(windowScale - scale) > 0.01)
+            {
+                int reconciledWidthPx = Math.Max(120, (int)Math.Ceiling(GhostWidthDip * windowScale));
+                int reconciledHeightPx = Math.Max(40, (int)Math.Ceiling(GhostHeightDip * windowScale));
+                RectInt32 reconciledBounds = ComputeGhostWindowBounds(
+                    cursorX,
+                    cursorY,
+                    reconciledWidthPx,
+                    reconciledHeightPx,
+                    workArea);
+                MoveAndShowNoLock(reconciledBounds);
+            }
         }
     }
 

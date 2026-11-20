@@ -82,4 +82,4 @@ public sealed record PerformancePresentationSettings(
     bool IdleWorkingSetTrimEnabled,
     bool ImmediateHiddenWorkingSetTrimEnabled,
     bool QuiescenceWorkingSetTrimEnabled,
-    bool KeepCapsuleContentWarm = true);
+    bool KeepCapsuleContentWarm = false);

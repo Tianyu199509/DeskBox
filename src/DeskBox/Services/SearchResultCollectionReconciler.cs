@@ -59,13 +59,43 @@ internal static class SearchResultCollectionReconciler
                     SearchResultRanker.GetIdentityKey(item),
                     out SearchResultItem? existing))
             {
-                // These values influence result ordering and the secondary columns.
-                // Preserve the resolved icon and other lazily loaded metadata on the
-                // stable instance instead of making every matching row start over.
-                existing.ModifiedAt = item.ModifiedAt;
-                existing.RelevanceScore = item.RelevanceScore;
-                existing.TypeDisplay = item.TypeDisplay;
-                merged.Add(existing);
+                if (HasSameDisplayPresentation(existing, item))
+                {
+                    // These values influence result ordering and the secondary columns.
+                    // Preserve the resolved icon and other lazily loaded metadata on the
+                    // stable instance instead of making every matching row start over.
+                    existing.ModifiedAt = item.ModifiedAt;
+                    existing.RelevanceScore = item.RelevanceScore;
+                    existing.TypeDisplay = item.TypeDisplay ?? existing.TypeDisplay;
+                    if (item.FileSize.HasValue)
+                    {
+                        existing.FileSize = item.FileSize;
+                    }
+
+                    if (!string.IsNullOrEmpty(item.SizeDisplay))
+                    {
+                        existing.SizeDisplay = item.SizeDisplay;
+                    }
+
+                    if (!string.IsNullOrEmpty(item.DateDisplay))
+                    {
+                        existing.DateDisplay = item.DateDisplay;
+                    }
+
+                    merged.Add(existing);
+                }
+                else
+                {
+                    item.Icon ??= existing.Icon;
+                    item.IconResolved |= existing.IconResolved;
+                    item.CreatedAt ??= existing.CreatedAt;
+                    item.FileSize ??= existing.FileSize;
+                    item.SizeDisplay ??= existing.SizeDisplay;
+                    item.DateDisplay ??= existing.DateDisplay;
+                    item.TypeDisplay ??= existing.TypeDisplay;
+                    item.RecommendationKey ??= existing.RecommendationKey;
+                    merged.Add(item);
+                }
             }
             else
             {
@@ -75,6 +105,17 @@ internal static class SearchResultCollectionReconciler
 
         return merged;
     }
+
+    private static bool HasSameDisplayPresentation(SearchResultItem existing, SearchResultItem incoming) =>
+        string.Equals(existing.Title, incoming.Title, StringComparison.Ordinal) &&
+        string.Equals(existing.Subtitle, incoming.Subtitle, StringComparison.Ordinal) &&
+        string.Equals(existing.Glyph, incoming.Glyph, StringComparison.Ordinal) &&
+        existing.TodoIsCompleted == incoming.TodoIsCompleted &&
+        string.Equals(existing.PreviewText, incoming.PreviewText, StringComparison.Ordinal) &&
+        string.Equals(existing.PreviewImagePath, incoming.PreviewImagePath, StringComparison.Ordinal) &&
+        string.Equals(existing.PreviewSourceApp, incoming.PreviewSourceApp, StringComparison.Ordinal) &&
+        existing.PreviewCharCount == incoming.PreviewCharCount &&
+        existing.PreviewLineCount == incoming.PreviewLineCount;
 
     /// <summary>
     /// Brings <paramref name="current"/> in line with <paramref name="target"/>

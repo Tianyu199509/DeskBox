@@ -1,6 +1,8 @@
+using System.Collections.Concurrent;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using System.Collections.Concurrent;
 using DeskBox.Models;
 
 namespace DeskBox.Services;
@@ -426,13 +428,54 @@ public sealed class GlanceWidgetStore
                new GlanceWidgetData();
     }
 
-    private static string GetSafeWidgetFileName(string widgetId)
+    internal static string GetSafeWidgetFileName(string widgetId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(widgetId);
-        char[] invalidCharacters = Path.GetInvalidFileNameChars();
-        return new string(widgetId.Trim()
-            .Select(character => invalidCharacters.Contains(character) ? '_' : character)
-            .ToArray());
+        const int MaxFileNameLength = 96;
+        string trimmed = widgetId.Trim();
+        var builder = new StringBuilder(Math.Min(trimmed.Length, MaxFileNameLength + 8));
+        foreach (char ch in trimmed)
+        {
+            builder.Append((char.IsAsciiLetterOrDigit(ch) || ch is '.' or '_' or '-') ? ch : '_');
+        }
+
+        string sanitized = builder.ToString().Trim('.', ' ');
+        if (sanitized.Length > MaxFileNameLength)
+        {
+            sanitized = sanitized[..MaxFileNameLength].Trim('.', ' ');
+        }
+
+        if (sanitized.Length == 0 ||
+            sanitized is "." or ".." ||
+            IsWindowsReservedDeviceFileName(sanitized))
+        {
+            return "invalid_" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(widgetId)))[..16];
+        }
+
+        return sanitized;
+    }
+
+    private static bool IsWindowsReservedDeviceFileName(string fileName)
+    {
+        int dotIndex = fileName.IndexOf('.');
+        ReadOnlySpan<char> stem = (dotIndex >= 0 ? fileName.AsSpan(0, dotIndex) : fileName.AsSpan()).Trim();
+        if (stem.Equals("CON", StringComparison.OrdinalIgnoreCase) ||
+            stem.Equals("PRN", StringComparison.OrdinalIgnoreCase) ||
+            stem.Equals("AUX", StringComparison.OrdinalIgnoreCase) ||
+            stem.Equals("NUL", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (stem.Length == 4 &&
+            (stem.StartsWith("COM", StringComparison.OrdinalIgnoreCase) ||
+             stem.StartsWith("LPT", StringComparison.OrdinalIgnoreCase)) &&
+            stem[3] is >= '0' and <= '9')
+        {
+            return true;
+        }
+
+        return false;
     }
 
     private static void TryDeleteFile(string path)

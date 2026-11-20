@@ -33,7 +33,7 @@ public sealed partial class PerformanceSettingsViewModel : ObservableObject
         PerformanceOptionKinds.CleanupAfter5Minutes;
     private string _selectedPerformanceCacheBudget = PerformanceOptionKinds.CacheBudgetSmall;
     private string _selectedHiddenCacheCleanupScope =
-        PerformanceOptionKinds.HiddenCacheCleanupScopeWarm;
+        PerformanceOptionKinds.HiddenCacheCleanupScopeAllRecreatable;
     private bool _enableTextMarqueeAnimations = true;
     private bool _enableVinylRotationAnimations = true;
     private bool _enableGlanceImageAutoRotation = true;
@@ -515,6 +515,7 @@ public sealed partial class PerformanceSettingsViewModel : ObservableObject
         }
 
         _settings.SetKeepCapsuleContentWarm(value);
+        SyncPresentation();
     }
 
     private void SetDecorativeAnimationOption(string option, ref bool backingField, bool value)

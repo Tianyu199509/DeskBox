@@ -414,13 +414,16 @@ public sealed class DesktopDoubleClickActivationService : IDisposable, IHookHeal
             generation = _lifecycleGeneration;
         }
 
-        if (nCode < 0 || wParam != (IntPtr)Win32Helper.WM_LBUTTONDOWN)
+        if (nCode < 0 || lParam == IntPtr.Zero || wParam != (IntPtr)Win32Helper.WM_LBUTTONDOWN)
         {
             return Win32Helper.CallNextHookEx(hookHandle, nCode, wParam, lParam);
         }
 
-        Win32Helper.MSLLHOOKSTRUCT data =
-            Marshal.PtrToStructure<Win32Helper.MSLLHOOKSTRUCT>(lParam);
+        Win32Helper.MSLLHOOKSTRUCT data;
+        unsafe
+        {
+            data = *(Win32Helper.MSLLHOOKSTRUCT*)lParam;
+        }
         long receivedCount = Interlocked.Increment(ref _mouseDownCount);
         // Do not blanket-reject LLMHF_INJECTED: precision touchpads,
         // accessibility tools and remote-control software may legitimately set it.

@@ -1,4 +1,5 @@
 using DeskBox.Models;
+using DeskBox.Services.DesktopOrganization;
 
 namespace DeskBox.Services;
 
@@ -12,6 +13,7 @@ public sealed class OrganizerService
     private readonly DesktopOrganizationRecoveryStore _sharedRecoveryStore;
     private readonly Func<string> _desktopPathProvider;
     private readonly DesktopAutoOrganizationSuppressionRegistry _autoOrganizationSuppressions;
+    private readonly DesktopIconPositionService? _desktopIconPositions;
 
     /// <summary>
     /// The widget's mapped folder (or the destination folder inside it) is
@@ -56,7 +58,8 @@ public sealed class OrganizerService
     public OrganizerService(
         SettingsService settingsService,
         FileService fileService,
-        Func<string>? desktopPathProvider = null)
+        Func<string>? desktopPathProvider = null,
+        DesktopIconPositionService? desktopIconPositions = null)
         : this(
             settingsService,
             fileService,
@@ -64,7 +67,9 @@ public sealed class OrganizerService
             new DesktopAutoOrganizationSuppressionRegistry(
                 ledgerPath: Path.Combine(
                     DeskBoxDataPathService.Current.DataDirectory,
-                    "desktop-organization-suppressions.json")))
+                    "desktop-organization-suppressions.json")),
+            recoveryJournalPath: null,
+            desktopIconPositions: desktopIconPositions)
     {
     }
 
@@ -73,12 +78,14 @@ public sealed class OrganizerService
         FileService fileService,
         Func<string>? desktopPathProvider,
         DesktopAutoOrganizationSuppressionRegistry autoOrganizationSuppressions,
-        string? recoveryJournalPath = null)
+        string? recoveryJournalPath = null,
+        DesktopIconPositionService? desktopIconPositions = null)
     {
         _settingsService = settingsService;
         _fileService = fileService;
         _desktopPathProvider = desktopPathProvider ?? GetDefaultDesktopPath;
         _autoOrganizationSuppressions = autoOrganizationSuppressions;
+        _desktopIconPositions = desktopIconPositions;
         // Read-only view of the desktop organization journal used to protect
         // a pending transaction's receipts from retention. The path is
         // injectable so tests never touch the real data directory.
@@ -87,6 +94,16 @@ public sealed class OrganizerService
 
     internal DesktopAutoOrganizationSuppressionRegistry AutoOrganizationSuppressions =>
         _autoOrganizationSuppressions;
+
+    internal DesktopIconPositionService? DesktopIconPositions =>
+        _desktopIconPositions;
+
+    /// <summary>
+    /// Exception.Data key carrying the partial-import history entry id out of
+    /// <see cref="OrganizeDropAsync"/> so undo receipts bind the exact batch
+    /// instead of the global latest (which can belong to another widget).
+    /// </summary>
+    internal const string PartialHistoryEntryIdDataKey = "DeskBox.OrganizerHistoryEntryId";
 
     public OrganizationHistoryEntry? GetLatestUndoableEntry()
     {
@@ -131,10 +148,12 @@ public sealed class OrganizerService
 
         Dictionary<string, HashSet<string>?> preExistingMergeSnapshots =
             new(StringComparer.OrdinalIgnoreCase);
+        DesktopIconCaptureSnapshot desktopIconCapture = DesktopIconCaptureSnapshot.Empty;
         try
         {
             IReadOnlyList<FileService.FileTransferPlan> plans = await Task.Run(
-                () => CreateTransferPlans(rootPath, normalizedSourcePaths),
+                () => CreateTransferPlans(rootPath, normalizedSourcePaths,
+                    useShellProgress ? FileService.FileTransferConflictPolicy.AskUser : FileService.FileTransferConflictPolicy.KeepBoth),
                 cancellationToken);
 
             if (plans.Count == 0)
@@ -156,6 +175,12 @@ public sealed class OrganizerService
                 preExistingMergeSnapshots = await Task.Run(
                     () => SnapshotPreExistingMergeDestinations(plans),
                     cancellationToken);
+                if (_desktopIconPositions is not null)
+                {
+                    desktopIconCapture = await _desktopIconPositions.CaptureBeforeMoveFromDesktopAsync(
+                        plans,
+                        cancellationToken);
+                }
             }
 
             var results = await _fileService.ExecuteTransferPlanAsync(
@@ -167,6 +192,13 @@ public sealed class OrganizerService
                 cancellationToken);
             if (move && results.Count > 0)
             {
+                if (_desktopIconPositions is not null)
+                {
+                    await _desktopIconPositions.CommitAfterMoveOffDesktopAsync(
+                        desktopIconCapture,
+                        results);
+                }
+
                 await RebaseMovedShortcutsOffThreadAsync(results);
             }
 
@@ -219,7 +251,8 @@ public sealed class OrganizerService
             return new OrganizerOperationResult
             {
                 History = historyEntry,
-                CompletedItems = completedItems
+                CompletedItems = completedItems,
+                SkippedItemCount = (results as FileService.FileTransferBatchResult)?.SkippedSourcePaths.Count ?? 0
             };
         }
         catch (Exception ex) when (
@@ -235,6 +268,13 @@ public sealed class OrganizerService
                         !Directory.Exists(result.SourcePath));
                 if (move)
                 {
+                    if (_desktopIconPositions is not null)
+                    {
+                        await _desktopIconPositions.CommitAfterMoveOffDesktopAsync(
+                            desktopIconCapture,
+                            completedResults);
+                    }
+
                     await RebaseMovedShortcutsOffThreadAsync(completedResults);
                 }
 
@@ -252,7 +292,7 @@ public sealed class OrganizerService
                 var partialReceipts = canUndoCompletedMove
                     ? await CaptureUndoReceiptsAsync(undoablePartialResults)
                     : UndoReceiptBatch.Empty;
-                await AddHistoryEntryAsync(CreateHistoryEntry(
+                OrganizationHistoryEntry partialEntry = CreateHistoryEntry(
                     widget.Id,
                     widgetName,
                     OrganizationActionType.ManagedDrop,
@@ -269,7 +309,12 @@ public sealed class OrganizerService
                                 ? partialReceipts.GetValue(result.DestinationPath)
                                 : null
                         }).ToList(),
-                    canUndo: canUndoCompletedMove));
+                    canUndo: canUndoCompletedMove);
+                await AddHistoryEntryAsync(partialEntry);
+                // Surface the exact partial-history id through the exception so
+                // callers (ImportPathsAsync → HUD undo receipts) can bind the
+                // undo button to THIS batch instead of guessing "latest".
+                ex.Data[PartialHistoryEntryIdDataKey] = partialEntry.Id;
             }
 
             App.Log(
@@ -328,7 +373,8 @@ public sealed class OrganizerService
 
     internal static IReadOnlyList<FileService.FileTransferPlan> CreateTransferPlans(
         string rootPath,
-        IReadOnlyList<string> sourcePaths)
+        IReadOnlyList<string> sourcePaths,
+        FileService.FileTransferConflictPolicy conflictPolicy = FileService.FileTransferConflictPolicy.KeepBoth)
     {
         var reservedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var reservedFilePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -342,7 +388,8 @@ public sealed class OrganizerService
                     path,
                     rootPath,
                     reservedPaths,
-                    reservedFilePaths);
+                    reservedFilePaths,
+                    conflictPolicy);
                 return new FileService.FileTransferPlan(path, destinationPath);
             })
             .ToArray();
@@ -391,7 +438,8 @@ public sealed class OrganizerService
         var plans = normalizedSourcePaths
             .Select(sourcePath => new FileService.FileTransferPlan(
                 sourcePath,
-                FileService.GetAvailablePath(Path.Combine(desktopPath, Path.GetFileName(sourcePath)), reservedPaths)))
+                FileService.ResolveTransferDestinationPath(sourcePath, desktopPath, reservedPaths,
+                    conflictPolicy: useShellProgress ? FileService.FileTransferConflictPolicy.AskUser : FileService.FileTransferConflictPolicy.KeepBoth)))
             .ToList();
         string operationId = Guid.NewGuid().ToString("N");
         _autoOrganizationSuppressions.BeginOperation(operationId, plans);
@@ -409,10 +457,18 @@ public sealed class OrganizerService
 
             if (results.Count > 0)
             {
+                if (_desktopIconPositions is not null)
+                {
+                    await _desktopIconPositions.RestoreAfterMoveToDesktopAsync(results);
+                }
+
                 await RebaseMovedShortcutsOffThreadAsync(results);
             }
 
-            var receipts = await CaptureUndoReceiptsAsync(results);
+            bool canUndoDesktopMove = !results.Any(static r => r.HadOverwrite);
+            var receipts = canUndoDesktopMove
+                ? await CaptureUndoReceiptsAsync(results)
+                : UndoReceiptBatch.Empty;
             var historyEntry = CreateHistoryEntry(
                 widget.Id,
                 widgetName,
@@ -425,9 +481,11 @@ public sealed class OrganizerService
                     DestinationPath = result.DestinationPath,
                     TargetWidgetId = widget.Id,
                     TargetWidgetName = widgetName,
-                    DestinationIdentity = receipts.GetValue(result.DestinationPath)
+                    DestinationIdentity = canUndoDesktopMove
+                        ? receipts.GetValue(result.DestinationPath)
+                        : null
                 }).ToList(),
-                canUndo: true);
+                canUndo: canUndoDesktopMove);
 
             // Snapshot before the retention policy may compact the same
             // entry: callers render per-run results from this list.
@@ -436,7 +494,8 @@ public sealed class OrganizerService
             return new OrganizerOperationResult
             {
                 History = historyEntry,
-                CompletedItems = completedItems
+                CompletedItems = completedItems,
+                SkippedItemCount = (results as FileService.FileTransferBatchResult)?.SkippedSourcePaths.Count ?? 0
             };
         }
         catch (Exception ex)
@@ -453,8 +512,16 @@ public sealed class OrganizerService
                     : [];
             if (completed.Count > 0)
             {
+                if (_desktopIconPositions is not null)
+                {
+                    await _desktopIconPositions.RestoreAfterMoveToDesktopAsync(completed);
+                }
+
                 await RebaseMovedShortcutsOffThreadAsync(completed);
-                var partialReceipts = await CaptureUndoReceiptsAsync(completed);
+                bool canUndoPartialDesktopMove = !completed.Any(static r => r.HadOverwrite);
+                var partialReceipts = canUndoPartialDesktopMove
+                    ? await CaptureUndoReceiptsAsync(completed)
+                    : UndoReceiptBatch.Empty;
                 await AddHistoryEntryAsync(CreateHistoryEntry(
                     widget.Id,
                     widgetName,
@@ -467,9 +534,11 @@ public sealed class OrganizerService
                         DestinationPath = result.DestinationPath,
                         TargetWidgetId = widget.Id,
                         TargetWidgetName = widgetName,
-                        DestinationIdentity = partialReceipts.GetValue(result.DestinationPath)
+                        DestinationIdentity = canUndoPartialDesktopMove
+                            ? partialReceipts.GetValue(result.DestinationPath)
+                            : null
                     }).ToList(),
-                    canUndo: true));
+                    canUndo: canUndoPartialDesktopMove));
             }
 
             // A user-cancelled Shell transfer is not a failure: whatever
@@ -554,7 +623,8 @@ public sealed class OrganizerService
         {
             var transaction = new DesktopOrganizationTransaction(_settingsService, _fileService)
             {
-                AutoOrganizationSuppressions = _autoOrganizationSuppressions
+                AutoOrganizationSuppressions = _autoOrganizationSuppressions,
+                DesktopIconPositions = _desktopIconPositions,
             };
             await transaction.UndoAsync(historyEntryId, ownerWindowHandle);
             return;
@@ -609,6 +679,11 @@ public sealed class OrganizerService
                 results.Select(result => result.DestinationPath));
             if (results.Count > 0)
             {
+                if (_desktopIconPositions is not null)
+                {
+                    await _desktopIconPositions.RestoreAfterMoveToDesktopAsync(results);
+                }
+
                 await RebaseMovedShortcutsOffThreadAsync(results);
             }
         }
@@ -623,6 +698,11 @@ public sealed class OrganizerService
             {
                 if (partial.CompletedResults.Count > 0)
                 {
+                    if (_desktopIconPositions is not null)
+                    {
+                        await _desktopIconPositions.RestoreAfterMoveToDesktopAsync(partial.CompletedResults);
+                    }
+
                     await RebaseMovedShortcutsOffThreadAsync(partial.CompletedResults);
                 }
                 foreach (FileService.FileTransferResult result in partial.CompletedResults)
@@ -667,7 +747,8 @@ public sealed class OrganizerService
         WidgetConfig widget,
         string widgetName,
         IReadOnlyList<FileService.FileTransferResult> results,
-        IReadOnlyDictionary<string, HashSet<string>?>? preExistingMergeSnapshots = null)
+        IReadOnlyDictionary<string, HashSet<string>?>? preExistingMergeSnapshots = null,
+        string? sourceWidgetId = null)
     {
         if (results.Count == 0)
         {
@@ -687,6 +768,10 @@ public sealed class OrganizerService
         }
 
         await RebaseMovedShortcutsOffThreadAsync(movedResults);
+        if (_desktopIconPositions is not null)
+        {
+            await _desktopIconPositions.RelocateMovesAsync(movedResults);
+        }
 
         var snapshots = preExistingMergeSnapshots is not null
             ? new Dictionary<string, HashSet<string>?>(preExistingMergeSnapshots, StringComparer.OrdinalIgnoreCase)
@@ -712,11 +797,31 @@ public sealed class OrganizerService
                 DestinationIdentity = canSafelyUndo ? receipts.GetValue(result.DestinationPath) : null,
             }).ToList(),
             canUndo: canSafelyUndo);
+        entry.SourceWidgetId = string.IsNullOrWhiteSpace(sourceWidgetId) ? null : sourceWidgetId;
         await AddHistoryEntryAsync(entry);
         return entry;
     }
 
     private const int MaxFolderMergeUndoSnapshotEntries = 4096;
+
+    internal static Dictionary<string, HashSet<string>?> SnapshotPreExistingMergeDestinations(
+        IReadOnlyList<string> sourcePaths,
+        string destinationDirectory)
+    {
+        if (sourcePaths.Count == 0 || string.IsNullOrWhiteSpace(destinationDirectory))
+        {
+            return new Dictionary<string, HashSet<string>?>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        string normalizedDestination = Path.GetFullPath(destinationDirectory);
+        if (!Directory.Exists(normalizedDestination))
+        {
+            return new Dictionary<string, HashSet<string>?>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        return SnapshotPreExistingMergeDestinations(
+            CreateTransferPlans(normalizedDestination, sourcePaths));
+    }
 
     internal static Dictionary<string, HashSet<string>?> SnapshotPreExistingMergeDestinations(
         IReadOnlyList<FileService.FileTransferPlan> plans)
@@ -775,8 +880,23 @@ public sealed class OrganizerService
             IReadOnlyList<FileService.FileTransferResult> results,
             Dictionary<string, HashSet<string>?> preExistingMergeSnapshots)
     {
+        if (results.Any(static r => r.HadOverwrite))
+        {
+            return ([], false);
+        }
+
         if (preExistingMergeSnapshots.Count == 0)
         {
+            // Defense-in-depth: if a directory merge produced MergedLeafResults
+            // without a pre-transfer destination snapshot, fail closed rather
+            // than recording the entire pre-existing destination folder.
+            if (results.Any(static r =>
+                    r.MergedLeafResults is { Count: > 0 } &&
+                    Directory.Exists(r.DestinationPath)))
+            {
+                return ([], false);
+            }
+
             return (results, true);
         }
 
@@ -806,8 +926,8 @@ public sealed class OrganizerService
                     if (!string.IsNullOrWhiteSpace(leaf.SourcePath) &&
                         !string.IsNullOrWhiteSpace(leaf.DestinationPath))
                     {
-                        exactSourceByDestination[Path.GetFullPath(leaf.DestinationPath)] =
-                            Path.GetFullPath(leaf.SourcePath);
+                        exactSourceByDestination[Path.TrimEndingDirectorySeparator(Path.GetFullPath(leaf.DestinationPath))] =
+                            Path.TrimEndingDirectorySeparator(Path.GetFullPath(leaf.SourcePath));
                     }
                 }
             }
@@ -831,16 +951,17 @@ public sealed class OrganizerService
                 foreach (string child in children)
                 {
                     string rel = Path.GetRelativePath(dest, child);
+                    bool isChildDirectory = Directory.Exists(child);
                     if (!preExisting.Contains(rel))
                     {
-                        string fullChild = Path.GetFullPath(child);
+                        string fullChild = Path.TrimEndingDirectorySeparator(Path.GetFullPath(child));
                         string resolvedSourcePath;
                         if (exactSourceByDestination is not null &&
                             exactSourceByDestination.TryGetValue(fullChild, out string? mappedSourcePath))
                         {
                             resolvedSourcePath = mappedSourcePath;
                         }
-                        else if (TryResolveUnnumberedMergeRelativePath(rel, preExisting, out string unnumberedRel))
+                        else if (TryResolveUnnumberedMergeRelativePath(rel, isChildDirectory, preExisting, out string unnumberedRel))
                         {
                             resolvedSourcePath = Path.Combine(sourceRoot, unnumberedRel);
                         }
@@ -853,7 +974,7 @@ public sealed class OrganizerService
                             resolvedSourcePath,
                             child));
                     }
-                    else if (Directory.Exists(child) && !FileService.IsFileSystemLink(child))
+                    else if (isChildDirectory && !FileService.IsFileSystemLink(child))
                     {
                         walk.Push(child);
                     }
@@ -866,14 +987,15 @@ public sealed class OrganizerService
 
     private static bool TryResolveUnnumberedMergeRelativePath(
         string relativePath,
+        bool isDirectory,
         HashSet<string> preExisting,
         out string unnumberedRelativePath)
     {
         unnumberedRelativePath = string.Empty;
         string? directoryPart = Path.GetDirectoryName(relativePath);
         string fileName = Path.GetFileName(relativePath);
-        string extension = Path.GetExtension(fileName);
-        string stem = Path.GetFileNameWithoutExtension(fileName);
+        string extension = isDirectory ? string.Empty : Path.GetExtension(fileName);
+        string stem = isDirectory ? fileName : Path.GetFileNameWithoutExtension(fileName);
         int openParen = stem.LastIndexOf(" (", StringComparison.Ordinal);
         if (openParen <= 0 || !stem.EndsWith(')'))
         {

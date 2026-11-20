@@ -522,12 +522,14 @@ internal sealed unsafe class MusicSpectrumService
         int count = Math.Min(frameCount, RingCapacity);
         lock (_bufferGate)
         {
-            for (int i = 0; i < count; i++)
+            int firstChunk = Math.Min(count, RingCapacity - _ringWriteIndex);
+            _ringBuffer.AsSpan(_ringWriteIndex, firstChunk).Clear();
+            if (firstChunk < count)
             {
-                _ringBuffer[_ringWriteIndex] = 0.0f;
-                _ringWriteIndex = (_ringWriteIndex + 1) & RingMask;
+                _ringBuffer.AsSpan(0, count - firstChunk).Clear();
             }
 
+            _ringWriteIndex = (_ringWriteIndex + count) & RingMask;
             _ringAvailableCount = Math.Min(RingCapacity, _ringAvailableCount + count);
         }
     }
@@ -554,12 +556,14 @@ internal sealed unsafe class MusicSpectrumService
 
             lock (_bufferGate)
             {
-                for (int i = 0; i < batch; i++)
+                int firstChunk = Math.Min(batch, RingCapacity - _ringWriteIndex);
+                scratch[..firstChunk].CopyTo(_ringBuffer.AsSpan(_ringWriteIndex, firstChunk));
+                if (firstChunk < batch)
                 {
-                    _ringBuffer[_ringWriteIndex] = scratch[i];
-                    _ringWriteIndex = (_ringWriteIndex + 1) & RingMask;
+                    scratch.Slice(firstChunk, batch - firstChunk).CopyTo(_ringBuffer.AsSpan(0, batch - firstChunk));
                 }
 
+                _ringWriteIndex = (_ringWriteIndex + batch) & RingMask;
                 _ringAvailableCount = Math.Min(RingCapacity, _ringAvailableCount + batch);
             }
 

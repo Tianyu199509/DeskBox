@@ -24,6 +24,7 @@ public partial class App
     // arriving during boot. Intent pushes are therefore queued until the
     // host's host.boot-ready notice arrives.
     private bool _settingsHostBootConfirmed;
+    private readonly object _pendingHostIntentsGate = new();
     private readonly Queue<(string Method, string? Payload)> _pendingHostIntents = new();
 
     // Deep review R13 (D5): the hotkey-suspend self-heal on host exit must
@@ -44,7 +45,7 @@ public partial class App
     internal bool IsSettingsHostVisible => IsSettingsHostRunning;
 
     /// <summary>
-    /// Out-of-process settings lives in <c>DeskBox.Settings.exe</c> with its
+    /// Out-of-process settings lives in a second <c>DeskBox.exe --settings</c> process with its
     /// own private heap and working set. Only block main-process memory
     /// cleanup / working-set trim while the host is actively recording a
     /// hotkey (hotkeys suspended on the main process).
@@ -68,7 +69,7 @@ public partial class App
             return true;
         }
 
-        if (BelongsToSettingsHostProcess(processId))
+        if (BelongsToSettingsHostProcess(processId) || BelongsToStudioHostProcess(processId))
         {
             return false;
         }
@@ -128,16 +129,19 @@ public partial class App
         // (deep review R13, D5) — queue the intents and deliver them when
         // the host confirms; after that the pipe is connected and pushes
         // land directly.
-        if (!_settingsHostBootConfirmed)
+        lock (_pendingHostIntentsGate)
         {
-            QueueHostIntent(sectionTag, glanceWidgetId, oneClickUpdate, installResult);
-            return;
+            if (!_settingsHostBootConfirmed)
+            {
+                QueueHostIntentLocked(sectionTag, glanceWidgetId, oneClickUpdate, installResult);
+                return;
+            }
         }
 
         PushHostIntent(sectionTag, glanceWidgetId, oneClickUpdate, installResult);
     }
 
-    private void QueueHostIntent(
+    private void QueueHostIntentLocked(
         string? sectionTag,
         string? glanceWidgetId,
         bool oneClickUpdate,
@@ -181,6 +185,7 @@ public partial class App
         bool oneClickUpdate,
         string? installResult)
     {
+        TryGrantSettingsHostForegroundRight(_settingsHostProcess);
         if (glanceWidgetId is not null)
         {
             _ = PushSettingsIpcEventAsync(SettingsIpcMethods.HostShowGlance, glanceWidgetId);
@@ -204,25 +209,49 @@ public partial class App
     /// <summary>
     /// host.boot-ready arrived (deep review R13, D5): the host's pipe,
     /// subscriptions, and window are live — flush everything queued during
-    /// boot, in order. Runs on the IPC dispatch pool thread; the queue and
-    /// flag are only touched here and from the UI thread before the host
-    /// connects (the host cannot confirm before the UI thread's spawn
-    /// returns), so the hand-off is race-free in practice.
+    /// boot, in order.
     /// </summary>
     private void OnSettingsHostBootReady()
     {
-        _settingsHostBootConfirmed = true;
-        int flushed = 0;
-        while (_pendingHostIntents.Count > 0)
+        List<(string Method, string? Payload)>? toFlush = null;
+        lock (_pendingHostIntentsGate)
         {
-            (string method, string? payload) = _pendingHostIntents.Dequeue();
-            _ = PushSettingsIpcEventAsync(method, payload);
-            flushed++;
+            _settingsHostBootConfirmed = true;
+            if (_pendingHostIntents.Count > 0)
+            {
+                toFlush = [.. _pendingHostIntents];
+                _pendingHostIntents.Clear();
+            }
         }
 
-        if (flushed > 0)
+        if (toFlush is { Count: > 0 })
         {
-            Log($"[SettingsHost] Boot confirmed; flushed {flushed} queued intent(s)");
+            TryGrantSettingsHostForegroundRight(_settingsHostProcess);
+            foreach ((string method, string? payload) in toFlush)
+            {
+                _ = PushSettingsIpcEventAsync(method, payload);
+            }
+
+            Log($"[SettingsHost] Boot confirmed; flushed {toFlush.Count} queued intent(s)");
+        }
+    }
+
+    private static void TryGrantSettingsHostForegroundRight(Process? host)
+    {
+        if (host is null)
+        {
+            return;
+        }
+
+        try
+        {
+            if (!host.HasExited)
+            {
+                _ = Platform.Win32Helper.AllowSetForegroundWindow((uint)host.Id);
+            }
+        }
+        catch
+        {
         }
     }
 
@@ -274,23 +303,13 @@ public partial class App
     {
         try
         {
-            string dedicatedHostPath = Path.Combine(
-                AppContext.BaseDirectory,
-                "DeskBox.Settings.exe");
-#if !DESKBOX_AOT_SMOKE_HARNESS && !DESKBOX_STORE
-            if (!File.Exists(dedicatedHostPath))
-            {
-                Log($"[SettingsHost] Companion host missing at '{dedicatedHostPath}'; refusing self-spawn.");
-                NotifyMissingSettingsCompanionHost(dedicatedHostPath);
-                return;
-            }
-            string exePath = dedicatedHostPath;
-#else
-            string exePath = File.Exists(dedicatedHostPath)
-                ? dedicatedHostPath
-                : Environment.ProcessPath ??
-                  Path.Combine(AppContext.BaseDirectory, "DeskBox.exe");
-#endif
+            // Single executable, two roles: the host is this same image
+            // relaunched with --settings <mainPid>. Native AOT links all code
+            // into each .exe, so a dedicated settings executable would ship a
+            // second copy of the whole app; the process boundary alone is what
+            // returns the settings UI memory when the window closes.
+            string exePath = Environment.ProcessPath ??
+                Path.Combine(AppContext.BaseDirectory, "DeskBox.exe");
             var startInfo = new ProcessStartInfo(exePath)
             {
                 UseShellExecute = false,
@@ -318,15 +337,22 @@ public partial class App
                 }
             }
 
-            _settingsHostProcess = Process.Start(startInfo);
-            Log("[SettingsHost] Spawned pid=" + (_settingsHostProcess?.Id.ToString() ?? "null"));
-            if (_settingsHostProcess is { } spawnedHost)
+            lock (_pendingHostIntentsGate)
             {
-                // New era: boot confirmation starts pending, and the exit
-                // guard below only self-heals for THIS era (deep review R13,
-                // D5 — see OnSettingsHostProcessExited).
                 _settingsHostBootConfirmed = false;
+                _pendingHostIntents.Clear();
+            }
+            Volatile.Write(ref _cachedSettingsHostWindowHandle, IntPtr.Zero);
+
+            Process? spawnedHost = Process.Start(startInfo);
+            Log("[SettingsHost] Spawned pid=" + (spawnedHost?.Id.ToString() ?? "null"));
+            if (spawnedHost is not null)
+            {
+                // Initialize start time BEFORE publishing _settingsHostProcess so
+                // SettingsHostPipeClientIdentity never pairs a new pid with a stale StartTime.
                 _settingsHostStartTime = TryGetStartTime(spawnedHost);
+                Volatile.Write(ref _settingsHostProcess, spawnedHost);
+                TryGrantSettingsHostForegroundRight(spawnedHost);
                 int generation = ++_settingsHostGeneration;
                 spawnedHost.EnableRaisingEvents = true;
                 void ExitHandler(object? sender, EventArgs args)
@@ -456,6 +482,7 @@ public partial class App
                     ref _settingsHostProcess, null, current);
                 if (ReferenceEquals(exchanged, current))
                 {
+                    Volatile.Write(ref _cachedSettingsHostWindowHandle, IntPtr.Zero);
                     _exitingSettingsHost = current;
                     // Query the dying Process object itself rather than
                     // pairing the (racy) spawn-time field: a respawn racing
@@ -505,6 +532,147 @@ public partial class App
     private Process? _exitingSettingsHost;
     private DateTime? _settingsHostStartTime;
     private DateTime? _exitingSettingsHostStartTime;
+    private IntPtr _cachedSettingsHostWindowHandle;
+
+    internal IntPtr TryGetVisibleSettingsHostProcessWindowHandle()
+    {
+        if (_settingsHostProcess is not { } host)
+        {
+            return IntPtr.Zero;
+        }
+
+        uint targetPid;
+        try
+        {
+            if (host.HasExited)
+            {
+                return IntPtr.Zero;
+            }
+
+            targetPid = (uint)host.Id;
+        }
+        catch
+        {
+            return IntPtr.Zero;
+        }
+
+        if (targetPid == 0)
+        {
+            return IntPtr.Zero;
+        }
+
+        IntPtr cached = Volatile.Read(ref _cachedSettingsHostWindowHandle);
+        if (IsVisibleNonEmptyProcessWindow(cached, targetPid))
+        {
+            return cached;
+        }
+
+        IntPtr discovered = FindVisibleTopLevelWindowForProcess(targetPid);
+        Volatile.Write(ref _cachedSettingsHostWindowHandle, discovered);
+        return discovered;
+    }
+
+    internal IntPtr ResolveStoreUpdateOwnerWindowHandle()
+    {
+        IntPtr inProcessVisible = GetVisibleSettingsWindowHandle();
+        if (IsVisibleNonEmptyOwnerWindow(inProcessVisible))
+        {
+            return inProcessVisible;
+        }
+
+        IntPtr hostSettingsHwnd = TryGetVisibleSettingsHostProcessWindowHandle();
+        if (hostSettingsHwnd != IntPtr.Zero)
+        {
+            return hostSettingsHwnd;
+        }
+
+        IntPtr studioHwnd = GetStudioHostWindowHandle();
+        if (IsVisibleNonEmptyOwnerWindow(studioHwnd))
+        {
+            return studioHwnd;
+        }
+
+        IntPtr visibleDeskBoxHwnd = FindVisibleTopLevelWindowForProcess(
+            (uint)Environment.ProcessId,
+            excludeHwnd: TrayHostWindowHandle);
+        if (visibleDeskBoxHwnd != IntPtr.Zero)
+        {
+            return visibleDeskBoxHwnd;
+        }
+
+        IntPtr inProcessSettingsAny = GetAnySettingsHostWindowHandle();
+        if (IsVisibleNonEmptyOwnerWindow(inProcessSettingsAny))
+        {
+            return inProcessSettingsAny;
+        }
+
+        IntPtr foreground = Platform.Win32Helper.GetForegroundWindow();
+        if (IsVisibleNonEmptyOwnerWindow(foreground))
+        {
+            return foreground;
+        }
+
+        IntPtr shell = Platform.Win32Helper.GetShellWindow();
+        if (shell != IntPtr.Zero && Platform.Win32Helper.IsWindow(shell) && Platform.Win32Helper.IsWindowVisible(shell))
+        {
+            return shell;
+        }
+
+        return RecreateFolderPickerHelperWindow();
+    }
+
+    private static bool IsVisibleNonEmptyOwnerWindow(IntPtr hwnd)
+    {
+        if (hwnd == IntPtr.Zero ||
+            !Platform.Win32Helper.IsWindow(hwnd) ||
+            !Platform.Win32Helper.IsWindowVisible(hwnd) ||
+            Platform.Win32Helper.IsWindowCloaked(hwnd))
+        {
+            return false;
+        }
+
+        return Platform.Win32Helper.GetWindowRect(hwnd, out Platform.Win32Helper.RECT rect) &&
+               (rect.Right - rect.Left) > 0 &&
+               (rect.Bottom - rect.Top) > 0;
+    }
+
+    private static bool IsVisibleNonEmptyProcessWindow(IntPtr hwnd, uint expectedPid)
+    {
+        if (!IsVisibleNonEmptyOwnerWindow(hwnd))
+        {
+            return false;
+        }
+
+        Platform.Win32Helper.GetWindowThreadProcessId(hwnd, out uint pid);
+        return pid == expectedPid;
+    }
+
+    private static IntPtr FindVisibleTopLevelWindowForProcess(uint targetPid, IntPtr excludeHwnd = default)
+    {
+        IntPtr found = IntPtr.Zero;
+        Platform.Win32Helper.EnumWindows((hWnd, _) =>
+        {
+            if (hWnd == IntPtr.Zero || hWnd == excludeHwnd)
+            {
+                return true;
+            }
+
+            Platform.Win32Helper.GetWindowThreadProcessId(hWnd, out uint pid);
+            if (pid != targetPid)
+            {
+                return true;
+            }
+
+            if (!IsVisibleNonEmptyOwnerWindow(hWnd))
+            {
+                return true;
+            }
+
+            found = hWnd;
+            return false;
+        }, IntPtr.Zero);
+        return found;
+    }
 
     private static DateTime? TryGetStartTime(Process process)
     {
@@ -556,39 +724,6 @@ public partial class App
         if (!ReferenceEquals(p2, p1))
         {
             try { p2?.Dispose(); } catch { }
-        }
-    }
-
-    private void NotifyMissingSettingsCompanionHost(string dedicatedHostPath)
-    {
-        string title = "DeskBox";
-        string message = $"DeskBox.Settings.exe was not found ({dedicatedHostPath}). Please reinstall or repair DeskBox.";
-        if (_nativeNotificationService?.TryShow(title, message, arguments: null) == true)
-        {
-            return;
-        }
-
-        if (_trayHost is not { IsCreated: true })
-        {
-            return;
-        }
-
-        try
-        {
-            _trayHost.ShowNotification(
-                title,
-                message,
-                Platform.TrayBalloonIconKind.Warning,
-                customIconHandle: null,
-                largeIcon: false,
-                sound: false,
-                respectQuietTime: true,
-                realtime: false,
-                timeout: TimeSpan.FromSeconds(8));
-        }
-        catch (Exception ex)
-        {
-            Log($"[SettingsHost] Companion missing notification failed: {ex.Message}");
         }
     }
 }

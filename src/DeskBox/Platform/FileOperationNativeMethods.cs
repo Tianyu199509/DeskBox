@@ -24,13 +24,15 @@ internal static partial class FileOperationNativeMethods
     [LibraryImport("ole32.dll")]
     internal static partial void CoTaskMemFree(IntPtr memory);
 
-    [StructLayout(LayoutKind.Sequential, Pack = 4)]
+    [StructLayout(LayoutKind.Sequential)]
     private struct ShQueryRbInfo
     {
         public int cbSize;
         public long i64Size;
         public long i64NumItems;
     }
+
+    internal static int ShQueryRbInfoNativeSize => Marshal.SizeOf<ShQueryRbInfo>();
 
     [LibraryImport("shell32.dll", EntryPoint = "SHQueryRecycleBinW", StringMarshalling = StringMarshalling.Utf16)]
     private static partial int SHQueryRecycleBin(string? pszRootPath, ref ShQueryRbInfo pSHQueryRBInfo);

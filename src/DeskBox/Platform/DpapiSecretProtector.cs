@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 
 namespace DeskBox.Platform;
@@ -20,31 +21,62 @@ internal static class DpapiSecretProtector
         }
 
         byte[] plainBytes = Encoding.UTF8.GetBytes(plaintext);
-        fixed (byte* pIn = plainBytes)
+        try
         {
-            var inBlob = new DataBlob
+            fixed (byte* pIn = plainBytes)
             {
-                cbData = plainBytes.Length,
-                pbData = (nint)pIn
-            };
-            if (!CryptProtectData(ref inBlob, null, nint.Zero, nint.Zero, nint.Zero, CryptProtectUiForbidden, out DataBlob outBlob))
-            {
-                return string.Empty;
-            }
-
-            try
-            {
-                byte[] encrypted = new byte[outBlob.cbData];
-                Marshal.Copy(outBlob.pbData, encrypted, 0, outBlob.cbData);
-                return Convert.ToBase64String(encrypted);
-            }
-            finally
-            {
-                if (outBlob.pbData != nint.Zero)
+                var inBlob = new DataBlob
                 {
-                    LocalFree(outBlob.pbData);
+                    cbData = plainBytes.Length,
+                    pbData = (nint)pIn
+                };
+                if (!CryptProtectData(ref inBlob, null, nint.Zero, nint.Zero, nint.Zero, CryptProtectUiForbidden, out DataBlob outBlob))
+                {
+                    int win32Error = Marshal.GetLastWin32Error();
+                    throw new CryptographicException(win32Error != 0 ? win32Error : -2147467259);
+                }
+
+                try
+                {
+                    if (outBlob.cbData <= 0 || outBlob.pbData == nint.Zero)
+                    {
+                        throw new CryptographicException("DPAPI CryptProtectData returned an empty cipher blob.");
+                    }
+
+                    return Convert.ToBase64String(new ReadOnlySpan<byte>((void*)outBlob.pbData, outBlob.cbData));
+                }
+                finally
+                {
+                    if (outBlob.pbData != nint.Zero)
+                    {
+                        LocalFree(outBlob.pbData);
+                    }
                 }
             }
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(plainBytes);
+        }
+    }
+
+    internal static bool TryProtectUtf8ToBase64(string plaintext, out string base64Cipher)
+    {
+        if (string.IsNullOrEmpty(plaintext))
+        {
+            base64Cipher = string.Empty;
+            return true;
+        }
+
+        try
+        {
+            base64Cipher = ProtectUtf8ToBase64(plaintext);
+            return !string.IsNullOrEmpty(base64Cipher);
+        }
+        catch (CryptographicException)
+        {
+            base64Cipher = string.Empty;
+            return false;
         }
     }
 
@@ -77,14 +109,22 @@ internal static class DpapiSecretProtector
 
                 try
                 {
-                    byte[] plain = new byte[outBlob.cbData];
-                    Marshal.Copy(outBlob.pbData, plain, 0, outBlob.cbData);
-                    return Encoding.UTF8.GetString(plain);
+                    if (outBlob.cbData <= 0 || outBlob.pbData == nint.Zero)
+                    {
+                        return string.Empty;
+                    }
+
+                    return Encoding.UTF8.GetString((byte*)outBlob.pbData, outBlob.cbData);
                 }
                 finally
                 {
                     if (outBlob.pbData != nint.Zero)
                     {
+                        if (outBlob.cbData > 0)
+                        {
+                            NativeMemory.Clear((void*)outBlob.pbData, (nuint)outBlob.cbData);
+                        }
+
                         LocalFree(outBlob.pbData);
                     }
                 }

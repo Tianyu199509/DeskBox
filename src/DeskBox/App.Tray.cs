@@ -29,6 +29,7 @@ public partial class App
     private const int TrayCommandSettings = 6;
     private const int TrayCommandExit = 7;
     private const int TrayCommandCreateAiWidget = 8;
+    private const int TrayCommandGlobalSearch = 9;
     private const int TrayCommandCreateWidgetFirst = 100;
 
     internal IntPtr TrayHostWindowHandle => _trayHost?.WindowHandle ?? IntPtr.Zero;
@@ -44,7 +45,7 @@ public partial class App
         _trayHost = new NativeTrayIconHost("DeskBox Tray Host");
         _trayHost.SetIconPath(AppBranding.ResolveTrayIconPath(
             SettingsService.Settings.Core.TrayIconStyle ?? "System",
-            IsDarkThemeActive()));
+            IsTaskbarDarkThemeActive()));
         RefreshTrayToolTipText();
 
         _trayHost.RightClickRequested += ShowTrayContextMenuFromTray;
@@ -92,10 +93,18 @@ public partial class App
 
     /// <summary>Attempts per tray creation pass through the early-logon window
     /// where the taskbar may not exist yet (roughly the first 30 seconds after
-    /// logon in the field reports).</summary>
-    private const int TrayCreationMaxAttempts = 15;
+    /// logon in the field reports). Starts fast (200ms -> 400ms -> 800ms -> 1500ms)
+    /// then settles at 2s so cold-logon tray registration succeeds as soon as
+    /// Explorer's shell tray window appears.</summary>
+    private const int TrayCreationMaxAttempts = 19;
 
-    private static readonly TimeSpan TrayCreationRetryDelay = TimeSpan.FromSeconds(2);
+    private static readonly int[] TrayCreationRetryDelaysMs = [200, 400, 800, 1500, 2000];
+
+    internal static TimeSpan GetTrayCreationRetryDelay(int attempt)
+    {
+        int index = Math.Clamp(attempt - 1, 0, TrayCreationRetryDelaysMs.Length - 1);
+        return TimeSpan.FromMilliseconds(TrayCreationRetryDelaysMs[index]);
+    }
 
     private Task<bool>? _trayIconCreationTask;
 
@@ -155,7 +164,7 @@ public partial class App
                 return false;
             }
 
-            await Task.Delay(TrayCreationRetryDelay);
+            await Task.Delay(GetTrayCreationRetryDelay(attempt));
         }
     }
 
@@ -200,7 +209,8 @@ public partial class App
             () => RunTraySettingsActionAsync(OpenAboutSettingsFromTray),
             () => RunTraySettingsActionAsync(OpenSettingsFromTray),
             () => RunTrayMenuActionAsync(ExitApplication),
-            () => RunTraySettingsActionAsync(OpenAiCreateStudioFromTray));
+            () => RunTraySettingsActionAsync(OpenAiCreateStudioFromTray),
+            () => RunTraySettingsActionAsync(OpenGlobalSearchFromTray));
     }
 
     internal static IReadOnlyList<NativeTrayMenuEntry> BuildTrayMenuEntriesCore(
@@ -216,9 +226,10 @@ public partial class App
         Func<Task> onOpenUpdate,
         Func<Task> onOpenSettings,
         Func<Task> onExit,
-        Func<Task>? onCreateAiWidget = null)
+        Func<Task>? onCreateAiWidget = null,
+        Func<Task>? onOpenGlobalSearch = null)
     {
-        var entries = new List<NativeTrayMenuEntry>(18)
+        var entries = new List<NativeTrayMenuEntry>(19)
         {
             NativeTrayMenuEntry.Item(
                 TrayCommandOrganizeDesktop,
@@ -226,8 +237,17 @@ public partial class App
                 "\uE74C",
                 canCreateWidget,
                 onOrganizeDesktop),
-            NativeTrayMenuEntry.Separator,
         };
+        if (onOpenGlobalSearch is not null)
+        {
+            entries.Add(NativeTrayMenuEntry.Item(
+                TrayCommandGlobalSearch,
+                localization.T("Tray.GlobalSearch"),
+                "\uE721",
+                isEnabled: true,
+                onOpenGlobalSearch));
+        }
+        entries.Add(NativeTrayMenuEntry.Separator);
 
         int nextCreateCommandId = TrayCommandCreateWidgetFirst;
         foreach (WidgetContentDescriptor descriptor in new WidgetContentFactory(localization).GetCreateEntryDescriptors())
@@ -439,7 +459,7 @@ public partial class App
         return WidgetManager?.HasVisibleWidgets == true;
     }
 
-    private readonly record struct TrayMenuPlacement(
+    internal readonly record struct TrayMenuPlacement(
         DrawingPoint Anchor,
         TrayMenuHorizontalAlignment HorizontalAlignment,
         TrayMenuVerticalAlignment VerticalAlignment);
@@ -488,11 +508,88 @@ public partial class App
                 TrayMenuVerticalAlignment.Bottom);
         }
 
-        DrawingPoint fallbackAnchor = GetTrayContextMenuAnchorPoint(fallbackPoint);
-        return new TrayMenuPlacement(
-            fallbackAnchor,
-            isRightToLeft ? TrayMenuHorizontalAlignment.Right : TrayMenuHorizontalAlignment.Left,
-            TrayMenuVerticalAlignment.Bottom);
+        return ResolveFallbackTrayMenuPlacement(
+            fallbackPoint,
+            isRightToLeft,
+            Win32Helper.TryGetMonitorWorkArea(fallbackPoint.X, fallbackPoint.Y, out var fallbackMonitor, out var fallbackWorkArea)
+                ? (fallbackMonitor, fallbackWorkArea)
+                : null,
+            Win32Helper.TryGetTaskbarPosition(out int abeEdge, out _)
+                ? MapAppBarEdge(abeEdge)
+                : null);
+    }
+
+    internal static TrayMenuPlacement ResolveFallbackTrayMenuPlacement(
+        DrawingPoint fallbackPoint,
+        bool isRightToLeft,
+        (Win32Helper.RECT Monitor, Win32Helper.RECT WorkArea)? monitorBounds,
+        TaskbarEdge? shellTaskbarEdge)
+    {
+        if (monitorBounds is not { } bounds)
+        {
+            return new TrayMenuPlacement(
+                new DrawingPoint(
+                    fallbackPoint.X,
+                    fallbackPoint.Y - TrayContextMenuFallbackOffsetPixels),
+                isRightToLeft ? TrayMenuHorizontalAlignment.Right : TrayMenuHorizontalAlignment.Left,
+                TrayMenuVerticalAlignment.Bottom);
+        }
+
+        Win32Helper.RECT monitor = bounds.Monitor;
+        Win32Helper.RECT workArea = bounds.WorkArea;
+        var pointRect = new Win32Helper.RECT
+        {
+            Left = fallbackPoint.X,
+            Top = fallbackPoint.Y,
+            Right = fallbackPoint.X + 1,
+            Bottom = fallbackPoint.Y + 1
+        };
+        TaskbarEdge edge = ResolveTaskbarEdge(pointRect, monitor, workArea, shellTaskbarEdge);
+        DrawingPoint anchor = edge switch
+        {
+            TaskbarEdge.Bottom => new DrawingPoint(
+                fallbackPoint.X,
+                workArea.Bottom < monitor.Bottom && fallbackPoint.Y >= workArea.Bottom
+                    ? workArea.Bottom - 1
+                    : Math.Min(workArea.Bottom - 1, fallbackPoint.Y)),
+            TaskbarEdge.Top => new DrawingPoint(
+                fallbackPoint.X,
+                workArea.Top > monitor.Top && fallbackPoint.Y <= workArea.Top
+                    ? workArea.Top
+                    : Math.Max(workArea.Top, fallbackPoint.Y)),
+            TaskbarEdge.Right => new DrawingPoint(
+                workArea.Right < monitor.Right && fallbackPoint.X >= workArea.Right
+                    ? workArea.Right - 1
+                    : Math.Min(workArea.Right - 1, fallbackPoint.X),
+                fallbackPoint.Y),
+            TaskbarEdge.Left => new DrawingPoint(
+                workArea.Left > monitor.Left && fallbackPoint.X <= workArea.Left
+                    ? workArea.Left
+                    : Math.Max(workArea.Left, fallbackPoint.X),
+                fallbackPoint.Y),
+            _ => fallbackPoint
+        };
+
+        DrawingPoint clamped = ClampPointToRect(anchor, monitor);
+        return edge switch
+        {
+            TaskbarEdge.Top => new TrayMenuPlacement(
+                clamped,
+                isRightToLeft ? TrayMenuHorizontalAlignment.Right : TrayMenuHorizontalAlignment.Left,
+                TrayMenuVerticalAlignment.Top),
+            TaskbarEdge.Right => new TrayMenuPlacement(
+                clamped,
+                TrayMenuHorizontalAlignment.Right,
+                TrayMenuVerticalAlignment.Center),
+            TaskbarEdge.Left => new TrayMenuPlacement(
+                clamped,
+                TrayMenuHorizontalAlignment.Left,
+                TrayMenuVerticalAlignment.Center),
+            _ => new TrayMenuPlacement(
+                clamped,
+                isRightToLeft ? TrayMenuHorizontalAlignment.Right : TrayMenuHorizontalAlignment.Left,
+                TrayMenuVerticalAlignment.Bottom),
+        };
     }
 
     private DrawingPoint GetTrayContextMenuAnchorPoint(DrawingPoint fallbackPoint)
@@ -559,7 +656,9 @@ public partial class App
                 point.Y - TrayContextMenuFallbackOffsetPixels);
         }
 
-        int x = point.X - (TrayContextMenuEstimatedWidth / 2);
+        // Compare the raw cursor X (not pre-shifted by estimated width) against
+        // workArea edges so Left/Right Win10 taskbars clamp accurately.
+        int x = point.X;
         int y = point.Y;
         bool moved = false;
 
@@ -626,6 +725,18 @@ public partial class App
         Win32Helper.RECT monitor,
         Win32Helper.RECT workArea)
     {
+        TaskbarEdge? shellEdge = Win32Helper.TryGetTaskbarPosition(out int abeEdge, out _)
+            ? MapAppBarEdge(abeEdge)
+            : null;
+        return ResolveTaskbarEdge(iconRect, monitor, workArea, shellEdge);
+    }
+
+    internal static TaskbarEdge ResolveTaskbarEdge(
+        Win32Helper.RECT iconRect,
+        Win32Helper.RECT monitor,
+        Win32Helper.RECT workArea,
+        TaskbarEdge? shellTaskbarEdge)
+    {
         if (workArea.Bottom < monitor.Bottom &&
             iconRect.Top >= workArea.Bottom)
         {
@@ -648,6 +759,14 @@ public partial class App
             iconRect.Right <= workArea.Left)
         {
             return TaskbarEdge.Left;
+        }
+
+        // When the icon rect lies strictly inside workArea (common on Win10 for
+        // NotifyIconOverflowWindow popups and auto-hide Left/Right/Top taskbars),
+        // trust SHAppBarMessage(ABM_GETTASKBARPOS) over nearest-edge heuristics.
+        if (shellTaskbarEdge is { } reportedEdge)
+        {
+            return reportedEdge;
         }
 
         int distanceToBottom = Math.Abs(monitor.Bottom - iconRect.Bottom);
@@ -673,6 +792,14 @@ public partial class App
             : TaskbarEdge.Left;
     }
 
+    private static TaskbarEdge MapAppBarEdge(int abeEdge) => abeEdge switch
+    {
+        Win32Helper.AbeTop => TaskbarEdge.Top,
+        Win32Helper.AbeLeft => TaskbarEdge.Left,
+        Win32Helper.AbeRight => TaskbarEdge.Right,
+        _ => TaskbarEdge.Bottom,
+    };
+
     private static DrawingPoint ClampPointToRect(DrawingPoint point, Win32Helper.RECT rect)
     {
         return new DrawingPoint(
@@ -680,7 +807,7 @@ public partial class App
             Math.Clamp(point.Y, rect.Top, rect.Bottom - 1));
     }
 
-    private enum TaskbarEdge
+    internal enum TaskbarEdge
     {
         Bottom,
         Top,
@@ -1003,13 +1130,10 @@ public partial class App
         }
 
         var window = new FolderMappingConflictWindow(LocalizationService, body, plan);
-        window.Closed += (_, _) =>
+        SubscribeWindowClosedOnce(window, () =>
         {
-            if (ReferenceEquals(_folderMappingConflictWindow, window))
-            {
-                _folderMappingConflictWindow = null;
-            }
-        };
+            if (ReferenceEquals(_folderMappingConflictWindow, window)) _folderMappingConflictWindow = null;
+        });
         ThemeService.TrackWindow(window);
         _folderMappingConflictWindow = window;
         window.Activate();
@@ -1133,6 +1257,12 @@ public partial class App
         ShowDesktopOrganizationWindow();
     }
 
+    private void OpenGlobalSearchFromTray()
+    {
+        CancelBackgroundMemoryCleanup();
+        OpenSearchPopup();
+    }
+
     private void OpenAboutSettingsFromTray()
     {
         CancelBackgroundMemoryCleanup();
@@ -1143,12 +1273,17 @@ public partial class App
     {
         string path = SettingsService.NormalizeManagedStorageRootPath(SettingsService.Settings.DefaultManagedStorageRootPath);
         Directory.CreateDirectory(path);
-        Win32Helper.OpenFile(path);
+        ShellLaunchService.FireAndForgetOpenPath(path);
     }
 
     private bool IsDarkThemeActive()
     {
         return Win32Helper.IsSystemDarkMode();
+    }
+
+    private bool IsTaskbarDarkThemeActive()
+    {
+        return Win32Helper.IsSystemTaskbarDarkMode();
     }
 
     private void UpdateTrayIconAppearance()
@@ -1180,7 +1315,7 @@ public partial class App
         }
 
         _trayHost.DesiredVisible = true;
-        _trayHost.SetIconPath(AppBranding.ResolveTrayIconPath(style, IsDarkThemeActive()));
+        _trayHost.SetIconPath(AppBranding.ResolveTrayIconPath(style, IsTaskbarDarkThemeActive()));
         if (!_trayHost.IsCreated)
         {
             try

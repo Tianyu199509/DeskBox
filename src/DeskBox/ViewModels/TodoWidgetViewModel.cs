@@ -42,6 +42,13 @@ public enum TodoDuePreset
     Clear
 }
 
+public enum TodoPriority
+{
+    Normal,
+    Medium,
+    High
+}
+
 internal sealed record TodoUndoDeletedEntry(
     int OriginalIndex,
     TodoItem ItemSnapshot);
@@ -484,14 +491,14 @@ public sealed partial class TodoWidgetViewModel : ObservableObject, IDisposable
             if (local.Date == today)
             {
                 return DraftHasDueTime
-                    ? _localizationService.Format("Todo.Due.TodayAt", local.ToString("HH:mm"))
+                    ? _localizationService.Format("Todo.Due.TodayAt", local.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture))
                     : _localizationService.T("Todo.Due.Today");
             }
 
             if (local.Date == today.AddDays(1))
             {
                 return DraftHasDueTime
-                    ? _localizationService.Format("Todo.Due.TomorrowAt", local.ToString("HH:mm"))
+                    ? _localizationService.Format("Todo.Due.TomorrowAt", local.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture))
                     : _localizationService.T("Todo.Due.Tomorrow");
             }
 
@@ -502,7 +509,7 @@ public sealed partial class TodoWidgetViewModel : ObservableObject, IDisposable
                     : $"{local.Year}/{local.Month}/{local.Day}";
             }
 
-            return $"{local.Month}/{local.Day} {local:HH:mm}";
+            return string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{local.Month}/{local.Day} {local:HH:mm}");
         }
     }
 

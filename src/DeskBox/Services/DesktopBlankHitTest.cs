@@ -94,6 +94,25 @@ internal static partial class DesktopBlankHitTest
 
         Win32Helper.GetWindowThreadProcessId(shellWindow, out uint shellProcessId);
         Win32Helper.GetWindowThreadProcessId(listView, out uint listProcessId);
+        return IsShellDesktopListViewForProcessIds(listView, shellWindow, shellProcessId, listProcessId);
+    }
+
+    internal static bool IsShellDesktopListViewForProcessIds(
+        IntPtr listView,
+        IntPtr shellWindow,
+        uint shellProcessId,
+        uint listProcessId)
+    {
+        if (listView == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        if (shellWindow == IntPtr.Zero)
+        {
+            return true;
+        }
+
         return shellProcessId == 0 ||
                listProcessId == 0 ||
                shellProcessId == listProcessId;
@@ -185,7 +204,7 @@ internal static partial class DesktopBlankHitTest
         return false;
     }
 
-    private static bool IsBlankListViewPoint(
+    private static unsafe bool IsBlankListViewPoint(
         IntPtr listView,
         Win32Helper.POINT screenPoint)
     {
@@ -217,12 +236,10 @@ internal static partial class DesktopBlankHitTest
             return false;
         }
 
-        int structureSize = Marshal.SizeOf<ListViewHitTestInfo>();
-        IntPtr localBuffer = IntPtr.Zero;
+        int structureSize = sizeof(ListViewHitTestInfo);
         IntPtr remoteBuffer = IntPtr.Zero;
         try
         {
-            localBuffer = Marshal.AllocHGlobal(structureSize);
             var hitTest = new ListViewHitTestInfo
             {
                 Point = clientPoint,
@@ -230,7 +247,6 @@ internal static partial class DesktopBlankHitTest
                 SubItemIndex = -1,
                 GroupIndex = -1
             };
-            Marshal.StructureToPtr(hitTest, localBuffer, false);
 
             remoteBuffer = RemoteProcessMemoryNativeMethods.VirtualAllocEx(
                 process,
@@ -242,7 +258,7 @@ internal static partial class DesktopBlankHitTest
                 !RemoteProcessMemoryNativeMethods.WriteProcessMemory(
                     process,
                     remoteBuffer,
-                    localBuffer,
+                    (IntPtr)(&hitTest),
                     (UIntPtr)structureSize,
                     out _))
             {
@@ -261,14 +277,13 @@ internal static partial class DesktopBlankHitTest
                 !RemoteProcessMemoryNativeMethods.ReadProcessMemory(
                     process,
                     remoteBuffer,
-                    localBuffer,
+                    (IntPtr)(&hitTest),
                     (UIntPtr)structureSize,
                     out _))
             {
                 return false;
             }
 
-            hitTest = Marshal.PtrToStructure<ListViewHitTestInfo>(localBuffer);
             return hitTest.ItemIndex < 0;
         }
         finally
@@ -278,23 +293,15 @@ internal static partial class DesktopBlankHitTest
                 RemoteProcessMemoryNativeMethods.VirtualFreeEx(process, remoteBuffer, UIntPtr.Zero, MemRelease);
             }
 
-            if (localBuffer != IntPtr.Zero)
-            {
-                Marshal.FreeHGlobal(localBuffer);
-            }
-
             RemoteProcessMemoryNativeMethods.CloseHandle(process);
         }
     }
 
     private static string GetWindowClass(IntPtr windowHandle)
     {
-        var className = new StringBuilder(128);
-        int length = Win32Helper.GetClassName(
-            windowHandle,
-            className,
-            className.Capacity);
-        return length > 0 ? className.ToString() : string.Empty;
+        Span<char> className = stackalloc char[128];
+        int length = Win32Helper.GetClassName(windowHandle, className);
+        return length > 0 ? new string(className[..length]) : string.Empty;
     }
 
     [StructLayout(LayoutKind.Sequential)]

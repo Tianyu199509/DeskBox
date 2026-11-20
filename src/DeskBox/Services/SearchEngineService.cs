@@ -11,7 +11,7 @@ namespace DeskBox.Services;
 /// </summary>
 public sealed class SearchEngineService : IDisposable
 {
-    public const int InitialFileResultPageSize = 200;
+    public const int InitialFileResultPageSize = 400;
     public const int FileResultPageSize = 200;
     internal const int MaxIndexedBodyCharacters = 2048;
     private const int DeskBoxContentRefreshIntervalMilliseconds = 1000;
@@ -27,12 +27,16 @@ public sealed class SearchEngineService : IDisposable
     private readonly Func<CancellationToken, Task<IReadOnlyList<ClipboardHistoryItem>>>? _clipboardItemsProvider;
     private readonly Func<string, double>? _frecencyBoostProvider;
     private readonly Func<ClipboardHistoryItem, string?>? _clipboardPreviewImageResolver;
+    private readonly string? _customWidgetsRootDataDirectory;
     private readonly object _deskBoxContentRefreshLock = new();
     private readonly object _settingsCatalogLock = new();
+    private readonly object _fileWidgetShortcutCacheLock = new();
     private readonly CancellationTokenSource _deskBoxContentLifetimeCts = new();
     private DeskBoxSearchDocument[] _deskBoxContentSnapshot = [];
     private SettingsCatalogItem[]? _cachedSettingsCatalog;
     private string? _cachedSettingsCatalogCulture;
+    private (string FullPath, string WidgetName, Helpers.AppRecommendationIdentity.Keys Keys)[]? _cachedFileWidgetShortcuts;
+    private long _fileWidgetShortcutCacheTickMs = long.MinValue;
     private Task? _deskBoxContentRefreshTask;
     private long _deskBoxContentLastRefreshMs = long.MinValue;
     private int _deskBoxContentInitialized;
@@ -47,7 +51,8 @@ public sealed class SearchEngineService : IDisposable
         QuickCaptureService quickCaptureService,
         Func<CancellationToken, Task<IReadOnlyList<ClipboardHistoryItem>>>? clipboardItemsProvider = null,
         Func<string, double>? frecencyBoostProvider = null,
-        Func<ClipboardHistoryItem, string?>? clipboardPreviewImageResolver = null)
+        Func<ClipboardHistoryItem, string?>? clipboardPreviewImageResolver = null,
+        string? customWidgetsRootDataDirectory = null)
     {
         _settingsService = settingsService;
         _localizationService = localizationService;
@@ -56,9 +61,12 @@ public sealed class SearchEngineService : IDisposable
         _clipboardItemsProvider = clipboardItemsProvider;
         _frecencyBoostProvider = frecencyBoostProvider;
         _clipboardPreviewImageResolver = clipboardPreviewImageResolver;
+        _customWidgetsRootDataDirectory = customWidgetsRootDataDirectory;
         _quickCaptureService.Changed += OnQuickCaptureChanged;
         _localizationService.LanguageChanged += OnLanguageChanged;
+        _settingsService.SettingsChanged += OnSettingsChanged;
         TodoWidgetStore.StoreChanged += OnTodoStoreChanged;
+        CustomWidgetDataStore.StoreChanged += OnCustomWidgetStoreChanged;
         RegisterActiveInstance(this);
     }
 
@@ -68,7 +76,16 @@ public sealed class SearchEngineService : IDisposable
 
     private void OnQuickCaptureChanged() => Interlocked.Exchange(ref _deskBoxContentDirty, 1);
 
+    private void OnSettingsChanged()
+    {
+        InvalidateFileWidgetShortcutCache();
+        Interlocked.Exchange(ref _deskBoxContentDirty, 1);
+    }
+
     private void OnTodoStoreChanged(string storePath, string widgetId) =>
+        Interlocked.Exchange(ref _deskBoxContentDirty, 1);
+
+    private void OnCustomWidgetStoreChanged(string storePath, string widgetId) =>
         Interlocked.Exchange(ref _deskBoxContentDirty, 1);
 
     private void OnLanguageChanged()
@@ -121,6 +138,17 @@ public sealed class SearchEngineService : IDisposable
         {
             _cachedSettingsCatalog = null;
             _cachedSettingsCatalogCulture = null;
+        }
+
+        InvalidateFileWidgetShortcutCache();
+    }
+
+    private void InvalidateFileWidgetShortcutCache()
+    {
+        lock (_fileWidgetShortcutCacheLock)
+        {
+            _cachedFileWidgetShortcuts = null;
+            _fileWidgetShortcutCacheTickMs = long.MinValue;
         }
     }
 
@@ -445,9 +473,92 @@ public sealed class SearchEngineService : IDisposable
     }
 
     private const long StartMenuShortcutCacheTtlMilliseconds = 180_000;
+    private const long FileWidgetShortcutCacheTtlMilliseconds = 30_000;
     private static readonly object s_startMenuShortcutCacheLock = new();
     private static long s_startMenuShortcutCacheTickMs = long.MinValue;
     private static (string FullPath, Helpers.AppRecommendationIdentity.Keys Keys)[] s_startMenuShortcutCache = [];
+
+    private (string FullPath, string WidgetName, Helpers.AppRecommendationIdentity.Keys Keys)[] GetOrScanFileWidgetShortcuts(
+        CancellationToken cancellationToken)
+    {
+        long nowTick = Environment.TickCount64;
+        lock (_fileWidgetShortcutCacheLock)
+        {
+            if (_cachedFileWidgetShortcuts is { } cached &&
+                nowTick - _fileWidgetShortcutCacheTickMs < FileWidgetShortcutCacheTtlMilliseconds)
+            {
+                return cached;
+            }
+        }
+
+        var scanned = new List<(string FullPath, string WidgetName, Helpers.AppRecommendationIdentity.Keys Keys)>();
+        var deduplicator = new Helpers.AppRecommendationDeduplicator();
+
+        void TryCollectShortcut(string path, string widgetName)
+        {
+            if (cancellationToken.IsCancellationRequested ||
+                !path.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase) ||
+                !File.Exists(path))
+            {
+                return;
+            }
+
+            string fullPath;
+            try
+            {
+                fullPath = Path.GetFullPath(path);
+            }
+            catch
+            {
+                return;
+            }
+
+            string fileName = Path.GetFileName(fullPath);
+            if (!deduplicator.TryAcceptWithKeys(
+                    fullPath,
+                    fileName,
+                    precomputedKeys: null,
+                    out Helpers.AppRecommendationIdentity.Keys keys,
+                    out _))
+            {
+                return;
+            }
+
+            scanned.Add((fullPath, widgetName, keys));
+        }
+
+        foreach (var widget in _settingsService.Settings.WidgetLayout.Widgets
+                     .Where(widget => widget.WidgetKind == WidgetKind.File && !widget.IsDisabled))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            foreach (var item in widget.Items.OrderBy(item => item.SortOrder))
+            {
+                TryCollectShortcut(item.Path, widget.Name);
+            }
+
+            if (!string.IsNullOrWhiteSpace(widget.MappedFolderPath))
+            {
+                foreach (string shortcut in EnumerateShortcutFilesSafely(
+                             widget.MappedFolderPath, recursive: false, cancellationToken))
+                {
+                    TryCollectShortcut(shortcut, widget.Name);
+                }
+            }
+        }
+
+        var snapshot = scanned.ToArray();
+        if (!cancellationToken.IsCancellationRequested)
+        {
+            lock (_fileWidgetShortcutCacheLock)
+            {
+                _cachedFileWidgetShortcuts = snapshot;
+                _fileWidgetShortcutCacheTickMs = Environment.TickCount64;
+            }
+        }
+
+        return snapshot;
+    }
 
     private IReadOnlyList<SearchResultItem> SearchLocalApps(
         ParsedSearchQuery parsed,
@@ -570,24 +681,13 @@ public sealed class SearchEngineService : IDisposable
 
         // The user's widgets are an explicit curation signal, so every shortcut shown
         // by an enabled file widget comes before generic Start menu applications.
-        foreach (var widget in _settingsService.Settings.WidgetLayout.Widgets
-                     .Where(widget => widget.WidgetKind == WidgetKind.File && !widget.IsDisabled))
+        foreach (var entry in GetOrScanFileWidgetShortcuts(cancellationToken))
         {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            foreach (var item in widget.Items.OrderBy(item => item.SortOrder))
-            {
-                AddShortcut(item.Path, widget.Name);
-            }
-
-            if (!string.IsNullOrWhiteSpace(widget.MappedFolderPath))
-            {
-                foreach (string shortcut in EnumerateShortcutFilesSafely(
-                             widget.MappedFolderPath, recursive: false, cancellationToken))
-                {
-                    AddShortcut(shortcut, widget.Name);
-                }
-            }
+            AddShortcut(
+                entry.FullPath,
+                entry.WidgetName,
+                precomputedKeys: entry.Keys,
+                skipExistsCheck: true);
         }
 
         string startMenuLabel = _localizationService.T("Search.Recommend.StartMenu");
@@ -827,14 +927,6 @@ public sealed class SearchEngineService : IDisposable
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            (string displayTitle, string glyph) = FormatClipboardDisplayTitleAndGlyph(
-                clip,
-                imageTypeLabel);
-            if (string.IsNullOrWhiteSpace(displayTitle))
-            {
-                continue;
-            }
-
             string cleanAppName = ClipboardClassifier.NormalizeFriendlyAppDisplayName(clip.SourceAppName);
             string subtitle = !string.IsNullOrWhiteSpace(cleanAppName)
                 ? $"{clipboardLabel} · {cleanAppName}"
@@ -844,29 +936,115 @@ public sealed class SearchEngineService : IDisposable
                 subtitle = $"{subtitle} · {clip.Note}";
             }
 
+            string displayTitle;
+            string glyph;
             double score;
+
             if (browseMode)
             {
+                (displayTitle, glyph) = FormatClipboardDisplayTitleAndGlyph(
+                    clip,
+                    imageTypeLabel,
+                    checkSecretHeuristics: true);
+                if (string.IsNullOrWhiteSpace(displayTitle))
+                {
+                    continue;
+                }
+
                 score = (clip.IsPinned ? 88 : 72) - Math.Min(30, results.Count);
             }
-            else
+            else if (clip.IsSensitive)
             {
-                string searchableBody = clip.IsSensitive
-                    ? (clip.Note ?? string.Empty)
-                    : string.Concat(clip.TextContent ?? clip.Summary ?? string.Empty, " ", clip.UrlTitle ?? string.Empty, " ", clip.Note ?? string.Empty);
+                (displayTitle, glyph) = FormatClipboardDisplayTitleAndGlyph(
+                    clip,
+                    imageTypeLabel,
+                    checkSecretHeuristics: false);
+                if (string.IsNullOrWhiteSpace(displayTitle))
+                {
+                    continue;
+                }
 
                 int matchScore = SettingsSearchMatcher.GetScore(
                     effectiveQuery,
                     displayTitle,
                     subtitle,
-                    clip.IsSensitive ? (clip.Note ?? string.Empty) : string.Concat(clip.Summary ?? string.Empty, " ", clip.UrlTitle ?? string.Empty));
+                    clip.Note ?? string.Empty);
+                if (matchScore == SettingsSearchMatcher.NoMatch)
+                {
+                    continue;
+                }
+
+                score = SettingsSearchMatcher.ConvertMatchScoreToSearchRelevance(matchScore);
+                if (clip.IsPinned)
+                {
+                    score += 6;
+                }
+            }
+            else
+            {
+                (string prelimTitle, string prelimGlyph) = FormatClipboardDisplayTitleAndGlyph(
+                    clip,
+                    imageTypeLabel,
+                    checkSecretHeuristics: false);
+                if (string.IsNullOrWhiteSpace(prelimTitle))
+                {
+                    continue;
+                }
+
+                string keywords = string.IsNullOrEmpty(clip.UrlTitle)
+                    ? (clip.Summary ?? string.Empty)
+                    : string.IsNullOrEmpty(clip.Summary)
+                        ? clip.UrlTitle
+                        : string.Concat(clip.Summary, " ", clip.UrlTitle);
+
+                int matchScore = SettingsSearchMatcher.GetScore(
+                    effectiveQuery,
+                    prelimTitle,
+                    subtitle,
+                    keywords);
+                bool bodyMatched = matchScore == SettingsSearchMatcher.NoMatch &&
+                                   ClipboardSearchableBodyContains(clip, effectiveQuery);
+
+                if (matchScore == SettingsSearchMatcher.NoMatch &&
+                    !bodyMatched &&
+                    effectiveQuery.AsSpan().IndexOfAny('•', '*') < 0)
+                {
+                    continue;
+                }
+
+                if (clip.Kind is ClipboardItemKind.Image or ClipboardItemKind.Files)
+                {
+                    displayTitle = prelimTitle;
+                    glyph = prelimGlyph;
+                }
+                else
+                {
+                    (displayTitle, glyph) = FormatClipboardDisplayTitleAndGlyph(
+                        clip,
+                        imageTypeLabel,
+                        checkSecretHeuristics: true);
+                    if (string.IsNullOrWhiteSpace(displayTitle))
+                    {
+                        continue;
+                    }
+
+                    if (!string.Equals(displayTitle, prelimTitle, StringComparison.Ordinal))
+                    {
+                        matchScore = SettingsSearchMatcher.GetScore(
+                            effectiveQuery,
+                            displayTitle,
+                            subtitle,
+                            keywords);
+                        bodyMatched = matchScore == SettingsSearchMatcher.NoMatch &&
+                                      ClipboardSearchableBodyContains(clip, effectiveQuery);
+                    }
+                }
 
                 if (matchScore != SettingsSearchMatcher.NoMatch)
                 {
                     score = SettingsSearchMatcher.ConvertMatchScoreToSearchRelevance(matchScore);
                 }
-                else if (!clip.IsSensitive &&
-                         searchableBody.Contains(effectiveQuery, StringComparison.OrdinalIgnoreCase))
+                else if (bodyMatched)
                 {
                     score = 44;
                 }
@@ -911,9 +1089,80 @@ public sealed class SearchEngineService : IDisposable
         return results;
     }
 
+    private static bool ClipboardSearchableBodyContains(ClipboardHistoryItem clip, string query)
+    {
+        if (string.IsNullOrEmpty(query))
+        {
+            return false;
+        }
+
+        ReadOnlySpan<char> querySpan = query.AsSpan();
+        ReadOnlySpan<char> primary = (clip.TextContent ?? clip.Summary ?? string.Empty).AsSpan();
+        if (!primary.IsEmpty && primary.Contains(querySpan, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        ReadOnlySpan<char> urlTitle = (clip.UrlTitle ?? string.Empty).AsSpan();
+        if (!urlTitle.IsEmpty && urlTitle.Contains(querySpan, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        ReadOnlySpan<char> note = (clip.Note ?? string.Empty).AsSpan();
+        if (!note.IsEmpty && note.Contains(querySpan, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (querySpan.IndexOf(' ') < 0)
+        {
+            return false;
+        }
+
+        // Preserve cross-field space-separated matching without concatenating large TextContent onto LOH.
+        int windowLen = Math.Max(1, querySpan.Length - 1);
+        ReadOnlySpan<char> primaryTail = primary.Length > windowLen ? primary[^windowLen..] : primary;
+        int joinLen = primaryTail.Length + 1 + urlTitle.Length + 1 + note.Length;
+        if (joinLen <= 512)
+        {
+            Span<char> joinBuf = stackalloc char[joinLen];
+            int pos = 0;
+            primaryTail.CopyTo(joinBuf[pos..]);
+            pos += primaryTail.Length;
+            joinBuf[pos++] = ' ';
+            urlTitle.CopyTo(joinBuf[pos..]);
+            pos += urlTitle.Length;
+            joinBuf[pos++] = ' ';
+            note.CopyTo(joinBuf[pos..]);
+            return joinBuf.Contains(querySpan, StringComparison.OrdinalIgnoreCase);
+        }
+
+        int totalLen = primaryTail.Length + 1 + urlTitle.Length + 1 + note.Length;
+        char[] rented = System.Buffers.ArrayPool<char>.Shared.Rent(totalLen);
+        try
+        {
+            Span<char> joinSpan = rented.AsSpan(0, totalLen);
+            int pos = 0;
+            primaryTail.CopyTo(joinSpan[pos..]);
+            pos += primaryTail.Length;
+            joinSpan[pos++] = ' ';
+            urlTitle.CopyTo(joinSpan[pos..]);
+            pos += urlTitle.Length;
+            joinSpan[pos++] = ' ';
+            note.CopyTo(joinSpan[pos..]);
+            return joinSpan.Contains(querySpan, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            System.Buffers.ArrayPool<char>.Shared.Return(rented);
+        }
+    }
+
     private static (string Title, string Glyph) FormatClipboardDisplayTitleAndGlyph(
         ClipboardHistoryItem clip,
-        string imageTypeLabel)
+        string imageTypeLabel,
+        bool checkSecretHeuristics = true)
     {
         switch (clip.Kind)
         {
@@ -947,9 +1196,15 @@ public sealed class SearchEngineService : IDisposable
                 string raw = !string.IsNullOrWhiteSpace(clip.Summary)
                     ? clip.Summary
                     : (clip.TextContent ?? string.Empty);
-                bool mustMask = clip.IsSensitive || ClipboardClassifier.IsHighConfidenceSecret(raw);
+                bool mustMask = clip.IsSensitive;
+                if (!mustMask && checkSecretHeuristics && raw.Length > 0)
+                {
+                    string probe = raw.Length > 8192 ? raw[..8192] : raw;
+                    mustMask = ClipboardClassifier.IsHighConfidenceSecret(probe);
+                }
+
                 string safeText = mustMask
-                    ? ClipboardClassifier.MaskSecretForDisplay(raw)
+                    ? ClipboardClassifier.MaskSecretForDisplay(raw.Length > 8192 ? raw[..8192] : raw)
                     : raw;
                 string glyph = clip.SubKind switch
                 {
@@ -994,9 +1249,10 @@ public sealed class SearchEngineService : IDisposable
                 string body = !string.IsNullOrWhiteSpace(clip.TextContent)
                     ? clip.TextContent
                     : (clip.Summary ?? string.Empty);
-                bool mustMask = clip.IsSensitive || ClipboardClassifier.IsHighConfidenceSecret(body);
+                bool mustMask = clip.IsSensitive ||
+                                (body.Length > 0 && ClipboardClassifier.IsHighConfidenceSecret(body.Length > 8192 ? body[..8192] : body));
                 string safePreview = mustMask
-                    ? ClipboardClassifier.MaskSecretForDisplay(body)
+                    ? ClipboardClassifier.MaskSecretForDisplay(body.Length > 8192 ? body[..8192] : body)
                     : (body.Length > 1200 ? string.Concat(body.AsSpan(0, 1200), "…") : body);
                 int? chars = clip.CharCount > 0 ? clip.CharCount : (body.Length > 0 ? body.Length : null);
                 int? lines = clip.LineCount > 0 ? clip.LineCount : (body.Length > 0 ? CountTextLines(body) : null);
@@ -1358,19 +1614,38 @@ public sealed class SearchEngineService : IDisposable
                 TodoItemId: null,
                 TodoIsCompleted: false,
                 QuickCaptureItemId: item.Id,
+                CustomWidgetId: null,
+                CustomWidgetItemId: null,
+                Glyph: "\uE70F",
                 IsPinned: item.IsPinned,
                 item.UpdatedAt));
         }
 
-        List<WidgetConfig> todoWidgets = _settingsService.Settings.WidgetLayout.Widgets
-            .Where(widget => widget.WidgetKind == WidgetKind.Todo && !widget.IsDisabled)
-            .ToList();
+        string todoWidgetsRoot = CustomWidgetHostSnapshotService.ResolveWidgetsRootForSettings(_settingsService);
+        List<WidgetConfig> todoWidgets = FeatureWidgetSettings.IsEnabled(_settingsService.Settings, WidgetKind.Todo)
+            ? _settingsService.Settings.WidgetLayout.Widgets
+                .Where(widget => widget.WidgetKind == WidgetKind.Todo &&
+                                 !widget.IsDisabled &&
+                                 !_settingsService.Settings.WidgetLayout.DeletedWidgetIds.Contains(widget.Id))
+                .ToList()
+            : [];
+        if (todoWidgets.Count == 0 &&
+            CustomWidgetHostSnapshotService.HasHeadlessDefaultTodoStore(todoWidgetsRoot))
+        {
+            todoWidgets.Add(new WidgetConfig
+            {
+                Id = CustomWidgetHostSnapshotService.FallbackTodoWidgetId,
+                Name = todoTypeLabel,
+                WidgetKind = WidgetKind.Todo
+            });
+        }
+
         Task<(WidgetConfig Widget, TodoWidgetData? Data)>[] todoLoads = todoWidgets
             .Select(async widget =>
             {
                 try
                 {
-                    TodoWidgetData data = await new TodoWidgetStore(widget.Id)
+                    TodoWidgetData data = await new TodoWidgetStore(todoWidgetsRoot, widget.Id)
                         .LoadReadOnlySnapshotAsync()
                         .WaitAsync(cancellationToken)
                         .ConfigureAwait(false);
@@ -1425,12 +1700,262 @@ public sealed class SearchEngineService : IDisposable
                     TodoItemId: item.Id,
                     TodoIsCompleted: item.IsCompleted,
                     QuickCaptureItemId: null,
+                    CustomWidgetId: null,
+                    CustomWidgetItemId: null,
+                    Glyph: "\uE9D5",
                     IsPinned: false,
                     item.UpdatedAt));
             }
         }
 
+        await AppendCustomWidgetSearchDocumentsAsync(documents, cancellationToken).ConfigureAwait(false);
+
         return documents.ToArray();
+    }
+
+    private static readonly string[] s_customRecordPrimaryFields =
+    [
+        "title", "name", "label", "text", "summary", "content", "fileName", "url"
+    ];
+
+    private static readonly string[] s_customRecordSecondaryFields =
+    [
+        "notes", "description", "summary", "body", "content", "subtitle", "path", "filePath", "url"
+    ];
+
+    private async Task AppendCustomWidgetSearchDocumentsAsync(
+        List<DeskBoxSearchDocument> documents,
+        CancellationToken cancellationToken)
+    {
+        List<WidgetConfig> customWidgets = _settingsService.Settings.WidgetLayout.Widgets
+            .Where(widget => widget.WidgetKind == WidgetKind.Custom && !widget.IsDisabled)
+            .ToList();
+        if (customWidgets.Count == 0)
+        {
+            return;
+        }
+
+        string customTypeLabel = _localizationService.T("CustomWidget.Title");
+        string activeCulture = _localizationService.CurrentCultureName;
+        const int MaxIndexedRecordsPerCustomWidget = 100;
+
+        Task<(WidgetConfig Widget, CustomWidgetManifest? Manifest, CustomWidgetStorePayload? Payload, DateTimeOffset ModifiedAt)>[] loads =
+            customWidgets.Select(async widget =>
+            {
+                try
+                {
+                    var store = new CustomWidgetDataStore(
+                        widget.Id,
+                        rootDataDirectory: _customWidgetsRootDataDirectory,
+                        createDirectory: false);
+                    (CustomWidgetManifest? manifest, CustomWidgetStorePayload payload, DateTimeOffset modifiedAt) =
+                        await store.LoadReadOnlySearchSnapshotAsync(activeCulture)
+                            .WaitAsync(cancellationToken)
+                            .ConfigureAwait(false);
+                    return (widget, manifest, (CustomWidgetStorePayload?)payload, modifiedAt);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    App.Log($"[Search] CustomWidget snapshot skipped widget={widget.Id}: {ex.Message}");
+                    return (widget, (CustomWidgetManifest?)null, (CustomWidgetStorePayload?)null, DateTimeOffset.UtcNow);
+                }
+            }).ToArray();
+
+        foreach ((WidgetConfig widget, CustomWidgetManifest? manifest, CustomWidgetStorePayload? payload, DateTimeOffset modifiedAt) in
+                 await Task.WhenAll(loads).ConfigureAwait(false))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (manifest is null && payload is null && string.IsNullOrWhiteSpace(widget.Name))
+            {
+                continue;
+            }
+
+            IReadOnlyDictionary<string, string> i18n = manifest?.ResolveI18nDictionary(activeCulture)
+                ?? new Dictionary<string, string>(StringComparer.Ordinal);
+            var evalCtx = new CustomWidgetEvaluationContext
+            {
+                I18n = i18n,
+                Settings = payload?.Settings ?? new Dictionary<string, string>(StringComparer.Ordinal),
+                State = payload?.State ?? new Dictionary<string, string>(StringComparer.Ordinal),
+                CultureName = activeCulture
+            };
+
+            string resolvedManifestName = manifest is not null
+                ? CustomWidgetExpressionEvaluator.Interpolate(manifest.Name, evalCtx).Trim()
+                : string.Empty;
+            string widgetDisplayName = !string.IsNullOrWhiteSpace(widget.Name)
+                ? widget.Name.Trim()
+                : (!string.IsNullOrWhiteSpace(resolvedManifestName) ? resolvedManifestName : customTypeLabel);
+            string description = manifest is not null
+                ? CustomWidgetExpressionEvaluator.Interpolate(manifest.Description, evalCtx).Trim()
+                : string.Empty;
+            string glyph = ResolveCustomWidgetSearchGlyph(manifest?.Icon);
+            string widgetSubtitle = !string.IsNullOrWhiteSpace(description)
+                ? $"{customTypeLabel} · {TruncateText(description, 48)}"
+                : customTypeLabel;
+            string tagsText = manifest?.Tags is { Count: > 0 } tags
+                ? string.Join(" ", tags)
+                : string.Empty;
+            string widgetBody = string.Join(
+                " ",
+                new[] { resolvedManifestName, description, tagsText, manifest?.Id }
+                    .Where(static s => !string.IsNullOrWhiteSpace(s)));
+
+            documents.Add(new DeskBoxSearchDocument(
+                SearchResultKind.CustomWidget,
+                widgetDisplayName,
+                TruncateIndexedBody(widgetBody),
+                AuxiliaryText: manifest?.Id,
+                widgetSubtitle,
+                TodoWidgetId: null,
+                TodoItemId: null,
+                TodoIsCompleted: false,
+                QuickCaptureItemId: null,
+                CustomWidgetId: widget.Id,
+                CustomWidgetItemId: null,
+                Glyph: glyph,
+                IsPinned: false,
+                modifiedAt));
+
+            if (payload?.Collections is not { Count: > 0 })
+            {
+                continue;
+            }
+
+            int emittedForWidget = 0;
+            foreach ((string _, List<CustomWidgetRecord> records) in payload.Collections)
+            {
+                if (records is null || records.Count == 0)
+                {
+                    continue;
+                }
+
+                foreach (CustomWidgetRecord record in records)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (record is null || record.IsDeleted || record.Fields is not { Count: > 0 })
+                    {
+                        continue;
+                    }
+
+                    string? primary = TryExtractFirstNonEmptyField(record.Fields, s_customRecordPrimaryFields);
+                    if (string.IsNullOrWhiteSpace(primary))
+                    {
+                        continue;
+                    }
+
+                    string cleanPrimary = primary.Trim();
+                    string? secondary = TryExtractSecondaryBody(record.Fields, cleanPrimary);
+                    record.Fields.TryGetValue("url", out string? urlVal);
+                    if (string.IsNullOrWhiteSpace(urlVal))
+                    {
+                        record.Fields.TryGetValue("path", out urlVal);
+                    }
+
+                    string itemSubtitle = !string.IsNullOrWhiteSpace(secondary) &&
+                                          !string.Equals(secondary, cleanPrimary, StringComparison.Ordinal)
+                        ? $"{customTypeLabel} · {widgetDisplayName} · {TruncateText(secondary, 36)}"
+                        : $"{customTypeLabel} · {widgetDisplayName}";
+
+                    documents.Add(new DeskBoxSearchDocument(
+                        SearchResultKind.CustomWidget,
+                        TruncateText(cleanPrimary, 96),
+                        TruncateIndexedBody(secondary ?? cleanPrimary),
+                        AuxiliaryText: string.IsNullOrWhiteSpace(urlVal) ? null : urlVal.Trim(),
+                        itemSubtitle,
+                        TodoWidgetId: null,
+                        TodoItemId: null,
+                        TodoIsCompleted: false,
+                        QuickCaptureItemId: null,
+                        CustomWidgetId: widget.Id,
+                        CustomWidgetItemId: record.Id,
+                        Glyph: glyph,
+                        IsPinned: false,
+                        record.UpdatedAtUtc));
+
+                    if (++emittedForWidget >= MaxIndexedRecordsPerCustomWidget)
+                    {
+                        break;
+                    }
+                }
+
+                if (emittedForWidget >= MaxIndexedRecordsPerCustomWidget)
+                {
+                    break;
+                }
+            }
+        }
+    }
+
+    private static string ResolveCustomWidgetSearchGlyph(string? rawIcon)
+    {
+        if (string.IsNullOrWhiteSpace(rawIcon))
+        {
+            return "\uE71D";
+        }
+
+        string trimmed = rawIcon.Trim();
+        return trimmed.Length == 1 && trimmed[0] >= '\uE000' && trimmed[0] <= '\uF8FF'
+            ? trimmed
+            : "\uE71D";
+    }
+
+    private static string? TryExtractFirstNonEmptyField(
+        IReadOnlyDictionary<string, string> fields,
+        ReadOnlySpan<string> candidateKeys)
+    {
+        foreach (string key in candidateKeys)
+        {
+            if (fields.TryGetValue(key, out string? val) && !string.IsNullOrWhiteSpace(val))
+            {
+                return val;
+            }
+        }
+
+        foreach ((string key, string val) in fields)
+        {
+            if (string.IsNullOrWhiteSpace(val))
+            {
+                continue;
+            }
+
+            foreach (string candidate in candidateKeys)
+            {
+                if (string.Equals(key, candidate, StringComparison.OrdinalIgnoreCase))
+                {
+                    return val;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static string? TryExtractSecondaryBody(
+        IReadOnlyDictionary<string, string> fields,
+        string primaryValue)
+    {
+        List<string>? parts = null;
+        foreach (string key in s_customRecordSecondaryFields)
+        {
+            if (fields.TryGetValue(key, out string? val) &&
+                !string.IsNullOrWhiteSpace(val) &&
+                !string.Equals(val.Trim(), primaryValue, StringComparison.Ordinal))
+            {
+                parts ??= [];
+                string trimmed = val.Trim();
+                if (!parts.Contains(trimmed, StringComparer.Ordinal))
+                {
+                    parts.Add(trimmed);
+                }
+            }
+        }
+
+        return parts is { Count: > 0 } ? string.Join(" · ", parts) : null;
     }
 
     private static IReadOnlyList<SearchResultItem> SearchDeskBoxContentSnapshot(
@@ -1519,7 +2044,11 @@ public sealed class SearchEngineService : IDisposable
                 TodoItemId = document.TodoItemId,
                 TodoIsCompleted = document.TodoIsCompleted,
                 QuickCaptureItemId = document.QuickCaptureItemId,
-                Glyph = document.Kind == SearchResultKind.Todo ? "\uE9D5" : "\uE70F",
+                CustomWidgetId = document.CustomWidgetId,
+                CustomWidgetItemId = document.CustomWidgetItemId,
+                Glyph = !string.IsNullOrWhiteSpace(document.Glyph)
+                    ? document.Glyph
+                    : (document.Kind == SearchResultKind.Todo ? "\uE9D5" : "\uE70F"),
                 ModifiedAt = document.ModifiedAt,
                 RelevanceScore = Math.Max(1, score),
                 PreviewText = docBody ?? document.AuxiliaryText,
@@ -1864,6 +2393,7 @@ public sealed class SearchEngineService : IDisposable
             (SearchResultKind.Action, _localizationService.T("Search.Group.Actions")),
             (SearchResultKind.Todo, _localizationService.T("Search.Group.Todos")),
             (SearchResultKind.QuickCapture, _localizationService.T("Search.Group.Notes")),
+            (SearchResultKind.CustomWidget, _localizationService.T("CustomWidget.Title")),
             (SearchResultKind.Clipboard, _localizationService.T("Search.Type.Clipboard")),
             (SearchResultKind.File, _localizationService.T("Search.Group.Files")),
             (SearchResultKind.Folder, _localizationService.T("Search.Group.Folders"))
@@ -1926,11 +2456,62 @@ public sealed class SearchEngineService : IDisposable
         return text[..length];
     }
 
-    private static string TruncateText(string text, int maxLength)
+    private static string TruncateText(string? text, int maxLength)
     {
         if (string.IsNullOrWhiteSpace(text))
         {
             return string.Empty;
+        }
+
+        ReadOnlySpan<char> span = text.AsSpan().Trim();
+        if (span.IsEmpty)
+        {
+            return string.Empty;
+        }
+
+        if (span.IndexOfAny("\r\n\f\u0085\u2028\u2029") < 0)
+        {
+            if (span.Length <= maxLength)
+            {
+                return span.Length == text.Length ? text : span.ToString();
+            }
+
+            return string.Concat(span[..maxLength], "...");
+        }
+
+        if (maxLength is > 0 and <= 256)
+        {
+            Span<char> buf = stackalloc char[maxLength + 3];
+            int written = 0;
+            for (int i = 0; i < span.Length; i++)
+            {
+                char c = span[i];
+                if (c == '\r')
+                {
+                    if (i + 1 < span.Length && span[i + 1] == '\n')
+                    {
+                        i++;
+                    }
+
+                    c = ' ';
+                }
+                else if (c is '\n' or '\f' or '\u0085' or '\u2028' or '\u2029')
+                {
+                    c = ' ';
+                }
+
+                if (written == maxLength)
+                {
+                    buf[written] = '.';
+                    buf[written + 1] = '.';
+                    buf[written + 2] = '.';
+                    return new string(buf[..(maxLength + 3)]);
+                }
+
+                buf[written++] = c;
+            }
+
+            return new string(buf[..written]);
         }
 
         string singleLine = text.ReplaceLineEndings(" ").Trim();
@@ -1956,6 +2537,9 @@ public sealed class SearchEngineService : IDisposable
         string? TodoItemId,
         bool TodoIsCompleted,
         string? QuickCaptureItemId,
+        string? CustomWidgetId,
+        string? CustomWidgetItemId,
+        string? Glyph,
         bool IsPinned,
         DateTimeOffset ModifiedAt);
 
@@ -1971,7 +2555,9 @@ public sealed class SearchEngineService : IDisposable
         Interlocked.Increment(ref _deskBoxContentCacheGeneration);
         _quickCaptureService.Changed -= OnQuickCaptureChanged;
         _localizationService.LanguageChanged -= OnLanguageChanged;
+        _settingsService.SettingsChanged -= OnSettingsChanged;
         TodoWidgetStore.StoreChanged -= OnTodoStoreChanged;
+        CustomWidgetDataStore.StoreChanged -= OnCustomWidgetStoreChanged;
         _deskBoxContentLifetimeCts.Cancel();
         _deskBoxContentLifetimeCts.Dispose();
         Volatile.Write(ref _deskBoxContentSnapshot, []);

@@ -34,7 +34,7 @@ namespace DeskBox.Views;
 /// eliminating any DWM window-shadow-before-content flash.
 /// </para>
 /// </summary>
-internal sealed class TrayContextMenuWindow : Window
+internal sealed partial class TrayContextMenuWindow : Window
 {
     private const double MinMenuWidthDip = 196;
     private const double TaskbarGapDip = 6;
@@ -378,7 +378,7 @@ internal sealed class TrayContextMenuWindow : Window
         SetCloaked(true);
         _appWindow.MoveAndResize(new RectInt32(anchor.X, anchor.Y, 1, 1));
 
-        double dpiScale = Win32Helper.GetDpiScaleForWindow(WindowHandle, _rootGrid.XamlRoot);
+        double dpiScale = Win32Helper.GetDpiScaleForPoint(anchor.X, anchor.Y);
         TrayAnchorPlacement placement = ComputeAnchorPlacement(
             anchor,
             horizontalAlignment,

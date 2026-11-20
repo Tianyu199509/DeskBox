@@ -105,8 +105,7 @@ public sealed class RemoteSettingsHotkeyActions : ISettingsHotkeyActions
 
     public bool ResetToDefault(out string? error)
     {
-        (bool ok, _, string? resetError) = _client.RequestAsync(SettingsIpcMethods.HotkeyReset)
-            .GetAwaiter().GetResult();
+        (bool ok, _, string? resetError) = SettingsIpcShell.RequestSyncSafe(_client, SettingsIpcMethods.HotkeyReset);
         error = resetError;
         if (ok)
         {
@@ -191,8 +190,7 @@ public sealed class RemoteSettingsHotkeyActions : ISettingsHotkeyActions
 
     private bool SendApplySync(string method, string payload, out string? error)
     {
-        (bool ok, _, string? applyError) = _client.RequestAsync(method, payload)
-            .GetAwaiter().GetResult();
+        (bool ok, _, string? applyError) = SettingsIpcShell.RequestSyncSafe(_client, method, payload);
         error = applyError;
         return ok;
     }
@@ -243,10 +241,10 @@ public sealed class RemoteSettingsHotkeyActions : ISettingsHotkeyActions
 
     public DesktopDoubleClickToggleResult TrySetDesktopDoubleClickEnabled(bool enabled)
     {
-        (bool ok, string? payload, _) = _client.RequestAsync(
-                SettingsIpcMethods.HotkeyDoubleClickSet,
-                SettingsIpcPayload.EncodeBoolean(enabled))
-            .GetAwaiter().GetResult();
+        (bool ok, string? payload, _) = SettingsIpcShell.RequestSyncSafe(
+            _client,
+            SettingsIpcMethods.HotkeyDoubleClickSet,
+            SettingsIpcPayload.EncodeBoolean(enabled));
         return ok && SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.DesktopDoubleClickToggleResult)
             is { } result
                 ? result

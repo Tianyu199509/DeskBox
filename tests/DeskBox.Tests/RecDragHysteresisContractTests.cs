@@ -9,14 +9,22 @@ namespace DeskBox.Tests;
 /// </summary>
 public sealed class RecDragHysteresisContractTests
 {
-    private const string SearchWindowPath =
-        "src/DeskBox/Views/SearchPopupWindow.xaml.cs";
+    private const string RecDragPath =
+        "src/DeskBox/Controls/Search/RecommendedAppsGridControl.DragAndSelection.cs";
+    private const string RecGridPath =
+        "src/DeskBox/Controls/Search/RecommendedAppsGridControl.xaml.cs";
+    private const string RecOverlayPath =
+        "src/DeskBox/Controls/Search/RecommendationFolderOverlayControl.xaml.cs";
+    private const string RecGridXamlPath =
+        "src/DeskBox/Controls/Search/RecommendedAppsGridControl.xaml";
+    private const string RecOverlayXamlPath =
+        "src/DeskBox/Controls/Search/RecommendationFolderOverlayControl.xaml";
 
     [Fact]
     public void DropEvaluation_HitTestsBaseRectsNeverLiveTransforms()
     {
         string body = ExtractMethodBody(
-            SearchWindowPath,
+            RecDragPath,
             "private RecommendedDropDecision EvaluateRecommendedDropTarget(");
 
         // Base rects make decisions immune to the reflow translations the
@@ -30,7 +38,7 @@ public sealed class RecDragHysteresisContractTests
     public void DropDecisions_GoThroughTheHysteresisAnchor()
     {
         string movedBody = ExtractMethodBody(
-            SearchWindowPath,
+            RecDragPath,
             "private void RecommendedApp_PointerMoved(");
 
         Assert.Contains(
@@ -47,7 +55,7 @@ public sealed class RecDragHysteresisContractTests
     public void DropRelease_CommitsTheAnchoredDecisionNotAFreshEvaluation()
     {
         string releaseBody = ExtractMethodBody(
-            SearchWindowPath,
+            RecDragPath,
             "private void RecommendedApp_PointerReleased(");
 
         Assert.Contains("_recLastDropDecision", releaseBody, StringComparison.Ordinal);
@@ -62,7 +70,7 @@ public sealed class RecDragHysteresisContractTests
     [Fact]
     public void OverlayDragOut_ClosesTheFolderOverlayOnSuccessfulExtraction()
     {
-        string source = ReadRepositoryFile(SearchWindowPath);
+        string source = ReadRepositoryFile(RecOverlayPath);
 
         // The overlay hides the main grid; keeping it open after an
         // extraction hides where the app landed. Close on any successful
@@ -80,9 +88,10 @@ public sealed class RecDragHysteresisContractTests
     [InlineData("[RecDrag] drag-out")]
     public void RecDrag_AttributionLogFingerprintsExist(string fingerprint)
     {
+        string combined = ReadRepositoryFile(RecDragPath) + "\n" + ReadRepositoryFile(RecOverlayPath);
         Assert.Contains(
             fingerprint,
-            ReadRepositoryFile(SearchWindowPath),
+            combined,
             StringComparison.Ordinal);
     }
 
@@ -90,7 +99,7 @@ public sealed class RecDragHysteresisContractTests
     public void DropRelease_SnapshotsDecisionAndDraggedKeysBeforeReleasingPointerCapture()
     {
         string releaseBody = ExtractMethodBody(
-            SearchWindowPath,
+            RecDragPath,
             "private void RecommendedApp_PointerReleased(");
 
         // ReleasePointerCapture synchronously raises RecommendedApp_PointerCaptureLost ->
@@ -111,7 +120,7 @@ public sealed class RecDragHysteresisContractTests
     public void OverlayRelease_SnapshotsFolderIdAndReorderBeforeReleasingPointerCapture()
     {
         string releaseBody = ExtractMethodBody(
-            SearchWindowPath,
+            RecOverlayPath,
             "private void OverlayAppCard_PointerReleased(");
 
         int releaseCaptureIdx = releaseBody.IndexOf("ReleasePointerCapture(", StringComparison.Ordinal);
@@ -192,12 +201,13 @@ public sealed class RecDragHysteresisContractTests
     [Fact]
     public void RecommendationTiles_UseHoverOnlyHighlightAndTransparentDragGhosts()
     {
-        string xaml = ReadRepositoryFile("src/DeskBox/Views/SearchPopupWindow.xaml");
+        string recXaml = ReadRepositoryFile(RecGridXamlPath);
+        string overlayXaml = ReadRepositoryFile(RecOverlayXamlPath);
         string selectEntryBody = ExtractMethodBody(
-            SearchWindowPath,
+            RecGridPath,
             "private void SelectRecommendedEntry(");
         string editVisualsBody = ExtractMethodBody(
-            SearchWindowPath,
+            RecGridPath,
             "private void ApplyRecommendedCardEditVisuals(");
 
         // Idle and selected recommendation tiles must not display a persistent mask.
@@ -206,8 +216,8 @@ public sealed class RecDragHysteresisContractTests
         Assert.DoesNotContain("? Visibility.Visible", ExtractPlateSection(editVisualsBody), StringComparison.Ordinal);
 
         // Drag ghosts carry only the clean icon + label (+ multi-drag count badge), no card mask.
-        string recGhost = ExtractElementTag(xaml, "x:Name=\"RecDragGhostBorder\"");
-        string folderGhost = ExtractElementTag(xaml, "x:Name=\"FolderDragGhostBorder\"");
+        string recGhost = ExtractElementTag(recXaml, "x:Name=\"RecDragGhostBorder\"");
+        string folderGhost = ExtractElementTag(overlayXaml, "x:Name=\"FolderDragGhostBorder\"");
         Assert.Contains("Background=\"Transparent\"", recGhost, StringComparison.Ordinal);
         Assert.Contains("BorderThickness=\"0\"", recGhost, StringComparison.Ordinal);
         Assert.Contains("Background=\"Transparent\"", folderGhost, StringComparison.Ordinal);
@@ -218,10 +228,10 @@ public sealed class RecDragHysteresisContractTests
     public void EditMode_SupportsFolderDoubleClickOpenAndSuppressesAccidentalFolderAppLaunch()
     {
         string recReleaseBody = ExtractMethodBody(
-            SearchWindowPath,
+            RecDragPath,
             "private void RecommendedApp_PointerReleased(");
         string overlayReleaseBody = ExtractMethodBody(
-            SearchWindowPath,
+            RecOverlayPath,
             "private void OverlayAppCard_PointerReleased(");
 
         Assert.Contains("EditFolderDoubleClickThresholdMs", recReleaseBody, StringComparison.Ordinal);
@@ -233,16 +243,16 @@ public sealed class RecDragHysteresisContractTests
     public void ReflowPreview_EnablesCompositionTranslationAndMemoizesUnchangedDecisions()
     {
         string preparedBody = ExtractMethodBody(
-            SearchWindowPath,
+            RecGridPath,
             "private void OnRecommendedAppsElementPrepared(");
         string clearingBody = ExtractMethodBody(
-            SearchWindowPath,
+            RecGridPath,
             "private void OnRecommendedAppsElementClearing(");
         string reflowAnimBody = ExtractMethodBody(
-            SearchWindowPath,
+            RecDragPath,
             "private static void AnimateReflowTranslation(");
         string reflowPreviewBody = ExtractMethodBody(
-            SearchWindowPath,
+            RecDragPath,
             "private bool ApplyRecommendedReflowPreview(");
 
         Assert.Contains("ElementCompositionPreview.SetIsTranslationEnabled(", preparedBody, StringComparison.Ordinal);

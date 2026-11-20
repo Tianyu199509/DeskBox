@@ -20,17 +20,6 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
 {
     private const float AlbumArtHoverScale = 1.018f;
     private const double AlbumArtHoverOffset = 3.0;
-    private const double TitleMarqueeGap = 32.0;
-    private const double TitleMarqueeStartDelayMs = 900.0;
-    private const double TitleMarqueeSpeedPixelsPerSecond = 50.0;
-    private const double TitleMarqueeOverflowTolerance = 4.0;
-    private const int TitleMarqueeDeferredMeasureMs = 120;
-    private const double LyricMarqueeGap = 28.0;
-    private const double LyricMarqueeStartDelayMs = 450.0;
-    private const double LyricMarqueeMinSpeedPixelsPerSecond = 46.0;
-    private const double LyricMarqueeMaxSpeedPixelsPerSecond = 88.0;
-    private const double LyricMarqueeOverflowTolerance = 3.0;
-    private const int LyricMarqueeDeferredMeasureMs = 90;
     private const int LyricsSingleTapExitDelayMs = 230;
     private const long LyricsDoubleTapSuppressMs = 340;
     private const int ArtworkTransitionDurationMs =
@@ -39,8 +28,8 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
     private const double WideResponsiveWidth = 320.0;
     private const double MinimumResponsiveHeight = 180.0;
     private const double WideResponsiveHeight = 280.0;
-    private const double WideAlbumArtSize = 108.0;
-    private const double MinimumAlbumArtSize = 60.0;
+    private const double WideAlbumArtSize = 72.0;
+    private const double MinimumAlbumArtSize = 48.0;
     private const double LyricsViewportEdgeFadeHeight = 40.0;
     private const double WideTransportButtonSize = 32.0;
     private const double CompactTransportButtonSize = 28.0;
@@ -59,14 +48,14 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
     private bool _isInlineVolumeReadyForUserInput;
     private bool _hasInlineSystemVolumeSnapshot;
     private int _inlineVolumeOpenGeneration;
-    private ScalarKeyFrameAnimation? _titleMarqueeAnimation;
-    private Grid? _titleMarqueeAnimatedCanvas;
-    private double _titleMarqueeDistance;
-    private int _titleMarqueeMeasureVersion;
-    private ScalarKeyFrameAnimation? _lyricMarqueeAnimation;
-    private Grid? _lyricMarqueeAnimatedCanvas;
-    private int _lyricMarqueeMeasureVersion;
     private int _artworkTransitionVersion;
+    private const double TonearmCanvasWidth = 64.0;
+    private const double TonearmCanvasHeight = 166.0;
+    private const double TonearmCanvasLeft = 40.0;
+    private const double TonearmCanvasTop = -102.0;
+    private const double TonearmPivotX = 44.0;
+    private const double TonearmPivotY = 22.0;
+    private const float TonearmParkedAngleDegrees = -20f;
     private bool? _lastTonearmPlayingState;
     private ScalarKeyFrameAnimation? _tonearmAnimation;
     private CubicBezierEasingFunction? _tonearmEasing;
@@ -168,8 +157,7 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
             }
             else
             {
-                StopTitleMarquee();
-                StopLyricMarquee();
+                StopAllTextMarquees();
                 StopSpectrumVisuals(immediate: true);
             }
 
@@ -263,8 +251,7 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
             AnimateTonearmForState();
         }
 
-        QueueTitleMarqueeUpdate();
-        QueueLyricMarqueeUpdate();
+        QueueAllTextMarquees();
     }
 
     private void LyricsOverlayPanel_Loaded(object sender, RoutedEventArgs e)
@@ -554,7 +541,9 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
                 {
                     Placement = MinimalSourceButton is not null && ReferenceEquals(anchor, MinimalSourceButton)
                         ? FlyoutPlacementMode.Top
-                        : FlyoutPlacementMode.Bottom,
+                        : SourceButton is not null && ReferenceEquals(anchor, SourceButton)
+                            ? FlyoutPlacementMode.BottomEdgeAlignedLeft
+                            : FlyoutPlacementMode.Bottom,
                     ShowMode = FlyoutShowMode.Standard
                 });
         }
@@ -780,8 +769,7 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
         UpdateProgressVisuals();
         UpdateLyricsOverlayState();
         UpdateSpectrumVisuals();
-        QueueTitleMarqueeUpdate();
-        QueueLyricMarqueeUpdate();
+        QueueAllTextMarquees();
     }
 
     private void MusicWidgetContent_Unloaded(object sender, RoutedEventArgs e)
@@ -790,8 +778,7 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
         HideInlineVolumePanelIfLoaded();
         CloseSourceFlyout();
         ResetAlbumArtMotion();
-        StopTitleMarquee();
-        StopLyricMarquee();
+        StopAllTextMarquees();
         StopRecordVinylRotation();
         StopRecordHorizontalVinylRotation();
         StopSpectrumVisuals(immediate: true);
@@ -821,8 +808,7 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
         _hasInlineSystemVolumeSnapshot = false;
         ++_inlineVolumeOpenGeneration;
         _volumeAnchorButton = null;
-        ++_titleMarqueeMeasureVersion;
-        ++_lyricMarqueeMeasureVersion;
+        InvalidateAllTextMarqueeVersions();
         ++_lyricsTapVersion;
         ++_artworkTransitionVersion;
         Loaded -= MusicWidgetContent_Loaded;
@@ -838,8 +824,7 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
         RootGrid.RemoveHandler(UIElement.PointerPressedEvent, _rootPointerPressedHandler);
         CloseSourceFlyout();
         ResetAlbumArtMotion();
-        StopTitleMarquee();
-        StopLyricMarquee();
+        StopAllTextMarquees();
 
         StopRecordVinylRotation();
         StopRecordHorizontalVinylRotation();
@@ -886,8 +871,7 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
         if (visible && !_isHostCompactCollapsed)
         {
             UpdateProgressVisuals();
-            QueueTitleMarqueeUpdate();
-            QueueLyricMarqueeUpdate();
+            QueueAllTextMarquees();
             UpdateRecordVinylRotation();
             UpdateRecordHorizontalVinylRotation();
             UpdateSpectrumVisuals();
@@ -902,8 +886,7 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
         {
             HideInlineVolumePanelIfLoaded();
             CloseSourceFlyout();
-            StopTitleMarquee();
-            StopLyricMarquee();
+            StopAllTextMarquees();
             StopRecordVinylRotation();
             StopRecordHorizontalVinylRotation();
             StopSpectrumVisuals(immediate: true);
@@ -922,8 +905,7 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
         {
             HideInlineVolumePanelIfLoaded();
             CloseSourceFlyout();
-            StopTitleMarquee();
-            StopLyricMarquee();
+            StopAllTextMarquees();
             StopRecordVinylRotation();
             StopRecordHorizontalVinylRotation();
             StopSpectrumVisuals(immediate: true);
@@ -931,8 +913,7 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
         }
 
         UpdateProgressVisuals();
-        QueueTitleMarqueeUpdate();
-        QueueLyricMarqueeUpdate();
+        QueueAllTextMarquees();
         UpdateRecordVinylRotation();
         UpdateRecordHorizontalVinylRotation();
         UpdateSpectrumVisuals();
@@ -946,8 +927,7 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
 
     public void ApplyPerformanceSettings()
     {
-        StopTitleMarquee();
-        StopLyricMarquee();
+        StopAllTextMarquees();
         StopRecordVinylRotation();
         StopRecordHorizontalVinylRotation();
         StopSpectrumVisuals(immediate: true);
@@ -958,8 +938,7 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
             return;
         }
 
-        QueueTitleMarqueeUpdate();
-        QueueLyricMarqueeUpdate();
+        QueueAllTextMarquees();
         UpdateRecordVinylRotation();
         UpdateRecordHorizontalVinylRotation();
         UpdateSpectrumVisuals();
@@ -994,57 +973,6 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
     {
         _isResponsiveLayoutTransitionActive = false;
         ApplyResponsiveLayout();
-    }
-
-    private static Windows.Foundation.Rect CreateHorizontalViewportClipRect(double width, double height) =>
-        new(0, -12, Math.Max(0, width), Math.Max(36, height) + 24);
-
-    private void TitleMarqueeHost_SizeChanged(object sender, SizeChangedEventArgs e)
-    {
-        RectangleGeometry? clip = null;
-        if (MinimalTitleMarqueeHost is not null && ReferenceEquals(sender, MinimalTitleMarqueeHost))
-        {
-            clip = MinimalTitleMarqueeClip;
-        }
-        else if (TitleMarqueeHost is not null && ReferenceEquals(sender, TitleMarqueeHost))
-        {
-            clip = TitleMarqueeClip;
-        }
-
-        if (clip is not null && e.NewSize.Width > 0)
-        {
-            clip.Rect = CreateHorizontalViewportClipRect(e.NewSize.Width, e.NewSize.Height);
-        }
-
-        QueueTitleMarqueeUpdate();
-    }
-
-    private void LyricMarqueeHost_SizeChanged(object sender, SizeChangedEventArgs e)
-    {
-        RectangleGeometry? clip = null;
-        if (MinimalLyricMarqueeHost is not null && ReferenceEquals(sender, MinimalLyricMarqueeHost))
-        {
-            clip = MinimalLyricMarqueeClip;
-        }
-        else if (ControlsLyricMarqueeHost is not null && ReferenceEquals(sender, ControlsLyricMarqueeHost))
-        {
-            clip = ControlsLyricMarqueeClip;
-        }
-        else if (RecordLyricMarqueeHost is not null && ReferenceEquals(sender, RecordLyricMarqueeHost))
-        {
-            clip = RecordLyricMarqueeClip;
-        }
-        else if (RecordHorizontalLyricMarqueeHost is not null && ReferenceEquals(sender, RecordHorizontalLyricMarqueeHost))
-        {
-            clip = RecordHorizontalLyricMarqueeClip;
-        }
-
-        if (clip is not null && e.NewSize.Width > 0)
-        {
-            clip.Rect = CreateHorizontalViewportClipRect(e.NewSize.Width, e.NewSize.Height);
-        }
-
-        QueueLyricMarqueeUpdate();
     }
 
     private void ProgressHost_PointerEntered(object sender, PointerRoutedEventArgs e)
@@ -1210,8 +1138,7 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
             HideInlineVolumePanelIfLoaded();
             CloseSourceFlyout();
             ResetAlbumArtMotion();
-            StopTitleMarquee();
-            StopLyricMarquee();
+            StopAllTextMarquees();
             StopSpectrumVisuals(immediate: true);
             if (!isRecordVertical)
             {
@@ -1241,8 +1168,7 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
             UpdateRecordVinylRotation();
             UpdateSpectrumVisuals();
             AnimateTonearmForState();
-            QueueTitleMarqueeUpdate();
-            QueueLyricMarqueeUpdate();
+            QueueAllTextMarquees();
             DispatcherQueue.TryEnqueue(UpdateProgressVisuals);
             return;
         }
@@ -1252,8 +1178,7 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
             ApplyRecordHorizontalSizing(width, height);
             UpdateRecordHorizontalVinylRotation();
             UpdateSpectrumVisuals();
-            QueueTitleMarqueeUpdate();
-            QueueLyricMarqueeUpdate();
+            QueueAllTextMarquees();
             DispatcherQueue.TryEnqueue(UpdateProgressVisuals);
             return;
         }
@@ -1263,8 +1188,7 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
             ApplyMinimalLayoutSizing(width, height);
             ApplyAlbumArtCornerRadius();
             UpdateSpectrumVisuals();
-            QueueTitleMarqueeUpdate();
-            QueueLyricMarqueeUpdate();
+            QueueAllTextMarquees();
             DispatcherQueue.TryEnqueue(UpdateProgressVisuals);
             return;
         }
@@ -1272,8 +1196,7 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
         ApplyStandardControlsLayoutSizing(width, height);
         UpdateSpectrumVisuals();
         PositionInlineVolumePanel();
-        QueueTitleMarqueeUpdate();
-        QueueLyricMarqueeUpdate();
+        QueueAllTextMarquees();
         DispatcherQueue.TryEnqueue(UpdateProgressVisuals);
     }
 
@@ -1305,42 +1228,45 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
         return true;
     }
 
+    private const double MinNaturalBarStripWidth = 220.0;
+
     private static void ConfigureLinearStripGeometry(
         MusicSpectrumControl control,
         MusicSpectrumMode mode,
         double usableWidth,
         double maxHeight)
     {
+        double naturalWidth = Math.Max(MinNaturalBarStripWidth, usableWidth);
         switch (mode)
         {
             case MusicSpectrumMode.AuroraSilk:
-                control.ConfigureGeometry(mode, 15, 3.0, 3.0, maxHeight);
+                control.ConfigureGeometry(mode, MusicSpectrumControl.ResolveAuroraAnchorCount(usableWidth), 3.0, 3.0, maxHeight);
                 break;
 
             case MusicSpectrumMode.WaveformScrub:
             {
-                int bars = Math.Clamp((int)Math.Floor((usableWidth + 2.2) / 4.8), 14, 48);
+                int bars = Math.Clamp((int)Math.Floor((naturalWidth + 2.2) / 4.8), 32, MusicSpectrumControl.MaxSupportedBars);
                 control.ConfigureGeometry(mode, bars, barWidth: 2.6, barSpacing: 2.2, maxBarHeight: maxHeight);
                 break;
             }
 
             case MusicSpectrumMode.MatrixLed:
             {
-                int cols = Math.Clamp((int)Math.Floor((usableWidth + 2.4) / 7.0), 10, 34);
+                int cols = Math.Clamp((int)Math.Floor((naturalWidth + 2.4) / 7.0), 22, 128);
                 control.ConfigureGeometry(mode, cols, barWidth: 4.6, barSpacing: 2.4, maxBarHeight: maxHeight);
                 break;
             }
 
             case MusicSpectrumMode.PeakHoldBars:
             {
-                int bars = Math.Clamp((int)Math.Floor((usableWidth + 2.6) / 5.8), 12, 40);
+                int bars = Math.Clamp((int)Math.Floor((naturalWidth + 2.6) / 5.8), 28, MusicSpectrumControl.MaxSupportedBars);
                 control.ConfigureGeometry(mode, bars, barWidth: 3.2, barSpacing: 2.6, maxBarHeight: maxHeight);
                 break;
             }
 
             default:
             {
-                int evenBars = Math.Clamp(((int)Math.Floor((usableWidth + 2.8) / 5.8)) & ~1, 12, 42);
+                int evenBars = Math.Clamp(((int)Math.Floor((naturalWidth + 2.8) / 5.8)) & ~1, 28, MusicSpectrumControl.MaxSupportedBars);
                 control.ConfigureGeometry(mode, evenBars, barWidth: 3.0, barSpacing: 2.8, maxBarHeight: maxHeight);
                 break;
             }
@@ -1403,7 +1329,7 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
 
         if (hasSpectrum && MinimalSpectrumBar is not null)
         {
-            double usableWidth = Math.Max(80, width - 24);
+            double usableWidth = Math.Max(80, width);
             double stripHeight = mode == MusicSpectrumMode.AuroraSilk ? 20.0 : 17.0;
             ConfigureLinearStripGeometry(MinimalSpectrumBar, mode, usableWidth, stripHeight);
             MinimalSpectrumBar.Opacity = 0.96;
@@ -1463,38 +1389,40 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
             (height - MinimumResponsiveHeight) / (WideResponsiveHeight - MinimumResponsiveHeight),
             0.0,
             1.0);
-        double densityRatio = Math.Min(widthRatio, heightRatio);
 
+        double headerButtonSize = width < 220 ? 24.0 : 26.0;
         double transportButtonSize = ResolveTransportButtonSize(width);
         double primaryButtonSize = ResolvePrimaryTransportButtonSize(width);
-        double contentPadding = Math.Round(Lerp(8, 12, densityRatio));
+        double horizontalPadding = Math.Round(Lerp(10, 15, widthRatio));
+        double verticalPadding = Math.Round(Lerp(8, 12, heightRatio));
         double columnSpacing = Math.Round(Lerp(10, 14, widthRatio));
-        double rowSpacing = Math.Round(Lerp(3, 7, heightRatio));
-        double controlsSpacing = Math.Round(Lerp(6, 16, widthRatio));
-        double timelineColumnWidth = Math.Round(Lerp(28, 34, widthRatio));
-        double progressTopMargin = Math.Round(Lerp(0, 2, heightRatio));
-        double controlsTopMargin = Math.Round(Lerp(1, 4, heightRatio));
+        double rowSpacing = Math.Round(Lerp(3, 6, heightRatio));
+        double controlsSpacing = Math.Round(Lerp(16, 28, widthRatio));
 
         bool showTimeline = ViewModel?.TimelineRowVisibility == Visibility.Visible;
-        double timelineHeight = showTimeline ? 24 + progressTopMargin : 0;
-        double reservedVertical = (contentPadding * 2) +
-            (rowSpacing * (showTimeline ? 2 : 1)) +
+        double timelineHeight = showTimeline ? 26.0 : 0.0;
+        double reservedVertical = (verticalPadding * 2) +
+            (rowSpacing * (showTimeline ? 3 : 2)) +
+            headerButtonSize +
             timelineHeight +
-            primaryButtonSize +
-            controlsTopMargin;
-        double maxAlbumByWidth = Math.Min(
-            WideAlbumArtSize,
-            Math.Max(MinimumAlbumArtSize, Math.Round(width * 0.37)));
+            primaryButtonSize;
+        double maxAlbumByWidth = Math.Clamp(
+            Math.Round(width * 0.21),
+            MinimumAlbumArtSize,
+            WideAlbumArtSize);
         double maxAlbumByHeight = Math.Max(MinimumAlbumArtSize, Math.Floor(height - reservedVertical));
         double albumSize = Math.Clamp(
             Math.Min(maxAlbumByWidth, maxAlbumByHeight),
             MinimumAlbumArtSize,
             WideAlbumArtSize);
 
-        ContentGrid.Padding = new Thickness(contentPadding);
-        ContentGrid.ColumnSpacing = columnSpacing;
+        ContentGrid.Padding = new Thickness(horizontalPadding, verticalPadding, horizontalPadding, verticalPadding);
         ContentGrid.RowSpacing = rowSpacing;
-        double rightColumnWidth = Math.Max(0, width - (contentPadding * 2) - albumSize - columnSpacing);
+        if (ControlsBodyGrid is not null)
+        {
+            ControlsBodyGrid.ColumnSpacing = columnSpacing;
+        }
+
         MusicSpectrumMode controlsSpectrumMode = MusicSpectrumMode.AuroraSilk;
         bool hasControlsSpectrum = ViewModel?.HasSession == true &&
             AreSystemAnimationsEnabled() &&
@@ -1512,9 +1440,9 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
 
             if (ControlsArtworkHalo is not null)
             {
-                double haloRadius = Math.Max(22.0, (albumSize * 0.5) - 2.0);
+                double haloRadius = Math.Max(20.0, (albumSize * 0.5) - 2.0);
                 ControlsArtworkHalo.ConfigureRadialGeometry(
-                    barCount: albumSize < 78 ? 28 : 36,
+                    barCount: albumSize < 64 ? 28 : 36,
                     barWidth: 2.1,
                     maxBarHeight: 9.5,
                     innerRadius: haloRadius);
@@ -1531,10 +1459,10 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
 
             if (ControlsSpectrumBar is not null)
             {
-                double usableWidth = Math.Max(110.0, width - (contentPadding * 2));
+                double usableWidth = Math.Max(110.0, width);
                 double barHeight = controlsSpectrumMode == MusicSpectrumMode.AuroraSilk ? 24.0 : 18.0;
                 ConfigureLinearStripGeometry(ControlsSpectrumBar, controlsSpectrumMode, usableWidth, barHeight);
-                ControlsSpectrumBar.Margin = new Thickness(0, 0, 0, -(contentPadding - 1));
+                ControlsSpectrumBar.Margin = new Thickness(-horizontalPadding, 0, -horizontalPadding, -(verticalPadding - 1));
                 ControlsSpectrumBar.Opacity = controlsSpectrumMode == MusicSpectrumMode.AuroraSilk ? 0.86 : 0.54;
                 ControlsSpectrumBar.Visibility = Visibility.Visible;
             }
@@ -1554,20 +1482,21 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
 
         if (SourceButton is not null)
         {
-            SourceButton.Height = 20;
-            SourceButton.MinHeight = 20;
-            const double sourceTextMinWidth = 166;
-            bool showSourceText = rightColumnWidth >= sourceTextMinWidth &&
-                ViewModel?.SourceBadgeTextVisibility == Visibility.Visible;
+            SourceButton.Height = headerButtonSize;
+            SourceButton.MinHeight = headerButtonSize;
+            bool modeVisible = ViewModel?.PlaybackModeButtonVisibility == Visibility.Visible;
+            double utilityClusterWidth = headerButtonSize + (modeVisible ? headerButtonSize + 2.0 : 0.0);
+            double availableHeaderWidth = Math.Max(0, width - (horizontalPadding * 2) - utilityClusterWidth - 8.0);
+            bool showSourceText = availableHeaderWidth >= 68.0;
             SourceButton.Padding = showSourceText
-                ? new Thickness(5, 0, 7, 0)
+                ? new Thickness(4, 0, 7, 0)
                 : new Thickness(4, 0, 4, 0);
             if (ControlsSourceButtonText is not null)
             {
                 ControlsSourceButtonText.Visibility = showSourceText
                     ? Visibility.Visible
                     : Visibility.Collapsed;
-                ControlsSourceButtonText.MaxWidth = Math.Clamp(Math.Round(rightColumnWidth * 0.42), 48, 96);
+                ControlsSourceButtonText.MaxWidth = Math.Max(40, Math.Floor(availableHeaderWidth - 26.0));
             }
         }
 
@@ -1579,40 +1508,24 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
         if (TopRow is not null)
         {
             TopRow.Height = new GridLength(1, GridUnitType.Star);
-            TopRow.MinHeight = albumSize;
+            TopRow.MinHeight = Math.Max(48, albumSize);
         }
 
         SetAlbumArtSize(albumSize);
-        if (ProgressRow is not null)
-        {
-            ProgressRow.Margin = new Thickness(0, progressTopMargin, 0, 0);
-            ProgressRow.ColumnSpacing = Math.Round(Lerp(5, 8, widthRatio));
-        }
-
-        if (PositionColumn is not null)
-        {
-            PositionColumn.MinWidth = timelineColumnWidth;
-        }
-
-        if (DurationColumn is not null)
-        {
-            DurationColumn.MinWidth = timelineColumnWidth;
-        }
-
-        if (TrackInfoGrid is not null)
-        {
-            TrackInfoGrid.RowSpacing = Math.Round(Lerp(2, 5, heightRatio));
-        }
 
         if (ControlsPanel is not null)
         {
-            ControlsPanel.Margin = new Thickness(0, controlsTopMargin, 0, 0);
             ControlsPanel.Spacing = controlsSpacing;
         }
 
         if (PlaybackModeButton is not null)
         {
-            SetButtonSize(PlaybackModeButton, transportButtonSize);
+            SetButtonSize(PlaybackModeButton, headerButtonSize);
+        }
+
+        if (VolumeButton is not null)
+        {
+            SetButtonSize(VolumeButton, headerButtonSize);
         }
 
         if (PreviousButton is not null)
@@ -1628,11 +1541,6 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
         if (NextButton is not null)
         {
             SetButtonSize(NextButton, transportButtonSize);
-        }
-
-        if (VolumeButton is not null)
-        {
-            SetButtonSize(VolumeButton, transportButtonSize);
         }
     }
 
@@ -1690,6 +1598,43 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
 
     internal static bool ShouldShowHorizontalPlaybackModeControl(double width) => width >= 292;
 
+    internal static double CalculateRecordVinylSize(
+        double width,
+        double height,
+        bool showLyricsSlot,
+        string? spectrumStyle)
+    {
+        bool compactHeight = height < 235;
+        double primaryButtonSize = compactHeight ? 30 : ResolvePrimaryTransportButtonSize(width);
+        double padding = compactHeight ? 6 : (height < 280 ? 8 : 12);
+        double rowSpacing = compactHeight ? 2 : (height < 280 ? 4 : 5);
+
+        MusicSpectrumMode configuredMode = MusicSpectrumMode.VinylRadialHalo;
+        bool spectrumConfigured = !compactHeight &&
+            width >= 132 &&
+            TryResolveSpectrumMode(
+                spectrumStyle,
+                SettingsService.MusicSpectrumStyleVinylRadialHalo,
+                out configuredMode);
+        bool reserveHalo = spectrumConfigured && configuredMode == MusicSpectrumMode.VinylRadialHalo;
+
+        int baselineRowsAroundVinyl = 2 +
+            (showLyricsSlot ? 1 : 0) +
+            1;
+        double reserved = (padding * 2) +
+            (baselineRowsAroundVinyl * rowSpacing) +
+            (compactHeight ? 40 : 46) +
+            (showLyricsSlot ? 22 : 0) +
+            (compactHeight ? 18 : 26) +
+            primaryButtonSize + (compactHeight ? 0 : 3);
+        double haloClearance = reserveHalo ? (height < 280 ? 22 : 28) : 0;
+
+        return Math.Clamp(
+            Math.Min(width - (padding * 2) - haloClearance, height - reserved - haloClearance),
+            52,
+            210);
+    }
+
     private void ApplyRecordLayoutSizing(double width, double height)
     {
         if (RecordLayout is null)
@@ -1721,8 +1666,6 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
 
         RecordPlaybackModeButton.Visibility = width < 190 ? Visibility.Collapsed : Visibility.Visible;
 
-        bool showLyricsRow = ViewModel?.InlineLyricVisibility == Visibility.Visible;
-        bool showTimelineRow = ViewModel?.TimelineRowVisibility == Visibility.Visible;
         double padding = compactHeight ? 6 : (height < 280 ? 8 : 12);
         double rowSpacing = compactHeight ? 2 : (height < 280 ? 4 : 5);
         RecordLayout.Padding = new Thickness(padding);
@@ -1732,27 +1675,25 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
         RecordProgressHost.Height = compactHeight ? 18 : 24;
 
         MusicSpectrumMode recordSpectrumMode = MusicSpectrumMode.VinylRadialHalo;
-        bool hasRecordSpectrum = !compactHeight &&
-            ViewModel?.HasSession == true &&
+        bool hasRecordSpectrum = ViewModel?.HasSession == true &&
             width >= 132 &&
             AreSystemAnimationsEnabled() &&
             TryResolveSpectrumMode(
                 ViewModel?.SpectrumStyle,
                 SettingsService.MusicSpectrumStyleVinylRadialHalo,
                 out recordSpectrumMode);
-        bool useRecordHalo = hasRecordSpectrum && recordSpectrumMode == MusicSpectrumMode.VinylRadialHalo;
-        bool showSpectrumRow = hasRecordSpectrum && !useRecordHalo;
-        double spectrumHeight = recordSpectrumMode == MusicSpectrumMode.AuroraSilk
-            ? (height < 285 ? 16 : 20)
-            : (height < 285 ? 14 : 18);
+        bool useRecordHalo = !compactHeight && hasRecordSpectrum && recordSpectrumMode == MusicSpectrumMode.VinylRadialHalo;
+        bool showBottomSpectrumBar = hasRecordSpectrum && recordSpectrumMode != MusicSpectrumMode.VinylRadialHalo;
+        double spectrumHeight = recordSpectrumMode == MusicSpectrumMode.AuroraSilk ? 22.0 : 18.0;
 
         if (RecordSpectrumBar is not null)
         {
-            if (showSpectrumRow)
+            if (showBottomSpectrumBar)
             {
-                double usableSpectrumWidth = Math.Max(92, Math.Min(width - (padding * 2) - 8, 280));
+                double usableSpectrumWidth = Math.Max(110.0, width);
                 ConfigureLinearStripGeometry(RecordSpectrumBar, recordSpectrumMode, usableSpectrumWidth, spectrumHeight);
-                RecordSpectrumBar.Opacity = 0.96;
+                RecordSpectrumBar.Margin = new Thickness(-padding, 0, -padding, -(padding - 1));
+                RecordSpectrumBar.Opacity = recordSpectrumMode == MusicSpectrumMode.AuroraSilk ? 0.85 : 0.54;
                 RecordSpectrumBar.Visibility = Visibility.Visible;
             }
             else
@@ -1761,22 +1702,11 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
             }
         }
 
-        int activeRowsAroundVinyl = 2 +
-            (showSpectrumRow ? 1 : 0) +
-            (showLyricsRow ? 1 : 0) +
-            (showTimelineRow ? 1 : 0);
-        double reserved = (padding * 2) +
-            (activeRowsAroundVinyl * rowSpacing) +
-            (compactHeight ? 40 : 46) +
-            (showSpectrumRow ? (spectrumHeight + 2) : 0) +
-            (showLyricsRow ? 24 : 0) +
-            (showTimelineRow ? (compactHeight ? 18 : 26) : 0) +
-            primaryButtonSize + (compactHeight ? 0 : 3);
-        double haloClearance = useRecordHalo ? (height < 280 ? 22 : 28) : 0;
-        double vinylSize = Math.Clamp(
-            Math.Min(width - (padding * 2) - haloClearance, height - reserved - haloClearance),
-            52,
-            230);
+        double vinylSize = CalculateRecordVinylSize(
+            width,
+            height,
+            showLyricsSlot: ViewModel?.ShowLyrics != false,
+            ViewModel?.SpectrumStyle);
         RecordVinylHost.MaxWidth = vinylSize;
         RecordVinylHost.MaxHeight = vinylSize;
         RecordVinylHost.Width = vinylSize;
@@ -1828,26 +1758,42 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
 
         bool small = vinylSize < 110;
         double baseTitleSize = ViewModel?.TitleTextSize ?? 16;
-        double baseSecondarySize = ViewModel?.SecondaryTextSize ?? 12;
-        double baseLyricSize = ViewModel?.LyricTextSize ?? 14;
+        double baseSecondarySize = ViewModel?.ControlsSecondaryTextSize ?? 12;
 
-        RecordTitleText.FontSize = compactHeight
+        double titleFontSize = compactHeight
             ? Math.Max(12, baseTitleSize - 3.5)
             : (small ? Math.Max(12.5, baseTitleSize - 2.5) : Math.Max(14, baseTitleSize - 1));
-        RecordArtistText.FontSize = compactHeight
+        double secondaryFontSize = compactHeight
             ? Math.Max(10.5, baseSecondarySize - 1.5)
             : (small ? Math.Max(11, baseSecondarySize - 1) : baseSecondarySize);
-        double lyricFontSize = compactHeight
-            ? Math.Max(12, baseLyricSize - 1.5)
-            : (small ? Math.Max(12.5, baseLyricSize - 0.5) : baseLyricSize);
-        RecordLyricText.FontSize = lyricFontSize;
-        RecordLyricTextPrimary.FontSize = lyricFontSize;
-        RecordLyricTextClone.FontSize = lyricFontSize;
-        RecordLyricMeasureText.FontSize = lyricFontSize;
 
-        RecordArtistText.MaxWidth = Math.Max(
-            0,
-            width - RecordLayout.Padding.Left - RecordLayout.Padding.Right - 8);
+        RecordTitleText.FontSize = titleFontSize;
+        if (RecordTitleTextPrimary is not null)
+        {
+            RecordTitleTextPrimary.FontSize = titleFontSize;
+        }
+
+        if (RecordTitleMeasureText is not null)
+        {
+            RecordTitleMeasureText.FontSize = titleFontSize;
+        }
+
+        RecordArtistText.FontSize = secondaryFontSize;
+        if (RecordArtistTextPrimary is not null)
+        {
+            RecordArtistTextPrimary.FontSize = secondaryFontSize;
+        }
+
+        if (RecordArtistMeasureText is not null)
+        {
+            RecordArtistMeasureText.FontSize = secondaryFontSize;
+        }
+
+        RecordLyricText.FontSize = secondaryFontSize;
+        RecordLyricTextPrimary.FontSize = secondaryFontSize;
+        RecordLyricTextClone.FontSize = secondaryFontSize;
+        RecordLyricMeasureText.FontSize = secondaryFontSize;
+
         UpdateTonearmLayout(vinylSize, small);
     }
 
@@ -1866,17 +1812,28 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
 
         RecordTonearm.Visibility = Visibility.Visible;
 
-        double armWidth = Math.Round(vinylSize * 0.42);
-        double armHeight = Math.Round(armWidth * 1.2);
+        // The tonearm artwork is a 64x166 canvas in units of vinylSize / 200 whose
+        // top-left sits at (+0.20, -0.51) * vinylSize from the platter center, which puts
+        // the pivot (44,22) just outside the upper-right edge of the record. A centered
+        // element is offset by half its margin, so the margin is twice the center offset.
+        double unit = vinylSize / 200.0;
+        double armWidth = TonearmCanvasWidth * unit;
+        double armHeight = TonearmCanvasHeight * unit;
         RecordTonearm.Width = armWidth;
         RecordTonearm.Height = armHeight;
         RecordTonearm.Margin = new Thickness(
-            Math.Round(vinylSize * 0.72), Math.Round(-vinylSize * 0.30), 0, 0);
+            (TonearmCanvasLeft + (TonearmCanvasWidth * 0.5)) * unit * 2.0,
+            (TonearmCanvasTop + (TonearmCanvasHeight * 0.5)) * unit * 2.0,
+            0,
+            0);
 
         Visual? visual = ElementCompositionPreview.GetElementVisual(RecordTonearm);
         if (visual is not null)
         {
-            visual.CenterPoint = new Vector3((float)(armWidth * 0.5), (float)(armHeight / 6.0), 0f);
+            visual.CenterPoint = new Vector3(
+                (float)(TonearmPivotX * unit),
+                (float)(TonearmPivotY * unit),
+                0f);
         }
     }
 
@@ -1943,32 +1900,54 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
         RecordHorizontalRightPanel.RowSpacing = height < 195 ? 2 : 4;
 
         double baseTitleSize = ViewModel?.TitleTextSize ?? 15.5;
-        double baseSecondarySize = ViewModel?.SecondaryTextSize ?? 12;
-        double baseLyricSize = ViewModel?.LyricTextSize ?? 14;
+        double baseSecondarySize = ViewModel?.ControlsSecondaryTextSize ?? 12;
 
-        RecordHorizontalTitleText.FontSize = small
+        double horizTitleSize = small
             ? Math.Max(13, baseTitleSize - 2.5)
             : Math.Max(14, baseTitleSize - 1);
-        RecordHorizontalArtistText.FontSize = small
+        double horizSecondarySize = small
             ? Math.Max(11, baseSecondarySize - 1)
             : baseSecondarySize;
-        double lyricFontSize = small
-            ? Math.Max(12.5, baseLyricSize - 0.5)
-            : baseLyricSize;
-        RecordHorizontalLyricText.FontSize = lyricFontSize;
-        RecordHorizontalLyricTextPrimary.FontSize = lyricFontSize;
-        RecordHorizontalLyricTextClone.FontSize = lyricFontSize;
-        RecordHorizontalLyricMeasureText.FontSize = lyricFontSize;
+
+        RecordHorizontalTitleText.FontSize = horizTitleSize;
+        if (RecordHorizontalTitleTextPrimary is not null)
+        {
+            RecordHorizontalTitleTextPrimary.FontSize = horizTitleSize;
+        }
+
+        if (RecordHorizontalTitleMeasureText is not null)
+        {
+            RecordHorizontalTitleMeasureText.FontSize = horizTitleSize;
+        }
+
+        RecordHorizontalArtistText.FontSize = horizSecondarySize;
+        if (RecordHorizontalArtistTextPrimary is not null)
+        {
+            RecordHorizontalArtistTextPrimary.FontSize = horizSecondarySize;
+        }
+
+        if (RecordHorizontalArtistMeasureText is not null)
+        {
+            RecordHorizontalArtistMeasureText.FontSize = horizSecondarySize;
+        }
+
+        RecordHorizontalLyricText.FontSize = horizSecondarySize;
+        RecordHorizontalLyricTextPrimary.FontSize = horizSecondarySize;
+        RecordHorizontalLyricTextClone.FontSize = horizSecondarySize;
+        RecordHorizontalLyricMeasureText.FontSize = horizSecondarySize;
 
         MusicSpectrumMode horizSpectrumMode = MusicSpectrumMode.PeakHoldBars;
+        bool horizSpectrumConfigured = TryResolveSpectrumMode(
+            ViewModel?.SpectrumStyle,
+            SettingsService.MusicSpectrumStylePeakHoldBars,
+            out horizSpectrumMode);
         bool hasHorizSpectrum = ViewModel?.HasSession == true &&
             AreSystemAnimationsEnabled() &&
-            TryResolveSpectrumMode(
-                ViewModel?.SpectrumStyle,
-                SettingsService.MusicSpectrumStylePeakHoldBars,
-                out horizSpectrumMode);
+            horizSpectrumConfigured;
         bool useHorizHalo = hasHorizSpectrum && horizSpectrumMode == MusicSpectrumMode.VinylRadialHalo;
-        double horizHaloClearance = useHorizHalo ? 22.0 : 0.0;
+        double horizHaloClearance = horizSpectrumConfigured && horizSpectrumMode == MusicSpectrumMode.VinylRadialHalo
+            ? 22.0
+            : 0.0;
 
         int buttonCount = 3 + (showVolume ? 1 : 0) + (showPlaybackMode ? 1 : 0);
         double buttonsWidth = (buttonCount - 1) * transportButtonSize + primaryButtonSize +
@@ -2010,10 +1989,10 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
 
             if (RecordHorizontalSpectrumBar is not null)
             {
-                double usableStripWidth = Math.Max(110.0, width - (padding * 2));
+                double usableStripWidth = Math.Max(110.0, width);
                 double stripHeight = horizSpectrumMode == MusicSpectrumMode.AuroraSilk ? 22.0 : 17.0;
                 ConfigureLinearStripGeometry(RecordHorizontalSpectrumBar, horizSpectrumMode, usableStripWidth, stripHeight);
-                RecordHorizontalSpectrumBar.Margin = new Thickness(0, 0, 0, -(padding - 1));
+                RecordHorizontalSpectrumBar.Margin = new Thickness(-padding, 0, -padding, -(padding - 1));
                 RecordHorizontalSpectrumBar.Opacity = horizSpectrumMode == MusicSpectrumMode.AuroraSilk ? 0.85 : 0.54;
                 RecordHorizontalSpectrumBar.Visibility = Visibility.Visible;
             }
@@ -2169,7 +2148,9 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
         }
 
         _lastTonearmPlayingState = isPlaying;
-        float targetAngle = isPlaying ? 0f : 22f;
+        // Playing: stylus rests mid-groove. Paused: the arm swings counter-clockwise
+        // around its pivot so the headshell parks just off the platter edge.
+        float targetAngle = isPlaying ? 0f : TonearmParkedAngleDegrees;
 
         Visual? visual = ElementCompositionPreview.GetElementVisual(RecordTonearm);
         if (visual is null)
@@ -2248,9 +2229,9 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
             AlbumArtSurface.CornerRadius = new CornerRadius(cornerRadius);
         }
 
-        if (AlbumArtInnerBorder is not null)
+        if (AlbumArtClipGrid is not null)
         {
-            AlbumArtInnerBorder.CornerRadius = new CornerRadius(Math.Max(0, cornerRadius - 1));
+            AlbumArtClipGrid.CornerRadius = new CornerRadius(cornerRadius <= 0 ? 0 : Math.Max(0, cornerRadius - 1));
         }
 
         if (AlbumArtPlaceholderBackground is not null)
@@ -2276,6 +2257,22 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
         if (InlineVolumePanel is not null)
         {
             InlineVolumePanel.CornerRadius = new CornerRadius(cornerRadius);
+        }
+
+        CornerRadius bottomSpectrumCorner = new(0, 0, cornerRadius, cornerRadius);
+        if (ControlsSpectrumBar is not null)
+        {
+            ControlsSpectrumBar.CornerRadius = bottomSpectrumCorner;
+        }
+
+        if (RecordSpectrumBar is not null)
+        {
+            RecordSpectrumBar.CornerRadius = bottomSpectrumCorner;
+        }
+
+        if (RecordHorizontalSpectrumBar is not null)
+        {
+            RecordHorizontalSpectrumBar.CornerRadius = bottomSpectrumCorner;
         }
     }
 
@@ -2504,7 +2501,9 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
         double panelWidth = InlineVolumePanel.Width > 0 ? InlineVolumePanel.Width : InlineVolumePanel.ActualWidth;
         double panelHeight = InlineVolumePanel.ActualHeight > 0 ? InlineVolumePanel.ActualHeight : 56;
         double left = buttonOrigin.X + anchor.ActualWidth - panelWidth;
-        double top = buttonOrigin.Y - panelHeight - 7;
+        double top = buttonOrigin.Y >= panelHeight + InlineVolumePanelHorizontalInset + 4
+            ? buttonOrigin.Y - panelHeight - 7
+            : buttonOrigin.Y + anchor.ActualHeight + 6;
 
         if (RootGrid.ActualWidth > 0)
         {
@@ -2752,8 +2751,7 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
 
             CloseSourceFlyout();
             ResetAlbumArtMotion();
-            StopTitleMarquee();
-            StopLyricMarquee();
+            StopAllTextMarquees();
             StopRecordVinylRotation();
             StopRecordHorizontalVinylRotation();
             StopSpectrumVisuals(immediate: true);
@@ -2993,14 +2991,14 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
                 if (panel.Children[0] is TextBlock primary)
                 {
                     primary.FontWeight = isActive
-                        ? FontWeights.Bold
-                        : (distance == 1 ? FontWeights.Medium : FontWeights.Normal);
+                        ? FontWeights.SemiBold
+                        : FontWeights.Normal;
                     primary.FontSize = isActive ? activePrimarySize : inactivePrimarySize;
                 }
 
                 if (panel.Children.Count > 1 && panel.Children[1] is TextBlock secondary)
                 {
-                    secondary.FontWeight = isActive ? FontWeights.SemiBold : FontWeights.Normal;
+                    secondary.FontWeight = FontWeights.Normal;
                     secondary.FontSize = isActive ? activeSecondarySize : inactiveSecondarySize;
                     secondary.Opacity = isActive ? 0.94 : 0.82;
                     secondary.Visibility = string.IsNullOrWhiteSpace(secondary.Text)
@@ -3132,14 +3130,25 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
 
         if (e.PropertyName is nameof(MusicWidgetViewModel.Title) or
             nameof(MusicWidgetViewModel.TitleTextSize) or
+            nameof(MusicWidgetViewModel.ControlsTitleTextSize) or
             nameof(MusicWidgetViewModel.MinimalTitleTextSize))
         {
             QueueTitleMarqueeUpdate();
         }
 
+        if (e.PropertyName is nameof(MusicWidgetViewModel.Artist) or
+            nameof(MusicWidgetViewModel.ControlsArtistText) or
+            nameof(MusicWidgetViewModel.ControlsArtistVisibility) or
+            nameof(MusicWidgetViewModel.SecondaryTextSize) or
+            nameof(MusicWidgetViewModel.ControlsSecondaryTextSize))
+        {
+            QueueArtistMarqueeUpdate();
+        }
+
         if (e.PropertyName is nameof(MusicWidgetViewModel.InlineLyricText) or
             nameof(MusicWidgetViewModel.SubtitleText) or
             nameof(MusicWidgetViewModel.LyricTextSize) or
+            nameof(MusicWidgetViewModel.ControlsSecondaryTextSize) or
             nameof(MusicWidgetViewModel.MinimalLyricTextSize))
         {
             QueueLyricMarqueeUpdate();
@@ -3168,6 +3177,7 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
             nameof(MusicWidgetViewModel.InlineLyricVisibility) or
             nameof(MusicWidgetViewModel.SubtitleVisibility) or
             nameof(MusicWidgetViewModel.TimelineRowVisibility) or
+            nameof(MusicWidgetViewModel.PlaybackModeButtonVisibility) or
             nameof(MusicWidgetViewModel.SourceBadgeTextVisibility))
         {
             ApplyResponsiveLayout();
@@ -3251,13 +3261,11 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
 
             if (ViewModel?.IsPlaying == true)
             {
-                QueueTitleMarqueeUpdate();
-                QueueLyricMarqueeUpdate();
+                QueueAllTextMarquees();
             }
             else
             {
-                StopTitleMarquee();
-                StopLyricMarquee();
+                StopAllTextMarquees();
             }
         }
     }
@@ -3363,366 +3371,6 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
         visual.Scale = Vector3.One;
     }
 
-    private void QueueTitleMarqueeUpdate()
-    {
-        if (!IsLoaded ||
-            !_isHostWindowVisible ||
-            _isHostCompactCollapsed ||
-            ViewModel?.IsPlaying != true ||
-            !TextMarqueeAnimationsEnabled() ||
-            !AreSystemAnimationsEnabled())
-        {
-            return;
-        }
-
-        int version = ++_titleMarqueeMeasureVersion;
-        StopTitleMarquee();
-        _ = RunDeferredTitleMarqueeUpdateAsync(version);
-    }
-
-    private async Task RunDeferredTitleMarqueeUpdateAsync(int version)
-    {
-        await Task.Delay(TitleMarqueeDeferredMeasureMs);
-        if (version != _titleMarqueeMeasureVersion ||
-            !IsLoaded ||
-            !_isHostWindowVisible ||
-            _isHostCompactCollapsed ||
-            ViewModel?.IsPlaying != true ||
-            !TextMarqueeAnimationsEnabled() ||
-            !AreSystemAnimationsEnabled())
-        {
-            return;
-        }
-
-        _ = DispatcherQueue.TryEnqueue(() => UpdateTitleMarquee(version));
-    }
-
-    private void UpdateTitleMarquee(int version)
-    {
-        if (version != _titleMarqueeMeasureVersion ||
-            !_isHostWindowVisible ||
-            _isHostCompactCollapsed ||
-            ViewModel?.IsPlaying != true ||
-            !TextMarqueeAnimationsEnabled() ||
-            !AreSystemAnimationsEnabled())
-        {
-            return;
-        }
-
-        if (!TryGetActiveTitleMarqueeElements(out var elements))
-        {
-            StopTitleMarquee();
-            return;
-        }
-
-        double viewportWidth = elements.Host.ActualWidth;
-        if (!IsLoaded || viewportWidth <= 0)
-        {
-            StopTitleMarquee();
-            return;
-        }
-
-        elements.Clip.Rect = CreateHorizontalViewportClipRect(viewportWidth, elements.Host.ActualHeight);
-        elements.Measure.FontSize = elements.Static.FontSize;
-        elements.Primary.FontSize = elements.Static.FontSize;
-        elements.Clone.FontSize = elements.Static.FontSize;
-
-        double titleWidth = MeasureTitleWidth(elements);
-        if (titleWidth <= 0)
-        {
-            StopTitleMarquee();
-            return;
-        }
-
-        bool shouldScroll = titleWidth > viewportWidth + TitleMarqueeOverflowTolerance;
-        if (!shouldScroll)
-        {
-            StopTitleMarquee();
-            return;
-        }
-
-        string titleText = ViewModel?.Title ?? string.Empty;
-        double distance = titleWidth + TitleMarqueeGap;
-        elements.Primary.Text = titleText;
-        elements.Clone.Text = titleText;
-        elements.Primary.Width = titleWidth;
-        elements.Clone.Width = titleWidth;
-        elements.Clone.Visibility = Visibility.Visible;
-        elements.Clone.Margin = new Thickness(distance, 0, 0, 0);
-        elements.Canvas.Width = distance + titleWidth;
-        elements.Static.Opacity = 0;
-        elements.Canvas.Visibility = Visibility.Visible;
-        _titleMarqueeDistance = distance;
-        elements.Canvas.Translation = Vector3.Zero;
-
-        double movingDurationSeconds = _titleMarqueeDistance / TitleMarqueeSpeedPixelsPerSecond;
-        double totalDurationSeconds = TitleMarqueeStartDelayMs / 1000.0 + movingDurationSeconds;
-        float movementStartProgress = (float)(TitleMarqueeStartDelayMs / 1000.0 / totalDurationSeconds);
-        ElementCompositionPreview.SetIsTranslationEnabled(elements.Canvas, true);
-        Visual visual = ElementCompositionPreview.GetElementVisual(elements.Canvas);
-        visual.Properties.InsertVector3("Translation", Vector3.Zero);
-        using StepEasingFunction holdStep = visual.Compositor.CreateStepEasingFunction();
-        holdStep.IsFinalStepSingleFrame = true;
-        ScalarKeyFrameAnimation animation = visual.Compositor.CreateScalarKeyFrameAnimation();
-        animation.InsertKeyFrame(0, 0);
-        animation.InsertKeyFrame(movementStartProgress, 0, holdStep);
-        animation.InsertKeyFrame(1, (float)-_titleMarqueeDistance);
-        animation.Duration = TimeSpan.FromSeconds(totalDurationSeconds);
-        animation.IterationBehavior = AnimationIterationBehavior.Forever;
-        _titleMarqueeAnimation?.Dispose();
-        _titleMarqueeAnimation = animation;
-        _titleMarqueeAnimatedCanvas = elements.Canvas;
-        visual.StartAnimation("Translation.X", animation);
-    }
-
-    private void StopTitleMarquee()
-    {
-        if (_titleMarqueeAnimatedCanvas is { } animatedCanvas)
-        {
-            ElementCompositionPreview.SetIsTranslationEnabled(animatedCanvas, true);
-            Visual visual = ElementCompositionPreview.GetElementVisual(animatedCanvas);
-            visual.StopAnimation("Translation.X");
-            visual.Properties.InsertVector3("Translation", Vector3.Zero);
-            animatedCanvas.Translation = Vector3.Zero;
-        }
-
-        _titleMarqueeAnimation?.Dispose();
-        _titleMarqueeAnimation = null;
-        _titleMarqueeAnimatedCanvas = null;
-        _titleMarqueeDistance = 0;
-        if (TitleStaticText is not null &&
-            TitleMarqueeCanvas is not null &&
-            TitleTextPrimary is not null &&
-            TitleTextClone is not null)
-        {
-            ResetMarqueeElements(TitleStaticText, TitleMarqueeCanvas, TitleTextPrimary, TitleTextClone);
-        }
-
-        if (MinimalTitleStaticText is not null &&
-            MinimalTitleMarqueeCanvas is not null &&
-            MinimalTitleTextPrimary is not null &&
-            MinimalTitleTextClone is not null)
-        {
-            ResetMarqueeElements(
-                MinimalTitleStaticText,
-                MinimalTitleMarqueeCanvas,
-                MinimalTitleTextPrimary,
-                MinimalTitleTextClone);
-        }
-    }
-
-    private void QueueLyricMarqueeUpdate()
-    {
-        if (!IsLoaded ||
-            !_isHostWindowVisible ||
-            _isHostCompactCollapsed ||
-            ViewModel?.IsPlaying != true ||
-            ViewModel.LyricsOverlayVisibility == Visibility.Visible ||
-            !TextMarqueeAnimationsEnabled() ||
-            !AreSystemAnimationsEnabled())
-        {
-            StopLyricMarquee();
-            return;
-        }
-
-        int version = ++_lyricMarqueeMeasureVersion;
-        StopLyricMarquee();
-        _ = RunDeferredLyricMarqueeUpdateAsync(version);
-    }
-
-    private async Task RunDeferredLyricMarqueeUpdateAsync(int version)
-    {
-        await Task.Delay(LyricMarqueeDeferredMeasureMs);
-        if (version != _lyricMarqueeMeasureVersion ||
-            !IsLoaded ||
-            !_isHostWindowVisible ||
-            _isHostCompactCollapsed ||
-            ViewModel?.IsPlaying != true ||
-            ViewModel.LyricsOverlayVisibility == Visibility.Visible ||
-            !TextMarqueeAnimationsEnabled() ||
-            !AreSystemAnimationsEnabled())
-        {
-            return;
-        }
-
-        _ = DispatcherQueue.TryEnqueue(() => UpdateLyricMarquee(version));
-    }
-
-    private void UpdateLyricMarquee(int version)
-    {
-        if (version != _lyricMarqueeMeasureVersion ||
-            !IsLoaded ||
-            !_isHostWindowVisible ||
-            _isHostCompactCollapsed ||
-            ViewModel?.IsPlaying != true ||
-            ViewModel.LyricsOverlayVisibility == Visibility.Visible ||
-            !TextMarqueeAnimationsEnabled() ||
-            !AreSystemAnimationsEnabled())
-        {
-            return;
-        }
-
-        if (!TryGetActiveLyricMarqueeElements(out var elements, out string? lyricText))
-        {
-            StopLyricMarquee();
-            return;
-        }
-
-        double viewportWidth = elements.Host.ActualWidth;
-        if (viewportWidth <= 0 || string.IsNullOrWhiteSpace(lyricText))
-        {
-            StopLyricMarquee();
-            return;
-        }
-
-        elements.Clip.Rect = CreateHorizontalViewportClipRect(viewportWidth, elements.Host.ActualHeight);
-
-        elements.Measure.FontSize = elements.Static.FontSize;
-        elements.Primary.FontSize = elements.Static.FontSize;
-        double lyricWidth = MeasureTextBlockWidth(elements.Measure, elements.Primary, lyricText);
-        if (lyricWidth <= viewportWidth + LyricMarqueeOverflowTolerance)
-        {
-            StopLyricMarquee();
-            return;
-        }
-
-        double overflow = lyricWidth - viewportWidth;
-        double travel = overflow + 2.0;
-
-        elements.Primary.Text = lyricText;
-        elements.Primary.Width = lyricWidth + 2.0;
-        elements.Clone.Visibility = Visibility.Collapsed;
-        elements.Clone.Margin = default;
-        elements.Canvas.Width = lyricWidth + 2.0;
-        elements.Static.Opacity = 0;
-        elements.Canvas.Visibility = Visibility.Visible;
-        elements.Canvas.Translation = Vector3.Zero;
-
-        ElementCompositionPreview.SetIsTranslationEnabled(elements.Canvas, true);
-        Visual visual = ElementCompositionPreview.GetElementVisual(elements.Canvas);
-        visual.Properties.InsertVector3("Translation", Vector3.Zero);
-        Compositor compositor = visual.Compositor;
-        using StepEasingFunction holdStep = compositor.CreateStepEasingFunction();
-        holdStep.IsFinalStepSingleFrame = true;
-        using CubicBezierEasingFunction smoothGlide = compositor.CreateCubicBezierEasingFunction(
-            new Vector2(0.42f, 0.0f),
-            new Vector2(0.18f, 1.0f));
-
-        ScalarKeyFrameAnimation animation = visual.Compositor.CreateScalarKeyFrameAnimation();
-        double lineDuration = ViewModel?.CurrentLyricDurationSeconds ?? 0;
-
-        if (lineDuration > 0.8 && lineDuration < 18.0)
-        {
-            double startHoldSec = Math.Clamp(lineDuration * 0.18, 0.30, 0.65);
-            double endHoldSec = Math.Clamp(lineDuration * 0.18, 0.32, 0.80);
-            double idealGlideSec = Math.Clamp(0.90 + (travel / 68.0), 1.05, 4.40);
-            double windowSec = Math.Max(0.68, lineDuration - startHoldSec - endHoldSec);
-            double glideSec = Math.Clamp(Math.Min(idealGlideSec, windowSec), 0.68, 4.60);
-            double tailHoldSec = Math.Max(endHoldSec, lineDuration - startHoldSec - glideSec + 1.5);
-            double totalDurationSeconds = startHoldSec + glideSec + tailHoldSec;
-
-            float holdProgress = (float)Math.Clamp(startHoldSec / totalDurationSeconds, 0.03, 0.65);
-            float glideEndProgress = (float)Math.Clamp(
-                (startHoldSec + glideSec) / totalDurationSeconds,
-                holdProgress + 0.08f,
-                0.98f);
-
-            animation.InsertKeyFrame(0f, 0f);
-            animation.InsertKeyFrame(holdProgress, 0f, holdStep);
-            animation.InsertKeyFrame(glideEndProgress, (float)-travel, smoothGlide);
-            animation.InsertKeyFrame(1f, (float)-travel, holdStep);
-            animation.Duration = TimeSpan.FromSeconds(totalDurationSeconds);
-            animation.IterationBehavior = AnimationIterationBehavior.Count;
-            animation.IterationCount = 1;
-            animation.StopBehavior = AnimationStopBehavior.LeaveCurrentValue;
-        }
-        else
-        {
-            const double startHoldSec = 0.95;
-            const double endHoldSec = 1.50;
-            double glideForwardSec = Math.Clamp(1.10 + (travel / 64.0), 1.25, 4.60);
-            double glideBackSec = Math.Clamp(0.95 + (travel / 85.0), 1.05, 3.60);
-            double totalDurationSeconds = startHoldSec + glideForwardSec + endHoldSec + glideBackSec;
-
-            float p1 = (float)(startHoldSec / totalDurationSeconds);
-            float p2 = (float)((startHoldSec + glideForwardSec) / totalDurationSeconds);
-            float p3 = (float)((startHoldSec + glideForwardSec + endHoldSec) / totalDurationSeconds);
-
-            animation.InsertKeyFrame(0f, 0f);
-            animation.InsertKeyFrame(p1, 0f, holdStep);
-            animation.InsertKeyFrame(p2, (float)-travel, smoothGlide);
-            animation.InsertKeyFrame(p3, (float)-travel, holdStep);
-            animation.InsertKeyFrame(1f, 0f, smoothGlide);
-            animation.Duration = TimeSpan.FromSeconds(totalDurationSeconds);
-            animation.IterationBehavior = AnimationIterationBehavior.Forever;
-        }
-
-        _lyricMarqueeAnimation?.Dispose();
-        _lyricMarqueeAnimation = animation;
-        _lyricMarqueeAnimatedCanvas = elements.Canvas;
-        visual.StartAnimation("Translation.X", animation);
-    }
-
-    private void StopLyricMarquee()
-    {
-        if (_lyricMarqueeAnimatedCanvas is { } animatedCanvas)
-        {
-            ElementCompositionPreview.SetIsTranslationEnabled(animatedCanvas, true);
-            Visual visual = ElementCompositionPreview.GetElementVisual(animatedCanvas);
-            visual.StopAnimation("Translation.X");
-            visual.Properties.InsertVector3("Translation", Vector3.Zero);
-            animatedCanvas.Translation = Vector3.Zero;
-        }
-
-        _lyricMarqueeAnimation?.Dispose();
-        _lyricMarqueeAnimation = null;
-        _lyricMarqueeAnimatedCanvas = null;
-
-        if (SubtitleTextBlock is not null &&
-            ControlsLyricMarqueeCanvas is not null &&
-            ControlsLyricTextPrimary is not null &&
-            ControlsLyricTextClone is not null)
-        {
-            ResetMarqueeElements(SubtitleTextBlock, ControlsLyricMarqueeCanvas, ControlsLyricTextPrimary, ControlsLyricTextClone);
-        }
-
-        if (MinimalLyricText is not null &&
-            MinimalLyricMarqueeCanvas is not null &&
-            MinimalLyricTextPrimary is not null &&
-            MinimalLyricTextClone is not null)
-        {
-            ResetMarqueeElements(
-                MinimalLyricText,
-                MinimalLyricMarqueeCanvas,
-                MinimalLyricTextPrimary,
-                MinimalLyricTextClone);
-        }
-
-        if (RecordLyricText is not null &&
-            RecordLyricMarqueeCanvas is not null &&
-            RecordLyricTextPrimary is not null &&
-            RecordLyricTextClone is not null)
-        {
-            ResetMarqueeElements(
-                RecordLyricText,
-                RecordLyricMarqueeCanvas,
-                RecordLyricTextPrimary,
-                RecordLyricTextClone);
-        }
-
-        if (RecordHorizontalLyricText is not null &&
-            RecordHorizontalLyricMarqueeCanvas is not null &&
-            RecordHorizontalLyricTextPrimary is not null &&
-            RecordHorizontalLyricTextClone is not null)
-        {
-            ResetMarqueeElements(
-                RecordHorizontalLyricText,
-                RecordHorizontalLyricMarqueeCanvas,
-                RecordHorizontalLyricTextPrimary,
-                RecordHorizontalLyricTextClone);
-        }
-    }
-
     private static bool AreSystemAnimationsEnabled()
     {
         return WindowsCompatibilityService.ShouldAnimateContinuousMedia;
@@ -3742,181 +3390,6 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
             app.SettingsService is null ||
             PerformanceSettingsPolicy.Resolve(app.SettingsService.Settings)
                 .AllowVinylRotationAnimations;
-    }
-
-    private double MeasureTitleWidth(
-        (Grid Host, RectangleGeometry Clip, TextBlock Static, Grid Canvas, TextBlock Primary, TextBlock Clone, TextBlock Measure) elements)
-    {
-        return MeasureTextBlockWidth(elements.Measure, elements.Primary, ViewModel?.Title);
-    }
-
-    private static double MeasureTextBlockWidth(TextBlock measureText, TextBlock fallbackPrimary, string? content)
-    {
-        if (string.IsNullOrEmpty(content))
-        {
-            return 0;
-        }
-
-        measureText.Text = content;
-        measureText.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
-        double desiredWidth = measureText.DesiredSize.Width;
-        if (double.IsFinite(desiredWidth) && desiredWidth > 0)
-        {
-            return Math.Ceiling(desiredWidth);
-        }
-
-        double actualWidth = fallbackPrimary.ActualWidth;
-        return double.IsFinite(actualWidth) ? Math.Ceiling(actualWidth) : 0;
-    }
-
-    private bool TryGetActiveTitleMarqueeElements(
-        out (Grid Host, RectangleGeometry Clip, TextBlock Static, Grid Canvas, TextBlock Primary, TextBlock Clone, TextBlock Measure) elements)
-    {
-        if (_isMinimalLayout)
-        {
-            if (MinimalTitleMarqueeHost is null ||
-                MinimalTitleMarqueeClip is null ||
-                MinimalTitleStaticText is null ||
-                MinimalTitleMarqueeCanvas is null ||
-                MinimalTitleTextPrimary is null ||
-                MinimalTitleTextClone is null ||
-                MinimalTitleMeasureText is null)
-            {
-                elements = default;
-                return false;
-            }
-
-            elements = (MinimalTitleMarqueeHost, MinimalTitleMarqueeClip, MinimalTitleStaticText, MinimalTitleMarqueeCanvas,
-                MinimalTitleTextPrimary, MinimalTitleTextClone, MinimalTitleMeasureText);
-            return true;
-        }
-
-        if (_isRecordLayout ||
-            _isRecordHorizontalLayout ||
-            TitleMarqueeHost is null ||
-            TitleMarqueeClip is null ||
-            TitleStaticText is null ||
-            TitleMarqueeCanvas is null ||
-            TitleTextPrimary is null ||
-            TitleTextClone is null ||
-            TitleMeasureText is null)
-        {
-            elements = default;
-            return false;
-        }
-
-        elements = (TitleMarqueeHost, TitleMarqueeClip, TitleStaticText, TitleMarqueeCanvas,
-            TitleTextPrimary, TitleTextClone, TitleMeasureText);
-        return true;
-    }
-
-    private bool TryGetActiveLyricMarqueeElements(
-        out (Grid Host, RectangleGeometry Clip, TextBlock Static, Grid Canvas, TextBlock Primary, TextBlock Clone, TextBlock Measure) elements,
-        out string? lyricText)
-    {
-        lyricText = null;
-        if (ViewModel is null)
-        {
-            elements = default;
-            return false;
-        }
-
-        if (_isMinimalLayout)
-        {
-            if (ViewModel.InlineLyricVisibility != Visibility.Visible ||
-                MinimalLyricMarqueeHost is null ||
-                MinimalLyricMarqueeClip is null ||
-                MinimalLyricText is null ||
-                MinimalLyricMarqueeCanvas is null ||
-                MinimalLyricTextPrimary is null ||
-                MinimalLyricTextClone is null ||
-                MinimalLyricMeasureText is null)
-            {
-                elements = default;
-                return false;
-            }
-
-            lyricText = ViewModel.InlineLyricText;
-            elements = (MinimalLyricMarqueeHost, MinimalLyricMarqueeClip, MinimalLyricText,
-                MinimalLyricMarqueeCanvas, MinimalLyricTextPrimary, MinimalLyricTextClone, MinimalLyricMeasureText);
-            return true;
-        }
-
-        if (_isRecordLayout)
-        {
-            if (ViewModel.InlineLyricVisibility != Visibility.Visible ||
-                RecordLyricMarqueeHost is null ||
-                RecordLyricMarqueeClip is null ||
-                RecordLyricText is null ||
-                RecordLyricMarqueeCanvas is null ||
-                RecordLyricTextPrimary is null ||
-                RecordLyricTextClone is null ||
-                RecordLyricMeasureText is null)
-            {
-                elements = default;
-                return false;
-            }
-
-            lyricText = ViewModel.InlineLyricText;
-            elements = (RecordLyricMarqueeHost, RecordLyricMarqueeClip, RecordLyricText,
-                RecordLyricMarqueeCanvas, RecordLyricTextPrimary, RecordLyricTextClone, RecordLyricMeasureText);
-            return true;
-        }
-
-        if (_isRecordHorizontalLayout)
-        {
-            if (ViewModel.InlineLyricVisibility != Visibility.Visible ||
-                RecordHorizontalLyricMarqueeHost is null ||
-                RecordHorizontalLyricMarqueeClip is null ||
-                RecordHorizontalLyricText is null ||
-                RecordHorizontalLyricMarqueeCanvas is null ||
-                RecordHorizontalLyricTextPrimary is null ||
-                RecordHorizontalLyricTextClone is null ||
-                RecordHorizontalLyricMeasureText is null)
-            {
-                elements = default;
-                return false;
-            }
-
-            lyricText = ViewModel.InlineLyricText;
-            elements = (RecordHorizontalLyricMarqueeHost, RecordHorizontalLyricMarqueeClip, RecordHorizontalLyricText,
-                RecordHorizontalLyricMarqueeCanvas, RecordHorizontalLyricTextPrimary, RecordHorizontalLyricTextClone, RecordHorizontalLyricMeasureText);
-            return true;
-        }
-
-        if (ViewModel.SubtitleVisibility != Visibility.Visible ||
-            ControlsLyricMarqueeHost is null ||
-            ControlsLyricMarqueeClip is null ||
-            SubtitleTextBlock is null ||
-            ControlsLyricMarqueeCanvas is null ||
-            ControlsLyricTextPrimary is null ||
-            ControlsLyricTextClone is null ||
-            ControlsLyricMeasureText is null)
-        {
-            elements = default;
-            return false;
-        }
-
-        lyricText = ViewModel.SubtitleText;
-        elements = (ControlsLyricMarqueeHost, ControlsLyricMarqueeClip, SubtitleTextBlock,
-            ControlsLyricMarqueeCanvas, ControlsLyricTextPrimary, ControlsLyricTextClone, ControlsLyricMeasureText);
-        return true;
-    }
-
-    private static void ResetMarqueeElements(
-        TextBlock staticText,
-        Grid canvas,
-        TextBlock primary,
-        TextBlock clone)
-    {
-        primary.ClearValue(WidthProperty);
-        clone.ClearValue(WidthProperty);
-        clone.Margin = default;
-        clone.Visibility = Visibility.Visible;
-        canvas.ClearValue(WidthProperty);
-        staticText.Opacity = 1;
-        canvas.Visibility = Visibility.Collapsed;
-        canvas.Translation = Vector3.Zero;
     }
 
     private void UpdateSeekFromPointer(Grid host, PointerRoutedEventArgs e)
@@ -4053,7 +3526,8 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
         {
             fillScale.ScaleX = ratio;
             float thumbX = (float)Math.Max(0, host.ActualWidth * ratio);
-            thumb.Translation = new Vector3(thumbX - 5f, 0f, 0f);
+            float halfThumb = thumb is FrameworkElement { Width: > 0 } fe ? (float)(fe.Width * 0.5) : 5f;
+            thumb.Translation = new Vector3(thumbX - halfThumb, 0f, 0f);
             bool activeHost = ReferenceEquals(_hoveredProgressHost, host) ||
                               (_isProgressDragging && ReferenceEquals(_activeProgressDragHost, host));
             thumb.Opacity = canInteract && activeHost ? 1 : 0;

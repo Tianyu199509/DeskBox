@@ -78,6 +78,8 @@ internal sealed partial class NativeDropTargetComObject : INativeDropTarget
 
 internal static partial class NativeDropTargetComInterop
 {
+    internal const int DragDropAlreadyRegisteredHResult = unchecked((int)0x80040101);
+
     internal static void Register(nint hwnd, INativeDropTarget dropTarget)
     {
         ArgumentNullException.ThrowIfNull(dropTarget);
@@ -86,6 +88,49 @@ internal static partial class NativeDropTargetComInterop
         try
         {
             Marshal.ThrowExceptionForHR(Ole32NativeMethods.RegisterDragDrop(hwnd, dropTargetPointer));
+        }
+        finally
+        {
+            ReleaseInterfacePointer(dropTargetPointer);
+        }
+    }
+
+    internal static bool TryRegister(
+        nint hwnd,
+        INativeDropTarget dropTarget,
+        bool replaceExisting,
+        out bool alreadyRegistered)
+    {
+        ArgumentNullException.ThrowIfNull(dropTarget);
+        alreadyRegistered = false;
+
+        nint dropTargetPointer = AcquireInterfacePointer(dropTarget);
+        try
+        {
+            int hr = Ole32NativeMethods.RegisterDragDrop(hwnd, dropTargetPointer);
+            if (hr == 0)
+            {
+                return true;
+            }
+
+            if (hr == DragDropAlreadyRegisteredHResult)
+            {
+                if (replaceExisting)
+                {
+                    _ = Ole32NativeMethods.RevokeDragDrop(hwnd);
+                    hr = Ole32NativeMethods.RegisterDragDrop(hwnd, dropTargetPointer);
+                    if (hr == 0)
+                    {
+                        return true;
+                    }
+                }
+
+                alreadyRegistered = true;
+                return false;
+            }
+
+            Marshal.ThrowExceptionForHR(hr);
+            return false;
         }
         finally
         {

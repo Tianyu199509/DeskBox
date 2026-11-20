@@ -587,20 +587,20 @@ public sealed partial class BackupSettingsViewModel
             long failureTicks = state.CloudLastFailureUtcTicks;
             string status = successTicks > 0
                 ? Format("Settings.CloudBackup.LastSuccess",
-                    new DateTimeOffset(successTicks, TimeSpan.Zero).ToLocalTime().ToString("g"))
+                    FormatLocalTimestamp(new DateTimeOffset(successTicks, TimeSpan.Zero)))
                 : Localize("Settings.CloudBackup.LastSuccess.Never");
 
             if (failureTicks > successTicks)
             {
                 status += " · " + Format("Settings.CloudBackup.LastFailure",
-                    new DateTimeOffset(failureTicks, TimeSpan.Zero).ToLocalTime().ToString("g"));
+                    FormatLocalTimestamp(new DateTimeOffset(failureTicks, TimeSpan.Zero)));
             }
 
             long unverifiedTicks = state.CloudLastUnverifiedUtcTicks;
             if (unverifiedTicks > 0)
             {
                 status += " · " + Format("Settings.CloudBackup.LastUnverified",
-                    new DateTimeOffset(unverifiedTicks, TimeSpan.Zero).ToLocalTime().ToString("g"));
+                    FormatLocalTimestamp(new DateTimeOffset(unverifiedTicks, TimeSpan.Zero)));
             }
 
             return status;
@@ -643,7 +643,7 @@ public sealed partial class BackupSettingsViewModel
             string details = item.Name;
             if (item.CreatedAtUtc is { } createdUtc)
             {
-                title = createdUtc.ToLocalTime().ToString("g", CultureInfo.CurrentCulture);
+                title = FormatLocalTimestamp(createdUtc);
                 string stem = item.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)
                     ? item.Name[..^4] : item.Name;
                 string tail = stem.Split('-').Last();
@@ -844,6 +844,19 @@ public sealed partial class BackupSettingsViewModel
         }
 
         return options;
+    }
+
+    private static string FormatLocalTimestamp(DateTimeOffset utcTimestamp)
+    {
+        DateTimeOffset local = utcTimestamp.ToLocalTime();
+        try
+        {
+            return local.ToString("g", CultureInfo.CurrentCulture);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return local.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
+        }
     }
 
     private static IReadOnlyList<SettingsOption> WrapOptions(SettingsOption[] options) =>

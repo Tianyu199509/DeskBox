@@ -151,9 +151,9 @@ internal static class TransientInputFocusGuard
         _ = Win32Helper.GetWindowThreadProcessId(candidate, out uint pid);
         if (pid == (uint)Environment.ProcessId)
         {
-            var sb = new StringBuilder(32);
-            if (Win32Helper.GetClassName(candidate, sb, sb.Capacity) > 0 &&
-                string.Equals(sb.ToString(), "#32768", StringComparison.Ordinal))
+            Span<char> classBuffer = stackalloc char[32];
+            int length = Win32Helper.GetClassName(candidate, classBuffer);
+            if (length > 0 && classBuffer[..length].SequenceEqual("#32768"))
             {
                 return true;
             }
@@ -197,16 +197,19 @@ internal static class TransientInputFocusGuard
         return result;
     }
 
-    internal static bool IsKnownTextInputProcessOrClass(string className, string processName)
+    internal static bool IsKnownTextInputProcessOrClass(string className, string processName) =>
+        IsKnownTextInputProcessOrClass(className.AsSpan(), processName);
+
+    internal static bool IsKnownTextInputProcessOrClass(ReadOnlySpan<char> className, string processName)
     {
-        if (string.IsNullOrEmpty(className) && string.IsNullOrEmpty(processName))
+        if (className.IsEmpty && string.IsNullOrEmpty(processName))
         {
             return false;
         }
 
         // OS-standard IMM32 / TSF candidate & status UI window classes.
-        if (string.Equals(className, "IME", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(className, "MSCTFIME UI", StringComparison.OrdinalIgnoreCase) ||
+        if (className.Equals("IME", StringComparison.OrdinalIgnoreCase) ||
+            className.Equals("MSCTFIME UI", StringComparison.OrdinalIgnoreCase) ||
             className.StartsWith("Microsoft.IME.UIManager.", StringComparison.OrdinalIgnoreCase))
         {
             return true;
@@ -221,11 +224,11 @@ internal static class TransientInputFocusGuard
         if (string.Equals(processName, "TextInputHost", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(processName, "TabTip", StringComparison.OrdinalIgnoreCase))
         {
-            return className.Contains("CoreWindow", StringComparison.OrdinalIgnoreCase) ||
-                   className.Contains("InputSite", StringComparison.OrdinalIgnoreCase) ||
-                   className.Contains("ApplicationFrameWindow", StringComparison.OrdinalIgnoreCase) ||
-                   className.Contains("IPTip_Main_Window", StringComparison.OrdinalIgnoreCase) ||
-                   className.Contains("IME", StringComparison.OrdinalIgnoreCase);
+            return className.Contains("CoreWindow".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+                   className.Contains("InputSite".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+                   className.Contains("ApplicationFrameWindow".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+                   className.Contains("IPTip_Main_Window".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+                   className.Contains("IME".AsSpan(), StringComparison.OrdinalIgnoreCase);
         }
 
         // First-party & major CJK out-of-process IME candidate/toolbar hosts.
@@ -410,7 +413,14 @@ internal static class TransientInputFocusGuard
                 return;
             }
 
-            await commitOnExternalDismissAsync();
+            try
+            {
+                await commitOnExternalDismissAsync();
+            }
+            catch (Exception ex)
+            {
+                App.Log($"[TransientInputFocusGuard] External dismiss commit failed: {ex}");
+            }
         };
 
         timer.Start();
@@ -425,13 +435,12 @@ internal static class TransientInputFocusGuard
 
     private static bool ClassifyWindowsTextInputExperienceWindowCore(IntPtr hwnd)
     {
-        var classBuf = new StringBuilder(96);
-        string className = Win32Helper.GetClassName(hwnd, classBuf, classBuf.Capacity) > 0
-            ? classBuf.ToString()
-            : string.Empty;
+        Span<char> classBuf = stackalloc char[96];
+        int classLen = Win32Helper.GetClassName(hwnd, classBuf);
+        ReadOnlySpan<char> className = classLen > 0 ? classBuf[..classLen] : ReadOnlySpan<char>.Empty;
 
-        if (string.Equals(className, "IME", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(className, "MSCTFIME UI", StringComparison.OrdinalIgnoreCase) ||
+        if (className.Equals("IME", StringComparison.OrdinalIgnoreCase) ||
+            className.Equals("MSCTFIME UI", StringComparison.OrdinalIgnoreCase) ||
             className.StartsWith("Microsoft.IME.UIManager.", StringComparison.OrdinalIgnoreCase))
         {
             return true;
@@ -445,7 +454,7 @@ internal static class TransientInputFocusGuard
 
         string procName = ProcessImageNameResolver.GetProcessName(pid);
         if (string.Equals(procName, "ApplicationFrameHost", StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(className, "ApplicationFrameWindow", StringComparison.OrdinalIgnoreCase))
+            className.Equals("ApplicationFrameWindow", StringComparison.OrdinalIgnoreCase))
         {
             IntPtr child = GetWindow(hwnd, GwChild);
             if (child != IntPtr.Zero)

@@ -32,8 +32,7 @@ public sealed class RemoteBackupCommands : IBackupCommands
                 return _isStoppingCacheValue;
             }
 
-            (bool ok, string? payload, _) = _client.RequestAsync(SettingsIpcMethods.BackupIsStopping)
-                .GetAwaiter().GetResult();
+            (bool ok, string? payload, _) = SettingsIpcShell.RequestSyncSafe(_client, SettingsIpcMethods.BackupIsStopping);
             _isStoppingCacheTicks = now;
             _isStoppingCacheValue = ok && SettingsIpcPayload.DecodeBoolean(payload);
             return _isStoppingCacheValue;

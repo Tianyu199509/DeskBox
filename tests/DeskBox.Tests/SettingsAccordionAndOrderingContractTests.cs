@@ -15,10 +15,10 @@ public sealed class SettingsAccordionAndOrderingContractTests
 
     // ---------------------------------------------------------------- A. 常规页
 
-    // Spec A1: 「开机自动启动」is a flat SettingsCard followed by a conditional
-    // 启动方式 sibling card (single-child pseudo-accordion flattened).
+    // Spec A1: 「开机自动启动」is a single flat SettingsCard (the legacy
+    // Standard vs ScheduledTask mode picker was retired under Scheme A).
     [Fact]
-    public void General_AutoStart_IsAFlatCardWithConditionalModeSibling()
+    public void General_AutoStart_IsASingleFlatCardWithoutModePicker()
     {
         string general = GeneralSectionSlice();
 
@@ -27,14 +27,11 @@ public sealed class SettingsAccordionAndOrderingContractTests
         Assert.NotNull(card);
         Assert.Null(FindOpeningTag(
             general, "toolkit:SettingsExpander", "HeaderKey=\"Settings.AutoStart.Title\""));
-
-        int mode = IndexOfOrFail(general, "HeaderKey=\"Settings.AutoStart.Mode.Title\"", "GeneralSection");
-        Assert.True(card.Index < mode,
-            "GeneralSection: Settings.AutoStart.Mode.Title must follow Settings.AutoStart.Title.");
+        Assert.DoesNotContain("HeaderKey=\"Settings.AutoStart.Mode.Title\"", general, StringComparison.Ordinal);
     }
 
     // Spec A2: pinned GeneralSection order
-    // Language < AutoStart < AutoStart.Mode < SilentStartup < Performance < Nav.AiSettings.
+    // Language < AutoStart < SilentStartup < Performance < Nav.AiSettings < Onboarding.
     [Fact]
     public void General_Cards_FollowThePinnedOrder()
     {
@@ -43,13 +40,13 @@ public sealed class SettingsAccordionAndOrderingContractTests
         AssertAscending(general, "GeneralSection ordering",
             "HeaderKey=\"Settings.Language.Title\"",
             "HeaderKey=\"Settings.AutoStart.Title\"",
-            "HeaderKey=\"Settings.AutoStart.Mode.Title\"",
             "HeaderKey=\"Settings.SilentStartup.Title\"",
             "HeaderKey=\"Settings.Performance.Title\"",
-            "HeaderKey=\"Settings.Nav.AiSettings\"");
+            "HeaderKey=\"Settings.Nav.AiSettings\"",
+            "HeaderKey=\"Settings.Onboarding.Title\"");
+        Assert.DoesNotContain("HeaderKey=\"Settings.AutoStart.Mode.Title\"", general, StringComparison.Ordinal);
         Assert.DoesNotContain("HeaderKey=\"Settings.AttachmentStorageMode.Title\"", general, StringComparison.Ordinal);
         Assert.DoesNotContain("HeaderKey=\"Settings.Displays.Title\"", general, StringComparison.Ordinal);
-        Assert.DoesNotContain("HeaderKey=\"Settings.Onboarding.Title\"", general, StringComparison.Ordinal);
     }
 
     // -------------------------------------------------- B. 文件叠放（文件堆叠）
@@ -486,26 +483,26 @@ public sealed class SettingsAccordionAndOrderingContractTests
             StringComparison.Ordinal);
     }
 
-    // -------------------------------------------------------------- J. 窗口子页
+    // -------------------------------------------------------------- J. 格子标题图标（精简后独立卡片）
 
-    // Spec J: DefaultWidth and DefaultHeight share one card (both NumberBoxes
-    // within 1200 chars of each other), and the app-visual header leads them.
+    // Spec J: Redundant per-widget chrome & preset window-size controls are removed from
+    // Appearance settings (configured directly on each widget); TitleIcon is promoted to a
+    // standalone top-level SettingsCard without the AppVisual expander wrapper.
     [Fact]
     public void AppearanceWindow_DefaultSizeCards_AreMergedAndTitleIconLeads()
     {
         string slice = ReadRepositoryFile(
             "src/DeskBox/Views/SettingsSections/AppearanceSettingsSection.xaml");
 
-        int width = IndexOfOrFail(slice, "x:Name=\"DefaultWidthBox\"", "Appearance section");
-        int height = IndexOfOrFail(slice, "x:Name=\"DefaultHeightBox\"", "Appearance section");
-        Assert.True(Math.Abs(height - width) < 1200,
-            $"Appearance section: DefaultWidthBox and DefaultHeightBox must share one " +
-            $"SettingsCard (distance {Math.Abs(height - width)} chars >= 1200).");
+        Assert.DoesNotContain("x:Name=\"DefaultWidthBox\"", slice, StringComparison.Ordinal);
+        Assert.DoesNotContain("x:Name=\"DefaultHeightBox\"", slice, StringComparison.Ordinal);
+        Assert.DoesNotContain("HeaderKey=\"Settings.DisplayWidgetChrome.Title\"", slice, StringComparison.Ordinal);
+        Assert.DoesNotContain("HeaderKey=\"Settings.InteractiveWidgetChrome.Title\"", slice, StringComparison.Ordinal);
+        Assert.DoesNotContain("HeaderKey=\"Settings.Group.AppVisual.Title\"", slice, StringComparison.Ordinal);
 
-        int titleIcon = IndexOfOrFail(
-            slice, "HeaderKey=\"Settings.Group.AppVisual.Title\"", "Appearance section");
-        Assert.True(titleIcon < width && titleIcon < height,
-            "Appearance section: the app-visual expander header must come before the merged default-size card.");
+        Match? titleIconCard = FindOpeningTag(
+            slice, "toolkit:SettingsCard", "HeaderKey=\"Settings.WidgetTitleIcon.Title\"");
+        Assert.NotNull(titleIconCard);
     }
 
     // ---------------------------------------------------------------- K. 词典
@@ -524,7 +521,7 @@ public sealed class SettingsAccordionAndOrderingContractTests
             "\"Settings\\.AutoStart\\.Mode\\.Standard\"\\s*:\\s*\"[^\"]*推荐",
             RegexOptions.CultureInvariant), json);
         Assert.Matches(new Regex(
-            "\"Settings\\.Density\\.Description\"\\s*:\\s*\"[^\"]*自定义",
+            "\"Settings\\.Density\\.Description\"\\s*:\\s*\"[^\"]*间距",
             RegexOptions.CultureInvariant), json);
         Assert.Matches(new Regex(
             "\"Settings\\.GlobalHotkey\\.PresetsTitle\"\\s*:\\s*\"[^\"]*预设",
@@ -548,7 +545,7 @@ public sealed class SettingsAccordionAndOrderingContractTests
     // ------------------------------------------------------------ L. 其他 Section
 
     // Spec L1: Theme < TrayIcon < Accent < Material < CornerAndBorder < Density <
-    // Group.AppVisual < Group.Animation, while WidgetGroups lives in Interaction.
+    // WidgetTitleIcon < Group.Animation, while WidgetGroups lives in Interaction.
     [Fact]
     public void AppearanceSection_FollowsThePinnedOrder()
     {
@@ -564,7 +561,7 @@ public sealed class SettingsAccordionAndOrderingContractTests
             "HeaderKey=\"Settings.CornerAndBorder.Title\"",
             "AutomationNameKey=\"Settings.Corner.Title\"",
             "HeaderKey=\"Settings.Density.Title\"",
-            "HeaderKey=\"Settings.Group.AppVisual.Title\"",
+            "HeaderKey=\"Settings.WidgetTitleIcon.Title\"",
             "HeaderKey=\"Settings.Group.Animation.Title\"");
 
         Assert.DoesNotContain("HeaderKey=\"Settings.Section.WidgetGroups\"", xaml, StringComparison.Ordinal);
@@ -605,26 +602,39 @@ public sealed class SettingsAccordionAndOrderingContractTests
             xaml.IndexOf("HeaderKey=\"Glance.Transition.Title\"", StringComparison.Ordinal));
     }
 
-    // Spec L4 (Round 2): DesktopOrganization overview collapses into AutoToggleExpander
-    // (IsExpanded="False") with 2 items: AutoIntervalCard and OrganizationRulesEntryCard.
+    // Spec L4: DesktopOrganization overview presents two flat top-level cards (OrganizeNowCard
+    // with AccentActionButtonStyle and drill-in AutoOrganizationEntryCard), and the 2nd-level
+    // AutoOrganizationSubPagePanel consolidates AutoToggleCard, AutoIntervalCard, and
+    // RulesViewSelectorBar (ByType / ByWidget) without a 3rd-level hop.
     [Fact]
     public void DesktopOrganization_AutoCard_IsFlatWithIntervalSibling()
     {
         string xaml = ReadRepositoryFile(
             "src/DeskBox/Views/SettingsSections/DesktopOrganizationSettingsSection.xaml");
 
-        Match? expander = FindOpeningTag(
-            xaml, "toolkit:SettingsExpander", "x:Name=\"AutoToggleExpander\"");
-        Assert.NotNull(expander);
-        Assert.Contains("IsExpanded=\"False\"", expander.Value, StringComparison.Ordinal);
-        Assert.Contains("HeaderKey=\"DesktopOrganization.Auto.Title\"", expander.Value, StringComparison.Ordinal);
-        AssertInsideExpander(xaml, expander, "HeaderKey=\"DesktopOrganization.Auto.Interval.Title\"", "AutoToggleExpander");
-        AssertInsideExpander(xaml, expander, "HeaderKey=\"DesktopOrganization.Rules.SectionTitle\"", "AutoToggleExpander");
+        Assert.DoesNotContain("x:Name=\"AutoToggleExpander\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("x:Name=\"RuleDetailPanel\"", xaml, StringComparison.Ordinal);
 
-        AssertAscending(xaml, "DesktopOrganization overview expander ordering",
-            "x:Name=\"AutoToggleExpander\"",
-            "HeaderKey=\"DesktopOrganization.Auto.Interval.Title\"",
-            "HeaderKey=\"DesktopOrganization.Rules.SectionTitle\"");
+        Match? organizeNowCard = FindOpeningTag(
+            xaml, "toolkit:SettingsCard", "x:Name=\"OrganizeNowCard\"");
+        Assert.NotNull(organizeNowCard);
+        Assert.Contains("Style=\"{StaticResource AccentActionButtonStyle}\"", xaml, StringComparison.Ordinal);
+
+        Match? autoEntryCard = FindOpeningTag(
+            xaml, "toolkit:SettingsCard", "x:Name=\"AutoOrganizationEntryCard\"");
+        Assert.NotNull(autoEntryCard);
+        Assert.Contains("IsClickEnabled=\"True\"", autoEntryCard.Value, StringComparison.Ordinal);
+        Assert.Contains("HeaderKey=\"DesktopOrganization.Auto.Title\"", autoEntryCard.Value, StringComparison.Ordinal);
+
+        AssertAscending(xaml, "DesktopOrganization overview and L2 subpage ordering",
+            "x:Name=\"OrganizeNowCard\"",
+            "x:Name=\"AutoOrganizationEntryCard\"",
+            "x:Name=\"AutoOrganizationSubPagePanel\"",
+            "x:Name=\"AutoToggleCard\"",
+            "x:Name=\"AutoIntervalCard\"",
+            "x:Name=\"RulesViewSelectorBar\"",
+            "x:Name=\"ByTypeViewTab\"",
+            "x:Name=\"ByWidgetViewTab\"");
     }
 
     // ------------------------------------------------------------ M. Round 2 Contracts
@@ -679,10 +689,8 @@ public sealed class SettingsAccordionAndOrderingContractTests
         (string FilePath, string? PanelName)[] subPages =
         [
             ("src/DeskBox/Views/SettingsSections/AiSettingsSection.xaml", null),
-            ("src/DeskBox/Views/SettingsSections/DesktopOrganizationSettingsSection.xaml", "RuleDetailPanel"),
             ("src/DeskBox/Views/SettingsSections/AppearanceSettingsSection.xaml", "MaterialSubPagePanel"),
             ("src/DeskBox/Views/SettingsSections/FileWidgetSettingsSection.xaml", "FileDisplaySubPagePanel"),
-            (SettingsWindowXaml, "WidgetGroupDetailSubPagePanel"),
             (SettingsWindowXaml, "CloudBackupSubPagePanel"),
         ];
 
@@ -706,22 +714,35 @@ public sealed class SettingsAccordionAndOrderingContractTests
     }
 
     [Fact]
-    public void Round2_SubPagesWithInlineEntryControl_RetainEntryOptionCardAtTop()
+    public void SubPagesWithInlineEntryControl_RetainEntryOptionCardAtTop()
     {
+        static void AssertFirstCardHasHeaderKey(string block, string expectedHeaderKey)
+        {
+            int entryIdx = block.IndexOf($"HeaderKey=\"{expectedHeaderKey}\"", StringComparison.Ordinal);
+            Assert.True(entryIdx >= 0, $"Missing card HeaderKey='{expectedHeaderKey}'");
+            int firstCardIdx = block.IndexOf("<toolkit:SettingsCard", StringComparison.Ordinal);
+            int firstExpanderIdx = block.IndexOf("<toolkit:SettingsExpander", StringComparison.Ordinal);
+            int earliestControlIdx = firstExpanderIdx >= 0 && firstExpanderIdx < firstCardIdx
+                ? firstExpanderIdx
+                : firstCardIdx;
+            int entryCardStartIdx = block.LastIndexOf("<toolkit:SettingsCard", entryIdx, StringComparison.Ordinal);
+            Assert.Equal(earliestControlIdx, entryCardStartIdx);
+        }
+
         string appearanceXaml = ReadRepositoryFile("src/DeskBox/Views/SettingsSections/AppearanceSettingsSection.xaml");
         string capsuleXaml = ReadRepositoryFile("src/DeskBox/Views/SettingsSections/CapsuleModeSettingsSection.xaml");
         string windowXaml = ReadRepositoryFile(SettingsWindowXaml);
 
         string materialSubPage = Slice(appearanceXaml, "x:Name=\"MaterialSubPagePanel\"", "</Grid>");
-        Assert.NotNull(FindOpeningTag(materialSubPage, "toolkit:SettingsCard", "HeaderKey=\"Settings.Material.Title\""));
+        AssertFirstCardHasHeaderKey(materialSubPage, "Settings.Material.Title");
 
-        Assert.NotNull(FindOpeningTag(capsuleXaml, "toolkit:SettingsCard", "HeaderKey=\"Settings.CollapseBehavior.Title\""));
+        AssertFirstCardHasHeaderKey(capsuleXaml, "Settings.CollapseBehavior.Title");
 
         string autoBackupSubPage = Slice(windowXaml, "x:Name=\"AutomaticBackupSubPagePanel\"", "x:Name=\"CloudBackupSubPagePanel\"");
-        Assert.NotNull(FindOpeningTag(autoBackupSubPage, "toolkit:SettingsCard", "HeaderKey=\"Settings.DataBackup.AutomaticBackup.Title\""));
+        AssertFirstCardHasHeaderKey(autoBackupSubPage, "Settings.DataBackup.AutomaticBackup.Title");
 
         string cloudBackupSubPage = Slice(windowXaml, "x:Name=\"CloudBackupSubPagePanel\"", "x:Key=\"AboutSectionTemplate\"");
-        Assert.NotNull(FindOpeningTag(cloudBackupSubPage, "toolkit:SettingsCard", "HeaderKey=\"Settings.CloudBackup.Title\""));
+        AssertFirstCardHasHeaderKey(cloudBackupSubPage, "Settings.CloudBackup.Title");
     }
 
     // Spec Z1: expanders must never carry HorizontalContentAlignment="Right".

@@ -43,10 +43,12 @@ public sealed class DisplayTopologyRestorationContractTests
         string source = File.ReadAllText(GetRepoFile(
             "src/DeskBox/Views/WidgetWindowBase.Bounds.cs"));
         string method = ExtractMethod(source, "protected void ConfigureWindowCore()");
+        string loadedHandler = ExtractMethod(source, "private void WidgetRootElement_Loaded(object sender, RoutedEventArgs e)");
 
         Assert.Contains("WidgetPositioningService.ResolveBoundsForCurrentTopology", method, StringComparison.Ordinal);
         Assert.DoesNotContain("WidgetPositioningService.GetAvailableWorkAreas()", method, StringComparison.Ordinal);
-        Assert.Contains("TryRestoreBoundsForCurrentTopology(allowHidden: true, updateConfig: false)", method, StringComparison.Ordinal);
+        Assert.Contains("RootElement.Loaded += WidgetRootElement_Loaded;", method, StringComparison.Ordinal);
+        Assert.Contains("TryRestoreBoundsForCurrentTopology(allowHidden: true, updateConfig: false)", loadedHandler, StringComparison.Ordinal);
     }
 
     private static string ExtractMethod(string source, string signature)

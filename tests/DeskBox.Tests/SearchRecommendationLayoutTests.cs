@@ -20,7 +20,7 @@ public sealed class SearchRecommendationLayoutTests : IDisposable
     {
         var deduplicator = new AppRecommendationDeduplicator();
 
-        var widgetApp = CreateApp("Visual Studio Code.lnk", @"C:\Users\simon\Desktop\Visual Studio Code.lnk");
+        var widgetApp = CreateApp("Visual Studio Code.lnk", @"C:\Users\alice\Desktop\Visual Studio Code.lnk");
         var startMenuDuplicate = CreateApp("Visual Studio Code.lnk", @"C:\ProgramData\Start Menu\Visual Studio Code.lnk");
         var directExe = CreateApp("Code.exe", @"C:\Apps\VSCode\Code.exe");
         var secondDirectExe = CreateApp("Code.exe", @"c:\apps\vscode\code.exe");
@@ -37,7 +37,7 @@ public sealed class SearchRecommendationLayoutTests : IDisposable
     public void Identity_ExtractsSquirrelTargetAndDistinguishesDistinctProxyPwas()
     {
         string? squirrelKey = AppRecommendationIdentity.ResolveShortcutMetadataTargetKey(
-            @"C:\Users\simon\AppData\Local\Discord\Update.exe",
+            @"C:\Users\alice\AppData\Local\Discord\Update.exe",
             "--processStart Discord.exe");
         Assert.Equal("squirrel:discord.exe", squirrelKey);
 
@@ -267,7 +267,7 @@ public sealed class SearchRecommendationLayoutTests : IDisposable
     {
         var firstPass = new AppRecommendationDeduplicator();
         Assert.True(firstPass.TryAcceptWithKeys(
-            @"C:\Users\simon\Desktop\Chrome.lnk",
+            @"C:\Users\alice\Desktop\Chrome.lnk",
             "Google Chrome.lnk",
             precomputedKeys: null,
             out AppRecommendationIdentity.Keys cachedKeys,
@@ -276,7 +276,7 @@ public sealed class SearchRecommendationLayoutTests : IDisposable
 
         var secondPass = new AppRecommendationDeduplicator();
         Assert.True(secondPass.TryAccept(
-            @"C:\Users\simon\Desktop\Chrome.lnk",
+            @"C:\Users\alice\Desktop\Chrome.lnk",
             "Google Chrome.lnk",
             cachedKeys,
             out string canonicalKey));
@@ -293,8 +293,16 @@ public sealed class SearchRecommendationLayoutTests : IDisposable
     public void EditModeVisuals_UseFluentCheckboxAndSubtleHideWithoutJiggle()
     {
         string repoRoot = FindRepositoryRoot();
-        string xaml = File.ReadAllText(Path.Combine(repoRoot, "src/DeskBox/Views/SearchPopupWindow.xaml"));
-        string code = File.ReadAllText(Path.Combine(repoRoot, "src/DeskBox/Views/SearchPopupWindow.xaml.cs"));
+        string xaml =
+            File.ReadAllText(Path.Combine(repoRoot, "src/DeskBox/Views/SearchPopupWindow.xaml")) +
+            "\n" +
+            File.ReadAllText(Path.Combine(repoRoot, "src/DeskBox/Controls/Search/RecommendedAppsGridControl.xaml"));
+        string code =
+            File.ReadAllText(Path.Combine(repoRoot, "src/DeskBox/Views/SearchPopupWindow.xaml.cs")) +
+            "\n" +
+            File.ReadAllText(Path.Combine(repoRoot, "src/DeskBox/Controls/Search/RecommendedAppsGridControl.xaml.cs")) +
+            "\n" +
+            File.ReadAllText(Path.Combine(repoRoot, "src/DeskBox/Controls/Search/RecommendedAppsGridControl.DragAndSelection.cs"));
 
         // Edit mode must never apply rotation/jiggle animations to recommendation cards.
         Assert.DoesNotContain("RotationAngleInDegrees", code, StringComparison.Ordinal);

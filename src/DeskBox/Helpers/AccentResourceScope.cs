@@ -1,3 +1,4 @@
+using DeskBox.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media;
 using Windows.UI;
@@ -10,11 +11,36 @@ namespace DeskBox.Helpers;
 /// </summary>
 public static class AccentResourceScope
 {
+    private static readonly string[] s_managedResourceKeys =
+    [
+        "SystemAccentColor",
+        "AccentFillColorDefaultBrush",
+        "AccentFillColorPrimaryBrush",
+        "AccentTextFillColorPrimaryBrush",
+        "SystemControlHighlightAccentBrush",
+        "SystemAccentColorLight2Brush",
+        "DeskBoxCheckFillCheckedBrush",
+        "DeskBoxCheckFillCheckedPointerOverBrush",
+        "DeskBoxCheckFillCheckedPressedBrush",
+        "DeskBoxCheckStrokePointerOverBrush",
+        "DeskBoxCheckGlyphBrush",
+    ];
+
     public static void Apply(FrameworkElement target, Color accent)
     {
         ArgumentNullException.ThrowIfNull(target);
 
         ResourceDictionary resources = target.Resources;
+        if (WindowsCompatibilityService.IsHighContrast)
+        {
+            foreach (string key in s_managedResourceKeys)
+            {
+                resources.Remove(key);
+            }
+
+            return;
+        }
+
         resources["SystemAccentColor"] = accent;
         SetBrush(resources, "AccentFillColorDefaultBrush", accent);
         SetBrush(resources, "AccentFillColorPrimaryBrush", accent);

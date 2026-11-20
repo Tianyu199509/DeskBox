@@ -22,6 +22,7 @@ internal static class WidgetStyleBackupProjection
     internal const string DocumentKind = "widget-style";
 
     private static readonly FileService s_fileService = new();
+    private static readonly JsonSerializerOptions s_indentedJsonOptions = new() { WriteIndented = true };
 
     /// <summary>
     /// Flat settings.json keys carrying widget-shell VISUAL style
@@ -317,7 +318,7 @@ internal static class WidgetStyleBackupProjection
             }
         }
 
-        string patched = settingsDom.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+        string patched = settingsDom.ToJsonString(s_indentedJsonOptions);
         if (!widgetsInLayoutFile)
         {
             // Single store: the resilient commit is already atomic — no
@@ -344,7 +345,7 @@ internal static class WidgetStyleBackupProjection
             await ResilientJsonStore.SaveAsync(settingsPath, patched);
             await ResilientJsonStore.SaveAsync(
                 layoutPath,
-                layoutDom!.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+                layoutDom!.ToJsonString(s_indentedJsonOptions));
             await File.WriteAllTextAsync(
                 JournalCommittedPath(settingsPath), "1", cancellationToken);
         }

@@ -42,9 +42,14 @@ public enum MusicSpectrumMode
 public sealed partial class MusicSpectrumControl : Grid
 {
     private const int FrameIntervalMs = 32; // ~31 fps smooth updates
-    private const int MaxSupportedBars = 52;
+    internal const int MaxSupportedBars = 160;
     private const int LedRowCount = 5;
-    private const int SilkAnchorCount = 15; // 14 cubic Bezier segments
+    internal const int DefaultSilkAnchorCount = 15; // 14 cubic Bezier segments at baseline width
+    internal const int MaxSilkAnchorCount = 65;     // Up to 64 cubic Bezier segments on ultra-wide cards
+    internal const double SilkTargetAnchorPitchPx = 18.5;
+    internal const double SilkMinVirtualWidthPx = 256.0;
+    internal const double ViewportEdgeSoftenWidthPx = 15.0;
+    private const double BarViewportEdgeSoftenWidthPx = 12.0;
 
     public static readonly DependencyProperty AccentBrushProperty =
         DependencyProperty.Register(
@@ -55,6 +60,7 @@ public sealed partial class MusicSpectrumControl : Grid
 
     private readonly StackPanel _barPanel;
     private readonly Canvas _overlayCanvas;
+    private readonly RectangleGeometry _viewportClip = new();
     private readonly List<Border> _barElements = new(MaxSupportedBars);
     private readonly List<Visual> _barVisuals = new(MaxSupportedBars);
     private readonly List<Border> _capElements = new(MaxSupportedBars);
@@ -68,16 +74,17 @@ public sealed partial class MusicSpectrumControl : Grid
     private readonly float[] _bands24 = new float[MusicSpectrumFft.BandCount];
     private readonly float[] _targetBars = new float[MaxSupportedBars];
     private readonly float[] _smoothedBars = new float[MaxSupportedBars];
-    private readonly float[] _secondarySmoothedBars = new float[SilkAnchorCount];
+    private readonly float[] _secondarySmoothedBars = new float[MaxSilkAnchorCount];
     private readonly float[] _peakLevels = new float[MaxSupportedBars];
     private readonly float[] _peakHoldTimers = new float[MaxSupportedBars];
     private readonly float[] _peakVelocities = new float[MaxSupportedBars];
 
-    private readonly double[] _silkX = new double[SilkAnchorCount];
-    private readonly double[] _silkFrontY = new double[SilkAnchorCount];
-    private readonly double[] _silkBackY = new double[SilkAnchorCount];
-    private readonly float[] _lastCommittedSilkFront = new float[SilkAnchorCount];
-    private readonly float[] _lastCommittedSilkBack = new float[SilkAnchorCount];
+    private readonly double[] _silkX = new double[MaxSilkAnchorCount];
+    private readonly double[] _silkFrontY = new double[MaxSilkAnchorCount];
+    private readonly double[] _silkBackY = new double[MaxSilkAnchorCount];
+    private readonly float[] _lastCommittedSilkFront = new float[MaxSilkAnchorCount];
+    private readonly float[] _lastCommittedSilkBack = new float[MaxSilkAnchorCount];
+    private int _activeSilkAnchorCount = DefaultSilkAnchorCount;
     private BezierSegment[]? _silkFrontSegments;
     private BezierSegment[]? _silkBackSegments;
     private BezierSegment[]? _silkCrestSegments;
@@ -261,7 +268,7 @@ public sealed partial class MusicSpectrumControl : Grid
         double maxBarHeight)
     {
         int effectiveCount = mode == MusicSpectrumMode.AuroraSilk
-            ? SilkAnchorCount
+            ? ResolveAuroraAnchorCount(ActualWidth > 16.0 ? ActualWidth : SilkMinVirtualWidthPx)
             : Math.Clamp(barCount, 2, MaxSupportedBars);
         double clampedWidth = Math.Clamp(barWidth, 1.4, 10.0);
         double clampedSpacing = Math.Clamp(barSpacing, 1.0, 10.0);
@@ -269,7 +276,7 @@ public sealed partial class MusicSpectrumControl : Grid
 
         bool needsRebuild = !_isBuilt ||
             _mode != mode ||
-            _barCount != effectiveCount ||
+            (mode != MusicSpectrumMode.AuroraSilk && _barCount != effectiveCount) ||
             Math.Abs(_barWidth - clampedWidth) > 0.01 ||
             Math.Abs(_maxBarHeight - clampedHeight) > 0.05 ||
             !double.IsNaN(Width);
@@ -282,10 +289,15 @@ public sealed partial class MusicSpectrumControl : Grid
         _barPanel.Spacing = clampedSpacing;
         Width = double.NaN;
         Height = clampedHeight;
+        UpdateViewportClip();
 
         if (needsRebuild)
         {
             RebuildVisualTree(force: true);
+        }
+        else if (mode == MusicSpectrumMode.AuroraSilk)
+        {
+            UpdateAuroraSilkGeometry(force: true);
         }
     }
 
@@ -316,6 +328,7 @@ public sealed partial class MusicSpectrumControl : Grid
         double outerDiameter = (clampedRadius + clampedHeight + 2.0) * 2.0;
         Width = outerDiameter;
         Height = outerDiameter;
+        UpdateViewportClip();
 
         if (needsRebuild)
         {
@@ -460,12 +473,42 @@ public sealed partial class MusicSpectrumControl : Grid
 
     private void MusicSpectrumControl_SizeChanged(object sender, SizeChangedEventArgs e)
     {
-        if (_isDisposed || !_isBuilt || _mode != MusicSpectrumMode.AuroraSilk)
+        if (_isDisposed)
         {
             return;
         }
 
-        UpdateAuroraSilkGeometry(force: true);
+        UpdateViewportClip();
+        if (!_isBuilt)
+        {
+            return;
+        }
+
+        if (_mode == MusicSpectrumMode.AuroraSilk)
+        {
+            UpdateAuroraSilkGeometry(force: true);
+        }
+        else if (!_shouldAnimate && _mode != MusicSpectrumMode.VinylRadialHalo)
+        {
+            SnapToIdle();
+        }
+    }
+
+    private void UpdateViewportClip()
+    {
+        if (_mode == MusicSpectrumMode.VinylRadialHalo)
+        {
+            Clip = null;
+            return;
+        }
+
+        double clipWidth = ActualWidth > 0 ? ActualWidth : 4096.0;
+        double clipHeight = ActualHeight > 0 ? ActualHeight : Math.Max(64.0, _maxBarHeight + 8.0);
+        _viewportClip.Rect = new Rect(0, -4, clipWidth, clipHeight + 8.0);
+        if (!ReferenceEquals(Clip, _viewportClip))
+        {
+            Clip = _viewportClip;
+        }
     }
 
     private void EnsureVisualTreeInitialized()
@@ -639,6 +682,7 @@ public sealed partial class MusicSpectrumControl : Grid
 
             Visual barVisual = ElementCompositionPreview.GetElementVisual(bar);
             barVisual.CenterPoint = new Vector3(centerX, centerY, 0.0f);
+            ElementCompositionPreview.SetIsTranslationEnabled(cap, true);
             Visual capVisual = ElementCompositionPreview.GetElementVisual(cap);
 
             float idleLevel = GetIdleScale(i, _barCount, _mode);
@@ -651,7 +695,7 @@ public sealed partial class MusicSpectrumControl : Grid
             barVisual.Opacity = 0.36f;
 
             float capOffset = (float)((idleLevel * barMaxH) + 1.2);
-            capVisual.Offset = new Vector3(0.0f, -capOffset, 0.0f);
+            capVisual.Properties.InsertVector3("Translation", new Vector3(0.0f, -capOffset, 0.0f));
             capVisual.Opacity = 0.48f;
 
             col.Children.Add(bar);
@@ -775,6 +819,37 @@ public sealed partial class MusicSpectrumControl : Grid
         }
     }
 
+    internal static int ResolveAuroraAnchorCount(double viewportWidth)
+    {
+        double virtualWidth = Math.Max(SilkMinVirtualWidthPx, double.IsFinite(viewportWidth) ? viewportWidth : SilkMinVirtualWidthPx);
+        int raw = (int)Math.Round(virtualWidth / SilkTargetAnchorPitchPx) + 1;
+        int clamped = Math.Clamp(raw, DefaultSilkAnchorCount, MaxSilkAnchorCount);
+        if ((clamped & 1) == 0)
+        {
+            clamped = clamped < MaxSilkAnchorCount ? clamped + 1 : clamped - 1;
+        }
+
+        return clamped;
+    }
+
+    internal static double ComputeAuroraEnvelope(double normX, double x, double viewportWidth)
+    {
+        if (viewportWidth <= 0.0 || x <= 0.0 || x >= viewportWidth)
+        {
+            return 0.0;
+        }
+
+        double ribbonEnvelope = Math.Sin(Math.Clamp(normX, 0.0, 1.0) * Math.PI);
+        double distFromEdge = Math.Min(x, viewportWidth - x);
+        if (distFromEdge >= ViewportEdgeSoftenWidthPx)
+        {
+            return ribbonEnvelope;
+        }
+
+        double edgeRamp = Math.Sin((distFromEdge / ViewportEdgeSoftenWidthPx) * (Math.PI * 0.5));
+        return ribbonEnvelope * edgeRamp;
+    }
+
     private void BuildAuroraSilkTree()
     {
         _barPanel.Visibility = Visibility.Collapsed;
@@ -784,33 +859,27 @@ public sealed partial class MusicSpectrumControl : Grid
         _overlayCanvas.HorizontalAlignment = HorizontalAlignment.Stretch;
         _overlayCanvas.VerticalAlignment = VerticalAlignment.Stretch;
 
-        int segCount = SilkAnchorCount - 1;
-        _silkBackSegments = new BezierSegment[segCount];
-        _silkFrontSegments = new BezierSegment[segCount];
-        _silkCrestSegments = new BezierSegment[segCount];
+        double initialWidth = ActualWidth > 16.0 ? ActualWidth : SilkMinVirtualWidthPx;
+        int initialAnchors = ResolveAuroraAnchorCount(initialWidth);
+        _activeSilkAnchorCount = initialAnchors;
+        _barCount = initialAnchors;
+
+        int maxSegCount = MaxSilkAnchorCount - 1;
+        _silkBackSegments = new BezierSegment[maxSegCount];
+        _silkFrontSegments = new BezierSegment[maxSegCount];
+        _silkCrestSegments = new BezierSegment[maxSegCount];
+
+        for (int i = 0; i < maxSegCount; i++)
+        {
+            _silkBackSegments[i] = new BezierSegment();
+            _silkFrontSegments[i] = new BezierSegment();
+            _silkCrestSegments[i] = new BezierSegment();
+        }
 
         _silkBackFigure = new PathFigure { IsClosed = true, IsFilled = true };
         _silkFrontFigure = new PathFigure { IsClosed = true, IsFilled = true };
         _silkCrestFigure = new PathFigure { IsClosed = false, IsFilled = false };
-
-        for (int i = 0; i < segCount; i++)
-        {
-            var backSeg = new BezierSegment();
-            var frontSeg = new BezierSegment();
-            var crestSeg = new BezierSegment();
-            _silkBackSegments[i] = backSeg;
-            _silkFrontSegments[i] = frontSeg;
-            _silkCrestSegments[i] = crestSeg;
-            _silkBackFigure.Segments.Add(backSeg);
-            _silkFrontFigure.Segments.Add(frontSeg);
-            _silkCrestFigure.Segments.Add(crestSeg);
-        }
-
-        // Closing bottom edges for filled ribbons
-        _silkBackFigure.Segments.Add(new LineSegment());
-        _silkBackFigure.Segments.Add(new LineSegment());
-        _silkFrontFigure.Segments.Add(new LineSegment());
-        _silkFrontFigure.Segments.Add(new LineSegment());
+        PopulateAuroraFigureSegments(initialAnchors - 1);
 
         var backGeom = new PathGeometry();
         backGeom.Figures.Add(_silkBackFigure);
@@ -844,14 +913,77 @@ public sealed partial class MusicSpectrumControl : Grid
         _overlayCanvas.Children.Add(_silkFrontPath);
         _overlayCanvas.Children.Add(_silkCrestPath);
 
-        for (int i = 0; i < SilkAnchorCount; i++)
+        for (int i = 0; i < initialAnchors; i++)
         {
-            float idle = GetIdleScale(i, SilkAnchorCount, _mode);
+            float idle = GetIdleScale(i, initialAnchors, _mode);
             _smoothedBars[i] = idle;
             _secondarySmoothedBars[i] = idle * 0.85f;
         }
 
+        _lastAuroraCommitWidth = -1.0;
         UpdateAuroraSilkGeometry(force: true);
+    }
+
+    private void PopulateAuroraFigureSegments(int activeSegCount)
+    {
+        if (_silkBackFigure is null ||
+            _silkFrontFigure is null ||
+            _silkCrestFigure is null ||
+            _silkBackSegments is null ||
+            _silkFrontSegments is null ||
+            _silkCrestSegments is null)
+        {
+            return;
+        }
+
+        _silkBackFigure.Segments.Clear();
+        _silkFrontFigure.Segments.Clear();
+        _silkCrestFigure.Segments.Clear();
+
+        for (int i = 0; i < activeSegCount; i++)
+        {
+            _silkBackFigure.Segments.Add(_silkBackSegments[i]);
+            _silkFrontFigure.Segments.Add(_silkFrontSegments[i]);
+            _silkCrestFigure.Segments.Add(_silkCrestSegments[i]);
+        }
+
+        // Closing bottom edges for filled ribbons
+        _silkBackFigure.Segments.Add(new LineSegment());
+        _silkBackFigure.Segments.Add(new LineSegment());
+        _silkFrontFigure.Segments.Add(new LineSegment());
+        _silkFrontFigure.Segments.Add(new LineSegment());
+    }
+
+    private void EnsureAuroraAnchorCountForWidth(double viewportWidth)
+    {
+        int desired = ResolveAuroraAnchorCount(viewportWidth);
+        if (desired == _activeSilkAnchorCount)
+        {
+            return;
+        }
+
+        int prevCount = Math.Max(2, _activeSilkAnchorCount);
+        Span<float> prevFront = stackalloc float[prevCount];
+        Span<float> prevBack = stackalloc float[prevCount];
+        _smoothedBars.AsSpan(0, prevCount).CopyTo(prevFront);
+        _secondarySmoothedBars.AsSpan(0, prevCount).CopyTo(prevBack);
+
+        for (int i = 0; i < desired; i++)
+        {
+            double t = i / (double)(desired - 1);
+            double srcPos = t * (prevCount - 1);
+            int idx0 = Math.Clamp((int)Math.Floor(srcPos), 0, prevCount - 1);
+            int idx1 = Math.Clamp(idx0 + 1, 0, prevCount - 1);
+            float frac = (float)(srcPos - idx0);
+            _smoothedBars[i] = prevFront[idx0] + ((prevFront[idx1] - prevFront[idx0]) * frac);
+            _secondarySmoothedBars[i] = prevBack[idx0] + ((prevBack[idx1] - prevBack[idx0]) * frac);
+            _lastCommittedSilkFront[i] = -1.0f;
+            _lastCommittedSilkBack[i] = -1.0f;
+        }
+
+        _activeSilkAnchorCount = desired;
+        _barCount = desired;
+        PopulateAuroraFigureSegments(desired - 1);
     }
 
     private void UpdateAuroraSilkGeometry(bool force = false)
@@ -866,11 +998,14 @@ public sealed partial class MusicSpectrumControl : Grid
             return;
         }
 
-        double width = ActualWidth > 16.0 ? ActualWidth : 220.0;
-        if (!force && Math.Abs(width - _lastAuroraCommitWidth) < 0.25)
+        double viewportWidth = ActualWidth > 16.0 ? ActualWidth : SilkMinVirtualWidthPx;
+        EnsureAuroraAnchorCountForWidth(viewportWidth);
+        int anchorCount = _activeSilkAnchorCount;
+
+        if (!force && Math.Abs(viewportWidth - _lastAuroraCommitWidth) < 0.25)
         {
             float maxDelta = 0.0f;
-            for (int i = 0; i < SilkAnchorCount; i++)
+            for (int i = 0; i < anchorCount; i++)
             {
                 float frontDelta = MathF.Abs(_smoothedBars[i] - _lastCommittedSilkFront[i]);
                 float backDelta = MathF.Abs(_secondarySmoothedBars[i] - _lastCommittedSilkBack[i]);
@@ -891,20 +1026,24 @@ public sealed partial class MusicSpectrumControl : Grid
             }
         }
 
-        _lastAuroraCommitWidth = width;
+        _lastAuroraCommitWidth = viewportWidth;
+        double virtualWidth = Math.Max(SilkMinVirtualWidthPx, viewportWidth);
+        double offsetX = (viewportWidth - virtualWidth) * 0.5;
         double height = _maxBarHeight;
         double baseline = height;
 
-        for (int i = 0; i < SilkAnchorCount; i++)
+        for (int i = 0; i < anchorCount; i++)
         {
             _lastCommittedSilkFront[i] = _smoothedBars[i];
             _lastCommittedSilkBack[i] = _secondarySmoothedBars[i];
 
-            double normX = i / (double)(SilkAnchorCount - 1);
-            _silkX[i] = normX * width;
+            double normX = i / (double)(anchorCount - 1);
+            double x = offsetX + (normX * virtualWidth);
+            _silkX[i] = x;
 
-            // Taper endpoints cleanly to baseline so the aurora ribbon emerges smoothly from the card bottom
-            double edgeTaper = Math.Sin(normX * Math.PI);
+            // Keep physical wavelength uncompressed when narrow (center-cropped virtual ribbon)
+            // while tapering smoothly to baseline inside the left/right viewport borders.
+            double edgeTaper = ComputeAuroraEnvelope(normX, x, viewportWidth);
             double frontAmp = _smoothedBars[i] * edgeTaper * (height - 2.0);
             double backAmp = _secondarySmoothedBars[i] * edgeTaper * (height - 3.0);
 
@@ -912,21 +1051,20 @@ public sealed partial class MusicSpectrumControl : Grid
             _silkBackY[i] = Math.Clamp(baseline - backAmp, 1.5, baseline);
         }
 
-        WriteCatmullRomToBezier(_silkX, _silkBackY, baseline, width, _silkBackFigure, _silkBackSegments, closeBottom: true);
-        WriteCatmullRomToBezier(_silkX, _silkFrontY, baseline, width, _silkFrontFigure, _silkFrontSegments, closeBottom: true);
-        WriteCatmullRomToBezier(_silkX, _silkFrontY, baseline, width, _silkCrestFigure, _silkCrestSegments, closeBottom: false);
+        WriteCatmullRomToBezier(_silkX, _silkBackY, anchorCount, baseline, _silkBackFigure, _silkBackSegments, closeBottom: true);
+        WriteCatmullRomToBezier(_silkX, _silkFrontY, anchorCount, baseline, _silkFrontFigure, _silkFrontSegments, closeBottom: true);
+        WriteCatmullRomToBezier(_silkX, _silkFrontY, anchorCount, baseline, _silkCrestFigure, _silkCrestSegments, closeBottom: false);
     }
 
     private static void WriteCatmullRomToBezier(
         double[] xs,
         double[] ys,
+        int n,
         double baseline,
-        double width,
         PathFigure figure,
         BezierSegment[] segments,
         bool closeBottom)
     {
-        int n = xs.Length;
         figure.StartPoint = new Point(xs[0], ys[0]);
 
         for (int i = 0; i < n - 1; i++)
@@ -951,12 +1089,12 @@ public sealed partial class MusicSpectrumControl : Grid
         {
             if (figure.Segments[n - 1] is LineSegment bottomRight)
             {
-                bottomRight.Point = new Point(width, baseline);
+                bottomRight.Point = new Point(xs[n - 1], baseline);
             }
 
             if (figure.Segments[n] is LineSegment bottomLeft)
             {
-                bottomLeft.Point = new Point(0.0, baseline);
+                bottomLeft.Point = new Point(xs[0], baseline);
             }
         }
     }
@@ -1217,7 +1355,12 @@ public sealed partial class MusicSpectrumControl : Grid
 
     private void TickActiveFrame(float dt)
     {
-        int count = _mode == MusicSpectrumMode.AuroraSilk ? SilkAnchorCount : _barCount;
+        if (_mode == MusicSpectrumMode.AuroraSilk)
+        {
+            EnsureAuroraAnchorCountForWidth(ActualWidth > 16.0 ? ActualWidth : SilkMinVirtualWidthPx);
+        }
+
+        int count = _mode == MusicSpectrumMode.AuroraSilk ? _activeSilkAnchorCount : _barCount;
         Span<float> targetSlice = _targetBars.AsSpan(0, count);
 
         switch (_mode)
@@ -1252,14 +1395,14 @@ public sealed partial class MusicSpectrumControl : Grid
             float backAttack = 1.0f - MathF.Exp(-dt * 14.0f);
             float backRelease = 1.0f - MathF.Exp(-dt * 5.0f);
 
-            for (int i = 0; i < SilkAnchorCount; i++)
+            for (int i = 0; i < count; i++)
             {
                 float desired = 0.10f + (0.90f * targetSlice[i]);
                 float prev = _smoothedBars[i];
                 float next = prev + ((desired - prev) * (desired > prev ? attack : release));
                 _smoothedBars[i] = next;
 
-                int mirrored = (SilkAnchorCount - 1) - i;
+                int mirrored = (count - 1) - i;
                 float shimmer = 0.06f * MathF.Sin((float)_silkPhase + (i * 0.55f));
                 float backDesired = Math.Clamp(0.08f + (0.78f * targetSlice[mirrored]) + shimmer, 0.05f, 1.0f);
                 float backPrev = _secondarySmoothedBars[i];
@@ -1274,11 +1417,12 @@ public sealed partial class MusicSpectrumControl : Grid
         {
             for (int i = 0; i < count; i++)
             {
-                float desired = 0.12f + (0.88f * targetSlice[i]);
+                float edgeFactor = ComputeBarViewportEdgeFactor(i);
+                float desired = (0.12f + (0.88f * targetSlice[i])) * edgeFactor;
                 float prev = _smoothedBars[i];
                 float next = prev + ((desired - prev) * (desired > prev ? attack : release));
                 _smoothedBars[i] = next;
-                ApplyLedColumnOpacity(i, next);
+                ApplyLedColumnOpacity(i, next, edgeFactor);
             }
 
             return;
@@ -1289,7 +1433,8 @@ public sealed partial class MusicSpectrumControl : Grid
             double barMaxH = Math.Max(6.0, _maxBarHeight - 3.2);
             for (int i = 0; i < _barVisuals.Count; i++)
             {
-                float desired = 0.13f + (0.87f * targetSlice[i]);
+                float edgeFactor = ComputeBarViewportEdgeFactor(i);
+                float desired = (0.13f + (0.87f * targetSlice[i])) * edgeFactor;
                 float prev = _smoothedBars[i];
                 float next = prev + ((desired - prev) * (desired > prev ? attack : release));
                 _smoothedBars[i] = next;
@@ -1312,12 +1457,12 @@ public sealed partial class MusicSpectrumControl : Grid
 
                 Visual barVis = _barVisuals[i];
                 barVis.Scale = new Vector3(1.0f, next, 1.0f);
-                barVis.Opacity = Math.Clamp(0.48f + (0.52f * targetSlice[i]), 0.42f, 1.0f);
+                barVis.Opacity = Math.Clamp(0.48f + (0.52f * targetSlice[i]), 0.42f, 1.0f) * edgeFactor;
 
                 Visual capVis = _capVisuals[i];
                 float capOffset = (float)((_peakLevels[i] * barMaxH) + 1.2);
-                capVis.Offset = new Vector3(0.0f, -capOffset, 0.0f);
-                capVis.Opacity = Math.Clamp(0.68f + (0.32f * _peakLevels[i]), 0.58f, 1.0f);
+                capVis.Properties.InsertVector3("Translation", new Vector3(0.0f, -capOffset, 0.0f));
+                capVis.Opacity = Math.Clamp(0.68f + (0.32f * _peakLevels[i]), 0.58f, 1.0f) * edgeFactor;
             }
 
             return;
@@ -1335,8 +1480,11 @@ public sealed partial class MusicSpectrumControl : Grid
 
         for (int i = 0; i < _barVisuals.Count; i++)
         {
+            float edgeFactor = _mode is MusicSpectrumMode.VinylRadialHalo or MusicSpectrumMode.MiniBadge
+                ? 1.0f
+                : ComputeBarViewportEdgeFactor(i);
             float boost = i == playheadIdx ? 0.10f : 0.0f;
-            float desired = Math.Clamp(minFloor + ((1.0f - minFloor) * targetSlice[i]) + boost, 0.0f, 1.0f);
+            float desired = Math.Clamp(minFloor + ((1.0f - minFloor) * targetSlice[i]) + boost, 0.0f, 1.0f) * edgeFactor;
             float prev = _smoothedBars[i];
             float coeff = desired > prev ? attack : release;
             float next = prev + ((desired - prev) * coeff);
@@ -1345,24 +1493,27 @@ public sealed partial class MusicSpectrumControl : Grid
             Visual visual = _barVisuals[i];
             visual.Scale = new Vector3(1.0f, next, 1.0f);
 
+            float baseOpacity;
             if (_mode == MusicSpectrumMode.WaveformScrub)
             {
-                visual.Opacity = i <= playheadIdx
+                baseOpacity = i <= playheadIdx
                     ? Math.Clamp(0.82f + (0.18f * targetSlice[i]), 0.80f, 1.0f)
                     : Math.Clamp(0.54f + (0.30f * targetSlice[i]), 0.50f, 0.85f);
             }
             else if (_mode == MusicSpectrumMode.VinylRadialHalo)
             {
-                visual.Opacity = Math.Clamp(0.38f + (0.62f * targetSlice[i]), 0.34f, 1.0f);
+                baseOpacity = Math.Clamp(0.38f + (0.62f * targetSlice[i]), 0.34f, 1.0f);
             }
             else if (_mode == MusicSpectrumMode.MiniBadge)
             {
-                visual.Opacity = Math.Clamp(0.62f + (0.38f * targetSlice[i]), 0.55f, 1.0f);
+                baseOpacity = Math.Clamp(0.62f + (0.38f * targetSlice[i]), 0.55f, 1.0f);
             }
             else
             {
-                visual.Opacity = Math.Clamp(0.42f + (0.58f * targetSlice[i]), 0.38f, 1.0f);
+                baseOpacity = Math.Clamp(0.42f + (0.58f * targetSlice[i]), 0.38f, 1.0f);
             }
+
+            visual.Opacity = baseOpacity * edgeFactor;
         }
     }
 
@@ -1373,9 +1524,10 @@ public sealed partial class MusicSpectrumControl : Grid
 
         if (_mode == MusicSpectrumMode.AuroraSilk)
         {
-            for (int i = 0; i < SilkAnchorCount; i++)
+            int anchorCount = _activeSilkAnchorCount;
+            for (int i = 0; i < anchorCount; i++)
             {
-                float idle = GetIdleScale(i, SilkAnchorCount, _mode);
+                float idle = GetIdleScale(i, anchorCount, _mode);
                 float next = _smoothedBars[i] + ((idle - _smoothedBars[i]) * settleRate);
                 float nextBack = _secondarySmoothedBars[i] + (((idle * 0.85f) - _secondarySmoothedBars[i]) * settleRate);
                 if (MathF.Abs(next - idle) > 0.008f)
@@ -1395,7 +1547,8 @@ public sealed partial class MusicSpectrumControl : Grid
         {
             for (int i = 0; i < _barCount; i++)
             {
-                float idle = GetIdleScale(i, _barCount, _mode);
+                float edgeFactor = ComputeBarViewportEdgeFactor(i);
+                float idle = GetIdleScale(i, _barCount, _mode) * edgeFactor;
                 float next = _smoothedBars[i] + ((idle - _smoothedBars[i]) * settleRate);
                 if (MathF.Abs(next - idle) > 0.008f)
                 {
@@ -1403,7 +1556,7 @@ public sealed partial class MusicSpectrumControl : Grid
                 }
 
                 _smoothedBars[i] = next;
-                ApplyLedColumnOpacity(i, next);
+                ApplyLedColumnOpacity(i, next, edgeFactor);
             }
 
             return allSettled;
@@ -1414,7 +1567,8 @@ public sealed partial class MusicSpectrumControl : Grid
             double barMaxH = Math.Max(6.0, _maxBarHeight - 3.2);
             for (int i = 0; i < _barVisuals.Count; i++)
             {
-                float idle = GetIdleScale(i, _barCount, _mode);
+                float edgeFactor = ComputeBarViewportEdgeFactor(i);
+                float idle = GetIdleScale(i, _barCount, _mode) * edgeFactor;
                 float next = _smoothedBars[i] + ((idle - _smoothedBars[i]) * settleRate);
                 float nextPeak = _peakLevels[i] + ((idle - _peakLevels[i]) * settleRate);
                 if (MathF.Abs(next - idle) > 0.008f || MathF.Abs(nextPeak - idle) > 0.008f)
@@ -1427,12 +1581,12 @@ public sealed partial class MusicSpectrumControl : Grid
 
                 Visual barVis = _barVisuals[i];
                 barVis.Scale = new Vector3(1.0f, next, 1.0f);
-                barVis.Opacity += (0.36f - barVis.Opacity) * settleRate;
+                barVis.Opacity += ((0.36f * edgeFactor) - barVis.Opacity) * settleRate;
 
                 Visual capVis = _capVisuals[i];
                 float capOffset = (float)((nextPeak * barMaxH) + 1.2);
-                capVis.Offset = new Vector3(0.0f, -capOffset, 0.0f);
-                capVis.Opacity += (0.48f - capVis.Opacity) * settleRate;
+                capVis.Properties.InsertVector3("Translation", new Vector3(0.0f, -capOffset, 0.0f));
+                capVis.Opacity += ((0.48f * edgeFactor) - capVis.Opacity) * settleRate;
             }
 
             return allSettled;
@@ -1442,7 +1596,10 @@ public sealed partial class MusicSpectrumControl : Grid
         int count = _barVisuals.Count;
         for (int i = 0; i < count; i++)
         {
-            float idleScale = GetIdleScale(i, count, _mode);
+            float edgeFactor = _mode is MusicSpectrumMode.VinylRadialHalo or MusicSpectrumMode.MiniBadge
+                ? 1.0f
+                : ComputeBarViewportEdgeFactor(i);
+            float idleScale = GetIdleScale(i, count, _mode) * edgeFactor;
             float prev = _smoothedBars[i];
             float next = prev + ((idleScale - prev) * settleRate);
             if (MathF.Abs(next - idleScale) > 0.008f)
@@ -1457,7 +1614,7 @@ public sealed partial class MusicSpectrumControl : Grid
             _smoothedBars[i] = next;
             Visual visual = _barVisuals[i];
             visual.Scale = new Vector3(1.0f, next, 1.0f);
-            visual.Opacity += (idleOpacity - visual.Opacity) * settleRate;
+            visual.Opacity += ((idleOpacity * edgeFactor) - visual.Opacity) * settleRate;
         }
 
         return allSettled;
@@ -1467,9 +1624,11 @@ public sealed partial class MusicSpectrumControl : Grid
     {
         if (_mode == MusicSpectrumMode.AuroraSilk)
         {
-            for (int i = 0; i < SilkAnchorCount; i++)
+            EnsureAuroraAnchorCountForWidth(ActualWidth > 16.0 ? ActualWidth : SilkMinVirtualWidthPx);
+            int anchorCount = _activeSilkAnchorCount;
+            for (int i = 0; i < anchorCount; i++)
             {
-                float idle = GetIdleScale(i, SilkAnchorCount, _mode);
+                float idle = GetIdleScale(i, anchorCount, _mode);
                 _smoothedBars[i] = idle;
                 _secondarySmoothedBars[i] = idle * 0.85f;
             }
@@ -1482,9 +1641,10 @@ public sealed partial class MusicSpectrumControl : Grid
         {
             for (int i = 0; i < _barCount; i++)
             {
-                float idle = GetIdleScale(i, _barCount, _mode);
+                float edgeFactor = ComputeBarViewportEdgeFactor(i);
+                float idle = GetIdleScale(i, _barCount, _mode) * edgeFactor;
                 _smoothedBars[i] = idle;
-                ApplyLedColumnOpacity(i, idle);
+                ApplyLedColumnOpacity(i, idle, edgeFactor);
             }
 
             return;
@@ -1495,7 +1655,8 @@ public sealed partial class MusicSpectrumControl : Grid
             double barMaxH = Math.Max(6.0, _maxBarHeight - 3.2);
             for (int i = 0; i < _barVisuals.Count; i++)
             {
-                float idle = GetIdleScale(i, _barCount, _mode);
+                float edgeFactor = ComputeBarViewportEdgeFactor(i);
+                float idle = GetIdleScale(i, _barCount, _mode) * edgeFactor;
                 _smoothedBars[i] = idle;
                 _peakLevels[i] = idle;
                 _peakHoldTimers[i] = 0.0f;
@@ -1503,12 +1664,12 @@ public sealed partial class MusicSpectrumControl : Grid
 
                 Visual barVis = _barVisuals[i];
                 barVis.Scale = new Vector3(1.0f, idle, 1.0f);
-                barVis.Opacity = 0.36f;
+                barVis.Opacity = 0.36f * edgeFactor;
 
                 Visual capVis = _capVisuals[i];
                 float capOffset = (float)((idle * barMaxH) + 1.2);
-                capVis.Offset = new Vector3(0.0f, -capOffset, 0.0f);
-                capVis.Opacity = 0.48f;
+                capVis.Properties.InsertVector3("Translation", new Vector3(0.0f, -capOffset, 0.0f));
+                capVis.Opacity = 0.48f * edgeFactor;
             }
 
             return;
@@ -1518,17 +1679,55 @@ public sealed partial class MusicSpectrumControl : Grid
         float idleOpacity = GetIdleOpacity(_mode);
         for (int i = 0; i < count; i++)
         {
-            float idleScale = GetIdleScale(i, count, _mode);
+            float edgeFactor = _mode is MusicSpectrumMode.VinylRadialHalo or MusicSpectrumMode.MiniBadge
+                ? 1.0f
+                : ComputeBarViewportEdgeFactor(i);
+            float idleScale = GetIdleScale(i, count, _mode) * edgeFactor;
             _smoothedBars[i] = idleScale;
             Visual visual = _barVisuals[i];
             visual.Scale = new Vector3(1.0f, idleScale, 1.0f);
-            visual.Opacity = _mode == MusicSpectrumMode.WaveformScrub && i <= _lastPlayheadIndex
+            float baseIdle = _mode == MusicSpectrumMode.WaveformScrub && i <= _lastPlayheadIndex
                 ? 0.78f
                 : idleOpacity;
+            visual.Opacity = baseIdle * edgeFactor;
         }
     }
 
-    private void ApplyLedColumnOpacity(int colIndex, float level)
+    private float ComputeBarViewportEdgeFactor(int barIndex)
+    {
+        double viewportWidth = ActualWidth;
+        if (viewportWidth <= 0.0 || _barCount <= 0)
+        {
+            return 1.0f;
+        }
+
+        double totalStripWidth = (_barCount * _barWidth) + (Math.Max(0, _barCount - 1) * _barSpacing);
+        if (viewportWidth >= totalStripWidth - 1.0)
+        {
+            return 1.0f;
+        }
+
+        double leftOrigin = (viewportWidth - totalStripWidth) * 0.5;
+        double barCenterX = leftOrigin + (barIndex * (_barWidth + _barSpacing)) + (_barWidth * 0.5);
+        double distFromEdge = Math.Min(barCenterX, viewportWidth - barCenterX);
+        if (distFromEdge <= -(_barWidth * 0.5))
+        {
+            return 0.0f;
+        }
+
+        if (distFromEdge >= BarViewportEdgeSoftenWidthPx)
+        {
+            return 1.0f;
+        }
+
+        double normalized = Math.Clamp(
+            (distFromEdge + (_barWidth * 0.5)) / (BarViewportEdgeSoftenWidthPx + (_barWidth * 0.5)),
+            0.0,
+            1.0);
+        return (float)Math.Sin(normalized * (Math.PI * 0.5));
+    }
+
+    private void ApplyLedColumnOpacity(int colIndex, float level, float edgeFactor = 1.0f)
     {
         float lit = Math.Clamp(level, 0.0f, 1.0f) * LedRowCount;
         for (int r = 0; r < LedRowCount; r++)
@@ -1539,19 +1738,22 @@ public sealed partial class MusicSpectrumControl : Grid
                 continue;
             }
 
+            float rawOpacity;
             if (r + 1 <= lit)
             {
-                cellVis.Opacity = 0.96f;
+                rawOpacity = 0.96f;
             }
             else if (r < lit)
             {
                 float frac = lit - r;
-                cellVis.Opacity = 0.12f + (0.84f * frac);
+                rawOpacity = 0.12f + (0.84f * frac);
             }
             else
             {
-                cellVis.Opacity = 0.12f;
+                rawOpacity = 0.12f;
             }
+
+            cellVis.Opacity = rawOpacity * edgeFactor;
         }
     }
 

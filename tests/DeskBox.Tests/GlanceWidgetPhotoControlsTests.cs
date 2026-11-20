@@ -90,8 +90,8 @@ public sealed class GlanceWidgetPhotoControlsTests
             "src/DeskBox/Views/SettingsSections/GlanceWidgetSettingsSection.xaml.cs"));
 
         Assert.Contains("x:Name=\"ClearLocalSourceButton\"", settingsXaml, StringComparison.Ordinal);
-        Assert.Contains("Grid.Column=\"1\"", settingsXaml, StringComparison.Ordinal);
-        Assert.Contains("HorizontalAlignment=\"Right\"", settingsXaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"LocalSourceCard\"", settingsXaml, StringComparison.Ordinal);
+        Assert.Contains("<controls:WrapFlowPanel", settingsXaml, StringComparison.Ordinal);
         Assert.Contains("ClearLocalSourceButton_Click", settingsCode, StringComparison.Ordinal);
         Assert.Contains("GlanceBackgroundSource.Bing", settingsCode, StringComparison.Ordinal);
 

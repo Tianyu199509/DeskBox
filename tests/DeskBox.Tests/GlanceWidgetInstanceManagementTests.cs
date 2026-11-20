@@ -183,7 +183,7 @@ public sealed class GlanceWidgetInstanceManagementTests
         Assert.True(ContainsNamedElement(dayInfo, "ShowChineseFestivalsToggle"));
         Assert.True(ContainsNamedElement(dayInfo, "ShowStatutoryHolidaysToggle"));
         Assert.True(ContainsNamedElement(dayInfo, "ShowTodoAgendaToggle"));
-        Assert.True(ContainsNamedElement(advanced, "DisplayContentDropDownButton"));
+        Assert.True(ContainsNamedElement(advanced, "DisplayContentCheckBoxesPanel"));
         Assert.True(ContainsNamedElement(advanced, "CalendarMaterialComboBox"));
         Assert.True(ContainsNamedElement(advanced, "FontComboBox"));
         Assert.True(ContainsNamedElement(advanced, "TimeFormatComboBox"));
@@ -198,7 +198,7 @@ public sealed class GlanceWidgetInstanceManagementTests
             "StyleGallery",
             "BackgroundSourceComboBox",
             "TraditionalCalendarComboBox",
-            "DisplayContentDropDownButton",
+            "DisplayContentCheckBoxesPanel",
             "FontComboBox",
             "TransitionComboBox",
             "CacheSizeText",
@@ -214,7 +214,6 @@ public sealed class GlanceWidgetInstanceManagementTests
         string[] selectorNames =
         [
             "PhotoClockAlignmentComboBox",
-            "DisplayContentDropDownButton",
             "BackgroundSourceComboBox",
             "OnlineImageCategoryComboBox",
             "ReadabilityComboBox",
@@ -233,6 +232,7 @@ public sealed class GlanceWidgetInstanceManagementTests
                     attribute.Name.LocalName == "Name" &&
                     attribute.Value == controlName)));
             Assert.Equal("{StaticResource SettingsControlMinWidth}", control.Attribute("MinWidth")?.Value);
+            Assert.Equal("{StaticResource SettingsControlMaxWidth}", control.Attribute("MaxWidth")?.Value);
         }
 
         Assert.Contains("svc:Localized.HeaderKey=\"Glance.Typography.Font\"", xaml, StringComparison.Ordinal);

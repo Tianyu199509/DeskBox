@@ -1,5 +1,6 @@
 using CommunityToolkit.WinUI.Controls;
 using DeskBox.Contracts;
+using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Services;
 using Microsoft.UI;
@@ -92,6 +93,8 @@ public sealed partial class DisplaySettingsSection : UserControl
     // do not keep showing a stale arrangement.
     private void OnSectionLoaded(object sender, RoutedEventArgs e)
     {
+        SettingsWindow.EnsureInformationalSeverityPinned(DisplaysStatusInfo);
+        SettingsWindow.ApplyNoticeMessageTypography(DisplaysStatusInfo);
         _appActions.DisplayTopologyChanged += OnExternalDisplayTopologyChanged;
         _appActions.ScreenHomeChanged += OnExternalScreenHomeChanged;
         Refresh();
@@ -924,7 +927,8 @@ public sealed partial class DisplaySettingsSection : UserControl
             PrimaryButtonText = T("Settings.Displays.MoveAll.ConfirmButton"),
             CloseButtonText = T("Common.Cancel"),
             DefaultButton = ContentDialogButton.Primary,
-            XamlRoot = XamlRoot
+            XamlRoot = XamlRoot,
+            RequestedTheme = NeutralInteractionBrush.ResolveEffectiveElementTheme(this)
         };
         if (await dialog.ShowAsync() != ContentDialogResult.Primary)
         {
@@ -1347,11 +1351,17 @@ public sealed partial class DisplaySettingsSection : UserControl
             ? minWidth
             : 176d;
 
+    private double ResolveControlMaxWidth() =>
+        Resources.TryGetValue("SettingsControlMaxWidth", out object? rawWidth) && rawWidth is double maxWidth
+            ? maxWidth
+            : 260d;
+
     private FrameworkElement CreateWidgetRow(WidgetSurfaceRow surface)
     {
         var combo = new ComboBox
         {
             MinWidth = ResolveControlMinWidth(),
+            MaxWidth = ResolveControlMaxWidth(),
             Tag = surface.ApplyWidgetId
         };
         _isRefreshing = true;

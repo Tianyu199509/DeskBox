@@ -2574,7 +2574,7 @@ public sealed partial class QuickCaptureService
         }
 
         string extension = NormalizeImageExtension(sourceImagePath);
-        return $"{prefix} {timestamp.ToLocalTime():yyyy-MM-dd HH-mm-ss}{extension}";
+        return FormattableString.Invariant($"{prefix} {timestamp.ToLocalTime():yyyy-MM-dd HH-mm-ss}{extension}");
     }
 
     private void CleanupOldExportFiles()
@@ -3366,7 +3366,7 @@ public sealed partial class QuickCaptureService
         }
 
         string? raw = reader.GetString();
-        return DateTimeOffset.TryParse(raw, out value);
+        return DateTimeOffset.TryParse(raw, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out value);
     }
 
     private static bool PropertyEqualsIgnoreCase(

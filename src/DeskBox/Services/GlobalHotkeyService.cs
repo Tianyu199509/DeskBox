@@ -92,8 +92,7 @@ public sealed class GlobalHotkeyService : IDisposable, IHookHealthProbeTarget, I
         Detach();
         _windowHandle = windowHandle;
         _isSubclassInstalled = Win32Helper.SetWindowSubclass(_windowHandle, _subclassProc, SubclassId, UIntPtr.Zero);
-        int subclassError = _isSubclassInstalled ? 0 : Marshal.GetLastWin32Error();
-        App.Log($"[GlobalHotkey] Subclass installed={_isSubclassInstalled} error={subclassError}");
+        App.Log($"[GlobalHotkey] Subclass installed={_isSubclassInstalled}");
         if (!_isSubclassInstalled)
         {
             LastError = _localizationService.T("Settings.GlobalHotkey.Status.Unavailable");

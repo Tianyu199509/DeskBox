@@ -401,7 +401,8 @@
                 KeyDown="SearchTextBox_KeyDown"
                 PlaceholderText="{x:Bind ViewModel.SearchPlaceholderText, Mode=OneWay}"
                 Style="{StaticResource WidgetSearchTextBoxStyle}"
-                Text="{x:Bind ViewModel.SearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                Text="{x:Bind ViewModel.SearchText, Mode=OneWay}"
+                TextChanged="SearchTextBox_TextChanged"
                 Visibility="{x:Bind ViewModel.SearchBoxVisibility, Mode=OneWay}" />
 
             <Button
@@ -463,7 +464,10 @@
                         <TextBlock
                             FontSize="{x:Bind ViewModel.SecondaryTextSize, Mode=OneWay}"
                             FontWeight="SemiBold"
-                            Text="{x:Bind ViewModel.ResumeActionText, Mode=OneWay}" />
+                            MaxLines="1"
+                            MaxWidth="88"
+                            Text="{x:Bind ViewModel.ResumeActionText, Mode=OneWay}"
+                            TextTrimming="CharacterEllipsis" />
                     </Button>
                 </Grid>
             </Border>
@@ -506,16 +510,20 @@
                             MinHeight="22"
                             Height="22"
                             Padding="7,0"
-                            AutomationProperties.Name="{x:Bind ViewModel.PasteQueuePasteText, Mode=OneWay}"
+                            AutomationProperties.Name="{x:Bind ViewModel.PasteQueuePasteTooltip, Mode=OneWay}"
                             Click="PasteQueueNextButton_Click"
                             CornerRadius="{StaticResource WidgetCornerRadiusSmall}"
                             IsEnabled="{x:Bind ViewModel.CanPasteOrSkipQueue, Mode=OneWay}"
-                            Style="{StaticResource SubtleButtonStyle}">
+                            Style="{StaticResource SubtleButtonStyle}"
+                            ToolTipService.ToolTip="{x:Bind ViewModel.PasteQueuePasteTooltip, Mode=OneWay}">
                             <TextBlock
                                 FontSize="11.5"
                                 FontWeight="SemiBold"
                                 Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
-                                Text="{x:Bind ViewModel.PasteQueuePasteText, Mode=OneWay}" />
+                                MaxLines="1"
+                                MaxWidth="76"
+                                Text="{x:Bind ViewModel.PasteQueuePasteText, Mode=OneWay}"
+                                TextTrimming="CharacterEllipsis" />
                         </Button>
                         <Button
                             MinWidth="0"
@@ -526,11 +534,15 @@
                             Click="PasteQueueSkipButton_Click"
                             CornerRadius="{StaticResource WidgetCornerRadiusSmall}"
                             IsEnabled="{x:Bind ViewModel.CanPasteOrSkipQueue, Mode=OneWay}"
-                            Style="{StaticResource SubtleButtonStyle}">
+                            Style="{StaticResource SubtleButtonStyle}"
+                            ToolTipService.ToolTip="{x:Bind ViewModel.PasteQueueSkipText, Mode=OneWay}">
                             <TextBlock
                                 FontSize="11.5"
                                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                Text="{x:Bind ViewModel.PasteQueueSkipText, Mode=OneWay}" />
+                                MaxLines="1"
+                                MaxWidth="76"
+                                Text="{x:Bind ViewModel.PasteQueueSkipText, Mode=OneWay}"
+                                TextTrimming="CharacterEllipsis" />
                         </Button>
                         <Button
                             Width="22"
@@ -558,6 +570,7 @@
                 CanDragItems="True"
                 CanReorderItems="False"
                 ContainerContentChanging="ItemsList_ContainerContentChanging"
+                DragItemsCompleted="ItemsList_DragItemsCompleted"
                 DragItemsStarting="ItemsList_DragItemsStarting"
                 IsItemClickEnabled="False"
                 ItemsSource="{x:Bind ViewModel.VisibleItems, Mode=OneWay}"
@@ -1222,7 +1235,10 @@
                                 FontSize="11.5"
                                 FontWeight="SemiBold"
                                 Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
-                                Text="{x:Bind ViewModel.MergeCopyLabel, Mode=OneWay}" />
+                                MaxLines="1"
+                                MaxWidth="96"
+                                Text="{x:Bind ViewModel.MergeCopyLabel, Mode=OneWay}"
+                                TextTrimming="CharacterEllipsis" />
                         </StackPanel>
                     </Button>
                     <Button

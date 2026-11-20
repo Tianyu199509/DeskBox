@@ -15,15 +15,70 @@ public sealed partial class WidgetShell
         {
             SuspendVisualActivity();
             ReleaseTitleBarClickCollapseTimer();
+            ReleaseCompactMarqueeDelayTimer();
+            StopDeferredExpandedContentRevealAnimation();
             GroupTitleSwitcher?.ReleaseVisualHandlers();
             StopCompactCompositionTransitionAnimations(force: true);
-            StopGroupDropPreviewBreathing();
+            GroupDropPreview?.Release();
+            ClearAllEventSubscribers();
+            Bindings?.StopTracking();
+            DataContext = null;
         }
         finally
         {
             try { StopCompactMarquee(); }
             finally { _compositionResources.Dispose(); }
         }
+    }
+
+    private void ClearAllEventSubscribers()
+    {
+        AddRequested = null;
+        QuickSettingsRequested = null;
+        PositionLockRequested = null;
+        SizeLockRequested = null;
+        MoreRequested = null;
+        CloseRequested = null;
+        CollapseRequested = null;
+        ExpandRequested = null;
+        CompactBodyExpandRequested = null;
+        CompactPreviousRequested = null;
+        CompactPrimaryActionRequested = null;
+        CompactPlayPauseRequested = null;
+        CompactNextRequested = null;
+        CompactPointerEntered = null;
+        CompactPointerMoved = null;
+        CompactPointerExited = null;
+        CompactExpansionPointerEntered = null;
+        CompactExpansionPointerExited = null;
+        CompactPointerPressed = null;
+        CompactActionPointerEntered = null;
+        CompactActionPointerExited = null;
+        CompactMoveHandlePointerEntered = null;
+        CompactMoveHandlePointerExited = null;
+        CompactDragEntered = null;
+        CompactDragLeft = null;
+        CompactDropCompleted = null;
+        TitleDoubleTapped = null;
+        TitleRightTapped = null;
+        TitlePointerPressed = null;
+        TitlePointerMoved = null;
+        TitlePointerReleased = null;
+        DragHandlePointerPressed = null;
+        DragHandlePointerMoved = null;
+        DragHandlePointerReleased = null;
+        GroupMemberInvoked = null;
+        GroupMemberRemoveRequested = null;
+        GroupMemberDetachRequested = null;
+        GroupMemberDetachDragStarted = null;
+        GroupMemberDetachDragCompleted = null;
+        GroupMemberReorderRequested = null;
+        GroupDissolveRequested = null;
+        GroupPickerOpened = null;
+        GroupPickerClosed = null;
+        HostedContentChanged = null;
+        EffectiveMaterialCornerRadiusChanged = null;
+        OverlayDragCueArmRequested = null;
     }
 
     /// <summary>

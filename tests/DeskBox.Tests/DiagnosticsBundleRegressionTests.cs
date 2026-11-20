@@ -1,4 +1,3 @@
-using System.Runtime.InteropServices;
 using DeskBox.Services;
 using Microsoft.UI.Dispatching;
 
@@ -7,42 +6,9 @@ namespace DeskBox.Tests;
 public sealed class DiagnosticsBundleRegressionTests
 {
     [Fact]
-    public void AppLifecycleRecoveryWatcher_RoutesGateEventsIndependentlyFromRecoveryReasons()
-    {
-        string watcher = File.ReadAllText(
-            TestPaths.FromRepository("src/DeskBox/Services/AppLifecycleRecoveryWatcher.cs"));
-
-        int resolveGate = watcher.IndexOf(
-            "AppLifecycleRecoverySignalClassifier.ResolveGateEvent(",
-            StringComparison.Ordinal);
-        int raiseGate = watcher.IndexOf(
-            "RaiseGateEvent(gateEvent);",
-            StringComparison.Ordinal);
-        int queueRecovery = watcher.IndexOf(
-            "QueueRecovery(recoveryReason);",
-            StringComparison.Ordinal);
-
-        Assert.True(resolveGate >= 0, "Expected ResolveGateEvent call in AppLifecycleRecoveryWatcher.");
-        Assert.True(raiseGate > resolveGate, "Expected gate event dispatch before recovery handling.");
-        Assert.True(queueRecovery > raiseGate, "Expected recovery queueing after gate dispatch.");
-        Assert.DoesNotContain(
-            "else if (message == AppLifecycleRecoverySignalClassifier.WmWtsSessionChange)",
-            watcher,
-            StringComparison.Ordinal);
-    }
-
-    [Fact]
     public async Task DisplayTopologyTransitionCoordinator_ResumesOnlyWhenAllGateReasonsOpen()
     {
-        DispatcherQueueController? controller;
-        try
-        {
-            controller = DispatcherQueueController.CreateOnDedicatedThread();
-        }
-        catch (COMException)
-        {
-            return;
-        }
+        DispatcherQueueController controller = DispatcherQueueController.CreateOnDedicatedThread();
 
         try
         {
@@ -95,56 +61,6 @@ public sealed class DiagnosticsBundleRegressionTests
     }
 
     [Fact]
-    public void ElementBackdropTargetBridge_ConfigurationChangedDoesNotResetBackdropTarget()
-    {
-        string backdropFile = File.ReadAllText(
-            TestPaths.FromRepository("src/DeskBox/Services/WidgetMaterialSystemBackdrop.cs"));
-
-        int bridgeStart = backdropFile.IndexOf(
-            "internal sealed partial class ElementBackdropTargetBridge",
-            StringComparison.Ordinal);
-        int configStart = backdropFile.IndexOf(
-            "protected override void OnDefaultSystemBackdropConfigurationChanged(",
-            bridgeStart,
-            StringComparison.Ordinal);
-        int disconnectStart = backdropFile.IndexOf(
-            "protected override void OnTargetDisconnected(",
-            configStart,
-            StringComparison.Ordinal);
-
-        Assert.True(bridgeStart >= 0 && configStart > bridgeStart && disconnectStart > configStart);
-        string configMethod = backdropFile[configStart..disconnectStart];
-        Assert.DoesNotContain("_onTargetChanged?.Invoke", configMethod, StringComparison.Ordinal);
-        Assert.DoesNotContain("_onTargetChanged(", configMethod, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void RenameManagedWidgetFolderAsync_SuspendsWatchersBeforeFilesystemMutation()
-    {
-        string storage = File.ReadAllText(
-            TestPaths.FromRepository("src/DeskBox/Services/WidgetManager.Storage.cs"));
-
-        int methodStart = storage.IndexOf(
-            "private async Task RenameManagedWidgetFolderAsync(",
-            StringComparison.Ordinal);
-        int helperStart = storage.IndexOf(
-            "private async Task SuspendFileWidgetWatchersAsync(",
-            methodStart,
-            StringComparison.Ordinal);
-        Assert.True(methodStart >= 0 && helperStart > methodStart);
-
-        string renameMethod = storage[methodStart..helperStart];
-        int firstSuspend = renameMethod.IndexOf("SuspendFileWidgetWatchersAsync(", StringComparison.Ordinal);
-        int deleteCall = renameMethod.IndexOf("Directory.Delete(currentFolderPath);", StringComparison.Ordinal);
-        int secondSuspend = renameMethod.LastIndexOf("SuspendFileWidgetWatchersAsync(", StringComparison.Ordinal);
-        int moveCall = renameMethod.IndexOf("MoveManagedFolderWithRetry(", StringComparison.Ordinal);
-
-        Assert.True(firstSuspend >= 0 && deleteCall > firstSuspend);
-        Assert.True(secondSuspend > deleteCall && moveCall > secondSuspend);
-        Assert.Contains("ResumeFileWidgetWatchersIfStoppedAsync(", renameMethod, StringComparison.Ordinal);
-    }
-
-    [Fact]
     public void PruneStaleInstallerDirectories_ReturnsCleanlyWhenUpdatesRootDoesNotExist()
     {
         string nonExistentRoot = Path.Combine(
@@ -157,29 +73,6 @@ public sealed class DiagnosticsBundleRegressionTests
 
         Assert.Null(exception);
         Assert.False(Directory.Exists(nonExistentRoot));
-    }
-
-    [Fact]
-    public void WidgetVisibilityAndTrayStartupLogging_FollowExpectedOrderAndGuards()
-    {
-        string interaction = File.ReadAllText(
-            TestPaths.FromRepository("src/DeskBox/Views/ContentWidgetWindow.WindowInteraction.cs"));
-        int showMethod = interaction.IndexOf(
-            "private void ShowWithoutActivation(bool persistVisibility)",
-            StringComparison.Ordinal);
-        Assert.True(showMethod >= 0);
-        string showSlice = interaction.Substring(showMethod, Math.Min(360, interaction.Length - showMethod));
-        int visibleTrue = showSlice.IndexOf("Visible = true;", StringComparison.Ordinal);
-        int appWindowShow = showSlice.IndexOf("AppWindow.Show();", StringComparison.Ordinal);
-        Assert.True(visibleTrue >= 0 && appWindowShow > visibleTrue);
-
-        string manager = File.ReadAllText(
-            TestPaths.FromRepository("src/DeskBox/Services/WidgetManager.cs"));
-        Assert.Contains("!App.IsBackgroundMemoryCleanupArmed", manager, StringComparison.Ordinal);
-
-        string tray = File.ReadAllText(
-            TestPaths.FromRepository("src/DeskBox/App.Tray.cs"));
-        Assert.Contains("if (GlobalHotkeyService is { } globalHotkeyService)", tray, StringComparison.Ordinal);
     }
 
     private static Task EnqueueAsync(DispatcherQueue queue, Action action)

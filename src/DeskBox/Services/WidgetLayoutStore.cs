@@ -68,7 +68,7 @@ public sealed class WidgetLayoutLoadResult
 /// </summary>
 public sealed class WidgetLayoutStore
 {
-    internal const int CurrentSchemaVersion = 1;
+    internal const int CurrentSchemaVersion = 2;
 
     private readonly string _layoutPath;
     private int _loadedSchemaVersion = CurrentSchemaVersion;
@@ -110,13 +110,40 @@ public sealed class WidgetLayoutStore
     /// </summary>
     internal static WidgetLayoutDocument ParseLayoutDocument(string json)
     {
-        WidgetLayoutDocument? document = JsonSerializer.Deserialize(
-            json,
-            WidgetLayoutJsonContext.Default.WidgetLayoutDocument);
-        return document?.Layout is { }
-            ? document
-            : throw new InvalidDataException(
-                "widget-layout.json is structurally empty.");
+        bool hasNewerSchema = ResilientJsonStore.TryReadSchemaVersion(json, out int rawSchemaVersion) &&
+            rawSchemaVersion > CurrentSchemaVersion;
+        try
+        {
+            WidgetLayoutDocument? document = JsonSerializer.Deserialize(
+                json,
+                WidgetLayoutJsonContext.Default.WidgetLayoutDocument);
+            if (document?.Layout is { })
+            {
+                return document;
+            }
+
+            if (hasNewerSchema)
+            {
+                return new WidgetLayoutDocument
+                {
+                    SchemaVersion = rawSchemaVersion,
+                    Layout = new WidgetLayoutSettingsSlice()
+                };
+            }
+
+            throw new InvalidDataException("widget-layout.json is structurally empty.");
+        }
+        catch (JsonException) when (hasNewerSchema)
+        {
+            // A future build may add new enum values (e.g. a new WidgetKind).
+            // Return a read-only placeholder stamped with the future schemaVersion
+            // so ResilientJsonStore never quarantines or overwrites the user's file.
+            return new WidgetLayoutDocument
+            {
+                SchemaVersion = rawSchemaVersion,
+                Layout = new WidgetLayoutSettingsSlice()
+            };
+        }
     }
 
     /// <summary>

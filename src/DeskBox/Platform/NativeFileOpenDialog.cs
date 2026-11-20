@@ -41,10 +41,17 @@ internal static unsafe class NativeFileOpenDialog
     private const int ApproximateDialogHeight = 640;
     private const int OwnerCascadeOffset = 32;
 
+    internal enum DedicatedStaDialogKind
+    {
+        Folder,
+        File,
+    }
+
     internal const uint PickFolderOptions =
         FosPickFolders | FosForceFileSystem | FosPathMustExist;
 
-    private static IntPtr s_activeStaOwnerHwnd;
+    private static IntPtr s_activeFolderStaOwnerHwnd;
+    private static IntPtr s_activeFileStaOwnerHwnd;
 
     // ERROR_CANCELLED is 1223 (0x4C7): IFileDialog::Show returns
     // HRESULT_FROM_WIN32(ERROR_CANCELLED) when the user dismisses the
@@ -98,7 +105,8 @@ internal static unsafe class NativeFileOpenDialog
     /// </summary>
     public static Task<T> RunOnDedicatedStaAsync<T>(
         IntPtr referenceOwnerHwnd,
-        Func<IntPtr, T> operation)
+        Func<IntPtr, T> operation,
+        DedicatedStaDialogKind dialogKind = DedicatedStaDialogKind.Folder)
     {
         ArgumentNullException.ThrowIfNull(operation);
 
@@ -121,12 +129,28 @@ internal static unsafe class NativeFileOpenDialog
                     IntPtr staOwnerHwnd = CreateStaDialogOwnerWindow(anchorX, anchorY);
                     try
                     {
-                        Volatile.Write(ref s_activeStaOwnerHwnd, staOwnerHwnd);
+                        if (dialogKind == DedicatedStaDialogKind.File)
+                        {
+                            Interlocked.Exchange(ref s_activeFileStaOwnerHwnd, staOwnerHwnd);
+                        }
+                        else
+                        {
+                            Interlocked.Exchange(ref s_activeFolderStaOwnerHwnd, staOwnerHwnd);
+                        }
+
                         result = operation(staOwnerHwnd);
                     }
                     finally
                     {
-                        Volatile.Write(ref s_activeStaOwnerHwnd, IntPtr.Zero);
+                        if (dialogKind == DedicatedStaDialogKind.File)
+                        {
+                            Interlocked.CompareExchange(ref s_activeFileStaOwnerHwnd, IntPtr.Zero, staOwnerHwnd);
+                        }
+                        else
+                        {
+                            Interlocked.CompareExchange(ref s_activeFolderStaOwnerHwnd, IntPtr.Zero, staOwnerHwnd);
+                        }
+
                         if (staOwnerHwnd != IntPtr.Zero)
                         {
                             _ = Win32Helper.DestroyWindow(staOwnerHwnd);
@@ -150,7 +174,9 @@ internal static unsafe class NativeFileOpenDialog
         })
         {
             IsBackground = true,
-            Name = "DeskBox FolderPicker STA",
+            Name = dialogKind == DedicatedStaDialogKind.File
+                ? "DeskBox FilePicker STA"
+                : "DeskBox FolderPicker STA",
         };
 
         try
@@ -170,9 +196,14 @@ internal static unsafe class NativeFileOpenDialog
     /// Brings an in-flight folder picker dialog to the foreground when the
     /// user invokes a folder-pick entrance again while a dialog is already open.
     /// </summary>
-    public static bool TryActivateActiveFolderDialog()
+    public static bool TryActivateActiveFolderDialog() =>
+        TryActivateActiveDialog(Volatile.Read(ref s_activeFolderStaOwnerHwnd));
+
+    public static bool TryActivateActiveFileDialog() =>
+        TryActivateActiveDialog(Volatile.Read(ref s_activeFileStaOwnerHwnd));
+
+    private static bool TryActivateActiveDialog(IntPtr activeOwner)
     {
-        IntPtr activeOwner = Volatile.Read(ref s_activeStaOwnerHwnd);
         if (activeOwner == IntPtr.Zero || !Win32Helper.IsWindow(activeOwner))
         {
             return false;
@@ -215,19 +246,12 @@ internal static unsafe class NativeFileOpenDialog
         _ = Win32Helper.ShowWindow(hwnd, Win32Helper.SW_SHOWNORMAL);
         if (!Win32Helper.SetForegroundWindow(hwnd))
         {
-            // When Windows foreground lock blocks activation (e.g. cold-start
-            // jump-list launch), lift the invisible owner to the topmost band
-            // so the owned #32770 dialog never opens hidden behind other apps.
-            _ = Win32Helper.SetWindowPos(
-                hwnd,
-                Win32Helper.HWND_TOPMOST,
-                0,
-                0,
-                0,
-                0,
-                Win32Helper.SWP_NOMOVE |
-                    Win32Helper.SWP_NOSIZE |
-                    Win32Helper.SWP_NOACTIVATE);
+            // Briefly pulse TOPMOST -> NOTOPMOST so the owned #32770 dialog rises
+            // above existing windows on cold-start without remaining permanently sticky
+            // above unrelated applications if the user switches away.
+            const uint flags = Win32Helper.SWP_NOMOVE | Win32Helper.SWP_NOSIZE | Win32Helper.SWP_NOACTIVATE;
+            _ = Win32Helper.SetWindowPos(hwnd, Win32Helper.HWND_TOPMOST, 0, 0, 0, 0, flags);
+            _ = Win32Helper.SetWindowPos(hwnd, Win32Helper.HWND_NOTOPMOST, 0, 0, 0, 0, flags);
         }
 
         DrainCurrentThreadMessages();

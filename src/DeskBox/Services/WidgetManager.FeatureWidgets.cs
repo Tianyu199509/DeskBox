@@ -133,12 +133,15 @@ public sealed partial class WidgetManager
     public async Task<ContentWidgetWindow> CreateTodoWidgetAsync(string? name = null, bool focusNewInput = false)
     {
         SetFeatureWidgetEnabledState(WidgetKind.Todo, true);
+        CustomWidgetHostSnapshotService.RegisterTodoWidgetRefresher(RefreshTodoWidgetAsync);
+        CustomWidgetHostSnapshotService.RegisterTodoLiveMutationBridge(CreateTodoLiveMutationBridge());
 
         // Single-instance: show existing Todo if one exists
         var existingConfig = _settingsService.Settings.Widgets
             .FirstOrDefault(w => w.WidgetKind == WidgetKind.Todo && !IsDeleted(w.Id));
         if (existingConfig is not null)
         {
+            await TryAdoptOrphanedTodoStoreAsync(existingConfig);
             await ShowWidgetAsync(existingConfig.Id, reveal: true, autoRestoreOnReveal: false);
             if (_contentWidgets.TryGetValue(existingConfig.Id, out var existing))
             {
@@ -204,6 +207,7 @@ public sealed partial class WidgetManager
     {
         try
         {
+            string widgetsRoot = CustomWidgetHostSnapshotService.ResolveWidgetsRootForSettings(_settingsService);
             var claimedIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (WidgetConfig widget in _settingsService.Settings.Widgets)
             {
@@ -216,16 +220,104 @@ public sealed partial class WidgetManager
             }
 
             await TodoWidgetStore.TryAdoptOrphanedStoreAsync(
-                Path.Combine(
-                    DeskBoxDataPathService.Current.DataDirectory,
-                    "widgets"),
+                widgetsRoot,
                 config.Id,
                 claimedIds);
+
+            if (!string.Equals(config.Id, CustomWidgetHostSnapshotService.FallbackTodoWidgetId, StringComparison.OrdinalIgnoreCase) &&
+                CustomWidgetHostSnapshotService.HasHeadlessDefaultTodoStore(widgetsRoot))
+            {
+                await MergeAndRemoveHeadlessDefaultTodoStoreAsync(widgetsRoot, config.Id);
+            }
         }
         catch (Exception ex)
         {
             App.Log($"[WidgetManager] Orphaned todo store adoption failed: {ex.Message}");
         }
+    }
+
+    private async Task MergeAndRemoveHeadlessDefaultTodoStoreAsync(string widgetsRoot, string targetWidgetId)
+    {
+        string orphanId = CustomWidgetHostSnapshotService.FallbackTodoWidgetId;
+        var orphanStore = new TodoWidgetStore(widgetsRoot, orphanId);
+        TodoWidgetData orphanData = await orphanStore.LoadAsync();
+        List<TodoItem> orphanLiveItems = (orphanData.Items ?? [])
+            .Where(static i => i is not null && !i.IsDeleted && !string.IsNullOrWhiteSpace(i.Text))
+            .ToList();
+
+        if (orphanLiveItems.Count > 0)
+        {
+            var targetStore = new TodoWidgetStore(widgetsRoot, targetWidgetId);
+            TodoWidgetData targetData = await targetStore.LoadAsync();
+            targetData.Items ??= [];
+
+            var existingIds = targetData.Items
+                .Where(static i => i is not null && !string.IsNullOrWhiteSpace(i.Id))
+                .Select(static i => i.Id)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            int nextSortOrder = targetData.Items
+                .Where(static i => i is not null && !i.IsDeleted)
+                .Select(static i => i.SortOrder)
+                .DefaultIfEmpty(-1)
+                .Max() + 1;
+            int mergedCount = 0;
+
+            foreach (TodoItem orphanItem in orphanLiveItems)
+            {
+                if (!existingIds.Add(orphanItem.Id))
+                {
+                    continue;
+                }
+
+                TodoItem cloned = TodoWidgetStore.CloneItem(orphanItem);
+                cloned.SortOrder = nextSortOrder++;
+                if (cloned.Attachments is { Count: > 0 })
+                {
+                    var migratedAttachments = new List<TodoAttachment>(cloned.Attachments.Count);
+                    foreach (TodoAttachment att in cloned.Attachments)
+                    {
+                        if (att is null || string.IsNullOrWhiteSpace(att.FilePath))
+                        {
+                            continue;
+                        }
+
+                        if (att.IsManagedCopy && File.Exists(att.FilePath))
+                        {
+                            TodoAttachment? imported = await AttachmentStorageService.ImportPathAsync(
+                                att.FilePath,
+                                Path.Combine(targetStore.AttachmentDirectory, cloned.Id),
+                                copyToManagedStorage: true);
+                            if (imported is not null)
+                            {
+                                migratedAttachments.Add(imported);
+                                continue;
+                            }
+                        }
+
+                        migratedAttachments.Add(att.Clone());
+                    }
+
+                    cloned.Attachments = migratedAttachments;
+                }
+
+                targetData.Items.Add(cloned);
+                mergedCount++;
+            }
+
+            if (mergedCount > 0)
+            {
+                await targetStore.SaveAsync(targetData);
+                if (FindLiveTodoAdapterWithHost(targetWidgetId).Adapter is not null)
+                {
+                    await RefreshTodoWidgetAsync(targetWidgetId);
+                }
+
+                App.Log($"[WidgetManager] Merged {mergedCount} headless '{orphanId}' item(s) into native Todo '{targetWidgetId}'.");
+            }
+        }
+
+        await TodoWidgetStore.DeleteForWidgetAsync(widgetsRoot, orphanId);
     }
 
     private async Task SeedTodoGuideAsync(WidgetConfig config)
@@ -300,6 +392,42 @@ public sealed partial class WidgetManager
             HasXamlRoot: false,
             ItemPresented: false,
             TargetPresented: false);
+    }
+
+    internal async Task<bool> ShowCustomWidgetTargetAsync(string? widgetId)
+    {
+        if (string.IsNullOrWhiteSpace(widgetId))
+        {
+            return false;
+        }
+
+        WidgetConfig? config = _settingsService.Settings.WidgetLayout.Widgets.FirstOrDefault(widget =>
+            widget.WidgetKind == WidgetKind.Custom &&
+            string.Equals(widget.Id, widgetId, StringComparison.Ordinal) &&
+            !IsDeleted(widget.Id));
+        if (config is null)
+        {
+            return false;
+        }
+
+        if (config.IsDisabled)
+        {
+            config.IsDisabled = false;
+            await _settingsService.SaveAsync();
+        }
+
+        await ShowWidgetAsync(
+            config.Id,
+            reveal: true,
+            autoRestoreOnReveal: true);
+        if (_contentWidgets.TryGetValue(config.Id, out ContentWidgetWindow? window) && window is not null)
+        {
+            await window.ContentReadyTask;
+            window.PrepareSurfaceForExternalInteraction();
+            return true;
+        }
+
+        return false;
     }
 
     private static async Task<bool> WaitForTodoReminderSurfaceLoadedAsync(
@@ -684,7 +812,8 @@ public sealed partial class WidgetManager
         CustomWidgetLocaleCatalog? localesOverride = null,
         bool hasLocalesOverride = false,
         IReadOnlyDictionary<string, string>? initialSettings = null,
-        IReadOnlyDictionary<string, string>? initialSecrets = null)
+        IReadOnlyDictionary<string, string>? initialSecrets = null,
+        bool allowTrustedJsonAuthoring = false)
     {
         if (!HasUiThreadAccess())
         {
@@ -695,7 +824,8 @@ public sealed partial class WidgetManager
                 localesOverride,
                 hasLocalesOverride,
                 initialSettings,
-                initialSecrets));
+                initialSecrets,
+                allowTrustedJsonAuthoring));
         }
 
         if (!GetFeatureWidgetEnabledState(WidgetKind.Custom))
@@ -762,20 +892,17 @@ public sealed partial class WidgetManager
             else
             {
                 templateId = templateOrPackageSpec;
-                if (CustomWidgetTemplates.MatchPresetOrNull(templateId) is null)
+                CustomWidgetTemplateBundle tplBundle = CustomWidgetTemplates.ResolveEffectiveTemplateBundle(templateId);
+                CustomWidgetParseResult tplParsed = CustomWidgetManifestParser.Parse(tplBundle.ManifestJson);
+                if (tplParsed.Manifest is not null && !tplParsed.Diagnostics.Any(d => d.IsError))
                 {
-                    CustomWidgetTemplateBundle tplBundle = CustomWidgetTemplates.ResolveEffectiveTemplateBundle(templateId);
-                    CustomWidgetParseResult tplParsed = CustomWidgetManifestParser.Parse(tplBundle.ManifestJson);
-                    if (tplParsed.Manifest is not null && !tplParsed.Diagnostics.Any(d => d.IsError))
-                    {
-                        importedManifest = tplParsed.Manifest;
-                        importedManifestJson = CustomWidgetManifestMetadataStamper.StampProvenance(
-                            tplBundle.ManifestJson,
-                            origin: CustomWidgetOriginKinds.Official,
-                            isCustomized: false);
-                        importedLocales = tplBundle.Locales;
-                        importedLogicJs = tplBundle.LogicJs;
-                    }
+                    importedManifest = tplParsed.Manifest;
+                    importedManifestJson = CustomWidgetManifestMetadataStamper.StampProvenance(
+                        tplBundle.ManifestJson,
+                        origin: CustomWidgetOriginKinds.Official,
+                        isCustomized: false);
+                    importedLocales = tplBundle.Locales;
+                    importedLogicJs = tplBundle.LogicJs;
                 }
             }
         }
@@ -798,13 +925,15 @@ public sealed partial class WidgetManager
             .FirstOrDefault(e =>
                 string.Equals(e.Id, templateId, StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(e.ManifestId, templateId, StringComparison.OrdinalIgnoreCase));
-        CustomWidgetPresetInfo preset = CustomWidgetTemplates.GetPreset(templateId);
+        CustomWidgetPresetInfo? preset = CustomWidgetTemplates.MatchPresetOrNull(templateId);
         string baseTitle = importedManifest?.ResolveLocalizedName(_localizationService.CurrentCultureName) ??
                            catalogEntry?.ResolveDisplayName(_localizationService) ??
-                           _localizationService.T(preset.NameKey);
-        if (string.IsNullOrWhiteSpace(baseTitle) || baseTitle == preset.NameKey)
+                           (preset is not null ? _localizationService.T(preset.NameKey) : null) ??
+                           _localizationService.T("CustomWidget.Title");
+        if (string.IsNullOrWhiteSpace(baseTitle) ||
+            (preset is not null && string.Equals(baseTitle, preset.NameKey, StringComparison.Ordinal)))
         {
-            baseTitle = catalogEntry?.DefaultTitle ?? preset.DefaultTitle;
+            baseTitle = catalogEntry?.DefaultTitle ?? preset?.DefaultTitle ?? _localizationService.T("CustomWidget.Title");
         }
 
         WidgetConfig? placementSource = _settingsService.Settings.WidgetLayout.Widgets
@@ -818,8 +947,8 @@ public sealed partial class WidgetManager
             BoundsCoordinateVersion = WidgetConfig.CurrentBoundsCoordinateVersion,
             X = (placementSource?.X ?? 120) + (placementSource is null ? 0 : 28),
             Y = (placementSource?.Y ?? 120) + (placementSource is null ? 0 : 28),
-            Width = importedManifest?.DefaultSize.Width ?? catalogEntry?.DefaultWidth ?? preset.DefaultWidth,
-            Height = importedManifest?.DefaultSize.Height ?? catalogEntry?.DefaultHeight ?? preset.DefaultHeight,
+            Width = importedManifest?.DefaultSize.Width ?? catalogEntry?.DefaultWidth ?? preset?.DefaultWidth ?? 324,
+            Height = importedManifest?.DefaultSize.Height ?? catalogEntry?.DefaultHeight ?? preset?.DefaultHeight ?? 360,
             ViewMode = ViewMode.Icon,
             IsVisible = true,
             IsDisabled = false,
@@ -830,13 +959,16 @@ public sealed partial class WidgetManager
         };
         ApplyDefaultFeatureWidgetChromeMode(config, WidgetKind.Custom);
 
-        string? initialEmoji = CustomWidgetTemplates.IsEmojiIcon(importedManifest?.Icon)
-            ? importedManifest!.Icon.Trim()
-            : CustomWidgetTemplates.IsEmojiIcon(catalogEntry?.IconGlyph)
-                ? catalogEntry!.IconGlyph
-                : CustomWidgetTemplates.IsEmojiIcon(preset.IconGlyph)
-                    ? preset.IconGlyph
-                    : null;
+        bool hasDedicatedVectorIcon = WidgetTitleIconKindNames.FromCustomTemplateId(templateId) is not null;
+        string? initialEmoji = hasDedicatedVectorIcon
+            ? null
+            : CustomWidgetTemplates.IsEmojiIcon(importedManifest?.Icon)
+                ? importedManifest!.Icon.Trim()
+                : CustomWidgetTemplates.IsEmojiIcon(catalogEntry?.IconGlyph)
+                    ? catalogEntry!.IconGlyph
+                    : preset is not null && CustomWidgetTemplates.IsEmojiIcon(preset.IconGlyph)
+                        ? preset.IconGlyph
+                        : null;
         if (initialEmoji is not null)
         {
             WidgetTitleIconCustomization.SetEmojiOverride(config, initialEmoji);
@@ -844,7 +976,9 @@ public sealed partial class WidgetManager
 
         bool isExternalImport =
             (templateOrPackageSpec?.StartsWith("file:", StringComparison.OrdinalIgnoreCase) == true) ||
-            string.Equals(importedManifest?.Origin, CustomWidgetOriginKinds.Community, StringComparison.OrdinalIgnoreCase);
+            (templateOrPackageSpec?.StartsWith("json:", StringComparison.OrdinalIgnoreCase) == true && !allowTrustedJsonAuthoring) ||
+            string.Equals(importedManifest?.Origin, CustomWidgetOriginKinds.Community, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(importedManifest?.Origin, CustomWidgetOriginKinds.Agent, StringComparison.OrdinalIgnoreCase);
         CustomWidgetTrustStore.Shared.RegisterWidgetProvenance(
             config.Id,
             trustedLocalAuthoring: !isExternalImport);
@@ -895,8 +1029,6 @@ public sealed partial class WidgetManager
 
             await store.SaveAsync(initialPayload);
         }
-
-        _ = CustomWidgetTemplates.EnsureAgentWorkspacePreparedAsync(store.WidgetDirectory, config.Id);
 
         ApplyNewWidgetPlacement(config);
         _settingsService.Settings.WidgetLayout.Widgets.Add(config);
@@ -957,6 +1089,11 @@ public sealed partial class WidgetManager
 
     public async Task<bool> LocateCustomWidgetAsync(string widgetId)
     {
+        if (!HasUiThreadAccess())
+        {
+            return await RunOnUiThreadAsync(() => LocateCustomWidgetAsync(widgetId));
+        }
+
         if (!GetFeatureWidgetEnabledState(WidgetKind.Custom))
         {
             return false;
@@ -972,6 +1109,94 @@ public sealed partial class WidgetManager
     }
 
     public Task RemoveCustomWidgetAsync(string widgetId) => RemoveWidgetAsync(widgetId);
+
+    private bool _isCustomWidgetsSessionLocked;
+    private bool _isCustomWidgetsDisplayPowerOff;
+    private bool _pendingCustomWidgetsResumeRefresh;
+
+    public bool IsCustomWidgetsPowerSuspended => _isCustomWidgetsSessionLocked || _isCustomWidgetsDisplayPowerOff;
+
+    public void SetCustomWidgetsSessionLocked(bool locked)
+    {
+        _isCustomWidgetsSessionLocked = locked;
+        ApplyCustomWidgetsPowerSuspension();
+    }
+
+    public void SetCustomWidgetsDisplayPowerOff(bool displayOff)
+    {
+        _isCustomWidgetsDisplayPowerOff = displayOff;
+        ApplyCustomWidgetsPowerSuspension();
+    }
+
+    private void ApplyCustomWidgetsPowerSuspension()
+    {
+        if (!HasUiThreadAccess())
+        {
+            _ = RunOnUiThreadAsync(() =>
+            {
+                ApplyCustomWidgetsPowerSuspension();
+                return Task.CompletedTask;
+            });
+            return;
+        }
+
+        bool suspended = IsCustomWidgetsPowerSuspended;
+        foreach (DeskBox.Controls.WidgetContents.CustomWidgetContentAdapter adapter in EnumerateAllLiveCustomWidgetAdapters())
+        {
+            adapter.SetPowerSuspended(suspended);
+        }
+
+        if (!suspended && _pendingCustomWidgetsResumeRefresh)
+        {
+            _pendingCustomWidgetsResumeRefresh = false;
+            _ = RefreshCustomWidgetsAfterResumeAsync();
+        }
+    }
+
+    public async Task RefreshCustomWidgetsAfterResumeAsync()
+    {
+        if (!HasUiThreadAccess())
+        {
+            await RunOnUiThreadAsync(RefreshCustomWidgetsAfterResumeAsync);
+            return;
+        }
+
+        if (IsCustomWidgetsPowerSuspended)
+        {
+            _pendingCustomWidgetsResumeRefresh = true;
+            return;
+        }
+
+        _pendingCustomWidgetsResumeRefresh = false;
+        foreach (DeskBox.Controls.WidgetContents.CustomWidgetContentAdapter adapter in EnumerateAllLiveCustomWidgetAdapters())
+        {
+            await adapter.ViewModel.RefreshAfterSystemResumeAsync();
+        }
+    }
+
+    private IReadOnlyList<DeskBox.Controls.WidgetContents.CustomWidgetContentAdapter> EnumerateAllLiveCustomWidgetAdapters()
+    {
+        var matches = new List<DeskBox.Controls.WidgetContents.CustomWidgetContentAdapter>(8);
+        foreach (ContentWidgetWindow window in _contentWidgets.Values.Distinct())
+        {
+            if (window.CurrentContent is DeskBox.Controls.WidgetContents.CustomWidgetContentAdapter activeAdapter &&
+                !matches.Contains(activeAdapter))
+            {
+                matches.Add(activeAdapter);
+            }
+
+            foreach (Contracts.IWidgetContent cached in window.CachedGroupContents)
+            {
+                if (cached is DeskBox.Controls.WidgetContents.CustomWidgetContentAdapter cachedAdapter &&
+                    !matches.Contains(cachedAdapter))
+                {
+                    matches.Add(cachedAdapter);
+                }
+            }
+        }
+
+        return matches;
+    }
 
     internal IReadOnlyList<DeskBox.Controls.WidgetContents.CustomWidgetContentAdapter> FindLiveCustomWidgetAdapters(string widgetId)
     {
@@ -1018,6 +1243,47 @@ public sealed partial class WidgetManager
         }
 
         string widgetId = mutation.WidgetId.Trim();
+        if (mutation.UpdateChromeMode)
+        {
+            WidgetConfig? targetConfig = _settingsService.Settings.WidgetLayout.Widgets.FirstOrDefault(w =>
+                w.WidgetKind == WidgetKind.Custom &&
+                string.Equals(w.Id, widgetId, StringComparison.Ordinal) &&
+                !IsDeleted(w.Id));
+            if (targetConfig is not null)
+            {
+                WidgetChromeMode desiredChrome = WidgetChromeModeNames.NormalizeMode(
+                    mutation.ChromeModeOverride,
+                    WidgetChromeMode.System,
+                    allowSystem: true);
+                if (IsWidgetGrouped(targetConfig.Id))
+                {
+                    if (desiredChrome != WidgetChromeMode.System &&
+                        WidgetGroupChromePolicy.IsSupportedGroupMode(desiredChrome))
+                    {
+                        SetWidgetGroupChromeMode(targetConfig, desiredChrome);
+                    }
+                }
+                else
+                {
+                    WidgetChromeModeNames.SetOverrideMode(targetConfig, desiredChrome);
+                    _settingsService.UpdateWidget(targetConfig);
+                }
+
+                if (_contentWidgets.TryGetValue(targetConfig.Id, out ContentWidgetWindow? hostWin) && hostWin is not null)
+                {
+                    hostWin.ApplyAppearancePreview();
+                }
+            }
+
+            if (!mutation.ClearAllData &&
+                mutation.Settings is not { Count: > 0 } &&
+                mutation.Secrets is not { Count: > 0 } &&
+                mutation.Permissions is not { Count: > 0 })
+            {
+                return;
+            }
+        }
+
         if (mutation.Permissions is { Count: > 0 })
         {
             CustomWidgetTrustStore.Shared.InvalidateCache();
@@ -1025,7 +1291,9 @@ public sealed partial class WidgetManager
             string? diskOrigin = !string.IsNullOrWhiteSpace(diskManifestJson)
                 ? CustomWidgetManifestParser.Parse(diskManifestJson).Manifest?.Origin
                 : null;
-            bool defaultTrusted = !string.Equals(diskOrigin, CustomWidgetOriginKinds.Community, StringComparison.OrdinalIgnoreCase);
+            bool defaultTrusted =
+                !string.Equals(diskOrigin, CustomWidgetOriginKinds.Community, StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(diskOrigin, CustomWidgetOriginKinds.Agent, StringComparison.OrdinalIgnoreCase);
             CustomWidgetTrustStore.Shared.ApplyPermissionMutations(
                 widgetId,
                 mutation.Permissions,
@@ -1378,6 +1646,134 @@ public sealed partial class WidgetManager
                 }
             }
         }
+    }
+
+    private Services.CustomWidgetCapabilities.TodoLiveWidgetMutationBridge CreateTodoLiveMutationBridge() =>
+        new(
+            TryAddExternalTodoItemAsync,
+            TryToggleExternalTodoItemAsync,
+            TryRemoveExternalTodoItemAsync,
+            TryCycleExternalTodoPriorityAsync,
+            TryClearCompletedExternalTodosAsync,
+            TryUpdateExternalTodoItemAsync,
+            TryRolloverOverdueExternalTodosAsync);
+
+    internal TodoWidgetViewModel? TryGetLiveTodoViewModel(string widgetId) =>
+        FindLiveTodoAdapterWithHost(widgetId).Adapter?.ViewModel;
+
+    private (TodoWidgetContentAdapter? Adapter, ContentWidgetWindow? HostWindow) FindLiveTodoAdapterWithHost(string widgetId)
+    {
+        if (string.IsNullOrWhiteSpace(widgetId))
+        {
+            return (null, null);
+        }
+
+        foreach (ContentWidgetWindow window in _contentWidgets.Values.Distinct())
+        {
+            if (window.CurrentContent is TodoWidgetContentAdapter activeTodo &&
+                !activeTodo.IsDisposed &&
+                activeTodo.ViewModel is { IsInitialized: true, IsDisposed: false } &&
+                string.Equals(activeTodo.WidgetId, widgetId, StringComparison.OrdinalIgnoreCase))
+            {
+                return (activeTodo, window);
+            }
+
+            foreach (Contracts.IWidgetContent cached in window.CachedGroupContents)
+            {
+                if (cached is TodoWidgetContentAdapter cachedTodo &&
+                    !cachedTodo.IsDisposed &&
+                    cachedTodo.ViewModel is { IsInitialized: true, IsDisposed: false } &&
+                    string.Equals(cachedTodo.WidgetId, widgetId, StringComparison.OrdinalIgnoreCase))
+                {
+                    return (cachedTodo, window);
+                }
+            }
+        }
+
+        return (null, null);
+    }
+
+    internal Task<bool?> TryAddExternalTodoItemAsync(
+        string widgetId,
+        string title,
+        DateTimeOffset? dueDate,
+        TodoPriority priority) =>
+        RunLiveTodoMutationOnUiAsync(
+            widgetId,
+            adapter => adapter.AddExternalItemAsync(title, dueDate, priority),
+            result => result);
+
+    internal Task<bool?> TryToggleExternalTodoItemAsync(string widgetId, string itemId) =>
+        RunLiveTodoMutationOnUiAsync(
+            widgetId,
+            adapter => adapter.ToggleExternalItemAsync(itemId),
+            result => result);
+
+    internal Task<bool?> TryRemoveExternalTodoItemAsync(string widgetId, string itemId) =>
+        RunLiveTodoMutationOnUiAsync(
+            widgetId,
+            adapter => adapter.RemoveExternalItemAsync(itemId),
+            result => result);
+
+    internal Task<bool?> TryCycleExternalTodoPriorityAsync(string widgetId, string itemId) =>
+        RunLiveTodoMutationOnUiAsync(
+            widgetId,
+            adapter => adapter.CycleExternalItemPriorityAsync(itemId),
+            result => result);
+
+    internal Task<int?> TryClearCompletedExternalTodosAsync(string widgetId, DateOnly? filterDueDate) =>
+        RunLiveTodoMutationOnUiAsync(
+            widgetId,
+            adapter => adapter.ClearCompletedExternalAsync(filterDueDate),
+            result => result > 0);
+
+    internal Task<bool?> TryUpdateExternalTodoItemAsync(
+        string widgetId,
+        string itemId,
+        string? title,
+        DateTimeOffset? dueDate,
+        bool updateDueDate,
+        TodoPriority? priority) =>
+        RunLiveTodoMutationOnUiAsync(
+            widgetId,
+            adapter => adapter.UpdateExternalItemAsync(itemId, title, dueDate, updateDueDate, priority),
+            result => result);
+
+    internal Task<int?> TryRolloverOverdueExternalTodosAsync(string widgetId, DateOnly targetDate) =>
+        RunLiveTodoMutationOnUiAsync(
+            widgetId,
+            adapter => adapter.RolloverOverdueExternalAsync(targetDate),
+            result => result > 0);
+
+    private async Task<T?> RunLiveTodoMutationOnUiAsync<T>(
+        string widgetId,
+        Func<TodoWidgetContentAdapter, Task<T>> mutation,
+        Func<T, bool> didMutate)
+        where T : struct
+    {
+        if (string.IsNullOrWhiteSpace(widgetId) || !UiDispatch.HasXamlApp)
+        {
+            return null;
+        }
+
+        if (!HasUiThreadAccess())
+        {
+            return await RunOnUiThreadAsync(() => RunLiveTodoMutationOnUiAsync(widgetId, mutation, didMutate));
+        }
+
+        (TodoWidgetContentAdapter? adapter, ContentWidgetWindow? hostWindow) = FindLiveTodoAdapterWithHost(widgetId);
+        if (adapter is null)
+        {
+            return null;
+        }
+
+        T result = await mutation(adapter);
+        if (didMutate(result) && hostWindow is not null && ReferenceEquals(hostWindow.CurrentContent, adapter))
+        {
+            hostWindow.RefreshCompactPresentationFromHost();
+        }
+
+        return result;
     }
 
     public async Task<int> ConvertQuickCaptureItemsToTodoAsync(IReadOnlyList<QuickCaptureItem> items)
@@ -1962,7 +2358,9 @@ public sealed partial class WidgetManager
                 config.Metadata[CustomWidgetViewModel.TemplateMetadataKey] =
                     CustomWidgetTemplates.SystemPulseTemplateId;
                 CustomWidgetTemplateBundle sysBundle =
-                    CustomWidgetTemplates.GetTemplateBundle(CustomWidgetTemplates.SystemPulseTemplateId);
+                    CustomWidgetTemplates.ResolveEffectiveTemplateBundle(
+                        CustomWidgetTemplates.SystemPulseTemplateId,
+                        _localizationService.CurrentCultureName);
                 await CustomWidgetDataStore.ForWidget(config.Id).WriteWorkspaceBundleAsync(
                     sysBundle.ManifestJson,
                     sysBundle.LogicJs,
@@ -2007,6 +2405,8 @@ public sealed partial class WidgetManager
         config.PositionMonitorDeviceName = null;
         config.PositionMonitorStableId = null;
         config.PositionMonitorWasPrimary = null;
+        config.LastUserPlacementUtc = null;
+        config.LastUserPlacementTopologyKey = null;
         config.ScreenBindingMode = WidgetScreenBindingMode.Unbound;
         config.BoundScreenId = null;
         config.BoundsCoordinateVersion = WidgetConfig.CurrentBoundsCoordinateVersion;
@@ -2104,6 +2504,7 @@ public sealed partial class WidgetManager
                 {
                     config.IsDisabled = false;
                     config.IsVisible = true;
+                    await TryAdoptOrphanedTodoStoreAsync(config);
                 }
 
                 await _settingsService.SaveAsync();

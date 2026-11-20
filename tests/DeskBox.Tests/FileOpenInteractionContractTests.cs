@@ -127,6 +127,9 @@ public sealed class FileOpenInteractionContractTests
         string opening = File.ReadAllText(TestPaths.FromRepository(
             "src/DeskBox/Controls/WidgetContents/FileSurfaceContent.Opening.cs"));
 
+        string shellLaunch = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Services/Shell/ShellLaunchService.cs"));
+
         // Every Shell dispatch path reports a dismissed picker as a silent
         // success, and no dialog API exposes a reliable cancellation signal,
         // so the service defers unassociated items to the UI layer's picker
@@ -140,8 +143,20 @@ public sealed class FileOpenInteractionContractTests
             win32Helper,
             StringComparison.Ordinal);
         Assert.Contains(
-            "Windows.System.Launcher.LaunchFileAsync",
+            "ShellLaunchService.ShowOpenWithPickerAsync(",
             opening,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "InitializeWithWindow.Initialize(options, visibleOwner)",
+            shellLaunch,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Windows.System.Launcher.LaunchFileAsync",
+            shellLaunch,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "ShellOpenWithHelper.ShowChooseAppDialog",
+            shellLaunch,
             StringComparison.Ordinal);
         // A picker failure is still a real error path.
         Assert.Contains(
@@ -253,15 +268,22 @@ public sealed class FileOpenInteractionContractTests
             opening.Split(
                 "ClearOpenedItemSelectionAfterDispatch(",
                 StringSplitOptions.None).Length - 1);
-        // Unassociated items get the system application picker here; a
-        // dismissal is silent because the dialog APIs report it as success.
+        string shellLaunch = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Services/Shell/ShellLaunchService.cs"));
+        // Unassociated items get the HWND-initialized system application picker
+        // via ShellLaunchService; a dismissal is silent because the dialog APIs
+        // report it as success.
         Assert.Contains(
-            "DisplayApplicationPicker",
+            "ShellLaunchService.ShowOpenWithPickerAsync(",
             opening,
             StringComparison.Ordinal);
         Assert.Contains(
+            "DisplayApplicationPicker",
+            shellLaunch,
+            StringComparison.Ordinal);
+        Assert.Contains(
             "Windows.System.Launcher.LaunchFileAsync",
-            opening,
+            shellLaunch,
             StringComparison.Ordinal);
         Assert.Contains(
             "generation != _openStateGeneration",
@@ -369,11 +391,14 @@ public sealed class FileOpenInteractionContractTests
     {
         string source = File.ReadAllText(TestPaths.FromRepository(
             "src/DeskBox/Services/FileService.OpenItem.cs"));
+        string shellLaunch = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Services/Shell/ShellLaunchService.cs"));
         string runner = File.ReadAllText(TestPaths.FromRepository(
             "src/DeskBox/Helpers/BoundedStaOperationRunner.cs"));
 
-        Assert.Contains("maxConcurrency: 2", source, StringComparison.Ordinal);
-        Assert.Contains("maxQueued: 6", source, StringComparison.Ordinal);
+        Assert.Contains("ShellLaunchService.LaunchRunner", source, StringComparison.Ordinal);
+        Assert.Contains("maxConcurrency: 4", shellLaunch, StringComparison.Ordinal);
+        Assert.Contains("maxQueued: 8", shellLaunch, StringComparison.Ordinal);
         Assert.Contains("SemaphoreSlim", runner, StringComparison.Ordinal);
         Assert.Contains("thread.SetApartmentState(ApartmentState.STA)", runner, StringComparison.Ordinal);
         Assert.Contains("Win32Helper.OpenFile(ownerHwnd", source, StringComparison.Ordinal);

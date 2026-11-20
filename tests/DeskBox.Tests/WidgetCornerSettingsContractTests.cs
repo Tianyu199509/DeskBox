@@ -167,7 +167,7 @@ public sealed class WidgetCornerSettingsContractTests
         Assert.Contains("InvalidateRect(hWnd, IntPtr.Zero, bErase: 1)", win32, StringComparison.Ordinal);
 
         string disableAccentBody = win32[win32.IndexOf("public static void DisableAccentPolicy(IntPtr hWnd)", StringComparison.Ordinal)..];
-        int nextMethod = disableAccentBody.IndexOf("private static void ApplyAccentPolicy(", StringComparison.Ordinal);
+        int nextMethod = disableAccentBody.IndexOf("private static unsafe bool ApplyAccentPolicy(", StringComparison.Ordinal);
         Assert.True(nextMethod > 0);
         Assert.Contains("IsTransparentWindowHostActive(hWnd)", disableAccentBody[..nextMethod], StringComparison.Ordinal);
         Assert.Contains("ApplyEmptyRegionBlurBehind(hWnd, enable: true)", disableAccentBody[..nextMethod], StringComparison.Ordinal);

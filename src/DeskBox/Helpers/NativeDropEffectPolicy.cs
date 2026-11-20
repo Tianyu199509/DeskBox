@@ -78,8 +78,15 @@ internal static class NativeDropEffectPolicy
         bool sameVolume = true,
         bool canCopy = true,
         bool canMove = true,
-        bool protectDefaultMoveAsCopy = false)
+        bool protectDefaultMoveAsCopy = false,
+        SourceOriginSnapshot? sourceOrigin = null,
+        TransferDomain domain = TransferDomain.ExternalInbound)
     {
+        if (sourceOrigin?.HasAppExecutionAliasSource == true)
+        {
+            return false;
+        }
+
         FileDropIntent intent = FileDropIntentPolicy.ResolveMappedTransfer(
             hasMappedFolder: true,
             forceCopy: containsTemporaryFiles,
@@ -91,18 +98,47 @@ internal static class NativeDropEffectPolicy
             altDown: (keyState & AltKeyState) != 0,
             followWindows: followWindows,
             sameVolume: sameVolume,
-            protectDefaultMoveAsCopy: protectDefaultMoveAsCopy);
-        return intent != FileDropIntent.Move;
+            protectDefaultMoveAsCopy: protectDefaultMoveAsCopy,
+            sourceOrigin: sourceOrigin,
+            domain: domain);
+        return intent != FileDropIntent.Move && intent != FileDropIntent.Shortcut;
     }
 
     public static bool ShouldCreateMappedShortcut(
         bool containsTemporaryFiles,
-        uint keyState)
+        uint keyState,
+        bool followWindows = false,
+        uint allowedEffects = Copy | Move | Link,
+        SourceOriginSnapshot? sourceOrigin = null)
     {
-        return !containsTemporaryFiles &&
-               ((keyState & AltKeyState) != 0 ||
-                (keyState & (ControlKeyState | ShiftKeyState)) ==
-                    (ControlKeyState | ShiftKeyState));
+        if (containsTemporaryFiles)
+        {
+            return false;
+        }
+
+        bool linkAllowed = (allowedEffects & Link) != 0;
+        if (sourceOrigin?.HasAppExecutionAliasSource == true)
+        {
+            return linkAllowed || (allowedEffects & Copy) != 0;
+        }
+
+        if ((keyState & AltKeyState) != 0 ||
+            (keyState & (ControlKeyState | ShiftKeyState)) == (ControlKeyState | ShiftKeyState))
+        {
+            return true;
+        }
+
+        bool ctrlOnly = (keyState & ControlKeyState) != 0 && (keyState & ShiftKeyState) == 0;
+        bool shiftOnly = (keyState & ShiftKeyState) != 0 && (keyState & ControlKeyState) == 0;
+        if (sourceOrigin?.PrefersShortcutByDefault == true &&
+            !ctrlOnly &&
+            !shiftOnly &&
+            linkAllowed)
+        {
+            return true;
+        }
+
+        return false;
     }
 
     public static bool IsRightButtonDrag(uint keyState)
@@ -121,7 +157,11 @@ internal static class NativeDropEffectPolicy
             return None;
         }
 
+        bool linkOnlyOffer =
+            (allowedEffects & (Copy | Move)) == 0 &&
+            (allowedEffects & Link) != 0;
         if (createdShellApplicationLinks ||
+            linkOnlyOffer ||
             (hasVirtualOnlyData && (allowedEffects & Copy) == 0))
         {
             return (allowedEffects & Link) != 0

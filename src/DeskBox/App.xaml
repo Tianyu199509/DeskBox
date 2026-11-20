@@ -166,7 +166,7 @@
             <CornerRadius x:Key="WidgetCornerRadiusLarge">8</CornerRadius>
             <x:Double x:Key="WidgetTitleTextSize">14</x:Double>
 
-            <FontFamily x:Key="DeskBoxMenuFontFamily">Microsoft YaHei UI, Segoe UI Variable, Segoe UI</FontFamily>
+            <FontFamily x:Key="DeskBoxMenuFontFamily">Segoe UI Variable Text, Segoe UI</FontFamily>
             <x:Double x:Key="DeskBoxMenuItemMinHeight">36</x:Double>
             <x:Double x:Key="DeskBoxMenuItemFontSize">13</x:Double>
             <Thickness x:Key="DeskBoxMenuPresenterPadding">0,4,0,4</Thickness>

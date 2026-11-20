@@ -111,7 +111,7 @@ public sealed partial class FileSurfaceContent
         UIElement pointerSurface,
         PointerRoutedEventArgs e)
     {
-        if (TryHandleElevatedPointerMoved(e))
+        if (TryHandleElevatedPointerMoved(e) || TryHandleWin10ShellPointerMoved(e))
         {
             return;
         }
@@ -160,6 +160,7 @@ public sealed partial class FileSurfaceContent
         UIElement pointerSurface,
         PointerRoutedEventArgs e)
     {
+        DisarmWin10ShellDragCandidate(e.Pointer.PointerId);
         if (TryHandleElevatedPointerReleased(e))
         {
             return;
@@ -217,6 +218,7 @@ public sealed partial class FileSurfaceContent
 
     private void HandleItemsPointerCaptureLost(ListViewBase listView)
     {
+        DisarmWin10ShellDragCandidate();
         FinishBoxSelection(listView);
         // Capture loss ends the gesture that staged the drag snapshot. A
         // stale snapshot keeps the deactivation selection clear guarded
@@ -683,15 +685,27 @@ public sealed partial class FileSurfaceContent
         };
         chooseApp.Click += (_, _) =>
         {
-            if (!ShellOpenWithHelper.ShowChooseAppDialog(
-                    _hostWindowHandle,
-                    item.Path))
+            UiDispatch.PostAfterCallback(async () =>
             {
-                ShowFeedback(new WidgetFeedbackRequest(
-                    T("Widget.Error.OperationIncomplete"),
-                    WidgetFeedbackSeverity.Warning,
-                    "open-with-choose"));
-            }
+                if (_isDisposed)
+                {
+                    return;
+                }
+
+                bool shown = await RunWithDialogOwnerAsync(
+                    item,
+                    ownerHwnd => ShellLaunchService.ShowChooseAppDialogAsync(
+                        ownerHwnd,
+                        item.Path,
+                        _lifetimeCancellation.Token));
+                if (!shown && !_isDisposed)
+                {
+                    ShowFeedback(new WidgetFeedbackRequest(
+                        T("Widget.Error.OperationIncomplete"),
+                        WidgetFeedbackSeverity.Warning,
+                        "open-with-choose"));
+                }
+            });
         };
         items.Add(chooseApp);
 
@@ -882,15 +896,27 @@ public sealed partial class FileSurfaceContent
             return;
         }
 
-        if (!ShellContextMenuHelper.ShowProperties(
-                _hostWindowHandle,
-                item.Path))
+        UiDispatch.PostAfterCallback(async () =>
         {
-            ShowFeedback(new WidgetFeedbackRequest(
-                T("Widget.Error.OperationIncomplete"),
-                WidgetFeedbackSeverity.Warning,
-                "file-properties"));
-        }
+            if (_isDisposed)
+            {
+                return;
+            }
+
+            bool shown = await RunWithDialogOwnerAsync(
+                item,
+                ownerHwnd => ShellLaunchService.ShowFilePropertiesAsync(
+                    ownerHwnd,
+                    item.Path,
+                    _lifetimeCancellation.Token));
+            if (!shown && !_isDisposed)
+            {
+                ShowFeedback(new WidgetFeedbackRequest(
+                    T("Widget.Error.OperationIncomplete"),
+                    WidgetFeedbackSeverity.Warning,
+                    "file-properties"));
+            }
+        });
     }
 
     /// <summary>
@@ -902,7 +928,8 @@ public sealed partial class FileSurfaceContent
     /// </summary>
     private async Task CreateItemShortcutAsync(WidgetItem item)
     {
-        if (TryBlockTransferMutation(new[] { item }))
+        if (TryBlockTransferMutation(new[] { item }) ||
+            TryBlockStoreVirtualizedDestination(Path.GetDirectoryName(item.Path)))
         {
             return;
         }
@@ -1144,10 +1171,17 @@ public sealed partial class FileSurfaceContent
             return;
         }
 
-        ElevatedFileLaunchResult result =
-            ElevatedFileLauncher.RunAsAdministrator(
-            _hostWindowHandle,
-            item);
+        ElevatedFileLaunchResult result = await RunWithDialogOwnerAsync(
+            item,
+            ownerHwnd => ShellLaunchService.RunAsAdministratorAsync(
+                ownerHwnd,
+                item,
+                _lifetimeCancellation.Token));
+        if (_isDisposed)
+        {
+            return;
+        }
+
         switch (result.Status)
         {
             case ElevatedFileLaunchStatus.Launched:
@@ -1360,7 +1394,9 @@ public sealed partial class FileSurfaceContent
                         out string resolvedPath)
                     ? resolvedPath
                     : mappedFolderPath;
-                Win32Helper.OpenFile(pathToOpen);
+                ShellLaunchService.FireAndForgetOpenPath(
+                    pathToOpen,
+                    _hostWindowHandle);
             }
         };
         flyout.Items.Add(openFolder);
@@ -1503,7 +1539,8 @@ public sealed partial class FileSurfaceContent
     {
         string? folderPath = ViewModel.CurrentFolderPath;
         if (string.IsNullOrWhiteSpace(folderPath) ||
-            TryBlockTransferMutation(folderPath))
+            TryBlockTransferMutation(folderPath) ||
+            TryBlockStoreVirtualizedDestination(folderPath))
         {
             return;
         }
@@ -1527,7 +1564,7 @@ public sealed partial class FileSurfaceContent
             // Shortcut tab is where the user completes it (Explorer's own
             // New→Shortcut uses its in-process wizard for the same step).
             // Modal — the refresh below also picks up a rename made there.
-            _ = Win32Helper.ShowFileProperties(_hostWindowHandle, targetPath);
+            _ = await ShellLaunchService.ShowFilePropertiesAsync(_hostWindowHandle, targetPath);
             await ViewModel.RefreshFolderContentsAsync();
         });
     }
@@ -1537,7 +1574,8 @@ public sealed partial class FileSurfaceContent
     {
         string? folderPath = ViewModel.CurrentFolderPath;
         if (string.IsNullOrWhiteSpace(folderPath) ||
-            TryBlockTransferMutation(folderPath))
+            TryBlockTransferMutation(folderPath) ||
+            TryBlockStoreVirtualizedDestination(folderPath))
         {
             return;
         }
@@ -1605,7 +1643,8 @@ public sealed partial class FileSurfaceContent
             return;
         }
 
-        if (TryBlockTransferMutation(ViewModel.CurrentFolderPath))
+        if (TryBlockTransferMutation(ViewModel.CurrentFolderPath) ||
+            TryBlockStoreVirtualizedDestination(ViewModel.CurrentFolderPath))
         {
             return;
         }

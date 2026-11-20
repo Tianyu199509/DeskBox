@@ -67,6 +67,8 @@ public sealed partial class MarkdownDocumentView : UserControl
     private readonly MarkdownDocumentService _markdownService;
     private Brush _contentForeground = new SolidColorBrush(Microsoft.UI.Colors.Black);
     private Brush _semanticForeground = new SolidColorBrush(Microsoft.UI.Colors.Black);
+    private SolidColorBrush? _watchedForegroundBrush;
+    private long _watchedForegroundColorToken;
     private Func<string, string?>? _attachmentResolver;
     private int _taskListIndex;
     private bool _isLoaded;
@@ -181,6 +183,10 @@ public sealed partial class MarkdownDocumentView : UserControl
         }
 
         _isLoaded = true;
+        SyncWatchedContentForegroundBrush();
+        WidgetTextShadow.SetEdgeColor(
+            _shadowMirror,
+            (_contentForeground as SolidColorBrush)?.Color);
         QueueInvalidatedRender();
         if (_shadowMirror.Source is null &&
             _hasRenderedState &&
@@ -200,6 +206,7 @@ public sealed partial class MarkdownDocumentView : UserControl
     private void OnUnloaded(object sender, RoutedEventArgs args)
     {
         _isLoaded = false;
+        UnwatchContentForegroundBrush();
         ReleaseWidthRenderTimer();
         ClearShadowMirrorSnapshot();
         if (_shadowSubscribed)
@@ -219,6 +226,7 @@ public sealed partial class MarkdownDocumentView : UserControl
         _visualHandlersReleased = true;
         _isLoaded = false;
         _attachmentResolver = null;
+        UnwatchContentForegroundBrush();
         ReleaseWidthRenderTimer();
         ClearShadowMirrorSnapshot();
         if (_shadowSubscribed)
@@ -754,9 +762,52 @@ public sealed partial class MarkdownDocumentView : UserControl
             ? BrushResource("AccentTextFillColorPrimaryBrush")
             : CreateLightThemeSemanticForeground();
         _documentText.Foreground = _contentForeground;
+        SyncWatchedContentForegroundBrush();
         WidgetTextShadow.SetEdgeColor(
             _shadowMirror,
             (_contentForeground as SolidColorBrush)?.Color);
+    }
+
+    private void SyncWatchedContentForegroundBrush()
+    {
+        SolidColorBrush? desired = _isLoaded && !_visualHandlersReleased
+            ? _contentForeground as SolidColorBrush
+            : null;
+        if (ReferenceEquals(_watchedForegroundBrush, desired))
+        {
+            return;
+        }
+
+        UnwatchContentForegroundBrush();
+        if (desired is not null)
+        {
+            _watchedForegroundBrush = desired;
+            _watchedForegroundColorToken = desired.RegisterPropertyChangedCallback(
+                SolidColorBrush.ColorProperty,
+                OnWatchedForegroundColorChanged);
+        }
+    }
+
+    private void UnwatchContentForegroundBrush()
+    {
+        if (_watchedForegroundBrush is { } brush)
+        {
+            brush.UnregisterPropertyChangedCallback(
+                SolidColorBrush.ColorProperty,
+                _watchedForegroundColorToken);
+            _watchedForegroundBrush = null;
+            _watchedForegroundColorToken = 0;
+        }
+    }
+
+    private void OnWatchedForegroundColorChanged(DependencyObject sender, DependencyProperty dp)
+    {
+        if (_visualHandlersReleased || sender is not SolidColorBrush brush)
+        {
+            return;
+        }
+
+        WidgetTextShadow.SetEdgeColor(_shadowMirror, brush.Color);
     }
 
     private bool UsesDarkTheme => NeutralInteractionBrush.IsDarkTheme(this);

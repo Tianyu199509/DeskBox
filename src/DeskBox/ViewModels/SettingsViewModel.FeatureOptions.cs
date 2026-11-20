@@ -142,10 +142,18 @@ public partial class SettingsViewModel
         // animation, and the dictionary never rides settings.json at all,
         // so waiting for the reload would show a permanently stale switch.
         MirrorFeatureEnabledLocally(kind, enabled);
-        bool applied = await _widgetActions.SetFeatureWidgetEnabled(kind, enabled);
-        if (applied != enabled)
+        try
         {
-            MirrorFeatureEnabledLocally(kind, applied);
+            bool applied = await _widgetActions.SetFeatureWidgetEnabled(kind, enabled);
+            if (applied != enabled)
+            {
+                MirrorFeatureEnabledLocally(kind, applied);
+            }
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[SettingsViewModel] SetWidgetEnabled({kind}, {enabled}) failed: {ex}");
+            MirrorFeatureEnabledLocally(kind, !enabled);
         }
     }
 

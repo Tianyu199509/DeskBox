@@ -41,13 +41,16 @@ public sealed class ClipboardStore
     private readonly string _rootDirectory;
     private readonly string _storePath;
     private readonly string _exportDirectory;
+    private readonly object _encryptedSensitiveItemCacheLock = new();
+    private readonly Dictionary<string, (long UpdatedAtUtcTicks, bool IsPinned, int UseCount, string? Note, string? UrlTitle, string? OcrText, ClipboardHistoryItem Encrypted)> _encryptedSensitiveItemCache =
+        new(StringComparer.Ordinal);
 
     public ClipboardStore()
         : this(
             GetDefaultRootDirectory(),
             DeskBoxDataPathService.Current.IsDevelopmentRoot
                 ? null
-                : Path.Combine(Path.GetTempPath(), "DeskBox", "ClipboardExports"))
+                : Path.Combine(DropStagingFileOps.GetStagingRootDirectory(), "ClipboardExports"))
     {
     }
 
@@ -73,6 +76,8 @@ public sealed class ClipboardStore
     internal string ThumbnailDirectory => Path.Combine(_rootDirectory, "thumbnails");
 
     internal string PayloadDirectory => Path.Combine(_rootDirectory, "payloads");
+
+    internal string DroppedDirectory => Path.Combine(_rootDirectory, "dropped");
 
     internal string ExportDirectory => _exportDirectory;
 
@@ -368,12 +373,13 @@ public sealed class ClipboardStore
         (int imgCount, long imgBytes) = ClipboardStorageFileOps.MeasureDirectoryFiles(Path.Combine(rootPath, "images"));
         (_, long thumbBytes) = ClipboardStorageFileOps.MeasureDirectoryFiles(Path.Combine(rootPath, "thumbnails"));
         (_, long payloadBytes) = ClipboardStorageFileOps.MeasureDirectoryFiles(Path.Combine(rootPath, "payloads"));
+        (_, long droppedBytes) = ClipboardStorageFileOps.MeasureDirectoryFilesRecursive(Path.Combine(rootPath, "dropped"));
 
         return new ClipboardStorageStats(
             activeCount,
             pinnedCount,
             imgCount,
-            imgBytes + thumbBytes + payloadBytes,
+            imgBytes + thumbBytes + payloadBytes + droppedBytes,
             observedApps);
     }
 
@@ -424,6 +430,7 @@ public sealed class ClipboardStore
         ClipboardStorageFileOps.DeleteOrphanedFiles(store.ImageDirectory, referencedImages);
         ClipboardStorageFileOps.DeleteOrphanedFiles(store.ThumbnailDirectory, referencedThumbs);
         ClipboardStorageFileOps.DeleteOrphanedFiles(store.PayloadDirectory, referencedPayloads);
+        CleanupOrphanedDroppedStorage(store, doc.Items);
 
         if (removed > 0)
         {
@@ -454,6 +461,7 @@ public sealed class ClipboardStore
         ClipboardStorageFileOps.DeleteOrphanedFiles(store.ImageDirectory, empty);
         ClipboardStorageFileOps.DeleteOrphanedFiles(store.ThumbnailDirectory, empty);
         ClipboardStorageFileOps.DeleteOrphanedFiles(store.PayloadDirectory, empty);
+        CleanupOrphanedDroppedStorage(store, []);
 
         if (removed > 0 || hadObserved || File.Exists(store.StorePath))
         {
@@ -461,6 +469,30 @@ public sealed class ClipboardStore
         }
 
         return removed;
+    }
+
+    internal static void CleanupOrphanedDroppedStorage(
+        ClipboardStore store,
+        IEnumerable<ClipboardHistoryItem> items)
+    {
+        var referencedDropped = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (ClipboardHistoryItem item in items)
+        {
+            if (item.FilePaths is null || item.FilePaths.Count == 0)
+            {
+                continue;
+            }
+
+            foreach (string path in item.FilePaths)
+            {
+                if (!string.IsNullOrWhiteSpace(path))
+                {
+                    referencedDropped.Add(path);
+                }
+            }
+        }
+
+        ClipboardStorageFileOps.DeleteOrphanedDroppedEntries(store.DroppedDirectory, referencedDropped);
     }
 
     private static bool TryReadStoreHeaderStats(
@@ -818,7 +850,7 @@ public sealed class ClipboardStore
         return (true, true, newFileName);
     }
 
-    private static ClipboardStoreDocument BuildPersistedDocument(ClipboardStoreDocument source)
+    private ClipboardStoreDocument BuildPersistedDocument(ClipboardStoreDocument source)
     {
         bool hasSensitive = false;
         foreach (ClipboardHistoryItem item in source.Items)
@@ -836,6 +868,7 @@ public sealed class ClipboardStore
         }
 
         var items = new List<ClipboardHistoryItem>(source.Items.Count);
+        HashSet<string>? activeSensitiveIds = null;
         foreach (ClipboardHistoryItem item in source.Items)
         {
             if (!item.IsSensitive)
@@ -844,9 +877,27 @@ public sealed class ClipboardStore
                 continue;
             }
 
+            activeSensitiveIds ??= new HashSet<string>(StringComparer.Ordinal);
+            activeSensitiveIds.Add(item.Id);
+
+            lock (_encryptedSensitiveItemCacheLock)
+            {
+                if (_encryptedSensitiveItemCache.TryGetValue(item.Id, out var cached) &&
+                    cached.UpdatedAtUtcTicks == item.UpdatedAtUtcTicks &&
+                    cached.IsPinned == item.IsPinned &&
+                    cached.UseCount == item.UseCount &&
+                    string.Equals(cached.Note, item.Note, StringComparison.Ordinal) &&
+                    string.Equals(cached.UrlTitle, item.UrlTitle, StringComparison.Ordinal) &&
+                    string.Equals(cached.OcrText, item.OcrText, StringComparison.Ordinal))
+                {
+                    items.Add(cached.Encrypted);
+                    continue;
+                }
+            }
+
             string maskedSummary = ClipboardClassifier.MaskSecretForDisplay(
                 item.TextContent ?? item.Summary ?? string.Empty);
-            items.Add(new ClipboardHistoryItem
+            var encryptedItem = new ClipboardHistoryItem
             {
                 Id = item.Id,
                 Kind = item.Kind,
@@ -880,7 +931,38 @@ public sealed class ClipboardStore
                 SourceAppIconFileName = item.SourceAppIconFileName,
                 CreatedAtUtcTicks = item.CreatedAtUtcTicks,
                 UpdatedAtUtcTicks = item.UpdatedAtUtcTicks
-            });
+            };
+            lock (_encryptedSensitiveItemCacheLock)
+            {
+                _encryptedSensitiveItemCache[item.Id] = (
+                    item.UpdatedAtUtcTicks,
+                    item.IsPinned,
+                    item.UseCount,
+                    item.Note,
+                    item.UrlTitle,
+                    item.OcrText,
+                    encryptedItem);
+            }
+
+            items.Add(encryptedItem);
+        }
+
+        lock (_encryptedSensitiveItemCacheLock)
+        {
+            if (activeSensitiveIds is null)
+            {
+                _encryptedSensitiveItemCache.Clear();
+            }
+            else if (_encryptedSensitiveItemCache.Count > activeSensitiveIds.Count)
+            {
+                foreach (string key in _encryptedSensitiveItemCache.Keys.ToArray())
+                {
+                    if (!activeSensitiveIds.Contains(key))
+                    {
+                        _encryptedSensitiveItemCache.Remove(key);
+                    }
+                }
+            }
         }
 
         return new ClipboardStoreDocument

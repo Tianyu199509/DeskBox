@@ -370,7 +370,7 @@ public sealed partial class WeatherWidgetViewModel
         // Hourly forecast
         if (data.Hourly is not null)
         {
-            PopulateHourlyForecast(data.Hourly);
+            PopulateHourlyForecast(data.Hourly, data.UtcOffsetSeconds, data.Timezone);
         }
         else
         {
@@ -617,9 +617,12 @@ public sealed partial class WeatherWidgetViewModel
         }
     }
 
-    private void PopulateHourlyForecast(WeatherHourly hourly)
+    private void PopulateHourlyForecast(
+        WeatherHourly hourly,
+        int? utcOffsetSeconds = null,
+        string? timezone = null)
     {
-        int startIndex = FindCurrentHourIndex(hourly.Time);
+        int startIndex = FindCurrentHourIndex(hourly.Time, utcOffsetSeconds, timezone);
         int targetCount = Math.Max(0, Math.Min(24, hourly.Time.Count - startIndex));
         bool requiresItemsSourceRefresh =
             HourlyForecast.Count != targetCount ||
@@ -688,91 +691,140 @@ public sealed partial class WeatherWidgetViewModel
         }
     }
 
-    private static int FindCurrentHourIndex(List<string> times)
+    internal static int FindCurrentHourIndex(
+        IReadOnlyList<string> times,
+        int? utcOffsetSeconds = null,
+        string? timezone = null,
+        DateTimeOffset? utcNowOverride = null)
     {
         if (times.Count == 0)
         {
             return 0;
         }
 
-        string now = DateTimeOffset.Now.ToString("yyyy-MM-ddTHH");
+        DateTimeOffset targetNow = ResolveTargetCityNow(utcOffsetSeconds, timezone, utcNowOverride);
+        string nowPrefix = targetNow.ToString("yyyy-MM-ddTHH", System.Globalization.CultureInfo.InvariantCulture);
         for (int i = 0; i < times.Count; i++)
         {
-            if (times[i].StartsWith(now, StringComparison.OrdinalIgnoreCase))
+            if (!string.IsNullOrEmpty(times[i]) &&
+                times[i].StartsWith(nowPrefix, StringComparison.OrdinalIgnoreCase))
             {
                 return i;
             }
         }
 
-        return 0;
+        DateTime targetWallClock = targetNow.DateTime;
+        int lastAtOrBefore = -1;
+        DateTime lastAtOrBeforeTime = default;
+        int firstAfter = -1;
+
+        for (int i = 0; i < times.Count; i++)
+        {
+            if (!DateTimeOffset.TryParse(
+                    times[i],
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None,
+                    out DateTimeOffset parsed))
+            {
+                continue;
+            }
+
+            DateTime slotWallClock = parsed.DateTime;
+            if (slotWallClock <= targetWallClock)
+            {
+                lastAtOrBefore = i;
+                lastAtOrBeforeTime = slotWallClock;
+            }
+            else if (firstAfter < 0)
+            {
+                firstAfter = i;
+            }
+        }
+
+        if (lastAtOrBefore >= 0 &&
+            (firstAfter >= 0 || targetWallClock - lastAtOrBeforeTime <= TimeSpan.FromHours(3)))
+        {
+            return lastAtOrBefore;
+        }
+
+        return firstAfter >= 0 ? firstAfter : 0;
+    }
+
+    private static DateTimeOffset ResolveTargetCityNow(
+        int? utcOffsetSeconds,
+        string? timezone,
+        DateTimeOffset? utcNowOverride)
+    {
+        DateTimeOffset utcNow = (utcNowOverride ?? DateTimeOffset.UtcNow).ToUniversalTime();
+        if (utcOffsetSeconds is int offsetSec and >= -18 * 3600 and <= 18 * 3600)
+        {
+            return utcNow.ToOffset(TimeSpan.FromSeconds(offsetSec));
+        }
+
+        if (!string.IsNullOrWhiteSpace(timezone) &&
+            TimeZoneInfo.TryFindSystemTimeZoneById(timezone, out TimeZoneInfo? tz))
+        {
+            return TimeZoneInfo.ConvertTime(utcNow, tz);
+        }
+
+        return utcNowOverride?.ToLocalTime() ?? DateTimeOffset.Now;
     }
 
     private static bool IsDaytimeHour(string isoTime)
     {
-        try
+        if (DateTimeOffset.TryParse(
+                isoTime,
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None,
+                out DateTimeOffset dt))
         {
-            var dt = DateTimeOffset.Parse(isoTime);
             return dt.Hour >= 6 && dt.Hour < 19;
         }
-        catch
-        {
-            return true;
-        }
+
+        return true;
     }
 
     private static string FormatHourLabel(string isoTime)
     {
-        try
+        if (DateTimeOffset.TryParse(
+                isoTime,
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None,
+                out DateTimeOffset dt))
         {
-            var dt = DateTimeOffset.Parse(isoTime);
-            return dt.Hour == 0 ? "0:00" : $"{dt.Hour}:00";
+            return dt.Hour == 0 ? "0:00" : string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{dt.Hour}:00");
         }
-        catch
-        {
-            return string.Empty;
-        }
+
+        return string.Empty;
     }
 
     private static string FormatTime(string isoTime)
     {
-        try
+        if (DateTimeOffset.TryParse(
+                isoTime,
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None,
+                out DateTimeOffset dt))
         {
-            var dt = DateTimeOffset.Parse(isoTime);
-            return dt.ToString("HH:mm");
+            return dt.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture);
         }
-        catch
-        {
-            return string.Empty;
-        }
+
+        return string.Empty;
     }
 
     private static string ParseDateToDayLabel(string dateStr, string language)
     {
-        try
+        if (DateTimeOffset.TryParse(
+                dateStr,
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None,
+                out DateTimeOffset dt))
         {
-            var dt = DateTimeOffset.Parse(dateStr);
-            var culture = language switch
-            {
-                "zh-CN" => System.Globalization.CultureInfo.GetCultureInfo("zh-CN"),
-                "zh-TW" => System.Globalization.CultureInfo.GetCultureInfo("zh-TW"),
-                "ja-JP" => System.Globalization.CultureInfo.GetCultureInfo("ja-JP"),
-                "de-DE" => System.Globalization.CultureInfo.GetCultureInfo("de-DE"),
-                "pt-BR" => System.Globalization.CultureInfo.GetCultureInfo("pt-BR"),
-                "hi-IN" => System.Globalization.CultureInfo.GetCultureInfo("hi-IN"),
-                "es-ES" => System.Globalization.CultureInfo.GetCultureInfo("es-ES"),
-                "fr-FR" => System.Globalization.CultureInfo.GetCultureInfo("fr-FR"),
-                "ar-SA" => System.Globalization.CultureInfo.GetCultureInfo("ar-SA"),
-                "bn-BD" => System.Globalization.CultureInfo.GetCultureInfo("bn-BD"),
-                "ru-RU" => System.Globalization.CultureInfo.GetCultureInfo("ru-RU"),
-                "ko-KR" => System.Globalization.CultureInfo.GetCultureInfo("ko-KR"),
-                _ => System.Globalization.CultureInfo.GetCultureInfo("en-US")
-            };
+            var culture = LocalizationService.GetGregorianCulture(language);
             return dt.ToString("ddd", culture);
         }
-        catch
-        {
-            return dateStr;
-        }
+
+        return dateStr;
     }
 
     private string FormatTemperature(double celsius)

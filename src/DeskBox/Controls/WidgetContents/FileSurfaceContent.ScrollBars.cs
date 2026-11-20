@@ -241,7 +241,8 @@ public sealed partial class FileSurfaceContent
         if (_isDisposed || !IsLoaded ||
             _autoScrollMode == InteractiveAutoScrollMode.None ||
             _autoScrollTargetView is not { } view ||
-            !Win32Helper.IsAnyMouseButtonDown() ||
+            (!Win32Helper.IsAnyMouseButtonDown() &&
+             !ActiveDeskBoxDragRegistry.HasActivePointerDragSession) ||
             !Win32Helper.GetCursorPos(out Win32Helper.POINT cursor))
         {
             StopInteractiveAutoScroll();

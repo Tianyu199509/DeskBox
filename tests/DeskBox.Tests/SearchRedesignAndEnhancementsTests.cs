@@ -18,6 +18,13 @@ public sealed class SearchRedesignAndEnhancementsTests : IDisposable
     [InlineData("2^10", "1024")]
     [InlineData("200*15%", "30")]
     [InlineData("（１００＋５０）×２", "300")]
+    [InlineData("=1,5 + 2,5", "4")]
+    [InlineData("19,99 * 2", "39.98")]
+    [InlineData("0,125 * 8", "1")]
+    [InlineData("1,000 + 2,500", "3500")]
+    [InlineData("1.234,56 + 0,44", "1235")]
+    [InlineData("1,234.56 + 0.44", "1235")]
+    [InlineData("1_000_000 / 1_000", "1000")]
     public void CalculatorEvaluator_EvaluatesSupportedExpressions(string query, string expected)
     {
         bool evaluated = SearchCalculatorEvaluator.TryEvaluate(query, out SearchCalculationResult result);
@@ -29,6 +36,8 @@ public sealed class SearchRedesignAndEnhancementsTests : IDisposable
     [Theory]
     [InlineData("")]
     [InlineData("123")]
+    [InlineData("1,5")]
+    [InlineData("1,2,3 + 1")]
     [InlineData("2026-04-20")]
     [InlineData("2026/11/04")]
     [InlineData("v1.2.3")]
@@ -683,6 +692,147 @@ public sealed class SearchRedesignAndEnhancementsTests : IDisposable
     }
 
     [Fact]
+    public void WidthSpringStepper_ProvidesGentleElasticOvershootPreservesMomentumAndTracksDetailsColumn()
+    {
+        // 1. Expanding 660 -> 780 exhibits gentle elastic overshoot in (780.5, 788.0] and settles at 780
+        double w = SearchPopupSurfacePolicy.DefaultPopupWidthLogical;
+        double v = 0.0;
+        double peak = w;
+        bool settled = false;
+        for (int frame = 0; frame < 60; frame++)
+        {
+            SearchPopupWidthSpringStep step = SearchPopupSurfacePolicy.StepWidthSpring(
+                w, v, targetWidth: SearchPopupSurfacePolicy.ExpandedWithDetailsWidthLogical, deltaSeconds: 0.012, expandingDirection: true);
+            w = step.Width;
+            v = step.Velocity;
+            peak = Math.Max(peak, w);
+            if (step.IsSettled)
+            {
+                settled = true;
+                break;
+            }
+        }
+
+        Assert.True(settled);
+        Assert.Equal((double)SearchPopupSurfacePolicy.ExpandedWithDetailsWidthLogical, w);
+        Assert.True(peak > 780.5 && peak <= 788.0, $"Expected gentle elastic overshoot in (780.5, 788.0], actual peak={peak:F2}");
+
+        // 2. Closing 780 -> 660 preserves momentum across mid-flight updates and settles at 660
+        w = SearchPopupSurfacePolicy.ExpandedWithDetailsWidthLogical;
+        v = 0.0;
+        SearchPopupWidthSpringStep midFlight = SearchPopupSurfacePolicy.StepWidthSpring(
+            w, v, targetWidth: SearchPopupSurfacePolicy.DefaultPopupWidthLogical, deltaSeconds: 0.036, expandingDirection: false);
+        Assert.True(midFlight.Velocity < -100.0);
+
+        w = midFlight.Width;
+        v = midFlight.Velocity;
+        double trough = w;
+        settled = false;
+        for (int frame = 0; frame < 60; frame++)
+        {
+            SearchPopupWidthSpringStep step = SearchPopupSurfacePolicy.StepWidthSpring(
+                w, v, targetWidth: SearchPopupSurfacePolicy.DefaultPopupWidthLogical, deltaSeconds: 0.012, expandingDirection: false);
+            w = step.Width;
+            v = step.Velocity;
+            trough = Math.Min(trough, w);
+            Assert.True(w >= SearchPopupSurfacePolicy.MinPopupWidthLogical);
+            if (step.IsSettled)
+            {
+                settled = true;
+                break;
+            }
+        }
+
+        Assert.True(settled);
+        Assert.Equal((double)SearchPopupSurfacePolicy.DefaultPopupWidthLogical, w);
+        Assert.True(trough >= 654.0 && trough < 659.5, $"Expected soft closing cushion in [654.0, 659.5), actual trough={trough:F2}");
+
+        // 3. Details column width and progress interpolate smoothly across 660 -> 720 -> 780
+        Assert.Equal(0.0, SearchPopupSurfacePolicy.ComputeDetailsColumnWidthLogical(660));
+        Assert.Equal(156.0, SearchPopupSurfacePolicy.ComputeDetailsColumnWidthLogical(720));
+        Assert.Equal(312.0, SearchPopupSurfacePolicy.ComputeDetailsColumnWidthLogical(780));
+
+        Assert.Equal(0.0, SearchPopupSurfacePolicy.ComputeDetailsCardProgress(660));
+        Assert.Equal(0.5, SearchPopupSurfacePolicy.ComputeDetailsCardProgress(720));
+        Assert.Equal(1.0, SearchPopupSurfacePolicy.ComputeDetailsCardProgress(780));
+
+        // 4. Overshoot above 780 is absorbed by DetailsPaneColumn so ResultsListColumn stays locked at 468px
+        Assert.Equal(468, SearchPopupSurfacePolicy.ResultsWithDetailsColumnWidthLogical);
+        Assert.Equal(468.0, Math.Round(784.6 - SearchPopupSurfacePolicy.ComputeDetailsColumnWidthLogical(784.6), 1));
+
+        // 5. Left-anchored SetWindowPos(SWP_NOSIZE) X glide matches ResolveAnchoredWindowBounds at both endpoints
+        var workAreas = new[]
+        {
+            new Windows.Graphics.RectInt32(0, 0, 1920, 1032),
+            new Windows.Graphics.RectInt32(0, 0, 2560, 1392),
+            new Windows.Graphics.RectInt32(10, 0, 1919, 1032)
+        };
+        foreach (var workArea in workAreas)
+        {
+            foreach (double scale in new[] { 1.0, 1.25, 1.5, 2.0 })
+            {
+                var narrowBounds = SearchPopupSurfacePolicy.ResolveAnchoredWindowBounds(
+                    workArea, scale, 360, null, null, null, SearchPopupSurfacePolicy.DefaultPopupWidthLogical);
+                var wideBounds = SearchPopupSurfacePolicy.ResolveAnchoredWindowBounds(
+                    workArea, scale, 360, null, null, null, SearchPopupSurfacePolicy.ExpandedWithDetailsWidthLogical);
+
+                Assert.Equal(
+                    narrowBounds.X,
+                    SearchPopupSurfacePolicy.ComputeAnchoredWindowX(
+                        workArea, scale, SearchPopupSurfacePolicy.DefaultPopupWidthLogical, null, null));
+                Assert.Equal(
+                    wideBounds.X,
+                    SearchPopupSurfacePolicy.ComputeAnchoredWindowX(
+                        workArea, scale, SearchPopupSurfacePolicy.ExpandedWithDetailsWidthLogical, null, null));
+
+                int midX = SearchPopupSurfacePolicy.ComputeAnchoredWindowX(workArea, scale, 720, null, null);
+                Assert.InRange(midX, wideBounds.X, narrowBounds.X);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task ClearSearch_CancelsPendingQueryAndLeavesViewModelInCleanRecommendationMode()
+    {
+        Directory.CreateDirectory(_root);
+        var settings = new SettingsService(Path.Combine(_root, "settings-clear-race"));
+        var localization = new LocalizationService(settings);
+        var store = new QuickCaptureStore(Path.Combine(_root, "quick-capture-clear-race"));
+        await store.SaveAsync(new QuickCaptureStoreData
+        {
+            Items =
+            [
+                new QuickCaptureItem
+                {
+                    Id = "note-11",
+                    Title = "111",
+                    Body = "111",
+                    UpdatedAt = DateTimeOffset.UtcNow
+                }
+            ]
+        });
+        var quickCapture = new QuickCaptureService(store);
+        var everything = new EverythingSearchService(settings);
+        var history = new SearchHistoryService(Path.Combine(_root, "history-clear-race"));
+        var fileMeta = new FileMetaService();
+
+        using var engine = new SearchEngineService(settings, localization, everything, quickCapture);
+        using var vm = new ViewModels.SearchPopupViewModel(engine, settings, localization, history, fileMeta);
+
+        vm.Query = "11";
+        vm.CancelPendingSearch();
+        vm.ClearSearch();
+
+        await Task.Delay(80);
+
+        Assert.Equal(string.Empty, vm.Query);
+        Assert.False(vm.IsQueryActive);
+        Assert.False(vm.HasResults);
+        Assert.False(vm.IsSearching);
+        Assert.False(vm.IsBatchUpdatingResults);
+    }
+
+    [Fact]
     public void SearchTypingStabilityAndCornerRadii_RemainStrictlyPreserved()
     {
         // Corner radii are frozen per user requirement
@@ -848,7 +998,7 @@ public sealed class SearchRedesignAndEnhancementsTests : IDisposable
         string cmdPaletteSource = File.ReadAllText(TestPaths.FromRepository(
             "src/DeskBox/Views/SearchPopupWindow.CommandPalette.cs"));
         string popupSource = File.ReadAllText(TestPaths.FromRepository(
-            "src/DeskBox/Views/SearchPopupWindow.xaml.cs"));
+            "src/DeskBox/Views/SearchPopupWindow.ResultsAndPreview.cs"));
 
         Assert.Contains("ms-appx:///Assets/WidgetTitleIcons/todo.svg", rowControlSource, StringComparison.Ordinal);
         Assert.Contains("ms-appx:///Assets/WidgetTitleIcons/quick-capture.svg", rowControlSource, StringComparison.Ordinal);

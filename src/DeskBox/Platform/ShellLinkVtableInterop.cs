@@ -3,13 +3,12 @@ using System.Runtime.InteropServices;
 namespace DeskBox.Platform;
 
 /// <summary>
-/// Reads the stored target PIDL of a Shell link (.lnk) through raw vtable
-/// COM (see <see cref="ComVtable"/>): classic ComImport RCW marshaling does
-/// not exist on NativeAOT, and every RCW link reader in this repo lives
-/// behind <c>#if !DESKBOX_NATIVE_AOT</c> with the Rust backend substituting —
-/// a backend that does not return the IDList. Only the Shell's own link
-/// object is created and loaded here; no third-party shell extension runs
-/// in-process, so the shell-extension isolation contract holds.
+/// Reads and stamps Shell link (.lnk) PIDLs and long-path properties through raw
+/// vtable COM (see <see cref="ComVtable"/>): production metadata I/O runs
+/// unconditionally on the Rust backend, while raw vtable calls cover PIDL and
+/// <c>PKEY_Link_TargetParsingPath</c> interop without classic ComImport RCWs.
+/// Only the Shell's own link object is created and loaded here; no third-party
+/// shell extension runs in-process, so the shell-extension isolation contract holds.
 /// Vtable slots verified against the Windows SDK 10.0.26100 headers:
 /// IPersistFile — GetClassID 3, IsDirty 4, Load 5, Save 6; IShellLinkW —
 /// GetPath 3, GetIDList 4, SetIDList 5; IShellItem — BindToHandler 3,
@@ -65,6 +64,8 @@ internal static class ShellLinkVtableInterop
     private const int ShellLinkDataListRemoveDataBlockSlot = 5;
     private const int ShellLinkDataListGetFlagsSlot = 6;
     private const int PropertyStoreGetValueSlot = 5;
+    private const int PropertyStoreSetValueSlot = 6;
+    private const int PropertyStoreCommitSlot = 7;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct PropertyKey
@@ -299,7 +300,7 @@ internal static class ShellLinkVtableInterop
 
             int loadResult = ComVtable.Slot<PersistFileLoadInvoker>(
                 persistFile,
-                PersistFileLoadSlot)(persistFile, shortcutPath, StgmRead);
+                PersistFileLoadSlot)(persistFile, ResolveLoadableShortcutPath(shortcutPath), StgmRead);
             if (loadResult < 0)
             {
                 return null;
@@ -520,12 +521,60 @@ internal static class ShellLinkVtableInterop
         }
     }
 
+    private static string ResolveLoadableShortcutPath(string shortcutPath)
+    {
+        if (string.IsNullOrWhiteSpace(shortcutPath) ||
+            shortcutPath.StartsWith(@"\\?\", StringComparison.Ordinal))
+        {
+            return shortcutPath;
+        }
+
+        if (shortcutPath.Length >= 248 || !File.Exists(shortcutPath))
+        {
+            try
+            {
+                string extended = StorageMigrationNativeMethods.Extended(shortcutPath);
+                if (File.Exists(extended))
+                {
+                    return extended;
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        return shortcutPath;
+    }
+
+    private static bool ShortcutFileExists(string? shortcutPath)
+    {
+        if (string.IsNullOrWhiteSpace(shortcutPath))
+        {
+            return false;
+        }
+
+        if (File.Exists(shortcutPath))
+        {
+            return true;
+        }
+
+        try
+        {
+            return File.Exists(StorageMigrationNativeMethods.Extended(shortcutPath));
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     internal static bool TryReadRawPidlBytes(
         string shortcutPath,
         out byte[] rawPidlBytes)
     {
         rawPidlBytes = [];
-        if (string.IsNullOrWhiteSpace(shortcutPath) || !File.Exists(shortcutPath))
+        if (!ShortcutFileExists(shortcutPath))
         {
             return false;
         }
@@ -591,7 +640,7 @@ internal static class ShellLinkVtableInterop
         expandedIconLocation = null;
         iconIndex = 0;
         longTargetPath = null;
-        if (string.IsNullOrWhiteSpace(shortcutPath) || !File.Exists(shortcutPath))
+        if (!ShortcutFileExists(shortcutPath))
         {
             return false;
         }
@@ -610,6 +659,7 @@ internal static class ShellLinkVtableInterop
             }
 
             textBuffer = Marshal.AllocCoTaskMem(ShellLinkStringBufferChars * sizeof(char));
+            Marshal.WriteInt16(textBuffer, 0, 0);
             int iconHr = ComVtable.Slot<ShellLinkGetIconLocationInvoker>(
                 link,
                 ShellLinkGetIconLocationSlot)(
@@ -660,13 +710,74 @@ internal static class ShellLinkVtableInterop
                             string? candidate = Marshal.PtrToStringUni(pv.PointerValue)?.Trim();
                             if (!string.IsNullOrWhiteSpace(candidate))
                             {
-                                longTargetPath = Environment.ExpandEnvironmentVariables(candidate);
+                                string expandedCandidate = Environment.ExpandEnvironmentVariables(candidate);
+                                longTargetPath = StripExtendedPathPrefixIfQualified(expandedCandidate);
                             }
                         }
                     }
                     finally
                     {
                         _ = PropVariantClear(ref pv);
+                    }
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(longTargetPath))
+            {
+                IntPtr pidl = IntPtr.Zero;
+                IntPtr shellItem = IntPtr.Zero;
+                IntPtr displayName = IntPtr.Zero;
+                try
+                {
+                    int idListResult = ComVtable.Slot<ShellLinkGetIdListInvoker>(
+                        link,
+                        ShellLinkGetIdListSlot)(link, out pidl);
+                    if (idListResult >= 0 && pidl != IntPtr.Zero)
+                    {
+                        Guid itemIid = s_iidIShellItem;
+                        SHCreateItemFromIDList(pidl, ref itemIid, out shellItem);
+                        if (shellItem != IntPtr.Zero)
+                        {
+                            int nameResult = ComVtable.Slot<ShellItemGetDisplayNameInvoker>(
+                                shellItem,
+                                ShellItemGetDisplayNameSlot)(
+                                shellItem,
+                                SigdnDesktopAbsoluteParsing,
+                                out displayName);
+                            if (nameResult >= 0 && displayName != IntPtr.Zero)
+                            {
+                                string? candidate = Marshal.PtrToStringUni(displayName)?.Trim();
+                                if (!string.IsNullOrWhiteSpace(candidate))
+                                {
+                                    candidate = StripExtendedPathPrefixIfQualified(candidate);
+                                    if (!string.IsNullOrWhiteSpace(candidate) &&
+                                        IsFilesystemLikePath(candidate))
+                                    {
+                                        longTargetPath = candidate;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                catch
+                {
+                }
+                finally
+                {
+                    if (displayName != IntPtr.Zero)
+                    {
+                        Marshal.FreeCoTaskMem(displayName);
+                    }
+
+                    if (shellItem != IntPtr.Zero)
+                    {
+                        _ = Marshal.Release(shellItem);
+                    }
+
+                    if (pidl != IntPtr.Zero)
+                    {
+                        Marshal.FreeCoTaskMem(pidl);
                     }
                 }
             }
@@ -720,7 +831,7 @@ internal static class ShellLinkVtableInterop
         string originalShortcutPath,
         IReadOnlyList<(string OldPath, string NewPath)> movedEntries)
     {
-        if (string.IsNullOrWhiteSpace(shortcutPath) || !File.Exists(shortcutPath))
+        if (!ShortcutFileExists(shortcutPath))
         {
             return false;
         }
@@ -934,7 +1045,13 @@ internal static class ShellLinkVtableInterop
                 }
             }
 
-            string tempPath = $"{shortcutPath}.{Guid.NewGuid():N}.deskbox-tmp";
+            string rawTempPath = $"{shortcutPath}.{Guid.NewGuid():N}.deskbox-tmp";
+            string tempPath = rawTempPath.Length >= 248
+                ? StorageMigrationNativeMethods.Extended(rawTempPath)
+                : rawTempPath;
+            string commitTargetPath = shortcutPath.Length >= 248
+                ? StorageMigrationNativeMethods.Extended(shortcutPath)
+                : shortcutPath;
             try
             {
                 int saveHr = ComVtable.Slot<PersistFileSaveInvoker>(
@@ -952,7 +1069,7 @@ internal static class ShellLinkVtableInterop
                 _ = Marshal.Release(link);
                 link = IntPtr.Zero;
 
-                return CommitRebasedShortcutFile(tempPath, shortcutPath);
+                return CommitRebasedShortcutFile(tempPath, commitTargetPath);
             }
             finally
             {
@@ -1044,7 +1161,10 @@ internal static class ShellLinkVtableInterop
 
         // Fallback for filesystems that do not support ReplaceFileW (such as
         // FAT32/exFAT): stage a durable backup before overwriting shortcutPath.
-        string backupPath = $"{shortcutPath}.{Guid.NewGuid():N}.deskbox-bak";
+        string rawBackupPath = $"{shortcutPath}.{Guid.NewGuid():N}.deskbox-bak";
+        string backupPath = rawBackupPath.Length >= 248
+            ? StorageMigrationNativeMethods.Extended(rawBackupPath)
+            : rawBackupPath;
         try
         {
             if (File.Exists(shortcutPath))
@@ -1142,6 +1262,77 @@ internal static class ShellLinkVtableInterop
         }
     }
 
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int PropertyStoreSetValueInvoker(
+        IntPtr self,
+        ref PropertyKey key,
+        ref PropVariant value);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int PropertyStoreCommitInvoker(IntPtr self);
+
+    internal static bool TryStampLongTargetParsingPropertyOnLink(
+        IntPtr shellLinkPtr,
+        string normalizedTargetPath)
+    {
+        if (shellLinkPtr == IntPtr.Zero || string.IsNullOrWhiteSpace(normalizedTargetPath))
+        {
+            return false;
+        }
+
+        IntPtr propStore = IntPtr.Zero;
+        IntPtr targetValuePtr = IntPtr.Zero;
+        try
+        {
+            Guid propStoreIid = s_iidIPropertyStore;
+            if (ComVtable.QueryInterface(shellLinkPtr, ref propStoreIid, out propStore) < 0 ||
+                propStore == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            PropertyKey key = new()
+            {
+                FmtId = s_fmtidLinkTargetParsingPath,
+                Pid = 2
+            };
+            targetValuePtr = Marshal.StringToCoTaskMemUni(normalizedTargetPath);
+            PropVariant pv = new()
+            {
+                Vt = VtLpwstr,
+                PointerValue = targetValuePtr
+            };
+            int setHr = ComVtable.Slot<PropertyStoreSetValueInvoker>(
+                propStore,
+                PropertyStoreSetValueSlot)(propStore, ref key, ref pv);
+            if (setHr < 0)
+            {
+                return false;
+            }
+
+            int commitHr = ComVtable.Slot<PropertyStoreCommitInvoker>(
+                propStore,
+                PropertyStoreCommitSlot)(propStore);
+            return commitHr >= 0;
+        }
+        catch
+        {
+            return false;
+        }
+        finally
+        {
+            if (targetValuePtr != IntPtr.Zero)
+            {
+                Marshal.FreeCoTaskMem(targetValuePtr);
+            }
+
+            if (propStore != IntPtr.Zero)
+            {
+                _ = Marshal.Release(propStore);
+            }
+        }
+    }
+
     private static bool TryLoadShellLink(
         string shortcutPath,
         out IntPtr link,
@@ -1170,7 +1361,7 @@ internal static class ShellLinkVtableInterop
 
         int loadResult = ComVtable.Slot<PersistFileLoadInvoker>(
             persistFile,
-            PersistFileLoadSlot)(persistFile, shortcutPath, StgmRead);
+            PersistFileLoadSlot)(persistFile, ResolveLoadableShortcutPath(shortcutPath), StgmRead);
         if (loadResult < 0)
         {
             _ = Marshal.Release(persistFile);
@@ -1391,6 +1582,23 @@ internal static class ShellLinkVtableInterop
         return false;
     }
 
+    private static string StripExtendedPathPrefixIfQualified(string path)
+    {
+        if (path.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase))
+        {
+            string unc = @"\\" + path[@"\\?\UNC\".Length..];
+            return Path.IsPathFullyQualified(unc) ? unc : path;
+        }
+
+        if (path.StartsWith(@"\\?\", StringComparison.Ordinal))
+        {
+            string trimmed = path[@"\\?\".Length..];
+            return Path.IsPathFullyQualified(trimmed) ? trimmed : path;
+        }
+
+        return path;
+    }
+
     private static bool IsFilesystemLikePath(string path)
     {
         return (path.Length >= 3 &&
@@ -1438,6 +1646,100 @@ internal static class ShellLinkVtableInterop
 
         return full.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
     }
+
+    internal static string NormalizeWorkingDirectoryForShortcut(string workingDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(workingDirectory))
+        {
+            return string.Empty;
+        }
+
+        string normalized = workingDirectory.Trim();
+        if (normalized.Length < 258)
+        {
+            return normalized;
+        }
+
+        string extended = StorageMigrationNativeMethods.Extended(normalized);
+        char[] buffer = new char[1024];
+        uint written = GetShortPathNameW(extended, buffer, (uint)buffer.Length);
+        if (written > 0 && written < buffer.Length)
+        {
+            string shortPath = new(buffer, 0, (int)written);
+            if (shortPath.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase))
+            {
+                shortPath = @"\\" + shortPath[@"\\?\UNC\".Length..];
+            }
+            else if (shortPath.StartsWith(@"\\?\", StringComparison.Ordinal))
+            {
+                shortPath = shortPath[@"\\?\".Length..];
+            }
+
+            if (shortPath.Length < 258)
+            {
+                return shortPath;
+            }
+        }
+
+        return string.Empty;
+    }
+
+    internal static bool TryParseDisplayNameWithLongPathFallback(
+        string targetPath,
+        out IntPtr pidl)
+    {
+        pidl = IntPtr.Zero;
+        if (string.IsNullOrWhiteSpace(targetPath))
+        {
+            return false;
+        }
+
+        int hr = Shell32NativeMethods.SHParseDisplayName(
+            targetPath,
+            IntPtr.Zero,
+            out pidl,
+            0,
+            out _);
+        if (hr >= 0 && pidl != IntPtr.Zero)
+        {
+            return true;
+        }
+
+        if (pidl != IntPtr.Zero)
+        {
+            Marshal.FreeCoTaskMem(pidl);
+            pidl = IntPtr.Zero;
+        }
+
+        if (!targetPath.StartsWith(@"\\?\", StringComparison.Ordinal) &&
+            targetPath.Length >= 248)
+        {
+            hr = Shell32NativeMethods.SHParseDisplayName(
+                StorageMigrationNativeMethods.Extended(targetPath),
+                IntPtr.Zero,
+                out pidl,
+                0,
+                out _);
+            if (hr >= 0 && pidl != IntPtr.Zero)
+            {
+                return true;
+            }
+
+            if (pidl != IntPtr.Zero)
+            {
+                Marshal.FreeCoTaskMem(pidl);
+                pidl = IntPtr.Zero;
+            }
+        }
+
+        return false;
+    }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern uint GetShortPathNameW(
+        string lpszLongPath,
+        [Out] char[] lpszShortPath,
+        uint cchBuffer);
 
     private static bool PathsEqual(string left, string right) =>
         string.Equals(

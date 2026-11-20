@@ -26,10 +26,14 @@ public partial class WidgetViewModel
     private const int RenderWindowActivationThreshold = 300;
     private const int RenderWindowInitialSize = 30;
     private const int RenderWindowGrowChunk = 200;
+    private const int ProgressiveRematerializationInitialSlice = 24;
+    private const int ProgressiveRematerializationSliceChunk = 24;
 
     public ObservableCollection<WidgetItem> RenderedItems { get; } = [];
 
     private int _renderWindowBudget = RenderWindowInitialSize;
+    private int? _progressiveRematerializationCap;
+    private int _progressiveRematerializationGeneration;
     private bool _renderWindowReconcileQueued;
     private bool _pendingPostBatchHydration;
     private bool _pendingHealAfterActiveHydration;
@@ -83,8 +87,16 @@ public partial class WidgetViewModel
         ? _stackDisplayItems.Count
         : Items.Count;
 
-    private int EffectiveRenderTarget =>
-        DeriveRenderTarget(_renderWindowBudget, VisibleItemCount);
+    private int EffectiveRenderTarget
+    {
+        get
+        {
+            int target = DeriveRenderTarget(_renderWindowBudget, VisibleItemCount);
+            return _progressiveRematerializationCap is int cap
+                ? Math.Min(cap, target)
+                : target;
+        }
+    }
 
     /// <summary>
     /// Pure target derivation shared with behavior tests: folders at or below
@@ -335,8 +347,106 @@ public partial class WidgetViewModel
     /// </summary>
     internal void ResetRenderWindow()
     {
+        CancelProgressiveRematerialization();
         _renderWindowBudget = RenderWindowInitialSize;
         ReconcileRenderWindow();
+    }
+
+    /// <summary>
+    /// Caps the initial synchronous <see cref="RenderedItems"/> layout pass when a
+    /// hibernated capsule view rematerializes on the UI thread, then streams the
+    /// remaining tiles across low-priority dispatcher frames so post-expand reveal
+    /// animations never drop frames on folders with 25–300 items.
+    /// </summary>
+    internal void BeginProgressiveRematerialization()
+    {
+        if (_isDisposed || _dispatcherQueue is null)
+        {
+            return;
+        }
+
+        int fullTarget = DeriveRenderTarget(_renderWindowBudget, VisibleItemCount);
+        if (fullTarget <= ProgressiveRematerializationInitialSlice)
+        {
+            CancelProgressiveRematerialization();
+            return;
+        }
+
+        int generation = ++_progressiveRematerializationGeneration;
+        _progressiveRematerializationCap = ProgressiveRematerializationInitialSlice;
+        ReconcileRenderWindow();
+        EnqueueNextProgressiveRematerializationSlice(generation);
+    }
+
+    internal void CompleteProgressiveRematerializationNow()
+    {
+        if (_progressiveRematerializationCap is null)
+        {
+            return;
+        }
+
+        CancelProgressiveRematerialization();
+        if (!_isDisposed)
+        {
+            ReconcileRenderWindow();
+            if (!_isIconHydrationDormant)
+            {
+                HealReleasedItemIconsIfIdle();
+            }
+        }
+    }
+
+    private void CancelProgressiveRematerialization()
+    {
+        _progressiveRematerializationGeneration++;
+        _progressiveRematerializationCap = null;
+    }
+
+    private void EnqueueNextProgressiveRematerializationSlice(int generation)
+    {
+        if (_isDisposed || _dispatcherQueue is null || _progressiveRematerializationCap is null)
+        {
+            return;
+        }
+
+        if (!_dispatcherQueue.TryEnqueue(
+                Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
+                () => AdvanceProgressiveRematerializationSlice(generation)))
+        {
+            CancelProgressiveRematerialization();
+        }
+    }
+
+    private void AdvanceProgressiveRematerializationSlice(int generation)
+    {
+        if (_isDisposed ||
+            generation != _progressiveRematerializationGeneration ||
+            _progressiveRematerializationCap is not int currentCap)
+        {
+            return;
+        }
+
+        int fullTarget = DeriveRenderTarget(_renderWindowBudget, VisibleItemCount);
+        int nextCap = currentCap + ProgressiveRematerializationSliceChunk;
+        if (nextCap >= fullTarget)
+        {
+            _progressiveRematerializationCap = null;
+            ReconcileRenderWindow();
+            RenderWindowSourceChanged?.Invoke();
+            if (!_isIconHydrationDormant)
+            {
+                HealReleasedItemIconsIfIdle();
+            }
+            return;
+        }
+
+        _progressiveRematerializationCap = nextCap;
+        ReconcileRenderWindow();
+        if (!_isIconHydrationDormant)
+        {
+            HealReleasedItemIconsIfIdle();
+        }
+        EnqueueNextProgressiveRematerializationSlice(generation);
     }
 
     /// <summary>
@@ -403,6 +513,7 @@ public partial class WidgetViewModel
     /// </summary>
     internal void EnsureItemRendered(WidgetItem item)
     {
+        CompleteProgressiveRematerializationNow();
         if (_isDisposed || RenderedItems.Contains(item) || !CanGrowRenderWindow)
         {
             return;

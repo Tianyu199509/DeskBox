@@ -840,6 +840,19 @@ public abstract partial class WidgetWindowBase
         RoundedBackdropMaskService.TrimIdle();
     }
 
+    protected void PauseBackdropControllersForHiddenWindow()
+    {
+        if (IsClosing)
+        {
+            return;
+        }
+
+        _lastAppliedBackdropSignature = null;
+        RoundedBackdropMaskService.TrimIdle();
+        DetachAcrylicControllerTarget();
+        DetachMicaControllerTarget();
+    }
+
     protected void SuspendBackdropTargetsForHiddenWindow()
     {
         if (IsClosing)
@@ -1004,9 +1017,8 @@ public abstract partial class WidgetWindowBase
     {
         slot.Configuration.IsInputActive = true;
         slot.Configuration.Theme = isDark ? SystemBackdropTheme.Dark : SystemBackdropTheme.Light;
-        slot.Configuration.HighContrastBackgroundColor = isDark
-            ? ColorHelper.FromArgb(0xFF, 0x20, 0x20, 0x20)
-            : ColorHelper.FromArgb(0xFF, 0xF3, 0xF3, 0xF3);
+        slot.Configuration.HighContrastBackgroundColor =
+            WindowsCompatibilityService.ResolveHighContrastBackgroundColor(isDark);
         slot.Controller.Kind = useBase ? DesktopAcrylicKind.Base : DesktopAcrylicKind.Thin;
         slot.Controller.TintColor = tintColor;
         slot.Controller.FallbackColor = tintColor;

@@ -29,32 +29,39 @@ public sealed partial class SettingsWindow
             return;
         }
 
-        var (recordCount, _) = await _dataActions.GetQuickCaptureCountsAsync();
-        var dialog = new ContentDialog
+        try
         {
-            XamlRoot = SettingsRoot.XamlRoot,
-            Title = _localizationService.T("QuickCapture.ClearDataTitle"),
-            PrimaryButtonText = _localizationService.T("QuickCapture.ClearData"),
-            CloseButtonText = _localizationService.T("Common.Cancel"),
-            DefaultButton = ContentDialogButton.Close,
-            Content = new TextBlock
+            var (recordCount, _) = await _dataActions.GetQuickCaptureCountsAsync();
+            var dialog = new ContentDialog
             {
-                Text = recordCount > 0
-                    ? _localizationService.Format(
-                        "QuickCapture.ClearDataDescriptionWithCount",
-                        recordCount)
-                    : _localizationService.T("QuickCapture.ClearDataDescription"),
-                TextWrapping = TextWrapping.Wrap
+                XamlRoot = SettingsRoot.XamlRoot,
+                Title = _localizationService.T("QuickCapture.ClearDataTitle"),
+                PrimaryButtonText = _localizationService.T("QuickCapture.ClearData"),
+                CloseButtonText = _localizationService.T("Common.Cancel"),
+                DefaultButton = ContentDialogButton.Close,
+                Content = new TextBlock
+                {
+                    Text = recordCount > 0
+                        ? _localizationService.Format(
+                            "QuickCapture.ClearDataDescriptionWithCount",
+                            recordCount)
+                        : _localizationService.T("QuickCapture.ClearDataDescription"),
+                    TextWrapping = TextWrapping.Wrap
+                }
+            };
+
+            if (await ShowDialogWhenFreeAsync(() => dialog) != ContentDialogResult.Primary)
+            {
+                return;
             }
-        };
 
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
-        {
-            return;
+            await _dataActions.ClearQuickCaptureDataAsync();
+            await ViewModel.RefreshQuickCaptureImageCacheInfoAsync();
         }
-
-        await _dataActions.ClearQuickCaptureDataAsync();
-        await ViewModel.RefreshQuickCaptureImageCacheInfoAsync();
+        catch (Exception ex)
+        {
+            App.Log($"[SettingsWindow] ClearQuickCaptureData failed: {ex.Message}");
+        }
     }
 
     private async void CleanupQuickCaptureImageCacheButton_Click(object sender, RoutedEventArgs e)
@@ -64,26 +71,33 @@ public sealed partial class SettingsWindow
             return;
         }
 
-        var result = await _dataActions.ClearUnusedQuickCaptureImageCacheAsync();
-        await ViewModel.RefreshQuickCaptureImageCacheInfoAsync();
-
-        var dialog = new ContentDialog
+        try
         {
-            XamlRoot = SettingsRoot.XamlRoot,
-            Title = _localizationService.T("Settings.QuickCapture.ImageCacheCleanupTitle"),
-            CloseButtonText = _localizationService.T("Common.GotIt"),
-            DefaultButton = ContentDialogButton.Close,
-            Content = new TextBlock
-            {
-                Text = _localizationService.Format(
-                    "Settings.QuickCapture.ImageCacheCleanupDescription",
-                    result.DeletedFileCount,
-                    ViewModel.FormatBytes(result.DeletedBytes)),
-                TextWrapping = TextWrapping.Wrap
-            }
-        };
+            var result = await _dataActions.ClearUnusedQuickCaptureImageCacheAsync();
+            await ViewModel.RefreshQuickCaptureImageCacheInfoAsync();
 
-        await dialog.ShowAsync();
+            var dialog = new ContentDialog
+            {
+                XamlRoot = SettingsRoot.XamlRoot,
+                Title = _localizationService.T("Settings.QuickCapture.ImageCacheCleanupTitle"),
+                CloseButtonText = _localizationService.T("Common.GotIt"),
+                DefaultButton = ContentDialogButton.Close,
+                Content = new TextBlock
+                {
+                    Text = _localizationService.Format(
+                        "Settings.QuickCapture.ImageCacheCleanupDescription",
+                        result.DeletedFileCount,
+                        ViewModel.FormatBytes(result.DeletedBytes)),
+                    TextWrapping = TextWrapping.Wrap
+                }
+            };
+
+            await ShowDialogWhenFreeAsync(() => dialog);
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[SettingsWindow] CleanupQuickCaptureImageCache failed: {ex.Message}");
+        }
     }
 
     private async void QuickCaptureMirrorFolderBrowseButton_Click(object sender, RoutedEventArgs e)
@@ -93,6 +107,14 @@ public sealed partial class SettingsWindow
             string? folderPath = await FolderPickerService.PickFolderAsync(_hWnd);
             if (string.IsNullOrWhiteSpace(folderPath))
             {
+                return;
+            }
+
+            if (Services.DragDrop.StoreVirtualizedPathPolicy.IsWriteBlockedDestination(folderPath))
+            {
+                await ShowInfoDialogAsync(
+                    _localizationService.T("Settings.DataBackup.AutomaticBackupDirectory.InvalidTitle"),
+                    _localizationService.T("Widget.DropBlocked.StoreVirtualizedAppData"));
                 return;
             }
 
@@ -116,7 +138,7 @@ public sealed partial class SettingsWindow
         try
         {
             Directory.CreateDirectory(folderPath);
-            Win32Helper.ShowInExplorer(folderPath);
+            Services.ShellLaunchService.FireAndForgetRevealInExplorer(folderPath);
         }
         catch (Exception ex)
         {
@@ -149,9 +171,24 @@ public sealed partial class SettingsWindow
             return;
         }
 
+#if !DESKBOX_STORE
+        if (AboutWechatQrContainer.Child is Image aboutQrImage && aboutQrImage.Source is null)
+        {
+            aboutQrImage.Source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(
+                new Uri("ms-appx:///Assets/wechat-qrcode.jpg"));
+        }
+#endif
+
         AboutMeDialog.XamlRoot = SettingsRoot.XamlRoot;
+        AboutMeDialog.RequestedTheme = NeutralInteractionBrush.ResolveEffectiveElementTheme(SettingsRoot);
         AboutMeDialog.CloseButtonText = _localizationService.T("Settings.Dialog.AboutMeClose");
-        await AboutMeDialog.ShowAsync();
+        try
+        {
+            await AboutMeDialog.ShowAsync();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException)
+        {
+        }
     }
 
     private ContentDialog? _activeOrphanFoldersDialog;
@@ -320,7 +357,17 @@ public sealed partial class SettingsWindow
             Content = _localizationService.T(textKey)
         };
         ToolTipService.SetToolTip(button, _localizationService.T(tooltipKey));
-        button.Click += async (_, _) => await action();
+        button.Click += async (_, _) =>
+        {
+            try
+            {
+                await action();
+            }
+            catch (Exception ex)
+            {
+                App.Log($"[SettingsDataTools] Action '{textKey}' failed: {ex}");
+            }
+        };
         return button;
     }
 
@@ -383,7 +430,7 @@ public sealed partial class SettingsWindow
             return;
         }
 
-        Win32Helper.OpenFile(folderPath);
+        Services.ShellLaunchService.FireAndForgetOpenPath(folderPath);
     }
 
     private async Task MoveManagedStorageFolderToDesktopAsync(string folderPath, string folderName)
@@ -490,6 +537,7 @@ public sealed partial class SettingsWindow
         var dialog = new ContentDialog
         {
             XamlRoot = SettingsRoot.XamlRoot,
+            RequestedTheme = NeutralInteractionBrush.ResolveEffectiveElementTheme(SettingsRoot),
             Title = title,
             PrimaryButtonText = primaryButtonText,
             CloseButtonText = _localizationService.T("Common.Cancel"),
@@ -564,6 +612,7 @@ public sealed partial class SettingsWindow
         var configDialog = new ContentDialog
         {
             XamlRoot = SettingsRoot.XamlRoot,
+            RequestedTheme = NeutralInteractionBrush.ResolveEffectiveElementTheme(SettingsRoot),
             Title = _localizationService.T("Todo.Export.DialogTitle"),
             PrimaryButtonText = _localizationService.T("Todo.Export.ConfirmButton"),
             CloseButtonText = _localizationService.T("Common.Cancel"),
@@ -625,6 +674,7 @@ public sealed partial class SettingsWindow
         var doneDialog = new ContentDialog
         {
             XamlRoot = SettingsRoot.XamlRoot,
+            RequestedTheme = NeutralInteractionBrush.ResolveEffectiveElementTheme(SettingsRoot),
             Title = _localizationService.T("Todo.Export.CompletedDialogTitle"),
             PrimaryButtonText = _localizationService.T("Todo.Export.Action.OpenFile"),
             SecondaryButtonText = _localizationService.T("Todo.Export.Action.RevealInFolder"),

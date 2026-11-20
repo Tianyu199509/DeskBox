@@ -4,6 +4,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
     <x:Double x:Key="SettingsControlMinWidth">176</x:Double>
+    <x:Double x:Key="SettingsControlMaxWidth">260</x:Double>
     <x:Double x:Key="SettingsCardSpacing">4</x:Double>
     <x:Double x:Key="SettingsRowMinHeight">64</x:Double>
     <x:Double x:Key="SettingsHeaderIconTextSpacing">20</x:Double>
@@ -51,6 +52,19 @@
     <Style x:Key="SettingValueTextStyle" TargetType="TextBlock" BasedOn="{StaticResource SettingDescriptionTextStyle}">
         <Setter Property="Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
         <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
+    <Style x:Key="InlineMetricSliderStyle" TargetType="Slider" BasedOn="{StaticResource DefaultSliderStyle}">
+        <Setter Property="Width" Value="168" />
+        <Setter Property="MinWidth" Value="140" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="IsThumbToolTipEnabled" Value="False" />
+    </Style>
+
+    <Style x:Key="SliderSettingValueTextStyle" TargetType="TextBlock" BasedOn="{StaticResource SettingValueTextStyle}">
+        <Setter Property="MinWidth" Value="42" />
+        <Setter Property="TextAlignment" Value="Right" />
+        <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
 
     <Style x:Key="SettingsSubsectionHeaderStyle" TargetType="StackPanel">

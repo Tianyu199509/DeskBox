@@ -388,6 +388,7 @@ internal sealed class ClipboardKeyboardChordObserver : IDisposable
                 0);
 
             bool cancelled;
+            bool hookInstalled = installedHook != IntPtr.Zero;
             lock (_sync)
             {
                 cancelled = _disposed || generation != _generation;
@@ -395,11 +396,12 @@ internal sealed class ClipboardKeyboardChordObserver : IDisposable
                 {
                     _threadId = threadId;
                     _hookHandle = installedHook;
+                    installedHook = IntPtr.Zero;
                 }
             }
 
             ready.TrySetResult(true);
-            if (installedHook == IntPtr.Zero || cancelled)
+            if (!hookInstalled || cancelled)
             {
                 return;
             }
@@ -416,15 +418,16 @@ internal sealed class ClipboardKeyboardChordObserver : IDisposable
         }
         finally
         {
-            if (installedHook != IntPtr.Zero)
-            {
-                _ = Win32Helper.UnhookWindowsHookEx(installedHook);
-            }
-
+            IntPtr hookToUnhook = installedHook;
             lock (_sync)
             {
                 if (ReferenceEquals(_thread, Thread.CurrentThread))
                 {
+                    if (hookToUnhook == IntPtr.Zero)
+                    {
+                        hookToUnhook = _hookHandle;
+                    }
+
                     _thread = null;
                     _threadId = 0;
                     _hookHandle = IntPtr.Zero;
@@ -433,69 +436,80 @@ internal sealed class ClipboardKeyboardChordObserver : IDisposable
                 _stateMachine.Reset();
             }
 
+            if (hookToUnhook != IntPtr.Zero)
+            {
+                _ = Win32Helper.UnhookWindowsHookEx(hookToUnhook);
+            }
+
             ready.TrySetResult(true);
         }
     }
 
-    private IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam)
+    private unsafe IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam)
     {
-        IntPtr hookHandle;
-        lock (_sync)
+        IntPtr hookHandle = IntPtr.Zero;
+        try
         {
-            hookHandle = _hookHandle;
-        }
-
-        bool isKeyDown = wParam == Win32Helper.WM_KEYDOWN || wParam == Win32Helper.WM_SYSKEYDOWN;
-        bool isKeyUp = wParam == Win32Helper.WM_KEYUP || wParam == Win32Helper.WM_SYSKEYUP;
-        if (nCode >= 0 && (isKeyDown || isKeyUp))
-        {
-            Win32Helper.KBDLLHOOKSTRUCT data = Marshal.PtrToStructure<Win32Helper.KBDLLHOOKSTRUCT>(lParam);
-            bool injected = (data.flags & Win32Helper.LLKHF_INJECTED) != 0;
-
-            ClipboardChordObservation obs;
             lock (_sync)
             {
-                if (!injected && isKeyDown &&
-                    data.vkCode is ClipboardKeyboardChordStateMachine.VkC
-                        or ClipboardKeyboardChordStateMachine.VkV
-                        or ClipboardKeyboardChordStateMachine.VkInsert)
-                {
-                    _stateMachine.SyncPhysicalModifiers(
-                        IsKeyPhysicallyDown(ClipboardKeyboardChordStateMachine.VkLControl),
-                        IsKeyPhysicallyDown(ClipboardKeyboardChordStateMachine.VkRControl),
-                        IsKeyPhysicallyDown(ClipboardKeyboardChordStateMachine.VkLShift),
-                        IsKeyPhysicallyDown(ClipboardKeyboardChordStateMachine.VkRShift),
-                        IsKeyPhysicallyDown(ClipboardKeyboardChordStateMachine.VkLMenu),
-                        IsKeyPhysicallyDown(ClipboardKeyboardChordStateMachine.VkRMenu),
-                        IsKeyPhysicallyDown(ClipboardKeyboardChordStateMachine.VkLWin),
-                        IsKeyPhysicallyDown(ClipboardKeyboardChordStateMachine.VkRWin));
-                }
-
-                obs = _stateMachine.ProcessKeyEvent(
-                    data.vkCode,
-                    isKeyDown,
-                    injected,
-                    data.time,
-                    _observeDoubleCopy,
-                    _observeExternalPaste);
+                hookHandle = _hookHandle;
             }
 
-            if (obs == ClipboardChordObservation.DoubleCopyTriggered)
+            bool isKeyDown = wParam == Win32Helper.WM_KEYDOWN || wParam == Win32Helper.WM_SYSKEYDOWN;
+            bool isKeyUp = wParam == Win32Helper.WM_KEYUP || wParam == Win32Helper.WM_SYSKEYUP;
+            if (nCode >= 0 && lParam != IntPtr.Zero && (isKeyDown || isKeyUp))
             {
-                IntPtr fg = ClipboardPlatformInterop.GetForegroundWindow();
-                if (ClipboardPlatformInterop.IsEligibleExternalPasteTarget(fg))
+                ref readonly Win32Helper.KBDLLHOOKSTRUCT data = ref *(Win32Helper.KBDLLHOOKSTRUCT*)lParam;
+                bool injected = (data.flags & Win32Helper.LLKHF_INJECTED) != 0;
+
+                ClipboardChordObservation obs;
+                lock (_sync)
                 {
-                    ThreadPool.UnsafeQueueUserWorkItem(static cb => cb(), _onDoubleCopy, preferLocal: false);
+                    if (!injected && isKeyDown &&
+                        data.vkCode is ClipboardKeyboardChordStateMachine.VkC
+                            or ClipboardKeyboardChordStateMachine.VkV
+                            or ClipboardKeyboardChordStateMachine.VkInsert)
+                    {
+                        _stateMachine.SyncPhysicalModifiers(
+                            IsKeyPhysicallyDown(ClipboardKeyboardChordStateMachine.VkLControl),
+                            IsKeyPhysicallyDown(ClipboardKeyboardChordStateMachine.VkRControl),
+                            IsKeyPhysicallyDown(ClipboardKeyboardChordStateMachine.VkLShift),
+                            IsKeyPhysicallyDown(ClipboardKeyboardChordStateMachine.VkRShift),
+                            IsKeyPhysicallyDown(ClipboardKeyboardChordStateMachine.VkLMenu),
+                            IsKeyPhysicallyDown(ClipboardKeyboardChordStateMachine.VkRMenu),
+                            IsKeyPhysicallyDown(ClipboardKeyboardChordStateMachine.VkLWin),
+                            IsKeyPhysicallyDown(ClipboardKeyboardChordStateMachine.VkRWin));
+                    }
+
+                    obs = _stateMachine.ProcessKeyEvent(
+                        data.vkCode,
+                        isKeyDown,
+                        injected,
+                        data.time,
+                        _observeDoubleCopy,
+                        _observeExternalPaste);
+                }
+
+                if (obs == ClipboardChordObservation.DoubleCopyTriggered)
+                {
+                    IntPtr fg = ClipboardPlatformInterop.GetForegroundWindow();
+                    if (ClipboardPlatformInterop.IsEligibleExternalPasteTarget(fg))
+                    {
+                        ThreadPool.UnsafeQueueUserWorkItem(static cb => cb(), _onDoubleCopy, preferLocal: false);
+                    }
+                }
+                else if (obs == ClipboardChordObservation.ExternalPasteTriggered)
+                {
+                    IntPtr fg = ClipboardPlatformInterop.GetForegroundWindow();
+                    if (ClipboardPlatformInterop.IsEligibleExternalPasteTarget(fg))
+                    {
+                        ThreadPool.UnsafeQueueUserWorkItem(static cb => cb(), _onExternalPaste, preferLocal: false);
+                    }
                 }
             }
-            else if (obs == ClipboardChordObservation.ExternalPasteTriggered)
-            {
-                IntPtr fg = ClipboardPlatformInterop.GetForegroundWindow();
-                if (ClipboardPlatformInterop.IsEligibleExternalPasteTarget(fg))
-                {
-                    ThreadPool.UnsafeQueueUserWorkItem(static cb => cb(), _onExternalPaste, preferLocal: false);
-                }
-            }
+        }
+        catch
+        {
         }
 
         return Win32Helper.CallNextHookEx(hookHandle, nCode, wParam, lParam);

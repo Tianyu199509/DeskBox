@@ -11,7 +11,9 @@ namespace DeskBox;
 
 public partial class App
 {
-    public DeskBoxDiagnosticsBundleService DiagnosticsBundleService { get; private set; } = null!;
+    private DeskBoxDiagnosticsBundleService? _diagnosticsBundleService;
+    public DeskBoxDiagnosticsBundleService DiagnosticsBundleService =>
+        _diagnosticsBundleService ??= Services.DiagnosticsBundleService;
 
     public DeskBoxDiagnosticSnapshot CreateDiagnosticSnapshot()
     {
@@ -22,14 +24,6 @@ public partial class App
             WidgetManager?.CreateDiagnosticsSnapshot() ?? DeskBoxWidgetManagerDiagnostic.Empty;
         IReadOnlyList<DeskBoxDisplayDiagnostic> displays = GetDisplayDiagnostics();
         SettingsPersistenceFailure? saveFailure = SettingsService.LastPersistenceFailure;
-        GlobalHotkeyGesture toggleGesture = GlobalHotkeyService?.CurrentGesture ??
-            GlobalHotkeyService.NormalizeGesture(
-                SettingsService.Settings.GlobalHotkeyModifiers,
-                SettingsService.Settings.GlobalHotkeyKey);
-        GlobalHotkeyGesture searchGesture = SearchHotkeyService?.CurrentGesture ??
-            GlobalHotkeyService.NormalizeGesture(
-                SettingsService.Settings.SearchHotkeyModifiers,
-                SettingsService.Settings.SearchHotkeyKey);
         ShortcutNativeDiagnosticState shortcutNative =
             ShortcutNativeBackend.CaptureDiagnosticState();
         var startupLedger = new DeskBoxStartupLedgerDiagnostic(
@@ -59,25 +53,7 @@ public partial class App
             OperatingSystem: RuntimeInformation.OSDescription,
             ProcessArchitecture: RuntimeInformation.ProcessArchitecture.ToString(),
             UiCulture: CultureInfo.CurrentUICulture.Name,
-            Hotkeys: new DeskBoxHotkeyDiagnostic(
-                SettingsService.Settings.GlobalHotkeyEnabled,
-                GlobalHotkeyService?.IsRegistered == true,
-                (int)toggleGesture.Modifiers,
-                toggleGesture.VirtualKey,
-                GlobalHotkeyService?.ReceivedCount ?? 0,
-                GlobalHotkeyService?.InvocationCount ?? 0,
-                GlobalHotkeyService?.DispatchFailureCount ?? 0,
-                GlobalHotkeyService?.UsesReservedHook == true,
-                GlobalHotkeyService?.ReservedHookThreadId ?? 0,
-                GlobalHotkeyService?.ReservedHookLastErrorCode ?? 0,
-                GlobalHotkeyService?.ReservedHookTriggerCount ?? 0,
-                GlobalHotkeyService?.ReservedHookPostFailureCount ?? 0,
-                GlobalHotkeyService?.ReservedHookInputFailureCount ?? 0,
-                !string.IsNullOrWhiteSpace(GlobalHotkeyService?.LastError),
-                SettingsService.Settings.SearchHotkeyEnabled,
-                SearchHotkeyService?.IsRegistered == true,
-                (int)searchGesture.Modifiers,
-                searchGesture.VirtualKey),
+            Hotkeys: BuildHotkeyDiagnostics(),
             Settings: new DeskBoxSettingsDiagnostic(
                 SettingsService.LastLoadRecoveryState,
                 SettingsService.HasPendingSave,
@@ -100,6 +76,52 @@ public partial class App
             StorageMigration: WidgetManager?.StorageMigrationDiagnostic,
             StartupLedger: startupLedger,
             CallbackRadar: callbackRadar);
+    }
+
+    internal DeskBoxHotkeyDiagnostic BuildHotkeyDiagnostics()
+    {
+        GlobalHotkeyGesture toggleGesture = GlobalHotkeyService?.CurrentGesture ??
+            GlobalHotkeyService.NormalizeGesture(
+                SettingsService.Settings.GlobalHotkeyModifiers,
+                SettingsService.Settings.GlobalHotkeyKey);
+        GlobalHotkeyGesture searchGesture = SearchHotkeyService?.CurrentGesture ??
+            GlobalHotkeyService.NormalizeGesture(
+                SettingsService.Settings.SearchHotkeyModifiers,
+                SettingsService.Settings.SearchHotkeyKey);
+        GlobalHotkeyGesture clipboardGesture = ClipboardHotkeyService?.CurrentGesture ??
+            GlobalHotkeyService.NormalizeActivation(
+                SettingsService.Settings.Clipboard.ClipboardHotkeyActivationKind,
+                SettingsService.Settings.Clipboard.ClipboardHotkeyModifiers,
+                SettingsService.Settings.Clipboard.ClipboardHotkeyKey).Gesture;
+
+        return new DeskBoxHotkeyDiagnostic(
+            SettingsService.Settings.GlobalHotkeyEnabled,
+            GlobalHotkeyService?.IsRegistered == true,
+            (int)toggleGesture.Modifiers,
+            toggleGesture.VirtualKey,
+            GlobalHotkeyService?.ReceivedCount ?? 0,
+            GlobalHotkeyService?.InvocationCount ?? 0,
+            GlobalHotkeyService?.DispatchFailureCount ?? 0,
+            GlobalHotkeyService?.UsesReservedHook == true,
+            GlobalHotkeyService?.ReservedHookThreadId ?? 0,
+            GlobalHotkeyService?.ReservedHookLastErrorCode ?? 0,
+            GlobalHotkeyService?.ReservedHookTriggerCount ?? 0,
+            GlobalHotkeyService?.ReservedHookPostFailureCount ?? 0,
+            GlobalHotkeyService?.ReservedHookInputFailureCount ?? 0,
+            !string.IsNullOrWhiteSpace(GlobalHotkeyService?.LastError),
+            SettingsService.Settings.SearchHotkeyEnabled,
+            SearchHotkeyService?.IsRegistered == true,
+            (int)searchGesture.Modifiers,
+            searchGesture.VirtualKey,
+            ClipboardEnabled: SettingsService.Settings.Clipboard.ClipboardHotkeyEnabled,
+            ClipboardRegistered: ClipboardHotkeyService?.IsRegistered == true,
+            ClipboardModifiers: (int)clipboardGesture.Modifiers,
+            ClipboardVirtualKey: clipboardGesture.VirtualKey,
+            ClipboardReceivedCount: ClipboardHotkeyService?.ReceivedCount ?? 0,
+            ClipboardInvocationCount: ClipboardHotkeyService?.InvocationCount ?? 0,
+            ClipboardDispatchFailureCount: ClipboardHotkeyService?.DispatchFailureCount ?? 0,
+            ClipboardUsesReservedHook: ClipboardHotkeyService?.UsesReservedHook == true,
+            ClipboardRegistrationFailed: !string.IsNullOrWhiteSpace(ClipboardHotkeyService?.LastError));
     }
 
     private static IReadOnlyList<DeskBoxDisplayDiagnostic> GetDisplayDiagnostics()

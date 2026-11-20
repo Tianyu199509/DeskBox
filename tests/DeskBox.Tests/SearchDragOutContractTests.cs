@@ -12,85 +12,133 @@ public sealed class SearchDragOutContractTests
 {
     private const string SearchWindowPath =
         "src/DeskBox/Views/SearchPopupWindow.xaml.cs";
+    private const string OutboundDragPath =
+        "src/DeskBox/Views/SearchPopupWindow.OutboundDrag.cs";
+    private const string ResultsPreviewPath =
+        "src/DeskBox/Views/SearchPopupWindow.ResultsAndPreview.cs";
+    private const string RecDragPath =
+        "src/DeskBox/Controls/Search/RecommendedAppsGridControl.DragAndSelection.cs";
+    private const string RecOverlayPath =
+        "src/DeskBox/Controls/Search/RecommendationFolderOverlayControl.xaml.cs";
 
     [Fact]
-    public void DragStartingHandler_IsSynchronousAndSetsDragUIBeforeReturn()
+    public void DragStartingHandlers_AreSynchronousAndSetDragUIBeforeReturn()
     {
-        string body = ExtractMethodBody(
-            SearchWindowPath,
+        string source = ReadRepositoryFile(SearchWindowPath) + "\n" + ReadRepositoryFile(OutboundDragPath);
+        string resultsHandler = ExtractMethodBody(
+            OutboundDragPath,
             "private void ResultsRow_DragStarting(");
+        string recommendHandler = ExtractMethodBody(
+            OutboundDragPath,
+            "private void RecommendedApp_DragStarting(");
 
-        Assert.Contains(
-            "args.DragUI.SetContentFromDataPackage()",
-            body,
-            StringComparison.Ordinal);
-        Assert.DoesNotContain("await ", body, StringComparison.Ordinal);
-        Assert.DoesNotContain("GetDeferral", body, StringComparison.Ordinal);
-    }
+        foreach (string body in new[] { resultsHandler, recommendHandler })
+        {
+            Assert.Contains("FileItemDragPackage.TryPreparePaths(", body, StringComparison.Ordinal);
+            Assert.Contains("args.DragUI.SetContentFromDataPackage()", body, StringComparison.Ordinal);
+            Assert.DoesNotContain("await ", body, StringComparison.Ordinal);
+            Assert.DoesNotContain("GetDeferral", body, StringComparison.Ordinal);
+        }
 
-    [Fact]
-    public void SearchWindow_HasNoDeferralOrEphemeralAsyncDragHandlerLeft()
-    {
-        string source = ReadRepositoryFile(SearchWindowPath);
-
-        // The ephemeral "handler = async (_, args) =>" pattern is gone; the
-        // wired handler is the named synchronous one.
+        // The ephemeral "handler = async (_, args) =>" pattern stays gone and
+        // no drag-out deferral may return: a deferral re-opens the window
+        // where the platform drag starts mid-handler (0x800710DD).
         Assert.DoesNotContain("DragStarting += handler", source, StringComparison.Ordinal);
-        Assert.Contains(
-            "DragStarting += ResultsRow_DragStarting",
-            source,
-            StringComparison.Ordinal);
-        // No drag-out deferral may return: with a synchronous handler there
-        // is nothing to defer, and a deferral re-opens the window where the
-        // platform drag starts mid-handler.
+        Assert.Contains("DragStarting += ResultsRow_DragStarting", source, StringComparison.Ordinal);
+        Assert.Contains("DragStarting += RecommendedApp_DragStarting", source, StringComparison.Ordinal);
         Assert.DoesNotContain("GetDeferral", source, StringComparison.Ordinal);
     }
 
     [Fact]
     public void StartDragAsyncBoundary_CatchesAndAttributesInsteadOfFailingFast()
     {
-        string body = ExtractMethodBody(
-            SearchWindowPath,
-            "private async Task RunDragOutAsync(");
+        foreach (string declaration in new[]
+                 {
+                     "private async Task RunPlatformDragOutAsync(",
+                     "private async Task RunPlatformRecommendedDragOutAsync(",
+                 })
+        {
+            string body = ExtractMethodBody(OutboundDragPath, declaration);
 
-        // An exception escaping this async boundary fail-fasts the process
-        // through DispatcherQueue (Application.UnhandledException never sees
-        // it) — the catch with an HRESULT fingerprint is the only guard.
-        Assert.Contains("catch (Exception ex)", body, StringComparison.Ordinal);
-        Assert.Contains(
-            "StartDragAsync failed",
-            body,
-            StringComparison.Ordinal);
-        Assert.Contains("ex.HResult", body, StringComparison.Ordinal);
+            // An exception escaping this async boundary fail-fasts the process
+            // through DispatcherQueue (Application.UnhandledException never sees
+            // it) — the catch with an HRESULT fingerprint is the only guard.
+            Assert.Contains(".StartDragAsync(", body, StringComparison.Ordinal);
+            Assert.Contains("catch (Exception ex)", body, StringComparison.Ordinal);
+            Assert.Contains("StartDragAsync failed", body, StringComparison.Ordinal);
+            Assert.Contains("ex.HResult", body, StringComparison.Ordinal);
+            Assert.Contains("restoreOpacity: !shouldAutoHide", body, StringComparison.Ordinal);
+        }
+
         Assert.Contains(
             "App.SafeFireAndForget",
-            ExtractMethodBody(SearchWindowPath, "private void StartDragOut("),
+            ExtractMethodBody(OutboundDragPath, "private void StartDragOut("),
             StringComparison.Ordinal);
     }
 
     [Fact]
-    public void SearchDragOut_SharesTheGridPayloadCoreWithoutOriginStamps()
+    public void SearchDragOut_UsesPlatformDragForNormalRunsAndGhostOnlyWhenElevated()
     {
-        string handlerBody = ExtractMethodBody(
-            SearchWindowPath,
+        string outboundSource = ReadRepositoryFile(OutboundDragPath);
+        string resultsHandler = ExtractMethodBody(
+            OutboundDragPath,
             "private void ResultsRow_DragStarting(");
-        string packageSource = ReadRepositoryFile(
-            "src/DeskBox/Controls/FileItemDragPackage.cs");
+        string elevatedResultRunBody = ExtractMethodBody(
+            OutboundDragPath,
+            "private async Task RunDragOutAsync(");
+        string executeBody = ExtractMethodBody(
+            OutboundDragPath,
+            "private async Task<bool> ExecuteElevatedSearchOutboundDragAsync(");
+        string elevatedBody = ExtractMethodBody(
+            OutboundDragPath,
+            "private async Task<bool> RunElevatedSearchOutboundDragAsync(");
 
-        // One payload pipeline for every file drag host: search calls the
-        // path-driven core (native Shell IDataObject, never a partial
-        // payload) and resolves the advertised effect set through the same
-        // resolver as the grid.
-        Assert.Contains(
-            "FileItemDragPackage.TryPreparePaths(",
-            handlerBody,
-            StringComparison.Ordinal);
+        // Normal runs share the grid's single continuous platform drag and
+        // effect resolver; no mid-gesture Win32 drag loop is started.
+        Assert.DoesNotContain("RunFileOutboundDragLoop(", outboundSource, StringComparison.Ordinal);
         Assert.Contains(
             "FileItemDragPackage.ResolveDragOutAllowedOperations(",
-            handlerBody,
+            resultsHandler,
             StringComparison.Ordinal);
-        // ...while staying unstamped: the widget-only origin markers live in
-        // the WidgetItem overload, never in the shared core.
+        Assert.DoesNotContain(
+            "AllowedOperations = DataPackageOperation.Copy;",
+            resultsHandler,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "DriveMediaInterop.ContainsProtectedInboundCopySource(",
+            resultsHandler,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "FileItemDragPackage.IsProtectedCopyOnlySource(",
+            resultsHandler,
+            StringComparison.Ordinal);
+
+        // Elevated runs keep the pointer-tracked ghost + clipboard bridge.
+        Assert.Contains(
+            "DragDropPermissionService.IsCurrentProcessElevatedCached()",
+            outboundSource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "FileItemDragPackage.IsProtectedCopyOnlySource(",
+            elevatedResultRunBody,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "RunElevatedSearchOutboundDragAsync(",
+            executeBody,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "ElevatedItemDragGhostWindow",
+            elevatedBody,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "ShellClipboardHelper.TrySetFileDropList(",
+            elevatedBody,
+            StringComparison.Ordinal);
+
+        // FileItemDragPackage's path-driven core must remain free of widget
+        // origin markers so search payloads never claim widget ownership.
+        string packageSource = ReadRepositoryFile(
+            "src/DeskBox/Controls/FileItemDragPackage.cs");
         Assert.DoesNotContain(
             "SourceWidgetIdProperty",
             ExtractMethodBody(
@@ -104,55 +152,36 @@ public sealed class SearchDragOutContractTests
     }
 
     [Fact]
-    public void SearchDragOut_AdvertisesTheSameEffectSetAsTheGrid()
+    public void RecommendedAppDragOut_ForcesCopy()
     {
-        // The grid's advertisement is preference-driven and OS-aware (Win10
-        // collapses to one effect to avoid the per-drop picker). Search drags
-        // carry files too and must not fork a second effect policy.
+        string elevatedBody = ExtractMethodBody(
+            OutboundDragPath,
+            "private async Task RunRecommendedDragOutAsync(");
         string handlerBody = ExtractMethodBody(
-            SearchWindowPath,
-            "private void ResultsRow_DragStarting(");
-
-        Assert.DoesNotContain(
-            "AllowedOperations = DataPackageOperation.Copy;",
-            handlerBody,
-            StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void RecommendedAppDragStarting_IsSynchronousCopyOnlyAndSetsDragUIBeforeReturn()
-    {
-        string body = ExtractMethodBody(
-            SearchWindowPath,
+            OutboundDragPath,
             "private void RecommendedApp_DragStarting(");
 
         Assert.Contains(
-            "FileItemDragPackage.TryPreparePaths(",
-            body,
+            "forceCopyOnly: true",
+            elevatedBody,
             StringComparison.Ordinal);
         Assert.Contains(
             "args.Data.RequestedOperation = DataPackageOperation.Copy;",
-            body,
+            handlerBody,
             StringComparison.Ordinal);
-        Assert.Contains(
-            "args.DragUI.SetContentFromDataPackage()",
-            body,
-            StringComparison.Ordinal);
-        Assert.DoesNotContain("await ", body, StringComparison.Ordinal);
-        Assert.DoesNotContain("GetDeferral", body, StringComparison.Ordinal);
     }
 
     [Fact]
     public void RecommendedAndOverlayIcons_HandOffToExternalDragWhenLeavingPopupBounds()
     {
         string recMovedBody = ExtractMethodBody(
-            SearchWindowPath,
+            RecDragPath,
             "private void RecommendedApp_PointerMoved(");
         string overlayMovedBody = ExtractMethodBody(
-            SearchWindowPath,
+            RecOverlayPath,
             "private void OverlayAppCard_PointerMoved(");
         string runBody = ExtractMethodBody(
-            SearchWindowPath,
+            OutboundDragPath,
             "private async Task RunRecommendedDragOutAsync(");
 
         Assert.Contains("IsPointLeavingPopupDragBounds(", recMovedBody, StringComparison.Ordinal);
@@ -178,13 +207,13 @@ public sealed class SearchDragOutContractTests
     public void ResultRowDragAndDisarm_ClearTransientPointerMaskStates()
     {
         string disarmBody = ExtractMethodBody(
-            SearchWindowPath,
+            ResultsPreviewPath,
             "private void DisarmDragOutCandidate(");
         string startBody = ExtractMethodBody(
-            SearchWindowPath,
+            OutboundDragPath,
             "private void StartDragOut(");
         string runBody = ExtractMethodBody(
-            SearchWindowPath,
+            OutboundDragPath,
             "private async Task RunDragOutAsync(");
 
         Assert.Contains("ClearPressedState()", disarmBody, StringComparison.Ordinal);
@@ -232,13 +261,13 @@ public sealed class SearchDragOutContractTests
     public void ExternalDragFade_ReleasesShowStoryboardHoldEndAndAvoidsAutoHideFlash()
     {
         string startFadeBody = ExtractMethodBody(
-            SearchWindowPath,
+            OutboundDragPath,
             "private void StartExternalDragFadeTimer(");
         string runResultDragBody = ExtractMethodBody(
-            SearchWindowPath,
+            OutboundDragPath,
             "private async Task RunDragOutAsync(");
         string runRecDragBody = ExtractMethodBody(
-            SearchWindowPath,
+            OutboundDragPath,
             "private async Task RunRecommendedDragOutAsync(");
         string hidePopupBody = ExtractMethodBody(
             SearchWindowPath,
@@ -259,7 +288,7 @@ public sealed class SearchDragOutContractTests
     public void ClearAllResultRowTransientStates_WalksRealizedVisualChildrenOnly()
     {
         string clearRowsBody = ExtractMethodBody(
-            SearchWindowPath,
+            ResultsPreviewPath,
             "private void ClearAllResultRowTransientStates(");
 
         Assert.Contains("VisualTreeHelper.GetChildrenCount(ResultsRepeater)", clearRowsBody, StringComparison.Ordinal);

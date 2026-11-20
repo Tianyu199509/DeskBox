@@ -1067,6 +1067,11 @@ internal sealed class NativeTrayIconHost : IDisposable
 
     private static unsafe void ApplyMenuTheme(IntPtr ownerHwnd, bool isDarkTheme)
     {
+        if (DeskBox.Services.WindowsCompatibilityService.IsHighContrast)
+        {
+            isDarkTheme = false;
+        }
+
         ResolveUxthemeMenuApi();
         int desired = isDarkTheme ? 1 : 0;
         if (s_fnSetPreferredAppMode != IntPtr.Zero &&
@@ -1092,9 +1097,9 @@ internal sealed class NativeTrayIconHost : IDisposable
         {
             if (s_fnAllowDarkModeForWindow != IntPtr.Zero)
             {
-                _ = ((delegate* unmanaged[Stdcall]<IntPtr, int, int>)s_fnAllowDarkModeForWindow)(
+                _ = ((delegate* unmanaged[Stdcall]<IntPtr, byte, byte>)s_fnAllowDarkModeForWindow)(
                     ownerHwnd,
-                    isDarkTheme ? 1 : 0);
+                    isDarkTheme ? (byte)1 : (byte)0);
             }
 
             _ = SetWindowTheme(

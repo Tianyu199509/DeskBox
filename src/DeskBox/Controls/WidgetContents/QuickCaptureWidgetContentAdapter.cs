@@ -75,7 +75,7 @@ public sealed class QuickCaptureWidgetContentAdapter :
     }
 
     private bool ShouldKeepCollapsedViewWarm =>
-        _settingsService.Settings.Performance.KeepCapsuleContentWarm;
+        PerformanceSettingsPolicy.ResolveEffectiveKeepCapsuleContentWarm(_settingsService.Settings);
 
     public QuickCaptureWidgetViewModel ViewModel { get; }
 

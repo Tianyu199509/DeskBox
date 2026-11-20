@@ -32,7 +32,41 @@ internal static class ResilientJsonStore
         TimeSpan.FromMilliseconds(150)
     ];
 
+    private static readonly TimeSpan[] s_readRetryDelays =
+    [
+        TimeSpan.FromMilliseconds(25),
+        TimeSpan.FromMilliseconds(75),
+        TimeSpan.FromMilliseconds(150)
+    ];
+
     internal static string GetBackupPath(string storePath) => $"{storePath}.bak";
+
+    internal static bool TryReadSchemaVersion(string json, out int schemaVersion)
+    {
+        schemaVersion = 0;
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object &&
+                doc.RootElement.TryGetProperty("schemaVersion", out System.Text.Json.JsonElement prop) &&
+                prop.ValueKind == System.Text.Json.JsonValueKind.Number &&
+                prop.TryGetInt32(out int parsed))
+            {
+                schemaVersion = parsed;
+                return true;
+            }
+        }
+        catch
+        {
+        }
+
+        return false;
+    }
 
     public static async Task<T> LoadAsync<T>(
         string storePath,
@@ -48,7 +82,21 @@ internal static class ResilientJsonStore
         return result.Value;
     }
 
-    public static async Task<ResilientJsonLoadResult<T>> LoadWithResultAsync<T>(
+    public static async Task<T> LoadUtf8Async<T>(
+        string storePath,
+        Func<ReadOnlyMemory<byte>, T> deserializeUtf8,
+        Func<T> createDefault,
+        string logName)
+    {
+        ResilientJsonLoadResult<T> result = await LoadUtf8WithResultAsync(
+            storePath,
+            deserializeUtf8,
+            createDefault,
+            logName);
+        return result.Value;
+    }
+
+    public static Task<ResilientJsonLoadResult<T>> LoadWithResultAsync<T>(
         string storePath,
         Func<string, T> deserialize,
         Func<T> createDefault,
@@ -58,6 +106,47 @@ internal static class ResilientJsonStore
         ArgumentNullException.ThrowIfNull(deserialize);
         ArgumentNullException.ThrowIfNull(createDefault);
 
+        return LoadCoreWithResultAsync(
+            storePath,
+            ReadAllTextSharedWithRetryAsync,
+            deserialize,
+            RestorePrimaryAsync,
+            createDefault,
+            logName);
+    }
+
+    public static Task<ResilientJsonLoadResult<T>> LoadUtf8WithResultAsync<T>(
+        string storePath,
+        Func<ReadOnlyMemory<byte>, T> deserializeUtf8,
+        Func<T> createDefault,
+        string logName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(storePath);
+        ArgumentNullException.ThrowIfNull(deserializeUtf8);
+        ArgumentNullException.ThrowIfNull(createDefault);
+
+        return LoadCoreWithResultAsync<T, byte[]>(
+            storePath,
+            ReadAllBytesSharedWithRetryAsync,
+            bytes => deserializeUtf8(StripUtf8Bom(bytes)),
+            static (path, bytes) => RestorePrimaryBytesAsync(path, bytes),
+            createDefault,
+            logName);
+    }
+
+    private static ReadOnlyMemory<byte> StripUtf8Bom(byte[] bytes) =>
+        bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF
+            ? bytes.AsMemory(3)
+            : bytes;
+
+    private static async Task<ResilientJsonLoadResult<T>> LoadCoreWithResultAsync<T, TPayload>(
+        string storePath,
+        Func<string, Task<TPayload>> readPayloadAsync,
+        Func<TPayload, T> deserialize,
+        Func<string, TPayload, Task> restorePrimaryAsync,
+        Func<T> createDefault,
+        string logName)
+    {
         bool primaryFailed = false;
         bool primaryUnreadable = false;
         if (File.Exists(storePath))
@@ -65,7 +154,7 @@ internal static class ResilientJsonStore
             try
             {
                 return new ResilientJsonLoadResult<T>(
-                    deserialize(await File.ReadAllTextAsync(storePath)),
+                    deserialize(await readPayloadAsync(storePath)),
                     ResilientJsonLoadSource.Primary);
             }
             catch (Exception ex)
@@ -103,8 +192,8 @@ internal static class ResilientJsonStore
         T recovered;
         try
         {
-            string backupJson = await File.ReadAllTextAsync(backupPath);
-            recovered = deserialize(backupJson);
+            TPayload backupPayload = await readPayloadAsync(backupPath);
+            recovered = deserialize(backupPayload);
 
             if (primaryUnreadable)
             {
@@ -119,7 +208,7 @@ internal static class ResilientJsonStore
             {
                 try
                 {
-                    await RestorePrimaryAsync(storePath, backupJson);
+                    await restorePrimaryAsync(storePath, backupPayload);
                     App.Log($"[{logName}] Restored store from '{backupPath}'.");
                 }
                 catch (Exception restoreException)
@@ -158,6 +247,80 @@ internal static class ResilientJsonStore
         return new ResilientJsonLoadResult<T>(
             recovered,
             ResilientJsonLoadSource.Backup);
+    }
+
+    private static async Task<string> ReadAllTextSharedWithRetryAsync(string path)
+    {
+        for (int retryIndex = 0; ; retryIndex++)
+        {
+            try
+            {
+                await using var stream = new FileStream(
+                    path,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.ReadWrite | FileShare.Delete,
+                    bufferSize: 4096,
+                    FileOptions.Asynchronous | FileOptions.SequentialScan);
+                using var reader = new StreamReader(stream, System.Text.Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+                return await reader.ReadToEndAsync();
+            }
+            catch (IOException ex) when (IsTransientReplaceConflict(ex) && retryIndex < s_readRetryDelays.Length)
+            {
+                await Task.Delay(s_readRetryDelays[retryIndex]);
+            }
+        }
+    }
+
+    private static async Task<byte[]> ReadAllBytesSharedWithRetryAsync(string path)
+    {
+        for (int retryIndex = 0; ; retryIndex++)
+        {
+            try
+            {
+                await using var stream = new FileStream(
+                    path,
+                    FileMode.Open,
+                    FileAccess.Read,
+                    FileShare.ReadWrite | FileShare.Delete,
+                    bufferSize: 4096,
+                    FileOptions.Asynchronous | FileOptions.SequentialScan);
+                long length = stream.Length;
+                if (length == 0)
+                {
+                    return [];
+                }
+
+                if (length > int.MaxValue)
+                {
+                    throw new IOException($"Store file '{path}' exceeds maximum supported byte length.");
+                }
+
+                byte[] bytes = GC.AllocateUninitializedArray<byte>((int)length);
+                int offset = 0;
+                while (offset < bytes.Length)
+                {
+                    int read = await stream.ReadAsync(bytes.AsMemory(offset, bytes.Length - offset));
+                    if (read == 0)
+                    {
+                        if (offset == bytes.Length)
+                        {
+                            break;
+                        }
+
+                        return bytes.AsSpan(0, offset).ToArray();
+                    }
+
+                    offset += read;
+                }
+
+                return bytes;
+            }
+            catch (IOException ex) when (IsTransientReplaceConflict(ex) && retryIndex < s_readRetryDelays.Length)
+            {
+                await Task.Delay(s_readRetryDelays[retryIndex]);
+            }
+        }
     }
 
     public static Task SaveAsync(string storePath, string json)
@@ -443,7 +606,7 @@ internal static class ResilientJsonStore
 
     private static void QuarantineCorruptFile(string storePath, string logName)
     {
-        string corruptPath = $"{storePath}.corrupt-{DateTime.UtcNow:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}";
+        string corruptPath = FormattableString.Invariant($"{storePath}.corrupt-{DateTime.UtcNow:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}");
         try
         {
             File.Move(storePath, corruptPath);
@@ -491,13 +654,16 @@ internal static class ResilientJsonStore
         }
     }
 
-    private static async Task RestorePrimaryAsync(string storePath, string json)
+    private static Task RestorePrimaryAsync(string storePath, string json) =>
+        RestorePrimaryBytesAsync(storePath, System.Text.Encoding.UTF8.GetBytes(json));
+
+    private static async Task RestorePrimaryBytesAsync(string storePath, ReadOnlyMemory<byte> utf8Bytes)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(storePath)!);
         string tempPath = $"{storePath}.{Guid.NewGuid():N}.recovery.tmp";
         try
         {
-            await File.WriteAllTextAsync(tempPath, json);
+            await File.WriteAllBytesAsync(tempPath, utf8Bytes);
             File.Move(tempPath, storePath, overwrite: true);
         }
         finally

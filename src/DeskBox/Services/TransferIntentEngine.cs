@@ -114,11 +114,12 @@ internal static class TransferIntentEngine
             // Domain B (intra-box, Stack Popover, cross-box): internal DeskBox
             // drags always carry full file paths and are never artificially
             // locked to Copy by ManagedDragOutAction == Copy or Win10 single-bit
-            // AllowedOperations. Only OS/shared roots (Public Desktop, Start Menu,
+            // AllowedOperations. Only OS/installation roots (Start Menu,
             // Program Files, Windows) forbid Move.
             sourceCanCopy = true;
             sourceCanMove = !effectiveForceCopy &&
-                !request.SourceOrigin.IsMoveProtectedSystemOrSharedSource;
+                !request.SourceOrigin.IsMoveProtectedSystemOrSharedSource &&
+                !request.SourceOrigin.HasAppExecutionAliasSource;
         }
         else
         {
@@ -131,6 +132,7 @@ internal static class TransferIntentEngine
                  (request.AllowedEffects & NativeDropEffectPolicy.Link) != 0);
             sourceCanMove = !effectiveForceCopy &&
                 !request.SourceOrigin.IsMoveProtectedSystemOrSharedSource &&
+                !request.SourceOrigin.HasAppExecutionAliasSource &&
                 (request.NoOperationMetadata ||
                  (request.AllowedEffects & NativeDropEffectPolicy.Move) != 0);
         }
@@ -155,7 +157,8 @@ internal static class TransferIntentEngine
             sourceCanMove,
             request.CanLink,
             protectDefaultMoveAsCopy,
-            prefersShortcutByDefault);
+            prefersShortcutByDefault,
+            request.SourceOrigin.HasAppExecutionAliasSource);
 
         uint feedbackEffect = MapIntentToWireEffect(
             intent,
@@ -228,7 +231,7 @@ internal static class TransferIntentEngine
         in TransferIntentRequest request)
     {
         // Passing file paths to an application shortcut never relocates or
-        // deletes source files, so Public Desktop / USB / Shift constraints do
+        // deletes source files, so protected-source / USB / Shift constraints do
         // not block launch feedback.
         if (!request.HasFileData || request.HasShellApplicationOrNamespaceData)
         {
@@ -307,8 +310,24 @@ internal static class TransferIntentEngine
         bool canMove,
         bool canLink,
         bool protectDefaultMoveAsCopy,
-        bool prefersShortcutByDefault = false)
+        bool prefersShortcutByDefault = false,
+        bool hasAppExecutionAliasSource = false)
     {
+        if (hasAppExecutionAliasSource)
+        {
+            if (altDown || (controlDown && shiftDown))
+            {
+                return (canLink || canCopy) ? FileDropIntent.Shortcut : FileDropIntent.None;
+            }
+
+            if (shiftDown)
+            {
+                return FileDropIntent.None;
+            }
+
+            return (canLink || canCopy) ? FileDropIntent.Shortcut : FileDropIntent.None;
+        }
+
         if (forceCopy)
         {
             return canCopy ? FileDropIntent.Copy : FileDropIntent.None;

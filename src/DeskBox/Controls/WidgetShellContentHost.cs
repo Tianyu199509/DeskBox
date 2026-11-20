@@ -17,6 +17,7 @@ public sealed class WidgetShellContentHost
     private readonly Func<IWidgetContent, bool>? _retainContent;
     private readonly Func<bool>? _hibernateContentView;
     private readonly Func<bool>? _ensureContentViewAttached;
+    private readonly Action<bool>? _setHostWindowVisible;
     private readonly System.Runtime.CompilerServices.ConditionalWeakTable<
         IWidgetContent,
         object> _disposedContents = new();
@@ -53,6 +54,8 @@ public sealed class WidgetShellContentHost
         _rollbackTransition = shell.RollbackContentTransition;
         _hibernateContentView = shell.HibernateHostedContentView;
         _ensureContentViewAttached = shell.EnsureHostedContentViewAttached;
+        _setHostWindowVisible = visible => shell.IsHostWindowVisible = visible;
+        shell.IsHostWindowVisible = _isWindowVisible;
         _retainContent = retainContent;
     }
 
@@ -321,6 +324,7 @@ public sealed class WidgetShellContentHost
         }
 
         _isWindowVisible = visible;
+        _setHostWindowVisible?.Invoke(visible);
         CurrentContent?.OnWindowVisibilityChanged(visible);
     }
 

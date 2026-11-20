@@ -1,6 +1,4 @@
-#if DESKBOX_AOT_SMOKE_HARNESS || DESKBOX_STORE
 using CommunityToolkit.WinUI.Controls;
-#endif
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
@@ -277,6 +275,9 @@ public static class Localized
                 case TextBlock textBlock:
                     textBlock.Text = text;
                     break;
+                case SelectorBarItem selectorBarItem:
+                    selectorBarItem.Text = text;
+                    break;
                 case ContentControl contentControl:
                     contentControl.Content = text;
                     break;
@@ -323,34 +324,16 @@ public static class Localized
         }
     }
 
-    private static Func<DependencyObject, string, bool>? s_externalTrySetHeader;
-    private static Func<DependencyObject, string, bool>? s_externalTrySetDescription;
-
-    internal static void RegisterExternalHeaderDescriptionAdapter(
-        Func<DependencyObject, string, bool> trySetHeader,
-        Func<DependencyObject, string, bool> trySetDescription)
-    {
-        s_externalTrySetHeader = trySetHeader;
-        s_externalTrySetDescription = trySetDescription;
-    }
-
     private static void SetLocalizedHeader(DependencyObject target, string value)
     {
-        if (s_externalTrySetHeader?.Invoke(target, value) == true)
-        {
-            return;
-        }
-
         switch (target)
         {
-#if DESKBOX_AOT_SMOKE_HARNESS || DESKBOX_STORE
             case SettingsCard settingsCard:
                 settingsCard.Header = InfoTip.TryCreateHeaderContent(settingsCard, value) ?? value;
                 break;
             case SettingsExpander settingsExpander:
                 settingsExpander.Header = InfoTip.TryCreateHeaderContent(settingsExpander, value) ?? value;
                 break;
-#endif
             case TextBox textBox:
                 textBox.Header = value;
                 break;
@@ -366,21 +349,14 @@ public static class Localized
 
     private static void SetLocalizedDescription(DependencyObject target, string value)
     {
-        if (s_externalTrySetDescription?.Invoke(target, value) == true)
-        {
-            return;
-        }
-
         switch (target)
         {
-#if DESKBOX_AOT_SMOKE_HARNESS || DESKBOX_STORE
             case SettingsCard settingsCard:
                 settingsCard.Description = value;
                 break;
             case SettingsExpander settingsExpander:
                 settingsExpander.Description = value;
                 break;
-#endif
             case InfoBar infoBar:
                 infoBar.Message = value;
                 break;

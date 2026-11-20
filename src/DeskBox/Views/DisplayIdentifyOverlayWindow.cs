@@ -83,6 +83,7 @@ internal sealed class DisplayIdentifyOverlayWindow
         int extendedStyle = Win32Helper.GetWindowLong(_hWnd, Win32Helper.GWL_EXSTYLE);
         extendedStyle |= Win32Helper.WS_EX_TOOLWINDOW |
                          Win32Helper.WS_EX_NOACTIVATE |
+                         Win32Helper.WS_EX_TRANSPARENT |
                          Win32Helper.WS_EX_LAYERED |
                          Win32Helper.WS_EX_TOPMOST;
         _ = Win32Helper.SetWindowLongPtr(
@@ -95,6 +96,25 @@ internal sealed class DisplayIdentifyOverlayWindow
                    Win32Helper.WS_DLGFRAME |
                    Win32Helper.WS_THICKFRAME);
         _ = Win32Helper.SetWindowLongPtr(_hWnd, Win32Helper.GWL_STYLE, new IntPtr(style));
+        _ = Win32Helper.SetWindowPos(
+            _hWnd,
+            IntPtr.Zero,
+            0,
+            0,
+            0,
+            0,
+            Win32Helper.SWP_NOMOVE |
+            Win32Helper.SWP_NOSIZE |
+            Win32Helper.SWP_NOZORDER |
+            Win32Helper.SWP_NOACTIVATE |
+            Win32Helper.SWP_FRAMECHANGED);
+        // WS_EX_LAYERED HWNDs stay invisible on Win10 until SetLayeredWindowAttributes
+        // initializes the alpha value prior to Show().
+        _ = Win32Helper.SetLayeredWindowAttributes(
+            _hWnd,
+            0,
+            255,
+            Win32Helper.LWA_ALPHA);
 
         // A monitor reconfiguration (primary switch, hot-plug) between the
         // style surgery and the AppWindow positioning leaves the target

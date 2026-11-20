@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -10,7 +11,12 @@ namespace DeskBox.Tests;
 public sealed class EverythingIntegrationTests
 {
     [Theory]
-    [InlineData("budget report", false, "\"budget report\"")]
+    [InlineData("budget report", false, "\"budget\" \"report\"")]
+    [InlineData("\"budget report\" 2026", false, "\"budget report\" \"2026\"")]
+    [InlineData("\"C:\\Users\\alice\\Desktop\\app用户评价-1.5.3.4.rp\"", false, "\"C:\\Users\\alice\\Desktop\\app用户评价-1.5.3.4.rp\"")]
+    [InlineData("a|b !draft <v2>", false, "\"a|b\" \"!draft\" \"<v2>\"")]
+    [InlineData("app用户评价\u30001.5.3.4", false, "\"app用户评价\" \"1.5.3.4\"")]
+    [InlineData("\"\"   \"  \"", false, "")]
     [InlineData("ext:pdf budget", true, "ext:pdf budget")]
     [InlineData("  notes  ", false, "\"notes\"")]
     public void ProviderQuery_IsLiteralUnlessAdvancedSyntaxIsEnabled(
@@ -26,12 +32,31 @@ public sealed class EverythingIntegrationTests
     [InlineData("report.txt", "report", 90)]
     [InlineData("report-final.txt", "report", 80)]
     [InlineData("annual-report.txt", "report", 50)]
+    [InlineData("app用户评价-1.5.3.4.rp", "app 1.5.3.4", 48)]
+    [InlineData("app用户评价-1.5.3.4.rp", "用户评价 rp", 45)]
+    [InlineData("app用户评价-1.5.3.4.rp", "Desktop app用户评价", 25)]
+    [InlineData("readme.txt", "Desktop app用户评价", 10)]
     public void ProviderResultRelevance_PreservesDeskBoxRanking(
         string fileName,
         string query,
         double expected)
     {
         Assert.Equal(expected, EverythingSearchService.ComputeRelevance(fileName, query));
+    }
+
+    [Fact]
+    public void QuotedPathQuery_ScoresExactFullPathAndSuppressesQuickCreateNoise()
+    {
+        const string quotedPath = "\"C:\\Users\\alice\\Desktop\\app用户评价-1.5.3.4.rp\"";
+        const string fullPath = @"C:\Users\alice\Desktop\app用户评价-1.5.3.4.rp";
+
+        Assert.True(SearchQuerySyntaxParser.LooksLikeFileSystemPath(quotedPath));
+        Assert.Equal(
+            100,
+            EverythingSearchService.ComputeRelevance("app用户评价-1.5.3.4.rp", quotedPath, fullPath));
+        Assert.Equal(
+            10,
+            EverythingSearchService.ComputeRelevance("other.txt", quotedPath, @"C:\Users\alice\Desktop\other.txt"));
     }
 
     [Fact]
@@ -254,7 +279,151 @@ public sealed class EverythingIntegrationTests
         bw.Write((ushort)0);
     }
 
-    private static byte[]? s_activeMockReply;
+    [Fact]
+    public void QueryNative_SupplementsFirstPageWithPrefixAndRecentHitsWithoutBreakingNextOffset()
+    {
+        string customClass = "DeskBoxEverythingMock_" + Guid.NewGuid().ToString("N");
+        long olderTime = new DateTimeOffset(2026, 5, 1, 8, 0, 0, TimeSpan.Zero).ToFileTime();
+        long recentTime = new DateTimeOffset(2026, 11, 11, 14, 0, 0, TimeSpan.Zero).ToFileTime();
+        var observedRequests = new List<MockQuery2Request>();
+
+        byte[] Respond(MockQuery2Request req)
+        {
+            lock (observedRequests)
+            {
+                observedRequests.Add(req);
+            }
+
+            if (req.SearchText == "\"app*\"" && req.SortType == EverythingNativeMethods.SortNameAscending)
+            {
+                return BuildSyntheticList2Buffer(
+                    totalItems: 2,
+                    ("app.exe", @"C:\Tools", IsFolder: false, Size: 2048L, DateModified: olderTime),
+                    ("app用户评价-1.5.3.4.rp", @"C:\Users\alice\Desktop", IsFolder: false, Size: 16384L, DateModified: recentTime));
+            }
+
+            if (req.SearchText == "\"app\"" && req.SortType == EverythingNativeMethods.SortDateModifiedDescending)
+            {
+                return BuildSyntheticList2Buffer(
+                    totalItems: 1200,
+                    ("app用户评价-1.5.3.4.rp", @"C:\Users\alice\Desktop", IsFolder: false, Size: 16384L, DateModified: recentTime),
+                    ("my-app-spec.docx", @"C:\Users\alice\Documents", IsFolder: false, Size: 8192L, DateModified: recentTime));
+            }
+
+            if (req.Offset == 2)
+            {
+                return BuildSyntheticList2Buffer(
+                    totalItems: 1200,
+                    ("003_archive_app.zip", @"D:\Archive", IsFolder: false, Size: 4096L, DateModified: olderTime),
+                    ("004_backup_app.zip", @"D:\Archive", IsFolder: false, Size: 4096L, DateModified: olderTime));
+            }
+
+            return BuildSyntheticList2Buffer(
+                totalItems: 1200,
+                ("001_app_cache.tmp", @"C:\Users\alice\AppData\Local\Temp", IsFolder: false, Size: 512L, DateModified: olderTime),
+                ("002_apple.png", @"C:\Assets", IsFolder: false, Size: 1024L, DateModified: olderTime));
+        }
+
+        using var ready = new ManualResetEventSlim(false);
+        using var stop = new ManualResetEventSlim(false);
+        Exception? serverError = null;
+        var serverThread = new Thread(() =>
+        {
+            try
+            {
+                RunMockEverythingServer(customClass, Respond, ready, stop);
+            }
+            catch (Exception ex)
+            {
+                serverError = ex;
+                ready.Set();
+            }
+        })
+        {
+            IsBackground = true,
+            Name = "MockEverythingSupplementalIpcServer",
+        };
+        serverThread.SetApartmentState(ApartmentState.STA);
+        serverThread.Start();
+
+        try
+        {
+            Assert.True(ready.Wait(TimeSpan.FromSeconds(5)));
+            Assert.Null(serverError);
+
+            SearchFileQueryPage firstPage = EverythingSearchService.QueryNative(
+                providerQuery: "\"app\"",
+                rankingQuery: "app",
+                resultOffset: 0,
+                resultCount: 2,
+                CancellationToken.None,
+                advancedSyntax: false,
+                ipcWindowClass: customClass);
+
+            Assert.Equal(1200, firstPage.TotalMatchedCount);
+            Assert.Equal(2, firstPage.NextOffset);
+            Assert.Equal(5, firstPage.Items.Count);
+            Assert.Single(firstPage.Items, i => i.Title == "app用户评价-1.5.3.4.rp");
+            Assert.Contains(firstPage.Items, i => i.Title == "my-app-spec.docx");
+
+            var ranked = SearchResultRanker.MergeAndRank(firstPage.Items, "app", maxResults: 10);
+            Assert.Equal("app", Path.GetFileNameWithoutExtension(ranked[0].Title));
+            Assert.Equal("app用户评价-1.5.3.4.rp", ranked[1].Title);
+
+            lock (observedRequests)
+            {
+                Assert.Equal(3, observedRequests.Count);
+                Assert.Equal(0u, observedRequests[0].SearchFlags);
+                observedRequests.Clear();
+            }
+
+            // Subsequent LoadMore pages issue only the primary alphabetical slice.
+            SearchFileQueryPage secondPage = EverythingSearchService.QueryNative(
+                providerQuery: "\"app\"",
+                rankingQuery: "app",
+                resultOffset: firstPage.NextOffset,
+                resultCount: 2,
+                CancellationToken.None,
+                advancedSyntax: false,
+                ipcWindowClass: customClass);
+            Assert.Equal(4, secondPage.NextOffset);
+            lock (observedRequests)
+            {
+                MockQuery2Request loadMoreReq = Assert.Single(observedRequests);
+                Assert.Equal(2u, loadMoreReq.Offset);
+                Assert.Equal(EverythingNativeMethods.SortNameAscending, loadMoreReq.SortType);
+                observedRequests.Clear();
+            }
+
+            // Path queries enable SearchFlagMatchPath when advanced syntax is disabled.
+            _ = EverythingSearchService.QueryNative(
+                providerQuery: "\"C:\\Program\" \"Files\\App\"",
+                rankingQuery: @"C:\Program Files\App",
+                resultOffset: 0,
+                resultCount: 10,
+                CancellationToken.None,
+                advancedSyntax: false,
+                ipcWindowClass: customClass);
+            lock (observedRequests)
+            {
+                Assert.Equal(EverythingNativeMethods.SearchFlagMatchPath, observedRequests[0].SearchFlags);
+            }
+        }
+        finally
+        {
+            stop.Set();
+            _ = serverThread.Join(TimeSpan.FromSeconds(5));
+        }
+    }
+
+    private readonly record struct MockQuery2Request(
+        uint SearchFlags,
+        uint Offset,
+        uint MaxResults,
+        uint SortType,
+        string SearchText);
+
+    private static readonly ConcurrentDictionary<nint, Func<MockQuery2Request, byte[]>> s_mockResponders = new();
 
     private delegate nint MockWndProcDelegate(nint hwnd, uint msg, nuint wParam, nint lParam);
 
@@ -264,9 +433,15 @@ public sealed class EverythingIntegrationTests
         string className,
         byte[] replyPayload,
         ManualResetEventSlim ready,
+        ManualResetEventSlim stop) =>
+        RunMockEverythingServer(className, _ => replyPayload, ready, stop);
+
+    private static void RunMockEverythingServer(
+        string className,
+        Func<MockQuery2Request, byte[]> responder,
+        ManualResetEventSlim ready,
         ManualResetEventSlim stop)
     {
-        s_activeMockReply = replyPayload;
         nint hInst = MockGetModuleHandle(null);
         nint classNamePtr = Marshal.StringToHGlobalUni(className);
         try
@@ -286,6 +461,7 @@ public sealed class EverythingIntegrationTests
         }
 
         nint hwnd = MockCreateWindowEx(0, className, string.Empty, 0x80000000u, 0, 0, 0, 0, 0, 0, hInst, 0);
+        s_mockResponders[hwnd] = responder;
         try
         {
             ready.Set();
@@ -302,6 +478,7 @@ public sealed class EverythingIntegrationTests
         }
         finally
         {
+            s_mockResponders.TryRemove(hwnd, out _);
             if (hwnd != 0)
             {
                 _ = MockDestroyWindow(hwnd);
@@ -327,10 +504,28 @@ public sealed class EverythingIntegrationTests
         if (msg == 0x004A && lParam != 0) // WM_COPYDATA
         {
             var cds = Marshal.PtrToStructure<EverythingNativeMethods.CopyDataStruct>(lParam);
-            if (cds.dwData == 18 && cds.cbData >= 28 && cds.lpData != 0 && s_activeMockReply is { } payload)
+            if (cds.dwData == 18 &&
+                cds.cbData >= 28 &&
+                cds.lpData != 0 &&
+                s_mockResponders.TryGetValue(hwnd, out var responder))
             {
                 uint replyHwnd = (uint)Marshal.ReadInt32(cds.lpData, 0);
                 uint replyToken = (uint)Marshal.ReadInt32(cds.lpData, 4);
+                uint searchFlags = (uint)Marshal.ReadInt32(cds.lpData, 8);
+                uint offset = (uint)Marshal.ReadInt32(cds.lpData, 12);
+                uint maxResults = (uint)Marshal.ReadInt32(cds.lpData, 16);
+                uint sortType = (uint)Marshal.ReadInt32(cds.lpData, 24);
+                int textByteLen = Math.Max(0, (int)cds.cbData - 28 - sizeof(char));
+                string searchText = textByteLen > 0
+                    ? Marshal.PtrToStringUni(cds.lpData + 28, textByteLen / sizeof(char))
+                    : string.Empty;
+
+                byte[] payload = responder(new MockQuery2Request(
+                    searchFlags,
+                    offset,
+                    maxResults,
+                    sortType,
+                    searchText));
                 nint replyPtr = Marshal.AllocHGlobal(payload.Length);
                 nint replyCdsPtr = Marshal.AllocHGlobal(Marshal.SizeOf<EverythingNativeMethods.CopyDataStruct>());
                 try

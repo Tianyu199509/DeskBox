@@ -52,7 +52,7 @@ public sealed partial class SettingsWindow
     private IReadOnlyList<SettingsOption>? _capsuleEntryOptions;
     private MaintenanceSubPageKind _activeMaintenanceSubPage;
     private bool _isSyncingMaintenanceEntries;
-    private string? _activeWidgetGroupId;
+    private bool _isAboutDiagnosticsSubPageOpen;
     private List<string>? _navigationTagOrder;
     private readonly HashSet<InfoBar> _pinnedNoticeInfoBars = [];
 
@@ -155,6 +155,14 @@ public sealed partial class SettingsWindow
         if (string.Equals(invokedTag, "Maintenance", StringComparison.Ordinal) &&
             string.Equals(_currentSettingsSection, "Maintenance", StringComparison.Ordinal) &&
             TryCloseMaintenanceSubPage())
+        {
+            CloseTransientNavigationOverlayIfNeeded();
+            return;
+        }
+
+        if (string.Equals(invokedTag, "About", StringComparison.Ordinal) &&
+            string.Equals(_currentSettingsSection, "About", StringComparison.Ordinal) &&
+            TryCloseAboutDiagnosticsSubPage())
         {
             CloseTransientNavigationOverlayIfNeeded();
             return;
@@ -394,35 +402,113 @@ public sealed partial class SettingsWindow
                 return;
             }
 
-            // Resolve only after navigation has created the target section.
-            // Expander items may not yet be part of the visual tree.
+            if (!section.IsLoaded || section.XamlRoot is null)
+            {
+                RoutedEventHandler? onLoaded = null;
+                onLoaded = (_, _) =>
+                {
+                    section.Loaded -= onLoaded;
+                    if (_isClosed || navigationGeneration != _settingsNavigationGeneration)
+                    {
+                        return;
+                    }
+
+                    ResolveAndScrollToSettingsSearchTarget(
+                        section,
+                        targetSectionTag,
+                        targetHeaderKey,
+                        navigationGeneration);
+                };
+                section.Loaded += onLoaded;
+                return;
+            }
+
+            ResolveAndScrollToSettingsSearchTarget(
+                section,
+                targetSectionTag,
+                targetHeaderKey,
+                navigationGeneration);
+        });
+    }
+
+    private void ResolveAndScrollToSettingsSearchTarget(
+        FrameworkElement section,
+        string targetSectionTag,
+        string targetHeaderKey,
+        int navigationGeneration)
+    {
+        section.UpdateLayout();
+        FrameworkElement? target = FindSettingsSearchTargetWithLocation(
+            section,
+            targetHeaderKey,
+            [],
+            out SettingsExpander? owningExpander,
+            out int expanderItemIndex);
+        if (target is null)
+        {
+            return;
+        }
+
+        RevealContainingSettingsSubPage(targetSectionTag, target);
+        ExpandSettingsSearchTargetAncestors(target);
+        section.UpdateLayout();
+
+        if (owningExpander is not null)
+        {
+            owningExpander.IsExpanded = true;
+            owningExpander.StartBringIntoView(new BringIntoViewOptions
+            {
+                AnimationDesired = false,
+                VerticalAlignmentRatio = 0.12
+            });
             section.UpdateLayout();
-            FrameworkElement? target = FindSettingsSearchTarget(section, targetHeaderKey, []);
-            if (target is null)
+            RealizeSettingsExpanderItem(owningExpander, expanderItemIndex);
+            section.UpdateLayout();
+        }
+
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            if (_isClosed || navigationGeneration != _settingsNavigationGeneration || section.XamlRoot is null)
             {
                 return;
             }
-            RevealContainingSettingsSubPage(targetSectionTag, target);
-            ExpandSettingsSearchTargetAncestors(target);
-            section.UpdateLayout();
-            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
-            {
-                if (_isClosed || navigationGeneration != _settingsNavigationGeneration || section.XamlRoot is null)
-                {
-                    return;
-                }
 
-                section.UpdateLayout();
-                FrameworkElement effectiveTarget = ResolveVisibleSettingsSearchTarget(target, section);
-                effectiveTarget.StartBringIntoView(new BringIntoViewOptions
-                {
-                    AnimationDesired = WindowsCompatibilityService.ShouldAnimate,
-                    VerticalAlignmentRatio = 0.18
-                });
-                HighlightSettingsSearchTarget(effectiveTarget);
-                FocusSettingsSearchTarget(effectiveTarget);
+            if (owningExpander is not null)
+            {
+                RealizeSettingsExpanderItem(owningExpander, expanderItemIndex);
+            }
+
+            section.UpdateLayout();
+            FrameworkElement effectiveTarget = ResolveVisibleSettingsSearchTarget(target, section);
+            effectiveTarget.StartBringIntoView(new BringIntoViewOptions
+            {
+                AnimationDesired = WindowsCompatibilityService.ShouldAnimate,
+                VerticalAlignmentRatio = 0.18
             });
+            HighlightSettingsSearchTarget(effectiveTarget);
+            FocusSettingsSearchTarget(effectiveTarget);
         });
+    }
+
+    private static void RealizeSettingsExpanderItem(SettingsExpander expander, int itemIndex)
+    {
+        if (itemIndex < 0 || itemIndex >= expander.Items.Count)
+        {
+            return;
+        }
+
+        foreach (Microsoft.UI.Xaml.Controls.ItemsRepeater repeater in
+                 FindDescendants<Microsoft.UI.Xaml.Controls.ItemsRepeater>(expander))
+        {
+            try
+            {
+                _ = repeater.GetOrCreateElement(itemIndex);
+                return;
+            }
+            catch
+            {
+            }
+        }
     }
 
     private static FrameworkElement ResolveVisibleSettingsSearchTarget(
@@ -574,7 +660,11 @@ public sealed partial class SettingsWindow
             if (accentBrush is not null)
             {
                 targetControl.BorderBrush = accentBrush;
-                targetControl.BorderThickness = new Thickness(2);
+                Thickness existing = targetControl.BorderThickness;
+                if (existing.Left <= 0 && existing.Top <= 0 && existing.Right <= 0 && existing.Bottom <= 0)
+                {
+                    targetControl.BorderThickness = new Thickness(1);
+                }
             }
         }
         else
@@ -760,12 +850,6 @@ public sealed partial class SettingsWindow
             return true;
         }
 
-        if (string.Equals(_currentSettingsSection, "WidgetGroups", StringComparison.Ordinal) &&
-            TryCloseWidgetGroupDetailSubPage())
-        {
-            return true;
-        }
-
         if (string.Equals(_currentSettingsSection, "AppearanceDetail", StringComparison.Ordinal) &&
             _settingsSectionElements.TryGetValue("AppearanceDetail", out FrameworkElement? detailEl) &&
             detailEl is FileWidgetSettingsSection detailSection &&
@@ -776,6 +860,12 @@ public sealed partial class SettingsWindow
 
         if (string.Equals(_currentSettingsSection, "Maintenance", StringComparison.Ordinal) &&
             TryCloseMaintenanceSubPage())
+        {
+            return true;
+        }
+
+        if (string.Equals(_currentSettingsSection, "About", StringComparison.Ordinal) &&
+            TryCloseAboutDiagnosticsSubPage())
         {
             return true;
         }
@@ -866,7 +956,14 @@ public sealed partial class SettingsWindow
                 string rawTag = sectionTag[..atIndex];
                 string headerKey = sectionTag[(atIndex + 1)..];
                 string destinationTag = NormalizeSettingsSectionTag(rawTag);
-                NavigateToSettingsSectionCore(destinationTag);
+                int generationBefore = _settingsNavigationGeneration;
+                NavigateToSettingsSectionCore(rawTag);
+                if (_settingsNavigationGeneration == generationBefore)
+                {
+                    ++_settingsNavigationGeneration;
+                    ClearSettingsSearchHighlight();
+                }
+
                 ScheduleSettingsSearchTarget(new SettingsSearchResult(
                     destinationTag,
                     string.Empty,
@@ -1044,7 +1141,6 @@ public sealed partial class SettingsWindow
             AppearanceDetailSection.OrganizationSection.Refresh();
             RefreshManagedStoragePathWarning();
             RefreshManagedStorageDesktopShortcutState();
-            RefreshDragOutWin10State();
             SyncManagedStorageQuickAccessToggleState();
             _ = ViewModel.RefreshQuickAccessStateAsync();
             _ = RefreshOrphanFoldersSummaryAsync();
@@ -1336,22 +1432,6 @@ public sealed partial class SettingsWindow
             return;
         }
 
-        if (string.Equals(route.Tag, "WidgetGroups", StringComparison.Ordinal) &&
-            _activeWidgetGroupId is not null &&
-            WidgetGroupDetailPresenter?.Content is WidgetGroupSettingsItem { DisplayName: { Length: > 0 } groupTitle })
-        {
-            SettingsBreadcrumbBar.ItemsSource = new object[]
-            {
-                new SettingsBreadcrumbItem("Interaction", _localizationService.T("Settings.Section.Interaction"), 0.62),
-                new SettingsBreadcrumbItem(route.Tag, _localizationService.T(route.TitleKey), 0.62),
-                new SettingsBreadcrumbItem("WidgetGroups:__detail__", groupTitle, 1.0)
-            };
-            SettingsBreadcrumbHost.Visibility = Visibility.Visible;
-            SettingsBreadcrumbBar.Visibility = Visibility.Visible;
-            SettingsNavigationView.IsBackButtonVisible = NavigationViewBackButtonVisible.Visible;
-            return;
-        }
-
         if (string.Equals(route.Tag, "AppearanceDetail", StringComparison.Ordinal) &&
             _settingsSectionElements.TryGetValue("AppearanceDetail", out FrameworkElement? detailEl) &&
             detailEl is FileWidgetSettingsSection detailSection)
@@ -1369,26 +1449,12 @@ public sealed partial class SettingsWindow
                 return;
             }
 
-            if (detailSection.OrganizationSection is { IsRuleDetailOpen: true, ActiveRuleDetailTitle: { Length: > 0 } ruleTitle })
+            if (detailSection.OrganizationSection.IsAutoOrganizationSubPageOpen)
             {
                 SettingsBreadcrumbBar.ItemsSource = new object[]
                 {
                     new SettingsBreadcrumbItem(route.Tag, _localizationService.T(route.TitleKey), 0.62),
-                    new SettingsBreadcrumbItem("AppearanceDetail:__rules__", _localizationService.T("DesktopOrganization.Rules.SectionTitle"), 0.62),
-                    new SettingsBreadcrumbItem("AppearanceDetail:__detail__", ruleTitle, 1.0)
-                };
-                SettingsBreadcrumbHost.Visibility = Visibility.Visible;
-                SettingsBreadcrumbBar.Visibility = Visibility.Visible;
-                SettingsNavigationView.IsBackButtonVisible = NavigationViewBackButtonVisible.Visible;
-                return;
-            }
-
-            if (detailSection.OrganizationSection.IsRuleListOpen)
-            {
-                SettingsBreadcrumbBar.ItemsSource = new object[]
-                {
-                    new SettingsBreadcrumbItem(route.Tag, _localizationService.T(route.TitleKey), 0.62),
-                    new SettingsBreadcrumbItem("AppearanceDetail:__rules__", _localizationService.T("DesktopOrganization.Rules.SectionTitle"), 1.0)
+                    new SettingsBreadcrumbItem("AppearanceDetail:__autoorganize__", _localizationService.T("DesktopOrganization.Auto.Title"), 1.0)
                 };
                 SettingsBreadcrumbHost.Visibility = Visibility.Visible;
                 SettingsBreadcrumbBar.Visibility = Visibility.Visible;
@@ -1407,6 +1473,20 @@ public sealed partial class SettingsWindow
             {
                 new SettingsBreadcrumbItem(route.Tag, _localizationService.T(route.TitleKey), 0.62),
                 new SettingsBreadcrumbItem("Maintenance:__subpage__", _localizationService.T(subPageTitleKey), 1.0)
+            };
+            SettingsBreadcrumbHost.Visibility = Visibility.Visible;
+            SettingsBreadcrumbBar.Visibility = Visibility.Visible;
+            SettingsNavigationView.IsBackButtonVisible = NavigationViewBackButtonVisible.Visible;
+            return;
+        }
+
+        if (string.Equals(route.Tag, "About", StringComparison.Ordinal) &&
+            _isAboutDiagnosticsSubPageOpen)
+        {
+            SettingsBreadcrumbBar.ItemsSource = new object[]
+            {
+                new SettingsBreadcrumbItem(route.Tag, _localizationService.T(route.TitleKey), 0.62),
+                new SettingsBreadcrumbItem("About:__diagnostics__", _localizationService.T("Settings.About.Diagnostics.Title"), 1.0)
             };
             SettingsBreadcrumbHost.Visibility = Visibility.Visible;
             SettingsBreadcrumbBar.Visibility = Visibility.Visible;
@@ -1446,10 +1526,10 @@ public sealed partial class SettingsWindow
         if (string.Equals(item.SectionTag, "CustomWidgetSettings:__detail__", StringComparison.Ordinal) ||
             string.Equals(item.SectionTag, "Appearance:__material__", StringComparison.Ordinal) ||
             string.Equals(item.SectionTag, "Interaction:__capsule__", StringComparison.Ordinal) ||
-            string.Equals(item.SectionTag, "WidgetGroups:__detail__", StringComparison.Ordinal) ||
             string.Equals(item.SectionTag, "AppearanceDetail:__filedisplay__", StringComparison.Ordinal) ||
-            string.Equals(item.SectionTag, "AppearanceDetail:__detail__", StringComparison.Ordinal) ||
-            string.Equals(item.SectionTag, "Maintenance:__subpage__", StringComparison.Ordinal))
+            string.Equals(item.SectionTag, "AppearanceDetail:__autoorganize__", StringComparison.Ordinal) ||
+            string.Equals(item.SectionTag, "Maintenance:__subpage__", StringComparison.Ordinal) ||
+            string.Equals(item.SectionTag, "About:__diagnostics__", StringComparison.Ordinal))
         {
             return;
         }
@@ -1479,22 +1559,6 @@ public sealed partial class SettingsWindow
             return;
         }
 
-        if (string.Equals(item.SectionTag, "WidgetGroups", StringComparison.Ordinal) &&
-            string.Equals(_currentSettingsSection, "WidgetGroups", StringComparison.Ordinal) &&
-            TryCloseWidgetGroupDetailSubPage())
-        {
-            return;
-        }
-
-        if (string.Equals(item.SectionTag, "AppearanceDetail:__rules__", StringComparison.Ordinal) &&
-            string.Equals(_currentSettingsSection, "AppearanceDetail", StringComparison.Ordinal) &&
-            _settingsSectionElements.TryGetValue("AppearanceDetail", out FrameworkElement? rulesDetailEl) &&
-            rulesDetailEl is FileWidgetSettingsSection rulesDetailSection)
-        {
-            _ = rulesDetailSection.OrganizationSection.TryNavigateBackToRuleList();
-            return;
-        }
-
         if (string.Equals(item.SectionTag, "AppearanceDetail", StringComparison.Ordinal) &&
             string.Equals(_currentSettingsSection, "AppearanceDetail", StringComparison.Ordinal) &&
             _settingsSectionElements.TryGetValue("AppearanceDetail", out FrameworkElement? detailEl) &&
@@ -1508,6 +1572,13 @@ public sealed partial class SettingsWindow
         if (string.Equals(item.SectionTag, "Maintenance", StringComparison.Ordinal) &&
             string.Equals(_currentSettingsSection, "Maintenance", StringComparison.Ordinal) &&
             TryCloseMaintenanceSubPage())
+        {
+            return;
+        }
+
+        if (string.Equals(item.SectionTag, "About", StringComparison.Ordinal) &&
+            string.Equals(_currentSettingsSection, "About", StringComparison.Ordinal) &&
+            TryCloseAboutDiagnosticsSubPage())
         {
             return;
         }
@@ -1589,8 +1660,14 @@ public sealed partial class SettingsWindow
 
     private void SetFeatureWidgetsHubTabIndex(int index)
     {
-        Segmented segmented = FeatureWidgetsHubSegmented;
-        if (segmented.SelectedIndex == index)
+        SelectorBar selectorBar = FeatureWidgetsHubSelectorBar;
+        if (index < 0 || index >= selectorBar.Items.Count)
+        {
+            return;
+        }
+
+        SelectorBarItem targetItem = selectorBar.Items[index];
+        if (ReferenceEquals(selectorBar.SelectedItem, targetItem))
         {
             return;
         }
@@ -1598,7 +1675,7 @@ public sealed partial class SettingsWindow
         _isSyncingFeatureWidgetsHubTab = true;
         try
         {
-            segmented.SelectedIndex = index;
+            selectorBar.SelectedItem = targetItem;
         }
         finally
         {
@@ -1606,14 +1683,19 @@ public sealed partial class SettingsWindow
         }
     }
 
-    private void FeatureWidgetsHubSegmented_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private void FeatureWidgetsHubSelectorBar_SelectionChanged(
+        SelectorBar sender,
+        SelectorBarSelectionChangedEventArgs args)
     {
         if (_isSyncingFeatureWidgetsHubTab || _isClosed)
         {
             return;
         }
 
-        string targetSection = FeatureWidgetsHubSegmented.SelectedIndex == 1
+        int selectedIndex = sender.SelectedItem is not null
+            ? sender.Items.IndexOf(sender.SelectedItem)
+            : 0;
+        string targetSection = selectedIndex == 1
             ? "CustomWidgetSettings"
             : "FeatureWidgets";
         if (!string.Equals(_currentSettingsSection, targetSection, StringComparison.Ordinal))
@@ -1659,11 +1741,6 @@ public sealed partial class SettingsWindow
             CloseCapsuleModeSubPage(animate: false);
         }
 
-        if (string.Equals(previousSectionTag, "WidgetGroups", StringComparison.Ordinal))
-        {
-            CloseWidgetGroupDetailSubPage(animate: false);
-        }
-
         if (string.Equals(previousSectionTag, "AppearanceDetail", StringComparison.Ordinal) &&
             _settingsSectionElements.TryGetValue("AppearanceDetail", out FrameworkElement? prevDetailEl) &&
             prevDetailEl is FileWidgetSettingsSection prevDetailSection)
@@ -1675,12 +1752,24 @@ public sealed partial class SettingsWindow
         {
             CloseMaintenanceSubPage(animate: false);
         }
+
+        if (string.Equals(previousSectionTag, "About", StringComparison.Ordinal))
+        {
+            CloseAboutDiagnosticsSubPage(animate: false);
+        }
     }
 
     private void ApplyRawSectionSubPageDeepLink(string rawSectionTag)
     {
         switch (rawSectionTag)
         {
+            case "Appearance":
+                if (_settingsSectionElements.TryGetValue("Appearance", out FrameworkElement? appearanceRootEl) &&
+                    appearanceRootEl is AppearanceSettingsSection appearanceRootSection)
+                {
+                    appearanceRootSection.CloseMaterialSubPage(animate: false);
+                }
+                break;
             case "AppearanceMaterialSettings":
                 if (_settingsSectionElements.TryGetValue("Appearance", out FrameworkElement? appearanceEl) &&
                     appearanceEl is AppearanceSettingsSection appearanceSection)
@@ -1688,9 +1777,20 @@ public sealed partial class SettingsWindow
                     appearanceSection.OpenMaterialSubPage(animate: false);
                 }
                 break;
+            case "Interaction":
+                CloseCapsuleModeSubPage(animate: false);
+                break;
             case "CapsuleMode":
             case "CapsuleOverridesSettings":
                 OpenCapsuleModeSubPage(animate: false);
+                break;
+            case "AppearanceDetail":
+                if (_settingsSectionElements.TryGetValue("AppearanceDetail", out FrameworkElement? detailRootEl) &&
+                    detailRootEl is FileWidgetSettingsSection detailRootSection &&
+                    detailRootSection.IsDetailSubPageOpen)
+                {
+                    detailRootSection.CloseAllSubPages(animate: false);
+                }
                 break;
             case "FileDisplaySettings":
                 if (_settingsSectionElements.TryGetValue("AppearanceDetail", out FrameworkElement? fileDisplayEl) &&
@@ -1703,14 +1803,20 @@ public sealed partial class SettingsWindow
                 if (_settingsSectionElements.TryGetValue("AppearanceDetail", out FrameworkElement? orgEl) &&
                     orgEl is FileWidgetSettingsSection orgSection)
                 {
-                    orgSection.OrganizationSection.OpenRuleList(animate: false);
+                    orgSection.OrganizationSection.OpenAutoOrganizationSubPage(animate: false);
                 }
+                break;
+            case "Maintenance":
+                CloseMaintenanceSubPage(animate: false);
                 break;
             case "BackupRestoreSettings":
                 OpenMaintenanceSubPage(MaintenanceSubPageKind.AutomaticBackup, animate: false);
                 break;
             case "CloudBackupSettings":
                 OpenMaintenanceSubPage(MaintenanceSubPageKind.CloudBackup, animate: false);
+                break;
+            case "About":
+                CloseAboutDiagnosticsSubPage(animate: false);
                 break;
         }
     }
@@ -1746,10 +1852,10 @@ public sealed partial class SettingsWindow
                 return;
             }
 
-            if (detailSection.OrganizationSection.FindName("RuleListPanel") is DependencyObject ruleListPanel &&
-                IsDescendantOf(target, ruleListPanel))
+            if (detailSection.OrganizationSection.FindName("AutoOrganizationSubPagePanel") is DependencyObject autoOrgPanel &&
+                IsDescendantOf(target, autoOrgPanel))
             {
-                detailSection.OrganizationSection.OpenRuleList(animate: false);
+                detailSection.OrganizationSection.OpenAutoOrganizationSubPage(animate: false);
                 return;
             }
 
@@ -1773,6 +1879,14 @@ public sealed partial class SettingsWindow
             {
                 OpenMaintenanceSubPage(MaintenanceSubPageKind.CloudBackup, animate: false);
             }
+        }
+
+        if (string.Equals(targetSectionTag, "About", StringComparison.Ordinal) &&
+            AboutDiagnosticsSubPagePanel is { } aboutDiagPanel &&
+            IsDescendantOf(target, aboutDiagPanel))
+        {
+            OpenAboutDiagnosticsSubPage(animate: false);
+            return;
         }
 
         if (string.Equals(targetSectionTag, "CustomWidgetSettings", StringComparison.Ordinal) &&
@@ -1812,8 +1926,6 @@ public sealed partial class SettingsWindow
              appEl is AppearanceSettingsSection { IsMaterialSubPageOpen: true }) ||
             (string.Equals(_currentSettingsSection, "Interaction", StringComparison.Ordinal) &&
              _isCapsuleModeSubPageOpen) ||
-            (string.Equals(_currentSettingsSection, "WidgetGroups", StringComparison.Ordinal) &&
-             _activeWidgetGroupId is not null) ||
             (string.Equals(_currentSettingsSection, "AppearanceDetail", StringComparison.Ordinal) &&
              _settingsSectionElements.TryGetValue("AppearanceDetail", out FrameworkElement? detEl) &&
              detEl is FileWidgetSettingsSection { IsDetailSubPageOpen: true }) ||
@@ -1821,7 +1933,9 @@ public sealed partial class SettingsWindow
              _settingsSectionElements.TryGetValue("CustomWidgetSettings", out FrameworkElement? customEl) &&
              customEl is CustomWidgetSettingsSection { IsDetailViewOpen: true }) ||
             (string.Equals(_currentSettingsSection, "Maintenance", StringComparison.Ordinal) &&
-             _activeMaintenanceSubPage != MaintenanceSubPageKind.None);
+             _activeMaintenanceSubPage != MaintenanceSubPageKind.None) ||
+            (string.Equals(_currentSettingsSection, "About", StringComparison.Ordinal) &&
+             _isAboutDiagnosticsSubPageOpen);
 
         bool isNestedSection = !string.IsNullOrWhiteSpace(route.ParentTag) || isSubPageOpen;
         SettingsNavigationView.IsBackButtonVisible = isNestedSection
@@ -1919,7 +2033,6 @@ public sealed partial class SettingsWindow
         _isCapsuleModeSubPageOpen = true;
         overviewPanel.Visibility = Visibility.Collapsed;
         subPagePanel.Visibility = Visibility.Visible;
-        ApplySegmentedNeutralStates(subPagePanel);
         PageScroller.ChangeView(null, 0d, null, disableAnimation: true);
         RefreshCurrentSectionHeaderAndBreadcrumb();
         if (animate && !wasAlreadyOpen && SettingsRoot.IsLoaded)
@@ -2126,86 +2239,55 @@ public sealed partial class SettingsWindow
         return true;
     }
 
-    private void GroupNavigationSettingsViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
+    private void AboutDiagnosticsEntryCard_Click(object sender, RoutedEventArgs e)
     {
-        if (_isClosed)
+        OpenAboutDiagnosticsSubPage(animate: true);
+    }
+
+    private void OpenAboutDiagnosticsSubPage(bool animate)
+    {
+        if (AboutOverviewPanel is not { } overviewPanel ||
+            AboutDiagnosticsSubPagePanel is not { } diagnosticsPanel)
         {
             return;
         }
 
-        if (string.IsNullOrEmpty(e.PropertyName) ||
-            e.PropertyName == nameof(DeskBox.Features.GroupNavigation.GroupNavigationSettingsViewModel.ExistingGroups))
-        {
-            if (!DispatcherQueue.HasThreadAccess)
-            {
-                DispatcherQueue.TryEnqueue(SyncActiveWidgetGroupDetail);
-                return;
-            }
-            SyncActiveWidgetGroupDetail();
-        }
-    }
-
-    private void WidgetGroupItemCard_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is FrameworkElement { DataContext: WidgetGroupSettingsItem groupItem })
-        {
-            OpenWidgetGroupDetailSubPage(groupItem.GroupId, animate: true);
-        }
-    }
-
-    private void OpenWidgetGroupDetailSubPage(string groupId, bool animate)
-    {
-        WidgetGroupSettingsItem? groupItem = _groupNavigationSettingsViewModel.ExistingGroups
-            .FirstOrDefault(item => string.Equals(item.GroupId, groupId, StringComparison.Ordinal));
-        if (groupItem is null ||
-            WidgetGroupsOverviewPanel is not { } overviewPanel ||
-            WidgetGroupDetailSubPagePanel is not { } detailPanel ||
-            WidgetGroupDetailPresenter is not { } presenter)
-        {
-            return;
-        }
-
-        bool wasAlreadyOpen = string.Equals(_activeWidgetGroupId, groupId, StringComparison.Ordinal) &&
-            detailPanel.Visibility == Visibility.Visible;
-        _activeWidgetGroupId = groupId;
-        presenter.Content = groupItem;
+        bool wasAlreadyOpen = _isAboutDiagnosticsSubPageOpen && diagnosticsPanel.Visibility == Visibility.Visible;
+        _isAboutDiagnosticsSubPageOpen = true;
         overviewPanel.Visibility = Visibility.Collapsed;
-        detailPanel.Visibility = Visibility.Visible;
+        diagnosticsPanel.Visibility = Visibility.Visible;
         PageScroller.ChangeView(null, 0d, null, disableAnimation: true);
         RefreshCurrentSectionHeaderAndBreadcrumb();
         if (animate && !wasAlreadyOpen && SettingsRoot.IsLoaded)
         {
-            detailPanel.UpdateLayout();
-            DetailPageTransitionHelper.PlayNavigationEnter(detailPanel, NavigationEnterOffsetPx);
+            diagnosticsPanel.UpdateLayout();
+            DetailPageTransitionHelper.PlayNavigationEnter(diagnosticsPanel, NavigationEnterOffsetPx);
         }
     }
 
-    private void CloseWidgetGroupDetailSubPage(bool animate)
+    private void CloseAboutDiagnosticsSubPage(bool animate)
     {
-        if (_activeWidgetGroupId is null && WidgetGroupDetailSubPagePanel is not { Visibility: Visibility.Visible })
+        if (!_isAboutDiagnosticsSubPageOpen &&
+            AboutDiagnosticsSubPagePanel is not { Visibility: Visibility.Visible })
         {
             return;
         }
 
-        _activeWidgetGroupId = null;
-        if (WidgetGroupDetailPresenter is { } presenter)
+        _isAboutDiagnosticsSubPageOpen = false;
+        if (AboutDiagnosticsSubPagePanel is { } diagnosticsPanel)
         {
-            presenter.Content = null;
+            diagnosticsPanel.Visibility = Visibility.Collapsed;
         }
-        if (WidgetGroupDetailSubPagePanel is { } detailPanel)
-        {
-            detailPanel.Visibility = Visibility.Collapsed;
-        }
-        if (WidgetGroupsOverviewPanel is { } overviewPanel)
+        if (AboutOverviewPanel is { } overviewPanel)
         {
             overviewPanel.Visibility = Visibility.Visible;
         }
 
-        if (string.Equals(_currentSettingsSection, "WidgetGroups", StringComparison.Ordinal))
+        if (string.Equals(_currentSettingsSection, "About", StringComparison.Ordinal))
         {
             PageScroller.ChangeView(null, 0d, null, disableAnimation: true);
             RefreshCurrentSectionHeaderAndBreadcrumb();
-            if (animate && SettingsRoot.IsLoaded && WidgetGroupsOverviewPanel is { } visibleOverview)
+            if (animate && SettingsRoot.IsLoaded && AboutOverviewPanel is { } visibleOverview)
             {
                 visibleOverview.UpdateLayout();
                 DetailPageTransitionHelper.PlayNavigationEnter(visibleOverview, -NavigationEnterOffsetPx);
@@ -2213,41 +2295,15 @@ public sealed partial class SettingsWindow
         }
     }
 
-    private bool TryCloseWidgetGroupDetailSubPage()
+    private bool TryCloseAboutDiagnosticsSubPage()
     {
-        if (_activeWidgetGroupId is null)
+        if (!_isAboutDiagnosticsSubPageOpen)
         {
             return false;
         }
 
-        CloseWidgetGroupDetailSubPage(animate: true);
+        CloseAboutDiagnosticsSubPage(animate: true);
         return true;
-    }
-
-    private void SyncActiveWidgetGroupDetail()
-    {
-        if (_activeWidgetGroupId is not string groupId)
-        {
-            return;
-        }
-
-        WidgetGroupSettingsItem? updatedItem = _groupNavigationSettingsViewModel.ExistingGroups
-            .FirstOrDefault(item => string.Equals(item.GroupId, groupId, StringComparison.Ordinal));
-        if (updatedItem is null)
-        {
-            CloseWidgetGroupDetailSubPage(animate: string.Equals(_currentSettingsSection, "WidgetGroups", StringComparison.Ordinal));
-            return;
-        }
-
-        if (WidgetGroupDetailPresenter is { } presenter)
-        {
-            presenter.Content = updatedItem;
-        }
-
-        if (string.Equals(_currentSettingsSection, "WidgetGroups", StringComparison.Ordinal))
-        {
-            RefreshCurrentSectionHeaderAndBreadcrumb();
-        }
     }
 
     private void NestedSettingsButton_Click(object sender, RoutedEventArgs e)
@@ -2305,62 +2361,6 @@ public sealed partial class SettingsWindow
         }
     }
 
-    private void WidgetGroupNavigationComboBox_SelectionChanged(
-        object sender,
-        SelectionChangedEventArgs e) =>
-        ApplyWidgetGroupOption(
-            sender,
-            ViewModel.SetWidgetGroupNavigationStyle);
-
-    private void WidgetGroupTitleComboBox_SelectionChanged(
-        object sender,
-        SelectionChangedEventArgs e) =>
-        ApplyWidgetGroupOption(
-            sender,
-            ViewModel.SetWidgetGroupTitleDisplayMode);
-
-    private void WidgetGroupChromeComboBox_SelectionChanged(
-        object sender,
-        SelectionChangedEventArgs e) =>
-        ApplyWidgetGroupOption(
-            sender,
-            ViewModel.SetWidgetGroupChromeMode);
-
-    private void WidgetGroupCollapseComboBox_SelectionChanged(
-        object sender,
-        SelectionChangedEventArgs e) =>
-        ApplyWidgetGroupOption(
-            sender,
-            ViewModel.SetWidgetGroupCollapseBehavior);
-
-    private void WidgetGroupWheelComboBox_SelectionChanged(
-        object sender,
-        SelectionChangedEventArgs e) =>
-        ApplyWidgetGroupOption(
-            sender,
-            ViewModel.SetWidgetGroupWheelSetting);
-
-    private void WidgetGroupHoverComboBox_SelectionChanged(
-        object sender,
-        SelectionChangedEventArgs e) =>
-        ApplyWidgetGroupOption(
-            sender,
-            ViewModel.SetWidgetGroupHoverSetting);
-
-    private static void ApplyWidgetGroupOption(
-        object sender,
-        Func<string, string?, bool> apply)
-    {
-        if (sender is ComboBox
-            {
-                Tag: string groupId,
-                SelectedItem: SettingsOption option
-            })
-        {
-            apply(groupId, option.Value?.ToString());
-        }
-    }
-
     private async void MoveWidgetGroupMemberUpButton_Click(
         object sender,
         RoutedEventArgs e)
@@ -2376,11 +2376,18 @@ public sealed partial class SettingsWindow
             return;
         }
 
-        if (await _widgetActions.ReorderWidgetGroupMemberAsync(
-                member.WidgetId,
-                targetId))
+        try
         {
-            ViewModel.RefreshWidgetGroupSettings();
+            if (await _widgetActions.ReorderWidgetGroupMemberAsync(
+                    member.WidgetId,
+                    targetId))
+            {
+                ViewModel.RefreshWidgetGroupSettings();
+            }
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[SettingsWindow] MoveWidgetGroupMemberUp failed: {ex.Message}");
         }
     }
 
@@ -2399,11 +2406,18 @@ public sealed partial class SettingsWindow
             return;
         }
 
-        if (await _widgetActions.ReorderWidgetGroupMemberAsync(
-                member.WidgetId,
-                targetId))
+        try
         {
-            ViewModel.RefreshWidgetGroupSettings();
+            if (await _widgetActions.ReorderWidgetGroupMemberAsync(
+                    member.WidgetId,
+                    targetId))
+            {
+                ViewModel.RefreshWidgetGroupSettings();
+            }
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[SettingsWindow] MoveWidgetGroupMemberDown failed: {ex.Message}");
         }
     }
 
@@ -2419,9 +2433,16 @@ public sealed partial class SettingsWindow
             return;
         }
 
-        if (await _widgetActions.RemoveWidgetFromGroupAsync(member.WidgetId))
+        try
         {
-            ViewModel.RefreshWidgetGroupSettings();
+            if (await _widgetActions.RemoveWidgetFromGroupAsync(member.WidgetId))
+            {
+                ViewModel.RefreshWidgetGroupSettings();
+            }
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[SettingsWindow] RemoveWidgetGroupMember failed: {ex.Message}");
         }
     }
 
@@ -2725,6 +2746,10 @@ public sealed partial class SettingsWindow
             ? el.FindName("Windows10CompatibilityInfoBar") as global::Microsoft.UI.Xaml.Controls.InfoBar
             : null;
 
+    private global::Microsoft.UI.Xaml.Controls.InfoBar? Win10DragBehaviorInfoBar =>
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.InfoBar>(
+            "AppearanceDetail", "Win10DragBehaviorInfoBar");
+
     private global::Microsoft.UI.Xaml.Controls.InfoBar? CloudBackupSyncNoticeInfoBar =>
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.InfoBar>(
             "Maintenance", "CloudBackupSyncNoticeInfoBar");
@@ -2732,6 +2757,10 @@ public sealed partial class SettingsWindow
     private global::Microsoft.UI.Xaml.Controls.InfoBar? StoreUninstallDataNoticeInfoBar =>
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.InfoBar>(
             "Maintenance", "StoreUninstallDataNoticeInfoBar");
+
+    private global::Microsoft.UI.Xaml.Controls.InfoBar? CustomDirectoryRecoveryNoteInfoBar =>
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.InfoBar>(
+            "Maintenance", "CustomDirectoryRecoveryNoteInfoBar");
 
     private void PrepareDeferredNoticeInfoBars()
     {
@@ -2743,12 +2772,21 @@ public sealed partial class SettingsWindow
         // null-guarded because each template only populates its field once
         // its section has been created.
         PinInformationalSeverityBrushes(Windows10CompatibilityInfoBar);
+        PinInformationalSeverityBrushes(Win10DragBehaviorInfoBar);
+        PinInformationalSeverityBrushes(AboutStoreNoticeInfoBar);
+        PinInformationalSeverityBrushes(ChannelCoexistenceInfoBar);
         PinInformationalSeverityBrushes(StoreUninstallDataNoticeInfoBar);
+        PinInformationalSeverityBrushes(CloudBackupSyncNoticeInfoBar);
+        PinInformationalSeverityBrushes(CustomDirectoryRecoveryNoteInfoBar);
         ApplyNoticeMessageTypography(CloudBackupSyncNoticeInfoBar);
+        ApplyNoticeMessageTypography(CustomDirectoryRecoveryNoteInfoBar);
         ApplyNoticeMessageTypography(Windows10CompatibilityInfoBar);
+        ApplyNoticeMessageTypography(Win10DragBehaviorInfoBar);
         ApplyNoticeMessageTypography(AboutStoreNoticeInfoBar);
         ApplyNoticeMessageTypography(StoreUninstallDataNoticeInfoBar);
     }
+
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<InfoBar, object> s_pinnedDynamicInfoBars = new();
 
     private void PinInformationalSeverityBrushes(InfoBar? infoBar)
     {
@@ -2757,12 +2795,44 @@ public sealed partial class SettingsWindow
             return;
         }
 
-        ApplyInformationalSeverityBrushes(infoBar);
-        if (_pinnedNoticeInfoBars.Add(infoBar))
+        _pinnedNoticeInfoBars.Add(infoBar);
+        EnsureInformationalSeverityPinned(infoBar);
+    }
+
+    /// <summary>
+    /// Pins theme-aware background brushes on a deferred-template <see cref="InfoBar"/>
+    /// whenever its <see cref="InfoBar.Severity"/> is <see cref="InfoBarSeverity.Informational"/>,
+    /// and clears the override when it switches to Warning/Success/Error. Automatically
+    /// tracks <c>ActualThemeChanged</c> and <c>Severity</c> changes so Windows 10 live
+    /// theme flips never leave stale light/dark washes behind.
+    /// </summary>
+    internal static void EnsureInformationalSeverityPinned(InfoBar? infoBar)
+    {
+        if (infoBar is null)
         {
-            // Local brush values do not follow theme swaps; re-pin when the
-            // realized section's theme flips.
-            infoBar.ActualThemeChanged += (_, _) => ApplyInformationalSeverityBrushes(infoBar);
+            return;
+        }
+
+        ApplyInformationalSeverityBrushes(infoBar);
+        if (!s_pinnedDynamicInfoBars.TryGetValue(infoBar, out _))
+        {
+            s_pinnedDynamicInfoBars.Add(infoBar, new object());
+            infoBar.ActualThemeChanged += static (sender, _) =>
+            {
+                if (sender is InfoBar bar)
+                {
+                    ApplyInformationalSeverityBrushes(bar);
+                }
+            };
+            _ = infoBar.RegisterPropertyChangedCallback(
+                InfoBar.SeverityProperty,
+                static (sender, _) =>
+                {
+                    if (sender is InfoBar bar)
+                    {
+                        ApplyInformationalSeverityBrushes(bar);
+                    }
+                });
         }
     }
 
@@ -2778,16 +2848,24 @@ public sealed partial class SettingsWindow
 
     internal static void ApplyInformationalSeverityBrushes(InfoBar infoBar)
     {
+        if (infoBar.Severity != InfoBarSeverity.Informational)
+        {
+            infoBar.ClearValue(Control.BackgroundProperty);
+            return;
+        }
+
         // Resolve per the notice's ActualTheme, never from
         // Application.Current.Resources: that lookup serves themed keys from
         // a stale dictionary on Windows 10 after a live theme switch, which
         // painted the light informational wash over the dark theme (the
         // Windows-11-only-correct mismatch). The template's default text
         // colors already follow the theme, so only the background is pinned.
-        Windows.UI.Color background = new Windows.UI.ViewManagement.AccessibilitySettings().HighContrast
-            ? new Windows.UI.ViewManagement.UISettings().GetColorValue(
-                Windows.UI.ViewManagement.UIColorType.Background)
-            : infoBar.ActualTheme == ElementTheme.Dark
+        bool isDark = infoBar.ActualTheme == ElementTheme.Default
+            ? NeutralInteractionBrush.IsDarkTheme(infoBar)
+            : infoBar.ActualTheme == ElementTheme.Dark;
+        Windows.UI.Color background = WindowsCompatibilityService.IsHighContrast
+            ? WindowsCompatibilityService.ResolveHighContrastBackgroundColor(isDark)
+            : isDark
                 ? NoticeInfoBackgroundDark
                 : NoticeInfoBackgroundLight;
         infoBar.Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(background);

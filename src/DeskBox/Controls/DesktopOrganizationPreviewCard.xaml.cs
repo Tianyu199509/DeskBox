@@ -8,207 +8,142 @@ using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Documents;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
-using Windows.ApplicationModel.DataTransfer;
 using Windows.System;
 
 namespace DeskBox.Controls;
 
-public enum DesktopOrganizationItemViewMode
-{
-    Tiles,
-    CompactGrid
-}
-
-/// <summary>A fixed-size (320x216) mini-box preview matching the user's real DeskBox file widget appearance, with inner vertical scrolling when > 8 items.</summary>
+/// <summary>
+/// A fixed-size (320x216) mini-box preview matching the user's real DeskBox file
+/// widget appearance, with inner vertical scrolling when items exceed one page.
+/// </summary>
 public sealed partial class DesktopOrganizationPreviewCard : UserControl, IDisposable
 {
     internal const double FixedBoxWidth = 320;
     internal const double FixedBoxHeight = 216;
-    private const int FixedGridColumns = 4;
+    internal const string PreviewIconCacheScope = "desktop-organization-preview";
+    private const int DefaultGridColumns = 4;
+    private const double InnerItemsContentWidth = 296;
     private const double RestMoreButtonOpacity = 0.52;
-
-    internal static string? ActiveDraggedSourcePath { get; set; }
-
-    internal static IReadOnlyList<string> ActiveDraggedSourcePaths { get; set; } = [];
-
-    internal static readonly HashSet<string> ActiveSelectedSourcePaths = new(StringComparer.OrdinalIgnoreCase);
-
-    internal static event EventHandler<bool>? DragSessionStateChanged;
-
-    internal static event EventHandler? GlobalSelectionVisualsChanged;
-
-    internal static event EventHandler<PointerRoutedEventArgs>? PointerDragMoved;
-
-    internal static event EventHandler<PointerRoutedEventArgs>? PointerDragReleased;
+    private const int IconLoadBatchSize = 8;
 
     private readonly DesktopOrganizationTargetPlan _target;
-    private readonly DesktopOrganizationTargetSelection _selection;
-    private readonly HashSet<string> _excludedPaths;
-    private readonly HashSet<string>? _retainedSelection;
-    private readonly bool _canSelectItems;
+    private readonly DesktopOrganizationWorkbenchSession _session;
+    private readonly DesktopOrganizationPointerDragController _dragController;
     private readonly Func<DesktopOrganizationFileSnapshot, string>? _itemDescription;
+    private readonly bool _readOnlyMode;
     private readonly List<PreviewTile> _tiles = [];
     private readonly List<RadioMenuFlyoutItem> _destinationRadioItems = [];
+    private readonly List<DesktopOrganizationDestinationOption> _destinations = [];
+    private readonly SemaphoreSlim _iconLoadGate = new(IconLoadBatchSize, IconLoadBatchSize);
+
     private FileWidgetIconLayout _layout;
     private PreviewTileAppearance? _tileAppearance;
-    private DesktopOrganizationItemViewMode _viewMode = DesktopOrganizationItemViewMode.CompactGrid;
     private XamlRoot? _observedXamlRoot;
-    private bool _updating;
+    private Brush? _selectedTileSurfaceBrush;
+    private Brush? _selectedTileBorderBrush;
+    private Brush? _hoverTileSurfaceBrush;
+    private Brush? _hoverTileBorderBrush;
+    private Brush? _transparentBrush;
+
     private bool _disposed;
-    private bool _inlineIncludeEnabled;
     private bool _isCommittingRename;
     private bool _isPointerOverCard;
     private bool _isDestinationFlyoutOpen;
-    private PreviewTile? _pressedTile;
-    private Windows.Foundation.Point _tileDragStartPoint;
-    private bool _isTilePointerDragging;
-    private string? _lastClickedSourcePath;
-    private int _columns = FixedGridColumns;
+    private long _titleRenameOpenedAtTick;
+    private int _columns = DefaultGridColumns;
     private int _visibleCount = -1;
     private int _iconGeneration;
-    internal const string PreviewIconCacheScope = "desktop-organization-preview";
-    private const int IconLoadBatchSize = 8;
-    private readonly SemaphoreSlim _iconLoadGate = new(IconLoadBatchSize, IconLoadBatchSize);
-    private IReadOnlySet<string> _newPaths = new HashSet<string>();
-    private readonly List<DesktopOrganizationDestinationOption> _destinations = [];
-
-    public DesktopOrganizationPreviewCard(
-        DesktopOrganizationTargetPlan target,
-        DesktopOrganizationTargetSelection selection,
-        HashSet<string> excludedPaths,
-        IReadOnlyList<DesktopOrganizationDestinationOption> destinations,
-        DesktopOrganizationItemViewMode viewMode = DesktopOrganizationItemViewMode.CompactGrid)
-        : this(target, selection, excludedPaths, destinations, null, true, null, DesktopOrganizationItemViewMode.CompactGrid)
-    {
-    }
 
     internal DesktopOrganizationPreviewCard(
-        string groupId,
-        string title,
-        string description,
-        IReadOnlyList<DesktopOrganizationFileSnapshot> items,
-        HashSet<string> selectedPaths,
-        bool canSelect,
-        Func<DesktopOrganizationFileSnapshot, string>? itemDescription = null,
-        DesktopOrganizationItemViewMode viewMode = DesktopOrganizationItemViewMode.CompactGrid)
-        : this(
-            new DesktopOrganizationTargetPlan
-            {
-                SourceBucketId = groupId,
-                CategoryId = groupId,
-                TargetWidgetId = groupId,
-                SuggestedDisplayName = title,
-                Items = items.ToList()
-            },
-            new DesktopOrganizationTargetSelection(),
-            [],
-            [],
-            selectedPaths,
-            canSelect,
-            itemDescription,
-            DesktopOrganizationItemViewMode.CompactGrid)
-    {
-        DestinationPanel.Visibility = Visibility.Collapsed;
-        GroupDescriptionText.Text = description;
-        GroupDescriptionText.Visibility = Visibility.Collapsed;
-        ToolTipService.SetToolTip(GroupDescriptionText, description);
-        if (!canSelect)
-        {
-            GroupCheckBox.Visibility = Visibility.Collapsed;
-            ReadOnlyTitleText.Text = title;
-            ReadOnlyHeaderPanel.Visibility = Visibility.Collapsed;
-        }
-        LayoutItems(force: true);
-    }
-
-    private DesktopOrganizationPreviewCard(
         DesktopOrganizationTargetPlan target,
-        DesktopOrganizationTargetSelection selection,
-        HashSet<string> excludedPaths,
+        DesktopOrganizationWorkbenchSession session,
+        DesktopOrganizationPointerDragController dragController,
         IReadOnlyList<DesktopOrganizationDestinationOption> destinations,
-        HashSet<string>? retainedSelection,
-        bool canSelect,
-        Func<DesktopOrganizationFileSnapshot, string>? itemDescription,
-        DesktopOrganizationItemViewMode viewMode)
+        Func<DesktopOrganizationFileSnapshot, string>? itemDescription = null,
+        bool readOnlyMode = false)
     {
-        _target = target;
-        _selection = selection;
-        _excludedPaths = excludedPaths;
-        _retainedSelection = retainedSelection;
-        _canSelectItems = canSelect;
+        _target = target ?? throw new ArgumentNullException(nameof(target));
+        _session = session ?? throw new ArgumentNullException(nameof(session));
+        _dragController = dragController ?? throw new ArgumentNullException(nameof(dragController));
         _itemDescription = itemDescription;
-        _viewMode = DesktopOrganizationItemViewMode.CompactGrid;
+        _readOnlyMode = readOnlyMode;
+
         InitializeComponent();
 
+        BucketKey = DesktopOrganizationWorkbenchSession.GetStableBucketKey(target);
         TitleText.Text = target.SuggestedDisplayName;
-        RoutePrefixText.Text = T("DesktopOrganization.Layout.RoutePrefix");
-        string categoryGlyph = GetCategoryGlyph(target.CategoryId);
-        CategoryIcon.Glyph = categoryGlyph;
-        ReadOnlyCategoryIcon.Glyph = categoryGlyph;
-
-        AutomationProperties.SetName(GroupCheckBox, target.SuggestedDisplayName);
-        ToolTipService.SetToolTip(
-            GroupCheckBox,
-            target.SuggestedDisplayName + "\n" + T("DesktopOrganization.Layout.SelectionHelp"));
-        AutomationProperties.SetHelpText(GroupCheckBox, T("DesktopOrganization.Layout.SelectionHelp"));
         ToolTipService.SetToolTip(TitleDisplayPanel, target.SuggestedDisplayName);
 
-        foreach (var destination in destinations.Where(item => target.CreatesWidget || item.Id != target.TargetWidgetId))
+        if (_readOnlyMode)
         {
-            _destinations.Add(destination);
+            DestinationPanel.Visibility = Visibility.Collapsed;
         }
-
-        if (!target.CreatesWidget && _destinations.All(item => item.Id != target.TargetWidgetId))
+        else
         {
-            _destinations.Insert(0, new DesktopOrganizationDestinationOption(
-                target.TargetWidgetId,
-                target.SuggestedDisplayName,
-                target.TargetDirectoryPath,
-                false));
-        }
+            DesktopOrganizationTargetSelection? currentSelection =
+                _session.TargetSelections.TryGetValue(BucketKey, out DesktopOrganizationTargetSelection? sel)
+                    ? sel
+                    : null;
+            string? selectedExistingWidgetId =
+                currentSelection?.DestinationMode == DesktopOrganizationDestinationMode.ExistingWidget
+                    ? currentSelection.ExistingWidgetId
+                    : !target.CreatesWidget
+                        ? target.TargetWidgetId
+                        : null;
 
-        RebuildDestinationFlyout();
+            foreach (DesktopOrganizationDestinationOption destination in destinations.Where(
+                         item => target.CreatesWidget || item.Id != target.TargetWidgetId))
+            {
+                _destinations.Add(destination);
+            }
+
+            if (!target.CreatesWidget && _destinations.All(item => item.Id != target.TargetWidgetId))
+            {
+                _destinations.Insert(0, new DesktopOrganizationDestinationOption(
+                    target.TargetWidgetId,
+                    target.SuggestedDisplayName,
+                    target.TargetDirectoryPath,
+                    false));
+            }
+
+            RebuildDestinationFlyout(selectedExistingWidgetId);
+        }
 
         Loaded += Card_Loaded;
         Unloaded += Card_Unloaded;
         ActualThemeChanged += (_, _) => RefreshAppearance();
-        GlobalSelectionVisualsChanged += OnGlobalSelectionVisualsChanged;
         AddHandler(KeyDownEvent, new KeyEventHandler(Card_KeyDown), true);
         RefreshAppearance();
     }
 
-    public event EventHandler? SelectionChanged;
-
-    public event EventHandler<bool>? InlineIncludeRequested;
-
-    internal event EventHandler<IReadOnlyList<string>>? FilesDroppedIntoCard;
+    internal event EventHandler<IReadOnlyList<string>>? ExcludeItemsRequested;
 
     internal event EventHandler<string>? BoxTitleRenamed;
 
-    internal event EventHandler? DestinationRouteChanged;
+    internal event EventHandler? InlineRenameCanceled;
+
+    internal event EventHandler<DesktopOrganizationTargetSelection>? DestinationRouteSelected;
+
+    internal event EventHandler? TileSelectionChanged;
+
+    internal string BucketKey { get; }
 
     internal string SourceBucketId => _target.SourceBucketId;
 
     internal DesktopOrganizationTargetPlan TargetPlan => _target;
 
-    internal static void NotifyDragSessionState(bool isDragging) =>
-        DragSessionStateChanged?.Invoke(null, isDragging);
+    internal string EffectiveBoxTitle => _target.SuggestedDisplayName;
 
-    internal static void NotifyPointerDragMoved(object? sender, PointerRoutedEventArgs e) =>
-        PointerDragMoved?.Invoke(sender, e);
-
-    internal static void NotifyPointerDragReleased(object? sender, PointerRoutedEventArgs e) =>
-        PointerDragReleased?.Invoke(sender, e);
-
-    internal string EffectiveBoxTitle => GetEffectiveBoxTitle();
+    private bool _dropTargetHighlighted;
 
     internal void SetDropTargetHighlight(bool highlighted)
     {
-        if (_disposed)
+        if (_disposed || _dropTargetHighlighted == highlighted)
         {
             return;
         }
 
+        _dropTargetHighlighted = highlighted;
         if (highlighted)
         {
             CardOutline.BorderBrush = ResolveThemeBrush("AccentFillColorDefaultBrush");
@@ -216,50 +151,27 @@ public sealed partial class DesktopOrganizationPreviewCard : UserControl, IDispo
         }
         else
         {
-            ApplyMaterial();
+            AppSettings appSettings = App.Current.SettingsService.Settings;
+            ApplyMaterial(appSettings);
         }
     }
 
-    internal static void ClearActiveTileSelection()
+    internal void RefreshSelectionVisuals()
     {
-        if (ActiveSelectedSourcePaths.Count == 0)
+        if (!_disposed)
         {
-            return;
+            UpdateSelectionVisuals();
         }
-
-        ActiveSelectedSourcePaths.Clear();
-        GlobalSelectionVisualsChanged?.Invoke(null, EventArgs.Empty);
     }
-
-    internal void EnableInlineIncludeAction()
-    {
-        _inlineIncludeEnabled = true;
-        InlineIncludeButton.Visibility = Visibility.Visible;
-        UpdateSelectionVisuals();
-    }
-
-    internal void SetViewMode(DesktopOrganizationItemViewMode mode)
-    {
-        _viewMode = DesktopOrganizationItemViewMode.CompactGrid;
-    }
-
-    internal void SetNewItems(IReadOnlySet<string> paths)
-    {
-        _newPaths = paths;
-        _tileAppearance = null;
-        RefreshAppearance();
-    }
-
-    private long _titleRenameOpenedAtTick;
 
     internal void BeginInlineRename()
     {
-        if (_disposed || !_canSelectItems || _retainedSelection is not null)
+        if (_disposed || _readOnlyMode)
         {
             return;
         }
 
-        TitleRenameBox.Text = GetEffectiveBoxTitle();
+        TitleRenameBox.Text = EffectiveBoxTitle;
         TitleDisplayPanel.Visibility = Visibility.Collapsed;
         TitleRenameBox.Visibility = Visibility.Visible;
         _titleRenameOpenedAtTick = Environment.TickCount64;
@@ -271,134 +183,6 @@ public sealed partial class DesktopOrganizationPreviewCard : UserControl, IDispo
             "DesktopOrganizationCardRename");
     }
 
-    internal string GetEffectiveBoxTitle()
-    {
-        var destination = _selection.DestinationMode == DesktopOrganizationDestinationMode.ExistingWidget
-            ? _destinations.FirstOrDefault(item => item.Id == _selection.ExistingWidgetId)
-            : null;
-        return destination?.DisplayName ?? _target.SuggestedDisplayName;
-    }
-
-    private void OnGlobalSelectionVisualsChanged(object? sender, EventArgs e)
-    {
-        if (!_disposed)
-        {
-            UpdateSelectionVisuals();
-        }
-    }
-
-    private void RebuildDestinationFlyout()
-    {
-        DestinationFlyout.Items.Clear();
-        _destinationRadioItems.Clear();
-
-        if (_canSelectItems && _retainedSelection is null)
-        {
-            var renameItem = new MenuFlyoutItem
-            {
-                Text = T("Common.Rename"),
-                Icon = new FontIcon
-                {
-                    Glyph = "\uE70F",
-                    FontSize = 14
-                }
-            };
-            renameItem.Click += (_, _) => BeginInlineRename();
-            DestinationFlyout.Items.Add(renameItem);
-        }
-
-        var destinationSubItem = new MenuFlyoutSubItem
-        {
-            Text = T("DesktopOrganization.Layout.ChangeDestination"),
-            Icon = new FontIcon
-            {
-                Glyph = "\uE8B7",
-                FontSize = 14
-            }
-        };
-
-        if (_target.CreatesWidget)
-        {
-            AddDestinationRadioItem(destinationSubItem, null);
-        }
-
-        foreach (var destination in _destinations)
-        {
-            AddDestinationRadioItem(destinationSubItem, destination);
-        }
-
-        if (destinationSubItem.Items.Count > 0)
-        {
-            DestinationFlyout.Items.Add(destinationSubItem);
-        }
-
-        if (_canSelectItems && _retainedSelection is null)
-        {
-            DestinationFlyout.Items.Add(new MenuFlyoutSeparator());
-            var excludeBoxItem = new MenuFlyoutItem
-            {
-                Text = T("DesktopOrganization.Layout.KeptTitle"),
-                Icon = new FontIcon
-                {
-                    Glyph = "\uE7F8",
-                    FontSize = 14
-                }
-            };
-            excludeBoxItem.Click += (_, _) => ExcludeAllItemsInBox();
-            DestinationFlyout.Items.Add(excludeBoxItem);
-        }
-    }
-
-    private void ExcludeAllItemsInBox()
-    {
-        if (_disposed || !_canSelectItems || _retainedSelection is not null)
-        {
-            return;
-        }
-
-        foreach (var item in _target.Items)
-        {
-            _excludedPaths.Add(item.SourcePath);
-            ActiveSelectedSourcePaths.Remove(item.SourcePath);
-        }
-
-        _selection.IsSelected = false;
-        LayoutItems(force: true);
-        SelectionChanged?.Invoke(this, EventArgs.Empty);
-    }
-
-    private void AddDestinationRadioItem(MenuFlyoutSubItem parentSubItem, DesktopOrganizationDestinationOption? option)
-    {
-        if (_target.CreatesWidget && option is not null &&
-            parentSubItem.Items.OfType<RadioMenuFlyoutItem>().Count() == 1)
-        {
-            parentSubItem.Items.Add(new MenuFlyoutSeparator());
-        }
-
-        var item = new RadioMenuFlyoutItem
-        {
-            Text = option is null
-                ? Format("DesktopOrganization.Layout.NewDestination", _target.SuggestedDisplayName)
-                : option.DisplayName,
-            Tag = option,
-            GroupName = _target.SourceBucketId
-        };
-        ToolTipService.SetToolTip(item, option?.DirectoryPath ?? _target.TargetDirectoryPath);
-        item.Click += (_, _) =>
-        {
-            _selection.DestinationMode = option is null
-                ? DesktopOrganizationDestinationMode.Dynamic
-                : DesktopOrganizationDestinationMode.ExistingWidget;
-            _selection.ExistingWidgetId = option?.Id;
-            _tileAppearance = null;
-            RefreshAppearance();
-            SelectionChanged?.Invoke(this, EventArgs.Empty);
-            DestinationRouteChanged?.Invoke(this, EventArgs.Empty);
-        };
-        _destinationRadioItems.Add(item);
-        parentSubItem.Items.Add(item);
-    }
-
     internal void RefreshAppearance()
     {
         if (_disposed)
@@ -406,21 +190,21 @@ public sealed partial class DesktopOrganizationPreviewCard : UserControl, IDispo
             return;
         }
 
-        var settings = App.Current.SettingsService.Settings;
-        WidgetConfig? config = settings.Widgets.FirstOrDefault(item =>
-            item.Id == (_selection.ExistingWidgetId ?? _target.TargetWidgetId));
+        AppSettings settings = App.Current.SettingsService.Settings;
+        WidgetConfig? config = settings.WidgetLayout.Widgets.FirstOrDefault(item =>
+            string.Equals(item.Id, _target.TargetWidgetId, StringComparison.Ordinal));
         _layout = FileWidgetIconLayout.Calculate(
             settings,
             config?.IconSizeOverride,
             WindowsCompatibilityService.ResolveSystemTextScaleFactor());
+
         var tileAppearance = new PreviewTileAppearance(
-            _viewMode,
             _layout,
-            settings.HideShortcutArrowOverlay,
-            settings.ShowImageFilesAsIcons,
-            settings.ShowFileExtensions,
-            settings.HideShortcutExtensionWhenShowingFileExtensions,
-            settings.ShowFileItemPathTooltips,
+            settings.FileWidget.HideShortcutArrowOverlay,
+            settings.FileWidget.ShowImageFilesAsIcons,
+            settings.FileWidget.ShowFileExtensions,
+            settings.FileWidget.HideShortcutExtensionWhenShowingFileExtensions,
+            settings.FileWidget.ShowFileItemPathTooltips,
             XamlRoot?.RasterizationScale ?? 1,
             ActualTheme);
         if (_tileAppearance != tileAppearance)
@@ -437,42 +221,150 @@ public sealed partial class DesktopOrganizationPreviewCard : UserControl, IDispo
             _visibleCount = -1;
         }
 
-        ApplyMaterial();
+        ApplyMaterial(settings);
         UpdateDestinationVisuals();
-        LayoutItems(force: true);
+        LayoutItems(settings, force: true);
     }
 
-    private bool ResolveCreatesNewWidget()
+    public void Dispose()
     {
-        var destination = _selection.DestinationMode == DesktopOrganizationDestinationMode.ExistingWidget
-            ? _destinations.FirstOrDefault(item => item.Id == _selection.ExistingWidgetId)
-            : null;
-        return destination is null && _target.CreatesWidget;
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        _iconGeneration++;
+        DetachXamlRoot();
+        foreach (PreviewTile tile in _tiles)
+        {
+            tile.Image.Source = null;
+        }
+
+        _tiles.Clear();
+        ItemsPanel.Children.Clear();
+        _iconLoadGate.Dispose();
+    }
+
+    private void RebuildDestinationFlyout(string? selectedExistingWidgetId)
+    {
+        DestinationFlyout.Items.Clear();
+        _destinationRadioItems.Clear();
+
+        var renameItem = new MenuFlyoutItem
+        {
+            Text = T("Common.Rename"),
+            Icon = new FontIcon
+            {
+                Glyph = "\uE70F",
+                FontSize = 14
+            }
+        };
+        renameItem.Click += (_, _) => BeginInlineRename();
+        DestinationFlyout.Items.Add(renameItem);
+
+        var destinationSubItem = new MenuFlyoutSubItem
+        {
+            Text = T("DesktopOrganization.Layout.ChangeDestination"),
+            Icon = new FontIcon
+            {
+                Glyph = "\uE8B7",
+                FontSize = 14
+            }
+        };
+
+        if (_target.CreatesWidget)
+        {
+            AddDestinationRadioItem(destinationSubItem, null, selectedExistingWidgetId);
+        }
+
+        foreach (DesktopOrganizationDestinationOption destination in _destinations)
+        {
+            AddDestinationRadioItem(destinationSubItem, destination, selectedExistingWidgetId);
+        }
+
+        if (destinationSubItem.Items.Count > 0)
+        {
+            DestinationFlyout.Items.Add(destinationSubItem);
+        }
+
+        DestinationFlyout.Items.Add(new MenuFlyoutSeparator());
+        var excludeBoxItem = new MenuFlyoutItem
+        {
+            Text = T("DesktopOrganization.Layout.KeptTitle"),
+            Icon = new FontIcon
+            {
+                Glyph = "\uE7F8",
+                FontSize = 14
+            }
+        };
+        excludeBoxItem.Click += (_, _) => ExcludeAllItemsInBox();
+        DestinationFlyout.Items.Add(excludeBoxItem);
+    }
+
+    private void AddDestinationRadioItem(
+        MenuFlyoutSubItem parentSubItem,
+        DesktopOrganizationDestinationOption? option,
+        string? selectedExistingWidgetId)
+    {
+        if (_target.CreatesWidget && option is not null &&
+            parentSubItem.Items.OfType<RadioMenuFlyoutItem>().Count() == 1)
+        {
+            parentSubItem.Items.Add(new MenuFlyoutSeparator());
+        }
+
+        var item = new RadioMenuFlyoutItem
+        {
+            Text = option is null
+                ? Format("DesktopOrganization.Layout.NewDestination", _target.SuggestedDisplayName)
+                : option.DisplayName,
+            Tag = option,
+            GroupName = BucketKey,
+            IsChecked = option is null
+                ? string.IsNullOrWhiteSpace(selectedExistingWidgetId)
+                : string.Equals(option.Id, selectedExistingWidgetId, StringComparison.Ordinal)
+        };
+        ToolTipService.SetToolTip(item, option?.DirectoryPath ?? _target.TargetDirectoryPath);
+        item.Click += (_, _) =>
+        {
+            DestinationRouteSelected?.Invoke(
+                this,
+                new DesktopOrganizationTargetSelection
+                {
+                    DestinationMode = option is null
+                        ? DesktopOrganizationDestinationMode.Dynamic
+                        : DesktopOrganizationDestinationMode.ExistingWidget,
+                    ExistingWidgetId = option?.Id
+                });
+        };
+        _destinationRadioItems.Add(item);
+        parentSubItem.Items.Add(item);
+    }
+
+    private void ExcludeAllItemsInBox()
+    {
+        if (_disposed || _readOnlyMode || _target.Items.Count == 0)
+        {
+            return;
+        }
+
+        ExcludeItemsRequested?.Invoke(this, _target.Items.Select(item => item.SourcePath).ToList());
     }
 
     private void UpdateDestinationVisuals()
     {
+        TitleText.Text = EffectiveBoxTitle;
+        ToolTipService.SetToolTip(TitleDisplayPanel, EffectiveBoxTitle);
+
         if (DestinationPanel.Visibility != Visibility.Visible)
         {
             return;
         }
 
-        var destination = _selection.DestinationMode == DesktopOrganizationDestinationMode.ExistingWidget
-            ? _destinations.FirstOrDefault(item => item.Id == _selection.ExistingWidgetId)
-            : null;
-        string targetTitle = destination?.DisplayName ?? _target.SuggestedDisplayName;
-        TitleText.Text = targetTitle;
-        DestinationText.Text = targetTitle;
-        ToolTipService.SetToolTip(TitleDisplayPanel, targetTitle);
-
-        string targetDirectory = destination?.DirectoryPath ?? _target.TargetDirectoryPath;
-        ToolTipService.SetToolTip(DestinationButton, T("DesktopOrganization.Layout.More") + "\n" + targetDirectory);
-        AutomationProperties.SetName(DestinationButton, targetTitle);
-
-        foreach (var menuItem in _destinationRadioItems)
-        {
-            menuItem.IsChecked = (menuItem.Tag as DesktopOrganizationDestinationOption)?.Id == destination?.Id;
-        }
+        ToolTipService.SetToolTip(
+            DestinationButton,
+            T("DesktopOrganization.Layout.More") + "\n" + _target.TargetDirectoryPath);
+        AutomationProperties.SetName(DestinationButton, EffectiveBoxTitle);
     }
 
     private void Card_Loaded(object sender, RoutedEventArgs e)
@@ -525,24 +417,23 @@ public sealed partial class DesktopOrganizationPreviewCard : UserControl, IDispo
             _ => App.Current.ThemeService.EffectiveTheme == ElementTheme.Dark
         };
 
-    private void ApplyMaterial()
+    private void ApplyMaterial(AppSettings appSettings)
     {
-        AppSettings appSettings = App.Current.SettingsService.Settings;
         bool isDark = IsDarkEffectiveTheme();
         Windows.UI.Color accentColor = App.Current.ThemeService?.GetEffectiveAccentColor()
             ?? AccentColorHelper.DefaultAccentColor;
 
         double cornerRadius = WidgetCompactBoundsCalculator.ResolveOuterCornerRadius(
             WindowsCompatibilityService.ResolveEffectiveWidgetCornerPreference(
-                appSettings.WidgetCornerPreference));
+                appSettings.WidgetShell.WidgetCornerPreference));
         var corner = new CornerRadius(cornerRadius);
         MaterialSurface.CornerRadius = FallbackSurface.CornerRadius = CardOutline.CornerRadius = corner;
         MaterialSurface.Visibility = Visibility.Collapsed;
         FallbackSurface.Visibility = Visibility.Visible;
 
-        string materialType = appSettings.WidgetMaterialType;
-        double surfaceOpacity = appSettings.WidgetOpacity;
-        double materialIntensity = appSettings.WidgetMaterialIntensity;
+        string materialType = appSettings.WidgetShell.WidgetMaterialType;
+        double surfaceOpacity = appSettings.WidgetShell.WidgetOpacity;
+        double materialIntensity = appSettings.WidgetShell.WidgetMaterialIntensity;
 
         Windows.UI.Color surfaceColor;
         if (SettingsService.IsMicaMaterial(materialType))
@@ -574,8 +465,8 @@ public sealed partial class DesktopOrganizationPreviewCard : UserControl, IDispo
         FallbackSurface.Background = new SolidColorBrush(surfaceColor);
 
         WidgetBorderVisuals borderVisuals = WidgetBorderVisualCalculator.Resolve(
-            appSettings.WidgetBorderStyle,
-            appSettings.WidgetBorderColorMode,
+            appSettings.WidgetShell.WidgetBorderStyle,
+            appSettings.WidgetShell.WidgetBorderColorMode,
             isDark,
             accentColor);
         if (borderVisuals.Thickness <= 0 || borderVisuals.BorderColor.A == 0)
@@ -593,21 +484,17 @@ public sealed partial class DesktopOrganizationPreviewCard : UserControl, IDispo
         HeaderDivider.BorderBrush = borderVisuals.DividerColor.A > 0
             ? new SolidColorBrush(borderVisuals.DividerColor)
             : ResolveThemeBrush("DividerStrokeColorDefaultBrush");
+
+        _transparentBrush = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        _selectedTileSurfaceBrush = new SolidColorBrush(
+            Windows.UI.Color.FromArgb(isDark ? (byte)0x2E : (byte)0x22, accentColor.R, accentColor.G, accentColor.B));
+        _selectedTileBorderBrush = new SolidColorBrush(
+            Windows.UI.Color.FromArgb(isDark ? (byte)0x8C : (byte)0x78, accentColor.R, accentColor.G, accentColor.B));
+        _hoverTileSurfaceBrush = ResolveThemeBrush("SubtleFillColorSecondaryBrush");
+        _hoverTileBorderBrush = _transparentBrush;
     }
 
-    private static string GetCategoryGlyph(string categoryId) =>
-        categoryId switch
-        {
-            DesktopOrganizationCategoryIds.Shortcuts => "\uE71D",
-            DesktopOrganizationCategoryIds.Design => "\uE790",
-            DesktopOrganizationCategoryIds.Documents => "\uE8A5",
-            DesktopOrganizationCategoryIds.Images => "\uEB9F",
-            DesktopOrganizationCategoryIds.Media => "\uE768",
-            DesktopOrganizationCategoryIds.Packages => "\uE7B8",
-            _ => "\uE8B7"
-        };
-
-    private void LayoutItems(bool force = false)
+    private void LayoutItems(AppSettings settings, bool force = false)
     {
         if (_disposed || _layout.CellWidth <= 0)
         {
@@ -617,13 +504,11 @@ public sealed partial class DesktopOrganizationPreviewCard : UserControl, IDispo
         CardRootGrid.Width = FixedBoxWidth;
         CardRootGrid.Height = FixedBoxHeight;
 
-        bool isTargetBox = _canSelectItems && _retainedSelection is null;
-        IReadOnlyList<DesktopOrganizationFileSnapshot> activeIncoming = isTargetBox
-            ? _target.Items.Where(IsItemSelected).ToList()
-            : _target.Items;
-
-        int totalCells = activeIncoming.Count;
-        const int columns = FixedGridColumns;
+        IReadOnlyList<DesktopOrganizationFileSnapshot> items = _target.Items;
+        int totalCells = items.Count;
+        double availableWidth = ItemsPanel.ActualWidth > 120 ? ItemsPanel.ActualWidth : InnerItemsContentWidth;
+        double effectiveCellWidth = Math.Max(54, Math.Min(110, _layout.CellWidth));
+        int columns = Math.Clamp((int)Math.Floor(availableWidth / effectiveCellWidth), 2, 5);
 
         if (!force && columns == _columns && totalCells == _visibleCount && _tiles.Count == totalCells)
         {
@@ -640,9 +525,9 @@ public sealed partial class DesktopOrganizationPreviewCard : UserControl, IDispo
         }
 
         _tiles.Clear();
-        foreach (var item in activeIncoming)
+        foreach (DesktopOrganizationFileSnapshot item in items)
         {
-            _tiles.Add(CreateTile(item));
+            _tiles.Add(CreateTile(item, settings));
         }
 
         ItemsPanel.Children.Clear();
@@ -656,12 +541,13 @@ public sealed partial class DesktopOrganizationPreviewCard : UserControl, IDispo
             });
         }
 
+        double tileRowHeight = ComputeTileRowHeight();
         int rowCount = Math.Max(1, (int)Math.Ceiling(totalCells / (double)columns));
         for (int i = 0; i < rowCount; i++)
         {
             ItemsPanel.RowDefinitions.Add(new RowDefinition
             {
-                Height = new GridLength(_tiles.Count == 0 ? 156 : 80)
+                Height = new GridLength(_tiles.Count == 0 ? 156 : tileRowHeight)
             });
         }
 
@@ -683,19 +569,32 @@ public sealed partial class DesktopOrganizationPreviewCard : UserControl, IDispo
 
         for (int i = 0; i < _tiles.Count; i++)
         {
-            var button = _tiles[i].Button;
-            Grid.SetColumn(button, i % columns);
-            Grid.SetRow(button, i / columns);
-            ItemsPanel.Children.Add(button);
+            ContentControl host = _tiles[i].Host;
+            Grid.SetColumn(host, i % columns);
+            Grid.SetRow(host, i / columns);
+            ItemsPanel.Children.Add(host);
         }
 
         UpdateSelectionVisuals();
     }
 
-    private PreviewTile CreateTile(DesktopOrganizationFileSnapshot item)
+    private double ComputeTileRowHeight()
     {
-        var settings = App.Current.SettingsService.Settings;
-        const double iconSize = 32;
+        double iconSize = Math.Clamp(_layout.ImageSize, 20, 52);
+        if (!_layout.ShowLabel)
+        {
+            return Math.Max(52, Math.Ceiling(iconSize + 20));
+        }
+
+        double fontSize = Math.Clamp(_layout.LabelFontSize, 10, 14);
+        int lines = Math.Clamp(_layout.LabelMaxLines, 1, 3);
+        double textHeight = Math.Ceiling(fontSize * 1.35 * lines);
+        return Math.Max(76, Math.Ceiling(iconSize + textHeight + 18));
+    }
+
+    private PreviewTile CreateTile(DesktopOrganizationFileSnapshot item, AppSettings settings)
+    {
+        double iconSize = Math.Clamp(_layout.ImageSize, 20, 52);
         var image = new Image
         {
             Width = iconSize,
@@ -722,35 +621,40 @@ public sealed partial class DesktopOrganizationPreviewCard : UserControl, IDispo
         string displayName = FileService.GetDisplayName(
             item.SourcePath,
             item.IsDirectory,
-            settings.ShowFileExtensions,
-            settings.HideShortcutExtensionWhenShowingFileExtensions);
+            settings.FileWidget.ShowFileExtensions,
+            settings.FileWidget.HideShortcutExtensionWhenShowingFileExtensions);
         string description = _itemDescription?.Invoke(item) ?? string.Empty;
 
-        var checkIcon = new FontIcon { Glyph = "\uE73E", FontSize = 10, Visibility = Visibility.Collapsed };
-        var checkIndicator = new Border { Width = 18, Height = 18, Visibility = Visibility.Collapsed, Child = checkIcon };
-        var subtitleText = new TextBlock { Visibility = Visibility.Collapsed };
+        double spacing = Math.Clamp(_layout.ContentSpacing, 2, 7);
+        double labelFontSize = Math.Clamp(_layout.LabelFontSize, 10, 14);
+        double labelLineHeight = Math.Ceiling(labelFontSize * 1.33);
+        int labelMaxLines = Math.Clamp(_layout.LabelMaxLines, 1, 3);
 
         var stack = new StackPanel
         {
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Top,
-            Spacing = 5,
-            Padding = new Thickness(4, 6, 4, 4)
+            Spacing = spacing,
+            Padding = new Thickness(3, 5, 3, 3)
         };
         stack.Children.Add(iconHost);
-        stack.Children.Add(new TextBlock
+
+        if (_layout.ShowLabel)
         {
-            Text = displayName,
-            FontSize = 12,
-            LineHeight = 16,
-            MaxLines = 2,
-            TextWrapping = TextWrapping.Wrap,
-            TextTrimming = TextTrimming.CharacterEllipsis,
-            TextAlignment = TextAlignment.Center,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Top,
-            Foreground = ResolveThemeBrush("TextFillColorPrimaryBrush")
-        });
+            stack.Children.Add(new TextBlock
+            {
+                Text = displayName,
+                FontSize = labelFontSize,
+                LineHeight = labelLineHeight,
+                MaxLines = labelMaxLines,
+                TextWrapping = TextWrapping.Wrap,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                TextAlignment = TextAlignment.Center,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Top,
+                Foreground = ResolveThemeBrush("TextFillColorPrimaryBrush")
+            });
+        }
 
         var gridCell = new Grid
         {
@@ -758,74 +662,74 @@ public sealed partial class DesktopOrganizationPreviewCard : UserControl, IDispo
             VerticalAlignment = VerticalAlignment.Top
         };
         gridCell.Children.Add(stack);
-        gridCell.Children.Add(checkIndicator);
-        FrameworkElement contentRoot = gridCell;
 
-        var button = new ToggleButton
+        if (_session.NewSourcePaths.Contains(item.SourcePath))
         {
-            Content = contentRoot,
-            Style = (Style)Resources["PreviewFileToggleStyle"],
+            var newBadge = new Border
+            {
+                Background = ResolveThemeBrush("AccentFillColorDefaultBrush"),
+                CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(4, 1, 4, 1),
+                HorizontalAlignment = HorizontalAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Top,
+                Margin = new Thickness(0, 1, 1, 0),
+                IsHitTestVisible = false,
+                Child = new TextBlock
+                {
+                    Text = T("DesktopOrganization.Layout.New"),
+                    FontSize = 9.5,
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                    Foreground = ResolveThemeBrush("TextOnAccentFillColorPrimaryBrush")
+                }
+            };
+            gridCell.Children.Add(newBadge);
+        }
+
+        var host = new ContentControl
+        {
+            Content = gridCell,
+            Style = (Style)Resources["PreviewTileHostStyle"],
             HorizontalAlignment = HorizontalAlignment.Stretch,
             VerticalAlignment = VerticalAlignment.Stretch,
-            CanDrag = false
+            ManipulationMode = ManipulationModes.TranslateX | ManipulationModes.TranslateY
         };
 
         string label = item.Name + (item.SourceScope == DesktopOrganizationSourceScope.Public
             ? " · " + T("DesktopOrganization.Public.Badge")
             : string.Empty);
         AutomationProperties.SetName(
-            button,
+            host,
             string.IsNullOrWhiteSpace(description) ? label : label + " · " + description);
-        string tooltip = settings.ShowFileItemPathTooltips ? item.SourcePath : label;
+        string tooltip = settings.FileWidget.ShowFileItemPathTooltips ? item.SourcePath : label;
         if (!string.IsNullOrWhiteSpace(description))
         {
             tooltip += "\n" + description;
         }
-        ToolTipService.SetToolTip(button, tooltip);
 
-        var tile = new PreviewTile(
-            item,
-            description,
-            button,
-            image,
-            fallback,
-            contentRoot,
-            subtitleText,
-            checkIndicator,
-            checkIcon,
-            iconSize);
+        ToolTipService.SetToolTip(host, tooltip);
 
-        if (!_canSelectItems)
+        var tile = new PreviewTile(item, description, host, image, fallback, iconSize);
+        host.PointerEntered += (_, _) =>
         {
-            button.Click += (_, _) =>
-            {
-                button.IsChecked = false;
-                CreateItemDetails(item, description).ShowAt(button);
-            };
+            tile.IsHovered = true;
+            UpdateSingleTileVisual(tile);
+        };
+        host.PointerExited += (_, _) =>
+        {
+            tile.IsHovered = false;
+            UpdateSingleTileVisual(tile);
+        };
+
+        if (_readOnlyMode)
+        {
+            host.Tapped += (_, _) => CreateItemDetails(item, description).ShowAt(host);
         }
-        else if (_retainedSelection is null)
+        else
         {
-            button.AddHandler(
+            host.AddHandler(
                 UIElement.PointerPressedEvent,
                 new PointerEventHandler((_, e) => OnTilePointerPressed(tile, e)),
                 handledEventsToo: true);
-            button.AddHandler(
-                UIElement.PointerMovedEvent,
-                new PointerEventHandler((_, e) => OnTilePointerMoved(tile, e)),
-                handledEventsToo: true);
-            button.AddHandler(
-                UIElement.PointerReleasedEvent,
-                new PointerEventHandler((_, e) => OnTilePointerReleased(tile, e)),
-                handledEventsToo: true);
-            button.AddHandler(
-                UIElement.PointerCanceledEvent,
-                new PointerEventHandler((_, _) => CancelTilePointerDrag()),
-                handledEventsToo: true);
-            button.AddHandler(
-                UIElement.PointerCaptureLostEvent,
-                new PointerEventHandler((_, _) => CancelTilePointerDrag()),
-                handledEventsToo: true);
-            button.Click += (_, _) => UpdateSelectionVisuals();
 
             var contextMenu = new MenuFlyout();
             var excludeItem = new MenuFlyoutItem
@@ -841,124 +745,67 @@ public sealed partial class DesktopOrganizationPreviewCard : UserControl, IDispo
                 Text = T("DesktopOrganization.Layout.Details"),
                 Icon = new FontIcon { Glyph = "\uE946", FontSize = 14 }
             };
-            detailsItem.Click += (_, _) => CreateItemDetails(item, description).ShowAt(button);
+            detailsItem.Click += (_, _) => CreateItemDetails(item, description).ShowAt(host);
             contextMenu.Items.Add(detailsItem);
-            button.ContextFlyout = contextMenu;
+            host.ContextFlyout = contextMenu;
         }
 
-        _ = LoadIconAsync(tile, _iconGeneration, settings.HideShortcutArrowOverlay, settings.ShowImageFilesAsIcons);
+        _ = LoadIconAsync(
+            tile,
+            _iconGeneration,
+            settings.FileWidget.HideShortcutArrowOverlay,
+            settings.FileWidget.ShowImageFilesAsIcons);
         return tile;
     }
 
     private void OnTilePointerPressed(PreviewTile tile, PointerRoutedEventArgs e)
     {
-        if (_updating || _disposed || !_canSelectItems || _retainedSelection is not null)
+        if (_disposed || _readOnlyMode)
         {
             return;
         }
 
-        var point = e.GetCurrentPoint(this);
-        if (!point.Properties.IsLeftButtonPressed)
-        {
-            return;
-        }
-
-        _pressedTile = tile;
-        _tileDragStartPoint = point.Position;
-        _isTilePointerDragging = false;
+        _dragController.TryBeginCandidate(
+            tile.Host,
+            e,
+            DesktopOrganizationDragOrigin.PreviewCard,
+            BucketKey,
+            () => ResolveTileDragPayload(tile),
+            () => HandleTileClickSelection(tile));
     }
 
-    private void OnTilePointerMoved(PreviewTile tile, PointerRoutedEventArgs e)
+    private IReadOnlyList<string> ResolveTileDragPayload(PreviewTile tile)
     {
-        if (_disposed || !ReferenceEquals(_pressedTile, tile))
+        if (!_session.SelectedSourcePaths.Contains(tile.Item.SourcePath))
         {
-            return;
+            _session.SelectAllInBucket([tile.Item.SourcePath], BucketKey);
+            TileSelectionChanged?.Invoke(this, EventArgs.Empty);
         }
 
-        var point = e.GetCurrentPoint(this);
-        if (!point.Properties.IsLeftButtonPressed)
-        {
-            CancelTilePointerDrag();
-            return;
-        }
-
-        if (!_isTilePointerDragging)
-        {
-            double dx = point.Position.X - _tileDragStartPoint.X;
-            double dy = point.Position.Y - _tileDragStartPoint.Y;
-            if ((dx * dx) + (dy * dy) < 25)
-            {
-                return;
-            }
-
-            _isTilePointerDragging = true;
-            tile.Button.CapturePointer(e.Pointer);
-
-            if (!ActiveSelectedSourcePaths.Contains(tile.Item.SourcePath))
-            {
-                ActiveSelectedSourcePaths.Clear();
-                ActiveSelectedSourcePaths.Add(tile.Item.SourcePath);
-                GlobalSelectionVisualsChanged?.Invoke(this, EventArgs.Empty);
-            }
-
-            List<string> batch = ActiveSelectedSourcePaths.ToList();
-            ActiveDraggedSourcePath = tile.Item.SourcePath;
-            ActiveDraggedSourcePaths = batch;
-            NotifyDragSessionState(true);
-        }
-
-        NotifyPointerDragMoved(this, e);
+        return _session.GetDragPayloadForTargetItem(tile.Item.SourcePath);
     }
 
-    private void OnTilePointerReleased(PreviewTile tile, PointerRoutedEventArgs e)
+    private void HandleTileClickSelection(PreviewTile tile)
     {
-        if (_disposed)
+        if (_disposed || _readOnlyMode)
         {
             return;
         }
 
-        if (!ReferenceEquals(_pressedTile, tile))
-        {
-            UpdateSelectionVisuals();
-            return;
-        }
-
-        bool wasDragging = _isTilePointerDragging;
-        _pressedTile = null;
-        _isTilePointerDragging = false;
-        tile.Button.ReleasePointerCapture(e.Pointer);
-
-        if (wasDragging)
-        {
-            NotifyPointerDragReleased(this, e);
-            ActiveDraggedSourcePath = null;
-            ActiveDraggedSourcePaths = [];
-            NotifyDragSessionState(false);
-            UpdateSelectionVisuals();
-            return;
-        }
-
-        HandleTileClickSelection(tile);
-    }
-
-    private void CancelTilePointerDrag()
-    {
-        bool wasDragging = _isTilePointerDragging;
-        _pressedTile = null;
-        _isTilePointerDragging = false;
-        if (wasDragging)
-        {
-            ActiveDraggedSourcePath = null;
-            ActiveDraggedSourcePaths = [];
-            NotifyDragSessionState(false);
-        }
-
-        UpdateSelectionVisuals();
+        IReadOnlyList<string> orderedPaths = _tiles.Select(t => t.Item.SourcePath).ToList();
+        _session.HandleTileClick(
+            tile.Item.SourcePath,
+            BucketKey,
+            orderedPaths,
+            isCtrlDown: IsKeyDown(VirtualKey.Control),
+            isShiftDown: IsKeyDown(VirtualKey.Shift));
+        tile.Host.Focus(FocusState.Pointer);
+        TileSelectionChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private void CardRootGrid_Tapped(object sender, TappedRoutedEventArgs e)
     {
-        if (_disposed || !_canSelectItems || _retainedSelection is not null)
+        if (_disposed || _readOnlyMode)
         {
             return;
         }
@@ -968,7 +815,8 @@ public sealed partial class DesktopOrganizationPreviewCard : UserControl, IDispo
             DependencyObject? current = source;
             while (current is not null && !ReferenceEquals(current, CardRootGrid))
             {
-                if (current is ButtonBase or TextBox)
+                if (current is ButtonBase or TextBox ||
+                    _tiles.Any(tile => ReferenceEquals(tile.Host, current)))
                 {
                     return;
                 }
@@ -977,68 +825,25 @@ public sealed partial class DesktopOrganizationPreviewCard : UserControl, IDispo
             }
         }
 
-        if (ActiveSelectedSourcePaths.Count > 0)
+        if (_session.ClearTileSelection())
         {
-            ClearActiveTileSelection();
+            TileSelectionChanged?.Invoke(this, EventArgs.Empty);
         }
-    }
-
-    private void HandleTileClickSelection(PreviewTile tile)
-    {
-        if (_updating || _disposed || !_canSelectItems || _retainedSelection is not null)
-        {
-            return;
-        }
-
-        bool shift = IsKeyDown(VirtualKey.Shift);
-        if (shift && !string.IsNullOrEmpty(_lastClickedSourcePath))
-        {
-            int anchorIdx = _tiles.FindIndex(t =>
-                string.Equals(t.Item.SourcePath, _lastClickedSourcePath, StringComparison.OrdinalIgnoreCase));
-            int currentIdx = _tiles.IndexOf(tile);
-            if (anchorIdx >= 0 && currentIdx >= 0)
-            {
-                int start = Math.Min(anchorIdx, currentIdx);
-                int end = Math.Max(anchorIdx, currentIdx);
-                for (int i = start; i <= end; i++)
-                {
-                    ActiveSelectedSourcePaths.Add(_tiles[i].Item.SourcePath);
-                }
-
-                GlobalSelectionVisualsChanged?.Invoke(this, EventArgs.Empty);
-                return;
-            }
-        }
-
-        if (!ActiveSelectedSourcePaths.Remove(tile.Item.SourcePath))
-        {
-            ActiveSelectedSourcePaths.Add(tile.Item.SourcePath);
-        }
-
-        _lastClickedSourcePath = tile.Item.SourcePath;
-        GlobalSelectionVisualsChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private void ExcludeTileOrSelectedBatch(PreviewTile tile)
     {
-        if (_updating || _disposed || !_canSelectItems || _retainedSelection is not null)
+        if (_disposed || _readOnlyMode)
         {
             return;
         }
 
-        List<string> pathsToExclude = ActiveSelectedSourcePaths.Contains(tile.Item.SourcePath) && ActiveSelectedSourcePaths.Count > 1
-            ? ActiveSelectedSourcePaths.ToList()
-            : [tile.Item.SourcePath];
+        IReadOnlyList<string> paths =
+            _session.SelectedSourcePaths.Contains(tile.Item.SourcePath) && _session.SelectedSourcePaths.Count > 1
+                ? _session.SelectedSourcePaths.ToList()
+                : [tile.Item.SourcePath];
 
-        foreach (string path in pathsToExclude)
-        {
-            _excludedPaths.Add(path);
-            ActiveSelectedSourcePaths.Remove(path);
-        }
-
-        _selection.IsSelected = _target.Items.Any(item => !_excludedPaths.Contains(item.SourcePath));
-        LayoutItems(force: true);
-        SelectionChanged?.Invoke(this, EventArgs.Empty);
+        ExcludeItemsRequested?.Invoke(this, paths);
     }
 
     private async Task LoadIconAsync(PreviewTile tile, int generation, bool hideArrow, bool imagesAsIcons)
@@ -1056,7 +861,7 @@ public sealed partial class DesktopOrganizationPreviewCard : UserControl, IDispo
                 int pixels = Math.Max(
                     _layout.DecodePixelWidth,
                     (int)Math.Ceiling(tile.IconSize * (XamlRoot?.RasterizationScale ?? 1)));
-                var icon = await IconHelper.GetIconAsync(
+                ImageSource? icon = await IconHelper.GetIconAsync(
                     tile.Item.SourcePath,
                     hideShortcutArrowOverlay: hideArrow,
                     showImageFilesAsIcons: imagesAsIcons,
@@ -1083,31 +888,76 @@ public sealed partial class DesktopOrganizationPreviewCard : UserControl, IDispo
 
     private void Card_KeyDown(object sender, KeyRoutedEventArgs e)
     {
-        if (_disposed || !_canSelectItems || TitleRenameBox.Visibility == Visibility.Visible)
+        if (_disposed || TitleRenameBox.Visibility == Visibility.Visible)
         {
             return;
         }
 
-        if (e.Key is VirtualKey.Delete or VirtualKey.Back && ActiveSelectedSourcePaths.Count > 0)
-        {
-            foreach (string path in ActiveSelectedSourcePaths.ToList())
-            {
-                _excludedPaths.Add(path);
-            }
+        object? focused = XamlRoot is not null ? FocusManager.GetFocusedElement(XamlRoot) : null;
+        PreviewTile? focusedTile = _tiles.FirstOrDefault(tile => ReferenceEquals(tile.Host, focused));
 
-            ActiveSelectedSourcePaths.Clear();
-            _selection.IsSelected = _target.Items.Any(item => !_excludedPaths.Contains(item.SourcePath));
-            LayoutItems(force: true);
-            SelectionChanged?.Invoke(this, EventArgs.Empty);
+        if (!_readOnlyMode && e.Key == VirtualKey.A && IsKeyDown(VirtualKey.Control))
+        {
+            _session.SelectAllInBucket(_target.Items.Select(item => item.SourcePath), BucketKey);
+            TileSelectionChanged?.Invoke(this, EventArgs.Empty);
             e.Handled = true;
             return;
         }
 
-        if (e.Key is VirtualKey.Left or VirtualKey.Right or VirtualKey.Up or VirtualKey.Down)
+        if (!_readOnlyMode && e.Key == VirtualKey.F2)
         {
-            int current = _tiles.FindIndex(tile =>
-                ReferenceEquals(tile.Button, FocusManager.GetFocusedElement(XamlRoot)));
-            if (current < 0 || _columns <= 0 || _tiles.Count == 0)
+            BeginInlineRename();
+            e.Handled = true;
+            return;
+        }
+
+        if (!_readOnlyMode && e.Key is VirtualKey.Delete or VirtualKey.Back)
+        {
+            if (_session.SelectedSourcePaths.Count > 0)
+            {
+                ExcludeItemsRequested?.Invoke(this, _session.SelectedSourcePaths.ToList());
+                e.Handled = true;
+                return;
+            }
+
+            if (focusedTile is not null)
+            {
+                ExcludeItemsRequested?.Invoke(this, [focusedTile.Item.SourcePath]);
+                e.Handled = true;
+                return;
+            }
+        }
+
+        if (focusedTile is not null && e.Key == VirtualKey.Enter)
+        {
+            CreateItemDetails(focusedTile.Item, focusedTile.Description).ShowAt(focusedTile.Host);
+            e.Handled = true;
+            return;
+        }
+
+        if (focusedTile is not null && e.Key == VirtualKey.Space)
+        {
+            if (_readOnlyMode)
+            {
+                CreateItemDetails(focusedTile.Item, focusedTile.Description).ShowAt(focusedTile.Host);
+            }
+            else
+            {
+                _session.ToggleTileSelection(focusedTile.Item.SourcePath, BucketKey);
+                TileSelectionChanged?.Invoke(this, EventArgs.Empty);
+            }
+
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key is VirtualKey.Left or VirtualKey.Right or VirtualKey.Up or VirtualKey.Down &&
+            focusedTile is not null &&
+            _columns > 0 &&
+            _tiles.Count > 0)
+        {
+            int current = _tiles.IndexOf(focusedTile);
+            if (current < 0)
             {
                 return;
             }
@@ -1120,7 +970,7 @@ public sealed partial class DesktopOrganizationPreviewCard : UserControl, IDispo
                 _ => _columns
             };
             int next = Math.Clamp(current + delta, 0, _tiles.Count - 1);
-            _tiles[next].Button.Focus(FocusState.Keyboard);
+            _tiles[next].Host.Focus(FocusState.Keyboard);
             e.Handled = true;
         }
     }
@@ -1157,6 +1007,11 @@ public sealed partial class DesktopOrganizationPreviewCard : UserControl, IDispo
 
     private void TitleDisplayPanel_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
     {
+        if (_readOnlyMode)
+        {
+            return;
+        }
+
         e.Handled = true;
         BeginInlineRename();
     }
@@ -1213,9 +1068,12 @@ public sealed partial class DesktopOrganizationPreviewCard : UserControl, IDispo
             TitleRenameBox.Visibility = Visibility.Collapsed;
             TitleDisplayPanel.Visibility = Visibility.Visible;
 
-            if (!cancel &&
-                !string.IsNullOrWhiteSpace(candidate) &&
-                !string.Equals(candidate, GetEffectiveBoxTitle(), StringComparison.Ordinal))
+            if (cancel)
+            {
+                InlineRenameCanceled?.Invoke(this, EventArgs.Empty);
+            }
+            else if (!string.IsNullOrWhiteSpace(candidate) &&
+                     !string.Equals(candidate, EffectiveBoxTitle, StringComparison.Ordinal))
             {
                 BoxTitleRenamed?.Invoke(this, candidate);
             }
@@ -1226,71 +1084,65 @@ public sealed partial class DesktopOrganizationPreviewCard : UserControl, IDispo
         }
     }
 
-    private void CardRootGrid_DragOver(object sender, DragEventArgs e)
+    private void UpdateSelectionVisuals()
     {
-        if (DeskBoxDragData.HasDroppedFiles(e.DataView))
+        int itemCount = _target.Items.Count;
+        CountText.Inlines.Clear();
+        if (_readOnlyMode)
         {
-            e.AcceptedOperation = DataPackageOperation.None;
-            return;
+            CountText.Text = Format("DesktopOrganization.Preview.ItemCount", itemCount);
+        }
+        else if (!_target.CreatesWidget)
+        {
+            CountText.Inlines.Add(new Run
+            {
+                Text = T("DesktopOrganization.Layout.RouteBadgeExisting") + " · "
+            });
+            CountText.Inlines.Add(new Run
+            {
+                Text = $"+{itemCount}",
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Foreground = ResolveThemeBrush("AccentTextFillColorPrimaryBrush")
+            });
+        }
+        else
+        {
+            CountText.Text = T("DesktopOrganization.Layout.RouteBadgeNew") + " · " +
+                             Format("DesktopOrganization.Preview.ItemCount", itemCount);
         }
 
-        if (_disposed || !_canSelectItems || _retainedSelection is not null ||
-            (ActiveDraggedSourcePaths.Count == 0 && string.IsNullOrWhiteSpace(ActiveDraggedSourcePath)))
+        foreach (PreviewTile tile in _tiles)
         {
-            return;
+            UpdateSingleTileVisual(tile);
         }
-
-        e.AcceptedOperation = DataPackageOperation.Move;
-        e.DragUIOverride.Caption = GetEffectiveBoxTitle();
-        e.DragUIOverride.IsCaptionVisible = true;
-        CardOutline.BorderBrush = ResolveThemeBrush("AccentFillColorDefaultBrush");
-        CardOutline.BorderThickness = new Thickness(1.5);
     }
 
-    private void CardRootGrid_DragLeave(object sender, DragEventArgs e)
+    private void UpdateSingleTileVisual(PreviewTile tile)
     {
-        if (!_disposed)
+        bool isSelected = !_readOnlyMode && _session.SelectedSourcePaths.Contains(tile.Item.SourcePath);
+        if (isSelected)
         {
-            ApplyMaterial();
+            tile.Host.Background = _selectedTileSurfaceBrush ?? _transparentBrush;
+            tile.Host.BorderBrush = _selectedTileBorderBrush ?? _transparentBrush;
+        }
+        else if (tile.IsHovered)
+        {
+            tile.Host.Background = _hoverTileSurfaceBrush ?? _transparentBrush;
+            tile.Host.BorderBrush = _hoverTileBorderBrush ?? _transparentBrush;
+        }
+        else
+        {
+            tile.Host.Background = _transparentBrush;
+            tile.Host.BorderBrush = _transparentBrush;
         }
     }
 
-    private async void CardRootGrid_Drop(object sender, DragEventArgs e)
+    private void ItemsPanel_SizeChanged(object sender, SizeChangedEventArgs e)
     {
-        if (_disposed || !_canSelectItems || _retainedSelection is not null ||
-            DeskBoxDragData.HasDroppedFiles(e.DataView))
+        if (!_disposed && _layout.CellWidth > 0 && Math.Abs(e.NewSize.Width - e.PreviousSize.Width) >= 24)
         {
-            e.AcceptedOperation = DataPackageOperation.None;
-            return;
-        }
-
-        ApplyMaterial();
-        List<string> droppedPaths = ActiveDraggedSourcePaths.Count > 0
-            ? ActiveDraggedSourcePaths.ToList()
-            : !string.IsNullOrWhiteSpace(ActiveDraggedSourcePath)
-                ? [ActiveDraggedSourcePath!]
-                : [];
-
-        if (droppedPaths.Count == 0 && e.DataView.Contains(StandardDataFormats.Text))
-        {
-            try
-            {
-                string raw = await e.DataView.GetTextAsync();
-                droppedPaths = raw.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
-            }
-            catch
-            {
-                droppedPaths = [];
-            }
-        }
-
-        ActiveDraggedSourcePath = null;
-        ActiveDraggedSourcePaths = [];
-        NotifyDragSessionState(false);
-
-        if (droppedPaths.Count > 0)
-        {
-            FilesDroppedIntoCard?.Invoke(this, droppedPaths);
+            AppSettings settings = App.Current.SettingsService.Settings;
+            LayoutItems(settings);
         }
     }
 
@@ -1326,145 +1178,29 @@ public sealed partial class DesktopOrganizationPreviewCard : UserControl, IDispo
         return new Flyout { Content = content };
     }
 
-    private void GroupCheckBox_Changed(object sender, RoutedEventArgs e)
-    {
-    }
-
-    private void InlineIncludeButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (_disposed || !_inlineIncludeEnabled)
-        {
-            return;
-        }
-
-        int selectedCount = _target.Items.Count(IsItemSelected);
-        InlineIncludeRequested?.Invoke(this, selectedCount == 0);
-    }
-
-    private void UpdateSelectionVisuals()
-    {
-        _updating = true;
-        try
-        {
-            int selected = _target.Items.Count(IsItemSelected);
-            GroupCheckBox.IsChecked = selected == 0
-                ? false
-                : selected == _target.Items.Count ? true : null;
-
-            CountText.Inlines.Clear();
-            if (!_canSelectItems)
-            {
-                CountText.Text = Format("DesktopOrganization.Preview.ItemCount", _target.Items.Count);
-            }
-            else if (!ResolveCreatesNewWidget())
-            {
-                CountText.Inlines.Add(new Run
-                {
-                    Text = T("DesktopOrganization.Layout.RouteBadgeExisting") + " · "
-                });
-                CountText.Inlines.Add(new Run
-                {
-                    Text = $"+{selected}",
-                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                    Foreground = ResolveThemeBrush("AccentTextFillColorPrimaryBrush")
-                });
-            }
-            else
-            {
-                CountText.Text = T("DesktopOrganization.Layout.RouteBadgeNew") + " · " +
-                                 Format("DesktopOrganization.Preview.ItemCount", selected);
-            }
-
-            if (_inlineIncludeEnabled)
-            {
-                InlineIncludeText.Text = selected > 0
-                    ? Format("DesktopOrganization.Layout.IncludeCount", selected)
-                    : Format("DesktopOrganization.Layout.IncludeAllCount", _target.Items.Count);
-            }
-
-            bool isDark = IsDarkEffectiveTheme();
-            Windows.UI.Color accent = App.Current.ThemeService?.GetEffectiveAccentColor()
-                ?? AccentColorHelper.DefaultAccentColor;
-            Brush transparentSurface = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
-            Brush selectedTileSurface = new SolidColorBrush(
-                Windows.UI.Color.FromArgb(isDark ? (byte)0x2E : (byte)0x22, accent.R, accent.G, accent.B));
-            Brush selectedTileBorder = new SolidColorBrush(
-                Windows.UI.Color.FromArgb(isDark ? (byte)0x8C : (byte)0x78, accent.R, accent.G, accent.B));
-
-            foreach (var tile in _tiles)
-            {
-                bool isTileHighlighted = ActiveSelectedSourcePaths.Contains(tile.Item.SourcePath);
-                tile.Button.IsChecked = isTileHighlighted;
-                tile.Button.Background = isTileHighlighted ? selectedTileSurface : transparentSurface;
-                tile.Button.BorderBrush = isTileHighlighted ? selectedTileBorder : transparentSurface;
-                tile.ContentRoot.Opacity = 1.0;
-                tile.CheckIndicator.Visibility = Visibility.Collapsed;
-            }
-        }
-        finally
-        {
-            _updating = false;
-        }
-    }
-
-    private bool IsItemSelected(DesktopOrganizationFileSnapshot item) =>
-        _canSelectItems &&
-        (_retainedSelection is not null
-            ? _retainedSelection.Contains(item.SourcePath)
-            : _selection.IsSelected && !_excludedPaths.Contains(item.SourcePath));
-
-    private void ItemsPanel_SizeChanged(object sender, SizeChangedEventArgs e)
-    {
-    }
-
-    public void Dispose()
-    {
-        if (_disposed)
-        {
-            return;
-        }
-
-        _disposed = true;
-        if (_isTilePointerDragging || _pressedTile is not null)
-        {
-            _pressedTile = null;
-            _isTilePointerDragging = false;
-            ActiveDraggedSourcePath = null;
-            ActiveDraggedSourcePaths = [];
-            NotifyDragSessionState(false);
-        }
-
-        _iconGeneration++;
-        GlobalSelectionVisualsChanged -= OnGlobalSelectionVisualsChanged;
-        DetachXamlRoot();
-        foreach (var tile in _tiles)
-        {
-            tile.Image.Source = null;
-        }
-
-        _tiles.Clear();
-        ItemsPanel.Children.Clear();
-    }
-
     private static string T(string key) => App.Current.LocalizationService.T(key);
 
     private static string Format(string key, params object[] args) =>
         App.Current.LocalizationService.Format(key, args);
 
-    private sealed record PreviewTile(
-        DesktopOrganizationFileSnapshot Item,
-        string Description,
-        ToggleButton Button,
-        Image Image,
-        FontIcon Fallback,
-        FrameworkElement ContentRoot,
-        TextBlock Subtitle,
-        Border CheckIndicator,
-        FontIcon CheckIcon,
-        double IconSize);
+    private sealed class PreviewTile(
+        DesktopOrganizationFileSnapshot item,
+        string description,
+        ContentControl host,
+        Image image,
+        FontIcon fallback,
+        double iconSize)
+    {
+        public DesktopOrganizationFileSnapshot Item { get; } = item;
+        public string Description { get; } = description;
+        public ContentControl Host { get; } = host;
+        public Image Image { get; } = image;
+        public FontIcon Fallback { get; } = fallback;
+        public double IconSize { get; } = iconSize;
+        public bool IsHovered { get; set; }
+    }
 
     private sealed record PreviewTileAppearance(
-        DesktopOrganizationItemViewMode ViewMode,
         FileWidgetIconLayout Layout,
         bool HideShortcutArrow,
         bool ImagesAsIcons,

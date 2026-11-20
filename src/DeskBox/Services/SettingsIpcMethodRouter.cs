@@ -584,6 +584,18 @@ public sealed class SettingsIpcMethodRouter
                 if (_widget is null) return unavailable(method);
                 return await DispatchMigrationRootAsync(payload, cancellationToken).ConfigureAwait(false);
 
+            case SettingsIpcMethods.WidgetMigrateTryEmptySwitch:
+                if (_widget is null) return unavailable(method);
+                return await DispatchMigrationTryEmptySwitchAsync(payload, cancellationToken).ConfigureAwait(false);
+
+            case SettingsIpcMethods.WidgetMigrateRetrySourceCleanup:
+                if (_widget is null) return unavailable(method);
+                return await DispatchMigrationCleanupAsync(payload, retrySource: true, cancellationToken).ConfigureAwait(false);
+
+            case SettingsIpcMethods.WidgetMigrateCleanupCopies:
+                if (_widget is null) return unavailable(method);
+                return await DispatchMigrationCleanupAsync(payload, retrySource: false, cancellationToken).ConfigureAwait(false);
+
             case SettingsIpcMethods.WidgetGlanceList:
                 if (_widget is null) return unavailable(method);
                 IReadOnlyList<GlanceWidgetInstanceInfo> instances = _widget.GetGlanceWidgetInstances();
@@ -679,6 +691,9 @@ public sealed class SettingsIpcMethodRouter
 
                 await _widget.ApplyCustomWidgetMutationAsync(customMutation);
                 return (true, null, null);
+
+            case SettingsIpcMethods.WidgetCustomApplyStoreData:
+                return await CustomWidgetDataStore.ApplyRelayedStorePayloadAsync(payload);
 
             case SettingsIpcMethods.WidgetCustomSetEnabled:
                 if (_widget is null) return unavailable(method);
@@ -893,7 +908,11 @@ public sealed class SettingsIpcMethodRouter
 
             case SettingsIpcMethods.AppSetSnapSpacing:
                 if (_appActions is null) return unavailable(method);
-                if (!double.TryParse(payload, out double spacingDips))
+                if (!double.TryParse(
+                        payload,
+                        System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        out double spacingDips))
                 {
                     return (false, null, "missing spacing payload");
                 }
@@ -979,6 +998,18 @@ public sealed class SettingsIpcMethodRouter
                 return (true, SettingsIpcPayload.Encode(
                     _appActions.RepairDragDropPermissions(),
                     SettingsIpcJsonContext.Default.DragDropPermissionRepairResult), null);
+
+            case SettingsIpcMethods.AppGetAutoStartStatus:
+                if (_appActions is null) return unavailable(method);
+                return (true, SettingsIpcPayload.Encode(
+                    await _appActions.GetAutoStartStatusAsync(),
+                    SettingsIpcJsonContext.Default.StartupOperationResult), null);
+
+            case SettingsIpcMethods.AppSetAutoStartEnabled:
+                if (_appActions is null) return unavailable(method);
+                return (true, SettingsIpcPayload.Encode(
+                    await _appActions.SetAutoStartEnabledAsync(SettingsIpcPayload.DecodeBoolean(payload)),
+                    SettingsIpcJsonContext.Default.StartupOperationResult), null);
 
             // ── Backup commands (batch 3c-3a) ────────────────────────
 
@@ -1416,6 +1447,11 @@ public sealed class SettingsIpcMethodRouter
         ownedCancelSource.Dispose();
     }
 
+    internal void CancelAllActiveMigrationsOnDisconnect()
+    {
+        CancelActiveMigration(operationId: null);
+    }
+
     private void CancelActiveMigration(string? operationId)
     {
         List<CancellationTokenSource>? targets = null;
@@ -1508,7 +1544,8 @@ public sealed class SettingsIpcMethodRouter
                     Ok: false,
                     ProblemKind: (int)ex.Problem,
                     ErrorMessage: ex.Message,
-                    TemporaryBytes: ex.TemporaryBytes),
+                    TemporaryBytes: ex.TemporaryBytes,
+                    BlockingPath: ex.BlockingPath),
                 SettingsIpcJsonContext.Default.SettingsIpcMigrationOutcome), null);
         }
         catch (Exception ex)
@@ -1518,12 +1555,101 @@ public sealed class SettingsIpcMethodRouter
                 new SettingsIpcMigrationOutcome(
                     Ok: false,
                     ProblemKind: (int)classified,
-                    ErrorMessage: ex.Message),
+                    ErrorMessage: ex.Message,
+                    BlockingPath: ManagedStorageMigrationPresentation.ExtractBlockingPath(ex)),
                 SettingsIpcJsonContext.Default.SettingsIpcMigrationOutcome), null);
         }
         finally
         {
             UnregisterMigrationCancellation(operationId, ownedCancelCts);
+        }
+    }
+
+    private async Task<(bool Ok, string? Payload, string? Error)> DispatchMigrationTryEmptySwitchAsync(
+        string? payload,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            ManagedStorageMigrationResult? result = await _widget!.TrySwitchEmptyManagedStorageRootAsync(
+                payload ?? string.Empty,
+                cancellationToken).ConfigureAwait(false);
+            return (true, SettingsIpcPayload.Encode(
+                new SettingsIpcMigrationOutcome(Ok: true, Result: result),
+                SettingsIpcJsonContext.Default.SettingsIpcMigrationOutcome), null);
+        }
+        catch (OperationCanceledException ex)
+        {
+            return (true, SettingsIpcPayload.Encode(
+                new SettingsIpcMigrationOutcome(Ok: false, Stopped: true, ErrorMessage: ex.Message),
+                SettingsIpcJsonContext.Default.SettingsIpcMigrationOutcome), null);
+        }
+        catch (StorageMigrationException ex)
+        {
+            return (true, SettingsIpcPayload.Encode(
+                new SettingsIpcMigrationOutcome(
+                    Ok: false,
+                    ProblemKind: (int)ex.Problem,
+                    ErrorMessage: ex.Message,
+                    TemporaryBytes: ex.TemporaryBytes,
+                    BlockingPath: ex.BlockingPath),
+                SettingsIpcJsonContext.Default.SettingsIpcMigrationOutcome), null);
+        }
+        catch (Exception ex)
+        {
+            StorageMigrationProblem classified = ManagedStorageMigrationPresentation.Classify(ex);
+            return (true, SettingsIpcPayload.Encode(
+                new SettingsIpcMigrationOutcome(
+                    Ok: false,
+                    ProblemKind: (int)classified,
+                    ErrorMessage: ex.Message,
+                    BlockingPath: ManagedStorageMigrationPresentation.ExtractBlockingPath(ex)),
+                SettingsIpcJsonContext.Default.SettingsIpcMigrationOutcome), null);
+        }
+    }
+
+    private async Task<(bool Ok, string? Payload, string? Error)> DispatchMigrationCleanupAsync(
+        string? payload,
+        bool retrySource,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            string targetPath = payload ?? string.Empty;
+            ManagedStorageMigrationCleanupResult cleanup = retrySource
+                ? await _widget!.RetryManagedStorageSourceCleanupAsync(targetPath, cancellationToken).ConfigureAwait(false)
+                : await _widget!.CleanupInterruptedMigrationCopiesAsync(targetPath, cancellationToken).ConfigureAwait(false);
+            return (true, SettingsIpcPayload.Encode(
+                new SettingsIpcMigrationOutcome(Ok: true, CleanupResult: cleanup),
+                SettingsIpcJsonContext.Default.SettingsIpcMigrationOutcome), null);
+        }
+        catch (OperationCanceledException ex)
+        {
+            return (true, SettingsIpcPayload.Encode(
+                new SettingsIpcMigrationOutcome(Ok: false, Stopped: true, ErrorMessage: ex.Message),
+                SettingsIpcJsonContext.Default.SettingsIpcMigrationOutcome), null);
+        }
+        catch (StorageMigrationException ex)
+        {
+            return (true, SettingsIpcPayload.Encode(
+                new SettingsIpcMigrationOutcome(
+                    Ok: false,
+                    ProblemKind: (int)ex.Problem,
+                    ErrorMessage: ex.Message,
+                    TemporaryBytes: ex.TemporaryBytes,
+                    BlockingPath: ex.BlockingPath),
+                SettingsIpcJsonContext.Default.SettingsIpcMigrationOutcome), null);
+        }
+        catch (Exception ex)
+        {
+            StorageMigrationProblem classified = ManagedStorageMigrationPresentation.Classify(ex);
+            return (true, SettingsIpcPayload.Encode(
+                new SettingsIpcMigrationOutcome(
+                    Ok: false,
+                    ProblemKind: (int)classified,
+                    ErrorMessage: ex.Message,
+                    BlockingPath: ManagedStorageMigrationPresentation.ExtractBlockingPath(ex)),
+                SettingsIpcJsonContext.Default.SettingsIpcMigrationOutcome), null);
         }
     }
 
@@ -1573,7 +1699,9 @@ public sealed class SettingsIpcMethodRouter
                 new ManagedStorageMigrationOptions(
                     Progress: progress,
                     CancellationToken: linkedCts.Token,
-                    RestartIfCopiesRemoved: migration.RestartIfCopiesRemoved)).ConfigureAwait(false);
+                    RestartIfCopiesRemoved: migration.RestartIfCopiesRemoved,
+                    RetainOriginals: migration.RetainOriginals,
+                    IncludeOrphanFolders: migration.IncludeOrphanFolders)).ConfigureAwait(false);
             return (true, SettingsIpcPayload.Encode(
                 new SettingsIpcMigrationOutcome(Ok: true, Result: migrationResult),
                 SettingsIpcJsonContext.Default.SettingsIpcMigrationOutcome), null);
@@ -1585,7 +1713,8 @@ public sealed class SettingsIpcMethodRouter
                     Ok: false,
                     Stopped: true,
                     ErrorMessage: ex.Message,
-                    TemporaryBytes: ex.TemporaryBytes),
+                    TemporaryBytes: ex.TemporaryBytes,
+                    HasPartialCopies: ex.HasPartialCopies),
                 SettingsIpcJsonContext.Default.SettingsIpcMigrationOutcome), null);
         }
         catch (OperationCanceledException ex)
@@ -1604,7 +1733,8 @@ public sealed class SettingsIpcMethodRouter
                     Ok: false,
                     ProblemKind: (int)ex.Problem,
                     ErrorMessage: ex.Message,
-                    TemporaryBytes: ex.TemporaryBytes),
+                    TemporaryBytes: ex.TemporaryBytes,
+                    BlockingPath: ex.BlockingPath),
                 SettingsIpcJsonContext.Default.SettingsIpcMigrationOutcome), null);
         }
         catch (Exception ex)
@@ -1614,7 +1744,8 @@ public sealed class SettingsIpcMethodRouter
                 new SettingsIpcMigrationOutcome(
                     Ok: false,
                     ProblemKind: (int)classified,
-                    ErrorMessage: ex.Message),
+                    ErrorMessage: ex.Message,
+                    BlockingPath: ManagedStorageMigrationPresentation.ExtractBlockingPath(ex)),
                 SettingsIpcJsonContext.Default.SettingsIpcMigrationOutcome), null);
         }
         finally

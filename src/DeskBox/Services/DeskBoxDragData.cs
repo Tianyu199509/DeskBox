@@ -1,7 +1,6 @@
 using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Platform;
-using System.Net.Http;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Storage;
 using Windows.Storage.Streams;
@@ -36,10 +35,6 @@ public static class DeskBoxDragData
     private static string? s_activeQuickCaptureDragToken;
     private static DateTimeOffset s_activeQuickCaptureDragCreatedAt;
     private static IReadOnlyList<QuickCaptureItem>? s_activeQuickCaptureDragItems;
-    private static readonly HttpClient s_virtualDropHttpClient = new()
-    {
-        Timeout = TimeSpan.FromSeconds(30)
-    };
 
     // Same ceiling the native path enforces: one dropped payload can never
     // materialize more than this onto disk or into memory.
@@ -192,6 +187,234 @@ public static class DeskBoxDragData
                dataView.Contains(StandardDataFormats.WebLink);
     }
 
+    public static bool HasCustomWidgetTextPayload(DataPackageView dataView) =>
+        dataView is not null &&
+        (dataView.Contains(TextFormat) ||
+         dataView.Contains(StandardDataFormats.Text) ||
+         dataView.Contains(StandardDataFormats.WebLink) ||
+         TryGetTodoDragItems(dataView) is { Count: > 0 } ||
+         TryGetQuickCaptureDragItems(dataView) is { Count: > 0 });
+
+    public static bool CanAcceptCustomWidgetDrop(
+        DataPackageView dataView,
+        string? acceptSpec,
+        DataPackageOperation allowedOperations,
+        bool preferLinkForFiles,
+        out DataPackageOperation negotiatedOperation,
+        out string matchedKind)
+    {
+        negotiatedOperation = DataPackageOperation.None;
+        matchedKind = string.Empty;
+        if (dataView is null)
+        {
+            return false;
+        }
+
+        CustomWidgetDropAcceptHelper.ParseAcceptModes(
+            acceptSpec,
+            out bool allowsFiles,
+            out bool allowsText,
+            out bool allowsItems,
+            out HashSet<string>? allowedExtensions);
+
+        if (allowsItems)
+        {
+            if (TryGetTodoDragItems(dataView) is { Count: > 0 })
+            {
+                matchedKind = "todo";
+                negotiatedOperation = ResolveNonFileDropOperation(allowedOperations);
+                return negotiatedOperation != DataPackageOperation.None;
+            }
+
+            if (TryGetQuickCaptureDragItems(dataView) is { Count: > 0 })
+            {
+                matchedKind = "quickCapture";
+                negotiatedOperation = ResolveNonFileDropOperation(allowedOperations);
+                return negotiatedOperation != DataPackageOperation.None;
+            }
+        }
+
+        if (allowsFiles && HasDroppedFiles(dataView))
+        {
+            IReadOnlyList<DroppedFilePath> internalFiles = GetInternalDroppedFiles(dataView);
+            if (allowedExtensions is { Count: > 0 } &&
+                internalFiles.Count > 0 &&
+                !internalFiles.Any(f => CustomWidgetDropAcceptHelper.MatchesFileExtensionFilter(f.Path, allowedExtensions)))
+            {
+                // Internal file drag has concrete paths right away and none matched the extension filter.
+            }
+            else
+            {
+                matchedKind = "files";
+                negotiatedOperation = preferLinkForFiles && allowedOperations.HasFlag(DataPackageOperation.Link)
+                    ? DataPackageOperation.Link
+                    : GetFileAssociationOperation(dataView, allowedOperations);
+                if (negotiatedOperation != DataPackageOperation.None)
+                {
+                    return true;
+                }
+            }
+        }
+
+        if (allowsText && HasCustomWidgetTextPayload(dataView))
+        {
+            matchedKind = "text";
+            negotiatedOperation = ResolveNonFileDropOperation(allowedOperations);
+            return negotiatedOperation != DataPackageOperation.None;
+        }
+
+        matchedKind = string.Empty;
+        negotiatedOperation = DataPackageOperation.None;
+        return false;
+    }
+
+    private static DataPackageOperation ResolveNonFileDropOperation(DataPackageOperation allowedOperations) =>
+        allowedOperations == DataPackageOperation.None || allowedOperations.HasFlag(DataPackageOperation.Copy)
+            ? DataPackageOperation.Copy
+            : ResolveInternalMetadataOperation(allowedOperations);
+
+    public static async Task<CustomWidgetExtractedDropBatch?> TryExtractCustomWidgetDropAsync(
+        DataPackageView dataView,
+        string? acceptSpec)
+    {
+        if (dataView is null)
+        {
+            return null;
+        }
+
+        CustomWidgetDropAcceptHelper.ParseAcceptModes(
+            acceptSpec,
+            out bool allowsFiles,
+            out bool allowsText,
+            out bool allowsItems,
+            out HashSet<string>? allowedExtensions);
+
+        if (allowsItems)
+        {
+            if (TryGetTodoDragItems(dataView) is { Count: > 0 } todoItems)
+            {
+                CustomWidgetDropItemRecord[] records = todoItems
+                    .Select(static item => new CustomWidgetDropItemRecord(
+                        Id: item.Id,
+                        Title: item.Text,
+                        Text: item.Text,
+                        Body: item.Notes,
+                        Url: null,
+                        IsCompleted: item.IsCompleted,
+                        Source: "todo"))
+                    .ToArray();
+                string joined = string.Join(
+                    Environment.NewLine,
+                    records.Select(static r => r.Text).Where(static t => !string.IsNullOrWhiteSpace(t)));
+                return new CustomWidgetExtractedDropBatch(
+                    new CustomWidgetStructuredDropPayload("todo", Text: joined, Items: records),
+                    fileBatch: null);
+            }
+
+            if (TryGetQuickCaptureDragItems(dataView) is { Count: > 0 } qcItems)
+            {
+                CustomWidgetDropItemRecord[] records = qcItems
+                    .Select(static item =>
+                    {
+                        string title = !string.IsNullOrWhiteSpace(item.Title)
+                            ? item.Title!.Trim()
+                            : FirstLineSummary(item.Body);
+                        string text = !string.IsNullOrWhiteSpace(item.Body)
+                            ? item.Body.Trim()
+                            : (item.Url ?? title);
+                        return new CustomWidgetDropItemRecord(
+                            Id: item.Id,
+                            Title: title,
+                            Text: text,
+                            Body: item.Body,
+                            Url: item.Url,
+                            IsCompleted: false,
+                            Source: "quickCapture");
+                    })
+                    .ToArray();
+                string joined = string.Join(
+                    Environment.NewLine,
+                    records.Select(static r => !string.IsNullOrWhiteSpace(r.Text) ? r.Text : r.Title)
+                           .Where(static t => !string.IsNullOrWhiteSpace(t)));
+                return new CustomWidgetExtractedDropBatch(
+                    new CustomWidgetStructuredDropPayload("quickCapture", Text: joined, Items: records),
+                    fileBatch: null);
+            }
+        }
+
+        if (allowsFiles && HasDroppedFiles(dataView))
+        {
+            DroppedFileBatch batch = await TryGetDroppedFilesAsync(dataView);
+            string[] paths = batch.Files
+                .Select(static f => f.Path)
+                .Where(p => !string.IsNullOrWhiteSpace(p) &&
+                            CustomWidgetDropAcceptHelper.MatchesFileExtensionFilter(p, allowedExtensions))
+                .ToArray();
+            if (paths.Length > 0)
+            {
+                bool forceCopy = batch.Files.Any(static f => f.ForceManagedCopy);
+                return new CustomWidgetExtractedDropBatch(
+                    new CustomWidgetStructuredDropPayload(
+                        "files",
+                        Text: string.Join(Environment.NewLine, paths),
+                        FilePaths: paths,
+                        ForceCopyFiles: forceCopy),
+                    fileBatch: batch);
+            }
+
+            batch.Dispose();
+        }
+
+        if (allowsText)
+        {
+            string? droppedText = await TryGetTextAsync(dataView);
+            if (string.IsNullOrWhiteSpace(droppedText))
+            {
+                if (TryGetTodoDragItems(dataView) is { Count: > 0 } fallbackTodos)
+                {
+                    droppedText = string.Join(Environment.NewLine, fallbackTodos.Select(static t => t.Text));
+                }
+                else if (TryGetQuickCaptureDragItems(dataView) is { Count: > 0 } fallbackNotes)
+                {
+                    droppedText = string.Join(Environment.NewLine, fallbackNotes.Select(static n =>
+                        !string.IsNullOrWhiteSpace(n.Body) ? n.Body : (n.Title ?? n.Url ?? string.Empty)));
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(droppedText))
+            {
+                string clean = droppedText.Trim();
+                string? detectedUrl = IsHttpUrl(clean) ? clean : null;
+                var single = new CustomWidgetDropItemRecord(
+                    Id: Guid.NewGuid().ToString("N")[..12],
+                    Title: FirstLineSummary(clean),
+                    Text: clean,
+                    Body: clean,
+                    Url: detectedUrl,
+                    IsCompleted: false,
+                    Source: detectedUrl is not null ? "url" : "text");
+                return new CustomWidgetExtractedDropBatch(
+                    new CustomWidgetStructuredDropPayload("text", Text: clean, Items: [single]),
+                    fileBatch: null);
+            }
+        }
+
+        return null;
+    }
+
+    private static string FirstLineSummary(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return string.Empty;
+        }
+
+        ReadOnlySpan<char> span = text.AsSpan().Trim();
+        int nl = span.IndexOfAny('\r', '\n');
+        ReadOnlySpan<char> line = nl >= 0 ? span[..nl].Trim() : span;
+        return line.Length > 80 ? string.Concat(line[..80], "…") : line.ToString();
+    }
+
     /// <summary>
     /// Identifies a file drag that originated from a DeskBox file surface. Content
     /// widgets treat this as a link/association, never as a file-system transfer.
@@ -208,14 +431,26 @@ public static class DeskBoxDragData
                dataView.Properties.ContainsKey(SourcePathsProperty);
     }
 
+    internal static string? TryGetSourceWidgetId(DataPackageView dataView) =>
+        dataView is not null &&
+        dataView.Properties.TryGetValue(SourceWidgetIdProperty, out object? rawWidgetId) &&
+        rawWidgetId is string widgetId &&
+        !string.IsNullOrWhiteSpace(widgetId)
+            ? widgetId
+            : null;
+
     public static DataPackageOperation GetFileAssociationOperation(
         DataPackageView dataView,
         DataPackageOperation allowedOperations =
             DataPackageOperation.Copy | DataPackageOperation.Move)
     {
+        bool linkOnlyOffer =
+            !allowedOperations.HasFlag(DataPackageOperation.Copy) &&
+            !allowedOperations.HasFlag(DataPackageOperation.Move) &&
+            allowedOperations.HasFlag(DataPackageOperation.Link);
         return ResolveFileDragFeedbackOperation(
             dataView,
-            IsInternalFileDrag(dataView)
+            IsInternalFileDrag(dataView) || linkOnlyOffer
                 ? DataPackageOperation.Link
                 : DataPackageOperation.Copy,
             allowedOperations);
@@ -250,11 +485,56 @@ public static class DeskBoxDragData
             DataPackageOperation.Copy | DataPackageOperation.Move) =>
         operation != DataPackageOperation.None &&
         IsInternalFileDrag(dataView)
+            ? allowedOperations.HasFlag(DataPackageOperation.Copy)
+                ? DataPackageOperation.Copy
+                : allowedOperations.HasFlag(DataPackageOperation.Move)
+                    ? DataPackageOperation.Move
+                    : allowedOperations.HasFlag(DataPackageOperation.Link)
+                        ? DataPackageOperation.Link
+                        : DataPackageOperation.Copy
+            : operation;
+
+    // Drop completion must never report Move for an internal DeskBox file drag
+    // (which could trigger OLE source deletion on StorageItems fallback), while
+    // still preserving Link when the source offered Link without Copy (such as
+    // single-bit Link for AppExecutionAlias stubs on Windows 10).
+    internal static DataPackageOperation ResolveFileDropCompletionFeedbackOperation(
+        DataPackageView dataView,
+        DataPackageOperation operation,
+        DataPackageOperation allowedOperations) =>
+        operation != DataPackageOperation.None &&
+        IsInternalFileDrag(dataView)
             ? !allowedOperations.HasFlag(DataPackageOperation.Copy) &&
-              allowedOperations.HasFlag(DataPackageOperation.Move)
-                ? DataPackageOperation.Move
+              allowedOperations.HasFlag(DataPackageOperation.Link)
+                ? DataPackageOperation.Link
                 : DataPackageOperation.Copy
             : operation;
+
+    /// <summary>
+    /// Drop-handler counterpart to <see cref="GetFileAssociationOperation"/>: marks any
+    /// internal DeskBox file drag as claimed by a DeskBox drop target and normalizes the
+    /// completion feedback so non-file DeskBox widgets never acknowledge Move on Win10.
+    /// </summary>
+    internal static DataPackageOperation GetFileAssociationDropCompletionOperation(
+        DataPackageView dataView,
+        DataPackageOperation allowedOperations,
+        string? targetWidgetId = null)
+    {
+        if (IsInternalFileDrag(dataView) &&
+            dataView.Properties.TryGetValue(DragSessionIdProperty, out object? rawSessionId) &&
+            rawSessionId is string sessionId &&
+            !string.IsNullOrWhiteSpace(sessionId))
+        {
+            ActiveDeskBoxDragRegistry.MarkClaimedByDeskBoxDropTarget(
+                sessionId,
+                string.IsNullOrWhiteSpace(targetWidgetId) ? "deskbox-xaml-target" : targetWidgetId);
+        }
+
+        return ResolveFileDropCompletionFeedbackOperation(
+            dataView,
+            GetFileAssociationOperation(dataView, allowedOperations),
+            allowedOperations);
+    }
 
     internal static DataPackageOperation GetFileTransferOperations(
         DataPackageView dataView,
@@ -316,14 +596,26 @@ public static class DeskBoxDragData
                         if (DropStagingFileOps.IsExternalTransientTempDropPath(fullFolderPath, hasShellIdList))
                         {
                             temporaryDirectory ??= CreateTemporaryDropDirectory();
-                            string stagedFolderPath = DropStagingFileOps.StagePathIntoDirectory(
-                                fullFolderPath,
-                                temporaryDirectory);
-                            files.Add(new DroppedFilePath(
-                                stagedFolderPath,
-                                storageFolder.Name,
-                                ForceManagedCopy: true,
-                                DroppedItemOriginKind.TransientArchiveOrCache));
+                            try
+                            {
+                                long itemBytes = 0;
+                                string stagedFolderPath = DropStagingFileOps.StagePathIntoDirectory(
+                                    fullFolderPath,
+                                    temporaryDirectory,
+                                    ref itemBytes,
+                                    remainingBudgetBytes);
+                                remainingBudgetBytes = Math.Max(0, remainingBudgetBytes - itemBytes);
+                                files.Add(new DroppedFilePath(
+                                    stagedFolderPath,
+                                    storageFolder.Name,
+                                    ForceManagedCopy: true,
+                                    DroppedItemOriginKind.TransientArchiveOrCache));
+                            }
+                            catch (IOException ex)
+                            {
+                                App.Log($"[DragDrop] Skipped staging transient folder '{fullFolderPath}': {ex.Message}");
+                                skippedCount++;
+                            }
                             continue;
                         }
 
@@ -347,14 +639,26 @@ public static class DeskBoxDragData
                         if (DropStagingFileOps.IsExternalTransientTempDropPath(fullFilePath, hasShellIdList))
                         {
                             temporaryDirectory ??= CreateTemporaryDropDirectory();
-                            string stagedFilePath = DropStagingFileOps.StagePathIntoDirectory(
-                                fullFilePath,
-                                temporaryDirectory);
-                            files.Add(new DroppedFilePath(
-                                stagedFilePath,
-                                storageFile.Name,
-                                ForceManagedCopy: true,
-                                DroppedItemOriginKind.TransientArchiveOrCache));
+                            try
+                            {
+                                long itemBytes = 0;
+                                string stagedFilePath = DropStagingFileOps.StagePathIntoDirectory(
+                                    fullFilePath,
+                                    temporaryDirectory,
+                                    ref itemBytes,
+                                    remainingBudgetBytes);
+                                remainingBudgetBytes = Math.Max(0, remainingBudgetBytes - itemBytes);
+                                files.Add(new DroppedFilePath(
+                                    stagedFilePath,
+                                    storageFile.Name,
+                                    ForceManagedCopy: true,
+                                    DroppedItemOriginKind.TransientArchiveOrCache));
+                            }
+                            catch (IOException ex)
+                            {
+                                App.Log($"[DragDrop] Skipped staging transient file '{fullFilePath}': {ex.Message}");
+                                skippedCount++;
+                            }
                             continue;
                         }
 
@@ -410,7 +714,7 @@ public static class DeskBoxDragData
                 using IRandomAccessStreamWithContentType bitmapStream = await bitmapReference.OpenReadAsync();
                 temporaryDirectory ??= CreateTemporaryDropDirectory();
                 string extension = GetBitmapExtension(bitmapStream.ContentType);
-                string fileName = $"Dropped image {DateTime.Now:yyyyMMdd-HHmmss}{extension}";
+                string fileName = FormattableString.Invariant($"Dropped image {DateTime.Now:yyyyMMdd-HHmmss}{extension}");
                 string path = await SaveRandomAccessStreamAsync(bitmapStream, fileName, temporaryDirectory);
                 files.Add(new DroppedFilePath(
                     path,
@@ -434,8 +738,9 @@ public static class DeskBoxDragData
             if (!string.IsNullOrWhiteSpace(webUrl))
             {
                 temporaryDirectory ??= CreateTemporaryDropDirectory();
-                string? materializedPath = await MaterializeWebUrlAsync(
+                string? materializedPath = TryCreateInternetShortcutFile(
                     webUrl,
+                    titleHint: null,
                     temporaryDirectory);
                 if (materializedPath is null)
                 {
@@ -594,93 +899,84 @@ public static class DeskBoxDragData
 
     private static bool IsHttpUrl(string? value)
     {
-        return Uri.TryCreate(value?.Trim().Trim('"'), UriKind.Absolute, out Uri? uri) &&
-               uri.Scheme is "http" or "https";
+        return !string.IsNullOrWhiteSpace(value) &&
+               value.IndexOfAny(['\r', '\n', '\0']) < 0 &&
+               Uri.TryCreate(value.Trim().Trim('"'), UriKind.Absolute, out Uri? uri) &&
+               uri.Scheme is "http" or "https" &&
+               !string.IsNullOrWhiteSpace(uri.Host);
     }
 
-    private static async Task<string?> MaterializeWebUrlAsync(
+    internal static string? TryCreateInternetShortcutFile(
         string url,
+        string? titleHint,
         string temporaryDirectory)
     {
-        if (!Uri.TryCreate(url.Trim().Trim('"'), UriKind.Absolute, out Uri? uri) ||
-            uri.Scheme is not ("http" or "https"))
+        if (string.IsNullOrWhiteSpace(url) || string.IsNullOrWhiteSpace(temporaryDirectory))
         {
             return null;
         }
 
-        string? destinationPath = null;
+        string candidate = url.Trim().Trim('"');
+        if (candidate.IndexOfAny(['\r', '\n', '\0']) >= 0 ||
+            !Uri.TryCreate(candidate, UriKind.Absolute, out Uri? uri) ||
+            uri.Scheme is not ("http" or "https") ||
+            string.IsNullOrWhiteSpace(uri.Host))
+        {
+            return null;
+        }
+
+        string safeUrl = uri.AbsoluteUri;
+        if (safeUrl.IndexOfAny(['\r', '\n', '\0']) >= 0)
+        {
+            return null;
+        }
+
         try
         {
-            string fileName = FileService.SanitizeFileSystemName(
-                Path.GetFileName(uri.LocalPath));
-            if (string.IsNullOrWhiteSpace(fileName))
+            Directory.CreateDirectory(temporaryDirectory);
+
+            string rawName = !string.IsNullOrWhiteSpace(titleHint)
+                ? titleHint
+                : Path.GetFileNameWithoutExtension(uri.LocalPath);
+            string baseName = FileService.SanitizeFileSystemName(rawName);
+            if (string.IsNullOrWhiteSpace(baseName))
             {
-                fileName = "Dropped web resource";
+                baseName = FileService.SanitizeFileSystemName(uri.Host);
             }
 
-            destinationPath = FileService.GetAvailablePath(
-                Path.Combine(temporaryDirectory, fileName));
-            // Stream the response instead of buffering it whole: the URL comes
-            // from the drop payload, so its size is untrusted.
-            using HttpResponseMessage response = await s_virtualDropHttpClient.GetAsync(
-                uri,
-                HttpCompletionOption.ResponseHeadersRead);
-            response.EnsureSuccessStatusCode();
-            long? declaredLength = response.Content.Headers.ContentLength;
-            if (declaredLength > MaxMaterializedBytes)
+            if (string.IsNullOrWhiteSpace(baseName))
             {
-                App.Log(
-                    $"[DragDrop] Web drop '{uri}' declares {declaredLength} bytes; " +
-                    "rejected over the materialization budget.");
-                return null;
+                baseName = "Web Shortcut";
             }
 
-            long totalBytes = 0;
-            using Stream sourceStream = await response.Content.ReadAsStreamAsync();
-            using (var destination = new FileStream(
-                destinationPath,
-                FileMode.CreateNew,
-                FileAccess.Write,
-                FileShare.None,
-                bufferSize: 81920,
-                useAsync: true))
+            if (baseName.Length > 120)
             {
-                var buffer = new byte[81920];
-                int read;
-                while ((read = await sourceStream.ReadAsync(buffer)) > 0)
+                baseName = baseName[..120].TrimEnd('.', ' ');
+                if (string.IsNullOrWhiteSpace(baseName))
                 {
-                    totalBytes += read;
-                    if (totalBytes > MaxMaterializedBytes)
-                    {
-                        App.Log(
-                            $"[DragDrop] Web drop '{uri}' exceeded " +
-                            $"{MaxMaterializedBytes} bytes mid-stream; aborted.");
-                        destination.Dispose();
-                        try { File.Delete(destinationPath); } catch { }
-                        return null;
-                    }
-
-                    await destination.WriteAsync(buffer.AsMemory(0, read));
+                    baseName = "Web Shortcut";
                 }
             }
 
-            destinationPath =
-                VirtualDropFileNameResolver.AddMissingExtensionFromContent(
-                    destinationPath);
-            ZoneIdentifierWriter.TryMarkFile(destinationPath, uri.AbsoluteUri);
+            string fileName = baseName.EndsWith(".url", StringComparison.OrdinalIgnoreCase)
+                ? baseName
+                : baseName + ".url";
+            string destinationPath = FileService.GetAvailablePath(
+                Path.Combine(temporaryDirectory, fileName));
+
+            string shortcutContent = $"[InternetShortcut]\r\nURL={safeUrl}\r\n";
+            File.WriteAllText(
+                destinationPath,
+                shortcutContent,
+                new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            ZoneIdentifierWriter.TryMarkFile(destinationPath, safeUrl);
             App.Log(
-                $"[DragDrop] Materialized web drop url='{uri}' " +
-                $"path='{destinationPath}' bytes={totalBytes}");
+                $"[DragDrop] Created web InternetShortcut url='{safeUrl}' path='{destinationPath}'");
             return destinationPath;
         }
         catch (Exception ex)
         {
-            App.Log($"[DragDrop] Failed to materialize web drop '{uri}': {ex.Message}");
-            if (destinationPath is not null)
-            {
-                try { File.Delete(destinationPath); } catch { }
-            }
-
+            App.Log($"[DragDrop] Failed to create web InternetShortcut '{safeUrl}': {ex.Message}");
             return null;
         }
     }
@@ -705,7 +1001,7 @@ public static class DeskBoxDragData
         string fileName = FileService.SanitizeFileSystemName(Path.GetFileName(storageFile.Name));
         if (string.IsNullOrWhiteSpace(fileName))
         {
-            fileName = $"Dropped file {DateTime.Now:yyyyMMdd-HHmmss}";
+            fileName = FormattableString.Invariant($"Dropped file {DateTime.Now:yyyyMMdd-HHmmss}");
         }
 
         try
@@ -770,19 +1066,26 @@ public static class DeskBoxDragData
                          bufferSize: 81920,
                          useAsync: true))
         {
-            var buffer = new byte[81920];
-            int read;
-            while ((read = await sourceStream.ReadAsync(buffer)) > 0)
+            byte[] buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(81920);
+            try
             {
-                totalBytes += read;
-                if (totalBytes > remainingBudgetBytes)
+                int read;
+                while ((read = await sourceStream.ReadAsync(buffer.AsMemory(0, 81920))) > 0)
                 {
-                    throw new VirtualDropBudgetExceededException(
-                        "The dropped stream exceeded the remaining materialization " +
-                        $"budget of {remainingBudgetBytes} bytes mid-copy.");
-                }
+                    totalBytes += read;
+                    if (totalBytes > remainingBudgetBytes)
+                    {
+                        throw new VirtualDropBudgetExceededException(
+                            "The dropped stream exceeded the remaining materialization " +
+                            $"budget of {remainingBudgetBytes} bytes mid-copy.");
+                    }
 
-                await destination.WriteAsync(buffer.AsMemory(0, read));
+                    await destination.WriteAsync(buffer.AsMemory(0, read));
+                }
+            }
+            finally
+            {
+                System.Buffers.ArrayPool<byte>.Shared.Return(buffer);
             }
         }
 
@@ -798,10 +1101,11 @@ public static class DeskBoxDragData
 
     private static string CreateTemporaryDropDirectory()
     {
+        string droppedRoot = DropStagingFileOps.GetDroppedFilesRootDirectory();
+        DropStagingFileOps.EnsureSafeStagingRootDirectory(DropStagingFileOps.GetStagingRootDirectory());
+        DropStagingFileOps.EnsureSafeStagingRootDirectory(droppedRoot);
         string directory = Path.Combine(
-            Path.GetTempPath(),
-            "DeskBox",
-            "DroppedFiles",
+            droppedRoot,
             Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         return directory;
@@ -866,11 +1170,31 @@ public sealed class DroppedFileBatch : IDisposable
 
         try
         {
-            Directory.Delete(_temporaryDirectory, recursive: true);
+            DropStagingFileOps.DeleteStagingTreeNonReparse(new DirectoryInfo(_temporaryDirectory));
         }
         catch (Exception ex)
         {
             App.Log($"[DragDrop] Failed to clean temporary drop files: {ex.Message}");
         }
+    }
+}
+
+public sealed class CustomWidgetExtractedDropBatch : IDisposable
+{
+    private readonly DroppedFileBatch? _fileBatch;
+
+    internal CustomWidgetExtractedDropBatch(
+        CustomWidgetStructuredDropPayload payload,
+        DroppedFileBatch? fileBatch)
+    {
+        Payload = payload;
+        _fileBatch = fileBatch;
+    }
+
+    public CustomWidgetStructuredDropPayload Payload { get; }
+
+    public void Dispose()
+    {
+        _fileBatch?.Dispose();
     }
 }

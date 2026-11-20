@@ -83,6 +83,18 @@ public static class DeskBoxProtocolActivationService
 
         if (!string.IsNullOrWhiteSpace(packagedLaunchArgs))
         {
+            string wholePackaged = packagedLaunchArgs.Trim().Trim('"');
+            if (wholePackaged.StartsWith("deskbox://", StringComparison.OrdinalIgnoreCase) &&
+                !wholePackaged.Any(char.IsWhiteSpace))
+            {
+                return wholePackaged;
+            }
+
+            if (TryBuildLocalPackageProtocolUri(wholePackaged, out string? wholePkgUri))
+            {
+                return wholePkgUri;
+            }
+
             foreach (string token in SplitLooseCommandLine(packagedLaunchArgs))
             {
                 if (token.StartsWith("deskbox://", StringComparison.OrdinalIgnoreCase))
@@ -100,10 +112,25 @@ public static class DeskBoxProtocolActivationService
         return null;
     }
 
+    public static string? BuildImportWidgetFileUri(string? filePath)
+    {
+        string candidate = (filePath ?? string.Empty).Trim().Trim('"');
+        if (string.IsNullOrWhiteSpace(candidate) ||
+            candidate.StartsWith("-", StringComparison.Ordinal) ||
+            !IsSupportedLocalPackageExtension(candidate) ||
+            !IsSafeLocalDrivePath(candidate, out string fullPath))
+        {
+            return null;
+        }
+
+        return $"deskbox://import-widget-file?path={Uri.EscapeDataString(fullPath)}";
+    }
+
     private static bool IsSupportedLocalPackageExtension(string path)
     {
         string ext = Path.GetExtension(path);
-        return string.Equals(ext, ".deskbox-widget", StringComparison.OrdinalIgnoreCase) ||
+        return string.Equals(ext, ".dbxwidget", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(ext, ".deskbox-widget", StringComparison.OrdinalIgnoreCase) ||
                string.Equals(ext, ".deskboxwidget", StringComparison.OrdinalIgnoreCase) ||
                string.Equals(ext, ".dbbox", StringComparison.OrdinalIgnoreCase);
     }
@@ -205,6 +232,7 @@ public static class DeskBoxProtocolActivationService
 
             case "install-widget":
             case "preview-widget":
+            case "import-widget-file":
             {
                 if (query.TryGetValue("url", out string? rawUrl) && !string.IsNullOrWhiteSpace(rawUrl))
                 {
@@ -236,7 +264,8 @@ public static class DeskBoxProtocolActivationService
                     return true;
                 }
 
-                if (query.TryGetValue("file", out string? rawFile) && !string.IsNullOrWhiteSpace(rawFile))
+                if ((query.TryGetValue("file", out string? rawFile) || query.TryGetValue("path", out rawFile)) &&
+                    !string.IsNullOrWhiteSpace(rawFile))
                 {
                     if (!IsSupportedLocalPackageExtension(rawFile) ||
                         !IsSafeLocalDrivePath(rawFile, out string safeFullPath))
@@ -251,7 +280,7 @@ public static class DeskBoxProtocolActivationService
                     return true;
                 }
 
-                errorMessage = "Missing 'template', 'url', or 'file' query parameter in deskbox://install-widget.";
+                errorMessage = "Missing 'template', 'url', 'file', or 'path' query parameter in deskbox://install-widget.";
                 return false;
             }
 

@@ -5,7 +5,7 @@ using System.Runtime.InteropServices;
 namespace DeskBox.Platform;
 
 /// <summary>Windows copy and stream enumeration for verified, non-destructive storage copies.</summary>
-internal static class StorageMigrationNativeMethods
+internal static partial class StorageMigrationNativeMethods
 {
     private const uint OpenExisting = 3;
     private const uint FileShareAll = 0x00000001 | 0x00000002 | 0x00000004;
@@ -31,8 +31,8 @@ internal static class StorageMigrationNativeMethods
         public uint ReparseTag;
     }
 
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern IntPtr CreateFileW(
+    [LibraryImport("kernel32.dll", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
+    private static partial IntPtr CreateFileW(
         string lpFileName,
         uint dwDesiredAccess,
         uint dwShareMode,
@@ -41,21 +41,21 @@ internal static class StorageMigrationNativeMethods
         uint dwFlagsAndAttributes,
         IntPtr hTemplateFile);
 
-    [DllImport("kernel32.dll", SetLastError = true)]
+    [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GetFileInformationByHandleEx(
+    private static partial bool GetFileInformationByHandleEx(
         IntPtr hFile,
         int fileInformationClass,
         out FileAttributeTagInfo lpFileInformation,
         uint dwBufferSize);
 
-    [DllImport("kernel32.dll", SetLastError = true)]
+    [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool CloseHandle(IntPtr hObject);
+    private static partial bool CloseHandle(IntPtr hObject);
 
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [LibraryImport("kernel32.dll", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool MoveFileExW(
+    private static partial bool MoveFileExW(
         string lpExistingFileName,
         string lpNewFileName,
         uint dwFlags);
@@ -161,6 +161,42 @@ internal static class StorageMigrationNativeMethods
                 tagInfo.FileAttributes,
                 tagInfo.ReparseTag,
                 out isUnhydratedCloudPlaceholder);
+        }
+        finally
+        {
+            CloseHandle(handle);
+        }
+    }
+
+    internal static unsafe bool HasCloudReparseTag(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
+        IntPtr handle = CreateFileW(
+            Extended(path),
+            dwDesiredAccess: 0,
+            FileShareAll,
+            IntPtr.Zero,
+            OpenExisting,
+            FileFlagOpenReparsePoint | FileFlagBackupSemantics,
+            IntPtr.Zero);
+        if (handle == IntPtr.Zero || handle == new IntPtr(-1))
+        {
+            return false;
+        }
+
+        try
+        {
+            return GetFileInformationByHandleEx(
+                       handle,
+                       FileAttributeTagInfoClass,
+                       out FileAttributeTagInfo tagInfo,
+                       (uint)sizeof(FileAttributeTagInfo)) &&
+                   (tagInfo.FileAttributes & FileAttributeReparsePoint) != 0 &&
+                   (tagInfo.ReparseTag & 0xFFFF0000u) == 0x90000000u;
         }
         finally
         {
@@ -315,7 +351,151 @@ internal static class StorageMigrationNativeMethods
     }
 
     internal static void PublishCopy(string source, string destination) =>
-        File.Move(source, destination, overwrite: false);
+        File.Move(Extended(source), Extended(destination), overwrite: false);
+
+    /// <summary>
+    /// Atomically moves a directory on the same volume without copy fallback
+    /// (<c>MOVEFILE_COPY_ALLOWED</c> is intentionally omitted).
+    /// </summary>
+    internal static void MoveDirectoryAtomic(string sourcePath, string destinationPath)
+    {
+        if (!MoveFileExW(Extended(sourcePath), Extended(destinationPath), dwFlags: 0))
+        {
+            int error = Marshal.GetLastWin32Error();
+            throw new IOException(
+                $"Cannot atomically move directory '{sourcePath}' to '{destinationPath}' (win32={error}).",
+                new Win32Exception(error));
+        }
+    }
+
+    internal static void TryDeleteJournalFiles(string journalPath, string backupPath)
+    {
+        try
+        {
+            if (File.Exists(journalPath)) File.Delete(journalPath);
+        }
+        catch { }
+
+        try
+        {
+            if (File.Exists(backupPath)) File.Delete(backupPath);
+        }
+        catch { }
+    }
+
+    internal static void TryDeleteTemporaryPartialFile(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return;
+        }
+
+        try
+        {
+            string extended = Extended(path);
+            if (!File.Exists(extended))
+            {
+                return;
+            }
+
+            FileAttributes attrs = File.GetAttributes(extended);
+            if ((attrs & FileAttributes.ReparsePoint) != 0)
+            {
+                return;
+            }
+
+            if ((attrs & (FileAttributes.ReadOnly | FileAttributes.Hidden | FileAttributes.System)) != 0)
+            {
+                File.SetAttributes(extended, FileAttributes.Normal);
+            }
+
+            File.Delete(extended);
+        }
+        catch
+        {
+            // Best-effort cleanup of task-owned partial files.
+        }
+    }
+
+    internal static void TryCleanTaskTemporaryFiles(string? temporaryDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(temporaryDirectory))
+        {
+            return;
+        }
+
+        try
+        {
+            string fullTaskTemp = Path.GetFullPath(temporaryDirectory);
+            string extendedTaskTemp = Extended(fullTaskTemp);
+            if (Directory.Exists(extendedTaskTemp) &&
+                (File.GetAttributes(extendedTaskTemp) & FileAttributes.ReparsePoint) == 0)
+            {
+                foreach (string partial in Directory.EnumerateFiles(extendedTaskTemp, "*.partial"))
+                {
+                    TryDeleteTemporaryPartialFile(partial);
+                }
+            }
+        }
+        catch
+        {
+            // Best-effort cleanup.
+        }
+
+        TryPruneEmptyMigrationWorkspace(temporaryDirectory);
+    }
+
+    internal static bool TryDeleteEmptyDirectory(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
+        string extended = Extended(path);
+        if (!Directory.Exists(extended))
+        {
+            return true;
+        }
+
+        FileAttributes originalAttributes;
+        try
+        {
+            originalAttributes = File.GetAttributes(extended);
+            if ((originalAttributes & FileAttributes.ReparsePoint) != 0 ||
+                Directory.EnumerateFileSystemEntries(extended).Any())
+            {
+                return false;
+            }
+        }
+        catch
+        {
+            return false;
+        }
+
+        bool clearedReadOnly = false;
+        try
+        {
+            if ((originalAttributes & FileAttributes.ReadOnly) != 0)
+            {
+                File.SetAttributes(extended, originalAttributes & ~FileAttributes.ReadOnly);
+                clearedReadOnly = true;
+            }
+
+            Directory.Delete(extended, recursive: false);
+            return true;
+        }
+        catch
+        {
+            if (clearedReadOnly)
+            {
+                try { File.SetAttributes(extended, originalAttributes); }
+                catch { }
+            }
+
+            return false;
+        }
+    }
 
     private const uint FileReadAttributes = 0x0080u;
     private const uint FsctlReadFileUsnData = 0x000900EBu;
@@ -327,9 +507,9 @@ internal static class StorageMigrationNativeMethods
         public ushort MaxMajorVersion;
     }
 
-    [DllImport("kernel32.dll", SetLastError = true)]
+    [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static unsafe extern bool DeviceIoControl(
+    private static unsafe partial bool DeviceIoControl(
         IntPtr hDevice,
         uint dwIoControlCode,
         ref ReadFileUsnDataInput lpInBuffer,
@@ -339,9 +519,9 @@ internal static class StorageMigrationNativeMethods
         out uint lpBytesReturned,
         IntPtr lpOverlapped);
 
-    [DllImport("kernel32.dll", SetLastError = true)]
+    [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static unsafe extern bool DeviceIoControl(
+    private static unsafe partial bool DeviceIoControl(
         IntPtr hDevice,
         uint dwIoControlCode,
         IntPtr lpInBuffer,
@@ -435,9 +615,11 @@ internal static class StorageMigrationNativeMethods
         Action<long> copyProgress,
         CancellationToken token)
     {
-        FileAttributes sourceAttributes = File.GetAttributes(source);
-        DateTime creationUtc = File.GetCreationTimeUtc(source);
-        DateTime lastWriteUtc = File.GetLastWriteTimeUtc(source);
+        string extendedSource = Extended(source);
+        string extendedDestination = Extended(temporaryDestination);
+        FileAttributes sourceAttributes = File.GetAttributes(extendedSource);
+        DateTime creationUtc = File.GetCreationTimeUtc(extendedSource);
+        DateTime lastWriteUtc = File.GetLastWriteTimeUtc(extendedSource);
 
         var streams = ReadStreams(source)
             .OrderBy(static s => s.Name, StringComparer.Ordinal)
@@ -446,9 +628,6 @@ internal static class StorageMigrationNativeMethods
         {
             streams.Add(("::$DATA", 0));
         }
-
-        string extendedSource = Extended(source);
-        string extendedDestination = Extended(temporaryDestination);
 
         // Exclusively reserve the base file first (matching COPY_FILE_FAIL_IF_EXISTS)
         // before opening any alternate stream that might sort lexically before "::$DATA".
@@ -460,6 +639,7 @@ internal static class StorageMigrationNativeMethods
             System.Security.Cryptography.HashAlgorithmName.SHA256);
         byte[] buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(1024 * 1024);
         long totalTransferred = 0;
+        bool completed = false;
         try
         {
             foreach (var stream in streams)
@@ -479,15 +659,19 @@ internal static class StorageMigrationNativeMethods
                     FileMode.Open,
                     FileAccess.Read,
                     FileShare.Read,
-                    bufferSize: 4096,
+                    bufferSize: 128 * 1024,
                     FileOptions.SequentialScan);
                 using var output = new FileStream(
                     outputPath,
                     FileMode.OpenOrCreate,
                     FileAccess.Write,
                     FileShare.Read,
-                    bufferSize: 4096,
+                    bufferSize: 128 * 1024,
                     FileOptions.SequentialScan);
+                if (stream.Length > 0)
+                {
+                    output.SetLength(stream.Length);
+                }
 
                 int read;
                 while ((read = input.Read(buffer)) != 0)
@@ -500,7 +684,7 @@ internal static class StorageMigrationNativeMethods
                     copyProgress(totalTransferred);
                 }
 
-                output.Flush(flushToDisk: true);
+                output.Flush();
                 if (stream.Length == 0)
                 {
                     copyProgress(totalTransferred);
@@ -520,11 +704,16 @@ internal static class StorageMigrationNativeMethods
                 extendedDestination,
                 targetAttributes == 0 ? FileAttributes.Normal : targetAttributes);
 
+            completed = true;
             return Convert.ToHexString(aggregate.GetHashAndReset());
         }
         finally
         {
             System.Buffers.ArrayPool<byte>.Shared.Return(buffer);
+            if (!completed)
+            {
+                TryDeleteTemporaryPartialFile(temporaryDestination);
+            }
         }
     }
 
@@ -558,34 +747,44 @@ internal static class StorageMigrationNativeMethods
         }
     }
 
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [LibraryImport("kernel32.dll", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool CopyFileExW(
+    private static partial bool CopyFileExW(
         string source, string destination, IntPtr progress, IntPtr state,
         IntPtr cancel, uint flags);
 
-    [DllImport("kernel32.dll", SetLastError = true)]
+    [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool FlushFileBuffers(IntPtr handle);
+    private static partial bool FlushFileBuffers(IntPtr handle);
 
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private struct StreamData
+    [StructLayout(LayoutKind.Sequential)]
+    private unsafe struct StreamData
     {
+        public const int MaxStreamNameLength = 296;
         public long Size;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 296)]
-        public string Name;
+        public fixed char Name[MaxStreamNameLength];
+
+        internal readonly string GetName()
+        {
+            fixed (char* ptr = Name)
+            {
+                var span = new ReadOnlySpan<char>(ptr, MaxStreamNameLength);
+                int nul = span.IndexOf('\0');
+                return new string(nul >= 0 ? span[..nul] : span);
+            }
+        }
     }
 
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern IntPtr FindFirstStreamW(string path, int level, out StreamData data, uint flags);
+    [LibraryImport("kernel32.dll", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
+    private static partial IntPtr FindFirstStreamW(string path, int level, out StreamData data, uint flags);
 
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool FindNextStreamW(IntPtr find, out StreamData data);
+    private static partial bool FindNextStreamW(IntPtr find, out StreamData data);
 
-    [DllImport("kernel32.dll")]
+    [LibraryImport("kernel32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool FindClose(IntPtr find);
+    private static partial bool FindClose(IntPtr find);
 
     internal static IReadOnlyList<(string Name, long Length)> ReadStreams(string path)
     {
@@ -601,7 +800,7 @@ internal static class StorageMigrationNativeMethods
         }
         try
         {
-            do { result.Add((data.Name, data.Size)); }
+            do { result.Add((data.GetName(), data.Size)); }
             while (FindNextStreamW(find, out data));
             int error = Marshal.GetLastWin32Error();
             if (error != 38) throw new IOException($"Cannot inspect file streams: '{path}'.", new Win32Exception(error));
@@ -784,6 +983,75 @@ internal static class StorageMigrationNativeMethods
         internal Action<long> Progress { get; } = progress;
         internal CancellationToken Token { get; } = token;
         internal Exception? Error { get; set; }
+    }
+
+    [LibraryImport("kernel32.dll", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
+    private static unsafe partial uint GetLongPathNameW(
+        string lpszShortPath,
+        char* lpszLongPath,
+        uint cchBuffer);
+
+    internal static unsafe bool TryExpandShortPathExceedingMaxPath(
+        string candidatePath,
+        out string expandedLongPath)
+    {
+        expandedLongPath = string.Empty;
+        if (string.IsNullOrWhiteSpace(candidatePath) ||
+            candidatePath.Contains('%') ||
+            !candidatePath.Contains('~'))
+        {
+            return false;
+        }
+
+        try
+        {
+            string queryPath = Path.IsPathFullyQualified(candidatePath)
+                ? Extended(candidatePath)
+                : candidatePath;
+            char[] buffer = new char[1024];
+            uint length;
+            fixed (char* ptr = buffer)
+            {
+                length = GetLongPathNameW(queryPath, ptr, (uint)buffer.Length);
+            }
+
+            if (length >= buffer.Length)
+            {
+                buffer = new char[(int)length + 1];
+                fixed (char* ptr = buffer)
+                {
+                    length = GetLongPathNameW(queryPath, ptr, (uint)buffer.Length);
+                }
+            }
+
+            if (length == 0 || length >= buffer.Length)
+            {
+                return false;
+            }
+
+            string resolved = new(buffer, 0, (int)length);
+            if (resolved.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase))
+            {
+                resolved = @"\\" + resolved[@"\\?\UNC\".Length..];
+            }
+            else if (resolved.StartsWith(@"\\?\", StringComparison.Ordinal))
+            {
+                resolved = resolved[@"\\?\".Length..];
+            }
+
+            if (resolved.Length < 258)
+            {
+                return false;
+            }
+
+            expandedLongPath = resolved;
+            return true;
+        }
+        catch
+        {
+            expandedLongPath = string.Empty;
+            return false;
+        }
     }
 
     internal static string Extended(string path) => path.StartsWith(@"\\?\", StringComparison.Ordinal)

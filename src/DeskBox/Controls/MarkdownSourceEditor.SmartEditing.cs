@@ -433,7 +433,7 @@ public sealed partial class MarkdownSourceEditor
         };
         if (isTextGlyph)
         {
-            icon.FontFamily = new FontFamily(italic ? "Cambria" : "Segoe UI Variable Text");
+            icon.FontFamily = new FontFamily(italic ? "Cambria" : "Segoe UI Variable Text, Segoe UI");
             if (bold)
             {
                 icon.FontWeight = Microsoft.UI.Text.FontWeights.Bold;

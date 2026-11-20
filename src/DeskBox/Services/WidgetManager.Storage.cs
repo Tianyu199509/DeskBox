@@ -4,6 +4,7 @@ using DeskBox.Models;
 using DeskBox.Helpers;
 using DeskBox.Controls.WidgetContents;
 using DeskBox.Platform;
+using DeskBox.Services.Distribution;
 using DeskBox.ViewModels;
 using DeskBox.Views;
 using Microsoft.UI.Dispatching;
@@ -65,13 +66,23 @@ public sealed partial class WidgetManager
         {
             if (config.FollowsDefaultStoragePath)
             {
-                foreach (string activePath in GetPossibleManagedStoragePaths(config, rootPath))
+                if (!string.IsNullOrWhiteSpace(config.MappedFolderPath))
                 {
-                    string folderName = Path.GetFileName(activePath);
-                    if (!string.IsNullOrWhiteSpace(folderName))
+                    // Only stamp ownership inside rootPath when this widget's
+                    // physical folder actually resides directly under rootPath.
+                    if (ManagedStoragePathService.IsDirectChildOfRoot(config.MappedFolderPath, rootPath))
                     {
-                        activeManagedNames.Add(folderName);
+                        string folderName = Path.GetFileName(
+                            Path.TrimEndingDirectorySeparator(Path.GetFullPath(config.MappedFolderPath)));
+                        if (!string.IsNullOrWhiteSpace(folderName))
+                        {
+                            activeManagedNames.Add(folderName);
+                        }
                     }
+                }
+                else if (!string.IsNullOrWhiteSpace(config.ManagedFolderName))
+                {
+                    activeManagedNames.Add(config.ManagedFolderName);
                 }
 
                 continue;
@@ -97,6 +108,8 @@ public sealed partial class WidgetManager
                Directory.Exists(config.MappedFolderPath);
     }
 
+    internal Func<IReadOnlySet<string>>? SiblingChannelActivePathsProvider { get; set; }
+
     public IReadOnlyList<ManagedStorageFolderCleanupCandidate> GetOrphanManagedStorageFolders()
     {
         string rootPath = SettingsService.NormalizeManagedStorageRootPath(_settingsService.Settings.DefaultManagedStorageRootPath);
@@ -120,6 +133,7 @@ public sealed partial class WidgetManager
                              !IsDeleted(widget.Id))
             .SelectMany(widget => GetPossibleManagedStoragePaths(widget, rootPath))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        activePaths.UnionWith(GetSiblingChannelProtectedFolderPaths());
 
         return Directory.EnumerateDirectories(rootPath)
             .Select(Path.GetFullPath)
@@ -259,18 +273,31 @@ public sealed partial class WidgetManager
         fileSurface.Surface?.NotifyItemsMovedOutFromExternalWidget();
     }
 
-    public async Task RefreshFileWidgetsAfterUndoAsync(string? targetWidgetId = null)
+    public async Task RefreshFileWidgetsAfterUndoAsync(
+        string? targetWidgetId = null,
+        IReadOnlyCollection<string>? restoredPaths = null,
+        IReadOnlyDictionary<string, string>? sourceToRestoredPathMap = null)
     {
         if (!HasUiThreadAccess())
         {
-            await RunOnUiThreadAsync(() => RefreshFileWidgetsAfterUndoAsync(targetWidgetId));
+            await RunOnUiThreadAsync(() => RefreshFileWidgetsAfterUndoAsync(
+                targetWidgetId,
+                restoredPaths,
+                sourceToRestoredPathMap));
             return;
         }
 
+        bool hasRestored = restoredPaths is { Count: > 0 } || sourceToRestoredPathMap is { Count: > 0 };
         if (!string.IsNullOrWhiteSpace(targetWidgetId) &&
             FindLoadedFileWidgetAdapter(targetWidgetId) is { } targetAdapter)
         {
             await targetAdapter.ViewModel.RefreshFolderContentsAsync();
+            if (hasRestored)
+            {
+                _ = targetAdapter.ViewModel.RestoreDepartedStackMemberships(
+                    restoredPaths ?? Array.Empty<string>(),
+                    sourceToRestoredPathMap);
+            }
             targetAdapter.Surface?.NotifyItemsMovedOutFromExternalWidget();
             return;
         }
@@ -281,6 +308,12 @@ public sealed partial class WidgetManager
                 FindLoadedFileWidgetAdapter(cfg.Id) is { } adapter)
             {
                 await adapter.ViewModel.RefreshFolderContentsAsync();
+                if (hasRestored)
+                {
+                    _ = adapter.ViewModel.RestoreDepartedStackMemberships(
+                        restoredPaths ?? Array.Empty<string>(),
+                        sourceToRestoredPathMap);
+                }
                 adapter.Surface?.NotifyItemsMovedOutFromExternalWidget();
             }
         }
@@ -412,6 +445,12 @@ public sealed partial class WidgetManager
                 {
                     await _settingsService.OrganizationHistory.SaveCheckedAsync();
                 }
+                if (_organizerService?.DesktopIconPositions is not null)
+                {
+                    await _organizerService.DesktopIconPositions.RelocateDirectoryPrefixAsync(
+                        currentFolderPath,
+                        destinationFolderPath);
+                }
                 ManagedStorageOwnershipFileOps.RecordManagedFolderRename(
                     rootPath,
                     currentFolderName,
@@ -461,6 +500,12 @@ public sealed partial class WidgetManager
                     refreshCopiedDestinationIdentities: false))
             {
                 await _settingsService.OrganizationHistory.SaveCheckedAsync();
+            }
+            if (_organizerService?.DesktopIconPositions is not null)
+            {
+                await _organizerService.DesktopIconPositions.RelocateDirectoryPrefixAsync(
+                    currentFolderPath,
+                    destinationFolderPath);
             }
             ManagedStorageOwnershipFileOps.RecordManagedFolderRename(
                 rootPath,
@@ -775,6 +820,10 @@ public sealed partial class WidgetManager
                 _organizerService?.AutoOrganizationSuppressions.CompleteOperation(
                     operationId,
                     results.Select(static result => result.DestinationPath));
+                if (results.Count > 0 && _organizerService?.DesktopIconPositions is not null)
+                {
+                    await _organizerService.DesktopIconPositions.RestoreAfterMoveToDesktopAsync(results);
+                }
             }
             catch
             {
@@ -842,13 +891,27 @@ public sealed partial class WidgetManager
                 widget,
                 SettingsService.NormalizeManagedStorageRootPath(_settingsService.Settings.DefaultManagedStorageRootPath)))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        activePaths.UnionWith(GetSiblingChannelProtectedFolderPaths());
 
         if (activePaths.Contains(normalizedPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)))
         {
-            throw new InvalidOperationException(_localizationService.T("Widget.Error.ManagedFolderStillActive"));
+            throw new InvalidOperationException(LocalizeOrKey("Widget.Error.ManagedFolderStillActive"));
         }
 
         return normalizedPath;
+    }
+
+    private IReadOnlySet<string> GetSiblingChannelProtectedFolderPaths()
+    {
+        try
+        {
+            return SiblingChannelActivePathsProvider?.Invoke() ??
+                ChannelCoexistenceService.ReadSiblingActiveManagedFolderPaths();
+        }
+        catch
+        {
+            return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        }
     }
 
     private bool IsDefaultManagedStorageFolder(string? folderPath)
@@ -939,6 +1002,30 @@ public sealed partial class WidgetManager
         }
 
         return true;
+    }
+
+    private async Task CreateInitialManagedWidgetWithFallbackAsync(string? name)
+    {
+        try
+        {
+            await CreateManagedWidgetCoreAsync(name, placeForFirstRun: true);
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException &&
+                                   !InitialFileWidgetSetupPolicy.HasConfiguredFileWidget(_settingsService.Settings))
+        {
+            string fallbackRoot = SettingsService.GetDefaultManagedStorageRootPath();
+            string currentRoot = GetManagedStorageRootPath();
+            if (string.Equals(currentRoot, fallbackRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                throw;
+            }
+
+            App.Log(
+                $"[WidgetManager] Initial storage root '{currentRoot}' rejected folder creation ({ex.Message}); " +
+                $"falling back to '{fallbackRoot}'.");
+            _settingsService.Settings.FileWidget.DefaultManagedStorageRootPath = fallbackRoot;
+            await CreateManagedWidgetCoreAsync(name, placeForFirstRun: true);
+        }
     }
 
     private string GetManagedStorageRootPath()

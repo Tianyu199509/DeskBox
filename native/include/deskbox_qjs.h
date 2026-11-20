@@ -30,6 +30,7 @@ extern "C" {
 #define DESKBOX_QJS_DEFAULT_MEMORY_LIMIT_BYTES (4u * 1024u * 1024u)
 #define DESKBOX_QJS_DEFAULT_MAX_STACK_BYTES    (256u * 1024u)
 #define DESKBOX_QJS_MAX_SOURCE_BYTES           (128u * 1024u)
+#define DESKBOX_QJS_MAX_PAYLOAD_JSON_BYTES     (4u * 1024u * 1024u)
 #define DESKBOX_QJS_MAX_RESULT_JSON_BYTES      (512u * 1024u)
 
 DESKBOX_QJS_API uint32_t __cdecl deskbox_qjs_abi_version(void);

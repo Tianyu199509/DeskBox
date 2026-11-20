@@ -139,10 +139,13 @@ public sealed class SettingsWindowNativeShellTests : IDisposable
         string contentHostWindow = xaml.Substring(contentHostPos, 240);
         Assert.Contains("HorizontalAlignment=\"Left\"", contentHostWindow, StringComparison.Ordinal);
 
-        // SaveFailedInfoBar occupies its own flow row above SettingsNavigationView.
+        // SaveFailedInfoBar occupies its own flow row above SettingsNavigationView
+        // (either directly or inside the row-1 notice StackPanel).
         int saveFailedPos = xaml.IndexOf("x:Name=\"SaveFailedInfoBar\"", StringComparison.Ordinal);
+        int rowHostStart = Math.Max(0, saveFailedPos - 120);
+        string saveFailedHostWindow = xaml.Substring(rowHostStart, Math.Min(380, xaml.Length - rowHostStart));
         string saveFailedWindow = xaml.Substring(saveFailedPos, 260);
-        Assert.Contains("Grid.Row=\"1\"", saveFailedWindow, StringComparison.Ordinal);
+        Assert.Contains("Grid.Row=\"1\"", saveFailedHostWindow, StringComparison.Ordinal);
         Assert.Contains("Visibility=\"Collapsed\"", saveFailedWindow, StringComparison.Ordinal);
         Assert.DoesNotContain("Canvas.ZIndex", saveFailedWindow, StringComparison.Ordinal);
 
@@ -166,16 +169,17 @@ public sealed class SettingsWindowNativeShellTests : IDisposable
         string orgSectionXaml = File.ReadAllText(
             TestPaths.FromRepository("src/DeskBox/Views/SettingsSections/DesktopOrganizationSettingsSection.xaml"));
         Assert.DoesNotContain("CloseRuleDetailButton_Click", orgSectionXaml, StringComparison.Ordinal);
-        Assert.Contains(
-            "ToolTipService.ToolTip=\"{x:Bind RuleDetailPath.Text, Mode=OneWay}\"",
-            orgSectionXaml,
-            StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"AutoOrganizationSubPagePanel\"", orgSectionXaml, StringComparison.Ordinal);
+
+        string orgSectionCode = File.ReadAllText(
+            TestPaths.FromRepository("src/DeskBox/Views/SettingsSections/DesktopOrganizationSettingsSection.xaml.cs"));
+        Assert.Contains("ToolTipService.SetToolTip(", orgSectionCode, StringComparison.Ordinal);
 
         string navCode = File.ReadAllText(
             TestPaths.FromRepository("src/DeskBox/Views/SettingsWindow.Navigation.cs"));
         Assert.Contains("detailSection.TryNavigateBack()", navCode, StringComparison.Ordinal);
-        Assert.Contains("OrganizationSection.TryNavigateBackToRuleList()", navCode, StringComparison.Ordinal);
-        Assert.Contains("\"AppearanceDetail:__detail__\"", navCode, StringComparison.Ordinal);
+        Assert.Contains("\"AppearanceDetail:__autoorganize__\"", navCode, StringComparison.Ordinal);
+        Assert.Contains("\"AppearanceDetail:__filedisplay__\"", navCode, StringComparison.Ordinal);
 
         string pointerCode = File.ReadAllText(
             TestPaths.FromRepository("src/DeskBox/Views/SettingsWindow.HotkeyAndAppearance.cs"));
@@ -255,17 +259,21 @@ public sealed class SettingsWindowNativeShellTests : IDisposable
         Assert.DoesNotContain("Settings.Performance.MoreSettings", generalSlice, StringComparison.Ordinal);
 
         // 2. Appearance -> MaterialEntryCard drills into MaterialSubPagePanel (Effect + WidgetBackground),
-        // while Accent, CornerAndBorder, Density, AppVisual, Animation remain L2 expanders without nested expanders
+        // WidgetTitleIcon is a standalone top-level card, while Accent, CornerAndBorder, Density, Animation
+        // remain L2 expanders without nested expanders
         Assert.DoesNotContain("Settings.Material.MoreSettings", appearanceXaml, StringComparison.Ordinal);
         Assert.Matches(
             new Regex("<toolkit:SettingsCard(?:(?!>).)*?x:Name=\"MaterialEntryCard\"(?:(?!>).)*?svc:Localized\\.HeaderKey=\"Settings\\.Material\\.Title\"", RegexOptions.Singleline),
             appearanceXaml);
+        Assert.Matches(
+            new Regex("<toolkit:SettingsCard(?:(?!>).)*?svc:Localized\\.HeaderKey=\"Settings\\.WidgetTitleIcon\\.Title\"", RegexOptions.Singleline),
+            appearanceXaml);
+        Assert.DoesNotContain("Settings.Group.AppVisual.Title", appearanceXaml, StringComparison.Ordinal);
         foreach (string headerKey in new[]
                  {
                      "Settings.Accent.Title",
                      "Settings.CornerAndBorder.Title",
                      "Settings.Density.Title",
-                     "Settings.Group.AppVisual.Title",
                      "Settings.Group.Animation.Title",
                      "Settings.Material.Group.Effect",
                      "Settings.Material.Group.WidgetBackground"

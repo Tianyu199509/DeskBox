@@ -1,6 +1,7 @@
 using System.Globalization;
 using DeskBox.Controls;
 using DeskBox.Contracts;
+using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Services;
 using Microsoft.UI.Xaml;
@@ -12,7 +13,6 @@ namespace DeskBox.Views.SettingsSections;
 
 public sealed partial class GlanceWidgetSettingsSection : UserControl
 {
-    private static readonly string[] DisplayOptions = ["Time", "Seconds", "Date", "Year", "Weekday"];
     private sealed partial class SelectionItem : ComboBoxItem
     {
         public SelectionItem(string label, object value)
@@ -739,6 +739,7 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
         var dialog = new ContentDialog
         {
             XamlRoot = XamlRoot,
+            RequestedTheme = NeutralInteractionBrush.ResolveEffectiveElementTheme(this),
             Title = Localization.T("Glance.Instances.RenameTitle"),
             Content = nameBox,
             PrimaryButtonText = Localization.T("Common.Save"),
@@ -782,6 +783,7 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
         var dialog = new ContentDialog
         {
             XamlRoot = XamlRoot,
+            RequestedTheme = NeutralInteractionBrush.ResolveEffectiveElementTheme(this),
             Title = Localization.Format("Glance.Instances.DeleteTitle", selected.Name),
             Content = new TextBlock
             {
@@ -810,50 +812,51 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
         }
     }
 
-    private void DisplayContentDropDown_Click(object sender, RoutedEventArgs e)
+    private void DisplayContentCheckBox_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is not DropDownButton button)
+        if (_isLoading || sender is not CheckBox { Tag: string option })
         {
             return;
         }
 
-        SettingsMultiSelectMenu.Show(
-            button,
-            DisplayOptions,
-            GetDisplayOptionLabel,
-            IsDisplayOptionSelected,
-            _ => true,
-            ToggleDisplayOption);
+        ToggleDisplayOption(option);
     }
 
     private async void ToggleDisplayOption(string option)
     {
-        GlanceDisplayElement? element = option switch
+        try
         {
-            "Time" => GlanceDisplayElement.Time,
-            "Seconds" => GlanceDisplayElement.Seconds,
-            "Date" => GlanceDisplayElement.Date,
-            "Year" => GlanceDisplayElement.Year,
-            "Weekday" => GlanceDisplayElement.Weekday,
-            _ => null
-        };
-        if (element is null)
-        {
-            return;
+            GlanceDisplayElement? element = option switch
+            {
+                "Time" => GlanceDisplayElement.Time,
+                "Seconds" => GlanceDisplayElement.Seconds,
+                "Date" => GlanceDisplayElement.Date,
+                "Year" => GlanceDisplayElement.Year,
+                "Weekday" => GlanceDisplayElement.Weekday,
+                _ => null
+            };
+            if (element is null)
+            {
+                return;
+            }
+
+            bool isVisible = GlanceWidgetSettingsPolicy.IsDisplayElementVisible(
+                _settings,
+                element.Value);
+            GlanceWidgetSettingsPolicy.SetDisplayElement(
+                _settings,
+                element.Value,
+                !isVisible);
+
+            UpdateDisplaySelectionSummary();
+            if (_store is { } store)
+            {
+                await SaveSettingsToStoreAsync(store);
+            }
         }
-
-        bool isVisible = GlanceWidgetSettingsPolicy.IsDisplayElementVisible(
-            _settings,
-            element.Value);
-        GlanceWidgetSettingsPolicy.SetDisplayElement(
-            _settings,
-            element.Value,
-            !isVisible);
-
-        UpdateDisplaySelectionSummary();
-        if (_store is { } store)
+        catch (Exception ex)
         {
-            await SaveSettingsToStoreAsync(store);
+            App.Log($"[GlanceSettings] ToggleDisplayOption failed: {ex}");
         }
     }
 
@@ -997,7 +1000,8 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
         _imageTransparencySaveTimer.Stop();
         if (_store is { } store)
         {
-            await SaveSettingsToStoreAsync(store);
+            try { await SaveSettingsToStoreAsync(store); }
+            catch (Exception ex) { App.Log($"[GlanceSettings] Save image transparency failed: {ex.Message}"); }
         }
     }
 
@@ -1021,7 +1025,8 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
         _calendarTransparencySaveTimer.Stop();
         if (_store is { } store)
         {
-            await SaveSettingsToStoreAsync(store);
+            try { await SaveSettingsToStoreAsync(store); }
+            catch (Exception ex) { App.Log($"[GlanceSettings] Save calendar transparency failed: {ex.Message}"); }
         }
     }
 
@@ -1070,7 +1075,8 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
         _scaleSaveTimer.Stop();
         if (_store is { } store)
         {
-            await SaveSettingsToStoreAsync(store);
+            try { await SaveSettingsToStoreAsync(store); }
+            catch (Exception ex) { App.Log($"[GlanceSettings] Save scale failed: {ex.Message}"); }
         }
     }
 
@@ -1151,6 +1157,7 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
         var dialog = new ContentDialog
         {
             XamlRoot = XamlRoot,
+            RequestedTheme = NeutralInteractionBrush.ResolveEffectiveElementTheme(this),
             Title = Localization.Format(
                 "Settings.FeatureWidgets.ResetDialogTitle",
                 Localization.T("Glance.Title")),
@@ -1285,36 +1292,12 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
 
     private void UpdateDisplaySelectionSummary()
     {
-        var selected = new List<string>(5);
-        if (_settings.ShowTime) selected.Add(Localization.T("Glance.Display.Time"));
-        if (_settings.ShowTime && _settings.ShowSeconds) selected.Add(Localization.T("Glance.Display.Seconds"));
-        if (_settings.ShowDate) selected.Add(Localization.T("Glance.Display.Date"));
-        if (_settings.ShowYear) selected.Add(Localization.T("Glance.Display.Year"));
-        if (_settings.ShowWeekday) selected.Add(Localization.T("Glance.Display.Weekday"));
-        DisplayContentDropDownButton.Content = selected.Count == 0
-            ? Localization.T("Glance.Display.PhotoOnly")
-            : string.Join(Localization.T("Glance.Display.Separator"), selected);
+        ShowTimeCheckBox.IsChecked = _settings.ShowTime;
+        ShowSecondsCheckBox.IsChecked = _settings.ShowTime && _settings.ShowSeconds;
+        ShowDateCheckBox.IsChecked = _settings.ShowDate;
+        ShowYearCheckBox.IsChecked = _settings.ShowYear;
+        ShowWeekdayCheckBox.IsChecked = _settings.ShowWeekday;
     }
-
-    private string GetDisplayOptionLabel(string option) => option switch
-    {
-        "Time" => Localization.T("Glance.Display.Time"),
-        "Seconds" => Localization.T("Glance.Display.Seconds"),
-        "Date" => Localization.T("Glance.Display.Date"),
-        "Year" => Localization.T("Glance.Display.Year"),
-        "Weekday" => Localization.T("Glance.Display.Weekday"),
-        _ => option
-    };
-
-    private bool IsDisplayOptionSelected(string option) => option switch
-    {
-        "Time" => _settings.ShowTime,
-        "Seconds" => _settings.ShowTime && _settings.ShowSeconds,
-        "Date" => _settings.ShowDate,
-        "Year" => _settings.ShowYear,
-        "Weekday" => _settings.ShowWeekday,
-        _ => false
-    };
 
     private void UpdateCacheSize()
     {

@@ -85,6 +85,7 @@ public sealed partial class ContentWidgetWindow
             ContentWidgetShell.CaptureOutgoingCompactSwitchState();
         }
 
+        WidgetEditorPopoverWindow.ClosePopoversForOwner(HWnd);
         ContentWidgetShell.ClearFeedback();
         _config = config;
         _descriptor = descriptor;
@@ -106,6 +107,7 @@ public sealed partial class ContentWidgetWindow
         AttachCompactPresentationSource(content);
         AttachFeedbackSource(content);
         AttachHostContextMenuSource(content);
+        AttachCustomSurfaceChromeBridge(content);
         ApplyLocalizedTitleActionTooltips();
         // The window chrome changes with the active member. A cached member's
         // content only needs updating if a real appearance notification occurred.
@@ -248,7 +250,7 @@ public sealed partial class ContentWidgetWindow
         // reconstruction, which is more disruptive than the retained memory.
         if (!Visible)
         {
-            SuspendBackdropTargetsForHiddenWindow();
+            PauseBackdropControllersForHiddenWindow();
         }
 
         _contentHost.CurrentContent?.OnWindowLongHidden();
@@ -270,15 +272,11 @@ public sealed partial class ContentWidgetWindow
             return 0;
         }
 
-        SuspendBackdropTargetsForHiddenWindow();
+        PauseBackdropControllersForHiddenWindow();
         _contentHost.CurrentContent?.OnWindowLongHidden();
         ContentWidgetShell.ClearCompactBitmaps();
         ReleaseCustomBackgroundSurface();
         int releasedCachedContents = _cachedGroupContents.Count;
-        if (IsTargetCollapsed)
-        {
-            _contentHost.TryHibernateCurrentContentView();
-        }
         DisposeCachedGroupContents();
         return releasedCachedContents;
     }
@@ -292,6 +290,59 @@ public sealed partial class ContentWidgetWindow
 
         _cachedGroupContents.Clear();
         _cachedGroupContentOrder.Clear();
+    }
+
+    internal bool HasMaterializedCachedGroupContentViews =>
+        _cachedGroupContents.Values.Any(static content =>
+            content is not WidgetContentAdapterBase adapter || adapter.HasMaterializedView);
+
+    /// <summary>
+    /// Hibernates leaf XAML trees of cached inactive group members while this window is settled
+    /// in collapsed capsule mode, keeping their ViewModels and transient state warm without
+    /// pinning off-screen XAML visual trees in memory. Optionally evicts idle adapters on
+    /// aggressive idle cleanup passes.
+    /// </summary>
+    internal int HibernateCollapsedInactiveGroupContents(bool evictIdleAdapters = false)
+    {
+        if (IsClosing || !IsTargetCollapsed)
+        {
+            return 0;
+        }
+
+        ContentWidgetShell.ClearCompactBitmaps();
+        return HibernateDetachedInactiveGroupContents(evictIdleAdapters);
+    }
+
+    internal int HibernateDetachedInactiveGroupContents(bool evictIdleAdapters = false)
+    {
+        if (IsClosing)
+        {
+            return 0;
+        }
+
+        int released = 0;
+        foreach (IWidgetContent content in _cachedGroupContents.Values.ToArray())
+        {
+            if (content is IWidgetGroupContentCacheable { HasActiveOutboundDrag: true })
+            {
+                continue;
+            }
+
+            content.OnWindowLongHidden();
+            if (ContentWidgetShell.HibernateDetachedGroupMemberView(content))
+            {
+                released++;
+            }
+        }
+
+        if (evictIdleAdapters)
+        {
+            int before = _cachedGroupContents.Count;
+            TrimCachedGroupContentsToCapacity(0);
+            released += Math.Max(0, before - _cachedGroupContents.Count);
+        }
+
+        return released;
     }
 
     private void RemoveCachedGroupContentOrderEntry(string widgetId)

@@ -172,6 +172,35 @@ public sealed class CloudBackupServiceCredentialTests : IDisposable
         Assert.Equal("nested/dir", options.RemotePath);
     }
 
+    [Fact]
+    public void GetOptions_NormalizesBackslashesAndLongCredentialKeys()
+    {
+        var settings = new AppSettings();
+        settings.CloudBackup.CloudBackupProvider = "webdav";
+        settings.CloudBackup.CloudBackupServerUrl = "https://dav.example.com/dav/";
+        settings.CloudBackup.CloudBackupRemotePath = @" \DeskBox\backups\\ ";
+        Assert.Equal("DeskBox/backups", CloudBackupSettingsPolicy.GetOptions(settings).RemotePath);
+
+        settings.CloudBackup.CloudBackupRemotePath = @"..\escape";
+        Assert.Equal("DeskBox/backups", CloudBackupSettingsPolicy.GetOptions(settings).RemotePath);
+
+        settings.CloudBackup.CloudBackupRemotePath = @"sub\..\dir";
+        Assert.Equal("DeskBox/backups", CloudBackupSettingsPolicy.GetOptions(settings).RemotePath);
+
+        string longPathA = new('a', 260);
+        string longPathB = new string('a', 259) + "b";
+        CloudBackupOptions optsA = MakeOptions(serverUrl: $"https://dav.example.com/{longPathA}");
+        CloudBackupOptions optsB = MakeOptions(serverUrl: $"https://dav.example.com/{longPathB}");
+
+        string keyA = CloudBackupSettingsPolicy.CredentialKey(optsA);
+        string keyB = CloudBackupSettingsPolicy.CredentialKey(optsB);
+
+        Assert.True(keyA.Length <= 240);
+        Assert.True(keyB.Length <= 240);
+        Assert.Equal(keyA, CloudBackupSettingsPolicy.CredentialKey(optsA));
+        Assert.NotEqual(keyA, keyB);
+    }
+
     private static CloudBackupOptions MakeOptions(
         string provider = CloudBackupSettingsPolicy.ProviderWebDav,
         string serverUrl = "https://dav.example.com/dav/",

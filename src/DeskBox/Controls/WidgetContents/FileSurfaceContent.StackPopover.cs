@@ -26,7 +26,8 @@ public sealed partial class FileSurfaceContent
         TimeSpan.FromSeconds(45);
     internal const int StackSpringLoadDelayMilliseconds = 500;
     internal const int StackPopoverLightDismissMaxDeferralMilliseconds = 450;
-    private const int StackSpringLoadedAutoCloseGraceMilliseconds = 270;
+    internal const int StackSpringLoadedAutoCloseGraceMilliseconds = 270;
+    internal const int StackSpringLoadedReleaseGraceMilliseconds = 220;
     private static readonly UIntPtr StackPopoverDropSubclassId = new(0xDDB3);
     private static WeakReference<FileSurfaceContent>? s_leasedStackPopoverOwner;
 
@@ -49,12 +50,7 @@ public sealed partial class FileSurfaceContent
     private StackPopoverHostWindow? _stackPopoverHostWindow;
     private NativeDropHostBridge? _stackPopoverNativeDropBridge;
     private bool _stackPopoverNativeDragOver;
-    private long _stackPopoverInboundEpoch;
-    private long _lastStackPopoverXamlClaimedEpoch = -1;
-    private string? _lastStackPopoverXamlClaimedSessionId;
-    private long _lastStackPopoverNativeClaimedGestureId;
-    private long _lastStackPopoverNativeCompletedTick64;
-    private string? _lastStackPopoverNativeFirstPath;
+    private readonly StackPopoverDropClaimTracker _stackPopoverDropClaimTracker = new();
     private DispatcherQueueTimer? _deferredStackPopoverDismissTimer;
     private long _deferredStackPopoverDismissStartedTick;
     private Win32Helper.POINT? _deferredStackPopoverDismissOriginCursor;
@@ -67,7 +63,8 @@ public sealed partial class FileSurfaceContent
     private DispatcherQueueTimer? _springLoadedPopoverWatchTimer;
     private DispatcherQueueTimer? _stackPopoverOutboundPassthroughTimer;
     private bool _stackPopoverDragForeignWindowActivated;
-    private long _springLoadedPopoverOutsideSinceTick;
+    private long? _springLoadedPopoverOutsideSinceTick;
+    private long? _springLoadedPopoverReleasedSinceTick;
     private DispatcherQueueTimer? _stackPopoverIdleReleaseTimer;
     private Windows.Graphics.RectInt32 _stackPopoverScreenBounds =
         new(0, 0, 0, 0);
@@ -100,6 +97,7 @@ public sealed partial class FileSurfaceContent
     private bool _stackPopoverIsListMode;
     private bool _stackPopoverContextMenuOpen;
     private bool _stackPopoverSystemContextMenuOpen;
+    private int _stackPopoverModalDialogOpenCount;
     private Services.FlyoutBridgeBandPromoter? _popoverFlyoutBandPromoter;
     private bool _stackPopoverDragActive;
     private bool _stackPopoverCleanupPending;
@@ -115,6 +113,7 @@ public sealed partial class FileSurfaceContent
     private KeyEventHandler? _stackPopoverPreviewKeyHandler;
     private PointerEventHandler? _stackPopoverExpansionWheelHandler;
     private PointerEventHandler? _stackPopoverSelectionPointerPressedHandler;
+    private PointerEventHandler? _stackPopoverPointerPressedResetHandler;
     private PointerEventHandler? _stackPopoverSelectionPointerMovedHandler;
     private PointerEventHandler? _stackPopoverSelectionPointerReleasedHandler;
     private PointerEventHandler? _stackPopoverSelectionPointerCaptureLostHandler;
@@ -129,15 +128,52 @@ public sealed partial class FileSurfaceContent
 
     private bool IsStackPopoverInteractionActive =>
         _stackPopoverItemsView is not null &&
-        (_stackPopoverPopupOpen || _stackPopoverContextMenuOpen);
+        (_stackPopoverPopupOpen ||
+            _stackPopoverContextMenuOpen ||
+            _stackPopoverModalDialogOpenCount > 0);
 
     internal bool IsStackPopoverBlockingSurfaceOpen =>
         _stackPopoverPopupOpen ||
         _stackPopoverPopupClosing ||
         _stackPopoverContextMenuOpen ||
+        _stackPopoverModalDialogOpenCount > 0 ||
         _stackPopoverDragActive ||
         _stackPopoverTitleEditing ||
         IsStackPopoverItemRenameEditing;
+
+    internal bool IsItemHostedInStackPopover(WidgetItem? item) =>
+        item is not null &&
+        _stackPopoverPopupOpen &&
+        _stackPopoverItemsView?.Items
+            .OfType<WidgetItem>()
+            .Any(candidate => ReferenceEquals(candidate, item)) == true;
+
+    internal async Task<T> RunWithDialogOwnerAsync<T>(
+        WidgetItem? item,
+        Func<IntPtr, Task<T>> operation)
+    {
+        bool fromStackPopover = IsItemHostedInStackPopover(item);
+        IntPtr popoverHwnd = fromStackPopover ? ActiveStackPopoverWindowHandle : IntPtr.Zero;
+        if (popoverHwnd == IntPtr.Zero)
+        {
+            return await operation(_hostWindowHandle);
+        }
+
+        _stackPopoverModalDialogOpenCount++;
+        TryBringStackPopoverToForeground();
+        try
+        {
+            return await operation(popoverHwnd);
+        }
+        finally
+        {
+            _stackPopoverModalDialogOpenCount = Math.Max(0, _stackPopoverModalDialogOpenCount - 1);
+            if (_stackPopoverModalDialogOpenCount == 0)
+            {
+                SchedulePopoverDismissIfDeactivated();
+            }
+        }
+    }
 
     internal IntPtr ActiveStackPopoverWindowHandle =>
         (_stackPopoverPopupOpen ||
@@ -913,6 +949,12 @@ public sealed partial class FileSurfaceContent
         int height = StackPopoverPixelCalculator.ToCoveringPhysicalPixels(
             layout.Height,
             targetScale);
+        if (Math.Abs(targetScale - hostScale) > 0.01 &&
+            Win32Helper.TryGetMonitorWorkArea(left + (width / 2), top + (height / 2), out _, out Win32Helper.RECT targetWork))
+        {
+            left = Math.Clamp(left, targetWork.Left, Math.Max(targetWork.Left, targetWork.Right - width));
+            top = Math.Clamp(top, targetWork.Top, Math.Max(targetWork.Top, targetWork.Bottom - height));
+        }
 
         _stackPopoverScreenBounds = new Windows.Graphics.RectInt32(
             left,
@@ -1157,6 +1199,7 @@ public sealed partial class FileSurfaceContent
         if (_isDisposed ||
             !_stackPopoverPopupOpen ||
             _stackPopoverContextMenuOpen ||
+            _stackPopoverModalDialogOpenCount > 0 ||
             _stackPopoverDragActive)
         {
             return;
@@ -1374,6 +1417,12 @@ public sealed partial class FileSurfaceContent
         view.DoubleTapped += Items_DoubleTapped;
         view.KeyDown += Root_KeyDown;
         view.RightTapped += Items_RightTapped;
+        _stackPopoverPointerPressedResetHandler =
+            new PointerEventHandler((_, _) => _suppressNextRightTap = false);
+        view.AddHandler(
+            UIElement.PointerPressedEvent,
+            _stackPopoverPointerPressedResetHandler,
+            handledEventsToo: true);
         view.SelectionChanged += Items_SelectionChanged;
         view.CharacterReceived += Root_CharacterReceived;
         _stackPopoverExpansionWheelHandler =
@@ -2177,7 +2226,7 @@ public sealed partial class FileSurfaceContent
 
     private int _stackPopoverAppearanceSignature;
 
-    private void UpdateStackPopoverAppearance()
+    private void UpdateStackPopoverAppearance(bool force = false)
     {
         if (_stackPopoverSurface is null)
         {
@@ -2187,7 +2236,8 @@ public sealed partial class FileSurfaceContent
         bool followMaterial = UsesStackPopoverMaterialStyle();
         // Per-open refresh rewrites the content resource dictionary, which
         // invalidates list-item templates on the persistent tree. Skip it
-        // entirely while nothing in the visual signature changed.
+        // entirely while nothing in the visual signature changed unless
+        // explicitly forced (e.g., clearing a transient drop highlight).
         var appearanceSignature = new HashCode();
         appearanceSignature.Add(IsStackPopoverDarkTheme());
         appearanceSignature.Add(followMaterial);
@@ -2203,7 +2253,8 @@ public sealed partial class FileSurfaceContent
         appearanceSignature.Add(
             _settingsService.Settings.WidgetBorderColorMode);
         int signature = appearanceSignature.ToHashCode();
-        if (signature == _stackPopoverAppearanceSignature &&
+        if (!force &&
+            signature == _stackPopoverAppearanceSignature &&
             _stackPopoverHostWindow is not null)
         {
             return;
@@ -2766,6 +2817,12 @@ public sealed partial class FileSurfaceContent
                     UIElement.PreviewKeyDownEvent,
                     _stackPopoverPreviewKeyHandler);
             }
+            if (_stackPopoverPointerPressedResetHandler is not null)
+            {
+                view.RemoveHandler(
+                    UIElement.PointerPressedEvent,
+                    _stackPopoverPointerPressedResetHandler);
+            }
             UnregisterScrollBarActivityTracking(view);
             view.ItemsSource = null;
         }
@@ -2831,6 +2888,7 @@ public sealed partial class FileSurfaceContent
         _stackPopoverPreviewKeyHandler = null;
         _stackPopoverExpansionWheelHandler = null;
         _stackPopoverSelectionPointerPressedHandler = null;
+        _stackPopoverPointerPressedResetHandler = null;
         _stackPopoverSelectionPointerMovedHandler = null;
         _stackPopoverSelectionPointerReleasedHandler = null;
         _stackPopoverSelectionPointerCaptureLostHandler = null;
@@ -3052,19 +3110,25 @@ public sealed partial class FileSurfaceContent
             return;
         }
 
+        bool insidePopover = IsCursorInsideOpenStackPopoverBounds(marginPixels: 0);
+        if (insidePopover)
+        {
+            // FL-13: returning the cursor back inside the popover cancels any
+            // earlier foreign-window passthrough latch so the user can cancel
+            // or reorder inside the popover instead of dropping through it.
+            _stackPopoverDragForeignWindowActivated = false;
+            host.SetExternalDragPassthrough(false);
+            return;
+        }
+
         IntPtr fg = Win32Helper.GetForegroundWindow();
-        if (fg != IntPtr.Zero &&
+        _stackPopoverDragForeignWindowActivated =
+            fg != IntPtr.Zero &&
             fg != host.WindowHandle &&
             fg != _hostWindowHandle &&
             !TransientInputFocusGuard.IsCurrentProcessPopupBridge(fg) &&
-            !Win32Helper.IsWindowInCurrentProcess(fg))
-        {
-            _stackPopoverDragForeignWindowActivated = true;
-        }
-
-        bool insidePopover = IsCursorInsideOpenStackPopoverBounds(marginPixels: 0);
-        bool passthrough = !insidePopover || _stackPopoverDragForeignWindowActivated;
-        host.SetExternalDragPassthrough(passthrough);
+            !Win32Helper.IsWindowInCurrentProcess(fg);
+        host.SetExternalDragPassthrough(true);
     }
 
     private void CompleteStackPopoverDragCore()
@@ -3076,6 +3140,7 @@ public sealed partial class FileSurfaceContent
             !_stackPopoverContextMenuOpen &&
             !_stackPopoverTitleEditing &&
             !IsStackPopoverItemRenameEditing &&
+            _stackPopoverDropClaimTracker.PendingDropCount == 0 &&
             _stackPopoverHostWindow is not null)
         {
             bool restoreOwnerForeground = _stackPopoverCleanupRestoreOwnerForeground;
@@ -3178,6 +3243,7 @@ public sealed partial class FileSurfaceContent
 
         BeginStackPopoverDragAutoScroll();
         DragPayloadSnapshot payload = GetDragPayload(e.DataView);
+        ObserveStackPopoverXamlDragSession(payload.DragSessionId);
         if (!TryGetCurrentStackPopoverDrag(
                 payload,
                 out _,
@@ -3254,7 +3320,7 @@ public sealed partial class FileSurfaceContent
         e.Handled = true;
         e.AcceptedOperation = ResolveInternalArrangementFeedbackOperation(
             e.AllowedOperations,
-            e.DataView.RequestedOperation);
+            DataPackageOperation.None);
         TraceInternalDragDecision("stack-reorder", payload, e);
         e.DragUIOverride.IsGlyphVisible = true;
         e.DragUIOverride.IsCaptionVisible = true;
@@ -3367,6 +3433,7 @@ public sealed partial class FileSurfaceContent
         }
 
         e.Handled = true;
+        MarkStackPopoverXamlDropClaimed(e.DataView);
         _activeDragHandledAsStackMembership = true;
         int insertionIndex = ResolveStackPopoverMemberInsertionIndex(
             view,
@@ -3377,7 +3444,7 @@ public sealed partial class FileSurfaceContent
             insertionIndex);
         e.AcceptedOperation = ResolveInternalArrangementCompletionOperation(
             e.AllowedOperations,
-            e.DataView.RequestedOperation);
+            DataPackageOperation.None);
         HideStackPopoverReorderIndicator();
         PersistSurfaceReorder();
         ResetExternalDropPreview();
@@ -4159,7 +4226,8 @@ public sealed partial class FileSurfaceContent
 
     private void StartSpringLoadedPopoverWatchTimer()
     {
-        _springLoadedPopoverOutsideSinceTick = 0;
+        _springLoadedPopoverOutsideSinceTick = null;
+        _springLoadedPopoverReleasedSinceTick = null;
         if (_springLoadedPopoverWatchTimer is null)
         {
             _springLoadedPopoverWatchTimer = DispatcherQueue.CreateTimer();
@@ -4177,7 +4245,63 @@ public sealed partial class FileSurfaceContent
     private void StopSpringLoadedPopoverWatchTimer()
     {
         _springLoadedPopoverWatchTimer?.Stop();
-        _springLoadedPopoverOutsideSinceTick = 0;
+        _springLoadedPopoverOutsideSinceTick = null;
+        _springLoadedPopoverReleasedSinceTick = null;
+    }
+
+    internal bool ConsumeSpringLoadedPopoverDrop()
+    {
+        bool closeAfterDrop = _stackPopoverOpenedBySpringLoad;
+        _stackPopoverOpenedBySpringLoad = false;
+        StopSpringLoadedPopoverWatchTimer();
+        return closeAfterDrop;
+    }
+
+    internal static bool ShouldAutoCloseSpringLoadedPopover(
+        bool insidePopoverOrAnchor,
+        bool mouseButtonDown,
+        bool nativeDragOver,
+        bool hasPendingOrBlockingActivity,
+        long nowTick,
+        ref long? outsideSinceTick,
+        ref long? releasedSinceTick)
+    {
+        if (hasPendingOrBlockingActivity)
+        {
+            outsideSinceTick = null;
+            releasedSinceTick = null;
+            return false;
+        }
+
+        if (mouseButtonDown || nativeDragOver)
+        {
+            releasedSinceTick = null;
+            if (insidePopoverOrAnchor)
+            {
+                outsideSinceTick = null;
+                return false;
+            }
+
+            if (outsideSinceTick is not { } outsideStart)
+            {
+                outsideSinceTick = nowTick;
+                return false;
+            }
+
+            return nowTick - outsideStart >= StackSpringLoadedAutoCloseGraceMilliseconds;
+        }
+
+        // Physical mouse button is released and nativeDragOver is false. Hold open
+        // briefly so an in-flight OLE Drop or async XAML Drop turn on the UI queue
+        // can land and consume the spring-loaded popover instead of losing DataContext
+        // to a 90ms watch-timer race right on button-up.
+        if (releasedSinceTick is not { } releasedStart)
+        {
+            releasedSinceTick = nowTick;
+            return false;
+        }
+
+        return nowTick - releasedStart >= StackSpringLoadedReleaseGraceMilliseconds;
     }
 
     private void SpringLoadedPopoverWatchTimer_Tick(
@@ -4215,35 +4339,19 @@ public sealed partial class FileSurfaceContent
             _stackPopoverNativeDragOver;
         bool overAnchor = IsScreenPointInsideStackSurface(openKey, cursor);
         bool mouseDown = IsAnyMouseButtonPressed();
+        bool hasPendingOrBlockingActivity =
+            _stackPopoverContextMenuOpen ||
+            _stackPopoverModalDialogOpenCount > 0 ||
+            _stackPopoverDropClaimTracker.PendingDropCount > 0;
 
-        if (insidePopover || overAnchor)
-        {
-            _springLoadedPopoverOutsideSinceTick = 0;
-            if (!mouseDown && !_stackPopoverNativeDragOver && !_stackPopoverContextMenuOpen)
-            {
-                // Spring-loaded popovers open via SW_SHOWNOACTIVATE; if the drag
-                // ended or cancelled via Esc without dropping, close the transient
-                // TOPMOST host so it cannot remain stranded without light-dismiss.
-                HideStackPopoverForReuse(restoreOwnerForeground: false);
-            }
-
-            return;
-        }
-
-        if (!mouseDown)
-        {
-            HideStackPopoverForReuse(restoreOwnerForeground: false);
-            return;
-        }
-
-        long now = Environment.TickCount64;
-        if (_springLoadedPopoverOutsideSinceTick == 0)
-        {
-            _springLoadedPopoverOutsideSinceTick = now;
-            return;
-        }
-
-        if (now - _springLoadedPopoverOutsideSinceTick >= StackSpringLoadedAutoCloseGraceMilliseconds)
+        if (ShouldAutoCloseSpringLoadedPopover(
+                insidePopover || overAnchor,
+                mouseDown,
+                _stackPopoverNativeDragOver,
+                hasPendingOrBlockingActivity,
+                Environment.TickCount64,
+                ref _springLoadedPopoverOutsideSinceTick,
+                ref _springLoadedPopoverReleasedSinceTick))
         {
             HideStackPopoverForReuse(restoreOwnerForeground: false);
         }
@@ -4282,27 +4390,28 @@ public sealed partial class FileSurfaceContent
         _pendingSpringLoadStackKey = null;
         _deferredStackPopoverDismissOriginCursor = null;
         _deferredStackPopoverDismissPointerMoved = false;
-        _springLoadedPopoverOutsideSinceTick = 0;
+        _springLoadedPopoverOutsideSinceTick = null;
+        _springLoadedPopoverReleasedSinceTick = null;
     }
+
+    internal void ObserveStackPopoverXamlDragSession(string? sessionId) =>
+        _stackPopoverDropClaimTracker.ObserveXamlDragSession(sessionId);
 
     internal void MarkStackPopoverXamlDropClaimed(DataPackageView? dataView)
     {
-        _lastStackPopoverXamlClaimedEpoch = _stackPopoverInboundEpoch;
+        string? sessionId = null;
         if (dataView is not null &&
             dataView.Properties.TryGetValue(
                 DeskBoxDragData.DragSessionIdProperty,
                 out object? rawSessionId) &&
-            rawSessionId is string sessionId &&
-            !string.IsNullOrWhiteSpace(sessionId))
+            rawSessionId is string resolvedSessionId &&
+            !string.IsNullOrWhiteSpace(resolvedSessionId))
         {
-            _lastStackPopoverXamlClaimedSessionId = sessionId;
+            sessionId = resolvedSessionId;
         }
 
-        if (_stackPopoverNativeDropBridge is { MaxActiveGestureId: > 0 } bridge &&
-            bridge.MaxActiveGestureId > _lastStackPopoverNativeClaimedGestureId)
-        {
-            _lastStackPopoverNativeClaimedGestureId = bridge.MaxActiveGestureId;
-        }
+        long maxActiveGestureId = _stackPopoverNativeDropBridge?.MaxActiveGestureId ?? 0;
+        _stackPopoverDropClaimTracker.MarkXamlDropClaimed(sessionId, maxActiveGestureId);
     }
 
     private void EnsureStackPopoverNativeDropBridge(StackPopoverHostWindow host)
@@ -4330,6 +4439,9 @@ public sealed partial class FileSurfaceContent
         _stackPopoverNativeDropBridge.EnsureRegistered();
     }
 
+    private volatile WidgetItem? _stackPopoverNativeItemTarget;
+    private volatile WidgetItem? _stackPopoverNativeLaunchTarget;
+
     private NativeDropTarget CreateStackPopoverNativeDropTarget(IntPtr targetWindow)
     {
         var target = new NativeDropTarget(
@@ -4339,7 +4451,13 @@ public sealed partial class FileSurfaceContent
             ShouldUseStackPopoverNativeDropVisual,
             ShouldFollowWindowsStackPopoverNativeDrop)
         {
-            SameVolumeProbe = IsStackPopoverNativeDropOnSameVolume,
+            TargetKindProbe = GetStackPopoverNativeDropTargetKind,
+            LaunchTargetPathProbe = () => _stackPopoverNativeLaunchTarget?.Path,
+            LaunchDropHandler = HandleStackPopoverNativeLaunchDrop,
+            SameVolumeProbe = paths => IsStackPopoverNativeDropOnSameVolume(
+                paths,
+                PathOriginClassifier.DefaultHoverProbeBudget),
+            SameVolumeWithBudgetProbe = (paths, budget) => IsStackPopoverNativeDropOnSameVolume(paths, budget),
             HasMappedFolderProbe = HasStackPopoverMappedFolder,
             UndisplayablePathProbe = FileService.IsFilteredFromWidgetDisplay,
             ImportBusyProbe = () => _isImportBusy
@@ -4363,10 +4481,34 @@ public sealed partial class FileSurfaceContent
         target.ZeroResultDropBlocked -= StackPopoverNativeDrop_ZeroResultBlocked;
         target.ImportBusyDropBlocked -= StackPopoverNativeDrop_ImportBusyBlocked;
         target.DropIntentEvent -= StackPopoverNativeDrop_DropIntent;
+        target.TargetKindProbe = null;
+        target.LaunchTargetPathProbe = null;
+        target.LaunchDropHandler = null;
+        target.SameVolumeProbe = null;
+        target.SameVolumeWithBudgetProbe = null;
+        target.HasMappedFolderProbe = null;
+        target.UndisplayablePathProbe = null;
+        target.ImportBusyProbe = null;
+    }
+
+    private TransferTargetKind GetStackPopoverNativeDropTargetKind()
+    {
+        if (_stackPopoverNativeLaunchTarget is { Path.Length: > 0 })
+        {
+            return TransferTargetKind.ApplicationShortcutTile;
+        }
+
+        if (_stackPopoverNativeItemTarget is { } item &&
+            ItemDropBehaviorPolicy.Resolve(item) == ItemDropBehavior.RecycleBinDelete)
+        {
+            return TransferTargetKind.RecycleBinTile;
+        }
+
+        return TransferTargetKind.DirectorySurface;
     }
 
     private bool ShouldUseStackPopoverNativeDropVisual() =>
-        !SuppressesNativeShellDragVisual && !_stackPopoverDragActive;
+        !SuppressesNativeShellDragVisual && (!_stackPopoverDragActive || IsWin10NativeShellDragActive);
 
     private bool ShouldDefaultStackPopoverNativeDropToMove() =>
         string.Equals(
@@ -4389,12 +4531,20 @@ public sealed partial class FileSurfaceContent
         return !string.IsNullOrWhiteSpace(prospective);
     }
 
-    private bool IsStackPopoverNativeDropOnSameVolume(IReadOnlyList<string> paths)
+    private bool IsStackPopoverNativeDropOnSameVolume(
+        IReadOnlyList<string> paths,
+        TimeSpan? probeBudget = null)
     {
-        string destination = TransferIntentEngine.ResolveProspectiveManagedDestination(
-            ViewModel.CurrentFolderPath,
-            ViewModel.MappedFolderPath,
-            _settingsService.Settings.FileWidget.DefaultManagedStorageRootPath);
+        TimeSpan budget = probeBudget ?? PathOriginClassifier.DefaultHoverProbeBudget;
+        string destination = _stackPopoverNativeItemTarget is { } targetItem &&
+            ItemDropBehaviorPolicy.TryGetFolderDropDestinationPath(
+                targetItem,
+                out string folderDest)
+                ? folderDest
+                : TransferIntentEngine.ResolveProspectiveManagedDestination(
+                    ViewModel.CurrentFolderPath,
+                    ViewModel.MappedFolderPath,
+                    _settingsService.Settings.FileWidget.DefaultManagedStorageRootPath);
         if (string.IsNullOrWhiteSpace(destination))
         {
             return true;
@@ -4403,7 +4553,7 @@ public sealed partial class FileSurfaceContent
         return PathOriginClassifier.AreAllOnSameVolume(
             paths,
             destination,
-            TimeSpan.FromMilliseconds(80));
+            budget);
     }
 
     private NativeDropDescriptionText? CreateStackPopoverNativeDropDescription(uint effect)
@@ -4413,6 +4563,60 @@ public sealed partial class FileSurfaceContent
             return null;
         }
 
+        if (_stackPopoverNativeLaunchTarget is
+            {
+                Path.Length: > 0,
+                Name.Length: > 0
+            } launchTarget)
+        {
+            string openWith = ContentWidgetWindow.ToShellDropDescriptionMessage(
+                _localizationService.Format(
+                    "Widget.DropOnShortcutOpenWith",
+                    launchTarget.Name));
+            return openWith.Contains("%1", StringComparison.Ordinal)
+                ? new NativeDropDescriptionText(openWith, launchTarget.Name)
+                : new NativeDropDescriptionText("%1", openWith);
+        }
+
+        if (_stackPopoverNativeItemTarget is { } binCandidate &&
+            ItemDropBehaviorPolicy.Resolve(binCandidate) == ItemDropBehavior.RecycleBinDelete)
+        {
+            string binMessage = ContentWidgetWindow.ToShellDropDescriptionMessage(
+                _localizationService.T("Widget.DropOnRecycleBinHint"));
+            return binMessage.Contains("%1", StringComparison.Ordinal)
+                ? new NativeDropDescriptionText(binMessage, string.Empty)
+                : new NativeDropDescriptionText("%1", binMessage);
+        }
+
+        if (_stackPopoverNativeItemTarget is { Name.Length: > 0 } folder &&
+            ItemDropBehaviorPolicy.Resolve(folder) == ItemDropBehavior.FolderImport)
+        {
+            string? folderKey = effect switch
+            {
+                NativeDropEffectPolicy.Copy => "Widget.CopyToFolder",
+                NativeDropEffectPolicy.Move => "Widget.MoveToFolder",
+                NativeDropEffectPolicy.Link => "Widget.CreateShortcut",
+                _ => null
+            };
+            if (folderKey is null)
+            {
+                return null;
+            }
+
+            string folderMessage = ContentWidgetWindow.ToShellDropDescriptionMessage(
+                _localizationService.T(folderKey));
+            if (effect == NativeDropEffectPolicy.Link &&
+                !folderMessage.Contains("%1", StringComparison.Ordinal))
+            {
+                return new NativeDropDescriptionText("%1", folderMessage);
+            }
+
+            return folderMessage.Contains("%1", StringComparison.Ordinal)
+                ? new NativeDropDescriptionText(folderMessage, folder.Name)
+                : null;
+        }
+
+        if (IsSameStackPopoverWin10ShellDrag()) return null;
         string stackName = _stackPopoverKey is { } key &&
             ViewModel.FindStackByKey(key) is { } stack
                 ? stack.Name
@@ -4469,7 +4673,7 @@ public sealed partial class FileSurfaceContent
 
     private void StackPopoverNativeDrop_DragEnter(int screenX, int screenY, bool hasFileData)
     {
-        System.Threading.Interlocked.Increment(ref _stackPopoverInboundEpoch);
+        _stackPopoverDropClaimTracker.OnNativeDragEnter();
         _stackPopoverNativeDragOver = hasFileData;
         ObserveStackPopoverNativePointer(screenX, screenY, hasFileData);
     }
@@ -4484,7 +4688,9 @@ public sealed partial class FileSurfaceContent
     private void StackPopoverNativeDrop_DragLeave()
     {
         _stackPopoverNativeDragOver = false;
-        System.Threading.Interlocked.Increment(ref _stackPopoverInboundEpoch);
+        _stackPopoverNativeItemTarget = null;
+        _stackPopoverNativeLaunchTarget = null;
+        _stackPopoverDropClaimTracker.OnNativeDragLeave();
         _ = DispatcherQueue.TryEnqueue(() =>
         {
             if (_isDisposed)
@@ -4494,6 +4700,8 @@ public sealed partial class FileSurfaceContent
 
             StopInteractiveAutoScroll(InteractiveAutoScrollMode.StackPopoverDrag);
             HideStackPopoverReorderIndicator();
+            ClearFolderDropTarget();
+            ClearLaunchDropTarget();
             if (ReferenceEquals(_stackMemberDropTarget, _stackPopoverSurface))
             {
                 ClearStackMemberDropTarget();
@@ -4507,12 +4715,21 @@ public sealed partial class FileSurfaceContent
         {
             if (_isDisposed || !_stackPopoverPopupOpen)
             {
+                _stackPopoverNativeItemTarget = null;
+                _stackPopoverNativeLaunchTarget = null;
                 return;
             }
 
-            if (!hasFileData || _isImportBusy || _stackPopoverDragActive)
+            bool isWin10SamePopoverDrag = _win10ShellDragInFlight && _stackPopoverDragActive;
+            if (!hasFileData ||
+                _isImportBusy ||
+                (_stackPopoverDragActive && !isWin10SamePopoverDrag))
             {
+                _stackPopoverNativeItemTarget = null;
+                _stackPopoverNativeLaunchTarget = null;
                 HideStackPopoverReorderIndicator();
+                ClearFolderDropTarget();
+                ClearLaunchDropTarget();
                 if (ReferenceEquals(_stackMemberDropTarget, _stackPopoverSurface))
                 {
                     ClearStackMemberDropTarget();
@@ -4522,7 +4739,8 @@ public sealed partial class FileSurfaceContent
             }
 
             BeginStackPopoverDragAutoScroll();
-            if (TryResolveStackPopoverChildIconDropTarget(
+            if (!isWin10SamePopoverDrag &&
+                TryResolveStackPopoverChildIconDropTarget(
                     screenX,
                     screenY,
                     out Border? childBorder,
@@ -4530,27 +4748,64 @@ public sealed partial class FileSurfaceContent
                 childBorder is not null &&
                 childTarget is not null)
             {
-                HideStackPopoverReorderIndicator();
-                if (ReferenceEquals(_stackMemberDropTarget, _stackPopoverSurface))
+                ItemDropBehavior childBehavior = ItemDropBehaviorPolicy.Resolve(childTarget);
+                if (childBehavior == ItemDropBehavior.Launch)
                 {
-                    ClearStackMemberDropTarget();
-                }
+                    string[] hints = _stackPopoverNativeDropBridge?.Targets
+                        .Where(static t => t.HasFileData)
+                        .SelectMany(static t => t.DragPathHints)
+                        .Where(static p => !string.IsNullOrWhiteSpace(p))
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToArray() ?? [];
+                    bool fromStackPopover = false;
+                    bool isDeskBoxDrag = hints.Length > 0 &&
+                        ActiveDeskBoxDragRegistry.TryMatch(
+                            hints,
+                            out _,
+                            out fromStackPopover);
+                    bool canLaunch = !isDeskBoxDrag ||
+                        ShortcutLaunchPolicy.EvaluateInternalDrag(
+                            isDeskBoxFileDrag: true,
+                            isStackPopoverMemberDrag: fromStackPopover,
+                            hints,
+                            childTarget.Path,
+                            targetHostedInStackPopover: true) == ShortcutLaunchDecision.Launch;
+                    if (canLaunch)
+                    {
+                        HideStackPopoverReorderIndicator();
+                        if (ReferenceEquals(_stackMemberDropTarget, _stackPopoverSurface))
+                        {
+                            ClearStackMemberDropTarget();
+                        }
 
-                if (ItemDropBehaviorPolicy.Resolve(childTarget) == ItemDropBehavior.Launch)
-                {
-                    SetLaunchDropTarget(childBorder);
+                        _stackPopoverNativeItemTarget = null;
+                        _stackPopoverNativeLaunchTarget = childTarget;
+                        ClearFolderDropTarget();
+                        SetLaunchDropTarget(childBorder);
+                        return;
+                    }
                 }
                 else
                 {
-                    SetFolderDropTarget(childBorder);
-                }
+                    HideStackPopoverReorderIndicator();
+                    if (ReferenceEquals(_stackMemberDropTarget, _stackPopoverSurface))
+                    {
+                        ClearStackMemberDropTarget();
+                    }
 
-                return;
+                    _stackPopoverNativeLaunchTarget = null;
+                    _stackPopoverNativeItemTarget = childTarget;
+                    ClearLaunchDropTarget();
+                    SetFolderDropTarget(childBorder);
+                    return;
+                }
             }
 
+            _stackPopoverNativeItemTarget = null;
+            _stackPopoverNativeLaunchTarget = null;
             ClearFolderDropTarget();
             ClearLaunchDropTarget();
-            if (_stackPopoverSurface is { } surface)
+            if (!isWin10SamePopoverDrag && _stackPopoverSurface is { } surface)
             {
                 SetStackMemberDropTarget(surface);
             }
@@ -4687,49 +4942,29 @@ public sealed partial class FileSurfaceContent
         return ResolveStackPopoverMemberInsertionIndex(view, visibleIndex);
     }
 
-    private bool IsStackPopoverGestureAlreadyClaimed(
-        IReadOnlyList<string> paths,
-        long gestureId,
-        long epochAtDrop)
+    private enum StackPopoverRightDropChoice
     {
-        if (gestureId > 0 && gestureId <= _lastStackPopoverNativeClaimedGestureId)
-        {
-            return true;
-        }
-
-        if (epochAtDrop >= 0 && _lastStackPopoverXamlClaimedEpoch == epochAtDrop)
-        {
-            return true;
-        }
-
-        if (ActiveDeskBoxDragRegistry.TryMatch(
-                paths,
-                out string matchedSessionId,
-                out _,
-                out _) &&
-            !string.IsNullOrWhiteSpace(matchedSessionId) &&
-            string.Equals(
-                matchedSessionId,
-                _lastStackPopoverXamlClaimedSessionId,
-                StringComparison.Ordinal))
-        {
-            return true;
-        }
-
-        return false;
+        Cancel,
+        Copy,
+        Move,
+        Shortcut,
+        OpenWithApp
     }
 
     private void StackPopoverNativeDrop_DropIntent(NativeDropIntentEventArgs args)
     {
         _stackPopoverNativeDragOver = false;
-        long capturedEpoch = _stackPopoverInboundEpoch;
-        System.Threading.Interlocked.Increment(ref _stackPopoverInboundEpoch);
+        _stackPopoverNativeItemTarget = null;
+        _stackPopoverNativeLaunchTarget = null;
 
         string[] ownedPaths = args.Paths.ToArray();
-        if (ownedPaths.Length == 0 ||
-            IsStackPopoverGestureAlreadyClaimed(ownedPaths, args.GestureId, capturedEpoch))
+        if (!_stackPopoverDropClaimTracker.TryBeginNativeDropIntent(
+                ownedPaths,
+                args.GestureId,
+                Environment.TickCount64,
+                out PendingStackPopoverNativeDrop pendingDrop))
         {
-            if (args.ContainsTemporaryFiles)
+            if (args.ContainsTemporaryFiles && ownedPaths.Length > 0)
             {
                 _ = Task.Run(() => NativeDropMaterializationWorker.CleanupVirtualDropDirectories(ownedPaths));
             }
@@ -4737,45 +4972,60 @@ public sealed partial class FileSurfaceContent
             return;
         }
 
-        if (args.GestureId > _lastStackPopoverNativeClaimedGestureId)
+        uint allowedEffects = args.AllowedEffects;
+        bool isDeskBoxOwnedSource = pendingDrop.IsDeskBoxOwnedSource;
+        bool isNativeShellSelfDrag = pendingDrop.CapturedSelfDrag is { IsNativeShellDrag: true };
+        if (pendingDrop.CapturedSelfDrag is { IsNativeShellDrag: true } nativeSelf)
         {
-            _lastStackPopoverNativeClaimedGestureId = args.GestureId;
+            // Synchronously mark the Win10 SHDoDragDrop session claimed by this
+            // widget before SHDoDragDrop unwinds into CompleteDragItemsSession.
+            ActiveDeskBoxDragRegistry.MarkClaimedByDeskBoxDropTarget(
+                nativeSelf.SessionId,
+                WidgetId);
         }
 
-        _lastStackPopoverNativeCompletedTick64 = Environment.TickCount64;
-        _lastStackPopoverNativeFirstPath = ownedPaths[0];
+        int? capturedNativeMemberIndex = DispatcherQueue.HasThreadAccess
+            ? TryResolveStackPopoverNativeInsertionIndex(args.ScreenX, args.ScreenY)
+            : null;
+        bool isSamePopoverMemberDrag = isDeskBoxOwnedSource &&
+            pendingDrop.FromStackPopover &&
+            string.Equals(pendingDrop.MatchedWidgetId, WidgetId, StringComparison.OrdinalIgnoreCase);
 
-        uint allowedEffects = args.AllowedEffects;
-        bool isDeskBoxOwnedSource = ActiveDeskBoxDragRegistry.TryMatch(
-            ownedPaths,
-            out _,
-            out _,
-            out _);
         SourceOriginSnapshot sourceOrigin = PathOriginClassifier.ClassifySources(
             ownedPaths,
-            TimeSpan.FromMilliseconds(80));
+            PathOriginClassifier.DefaultDropProbeBudget);
         bool allItemsTemporary = args.ItemOrigins is { Count: > 0 } origins
             ? origins.All(static o => o != DroppedItemOriginKind.RealFileSystemPath)
             : args.ContainsTemporaryFiles;
-        bool sourceCanCopy = isDeskBoxOwnedSource ||
-            (allowedEffects & NativeDropEffectPolicy.Copy) != 0;
+        bool sourceCanCopy = !sourceOrigin.HasAppExecutionAliasSource &&
+            (isDeskBoxOwnedSource ||
+             allItemsTemporary ||
+             (allowedEffects & NativeDropEffectPolicy.Copy) != 0);
         bool sourceCanMove = !allItemsTemporary &&
+            !sourceOrigin.HasAppExecutionAliasSource &&
             !sourceOrigin.IsMoveProtectedSystemOrSharedSource &&
             (isDeskBoxOwnedSource ||
              (allowedEffects & NativeDropEffectPolicy.Move) != 0);
         if (args.RightButtonDrag)
         {
-            if (!DispatcherQueue.TryEnqueue(() => _ = HandleStackPopoverRightButtonDropAsync(
-                    ownedPaths,
-                    args.ContainsTemporaryFiles,
-                    allowedEffects,
-                    args.ScreenX,
-                    args.ScreenY,
-                    args.ItemOrigins,
-                    sourceCanCopy,
-                    sourceCanMove,
-                    allItemsTemporary)))
+            if (!DispatcherQueue.TryEnqueue(
+                    isDeskBoxOwnedSource ? DispatcherQueuePriority.Low : DispatcherQueuePriority.Normal,
+                    () => _ = RunTrackedPendingNativePopoverDropAsync(() =>
+                        HandleStackPopoverRightButtonDropAsync(
+                            ownedPaths,
+                            args.ContainsTemporaryFiles,
+                            allowedEffects,
+                            args.ScreenX,
+                            args.ScreenY,
+                            args.ItemOrigins,
+                            sourceCanCopy,
+                            sourceCanMove,
+                            allItemsTemporary,
+                            pendingDrop,
+                            isSamePopoverMemberDrag,
+                            args.MaterializationSkippedCount))))
             {
+                _stackPopoverDropClaimTracker.CompletePendingNativeDrop();
                 if (args.ContainsTemporaryFiles)
                 {
                     _ = Task.Run(() => NativeDropMaterializationWorker.CleanupVirtualDropDirectories(ownedPaths));
@@ -4787,27 +5037,54 @@ public sealed partial class FileSurfaceContent
 
         bool ctrlDown = (args.KeyState & NativeDropEffectPolicy.ControlKeyState) != 0;
         bool shiftDown = (args.KeyState & NativeDropEffectPolicy.ShiftKeyState) != 0;
-        FileDropIntent? forcedIntent = args.ShortcutRequested && !allItemsTemporary
-            ? FileDropIntent.Shortcut
-            : ctrlDown && !shiftDown
-                ? (sourceCanCopy ? FileDropIntent.Copy : FileDropIntent.None)
-                : shiftDown && !ctrlDown
-                    ? (sourceCanMove ? FileDropIntent.Move : FileDropIntent.None)
-                    : null;
+        FileDropIntent? forcedIntent = sourceOrigin.HasAppExecutionAliasSource && !allItemsTemporary
+            ? ((allowedEffects & NativeDropEffectPolicy.Link) != 0 || isDeskBoxOwnedSource
+                ? FileDropIntent.Shortcut
+                : FileDropIntent.None)
+            : args.ShortcutRequested && !allItemsTemporary
+                ? FileDropIntent.Shortcut
+                : ctrlDown && !shiftDown
+                    ? (sourceCanCopy ? FileDropIntent.Copy : FileDropIntent.None)
+                    : shiftDown && !ctrlDown
+                        ? (sourceCanMove ? FileDropIntent.Move : FileDropIntent.None)
+                        : null;
 
-        if (!DispatcherQueue.TryEnqueue(() => _ = ImportStackPopoverNativeDropAsync(
-                ownedPaths,
-                args.ContainsTemporaryFiles,
-                forcedIntent,
-                allowedEffects,
-                args.ScreenX,
-                args.ScreenY,
-                args.ItemOrigins)))
+        if (!DispatcherQueue.TryEnqueue(
+                isDeskBoxOwnedSource && !isNativeShellSelfDrag
+                    ? DispatcherQueuePriority.Low
+                    : DispatcherQueuePriority.Normal,
+                () => _ = RunTrackedPendingNativePopoverDropAsync(() =>
+                    ImportStackPopoverNativeDropAsync(
+                        ownedPaths,
+                        args.ContainsTemporaryFiles,
+                        forcedIntent,
+                        allowedEffects,
+                        args.ScreenX,
+                        args.ScreenY,
+                        args.ItemOrigins,
+                        pendingDrop,
+                        isSamePopoverMemberDrag,
+                        preResolvedMemberIndex: capturedNativeMemberIndex,
+                        materializationSkippedCount: args.MaterializationSkippedCount,
+                        copyWhenMapped: args.CopyRequested))))
         {
+            _stackPopoverDropClaimTracker.CompletePendingNativeDrop();
             if (args.ContainsTemporaryFiles)
             {
                 _ = Task.Run(() => NativeDropMaterializationWorker.CleanupVirtualDropDirectories(ownedPaths));
             }
+        }
+    }
+
+    private async Task RunTrackedPendingNativePopoverDropAsync(Func<Task> action)
+    {
+        try
+        {
+            await action();
+        }
+        finally
+        {
+            _stackPopoverDropClaimTracker.CompletePendingNativeDrop();
         }
     }
 
@@ -4820,95 +5097,121 @@ public sealed partial class FileSurfaceContent
         IReadOnlyList<DroppedItemOriginKind>? itemOrigins,
         bool sourceCanCopy,
         bool sourceCanMove,
-        bool allItemsTemporary)
+        bool allItemsTemporary,
+        PendingStackPopoverNativeDrop pendingDrop,
+        bool isSamePopoverMemberDrag,
+        int materializationSkippedCount = 0)
     {
         if (_isDisposed ||
             !_stackPopoverPopupOpen ||
             _stackPopoverSurface is not { XamlRoot: not null } surface ||
-            _stackPopoverHostWindow is not { WindowHandle: not 0 } host)
+            _stackPopoverHostWindow is not { WindowHandle: not 0 } host ||
+            !_stackPopoverDropClaimTracker.TryClaimDeferredNativeDrop(pendingDrop, ownedPaths))
         {
-            if (containsTemporaryFiles)
-            {
-                _ = Task.Run(() => NativeDropMaterializationWorker.CleanupVirtualDropDirectories(ownedPaths));
-            }
+            QueueStackPopoverDropCleanup(ownedPaths, containsTemporaryFiles);
 
             return;
         }
 
+        int? capturedMemberIndex = TryResolveStackPopoverNativeInsertionIndex(screenX, screenY);
+        TryResolveStackPopoverChildIconDropTarget(
+            screenX,
+            screenY,
+            out _,
+            out WidgetItem? capturedChildTarget);
+        ItemDropBehavior childBehavior = capturedChildTarget is not null
+            ? ItemDropBehaviorPolicy.Resolve(capturedChildTarget)
+            : ItemDropBehavior.None;
+        ClearFolderDropTarget();
+        ClearLaunchDropTarget();
         HideStackPopoverReorderIndicator();
-        var tcs = new TaskCompletionSource<FileDropIntent?>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var menu = new MenuFlyout();
-
-        void AddItem(string text, FileDropIntent? choice)
+        if (ReferenceEquals(_stackMemberDropTarget, _stackPopoverSurface))
         {
-            var item = new MenuFlyoutItem { Text = text };
-            item.Click += (_, _) => tcs.TrySetResult(choice);
-            menu.Items.Add(item);
+            ClearStackMemberDropTarget();
         }
 
-        if (sourceCanCopy)
+        if (isSamePopoverMemberDrag && capturedChildTarget is null)
         {
-            AddItem(T("Common.Copy"), FileDropIntent.Copy);
+            QueueStackPopoverDropCleanup(ownedPaths, containsTemporaryFiles);
+
+            return;
         }
 
-        if (sourceCanMove && HasStackPopoverMappedFolder())
-        {
-            AddItem(T("Common.Move"), FileDropIntent.Move);
-        }
+        bool hasLaunchShortcut = capturedChildTarget is { Path.Length: > 0 } &&
+            childBehavior == ItemDropBehavior.Launch &&
+            !isSamePopoverMemberDrag;
+        bool hasTargetFolder = HasStackPopoverMappedFolder() ||
+            (capturedChildTarget is not null &&
+             ItemDropBehaviorPolicy.TryGetFolderDropDestinationPath(capturedChildTarget, out _));
+        string destination = capturedChildTarget is not null &&
+            ItemDropBehaviorPolicy.TryGetFolderDropDestinationPath(
+                capturedChildTarget,
+                out string childDestFolder)
+                ? childDestFolder
+                : TransferIntentEngine.ResolveProspectiveManagedDestination(
+                    ViewModel.CurrentFolderPath,
+                    ViewModel.MappedFolderPath,
+                    _settingsService.Settings.FileWidget.DefaultManagedStorageRootPath);
+        StackPopoverRightDropChoice selected = await ShowRightButtonDropMenuAsync(
+            surface,
+            host.WindowHandle,
+            screenX,
+            screenY,
+            ownedPaths,
+            capturedChildTarget,
+            isRecycleBinTarget: capturedChildTarget is not null &&
+                childBehavior == ItemDropBehavior.RecycleBinDelete,
+            allowLaunchShortcut: hasLaunchShortcut,
+            hasTargetFolder: hasTargetFolder,
+            destinationFolder: destination,
+            isDeskBoxOwnedSource: pendingDrop.IsDeskBoxOwnedSource,
+            containsTemporaryFiles: containsTemporaryFiles,
+            allItemsTemporary: allItemsTemporary,
+            sourceCanCopy: sourceCanCopy,
+            sourceCanMove: sourceCanMove,
+            allowedEffects: allowedEffects,
+            trackPopoverContextMenu: true);
 
-        if (!allItemsTemporary && HasStackPopoverMappedFolder())
-        {
-            AddItem(T("Widget.CreateShortcut"), FileDropIntent.Shortcut);
-        }
-
-        menu.Items.Add(new MenuFlyoutSeparator());
-        AddItem(T("Common.Cancel"), null);
-        menu.Closed += (_, _) => tcs.TrySetResult(null);
-
-        _stackPopoverContextMenuOpen = true;
-        FileDropIntent? selected;
-        try
-        {
-            var clientPt = new Win32Helper.POINT { X = screenX, Y = screenY };
-            double scale = surface.XamlRoot.RasterizationScale > 0 ? surface.XamlRoot.RasterizationScale : 1.0;
-            Windows.Foundation.Point localPt = Win32Helper.ScreenToClient(host.WindowHandle, ref clientPt)
-                ? new Windows.Foundation.Point(clientPt.X / scale, clientPt.Y / scale)
-                : new Windows.Foundation.Point(16, 16);
-            menu.ShowAt(surface, localPt);
-            selected = await tcs.Task;
-        }
-        catch
-        {
-            selected = null;
-        }
-        finally
-        {
-            _stackPopoverContextMenuOpen = false;
-        }
-
-        if (selected is null)
+        if (selected == StackPopoverRightDropChoice.Cancel)
         {
             if (_stackPopoverOpenedBySpringLoad && _stackPopoverPopupOpen)
             {
                 HideStackPopoverForReuse(restoreOwnerForeground: false);
             }
 
-            if (containsTemporaryFiles)
-            {
-                _ = Task.Run(() => NativeDropMaterializationWorker.CleanupVirtualDropDirectories(ownedPaths));
-            }
+            QueueStackPopoverDropCleanup(ownedPaths, containsTemporaryFiles);
 
             return;
         }
 
-        await ImportStackPopoverNativeDropAsync(
+        FileDropIntent? forcedChoiceIntent = selected switch
+        {
+            StackPopoverRightDropChoice.Copy => FileDropIntent.Copy,
+            StackPopoverRightDropChoice.Move => FileDropIntent.Move,
+            StackPopoverRightDropChoice.Shortcut => FileDropIntent.Shortcut,
+            _ => null,
+        };
+        // When the user explicitly chose Copy/Move/Shortcut on an app-shortcut tile's
+        // right-click menu rather than "Open with", import into the stack instead of launching.
+        WidgetItem? effectiveChildTarget =
+            selected != StackPopoverRightDropChoice.OpenWithApp &&
+            childBehavior == ItemDropBehavior.Launch
+                ? null
+                : capturedChildTarget;
+        _ = await ImportStackPopoverNativeDropAsync(
             ownedPaths,
             containsTemporaryFiles,
-            selected,
+            forcedChoiceIntent,
             allowedEffects,
             screenX,
             screenY,
-            itemOrigins);
+            itemOrigins,
+            pendingDrop: PendingStackPopoverNativeDrop.Unclaimed,
+            isSamePopoverMemberDrag: isSamePopoverMemberDrag,
+            hasPreResolvedTargets: true,
+            preResolvedChildTarget: effectiveChildTarget,
+            preResolvedMemberIndex: capturedMemberIndex,
+            materializationSkippedCount: materializationSkippedCount);
     }
 
     private bool ShouldSkipStackPopoverLegacyDropFiles(IReadOnlyList<string> paths)
@@ -4918,25 +5221,44 @@ public sealed partial class FileSurfaceContent
             return true;
         }
 
-        if (Environment.TickCount64 - _lastStackPopoverNativeCompletedTick64 < 250 &&
-            string.Equals(paths[0], _lastStackPopoverNativeFirstPath, StringComparison.OrdinalIgnoreCase))
+        if (_isImportBusy)
+        {
+            NotifyNativeDropImportBusy();
+            return true;
+        }
+
+        if (WasLaunchConsumedRecently())
         {
             return true;
         }
 
-        return false;
+        return _stackPopoverDropClaimTracker.ShouldSkipLegacyDropFiles(
+            paths,
+            Environment.TickCount64);
     }
 
     private void HandleStackPopoverLegacyDropFiles(LegacyDropFilesPayload payload)
     {
+        if (payload.StagedPaths.Count == 0 && payload.MaterializationSkippedCount > 0)
+        {
+            NotifyNativeDropZeroResult();
+            return;
+        }
+
+        uint allowedEffects = payload.ContainsTemporaryFiles
+            ? NativeDropEffectPolicy.Copy
+            : NativeDropEffectPolicy.Copy | NativeDropEffectPolicy.Move | NativeDropEffectPolicy.Link;
         _ = ImportStackPopoverNativeDropAsync(
             payload.StagedPaths,
             payload.ContainsTemporaryFiles,
-            forcedIntent: null,
-            allowedEffects: null,
+            forcedIntent: payload.ForcedIntent,
+            allowedEffects: allowedEffects,
             payload.ScreenX,
             payload.ScreenY,
-            payload.ItemOrigins);
+            payload.ItemOrigins,
+            pendingDrop: PendingStackPopoverNativeDrop.Unclaimed,
+            materializationSkippedCount: payload.MaterializationSkippedCount,
+            copyWhenMapped: payload.ContainsTemporaryFiles ? true : null);
     }
 
     private async Task<bool> ImportStackPopoverNativeDropAsync(
@@ -4946,8 +5268,16 @@ public sealed partial class FileSurfaceContent
         uint? allowedEffects,
         int? screenX,
         int? screenY,
-        IReadOnlyList<DroppedItemOriginKind>? itemOrigins)
+        IReadOnlyList<DroppedItemOriginKind>? itemOrigins,
+        PendingStackPopoverNativeDrop pendingDrop,
+        bool isSamePopoverMemberDrag = false,
+        bool hasPreResolvedTargets = false,
+        WidgetItem? preResolvedChildTarget = null,
+        int? preResolvedMemberIndex = null,
+        int materializationSkippedCount = 0,
+        bool? copyWhenMapped = null)
     {
+        bool deferTemporaryCleanup = false;
         try
         {
             if (_isDisposed ||
@@ -4958,12 +5288,32 @@ public sealed partial class FileSurfaceContent
                 return false;
             }
 
-            int? preferredMemberIndex = TryResolveStackPopoverNativeInsertionIndex(screenX, screenY);
-            TryResolveStackPopoverChildIconDropTarget(
-                screenX,
-                screenY,
-                out _,
-                out WidgetItem? childIconTarget);
+            if (pendingDrop.EpochAtDrop >= 0 &&
+                !_stackPopoverDropClaimTracker.TryClaimDeferredNativeDrop(pendingDrop, paths))
+            {
+                App.LogVerbose(
+                    $"[FileStack] Popover native import skipped: gesture already claimed " +
+                    $"widget={WidgetId} gesture={pendingDrop.GestureId}");
+                return false;
+            }
+
+            int? preferredMemberIndex = hasPreResolvedTargets
+                ? preResolvedMemberIndex
+                : preResolvedMemberIndex ?? TryResolveStackPopoverNativeInsertionIndex(screenX, screenY);
+            WidgetItem? childIconTarget;
+            if (hasPreResolvedTargets)
+            {
+                childIconTarget = preResolvedChildTarget;
+            }
+            else
+            {
+                TryResolveStackPopoverChildIconDropTarget(
+                    screenX,
+                    screenY,
+                    out _,
+                    out childIconTarget);
+            }
+
             ClearFolderDropTarget();
             ClearLaunchDropTarget();
             HideStackPopoverReorderIndicator();
@@ -4972,18 +5322,58 @@ public sealed partial class FileSurfaceContent
                 ClearStackMemberDropTarget();
             }
 
-            bool closeAfterSpringDrop = _stackPopoverOpenedBySpringLoad;
-            _stackPopoverOpenedBySpringLoad = false;
-            StopSpringLoadedPopoverWatchTimer();
+            if (isSamePopoverMemberDrag && childIconTarget is null)
+            {
+                return TryCommitWin10SamePopoverReorder(
+                    stackKey,
+                    paths,
+                    pendingDrop.CapturedSelfDrag,
+                    preferredMemberIndex);
+            }
+
+            bool closeAfterSpringDrop = ConsumeSpringLoadedPopoverDrop();
 
             if (childIconTarget is not null &&
                 ItemDropBehaviorPolicy.Resolve(childIconTarget) == ItemDropBehavior.Launch)
             {
-                bool launched = ShortcutFileLauncher.TryLaunchWithFiles(
-                    childIconTarget.Path,
-                    paths);
+                if (isSamePopoverMemberDrag || WasLaunchConsumedRecently())
+                {
+                    return false;
+                }
+
                 MarkNativeLaunchConsumed();
-                if (!launched)
+                string[] existingPaths = await Task.Run(() => paths
+                    .Where(static p =>
+                        !string.IsNullOrWhiteSpace(p) &&
+                        (File.Exists(p) || Directory.Exists(p)))
+                    .ToArray());
+                if (existingPaths.Length == 0)
+                {
+                    if (!_isDisposed)
+                    {
+                        ShowShortcutLaunchRefusedFeedback(childIconTarget.Name);
+                    }
+
+                    if (closeAfterSpringDrop && _stackPopoverPopupOpen)
+                    {
+                        HideStackPopoverForReuse(restoreOwnerForeground: false);
+                    }
+
+                    return false;
+                }
+
+                ShellLaunchOutcome launchOutcome = await ShortcutFileLauncher.LaunchWithFilesAsync(
+                    childIconTarget.Path,
+                    existingPaths,
+                    ActiveStackPopoverWindowHandle,
+                    _lifetimeCancellation.Token);
+                if (launchOutcome == ShellLaunchOutcome.Launched && containsTemporaryFiles)
+                {
+                    deferTemporaryCleanup = true;
+                    IReadOnlyList<string> launchedTempPaths = paths;
+                    _ = Task.Run(() => DropStagingFileOps.MarkStagingBatchLaunchedRetention(launchedTempPaths));
+                }
+                else if (launchOutcome == ShellLaunchOutcome.Failed && !_isDisposed)
                 {
                     ShowShortcutLaunchRefusedFeedback(childIconTarget.Name);
                 }
@@ -4993,7 +5383,7 @@ public sealed partial class FileSurfaceContent
                     HideStackPopoverForReuse(restoreOwnerForeground: false);
                 }
 
-                return launched;
+                return launchOutcome == ShellLaunchOutcome.Launched;
             }
 
             WidgetItem effectiveTargetItem = childIconTarget is not null &&
@@ -5005,7 +5395,7 @@ public sealed partial class FileSurfaceContent
             bool imported = await ImportNativeDroppedFilesAsync(
                 paths,
                 containsTemporaryFiles,
-                copyWhenMapped: null,
+                copyWhenMapped: copyWhenMapped,
                 targetItem: effectiveTargetItem,
                 forcedIntent: forcedIntent,
                 screenX: screenX,
@@ -5014,21 +5404,49 @@ public sealed partial class FileSurfaceContent
                 itemOrigins: itemOrigins,
                 preferredStackMemberIndex: ReferenceEquals(effectiveTargetItem, targetStack)
                     ? preferredMemberIndex
-                    : null);
+                    : null,
+                preMaterializationSkippedCount: materializationSkippedCount,
+                capturedSelfDrag: pendingDrop.CapturedSelfDrag);
             if (closeAfterSpringDrop && _stackPopoverPopupOpen)
             {
                 HideStackPopoverForReuse(restoreOwnerForeground: false);
+            }
+            else if (imported &&
+                _stackPopoverPopupOpen &&
+                _stackPopoverHostWindow is { IsVisible: true } activeHost)
+            {
+                activeHost.ActivateInput(_stackPopoverItemsView);
             }
 
             return imported;
         }
         finally
         {
-            if (containsTemporaryFiles)
+            if (!deferTemporaryCleanup)
             {
-                _ = Task.Run(() => NativeDropMaterializationWorker.CleanupVirtualDropDirectories(paths));
+                QueueStackPopoverDropCleanup(paths, containsTemporaryFiles);
             }
         }
+    }
+
+    private static void QueueStackPopoverDropCleanup(
+        IReadOnlyList<string> paths,
+        bool containsTemporaryFiles)
+    {
+        if (paths.Count == 0)
+        {
+            return;
+        }
+
+        _ = Task.Run(() =>
+        {
+            if (containsTemporaryFiles)
+            {
+                NativeDropMaterializationWorker.CleanupVirtualDropDirectories(paths);
+            }
+
+            DeskBox.Platform.DropStagingFileOps.CleanupConsumedStagedPaths(paths);
+        });
     }
 
     internal string ObserveCrossWidgetElevatedStackPopoverDrag(
@@ -5207,13 +5625,241 @@ public sealed partial class FileSurfaceContent
         }
     }
 
+    private async Task<StackPopoverRightDropChoice> ShowRightButtonDropMenuAsync(
+        FrameworkElement placementTarget,
+        IntPtr placementWindowHandle,
+        int screenX,
+        int screenY,
+        IReadOnlyList<string> sourcePaths,
+        WidgetItem? targetItem,
+        bool isRecycleBinTarget,
+        bool allowLaunchShortcut,
+        bool hasTargetFolder,
+        string? destinationFolder,
+        bool isDeskBoxOwnedSource,
+        bool containsTemporaryFiles,
+        bool allItemsTemporary,
+        bool sourceCanCopy,
+        bool sourceCanMove,
+        uint allowedEffects,
+        bool trackPopoverContextMenu = false)
+    {
+        if (placementTarget.XamlRoot is null || placementWindowHandle == IntPtr.Zero)
+        {
+            return StackPopoverRightDropChoice.Cancel;
+        }
+
+        var tcs = new TaskCompletionSource<StackPopoverRightDropChoice>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var menu = new MenuFlyout();
+
+        void AddItem(
+            string text,
+            StackPopoverRightDropChoice choice,
+            bool isDefault = false)
+        {
+            var item = new MenuFlyoutItem
+            {
+                Text = text,
+                FontWeight = isDefault
+                    ? Microsoft.UI.Text.FontWeights.SemiBold
+                    : Microsoft.UI.Text.FontWeights.Normal,
+            };
+            item.Click += (_, _) =>
+            {
+                tcs.TrySetResult(choice);
+                menu.Hide();
+            };
+            menu.Items.Add(item);
+        }
+
+        if (isRecycleBinTarget)
+        {
+            if (!allItemsTemporary)
+            {
+                AddItem(
+                    T("Widget.DropOnRecycleBinHint"),
+                    StackPopoverRightDropChoice.Move,
+                    isDefault: true);
+                menu.Items.Add(new MenuFlyoutSeparator());
+            }
+
+            AddItem(T("Common.Cancel"), StackPopoverRightDropChoice.Cancel);
+        }
+        else
+        {
+            bool hasLaunchShortcut = allowLaunchShortcut && targetItem is { Path.Length: > 0 };
+            SourceOriginSnapshot sourceOrigin = PathOriginClassifier.ClassifySources(
+                sourcePaths,
+                PathOriginClassifier.DefaultDropProbeBudget);
+            bool effectiveSourceCanCopy = sourceCanCopy && !sourceOrigin.HasAppExecutionAliasSource;
+            bool canMoveOption = sourceCanMove &&
+                hasTargetFolder &&
+                !allItemsTemporary &&
+                !sourceOrigin.HasAppExecutionAliasSource &&
+                !sourceOrigin.IsMoveProtectedSystemOrSharedSource;
+            bool canShortcutOption = !allItemsTemporary &&
+                (hasTargetFolder || sourceOrigin.HasAppExecutionAliasSource);
+
+            StackPopoverRightDropChoice defaultChoice = StackPopoverRightDropChoice.Cancel;
+            if (hasLaunchShortcut)
+            {
+                defaultChoice = StackPopoverRightDropChoice.OpenWithApp;
+            }
+            else if (hasTargetFolder || sourceOrigin.HasAppExecutionAliasSource)
+            {
+                bool sameVolume = !hasTargetFolder ||
+                    string.IsNullOrWhiteSpace(destinationFolder) ||
+                    PathOriginClassifier.AreAllOnSameVolume(
+                        sourcePaths,
+                        destinationFolder,
+                        PathOriginClassifier.DefaultDropProbeBudget);
+                TransferIntentDecision defaultDecision = TransferIntentEngine.Evaluate(new TransferIntentRequest(
+                    Domain: isDeskBoxOwnedSource
+                        ? TransferDomain.InternalDeskBox
+                        : TransferDomain.ExternalInbound,
+                    TargetKind: TransferTargetKind.DirectorySurface,
+                    HasFileData: true,
+                    HasVirtualFileData: containsTemporaryFiles,
+                    HasShellApplicationOrNamespaceData: false,
+                    ForceCopy: allItemsTemporary || containsTemporaryFiles,
+                    HasMappedFolder: hasTargetFolder,
+                    ControlDown: false,
+                    ShiftDown: false,
+                    AltDown: false,
+                    AllowedEffects: isDeskBoxOwnedSource
+                        ? allowedEffects |
+                          NativeDropEffectPolicy.Copy |
+                          NativeDropEffectPolicy.Move |
+                          NativeDropEffectPolicy.Link
+                        : allowedEffects,
+                    NoOperationMetadata: allowedEffects == NativeDropEffectPolicy.None,
+                    DefaultMove: ShouldDefaultStackPopoverNativeDropToMove(),
+                    FollowWindows: ShouldFollowWindowsStackPopoverNativeDrop(),
+                    SameVolume: sameVolume,
+                    CanLink: canShortcutOption,
+                    SourceOrigin: sourceOrigin));
+                defaultChoice = defaultDecision.Intent switch
+                {
+                    FileDropIntent.Shortcut when canShortcutOption => StackPopoverRightDropChoice.Shortcut,
+                    FileDropIntent.Move when canMoveOption => StackPopoverRightDropChoice.Move,
+                    _ when effectiveSourceCanCopy => StackPopoverRightDropChoice.Copy,
+                    _ when canMoveOption => StackPopoverRightDropChoice.Move,
+                    _ when canShortcutOption => StackPopoverRightDropChoice.Shortcut,
+                    _ => StackPopoverRightDropChoice.Cancel,
+                };
+            }
+            else if (effectiveSourceCanCopy)
+            {
+                defaultChoice = StackPopoverRightDropChoice.Copy;
+            }
+
+            if (hasLaunchShortcut && targetItem is { } launchShortcut)
+            {
+                AddItem(
+                    _localizationService.Format("Widget.DropOnShortcutOpenWith", launchShortcut.Name),
+                    StackPopoverRightDropChoice.OpenWithApp,
+                    isDefault: defaultChoice == StackPopoverRightDropChoice.OpenWithApp);
+            }
+
+            if (effectiveSourceCanCopy)
+            {
+                AddItem(
+                    T("Common.Copy"),
+                    StackPopoverRightDropChoice.Copy,
+                    isDefault: defaultChoice == StackPopoverRightDropChoice.Copy);
+            }
+
+            if (canMoveOption)
+            {
+                AddItem(
+                    T("Common.Move"),
+                    StackPopoverRightDropChoice.Move,
+                    isDefault: defaultChoice == StackPopoverRightDropChoice.Move);
+            }
+
+            if (canShortcutOption)
+            {
+                AddItem(
+                    T("Widget.CreateShortcut"),
+                    StackPopoverRightDropChoice.Shortcut,
+                    isDefault: defaultChoice == StackPopoverRightDropChoice.Shortcut);
+            }
+
+            if (menu.Items.Count > 0)
+            {
+                menu.Items.Add(new MenuFlyoutSeparator());
+            }
+
+            AddItem(T("Common.Cancel"), StackPopoverRightDropChoice.Cancel);
+        }
+
+        bool isPopoverHost = trackPopoverContextMenu ||
+            (_stackPopoverHostWindow is { WindowHandle: not 0 } popHostWindow &&
+             placementWindowHandle == popHostWindow.WindowHandle);
+        if (isPopoverHost)
+        {
+            _stackPopoverContextMenuOpen = true;
+        }
+
+        try
+        {
+            Windows.Foundation.Point localPt;
+            if (!TryGetScreenPointInElement(
+                    placementTarget,
+                    placementWindowHandle,
+                    screenX,
+                    screenY,
+                    out localPt))
+            {
+                var clientPt = new Win32Helper.POINT { X = screenX, Y = screenY };
+                double scale = placementTarget.XamlRoot.RasterizationScale > 0
+                    ? placementTarget.XamlRoot.RasterizationScale
+                    : 1.0;
+                localPt = Win32Helper.ScreenToClient(placementWindowHandle, ref clientPt)
+                    ? new Windows.Foundation.Point(clientPt.X / scale, clientPt.Y / scale)
+                    : new Windows.Foundation.Point(16, 16);
+            }
+
+            return await DropChoiceFlyoutHelper.ShowAndWaitAsync(
+                menu,
+                placementTarget,
+                localPt,
+                tcs,
+                StackPopoverRightDropChoice.Cancel,
+                hostWindowHandle: placementWindowHandle,
+                onOpened: isPopoverHost ? BeginPopoverFlyoutBandPromotion : null,
+                cancellationToken: _lifetimeCancellation.Token);
+        }
+        catch
+        {
+            return StackPopoverRightDropChoice.Cancel;
+        }
+        finally
+        {
+            if (isPopoverHost)
+            {
+                EndPopoverFlyoutBandPromotion();
+                if (!_stackPopoverSystemContextMenuOpen)
+                {
+                    CompleteStackPopoverContextMenu();
+                }
+                else
+                {
+                    _stackPopoverContextMenuOpen = false;
+                }
+            }
+        }
+    }
+
     internal async Task<bool> AcceptCrossWidgetElevatedStackPopoverDropAsync(
         IReadOnlyList<string> sourcePaths,
         int screenX,
         int screenY,
         bool? controlDown,
         bool? shiftDown,
-        bool? altDown)
+        bool? altDown,
+        bool isSecondaryButtonDrag = false)
     {
         if (_isDisposed ||
             sourcePaths.Count == 0 ||
@@ -5236,31 +5882,17 @@ public sealed partial class FileSurfaceContent
         _stackPopoverOpenedBySpringLoad = false;
         StopSpringLoadedPopoverWatchTimer();
 
-        if (childIconTarget is not null &&
-            ItemDropBehaviorPolicy.Resolve(childIconTarget) == ItemDropBehavior.Launch)
-        {
-            bool launched = ShortcutFileLauncher.TryLaunchWithFiles(
-                childIconTarget.Path,
-                sourcePaths);
-            MarkNativeLaunchConsumed();
-            if (!launched)
-            {
-                ShowShortcutLaunchRefusedFeedback(childIconTarget.Name);
-            }
-
-            if (closeAfterSpringDrop && _stackPopoverPopupOpen)
-            {
-                HideStackPopoverForReuse(restoreOwnerForeground: false);
-            }
-
-            return launched;
-        }
-
-        WidgetItem effectiveTargetItem = childIconTarget is not null &&
-            ItemDropBehaviorPolicy.Resolve(childIconTarget) is
-                ItemDropBehavior.FolderImport or ItemDropBehavior.RecycleBinDelete
-            ? childIconTarget
-            : targetStack;
+        ItemDropBehavior childBehavior = childIconTarget is not null
+            ? ItemDropBehaviorPolicy.Resolve(childIconTarget)
+            : ItemDropBehavior.None;
+        SourceOriginSnapshot origin = PathOriginClassifier.ClassifySources(
+            sourcePaths,
+            PathOriginClassifier.DefaultDropProbeBudget);
+        bool canSourceMove = !DriveMediaInterop.IsProtectedDragOutSource(sourcePaths) &&
+            !origin.IsMoveProtectedSystemOrSharedSource;
+        uint allowedEffects = canSourceMove
+            ? NativeDropEffectPolicy.Copy | NativeDropEffectPolicy.Move | NativeDropEffectPolicy.Link
+            : NativeDropEffectPolicy.Copy | NativeDropEffectPolicy.Link;
 
         string destination = childIconTarget is not null &&
             ItemDropBehaviorPolicy.TryGetFolderDropDestinationPath(
@@ -5271,27 +5903,113 @@ public sealed partial class FileSurfaceContent
                 ViewModel.CurrentFolderPath,
                 ViewModel.MappedFolderPath,
                 _settingsService.Settings.FileWidget.DefaultManagedStorageRootPath);
-        FileDropIntent snapshotIntent = ResolveCrossWidgetElevatedPopoverIntent(
-            sourcePaths,
-            destination,
-            hasMappedFolder: !string.IsNullOrWhiteSpace(destination),
-            controlDown: controlDown,
-            shiftDown: shiftDown,
-            altDown: altDown);
-        if (snapshotIntent == FileDropIntent.None)
+
+        FileDropIntent? forcedIntent;
+        bool shouldLaunch = !isSecondaryButtonDrag &&
+            childIconTarget is not null &&
+            childBehavior == ItemDropBehavior.Launch;
+
+        if (isSecondaryButtonDrag)
         {
-            return false;
+            if (_stackPopoverSurface is not { XamlRoot: not null } popSurface ||
+                _stackPopoverHostWindow is not { WindowHandle: not 0 } popHost)
+            {
+                if (closeAfterSpringDrop && _stackPopoverPopupOpen)
+                {
+                    HideStackPopoverForReuse(restoreOwnerForeground: false);
+                }
+
+                return false;
+            }
+
+            StackPopoverRightDropChoice choice = await ShowRightButtonDropMenuAsync(
+                popSurface,
+                popHost.WindowHandle,
+                screenX,
+                screenY,
+                sourcePaths,
+                childIconTarget,
+                isRecycleBinTarget: childBehavior == ItemDropBehavior.RecycleBinDelete,
+                allowLaunchShortcut: childBehavior == ItemDropBehavior.Launch,
+                hasTargetFolder: !string.IsNullOrWhiteSpace(destination),
+                destinationFolder: destination,
+                isDeskBoxOwnedSource: true,
+                containsTemporaryFiles: false,
+                allItemsTemporary: false,
+                sourceCanCopy: !origin.HasAppExecutionAliasSource,
+                sourceCanMove: canSourceMove,
+                allowedEffects: allowedEffects,
+                trackPopoverContextMenu: true);
+            if (choice == StackPopoverRightDropChoice.Cancel)
+            {
+                if (closeAfterSpringDrop && _stackPopoverPopupOpen)
+                {
+                    HideStackPopoverForReuse(restoreOwnerForeground: false);
+                }
+
+                return false;
+            }
+
+            shouldLaunch = choice == StackPopoverRightDropChoice.OpenWithApp &&
+                childIconTarget is not null &&
+                childBehavior == ItemDropBehavior.Launch;
+            forcedIntent = choice switch
+            {
+                StackPopoverRightDropChoice.Copy => FileDropIntent.Copy,
+                StackPopoverRightDropChoice.Move => FileDropIntent.Move,
+                StackPopoverRightDropChoice.Shortcut => FileDropIntent.Shortcut,
+                _ => null,
+            };
+        }
+        else if (!shouldLaunch)
+        {
+            FileDropIntent snapshotIntent = ResolveCrossWidgetElevatedPopoverIntent(
+                sourcePaths,
+                destination,
+                hasMappedFolder: !string.IsNullOrWhiteSpace(destination),
+                controlDown: controlDown,
+                shiftDown: shiftDown,
+                altDown: altDown,
+                probeBudget: PathOriginClassifier.DefaultDropProbeBudget);
+            if (snapshotIntent == FileDropIntent.None)
+            {
+                return false;
+            }
+
+            forcedIntent = snapshotIntent == FileDropIntent.Reference
+                ? null
+                : snapshotIntent;
+        }
+        else
+        {
+            forcedIntent = null;
         }
 
-        FileDropIntent? forcedIntent = snapshotIntent == FileDropIntent.Reference
-            ? null
-            : snapshotIntent;
-        SourceOriginSnapshot origin = PathOriginClassifier.ClassifySources(
-            sourcePaths,
-            TimeSpan.FromMilliseconds(80));
-        uint allowedEffects = !origin.IsMoveProtectedSystemOrSharedSource
-            ? NativeDropEffectPolicy.Copy | NativeDropEffectPolicy.Move | NativeDropEffectPolicy.Link
-            : NativeDropEffectPolicy.Copy | NativeDropEffectPolicy.Link;
+        if (shouldLaunch && childIconTarget is not null)
+        {
+            MarkNativeLaunchConsumed();
+            ShellLaunchOutcome launchOutcome = await ShortcutFileLauncher.LaunchWithFilesAsync(
+                childIconTarget.Path,
+                sourcePaths,
+                ActiveStackPopoverWindowHandle,
+                _lifetimeCancellation.Token);
+            if (launchOutcome == ShellLaunchOutcome.Failed && !_isDisposed)
+            {
+                ShowShortcutLaunchRefusedFeedback(childIconTarget.Name);
+            }
+
+            if (closeAfterSpringDrop && _stackPopoverPopupOpen)
+            {
+                HideStackPopoverForReuse(restoreOwnerForeground: false);
+            }
+
+            return launchOutcome == ShellLaunchOutcome.Launched;
+        }
+
+        WidgetItem effectiveTargetItem = childIconTarget is not null &&
+            childBehavior is ItemDropBehavior.FolderImport or ItemDropBehavior.RecycleBinDelete
+            ? childIconTarget
+            : targetStack;
 
         bool imported = await ImportNativeDroppedFilesAsync(
             sourcePaths,
@@ -5319,8 +6037,10 @@ public sealed partial class FileSurfaceContent
         bool hasMappedFolder,
         bool? controlDown,
         bool? shiftDown,
-        bool? altDown)
+        bool? altDown,
+        TimeSpan? probeBudget = null)
     {
+        TimeSpan budget = probeBudget ?? PathOriginClassifier.DefaultHoverProbeBudget;
         string dropAction = _settingsService.Settings.FileWidget.ManagedDropAction;
         bool followWindows = string.Equals(
             dropAction,
@@ -5333,13 +6053,15 @@ public sealed partial class FileSurfaceContent
                 StringComparison.Ordinal);
         SourceOriginSnapshot origin = PathOriginClassifier.ClassifySources(
             sourcePaths,
-            TimeSpan.FromMilliseconds(80));
+            budget);
         bool sameVolume = !string.IsNullOrWhiteSpace(destination) &&
             PathOriginClassifier.AreAllOnSameVolume(
                 sourcePaths,
                 destination,
-                TimeSpan.FromMilliseconds(80));
-        uint allowedEffects = !origin.IsMoveProtectedSystemOrSharedSource
+                budget);
+        bool canSourceMove = !DriveMediaInterop.IsProtectedDragOutSource(sourcePaths) &&
+            !origin.IsMoveProtectedSystemOrSharedSource;
+        uint allowedEffects = canSourceMove
             ? NativeDropEffectPolicy.Copy | NativeDropEffectPolicy.Move | NativeDropEffectPolicy.Link
             : NativeDropEffectPolicy.Copy | NativeDropEffectPolicy.Link;
         return TransferIntentEngine.Evaluate(new TransferIntentRequest(
@@ -5350,9 +6072,9 @@ public sealed partial class FileSurfaceContent
             HasShellApplicationOrNamespaceData: false,
             ForceCopy: false,
             HasMappedFolder: hasMappedFolder,
-            ControlDown: controlDown ?? Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control),
-            ShiftDown: shiftDown ?? Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Shift),
-            AltDown: altDown ?? Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Menu),
+            ControlDown: controlDown ?? Win32Helper.IsAsyncKeyPressed(Windows.System.VirtualKey.Control),
+            ShiftDown: shiftDown ?? Win32Helper.IsAsyncKeyPressed(Windows.System.VirtualKey.Shift),
+            AltDown: altDown ?? Win32Helper.IsAsyncKeyPressed(Windows.System.VirtualKey.Menu),
             AllowedEffects: allowedEffects,
             NoOperationMetadata: false,
             DefaultMove: defaultMove,

@@ -15,8 +15,8 @@ public sealed class SettingsSearchChannelPolicyTests
     [Fact]
     public void DirectOnlyHeaderKeys_AreFrozenAtTheChannelGatedCards()
     {
-        Assert.Equal(5, SettingsSearchChannelPolicy.DirectOnlyHeaderKeys.Count);
-        Assert.Contains("Settings.AutoStart.Mode.Title", SettingsSearchChannelPolicy.DirectOnlyHeaderKeys);
+        Assert.Equal(4, SettingsSearchChannelPolicy.DirectOnlyHeaderKeys.Count);
+        Assert.DoesNotContain("Settings.AutoStart.Mode.Title", SettingsSearchChannelPolicy.DirectOnlyHeaderKeys);
         Assert.Contains("Settings.Update.AutoCheck", SettingsSearchChannelPolicy.DirectOnlyHeaderKeys);
         Assert.Contains("Settings.Update.AutoDownload", SettingsSearchChannelPolicy.DirectOnlyHeaderKeys);
         Assert.Contains("Settings.Update.ShowUpdateToast", SettingsSearchChannelPolicy.DirectOnlyHeaderKeys);

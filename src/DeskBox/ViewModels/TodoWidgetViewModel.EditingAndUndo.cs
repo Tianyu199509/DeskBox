@@ -515,4 +515,389 @@ public sealed partial class TodoWidgetViewModel
         Items.Remove(item);
         _tombstones.Add(item.Item);
     }
+
+    public async Task<bool> AddExternalItemAsync(
+        string title,
+        DateTimeOffset? dueDate,
+        TodoPriority priority)
+    {
+        string normalizedText = NormalizeText(title);
+        if (string.IsNullOrWhiteSpace(normalizedText))
+        {
+            return false;
+        }
+
+        DateTimeOffset now = CurrentUtcNow;
+        DateTimeOffset? normalizedDueDate = dueDate is null
+            ? null
+            : TodoWidgetStore.NormalizeAllDayDueDate(dueDate.Value);
+        (bool isImportant, string? colorMarker) = MapExternalPriority(priority);
+        string effectivePosition = _settingsService is not null
+            ? NormalizeNewTaskPosition(_settingsService.Settings.Todo.TodoNewTaskPosition)
+            : NewTaskPosition;
+
+        var item = new TodoItem
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Text = normalizedText,
+            IsImportant = isImportant,
+            ColorMarker = colorMarker,
+            DueDate = normalizedDueDate,
+            HasDueTime = false,
+            CreatedAt = now,
+            UpdatedAt = now,
+            DeviceId = DeviceIdentity.Id,
+            SortOrder = 0
+        };
+        TodoItemViewModel viewModel = CreateItemViewModel(item);
+        if (string.Equals(effectivePosition, SettingsService.TodoNewTaskPositionBottom, StringComparison.Ordinal))
+        {
+            Items.Add(viewModel);
+        }
+        else
+        {
+            Items.Insert(0, viewModel);
+        }
+
+        NormalizeSortOrders();
+        RefreshVisibleItems();
+        RefreshCountProperties();
+        await SaveAsync();
+        return true;
+    }
+
+    public async Task<bool> ToggleExternalItemAsync(string itemId)
+    {
+        TodoItemViewModel? item = FindLiveItemByIdCaseInsensitive(itemId);
+        if (item is null)
+        {
+            return false;
+        }
+
+        DateTimeOffset now = CurrentUtcNow;
+        bool nextCompleted = !item.IsCompleted;
+        if (nextCompleted)
+        {
+            if (item.Recurrence is not null)
+            {
+                item.RecurrenceSeriesId ??= Guid.NewGuid().ToString("N");
+            }
+
+            item.SnoozedUntil = null;
+            item.Item.SnoozeLastNotifiedAt = null;
+            item.Item.GeneratedNextItemId = null;
+
+            if (TodoRecurrenceService.TryCreateNextOccurrence(item.Item, now, out TodoItem? nextItem) &&
+                nextItem is not null)
+            {
+                item.Item.GeneratedNextItemId = nextItem.Id;
+                int currentIndex = Items.IndexOf(item);
+                TodoItemViewModel nextViewModel = CreateItemViewModel(nextItem);
+                Items.Insert(Math.Clamp(currentIndex + 1, 0, Items.Count), nextViewModel);
+            }
+
+            item.CompletedAt = now;
+            item.IsCompleted = true;
+            item.RefreshDateDependentProperties();
+        }
+        else
+        {
+            TodoItemViewModel? generatedOccurrence = FindGeneratedOccurrence(item);
+            if (generatedOccurrence is not null &&
+                TodoRecurrenceService.ShouldRemoveGeneratedOccurrence(item.Item, generatedOccurrence.Item))
+            {
+                if (SelectedDetailItem is not null &&
+                    string.Equals(SelectedDetailItem.Id, generatedOccurrence.Id, StringComparison.Ordinal))
+                {
+                    SelectedDetailItem = null;
+                    IsCreatingDetailItem = false;
+                }
+
+                TombstoneItem(generatedOccurrence);
+            }
+
+            item.Item.GeneratedNextItemId = null;
+            item.CompletedAt = null;
+            item.IsCompleted = false;
+            item.RefreshDateDependentProperties();
+        }
+
+        item.UpdatedAt = now;
+        item.Item.DeviceId = DeviceIdentity.Id;
+        RefreshVisibleItems(item);
+        RefreshCountProperties();
+        await SaveAsync();
+        return true;
+    }
+
+    public async Task<bool> RemoveExternalItemAsync(string itemId)
+    {
+        TodoItemViewModel? item = FindLiveItemByIdCaseInsensitive(itemId);
+        if (item is null)
+        {
+            return false;
+        }
+
+        if (IsCreatingDetailItem &&
+            string.Equals(SelectedDetailItem?.Id, item.Id, StringComparison.Ordinal))
+        {
+            item.CancelEdit();
+            SelectedDetailItem = null;
+            IsCreatingDetailItem = false;
+            return true;
+        }
+
+        var itemsToDelete = new List<TodoItemViewModel> { item };
+        if (FindDeferredGeneratedOccurrence(item) is { } deferred)
+        {
+            itemsToDelete.Add(deferred);
+        }
+
+        if (SelectedDetailItem is not null &&
+            itemsToDelete.Any(entry => string.Equals(entry.Id, SelectedDetailItem.Id, StringComparison.Ordinal)))
+        {
+            SelectedDetailItem = null;
+            IsCreatingDetailItem = false;
+        }
+
+        foreach (TodoItemViewModel entry in itemsToDelete)
+        {
+            TombstoneItem(entry);
+        }
+
+        NormalizeSortOrders();
+        RefreshVisibleItems();
+        RefreshCountProperties();
+        await SaveAsync();
+        await ReclaimUnreferencedAttachmentsAsync();
+        return true;
+    }
+
+    public async Task<bool> CycleExternalItemPriorityAsync(string itemId)
+    {
+        TodoItemViewModel? item = FindLiveItemByIdCaseInsensitive(itemId);
+        if (item is null)
+        {
+            return false;
+        }
+
+        TodoPriority current = ResolveExternalPriority(item.Item);
+        TodoPriority next = current switch
+        {
+            TodoPriority.Normal => TodoPriority.Medium,
+            TodoPriority.Medium => TodoPriority.High,
+            _ => TodoPriority.Normal
+        };
+        (bool isImportant, string? colorMarker) = MapExternalPriority(next);
+        DateTimeOffset now = CurrentUtcNow;
+
+        item.IsImportant = isImportant;
+        item.ColorMarker = colorMarker;
+        item.UpdatedAt = now;
+        item.Item.DeviceId = DeviceIdentity.Id;
+        if (FindDeferredGeneratedOccurrence(item) is { } deferred)
+        {
+            deferred.IsImportant = isImportant;
+            deferred.ColorMarker = colorMarker;
+            deferred.UpdatedAt = now;
+            deferred.Item.DeviceId = DeviceIdentity.Id;
+        }
+
+        RefreshVisibleItems();
+        RefreshCountProperties();
+        await SaveAsync();
+        return true;
+    }
+
+    public async Task<int> ClearCompletedExternalAsync(DateOnly? filterDueDate)
+    {
+        var completedItems = Items
+            .Where(item =>
+            {
+                if (!item.IsCompleted)
+                {
+                    return false;
+                }
+
+                if (!filterDueDate.HasValue)
+                {
+                    return true;
+                }
+
+                if (!item.DueDate.HasValue)
+                {
+                    return false;
+                }
+
+                DateOnly localDate = DateOnly.FromDateTime(item.DueDate.Value.ToLocalTime().DateTime);
+                return localDate == filterDueDate.Value;
+            })
+            .ToList();
+
+        if (completedItems.Count == 0)
+        {
+            return 0;
+        }
+
+        int clearedCount = completedItems.Count;
+        var itemsToDelete = new List<TodoItemViewModel>(completedItems);
+        foreach (TodoItemViewModel completedItem in completedItems)
+        {
+            if (FindDeferredGeneratedOccurrence(completedItem) is { } deferred &&
+                !itemsToDelete.Contains(deferred))
+            {
+                itemsToDelete.Add(deferred);
+            }
+        }
+
+        if (SelectedDetailItem is not null &&
+            itemsToDelete.Any(entry => string.Equals(entry.Id, SelectedDetailItem.Id, StringComparison.Ordinal)))
+        {
+            SelectedDetailItem = null;
+            IsCreatingDetailItem = false;
+        }
+
+        foreach (TodoItemViewModel entry in itemsToDelete)
+        {
+            TombstoneItem(entry);
+        }
+
+        NormalizeSortOrders();
+        RefreshVisibleItems();
+        RefreshCountProperties();
+        await SaveAsync();
+        await ReclaimUnreferencedAttachmentsAsync();
+        return clearedCount;
+    }
+
+    public async Task<bool> UpdateExternalItemAsync(
+        string itemId,
+        string? title,
+        DateTimeOffset? dueDate,
+        bool updateDueDate,
+        TodoPriority? priority)
+    {
+        TodoItemViewModel? item = FindLiveItemByIdCaseInsensitive(itemId);
+        if (item is null)
+        {
+            return false;
+        }
+
+        string? normalizedText = string.IsNullOrWhiteSpace(title) ? null : NormalizeText(title);
+        if (normalizedText is null && !updateDueDate && priority is null)
+        {
+            return false;
+        }
+
+        DateTimeOffset now = CurrentUtcNow;
+        if (normalizedText is not null)
+        {
+            item.Text = normalizedText;
+        }
+
+        if (updateDueDate)
+        {
+            item.DueDate = dueDate.HasValue
+                ? TodoWidgetStore.NormalizeAllDayDueDate(dueDate.Value)
+                : null;
+            item.HasDueTime = false;
+            item.SnoozedUntil = null;
+            item.Item.SnoozeLastNotifiedAt = null;
+        }
+
+        if (priority.HasValue)
+        {
+            (bool isImportant, string? colorMarker) = MapExternalPriority(priority.Value);
+            item.IsImportant = isImportant;
+            item.ColorMarker = colorMarker;
+            if (FindDeferredGeneratedOccurrence(item) is { } deferred)
+            {
+                deferred.IsImportant = isImportant;
+                deferred.ColorMarker = colorMarker;
+                deferred.UpdatedAt = now;
+                deferred.Item.DeviceId = DeviceIdentity.Id;
+            }
+        }
+
+        item.UpdatedAt = now;
+        item.Item.DeviceId = DeviceIdentity.Id;
+        item.RefreshDateDependentProperties();
+        RefreshVisibleItems(item);
+        RefreshCountProperties();
+        await SaveAsync();
+        return true;
+    }
+
+    public async Task<int> RolloverOverdueExternalAsync(DateOnly targetDate)
+    {
+        DateOnly localToday = DateOnly.FromDateTime(DateTime.Now);
+        DateTime localMidnight = targetDate.ToDateTime(TimeOnly.MinValue);
+        DateTimeOffset normalizedTarget = TodoWidgetStore.NormalizeAllDayDueDate(
+            new DateTimeOffset(localMidnight, TimeZoneInfo.Local.GetUtcOffset(localMidnight)));
+
+        var overdueItems = Items
+            .Where(item =>
+                !item.IsCompleted &&
+                item.DueDate.HasValue &&
+                DateOnly.FromDateTime(item.DueDate.Value.ToLocalTime().DateTime) < localToday)
+            .ToList();
+
+        if (overdueItems.Count == 0)
+        {
+            return 0;
+        }
+
+        DateTimeOffset now = CurrentUtcNow;
+        foreach (TodoItemViewModel item in overdueItems)
+        {
+            item.DueDate = normalizedTarget;
+            item.HasDueTime = false;
+            item.SnoozedUntil = null;
+            item.Item.SnoozeLastNotifiedAt = null;
+            item.UpdatedAt = now;
+            item.Item.DeviceId = DeviceIdentity.Id;
+            item.RefreshDateDependentProperties();
+        }
+
+        RefreshVisibleItems();
+        RefreshCountProperties();
+        await SaveAsync();
+        return overdueItems.Count;
+    }
+
+    private TodoItemViewModel? FindLiveItemByIdCaseInsensitive(string? itemId)
+    {
+        if (string.IsNullOrWhiteSpace(itemId))
+        {
+            return null;
+        }
+
+        string trimmed = itemId.Trim();
+        return Items.FirstOrDefault(entry => string.Equals(entry.Id, trimmed, StringComparison.Ordinal))
+            ?? Items.FirstOrDefault(entry => string.Equals(entry.Id, trimmed, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static (bool IsImportant, string? ColorMarker) MapExternalPriority(TodoPriority priority) =>
+        priority switch
+        {
+            TodoPriority.High => (true, TodoItem.RedColorMarker),
+            TodoPriority.Medium => (false, TodoItem.OrangeColorMarker),
+            _ => (false, null)
+        };
+
+    private static TodoPriority ResolveExternalPriority(TodoItem item)
+    {
+        string? normalizedColor = TodoItem.NormalizeColorMarker(item.ColorMarker);
+        if (item.IsImportant || string.Equals(normalizedColor, TodoItem.RedColorMarker, StringComparison.Ordinal))
+        {
+            return TodoPriority.High;
+        }
+
+        if (normalizedColor is TodoItem.OrangeColorMarker or TodoItem.YellowColorMarker)
+        {
+            return TodoPriority.Medium;
+        }
+
+        return TodoPriority.Normal;
+    }
 }

@@ -36,6 +36,10 @@ public sealed partial class OnboardingWindow : Window
 
     private readonly SettingsService _settingsService;
     private readonly LocalizationService _localizationService;
+    private readonly ThemeService? _themeService;
+    private readonly WidgetManager? _widgetManager;
+    private readonly ManagedStorageDesktopShortcutService? _desktopShortcutService;
+    private readonly Action? _showDesktopOrganization;
     private readonly AppWindow _appWindow;
     private readonly IntPtr _hWnd;
 
@@ -48,6 +52,7 @@ public sealed partial class OnboardingWindow : Window
     private bool _hasToggledDuringSummonStep;
     private bool _hasCompletedSummonPractice;
     private bool _isCompactLayout;
+    private Task _storagePathUpdateTask = Task.CompletedTask;
     private Task _featureWidgetSelectionUpdateTask = Task.CompletedTask;
     private readonly Win32Helper.SubclassProc _windowSubclassProc;
     private Storyboard? _textRevealStoryboard;
@@ -56,10 +61,18 @@ public sealed partial class OnboardingWindow : Window
     public OnboardingWindow(
         SettingsService settingsService,
         LocalizationService localizationService,
-        int initialStep = 0)
+        int initialStep = 0,
+        ThemeService? themeService = null,
+        WidgetManager? widgetManager = null,
+        ManagedStorageDesktopShortcutService? desktopShortcutService = null,
+        Action? showDesktopOrganization = null)
     {
         _settingsService = settingsService;
         _localizationService = localizationService;
+        _themeService = themeService;
+        _widgetManager = widgetManager;
+        _desktopShortcutService = desktopShortcutService;
+        _showDesktopOrganization = showDesktopOrganization;
         _stepIndex = Math.Clamp(initialStep, 0, StepCount - 1);
         _windowSubclassProc = CallbackDepth.WrapSubclassProc(WindowSubclassProc);
         InitializeComponent();
@@ -68,6 +81,7 @@ public sealed partial class OnboardingWindow : Window
         App.Current.OnboardingWidgetsVisibilityChanged += OnOnboardingWidgetsVisibilityChanged;
 
         WindowsCompatibilityService.ApplySafeBackdrop(this);
+        _themeService?.TrackWindow(this);
 
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(TitleBarHost);
@@ -76,6 +90,7 @@ public sealed partial class OnboardingWindow : Window
         _hWnd = WindowNative.GetWindowHandle(this);
         var windowId = Win32Interop.GetWindowIdFromWindow(_hWnd);
         _appWindow = AppWindow.GetFromWindowId(windowId);
+        ApplyTitleBarButtonColors();
         AppBranding.ApplyWindowIcon(_appWindow);
         ResizeAndCenterForDisplay(windowId);
         InstallMinimumSizeHook();
@@ -87,43 +102,77 @@ public sealed partial class OnboardingWindow : Window
             presenter.IsMinimizable = false;
         }
 
-        SizeChanged += (_, _) => ApplyResponsiveLayout();
-        RootGrid.Loaded += (_, _) =>
-        {
-            _hasLoaded = true;
-            ApplyResponsiveLayout();
-            StepPips.SelectedPageIndex = _stepIndex;
-            SetupStep(animate: false);
-            UpdateFooterState();
-            ApplySceneState(_stepIndex, animate: false);
-            StartSceneLoops(_stepIndex);
-            PlaySceneEntrance();
-            PlayTextReveal(GetStepPanel(_stepIndex), direction: 1, initialDelayMs: 220);
-        };
+        SizeChanged += OnWindowSizeChanged;
+        RootGrid.Loaded += OnRootGridLoaded;
+        RootGrid.ActualThemeChanged += OnRootGridActualThemeChanged;
+        Closed += OnWindowClosed;
+    }
 
-        RootGrid.ActualThemeChanged += (_, _) =>
-        {
-            if (!_hasLoaded)
-            {
-                return;
-            }
+    private void ApplyTitleBarButtonColors()
+    {
+        bool isDark = NeutralInteractionBrush.IsDarkTheme(RootGrid);
+        Win32Helper.SetWindowTheme(_hWnd, isDark);
+        WindowShellState.TryApplyExtendedTitleBarButtonColors(_appWindow, isDark);
+    }
 
-            SetupStep(animate: false);
-            ApplySceneState(_stepIndex, animate: false);
-            StartSceneLoops(_stepIndex);
-        };
+    private void OnWindowSizeChanged(object sender, WindowSizeChangedEventArgs args) =>
+        ApplyResponsiveLayout();
 
-        Closed += (_, _) =>
+    private void OnRootGridLoaded(object sender, RoutedEventArgs e)
+    {
+        _hasLoaded = true;
+        ApplyTitleBarButtonColors();
+        ApplyResponsiveLayout();
+        StepPips.SelectedPageIndex = _stepIndex;
+        SetupStep(animate: false);
+        UpdateFooterState();
+        ApplySceneState(_stepIndex, animate: false);
+        StartSceneLoops(_stepIndex);
+        PlaySceneEntrance();
+        PlayTextReveal(GetStepPanel(_stepIndex), direction: 1, initialDelayMs: 220);
+    }
+
+    private void OnRootGridActualThemeChanged(FrameworkElement sender, object args)
+    {
+        if (_isClosed)
         {
-            _isClosed = true;
-            WindowsCompatibilityService.ReleaseTitleBarExtensions(this, _appWindow);
-            StopAllSceneAnimations();
-            FinishTextReveal();
-            RemoveMinimumSizeHook();
-            _localizationService.LanguageChanged -= OnLanguageChanged;
-            _settingsService.SettingsChanged -= OnFeatureWidgetSettingsChanged;
-            App.Current.OnboardingWidgetsVisibilityChanged -= OnOnboardingWidgetsVisibilityChanged;
-        };
+            return;
+        }
+
+        ApplyTitleBarButtonColors();
+        if (!_hasLoaded)
+        {
+            return;
+        }
+
+        SetupStep(animate: false);
+        ApplySceneState(_stepIndex, animate: false);
+        StartSceneLoops(_stepIndex);
+    }
+
+    private void OnWindowClosed(object sender, WindowEventArgs args)
+    {
+        if (_isClosed)
+        {
+            return;
+        }
+
+        _isClosed = true;
+        Closed -= OnWindowClosed;
+        SizeChanged -= OnWindowSizeChanged;
+        RootGrid.Loaded -= OnRootGridLoaded;
+        RootGrid.ActualThemeChanged -= OnRootGridActualThemeChanged;
+        WindowsCompatibilityService.ReleaseTitleBarExtensions(this, _appWindow);
+        SystemBackdrop = null;
+        StopAllSceneAnimations();
+        FinishTextReveal();
+        _sceneCompositor = null;
+        RemoveMinimumSizeHook();
+        _localizationService.LanguageChanged -= OnLanguageChanged;
+        _settingsService.SettingsChanged -= OnFeatureWidgetSettingsChanged;
+        App.Current.OnboardingWidgetsVisibilityChanged -= OnOnboardingWidgetsVisibilityChanged;
+        RootGrid.Children.Clear();
+        Content = null;
     }
 
     public void RestartIntro(int stepIndex = 0)
@@ -238,7 +287,9 @@ public sealed partial class OnboardingWindow : Window
         NextButton.IsEnabled = false;
         BackButton.IsEnabled = false;
         SkipButton.IsEnabled = false;
+        SetStoragePathControlsEnabled(false);
         SetFeatureTogglesEnabled(false);
+        await _storagePathUpdateTask;
         await _featureWidgetSelectionUpdateTask;
         _settingsService.Settings.HasCompletedOnboarding = true;
         _settingsService.Settings.CompletedOnboardingVersion = CurrentOnboardingVersion;
@@ -548,23 +599,6 @@ public sealed partial class OnboardingWindow : Window
         Win32Helper.RemoveWindowSubclass(_hWnd, _windowSubclassProc, OnboardingWindowSubclassId);
     }
 
-    private struct NativePoint
-    {
-        public int X;
-        public int Y;
-    }
-
-    [System.Runtime.InteropServices.StructLayout(
-        System.Runtime.InteropServices.LayoutKind.Sequential)]
-    private struct MinMaxInfo
-    {
-        public NativePoint Reserved;
-        public NativePoint MaxSize;
-        public NativePoint MaxPosition;
-        public NativePoint MinTrackSize;
-        public NativePoint MaxTrackSize;
-    }
-
     private IntPtr WindowSubclassProc(
         IntPtr hWnd,
         uint message,
@@ -576,14 +610,16 @@ public sealed partial class OnboardingWindow : Window
         const uint WmGetMinMaxInfo = 0x0024;
         const uint WmNcDestroy = 0x0082;
 
-        if (message == WmGetMinMaxInfo)
+        if (message == WmGetMinMaxInfo && lParam != IntPtr.Zero)
         {
-            var minMaxInfo = System.Runtime.InteropServices.Marshal.PtrToStructure<MinMaxInfo>(lParam);
-            double scale = GetCurrentDpiScale();
-            minMaxInfo.MinTrackSize.X = Math.Max(minMaxInfo.MinTrackSize.X, ToPhysicalPixels(MinWindowWidth, scale));
-            minMaxInfo.MinTrackSize.Y = Math.Max(minMaxInfo.MinTrackSize.Y, ToPhysicalPixels(MinWindowHeight, scale));
-            System.Runtime.InteropServices.Marshal.StructureToPtr(minMaxInfo, lParam, false);
-            return IntPtr.Zero;
+            return WindowShellState.ApplyMinTrackSizeWithWorkAreaClamp(
+                hWnd,
+                message,
+                wParam,
+                lParam,
+                GetCurrentDpiScale(),
+                MinWindowWidth,
+                MinWindowHeight);
         }
 
         if (message == WmNcDestroy)

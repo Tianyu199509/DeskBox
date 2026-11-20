@@ -48,24 +48,30 @@ public sealed class MemoryArchitectureLongTermTests
     }
 
     [Fact]
-    public void Phase2_PhysicalSettingsProject_StripsSettingsPayloadAndPriFromResidentHost()
+    public void SingleBinarySettingsHost_RelaunchesMainImageInsteadOfShippingACompanionExecutable()
     {
+        // The settings process is DeskBox.exe --settings <mainPid>: the
+        // process boundary returns the settings UI memory on close, while a
+        // separate Native AOT settings executable would statically duplicate
+        // the whole app image (1.6.0 measured 53 MB of duplicated code).
+        Assert.True(App.SettingsHostLaunch.IsSettingsHostLaunch(["DeskBox.exe", "--settings", "4242"]));
+        Assert.Equal(4242, App.SettingsHostLaunch.TryGetMainProcessId(["DeskBox.exe", "--settings", "4242"]));
+        Assert.False(App.SettingsHostLaunch.IsSettingsHostLaunch(["DeskBox.exe", "--open-settings"]));
+        Assert.Equal(0, App.SettingsHostLaunch.TryGetMainProcessId(["DeskBox.exe", "--settings"]));
+
+        Assert.False(
+            Directory.Exists(TestPaths.FromRepository("src/DeskBox.Settings")) &&
+            File.Exists(TestPaths.FromRepository("src/DeskBox.Settings/DeskBox.Settings.csproj")),
+            "The DeskBox.Settings companion project must not return; the settings host is DeskBox.exe --settings.");
+        Assert.True(typeof(App).Assembly.GetType("DeskBox.Views.SettingsWindow") is not null,
+            "SettingsWindow must compile into the main image for the single-binary settings host.");
+
+        string sharedSrcProps = Read("src/Directory.Build.props");
         string residentCsproj = Read("src/DeskBox/DeskBox.csproj");
-        string settingsCsproj = Read("src/DeskBox.Settings/DeskBox.Settings.csproj");
-
-        Assert.Contains("ExcludeSettingsOnlyToolkitPriFromResidentHost", residentCsproj, StringComparison.Ordinal);
-        Assert.Contains("'%(_PriFile.Filename)' == 'CommunityToolkit.WinUI.Controls.ColorPicker'", residentCsproj, StringComparison.Ordinal);
-        Assert.Contains("'%(_PriFile.Filename)' == 'CommunityToolkit.WinUI.Controls.SettingsControls'", residentCsproj, StringComparison.Ordinal);
-        Assert.Contains("Views\\SettingsWindow.xaml", residentCsproj, StringComparison.Ordinal);
-        Assert.Contains("Views\\SettingsSections\\**\\*.xaml", residentCsproj, StringComparison.Ordinal);
-
-        Assert.Contains("DESKBOX_SETTINGS_HOST_BINARY", settingsCsproj, StringComparison.Ordinal);
-        Assert.Contains("<AssemblyName>DeskBox.Settings</AssemblyName>", settingsCsproj, StringComparison.Ordinal);
-
         // Native AOT size/trim optimizations enabled on resident host.
-        Assert.Contains("<OptimizationPreference>Size</OptimizationPreference>", residentCsproj, StringComparison.Ordinal);
-        Assert.Contains("<IlcOptimizationPreference>Size</IlcOptimizationPreference>", residentCsproj, StringComparison.Ordinal);
-        Assert.Contains("<IlcFoldIdenticalMethodBodies>true</IlcFoldIdenticalMethodBodies>", residentCsproj, StringComparison.Ordinal);
+        Assert.Contains("<OptimizationPreference>Size</OptimizationPreference>", sharedSrcProps, StringComparison.Ordinal);
+        Assert.Contains("<IlcOptimizationPreference>Size</IlcOptimizationPreference>", sharedSrcProps, StringComparison.Ordinal);
+        Assert.Contains("<IlcFoldIdenticalMethodBodies>true</IlcFoldIdenticalMethodBodies>", sharedSrcProps, StringComparison.Ordinal);
         Assert.Contains("<UseSystemResourceKeys Condition=\"'$(DeskBoxAotSmokeHarness)' != 'true'\">true</UseSystemResourceKeys>", residentCsproj, StringComparison.Ordinal);
     }
 
@@ -585,8 +591,8 @@ public sealed class MemoryArchitectureLongTermTests
                 ShellChangeNotificationService.GetRegistrationKey(appData));
         }
 
-        const string root = @"C:\Users\simon\Desktop";
-        const string rootSep = @"C:\Users\simon\Desktop\";
+        const string root = @"C:\Users\alice\Desktop";
+        const string rootSep = @"C:\Users\alice\Desktop\";
 
         // Unrelated path & deep nested path must be rejected before allocating notifications.
         Assert.False(ShellChangeNotificationService.TryClassifyShellEvent(
@@ -595,30 +601,30 @@ public sealed class MemoryArchitectureLongTermTests
             out _, out _));
         Assert.False(ShellChangeNotificationService.TryClassifyShellEvent(
             root, rootSep, ShellChangeNotificationService.ShcneUpdateItem,
-            @"C:\Users\simon\Desktop\SubFolder\Nested\file.txt".AsSpan(), ReadOnlySpan<char>.Empty,
+            @"C:\Users\alice\Desktop\SubFolder\Nested\file.txt".AsSpan(), ReadOnlySpan<char>.Empty,
             out _, out _));
 
         // Direct child folder desktop.ini -> FolderIconChanged on child directory.
         Assert.True(ShellChangeNotificationService.TryClassifyShellEvent(
             root, rootSep, ShellChangeNotificationService.ShcneUpdateItem,
-            @"C:\Users\simon\Desktop\ProjectAlpha\desktop.ini".AsSpan(), ReadOnlySpan<char>.Empty,
+            @"C:\Users\alice\Desktop\ProjectAlpha\desktop.ini".AsSpan(), ReadOnlySpan<char>.Empty,
             out ShellFolderNotification iconNotice, out _));
         Assert.Equal(ShellFolderNotificationKind.FolderIconChanged, iconNotice.Kind);
-        Assert.Equal(@"C:\Users\simon\Desktop\ProjectAlpha", iconNotice.Path);
+        Assert.Equal(@"C:\Users\alice\Desktop\ProjectAlpha", iconNotice.Path);
 
         // In-folder rename -> Renamed; move out -> Deleted; move in -> Created.
         Assert.True(ShellChangeNotificationService.TryClassifyShellEvent(
             root, rootSep, ShellChangeNotificationService.ShcneRenameItem,
-            @"C:\Users\simon\Desktop\old.txt".AsSpan(),
-            @"C:\Users\simon\Desktop\new.txt".AsSpan(),
+            @"C:\Users\alice\Desktop\old.txt".AsSpan(),
+            @"C:\Users\alice\Desktop\new.txt".AsSpan(),
             out ShellFolderNotification renamedNotice, out _));
         Assert.Equal(ShellFolderNotificationKind.Renamed, renamedNotice.Kind);
-        Assert.Equal(@"C:\Users\simon\Desktop\new.txt", renamedNotice.Path);
-        Assert.Equal(@"C:\Users\simon\Desktop\old.txt", renamedNotice.OldPath);
+        Assert.Equal(@"C:\Users\alice\Desktop\new.txt", renamedNotice.Path);
+        Assert.Equal(@"C:\Users\alice\Desktop\old.txt", renamedNotice.OldPath);
 
         Assert.True(ShellChangeNotificationService.TryClassifyShellEvent(
             root, rootSep, ShellChangeNotificationService.ShcneRenameItem,
-            @"C:\Users\simon\Desktop\moved-out.txt".AsSpan(),
+            @"C:\Users\alice\Desktop\moved-out.txt".AsSpan(),
             @"D:\Archive\moved-out.txt".AsSpan(),
             out ShellFolderNotification movedOutNotice, out _));
         Assert.Equal(ShellFolderNotificationKind.Deleted, movedOutNotice.Kind);
@@ -626,14 +632,14 @@ public sealed class MemoryArchitectureLongTermTests
         Assert.True(ShellChangeNotificationService.TryClassifyShellEvent(
             root, rootSep, ShellChangeNotificationService.ShcneRenameItem,
             @"D:\Staging\moved-in.txt".AsSpan(),
-            @"C:\Users\simon\Desktop\moved-in.txt".AsSpan(),
+            @"C:\Users\alice\Desktop\moved-in.txt".AsSpan(),
             out ShellFolderNotification movedInNotice, out _));
         Assert.Equal(ShellFolderNotificationKind.Created, movedInNotice.Kind);
 
         // Watched root UpdateDir or RenameFolder -> DirectoryReload.
         Assert.True(ShellChangeNotificationService.TryClassifyShellEvent(
             root, rootSep, ShellChangeNotificationService.ShcneUpdateDir,
-            @"C:\Users\simon\Desktop".AsSpan(), ReadOnlySpan<char>.Empty,
+            @"C:\Users\alice\Desktop".AsSpan(), ReadOnlySpan<char>.Empty,
             out ShellFolderNotification reloadNotice, out _));
         Assert.Equal(ShellFolderNotificationKind.DirectoryReload, reloadNotice.Kind);
 
@@ -667,16 +673,7 @@ public sealed class MemoryArchitectureLongTermTests
         Directory.CreateDirectory(dirBNested);
         Directory.CreateDirectory(unrelatedDir);
 
-        DispatcherQueueController? controller;
-        try
-        {
-            controller = DispatcherQueueController.CreateOnDedicatedThread();
-        }
-        catch (COMException)
-        {
-            try { Directory.Delete(tempRoot, recursive: true); } catch { }
-            return;
-        }
+        DispatcherQueueController controller = DispatcherQueueController.CreateOnDedicatedThread();
 
         try
         {
@@ -888,7 +885,13 @@ public sealed class MemoryArchitectureLongTermTests
         Assert.Equal("phys_0_eng_0_engtype_3D", engineKey.ToString());
         Assert.Equal("default", CustomWidgetNativeMetrics.GpuEngineCounterSampler.ExtractEngineKeySpan(ReadOnlySpan<char>.Empty).ToString());
 
-        string rendererSource = Read("src/DeskBox/Controls/WidgetContents/CustomWidgetNativeRenderer.cs");
+        string rendererSource = string.Join(
+            "\n",
+            Directory.GetFiles(
+                    TestPaths.FromRepository("src/DeskBox/Controls/WidgetContents"),
+                    "CustomWidgetNativeRenderer*.cs")
+                .OrderBy(static p => p, StringComparer.Ordinal)
+                .Select(File.ReadAllText));
         Assert.Contains("SetOrAppendPoint(", rendererSource, StringComparison.Ordinal);
         Assert.Contains("_solidBrushCache", rendererSource, StringComparison.Ordinal);
         Assert.Contains("_sparklineBrushCache", rendererSource, StringComparison.Ordinal);
@@ -1068,11 +1071,8 @@ public sealed class MemoryArchitectureLongTermTests
     public void Wave5_RuntimeGcDatasAndConserveMemory_AreConfiguredAcrossBothHostsAndCompactingReclaimer()
     {
         string mainProj = Read("src/DeskBox/DeskBox.csproj");
-        string settingsProj = Read("src/DeskBox.Settings/DeskBox.Settings.csproj");
         Assert.Contains("<GarbageCollectionAdaptationMode>1</GarbageCollectionAdaptationMode>", mainProj, StringComparison.Ordinal);
         Assert.Contains("Include=\"System.GC.ConserveMemory\" Value=\"9\"", mainProj, StringComparison.Ordinal);
-        Assert.Contains("<GarbageCollectionAdaptationMode>1</GarbageCollectionAdaptationMode>", settingsProj, StringComparison.Ordinal);
-        Assert.Contains("Include=\"System.GC.ConserveMemory\" Value=\"9\"", settingsProj, StringComparison.Ordinal);
 
         string reclaimer = Read("src/DeskBox/Services/MemoryReclaimer.cs");
         Assert.Contains("GCLargeObjectHeapCompactionMode.CompactOnce", reclaimer, StringComparison.Ordinal);
@@ -1135,26 +1135,42 @@ public sealed class MemoryArchitectureLongTermTests
         Directory.CreateDirectory(tempDir);
         try
         {
-            string claudePath = Path.Combine(tempDir, "claude.jsonl");
+            DateTimeOffset fixedNow = new(2026, 10, 31, 02, 00, 00, TimeSpan.Zero);
+            string claudeDir = Path.Combine(tempDir, "claude");
+            string codexDir = Path.Combine(tempDir, "codex");
+            Directory.CreateDirectory(claudeDir);
+            Directory.CreateDirectory(codexDir);
+
+            string claudePath = Path.Combine(claudeDir, "claude.jsonl");
             string bigBlob = new('A', 96 * 1024);
             File.WriteAllText(
                 claudePath,
                 "{\"type\":\"user\",\"message\":{\"content\":\"" + bigBlob + "\"}}\n" +
                 "{\"type\":\"assistant\",\"timestamp\":\"2026-10-31T01:00:00Z\",\"message\":{\"id\":\"msg_mega_1\",\"model\":\"claude-sonnet-4-5\",\"content\":[{\"type\":\"text\",\"text\":\"" + bigBlob + "\"}],\"usage\":{\"input_tokens\":1200,\"output_tokens\":350,\"cache_creation_input_tokens\":100,\"cache_read_input_tokens\":4000}}}\n" +
                 "{\"type\":\"assistant\",\"timestamp\":\"2026-10-31T01:01:00Z\",\"message\":{\"id\":\"msg_norm_2\",\"model\":\"claude-opus-4-6\",\"usage\":{\"input_tokens\":500,\"output_tokens\":200,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0}}}\n");
+            File.SetLastWriteTimeUtc(claudePath, fixedNow.UtcDateTime.AddMinutes(-5));
 
-            var claudeSamples = CustomWidgetAiMonitorEngine.ParseSingleClaudeJsonlFile(claudePath, DateTime.UtcNow);
+            var (_, claudeSamples, _) = CustomWidgetAiMonitorEngine.AnalyzeClaudeDirectory(
+                claudeDir,
+                planTier: "pro",
+                enabled: true,
+                now: fixedNow);
             Assert.Equal(2, claudeSamples.Count);
             Assert.Contains(claudeSamples, s => s.InputTokens == 1200 && s.OutputTokens == 350 && s.CacheReadTokens == 4000);
             Assert.Contains(claudeSamples, s => s.InputTokens == 500 && s.OutputTokens == 200);
 
-            string codexPath = Path.Combine(tempDir, "codex.jsonl");
+            string codexPath = Path.Combine(codexDir, "codex.jsonl");
             File.WriteAllText(
                 codexPath,
                 "{\"type\":\"response_item\",\"payload\":{\"output\":\"" + bigBlob + "\"}}\n" +
                 "{\"timestamp\":\"2026-10-31T01:05:00Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":10000,\"cached_input_tokens\":6000,\"output_tokens\":800}},\"rate_limits\":{\"plan_type\":\"pro\",\"primary\":{\"used_percent\":42.5,\"resets_in_seconds\":3600}}}}\n");
+            File.SetLastWriteTimeUtc(codexPath, fixedNow.UtcDateTime.AddMinutes(-5));
 
-            var codexSummary = CustomWidgetAiMonitorEngine.ParseSingleCodexJsonlFile(codexPath, DateTime.UtcNow, 1, 2);
+            var (_, codexSessions, _) = CustomWidgetAiMonitorEngine.AnalyzeCodexDirectory(
+                codexDir,
+                enabled: true,
+                now: fixedNow);
+            var codexSummary = Assert.Single(codexSessions);
             Assert.Equal(4000, codexSummary.InputTokens);
             Assert.Equal(6000, codexSummary.CachedInputTokens);
             Assert.Equal(800, codexSummary.OutputTokens);
@@ -1234,6 +1250,7 @@ public sealed class MemoryArchitectureLongTermTests
         Directory.CreateDirectory(tempDir);
         try
         {
+            DateTimeOffset fixedNow = new(2026, 10, 31, 03, 00, 00, TimeSpan.Zero);
             string claudePath = Path.Combine(tempDir, "claude_nested.jsonl");
             string bigToolOutput = "{\"usage\":{\"input_tokens\":999999,\"output_tokens\":888888}} " + new string('X', 80 * 1024);
             string escapedToolOutput = bigToolOutput.Replace("\"", "\\\"");
@@ -1244,8 +1261,13 @@ public sealed class MemoryArchitectureLongTermTests
                 "\"content\":[{\"type\":\"text\",\"text\":\"" + escapedToolOutput + "\"}]," +
                 "\"usage\":{\"input_tokens\":1234,\"output_tokens\":567,\"cache_creation_input_tokens\":89,\"cache_read_input_tokens\":2000}}}\n";
             File.WriteAllText(claudePath, megaLine);
+            File.SetLastWriteTimeUtc(claudePath, fixedNow.UtcDateTime.AddMinutes(-5));
 
-            var samples = CustomWidgetAiMonitorEngine.ParseSingleClaudeJsonlFile(claudePath, DateTime.UtcNow);
+            var (_, samples, _) = CustomWidgetAiMonitorEngine.AnalyzeClaudeDirectory(
+                tempDir,
+                planTier: "pro",
+                enabled: true,
+                now: fixedNow);
             Assert.Single(samples);
             Assert.Equal(1234, samples[0].InputTokens);
             Assert.Equal(567, samples[0].OutputTokens);
@@ -1264,11 +1286,17 @@ public sealed class MemoryArchitectureLongTermTests
         Assert.True(CitySearchService.MatchesPinyinInitials("huhehaote", "hhht"));
         Assert.False(CitySearchService.MatchesPinyinInitials("shanghai", "sjz"));
 
-        Assert.Equal(6, CustomWidgetCountdownEngine.GetLunarLeapLogicalMonth(2025));
+        Assert.True(CustomWidgetCountdownEngine.TryLunarToSolar(2025, 6, 1, isLeapMonth: true, out DateOnly leapMonth2025Solar));
+        Assert.True(CustomWidgetCountdownEngine.TrySolarToLunar(leapMonth2025Solar, out int ly2025, out int lm2025, out int ld2025, out bool isLeap2025));
+        Assert.Equal(2025, ly2025);
+        Assert.Equal(6, lm2025);
+        Assert.Equal(1, ld2025);
+        Assert.True(isLeap2025);
 
         string searchPopupSource = Read("src/DeskBox/Views/SearchPopupWindow.xaml.cs");
+        string recGridSource = Read("src/DeskBox/Controls/Search/RecommendedAppsGridControl.xaml.cs");
         Assert.Contains("ResultsRepeater.ElementClearing += OnResultsElementClearing;", searchPopupSource, StringComparison.Ordinal);
-        Assert.Contains("RecommendedAppsRepeater.ElementClearing += OnRecommendedAppsElementClearing;", searchPopupSource, StringComparison.Ordinal);
+        Assert.Contains("RecommendedAppsRepeater.ElementClearing += OnRecommendedAppsElementClearing;", recGridSource, StringComparison.Ordinal);
         Assert.Contains("Close();", searchPopupSource, StringComparison.Ordinal);
     }
 
@@ -1276,16 +1304,14 @@ public sealed class MemoryArchitectureLongTermTests
     public void Wave7_ExternalizedJsonPayloadsAndWinUiExExclusion_KeepAssemblyLeanAndStreamingFunctional()
     {
         string mainProj = Read("src/DeskBox/DeskBox.csproj");
-        Assert.Contains("<Content Include=\"Assets\\Cities\\cities.json\">", mainProj, StringComparison.Ordinal);
-        Assert.Contains("<Content Include=\"Strings\\zh-CN.json\">", mainProj, StringComparison.Ordinal);
+        Assert.Contains("<Content Update=\"Assets\\Cities\\cities.json\">", mainProj, StringComparison.Ordinal);
+        Assert.Contains("<Content Include=\"Strings\\*.json\">", mainProj, StringComparison.Ordinal);
         Assert.DoesNotContain("<EmbeddedResource Include=\"Assets\\Cities\\cities.json\"", mainProj, StringComparison.Ordinal);
         Assert.DoesNotContain("<EmbeddedResource Include=\"Strings\\", mainProj, StringComparison.Ordinal);
 
-        string settingsProj = Read("src/DeskBox.Settings/DeskBox.Settings.csproj");
-        Assert.Contains("<PackageReference Include=\"WinUIEx\" Version=\"2.9.3\" />", settingsProj, StringComparison.Ordinal);
-        Assert.Contains("ExcludeUnusedWinUIExReferencesFromSettingsHost", settingsProj, StringComparison.Ordinal);
-        Assert.Contains("ExcludeUnusedWinUIExReferencePathsFromSettingsHost", settingsProj, StringComparison.Ordinal);
-        Assert.Contains("ExcludeUnusedWinUIExPriFromSettingsHost", settingsProj, StringComparison.Ordinal);
+        Assert.Contains("ExcludeUnusedWinUIExReferencesFromDeskBox", mainProj, StringComparison.Ordinal);
+        Assert.Contains("ExcludeUnusedWinUIExReferencePathsFromDeskBox", mainProj, StringComparison.Ordinal);
+        Assert.Contains("ExcludeUnusedWinUIExPriFromDeskBox", mainProj, StringComparison.Ordinal);
 
         var localization = TestServices.CreateLocalizationService();
         string windowTitle = localization.T("Settings.WindowTitle");

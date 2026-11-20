@@ -122,12 +122,17 @@ internal static class ImeCompositionGuard
         AttachSingle(root);
 
         int count = SafeGetChildrenCount(root);
-        for (int i = 0; i < count; i++)
+        if (count > 0)
         {
-            if (SafeGetChild(root, i) is { } child)
+            for (int i = 0; i < count; i++)
             {
-                AttachRecursive(child);
+                if (SafeGetChild(root, i) is { } child)
+                {
+                    AttachRecursive(child);
+                }
             }
+
+            return;
         }
 
         if (root is Panel panel)

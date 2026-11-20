@@ -87,6 +87,119 @@ public sealed class AutoStartDefaultPolicyTests
         Assert.Equal(expected, AutoStartDefaultPolicy.IsEnabledState(state));
     }
 
+    [Fact]
+    public async Task SettingsLoad_LegacyProfileWithAutoStartFalseAndNoAppliedFlag_MarksDefaultApplied()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "DeskBoxLegacyAutoStart-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            // Legacy settings.json from before autoStartDefaultApplied existed,
+            // with user explicitly opting out of autoStart.
+            await File.WriteAllTextAsync(
+                Path.Combine(tempDir, "settings.json"),
+                """{"schemaVersion": 1, "autoStart": false}""");
+
+            var settings = new SettingsService(tempDir);
+            await settings.LoadAsync();
+
+            Assert.False(settings.Settings.Core.AutoStart);
+            Assert.True(settings.Settings.Core.AutoStartDefaultApplied);
+            Assert.False(AutoStartDefaultPolicy.ShouldApply(settings.Settings));
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, recursive: true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task SettingsLoad_ModernProfileWithExplicitAppliedFalse_RemainsRetriable()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "DeskBoxRetryAutoStart-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            // Modern settings.json whose first-run default attempt hit BlockedOrFailed
+            // writes explicit autoStartDefaultApplied: false so next launch can retry.
+            await File.WriteAllTextAsync(
+                Path.Combine(tempDir, "settings.json"),
+                """{"schemaVersion": 1, "autoStart": false, "autoStartDefaultApplied": false}""");
+
+            var settings = new SettingsService(tempDir);
+            await settings.LoadAsync();
+
+            Assert.False(settings.Settings.Core.AutoStart);
+            Assert.False(settings.Settings.Core.AutoStartDefaultApplied);
+            Assert.True(AutoStartDefaultPolicy.ShouldApply(settings.Settings));
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, recursive: true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task SettingsApplyExternalSnapshot_PreservesMainOwnedAutoStartFields()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "DeskBoxMainOwnedAutoStart-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var settings = new SettingsService(tempDir);
+            await settings.LoadAsync();
+
+            settings.Settings.Core.AutoStart = false;
+            settings.Settings.Core.AutoStartMode = StartupMode.ScheduledTask;
+            settings.Settings.Core.AutoStartDefaultApplied = true;
+            await settings.SaveAsync();
+
+            // Simulate a stale SettingsHost snapshot carrying outdated AutoStart fields.
+            string staleHostJson = """
+            {
+              "schemaVersion": 1,
+              "autoStart": true,
+              "autoStartDefaultApplied": false,
+              "autoStartMode": "Standard",
+              "silentStartup": true
+            }
+            """;
+
+            bool applied = await settings.ApplyExternalSnapshotAsync(staleHostJson);
+
+            Assert.True(applied);
+            Assert.True(settings.Settings.Core.SilentStartup);
+            Assert.False(settings.Settings.Core.AutoStart);
+            Assert.Equal(StartupMode.ScheduledTask, settings.Settings.Core.AutoStartMode);
+            Assert.True(settings.Settings.Core.AutoStartDefaultApplied);
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, recursive: true); } catch { }
+        }
+    }
+
+    [Theory]
+    [InlineData(StartupRegistrationState.NotRegistered, false, false, true, "Settings.AutoStart.ExternallyRemoved")]
+    [InlineData(StartupRegistrationState.NotRegistered, false, false, false, null)]
+    [InlineData(StartupRegistrationState.Enabled, true, false, true, "Settings.AutoStart.Fallback")]
+    [InlineData(StartupRegistrationState.Enabled, false, false, true, null)]
+    [InlineData(StartupRegistrationState.DisabledByUser, false, false, true, "Settings.AutoStart.WindowsDisabled")]
+    [InlineData(StartupRegistrationState.DisabledByTaskScheduler, false, false, true, "Settings.AutoStart.TaskDisabled")]
+    [InlineData(StartupRegistrationState.BlockedOrFailed, false, true, true, "Settings.AutoStart.ChangeFailed")]
+    public void SettingsAutoStartStatusKey_DistinguishesExternalRemovalFromManualTurnOff(
+        StartupRegistrationState state,
+        bool usedFallback,
+        bool operationFailed,
+        bool? preferenceAtLoad,
+        string? expectedKey)
+    {
+        Assert.Equal(
+            expectedKey,
+            DeskBox.ViewModels.SettingsViewModel.ResolveAutoStartStatusKey(
+                state, usedFallback, operationFailed, preferenceAtLoad));
+    }
+
     private sealed class RecordingStartupService(StartupRegistrationState state)
         : IStartupService
     {

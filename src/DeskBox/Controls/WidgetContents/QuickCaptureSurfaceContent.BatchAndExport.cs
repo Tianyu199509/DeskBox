@@ -500,17 +500,22 @@ public sealed partial class QuickCaptureSurfaceContent
     {
         try
         {
-            if (NativeFileOpenDialog.TryActivateActiveFolderDialog())
+            IntPtr foreground = Win32Helper.GetForegroundWindow();
+            IntPtr owner = foreground != IntPtr.Zero && Win32Helper.IsWindow(foreground)
+                ? foreground
+                : Win32Helper.GetDesktopWindow();
+            string? folder = await FolderPickerService.PickFolderAsync(owner, "QuickCapture.ExportMarkdown");
+            if (string.IsNullOrWhiteSpace(folder))
             {
                 return;
             }
 
-            IntPtr foreground = Win32Helper.GetForegroundWindow();
-            string? folder = await NativeFileOpenDialog.RunOnDedicatedStaAsync(
-                foreground,
-                NativeFileOpenDialog.ShowPickFolder);
-            if (string.IsNullOrWhiteSpace(folder))
+            if (Services.DragDrop.StoreVirtualizedPathPolicy.IsWriteBlockedDestination(folder))
             {
+                RaiseFeedback(
+                    T("Widget.DropBlocked.StoreVirtualizedAppData"),
+                    WidgetFeedbackSeverity.Warning,
+                    "store-virtualized-appdata-export-blocked");
                 return;
             }
 
@@ -541,17 +546,22 @@ public sealed partial class QuickCaptureSurfaceContent
     {
         try
         {
-            if (NativeFileOpenDialog.TryActivateActiveFolderDialog())
+            IntPtr foreground = Win32Helper.GetForegroundWindow();
+            IntPtr owner = foreground != IntPtr.Zero && Win32Helper.IsWindow(foreground)
+                ? foreground
+                : Win32Helper.GetDesktopWindow();
+            string? folder = await FolderPickerService.PickFolderAsync(owner, "QuickCapture.MirrorFolder");
+            if (string.IsNullOrWhiteSpace(folder))
             {
                 return;
             }
 
-            IntPtr foreground = Win32Helper.GetForegroundWindow();
-            string? folder = await NativeFileOpenDialog.RunOnDedicatedStaAsync(
-                foreground,
-                NativeFileOpenDialog.ShowPickFolder);
-            if (string.IsNullOrWhiteSpace(folder))
+            if (Services.DragDrop.StoreVirtualizedPathPolicy.IsWriteBlockedDestination(folder))
             {
+                RaiseFeedback(
+                    T("Widget.DropBlocked.StoreVirtualizedAppData"),
+                    WidgetFeedbackSeverity.Warning,
+                    "store-virtualized-appdata-mirror-blocked");
                 return;
             }
 

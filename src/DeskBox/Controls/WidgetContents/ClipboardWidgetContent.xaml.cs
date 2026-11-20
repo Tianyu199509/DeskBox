@@ -87,6 +87,7 @@ public sealed partial class ClipboardWidgetContent : UserControl, IDisposable
 
         ViewModel.PropertyChanged += ViewModel_PropertyChanged;
         _settingsService.SettingsChanged += SettingsService_SettingsChanged;
+        _localizationService.LanguageChanged += LocalizationService_LanguageChanged;
         ActualThemeChanged += ClipboardWidgetContent_ActualThemeChanged;
         Loaded += ClipboardWidgetContent_Loaded;
         Unloaded += ClipboardWidgetContent_Unloaded;
@@ -119,7 +120,7 @@ public sealed partial class ClipboardWidgetContent : UserControl, IDisposable
 
         ClosePeekFlyout();
         ViewModel.ExitMultiSelectMode();
-        ViewModel.ActiveFilter = ClipboardFilterKind.All;
+        ViewModel.ActiveFilter = ViewModel.GetFirstVisibleFilterTab();
         ViewModel.SearchText = string.Empty;
         ViewModel.IsSearchOpen = true;
         SynchronizeFilterSelection(bringIntoView: false);
@@ -151,6 +152,18 @@ public sealed partial class ClipboardWidgetContent : UserControl, IDisposable
         SynchronizeQuickCaptureButtonVisibility();
         UpdateResponsiveLabels(RootGrid.ActualWidth);
         UpdateTimestampTimerState();
+    }
+
+    internal void ApplyAppearanceVisuals()
+    {
+        if (_isDisposed || !IsLoaded)
+        {
+            return;
+        }
+
+        SynchronizeFilterSelection(bringIntoView: false);
+        SynchronizeViewModeButtonVisual();
+        SynchronizePasteQueueButtonVisual();
     }
 
     public void OnWindowVisibilityChanged(bool isVisible)
@@ -186,7 +199,9 @@ public sealed partial class ClipboardWidgetContent : UserControl, IDisposable
 
     public void RestoreTransientState(ClipboardTransientState state)
     {
-        ViewModel.ActiveFilter = state.Filter;
+        ViewModel.ActiveFilter = ViewModel.IsFilterTabVisible(state.Filter)
+            ? state.Filter
+            : ViewModel.GetFirstVisibleFilterTab();
         ViewModel.IsSearchOpen = state.IsSearchOpen;
         if (state.IsSearchOpen)
         {
@@ -249,6 +264,7 @@ public sealed partial class ClipboardWidgetContent : UserControl, IDisposable
         _timestampTimer?.Stop();
         ViewModel.PropertyChanged -= ViewModel_PropertyChanged;
         _settingsService.SettingsChanged -= SettingsService_SettingsChanged;
+        _localizationService.LanguageChanged -= LocalizationService_LanguageChanged;
         ActualThemeChanged -= ClipboardWidgetContent_ActualThemeChanged;
         Loaded -= ClipboardWidgetContent_Loaded;
         Unloaded -= ClipboardWidgetContent_Unloaded;
@@ -284,6 +300,28 @@ public sealed partial class ClipboardWidgetContent : UserControl, IDisposable
         SynchronizeViewModeButtonVisual();
     }
 
+    private void LocalizationService_LanguageChanged()
+    {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        if (DispatcherQueue is { HasThreadAccess: false } dq)
+        {
+            dq.TryEnqueue(() =>
+            {
+                if (!_isDisposed)
+                {
+                    ClosePeekFlyout();
+                }
+            });
+            return;
+        }
+
+        ClosePeekFlyout();
+    }
+
     private void ClipboardWidgetContent_ActualThemeChanged(FrameworkElement sender, object args)
     {
         if (!_isDisposed)
@@ -302,7 +340,8 @@ public sealed partial class ClipboardWidgetContent : UserControl, IDisposable
         }
 
         if (string.Equals(e.PropertyName, nameof(ClipboardWidgetViewModel.ActiveFilter), StringComparison.Ordinal) ||
-            string.Equals(e.PropertyName, nameof(ClipboardWidgetViewModel.TabDisplayMode), StringComparison.Ordinal))
+            string.Equals(e.PropertyName, nameof(ClipboardWidgetViewModel.TabDisplayMode), StringComparison.Ordinal) ||
+            string.Equals(e.PropertyName, nameof(ClipboardWidgetViewModel.TabLayout), StringComparison.Ordinal))
         {
             SynchronizeFilterSelection(bringIntoView: true);
         }
@@ -440,12 +479,54 @@ public sealed partial class ClipboardWidgetContent : UserControl, IDisposable
         ViewModel.UpdateResponsiveFilterChrome(width);
     }
 
+    private void ApplyFilterTabOrderAndVisibility()
+    {
+        if (FilterTabPanel is null)
+        {
+            return;
+        }
+
+        IReadOnlyList<ClipboardTabEntry> configured = ViewModel.GetConfiguredTabEntries();
+        int targetSlot = 0;
+        for (int i = 0; i < configured.Count; i++)
+        {
+            ClipboardTabEntry entry = configured[i];
+            int foundIndex = -1;
+            Button? matchingButton = null;
+            for (int j = 0; j < FilterTabPanel.Children.Count; j++)
+            {
+                if (FilterTabPanel.Children[j] is Button candidate &&
+                    string.Equals(candidate.Tag as string, entry.Id, StringComparison.OrdinalIgnoreCase))
+                {
+                    foundIndex = j;
+                    matchingButton = candidate;
+                    break;
+                }
+            }
+
+            if (matchingButton is null)
+            {
+                continue;
+            }
+
+            matchingButton.Visibility = entry.Enabled ? Visibility.Visible : Visibility.Collapsed;
+            if (foundIndex >= 0 && foundIndex != targetSlot && targetSlot < FilterTabPanel.Children.Count)
+            {
+                FilterTabPanel.Children.Move((uint)foundIndex, (uint)targetSlot);
+            }
+
+            targetSlot++;
+        }
+    }
+
     private void SynchronizeFilterSelection(bool bringIntoView)
     {
         if (FilterTabPanel is null)
         {
             return;
         }
+
+        ApplyFilterTabOrderAndVisibility();
 
         string activeTag = ViewModel.ActiveFilter.ToString();
         Brush selectedBg = ResolveThemeBrush("ControlFillColorSecondaryBrush") ?? s_transparentBrush;
@@ -499,7 +580,7 @@ public sealed partial class ClipboardWidgetContent : UserControl, IDisposable
             }
         }
 
-        if (bringIntoView && activeButton is not null)
+        if (bringIntoView && activeButton is { Visibility: Visibility.Visible })
         {
             activeButton.StartBringIntoView(new BringIntoViewOptions
             {
@@ -560,26 +641,8 @@ public sealed partial class ClipboardWidgetContent : UserControl, IDisposable
         }
     }
 
-    private Brush? ResolveThemeBrush(string key)
-    {
-        ElementTheme effective = ActualTheme == ElementTheme.Default
-            ? (Application.Current.RequestedTheme == ApplicationTheme.Light ? ElementTheme.Light : ElementTheme.Dark)
-            : ActualTheme;
-
-        if (Application.Current.Resources.ThemeDictionaries.TryGetValue(
-                effective == ElementTheme.Light ? "Light" : "Dark",
-                out object? dictObj) &&
-            dictObj is ResourceDictionary themeDict &&
-            themeDict.TryGetValue(key, out object? themedBrush) &&
-            themedBrush is Brush tb)
-        {
-            return tb;
-        }
-
-        return Application.Current.Resources.TryGetValue(key, out object? fallback) && fallback is Brush fb
-            ? fb
-            : null;
-    }
+    private Brush? ResolveThemeBrush(string key) =>
+        NeutralInteractionBrush.ResolveThemedResource(key, this);
 
     private void FilterTabButton_Click(object sender, RoutedEventArgs e)
     {
@@ -960,6 +1023,14 @@ public sealed partial class ClipboardWidgetContent : UserControl, IDisposable
         });
     }
 
+    private void SearchTextBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (!_isDisposed)
+        {
+            ViewModel.UpdateSearchTextDebounced(SearchTextBox.Text);
+        }
+    }
+
     private async void SearchTextBox_KeyDown(object sender, KeyRoutedEventArgs e)
     {
         try
@@ -968,6 +1039,8 @@ public sealed partial class ClipboardWidgetContent : UserControl, IDisposable
             {
                 return;
             }
+
+            ViewModel.FlushPendingSearchText();
 
             if (e.Key == VirtualKey.Escape &&
                 !DeskBox.Helpers.ImeCompositionGuard.IsImeCompositionKeyEvent(e))
@@ -1456,7 +1529,7 @@ public sealed partial class ClipboardWidgetContent : UserControl, IDisposable
                 item.TextSubKind == ClipboardTextSubKind.Url &&
                 Uri.TryCreate(item.Model.PlainText?.Trim(), UriKind.Absolute, out Uri? uri))
             {
-                Win32Helper.OpenFile(uri.AbsoluteUri);
+                ShellLaunchService.FireAndForgetOpenPath(uri.AbsoluteUri);
                 return;
             }
 
@@ -1472,7 +1545,7 @@ public sealed partial class ClipboardWidgetContent : UserControl, IDisposable
                     static p => File.Exists(p) || Directory.Exists(p));
                 if (!string.IsNullOrWhiteSpace(existingPath))
                 {
-                    Win32Helper.ShowInExplorer(existingPath);
+                    ShellLaunchService.FireAndForgetRevealInExplorer(existingPath);
                 }
 
                 return;
@@ -1802,7 +1875,7 @@ public sealed partial class ClipboardWidgetContent : UserControl, IDisposable
                 openUrlItem.Click += (_, _) =>
                 {
                     owner.Hide();
-                    Win32Helper.OpenFile(uri.AbsoluteUri);
+                    ShellLaunchService.FireAndForgetOpenPath(uri.AbsoluteUri);
                 };
                 return openUrlItem;
             }
@@ -1839,7 +1912,7 @@ public sealed partial class ClipboardWidgetContent : UserControl, IDisposable
                     revealItem.Click += (_, _) =>
                     {
                         owner.Hide();
-                        Win32Helper.ShowInExplorer(existingPath);
+                        ShellLaunchService.FireAndForgetRevealInExplorer(existingPath);
                     };
                     return revealItem;
                 }
@@ -2119,7 +2192,7 @@ public sealed partial class ClipboardWidgetContent : UserControl, IDisposable
         var picker = new FileSavePicker(Microsoft.UI.Win32Interop.GetWindowIdFromWindow(hwnd))
         {
             SuggestedStartLocation = PickerLocationId.PicturesLibrary,
-            SuggestedFileName = $"Clipboard_{item.Model.CreatedAtUtc.ToLocalTime():yyyyMMdd_HHmmss}"
+            SuggestedFileName = FormattableString.Invariant($"Clipboard_{item.Model.CreatedAtUtc.ToLocalTime():yyyyMMdd_HHmmss}")
         };
         picker.FileTypeChoices.Add("PNG Image", new List<string> { ".png" });
 
@@ -2141,6 +2214,15 @@ public sealed partial class ClipboardWidgetContent : UserControl, IDisposable
 
         if (!string.IsNullOrWhiteSpace(destination?.Path))
         {
+            if (Services.DragDrop.StoreVirtualizedPathPolicy.IsWriteBlockedDestination(destination.Path))
+            {
+                RaiseFeedback(
+                    _localizationService.T("Widget.DropBlocked.StoreVirtualizedAppData"),
+                    WidgetFeedbackSeverity.Warning,
+                    "store-virtualized-appdata-save-blocked");
+                return;
+            }
+
             ClipboardStorageFileOps.CopyFileOverwrite(sourcePath, destination.Path);
             RaiseFeedback(
                 _localizationService.T("Clipboard.Feedback.ImageSaved"),
@@ -2923,6 +3005,10 @@ public sealed partial class ClipboardWidgetContent : UserControl, IDisposable
 
     // ── Drag-Out & Drop-In ────────────────────────────────────────────────────
 
+    private bool _isInternalClipboardDragActive;
+
+    internal string? OwnerWidgetId { get; set; }
+
     internal static IReadOnlyList<ClipboardItemViewModel> ResolveMultiSelectDragBatch(
         ClipboardItemViewModel draggedItem,
         bool isMultiSelectMode,
@@ -2940,12 +3026,19 @@ public sealed partial class ClipboardWidgetContent : UserControl, IDisposable
 
     private void ItemsList_DragItemsStarting(object sender, DragItemsStartingEventArgs e)
     {
+        _isInternalClipboardDragActive = false;
         try
         {
             if (e.Items.FirstOrDefault() is not ClipboardItemViewModel item)
             {
                 e.Cancel = true;
                 return;
+            }
+
+            e.Data.Properties["DeskBoxClipboardInternalDrag"] = true;
+            if (!string.IsNullOrWhiteSpace(OwnerWidgetId))
+            {
+                e.Data.Properties[DeskBoxDragData.SourceWidgetIdProperty] = OwnerWidgetId;
             }
 
             IReadOnlyList<ClipboardItemViewModel> dragBatch = ResolveMultiSelectDragBatch(
@@ -2959,14 +3052,33 @@ public sealed partial class ClipboardWidgetContent : UserControl, IDisposable
                 {
                     if (entry.Kind == ClipboardItemKind.Files)
                     {
-                        batchPaths.AddRange(entry.Model.FilePaths.Where(static p => File.Exists(p) || Directory.Exists(p)));
+                        batchPaths.AddRange(entry.Model.FilePaths.Where(static p =>
+                            !string.IsNullOrWhiteSpace(p) &&
+                            (DeskBox.Helpers.DesktopOutboundDropCoordinator.IsFastNetworkCandidatePath(p) ||
+                             File.Exists(p) ||
+                             Directory.Exists(p))));
                     }
                     else if (entry.Kind == ClipboardItemKind.Image)
                     {
                         string? imgPath = ViewModel.ResolveOriginalImagePath(entry.Model);
                         if (!string.IsNullOrWhiteSpace(imgPath) && File.Exists(imgPath))
                         {
-                            batchPaths.Add(imgPath);
+                            string dragImagePath = imgPath;
+                            if (DeskBox.Services.AppDistributionService.Current.IsPackaged ||
+                                DeskBox.Services.AppDistributionService.Current.IsMicrosoftStore)
+                            {
+                                try
+                                {
+                                    dragImagePath = DeskBox.Platform.StoreUserAssetMigrationFileOps
+                                        .StageTemporaryDragExportCopy(imgPath, "ClipboardDragExports");
+                                }
+                                catch
+                                {
+                                    dragImagePath = imgPath;
+                                }
+                            }
+
+                            batchPaths.Add(dragImagePath);
                         }
                     }
                 }
@@ -2983,13 +3095,16 @@ public sealed partial class ClipboardWidgetContent : UserControl, IDisposable
                             fileService.GetStorageItems,
                             paths => paths.Count == 1 ? Path.GetFileName(paths[0]) : paths.Count.ToString(),
                             "clipboard-multiselect",
-                            out _))
+                            out FileItemDragPackageResult multiDragResult))
                     {
                         e.Cancel = true;
                         return;
                     }
 
-                    e.Data.RequestedOperation = DataPackageOperation.Copy;
+                    e.Data.RequestedOperation = FileItemDragPackage.ContainsAppExecutionAliasSource(multiDragResult.SourcePaths)
+                        ? DataPackageOperation.Link
+                        : DataPackageOperation.Copy;
+                    _isInternalClipboardDragActive = true;
                     return;
                 }
 
@@ -3014,6 +3129,7 @@ public sealed partial class ClipboardWidgetContent : UserControl, IDisposable
                         deferral.Complete();
                     }
                 });
+                _isInternalClipboardDragActive = true;
                 return;
             }
 
@@ -3022,7 +3138,11 @@ public sealed partial class ClipboardWidgetContent : UserControl, IDisposable
                 case ClipboardItemKind.Files:
                 {
                     string[] existing = item.Model.FilePaths
-                        .Where(static p => File.Exists(p) || Directory.Exists(p))
+                        .Where(static p =>
+                            !string.IsNullOrWhiteSpace(p) &&
+                            (DeskBox.Helpers.DesktopOutboundDropCoordinator.IsFastNetworkCandidatePath(p) ||
+                             File.Exists(p) ||
+                             Directory.Exists(p)))
                         .ToArray();
                     if (existing.Length == 0)
                     {
@@ -3039,13 +3159,15 @@ public sealed partial class ClipboardWidgetContent : UserControl, IDisposable
                                 ? Path.GetFileName(paths[0])
                                 : paths.Count.ToString(),
                             "clipboard",
-                            out _))
+                            out FileItemDragPackageResult singleDragResult))
                     {
                         e.Cancel = true;
                         return;
                     }
 
-                    e.Data.RequestedOperation = DataPackageOperation.Copy;
+                    e.Data.RequestedOperation = FileItemDragPackage.ContainsAppExecutionAliasSource(singleDragResult.SourcePaths)
+                        ? DataPackageOperation.Link
+                        : DataPackageOperation.Copy;
                     break;
                 }
 
@@ -3058,26 +3180,57 @@ public sealed partial class ClipboardWidgetContent : UserControl, IDisposable
                         return;
                     }
 
+                    string dragImagePath = imagePath;
+                    if (DeskBox.Services.AppDistributionService.Current.IsPackaged ||
+                        DeskBox.Services.AppDistributionService.Current.IsMicrosoftStore)
+                    {
+                        try
+                        {
+                            dragImagePath = DeskBox.Platform.StoreUserAssetMigrationFileOps
+                                .StageTemporaryDragExportCopy(imagePath, "ClipboardDragExports");
+                        }
+                        catch
+                        {
+                            dragImagePath = imagePath;
+                        }
+                    }
+
                     FileService fileService = App.Current?.FileService ?? new FileService();
                     _ = FileItemDragPackage.TryPreparePaths(
                         e.Data,
-                        [imagePath],
+                        [dragImagePath],
                         fileService.GetStorageItems,
                         static paths => Path.GetFileName(paths[0]),
                         "clipboard-image",
                         out _);
                     e.Data.RequestedOperation = DataPackageOperation.Copy;
 
-                    var capturedModel = item.Model;
-                    string fallbackImagePath = imagePath;
+                    string exportImagePath = dragImagePath;
                     e.Data.SetDataProvider(StandardDataFormats.Bitmap, async request =>
                     {
                         DataProviderDeferral deferral = request.GetDeferral();
                         try
                         {
-                            string exportPath = await ViewModel.PrepareDragExportImageAsync(capturedModel) ?? fallbackImagePath;
-                            StorageFile file = await StorageFile.GetFileFromPathAsync(exportPath);
-                            request.SetData(RandomAccessStreamReference.CreateFromFile(file));
+                            try
+                            {
+                                StorageFile file = await StorageFile.GetFileFromPathAsync(exportImagePath);
+                                request.SetData(RandomAccessStreamReference.CreateFromFile(file));
+                            }
+                            catch
+                            {
+                                byte[] bytes = await File.ReadAllBytesAsync(exportImagePath);
+                                var memStream = new Windows.Storage.Streams.InMemoryRandomAccessStream();
+                                using (var writer = new Windows.Storage.Streams.DataWriter(memStream.GetOutputStreamAt(0)))
+                                {
+                                    writer.WriteBytes(bytes);
+                                    await writer.StoreAsync();
+                                    await writer.FlushAsync();
+                                    writer.DetachStream();
+                                }
+
+                                memStream.Seek(0);
+                                request.SetData(RandomAccessStreamReference.CreateFromStream(memStream));
+                            }
                         }
                         catch (Exception ex)
                         {
@@ -3135,17 +3288,53 @@ public sealed partial class ClipboardWidgetContent : UserControl, IDisposable
                     break;
                 }
             }
+
+            if (!e.Cancel)
+            {
+                _isInternalClipboardDragActive = true;
+            }
         }
         catch (Exception ex)
         {
+            _isInternalClipboardDragActive = false;
+            FileDragSourceGuardDataObject.ClearActiveManagedRoot();
             App.Log($"[ClipboardWidgetContent] ItemsList_DragItemsStarting failed: {ex.Message}");
             e.Cancel = true;
         }
     }
 
+    private void ItemsList_DragItemsCompleted(ListViewBase sender, DragItemsCompletedEventArgs args)
+    {
+        _isInternalClipboardDragActive = false;
+        FileDragSourceGuardDataObject.ClearActiveManagedRoot();
+    }
+
+    private bool IsSameClipboardWidgetDrag(DataPackageView view)
+    {
+        if (_isInternalClipboardDragActive)
+        {
+            return true;
+        }
+
+        if (view.Properties.ContainsKey("DeskBoxClipboardInternalDrag"))
+        {
+            return true;
+        }
+
+        string? sourceWidgetId = DeskBoxDragData.TryGetSourceWidgetId(view);
+        return !string.IsNullOrWhiteSpace(sourceWidgetId) &&
+               !string.IsNullOrWhiteSpace(OwnerWidgetId) &&
+               string.Equals(sourceWidgetId, OwnerWidgetId, StringComparison.OrdinalIgnoreCase);
+    }
+
     private void RootGrid_DragOver(object sender, DragEventArgs e)
     {
         DataPackageView view = e.DataView;
+        if (IsSameClipboardWidgetDrag(view))
+        {
+            e.AcceptedOperation = DataPackageOperation.None;
+            return;
+        }
         if (DeskBoxDragData.HasDroppedFiles(view))
         {
             DataPackageOperation negotiated = DeskBoxDragData.GetFileAssociationOperation(
@@ -3176,6 +3365,12 @@ public sealed partial class ClipboardWidgetContent : UserControl, IDisposable
         try
         {
             DataPackageView view = e.DataView;
+            if (IsSameClipboardWidgetDrag(view))
+            {
+                e.AcceptedOperation = DataPackageOperation.None;
+                return;
+            }
+
             if (DeskBoxDragData.HasDroppedFiles(view))
             {
                 using DroppedFileBatch batch = await DeskBoxDragData.TryGetDroppedFilesAsync(view);
@@ -3183,7 +3378,7 @@ public sealed partial class ClipboardWidgetContent : UserControl, IDisposable
                 {
                     int imported = await HandleNativeDroppedFilesAsync(batch.Files);
                     e.AcceptedOperation = imported > 0
-                        ? DeskBoxDragData.GetFileAssociationOperation(view, allowedOperations)
+                        ? DeskBoxDragData.GetFileAssociationDropCompletionOperation(view, allowedOperations, ViewModel.Config.Id)
                         : DataPackageOperation.None;
                     return;
                 }
@@ -3194,6 +3389,7 @@ public sealed partial class ClipboardWidgetContent : UserControl, IDisposable
                 Uri? uri = await view.GetWebLinkAsync();
                 if (uri is not null && await ViewModel.ImportDroppedTextAsync(uri.AbsoluteUri))
                 {
+                    e.AcceptedOperation = DataPackageOperation.Copy;
                     RaiseFeedback(_localizationService.T("Clipboard.Feedback.ImportedText"), WidgetFeedbackSeverity.Info, "clipboard-imported");
                     return;
                 }
@@ -3204,6 +3400,7 @@ public sealed partial class ClipboardWidgetContent : UserControl, IDisposable
                 string text = await view.GetTextAsync();
                 if (!string.IsNullOrWhiteSpace(text) && await ViewModel.ImportDroppedTextAsync(text))
                 {
+                    e.AcceptedOperation = DataPackageOperation.Copy;
                     RaiseFeedback(_localizationService.T("Clipboard.Feedback.ImportedText"), WidgetFeedbackSeverity.Info, "clipboard-imported");
                 }
             }

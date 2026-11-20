@@ -25,7 +25,6 @@ $logPath = Join-Path $runRoot "publish.log"
 $summaryPath = Join-Path $runRoot "summary.json"
 $project = Join-Path $repoRoot "src\DeskBox\DeskBox.csproj"
 $updaterProject = Join-Path $repoRoot "src\DeskBox.Updater\DeskBox.Updater.csproj"
-$settingsProject = Join-Path $repoRoot "src\DeskBox.Settings\DeskBox.Settings.csproj"
 $toolchainScript = Join-Path $PSScriptRoot "rust-arm64-msvc-environment.ps1"
 $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 
@@ -102,7 +101,7 @@ function Copy-WindowsAppRuntimeInsightsResource {
         throw "The restored $($runtimeLibrary.Name) framework MSIX is missing for '$NativePlatform'."
     }
 
-    # WindowsAppSDK 2.6.5 resolves Foundation 2.6.5, whose self-contained
+    # WindowsAppSDK 2.7.0 resolves Foundation 2.7.0, whose self-contained
     # component payload omits this signed resource DLL even though the matching
     # Runtime framework MSIX contains it. Extract the file from that exact,
     # restore-locked MSIX so app-local RuntimeInfo/AppNotification startup does
@@ -282,7 +281,7 @@ try {
     [Environment]::SetEnvironmentVariable("DOTNET_CLI_UI_LANGUAGE", "en-US", "Process")
     [Environment]::SetEnvironmentVariable("DOTNET_NOLOGO", "1", "Process")
 
-    foreach ($restoreProject in @($project, $updaterProject, $settingsProject)) {
+    foreach ($restoreProject in @($project, $updaterProject)) {
         $restoreArguments = @(
             "restore",
             $restoreProject,
@@ -376,6 +375,59 @@ foreach ($pdb in $pdbFiles) {
     Move-Item -LiteralPath $pdb.FullName -Destination $destination -Force
 }
 
+# Strip compile-time WinMD metadata, unused WindowsAppSDK AI/Search/Widgets/Workloads
+# payloads, and unsupported satellite .mui locale directories before generating the install manifest.
+# Note: Microsoft.UI.Xaml.Phone.dll MUST be retained because Microsoft.ui.xaml.dll dynamically
+# LoadLibrary's it at runtime when instantiating ComboBox/Picker/NavigationView templates in SettingsWindow.
+$pruneFilePatterns = @(
+    "*.winmd",
+    "Microsoft.Windows.Search.dll",
+    "Microsoft.Asg.SemanticIndex.AiFabric.Compatibility.dll",
+    "Microsoft.Windows.Widgets.dll",
+    "PerceptiveStreaming.dll",
+    "Microsoft.Windows.AI.*.dll",
+    "Microsoft.Windows.Workloads*.dll",
+    "Microsoft.Windows.Workloads.pri",
+    "WorkloadsSessionHost*",
+    "workloads*.json",
+    "NPUDetect.dll"
+)
+foreach ($pattern in $pruneFilePatterns) {
+    foreach ($candidate in @(Get-ChildItem -LiteralPath $publishDir -Filter $pattern -File -Recurse -ErrorAction SilentlyContinue)) {
+        Assert-PathInsideRoot -Root $publishDir -Candidate $candidate.FullName
+        Remove-Item -LiteralPath $candidate.FullName -Force
+    }
+}
+
+$retainedTopLevelDirectories = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+foreach ($dirName in @(
+        "Assets",
+        "Strings",
+        "Microsoft.UI.Xaml",
+        "ar-SA",
+        "bn-BD",
+        "bn-IN",
+        "de-DE",
+        "en-US",
+        "en-GB",
+        "es-ES",
+        "fr-FR",
+        "hi-IN",
+        "ja-JP",
+        "ko-KR",
+        "pt-BR",
+        "ru-RU",
+        "zh-CN",
+        "zh-TW")) {
+    [void]$retainedTopLevelDirectories.Add($dirName)
+}
+foreach ($topDir in @(Get-ChildItem -LiteralPath $publishDir -Directory -ErrorAction SilentlyContinue)) {
+    if (-not $retainedTopLevelDirectories.Contains($topDir.Name)) {
+        Assert-PathInsideRoot -Root $publishDir -Candidate $topDir.FullName
+        Remove-Item -LiteralPath $topDir.FullName -Recurse -Force
+    }
+}
+
 $installManifestName = "DeskBox.InstallManifest.txt"
 $installManifestPath = Join-Path $publishDir $installManifestName
 $installManifestEntries = [System.Collections.Generic.List[string]]::new()
@@ -399,14 +451,13 @@ $installManifestEntries = @($installManifestEntries | Sort-Object -Unique)
 
 $requiredFiles = @(
     "DeskBox.exe",
-    "DeskBox.Settings.exe",
     "DeskBox.Updater.exe",
     "DeskBox.ThumbnailProxy.exe",
     "DeskBox.pri",
-    "DeskBox.Settings.pri",
     "deskbox_native.dll",
     "deskbox_qjs.dll",
     "Microsoft.UI.Input.dll",
+    "Microsoft.UI.Xaml.Phone.dll",
     "Microsoft.ui.xaml.dll",
     "Microsoft.WindowsAppRuntime.dll",
     "Microsoft.WindowsAppRuntime.Insights.Resource.dll",
@@ -423,6 +474,20 @@ $requiredFiles = @(
     "Strings\ru-RU.json",
     "Strings\zh-CN.json",
     "Strings\zh-TW.json",
+    "Assets\CustomWidgets\Templates\agent-hud\manifest.json",
+    "Assets\CustomWidgets\Templates\ai-inbox\manifest.json",
+    "Assets\CustomWidgets\Templates\ai-pulse\manifest.json",
+    "Assets\CustomWidgets\Templates\countdown\manifest.json",
+    "Assets\CustomWidgets\Templates\dev-toolbox\manifest.json",
+    "Assets\CustomWidgets\Templates\focus-dial\manifest.json",
+    "Assets\CustomWidgets\Templates\hydration\manifest.json",
+    "Assets\CustomWidgets\Templates\news-rss\manifest.json",
+    "Assets\CustomWidgets\Templates\pomodoro\manifest.json",
+    "Assets\CustomWidgets\Templates\snippet-grid\manifest.json",
+    "Assets\CustomWidgets\Templates\sys-pulse\manifest.json",
+    "Assets\CustomWidgets\Templates\todo-agenda\manifest.json",
+    "Assets\CustomWidgets\Templates\weather-desk\manifest.json",
+    "Assets\CustomWidgets\Templates\world-clock\manifest.json",
     $installManifestName
 )
 foreach ($requiredFile in $requiredFiles) {
@@ -434,7 +499,6 @@ foreach ($requiredFile in $requiredFiles) {
 $symbolFiles = @(Get-ChildItem -LiteralPath $symbolsDir -File -Recurse)
 foreach ($requiredSymbolFile in @(
         "DeskBox.pdb",
-        "DeskBox.Settings.pdb",
         "DeskBox.Updater.pdb",
         "DeskBox.ThumbnailProxy.pdb",
         "deskbox_native.pdb",
@@ -454,6 +518,10 @@ $forbiddenNames = @(
     "DeskBox.dll",
     "DeskBox.deps.json",
     "DeskBox.runtimeconfig.json",
+    # The settings host is DeskBox.exe --settings; a separate settings image
+    # would statically duplicate the whole Native AOT app.
+    "DeskBox.Settings.exe",
+    "DeskBox.Settings.pri",
     "DeskBox.Settings.dll",
     "DeskBox.Settings.deps.json",
     "DeskBox.Settings.runtimeconfig.json",
@@ -464,7 +532,15 @@ $forbiddenNames = @(
 $forbiddenNamePatterns = @(
     '^EverythingSdk\.dll$',
     '^H\.NotifyIcon(?:\.WinUI)?\.dll$',
-    '^deskbox_search_core(?:\.|$)'
+    '^deskbox_search_core(?:\.|$)',
+    # WinAppSDK AI / App Content Search / Widgets components and compile-time WinMD metadata
+    # are excluded from the retail Native AOT payload.
+    '\.winmd$',
+    '^Microsoft\.Windows\.(?:AI\.|Search\.|Widgets\.|Workloads\.)',
+    '^Microsoft\.Asg\.',
+    '^PerceptiveStreaming\.dll$',
+    '^NPUDetect\.dll$',
+    '^workloads(?:\.[a-z0-9]+)?\.json$'
 )
 $forbiddenNameRegex = $forbiddenNamePatterns -join '|'
 $forbiddenFiles = @(
@@ -481,7 +557,6 @@ if ($forbiddenFiles.Count -gt 0) {
 $peResults = @(
     foreach ($fileName in @(
             "DeskBox.exe",
-            "DeskBox.Settings.exe",
             "DeskBox.Updater.exe",
             "DeskBox.ThumbnailProxy.exe",
             "deskbox_native.dll",

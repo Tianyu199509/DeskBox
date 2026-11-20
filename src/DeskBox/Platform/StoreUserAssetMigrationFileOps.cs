@@ -36,19 +36,29 @@ internal static class StoreUserAssetMigrationFileOps
                 return;
             }
 
+            string legacyDataDir = Path.Combine(normalizedLegacyRoot, "data");
+            string durableDataDir = Path.Combine(normalizedDurableRoot, "data");
+            string legacySettingsPath = Path.Combine(legacyDataDir, "settings.json");
+            string durableSettingsPath = Path.Combine(durableDataDir, "settings.json");
+
             string sentinelPath = Path.Combine(normalizedDurableRoot, MigrationSentinelFileName);
-            if (File.Exists(sentinelPath))
+            // A stale sentinel left behind by an earlier empty Store run must not
+            // block migrating real Direct data when the Store profile has no settings yet.
+            if (File.Exists(sentinelPath) &&
+                (File.Exists(durableSettingsPath) || !File.Exists(legacySettingsPath)))
             {
+                if (File.Exists(durableSettingsPath) && Directory.Exists(legacyDataDir))
+                {
+                    // Retry retiring any previously locked MSIX LocalCache shadow directory.
+                    TryRetireMigratedLegacyLocalCacheDataDirectory(legacyDataDir, durableSettingsPath);
+                }
+
                 return;
             }
 
             EnsureHiddenDirectory(normalizedDurableRoot);
             string inProgressPath = Path.Combine(normalizedDurableRoot, MigrationInProgressMarkerFileName);
             bool allCopiedCleanly = true;
-
-            string legacyDataDir = Path.Combine(normalizedLegacyRoot, "data");
-            string durableDataDir = Path.Combine(normalizedDurableRoot, "data");
-            string durableSettingsPath = Path.Combine(durableDataDir, "settings.json");
 
             if (Directory.Exists(legacyDataDir) &&
                 (!File.Exists(durableSettingsPath) || File.Exists(inProgressPath)))
@@ -82,6 +92,13 @@ internal static class StoreUserAssetMigrationFileOps
                 {
                     File.Delete(inProgressPath);
                 }
+
+                // Retire the physical MSIX LocalCache\Local\DeskBox\data directory
+                // after verified migration so Win10 bindflt virtualization no longer
+                // shadows real %LOCALAPPDATA%\DeskBox\data for Direct re-imports and
+                // cross-channel orphan-folder protection. Never touches Direct's real
+                // %LOCALAPPDATA%\DeskBox\data path.
+                TryRetireMigratedLegacyLocalCacheDataDirectory(legacyDataDir, durableSettingsPath);
             }
         }
         catch
@@ -106,7 +123,10 @@ internal static class StoreUserAssetMigrationFileOps
         }
     }
 
-    private static bool CopyDirectoryNonDestructive(string sourceDir, string destinationDir)
+    internal static bool CopyDirectoryNonDestructive(
+        string sourceDir,
+        string destinationDir,
+        bool overwriteExisting = false)
     {
         DirectoryInfo rootInfo = new(sourceDir);
         if (!rootInfo.Exists || (rootInfo.Attributes & FileAttributes.ReparsePoint) != 0)
@@ -128,9 +148,9 @@ internal static class StoreUserAssetMigrationFileOps
                 }
 
                 string targetFile = Path.Combine(destinationDir, Path.GetFileName(filePath));
-                if (!File.Exists(targetFile))
+                if (overwriteExisting || !File.Exists(targetFile))
                 {
-                    File.Copy(filePath, targetFile, overwrite: false);
+                    File.Copy(filePath, targetFile, overwrite: overwriteExisting);
                 }
             }
             catch
@@ -152,7 +172,8 @@ internal static class StoreUserAssetMigrationFileOps
 
                 allCopiedCleanly &= CopyDirectoryNonDestructive(
                     subDir,
-                    Path.Combine(destinationDir, subInfo.Name));
+                    Path.Combine(destinationDir, subInfo.Name),
+                    overwriteExisting);
             }
             catch
             {
@@ -164,7 +185,7 @@ internal static class StoreUserAssetMigrationFileOps
         return allCopiedCleanly;
     }
 
-    private static void RebaseMigratedJsonStorePaths(string legacyDataDir, string durableDataDir)
+    internal static void RebaseMigratedJsonStorePaths(string legacyDataDir, string durableDataDir)
     {
         var oldPrefixes = new List<string>(2)
         {
@@ -183,24 +204,47 @@ internal static class StoreUserAssetMigrationFileOps
 
         string newPrefix = EnsureTrailingBackslash(durableDataDir);
 
+        string settingsJson = Path.Combine(durableDataDir, "settings.json");
+        RewriteJsonPathPrefixesIfPresent(settingsJson, oldPrefixes, newPrefix);
+        RewriteJsonPathPrefixesIfPresent(settingsJson + ".bak", oldPrefixes, newPrefix);
+
+        string widgetLayoutJson = Path.Combine(durableDataDir, "widget-layout.json");
+        RewriteJsonPathPrefixesIfPresent(widgetLayoutJson, oldPrefixes, newPrefix);
+        RewriteJsonPathPrefixesIfPresent(widgetLayoutJson + ".bak", oldPrefixes, newPrefix);
+
         string quickCaptureJson = Path.Combine(durableDataDir, "quick-capture", "quick-capture.json");
         RewriteJsonPathPrefixesIfPresent(quickCaptureJson, oldPrefixes, newPrefix);
         RewriteJsonPathPrefixesIfPresent(quickCaptureJson + ".bak", oldPrefixes, newPrefix);
 
+        string clipboardJson = Path.Combine(durableDataDir, "clipboard", "clipboard.json");
+        RewriteJsonPathPrefixesIfPresent(clipboardJson, oldPrefixes, newPrefix);
+        RewriteJsonPathPrefixesIfPresent(clipboardJson + ".bak", oldPrefixes, newPrefix);
+
+        string legacyClipboardJson = Path.Combine(durableDataDir, "clipboard", "clipboard-history.json");
+        RewriteJsonPathPrefixesIfPresent(legacyClipboardJson, oldPrefixes, newPrefix);
+        RewriteJsonPathPrefixesIfPresent(legacyClipboardJson + ".bak", oldPrefixes, newPrefix);
+
+        string customWidgetsDir = Path.Combine(durableDataDir, "custom-widgets");
+        if (Directory.Exists(customWidgetsDir))
+        {
+            foreach (string storeJson in Directory.EnumerateFiles(customWidgetsDir, "store.json*", SearchOption.AllDirectories))
+            {
+                RewriteJsonPathPrefixesIfPresent(storeJson, oldPrefixes, newPrefix);
+            }
+        }
+
         string widgetsDir = Path.Combine(durableDataDir, "widgets");
-        if (!Directory.Exists(widgetsDir))
+        if (Directory.Exists(widgetsDir))
         {
-            return;
-        }
+            foreach (string todoJson in Directory.EnumerateFiles(widgetsDir, "todo.json*", SearchOption.AllDirectories))
+            {
+                RewriteJsonPathPrefixesIfPresent(todoJson, oldPrefixes, newPrefix);
+            }
 
-        foreach (string todoJson in Directory.EnumerateFiles(widgetsDir, "todo.json*", SearchOption.AllDirectories))
-        {
-            RewriteJsonPathPrefixesIfPresent(todoJson, oldPrefixes, newPrefix);
-        }
-
-        foreach (string storeJson in Directory.EnumerateFiles(widgetsDir, "store.json*", SearchOption.AllDirectories))
-        {
-            RewriteJsonPathPrefixesIfPresent(storeJson, oldPrefixes, newPrefix);
+            foreach (string storeJson in Directory.EnumerateFiles(widgetsDir, "store.json*", SearchOption.AllDirectories))
+            {
+                RewriteJsonPathPrefixesIfPresent(storeJson, oldPrefixes, newPrefix);
+            }
         }
     }
 
@@ -217,21 +261,7 @@ internal static class StoreUserAssetMigrationFileOps
         try
         {
             string content = File.ReadAllText(filePath, Encoding.UTF8);
-            string updated = content;
-            string escapedNew = EscapeJsonBackslashes(newPrefix);
-            string slashNew = newPrefix.Replace('\\', '/');
-
-            foreach (string oldPrefix in oldPrefixes)
-            {
-                updated = updated.Replace(
-                    EscapeJsonBackslashes(oldPrefix),
-                    escapedNew,
-                    StringComparison.OrdinalIgnoreCase);
-                updated = updated.Replace(
-                    oldPrefix.Replace('\\', '/'),
-                    slashNew,
-                    StringComparison.OrdinalIgnoreCase);
-            }
+            string updated = RewriteJsonPathPrefixesContent(content, oldPrefixes, newPrefix);
 
             if (string.Equals(content, updated, StringComparison.Ordinal))
             {
@@ -248,6 +278,117 @@ internal static class StoreUserAssetMigrationFileOps
         }
     }
 
+    internal static string RewriteJsonPathPrefixesContent(
+        string content,
+        IReadOnlyList<string> oldPrefixes,
+        string newPrefix)
+    {
+        string updated = content;
+        string escapedNew = EscapeJsonBackslashes(newPrefix);
+        string slashNew = newPrefix.Replace('\\', '/');
+        string defaultEncodedNew = System.Text.Json.JsonEncodedText.Encode(
+            newPrefix,
+            System.Text.Encodings.Web.JavaScriptEncoder.Default).ToString();
+        string defaultEncodedSlashNew = System.Text.Json.JsonEncodedText.Encode(
+            slashNew,
+            System.Text.Encodings.Web.JavaScriptEncoder.Default).ToString();
+
+        foreach (string oldPrefix in oldPrefixes)
+        {
+            string oldSlash = oldPrefix.Replace('\\', '/');
+            // 1. Default System.Text.Json JavaScriptEncoder escaping (\uXXXX for non-ASCII & HTML chars).
+            string defaultEncodedOld = System.Text.Json.JsonEncodedText.Encode(
+                oldPrefix,
+                System.Text.Encodings.Web.JavaScriptEncoder.Default).ToString();
+            updated = updated.Replace(
+                defaultEncodedOld,
+                defaultEncodedNew,
+                StringComparison.OrdinalIgnoreCase);
+
+            string defaultEncodedSlashOld = System.Text.Json.JsonEncodedText.Encode(
+                oldSlash,
+                System.Text.Encodings.Web.JavaScriptEncoder.Default).ToString();
+            updated = updated.Replace(
+                defaultEncodedSlashOld,
+                defaultEncodedSlashNew,
+                StringComparison.OrdinalIgnoreCase);
+
+            // 2. Raw Unicode escaped-backslash and forward-slash forms.
+            updated = updated.Replace(
+                EscapeJsonBackslashes(oldPrefix),
+                escapedNew,
+                StringComparison.OrdinalIgnoreCase);
+            updated = updated.Replace(
+                oldSlash,
+                slashNew,
+                StringComparison.OrdinalIgnoreCase);
+        }
+
+        return updated;
+    }
+
+    internal static void TryRetireMigratedLegacyLocalCacheDataDirectory(
+        string legacyDataDir,
+        string durableSettingsPath)
+    {
+        try
+        {
+            if (!File.Exists(durableSettingsPath))
+            {
+                return;
+            }
+
+            string? physicalDataDir = null;
+            string legacySettingsPath = Path.Combine(legacyDataDir, "settings.json");
+            if (File.Exists(legacySettingsPath) &&
+                Win32Helper.TryGetFinalPath(legacySettingsPath, out string physicalSettingsPath) &&
+                !string.IsNullOrWhiteSpace(physicalSettingsPath) &&
+                IsLegacyLocalCachePath(physicalSettingsPath))
+            {
+                physicalDataDir = Path.GetDirectoryName(physicalSettingsPath);
+            }
+            else if (Directory.Exists(legacyDataDir) &&
+                     Win32Helper.TryGetFinalPath(legacyDataDir, out string resolvedDataDir) &&
+                     !string.IsNullOrWhiteSpace(resolvedDataDir) &&
+                     IsLegacyLocalCachePath(resolvedDataDir))
+            {
+                physicalDataDir = resolvedDataDir;
+            }
+
+            if (string.IsNullOrWhiteSpace(physicalDataDir) ||
+                !Directory.Exists(physicalDataDir) ||
+                !IsLegacyLocalCachePath(physicalDataDir))
+            {
+                return;
+            }
+
+            string trimmedPhysicalDataDir = TrimTrailingSeparators(physicalDataDir);
+            string? parentDir = Path.GetDirectoryName(trimmedPhysicalDataDir);
+            if (string.IsNullOrWhiteSpace(parentDir))
+            {
+                return;
+            }
+
+            string retiredPath = Path.Combine(parentDir, "data.migrated-to-appdata");
+            if (Directory.Exists(retiredPath))
+            {
+                retiredPath = Path.Combine(parentDir, $"data.migrated-to-appdata.{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}");
+            }
+
+            Directory.Move(trimmedPhysicalDataDir, retiredPath);
+        }
+        catch
+        {
+            // Non-fatal: if an antivirus or shell handle holds LocalCache open,
+            // leave it intact rather than failing startup.
+        }
+    }
+
+    internal static bool IsLegacyLocalCachePath(string path) =>
+        !string.IsNullOrWhiteSpace(path) &&
+        path.Contains(@"\Packages\", StringComparison.OrdinalIgnoreCase) &&
+        path.Contains(@"\LocalCache\", StringComparison.OrdinalIgnoreCase);
+
     private static string EscapeJsonBackslashes(string value) =>
         value.Replace("\\", "\\\\", StringComparison.Ordinal);
 
@@ -258,18 +399,60 @@ internal static class StoreUserAssetMigrationFileOps
         string sourcePath,
         string categoryFolder)
     {
-        string stageDir = Path.Combine(
-            Path.GetTempPath(),
-            "DeskBox",
-            categoryFolder,
-            Guid.NewGuid().ToString("N"));
+        DropStagingFileOps.TriggerThrottledStaleStagingCleanup();
+        string resolvedSourcePath = Win32Helper.ResolveUnvirtualizedPhysicalPath(sourcePath);
+        string stagingRoot = DropStagingFileOps.GetStagingRootDirectory();
+        DropStagingFileOps.EnsureSafeStagingRootDirectory(stagingRoot);
+        string stageDir = Win32Helper.ResolveUnvirtualizedPhysicalPath(
+            Path.Combine(
+                stagingRoot,
+                categoryFolder,
+                Guid.NewGuid().ToString("N")));
         Directory.CreateDirectory(stageDir);
-        string stagedPath = Path.Combine(stageDir, Path.GetFileName(sourcePath));
-        File.Copy(sourcePath, stagedPath, overwrite: true);
+        string stagedPath = Path.Combine(stageDir, Path.GetFileName(resolvedSourcePath));
+        File.Copy(resolvedSourcePath, stagedPath, overwrite: true);
         File.SetAttributes(stagedPath, FileAttributes.Normal);
-        return stagedPath;
+        return Win32Helper.ResolveUnvirtualizedPhysicalPath(stagedPath);
     }
 
     private static string TrimTrailingSeparators(string path) =>
         path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+    internal static void TryDeleteFileQuietly(string? filePath)
+    {
+        if (string.IsNullOrWhiteSpace(filePath))
+        {
+            return;
+        }
+
+        try
+        {
+            if (File.Exists(filePath))
+            {
+                File.Delete(filePath);
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    internal static bool TryMirrorShortcutFileQuietly(string sourcePath, string destinationPath)
+    {
+        try
+        {
+            if (!File.Exists(sourcePath) || File.Exists(destinationPath))
+            {
+                return false;
+            }
+
+            File.Copy(sourcePath, destinationPath, overwrite: false);
+            File.SetAttributes(destinationPath, FileAttributes.Normal);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
 }

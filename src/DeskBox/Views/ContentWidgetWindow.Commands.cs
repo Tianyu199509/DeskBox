@@ -5,6 +5,7 @@ using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Platform;
 using DeskBox.Services;
+using DeskBox.ViewModels;
 using Microsoft.UI;
 using Microsoft.UI.Composition;
 using Microsoft.UI.Composition.SystemBackdrops;
@@ -24,10 +25,59 @@ namespace DeskBox.Views;
 public sealed partial class ContentWidgetWindow
 {
     private bool _isCloseWidgetPending;
+    private CustomWidgetContentAdapter? _customChromeSource;
 
-    private WidgetChromeMode ResolveTitleBarChromeMode() =>
-        App.Current.WidgetManager?.ResolveWidgetChromeMode(_config, _descriptor) ??
-        _chromeModeResolver.Resolve(_config, _descriptor);
+    private void OpenHostSettings(string sectionTag) => App.Current.ShowSettings(sectionTag);
+
+    private void AttachCustomSurfaceChromeBridge(IWidgetContent content)
+    {
+        DetachCustomSurfaceChromeBridge();
+        if (content is not CustomWidgetContentAdapter customAdapter)
+        {
+            return;
+        }
+
+        _customChromeSource = customAdapter;
+        _customChromeSource.ChromePreferenceChanged += CustomChromeSource_ChromePreferenceChanged;
+        _customChromeSource.SettingsNavigationRequested += CustomChromeSource_SettingsNavigationRequested;
+    }
+
+    private void DetachCustomSurfaceChromeBridge()
+    {
+        if (_customChromeSource is null)
+        {
+            return;
+        }
+
+        _customChromeSource.ChromePreferenceChanged -= CustomChromeSource_ChromePreferenceChanged;
+        _customChromeSource.SettingsNavigationRequested -= CustomChromeSource_SettingsNavigationRequested;
+        _customChromeSource = null;
+    }
+
+    private void CustomChromeSource_SettingsNavigationRequested(string sectionTag)
+    {
+        if (!IsClosing && !string.IsNullOrWhiteSpace(sectionTag))
+        {
+            OpenHostSettings(sectionTag);
+        }
+    }
+
+    private void CustomChromeSource_ChromePreferenceChanged(object? sender, EventArgs e)
+    {
+        if (!IsClosing && ContentWidgetShell.ChromeMode != ResolveTitleBarChromeMode())
+        {
+            ApplyTitleBarLayout();
+        }
+    }
+
+    private WidgetChromeMode ResolveTitleBarChromeMode()
+    {
+        WidgetChromeCategory? customCategory = CurrentContent is CustomWidgetContentAdapter customAdapter
+            ? CustomWidgetChromeCategoryClassifier.Classify(customAdapter.ViewModel.Manifest)
+            : null;
+        return App.Current.WidgetManager?.ResolveWidgetChromeMode(_config, _descriptor) ??
+               _chromeModeResolver.Resolve(_config, _descriptor, customCategory);
+    }
 
     protected override void OnWidgetGroupPresentationChanged(WidgetGroupPresentation? presentation)
     {
@@ -65,6 +115,8 @@ public sealed partial class ContentWidgetWindow
             : Visibility.Collapsed;
         ContentWidgetShell.ShowAddButton =
             actions.Contains(SettingsService.WidgetHoverActionAdd);
+        ContentWidgetShell.ShowQuickSettingsButton =
+            _config.WidgetKind == WidgetKind.Custom;
         ContentWidgetShell.MoreActionButton.Visibility = actions.Contains(SettingsService.WidgetHoverActionMore)
             ? Visibility.Visible
             : Visibility.Collapsed;
@@ -94,6 +146,204 @@ public sealed partial class ContentWidgetWindow
     private void AddButton_Click(object sender, RoutedEventArgs e)
     {
         ShowWidgetCreateFlyout();
+    }
+
+    private void QuickSettingsButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_config.WidgetKind != WidgetKind.Custom)
+        {
+            return;
+        }
+
+        CustomWidgetViewModel? vm = CurrentContent is CustomWidgetContentAdapter customAdapter
+            ? customAdapter.ViewModel
+            : null;
+        if (vm is null)
+        {
+            OpenHostSettings("CustomWidgetSettings:select:" + _config.Id);
+            return;
+        }
+
+        IReadOnlyList<CustomWidgetSettingDefinition> localizedSettings =
+            vm.Manifest.ResolveLocalizedSettings(vm.ActiveCultureName);
+        bool needsGlobalAiBanner = CustomWidgetNativeRenderer.NeedsGlobalAiSetupBanner(vm);
+        bool hasMissingSecrets = vm.GetUnconfiguredSecretSettings().Count > 0;
+        if (localizedSettings.Count == 0 && !needsGlobalAiBanner && !hasMissingSecrets)
+        {
+            OpenHostSettings("CustomWidgetSettings:select:" + _config.Id);
+            return;
+        }
+
+        FrameworkElement anchor = ContentWidgetShell.QuickSettingsActionButton;
+        string logicalKey = $"custom-quick-settings:{_config.Id}";
+        if (WidgetEditorPopoverWindow.TryConsumeToggleOrCloseExisting(HWnd, logicalKey, anchor))
+        {
+            return;
+        }
+
+        var loc = App.Current.LocalizationService;
+        string title = vm.Manifest.ResolveLocalizedName(vm.ActiveCultureName);
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            title = _config.Name;
+        }
+
+        var popover = new WidgetEditorPopoverWindow(HWnd, title);
+        var root = new StackPanel
+        {
+            Width = 316,
+            Spacing = 10
+        };
+
+        var headerGrid = new Grid { ColumnSpacing = 8 };
+        headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        headerGrid.Children.Add(new TextBlock
+        {
+            Text = title,
+            FontSize = 13.5,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            MaxLines = 1,
+            VerticalAlignment = VerticalAlignment.Center
+        });
+        Button closeBtn = WidgetEditorPopoverWindow.CreateHeaderCloseButton(
+            loc.T("Common.Close"),
+            () => popover.ClosePopover(restoreOwnerForeground: true),
+            anchor);
+        Grid.SetColumn(closeBtn, 1);
+        headerGrid.Children.Add(closeBtn);
+        root.Children.Add(headerGrid);
+
+        if (localizedSettings.Count > 0)
+        {
+            var fieldsStack = new StackPanel { Spacing = 10 };
+            var formOptions = new CustomWidgetSettingsFormOptions
+            {
+                Localization = loc,
+                CultureName = vm.ActiveCultureName,
+                OwnerWindowHandle = popover.WindowHandle,
+                ThemeScope = root,
+                CommitSettingAsync = (key, value) => vm.SetSettingValueAsync(key, value),
+                ReadSecret = key => vm.Secrets.TryGetValue(key, out string? secret) ? secret : string.Empty,
+                CommitSecretAsync = (key, secret) => vm.SetSecretValueAsync(key, secret),
+                SetModalPickerActive = active => popover.SuppressDeactivationDismiss = active
+            };
+
+            foreach (CustomWidgetSettingDefinition def in localizedSettings)
+            {
+                string currentVal = vm.Settings.TryGetValue(def.Key, out string? liveVal)
+                    ? liveVal
+                    : def.DefaultValue;
+                fieldsStack.Children.Add(
+                    CustomWidgetSettingsFormBuilder.BuildCompactFlyoutEntry(def, currentVal, formOptions));
+            }
+
+            var fieldsScroll = new ScrollViewer
+            {
+                MaxHeight = 360,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                Content = fieldsStack
+            };
+            root.Children.Add(fieldsScroll);
+
+            var divider = new Border
+            {
+                Height = 1,
+                Opacity = 0.2,
+                Background = new SolidColorBrush(Colors.Gray),
+                Margin = new Thickness(0, 2, 0, 0)
+            };
+            root.Children.Add(divider);
+        }
+
+        var footerStack = new StackPanel { Spacing = 6 };
+        if (needsGlobalAiBanner)
+        {
+            var aiSettingsBtn = new Button
+            {
+                Content = loc.T("Settings.AiSettings.EntryCard.Header") + " — " + loc.T("CustomWidget.Workshop.Composer.QuickSetupApi"),
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Left,
+                MinHeight = 30,
+                Padding = new Thickness(10, 4, 10, 4),
+                CornerRadius = new CornerRadius(6),
+                FontSize = 12
+            };
+            aiSettingsBtn.Click += (_, _) =>
+            {
+                popover.ClosePopover(restoreOwnerForeground: false);
+                OpenHostSettings("AiSettings");
+            };
+            footerStack.Children.Add(aiSettingsBtn);
+        }
+
+        if (hasMissingSecrets)
+        {
+            var secretsBtn = new Button
+            {
+                Content = loc.T("CustomWidget.Secret.DialogTitle"),
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Left,
+                MinHeight = 30,
+                Padding = new Thickness(10, 4, 10, 4),
+                CornerRadius = new CornerRadius(6),
+                FontSize = 12
+            };
+            secretsBtn.Click += (_, _) =>
+            {
+                popover.ClosePopover(restoreOwnerForeground: false);
+                CustomWidgetNativeRenderer.ShowSecretSettingsPopover(anchor, vm);
+            };
+            footerStack.Children.Add(secretsBtn);
+        }
+
+        var studioBtn = new Button
+        {
+            Content = loc.T("CustomWidget.QuickSettings.OpenInStudio"),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Left,
+            MinHeight = 30,
+            Padding = new Thickness(10, 4, 10, 4),
+            CornerRadius = new CornerRadius(6),
+            FontSize = 12
+        };
+        studioBtn.Click += (_, _) =>
+        {
+            popover.ClosePopover(restoreOwnerForeground: false);
+            App.Current.ShowCustomWidgetStudio(_config.Id);
+        };
+        footerStack.Children.Add(studioBtn);
+
+        var fullSettingsBtn = new Button
+        {
+            Content = loc.T("CustomWidget.QuickSettings.FullSettings"),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Left,
+            MinHeight = 30,
+            Padding = new Thickness(10, 4, 10, 4),
+            CornerRadius = new CornerRadius(6),
+            FontSize = 12
+        };
+        fullSettingsBtn.Click += (_, _) =>
+        {
+            popover.ClosePopover(restoreOwnerForeground: false);
+            OpenHostSettings("CustomWidgetSettings:select:" + _config.Id);
+        };
+        footerStack.Children.Add(fullSettingsBtn);
+        root.Children.Add(footerStack);
+
+        popover.ShowAnchored(
+            anchor,
+            root,
+            WidgetPopoverPlacement.Bottom,
+            minWidthDip: 336,
+            maxWidthDip: 352,
+            initialFocusTarget: null,
+            triggerElement: anchor,
+            logScope: "CustomWidgetQuickSettings",
+            logicalKey: logicalKey);
     }
 
     private void ShowWidgetCreateFlyout()
@@ -350,7 +600,7 @@ public sealed partial class ContentWidgetWindow
                 flyout,
                 customContent,
                 App.Current.LocalizationService,
-                section => App.Current.ShowSettings(section),
+                OpenHostSettings,
                 widgetId => App.Current.ShowCustomWidgetStudio(widgetId));
         }
 
@@ -534,11 +784,14 @@ public sealed partial class ContentWidgetWindow
             App.Current.WidgetManager,
             App.Current.LocalizationService);
 
-        flyout.Items.Add(WidgetSettingsMenuHelper.CreateMenuItem(
-            _config.WidgetKind,
-            App.Current.LocalizationService,
-            beforeClick: flyout.Hide,
-            widgetId: _config.Id));
+        if (_config.WidgetKind is not WidgetKind.Custom)
+        {
+            flyout.Items.Add(WidgetSettingsMenuHelper.CreateMenuItem(
+                _config.WidgetKind,
+                App.Current.LocalizationService,
+                beforeClick: flyout.Hide,
+                widgetId: _config.Id));
+        }
 
         flyout.Items.Add(new MenuFlyoutSeparator());
         var disableWidget = new MenuFlyoutItem
@@ -606,17 +859,13 @@ public sealed partial class ContentWidgetWindow
         e.CloseWidgetItem = closeWidget;
     }
 
-    private string GetFeatureWidgetCloseMenuGlyph() =>
-        _config.WidgetKind == WidgetKind.Custom ? "\uE74D" : "\uE7E8";
+    private string GetFeatureWidgetCloseMenuGlyph() => "\uE7E8";
 
     private string GetFeatureWidgetCloseMenuText()
     {
         LocalizationService localization = App.Current.LocalizationService;
         return _config.WidgetKind switch
         {
-            WidgetKind.Custom => localization.Format(
-                "CustomWidget.Menu.DeleteWidget",
-                _config.Name),
             WidgetKind.Glance => localization.Format(
                 "Widget.FeatureWidget.DisableConfirmTitle",
                 _config.Name),
@@ -726,16 +975,9 @@ public sealed partial class ContentWidgetWindow
         WidgetManager widgetManager)
     {
         LocalizationService localization = App.Current.LocalizationService;
-        bool isCustomDelete = _config.WidgetKind == WidgetKind.Custom;
-        string confirmTitle = isCustomDelete
-            ? localization.Format("CustomWidget.DeleteConfirm.Title", _config.Name)
-            : localization.Format("Widget.FeatureWidget.DisableConfirmTitle", _config.Name);
-        string confirmActionText = isCustomDelete
-            ? localization.T("Common.Delete")
-            : localization.T("Widget.FeatureWidget.Disable");
-        string confirmNote = isCustomDelete
-            ? localization.T("CustomWidget.DeleteConfirm.Note")
-            : localization.T("Widget.FeatureWidget.DisableConfirmNote");
+        string confirmTitle = localization.Format("Widget.FeatureWidget.DisableConfirmTitle", _config.Name);
+        string confirmActionText = localization.T("Widget.FeatureWidget.Disable");
+        string confirmNote = localization.T("Widget.FeatureWidget.DisableConfirmNote");
 
         return WidgetCompactConfirmationMenuBuilder.CreateDeleteConfirmation(
             new WidgetCompactConfirmationOptions(
@@ -760,7 +1002,7 @@ public sealed partial class ContentWidgetWindow
                 })
             {
                 Message = confirmNote,
-                MessageGlyph = isCustomDelete ? "\uE74D" : "\uE946",
+                MessageGlyph = "\uE946",
                 CancelText = localization.T("Common.Cancel")
             });
     }
@@ -770,7 +1012,7 @@ public sealed partial class ContentWidgetWindow
         return _config.WidgetKind switch
         {
             WidgetKind.Glance => widgetManager.SetGlanceWidgetInstanceEnabledAsync(_config.Id, enabled: false),
-            WidgetKind.Custom => widgetManager.RemoveCustomWidgetAsync(_config.Id),
+            WidgetKind.Custom => widgetManager.SetCustomWidgetInstanceEnabledAsync(_config.Id, enabled: false),
             _ => widgetManager.SetFeatureWidgetEnabledAsync(
                 _config.WidgetKind,
                 enabled: false,

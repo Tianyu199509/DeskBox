@@ -123,7 +123,7 @@
                         FontSize="11"
                         Opacity="0.7" />
                 </Grid>
-                <Slider AutomationProperties.LabeledBy="{Binding ElementName=DimLabel}"
+                <Slider AutomationProperties.LabeledBy="{x:Bind DimLabel, Mode=OneTime}"
                     x:Name="DimSlider"
                     Maximum="100"
                     Minimum="0"

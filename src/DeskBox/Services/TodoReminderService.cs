@@ -149,8 +149,58 @@ public sealed class TodoReminderService : IDisposable, ITodoReminderSession
     private bool ShouldBeRunning()
     {
         var settings = _settingsService.Settings;
-        return settings.TodoReminderEnabled &&
-               FeatureWidgetSettings.IsEnabled(settings, WidgetKind.Todo);
+        if (!settings.TodoReminderEnabled)
+        {
+            return false;
+        }
+
+        return FeatureWidgetSettings.IsEnabled(settings, WidgetKind.Todo) ||
+               HasHeadlessDefaultTodoStore();
+    }
+
+    private bool HasHeadlessDefaultTodoStore()
+    {
+        try
+        {
+            string storePath = _storeFactory(CustomWidgetHostSnapshotService.FallbackTodoWidgetId).StorePath;
+            return CustomWidgetHostSnapshotService.HasStoreFileAtPath(storePath);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private List<WidgetConfig> GetActiveReminderWidgets(AppSettings settings)
+    {
+        if (FeatureWidgetSettings.IsEnabled(settings, WidgetKind.Todo))
+        {
+            var configured = settings.WidgetLayout.Widgets
+                .Where(widget =>
+                    widget.WidgetKind == WidgetKind.Todo &&
+                    !widget.IsDisabled &&
+                    !settings.WidgetLayout.DeletedWidgetIds.Contains(widget.Id))
+                .ToList();
+            if (configured.Count > 0)
+            {
+                return configured;
+            }
+        }
+
+        if (HasHeadlessDefaultTodoStore())
+        {
+            return
+            [
+                new WidgetConfig
+                {
+                    Id = CustomWidgetHostSnapshotService.FallbackTodoWidgetId,
+                    Name = _localizationService.T("Todo.Title"),
+                    WidgetKind = WidgetKind.Todo
+                }
+            ];
+        }
+
+        return [];
     }
 
     public Task<int> CheckNowAsync(DateTimeOffset now)
@@ -169,8 +219,7 @@ public sealed class TodoReminderService : IDisposable, ITodoReminderSession
         try
         {
             var settings = _settingsService.Settings;
-            if (!settings.TodoReminderEnabled ||
-                !FeatureWidgetSettings.IsEnabled(settings, WidgetKind.Todo))
+            if (!settings.TodoReminderEnabled)
             {
                 return 0;
             }
@@ -180,12 +229,7 @@ public sealed class TodoReminderService : IDisposable, ITodoReminderSession
             bool allDayRemindersEnabled = settings.Todo.TodoAllDayReminderEnabled;
             int allDayReminderTimeMinutes = SettingsService.NormalizeTodoAllDayReminderTimeMinutes(
                 settings.Todo.TodoAllDayReminderTimeMinutes);
-            var widgets = settings.Widgets
-                .Where(widget =>
-                    widget.WidgetKind == WidgetKind.Todo &&
-                    !widget.IsDisabled &&
-                    !settings.DeletedWidgetIds.Contains(widget.Id))
-                .ToList();
+            var widgets = GetActiveReminderWidgets(settings);
 
             if (widgets.Count == 0)
             {
@@ -452,17 +496,13 @@ public sealed class TodoReminderService : IDisposable, ITodoReminderSession
     {
         widget = null!;
         var settings = _settingsService.Settings;
-        if ((requireReminderEnabled && !settings.TodoReminderEnabled) ||
-            !FeatureWidgetSettings.IsEnabled(settings, WidgetKind.Todo))
+        if (requireReminderEnabled && !settings.TodoReminderEnabled)
         {
             return false;
         }
 
-        var match = settings.Widgets.FirstOrDefault(entry =>
-            entry.WidgetKind == WidgetKind.Todo &&
-            !entry.IsDisabled &&
-            !settings.DeletedWidgetIds.Contains(entry.Id) &&
-            string.Equals(entry.Id, widgetId, StringComparison.Ordinal));
+        var match = GetActiveReminderWidgets(settings).FirstOrDefault(entry =>
+            string.Equals(entry.Id, widgetId, StringComparison.OrdinalIgnoreCase));
         if (match is null)
         {
             return false;
@@ -481,6 +521,20 @@ public sealed class TodoReminderService : IDisposable, ITodoReminderSession
     {
         if (_disposed || _dispatcherQueue is null)
         {
+            return;
+        }
+
+        if (_timer is null && ShouldBeRunning())
+        {
+            if (_dispatcherQueue.HasThreadAccess)
+            {
+                Refresh();
+            }
+            else
+            {
+                _dispatcherQueue.TryEnqueue(Refresh);
+            }
+
             return;
         }
 
@@ -530,12 +584,7 @@ public sealed class TodoReminderService : IDisposable, ITodoReminderSession
             bool allDayRemindersEnabled = settings.Todo.TodoAllDayReminderEnabled;
             int allDayReminderTimeMinutes = SettingsService.NormalizeTodoAllDayReminderTimeMinutes(
                 settings.Todo.TodoAllDayReminderTimeMinutes);
-            var widgets = settings.WidgetLayout.Widgets
-                .Where(widget =>
-                    widget.WidgetKind == WidgetKind.Todo &&
-                    !widget.IsDisabled &&
-                    !settings.WidgetLayout.DeletedWidgetIds.Contains(widget.Id))
-                .ToList();
+            var widgets = GetActiveReminderWidgets(settings);
 
             DateTimeOffset? earliestNextWakeup = null;
             foreach (WidgetConfig widget in widgets)
@@ -997,12 +1046,12 @@ public sealed class TodoReminderService : IDisposable, ITodoReminderSession
                 return _localizationService.T("Todo.Due.Tomorrow");
             }
 
-            return localDueDate.ToString("yyyy/M/d");
+            return localDueDate.ToString("yyyy/M/d", System.Globalization.CultureInfo.InvariantCulture);
         }
 
         string time = localDueDate.Second == 0
-            ? localDueDate.ToString("HH:mm")
-            : localDueDate.ToString("HH:mm:ss");
+            ? localDueDate.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture)
+            : localDueDate.ToString("HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
 
         if (localDueDate.Date == today)
         {
@@ -1015,8 +1064,8 @@ public sealed class TodoReminderService : IDisposable, ITodoReminderSession
         }
 
         return localDueDate.Second == 0
-            ? localDueDate.ToString("yyyy/M/d HH:mm")
-            : localDueDate.ToString("yyyy/M/d HH:mm:ss");
+            ? localDueDate.ToString("yyyy/M/d HH:mm", System.Globalization.CultureInfo.InvariantCulture)
+            : localDueDate.ToString("yyyy/M/d HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
     }
 
     private string NormalizeNotificationText(string? text)

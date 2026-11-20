@@ -234,6 +234,7 @@ static const char DESKBOX_BOOTSTRAP_SCRIPT[] =
     "  const _keys = Object.keys;\n"
     "  const _freeze = Object.freeze;\n"
     "  const _assign = Object.assign;\n"
+    "  const _defineProperty = Object.defineProperty;\n"
     "  const _hasOwn = Object.prototype.hasOwnProperty;\n"
     "  const _isArray = Array.isArray;\n"
     "  const _String = String;\n"
@@ -250,6 +251,31 @@ static const char DESKBOX_BOOTSTRAP_SCRIPT[] =
     "    if (t === 'number') return _Number.isFinite(v) ? _String(v) : '';\n"
     "    try { return _jsonStringify(v) ?? ''; } catch { return _String(v); }\n"
     "  }\n"
+    "  function cloneJson(v, depth) {\n"
+    "    if (v === null || v === undefined) return null;\n"
+    "    const t = typeof v;\n"
+    "    if (t === 'string' || t === 'boolean') return v;\n"
+    "    if (t === 'number') return _Number.isFinite(v) ? v : null;\n"
+    "    if (depth > 12) return null;\n"
+    "    if (_isArray(v)) {\n"
+    "      const a = [];\n"
+    "      for (let i = 0; i < v.length; i++) a.push(cloneJson(v[i], depth + 1));\n"
+    "      return a;\n"
+    "    }\n"
+    "    if (t === 'object') {\n"
+    "      const o = {};\n"
+    "      const ks = _keys(v);\n"
+    "      for (let i = 0; i < ks.length; i++) {\n"
+    "        const k = ks[i];\n"
+    "        if (v[k] !== undefined) o[k] = cloneJson(v[k], depth + 1);\n"
+    "      }\n"
+    "      return o;\n"
+    "    }\n"
+    "    return _String(v);\n"
+    "  }\n"
+    "  function safeJsonSig(v) {\n"
+    "    try { return _jsonStringify(v); } catch { return ''; }\n"
+    "  }\n"
     "  function deepFreeze(obj, depth) {\n"
     "    if (!obj || typeof obj !== 'object' || depth > 5) return obj;\n"
     "    const ks = _keys(obj);\n"
@@ -257,6 +283,43 @@ static const char DESKBOX_BOOTSTRAP_SCRIPT[] =
     "      deepFreeze(obj[ks[i]], depth + 1);\n"
     "    }\n"
     "    return _freeze(obj);\n"
+    "  }\n"
+    "  function defineHiddenMethod(obj, name, fn) {\n"
+    "    if (!obj || _hasOwn.call(obj, name)) return;\n"
+    "    _defineProperty(obj, name, { value: fn, enumerable: false, writable: false, configurable: true });\n"
+    "  }\n"
+    "  function attachMutableMapAccessors(obj) {\n"
+    "    defineHiddenMethod(obj, 'get', function(k, fb) {\n"
+    "      const key = k == null ? '' : _String(k);\n"
+    "      return (_hasOwn.call(obj, key) && obj[key] !== undefined) ? obj[key] : fb;\n"
+    "    });\n"
+    "    defineHiddenMethod(obj, 'set', function(k, v) {\n"
+    "      const key = k == null ? '' : _String(k);\n"
+    "      if (key) obj[key] = v;\n"
+    "      return v;\n"
+    "    });\n"
+    "    defineHiddenMethod(obj, 'has', function(k) {\n"
+    "      const key = k == null ? '' : _String(k);\n"
+    "      return _hasOwn.call(obj, key) && obj[key] !== undefined;\n"
+    "    });\n"
+    "    defineHiddenMethod(obj, 'delete', function(k) {\n"
+    "      const key = k == null ? '' : _String(k);\n"
+    "      if (!_hasOwn.call(obj, key)) return false;\n"
+    "      delete obj[key];\n"
+    "      return true;\n"
+    "    });\n"
+    "    return obj;\n"
+    "  }\n"
+    "  function attachReadOnlyMapAccessors(obj) {\n"
+    "    defineHiddenMethod(obj, 'get', function(k, fb) {\n"
+    "      const key = k == null ? '' : _String(k);\n"
+    "      return (_hasOwn.call(obj, key) && obj[key] !== undefined) ? obj[key] : fb;\n"
+    "    });\n"
+    "    defineHiddenMethod(obj, 'has', function(k) {\n"
+    "      const key = k == null ? '' : _String(k);\n"
+    "      return _hasOwn.call(obj, key) && obj[key] !== undefined;\n"
+    "    });\n"
+    "    return obj;\n"
     "  }\n"
     "  let _seq = 1;\n"
     "  function makeId(nowMs) {\n"
@@ -270,18 +333,18 @@ static const char DESKBOX_BOOTSTRAP_SCRIPT[] =
     "        const fks = _keys(raw.fields);\n"
     "        for (let i = 0; i < fks.length; i++) {\n"
     "          const k = fks[i];\n"
-    "          out[k] = toStateStr(raw.fields[k]);\n"
+    "          if (raw.fields[k] !== undefined) out[k] = cloneJson(raw.fields[k], 0);\n"
     "        }\n"
     "      }\n"
     "      const ks = _keys(raw);\n"
     "      for (let i = 0; i < ks.length; i++) {\n"
     "        const k = ks[i];\n"
     "        if (k === 'fields') continue;\n"
-    "        out[k] = toStateStr(raw[k]);\n"
+    "        if (raw[k] !== undefined) out[k] = cloneJson(raw[k], 0);\n"
     "      }\n"
     "    }\n"
-    "    if (!out.id) out.id = makeId(0);\n"
-    "    if (!out.createdAt) out.createdAt = nowIso || '';\n"
+    "    out.id = out.id == null || out.id === '' ? makeId(0) : _String(out.id);\n"
+    "    out.createdAt = out.createdAt == null || out.createdAt === '' ? (nowIso || '') : _String(out.createdAt);\n"
     "    return out;\n"
     "  }\n"
     "  function normalizeItemForHost(item, nowMs, nowIso) {\n"
@@ -291,59 +354,86 @@ static const char DESKBOX_BOOTSTRAP_SCRIPT[] =
     "    let createdAtUtcTicks = 0;\n"
     "    if (item && typeof item === 'object') {\n"
     "      if (typeof item.id === 'string' && item.id.length > 0) id = item.id;\n"
+    "      else if (typeof item.id === 'number' && _Number.isFinite(item.id)) id = _String(item.id);\n"
     "      if (typeof item.createdAt === 'string' && item.createdAt.length > 0) createdAt = item.createdAt;\n"
     "      if (item.createdAtUtcTicks) createdAtUtcTicks = _Number(item.createdAtUtcTicks) || 0;\n"
     "      if (item.fields && typeof item.fields === 'object') {\n"
     "        const fks = _keys(item.fields);\n"
     "        for (let i = 0; i < fks.length; i++) {\n"
     "          const k = fks[i];\n"
-    "          fields[k] = toStateStr(item.fields[k]);\n"
+    "          if (item.fields[k] !== undefined) fields[k] = cloneJson(item.fields[k], 0);\n"
     "        }\n"
     "      }\n"
     "      const ks = _keys(item);\n"
     "      for (let i = 0; i < ks.length; i++) {\n"
     "        const k = ks[i];\n"
     "        if (META_KEYS.has(k)) continue;\n"
-    "        fields[k] = toStateStr(item[k]);\n"
+    "        if (item[k] !== undefined) fields[k] = cloneJson(item[k], 0);\n"
     "      }\n"
     "    }\n"
     "    if (!id) id = makeId(nowMs);\n"
-    "    const jsView = _assign({}, fields, { id, createdAt });\n"
-    "    if (createdAtUtcTicks > 0) jsView.createdAtUtcTicks = _String(createdAtUtcTicks);\n"
+    "    const jsView = _assign({}, cloneJson(fields, 0), { id, createdAt });\n"
+    "    if (createdAtUtcTicks > 0) jsView.createdAtUtcTicks = createdAtUtcTicks;\n"
     "    return { id, createdAt, createdAtUtcTicks, fields, jsView };\n"
     "  }\n"
     "  return function prepareSession(moduleFn, rawPayload, fnName) {\n"
     "    const payload = rawPayload || {};\n"
     "    const nowMs = _Number(payload.env && payload.env.nowMs) || Date.now();\n"
     "    const nowIso = (payload.env && payload.env.isoDate) ? _String(payload.env.isoDate) : '';\n"
+    "    const nowIsoFull = (payload.env && payload.env.isoDateTime) ? _String(payload.env.isoDateTime) : nowIso;\n"
+    "    const locale = (payload.env && payload.env.locale) ? _String(payload.env.locale) : '';\n"
     "    const maxColItems = _Math.min(500, _Math.max(1, _Number(payload.maxCollectionItems) || 500));\n"
     "    const allowCopy = !!payload.allowCopy;\n"
     "    const initState = payload.state || {};\n"
+    "    const initStateSigs = _create(null);\n"
     "    const state = {};\n"
     "    const initStateKeys = _keys(initState);\n"
     "    for (let i = 0; i < initStateKeys.length; i++) {\n"
     "      const k = initStateKeys[i];\n"
-    "      state[k] = toStateStr(initState[k]);\n"
+    "      const cloned = cloneJson(initState[k], 0);\n"
+    "      state[k] = cloned;\n"
+    "      initStateSigs[k] = safeJsonSig(cloned);\n"
     "    }\n"
+    "    attachMutableMapAccessors(state);\n"
     "    const computed = (payload.computed && typeof payload.computed === 'object' && !_isArray(payload.computed))\n"
-    "      ? _assign({}, payload.computed)\n"
+    "      ? cloneJson(payload.computed, 0)\n"
     "      : {};\n"
-    "    const settings = _freeze(_assign({}, payload.settings || {}));\n"
-    "    const i18n = _freeze(_assign({}, payload.i18n || {}));\n"
+    "    attachMutableMapAccessors(computed);\n"
+    "    const settings = _freeze(attachReadOnlyMapAccessors(_assign({}, payload.settings || {})));\n"
+    "    const i18n = _freeze(attachReadOnlyMapAccessors(_assign({}, payload.i18n || {})));\n"
     "    const rawArgs = (payload.args && typeof payload.args === 'object' && !_isArray(payload.args)) ? payload.args : {};\n"
-    "    const args = _freeze(_assign({}, rawArgs));\n"
+    "    const args = _freeze(attachReadOnlyMapAccessors(_assign({}, rawArgs)));\n"
     "    const rawEv = payload.event || {};\n"
+    "    const rawFiles = _isArray(rawEv.files) ? rawEv.files : [];\n"
+    "    const filesList = [];\n"
+    "    for (let i = 0; i < rawFiles.length && i < 200; i++) {\n"
+    "      const f = rawFiles[i];\n"
+    "      if (f && typeof f === 'object') filesList.push(_freeze(_assign({}, f)));\n"
+    "    }\n"
+    "    const rawItems = _isArray(rawEv.items) ? rawEv.items : [];\n"
+    "    const itemsList = [];\n"
+    "    for (let i = 0; i < rawItems.length && i < 200; i++) {\n"
+    "      const it = rawItems[i];\n"
+    "      if (it && typeof it === 'object') itemsList.push(_freeze(_assign({}, it)));\n"
+    "    }\n"
     "    const event = _freeze({\n"
     "      arg: rawEv.arg == null ? '' : _String(rawEv.arg),\n"
     "      value: rawEv.value == null ? '' : _String(rawEv.value),\n"
+    "      kind: rawEv.kind == null ? '' : _String(rawEv.kind),\n"
+    "      text: rawEv.text == null ? '' : _String(rawEv.text),\n"
     "      id: rawEv.id == null ? '' : _String(rawEv.id),\n"
     "      x: rawEv.x == null ? null : _Number(rawEv.x),\n"
     "      y: rawEv.y == null ? null : _Number(rawEv.y),\n"
+    "      normX: rawEv.normX == null ? null : _Number(rawEv.normX),\n"
+    "      normY: rawEv.normY == null ? null : _Number(rawEv.normY),\n"
+    "      isPressed: rawEv.isPressed == null ? false : !!rawEv.isPressed,\n"
     "      fromIndex: rawEv.fromIndex == null ? null : _Number(rawEv.fromIndex),\n"
     "      toIndex: rawEv.toIndex == null ? null : _Number(rawEv.toIndex),\n"
     "      args: args,\n"
-    "      item: (rawEv.item && typeof rawEv.item === 'object') ? _freeze(_assign({}, rawEv.item)) : null,\n"
-    "      drop: (rawEv.drop && typeof rawEv.drop === 'object') ? _freeze(_assign({}, rawEv.drop)) : null\n"
+    "      item: (rawEv.item && typeof rawEv.item === 'object') ? deepFreeze(cloneJson(rawEv.item, 0), 0) : null,\n"
+    "      items: _freeze(itemsList),\n"
+    "      drop: (rawEv.drop && typeof rawEv.drop === 'object') ? _freeze(_assign({}, rawEv.drop)) : null,\n"
+    "      files: _freeze(filesList)\n"
     "    });\n"
     "    const env = deepFreeze(_assign({}, payload.env || {}), 0);\n"
     "    const rawCols = payload.collections || {};\n"
@@ -366,12 +456,26 @@ static const char DESKBOX_BOOTSTRAP_SCRIPT[] =
     "      get(name) {\n"
     "        const arr = ensureCol(name);\n"
     "        const res = [];\n"
-    "        for (let i = 0; i < arr.length; i++) res.push(_assign({}, arr[i].jsView));\n"
+    "        for (let i = 0; i < arr.length; i++) res.push(cloneJson(arr[i].jsView, 0));\n"
     "        return res;\n"
     "      },\n"
     "      add(name, fieldsObj, opts) {\n"
     "        const colKey = _String(name || '');\n"
     "        if (!colKey) return null;\n"
+    "        if (_isArray(fieldsObj)) {\n"
+    "          let lastAdded = null;\n"
+    "          const isPrepend = !(opts && opts.prepend === false);\n"
+    "          if (isPrepend) {\n"
+    "            for (let i = fieldsObj.length - 1; i >= 0; i--) {\n"
+    "              lastAdded = collections.add(colKey, fieldsObj[i], opts);\n"
+    "            }\n"
+    "          } else {\n"
+    "            for (let i = 0; i < fieldsObj.length; i++) {\n"
+    "              lastAdded = collections.add(colKey, fieldsObj[i], opts);\n"
+    "            }\n"
+    "          }\n"
+    "          return lastAdded;\n"
+    "        }\n"
     "        const arr = ensureCol(colKey);\n"
     "        const norm = normalizeItemForHost(fieldsObj || {}, nowMs, nowIso);\n"
     "        if (opts && opts.prepend === false) {\n"
@@ -382,7 +486,7 @@ static const char DESKBOX_BOOTSTRAP_SCRIPT[] =
     "          if (arr.length > maxColItems) arr.length = maxColItems;\n"
     "        }\n"
     "        dirtyCols.add(colKey);\n"
-    "        return _assign({}, norm.jsView);\n"
+    "        return cloneJson(norm.jsView, 0);\n"
     "      },\n"
     "      prepend(name, fieldsObj) {\n"
     "        return collections.add(name, fieldsObj, { prepend: true });\n"
@@ -397,7 +501,7 @@ static const char DESKBOX_BOOTSTRAP_SCRIPT[] =
     "        const arr = ensureCol(colKey);\n"
     "        for (let i = 0; i < arr.length; i++) {\n"
     "          if (arr[i].id === targetId) {\n"
-    "            const merged = _assign({}, arr[i].jsView, patchObj, { id: targetId });\n"
+    "            const merged = _assign({}, cloneJson(arr[i].jsView, 0), patchObj, { id: targetId });\n"
     "            arr[i] = normalizeItemForHost(merged, nowMs, arr[i].createdAt);\n"
     "            dirtyCols.add(colKey);\n"
     "            return true;\n"
@@ -414,7 +518,7 @@ static const char DESKBOX_BOOTSTRAP_SCRIPT[] =
     "        const targetId = isFn ? '' : _String(idOrPredicate);\n"
     "        const kept = [];\n"
     "        for (let i = 0; i < arr.length; i++) {\n"
-    "          const drop = isFn ? !!idOrPredicate(_assign({}, arr[i].jsView), i) : (arr[i].id === targetId);\n"
+    "          const drop = isFn ? !!idOrPredicate(cloneJson(arr[i].jsView, 0), i) : (arr[i].id === targetId);\n"
     "          if (!drop) kept.push(arr[i]);\n"
     "        }\n"
     "        if (kept.length !== before) {\n"
@@ -438,6 +542,12 @@ static const char DESKBOX_BOOTSTRAP_SCRIPT[] =
     "        }\n"
     "        workingCols[colKey] = next;\n"
     "        dirtyCols.add(colKey);\n"
+    "      },\n"
+    "      delete(name, idOrPredicate) {\n"
+    "        return collections.remove(name, idOrPredicate);\n"
+    "      },\n"
+    "      count(name) {\n"
+    "        return ensureCol(name).length;\n"
     "      }\n"
     "    });\n"
     "    function t(key, fallbackOrVars, maybeVars) {\n"
@@ -473,14 +583,14 @@ static const char DESKBOX_BOOTSTRAP_SCRIPT[] =
     "    function dispatch(actOrArr) {\n"
     "      if (!actOrArr) return;\n"
     "      if (_isArray(actOrArr)) {\n"
-    "        for (let i = 0; i < actOrArr.length && dispatchedActions.length < 8; i++) {\n"
+    "        for (let i = 0; i < actOrArr.length && dispatchedActions.length < 16; i++) {\n"
     "          const a = actOrArr[i];\n"
     "          if (a && typeof a === 'object' && typeof a.type === 'string' && a.type.length > 0) {\n"
     "            dispatchedActions.push(a);\n"
     "          }\n"
     "        }\n"
     "      } else if (typeof actOrArr === 'object' && typeof actOrArr.type === 'string' && actOrArr.type.length > 0) {\n"
-    "        if (dispatchedActions.length < 8) dispatchedActions.push(actOrArr);\n"
+    "        if (dispatchedActions.length < 16) dispatchedActions.push(actOrArr);\n"
     "      }\n"
     "    }\n"
     "    const ui = _freeze({\n"
@@ -505,11 +615,18 @@ static const char DESKBOX_BOOTSTRAP_SCRIPT[] =
     "      }\n"
     "    });\n"
     "    const response = payload.rawPayload !== undefined ? payload.rawPayload : null;\n"
-    "    const ctx = _freeze({ state, computed, settings, i18n, args, event, env, collections, t, ui, dispatch, response });\n"
+    "    const sysAlias = env.sys || _freeze({});\n"
+    "    const deviceAlias = env.device || _freeze({});\n"
+    "    const weatherAlias = env.weather || _freeze({});\n"
+    "    const ctx = _freeze({ state, computed, settings, i18n, args, event, env, sys: sysAlias, device: deviceAlias, weather: weatherAlias, locale, nowIso: nowIsoFull, collections, t, ui, dispatch, response });\n"
+    "    const callKind = payload.callKind ? _String(payload.callKind) : '';\n"
     "    let callResult;\n"
-    "    if (fnName === 'onSourceData') {\n"
+    "    if (callKind === 'sourceData' || (!callKind && fnName === 'onSourceData')) {\n"
     "      callResult = moduleFn(ctx, payload.sourceId == null ? '' : _String(payload.sourceId), payload.rawPayload);\n"
-    "    } else if (fnName === 'onHttpResponse' || fnName === 'onCommandResult') {\n"
+    "    } else if (callKind === 'tick' || (!callKind && fnName === 'onTick')) {\n"
+    "      callResult = moduleFn(ctx, nowMs, event);\n"
+    "    } else if (callKind === 'jobProgress' || callKind === 'jobResult' ||\n"
+    "               (!callKind && (fnName === 'onHttpResponse' || fnName === 'onCommandResult' || fnName === 'onAiResult' || fnName === 'onJobProgress' || fnName === 'onJobComplete'))) {\n"
     "      callResult = moduleFn(ctx, payload.rawPayload, event);\n"
     "    } else {\n"
     "      callResult = moduleFn(ctx, event);\n"
@@ -523,12 +640,13 @@ static const char DESKBOX_BOOTSTRAP_SCRIPT[] =
     "        const k = curStateKeys[i];\n"
     "        const rawV = state[k];\n"
     "        if (rawV === undefined || rawV === null) {\n"
-    "          if (_hasOwn.call(initState, k)) { stateRemoved.push(k); stateChanged = true; }\n"
+    "          if (_hasOwn.call(initStateSigs, k)) { stateRemoved.push(k); stateChanged = true; }\n"
     "          continue;\n"
     "        }\n"
-    "        const sv = toStateStr(rawV);\n"
-    "        if (!_hasOwn.call(initState, k) || toStateStr(initState[k]) !== sv) {\n"
-    "          stateSet[k] = sv;\n"
+    "        const normV = cloneJson(rawV, 0);\n"
+    "        const sig = safeJsonSig(normV);\n"
+    "        if (!_hasOwn.call(initStateSigs, k) || initStateSigs[k] !== sig) {\n"
+    "          stateSet[k] = normV;\n"
     "          stateChanged = true;\n"
     "        }\n"
     "      }\n"
@@ -769,15 +887,41 @@ DESKBOX_QJS_API int32_t __cdecl deskbox_qjs_compile_module(
 
     JSValue exports_json = JS_JSONStringify(ctx, meta_obj, JS_UNDEFINED, JS_UNDEFINED);
     JS_FreeValue(ctx, meta_obj);
-    if (!JS_IsException(exports_json)) {
-        size_t exp_len = 0;
-        const char *exp_cstr = JS_ToCStringLen(ctx, &exp_len, exports_json);
-        if (exp_cstr) {
-            alloc_copy_bytes(exp_cstr, exp_len, out_exports_json_utf8, out_exports_json_len);
-            JS_FreeCString(ctx, exp_cstr);
-        }
+    if (JS_IsException(exports_json)) {
+        free(*out_bytecode);
+        *out_bytecode = NULL;
+        *out_bytecode_len = 0;
+        int32_t code = capture_exception_and_classify(ctx, &guard, out_error_utf8, out_error_len);
+        JS_FreeContext(ctx);
+        JS_FreeRuntime(rt);
+        return code;
     }
+
+    size_t exp_len = 0;
+    const char *exp_cstr = JS_ToCStringLen(ctx, &exp_len, exports_json);
+    if (!exp_cstr) {
+        JS_FreeValue(ctx, exports_json);
+        free(*out_bytecode);
+        *out_bytecode = NULL;
+        *out_bytecode_len = 0;
+        int32_t code = capture_exception_and_classify(ctx, &guard, out_error_utf8, out_error_len);
+        JS_FreeContext(ctx);
+        JS_FreeRuntime(rt);
+        return code;
+    }
+
+    int copied = alloc_copy_bytes(exp_cstr, exp_len, out_exports_json_utf8, out_exports_json_len);
+    JS_FreeCString(ctx, exp_cstr);
     JS_FreeValue(ctx, exports_json);
+    if (!copied) {
+        free(*out_bytecode);
+        *out_bytecode = NULL;
+        *out_bytecode_len = 0;
+        set_error_text("Out of host memory while copying module exports.", out_error_utf8, out_error_len);
+        JS_FreeContext(ctx);
+        JS_FreeRuntime(rt);
+        return DESKBOX_QJS_OOM;
+    }
 
     JS_FreeContext(ctx);
     JS_FreeRuntime(rt);
@@ -809,6 +953,11 @@ DESKBOX_QJS_API int32_t __cdecl deskbox_qjs_invoke_bytecode(
 
     if (!bytecode || bytecode_len == 0 || !fn_name_utf8 || fn_name_utf8[0] == '\0') {
         set_error_text("Invalid bytecode or function name.", out_error_utf8, out_error_len);
+        return DESKBOX_QJS_INVALID_ARGUMENT;
+    }
+
+    if (payload_json_len > DESKBOX_QJS_MAX_PAYLOAD_JSON_BYTES) {
+        set_error_text("Input payload JSON exceeds 4 MB maximum size.", out_error_utf8, out_error_len);
         return DESKBOX_QJS_INVALID_ARGUMENT;
     }
 
@@ -864,6 +1013,13 @@ DESKBOX_QJS_API int32_t __cdecl deskbox_qjs_invoke_bytecode(
         }
     } else {
         payload_val = JS_NewObject(ctx);
+        if (JS_IsException(payload_val)) {
+            JS_FreeValue(ctx, prepare_fn);
+            int32_t code = capture_exception_and_classify(ctx, &guard, out_error_utf8, out_error_len);
+            JS_FreeContext(ctx);
+            JS_FreeRuntime(rt);
+            return code;
+        }
     }
 
     /* 3. Deserialize and evaluate precompiled module bytecode. */
@@ -954,7 +1110,10 @@ DESKBOX_QJS_API int32_t __cdecl deskbox_qjs_invoke_bytecode(
             return DESKBOX_QJS_EXPORT_NOT_FOUND;
         }
         static const char NOT_INVOKED_JSON[] = "{\"invoked\":false}";
-        alloc_copy_bytes(NOT_INVOKED_JSON, sizeof(NOT_INVOKED_JSON) - 1, out_result_json_utf8, out_result_json_len);
+        if (!alloc_copy_bytes(NOT_INVOKED_JSON, sizeof(NOT_INVOKED_JSON) - 1, out_result_json_utf8, out_result_json_len)) {
+            set_error_text("Out of memory allocating invocation result.", out_error_utf8, out_error_len);
+            return DESKBOX_QJS_OOM;
+        }
         return DESKBOX_QJS_OK;
     }
 
@@ -998,6 +1157,13 @@ DESKBOX_QJS_API int32_t __cdecl deskbox_qjs_invoke_bytecode(
     JS_FreeValue(ctx, call_res);
 
     JSValue finalize_fn = JS_GetPropertyStr(ctx, session_obj, "finalize");
+    if (JS_IsException(finalize_fn)) {
+        JS_FreeValue(ctx, session_obj);
+        int32_t code = capture_exception_and_classify(ctx, &guard, out_error_utf8, out_error_len);
+        JS_FreeContext(ctx);
+        JS_FreeRuntime(rt);
+        return code;
+    }
     JSValue delta_obj = JS_Call(ctx, finalize_fn, JS_UNDEFINED, 0, NULL);
     JS_FreeValue(ctx, finalize_fn);
     JS_FreeValue(ctx, session_obj);

@@ -1,41 +1,38 @@
-using System.IO;
 using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Services;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
-using Windows.ApplicationModel.DataTransfer;
+using Windows.System;
 
 namespace DeskBox.Controls;
 
 public sealed partial class DesktopOrganizationTaskView
 {
-    private readonly List<DesktopOrganizationPreviewCard> _retainedCards = [];
-    private readonly HashSet<string> _retainedSelection = new(StringComparer.OrdinalIgnoreCase);
     private int _trayIconGeneration;
 
     private void ReleaseRetainedCards()
     {
         _trayIconGeneration++;
-        foreach (var card in _retainedCards) card.Dispose();
-        _retainedCards.Clear();
-        RetainedRows.Children.Clear();
         TrayItemsPanel.Children.Clear();
     }
 
-    private void RenderExcludedItems(DesktopOrganizationPlan plan)
+    private void RenderExcludedItems(DesktopOrganizationPlan? explicitPlan = null)
     {
         ReleaseRetainedCards();
-        var retained = GetRetainedPreviewItems();
+        DesktopOrganizationPlan? plan = explicitPlan ?? (_hasCompletedExecution ? _lastExecutionPlan : Session.EffectivePlan);
+        var retained = GetRetainedPreviewItems(plan);
         var movableItems = retained.Where(CanIncludeRetainedItem).ToList();
         var lockedItems = retained.Where(item => !CanIncludeRetainedItem(item)).ToList();
-        _retainedSelection.IntersectWith(movableItems.Select(item => item.SourcePath));
 
         StayOnDesktopHeaderTitleText.Text = T("DesktopOrganization.Layout.KeptTitle");
         StayOnDesktopTrayTitleText.Text = Format("DesktopOrganization.Preview.ItemCount", retained.Count);
         RestoreAllExcludedButton.Content = T("DesktopOrganization.Layout.Include");
-        RestoreAllExcludedButton.Visibility = !_hasCompletedExecution && _excludedSourcePaths.Count > 0
+        RestoreAllExcludedButton.Visibility = !_hasCompletedExecution && Session.ExcludedSourcePaths.Count > 0
             ? Visibility.Visible
             : Visibility.Collapsed;
         TrayEmptyHintText.Visibility = Visibility.Collapsed;
@@ -95,9 +92,6 @@ public sealed partial class DesktopOrganizationTaskView
                 TrayItemsPanel.Children.Add(CreateLaneRow(item, canInclude: false, generation, appSettings));
             }
         }
-
-        RetainedEmptyText.Text = T("DesktopOrganization.Layout.NoRetained");
-        RetainedEmptyCard.Visibility = retained.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private UIElement CreateLaneEmptyDropZone()
@@ -183,8 +177,8 @@ public sealed partial class DesktopOrganizationTaskView
         string displayName = FileService.GetDisplayName(
             item.SourcePath,
             item.IsDirectory,
-            appSettings.ShowFileExtensions,
-            appSettings.HideShortcutExtensionWhenShowingFileExtensions);
+            appSettings.FileWidget.ShowFileExtensions,
+            appSettings.FileWidget.HideShortcutExtensionWhenShowingFileExtensions);
 
         var nameText = new TextBlock
         {
@@ -196,24 +190,38 @@ public sealed partial class DesktopOrganizationTaskView
             Foreground = canInclude ? primaryBrush : secondaryBrush
         };
 
-        var backText = new TextBlock
+        Button? includeButton = null;
+        if (canInclude)
         {
-            Text = T("DesktopOrganization.Layout.Include"),
-            FontSize = 11.5,
-            VerticalAlignment = VerticalAlignment.Center,
-            Opacity = 0,
-            Foreground = accentBrush,
-            Visibility = canInclude ? Visibility.Visible : Visibility.Collapsed
-        };
+            includeButton = new Button
+            {
+                Content = new TextBlock
+                {
+                    Text = T("DesktopOrganization.Layout.Include"),
+                    FontSize = 11.5,
+                    Foreground = accentBrush
+                },
+                Background = transparentBg,
+                BorderThickness = new Thickness(0),
+                Padding = new Thickness(6, 2, 6, 2),
+                MinHeight = 24,
+                CornerRadius = new CornerRadius(4),
+                VerticalAlignment = VerticalAlignment.Center,
+                Opacity = 0
+            };
+            AutomationProperties.SetName(includeButton, $"{T("DesktopOrganization.Layout.Include")} {displayName}");
+            ToolTipService.SetToolTip(includeButton, T("DesktopOrganization.Layout.Include"));
+            includeButton.Click += (_, _) => RestoreSingleRetainedItem(item);
+        }
 
         var rowGrid = new Grid
         {
             Height = 32,
-            Padding = new Thickness(8, 0, 8, 0),
+            Padding = new Thickness(8, 0, 6, 0),
             ColumnSpacing = 8,
             CornerRadius = new CornerRadius(6),
             Background = transparentBg,
-            Opacity = canInclude ? 1.0 : 0.56,
+            Opacity = canInclude ? 1.0 : 0.62,
             CanDrag = false
         };
         rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -221,104 +229,155 @@ public sealed partial class DesktopOrganizationTaskView
         rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         Grid.SetColumn(iconHost, 0);
         Grid.SetColumn(nameText, 1);
-        Grid.SetColumn(backText, 2);
         rowGrid.Children.Add(iconHost);
         rowGrid.Children.Add(nameText);
-        rowGrid.Children.Add(backText);
+        if (includeButton is not null)
+        {
+            Grid.SetColumn(includeButton, 2);
+            rowGrid.Children.Add(includeButton);
+        }
 
         string reason = ExclusionDescription(item);
         string tooltip = item.Name + "\n" + reason;
         ToolTipService.SetToolTip(rowGrid, tooltip);
 
+        var rowHost = new ContentControl
+        {
+            Content = rowGrid,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            IsTabStop = true,
+            UseSystemFocusVisuals = true,
+            ManipulationMode = canInclude
+                ? ManipulationModes.TranslateX | ManipulationModes.TranslateY
+                : ManipulationModes.System
+        };
+        AutomationProperties.SetName(rowHost, $"{displayName}, {reason}");
+
+        bool isPointerOver = false;
+        bool isRowFocused = false;
+        bool isButtonFocused = false;
+        void UpdateRowVisualState()
+        {
+            bool active = isPointerOver || isRowFocused || isButtonFocused;
+            rowGrid.Background = active ? hoverBg : transparentBg;
+            if (includeButton is not null)
+            {
+                includeButton.Opacity = active ? 1 : 0;
+            }
+        }
+
+        rowHost.PointerEntered += (_, _) =>
+        {
+            isPointerOver = true;
+            UpdateRowVisualState();
+        };
+        rowHost.PointerExited += (_, _) =>
+        {
+            isPointerOver = false;
+            UpdateRowVisualState();
+        };
+        rowHost.GotFocus += (_, _) =>
+        {
+            isRowFocused = true;
+            UpdateRowVisualState();
+        };
+        rowHost.LostFocus += (_, _) =>
+        {
+            isRowFocused = false;
+            UpdateRowVisualState();
+        };
+
+        if (includeButton is not null)
+        {
+            includeButton.GotFocus += (_, _) =>
+            {
+                isButtonFocused = true;
+                UpdateRowVisualState();
+            };
+            includeButton.LostFocus += (_, _) =>
+            {
+                isButtonFocused = false;
+                UpdateRowVisualState();
+            };
+        }
+
+        var contextMenu = new MenuFlyout();
         if (canInclude)
         {
-            bool isRowPointerPressed = false;
-            bool isRowDragging = false;
-            Windows.Foundation.Point rowPressStart = default;
+            var includeMenuItem = new MenuFlyoutItem
+            {
+                Text = T("DesktopOrganization.Layout.Include"),
+                Icon = new FontIcon { Glyph = "\uE710" }
+            };
+            includeMenuItem.Click += (_, _) => RestoreSingleRetainedItem(item);
+            contextMenu.Items.Add(includeMenuItem);
+        }
 
-            rowGrid.PointerEntered += (_, _) =>
-            {
-                rowGrid.Background = hoverBg;
-                backText.Opacity = 1;
-            };
-            rowGrid.PointerExited += (_, _) =>
-            {
-                rowGrid.Background = transparentBg;
-                backText.Opacity = 0;
-            };
-            rowGrid.AddHandler(
+        var detailsMenuItem = new MenuFlyoutItem
+        {
+            Text = T("DesktopOrganization.Layout.Details"),
+            Icon = new FontIcon { Glyph = "\uE946" }
+        };
+        detailsMenuItem.Click += (_, _) => ShowRetainedItemDetailsFlyout(rowHost, item, canInclude);
+        contextMenu.Items.Add(detailsMenuItem);
+        rowHost.ContextFlyout = contextMenu;
+
+        if (canInclude)
+        {
+            rowHost.AddHandler(
                 UIElement.PointerPressedEvent,
-                new Microsoft.UI.Xaml.Input.PointerEventHandler((_, e) =>
+                new PointerEventHandler((_, e) =>
                 {
-                    if (_hasCompletedExecution || !e.GetCurrentPoint(rowGrid).Properties.IsLeftButtonPressed)
+                    if (_isScanning || _isExecuting || _hasCompletedExecution ||
+                        IsOriginInsideButton(e.OriginalSource as DependencyObject, rowHost))
                     {
                         return;
                     }
 
-                    isRowPointerPressed = true;
-                    isRowDragging = false;
-                    rowPressStart = e.GetCurrentPoint(this).Position;
+                    _dragController.TryBeginCandidate(
+                        rowHost,
+                        e,
+                        DesktopOrganizationDragOrigin.StayOnDesktopTray,
+                        string.Empty,
+                        () => [item.SourcePath],
+                        onClickWithoutDrag: null);
                 }),
                 handledEventsToo: true);
-            rowGrid.AddHandler(
-                UIElement.PointerMovedEvent,
-                new Microsoft.UI.Xaml.Input.PointerEventHandler((_, e) =>
+
+            rowHost.DoubleTapped += (_, e) =>
+            {
+                if (!IsOriginInsideButton(e.OriginalSource as DependencyObject, rowHost))
                 {
-                    if (!isRowPointerPressed)
-                    {
-                        return;
-                    }
-
-                    var pt = e.GetCurrentPoint(this);
-                    if (!pt.Properties.IsLeftButtonPressed)
-                    {
-                        isRowPointerPressed = false;
-                        isRowDragging = false;
-                        return;
-                    }
-
-                    if (!isRowDragging)
-                    {
-                        double dx = pt.Position.X - rowPressStart.X;
-                        double dy = pt.Position.Y - rowPressStart.Y;
-                        if ((dx * dx) + (dy * dy) < 25)
-                        {
-                            return;
-                        }
-
-                        isRowDragging = true;
-                        rowGrid.CapturePointer(e.Pointer);
-                        DesktopOrganizationPreviewCard.ActiveDraggedSourcePath = item.SourcePath;
-                        DesktopOrganizationPreviewCard.ActiveDraggedSourcePaths = [item.SourcePath];
-                        DesktopOrganizationPreviewCard.NotifyDragSessionState(true);
-                    }
-
-                    DesktopOrganizationPreviewCard.NotifyPointerDragMoved(rowGrid, e);
-                }),
-                handledEventsToo: true);
-            rowGrid.AddHandler(
-                UIElement.PointerReleasedEvent,
-                new Microsoft.UI.Xaml.Input.PointerEventHandler((_, e) =>
-                {
-                    if (!isRowPointerPressed)
-                    {
-                        return;
-                    }
-
-                    bool wasDragging = isRowDragging;
-                    isRowPointerPressed = false;
-                    isRowDragging = false;
-                    rowGrid.ReleasePointerCapture(e.Pointer);
-
-                    if (wasDragging)
-                    {
-                        DesktopOrganizationPreviewCard.NotifyPointerDragReleased(rowGrid, e);
-                        return;
-                    }
-
                     RestoreSingleRetainedItem(item);
-                }),
-                handledEventsToo: true);
+                }
+            };
+
+            rowHost.KeyDown += (_, e) =>
+            {
+                if (e.Key == VirtualKey.Enter && !IsOriginInsideButton(e.OriginalSource as DependencyObject, rowHost))
+                {
+                    e.Handled = true;
+                    RestoreSingleRetainedItem(item);
+                }
+                else if (e.Key == VirtualKey.Space)
+                {
+                    e.Handled = true;
+                    ShowRetainedItemDetailsFlyout(rowHost, item, canInclude: true);
+                }
+            };
+        }
+        else
+        {
+            rowHost.Tapped += (_, _) => ShowRetainedItemDetailsFlyout(rowHost, item, canInclude: false);
+            rowHost.KeyDown += (_, e) =>
+            {
+                if (e.Key is VirtualKey.Enter or VirtualKey.Space)
+                {
+                    e.Handled = true;
+                    ShowRetainedItemDetailsFlyout(rowHost, item, canInclude: false);
+                }
+            };
         }
 
         _ = LoadTrayIconAsync(
@@ -326,9 +385,88 @@ public sealed partial class DesktopOrganizationTaskView
             fallback,
             item.SourcePath,
             generation,
-            appSettings.HideShortcutArrowOverlay,
-            appSettings.ShowImageFilesAsIcons);
-        return rowGrid;
+            appSettings.FileWidget.HideShortcutArrowOverlay,
+            appSettings.FileWidget.ShowImageFilesAsIcons);
+        return rowHost;
+    }
+
+    private void ShowRetainedItemDetailsFlyout(
+        FrameworkElement target,
+        DesktopOrganizationFileSnapshot item,
+        bool canInclude)
+    {
+        Brush primaryBrush = NeutralInteractionBrush.ResolveThemedResource("TextFillColorPrimaryBrush", this)
+            ?? new SolidColorBrush(Windows.UI.Color.FromArgb(0xFF, 0xE0, 0xE0, 0xE0));
+        Brush secondaryBrush = NeutralInteractionBrush.ResolveThemedResource("TextFillColorSecondaryBrush", this)
+            ?? new SolidColorBrush(Windows.UI.Color.FromArgb(0xB0, 0x9E, 0x9E, 0x9E));
+
+        string scopeLabel = T(item.SourceScope == DesktopOrganizationSourceScope.Public
+            ? "DesktopOrganization.Public.SharedLabel"
+            : "DesktopOrganization.Public.PersonalLabel");
+
+        var contentStack = new StackPanel
+        {
+            MaxWidth = 300,
+            Spacing = 6
+        };
+        contentStack.Children.Add(new TextBlock
+        {
+            Text = item.Name,
+            FontSize = 13,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = primaryBrush
+        });
+        contentStack.Children.Add(new TextBlock
+        {
+            Text = $"{scopeLabel} · {ExclusionDescription(item)}",
+            FontSize = 12,
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = secondaryBrush
+        });
+        contentStack.Children.Add(new TextBlock
+        {
+            Text = item.SourcePath,
+            FontSize = 11.5,
+            TextWrapping = TextWrapping.Wrap,
+            IsTextSelectionEnabled = true,
+            Foreground = secondaryBrush
+        });
+
+        var flyout = new Flyout { Content = contentStack };
+        if (canInclude)
+        {
+            var actionButton = new Button
+            {
+                Content = T("DesktopOrganization.Layout.Include"),
+                Margin = new Thickness(0, 4, 0, 0),
+                HorizontalAlignment = HorizontalAlignment.Left
+            };
+            actionButton.Click += (_, _) =>
+            {
+                flyout.Hide();
+                RestoreSingleRetainedItem(item);
+            };
+            contentStack.Children.Add(actionButton);
+        }
+
+        flyout.ShowAt(target, new FlyoutShowOptions { Placement = FlyoutPlacementMode.LeftEdgeAlignedTop });
+    }
+
+    private static bool IsOriginInsideButton(DependencyObject? origin, DependencyObject boundary)
+    {
+        DependencyObject? current = origin;
+        while (current is not null && !ReferenceEquals(current, boundary))
+        {
+            if (current is ButtonBase)
+            {
+                return true;
+            }
+
+            current = VisualTreeHelper.GetParent(current);
+        }
+
+        return false;
     }
 
     private async Task LoadTrayIconAsync(
@@ -363,173 +501,20 @@ public sealed partial class DesktopOrganizationTaskView
 
     private void RestoreSingleRetainedItem(DesktopOrganizationFileSnapshot item)
     {
-        if (_isScanning || _isExecuting || _hasCompletedExecution || _basePlan is null || _plan is null)
+        if (_isScanning || _isExecuting || _hasCompletedExecution || Session.BasePlan is null)
         {
             return;
         }
 
-        _retainedSelection.Clear();
-        _retainedSelection.Add(item.SourcePath);
-        IncludeOptionalItems(includeAll: false);
-    }
-
-    private void RestoreAllExcludedButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (_isScanning || _isExecuting || _hasCompletedExecution || _plan is null)
-        {
-            return;
-        }
-
-        _excludedSourcePaths.Clear();
-        foreach (var selection in _targetSelections.Values)
-        {
-            selection.IsSelected = true;
-        }
-
-        RenderPlan(_plan);
-    }
-
-    private void StayOnDesktopTray_DragOver(object sender, DragEventArgs e)
-    {
-        if (DeskBoxDragData.HasDroppedFiles(e.DataView))
-        {
-            e.AcceptedOperation = DataPackageOperation.None;
-            return;
-        }
-
-        if (_isScanning || _isExecuting || _hasCompletedExecution ||
-            (DesktopOrganizationPreviewCard.ActiveDraggedSourcePaths.Count == 0 &&
-             string.IsNullOrWhiteSpace(DesktopOrganizationPreviewCard.ActiveDraggedSourcePath)))
-        {
-            return;
-        }
-
-        e.AcceptedOperation = DataPackageOperation.Move;
-        e.DragUIOverride.Caption = T("DesktopOrganization.Layout.KeptTitle");
-        e.DragUIOverride.IsCaptionVisible = true;
-        StayOnDesktopTrayBorder.BorderBrush =
-            NeutralInteractionBrush.ResolveThemedResource("AccentFillColorDefaultBrush", this);
-    }
-
-    private void StayOnDesktopTray_DragLeave(object sender, DragEventArgs e)
-    {
-        StayOnDesktopTrayBorder.BorderBrush =
-            NeutralInteractionBrush.ResolveThemedResource("CardStrokeColorDefaultBrush", this);
-    }
-
-    private async void StayOnDesktopTray_Drop(object sender, DragEventArgs e)
-    {
-        StayOnDesktopTrayBorder.BorderBrush =
-            NeutralInteractionBrush.ResolveThemedResource("CardStrokeColorDefaultBrush", this);
-
-        if (_isScanning || _isExecuting || _hasCompletedExecution || _plan is null ||
-            DeskBoxDragData.HasDroppedFiles(e.DataView))
-        {
-            e.AcceptedOperation = DataPackageOperation.None;
-            return;
-        }
-
-        List<string> droppedPaths = DesktopOrganizationPreviewCard.ActiveDraggedSourcePaths.Count > 0
-            ? DesktopOrganizationPreviewCard.ActiveDraggedSourcePaths.ToList()
-            : !string.IsNullOrWhiteSpace(DesktopOrganizationPreviewCard.ActiveDraggedSourcePath)
-                ? [DesktopOrganizationPreviewCard.ActiveDraggedSourcePath!]
-                : [];
-
-        if (droppedPaths.Count == 0 && e.DataView.Contains(StandardDataFormats.Text))
-        {
-            try
-            {
-                string raw = await e.DataView.GetTextAsync();
-                droppedPaths = raw.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
-            }
-            catch
-            {
-                droppedPaths = [];
-            }
-        }
-
-        DesktopOrganizationPreviewCard.ActiveDraggedSourcePath = null;
-        DesktopOrganizationPreviewCard.ActiveDraggedSourcePaths = [];
-        DesktopOrganizationPreviewCard.NotifyDragSessionState(false);
-
-        if (droppedPaths.Count == 0)
-        {
-            return;
-        }
-
-        foreach (string path in droppedPaths)
-        {
-            _excludedSourcePaths.Add(path);
-        }
-
-        DesktopOrganizationPreviewCard.ClearActiveTileSelection();
-        RenderPlan(_plan);
-    }
-
-    private string ExclusionDescription(DesktopOrganizationFileSnapshot item) =>
-        _newPaths.Contains(item.SourcePath)
-            ? T("DesktopOrganization.Layout.NewHelp")
-            : T("DesktopOrganization.Exclusion." + item.ExclusionReason);
-
-    private bool CanIncludeRetainedItem(DesktopOrganizationFileSnapshot item) =>
-        !_hasCompletedExecution && (item.CanOptIn || item.ExclusionReason == DesktopOrganizationExclusionReason.UserChoice);
-
-    private DesktopOrganizationFileSnapshot FindPreviewSnapshot(string path, string name, DesktopOrganizationSourceScope scope) =>
-        (_lastExecutionPlan ?? _plan)?.SourceItems.FirstOrDefault(item =>
-            string.Equals(item.SourcePath, path, StringComparison.OrdinalIgnoreCase)) ??
-        new DesktopOrganizationFileSnapshot(path, name, Path.GetExtension(path), 0, DateTime.MinValue,
-            DesktopOrganizationCategoryIds.Other, null, DesktopOrganizationExclusionReason.Unavailable, SourceScope: scope);
-
-    private void IncludeOptionalItems(bool includeAll)
-    {
-        if (_isScanning || _isExecuting || _hasCompletedExecution || _basePlan is null || _plan is null)
-        {
-            return;
-        }
-
-        var chosen = GetRetainedPreviewItems()
-            .Where(item => CanIncludeRetainedItem(item) &&
-                (includeAll || _retainedSelection.Contains(item.SourcePath)))
-            .ToList();
-        if (chosen.Count == 0)
-        {
-            return;
-        }
-
+        _dragController.CancelActiveDrag();
         try
         {
-            var chosenPaths = chosen.Select(item => item.SourcePath).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            foreach (var item in chosen)
+            DesktopOrganizationWorkbenchSession.MoveResult moveResult = Session.IncludeItems([item.SourcePath]);
+            if (moveResult.MovedCount > 0)
             {
-                if (item.CanOptIn) _optionalIncludedPaths.Add(item.SourcePath);
-                _excludedSourcePaths.Remove(item.SourcePath);
-                _newPaths.Remove(item.SourcePath);
+                _pendingEmptyCustomBoxRenameId = null;
+                RenderSessionPlan();
             }
-
-            foreach (var target in _plan.Targets.Where(target => target.Items.Any(item => chosenPaths.Contains(item.SourcePath))))
-            {
-                if (_targetSelections.TryGetValue(target.SourceBucketId, out var selection))
-                {
-                    selection.IsSelected = true;
-                }
-            }
-
-            _plan = Coordinator.CreatePreviewPlanWithOptionalItems(
-                _basePlan,
-                _optionalIncludedPaths,
-                _plan.IncludePersonalDesktop,
-                _plan.IncludePublicDesktop);
-
-            foreach (var target in _plan.Targets.Where(target => target.Items.Any(item => chosenPaths.Contains(item.SourcePath))))
-            {
-                if (_targetSelections.TryGetValue(target.SourceBucketId, out var selection))
-                {
-                    selection.IsSelected = true;
-                }
-            }
-
-            _retainedSelection.Clear();
-            RenderPlan(_plan);
         }
         catch (Exception ex)
         {
@@ -539,5 +524,48 @@ public sealed partial class DesktopOrganizationTaskView
             ResultInfo.Message = T("DesktopOrganization.Result.FailedBody");
             ResultInfo.IsOpen = true;
         }
+    }
+
+    private void RestoreAllExcludedButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_isScanning || _isExecuting || _hasCompletedExecution || Session.BasePlan is null)
+        {
+            return;
+        }
+
+        _dragController.CancelActiveDrag();
+        if (Session.RestoreManualExclusions() > 0)
+        {
+            RenderSessionPlan();
+        }
+    }
+
+    private string ExclusionDescription(DesktopOrganizationFileSnapshot item) =>
+        Session.NewSourcePaths.Contains(item.SourcePath)
+            ? T("DesktopOrganization.Layout.NewHelp")
+            : T("DesktopOrganization.Exclusion." + item.ExclusionReason);
+
+    private bool CanIncludeRetainedItem(DesktopOrganizationFileSnapshot item) =>
+        !_hasCompletedExecution &&
+        (item.IsEligible || item.CanOptIn || item.ExclusionReason == DesktopOrganizationExclusionReason.UserChoice);
+
+    private DesktopOrganizationFileSnapshot FindPreviewSnapshot(string path, string name, DesktopOrganizationSourceScope scope) =>
+        (_lastExecutionPlan ?? Session.BasePlan ?? Session.EffectivePlan)?.SourceItems.FirstOrDefault(item =>
+            string.Equals(item.SourcePath, path, StringComparison.OrdinalIgnoreCase)) ??
+        new DesktopOrganizationFileSnapshot(path, name, System.IO.Path.GetExtension(path), 0, DateTime.MinValue,
+            DesktopOrganizationCategoryIds.Other, null, DesktopOrganizationExclusionReason.Unavailable, SourceScope: scope);
+
+    private IReadOnlyList<DesktopOrganizationFileSnapshot> GetRetainedPreviewItems(DesktopOrganizationPlan? plan = null)
+    {
+        DesktopOrganizationPlan? sourcePlan = plan ?? (_hasCompletedExecution ? _lastExecutionPlan : Session.EffectivePlan);
+        if (sourcePlan is null)
+        {
+            return [];
+        }
+
+        return sourcePlan.ExcludedItems
+            .Where(item => DesktopOrganizationPreviewSummary.IncludesSource(sourcePlan, item))
+            .DistinctBy(item => item.SourcePath, StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 }

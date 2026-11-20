@@ -306,7 +306,6 @@ public sealed partial class SettingsWindow : Window
         _managedStorageSettingsViewModel.PropertyChanged += ManagedStorageSettingsViewModel_PropertyChanged;
         _capsuleSettingsViewModel.PropertyChanged += CapsuleSettingsViewModel_PropertyChanged;
         _backupSettingsViewModel.PropertyChanged += BackupSettingsViewModel_PropertyChanged;
-        _groupNavigationSettingsViewModel.PropertyChanged += GroupNavigationSettingsViewModel_PropertyChanged;
         _hotkeyActions.RegistrationChanged += OnGlobalHotkeyRegistrationChanged;
 
         ApplyTitleBarButtonColors();
@@ -321,6 +320,7 @@ public sealed partial class SettingsWindow : Window
 
         SizeChanged += SettingsWindow_SizeChanged;
         SaveFailedInfoBar.Closed += SaveFailedInfoBar_Closed;
+        ChannelCoexistenceInfoBar.Closed += ChannelCoexistenceInfoBar_Closed;
         SettingsNavigationView.PaneOpening += SettingsNavigationView_PaneOpening;
         SettingsNavigationView.PaneClosing += SettingsNavigationView_PaneClosing;
 
@@ -372,6 +372,10 @@ public sealed partial class SettingsWindow : Window
             _hWnd,
             "settings-shown");
         Activate();
+        if (_hWnd != IntPtr.Zero)
+        {
+            _ = DeskBox.Platform.Win32Helper.SetForegroundWindow(_hWnd);
+        }
         if (wasShownOnce)
         {
             RefreshOnReopen();
@@ -418,7 +422,6 @@ public sealed partial class SettingsWindow : Window
         UpdateTitleBarInsets();
         UpdateResponsiveLayout(GetWindowWidth());
         ApplyToggleSwitchContentVisibility();
-        ApplySegmentedNeutralStates(SettingsRoot);
     }
 
     private void SettingsRoot_Loaded(object sender, RoutedEventArgs e)
@@ -433,7 +436,7 @@ public sealed partial class SettingsWindow : Window
         UpdateTitleBarInsets();
         UpdateResponsiveLayout(GetWindowWidth());
         ApplyToggleSwitchContentVisibility();
-        ApplySegmentedNeutralStates(SettingsRoot);
+        StartChannelCoexistenceBannerProbe();
         stopwatch.Stop();
         App.Log(
             $"[SettingsPerf] Loaded responsiveTreeMs={responsiveTreeMilliseconds} " +
@@ -595,6 +598,16 @@ public sealed partial class SettingsWindow : Window
         AppWindow sender,
         AppWindowClosingEventArgs args)
     {
+        if (_isStorageMigrationRunning && !_allowRealClose)
+        {
+            args.Cancel = true;
+            return;
+        }
+
+        // Always shut down an active hotkey recorder up front — including on
+        // real / out-of-process host closes — so its global keyboard hook stops
+        // and HotkeyResume is dispatched before window/pipe teardown.
+        global::DeskBox.Views.Dialogs.HotkeyRecorderDialog.ShutdownActiveRecorder();
         PersistWindowPlacement();
 
         if (_allowRealClose || _isHostProcessWindow)
@@ -603,10 +616,6 @@ public sealed partial class SettingsWindow : Window
         }
 
         args.Cancel = true;
-        // Hiding the window does not close an open ContentDialog, and the
-        // hotkey recorder's only hook teardown is its Closing event — force
-        // it shut or its keyboard hook keeps swallowing input system-wide.
-        global::DeskBox.Views.Dialogs.HotkeyRecorderDialog.ShutdownActiveRecorder();
         _appWindow.Hide();
         UpdateSearchSettingsActivity();
         UpdateBackupSettingsActivity();
@@ -619,7 +628,6 @@ public sealed partial class SettingsWindow : Window
     private void SettingsRoot_ActualThemeChanged(FrameworkElement sender, object args)
     {
         ApplyTitleBarButtonColors();
-        ApplySegmentedNeutralStates(SettingsRoot);
     }
 
     private void SettingsWindow_Closed(object sender, WindowEventArgs args)
@@ -646,6 +654,7 @@ public sealed partial class SettingsWindow : Window
         Closed -= SettingsWindow_Closed;
         SizeChanged -= SettingsWindow_SizeChanged;
         SaveFailedInfoBar.Closed -= SaveFailedInfoBar_Closed;
+        ChannelCoexistenceInfoBar.Closed -= ChannelCoexistenceInfoBar_Closed;
         SettingsNavigationView.PaneOpening -= SettingsNavigationView_PaneOpening;
         SettingsNavigationView.PaneClosing -= SettingsNavigationView_PaneClosing;
         SettingsRoot.Loaded -= SettingsRoot_Loaded;
@@ -662,17 +671,9 @@ public sealed partial class SettingsWindow : Window
         _sectionLayoutSettleTimer.Tick -= SectionLayoutSettleTimer_Tick;
         ClearSettingsSearchHighlight();
         ClearFeatureSettingsExpanderCallbacks();
-        if (AboutDiagnosticsExpander is { } aboutDiag)
+        if (AboutDiagnosticsSubPagePanel is { } aboutDiagSubPage)
         {
-            foreach (FrameworkElement item in aboutDiag.Items.OfType<FrameworkElement>())
-            {
-                item.DataContext = null;
-            }
-            aboutDiag.DataContext = null;
-        }
-        if (WidgetGroupDetailPresenter is { } groupPresenter)
-        {
-            groupPresenter.Content = null;
+            aboutDiagSubPage.DataContext = null;
         }
         if (CapsuleModeSection is not null)
         {
@@ -743,7 +744,6 @@ public sealed partial class SettingsWindow : Window
         _managedStorageSettingsViewModel.PropertyChanged -= ManagedStorageSettingsViewModel_PropertyChanged;
         _capsuleSettingsViewModel.PropertyChanged -= CapsuleSettingsViewModel_PropertyChanged;
         _backupSettingsViewModel.PropertyChanged -= BackupSettingsViewModel_PropertyChanged;
-        _groupNavigationSettingsViewModel.PropertyChanged -= GroupNavigationSettingsViewModel_PropertyChanged;
         _hotkeyActions.RegistrationChanged -= OnGlobalHotkeyRegistrationChanged;
 
         foreach (FrameworkElement item in PerformanceInlineCard.Items.OfType<FrameworkElement>())
@@ -825,22 +825,7 @@ public sealed partial class SettingsWindow : Window
     private void ApplyTitleBarButtonColors()
     {
         bool isDark = IsEffectiveSettingsThemeDark();
-
-        var titleBar = _appWindow.TitleBar;
-        titleBar.ButtonBackgroundColor = Colors.Transparent;
-        titleBar.ButtonInactiveBackgroundColor = Colors.Transparent;
-        titleBar.ButtonForegroundColor = isDark ? Colors.White : Colors.Black;
-        titleBar.ButtonHoverForegroundColor = isDark ? Colors.White : Colors.Black;
-        titleBar.ButtonPressedForegroundColor = isDark ? Colors.White : Colors.Black;
-        titleBar.ButtonInactiveForegroundColor = isDark
-            ? ColorHelper.FromArgb(0xB8, 0xFF, 0xFF, 0xFF)
-            : ColorHelper.FromArgb(0xB8, 0x10, 0x10, 0x10);
-        titleBar.ButtonHoverBackgroundColor = isDark
-            ? ColorHelper.FromArgb(0x22, 0xFF, 0xFF, 0xFF)
-            : ColorHelper.FromArgb(0x10, 0x00, 0x00, 0x00);
-        titleBar.ButtonPressedBackgroundColor = isDark
-            ? ColorHelper.FromArgb(0x30, 0xFF, 0xFF, 0xFF)
-            : ColorHelper.FromArgb(0x18, 0x00, 0x00, 0x00);
+        WindowShellState.TryApplyExtendedTitleBarButtonColors(_appWindow, isDark);
     }
 
     private double GetWindowWidth()
@@ -858,8 +843,9 @@ public sealed partial class SettingsWindow : Window
         }
 
         double scale = SettingsWindowPlacementStore.NormalizeDpiScale(GetCurrentDpiScale());
-        int leftInsetPx = _appWindow.TitleBar.LeftInset;
-        int rightInsetPx = _appWindow.TitleBar.RightInset;
+        bool titleBarSupported = AppWindowTitleBar.IsCustomizationSupported();
+        int leftInsetPx = titleBarSupported ? _appWindow.TitleBar.LeftInset : 0;
+        int rightInsetPx = titleBarSupported ? _appWindow.TitleBar.RightInset : 0;
         if (leftInsetPx <= 0 && rightInsetPx <= 0)
         {
             bool isRtl = SettingsRoot?.FlowDirection == FlowDirection.RightToLeft;
@@ -974,6 +960,13 @@ public sealed partial class SettingsWindow : Window
         {
             GlobalHotkeyActionsPanel.HorizontalAlignment = isNarrow ? HorizontalAlignment.Stretch : HorizontalAlignment.Right;
             GlobalHotkeyCaptureButton.HorizontalAlignment = isNarrow ? HorizontalAlignment.Stretch : HorizontalAlignment.Left;
+        }
+        if (CustomWidgetsToolbarPanel is not null)
+        {
+            Grid.SetRow(CustomWidgetsToolbarPanel, isNarrow ? 1 : 0);
+            Grid.SetColumn(CustomWidgetsToolbarPanel, isNarrow ? 0 : 1);
+            Grid.SetColumnSpan(CustomWidgetsToolbarPanel, isNarrow ? 2 : 1);
+            CustomWidgetsToolbarPanel.HorizontalAlignment = isNarrow ? HorizontalAlignment.Left : HorizontalAlignment.Right;
         }
 
         foreach (var row in _settingRows)
@@ -1239,14 +1232,17 @@ public sealed partial class SettingsWindow : Window
         UIntPtr subclassId,
         UIntPtr refData)
     {
-        if (message == WmGetMinMaxInfo)
+        if (message == WmGetMinMaxInfo && lParam != IntPtr.Zero)
         {
-            var minMaxInfo = Marshal.PtrToStructure<MinMaxInfo>(lParam);
+            IntPtr result = Win32Helper.DefSubclassProc(hWnd, message, wParam, lParam);
             double scale = GetCurrentDpiScale();
-            minMaxInfo.MinTrackSize.X = Math.Max(minMaxInfo.MinTrackSize.X, ToPhysicalPixels(MinWindowWidth, scale));
-            minMaxInfo.MinTrackSize.Y = Math.Max(minMaxInfo.MinTrackSize.Y, ToPhysicalPixels(MinWindowHeight, scale));
-            Marshal.StructureToPtr(minMaxInfo, lParam, false);
-            return IntPtr.Zero;
+            unsafe
+            {
+                ref MinMaxInfo minMaxInfo = ref *(MinMaxInfo*)lParam;
+                minMaxInfo.MinTrackSize.X = Math.Max(minMaxInfo.MinTrackSize.X, ToPhysicalPixels(MinWindowWidth, scale));
+                minMaxInfo.MinTrackSize.Y = Math.Max(minMaxInfo.MinTrackSize.Y, ToPhysicalPixels(MinWindowHeight, scale));
+            }
+            return result;
         }
 
         if (message == WmNcDestroy)

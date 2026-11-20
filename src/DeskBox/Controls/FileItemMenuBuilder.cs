@@ -568,7 +568,17 @@ public static class FileItemMenuBuilder
 
         // MenuFlyout closes itself on selection; the retired strip-plus-rows
         // rows needed an explicit Hide on every command.
-        row.Click += async (_, _) => await onClick();
+        row.Click += async (_, _) =>
+        {
+            try
+            {
+                await onClick();
+            }
+            catch (Exception ex)
+            {
+                App.Log($"[FileItemMenu] Menu action '{localizationKey}' failed: {ex}");
+            }
+        };
         return row;
     }
 }

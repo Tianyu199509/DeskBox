@@ -1,4 +1,5 @@
 using DeskBox.Features.Backup;
+using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Services;
 using DeskBox.Contracts;
@@ -243,7 +244,7 @@ public sealed partial class SettingsWindow
             }
         };
 
-        if (await confirmDialog.ShowAsync() != ContentDialogResult.Primary)
+        if (await ShowDialogWhenFreeAsync(() => confirmDialog) != ContentDialogResult.Primary)
         {
             return;
         }
@@ -330,6 +331,7 @@ public sealed partial class SettingsWindow
             var domainDialog = new ContentDialog
             {
                 XamlRoot = SettingsRoot.XamlRoot,
+                RequestedTheme = NeutralInteractionBrush.ResolveEffectiveElementTheme(SettingsRoot),
                 Title = _localizationService.T("Settings.CloudBackup.RestoreDomains.Title"),
                 PrimaryButtonText = _localizationService.T("Settings.CloudBackup.RestoreDomains.Continue"),
                 CloseButtonText = _localizationService.T("Common.Cancel"),
@@ -406,7 +408,7 @@ public sealed partial class SettingsWindow
                 : _localizationService.T("Settings.CloudBackup.RestoreDomains.None");
             var bodyText = new System.Text.StringBuilder(_localizationService.Format(
                 "Settings.CloudBackup.RestoreConfirm.Body",
-                preparation.BackupCreatedAtUtc.ToLocalTime().ToString("g"),
+                FormatLocalBackupTimestamp(preparation.BackupCreatedAtUtc),
                 preparation.AppVersion,
                 preparation.FileCount,
                 ViewModel.FormatBytes(preparation.TotalUncompressedBytes),
@@ -504,6 +506,7 @@ public sealed partial class SettingsWindow
             var confirmDialog = new ContentDialog
             {
                 XamlRoot = SettingsRoot.XamlRoot,
+                RequestedTheme = NeutralInteractionBrush.ResolveEffectiveElementTheme(SettingsRoot),
                 Title = _localizationService.T("Settings.CloudBackup.RestoreConfirm.Title"),
                 PrimaryButtonText = _localizationService.T("Settings.CloudBackup.RestoreConfirm.Button"),
                 CloseButtonText = _localizationService.T("Common.Cancel"),
@@ -575,6 +578,19 @@ public sealed partial class SettingsWindow
             _backupRestoreActions.DeleteTemporaryDownload(downloadDirectory);
 
             if (!_isClosed) _backupSettingsViewModel.SetCommandBusy(false);
+        }
+    }
+
+    private static string FormatLocalBackupTimestamp(DateTimeOffset utcTimestamp)
+    {
+        DateTimeOffset local = utcTimestamp.ToLocalTime();
+        try
+        {
+            return local.ToString("g", System.Globalization.CultureInfo.CurrentCulture);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return local.ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture);
         }
     }
 }

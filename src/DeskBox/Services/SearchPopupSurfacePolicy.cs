@@ -34,6 +34,23 @@ internal readonly record struct SearchPopupHeightSpringStep(
     double Velocity,
     bool IsSettled);
 
+internal readonly record struct SearchPopupWidthSpringStep(
+    double Width,
+    double Velocity,
+    bool IsSettled);
+
+internal enum SearchPopupHorizontalAnchor
+{
+    Center,
+    Left,
+    Right
+}
+
+internal readonly record struct SearchPopupHorizontalEnvelope(
+    int EnvelopeX,
+    int EnvelopeWidth,
+    SearchPopupHorizontalAnchor Anchor);
+
 /// <summary>
 /// Pure geometry and material policy for the standalone search popup:
 /// - Always uses a harmonious 16px outer corner radius (12px input capsule, 10px result cards).
@@ -49,6 +66,10 @@ internal static class SearchPopupSurfacePolicy
 
     public const int DefaultPopupWidthLogical = 660;
     public const int ExpandedWithDetailsWidthLogical = 780;
+    public const int MinPopupWidthLogical = 400;
+    public const int DetailsPaneTargetWidthLogical = 312;
+    public const int DetailsPaneContentWidthLogical = 266;
+    public const int ResultsWithDetailsColumnWidthLogical = ExpandedWithDetailsWidthLogical - DetailsPaneTargetWidthLogical;
     public const int CapsuleOnlyHeightLogical = 56;
     public const int EverythingBannerHeightLogical = 56;
     public const int FilterBarHeightLogical = 36;
@@ -302,9 +323,187 @@ internal static class SearchPopupSurfacePolicy
         double deltaSeconds,
         bool expandingDirection)
     {
-        if (!double.IsFinite(currentHeight))
+        (double value, double velocity, bool isSettled) = StepSpringCore(
+            currentHeight,
+            currentVelocity,
+            targetHeight,
+            deltaSeconds,
+            expandingDirection,
+            maxOvershootAboveTarget: 7.0,
+            maxUndershootBelowTarget: 5.0,
+            minFloor: CapsuleOnlyHeightLogical);
+        return new SearchPopupHeightSpringStep(value, velocity, isSettled);
+    }
+
+    /// <summary>
+    /// Advances a velocity-preserving, gently under-damped spring for smooth, organic
+    /// horizontal width transitions when the Details sidebar opens or closes.
+    /// </summary>
+    public static SearchPopupWidthSpringStep StepWidthSpring(
+        double currentWidth,
+        double currentVelocity,
+        double targetWidth,
+        double deltaSeconds,
+        bool expandingDirection)
+    {
+        (double value, double velocity, bool isSettled) = StepSpringCore(
+            currentWidth,
+            currentVelocity,
+            targetWidth,
+            deltaSeconds,
+            expandingDirection,
+            maxOvershootAboveTarget: 8.0,
+            maxUndershootBelowTarget: 6.0,
+            minFloor: MinPopupWidthLogical);
+        return new SearchPopupWidthSpringStep(value, velocity, isSettled);
+    }
+
+    public static double ComputeDetailsColumnWidthLogical(double currentPopupWidthLogical)
+    {
+        if (!double.IsFinite(currentPopupWidthLogical) ||
+            currentPopupWidthLogical <= DefaultPopupWidthLogical)
         {
-            return new SearchPopupHeightSpringStep(targetHeight, 0, IsSettled: true);
+            return 0.0;
+        }
+
+        if (currentPopupWidthLogical >= ExpandedWithDetailsWidthLogical)
+        {
+            return Math.Round(currentPopupWidthLogical - ResultsWithDetailsColumnWidthLogical, 1);
+        }
+
+        double t = (currentPopupWidthLogical - DefaultPopupWidthLogical) /
+                   (ExpandedWithDetailsWidthLogical - DefaultPopupWidthLogical);
+        return Math.Round(DetailsPaneTargetWidthLogical * t, 1);
+    }
+
+    public static double ComputeDetailsCardProgress(double currentPopupWidthLogical)
+    {
+        if (!double.IsFinite(currentPopupWidthLogical) ||
+            currentPopupWidthLogical <= DefaultPopupWidthLogical)
+        {
+            return 0.0;
+        }
+
+        return Math.Clamp(
+            (currentPopupWidthLogical - DefaultPopupWidthLogical) /
+            (ExpandedWithDetailsWidthLogical - DefaultPopupWidthLogical),
+            0.0,
+            1.0);
+    }
+
+    /// <summary>
+    /// Resolves the exact physical screen X coordinate for a left-anchored XAML root
+    /// (<c>HorizontalAlignment="Left"</c>) at any live logical spring width, matching
+    /// <see cref="ResolveAnchoredWindowBounds"/> pixel-for-pixel at settled endpoints
+    /// so <c>SetWindowPos(SWP_NOSIZE)</c> glides smoothly with zero 1-frame DWM/XAML offset jump.
+    /// </summary>
+    public static int ComputeAnchoredWindowX(
+        RectInt32 workAreaPhysical,
+        double dpiScale,
+        double currentLogicalWidth,
+        int? customXPhysical,
+        int? customYPhysical)
+    {
+        double scale = double.IsFinite(dpiScale) && dpiScale > 0 ? dpiScale : 1.0;
+        double safeLogical = double.IsFinite(currentLogicalWidth) && currentLogicalWidth > 0
+            ? currentLogicalWidth
+            : DefaultPopupWidthLogical;
+        int rawPhysicalWidth = Math.Max(1, (int)Math.Round(safeLogical * scale, MidpointRounding.AwayFromZero));
+        int widthPhysical = Math.Min(Math.Max(320, workAreaPhysical.Width - 24), rawPhysicalWidth);
+
+        if (customXPhysical is int savedX &&
+            customYPhysical is int savedY &&
+            IntersectsAnchorWithWorkArea(savedX, savedY, widthPhysical, workAreaPhysical))
+        {
+            return Math.Clamp(
+                savedX,
+                workAreaPhysical.X + 8,
+                Math.Max(workAreaPhysical.X + 8, workAreaPhysical.X + workAreaPhysical.Width - widthPhysical - 8));
+        }
+
+        return workAreaPhysical.X + ((workAreaPhysical.Width - widthPhysical) / 2);
+    }
+
+    public static SearchPopupHorizontalEnvelope ResolveMorphHorizontalEnvelope(
+        bool widthAnimating,
+        PointInt32 livePos,
+        SizeInt32 liveSize,
+        RectInt32 targetBounds,
+        RectInt32 workAreaPhysical,
+        int? customX,
+        int headroomPhysical,
+        int maxAllowedWidth,
+        int peakPhysicalWidth)
+    {
+        if (!widthAnimating && liveSize.Width >= targetBounds.Width)
+        {
+            if (customX is null && (livePos.X != targetBounds.X || liveSize.Width != targetBounds.Width))
+            {
+                int w = AlignEnvelopeParity(
+                    Math.Min(maxAllowedWidth, Math.Max(liveSize.Width, targetBounds.Width)),
+                    targetBounds.Width,
+                    maxAllowedWidth);
+                return new SearchPopupHorizontalEnvelope(
+                    targetBounds.X - ((w - targetBounds.Width) / 2),
+                    w,
+                    SearchPopupHorizontalAnchor.Center);
+            }
+
+            return new SearchPopupHorizontalEnvelope(
+                livePos.X,
+                liveSize.Width,
+                SearchPopupHorizontalAnchor.Center);
+        }
+
+        if (customX is int savedX)
+        {
+            int w = Math.Min(maxAllowedWidth, Math.Max(liveSize.Width, peakPhysicalWidth + headroomPhysical));
+            return targetBounds.X == Math.Max(workAreaPhysical.X + 8, savedX)
+                ? new SearchPopupHorizontalEnvelope(targetBounds.X, w, SearchPopupHorizontalAnchor.Left)
+                : new SearchPopupHorizontalEnvelope(
+                    (targetBounds.X + targetBounds.Width) - w,
+                    w,
+                    SearchPopupHorizontalAnchor.Right);
+        }
+
+        int centeredW = AlignEnvelopeParity(
+            Math.Min(maxAllowedWidth, Math.Max(liveSize.Width, peakPhysicalWidth + (2 * headroomPhysical))),
+            targetBounds.Width,
+            maxAllowedWidth);
+        return new SearchPopupHorizontalEnvelope(
+            targetBounds.X - ((centeredW - targetBounds.Width) / 2),
+            centeredW,
+            SearchPopupHorizontalAnchor.Center);
+    }
+
+    private static int AlignEnvelopeParity(int envelopeWidth, int targetWidth, int maxAllowedWidth)
+    {
+        if ((envelopeWidth - targetWidth) % 2 == 0)
+        {
+            return envelopeWidth;
+        }
+
+        if (envelopeWidth + 1 <= maxAllowedWidth)
+        {
+            return envelopeWidth + 1;
+        }
+
+        return envelopeWidth > targetWidth ? envelopeWidth - 1 : envelopeWidth;
+    }
+
+    private static (double Value, double Velocity, bool IsSettled) StepSpringCore(
+        double currentValue,
+        double currentVelocity,
+        double targetValue,
+        double deltaSeconds,
+        bool expandingDirection,
+        double maxOvershootAboveTarget,
+        double maxUndershootBelowTarget,
+        double minFloor)
+    {
+        if (!double.IsFinite(currentValue))
+        {
+            return (targetValue, 0, true);
         }
 
         if (!double.IsFinite(currentVelocity))
@@ -325,51 +524,49 @@ internal static class SearchPopupSurfacePolicy
         // Sub-step at <= 4 ms for unconditional numerical stability regardless of UI frame jitter.
         int steps = Math.Max(1, (int)Math.Ceiling(dt / 0.004));
         double subDt = dt / steps;
-        double x = currentHeight;
+        double x = currentValue;
         double v = currentVelocity;
 
         for (int i = 0; i < steps; i++)
         {
-            double accel = (stiffness * (targetHeight - x)) - (damping * v);
+            double accel = (stiffness * (targetValue - x)) - (damping * v);
             v += accel * subDt;
             x += v * subDt;
         }
 
-        // Bound maximum elastic excursion so large jumps never overshoot excessively or dip below capsule height.
-        double maxOvershootAboveTarget = 7.0;
-        double maxUndershootBelowTarget = 5.0;
-        if (expandingDirection && x > targetHeight + maxOvershootAboveTarget)
+        // Bound maximum elastic excursion so large jumps never overshoot excessively or dip below floor.
+        if (expandingDirection && x > targetValue + maxOvershootAboveTarget)
         {
-            x = targetHeight + maxOvershootAboveTarget;
+            x = targetValue + maxOvershootAboveTarget;
             if (v > 0)
             {
                 v *= 0.35;
             }
         }
-        else if (!expandingDirection && x < targetHeight - maxUndershootBelowTarget)
+        else if (!expandingDirection && x < targetValue - maxUndershootBelowTarget)
         {
-            x = targetHeight - maxUndershootBelowTarget;
+            x = targetValue - maxUndershootBelowTarget;
             if (v < 0)
             {
                 v *= 0.35;
             }
         }
 
-        if (x < CapsuleOnlyHeightLogical)
+        if (x < minFloor)
         {
-            x = CapsuleOnlyHeightLogical;
+            x = minFloor;
             if (v < 0)
             {
                 v = 0;
             }
         }
 
-        if (Math.Abs(targetHeight - x) <= 0.35 && Math.Abs(v) <= 3.0)
+        if (Math.Abs(targetValue - x) <= 0.35 && Math.Abs(v) <= 3.0)
         {
-            return new SearchPopupHeightSpringStep(targetHeight, 0, IsSettled: true);
+            return (targetValue, 0, true);
         }
 
-        return new SearchPopupHeightSpringStep(x, v, IsSettled: false);
+        return (x, v, false);
     }
 
     public static int ToPhysicalPixels(int logicalPixels, double scale)

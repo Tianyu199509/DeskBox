@@ -176,6 +176,9 @@ public sealed class WidgetManagerStorageCleanupTests : IDisposable
         _settingsService.Settings.Widgets.Add(widget);
 
         _widgetManager.EnsureFileWidgetPathAvailable(mappedFolder, widget.Id);
+        Assert.Single(_settingsService.Settings.Widgets);
+        Assert.Throws<InvalidOperationException>(() =>
+            _widgetManager.EnsureFileWidgetPathAvailable(mappedFolder, Guid.NewGuid().ToString("N")));
     }
 
     [Fact]

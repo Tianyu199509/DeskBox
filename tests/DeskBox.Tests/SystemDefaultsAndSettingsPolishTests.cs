@@ -33,13 +33,13 @@ public sealed class SystemDefaultsAndSettingsPolishTests : IDisposable
         var restored = new AppSettings
         {
             WidgetCornerPreference = SettingsService.WidgetCornerPreferenceSquare,
-            HiddenCacheCleanupScope = PerformanceSettingsPolicy.HiddenCacheCleanupScopeAllRecreatable,
+            HiddenCacheCleanupScope = PerformanceSettingsPolicy.HiddenCacheCleanupScopeWarm,
             WidgetAnimationEffect = SettingsService.WidgetAnimationEffectFade,
             WidgetAnimationSpeed = SettingsService.WidgetAnimationSpeedFast,
             WidgetAnimationSlideDirection = SettingsService.WidgetAnimationSlideDirectionLeft,
             DynamicClickRaiseScope = SettingsService.DynamicClickRaiseScopeSingle,
             FileStackOpenMode = SettingsService.FileStackOpenModeInline,
-            KeepCapsuleContentWarm = false
+            KeepCapsuleContentWarm = true
         };
         SettingsService.ApplyDefaultPreferences(restored);
 
@@ -48,10 +48,11 @@ public sealed class SystemDefaultsAndSettingsPolishTests : IDisposable
             // 1. 格子圆角：默认标准圆角
             Assert.Equal(SettingsService.WidgetCornerPreferenceRound, candidate.WidgetCornerPreference);
 
-            // 2. 性能与资源 - 隐藏后保留界面缓存：默认打开 (Warm)
+            // 2. 性能与资源 - ResourceSaver 默认释放隐藏可重建缓存并开启胶囊闲置休眠
             EffectivePerformanceSettings perf = PerformanceSettingsPolicy.Resolve(candidate);
-            Assert.Equal(PerformanceSettingsPolicy.HiddenCacheCleanupScopeWarm, perf.HiddenCacheCleanupScope);
-            Assert.True(candidate.Performance.KeepCapsuleContentWarm);
+            Assert.Equal(PerformanceSettingsPolicy.HiddenCacheCleanupScopeAllRecreatable, perf.HiddenCacheCleanupScope);
+            Assert.False(perf.KeepCapsuleContentWarm);
+            Assert.False(PerformanceSettingsPolicy.ResolveEffectiveKeepCapsuleContentWarm(candidate));
 
             // 4. 显示与隐藏动画：默认贴边滑出 + 向右 + 舒缓
             WidgetAnimationOptions anim = WidgetAnimationSettings.From(candidate);
@@ -77,12 +78,15 @@ public sealed class SystemDefaultsAndSettingsPolishTests : IDisposable
             static key => key,
             static () => true);
 
-        Assert.True(editor.KeepWarmCacheWhenHidden);
-        Assert.True(editor.KeepCapsuleContentWarm);
+        Assert.False(editor.KeepWarmCacheWhenHidden);
+        Assert.False(editor.KeepCapsuleContentWarm);
         Assert.Equal(
-            PerformanceOptionKinds.HiddenCacheCleanupScopeWarm,
+            PerformanceOptionKinds.HiddenCacheCleanupScopeAllRecreatable,
             editor.SelectedHiddenCacheCleanupScope);
 
+        editor.KeepCapsuleContentWarm = true;
+        Assert.True(settings.Settings.Performance.KeepCapsuleContentWarm);
+        Assert.Equal(PerformanceOptionKinds.ModeCustom, editor.SelectedPerformanceMode);
         editor.KeepCapsuleContentWarm = false;
         Assert.False(settings.Settings.Performance.KeepCapsuleContentWarm);
 
@@ -107,21 +111,10 @@ public sealed class SystemDefaultsAndSettingsPolishTests : IDisposable
     }
 
     [Fact]
-    public void WebAiDefault_UsesDeepSeekForMainlandChina_AndChatGptGlobally()
+    public void StarterProviderDefault_UsesDeepSeekForMainlandChina_AndOpenAiGlobally()
     {
-        string prefsPath = Path.Combine(_root, "studio-prefs.json");
-        Directory.CreateDirectory(_root);
-        var store = new CustomWidgetStudioPreferencesStore(prefsPath);
-
-        Assert.Equal(
-            CustomWidgetStudioPreferencesStore.TargetDeepSeek,
-            store.ResolveEffectiveWebAiTarget("zh-CN"));
-        Assert.Equal(
-            CustomWidgetStudioPreferencesStore.TargetDeepSeek,
-            CustomWidgetStudioPreferencesStore.GetOrderedWebAiTargets("zh-CN", includeCopyOnly: false)[0].Id);
-        Assert.Equal(
-            CustomWidgetStudioPreferencesStore.TargetChatGpt,
-            store.ResolveEffectiveWebAiTarget("en-US"));
+        Assert.Equal("deepseek", DeskBoxAiService.GetDefaultStarterProviderId("zh-CN"));
+        Assert.Equal("openai", DeskBoxAiService.GetDefaultStarterProviderId("en-US"));
     }
 
     [Fact]
@@ -186,8 +179,8 @@ public sealed class SystemDefaultsAndSettingsPolishTests : IDisposable
         };
         var clipboard = new WidgetConfig { WidgetKind = WidgetKind.Clipboard };
 
-        Assert.True(WidgetTitleIconCustomization.NormalizeOverrides(pomodoroLiveKey));
-        Assert.False(pomodoroLiveKey.Metadata.ContainsKey(WidgetTitleIconCustomization.EmojiMetadataKey));
+        Assert.False(WidgetTitleIconCustomization.NormalizeOverrides(pomodoroLiveKey));
+        Assert.Equal("🍅", WidgetTitleIconCustomization.GetEmojiOverride(pomodoroLiveKey));
 
         Assert.Equal(
             "mapped-folder",

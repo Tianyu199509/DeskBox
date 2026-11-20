@@ -1,4 +1,5 @@
 using DeskBox.Models;
+using DeskBox.Services.DesktopOrganization;
 
 namespace DeskBox.Services;
 
@@ -15,6 +16,8 @@ public sealed partial class DesktopOrganizationTransaction
     public bool HasPendingRecovery => _recoveryStore.HasPendingJournal;
 
     internal DesktopAutoOrganizationSuppressionRegistry? AutoOrganizationSuppressions { get; init; }
+
+    internal DesktopIconPositionService? DesktopIconPositions { get; init; }
 
     public DesktopOrganizationTransaction(
         SettingsService settingsService,
@@ -65,6 +68,7 @@ public sealed partial class DesktopOrganizationTransaction
             // in-memory settings back — the physical moves are committed and
             // no journal remains to reconcile them.
             bool committed = false;
+            DesktopIconCaptureSnapshot desktopIconCapture = DesktopIconCaptureSnapshot.Empty;
 
             try
             {
@@ -93,6 +97,13 @@ public sealed partial class DesktopOrganizationTransaction
                 }
 
                 ReserveDestinations(journal);
+                desktopIconCapture = DesktopIconPositions is not null && journal.Items.Count > 0
+                    ? await DesktopIconPositions.CaptureBeforeMoveFromDesktopAsync(
+                        journal.Items
+                            .Select(item => new FileService.FileTransferPlan(item.SourcePath, item.DestinationPath))
+                            .ToList(),
+                        cancellationToken)
+                    : DesktopIconCaptureSnapshot.Empty;
                 if (journal.Items.Count > 0)
                 {
                     await _recoveryStore.SaveAsync(journal);
@@ -208,6 +219,22 @@ public sealed partial class DesktopOrganizationTransaction
                     }
                 }
 
+                if (DesktopIconPositions is not null)
+                {
+                    List<FileService.FileTransferResult> movedForPositions = journal.Items
+                        .Where(static item => item.Completed)
+                        .Select(static item => new FileService.FileTransferResult(
+                            item.SourcePath,
+                            item.DestinationPath))
+                        .ToList();
+                    if (movedForPositions.Count > 0)
+                    {
+                        await DesktopIconPositions.CommitAfterMoveOffDesktopAsync(
+                            desktopIconCapture,
+                            movedForPositions);
+                    }
+                }
+
                 await RebaseCompletedShortcutsAndSaveJournalAsync(
                     journal,
                     isRestore: false);
@@ -312,6 +339,22 @@ public sealed partial class DesktopOrganizationTransaction
                     // would desynchronize settings from the already-moved
                     // files with no journal left to reconcile them.
                     throw;
+                }
+
+                if (DesktopIconPositions is not null && !desktopIconCapture.IsEmpty)
+                {
+                    List<FileService.FileTransferResult> partialMovedForPositions = journal.Items
+                        .Where(static item => item.Completed)
+                        .Select(static item => new FileService.FileTransferResult(
+                            item.SourcePath,
+                            item.DestinationPath))
+                        .ToList();
+                    if (partialMovedForPositions.Count > 0)
+                    {
+                        await DesktopIconPositions.CommitAfterMoveOffDesktopAsync(
+                            desktopIconCapture,
+                            partialMovedForPositions);
+                    }
                 }
 
                 settings.Widgets = originalWidgets;
@@ -464,9 +507,11 @@ public sealed partial class DesktopOrganizationTransaction
                 continue;
             }
 
-            string? sourceRoot = NormalizeVolumeRoot(
-                FileService.GetComparableVolumeRoot(entry.Snapshot.SourcePath, useParentPath: false));
-            if (string.Equals(targetRoot, sourceRoot, StringComparison.OrdinalIgnoreCase))
+            string? targetIdentity = NormalizeVolumeRoot(
+                FileService.GetComparableVolumeIdentity(entry.Target, useParentPath: false));
+            string? sourceIdentity = NormalizeVolumeRoot(
+                FileService.GetComparableVolumeIdentity(entry.Snapshot.SourcePath, useParentPath: false));
+            if (string.Equals(targetIdentity, sourceIdentity, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
@@ -490,10 +535,14 @@ public sealed partial class DesktopOrganizationTransaction
             : root + Path.DirectorySeparatorChar;
     }
 
-    private static void RevalidateSource(DesktopOrganizationFileSnapshot item)
+    internal static void RevalidateSource(
+        DesktopOrganizationFileSnapshot item,
+        Func<string, bool>? safeTraversableProbe = null,
+        Func<string, FileAttributes>? attributesProbe = null)
     {
-        var attributes = File.GetAttributes(item.SourcePath);
-        if ((attributes & (FileAttributes.ReparsePoint | FileAttributes.Hidden | FileAttributes.System | FileAttributes.Offline | FileAttributes.Temporary)) != 0)
+        var attributes = (attributesProbe ?? File.GetAttributes)(item.SourcePath);
+        bool isSafeTraversable = (safeTraversableProbe ?? Platform.StorageMigrationNativeMethods.IsSafeTraversablePath)(item.SourcePath);
+        if ((attributes & (FileAttributes.Hidden | FileAttributes.System | FileAttributes.Temporary)) != 0 || !isSafeTraversable)
             throw new DesktopOrganizationSourceChangedException(item.Name);
         if (item.IsDirectory)
         {
@@ -604,14 +653,22 @@ public sealed partial class DesktopOrganizationTransaction
         DesktopOrganizationPlan plan,
         ICollection<DesktopOrganizationRule> rules)
     {
+        var activeCategories = rules
+            .Where(rule => rule.IsEnabled)
+            .SelectMany(rule => rule.CategoryIds)
+            .Where(categoryId => !string.IsNullOrWhiteSpace(categoryId))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
         foreach (DesktopOrganizationTargetPlan target in plan.Targets.Where(target => target.CreatesWidget))
         {
-            // Never auto-bind the catch-all "Other" bucket or harvest secondary
-            // overflow categories from merged items: doing so would hijack future
-            // auto-organization of concrete categories (e.g. Images/Documents)
-            // into "Other". Users can always configure custom rules explicitly.
-            if (string.IsNullOrWhiteSpace(target.CategoryId) ||
-                string.Equals(target.CategoryId, DesktopOrganizationCategoryIds.Other, StringComparison.Ordinal))
+            // Never auto-bind the catch-all "Other" bucket, user-renamed or custom
+            // boxes (AutoBindCategoryRule = false), or duplicate active categories:
+            // doing so would hijack future auto-organization of concrete categories.
+            // Users can always configure custom rules explicitly.
+            if (!target.AutoBindCategoryRule ||
+                string.IsNullOrWhiteSpace(target.CategoryId) ||
+                string.Equals(target.CategoryId, DesktopOrganizationCategoryIds.Other, StringComparison.Ordinal) ||
+                !activeCategories.Add(target.CategoryId))
             {
                 continue;
             }

@@ -5,6 +5,7 @@ using DeskBox.Platform;
 using DeskBox.Services;
 using DeskBox.ViewModels;
 using Microsoft.UI;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media;
@@ -29,10 +30,12 @@ public sealed partial class ClipboardQuickPasteWindow : Window
     private readonly SettingsService _settingsService;
     private readonly LocalizationService _localizationService;
     private readonly ThemeService? _themeService;
+    private readonly Action? _onBeforeColdClose;
     private readonly AppWindow _appWindow;
     private readonly IntPtr _hwnd;
     private readonly ClipboardWidgetViewModel _viewModel;
     private readonly ClipboardWidgetContent _content;
+    private DispatcherQueueTimer? _coldHiddenCleanupTimer;
     private long _sessionId;
     private bool _isVisible;
     private bool _isClosed;
@@ -41,7 +44,8 @@ public sealed partial class ClipboardQuickPasteWindow : Window
         ClipboardHistoryService clipboardService,
         SettingsService settingsService,
         LocalizationService localizationService,
-        ThemeService? themeService = null)
+        ThemeService? themeService = null,
+        Action? onBeforeColdClose = null)
     {
         ArgumentNullException.ThrowIfNull(clipboardService);
         ArgumentNullException.ThrowIfNull(settingsService);
@@ -51,11 +55,11 @@ public sealed partial class ClipboardQuickPasteWindow : Window
         _settingsService = settingsService;
         _localizationService = localizationService;
         _themeService = themeService;
+        _onBeforeColdClose = onBeforeColdClose;
 
         Title = _localizationService.T("Window.ClipboardQuickPaste.Title");
         InitializeComponent();
         WindowsCompatibilityService.ApplySafeBackdrop(this);
-        ExtendsContentIntoTitleBar = true;
 
         _hwnd = WindowNative.GetWindowHandle(this);
         WindowId windowId = Win32Interop.GetWindowIdFromWindow(_hwnd);
@@ -108,7 +112,7 @@ public sealed partial class ClipboardQuickPasteWindow : Window
             QuickPasteQueueNextExecutor = ExecuteQuickPasteQueueNextAndHideAsync
         };
         _content.OnWindowVisibilityChanged(false);
-        _content.DismissRequested += (_, _) => HidePopup();
+        _content.DismissRequested += OnContentDismissRequested;
         ContentHost.Content = _content;
 
         _themeService?.TrackWindow(this);
@@ -149,6 +153,7 @@ public sealed partial class ClipboardQuickPasteWindow : Window
             return;
         }
 
+        CancelColdHiddenCleanupTimer();
         long session = ++_sessionId;
 
         // Capture the external foreground window BEFORE activating our popup so
@@ -217,6 +222,91 @@ public sealed partial class ClipboardQuickPasteWindow : Window
         {
             ReleaseColdViewAssets();
         }
+
+        ArmColdHiddenCleanupTimer();
+    }
+
+    private void OnContentDismissRequested(object? sender, EventArgs e) => HidePopup();
+
+    private void ArmColdHiddenCleanupTimer()
+    {
+        int delaySeconds = PerformanceSettingsPolicy
+            .Resolve(_settingsService.Settings)
+            .TransientWindowReleaseDelaySeconds;
+        if (delaySeconds <= 0)
+        {
+            CancelColdHiddenCleanupTimer();
+            return;
+        }
+
+        DispatcherQueue? queue = DispatcherQueue;
+        if (queue is null)
+        {
+            return;
+        }
+
+        TimeSpan interval = TimeSpan.FromSeconds(delaySeconds);
+        if (_coldHiddenCleanupTimer is null)
+        {
+            DispatcherQueueTimer timer = queue.CreateTimer();
+            timer.IsRepeating = false;
+            timer.Interval = interval;
+            timer.Tick += ColdHiddenCleanupTimer_Tick;
+            _coldHiddenCleanupTimer = timer;
+            PerformanceLogger.RecordTransientUiTimerCreated();
+        }
+        else
+        {
+            _coldHiddenCleanupTimer.Stop();
+            _coldHiddenCleanupTimer.Interval = interval;
+        }
+
+        _coldHiddenCleanupTimer.Start();
+    }
+
+    private void CancelColdHiddenCleanupTimer()
+    {
+        _coldHiddenCleanupTimer?.Stop();
+    }
+
+    private void DisposeColdHiddenCleanupTimer()
+    {
+        if (_coldHiddenCleanupTimer is not { } timer)
+        {
+            return;
+        }
+
+        _coldHiddenCleanupTimer = null;
+        timer.Tick -= ColdHiddenCleanupTimer_Tick;
+        try
+        {
+            timer.Stop();
+        }
+        catch
+        {
+        }
+
+        PerformanceLogger.RecordTransientUiTimerReleased();
+    }
+
+    private void ColdHiddenCleanupTimer_Tick(DispatcherQueueTimer sender, object args)
+    {
+        sender.Stop();
+        if (IsPopupVisible || _isClosed)
+        {
+            return;
+        }
+
+        if (_content.IsModalDialogOpen || _content.IsPeekPopoverOpen)
+        {
+            ArmColdHiddenCleanupTimer();
+            return;
+        }
+
+        ReleaseColdViewAssets();
+        App.Log("[Clipboard] Cold-hidden quick-paste popup closing to reclaim window shell");
+        _onBeforeColdClose?.Invoke();
+        Close();
     }
 
     private async Task ExecuteQuickPasteAndHideAsync(ClipboardItemViewModel item, bool preferPlainText)
@@ -315,6 +405,14 @@ public sealed partial class ClipboardQuickPasteWindow : Window
         SurfaceBorder.CornerRadius = WindowsCompatibilityService.SupportsNativeWindowCorners
             ? new CornerRadius(8)
             : new CornerRadius(0);
+        if (WindowsCompatibilityService.SupportsNativeWindowCorners)
+        {
+            int cornerPreference = Win32Helper.DWMWCP_ROUND;
+            _ = Win32Helper.TrySetDwmWindowAttribute(
+                _hwnd,
+                Win32Helper.DWMWA_WINDOW_CORNER_PREFERENCE,
+                ref cornerPreference);
+        }
 
         int exStyle = Win32Helper.GetWindowLong(_hwnd, Win32Helper.GWL_EXSTYLE);
         exStyle |= Win32Helper.WS_EX_TOOLWINDOW | Win32Helper.WS_EX_TOPMOST;
@@ -409,9 +507,15 @@ public sealed partial class ClipboardQuickPasteWindow : Window
 
         _isClosed = true;
         _isVisible = false;
+        DisposeColdHiddenCleanupTimer();
+        SystemBackdrop = null;
         _localizationService.LanguageChanged -= OnLanguageChanged;
         Activated -= OnWindowActivated;
         Closed -= OnWindowClosed;
+        _content.DismissRequested -= OnContentDismissRequested;
+        ContentHost.Content = null;
+        RootGrid.Children.Clear();
+        Content = null;
         _content.DisposeLeafOnly();
         _viewModel.Dispose();
         IconHelper.ClearCacheScope(QuickPasteIconCacheScope);

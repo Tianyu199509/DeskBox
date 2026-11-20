@@ -28,7 +28,9 @@ public sealed record CustomWidgetSettingsMutation(
     Dictionary<string, string>? Settings = null,
     Dictionary<string, string>? Secrets = null,
     bool ClearAllData = false,
-    Dictionary<string, bool>? Permissions = null);
+    Dictionary<string, bool>? Permissions = null,
+    string? ChromeModeOverride = null,
+    bool UpdateChromeMode = false);
 
 public sealed record CustomWidgetCreateOptions(
     string? Spec,
@@ -138,6 +140,21 @@ public interface ISettingsWidgetActions
     Task<ManagedStorageMigrationResult> UpdateDefaultManagedStorageRootAsync(
         string newRootPath,
         ManagedStorageMigrationOptions? options);
+
+    Task<ManagedStorageMigrationResult?> TrySwitchEmptyManagedStorageRootAsync(
+        string newRootPath,
+        CancellationToken token) =>
+        Task.FromResult<ManagedStorageMigrationResult?>(null);
+
+    Task<ManagedStorageMigrationCleanupResult> RetryManagedStorageSourceCleanupAsync(
+        string newRootPath,
+        CancellationToken token) =>
+        Task.FromResult(new ManagedStorageMigrationCleanupResult(0, 0, 0, false));
+
+    Task<ManagedStorageMigrationCleanupResult> CleanupInterruptedMigrationCopiesAsync(
+        string newRootPath,
+        CancellationToken token) =>
+        Task.FromResult(new ManagedStorageMigrationCleanupResult(0, 0, 0, false));
 
     // ── Glance instances ────────────────────────────────────────────
 

@@ -26,7 +26,7 @@ public sealed partial class WidgetGroupTitleSwitcher : UserControl
     private const double DetachLongPressMovementTolerance = 12;
     private const double MaximumTitleWidth = 132;
     private const double IdentitySpacing = 5;
-    private const double TabsModeOuterInset = 6.0;
+    internal const double TabsModeOuterInset = 4.5;
     private double _titleBarContentHeight = WidgetTitleBarMetricsCalculator.MinimumTitleContentHeight;
     private double _outerCornerRadius = 16.0;
 
@@ -117,10 +117,6 @@ public sealed partial class WidgetGroupTitleSwitcher : UserControl
     public WidgetGroupTitleSwitcher()
     {
         InitializeComponent();
-        if (DragDropPermissionService.IsCurrentProcessElevatedCached())
-        {
-            _isTabDragDisabledByElevation = true;
-        }
 
         RegisterSelectorPointerHandlers();
         RegisterTabPointerHandlers();
@@ -384,15 +380,13 @@ public sealed partial class WidgetGroupTitleSwitcher : UserControl
         InvalidateTabStripChrome();
     }
 
-    private double ComputeTabsConcentricCornerRadius()
-    {
-        // Concentric top corner radius: R_tab = max(5.0, R_outer - d_inset).
-        // When the widget is square (R_outer == 0), keep a soft 5.0px small rounded corner.
-        return Math.Clamp(
-            Math.Max(5.0, _outerCornerRadius - TabsModeOuterInset),
-            5.0,
-            11.0);
-    }
+    private double ComputeTabsConcentricCornerRadius() =>
+        ComputeTabsConcentricCornerRadius(_outerCornerRadius);
+
+    internal static double ComputeTabsConcentricCornerRadius(double outerCornerRadius) =>
+        outerCornerRadius <= 0
+            ? 4.5
+            : Math.Clamp(outerCornerRadius * 0.5, 5.0, 8.0);
 
     internal void SetTabStripMargin(Thickness margin)
     {

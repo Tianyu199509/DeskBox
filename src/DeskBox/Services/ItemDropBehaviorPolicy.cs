@@ -1,6 +1,7 @@
 using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Platform;
+using DeskBox.Services.DragDrop;
 using DeskBox.ViewModels;
 
 namespace DeskBox.Services;
@@ -62,6 +63,11 @@ internal static class ItemDropBehaviorPolicy
 
         if (item.IsFolder && item.Path.Length > 0)
         {
+            if (StoreVirtualizedPathPolicy.IsWriteBlockedDestination(item.Path))
+            {
+                return false;
+            }
+
             destinationPath = item.Path;
             return true;
         }
@@ -73,27 +79,22 @@ internal static class ItemDropBehaviorPolicy
             return false;
         }
 
-        string? targetPath = item.TargetPath;
-        if (string.IsNullOrWhiteSpace(targetPath))
-        {
-            targetPath = ShortcutHelper.ReadStoredMetadata(item.Path)?.TargetPath;
-        }
-
-        if (string.IsNullOrWhiteSpace(targetPath) ||
-            ShortcutTargetProbe.Classify(targetPath) != ShortcutTargetKind.LocalFileSystem)
-        {
-            return false;
-        }
-
-        string expanded = ShortcutLaunchPolicy.ExpandTargetPath(targetPath);
-        if (expanded.Length == 0 ||
-            DriveMediaInterop.IsProtectedDragOutSource([expanded]) ||
-            !ShortcutLaunchPolicy.IsExpandedTargetDirectory(expanded))
+        if (!ShortcutTargetProbe.TryResolveShortcutLocalTarget(
+                item.Path,
+                item.TargetPath,
+                out string resolvedLocalTarget,
+                out bool targetIsDirectory,
+                out bool hasStoredArguments) ||
+            hasStoredArguments ||
+            !targetIsDirectory ||
+            resolvedLocalTarget.Length == 0 ||
+            DriveMediaInterop.IsProtectedDragOutSource([resolvedLocalTarget]) ||
+            StoreVirtualizedPathPolicy.IsWriteBlockedDestination(resolvedLocalTarget))
         {
             return false;
         }
 
-        destinationPath = expanded;
+        destinationPath = resolvedLocalTarget;
         return true;
     }
 }

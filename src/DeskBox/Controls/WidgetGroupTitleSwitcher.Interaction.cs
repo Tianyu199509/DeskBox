@@ -48,13 +48,47 @@ public sealed partial class WidgetGroupTitleSwitcher
 
     private void OpenPickerAccelerator_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
     {
-        if (_presentation is null || _pickerOpen)
+        if (_presentation is null || _pickerOpen || IsFocusedInsideDropdownOrTextInput())
         {
             return;
         }
 
         OpenPicker();
         args.Handled = true;
+    }
+
+    private bool IsFocusedInsideDropdownOrTextInput(object? originalSource = null)
+    {
+        DependencyObject? node = originalSource as DependencyObject;
+        if (node is null && XamlRoot is not null)
+        {
+            try
+            {
+                node = FocusManager.GetFocusedElement(XamlRoot) as DependencyObject;
+            }
+            catch
+            {
+                node = null;
+            }
+        }
+
+        while (node is not null)
+        {
+            if (node is ComboBox or
+                AutoSuggestBox or
+                TextBox or
+                PasswordBox or
+                RichEditBox or
+                NumberBox or
+                CalendarDatePicker or
+                TimePicker)
+            {
+                return true;
+            }
+            node = VisualTreeHelper.GetParent(node);
+        }
+
+        return false;
     }
 
     private void ReleaseInteractionTimersAndAccelerators()
@@ -84,7 +118,7 @@ public sealed partial class WidgetGroupTitleSwitcher
         bool menu =
             menuState.HasFlag(CoreVirtualKeyStates.Down);
 
-        if (e.Key == VirtualKey.Down && menu)
+        if (e.Key == VirtualKey.Down && menu && !IsFocusedInsideDropdownOrTextInput(e.OriginalSource))
         {
             OpenPicker(SelectorButton);
             e.Handled = true;

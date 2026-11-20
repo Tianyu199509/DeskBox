@@ -235,6 +235,12 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
     public bool IsApplyingBackgroundResultRefresh { get; private set; }
 
     /// <summary>
+    /// True while <see cref="CurrentResults"/> and related tab/result flags are being
+    /// reconciled in batch so the view coalesces per-item notifications into one layout pass.
+    /// </summary>
+    public bool IsBatchUpdatingResults { get; private set; }
+
+    /// <summary>
     /// Whether search history (recent queries + favorites) is currently being
     /// recorded and shown. Driven by the <see cref="AppSettings.SearchSaveHistory"/> flag.
     /// </summary>
@@ -261,6 +267,8 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
     /// <summary>Palette (command) mode: a compact launcher.</summary>
     public bool IsPaletteMode => string.Equals(DisplayMode, "Palette", StringComparison.OrdinalIgnoreCase);
 
+    private bool _suppressQueryChangedSearch;
+
     private IReadOnlyList<SearchResultItem> ActivePool => IsQueryActive ? _allResults : _emptyStateItems;
 
     partial void OnQueryChanged(string value) => HandleQueryChangedCore(value);
@@ -269,6 +277,11 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
     {
         ActiveScopeBadgeText = Services.SearchQuerySyntaxParser.Parse(value).ScopeBadgeText ?? string.Empty;
         OnPropertyChanged(nameof(EffectiveHighlightQuery));
+        if (_suppressQueryChangedSearch)
+        {
+            return;
+        }
+
         ResultFilter = SearchResultFilter.All;
         _ = SearchAsync(value, SearchRefreshKind.UserQuery);
     }
@@ -1099,6 +1112,8 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
         TodoWidgetId = rec.TodoWidgetId,
         TodoItemId = rec.TodoItemId,
         QuickCaptureItemId = rec.QuickCaptureItemId,
+        CustomWidgetId = rec.CustomWidgetId,
+        CustomWidgetItemId = rec.CustomWidgetItemId,
         HistoryQuery = rec.HistoryQuery
     };
 
@@ -1121,16 +1136,31 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
 
         if (string.IsNullOrWhiteSpace(query))
         {
-            _allResults = [];
-            _nextFileResultOffset = 0;
-            IsQueryActive = false;
-            HasResults = false;
-            HasMoreResults = false;
-            TotalResultCount = 0;
-            IsSearching = false;
-            StatusText = string.Empty;
-            // Refresh history — the previous query may have just been recorded.
-            RebuildEmptyStateItems();
+            bool previousBatch = IsBatchUpdatingResults;
+            IsBatchUpdatingResults = true;
+            try
+            {
+                _allResults = [];
+                _nextFileResultOffset = 0;
+                IsQueryActive = false;
+                HasResults = false;
+                HasMoreResults = false;
+                TotalResultCount = 0;
+                IsSearching = false;
+                StatusText = string.Empty;
+                // Refresh history — the previous query may have just been recorded.
+                RebuildEmptyStateItems();
+            }
+            finally
+            {
+                IsBatchUpdatingResults = previousBatch;
+            }
+
+            if (!previousBatch)
+            {
+                OnPropertyChanged(nameof(HasResults));
+            }
+
             return;
         }
 
@@ -1170,11 +1200,14 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
             int fileResultOffset = refreshKind == SearchRefreshKind.LoadMore
                 ? _nextFileResultOffset
                 : 0;
-            int fileResultPageSize = refreshKind == SearchRefreshKind.ProviderUpdate
-                ? Math.Max(
+            int fileResultPageSize = refreshKind switch
+            {
+                SearchRefreshKind.ProviderUpdate => Math.Max(
                     Services.SearchEngineService.InitialFileResultPageSize,
-                    _nextFileResultOffset)
-                : Services.SearchEngineService.FileResultPageSize;
+                    _nextFileResultOffset),
+                SearchRefreshKind.LoadMore => Services.SearchEngineService.FileResultPageSize,
+                _ => Services.SearchEngineService.InitialFileResultPageSize
+            };
             SearchResponse response = await _searchEngine.SearchPageAsync(
                 query,
                 fileResultOffset,
@@ -1279,6 +1312,7 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
 
         IsQueryActive = true;
         IsApplyingBackgroundResultRefresh = refreshKind != SearchRefreshKind.UserQuery;
+        IsBatchUpdatingResults = true;
         try
         {
             HasResults = _allResults.Count > 0;
@@ -1291,6 +1325,8 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
         }
         finally
         {
+            IsBatchUpdatingResults = false;
+            OnPropertyChanged(nameof(HasCurrentResults));
             IsApplyingBackgroundResultRefresh = false;
         }
 
@@ -1362,6 +1398,12 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
             response.Elapsed.TotalMilliseconds);
     }
 
+    internal void CancelPendingSearch()
+    {
+        Interlocked.Increment(ref _searchGeneration);
+        CancelCurrentSearch();
+    }
+
     private void CancelCurrentSearch()
     {
         CancellationTokenSource? previous = Interlocked.Exchange(ref _searchCts, null);
@@ -1390,15 +1432,51 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
         CancellationToken token,
         bool hideShortcutArrowOverlay = false)
     {
+        _ = hideShortcutArrowOverlay;
         try
         {
-            await _fileMetaService.EnrichAsync(items, token, hideShortcutArrowOverlay);
-            if (token.IsCancellationRequested)
+            bool sortDependsOnStats = SortColumn is ResultSortColumn.Size or ResultSortColumn.Date;
+            if (!sortDependsOnStats)
+            {
+                await Task.Delay(220, token);
+            }
+
+            if (sortDependsOnStats)
+            {
+                var pending = items
+                    .Where(item => !item.IconResolved)
+                    .Select(EnsureResultMetadataAsync)
+                    .ToList();
+                if (pending.Count > 0)
+                {
+                    await Task.WhenAll(pending);
+                }
+            }
+            else
+            {
+                foreach (SearchResultItem item in items)
+                {
+                    if (token.IsCancellationRequested || _isDisposed)
+                    {
+                        return;
+                    }
+
+                    if (!item.IconResolved)
+                    {
+                        await EnsureResultMetadataAsync(item);
+                    }
+                }
+            }
+
+            if (token.IsCancellationRequested || _isDisposed)
             {
                 return;
             }
 
-            RebuildCurrentResults(preserveSelection: true);
+            if (sortDependsOnStats)
+            {
+                RebuildCurrentResults(preserveSelection: true);
+            }
         }
         catch (OperationCanceledException)
         {
@@ -1503,7 +1581,7 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
                     FileCategoryHelper.Categorize(item.Title) == FileCategory.Document,
             SupportsFileSort: true),
         new("deskbox", "Search.Tab.DeskBox", "\uE80F",
-            item => item.Kind is SearchResultKind.Todo or SearchResultKind.QuickCapture or SearchResultKind.Clipboard or SearchResultKind.Action,
+            item => item.Kind is SearchResultKind.Todo or SearchResultKind.QuickCapture or SearchResultKind.CustomWidget or SearchResultKind.Clipboard or SearchResultKind.Action,
             SupportsFileSort: false)
     ];
 
@@ -1669,6 +1747,7 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
         SearchResultKind.Folder => _localizationService.T("Search.Type.Folder"),
         SearchResultKind.Todo => _localizationService.T("Search.Type.Todo"),
         SearchResultKind.QuickCapture => _localizationService.T("Search.Type.Note"),
+        SearchResultKind.CustomWidget => _localizationService.T("CustomWidget.Title"),
         SearchResultKind.Clipboard => _localizationService.T("Search.Type.Clipboard"),
         SearchResultKind.Action => _localizationService.T("Search.Type.Action"),
         SearchResultKind.File => FileCategoryHelper.Categorize(item.Title) switch
@@ -1723,23 +1802,40 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
             target = GetSortedTabItems(tab);
         }
 
-        Services.SearchResultCollectionReconciler.Reconcile(CurrentResults, target);
-
-        HasCurrentResults = CurrentResults.Count > 0;
-
-        if (preserveSelection && previous is not null)
+        bool ownsBatch = !IsBatchUpdatingResults;
+        if (ownsBatch)
         {
-            int index = CurrentResults.IndexOf(previous);
-            if (index >= 0)
-            {
-                SelectedIndex = index;
-                SelectedItem = previous;
-                return;
-            }
+            IsBatchUpdatingResults = true;
         }
 
-        SelectedIndex = CurrentResults.Count > 0 ? 0 : -1;
-        SelectedItem = SelectedIndex >= 0 ? CurrentResults[SelectedIndex] : null;
+        try
+        {
+            Services.SearchResultCollectionReconciler.Reconcile(CurrentResults, target);
+
+            HasCurrentResults = CurrentResults.Count > 0;
+
+            if (preserveSelection && previous is not null)
+            {
+                int index = CurrentResults.IndexOf(previous);
+                if (index >= 0)
+                {
+                    SelectedIndex = index;
+                    SelectedItem = previous;
+                    return;
+                }
+            }
+
+            SelectedIndex = CurrentResults.Count > 0 ? 0 : -1;
+            SelectedItem = SelectedIndex >= 0 ? CurrentResults[SelectedIndex] : null;
+        }
+        finally
+        {
+            if (ownsBatch)
+            {
+                IsBatchUpdatingResults = false;
+                OnPropertyChanged(nameof(HasCurrentResults));
+            }
+        }
     }
 
     private List<SearchResultItem> GetSortedTabItems(SearchTabItem tab)
@@ -1767,8 +1863,8 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
                 ? items.OrderBy(i => i.FileSize ?? long.MaxValue).ToList()
                 : items.OrderByDescending(i => i.FileSize ?? long.MinValue).ToList(),
             ResultSortColumn.Date => SortAscending
-                ? items.OrderBy(i => i.CreatedAt ?? DateTimeOffset.MaxValue).ToList()
-                : items.OrderByDescending(i => i.CreatedAt ?? DateTimeOffset.MinValue).ToList(),
+                ? items.OrderBy(i => i.ModifiedAt ?? i.CreatedAt ?? DateTimeOffset.MaxValue).ToList()
+                : items.OrderByDescending(i => i.ModifiedAt ?? i.CreatedAt ?? DateTimeOffset.MinValue).ToList(),
             ResultSortColumn.Type => SortAscending
                 ? items.OrderBy(i => i.TypeDisplay ?? string.Empty, StringComparer.OrdinalIgnoreCase).ToList()
                 : items.OrderByDescending(i => i.TypeDisplay ?? string.Empty, StringComparer.OrdinalIgnoreCase).ToList(),
@@ -1787,6 +1883,7 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
                                         FileCategoryHelper.Categorize(item.Title) == FileCategory.Document,
         SearchResultFilter.DeskBox => item.Kind is SearchResultKind.Todo or
                                       SearchResultKind.QuickCapture or
+                                      SearchResultKind.CustomWidget or
                                       SearchResultKind.Clipboard or
                                       SearchResultKind.Action,
         _ => true
@@ -1899,33 +1996,15 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
                 if (!string.IsNullOrWhiteSpace(item.DetailPath))
                 {
                     string filePath = item.DetailPath;
-                    IntPtr ownerHandle = OwnerWindowHandle;
                     // Search execution handlers run inside KeyDown / DoubleTapped
-                    // / PointerReleased callback frames; the shell open is a
-                    // cross-process Explorer call with no timeout and must
-                    // leave the frame by one dispatcher turn — the same
-                    // discipline as FileSurfaceContent.Opening's yield
-                    // (drag-freeze family). The popup commits optimistically;
-                    // a failed open is logged instead of reopening the popup.
+                    // / PointerReleased callback frames; dispatch through
+                    // FileService.OpenItemAsync after leaving the input frame so
+                    // Shell/COM work runs on the bounded STA pool off the UI
+                    // thread, and pass IntPtr.Zero because HidePopupCallback
+                    // immediately hides the popup window.
                     DeskBox.Platform.UiDispatch.PostAfterCallback(() =>
                     {
-                        try
-                        {
-                            bool opened =
-                                DeskBox.Platform.Win32Helper.OpenFileOrChooseApp(
-                                    ownerHandle,
-                                    filePath);
-                            if (!opened)
-                            {
-                                App.Log(
-                                    "[SearchPopup] Deferred open returned no " +
-                                    $"handler path='{filePath}'");
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            App.Log($"[SearchPopup] Deferred open failed: {ex.Message}");
-                        }
+                        _ = OpenSearchFileItemAsync(filePath);
                     });
                     CommitExecution(item);
                     HidePopupCallback?.Invoke();
@@ -1934,20 +2013,15 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
                 break;
 
             case SearchResultKind.Folder:
-                // Folders always open in Explorer.
+                // Folders share the unified ShellLaunchService / FileService.OpenItemAsync
+                // pipeline so third-party default Folder handlers, Explorer routing,
+                // and working-directory hygiene match File Grid surfaces.
                 if (!string.IsNullOrWhiteSpace(item.DetailPath))
                 {
                     string folderPath = item.DetailPath;
                     DeskBox.Platform.UiDispatch.PostAfterCallback(() =>
                     {
-                        try
-                        {
-                            OpenPath(folderPath);
-                        }
-                        catch (Exception ex)
-                        {
-                            App.Log($"[SearchPopup] Deferred folder open failed: {ex.Message}");
-                        }
+                        _ = OpenSearchFileItemAsync(folderPath);
                     });
                     CommitExecution(item);
                     HidePopupCallback?.Invoke();
@@ -2002,6 +2076,15 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
                 CommitExecution(item);
                 ContentRequested?.Invoke(this, item);
                 return true;
+
+            case SearchResultKind.CustomWidget:
+                if (!string.IsNullOrWhiteSpace(item.CustomWidgetId))
+                {
+                    CommitExecution(item);
+                    ContentRequested?.Invoke(this, item);
+                    return true;
+                }
+                break;
         }
 
         return false;
@@ -2024,26 +2107,14 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
             // for drive roots whose parent cannot be selected in.
             bool openDirectly = item.Kind == SearchResultKind.Folder &&
                 string.IsNullOrWhiteSpace(Directory.GetParent(path)?.FullName);
-            DeskBox.Platform.UiDispatch.PostAfterCallback(() =>
+            if (openDirectly)
             {
-                try
-                {
-                    if (openDirectly)
-                    {
-                        OpenPath(path);
-                    }
-                    else
-                    {
-                        System.Diagnostics.Process.Start(
-                            "explorer.exe",
-                            $"/select,\"{path}\"");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    App.Log($"[SearchPopup] Failed to open result location: {ex.Message}");
-                }
-            });
+                DeskBox.Services.ShellLaunchService.FireAndForgetOpenPath(path);
+            }
+            else
+            {
+                DeskBox.Services.ShellLaunchService.FireAndForgetRevealInExplorer(path);
+            }
 
             CommitExecution(item);
             HidePopupCallback?.Invoke();
@@ -2081,22 +2152,47 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
     /// </summary>
     public void ClearSearch()
     {
+        Interlocked.Increment(ref _searchGeneration);
         CancelCurrentSearch();
-        Query = string.Empty;
-        ActiveScopeBadgeText = string.Empty;
-        _allResults = [];
-        _nextFileResultOffset = 0;
-        IsQueryActive = false;
-        IsSearching = false;
-        HasResults = false;
-        HasMoreResults = false;
-        TotalResultCount = 0;
-        StatusText = string.Empty;
-        lock (_metadataTaskGate)
+        bool previousBatch = IsBatchUpdatingResults;
+        IsBatchUpdatingResults = true;
+        try
         {
-            _metadataTasks.Clear();
+            _suppressQueryChangedSearch = true;
+            try
+            {
+                Query = string.Empty;
+            }
+            finally
+            {
+                _suppressQueryChangedSearch = false;
+            }
+
+            ActiveScopeBadgeText = string.Empty;
+            _allResults = [];
+            _nextFileResultOffset = 0;
+            IsQueryActive = false;
+            IsSearching = false;
+            HasResults = false;
+            HasMoreResults = false;
+            TotalResultCount = 0;
+            StatusText = string.Empty;
+            ResultFilter = SearchResultFilter.All;
+            lock (_metadataTaskGate)
+            {
+                _metadataTasks.Clear();
+            }
+            RebuildEmptyStateItems();
         }
-        RebuildEmptyStateItems();
+        finally
+        {
+            IsBatchUpdatingResults = previousBatch;
+        }
+
+        if (!previousBatch)
+        {
+            OnPropertyChanged(nameof(HasResults));
+        }
     }
 
     /// <summary>
@@ -2105,28 +2201,48 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
     /// </summary>
     public void OnPopupHidden()
     {
+        Interlocked.Increment(ref _searchGeneration);
         CancelCurrentSearch();
         _resultRefreshCts?.Cancel();
         if (!_isRecommendationEnrichmentInFlight)
         {
             _recommendationCts?.Cancel();
         }
-        Query = string.Empty;
-        ActiveScopeBadgeText = string.Empty;
-        _allResults = [];
-        _nextFileResultOffset = 0;
-        SelectedItem = null;
-        IsQueryActive = false;
-        IsSearching = false;
-        HasResults = false;
-        HasMoreResults = false;
-        TotalResultCount = 0;
-        StatusText = string.Empty;
-        lock (_metadataTaskGate)
+
+        bool previousBatch = IsBatchUpdatingResults;
+        IsBatchUpdatingResults = true;
+        try
         {
-            _metadataTasks.Clear();
+            _suppressQueryChangedSearch = true;
+            try
+            {
+                Query = string.Empty;
+            }
+            finally
+            {
+                _suppressQueryChangedSearch = false;
+            }
+
+            ActiveScopeBadgeText = string.Empty;
+            _allResults = [];
+            _nextFileResultOffset = 0;
+            SelectedItem = null;
+            IsQueryActive = false;
+            IsSearching = false;
+            HasResults = false;
+            HasMoreResults = false;
+            TotalResultCount = 0;
+            StatusText = string.Empty;
+            lock (_metadataTaskGate)
+            {
+                _metadataTasks.Clear();
+            }
+            RebuildEmptyStateItems();
         }
-        RebuildEmptyStateItems();
+        finally
+        {
+            IsBatchUpdatingResults = previousBatch;
+        }
     }
 
     public int ReleaseColdHiddenCaches()
@@ -2277,22 +2393,25 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
         }
     }
 
-    private static void OpenPath(string path)
+    private static async Task OpenSearchFileItemAsync(string filePath)
     {
         try
         {
-            if (Directory.Exists(path))
+            DeskBox.Services.FileService.OpenItemResult result =
+                await DeskBox.Services.ShellLaunchService.OpenPathAsync(
+                    filePath,
+                    IntPtr.Zero).ConfigureAwait(false);
+            if (result != DeskBox.Services.FileService.OpenItemResult.OpenedOrHandled &&
+                result != DeskBox.Services.FileService.OpenItemResult.ShortcutDeleted)
             {
-                System.Diagnostics.Process.Start("explorer.exe", $"\"{path}\"");
-            }
-            else if (File.Exists(path))
-            {
-                System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{path}\"");
+                App.Log(
+                    "[SearchPopup] Deferred open completed with " +
+                    $"result={result} path='{filePath}'");
             }
         }
         catch (Exception ex)
         {
-            App.Log($"[SearchPopup] Failed to open path '{path}': {ex.Message}");
+            App.Log($"[SearchPopup] Deferred open failed: {ex.Message}");
         }
     }
 

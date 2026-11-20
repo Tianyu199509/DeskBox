@@ -440,27 +440,40 @@ public sealed class FeatureWidgetsSettingsCoordinator : IFeatureWidgetsSettings
     public bool SetManagedDropAction(string? action)
     {
         ThrowIfStopped();
-        string normalized = action switch
-        {
-            SettingsService.ManagedDropActionCopy =>
-                SettingsService.ManagedDropActionCopy,
-            SettingsService.ManagedDropActionFollowWindows =>
-                SettingsService.ManagedDropActionFollowWindows,
-            _ => SettingsService.ManagedDropActionMove
-        };
+        string normalized = NormalizeManagedAction(action);
         FileWidgetSettingsSlice fileWidget = _settings.Settings.FileWidget;
-        if (string.Equals(
-                fileWidget.ManagedDropAction,
-                normalized,
-                StringComparison.Ordinal))
+        string currentDrop = NormalizeManagedAction(fileWidget.ManagedDropAction);
+        string currentDragOut = NormalizeManagedAction(fileWidget.ManagedDragOutAction);
+        bool keepLinked = string.Equals(currentDrop, currentDragOut, StringComparison.Ordinal);
+        bool dropSame = string.Equals(
+            fileWidget.ManagedDropAction,
+            normalized,
+            StringComparison.Ordinal);
+        bool dragOutSame = !keepLinked || string.Equals(
+            fileWidget.ManagedDragOutAction,
+            normalized,
+            StringComparison.Ordinal);
+        if (dropSame && dragOutSame)
         {
             return false;
         }
 
         fileWidget.ManagedDropAction = normalized;
+        if (keepLinked)
+        {
+            fileWidget.ManagedDragOutAction = normalized;
+        }
+
         _settings.SaveDebounced();
         return true;
     }
+
+    private static string NormalizeManagedAction(string? action) => action switch
+    {
+        SettingsService.ManagedDropActionCopy => SettingsService.ManagedDropActionCopy,
+        SettingsService.ManagedDropActionFollowWindows => SettingsService.ManagedDropActionFollowWindows,
+        _ => SettingsService.ManagedDropActionMove
+    };
 
     public string ReadFileWidgetFolderOpenBehavior() =>
         FileWidgetFolderOpenBehaviorNames.NormalizeGlobal(

@@ -14,7 +14,7 @@ public sealed class SearchDeletionShellContractTests
     public void SearchDeletion_RoutesThroughShellWithOwnerWindow()
     {
         string source = ReadRepositoryFile(
-            "src/DeskBox/Views/SearchPopupWindow.xaml.cs");
+            "src/DeskBox/Views/SearchPopupWindow.ResultsAndPreview.cs");
 
         Assert.Contains(
             "DeleteEntriesWithShellAsync(",
@@ -30,7 +30,7 @@ public sealed class SearchDeletionShellContractTests
     public void SearchDeletion_DoesNotUseVisualBasicOrSelfDrawnRecyclePromise()
     {
         string source = ReadRepositoryFile(
-            "src/DeskBox/Views/SearchPopupWindow.xaml.cs");
+            "src/DeskBox/Views/SearchPopupWindow.ResultsAndPreview.cs");
 
         Assert.DoesNotContain("Microsoft.VisualBasic", source, StringComparison.Ordinal);
         Assert.DoesNotContain("Search.Delete.Title", source, StringComparison.Ordinal);

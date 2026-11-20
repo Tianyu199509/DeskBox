@@ -1,4 +1,6 @@
 using DeskBox.Controls;
+using DeskBox.Controls.Search;
+using DeskBox.Features.Search;
 using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Platform;
@@ -36,7 +38,7 @@ namespace DeskBox.Views;
 /// Layout: search box, dynamic tab bar, result list, and a persistent footer.
 /// The surface material and border follow the widget appearance settings.
 /// </summary>
-public sealed partial class SearchPopupWindow : Window
+public sealed partial class SearchPopupWindow : Window, ISearchRecommendationGridHost, ISearchRecommendationOverlayHost
 {
     private readonly SearchPopupViewModel _viewModel;
     private readonly SettingsService _settingsService;
@@ -44,22 +46,31 @@ public sealed partial class SearchPopupWindow : Window
     private readonly SpacePreviewBroker _spacePreviewService = new();
     private readonly ThemeService? _themeService;
     private DispatcherTimer? _searchDebounceTimer;
-    private DispatcherTimer? _heightMorphTimer;
+    private IDisposable? _morphAnimationRegistration;
     private long _heightSpringLastTimestamp;
     private double _heightSpringCurrentLogical;
     private double _heightSpringVelocity;
     private bool _heightSpringExpanding;
     private double _heightMorphTargetLogical;
+    private double _widthSpringCurrentLogical;
+    private double _widthSpringVelocity;
+    private bool _widthSpringExpanding;
+    private double _widthMorphTargetLogical;
     private RectInt32 _heightMorphPendingBounds;
-    private CancellationTokenSource? _skeletonDelayCancellation;
+    private RectInt32 _morphWorkAreaPhysical;
+    private double _morphDpiScale = 1.0;
+    private int? _morphCustomX;
+    private int? _morphCustomY;
+    private int _lastMorphWindowX = int.MinValue;
     private bool _suppressPanelEntranceAnimation;
+    private bool _hasPlayedOpenRecommendationsEntrance;
+
+    private bool IsMorphSpringRunning => _morphAnimationRegistration is not null;
 
     // When non-null, the recommended-apps entrance animation is "pending": each
     // card is animated the moment ItemsRepeater realizes it (via ElementPrepared),
     // because TryGetElement returns null until a layout pass has realized the
     // virtualized elements. The flag carries the configured style index.
-    private int? _pendingEntranceStyle;
-    private DispatcherTimer? _entranceGuardTimer;
     private DispatcherQueueTimer? _coldHiddenCleanupTimer;
     private DispatcherQueueTimer? _unfocusedAutoHideTimer;
     private bool _isPopupInputActive;
@@ -87,8 +98,9 @@ public sealed partial class SearchPopupWindow : Window
     // WM_CLOSE" (WinUI/DWM teardown).
     private const uint WmClose = 0x0010;
     private const uint WmDestroy = 0x0002;
+    private const uint WmDpiChanged = 0x02E0;
     private static readonly UIntPtr PopupCloseWatcherSubclassId = new(0x5E4C);
-    private static readonly SolidColorBrush s_transparentCardBrush = new(Colors.Transparent);
+    private static App? CurrentApp => App.Current as App;
     private readonly Win32Helper.SubclassProc _popupCloseWatcherProc;
     private bool _isPopupCloseWatcherInstalled;
     private bool _isWindowClosed;
@@ -104,128 +116,10 @@ public sealed partial class SearchPopupWindow : Window
 
     // Keyboard-selected result row. Hover feedback is owned by the row control itself.
     private SearchResultRowControl? _selectedRow;
+    private bool _isNavigatingResults;
     private double? _measuredResultRowHeight;
     private int _selectedRowHighlightGeneration;
     private int _tabFocusRestoreGeneration;
-
-    // Recommended-apps selection: tracks the currently highlighted app card.
-    private int _selectedAppIndex = -1;
-    private Grid? _selectedAppCard;
-    private Grid? _hoveredAppCard;
-
-    // Recommendation grid drag/merge, batch edit mode, and centered overlay state.
-    private Grid? _recPointerCard;
-    private RecommendedGridEntry? _recPressedEntry;
-    private Point _recPointerStartInPanel;
-    private bool _recIsDragging;
-    private bool _recWasCtrlPressedOnDown;
-    private bool _recAutoEnteredEditModeOnDown;
-    private bool _isRecommendationEditMode;
-    private readonly HashSet<string> _recMultiSelectedKeys = new(StringComparer.OrdinalIgnoreCase);
-    private readonly HashSet<string> _recRubberBandBaseKeys = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, Rect> _recRubberBandKnownTileRects = new(StringComparer.OrdinalIgnoreCase);
-    private readonly List<string> _recDraggedAppKeys = [];
-    private readonly HashSet<string> _recDraggedEntryKeys = new(StringComparer.OrdinalIgnoreCase);
-    // Live reflow preview: translation-free base rects (snapshot per drag so
-    // applying translations never corrupts decisions or metrics) and the
-    // translations currently applied, so only touched tiles are cleared.
-    // Decisions MUST come from these base rects — live rects include the
-    // reflow translations, which fed pointer→decision→reflow→pointer
-    // oscillation (2026-11-06 evening report: flicker + unreachable folder
-    // merge zone).
-    private readonly Dictionary<string, Rect> _recTileBaseRects = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, System.Numerics.Vector3> _recReflowTranslations = new(StringComparer.OrdinalIgnoreCase);
-    // Drop-decision hysteresis: once a decision lands, the pointer owns its
-    // anchor region (matched tile / append band, inflated) and the decision
-    // is not re-evaluated until the pointer leaves it.
-    private RecommendedDropDecision _recLastDropDecision = new(false, null, null, -1, default, default, default);
-    private Rect _recDropAnchorRect;
-    private bool _recHasDropAnchor;
-    private string? _recLastDecisionSummary;
-    private bool _recExternalDragAttempted;
-    private bool _recHasCachedReflowState;
-    private bool _recCachedReflowActive;
-    private int _recCachedReflowTargetIndex = -1;
-    private int _recCachedReflowRealizedCount = -1;
-    private int _recCachedReflowEntriesCount = -1;
-    private bool _isRecRubberBanding;
-    private Point _recRubberBandStart;
-    private Point _recRubberBandCurrent;
-    private Point _recRubberBandPointerInViewport;
-    private DispatcherTimer? _recRubberBandAutoScrollTimer;
-    private FrameworkElement? _recMergeHoveredCard;
-    private string? _lastEditFolderClickKey;
-    private long _lastEditFolderClickTickMs;
-    private bool _lastEditFolderSelectedBeforeClick;
-    private const long EditFolderDoubleClickThresholdMs = 450;
-    private int _overlayAnimationGeneration;
-    private bool _isOverlayClosing;
-    private Grid? _hoveredOverlayCard;
-    private Grid? _overlayPointerCard;
-    private SearchResultItem? _overlayPressedItem;
-    private Point _overlayPointerStartInHost;
-    private bool _overlayIsDragging;
-    private bool _overlayPressedInFolder;
-    private bool _overlayExternalDragAttempted;
-    private string? _openFolderId;
-    private bool _isEditingFolderTitle;
-    private bool _suppressFolderTitleBlurCommit;
-    private readonly System.Collections.ObjectModel.ObservableCollection<SearchResultItem> _folderOverlayItems = [];
-
-    // True after the user presses Up/Down in the search box to navigate results.
-    // While navigating, plain Space triggers QuickLook preview instead of typing.
-    // Cleared whenever the user types a character (TextChanged).
-    private bool _isNavigatingResults;
-
-    // Drag state for result rows: distinguishes a click (execute) from a drag
-    // (export the file/folder path to another app or widget) from anywhere on
-    // a file/folder row. The candidate is pointer-bound (the model the grid's
-    // manual drag uses, FileSurfaceContent.ElevatedPointerDrag): armed only
-    // for a physical left-button press with panel pointer capture, re-checked
-    // for button contact on every move, disarmed by release, capture loss,
-    // right-tap, or popup hide. While a drag-out session is in flight the
-    // flag blocks re-arming.
-    private readonly record struct SearchDragOutCandidate(
-        uint PointerId,
-        SearchResultItem Item,
-        SearchResultRowControl Row,
-        Point StartPoint);
-    private SearchDragOutCandidate? _dragOutCandidate;
-    private SearchResultItem? _pressedItem;
-    private SearchResultItem? _pendingCtrlToggleOffOnRelease;
-    private bool _dragOutInProgress;
-    private string[]? _activeDragOutPaths;
-    private bool _isExternalFileDragActive;
-    private bool _externalDragLeftPopupOnce;
-    private bool _hasEnteredPlatformDragLoop;
-    private bool _externalDragPassthroughApplied;
-    private DispatcherQueueTimer? _externalDragFadeTimer;
-    private bool _restoreResultFocusAfterFlyout;
-
-    private static bool? s_isProcessElevatedForDrag;
-
-    // Cached per process — elevation cannot change mid-run, and the probe
-    // sits on the pointer-pressed hot path. Elevated runs never arm a drag
-    // candidate: WinUI's StartDragAsync throws inside the platform drag
-    // pipeline for an elevated process (see FileSurfaceContent's elevated
-    // CanDrag removal), and this window's await has no catch.
-    private static bool IsCurrentProcessElevatedForDrag()
-    {
-        s_isProcessElevatedForDrag ??= DragDropPermissionService.IsCurrentProcessElevated();
-        return s_isProcessElevatedForDrag.Value;
-    }
-
-    // Multi-selection state: tracks all items selected via rubber-band or Ctrl+click.
-    // When non-empty, batch operations (copy/cut/delete) act on these items.
-    private readonly HashSet<SearchResultItem> _multiSelectedItems = new();
-    private readonly HashSet<SearchResultItem> _rubberBandBaseSelection = new();
-    private bool _isRubberBanding;
-    private Point _rubberBandStart;
-    private Point _rubberBandCurrent;
-    private Point _rubberBandPointerInViewport;
-    private DispatcherTimer? _rubberBandAutoScrollTimer;
-    private bool _suppressMultiSelectSync;
-    private int _selectionAnchorIndex = -1;
 
     // One stable search surface. Layout differences should follow available width,
     // not a user-facing mode that only changes the window dimensions.
@@ -249,6 +143,9 @@ public sealed partial class SearchPopupWindow : Window
         var windowId = Win32Interop.GetWindowIdFromWindow(_hwnd);
         _appWindow = AppWindow.GetFromWindowId(windowId);
 
+        RecommendedAppsGrid.Initialize(_viewModel, _settingsService, _localizationService, this);
+        RecommendationOverlays.Initialize(_viewModel, _localizationService, this);
+
         ConfigureWindow();
         ApplyTheme();
         SetupBindings();
@@ -259,13 +156,8 @@ public sealed partial class SearchPopupWindow : Window
         _viewModel.CurrentResults.CollectionChanged += OnCurrentResultsCollectionChanged;
         ResultsRepeater.ElementPrepared += OnResultsElementPrepared;
         ResultsRepeater.ElementClearing += OnResultsElementClearing;
-        RecommendedAppsRepeater.ElementPrepared += OnRecommendedAppsElementPrepared;
-        RecommendedAppsRepeater.ElementClearing += OnRecommendedAppsElementClearing;
-        FolderAppsRepeater.ElementPrepared += OnOverlayAppsElementPrepared;
-        FolderAppsRepeater.ElementClearing += OnOverlayAppsElementClearing;
-        HiddenAppsRepeater.ElementPrepared += OnOverlayAppsElementPrepared;
-        HiddenAppsRepeater.ElementClearing += OnOverlayAppsElementClearing;
         _viewModel.RecommendationIconsResolved += OnRecommendationIconsResolved;
+        ApplyWin10SafeSearchGlyphs();
         _viewModel.RecommendationLayoutUpdated += OnRecommendationLayoutUpdated;
         _settingsService.SettingsChanged += OnAppearanceSettingsChanged;
         _settingsService.AppearancePreviewChanged += OnAppearanceSettingsChanged;
@@ -305,6 +197,22 @@ public sealed partial class SearchPopupWindow : Window
             IntPtr destroyResult = Win32Helper.DefSubclassProc(hWnd, message, wParam, lParam);
             RemovePopupCloseWatcherSubclass();
             return destroyResult;
+        }
+        else if (message == WmDpiChanged)
+        {
+            IntPtr dpiResult = Win32Helper.DefSubclassProc(hWnd, message, wParam, lParam);
+            if (IsPopupVisible && !_isWindowDragging && !_isWindowResizing)
+            {
+                _ = DispatcherQueue.TryEnqueue(() =>
+                {
+                    if (IsPopupVisible && !_isWindowClosed && !_isWindowDragging && !_isWindowResizing)
+                    {
+                        UpdatePopupDynamicBounds(forceWhenOpening: true);
+                    }
+                });
+            }
+
+            return dpiResult;
         }
 
         return Win32Helper.DefSubclassProc(hWnd, message, wParam, lParam);
@@ -360,7 +268,8 @@ public sealed partial class SearchPopupWindow : Window
     /// </summary>
     public async void ShowPopup()
     {
-        await ShowPopupCoreAsync(null);
+        try { await ShowPopupCoreAsync(null); }
+        catch (Exception ex) { App.Log($"[SearchPopup] ShowPopup failed: {ex}"); }
     }
 
     /// <summary>
@@ -368,7 +277,8 @@ public sealed partial class SearchPopupWindow : Window
     /// </summary>
     public async void ShowPopupWithQuery(string query)
     {
-        await ShowPopupCoreAsync(query);
+        try { await ShowPopupCoreAsync(query); }
+        catch (Exception ex) { App.Log($"[SearchPopup] ShowPopupWithQuery failed: {ex}"); }
     }
 
     private async Task ShowPopupCoreAsync(string? initialQuery)
@@ -409,6 +319,7 @@ public sealed partial class SearchPopupWindow : Window
         // Alt+D re-toggle interrupts the dismissal instead of racing with it.
         PopupHideStoryboard.Stop();
         PopupHideStoryboard.Completed -= OnPopupHideCompleted;
+        _hasPlayedOpenRecommendationsEntrance = false;
 
         // Appearance settings may have changed while the popup was hidden.
         ApplyMaterialFromSettings();
@@ -501,24 +412,8 @@ public sealed partial class SearchPopupWindow : Window
                 && !hadRecommendationCache;
             if (showSkeleton)
             {
-                if (_heightMorphTimer is { } morphTimer)
-        {
-            _heightMorphTimer = null;
-            morphTimer.Tick -= OnHeightMorphTimerTick;
-            try
-            {
-                morphTimer.Stop();
-            }
-            catch
-            {
-            }
-        }
-
-        _skeletonDelayCancellation?.Cancel();
-                _skeletonDelayCancellation?.Dispose();
-                _skeletonDelayCancellation = new CancellationTokenSource();
-                _ = ShowAppsSkeletonAfterDelayAsync(
-                    _skeletonDelayCancellation.Token);
+                StopHeightMorphTimer();
+                RecommendedAppsGrid.StartSkeletonDelay();
             }
 
             // Recommendation identities may be published before their shell icons
@@ -536,16 +431,13 @@ public sealed partial class SearchPopupWindow : Window
 
             if (!IsPopupVisible)
             {
-                HideAppsSkeleton();
+                RecommendedAppsGrid.CancelSkeletonDelayAndHide();
                 return;
             }
 
             if (showSkeleton)
             {
-                _skeletonDelayCancellation?.Cancel();
-                _skeletonDelayCancellation?.Dispose();
-                _skeletonDelayCancellation = null;
-                HideAppsSkeleton();
+                RecommendedAppsGrid.CancelSkeletonDelayAndHide();
             }
 
             UpdatePanelVisibility();
@@ -553,9 +445,10 @@ public sealed partial class SearchPopupWindow : Window
             // Replaying the configured card entrance on every popup invocation is
             // intentional. A cached reopen should be immediate, but not visually
             // static; the window and its application cards are one entrance gesture.
-            if (RecommendedAppsPanel.Visibility == Visibility.Visible)
+            if (RecommendedAppsGrid.IsAppsPanelVisible)
             {
-                AnimateAppIconsEntrance();
+                _hasPlayedOpenRecommendationsEntrance = true;
+                RecommendedAppsGrid.AnimateEntrance();
             }
         }
     }
@@ -598,36 +491,37 @@ public sealed partial class SearchPopupWindow : Window
         DisarmDragOutCandidate();
         StopExternalDragFadeTimer(restoreOpacity: false);
         StopHeightMorphTimer();
+        CompleteDetailsPaneClose();
         _isPopupInputActive = false;
         IsPopupVisible = false;
-        CancelRecommendedDrag();
-        SetRecommendationEditMode(false);
-        CloseRecommendationOverlays(immediate: true);
+        _hasPlayedOpenRecommendationsEntrance = false;
+        RecommendedAppsGrid.CancelDrag();
+        RecommendedAppsGrid.DisableEditMode();
+        RecommendationOverlays.CloseOverlays(immediate: true);
         if (_isCmdBarFlyoutOpen)
         {
             CmdBarActionsFlyout.Hide();
         }
+        _activeRightDropMenu?.Hide();
+        _activeRightDropMenu = null;
         _detailsUpdateCoalesceTimer?.Stop();
         ResetSearchSessionVisualFlags();
         _displayedDetailsItem = null;
         ResetLatchedScopeState();
         ClearSelectedResultRow();
-        ClearRecommendedAppSelection();
-        ClearHoveredRecommendedCard();
-        ClearHoveredOverlayCard();
-        ResetEditFolderDoubleClickTracking();
+        RecommendedAppsGrid.ClearSelection();
+        RecommendedAppsGrid.ClearHoveredCard();
+        RecommendationOverlays.ClearHoveredCard();
+        RecommendedAppsGrid.ResetDoubleClickTracking();
         ClearAllResultRowTransientStates();
         ClearMultiSelection();
         _viewModel.OnPopupHidden();
         _searchDebounceTimer?.Stop();
-        _skeletonDelayCancellation?.Cancel();
-        _skeletonDelayCancellation?.Dispose();
-        _skeletonDelayCancellation = null;
-        HideAppsSkeleton();
+        RecommendedAppsGrid.CancelSkeletonDelayAndHide();
         SearchProgressBar.IsIndeterminate = false;
         LoadingRing.IsActive = false;
         SearchFeedbackPresenter.Clear();
-        StopAndClearEntranceGuardTimer();
+        RecommendedAppsGrid.StopEntranceGuard();
         PopupHidden?.Invoke(this, EventArgs.Empty);
 
         // Fluent exit: fast shrink + fade, then remove the window from view once the
@@ -740,12 +634,10 @@ public sealed partial class SearchPopupWindow : Window
     private bool HasActivePopupInteraction() =>
         _isWindowDragging ||
         _isWindowResizing ||
-        _recIsDragging ||
-        _overlayIsDragging ||
+        RecommendedAppsGrid.HasActiveInteraction ||
+        RecommendationOverlays.HasActiveInteraction ||
         _isRubberBanding ||
-        _isRecRubberBanding ||
-        _isEditingFolderTitle ||
-        _isExternalFileDragActive ||
+                        _isExternalFileDragActive ||
         _isCmdBarFlyoutOpen ||
         _dragOutCandidate is not null ||
         _dragOutInProgress ||
@@ -870,12 +762,12 @@ public sealed partial class SearchPopupWindow : Window
             return;
         }
 
-        SetRecommendationEditMode(false);
+        RecommendedAppsGrid.DisableEditMode();
         ClearSelectedResultRow();
-        ClearRecommendedAppSelection();
-        ClearHoveredRecommendedCard();
-        ClearHoveredOverlayCard();
-        ResetEditFolderDoubleClickTracking();
+        RecommendedAppsGrid.ClearSelection();
+        RecommendedAppsGrid.ClearHoveredCard();
+        RecommendationOverlays.ClearHoveredCard();
+        RecommendedAppsGrid.ResetDoubleClickTracking();
         ClearAllResultRowTransientStates();
         ClearMultiSelection();
         ClearRealizedRepeaterVisuals();
@@ -931,101 +823,8 @@ public sealed partial class SearchPopupWindow : Window
             }
         }
 
-        int appChildCount = VisualTreeHelper.GetChildrenCount(RecommendedAppsRepeater);
-        for (int i = 0; i < appChildCount; i++)
-        {
-            if (VisualTreeHelper.GetChild(RecommendedAppsRepeater, i) is FrameworkElement card)
-            {
-                ClearRecommendedCardVisuals(card);
-            }
-        }
-
-        ClearOverlayRepeaterVisuals(FolderAppsRepeater);
-        ClearOverlayRepeaterVisuals(HiddenAppsRepeater);
-    }
-
-    private static void ClearRecommendedCardVisuals(FrameworkElement card)
-    {
-        DetachImplicitOffsetAnimation(card);
-        if (card is Grid grid)
-        {
-            grid.Background = s_transparentCardBrush;
-        }
-
-        card.Opacity = 1;
-        if (FindVisualChild<FrameworkElement>(card, "CardContentHost") is { } contentHost)
-        {
-            ResetCardContentHostVisual(contentHost);
-        }
-
-        if (FindVisualChild<Border>(card, "CardEditSlotPlate") is { } editSlotPlate)
-        {
-            editSlotPlate.Visibility = Visibility.Collapsed;
-        }
-
-        if (FindVisualChild<Border>(card, "CardSelectionPlate") is { } selectionPlate)
-        {
-            selectionPlate.Visibility = Visibility.Collapsed;
-        }
-
-        if (FindVisualChild<FrameworkElement>(card, "CardSelectionCheckBox") is { } selectionCheckBox)
-        {
-            selectionCheckBox.Visibility = Visibility.Collapsed;
-            if (FindVisualChild<Border>(selectionCheckBox, "CardSelectionCheckedBox") is { } checkedBox)
-            {
-                checkedBox.Visibility = Visibility.Collapsed;
-            }
-            if (FindVisualChild<Border>(selectionCheckBox, "CardSelectionUncheckedBox") is { } uncheckedBox)
-            {
-                uncheckedBox.Visibility = Visibility.Visible;
-                uncheckedBox.Opacity = 1;
-            }
-        }
-
-        if (FindVisualChild<Button>(card, "CardQuickHideButton") is { } quickHideButton)
-        {
-            quickHideButton.Visibility = Visibility.Collapsed;
-            quickHideButton.Opacity = 1;
-        }
-
-        if (FindVisualChild<Image>(card, "SingleAppIcon") is { } singleImage)
-        {
-            singleImage.Source = null;
-        }
-
-        for (int slot = 0; slot < 4; slot++)
-        {
-            if (FindVisualChild<Image>(card, $"FolderMiniIcon{slot}") is { } miniImage)
-            {
-                miniImage.Source = null;
-            }
-        }
-
-        card.DataContext = null;
-    }
-
-    private static void ClearOverlayRepeaterVisuals(ItemsRepeater repeater)
-    {
-        int childCount = VisualTreeHelper.GetChildrenCount(repeater);
-        for (int i = 0; i < childCount; i++)
-        {
-            if (VisualTreeHelper.GetChild(repeater, i) is FrameworkElement card)
-            {
-                DetachImplicitOffsetAnimation(card);
-                if (card is Grid grid)
-                {
-                    grid.Background = s_transparentCardBrush;
-                }
-
-                card.Opacity = 1;
-                if (FindDescendant<Image>(card) is { } iconImage)
-                {
-                    iconImage.Source = null;
-                }
-
-                card.DataContext = null;
-            }
-        }
+        RecommendedAppsGrid.ClearRealizedVisuals();
+        RecommendationOverlays.ClearRealizedVisuals();
     }
 
     private void ConfigureWindow()
@@ -1113,9 +912,9 @@ public sealed partial class SearchPopupWindow : Window
 
         RootGrid.RequestedTheme = theme;
         SyncEditRecommendationsButtonVisuals();
-        if (_isRecommendationEditMode)
+        if (RecommendedAppsGrid.IsEditMode)
         {
-            RefreshAllRecommendedCardEditVisuals();
+            RecommendedAppsGrid.RefreshEditVisuals();
         }
 
         ApplySearchInputWellVisuals();
@@ -1146,8 +945,8 @@ public sealed partial class SearchPopupWindow : Window
         {
             if (!IsPointerOverPopupWindow())
             {
-                ClearHoveredRecommendedCard();
-                ClearHoveredOverlayCard();
+                RecommendedAppsGrid.ClearHoveredCard();
+                RecommendationOverlays.ClearHoveredCard();
                 ClearAllResultRowTransientStates();
             }
 
@@ -1181,7 +980,7 @@ public sealed partial class SearchPopupWindow : Window
         _settingsService.Settings.Search.SearchPopupCustomY = null;
         _settingsService.Settings.Search.SearchPopupCustomWidth = null;
         _settingsService.Settings.Search.SearchPopupCustomHeight = null;
-        _settingsService.SaveDebounced();
+        _settingsService.SaveDebounced(notifySubscribers: false);
 
         UpdatePopupDynamicBounds(forceWhenOpening: true);
     }
@@ -1234,6 +1033,7 @@ public sealed partial class SearchPopupWindow : Window
         }
 
         string direction = element.Tag as string ?? string.Empty;
+        SnapHeightMorphToTarget();
         if (string.IsNullOrEmpty(direction) || !TryBeginWindowInteraction(element, e))
         {
             return;
@@ -1285,9 +1085,11 @@ public sealed partial class SearchPopupWindow : Window
         int deltaY = cursor.Y - _interactionStartCursor.Y;
         if (_isWindowDragging)
         {
-            _appWindow.Move(new PointInt32(
+            WindowShellState.MoveWindowInteractive(
+                _appWindow,
+                _hwnd,
                 _interactionStartBounds.X + deltaX,
-                _interactionStartBounds.Y + deltaY));
+                _interactionStartBounds.Y + deltaY);
         }
         else
         {
@@ -1334,7 +1136,7 @@ public sealed partial class SearchPopupWindow : Window
             y = bottom - height;
         }
 
-        _appWindow.MoveAndResize(new RectInt32(x, y, width, height));
+        WindowShellState.ResizeWindowInteractive(_appWindow, _hwnd, x, y, width, height);
     }
 
     private void WindowInteraction_PointerReleased(object sender, PointerRoutedEventArgs e)
@@ -1355,6 +1157,7 @@ public sealed partial class SearchPopupWindow : Window
             return;
         }
 
+        bool wasDragging = _isWindowDragging;
         var captureElement = _windowInteractionElement;
         _windowInteractionElement = null;
         _isWindowDragging = false;
@@ -1364,6 +1167,10 @@ public sealed partial class SearchPopupWindow : Window
         if (persist)
         {
             PersistCustomBounds();
+            if (wasDragging && IsPopupVisible && !_isWindowClosed)
+            {
+                UpdatePopupDynamicBounds(forceWhenOpening: true);
+            }
         }
     }
 
@@ -1422,8 +1229,7 @@ public sealed partial class SearchPopupWindow : Window
 
         PopupSurfacePlate.CornerRadius = outerCornerRadius;
         PopupBorderOverlay.CornerRadius = outerCornerRadius;
-        FolderOverlayScrim.CornerRadius = bottomCornerRadius;
-        HiddenAppsOverlayScrim.CornerRadius = bottomCornerRadius;
+        RecommendationOverlays.ApplyBottomCornerRadius(bottomCornerRadius);
         FooterAcrylicSurface.CornerRadius = bottomCornerRadius;
         _materialBackdropBridge?.SetCornerRadius(radius);
     }
@@ -1530,13 +1336,13 @@ public sealed partial class SearchPopupWindow : Window
             Win32Helper.SetWindowTheme(_hwnd, isDark);
             Win32Helper.DisableWindowFrameShadow(_hwnd);
             ApplyWindowCornerPreference();
-            RootGrid.Background = s_transparentCardBrush;
+            RootGrid.Background = SearchRecommendationLayoutEngine.TransparentCardBrush;
 
             int backdropType;
             bool controllerApplied = false;
             bool awaitingElementTarget = false;
 
-            if (materialType is SettingsService.WidgetMaterialTypeSolid)
+            if (materialType is SettingsService.WidgetMaterialTypeSolid || WindowsCompatibilityService.IsHighContrast)
             {
                 EnsureTransparentWindowBackdrop();
                 PopupMaterialSurface.Visibility = Visibility.Collapsed;
@@ -1545,10 +1351,13 @@ public sealed partial class SearchPopupWindow : Window
                 backdropType = Win32Helper.DWMSBT_NONE;
                 Win32Helper.TrySetDwmWindowAttribute(_hwnd, Win32Helper.DWMWA_SYSTEMBACKDROP_TYPE, ref backdropType);
                 Win32Helper.DisableAccentPolicy(_hwnd);
-                var opaqueBase = BuildOpaquePopupSurfaceColor(isDark, accentColor, materialIntensity);
+                bool hc = WindowsCompatibilityService.IsHighContrast;
+                var opaqueBase = hc
+                    ? WindowsCompatibilityService.ResolveHighContrastBackgroundColor(isDark)
+                    : BuildOpaquePopupSurfaceColor(isDark, accentColor, materialIntensity);
                 PopupSurfacePlate.Background = new SolidColorBrush(
                     Windows.UI.Color.FromArgb(
-                        materialResolution.SurfacePlateColor.A,
+                        hc ? (byte)0xFF : materialResolution.SurfacePlateColor.A,
                         opaqueBase.R,
                         opaqueBase.G,
                         opaqueBase.B));
@@ -1641,7 +1450,9 @@ public sealed partial class SearchPopupWindow : Window
                 BuildOpaquePopupSurfaceColor(isDark, accentColor, materialIntensity));
         }
 
-        var (thickness, borderColor) = GetPopupBorderVisuals(isDark, accentColor);
+        var (thickness, borderColor) = WindowsCompatibilityService.IsHighContrast
+            ? (1.0, WindowsCompatibilityService.ResolveHighContrastForegroundColor(isDark))
+            : GetPopupBorderVisuals(isDark, accentColor);
         PopupBorderOverlay.BorderBrush = new SolidColorBrush(
             borderColor.A == 0 ? Colors.Transparent : borderColor);
         PopupBorderOverlay.BorderThickness = new Thickness(thickness);
@@ -1659,10 +1470,10 @@ public sealed partial class SearchPopupWindow : Window
             isExpanded,
             isDark);
         SearchBoxBorder.Background = visuals.BackgroundColor.A == 0
-            ? s_transparentCardBrush
+            ? SearchRecommendationLayoutEngine.TransparentCardBrush
             : new SolidColorBrush(visuals.BackgroundColor);
         SearchBoxBorder.BorderBrush = visuals.BorderColor.A == 0
-            ? s_transparentCardBrush
+            ? SearchRecommendationLayoutEngine.TransparentCardBrush
             : new SolidColorBrush(visuals.BorderColor);
         HeaderBottomDivider.Visibility = visuals.ShowHeaderBottomDivider
             ? Visibility.Visible
@@ -1703,17 +1514,15 @@ public sealed partial class SearchPopupWindow : Window
         _backdropConfiguration.IsInputActive = true;
         _backdropConfiguration.Theme = isDark ? SystemBackdropTheme.Dark : SystemBackdropTheme.Light;
 
-        if (_micaController is not null)
+        DetachAcrylicControllerTarget();
+        if (_micaController is null)
         {
-            DisposeMicaController();
+            _micaController = new MicaController();
+            _micaControllerAttached = false;
         }
 
-        _micaController = new MicaController
-        {
-            Kind = useAlt ? MicaKind.BaseAlt : MicaKind.Base
-        };
+        _micaController.Kind = useAlt ? MicaKind.BaseAlt : MicaKind.Base;
 
-        DetachAcrylicControllerTarget();
         if (!_micaControllerAttached)
         {
             if (!_micaController.AddSystemBackdropTarget(_backdropTarget))
@@ -1723,8 +1532,9 @@ public sealed partial class SearchPopupWindow : Window
             }
 
             _micaControllerAttached = true;
-            _micaController.SetSystemBackdropConfiguration(_backdropConfiguration);
         }
+
+        _micaController.SetSystemBackdropConfiguration(_backdropConfiguration);
 
         _micaController.TintColor = tintColor;
         _micaController.FallbackColor = useAlt
@@ -1764,21 +1574,18 @@ public sealed partial class SearchPopupWindow : Window
         _backdropConfiguration ??= new SystemBackdropConfiguration();
         _backdropConfiguration.IsInputActive = true;
         _backdropConfiguration.Theme = isDark ? SystemBackdropTheme.Dark : SystemBackdropTheme.Light;
-        _backdropConfiguration.HighContrastBackgroundColor = isDark
-            ? Windows.UI.Color.FromArgb(0xFF, 0x20, 0x20, 0x20)
-            : Windows.UI.Color.FromArgb(0xFF, 0xF3, 0xF3, 0xF3);
-
-        if (_acrylicController is not null && !_acrylicController.IsClosed)
-        {
-            DisposeAcrylicController();
-        }
-
-        _acrylicController = new DesktopAcrylicController
-        {
-            Kind = useBase ? DesktopAcrylicKind.Base : DesktopAcrylicKind.Thin
-        };
+        _backdropConfiguration.HighContrastBackgroundColor = WindowsCompatibilityService.ResolveHighContrastBackgroundColor(isDark);
 
         DetachMicaControllerTarget();
+        if (_acrylicController is null || _acrylicController.IsClosed)
+        {
+            DisposeAcrylicController();
+            _acrylicController = new DesktopAcrylicController();
+            _acrylicControllerAttached = false;
+        }
+
+        _acrylicController.Kind = useBase ? DesktopAcrylicKind.Base : DesktopAcrylicKind.Thin;
+
         if (!_acrylicControllerAttached)
         {
             if (!_acrylicController.AddSystemBackdropTarget(_backdropTarget))
@@ -1788,8 +1595,9 @@ public sealed partial class SearchPopupWindow : Window
             }
 
             _acrylicControllerAttached = true;
-            _acrylicController.SetSystemBackdropConfiguration(_backdropConfiguration);
         }
+
+        _acrylicController.SetSystemBackdropConfiguration(_backdropConfiguration);
 
         _acrylicController.TintColor = tintColor;
         _acrylicController.FallbackColor = tintColor;
@@ -2042,31 +1850,21 @@ public sealed partial class SearchPopupWindow : Window
         AttachSelectedLabel.Text = _localizationService.T("Search.Menu.AttachToTodo");
         SaveSelectedLabel.Text = _localizationService.T("Search.Menu.SaveToNote");
 
-        AllRecommendedHiddenHintText.Text = _localizationService.T("Search.Recommend.AllHiddenHint");
-        HiddenOverlayTitleText.Text = _localizationService.T("Search.Recommend.HiddenTitle");
-        HiddenOverlaySubtitleText.Text = _localizationService.T("Search.Recommend.HiddenHint");
-        UnhideAllButtonText.Text = _localizationService.T("Search.Recommend.UnhideAll");
         ToolTipService.SetToolTip(
             HiddenAppsEntryButton,
             _localizationService.T("Search.Recommend.HiddenTitle"));
         ToolTipService.SetToolTip(
             EverythingDismissButton,
             _localizationService.T("Search.EverythingBanner.DontRemind"));
-        ToolTipService.SetToolTip(
-            FolderOverlayTitleButton,
-            _localizationService.T("Search.Recommend.RenameFolder"));
-        ToolTipService.SetToolTip(
-            CloseHiddenOverlayButton,
-            _localizationService.T("Common.Close"));
+        RecommendedAppsGrid.ApplyLocalizedStrings();
+        RecommendationOverlays.ApplyLocalizedStrings();
         SyncEditRecommendationsButtonVisuals();
         ApplyLocalizedCommandPaletteStrings();
-        UpdateRecommendationOverlayResponsiveBounds();
 
         TabsList.ItemsSource = _viewModel.Tabs;
         ResultsRepeater.ItemsSource = _viewModel.CurrentResults;
-        RecommendedAppsRepeater.ItemsSource = _viewModel.RecommendedEntries;
-        FolderAppsRepeater.ItemsSource = _folderOverlayItems;
-        HiddenAppsRepeater.ItemsSource = _viewModel.HiddenRecommendations;
+        RecommendedAppsGrid.BindItemsSource();
+        RecommendationOverlays.BindItemsSources();
 
         UpdateEverythingPromptBanner();
         UpdateRecommendationHeaderState();
@@ -2097,8 +1895,8 @@ public sealed partial class SearchPopupWindow : Window
             return;
         }
 
-        if (!IsAnyRecommendationOverlayOpen() &&
-            !_isEditingFolderTitle &&
+        if (!RecommendationOverlays.IsAnyOverlayOpen &&
+            !RecommendationOverlays.IsEditingFolderTitle &&
             HandleCommandPaletteShortcutKeys(e))
         {
             e.Handled = true;
@@ -2117,9 +1915,9 @@ public sealed partial class SearchPopupWindow : Window
             return;
         }
 
-        if (!IsAnyRecommendationOverlayOpen() &&
-            !_isEditingFolderTitle &&
-            RecommendedAppsPanel.Visibility == Visibility.Visible &&
+        if (!RecommendationOverlays.IsAnyOverlayOpen &&
+            !RecommendationOverlays.IsEditingFolderTitle &&
+            RecommendedAppsGrid.IsAppsPanelVisible &&
             string.IsNullOrEmpty(SearchTextBox.Text))
         {
             bool plainArrowKey =
@@ -2132,11 +1930,11 @@ public sealed partial class SearchPopupWindow : Window
                 !Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Shift);
             bool routeToRecommend =
                 plainArrowKey ||
-                (_isRecommendationEditMode &&
-                 ((e.Key == Windows.System.VirtualKey.Delete && _recMultiSelectedKeys.Count > 0) ||
+                (RecommendedAppsGrid.IsEditMode &&
+                 ((e.Key == Windows.System.VirtualKey.Delete && RecommendedAppsGrid.MultiSelectedCount > 0) ||
                   (e.Key == Windows.System.VirtualKey.A &&
                    Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control))));
-            if (routeToRecommend && HandleRecommendedAppsKey(e))
+            if (routeToRecommend && RecommendedAppsGrid.HandleKey(e))
             {
                 e.Handled = true;
                 return;
@@ -2148,14 +1946,14 @@ public sealed partial class SearchPopupWindow : Window
             return;
         }
 
-        if (IsAnyRecommendationOverlayOpen())
+        if (RecommendationOverlays.IsAnyOverlayOpen)
         {
             return;
         }
 
-        if (RecommendedAppsPanel.Visibility == Visibility.Visible)
+        if (RecommendedAppsGrid.IsAppsPanelVisible)
         {
-            if (HandleRecommendedAppsKey(e))
+            if (RecommendedAppsGrid.HandleKey(e))
             {
                 e.Handled = true;
             }
@@ -2177,38 +1975,36 @@ public sealed partial class SearchPopupWindow : Window
 
         // ── Recommended apps panel takes priority when visible ──
         bool recommendedVisible =
-            RecommendedAppsPanel.Visibility == Visibility.Visible &&
-            !IsAnyRecommendationOverlayOpen();
+            RecommendedAppsGrid.IsAppsPanelVisible &&
+            !RecommendationOverlays.IsAnyOverlayOpen;
 
         // Escape: close active folder/hidden overlays first, then clear recommended
         // app selection, then hand focus back from a sort header to the search box,
         // then hide popup.
         if (e.Key == Windows.System.VirtualKey.Escape)
         {
-            if (_isEditingFolderTitle)
+            if (RecommendationOverlays.IsEditingFolderTitle)
             {
-                CancelFolderTitleEdit();
+                RecommendationOverlays.CancelTitleEdit();
                 e.Handled = true;
                 return;
             }
-            if (IsAnyRecommendationOverlayOpen())
+            if (RecommendationOverlays.IsAnyOverlayOpen)
             {
-                CloseRecommendationOverlays();
+                RecommendationOverlays.CloseOverlays();
                 SearchTextBox.Focus(FocusState.Programmatic);
                 e.Handled = true;
                 return;
             }
-            if (_isRecommendationEditMode)
+            if (RecommendedAppsGrid.IsEditMode)
             {
-                if (_recMultiSelectedKeys.Count > 0)
+                if (RecommendedAppsGrid.MultiSelectedCount > 0)
                 {
-                    _recMultiSelectedKeys.Clear();
-                    RefreshAllRecommendedCardEditVisuals();
-                    UpdateRecommendationEditStatusHint();
+                    RecommendedAppsGrid.ClearEditMultiSelection();
                 }
                 else
                 {
-                    SetRecommendationEditMode(false);
+                    RecommendedAppsGrid.DisableEditMode();
                 }
 
                 SearchTextBox.Focus(FocusState.Programmatic);
@@ -2222,9 +2018,9 @@ public sealed partial class SearchPopupWindow : Window
                 e.Handled = true;
                 return;
             }
-            if (_selectedAppIndex >= 0)
+            if (RecommendedAppsGrid.SelectedIndex >= 0)
             {
-                ClearRecommendedAppSelection();
+                RecommendedAppsGrid.ClearSelection();
                 SearchTextBox.Focus(FocusState.Programmatic);
                 e.Handled = true;
                 return;
@@ -2257,7 +2053,7 @@ public sealed partial class SearchPopupWindow : Window
         }
 
         // Recommended apps keyboard navigation (arrows, Enter, Space).
-        if (recommendedVisible && HandleRecommendedAppsKey(e))
+        if (recommendedVisible && RecommendedAppsGrid.HandleKey(e))
         {
             e.Handled = true;
             return;
@@ -2279,7 +2075,7 @@ public sealed partial class SearchPopupWindow : Window
         {
             // If a recommended app is selected, preview it even when focus
             // is in the search text box.
-            if (_selectedAppIndex >= 0)
+            if (RecommendedAppsGrid.SelectedIndex >= 0)
             {
                 TryPreviewSelectedItem();
                 e.Handled = true;
@@ -2299,14 +2095,14 @@ public sealed partial class SearchPopupWindow : Window
         // stay untouched — Ctrl+A/C/V must not insert literal characters.
         if (!Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control) &&
             !Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Menu) &&
-            !_isEditingFolderTitle &&
-            !IsAnyRecommendationOverlayOpen())
+            !RecommendationOverlays.IsEditingFolderTitle &&
+            !RecommendationOverlays.IsAnyOverlayOpen)
         {
             object? focused = FocusManager.GetFocusedElement();
             if (focused is not TextBox and not ComboBox &&
                 (focused is not Button focusedBtn ||
                  IsSortHeaderButton(focusedBtn) ||
-                 RecommendedAppsPanel.Visibility == Visibility.Visible))
+                 RecommendedAppsGrid.IsAppsPanelVisible))
             {
                 if (TryRedirectCharToSearchBox(e.Key))
                 {
@@ -2344,7 +2140,6 @@ public sealed partial class SearchPopupWindow : Window
             return false;
         }
 
-
         SearchResultItem? previousSelection = _viewModel.SelectedItem;
         if (key == Windows.System.VirtualKey.Up)
         {
@@ -2375,38 +2170,12 @@ public sealed partial class SearchPopupWindow : Window
 
     private static bool IsVisualDescendantOf(
         DependencyObject element,
-        DependencyObject ancestor)
-    {
-        DependencyObject? current = element;
-        while (current is not null)
-        {
-            if (ReferenceEquals(current, ancestor))
-            {
-                return true;
-            }
-
-            current = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(current);
-        }
-
-        return false;
-    }
+        DependencyObject ancestor) =>
+        SearchRecommendationLayoutEngine.IsVisualDescendantOf(element, ancestor);
 
     private static T? FindVisualAncestor<T>(DependencyObject? element)
-        where T : DependencyObject
-    {
-        DependencyObject? current = element;
-        while (current is not null)
-        {
-            if (current is T match)
-            {
-                return match;
-            }
-
-            current = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(current);
-        }
-
-        return null;
-    }
+        where T : DependencyObject =>
+        SearchRecommendationLayoutEngine.FindVisualAncestor<T>(element);
 
     private void ClosePopupButton_Click(object sender, RoutedEventArgs e)
     {
@@ -2419,295 +2188,13 @@ public sealed partial class SearchPopupWindow : Window
     /// lazily by FileMetaService and is not observable, so XAML binding alone
     /// cannot track it.
     /// </summary>
-    private void OnRecommendedAppsElementPrepared(ItemsRepeater sender, ItemsRepeaterElementPreparedEventArgs args)
-    {
-        if (args.Element is FrameworkElement card)
-        {
-            ElementCompositionPreview.SetIsTranslationEnabled(card, true);
-            _recHasCachedReflowState = false;
-            DetachImplicitOffsetAnimation(card);
-            RecommendedGridEntry? resolvedEntry =
-                RecommendedAppsRepeater.ItemsSource is System.Collections.IList items &&
-                args.Index >= 0 &&
-                args.Index < items.Count
-                    ? items[args.Index] as RecommendedGridEntry
-                    : card.DataContext as RecommendedGridEntry;
-            SyncRecommendedCardContent(card, resolvedEntry);
-            ArmImplicitOffsetAnimationAfterLayout(card);
-        }
-
-        // If an entrance animation is pending, animate this freshly realized card
-        // immediately. This is the reliable trigger because ItemsRepeater realizes
-        // elements asynchronously; TryGetElement would still be null at call time.
-        if (_pendingEntranceStyle is int style && args.Element is FrameworkElement element)
-        {
-            AnimateSingleAppCard(element, args.Index, style);
-            if (RecommendedAppsRepeater.ItemsSource is System.Collections.ICollection coll &&
-                args.Index >= coll.Count - 1)
-            {
-                _pendingEntranceStyle = null;
-                StopAndClearEntranceGuardTimer();
-            }
-        }
-    }
-
-    private void SyncRecommendedCardContent(FrameworkElement card, RecommendedGridEntry? entry)
-    {
-        card.DataContext = entry;
-        card.Opacity = _recIsDragging &&
-                       entry is not null &&
-                       _recDraggedEntryKeys.Contains(entry.EntryKey)
-            ? 0.36
-            : 1;
-
-        if (card is Grid grid)
-        {
-            bool showHoverMask = ReferenceEquals(grid, _hoveredAppCard) &&
-                                 !_recIsDragging &&
-                                 !_isRecRubberBanding;
-            grid.Background = showHoverMask
-                ? ResolveThemeBrush("SubtleFillColorSecondaryBrush")
-                : s_transparentCardBrush;
-        }
-
-        if (FindVisualChild<TextBlock>(card, "CardLabelTextBlock") is { } labelBlock)
-        {
-            labelBlock.Text = entry?.Label ?? string.Empty;
-        }
-
-        if (FindVisualChild<FrameworkElement>(card, "SingleIconHost") is { } singleIconHost)
-        {
-            singleIconHost.Visibility = entry?.SingleIconVisibility ?? Visibility.Collapsed;
-        }
-
-        if (FindVisualChild<FrameworkElement>(card, "FolderPreviewPlate") is { } folderPreviewPlate)
-        {
-            folderPreviewPlate.Visibility = entry?.FolderPreviewVisibility ?? Visibility.Collapsed;
-        }
-
-        // Always assign image.Source (even when Icon is null) so recycled
-        // containers never flash a previous app's icon while async icons load.
-        if (FindVisualChild<Image>(card, "SingleAppIcon") is { } image)
-        {
-            if (entry is { IsFolder: false, AppItem: { } item })
-            {
-                image.Source = item.Icon;
-            }
-            else
-            {
-                image.Source = null;
-            }
-        }
-
-        PopulateFolderPreviewIcons(card, entry);
-        ApplyRecommendedCardEditVisuals(card, entry);
-    }
-
-    private void OnRecommendedAppsElementClearing(ItemsRepeater sender, ItemsRepeaterElementClearingEventArgs args)
-    {
-        if (args.Element is not FrameworkElement card)
-        {
-            return;
-        }
-
-        if (ReferenceEquals(_selectedAppCard, card))
-        {
-            _selectedAppCard = null;
-            _selectedAppIndex = -1;
-        }
-
-        if (ReferenceEquals(_hoveredAppCard, card))
-        {
-            _hoveredAppCard = null;
-        }
-
-        // A recycled card must not carry a live-reflow translation into its
-        // next incarnation.
-        _recHasCachedReflowState = false;
-        if (card.DataContext is RecommendedGridEntry clearingEntry)
-        {
-            _recTileBaseRects.Remove(clearingEntry.EntryKey);
-            _recReflowTranslations.Remove(clearingEntry.EntryKey);
-        }
-
-        ElementCompositionPreview.SetIsTranslationEnabled(card, true);
-        if (ElementCompositionPreview.GetElementVisual(card) is { } clearingVisual)
-        {
-            clearingVisual.StopAnimation("Translation");
-            // Translation is animatable but not a settable CLR property in
-            // the WinUI 3 projection; it lives in the property store.
-            clearingVisual.Properties.InsertVector3(
-                "Translation",
-                System.Numerics.Vector3.Zero);
-        }
-
-        ClearRecommendedCardVisuals(card);
-    }
-
-    private static void PopulateFolderPreviewIcons(FrameworkElement card, RecommendedGridEntry? entry)
-    {
-        for (int slot = 0; slot < 4; slot++)
-        {
-            if (FindVisualChild<Image>(card, $"FolderMiniIcon{slot}") is not { } miniImage)
-            {
-                continue;
-            }
-
-            if (entry is { IsFolder: true } && slot < entry.FolderItems.Count)
-            {
-                ImageSource? memberIcon = entry.FolderItems[slot].Icon;
-                miniImage.Source = memberIcon;
-                miniImage.Visibility = memberIcon is not null ? Visibility.Visible : Visibility.Collapsed;
-            }
-            else
-            {
-                miniImage.Source = null;
-                miniImage.Visibility = Visibility.Collapsed;
-            }
-        }
-    }
-
-    private void OnOverlayAppsElementPrepared(ItemsRepeater sender, ItemsRepeaterElementPreparedEventArgs args)
-    {
-        if (args.Element is not FrameworkElement card)
-        {
-            return;
-        }
-
-        DetachImplicitOffsetAnimation(card);
-        SearchResultItem? resolvedItem =
-            sender.ItemsSource is System.Collections.IList items &&
-            args.Index >= 0 &&
-            args.Index < items.Count
-                ? items[args.Index] as SearchResultItem
-                : card.DataContext as SearchResultItem;
-        card.DataContext = resolvedItem;
-        card.Opacity = 1;
-
-        if (card is Grid grid)
-        {
-            grid.Background = s_transparentCardBrush;
-        }
-
-        if (FindDescendant<Image>(card) is { } overlayImage)
-        {
-            ImageSource? resolvedIcon = resolvedItem?.Icon;
-            overlayImage.Source = resolvedIcon;
-        }
-
-        ArmImplicitOffsetAnimationAfterLayout(card);
-    }
-
-    private void OnOverlayAppsElementClearing(ItemsRepeater sender, ItemsRepeaterElementClearingEventArgs args)
-    {
-        if (args.Element is not FrameworkElement card)
-        {
-            return;
-        }
-
-        if (ReferenceEquals(_hoveredOverlayCard, card))
-        {
-            _hoveredOverlayCard = null;
-        }
-
-        DetachImplicitOffsetAnimation(card);
-        if (card is Grid grid)
-        {
-            grid.Background = s_transparentCardBrush;
-        }
-
-        card.Opacity = 1;
-        if (FindDescendant<Image>(card) is { } overlayImage)
-        {
-            overlayImage.Source = null;
-        }
-
-        card.DataContext = null;
-    }
-
-    /// <summary>
-    /// Finds the first descendant of the specified type in the visual tree.
-    /// </summary>
-    private static T? FindDescendant<T>(DependencyObject parent) where T : DependencyObject
-    {
-        int count = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(parent);
-        for (int i = 0; i < count; i++)
-        {
-            var child = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(parent, i);
-            if (child is T result)
-            {
-                return result;
-            }
-
-            var descendant = FindDescendant<T>(child);
-            if (descendant is not null)
-            {
-                return descendant;
-            }
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// Refreshes icons on all realized containers in the recommended-apps repeater.
-    /// Called after FileMetaService finishes lazy icon enrichment.
-    /// </summary>
-    private void RefreshRecommendedAppIcons()
-    {
-        int childCount = VisualTreeHelper.GetChildrenCount(RecommendedAppsRepeater);
-        for (int i = 0; i < childCount; i++)
-        {
-            if (VisualTreeHelper.GetChild(RecommendedAppsRepeater, i) is not FrameworkElement card ||
-                card.DataContext is not RecommendedGridEntry entry)
-            {
-                continue;
-            }
-
-            if (!entry.IsFolder && entry.AppItem is { } item)
-            {
-                var image = FindVisualChild<Image>(card, "SingleAppIcon");
-                if (image is not null && !ReferenceEquals(image.Source, item.Icon))
-                {
-                    image.Source = item.Icon;
-                }
-            }
-            else if (entry.IsFolder)
-            {
-                PopulateFolderPreviewIcons(card, entry);
-            }
-        }
-
-        RefreshOverlayRepeaterIcons(FolderAppsRepeater);
-        RefreshOverlayRepeaterIcons(HiddenAppsRepeater);
-    }
-
-    private static void RefreshOverlayRepeaterIcons(ItemsRepeater repeater)
-    {
-        int childCount = VisualTreeHelper.GetChildrenCount(repeater);
-        for (int i = 0; i < childCount; i++)
-        {
-            if (VisualTreeHelper.GetChild(repeater, i) is FrameworkElement card &&
-                card.DataContext is SearchResultItem entryItem &&
-                FindDescendant<Image>(card) is { } overlayImage)
-            {
-                ImageSource? resolvedIcon = entryItem.Icon;
-                if (!ReferenceEquals(overlayImage.Source, resolvedIcon))
-                {
-                    overlayImage.Source = resolvedIcon;
-                }
-            }
-        }
-    }
 
     private void OnRecommendationIconsResolved()
     {
-        if (!IsPopupVisible)
+        if (IsPopupVisible)
         {
-            return;
+            RecommendedAppsGrid.RefreshIcons();
         }
-
-        RefreshRecommendedAppIcons();
     }
 
     private void OnRecommendationLayoutUpdated()
@@ -2717,12 +2204,11 @@ public sealed partial class SearchPopupWindow : Window
             return;
         }
 
-        PruneStaleMultiSelectedRecommendationKeys();
+        RecommendedAppsGrid.RefreshAfterLayoutUpdate();
         UpdateRecommendationHeaderState();
-        SyncOpenFolderOverlayWithViewModel();
-        RefreshAllRecommendedCardEditVisuals();
+        RecommendationOverlays.SyncWithViewModel();
         UpdateRecommendationEditStatusHint();
-        RefreshRecommendedAppIcons();
+        RecommendedAppsGrid.RefreshIcons();
 
         DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
         {
@@ -2731,8 +2217,7 @@ public sealed partial class SearchPopupWindow : Window
                 return;
             }
 
-            RefreshAllRecommendedCardEditVisuals();
-            RefreshRecommendedAppIcons();
+            RecommendedAppsGrid.QueueDeferredEditRefresh();
         });
     }
 
@@ -2764,7 +2249,7 @@ public sealed partial class SearchPopupWindow : Window
     private void UpdateRecommendationHeaderState()
     {
         bool homeVisible = string.IsNullOrWhiteSpace(SearchTextBox.Text) &&
-                           RecommendedAppsPanel.Visibility == Visibility.Visible;
+                           RecommendedAppsGrid.IsAppsPanelVisible;
         bool hasHidden = _viewModel.HasHiddenRecommendations;
         bool hasEntries = _viewModel.HasRecommendedEntries;
 
@@ -2781,22 +2266,16 @@ public sealed partial class SearchPopupWindow : Window
         EditRecommendationsButton.Visibility = homeVisible && hasEntries
             ? Visibility.Visible
             : Visibility.Collapsed;
-        if (!hasEntries && _isRecommendationEditMode)
+        if (!hasEntries && RecommendedAppsGrid.IsEditMode)
         {
-            SetRecommendationEditMode(false);
+            RecommendedAppsGrid.DisableEditMode();
         }
 
-        RecommendedAppsScrollViewer.Visibility = hasEntries
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-        AllRecommendedHiddenHintPanel.Visibility =
-            !hasEntries && hasHidden
-                ? Visibility.Visible
-                : Visibility.Collapsed;
+        RecommendedAppsGrid.SetHomeContentState(hasEntries, hasHidden);
 
-        if (!hasHidden && HiddenAppsOverlayHost.Visibility == Visibility.Visible)
+        if (!hasHidden && RecommendationOverlays.IsHiddenOverlayVisible)
         {
-            CloseRecommendationOverlays();
+            RecommendationOverlays.CloseOverlays();
         }
     }
 
@@ -2860,33 +2339,44 @@ public sealed partial class SearchPopupWindow : Window
         UpdateDetailsSplitLayout(showResults);
         UpdateCommandBarForSelectedItem();
 
-        bool showRecommendedApps = !hasQuery &&
+        bool holdRecommendationsForInitialSearch =
+            hasQuery &&
+            searching &&
+            !hasResults &&
+            !showNoResults &&
+            !_hasExpandedResultsInQuerySession &&
+            recommendationsEnabled &&
+            RecommendedAppsGrid.IsAppsPanelVisible;
+        bool showRecommendedApps = (!hasQuery || holdRecommendationsForInitialSearch) &&
             recommendationsEnabled &&
             (tabHasItems ||
              _viewModel.HasRecommendedEntries ||
              _viewModel.HasHiddenRecommendations ||
-             AppsSkeletonPanel.Visibility == Visibility.Visible);
+             RecommendedAppsGrid.IsSkeletonVisible);
         if (showRecommendedApps)
         {
-            bool wasHidden = RecommendedAppsPanel.Visibility != Visibility.Visible;
-            RecommendedAppsPanel.Visibility = Visibility.Visible;
+            bool wasHidden = !RecommendedAppsGrid.IsAppsPanelVisible;
+            RecommendedAppsGrid.SetAppsPanelVisibility(true);
             UpdateRecommendationHeaderState();
-            RefreshRecommendedAppIcons();
+            RecommendedAppsGrid.RefreshIcons();
 
-            if (wasHidden && !_suppressPanelEntranceAnimation)
+            if (wasHidden &&
+                !_suppressPanelEntranceAnimation &&
+                !_hasPlayedOpenRecommendationsEntrance)
             {
-                AnimateAppIconsEntrance();
+                _hasPlayedOpenRecommendationsEntrance = true;
+                RecommendedAppsGrid.AnimateEntrance();
             }
         }
         else
         {
-            RecommendedAppsPanel.Visibility = Visibility.Collapsed;
-            SetRecommendationEditMode(false);
+            RecommendedAppsGrid.SetAppsPanelVisibility(false);
+            RecommendedAppsGrid.DisableEditMode();
             UpdateRecommendationHeaderState();
-            CancelRecommendedDrag();
-            CloseRecommendationOverlays(immediate: true);
-            ClearRecommendedAppSelection();
-            ClearHoveredRecommendedCard();
+            RecommendedAppsGrid.CancelDrag();
+            RecommendationOverlays.CloseOverlays(immediate: true);
+            RecommendedAppsGrid.ClearSelection();
+            RecommendedAppsGrid.ClearHoveredCard();
         }
 
         UpdateRecommendationEditStatusHint();
@@ -2907,7 +2397,7 @@ public sealed partial class SearchPopupWindow : Window
 
         BodyContentRow.Visibility =
             (showResults || showNoResults || showRecommendedApps || showEmptySelectedTab ||
-             AppsSkeletonPanel.Visibility == Visibility.Visible)
+             RecommendedAppsGrid.IsSkeletonVisible)
                 ? Visibility.Visible
                 : Visibility.Collapsed;
 
@@ -2948,15 +2438,17 @@ public sealed partial class SearchPopupWindow : Window
             return;
         }
 
-        double scale = Win32Helper.GetDpiScaleForWindow(_hwnd, Content?.XamlRoot);
+        var searchSlice = _settingsService.Settings.Search;
+        int? customX = searchSlice.SearchPopupCustomX;
+        int? customY = searchSlice.SearchPopupCustomY;
+
+        double scale = customX is int targetX && customY is int targetY
+            ? Win32Helper.GetDpiScaleForPoint(targetX, targetY)
+            : Win32Helper.GetDpiScaleForWindow(_hwnd, Content?.XamlRoot);
         if (!double.IsFinite(scale) || scale <= 0)
         {
             scale = 1.0;
         }
-
-        var searchSlice = _settingsService.Settings.Search;
-        int? customX = searchSlice.SearchPopupCustomX;
-        int? customY = searchSlice.SearchPopupCustomY;
 
         DisplayArea displayArea = customX is int savedX && customY is int savedY
             ? DisplayArea.GetFromPoint(new PointInt32(savedX, savedY), DisplayAreaFallback.Nearest)
@@ -2965,7 +2457,7 @@ public sealed partial class SearchPopupWindow : Window
         int workAreaLogicalHeight = Math.Max(320, (int)Math.Round(workAreaPhysical.Height / scale));
 
         bool hasQuery = HasActiveSearchOrScope;
-        bool showDetailsPane = DetailsPaneCard.Visibility == Visibility.Visible;
+        bool showDetailsPane = DetailsPaneCard.Visibility == Visibility.Visible && !_isDetailsPaneClosing;
         bool showNoResultsOrEmptyTab = NoResultsPanel.Visibility == Visibility.Visible ||
                                        EmptyTabHintPanel.Visibility == Visibility.Visible;
 
@@ -2981,9 +2473,9 @@ public sealed partial class SearchPopupWindow : Window
             return;
         }
 
-        bool showRecommendations = RecommendedAppsPanel.Visibility == Visibility.Visible ||
-                                   AppsSkeletonPanel.Visibility == Visibility.Visible;
-        int recCount = AppsSkeletonPanel.Visibility == Visibility.Visible
+        bool showRecommendations = RecommendedAppsGrid.IsAppsPanelVisible ||
+                                   RecommendedAppsGrid.IsSkeletonVisible;
+        int recCount = RecommendedAppsGrid.IsSkeletonVisible
             ? Math.Max(6, _viewModel.RecommendedEntries.Count)
             : _viewModel.RecommendedEntries.Count;
 
@@ -2996,7 +2488,7 @@ public sealed partial class SearchPopupWindow : Window
             ShowEverythingBanner: EverythingPromptBanner.Visibility == Visibility.Visible,
             ShowRecommendations: showRecommendations,
             RecommendationEntryCount: recCount,
-            ShowAllHiddenRecommendationsHint: AllRecommendedHiddenHintPanel.Visibility == Visibility.Visible,
+            ShowAllHiddenRecommendationsHint: RecommendedAppsGrid.IsAllHiddenHintVisible,
             ShowNoResults: showNoResultsOrEmptyTab,
             ShowFooter: FooterBar.Visibility == Visibility.Visible,
             ShowDetailsPane: showDetailsPane);
@@ -3013,7 +2505,7 @@ public sealed partial class SearchPopupWindow : Window
                 ? ScrollBarVisibility.Auto
                 : ScrollBarVisibility.Hidden;
 
-        int? minOverlayHeightPhysical = IsAnyRecommendationOverlayOpen()
+        int? minOverlayHeightPhysical = RecommendationOverlays.IsAnyOverlayOpen
             ? SearchPopupSurfacePolicy.ToPhysicalPixels(420, scale)
             : null;
 
@@ -3034,6 +2526,9 @@ public sealed partial class SearchPopupWindow : Window
             minOverlayHeightPhysical,
             desiredLogicalWidth);
 
+        double targetLogicalWidth = Math.Max(
+            SearchPopupSurfacePolicy.MinPopupWidthLogical,
+            Math.Round(targetBounds.Width / scale, 2));
         double targetLogicalHeight = Math.Max(
             SearchPopupSurfacePolicy.CapsuleOnlyHeightLogical,
             Math.Round(targetBounds.Height / scale, 2));
@@ -3041,51 +2536,39 @@ public sealed partial class SearchPopupWindow : Window
         bool animateMorph = !forceWhenOpening &&
                             IsPopupVisible &&
                             AreSystemAnimationsEnabled() &&
-                            !IsAnyRecommendationOverlayOpen() &&
+                            !RecommendationOverlays.IsAnyOverlayOpen &&
                             double.IsFinite(RootGrid.Height) &&
-                            RootGrid.Height > 0;
+                            RootGrid.Height > 0 &&
+                            double.IsFinite(RootGrid.Width) &&
+                            RootGrid.Width > 0;
 
         if (!animateMorph)
         {
-            StopHeightMorphTimer();
-            _heightSpringCurrentLogical = targetLogicalHeight;
-            _heightSpringVelocity = 0;
-            RootGrid.Height = targetLogicalHeight;
-            PointInt32 currentPos = _appWindow.Position;
-            SizeInt32 currentSize = _appWindow.Size;
-            if (currentPos.X != targetBounds.X ||
-                currentPos.Y != targetBounds.Y ||
-                currentSize.Width != targetBounds.Width ||
-                currentSize.Height != targetBounds.Height)
-            {
-                _appWindow.MoveAndResize(targetBounds);
-            }
+            SnapMorphBoundsToTarget(targetLogicalWidth, targetLogicalHeight, targetBounds);
             return;
         }
 
-        bool isSpringRunning = _heightMorphTimer is { IsEnabled: true };
+        bool isSpringRunning = IsMorphSpringRunning;
         if (!isSpringRunning || !double.IsFinite(_heightSpringCurrentLogical) || _heightSpringCurrentLogical <= 0)
         {
             _heightSpringCurrentLogical = RootGrid.Height;
             _heightSpringVelocity = 0;
         }
 
-        if (Math.Abs(targetLogicalHeight - _heightSpringCurrentLogical) < 0.5 &&
-            Math.Abs(_heightSpringVelocity) < 3.0)
+        if (!isSpringRunning || !double.IsFinite(_widthSpringCurrentLogical) || _widthSpringCurrentLogical <= 0)
         {
-            StopHeightMorphTimer();
-            _heightSpringCurrentLogical = targetLogicalHeight;
-            _heightSpringVelocity = 0;
-            RootGrid.Height = targetLogicalHeight;
-            PointInt32 pos = _appWindow.Position;
-            SizeInt32 size = _appWindow.Size;
-            if (pos.X != targetBounds.X ||
-                pos.Y != targetBounds.Y ||
-                size.Width != targetBounds.Width ||
-                size.Height != targetBounds.Height)
-            {
-                _appWindow.MoveAndResize(targetBounds);
-            }
+            _widthSpringCurrentLogical = RootGrid.Width;
+            _widthSpringVelocity = 0;
+        }
+
+        bool widthAnimating = Math.Abs(targetLogicalWidth - _widthSpringCurrentLogical) >= 0.5 ||
+                              Math.Abs(_widthSpringVelocity) >= 3.0;
+        bool heightAnimating = Math.Abs(targetLogicalHeight - _heightSpringCurrentLogical) >= 0.5 ||
+                               Math.Abs(_heightSpringVelocity) >= 3.0;
+
+        if (!widthAnimating && !heightAnimating)
+        {
+            SnapMorphBoundsToTarget(targetLogicalWidth, targetLogicalHeight, targetBounds);
             return;
         }
 
@@ -3100,42 +2583,65 @@ public sealed partial class SearchPopupWindow : Window
         int immediatePhysicalHeight = Math.Min(
             maxDownwardPhysical,
             Math.Max(liveSize.Height, targetBounds.Height + headroomPhysical));
+        int immediatePhysicalWidth = widthAnimating
+            ? Math.Max(liveSize.Width, targetBounds.Width + headroomPhysical)
+            : Math.Max(liveSize.Width, targetBounds.Width);
+        int startX = widthAnimating ? livePos.X : targetBounds.X;
 
-        if (livePos.X != targetBounds.X ||
+        if (RootGrid.HorizontalAlignment != HorizontalAlignment.Left)
+        {
+            RootGrid.HorizontalAlignment = HorizontalAlignment.Left;
+        }
+
+        if (livePos.X != startX ||
             livePos.Y != targetBounds.Y ||
-            liveSize.Width != targetBounds.Width ||
-            liveSize.Height != immediatePhysicalHeight)
+            liveSize.Width < immediatePhysicalWidth ||
+            liveSize.Height < immediatePhysicalHeight)
         {
             _appWindow.MoveAndResize(new RectInt32(
-                targetBounds.X,
+                startX,
                 targetBounds.Y,
-                targetBounds.Width,
+                immediatePhysicalWidth,
                 immediatePhysicalHeight));
         }
 
-        _heightSpringExpanding = targetLogicalHeight >= _heightSpringCurrentLogical;
+        _morphWorkAreaPhysical = workAreaPhysical;
+        _morphDpiScale = scale;
+        _morphCustomX = customX;
+        _morphCustomY = customY;
+        _lastMorphWindowX = startX;
+
+        if (!isSpringRunning || Math.Abs(targetLogicalWidth - _widthMorphTargetLogical) >= 0.5)
+        {
+            _widthSpringExpanding = targetLogicalWidth >= _widthSpringCurrentLogical;
+        }
+
+        _widthMorphTargetLogical = targetLogicalWidth;
+        if (!isSpringRunning || Math.Abs(targetLogicalHeight - _heightMorphTargetLogical) >= 0.5)
+        {
+            _heightSpringExpanding = targetLogicalHeight >= _heightSpringCurrentLogical;
+        }
+
         _heightMorphTargetLogical = targetLogicalHeight;
         _heightMorphPendingBounds = targetBounds;
 
-        _heightMorphTimer ??= CreateHeightMorphTimer();
-        if (!_heightMorphTimer.IsEnabled)
-        {
-            _heightSpringLastTimestamp = Stopwatch.GetTimestamp();
-            _heightMorphTimer.Start();
-        }
+        StartMorphAnimation();
     }
 
-    private DispatcherTimer CreateHeightMorphTimer()
+    private void StartMorphAnimation()
     {
-        var timer = new DispatcherTimer
+        if (_morphAnimationRegistration is not null || _isWindowClosed)
         {
-            Interval = TimeSpan.FromMilliseconds(12)
-        };
-        timer.Tick += OnHeightMorphTimerTick;
-        return timer;
+            return;
+        }
+
+        _heightSpringLastTimestamp = Stopwatch.GetTimestamp();
+        _morphAnimationRegistration = WidgetCompactAnimationCoordinator.Register(
+            OnMorphFrameRendered,
+            _hwnd);
     }
 
-    private void OnHeightMorphTimerTick(object? sender, object e)
+    private void OnMorphFrameRendered()
     {
         if (!IsPopupVisible || _isWindowClosed || _appWindow is null)
         {
@@ -3149,58 +2655,137 @@ public sealed partial class SearchPopupWindow : Window
             : 0.014;
         _heightSpringLastTimestamp = nowTimestamp;
 
-        SearchPopupHeightSpringStep step = SearchPopupSurfacePolicy.StepHeightSpring(
+        SearchPopupWidthSpringStep widthStep = SearchPopupSurfacePolicy.StepWidthSpring(
+            _widthSpringCurrentLogical,
+            _widthSpringVelocity,
+            _widthMorphTargetLogical,
+            dtSeconds,
+            _widthSpringExpanding);
+
+        SearchPopupHeightSpringStep heightStep = SearchPopupSurfacePolicy.StepHeightSpring(
             _heightSpringCurrentLogical,
             _heightSpringVelocity,
             _heightMorphTargetLogical,
             dtSeconds,
             _heightSpringExpanding);
 
-        _heightSpringCurrentLogical = step.Height;
-        _heightSpringVelocity = step.Velocity;
+        _widthSpringCurrentLogical = widthStep.Width;
+        _widthSpringVelocity = widthStep.Velocity;
+        _heightSpringCurrentLogical = heightStep.Height;
+        _heightSpringVelocity = heightStep.Velocity;
 
-        if (step.IsSettled)
+        if (widthStep.IsSettled && heightStep.IsSettled)
         {
-            StopHeightMorphTimer();
-            RootGrid.Height = _heightMorphTargetLogical;
-            PointInt32 pos = _appWindow.Position;
-            SizeInt32 size = _appWindow.Size;
-            if (pos.X != _heightMorphPendingBounds.X ||
-                pos.Y != _heightMorphPendingBounds.Y ||
-                size.Width != _heightMorphPendingBounds.Width ||
-                size.Height != _heightMorphPendingBounds.Height)
-            {
-                _appWindow.MoveAndResize(_heightMorphPendingBounds);
-            }
+            SnapMorphBoundsToTarget(
+                _widthMorphTargetLogical,
+                _heightMorphTargetLogical,
+                _heightMorphPendingBounds,
+                syncMinHeight: true);
             return;
         }
 
-        RootGrid.Height = step.Height;
+        if (Math.Abs(RootGrid.Width - widthStep.Width) > 0.001)
+        {
+            RootGrid.Width = widthStep.Width;
+        }
+
+        if (Math.Abs(RootGrid.Height - heightStep.Height) > 0.001)
+        {
+            RootGrid.Height = heightStep.Height;
+        }
+
+        int frameX = widthStep.IsSettled
+            ? _heightMorphPendingBounds.X
+            : SearchPopupSurfacePolicy.ComputeAnchoredWindowX(
+                _morphWorkAreaPhysical,
+                _morphDpiScale,
+                widthStep.Width,
+                _morphCustomX,
+                _morphCustomY);
+        if (frameX != _lastMorphWindowX)
+        {
+            _lastMorphWindowX = frameX;
+            _ = Win32Helper.SetWindowPos(
+                _hwnd,
+                IntPtr.Zero,
+                frameX,
+                _heightMorphPendingBounds.Y,
+                0,
+                0,
+                Win32Helper.SWP_NOSIZE |
+                Win32Helper.SWP_NOZORDER |
+                Win32Helper.SWP_NOACTIVATE |
+                Win32Helper.SWP_NOCOPYBITS);
+        }
+
+        ApplyDetailsSplitWidthForPopupWidth(widthStep.Width, isSettled: widthStep.IsSettled);
     }
 
     private void StopHeightMorphTimer()
     {
-        _heightMorphTimer?.Stop();
+        if (_morphAnimationRegistration is { } registration)
+        {
+            _morphAnimationRegistration = null;
+            try { registration.Dispose(); } catch { }
+        }
+
         _heightSpringVelocity = 0;
+        _widthSpringVelocity = 0;
         _heightSpringLastTimestamp = 0;
     }
 
     private void SnapHeightMorphToTarget()
     {
-        if (_heightMorphTimer is not { IsEnabled: true } || _appWindow is null)
+        if (!IsMorphSpringRunning || _appWindow is null)
         {
             return;
         }
 
+        SnapMorphBoundsToTarget(
+            _widthMorphTargetLogical,
+            _heightMorphTargetLogical,
+            _heightMorphPendingBounds,
+            syncMinHeight: true);
+    }
+
+    private void SnapMorphBoundsToTarget(
+        double targetLogicalWidth,
+        double targetLogicalHeight,
+        RectInt32 targetBounds,
+        bool syncMinHeight = false)
+    {
         StopHeightMorphTimer();
-        _heightSpringCurrentLogical = _heightMorphTargetLogical;
-        RootGrid.Height = _heightMorphTargetLogical;
-        _appWindow.MoveAndResize(_heightMorphPendingBounds);
+        _widthSpringCurrentLogical = targetLogicalWidth;
+        _heightSpringCurrentLogical = targetLogicalHeight;
+        RootGrid.HorizontalAlignment = HorizontalAlignment.Left;
+        RootGrid.Width = targetLogicalWidth;
+        RootGrid.Height = targetLogicalHeight;
+        _lastMorphWindowX = targetBounds.X;
+        ApplyDetailsSplitWidthForPopupWidth(targetLogicalWidth, isSettled: true);
+        if (syncMinHeight)
+        {
+            SyncResultsSurfaceMinHeight();
+        }
+
+        if (_appWindow is null)
+        {
+            return;
+        }
+
+        PointInt32 pos = _appWindow.Position;
+        SizeInt32 size = _appWindow.Size;
+        if (pos.X != targetBounds.X ||
+            pos.Y != targetBounds.Y ||
+            size.Width != targetBounds.Width ||
+            size.Height != targetBounds.Height)
+        {
+            _appWindow.MoveAndResize(targetBounds);
+        }
     }
 
     private void SearchTextBox_Loaded(object sender, RoutedEventArgs e)
     {
-        if (FindVisualChild<Button>(SearchTextBox, "DeleteButton") is { } nativeDeleteButton)
+        if (SearchRecommendationLayoutEngine.FindVisualChild<Button>(SearchTextBox, "DeleteButton") is { } nativeDeleteButton)
         {
             nativeDeleteButton.MaxWidth = 0;
             nativeDeleteButton.MaxHeight = 0;
@@ -3211,7 +2796,23 @@ public sealed partial class SearchPopupWindow : Window
 
     private void ClearQueryButton_Click(object sender, RoutedEventArgs e)
     {
-        SearchTextBox.Text = string.Empty;
+        _searchDebounceTimer?.Stop();
+        _suppressScopeLatchTextChange = true;
+        try
+        {
+            SearchTextBox.Text = string.Empty;
+        }
+        finally
+        {
+            _suppressScopeLatchTextChange = false;
+        }
+
+        ClearQueryButton.Visibility = Visibility.Collapsed;
+        HotkeyHintBadge.Visibility = _latchedInlineScope == SearchInlineScope.None &&
+                                     !string.IsNullOrWhiteSpace(_viewModel.HotkeyHint)
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        UpdateScopePrefixBadge(string.Empty);
         if (_latchedInlineScope != SearchInlineScope.None)
         {
             _viewModel.Query = GetEffectivePopupQuery();
@@ -3235,15 +2836,15 @@ public sealed partial class SearchPopupWindow : Window
 
         // Typing a new query clears any recommended-app selection so that
         // Space/arrow keys switch back to result-list navigation.
-        ClearRecommendedAppSelection();
+        RecommendedAppsGrid.ClearSelection();
         _isNavigatingResults = false;
         ClearMultiSelection();
         bool hasText = !string.IsNullOrEmpty(SearchTextBox.Text);
         if (HasActiveSearchOrScope)
         {
-            SetRecommendationEditMode(false);
-            CancelRecommendedDrag();
-            CloseRecommendationOverlays(immediate: true);
+            RecommendedAppsGrid.DisableEditMode();
+            RecommendedAppsGrid.CancelDrag();
+            RecommendationOverlays.CloseOverlays(immediate: true);
         }
         ClearQueryButton.Visibility = hasText
             ? Visibility.Visible
@@ -3254,6 +2855,22 @@ public sealed partial class SearchPopupWindow : Window
             ? Visibility.Visible
             : Visibility.Collapsed;
         UpdateScopePrefixBadge(SearchTextBox.Text);
+
+        // When the input becomes empty outside active CJK IME preedit composition,
+        // cancel any in-flight Everything IPC search immediately and return directly
+        // to recommendations so a 30-80ms query cannot land during a 35ms debounce
+        // and bounce Recommendation -> Search Results -> Recommendation.
+        if (!HasActiveSearchOrScope)
+        {
+            _viewModel.CancelPendingSearch();
+            if (!DeskBox.Helpers.ImeCompositionGuard.IsActivelyComposing(SearchTextBox))
+            {
+                _searchDebounceTimer?.Stop();
+                _viewModel.ClearSearch();
+                UpdatePanelVisibility();
+                return;
+            }
+        }
 
         // Keep only a short coalescing window. Native queries are cancellable and the
         // resident catalog is the sole file provider, so a long visual debounce is
@@ -3280,7 +2897,15 @@ public sealed partial class SearchPopupWindow : Window
     private void OnSearchDebounceTick(object? sender, object e)
     {
         _searchDebounceTimer?.Stop();
-        _viewModel.Query = GetEffectivePopupQuery();
+        string effectiveQuery = GetEffectivePopupQuery();
+        if (string.IsNullOrEmpty(effectiveQuery) && _latchedInlineScope == SearchInlineScope.None)
+        {
+            _viewModel.ClearSearch();
+        }
+        else
+        {
+            _viewModel.Query = effectiveQuery;
+        }
         UpdatePanelVisibility();
     }
 
@@ -3294,25 +2919,23 @@ public sealed partial class SearchPopupWindow : Window
         switch (e.Key)
         {
             case Windows.System.VirtualKey.Escape:
-                if (_isEditingFolderTitle)
+                if (RecommendationOverlays.IsEditingFolderTitle)
                 {
-                    CancelFolderTitleEdit();
+                    RecommendationOverlays.CancelTitleEdit();
                 }
-                else if (IsAnyRecommendationOverlayOpen())
+                else if (RecommendationOverlays.IsAnyOverlayOpen)
                 {
-                    CloseRecommendationOverlays();
+                    RecommendationOverlays.CloseOverlays();
                 }
-                else if (_isRecommendationEditMode)
+                else if (RecommendedAppsGrid.IsEditMode)
                 {
-                    if (_recMultiSelectedKeys.Count > 0)
+                    if (RecommendedAppsGrid.MultiSelectedCount > 0)
                     {
-                        _recMultiSelectedKeys.Clear();
-                        RefreshAllRecommendedCardEditVisuals();
-                        UpdateRecommendationEditStatusHint();
+                        RecommendedAppsGrid.ClearEditMultiSelection();
                     }
                     else
                     {
-                        SetRecommendationEditMode(false);
+                        RecommendedAppsGrid.DisableEditMode();
                     }
                 }
                 else if (_multiSelectedItems.Count > 0)
@@ -3352,59 +2975,17 @@ public sealed partial class SearchPopupWindow : Window
                 break;
 
             case Windows.System.VirtualKey.Enter:
-                if (IsAnyRecommendationOverlayOpen())
+                if (RecommendationOverlays.IsAnyOverlayOpen)
                 {
                     e.Handled = true;
                     break;
                 }
 
                 bool controlPressed = Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control);
-                if (_isRecommendationEditMode &&
-                    !HasActiveSearchOrScope &&
-                    RecommendedAppsPanel.Visibility == Visibility.Visible)
-                {
-                    if (_selectedAppIndex >= 0 &&
-                        RecommendedAppsRepeater.ItemsSource is System.Collections.IList editRecEntries &&
-                        _selectedAppIndex < editRecEntries.Count &&
-                        editRecEntries[_selectedAppIndex] is RecommendedGridEntry editSelectedEntry)
-                    {
-                        if (!_recMultiSelectedKeys.Add(editSelectedEntry.EntryKey))
-                        {
-                            _recMultiSelectedKeys.Remove(editSelectedEntry.EntryKey);
-                        }
-
-                        RefreshAllRecommendedCardEditVisuals();
-                        UpdateRecommendationEditStatusHint();
-                    }
-
-                    e.Handled = true;
-                    break;
-                }
-
                 if (!HasActiveSearchOrScope &&
-                    RecommendedAppsPanel.Visibility == Visibility.Visible &&
-                    _selectedAppIndex >= 0 &&
-                    RecommendedAppsRepeater.ItemsSource is System.Collections.IList recEntries &&
-                    _selectedAppIndex < recEntries.Count &&
-                    recEntries[_selectedAppIndex] is RecommendedGridEntry selectedEntry)
+                    RecommendedAppsGrid.IsAppsPanelVisible &&
+                    RecommendedAppsGrid.HandleEnterKey(controlPressed))
                 {
-                    if (selectedEntry.IsFolder)
-                    {
-                        OpenFolderOverlay(selectedEntry);
-                    }
-                    else if (selectedEntry.AppItem is { } recApp)
-                    {
-                        if (controlPressed && !string.IsNullOrWhiteSpace(recApp.DetailPath))
-                        {
-                            Win32Helper.ShowInExplorer(recApp.DetailPath);
-                            HidePopup();
-                        }
-                        else if (_viewModel.ExecuteItem(recApp))
-                        {
-                            HidePopup();
-                        }
-                    }
-
                     e.Handled = true;
                     break;
                 }
@@ -3576,96 +3157,58 @@ public sealed partial class SearchPopupWindow : Window
 
     // ── Recommended apps: Win11 Start Menu single-click open, drag reorder, folder grouping & batch edit mode ──
 
-    private const double RecommendationDragThreshold = 6.0;
-
-    private readonly record struct RecommendedDropDecision(
-        bool IsMerge,
-        RecommendedGridEntry? MergeTarget,
-        FrameworkElement? MergeTargetElement,
-        int ReorderTargetIndex,
-        Rect HighlightRect,
-        Point InsertBarPosition,
-        Rect AnchorRect);
-
     private void EditRecommendationsButton_Click(object sender, RoutedEventArgs e)
     {
-        if (IsAnyRecommendationOverlayOpen())
+        if (RecommendationOverlays.IsAnyOverlayOpen)
         {
-            CloseRecommendationOverlays();
+            RecommendationOverlays.CloseOverlays();
         }
 
-        SetRecommendationEditMode(!_isRecommendationEditMode);
-    }
-
-    private void SetRecommendationEditMode(bool enabled)
-    {
-        if (enabled && !_viewModel.HasRecommendedEntries)
-        {
-            enabled = false;
-        }
-
-        if (_isRecommendationEditMode == enabled &&
-            (enabled || (_recMultiSelectedKeys.Count == 0 && !_isRecRubberBanding)))
-        {
-            SyncEditRecommendationsButtonVisuals();
-            UpdateRecommendationEditStatusHint();
-            return;
-        }
-
-        _isRecommendationEditMode = enabled;
-        ResetEditFolderDoubleClickTracking();
-        if (!enabled)
-        {
-            _recMultiSelectedKeys.Clear();
-            _recRubberBandBaseKeys.Clear();
-            _recRubberBandKnownTileRects.Clear();
-            EndRecommendationRubberBand();
-        }
-
-        ClearRecommendedAppSelection();
-        SyncEditRecommendationsButtonVisuals();
-        RefreshAllRecommendedCardEditVisuals();
-        UpdateRecommendationEditStatusHint();
+        RecommendedAppsGrid.ToggleEditMode();
     }
 
     private void SyncEditRecommendationsButtonVisuals()
     {
-        EditRecommendationsIcon.Glyph = _isRecommendationEditMode ? "\uE73E" : "\uE70F";
+        bool isEditMode = RecommendedAppsGrid.IsEditMode;
+        EditRecommendationsIcon.Glyph = isEditMode ? "\uE73E" : "\uE70F";
         string label = _localizationService.T(
-            _isRecommendationEditMode
+            isEditMode
                 ? "Search.Recommend.EditDone"
                 : "Search.Recommend.Edit");
         EditRecommendationsLabel.Text = label;
         ToolTipService.SetToolTip(EditRecommendationsButton, label);
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(EditRecommendationsButton, label);
-        EditRecommendationsButton.Background = ResolveThemeBrush(
-            _isRecommendationEditMode
+        EditRecommendationsButton.Background = SearchRecommendationLayoutEngine.ResolveThemeBrush(
+            RootGrid,
+            isEditMode
                 ? "ControlFillColorSecondaryBrush"
                 : "ControlFillColorDefaultBrush");
-        EditRecommendationsButton.BorderBrush = ResolveThemeBrush(
-            _isRecommendationEditMode
+        EditRecommendationsButton.BorderBrush = SearchRecommendationLayoutEngine.ResolveThemeBrush(
+            RootGrid,
+            isEditMode
                 ? "ControlStrokeColorDefaultBrush"
                 : "CardStrokeColorDefaultBrush");
     }
 
     private void UpdateRecommendationEditStatusHint()
     {
+        int selectedCount = RecommendedAppsGrid.MultiSelectedCount;
         bool showHint = string.IsNullOrWhiteSpace(SearchTextBox.Text) &&
-                        RecommendedAppsPanel.Visibility == Visibility.Visible &&
-                        _isRecommendationEditMode &&
-                        _recMultiSelectedKeys.Count > 0;
+                        RecommendedAppsGrid.IsAppsPanelVisible &&
+                        RecommendedAppsGrid.IsEditMode &&
+                        selectedCount > 0;
         if (showHint)
         {
             string batchHideLabel = string.Format(
                 _localizationService.T("Search.Recommend.BatchHideFormat"),
-                _recMultiSelectedKeys.Count);
+                selectedCount);
             BatchHideSelectedLabel.Text = batchHideLabel;
             ToolTipService.SetToolTip(BatchHideSelectedButton, batchHideLabel);
             BatchHideSelectedButton.Visibility = Visibility.Visible;
 
             StatusTextBlock.Text = string.Format(
                 _localizationService.T("Search.Recommend.EditSelectionHint"),
-                _recMultiSelectedKeys.Count);
+                selectedCount);
             StatusBar.Visibility = Visibility.Visible;
         }
         else
@@ -3677,3727 +3220,12 @@ public sealed partial class SearchPopupWindow : Window
 
     private void BatchHideSelectedButton_Click(object sender, RoutedEventArgs e)
     {
-        HideSelectedRecommendations();
-    }
-
-    private void HideSelectedRecommendations()
-    {
-        if (_recMultiSelectedKeys.Count == 0)
-        {
-            return;
-        }
-
-        var selectedItems = new List<SearchResultItem>();
-        foreach (RecommendedGridEntry entry in _viewModel.RecommendedEntries)
-        {
-            if (!_recMultiSelectedKeys.Contains(entry.EntryKey))
-            {
-                continue;
-            }
-
-            if (entry.IsFolder)
-            {
-                selectedItems.AddRange(entry.FolderItems);
-            }
-            else if (entry.AppItem is { } appItem)
-            {
-                selectedItems.Add(appItem);
-            }
-        }
-
-        _recMultiSelectedKeys.Clear();
-        if (selectedItems.Count > 0)
-        {
-            _viewModel.HideRecommendations(selectedItems);
-        }
-
-        RefreshAllRecommendedCardEditVisuals();
-        UpdateRecommendationEditStatusHint();
-    }
-
-    private void PruneStaleMultiSelectedRecommendationKeys()
-    {
-        if (_recMultiSelectedKeys.Count == 0)
-        {
-            return;
-        }
-
-        var validEntryKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (RecommendedGridEntry entry in _viewModel.RecommendedEntries)
-        {
-            validEntryKeys.Add(entry.EntryKey);
-        }
-
-        _recMultiSelectedKeys.RemoveWhere(key => !validEntryKeys.Contains(key));
-    }
-
-    private void ResetEditFolderDoubleClickTracking()
-    {
-        _lastEditFolderClickKey = null;
-        _lastEditFolderClickTickMs = 0;
-        _lastEditFolderSelectedBeforeClick = false;
-    }
-
-    private void ClearHoveredRecommendedCard()
-    {
-        if (_hoveredAppCard is not null)
-        {
-            Grid prev = _hoveredAppCard;
-            _hoveredAppCard = null;
-            prev.Background = s_transparentCardBrush;
-            if (_isRecommendationEditMode)
-            {
-                ApplyRecommendedCardEditVisuals(
-                    prev,
-                    prev.DataContext as RecommendedGridEntry,
-                    isPointerOver: false);
-            }
-        }
-    }
-
-    private void RefreshAllRecommendedCardEditVisuals()
-    {
-        int childCount = VisualTreeHelper.GetChildrenCount(RecommendedAppsRepeater);
-        for (int i = 0; i < childCount; i++)
-        {
-            if (VisualTreeHelper.GetChild(RecommendedAppsRepeater, i) is FrameworkElement card)
-            {
-                bool isHovered = ReferenceEquals(card, _hoveredAppCard) &&
-                                 !_recIsDragging &&
-                                 !_isRecRubberBanding;
-                if (card is Grid grid)
-                {
-                    grid.Background = isHovered
-                        ? ResolveThemeBrush("SubtleFillColorSecondaryBrush")
-                        : s_transparentCardBrush;
-                }
-
-                ApplyRecommendedCardEditVisuals(
-                    card,
-                    card.DataContext as RecommendedGridEntry,
-                    isPointerOver: isHovered);
-            }
-        }
-    }
-
-    private void ApplyRecommendedCardEditVisuals(
-        FrameworkElement card,
-        RecommendedGridEntry? entry,
-        bool isPointerOver = false)
-    {
-        bool isEditActive = _isRecommendationEditMode && entry is not null;
-        bool isQuickHideEligible = isEditActive && !entry!.IsFolder;
-        bool isSelected = isEditActive && _recMultiSelectedKeys.Contains(entry!.EntryKey);
-
-        // Tile background/plate masks are strictly hover-only (via card.Background on
-        // PointerEntered/Exited); neither idle tiles nor selected tiles show a mask.
-        if (FindVisualChild<Border>(card, "CardEditSlotPlate") is { } editSlotPlate)
-        {
-            editSlotPlate.Visibility = Visibility.Collapsed;
-        }
-
-        if (FindVisualChild<Border>(card, "CardSelectionPlate") is { } selectionPlate)
-        {
-            selectionPlate.Visibility = Visibility.Collapsed;
-        }
-
-        if (FindVisualChild<FrameworkElement>(card, "CardSelectionCheckBox") is { } selectionCheckBox)
-        {
-            selectionCheckBox.Visibility = isEditActive
-                ? Visibility.Visible
-                : Visibility.Collapsed;
-
-            if (FindVisualChild<Border>(selectionCheckBox, "CardSelectionCheckedBox") is { } checkedBox)
-            {
-                checkedBox.Visibility = isSelected
-                    ? Visibility.Visible
-                    : Visibility.Collapsed;
-            }
-
-            if (FindVisualChild<Border>(selectionCheckBox, "CardSelectionUncheckedBox") is { } uncheckedBox)
-            {
-                uncheckedBox.Visibility = isEditActive && !isSelected
-                    ? Visibility.Visible
-                    : Visibility.Collapsed;
-                if (isEditActive && !isSelected)
-                {
-                    uncheckedBox.Opacity = isPointerOver ? 1.0 : 0.68;
-                    uncheckedBox.BorderBrush = ResolveThemeBrush(
-                        isPointerOver
-                            ? "ControlStrongStrokeColorDefaultBrush"
-                            : "ControlStrongStrokeColorDisabledBrush");
-                }
-            }
-        }
-
-        if (FindVisualChild<Button>(card, "CardQuickHideButton") is { } quickHideButton)
-        {
-            quickHideButton.Visibility = isQuickHideEligible
-                ? Visibility.Visible
-                : Visibility.Collapsed;
-            quickHideButton.Opacity = (isPointerOver || isSelected) ? 0.96 : 0.62;
-        }
-    }
-
-    private static void ResetCardContentHostVisual(FrameworkElement contentHost)
-    {
-        var visual = ElementCompositionPreview.GetElementVisual(contentHost);
-        if (visual is null)
-        {
-            return;
-        }
-
-        visual.StopAnimation("Scale.X");
-        visual.StopAnimation("Scale.Y");
-        visual.Scale = System.Numerics.Vector3.One;
-    }
-
-    private void ArmImplicitOffsetAnimationAfterLayout(FrameworkElement card)
-    {
-        if (!AreSystemAnimationsEnabled())
-        {
-            return;
-        }
-
-        DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
-        {
-            if (_isWindowClosed || !IsPopupVisible || card.DataContext is null || !AreSystemAnimationsEnabled())
-            {
-                return;
-            }
-
-            var visual = ElementCompositionPreview.GetElementVisual(card);
-            if (visual is null || visual.ImplicitAnimations is not null)
-            {
-                return;
-            }
-
-            var compositor = visual.Compositor;
-            var decel = compositor.CreateCubicBezierEasingFunction(
-                new System.Numerics.Vector2(0.0f, 0.0f),
-                new System.Numerics.Vector2(0.1f, 1.0f));
-            var offsetAnim = compositor.CreateVector3KeyFrameAnimation();
-            offsetAnim.Target = "Offset";
-            offsetAnim.InsertExpressionKeyFrame(1.0f, "this.FinalValue", decel);
-            offsetAnim.Duration = TimeSpan.FromMilliseconds(190);
-
-            var implicitCollection = compositor.CreateImplicitAnimationCollection();
-            implicitCollection["Offset"] = offsetAnim;
-            visual.ImplicitAnimations = implicitCollection;
-        });
-    }
-
-    private static void DetachImplicitOffsetAnimation(FrameworkElement card)
-    {
-        var visual = ElementCompositionPreview.GetElementVisual(card);
-        if (visual is not null)
-        {
-            visual.ImplicitAnimations = null;
-        }
-    }
-
-    private void CardQuickHideButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (FindDataContext<RecommendedGridEntry>(sender as DependencyObject) is
-            { IsFolder: false, AppItem: { } appItem } entry)
-        {
-            _recMultiSelectedKeys.Remove(entry.EntryKey);
-            _viewModel.HideRecommendation(appItem);
-            UpdateRecommendationEditStatusHint();
-        }
-    }
-
-    private void RecommendedAppsScrollViewer_SizeChanged(object sender, SizeChangedEventArgs e)
-    {
-        RecommendedAppsSurface.MinHeight = Math.Max(
-            0,
-            e.NewSize.Height - RecommendedAppsScrollViewer.Padding.Top - RecommendedAppsScrollViewer.Padding.Bottom);
-    }
-
-    private void RecommendedAppsSurface_PointerPressed(object sender, PointerRoutedEventArgs e)
-    {
-        if (_recIsDragging || IsAnyRecommendationOverlayOpen())
-        {
-            return;
-        }
-
-        var point = e.GetCurrentPoint(RecommendedAppsSurface);
-        if (!point.Properties.IsLeftButtonPressed)
-        {
-            return;
-        }
-
-        bool isCtrlPressed = Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control);
-        if (!_isRecommendationEditMode)
-        {
-            if (!isCtrlPressed)
-            {
-                ClearRecommendedAppSelection();
-                SearchTextBox.Focus(FocusState.Programmatic);
-                return;
-            }
-
-            SetRecommendationEditMode(true);
-        }
-
-        StartRecommendationRubberBand(e, isAdditive: isCtrlPressed);
-        e.Handled = true;
-    }
-
-    private void RecommendedAppsSurface_PointerMoved(object sender, PointerRoutedEventArgs e)
-    {
-        if (!_isRecRubberBanding)
-        {
-            return;
-        }
-
-        _recRubberBandPointerInViewport = e.GetCurrentPoint(RecommendedAppsScrollViewer).Position;
-        UpdateRecommendationRubberBand(e.GetCurrentPoint(RecommendedAppsSurface).Position);
-        e.Handled = true;
-    }
-
-    private void RecommendedAppsSurface_PointerReleased(object sender, PointerRoutedEventArgs e)
-    {
-        if (!_isRecRubberBanding)
-        {
-            return;
-        }
-
-        EndRecommendationRubberBand();
-        e.Handled = true;
-    }
-
-    private void RecommendedAppsSurface_PointerCaptureLost(object sender, PointerRoutedEventArgs e)
-    {
-        if (_isRecRubberBanding)
-        {
-            EndRecommendationRubberBand();
-        }
-    }
-
-    private void StartRecommendationRubberBand(PointerRoutedEventArgs e, bool isAdditive)
-    {
-        ClearHoveredRecommendedCard();
-        _isRecRubberBanding = true;
-        _recRubberBandBaseKeys.Clear();
-        _recRubberBandKnownTileRects.Clear();
-        if (isAdditive)
-        {
-            _recRubberBandBaseKeys.UnionWith(_recMultiSelectedKeys);
-        }
-        else if (_recMultiSelectedKeys.Count > 0)
-        {
-            _recMultiSelectedKeys.Clear();
-            RefreshAllRecommendedCardEditVisuals();
-            UpdateRecommendationEditStatusHint();
-        }
-
-        Point pos = e.GetCurrentPoint(RecommendedAppsSurface).Position;
-        _recRubberBandStart = pos;
-        _recRubberBandCurrent = pos;
-        _recRubberBandPointerInViewport = e.GetCurrentPoint(RecommendedAppsScrollViewer).Position;
-        UpdateRecommendationRubberBandRect(pos, pos);
-        RecRubberBandRect.Visibility = Visibility.Visible;
-        RecommendedAppsSurface.CapturePointer(e.Pointer);
-        EnsureRecommendationRubberBandAutoScrollTimer();
-        _recRubberBandAutoScrollTimer!.Start();
-    }
-
-    private void UpdateRecommendationRubberBand(Point currentInSurface)
-    {
-        _recRubberBandCurrent = currentInSurface;
-        UpdateRecommendationRubberBandRect(_recRubberBandStart, currentInSurface);
-
-        var rubberRect = new Rect(
-            Math.Min(_recRubberBandStart.X, currentInSurface.X),
-            Math.Min(_recRubberBandStart.Y, currentInSurface.Y),
-            Math.Abs(currentInSurface.X - _recRubberBandStart.X),
-            Math.Abs(currentInSurface.Y - _recRubberBandStart.Y));
-
-        if (rubberRect.Width < 3 && rubberRect.Height < 3)
-        {
-            return;
-        }
-
-        int childCount = VisualTreeHelper.GetChildrenCount(RecommendedAppsRepeater);
-        for (int i = 0; i < childCount; i++)
-        {
-            if (VisualTreeHelper.GetChild(RecommendedAppsRepeater, i) is not FrameworkElement tile ||
-                tile.Visibility != Visibility.Visible ||
-                tile.ActualWidth <= 0 ||
-                tile.ActualHeight <= 0 ||
-                tile.DataContext is not RecommendedGridEntry entry)
-            {
-                continue;
-            }
-
-            var tileRect = new Rect(
-                tile.TransformToVisual(RecommendedAppsSurface).TransformPoint(new Point(0, 0)),
-                new Size(tile.ActualWidth, tile.ActualHeight));
-            _recRubberBandKnownTileRects[entry.EntryKey] = tileRect;
-        }
-
-        _recMultiSelectedKeys.Clear();
-        _recMultiSelectedKeys.UnionWith(_recRubberBandBaseKeys);
-
-        foreach (RecommendedGridEntry entry in _viewModel.RecommendedEntries)
-        {
-            if (_recRubberBandKnownTileRects.TryGetValue(entry.EntryKey, out Rect tileRect) &&
-                Intersects(rubberRect, tileRect))
-            {
-                _recMultiSelectedKeys.Add(entry.EntryKey);
-            }
-        }
-
-        RefreshAllRecommendedCardEditVisuals();
-        UpdateRecommendationEditStatusHint();
-    }
-
-    private void UpdateRecommendationRubberBandRect(Point start, Point end)
-    {
-        double x = Math.Min(start.X, end.X);
-        double y = Math.Min(start.Y, end.Y);
-        RecRubberBandRect.Width = Math.Abs(end.X - start.X);
-        RecRubberBandRect.Height = Math.Abs(end.Y - start.Y);
-        RecRubberBandTransform.X = x;
-        RecRubberBandTransform.Y = y;
-    }
-
-    private void EndRecommendationRubberBand()
-    {
-        if (!_isRecRubberBanding && RecRubberBandRect.Visibility != Visibility.Visible)
-        {
-            return;
-        }
-
-        _isRecRubberBanding = false;
-        _recRubberBandAutoScrollTimer?.Stop();
-        _recRubberBandBaseKeys.Clear();
-        _recRubberBandKnownTileRects.Clear();
-        RecRubberBandRect.Visibility = Visibility.Collapsed;
-        RecommendedAppsSurface.ReleasePointerCaptures();
-    }
-
-    private void EnsureRecommendationRubberBandAutoScrollTimer()
-    {
-        if (_recRubberBandAutoScrollTimer is not null)
-        {
-            return;
-        }
-
-        _recRubberBandAutoScrollTimer = new DispatcherTimer
-        {
-            Interval = TimeSpan.FromMilliseconds(32)
-        };
-        _recRubberBandAutoScrollTimer.Tick += OnRecommendationRubberBandAutoScrollTick;
-    }
-
-    private void OnRecommendationRubberBandAutoScrollTick(object? sender, object e)
-    {
-        if (!_isRecRubberBanding)
-        {
-            _recRubberBandAutoScrollTimer?.Stop();
-            return;
-        }
-
-        double delta = SearchResultSelectionPolicy.GetAutoScrollDelta(
-            _recRubberBandPointerInViewport.Y,
-            RecommendedAppsScrollViewer.ViewportHeight);
-        if (Math.Abs(delta) < 0.1)
-        {
-            return;
-        }
-
-        double previousOffset = RecommendedAppsScrollViewer.VerticalOffset;
-        double targetOffset = Math.Clamp(
-            previousOffset + delta,
-            0,
-            RecommendedAppsScrollViewer.ScrollableHeight);
-        if (Math.Abs(targetOffset - previousOffset) < 0.1)
-        {
-            return;
-        }
-
-        RecommendedAppsScrollViewer.ChangeView(null, targetOffset, null, disableAnimation: true);
-        _recRubberBandCurrent = new Point(
-            _recRubberBandCurrent.X,
-            _recRubberBandCurrent.Y + targetOffset - previousOffset);
-        UpdateRecommendationRubberBand(_recRubberBandCurrent);
-    }
-
-    private void RecommendedApp_PointerPressed(object sender, PointerRoutedEventArgs e)
-    {
-        if (sender is not Grid card || card.DataContext is not RecommendedGridEntry entry)
-        {
-            return;
-        }
-
-        if (FindVisualAncestor<Button>(e.OriginalSource as DependencyObject) is
-            { Name: "CardQuickHideButton" })
-        {
-            return;
-        }
-
-        var pointInPanel = e.GetCurrentPoint(RecommendedAppsPanel);
-        if (!pointInPanel.Properties.IsLeftButtonPressed)
-        {
-            return;
-        }
-
-        _recWasCtrlPressedOnDown = Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control);
-        _recAutoEnteredEditModeOnDown = false;
-
-        if (!_isRecommendationEditMode && _recWasCtrlPressedOnDown)
-        {
-            _recAutoEnteredEditModeOnDown = true;
-            SetRecommendationEditMode(true);
-            _recMultiSelectedKeys.Add(entry.EntryKey);
-            RefreshAllRecommendedCardEditVisuals();
-            UpdateRecommendationEditStatusHint();
-        }
-        else if (!_isRecommendationEditMode)
-        {
-            SelectRecommendedEntry(card, entry);
-        }
-
-        _recPointerCard = card;
-        _recPressedEntry = entry;
-        _recPointerStartInPanel = pointInPanel.Position;
-        _recIsDragging = false;
-        _recExternalDragAttempted = false;
-        card.CapturePointer(e.Pointer);
-        e.Handled = true;
-    }
-
-    private void RecommendedApp_PointerMoved(object sender, PointerRoutedEventArgs e)
-    {
-        if (_recPressedEntry is null ||
-            _recPointerCard is null ||
-            !ReferenceEquals(sender, _recPointerCard))
-        {
-            return;
-        }
-
-        var pointInPanel = e.GetCurrentPoint(RecommendedAppsPanel);
-        if (!pointInPanel.Properties.IsLeftButtonPressed)
-        {
-            CancelRecommendedDrag();
-            return;
-        }
-
-        double dx = pointInPanel.Position.X - _recPointerStartInPanel.X;
-        double dy = pointInPanel.Position.Y - _recPointerStartInPanel.Y;
-        if (!_recIsDragging)
-        {
-            if ((dx * dx) + (dy * dy) < RecommendationDragThreshold * RecommendationDragThreshold)
-            {
-                return;
-            }
-
-            ClearHoveredRecommendedCard();
-            ResetEditFolderDoubleClickTracking();
-            _recPointerCard.Background = s_transparentCardBrush;
-            _recIsDragging = true;
-            PrepareRecommendedDragPayload(_recPressedEntry);
-            // Freeze the grid geometry this gesture decides against: every
-            // later decision and reflow projection anchors to these rects,
-            // immune to the translations the preview itself applies.
-            SnapshotRecommendedTileBaseRects();
-            ResetRecommendedDropAnchor();
-            App.Log(
-                $"[RecDrag] start mode={(_isRecommendationEditMode ? "edit" : "normal")} " +
-                $"dragged={_recDraggedEntryKeys.Count} apps={_recDraggedAppKeys.Count} " +
-                $"selection={_recMultiSelectedKeys.Count}");
-            SetDraggedRecommendedTilesOpacity(0.36);
-
-            RecDragGhostTitle.Text = _recPressedEntry.Label;
-            if (_recPressedEntry.IsFolder)
-            {
-                RecDragGhostImage.Source = null;
-                RecDragGhostImage.Visibility = Visibility.Collapsed;
-                RecDragGhostFolderGlyph.Visibility = Visibility.Visible;
-            }
-            else
-            {
-                ImageSource? ghostIcon = _recPressedEntry.AppItem?.Icon;
-                RecDragGhostImage.Source = ghostIcon;
-                RecDragGhostImage.Visibility = ghostIcon is not null
-                    ? Visibility.Visible
-                    : Visibility.Collapsed;
-                RecDragGhostFolderGlyph.Visibility = ghostIcon is null
-                    ? Visibility.Visible
-                    : Visibility.Collapsed;
-            }
-
-            if (_recDraggedEntryKeys.Count > 1)
-            {
-                RecDragGhostCountText.Text = _recDraggedEntryKeys.Count.ToString();
-                RecDragGhostCountBadge.Visibility = Visibility.Visible;
-            }
-            else
-            {
-                RecDragGhostCountBadge.Visibility = Visibility.Collapsed;
-            }
-
-            RecDragGhostBorder.Visibility = Visibility.Visible;
-            AnimateDragGhostPickup(RecDragGhostBorder);
-        }
-
-        Point pointInRoot = e.GetCurrentPoint(RootGrid).Position;
-        double rootWidth = RootGrid.ActualWidth;
-        double rootHeight = RootGrid.ActualHeight;
-        if (IsPointLeavingPopupDragBounds(pointInRoot, rootWidth, rootHeight))
-        {
-            if (!_recExternalDragAttempted)
-            {
-                _recExternalDragAttempted = true;
-                Grid dragCard = _recPointerCard;
-                List<string> candidatePaths = CollectDraggedRecommendationFilePaths(_recPressedEntry);
-                if (TryStartRecommendedExternalDragOut(
-                        dragCard,
-                        e,
-                        candidatePaths,
-                        "recommend-grid",
-                        SuspendRecommendedDragForExternalHandoff))
-                {
-                    e.Handled = true;
-                    return;
-                }
-            }
-
-            if (pointInRoot.X < 0 ||
-                pointInRoot.Y < 0 ||
-                pointInRoot.X > rootWidth ||
-                pointInRoot.Y > rootHeight)
-            {
-                RecDragGhostTransform.X = pointInPanel.Position.X - (RecDragGhostBorder.Width / 2);
-                RecDragGhostTransform.Y = pointInPanel.Position.Y - (RecDragGhostBorder.Height / 2);
-                ResetRecommendedDropAnchor();
-                ClearRecommendedReflowPreview();
-                HideRecommendedDropVisuals();
-                e.Handled = true;
-                return;
-            }
-        }
-        else
-        {
-            _recExternalDragAttempted = false;
-        }
-
-        RecDragGhostTransform.X = pointInPanel.Position.X - (RecDragGhostBorder.Width / 2);
-        RecDragGhostTransform.Y = pointInPanel.Position.Y - (RecDragGhostBorder.Height / 2);
-
-        AutoScrollScrollViewerOnDrag(
-            RecommendedAppsScrollViewer,
-            e.GetCurrentPoint(RecommendedAppsScrollViewer).Position);
-
-        Point pointInSurface = e.GetCurrentPoint(RecommendedAppsSurface).Position;
-        RecommendedDropDecision decision = ResolveRecommendedDropDecision(pointInSurface);
-        bool reflowActive = ApplyRecommendedReflowPreview(decision);
-        ApplyRecommendedDropVisuals(decision, suppressInsertBar: reflowActive);
-        e.Handled = true;
-    }
-
-    private List<string> CollectDraggedRecommendationFilePaths(RecommendedGridEntry pressedEntry)
-    {
-        var paths = new List<string>();
-        if (_recDraggedEntryKeys.Count > 0)
-        {
-            foreach (RecommendedGridEntry entry in _viewModel.RecommendedEntries)
-            {
-                if (!_recDraggedEntryKeys.Contains(entry.EntryKey))
-                {
-                    continue;
-                }
-
-                AppendEntryFilePaths(entry, paths);
-            }
-        }
-
-        if (paths.Count == 0)
-        {
-            AppendEntryFilePaths(pressedEntry, paths);
-        }
-
-        return paths;
-    }
-
-    private static void AppendEntryFilePaths(RecommendedGridEntry entry, List<string> target)
-    {
-        if (entry.IsFolder)
-        {
-            foreach (SearchResultItem member in entry.FolderItems)
-            {
-                if (!string.IsNullOrWhiteSpace(member.DetailPath))
-                {
-                    target.Add(member.DetailPath);
-                }
-            }
-        }
-        else if (!string.IsNullOrWhiteSpace(entry.AppItem?.DetailPath))
-        {
-            target.Add(entry.AppItem.DetailPath);
-        }
-    }
-
-    private void PrepareRecommendedDragPayload(RecommendedGridEntry pressedEntry)
-    {
-        _recDraggedAppKeys.Clear();
-        _recDraggedEntryKeys.Clear();
-
-        if (_isRecommendationEditMode)
-        {
-            bool pressedWasSelected = _recMultiSelectedKeys.Contains(pressedEntry.EntryKey);
-            if (!pressedWasSelected && _recWasCtrlPressedOnDown)
-            {
-                _recMultiSelectedKeys.Add(pressedEntry.EntryKey);
-                pressedWasSelected = true;
-                RefreshAllRecommendedCardEditVisuals();
-                UpdateRecommendationEditStatusHint();
-            }
-            else if (!pressedWasSelected && _recMultiSelectedKeys.Count > 0)
-            {
-                // Dragging an unselected tile without Ctrl acts on just that
-                // tile instead of leaving a sticky checkbox selection behind.
-                _recMultiSelectedKeys.Clear();
-                RefreshAllRecommendedCardEditVisuals();
-                UpdateRecommendationEditStatusHint();
-            }
-
-            if (pressedWasSelected && _recMultiSelectedKeys.Count > 0)
-            {
-                foreach (RecommendedGridEntry entry in _viewModel.RecommendedEntries)
-                {
-                    if (!_recMultiSelectedKeys.Contains(entry.EntryKey))
-                    {
-                        continue;
-                    }
-
-                    _recDraggedEntryKeys.Add(entry.EntryKey);
-                    if (!entry.IsFolder && entry.AppItem is { } selectedApp)
-                    {
-                        _recDraggedAppKeys.Add(Helpers.AppRecommendationIdentity.GetCanonicalKey(selectedApp));
-                    }
-                }
-
-                if (_recDraggedEntryKeys.Count > 0)
-                {
-                    return;
-                }
-            }
-        }
-
-        if (!pressedEntry.IsFolder && pressedEntry.AppItem is { } singleApp)
-        {
-            _recDraggedAppKeys.Add(Helpers.AppRecommendationIdentity.GetCanonicalKey(singleApp));
-        }
-
-        _recDraggedEntryKeys.Add(pressedEntry.EntryKey);
-    }
-
-    private void SetDraggedRecommendedTilesOpacity(double opacity)
-    {
-        int childCount = VisualTreeHelper.GetChildrenCount(RecommendedAppsRepeater);
-        for (int i = 0; i < childCount; i++)
-        {
-            if (VisualTreeHelper.GetChild(RecommendedAppsRepeater, i) is FrameworkElement tile &&
-                tile.DataContext is RecommendedGridEntry entry &&
-                _recDraggedEntryKeys.Contains(entry.EntryKey))
-            {
-                tile.Opacity = opacity;
-            }
-        }
-    }
-
-    private void RecommendedApp_PointerReleased(object sender, PointerRoutedEventArgs e)
-    {
-        if (_recPressedEntry is not { } pressedEntry ||
-            _recPointerCard is not { } pressedCard ||
-            !ReferenceEquals(sender, pressedCard))
-        {
-            return;
-        }
-
-        // Snapshot all gesture state BEFORE ReleasePointerCapture: releasing
-        // capture synchronously raises RecommendedApp_PointerCaptureLost ->
-        // CancelRecommendedDrag(), which clears _recLastDropDecision,
-        // _recDraggedAppKeys, and _recDraggedEntryKeys.
-        bool wasDragging = _recIsDragging;
-        bool autoEnteredOnDown = _recAutoEnteredEditModeOnDown;
-        RecommendedDropDecision decision = _recLastDropDecision;
-        string? lastDecisionSummary = _recLastDecisionSummary;
-        List<string> draggedApps = wasDragging ? _recDraggedAppKeys.ToList() : [];
-        List<string> draggedEntries = wasDragging ? _recDraggedEntryKeys.ToList() : [];
-        Point pointInCard = e.GetCurrentPoint(pressedCard).Position;
-        var cardBounds = new Rect(0, 0, pressedCard.ActualWidth, pressedCard.ActualHeight);
-        pressedCard.ReleasePointerCapture(e.Pointer);
-
-        if (wasDragging)
-        {
-            // Commit the anchored decision the pointer last owned — a fresh
-            // evaluation here could disagree with the preview the user just
-            // acted on.
-            CancelRecommendedDrag();
-
-            if (decision.IsMerge &&
-                decision.MergeTarget is { } mergeTarget &&
-                draggedApps.Count > 0)
-            {
-                _recMultiSelectedKeys.Clear();
-                string? mergeFolderId = _viewModel.MergeRecommendationsIntoFolder(
-                    draggedApps,
-                    mergeTarget.EntryKey);
-                App.Log(
-                    $"[RecDrag] release merge target={mergeTarget.EntryKey} " +
-                    $"apps={draggedApps.Count} folderId={(mergeFolderId is null ? "null" : "ok")}");
-                RefreshAllRecommendedCardEditVisuals();
-                UpdateRecommendationEditStatusHint();
-            }
-            else if (decision.ReorderTargetIndex >= 0)
-            {
-                bool moved;
-                if (draggedEntries.Count > 1)
-                {
-                    moved = _viewModel.MoveRecommendationEntries(
-                        draggedEntries,
-                        decision.ReorderTargetIndex);
-                }
-                else
-                {
-                    moved = _viewModel.MoveRecommendationEntry(
-                        pressedEntry.EntryKey,
-                        decision.ReorderTargetIndex);
-                }
-
-                App.Log(
-                    $"[RecDrag] release reorder index={decision.ReorderTargetIndex} " +
-                    $"entries={draggedEntries.Count} moved={moved}");
-                RefreshAllRecommendedCardEditVisuals();
-                UpdateRecommendationEditStatusHint();
-            }
-            else
-            {
-                App.Log(
-                    $"[RecDrag] release none entries={draggedEntries.Count} " +
-                    $"summary={lastDecisionSummary ?? "none"}");
-            }
-
-            e.Handled = true;
-            return;
-        }
-
-        CancelRecommendedDrag();
-        if (cardBounds.Contains(pointInCard))
-        {
-            if (_isRecommendationEditMode)
-            {
-                if (!autoEnteredOnDown)
-                {
-                    long nowMs = Environment.TickCount64;
-                    if (pressedEntry.IsFolder &&
-                        string.Equals(_lastEditFolderClickKey, pressedEntry.EntryKey, StringComparison.OrdinalIgnoreCase) &&
-                        nowMs - _lastEditFolderClickTickMs <= EditFolderDoubleClickThresholdMs)
-                    {
-                        bool restoreSelected = _lastEditFolderSelectedBeforeClick;
-                        ResetEditFolderDoubleClickTracking();
-                        if (restoreSelected)
-                        {
-                            _recMultiSelectedKeys.Add(pressedEntry.EntryKey);
-                        }
-                        else
-                        {
-                            _recMultiSelectedKeys.Remove(pressedEntry.EntryKey);
-                        }
-
-                        RefreshAllRecommendedCardEditVisuals();
-                        UpdateRecommendationEditStatusHint();
-                        OpenFolderOverlay(pressedEntry);
-                    }
-                    else
-                    {
-                        bool wasSelectedBeforeClick = _recMultiSelectedKeys.Contains(pressedEntry.EntryKey);
-                        if (!wasSelectedBeforeClick)
-                        {
-                            _recMultiSelectedKeys.Add(pressedEntry.EntryKey);
-                        }
-                        else
-                        {
-                            _recMultiSelectedKeys.Remove(pressedEntry.EntryKey);
-                        }
-
-                        if (pressedEntry.IsFolder)
-                        {
-                            _lastEditFolderClickKey = pressedEntry.EntryKey;
-                            _lastEditFolderClickTickMs = nowMs;
-                            _lastEditFolderSelectedBeforeClick = wasSelectedBeforeClick;
-                        }
-                        else
-                        {
-                            ResetEditFolderDoubleClickTracking();
-                        }
-
-                        RefreshAllRecommendedCardEditVisuals();
-                        UpdateRecommendationEditStatusHint();
-                    }
-                }
-            }
-            else if (pressedEntry.IsFolder)
-            {
-                OpenFolderOverlay(pressedEntry);
-            }
-            else if (pressedEntry.AppItem is { } appItem)
-            {
-                _viewModel.ExecuteItem(appItem);
-            }
-        }
-        else
-        {
-            ClearHoveredRecommendedCard();
-        }
-
-        e.Handled = true;
-    }
-
-    private void RecommendedApp_PointerCaptureLost(object sender, PointerRoutedEventArgs e)
-    {
-        if (_recPointerCard is not null && ReferenceEquals(sender, _recPointerCard))
-        {
-            CancelRecommendedDrag();
-        }
-    }
-
-    private void RecommendedApp_PointerEntered(object sender, PointerRoutedEventArgs e)
-    {
-        if (_recIsDragging || _isRecRubberBanding || _dragOutInProgress || sender is not Grid card)
-        {
-            return;
-        }
-
-        if (_hoveredAppCard is not null && !ReferenceEquals(_hoveredAppCard, card))
-        {
-            _hoveredAppCard.Background = s_transparentCardBrush;
-        }
-
-        _hoveredAppCard = card;
-        card.Background = ResolveThemeBrush("SubtleFillColorSecondaryBrush");
-
-        if (_isRecommendationEditMode && card.DataContext is RecommendedGridEntry editEntry)
-        {
-            ApplyRecommendedCardEditVisuals(card, editEntry, isPointerOver: true);
-        }
-    }
-
-    private void RecommendedApp_PointerExited(object sender, PointerRoutedEventArgs e)
-    {
-        if (sender is not Grid card)
-        {
-            return;
-        }
-
-        if (ReferenceEquals(_hoveredAppCard, card))
-        {
-            _hoveredAppCard = null;
-        }
-
-        card.Background = s_transparentCardBrush;
-
-        if (_isRecommendationEditMode)
-        {
-            ApplyRecommendedCardEditVisuals(
-                card,
-                card.DataContext as RecommendedGridEntry,
-                isPointerOver: false);
-        }
-    }
-
-    private void SuspendRecommendedDragForExternalHandoff()
-    {
-        SetDraggedRecommendedTilesOpacity(1.0);
-        if (_recPointerCard is not null)
-        {
-            _recPointerCard.Opacity = 1;
-            _recPointerCard.Background = s_transparentCardBrush;
-            _recPointerCard = null;
-        }
-
-        _recPressedEntry = null;
-        _recIsDragging = false;
-        _recExternalDragAttempted = false;
-        _recWasCtrlPressedOnDown = false;
-        _recAutoEnteredEditModeOnDown = false;
-        _recDraggedAppKeys.Clear();
-        _recDraggedEntryKeys.Clear();
-        ClearRecommendedReflowPreview();
-        _recTileBaseRects.Clear();
-        ResetRecommendedDropAnchor();
-        RecDragGhostBorder.Visibility = Visibility.Collapsed;
-        RecDragGhostCountBadge.Visibility = Visibility.Collapsed;
-        RecDragGhostImage.Source = null;
-        HideRecommendedDropVisuals();
-    }
-
-    private void CancelRecommendedDrag()
-    {
-        SetDraggedRecommendedTilesOpacity(1.0);
-        if (_recPointerCard is not null)
-        {
-            _recPointerCard.Opacity = 1;
-            _recPointerCard.ReleasePointerCaptures();
-            _recPointerCard = null;
-        }
-
-        _recPressedEntry = null;
-        _recIsDragging = false;
-        _recExternalDragAttempted = false;
-        _recWasCtrlPressedOnDown = false;
-        _recAutoEnteredEditModeOnDown = false;
-        _recDraggedAppKeys.Clear();
-        _recDraggedEntryKeys.Clear();
-        // Unwinds the live-reflow translations with the same curve the commit
-        // path relies on: for a committed drop they cancel against the layout
-        // Offset animation started by the collection change in the same
-        // frame; for a cancelled drag they simply close the gap.
-        ClearRecommendedReflowPreview();
-        _recTileBaseRects.Clear();
-        ResetRecommendedDropAnchor();
-        RecDragGhostBorder.Visibility = Visibility.Collapsed;
-        RecDragGhostCountBadge.Visibility = Visibility.Collapsed;
-        RecDragGhostImage.Source = null;
-        HideRecommendedDropVisuals();
-        CancelOverlayDrag();
-    }
-
-    private void HideRecommendedDropVisuals()
-    {
-        SetHoveredMergeTargetCard(null);
-        RecMergeTargetHighlight.Visibility = Visibility.Collapsed;
-        RecDropInsertIndicator.Visibility = Visibility.Collapsed;
-    }
-
-    private void ApplyRecommendedDropVisuals(
-        RecommendedDropDecision decision,
-        bool suppressInsertBar = false)
-    {
-        if (decision.IsMerge && decision.MergeTarget is not null)
-        {
-            SetHoveredMergeTargetCard(decision.MergeTargetElement);
-            if (RecDropInsertIndicator.Visibility != Visibility.Collapsed)
-            {
-                RecDropInsertIndicator.Visibility = Visibility.Collapsed;
-            }
-            if (Math.Abs(RecMergeTargetHighlight.Width - decision.HighlightRect.Width) > 0.01)
-            {
-                RecMergeTargetHighlight.Width = decision.HighlightRect.Width;
-            }
-            if (Math.Abs(RecMergeTargetHighlight.Height - decision.HighlightRect.Height) > 0.01)
-            {
-                RecMergeTargetHighlight.Height = decision.HighlightRect.Height;
-            }
-            if (Math.Abs(RecMergeTargetTransform.X - decision.HighlightRect.X) > 0.01)
-            {
-                RecMergeTargetTransform.X = decision.HighlightRect.X;
-            }
-            if (Math.Abs(RecMergeTargetTransform.Y - decision.HighlightRect.Y) > 0.01)
-            {
-                RecMergeTargetTransform.Y = decision.HighlightRect.Y;
-            }
-            if (RecMergeTargetHighlight.Visibility != Visibility.Visible)
-            {
-                RecMergeTargetHighlight.Visibility = Visibility.Visible;
-            }
-            return;
-        }
-
-        SetHoveredMergeTargetCard(null);
-        if (RecMergeTargetHighlight.Visibility != Visibility.Collapsed)
-        {
-            RecMergeTargetHighlight.Visibility = Visibility.Collapsed;
-        }
-        // When the live reflow preview is active the opened gap IS the
-        // affordance; the insert bar only shows as the reduced-motion
-        // fallback.
-        if (decision.ReorderTargetIndex >= 0 && !suppressInsertBar)
-        {
-            if (Math.Abs(RecDropInsertTransform.X - decision.InsertBarPosition.X) > 0.01)
-            {
-                RecDropInsertTransform.X = decision.InsertBarPosition.X;
-            }
-            if (Math.Abs(RecDropInsertTransform.Y - decision.InsertBarPosition.Y) > 0.01)
-            {
-                RecDropInsertTransform.Y = decision.InsertBarPosition.Y;
-            }
-            if (RecDropInsertIndicator.Visibility != Visibility.Visible)
-            {
-                RecDropInsertIndicator.Visibility = Visibility.Visible;
-            }
-        }
-        else if (RecDropInsertIndicator.Visibility != Visibility.Collapsed)
-        {
-            RecDropInsertIndicator.Visibility = Visibility.Collapsed;
-        }
-    }
-
-    /// <summary>
-    /// Live reflow preview: projects the order a drop would commit and shifts
-    /// tiles to their projected slots via Translation animations, so the grid
-    /// opens the landing gap while the pointer is still down. The dragged
-    /// tiles move to their projected slot too (still dimmed) — the ghost
-    /// stays the pointer representation. Returns whether the preview engaged
-    /// (used to suppress the static insert bar).
-    /// </summary>
-    private bool ApplyRecommendedReflowPreview(RecommendedDropDecision decision)
-    {
-        if (!AreSystemAnimationsEnabled() ||
-            decision.IsMerge ||
-            decision.ReorderTargetIndex < 0)
-        {
-            ClearRecommendedReflowPreview();
-            return false;
-        }
-
-        var entries = _viewModel.RecommendedEntries;
-        int realizedChildCount = VisualTreeHelper.GetChildrenCount(RecommendedAppsRepeater);
-        if (_recHasCachedReflowState &&
-            _recCachedReflowTargetIndex == decision.ReorderTargetIndex &&
-            _recCachedReflowRealizedCount == realizedChildCount &&
-            _recCachedReflowEntriesCount == entries.Count)
-        {
-            return _recCachedReflowActive;
-        }
-        // EvaluateRecommendedDropTarget reports the remaining-list index for
-        // single drags but the full-list slot for batch drags (the two Move
-        // overloads' conventions); normalize to the remaining-list index.
-        int insertIndex = decision.ReorderTargetIndex;
-        if (_recDraggedEntryKeys.Count > 1)
-        {
-            int slot = Math.Clamp(decision.ReorderTargetIndex, 0, entries.Count);
-            int draggedBeforeSlot = 0;
-            for (int i = 0; i < slot; i++)
-            {
-                if (_recDraggedEntryKeys.Contains(entries[i].EntryKey))
-                {
-                    draggedBeforeSlot++;
-                }
-            }
-
-            insertIndex = slot - draggedBeforeSlot;
-        }
-
-        List<string> projected = ProjectReorderedEntryKeys(
-            entries,
-            _recDraggedEntryKeys,
-            insertIndex);
-        if (projected.Count != entries.Count)
-        {
-            ClearRecommendedReflowPreview();
-            return false;
-        }
-
-        var projectedSlotByKey = new Dictionary<string, int>(
-            projected.Count,
-            StringComparer.OrdinalIgnoreCase);
-        for (int i = 0; i < projected.Count; i++)
-        {
-            projectedSlotByKey[projected[i]] = i;
-        }
-
-        var tileBases = CollectReflowTileBases();
-        if (tileBases.Count == 0 ||
-            !TryResolveReflowGridMetrics(
-                tileBases,
-                out double pitchX,
-                out double pitchY,
-                out int capacity,
-                out Point origin))
-        {
-            ClearRecommendedReflowPreview();
-            return false;
-        }
-
-        var desired = new Dictionary<string, (FrameworkElement Tile, System.Numerics.Vector3 Delta)>(
-            StringComparer.OrdinalIgnoreCase);
-        foreach (var (key, tile, baseRect) in tileBases)
-        {
-            if (!projectedSlotByKey.TryGetValue(key, out int slot))
-            {
-                continue;
-            }
-
-            double targetX = origin.X + ((capacity > 0 ? slot % capacity : 0) * pitchX);
-            double targetY = origin.Y + ((capacity > 0 ? slot / capacity : 0) * pitchY);
-            double dx = targetX - baseRect.X;
-            double dy = targetY - baseRect.Y;
-            if (Math.Abs(dx) >= 0.5 || Math.Abs(dy) >= 0.5)
-            {
-                desired[key] = (tile, new System.Numerics.Vector3((float)dx, (float)dy, 0f));
-            }
-        }
-
-        foreach (var (key, shift) in desired)
-        {
-            if (_recReflowTranslations.TryGetValue(key, out System.Numerics.Vector3 applied) &&
-                Math.Abs(applied.X - shift.Delta.X) < 0.5 &&
-                Math.Abs(applied.Y - shift.Delta.Y) < 0.5)
-            {
-                continue;
-            }
-
-            AnimateReflowTranslation(shift.Tile, shift.Delta);
-            _recReflowTranslations[key] = shift.Delta;
-        }
-
-        foreach (string key in _recReflowTranslations.Keys.ToList())
-        {
-            if (desired.ContainsKey(key))
-            {
-                continue;
-            }
-
-            // Tile no longer needs a shift; unwind it.
-            foreach (var (staleKey, staleTile, _) in tileBases)
-            {
-                if (string.Equals(staleKey, key, StringComparison.OrdinalIgnoreCase))
-                {
-                    AnimateReflowTranslation(staleTile, System.Numerics.Vector3.Zero);
-                    break;
-                }
-            }
-
-            _recReflowTranslations.Remove(key);
-        }
-
-        _recHasCachedReflowState = true;
-        _recCachedReflowActive = _recReflowTranslations.Count > 0;
-        _recCachedReflowTargetIndex = decision.ReorderTargetIndex;
-        _recCachedReflowRealizedCount = realizedChildCount;
-        _recCachedReflowEntriesCount = entries.Count;
-        return _recCachedReflowActive;
-    }
-
-    private void ClearRecommendedReflowPreview()
-    {
-        _recHasCachedReflowState = false;
-        _recCachedReflowActive = false;
-        _recCachedReflowTargetIndex = -1;
-        _recCachedReflowRealizedCount = -1;
-        _recCachedReflowEntriesCount = -1;
-        if (_recReflowTranslations.Count == 0)
-        {
-            return;
-        }
-
-        foreach (var (key, tile, _) in CollectReflowTileBases())
-        {
-            if (_recReflowTranslations.ContainsKey(key))
-            {
-                AnimateReflowTranslation(tile, System.Numerics.Vector3.Zero);
-            }
-        }
-
-        _recReflowTranslations.Clear();
-    }
-
-    private List<(string Key, FrameworkElement Tile, Rect Base)> CollectReflowTileBases()
-    {
-        var tileBases = new List<(string, FrameworkElement, Rect)>();
-        int childCount = VisualTreeHelper.GetChildrenCount(RecommendedAppsRepeater);
-        for (int c = 0; c < childCount; c++)
-        {
-            if (VisualTreeHelper.GetChild(RecommendedAppsRepeater, c) is not FrameworkElement tile ||
-                tile.Visibility != Visibility.Visible ||
-                tile.ActualWidth <= 0 ||
-                tile.ActualHeight <= 0 ||
-                tile.DataContext is not RecommendedGridEntry tileEntry)
-            {
-                continue;
-            }
-
-            tileBases.Add((tileEntry.EntryKey, tile, GetTileBaseRect(tile, tileEntry.EntryKey)));
-        }
-
-        return tileBases;
-    }
-
-    private static bool TryResolveReflowGridMetrics(
-        List<(string Key, FrameworkElement Tile, Rect Base)> tileBases,
-        out double pitchX,
-        out double pitchY,
-        out int capacity,
-        out Point origin)
-    {
-        pitchX = 0;
-        pitchY = 0;
-        capacity = 0;
-        origin = new Point(double.PositiveInfinity, double.PositiveInfinity);
-
-        if (tileBases.Count == 0)
-        {
-            return false;
-        }
-
-        // Rows keyed by Y rounded to 0.1px (sub-pixel drift tolerance).
-        var rows = new SortedDictionary<double, List<(double X, double Y, Size Size)>>();
-        foreach (var (_, _, baseRect) in tileBases)
-        {
-            double rowKey = Math.Round(baseRect.Y, 1);
-            if (!rows.TryGetValue(rowKey, out var rowTiles))
-            {
-                rowTiles = [];
-                rows[rowKey] = rowTiles;
-            }
-
-            rowTiles.Add((baseRect.X, baseRect.Y, new Size(baseRect.Width, baseRect.Height)));
-            origin.X = Math.Min(origin.X, baseRect.X);
-            origin.Y = Math.Min(origin.Y, baseRect.Y);
-        }
-
-        capacity = rows.Values.Max(static row => row.Count);
-        List<(double X, double Y, Size Size)> firstRow =
-            rows.First().Value.OrderBy(static tile => tile.X).ToList();
-        Size cellSize = firstRow[0].Size;
-        // Fallback pitch uses the UniformGridLayout 6px spacing declared in
-        // the XAML (single-column rows / single-row grids have no neighbour
-        // to measure from).
-        pitchX = firstRow.Count >= 2
-            ? firstRow[1].X - firstRow[0].X
-            : cellSize.Width + 6;
-        pitchY = rows.Count >= 2
-            ? rows.Keys.Skip(1).First() - rows.Keys.First()
-            : cellSize.Height + 6;
-        return pitchX > 0 && pitchY > 0 && capacity > 0;
-    }
-
-    private static void AnimateReflowTranslation(
-        FrameworkElement tile,
-        System.Numerics.Vector3 target)
-    {
-        ElementCompositionPreview.SetIsTranslationEnabled(tile, true);
-        var visual = ElementCompositionPreview.GetElementVisual(tile);
-        if (visual is null)
-        {
-            return;
-        }
-
-        if (!AreSystemAnimationsEnabled())
-        {
-            visual.StopAnimation("Translation");
-            // Translation is animatable but not a settable CLR property in
-            // the WinUI 3 projection; it lives in the property store.
-            visual.Properties.InsertVector3("Translation", target);
-            return;
-        }
-
-        // Same curve and duration as the implicit Offset animation: when the
-        // commit reorders the collection, the layout Offset animation and
-        // this translation unwind cancel each other — no visual jump between
-        // preview and settled state.
-        var compositor = visual.Compositor;
-        var decel = compositor.CreateCubicBezierEasingFunction(
-            new System.Numerics.Vector2(0.0f, 0.0f),
-            new System.Numerics.Vector2(0.1f, 1.0f));
-        var anim = compositor.CreateVector3KeyFrameAnimation();
-        anim.Target = "Translation";
-        anim.InsertKeyFrame(1.0f, target, decel);
-        anim.Duration = TimeSpan.FromMilliseconds(190);
-        visual.StartAnimation("Translation", anim);
-    }
-
-    private void SetHoveredMergeTargetCard(FrameworkElement? targetCard)
-    {
-        if (ReferenceEquals(_recMergeHoveredCard, targetCard))
-        {
-            return;
-        }
-
-        if (_recMergeHoveredCard is { } previousCard &&
-            FindVisualChild<FrameworkElement>(previousCard, "CardContentHost") is { } prevHost)
-        {
-            AnimateMergeTargetScale(prevHost, 1.0f, 120);
-        }
-
-        _recMergeHoveredCard = targetCard;
-        if (targetCard is not null &&
-            FindVisualChild<FrameworkElement>(targetCard, "CardContentHost") is { } nextHost)
-        {
-            AnimateMergeTargetScale(nextHost, 1.07f, 140);
-        }
-    }
-
-    private static void AnimateMergeTargetScale(FrameworkElement host, float targetScale, int durationMs)
-    {
-        var visual = ElementCompositionPreview.GetElementVisual(host);
-        if (visual is null)
-        {
-            return;
-        }
-
-        if (!AreSystemAnimationsEnabled())
-        {
-            visual.Scale = new System.Numerics.Vector3(targetScale, targetScale, 1f);
-            return;
-        }
-
-        float cx = visual.Size.X > 0
-            ? visual.Size.X / 2f
-            : (float)(host.ActualWidth > 0 ? host.ActualWidth : 86) / 2f;
-        float cy = visual.Size.Y > 0
-            ? visual.Size.Y / 2f
-            : (float)(host.ActualHeight > 0 ? host.ActualHeight : 78) / 2f;
-        visual.CenterPoint = new System.Numerics.Vector3(cx, cy, 0f);
-
-        var compositor = visual.Compositor;
-        var decel = compositor.CreateCubicBezierEasingFunction(
-            new System.Numerics.Vector2(0.0f, 0.0f),
-            new System.Numerics.Vector2(0.1f, 1.0f));
-        var scaleAnim = compositor.CreateScalarKeyFrameAnimation();
-        scaleAnim.InsertKeyFrame(1.0f, targetScale, decel);
-        scaleAnim.Duration = TimeSpan.FromMilliseconds(durationMs);
-        visual.StartAnimation("Scale.X", scaleAnim);
-        visual.StartAnimation("Scale.Y", scaleAnim);
-    }
-
-    private static void AnimateDragGhostPickup(FrameworkElement ghostElement)
-    {
-        var visual = ElementCompositionPreview.GetElementVisual(ghostElement);
-        if (visual is null)
-        {
-            return;
-        }
-
-        if (!AreSystemAnimationsEnabled())
-        {
-            visual.Scale = System.Numerics.Vector3.One;
-            return;
-        }
-
-        float cx = (float)(ghostElement.Width > 0 && !double.IsNaN(ghostElement.Width)
-            ? ghostElement.Width
-            : 100) / 2f;
-        float cy = (float)(ghostElement.Height > 0 && !double.IsNaN(ghostElement.Height)
-            ? ghostElement.Height
-            : 88) / 2f;
-        visual.CenterPoint = new System.Numerics.Vector3(cx, cy, 0f);
-
-        var compositor = visual.Compositor;
-        var decel = compositor.CreateCubicBezierEasingFunction(
-            new System.Numerics.Vector2(0.0f, 0.0f),
-            new System.Numerics.Vector2(0.1f, 1.0f));
-        var anim = compositor.CreateScalarKeyFrameAnimation();
-        anim.InsertKeyFrame(0.0f, 0.91f);
-        anim.InsertKeyFrame(1.0f, 1.04f, decel);
-        anim.Duration = TimeSpan.FromMilliseconds(140);
-        visual.StartAnimation("Scale.X", anim);
-        visual.StartAnimation("Scale.Y", anim);
-    }
-
-    private Rect GetTileBaseRect(FrameworkElement tile, string entryKey)
-    {
-        if (_recTileBaseRects.TryGetValue(entryKey, out Rect cached))
-        {
-            return cached;
-        }
-
-        Point position = tile.TransformToVisual(RecommendedAppsSurface)
-            .TransformPoint(new Point(0, 0));
-        if (_recReflowTranslations.TryGetValue(entryKey, out System.Numerics.Vector3 applied))
-        {
-            position.X -= applied.X;
-            position.Y -= applied.Y;
-        }
-
-        // A gesture starting within the previous gesture's 190ms unwind can
-        // capture a residual offset here; it decays to zero by the next
-        // snapshot and never accumulates.
-        var rect = new Rect(position, new Size(tile.ActualWidth, tile.ActualHeight));
-        _recTileBaseRects[entryKey] = rect;
-        return rect;
-    }
-
-    private void SnapshotRecommendedTileBaseRects()
-    {
-        _recTileBaseRects.Clear();
-        int childCount = VisualTreeHelper.GetChildrenCount(RecommendedAppsRepeater);
-        for (int c = 0; c < childCount; c++)
-        {
-            if (VisualTreeHelper.GetChild(RecommendedAppsRepeater, c) is not FrameworkElement tile ||
-                tile.Visibility != Visibility.Visible ||
-                tile.ActualWidth <= 0 ||
-                tile.ActualHeight <= 0 ||
-                tile.DataContext is not RecommendedGridEntry tileEntry)
-            {
-                continue;
-            }
-
-            _recTileBaseRects[tileEntry.EntryKey] = new Rect(
-                tile.TransformToVisual(RecommendedAppsSurface).TransformPoint(new Point(0, 0)),
-                new Size(tile.ActualWidth, tile.ActualHeight));
-        }
-    }
-
-    internal const double DropAnchorDeadband = 4.0;
-    internal const double PopupExternalDragEdgeInset = 1.5;
-
-    /// <summary>
-    /// Drop decision with sub-zone hysteresis: once a decision lands, the
-    /// pointer owns that decision's specific sub-zone (merge center, left/right
-    /// insertion strip, or trailing space) inflated by a small anti-jitter
-    /// deadband. Leaving that sub-zone re-evaluates cleanly without locking out
-    /// adjacent merge or insertion zones.
-    /// </summary>
-    private RecommendedDropDecision ResolveRecommendedDropDecision(Point pointInSurface)
-    {
-        if (_recHasDropAnchor && _recDropAnchorRect.Contains(pointInSurface))
-        {
-            return _recLastDropDecision;
-        }
-
-        if (_recPressedEntry is null)
-        {
-            return new RecommendedDropDecision(false, null, null, -1, default, default, default);
-        }
-
-        RecommendedDropDecision decision = EvaluateRecommendedDropTarget(
-            pointInSurface,
-            _recPressedEntry);
-        if (decision.IsMerge || decision.ReorderTargetIndex >= 0)
-        {
-            _recDropAnchorRect = InflateDropAnchorRect(decision.AnchorRect, DropAnchorDeadband);
-            _recHasDropAnchor = true;
-        }
-        else
-        {
-            _recHasDropAnchor = false;
-        }
-
-        _recLastDropDecision = decision;
-        LogRecDragDecision(decision);
-        return decision;
-    }
-
-    internal static Rect InflateDropAnchorRect(Rect anchor, double margin) =>
-        new(
-            anchor.X - margin,
-            anchor.Y - margin,
-            Math.Max(0, anchor.Width + (2 * margin)),
-            Math.Max(0, anchor.Height + (2 * margin)));
-
-    internal static Rect ComputeTileMergeAnchorRect(Rect tileRect, bool targetIsFolder)
-    {
-        double minX = targetIsFolder ? 0.16 : 0.34;
-        double maxX = targetIsFolder ? 0.84 : 0.66;
-        double minY = targetIsFolder ? 0.12 : 0.20;
-        double maxY = targetIsFolder ? 0.88 : 0.80;
-        return new Rect(
-            tileRect.X + (tileRect.Width * minX),
-            tileRect.Y + (tileRect.Height * minY),
-            tileRect.Width * (maxX - minX),
-            tileRect.Height * (maxY - minY));
-    }
-
-    internal static Rect ComputeTileReorderAnchorRect(
-        Rect tileRect,
-        double relX,
-        double relY,
-        bool beforeTile,
-        bool canMergeOntoTarget,
-        bool targetIsFolder)
-    {
-        double halfWidth = tileRect.Width * 0.5;
-        double halfX = beforeTile ? tileRect.X : tileRect.X + halfWidth;
-
-        if (!canMergeOntoTarget)
-        {
-            return new Rect(halfX, tileRect.Y, halfWidth, tileRect.Height);
-        }
-
-        double mergeMinX = targetIsFolder ? 0.16 : 0.34;
-        double mergeMaxX = targetIsFolder ? 0.84 : 0.66;
-        double mergeMinY = targetIsFolder ? 0.12 : 0.20;
-        double mergeMaxY = targetIsFolder ? 0.88 : 0.80;
-
-        if (beforeTile && relX < mergeMinX)
-        {
-            return new Rect(tileRect.X, tileRect.Y, tileRect.Width * mergeMinX, tileRect.Height);
-        }
-
-        if (!beforeTile && relX > mergeMaxX)
-        {
-            double stripX = tileRect.X + (tileRect.Width * mergeMaxX);
-            return new Rect(stripX, tileRect.Y, Math.Max(1.0, tileRect.Right - stripX), tileRect.Height);
-        }
-
-        if (relY < mergeMinY)
-        {
-            return new Rect(halfX, tileRect.Y, halfWidth, tileRect.Height * mergeMinY);
-        }
-
-        if (relY > mergeMaxY)
-        {
-            double stripY = tileRect.Y + (tileRect.Height * mergeMaxY);
-            return new Rect(halfX, stripY, halfWidth, Math.Max(1.0, tileRect.Bottom - stripY));
-        }
-
-        return new Rect(halfX, tileRect.Y, halfWidth, tileRect.Height);
-    }
-
-    internal static Rect ComputeTrailingAppendAnchorRect(
-        Point pointInSurface,
-        Rect lastTileRect,
-        double surfaceWidth,
-        double surfaceHeight)
-    {
-        if (pointInSurface.Y > lastTileRect.Bottom + DropAnchorDeadband)
-        {
-            double startY = lastTileRect.Bottom + DropAnchorDeadband + 1.0;
-            return new Rect(
-                0,
-                startY,
-                Math.Max(16.0, Math.Max(surfaceWidth, lastTileRect.Right)),
-                Math.Max(16.0, surfaceHeight - startY));
-        }
-
-        double startX = lastTileRect.Right + DropAnchorDeadband + 1.0;
-        return new Rect(
-            startX,
-            lastTileRect.Y,
-            Math.Max(16.0, surfaceWidth - startX),
-            Math.Max(16.0, surfaceHeight - lastTileRect.Y));
-    }
-
-    internal static bool IsPointLeavingPopupDragBounds(
-        Point pointInRoot,
-        double rootWidth,
-        double rootHeight) =>
-        rootWidth > (2 * PopupExternalDragEdgeInset) &&
-        rootHeight > (2 * PopupExternalDragEdgeInset) &&
-        (pointInRoot.X <= PopupExternalDragEdgeInset ||
-         pointInRoot.Y <= PopupExternalDragEdgeInset ||
-         pointInRoot.X >= rootWidth - PopupExternalDragEdgeInset ||
-         pointInRoot.Y >= rootHeight - PopupExternalDragEdgeInset);
-
-    private void LogRecDragDecision(RecommendedDropDecision decision)
-    {
-        string summary = decision.IsMerge && decision.MergeTarget is { } mergeTarget
-            ? $"merge:{mergeTarget.EntryKey}"
-            : decision.ReorderTargetIndex >= 0
-                ? $"insert:{decision.ReorderTargetIndex}"
-                : "none";
-        if (string.Equals(summary, _recLastDecisionSummary, StringComparison.Ordinal))
-        {
-            return;
-        }
-
-        _recLastDecisionSummary = summary;
-        App.Log(
-            $"[RecDrag] decision {summary} " +
-            $"dragged={_recDraggedEntryKeys.Count} apps={_recDraggedAppKeys.Count} " +
-            $"batch={_recDraggedEntryKeys.Count > 1}");
-    }
-
-    private void ResetRecommendedDropAnchor()
-    {
-        _recLastDropDecision = new RecommendedDropDecision(false, null, null, -1, default, default, default);
-        _recHasDropAnchor = false;
-        _recLastDecisionSummary = null;
-        _recHasCachedReflowState = false;
-    }
-
-    private RecommendedDropDecision EvaluateRecommendedDropTarget(
-        Point pointInSurface,
-        RecommendedGridEntry draggedEntry)
-    {
-        var entries = _viewModel.RecommendedEntries;
-        int count = entries.Count;
-        if (count <= 1)
-        {
-            return new RecommendedDropDecision(false, null, null, -1, default, default, default);
-        }
-
-        var indexByKey = new Dictionary<string, int>(count, StringComparer.OrdinalIgnoreCase);
-        for (int i = 0; i < count; i++)
-        {
-            indexByKey[entries[i].EntryKey] = i;
-        }
-
-        if (!indexByKey.TryGetValue(draggedEntry.EntryKey, out int sourceIndex))
-        {
-            return new RecommendedDropDecision(false, null, null, -1, default, default, default);
-        }
-
-        bool isBatchDrag = _recDraggedEntryKeys.Count > 1;
-        bool anyDraggedIsFolder = draggedEntry.IsFolder;
-        if (!anyDraggedIsFolder && isBatchDrag)
-        {
-            foreach (string key in _recDraggedEntryKeys)
-            {
-                if (key.StartsWith("folder:", StringComparison.OrdinalIgnoreCase))
-                {
-                    anyDraggedIsFolder = true;
-                    break;
-                }
-            }
-        }
-
-        var realizedTiles = new List<(int EntryIndex, RecommendedGridEntry Entry, FrameworkElement Tile, Rect Rect)>();
-        int childCount = VisualTreeHelper.GetChildrenCount(RecommendedAppsRepeater);
-        for (int c = 0; c < childCount; c++)
-        {
-            if (VisualTreeHelper.GetChild(RecommendedAppsRepeater, c) is not FrameworkElement tile ||
-                tile.Visibility != Visibility.Visible ||
-                tile.ActualWidth <= 0 ||
-                tile.ActualHeight <= 0 ||
-                tile.DataContext is not RecommendedGridEntry tileEntry ||
-                !indexByKey.TryGetValue(tileEntry.EntryKey, out int entryIndex))
-            {
-                continue;
-            }
-
-            // Base rects, never live transforms: live rects include the
-            // reflow translations and would feed decision→reflow→decision
-            // oscillation. New tiles realized mid-drag capture lazily.
-            var rect = GetTileBaseRect(tile, tileEntry.EntryKey);
-            realizedTiles.Add((entryIndex, entries[entryIndex], tile, rect));
-        }
-
-        if (realizedTiles.Count == 0)
-        {
-            return new RecommendedDropDecision(false, null, null, -1, default, default, default);
-        }
-
-        realizedTiles.Sort(static (left, right) => left.EntryIndex.CompareTo(right.EntryIndex));
-
-        int matchedTileIdx = -1;
-        double bestCenterDistanceSq = double.MaxValue;
-        for (int t = 0; t < realizedTiles.Count; t++)
-        {
-            Rect rect = realizedTiles[t].Rect;
-            // Expand by half the UniformGridLayout 6px spacing (+2px overlap) so inter-tile gaps never become dead zones.
-            var hitRect = new Rect(rect.X - 5, rect.Y - 5, rect.Width + 10, rect.Height + 10);
-            if (!hitRect.Contains(pointInSurface))
-            {
-                continue;
-            }
-
-            double cx = rect.X + (rect.Width * 0.5);
-            double cy = rect.Y + (rect.Height * 0.5);
-            double distSq = ((pointInSurface.X - cx) * (pointInSurface.X - cx)) +
-                            ((pointInSurface.Y - cy) * (pointInSurface.Y - cy));
-            if (distSq < bestCenterDistanceSq)
-            {
-                bestCenterDistanceSq = distSq;
-                matchedTileIdx = t;
-            }
-        }
-
-        if (matchedTileIdx >= 0)
-        {
-            var (i, targetEntry, tile, rect) = realizedTiles[matchedTileIdx];
-            if (i == sourceIndex)
-            {
-                return new RecommendedDropDecision(false, null, null, -1, default, default, default);
-            }
-
-            double relX = Math.Clamp((pointInSurface.X - rect.X) / Math.Max(1.0, rect.Width), 0.0, 1.0);
-            double relY = Math.Clamp((pointInSurface.Y - rect.Y) / Math.Max(1.0, rect.Height), 0.0, 1.0);
-
-            // Deliberate center zone merges dragged apps into a folder:
-            // - Disabled whenever any dragged item is itself a folder.
-            // - In batch drag, only merge onto an existing folder so multi-select drag onto app slots reliably reorders.
-            bool canMergeOntoTarget =
-                !anyDraggedIsFolder &&
-                !_recDraggedEntryKeys.Contains(targetEntry.EntryKey) &&
-                (!isBatchDrag || targetEntry.IsFolder);
-            if (canMergeOntoTarget &&
-                ShouldMergeOntoTile(relX, relY, targetEntry.IsFolder, isBatchDrag))
-            {
-                return new RecommendedDropDecision(
-                    IsMerge: true,
-                    MergeTarget: targetEntry,
-                    MergeTargetElement: tile,
-                    ReorderTargetIndex: -1,
-                    HighlightRect: rect,
-                    InsertBarPosition: default,
-                    AnchorRect: ComputeTileMergeAnchorRect(rect, targetEntry.IsFolder));
-            }
-
-            bool beforeTile = relX < 0.5;
-            int slotIndex = beforeTile ? i : i + 1;
-            if (!isBatchDrag)
-            {
-                if (slotIndex == sourceIndex || slotIndex == sourceIndex + 1)
-                {
-                    return new RecommendedDropDecision(false, null, null, -1, default, default, default);
-                }
-            }
-            else if (!WouldBatchReorderChangeOrder(entries, _recDraggedEntryKeys, slotIndex))
-            {
-                return new RecommendedDropDecision(false, null, null, -1, default, default, default);
-            }
-
-            int targetIndex = isBatchDrag
-                ? slotIndex
-                : (slotIndex > sourceIndex ? slotIndex - 1 : slotIndex);
-            double barX = beforeTile ? Math.Max(1, rect.X - 4) : rect.Right + 2;
-            double barY = rect.Y + ((rect.Height - RecDropInsertIndicator.Height) / 2);
-            Rect reorderAnchor = ComputeTileReorderAnchorRect(
-                rect,
-                relX,
-                relY,
-                beforeTile,
-                canMergeOntoTarget,
-                targetEntry.IsFolder);
-            return new RecommendedDropDecision(
-                IsMerge: false,
-                MergeTarget: null,
-                MergeTargetElement: null,
-                ReorderTargetIndex: targetIndex,
-                HighlightRect: default,
-                InsertBarPosition: new Point(barX, barY),
-                AnchorRect: reorderAnchor);
-        }
-
-        // Trailing blank space after the last realized tile appends to the end.
-        var lastTileInfo = realizedTiles[^1];
-        Rect lastRect = lastTileInfo.Rect;
-        if ((pointInSurface.Y > lastRect.Bottom - 8 ||
-             (pointInSurface.Y >= lastRect.Y - 5 && pointInSurface.X >= lastRect.Right)) &&
-            (isBatchDrag
-                ? WouldBatchReorderChangeOrder(entries, _recDraggedEntryKeys, count)
-                : sourceIndex < count - 1))
-        {
-            double barX = lastRect.Right + 2;
-            double barY = lastRect.Y + ((lastRect.Height - RecDropInsertIndicator.Height) / 2);
-            Rect appendAnchor = ComputeTrailingAppendAnchorRect(
-                pointInSurface,
-                lastRect,
-                RecommendedAppsSurface.ActualWidth,
-                RecommendedAppsSurface.ActualHeight);
-            return new RecommendedDropDecision(
-                IsMerge: false,
-                MergeTarget: null,
-                MergeTargetElement: null,
-                ReorderTargetIndex: isBatchDrag ? count : count - 1,
-                HighlightRect: default,
-                InsertBarPosition: new Point(barX, barY),
-                AnchorRect: appendAnchor);
-        }
-
-        return new RecommendedDropDecision(false, null, null, -1, default, default, default);
-    }
-
-    internal static bool WouldBatchReorderChangeOrder(
-        IReadOnlyList<RecommendedGridEntry> entries,
-        IReadOnlySet<string> draggedEntryKeys,
-        int targetVisibleIndex)
-    {
-        int count = entries.Count;
-        if (count <= 1 || draggedEntryKeys.Count == 0)
-        {
-            return false;
-        }
-
-        int clampedSlot = Math.Clamp(targetVisibleIndex, 0, count);
-        int draggedBeforeSlot = 0;
-        for (int i = 0; i < clampedSlot; i++)
-        {
-            if (draggedEntryKeys.Contains(entries[i].EntryKey))
-            {
-                draggedBeforeSlot++;
-            }
-        }
-
-        List<string> projected = ProjectReorderedEntryKeys(
-            entries,
-            draggedEntryKeys,
-            clampedSlot - draggedBeforeSlot);
-        for (int i = 0; i < count; i++)
-        {
-            if (!string.Equals(projected[i], entries[i].EntryKey, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /// <summary>
-    /// Projects the entry-key order a reorder commit produces: the dragged
-    /// block (kept in current order) removed and re-inserted at
-    /// <paramref name="insertIndexInRemaining"/> of the remaining entries.
-    /// Shared by the drop gate (no-op detection above) and the live reflow
-    /// preview below, so both always agree on what a commit would do.
-    /// Returns an empty list for degenerate inputs (nothing to move).
-    /// </summary>
-    internal static List<string> ProjectReorderedEntryKeys(
-        IReadOnlyList<RecommendedGridEntry> entries,
-        IReadOnlySet<string> draggedEntryKeys,
-        int insertIndexInRemaining)
-    {
-        int count = entries.Count;
-        if (count <= 1 || draggedEntryKeys.Count == 0)
-        {
-            return [];
-        }
-
-        var movingKeys = new List<string>(draggedEntryKeys.Count);
-        var remainingKeys = new List<string>(count);
-        for (int i = 0; i < count; i++)
-        {
-            string entryKey = entries[i].EntryKey;
-            if (draggedEntryKeys.Contains(entryKey))
-            {
-                movingKeys.Add(entryKey);
-            }
-            else
-            {
-                remainingKeys.Add(entryKey);
-            }
-        }
-
-        if (movingKeys.Count == 0)
-        {
-            return [];
-        }
-
-        remainingKeys.InsertRange(
-            Math.Clamp(insertIndexInRemaining, 0, remainingKeys.Count),
-            movingKeys);
-        return remainingKeys;
-    }
-
-    /// <summary>
-    /// Merge-zone geometry for drop targets. Folder tiles accept across most
-    /// of the card — the launcher convention where dropping onto a folder
-    /// enters it — while the narrow edge strips keep insert-here reachable.
-    /// App tiles keep the small centre band so folders are only created
-    /// deliberately, and batch selections never merge onto single apps.
-    /// </summary>
-    internal static bool ShouldMergeOntoTile(
-        double relX,
-        double relY,
-        bool targetIsFolder,
-        bool isBatchDrag) =>
-        targetIsFolder
-            ? relX >= 0.16 && relX <= 0.84 && relY >= 0.12 && relY <= 0.88
-            : !isBatchDrag && relX >= 0.34 && relX <= 0.66 && relY >= 0.20 && relY <= 0.80;
-
-    private static void AutoScrollScrollViewerOnDrag(ScrollViewer viewer, Point pointInViewer)
-    {
-        if (viewer.ScrollableHeight <= 0 || viewer.ActualHeight <= 0)
-        {
-            return;
-        }
-
-        const double edgeZone = 26.0;
-        const double step = 12.0;
-        if (pointInViewer.Y < edgeZone && viewer.VerticalOffset > 0)
-        {
-            viewer.ChangeView(null, Math.Max(0, viewer.VerticalOffset - step), null, disableAnimation: true);
-        }
-        else if (pointInViewer.Y > viewer.ActualHeight - edgeZone &&
-                 viewer.VerticalOffset < viewer.ScrollableHeight)
-        {
-            viewer.ChangeView(
-                null,
-                Math.Min(viewer.ScrollableHeight, viewer.VerticalOffset + step),
-                null,
-                disableAnimation: true);
-        }
-    }
-
-    // ── Centered frosted overlays (Win11 folder & hidden items) ──────────────
-
-    private void RecommendationOverlaysLayer_SizeChanged(object sender, SizeChangedEventArgs e)
-    {
-        UpdateRecommendationOverlayResponsiveBounds();
-    }
-
-    private void UpdateRecommendationOverlayResponsiveBounds()
-    {
-        double hostWidth = RootGrid.ActualWidth > 0
-            ? RootGrid.ActualWidth
-            : (RecommendationOverlaysLayer.ActualWidth > 0
-                ? RecommendationOverlaysLayer.ActualWidth
-                : PopupWidth);
-        double searchRowHeight = SearchBoxRow.ActualHeight > 0 ? SearchBoxRow.ActualHeight : 60;
-        double hostHeight = RecommendationOverlaysLayer.ActualHeight > 0
-            ? RecommendationOverlaysLayer.ActualHeight
-            : Math.Max(
-                220,
-                (RootGrid.ActualHeight > 0 ? RootGrid.ActualHeight : PopupHeight) - searchRowHeight);
-
-        double cardWidth = Math.Min(448, Math.Max(200, hostWidth - 28));
-        double cardMaxHeight = Math.Clamp(hostHeight - 20, 180, 368);
-        double cardMinHeight = Math.Min(196, cardMaxHeight);
-        double maxTitleWidth = Math.Max(120, cardWidth - 68);
-
-        FolderOverlayCard.Width = cardWidth;
-        FolderOverlayCard.MinHeight = cardMinHeight;
-        FolderOverlayCard.MaxHeight = cardMaxHeight;
-        FolderOverlayTitleText.MaxWidth = maxTitleWidth;
-        FolderOverlayTitleEditor.MaxWidth = maxTitleWidth;
-        FolderOverlayTitleEditor.MinWidth = Math.Min(160, maxTitleWidth);
-
-        HiddenAppsOverlayCard.Width = cardWidth;
-        HiddenAppsOverlayCard.MinHeight = cardMinHeight;
-        HiddenAppsOverlayCard.MaxHeight = cardMaxHeight;
-    }
-
-    private bool IsAnyRecommendationOverlayOpen() =>
-        !_isOverlayClosing &&
-        RecommendationOverlaysLayer.Visibility == Visibility.Visible &&
-        (FolderOverlayHost.Visibility == Visibility.Visible ||
-         HiddenAppsOverlayHost.Visibility == Visibility.Visible);
-
-    private void OpenFolderOverlay(RecommendedGridEntry folderEntry, bool startRename = false)
-    {
-        if (!folderEntry.IsFolder || string.IsNullOrWhiteSpace(folderEntry.FolderId))
-        {
-            return;
-        }
-
-        CancelRecommendedDrag();
-        CancelFolderTitleEdit();
-        EndRecommendationRubberBand();
-        UpdateRecommendationOverlayResponsiveBounds();
-        _openFolderId = folderEntry.FolderId;
-        FolderOverlayTitleText.Text = folderEntry.Label;
-
-        _folderOverlayItems.Clear();
-        foreach (SearchResultItem member in folderEntry.FolderItems)
-        {
-            _folderOverlayItems.Add(member);
-        }
-
-        HiddenAppsOverlayHost.Visibility = Visibility.Collapsed;
-        FolderOverlayHost.Visibility = Visibility.Visible;
-        RecommendationOverlaysLayer.Visibility = Visibility.Visible;
-        UpdatePopupDynamicBounds();
-        FolderOverlayScrollViewer.ChangeView(null, 0, null, disableAnimation: true);
-        RefreshOverlayRepeaterIcons(FolderAppsRepeater);
-        AnimateRecommendationOverlayOpen(FolderOverlayScrim, FolderOverlayCard);
-
-        if (startRename)
-        {
-            DispatcherQueue.TryEnqueue(BeginFolderTitleEdit);
-        }
-    }
-
-    private void OpenHiddenAppsOverlay()
-    {
-        if (!_viewModel.HasHiddenRecommendations)
-        {
-            return;
-        }
-
-        CancelRecommendedDrag();
-        CancelFolderTitleEdit();
-        EndRecommendationRubberBand();
-        UpdateRecommendationOverlayResponsiveBounds();
-        _openFolderId = null;
-
-        FolderOverlayHost.Visibility = Visibility.Collapsed;
-        HiddenAppsOverlayHost.Visibility = Visibility.Visible;
-        RecommendationOverlaysLayer.Visibility = Visibility.Visible;
-        UpdatePopupDynamicBounds();
-        HiddenOverlayScrollViewer.ChangeView(null, 0, null, disableAnimation: true);
-        RefreshOverlayRepeaterIcons(HiddenAppsRepeater);
-        AnimateRecommendationOverlayOpen(HiddenAppsOverlayScrim, HiddenAppsOverlayCard);
-    }
-
-    private void CloseRecommendationOverlays(bool immediate = false)
-    {
-        ClearHoveredOverlayCard();
-        CancelOverlayDrag();
-        CancelFolderTitleEdit();
-        _openFolderId = null;
-
-        bool anyVisible = RecommendationOverlaysLayer.Visibility == Visibility.Visible &&
-                          (FolderOverlayHost.Visibility == Visibility.Visible ||
-                           HiddenAppsOverlayHost.Visibility == Visibility.Visible);
-        if (!anyVisible)
-        {
-            _isOverlayClosing = false;
-            FolderOverlayHost.Visibility = Visibility.Collapsed;
-            HiddenAppsOverlayHost.Visibility = Visibility.Collapsed;
-            RecommendationOverlaysLayer.Visibility = Visibility.Collapsed;
-            return;
-        }
-
-        if (immediate || !AreSystemAnimationsEnabled())
-        {
-            ++_overlayAnimationGeneration;
-            _isOverlayClosing = false;
-            ResetRecommendationOverlayVisuals();
-            FolderOverlayHost.Visibility = Visibility.Collapsed;
-            HiddenAppsOverlayHost.Visibility = Visibility.Collapsed;
-            RecommendationOverlaysLayer.Visibility = Visibility.Collapsed;
-            return;
-        }
-
-        if (_isOverlayClosing)
-        {
-            return;
-        }
-
-        _isOverlayClosing = true;
-        int generation = ++_overlayAnimationGeneration;
-        bool closingFolder = FolderOverlayHost.Visibility == Visibility.Visible;
-        Border scrim = closingFolder ? FolderOverlayScrim : HiddenAppsOverlayScrim;
-        Border card = closingFolder ? FolderOverlayCard : HiddenAppsOverlayCard;
-
-        ElementCompositionPreview.SetIsTranslationEnabled(card, true);
-        var scrimVisual = ElementCompositionPreview.GetElementVisual(scrim);
-        var cardVisual = ElementCompositionPreview.GetElementVisual(card);
-        var compositor = cardVisual.Compositor;
-
-        float cx = (float)(card.ActualWidth > 0
-            ? card.ActualWidth
-            : (!double.IsNaN(card.Width) && card.Width > 0 ? card.Width : 380)) / 2f;
-        float cy = (float)(card.ActualHeight > 0 ? card.ActualHeight : 250) / 2f;
-        cardVisual.CenterPoint = new System.Numerics.Vector3(cx, cy, 0f);
-
-        var easeIn = compositor.CreateCubicBezierEasingFunction(
-            new System.Numerics.Vector2(0.4f, 0.0f),
-            new System.Numerics.Vector2(1.0f, 1.0f));
-
-        var batch = compositor.CreateScopedBatch(CompositionBatchTypes.Animation);
-
-        StartScalarAnim(compositor, scrimVisual, "Opacity", TimeSpan.Zero, 125, easeIn, scrimVisual.Opacity, 0f);
-        StartScalarAnim(compositor, cardVisual, "Opacity", TimeSpan.Zero, 125, easeIn, cardVisual.Opacity, 0f);
-        StartScalarAnim(compositor, cardVisual, "Scale.X", TimeSpan.Zero, 135, easeIn, 1.0f, 0.94f);
-        StartScalarAnim(compositor, cardVisual, "Scale.Y", TimeSpan.Zero, 135, easeIn, 1.0f, 0.94f);
-        StartScalarAnim(compositor, cardVisual, "Translation.Y", TimeSpan.Zero, 135, easeIn, 0f, 6f);
-
-        batch.Completed += (_, _) =>
-        {
-            DispatcherQueue.TryEnqueue(() =>
-            {
-                if (generation != _overlayAnimationGeneration)
-                {
-                    return;
-                }
-
-                _isOverlayClosing = false;
-                FolderOverlayHost.Visibility = Visibility.Collapsed;
-                HiddenAppsOverlayHost.Visibility = Visibility.Collapsed;
-                RecommendationOverlaysLayer.Visibility = Visibility.Collapsed;
-                ResetRecommendationOverlayVisuals();
-                UpdatePopupDynamicBounds();
-            });
-        };
-        batch.End();
-    }
-
-    private void AnimateRecommendationOverlayOpen(Border scrim, Border card)
-    {
-        ++_overlayAnimationGeneration;
-        _isOverlayClosing = false;
-        ElementCompositionPreview.SetIsTranslationEnabled(card, true);
-        var scrimVisual = ElementCompositionPreview.GetElementVisual(scrim);
-        var cardVisual = ElementCompositionPreview.GetElementVisual(card);
-
-        scrimVisual.StopAnimation("Opacity");
-        cardVisual.StopAnimation("Opacity");
-        cardVisual.StopAnimation("Scale.X");
-        cardVisual.StopAnimation("Scale.Y");
-        cardVisual.StopAnimation("Translation.Y");
-
-        if (!AreSystemAnimationsEnabled())
-        {
-            scrimVisual.Opacity = 1f;
-            cardVisual.Opacity = 1f;
-            cardVisual.Scale = System.Numerics.Vector3.One;
-            return;
-        }
-
-        float cx = (float)(!double.IsNaN(card.Width) && card.Width > 0
-            ? card.Width
-            : (card.ActualWidth > 0 ? card.ActualWidth : 380)) / 2f;
-        float cy = (float)(card.ActualHeight > 0 ? card.ActualHeight : 250) / 2f;
-        cardVisual.CenterPoint = new System.Numerics.Vector3(cx, cy, 0f);
-
-        var compositor = cardVisual.Compositor;
-        var decel = compositor.CreateCubicBezierEasingFunction(
-            new System.Numerics.Vector2(0.0f, 0.0f),
-            new System.Numerics.Vector2(0.1f, 1.0f));
-
-        scrimVisual.Opacity = 0f;
-        cardVisual.Opacity = 0f;
-        StartScalarAnim(compositor, scrimVisual, "Opacity", TimeSpan.Zero, 150, decel, 0f, 1f);
-        StartScalarAnim(compositor, cardVisual, "Opacity", TimeSpan.Zero, 155, decel, 0f, 1f);
-        StartScalarAnim(compositor, cardVisual, "Scale.X", TimeSpan.Zero, 200, decel, 0.93f, 1.0f);
-        StartScalarAnim(compositor, cardVisual, "Scale.Y", TimeSpan.Zero, 200, decel, 0.93f, 1.0f);
-        StartScalarAnim(compositor, cardVisual, "Translation.Y", TimeSpan.Zero, 200, decel, 10f, 0f);
-    }
-
-    private void ResetRecommendationOverlayVisuals()
-    {
-        ResetSingleOverlayVisualPair(FolderOverlayScrim, FolderOverlayCard);
-        ResetSingleOverlayVisualPair(HiddenAppsOverlayScrim, HiddenAppsOverlayCard);
-    }
-
-    private static void ResetSingleOverlayVisualPair(Border scrim, Border card)
-    {
-        var scrimVisual = ElementCompositionPreview.GetElementVisual(scrim);
-        if (scrimVisual is not null)
-        {
-            scrimVisual.StopAnimation("Opacity");
-            scrimVisual.Opacity = 1f;
-        }
-
-        ElementCompositionPreview.SetIsTranslationEnabled(card, true);
-        var cardVisual = ElementCompositionPreview.GetElementVisual(card);
-        if (cardVisual is not null)
-        {
-            cardVisual.StopAnimation("Opacity");
-            cardVisual.StopAnimation("Scale.X");
-            cardVisual.StopAnimation("Scale.Y");
-            cardVisual.StopAnimation("Translation.Y");
-            cardVisual.Opacity = 1f;
-            cardVisual.Scale = System.Numerics.Vector3.One;
-        }
-    }
-
-    private void SyncOpenFolderOverlayWithViewModel()
-    {
-        if (FolderOverlayHost.Visibility != Visibility.Visible ||
-            string.IsNullOrWhiteSpace(_openFolderId))
-        {
-            return;
-        }
-
-        RecommendedGridEntry? refreshedFolder = _viewModel.FindRecommendedFolder(_openFolderId);
-        if (refreshedFolder is null || refreshedFolder.FolderItems.Count == 0)
-        {
-            CloseRecommendationOverlays();
-            return;
-        }
-
-        if (!_isEditingFolderTitle)
-        {
-            FolderOverlayTitleText.Text = refreshedFolder.Label;
-        }
-
-        _folderOverlayItems.Clear();
-        foreach (SearchResultItem member in refreshedFolder.FolderItems)
-        {
-            _folderOverlayItems.Add(member);
-        }
-
-        RefreshOverlayRepeaterIcons(FolderAppsRepeater);
-    }
-
-    private void BeginFolderTitleEdit()
-    {
-        if (FolderOverlayHost.Visibility != Visibility.Visible ||
-            string.IsNullOrWhiteSpace(_openFolderId))
-        {
-            return;
-        }
-
-        _isEditingFolderTitle = true;
-        _suppressFolderTitleBlurCommit = false;
-        _folderTitleEditOpenedAtTick = Environment.TickCount64;
-        FolderOverlayTitleEditor.Text = FolderOverlayTitleText.Text;
-        FolderOverlayTitleButton.Visibility = Visibility.Collapsed;
-        FolderOverlayTitleEditor.Visibility = Visibility.Visible;
-        DeskBox.Helpers.ImeCompositionGuard.AttachAncestors(FolderOverlayTitleEditor);
-        FolderOverlayTitleEditor.Focus(FocusState.Programmatic);
-        FolderOverlayTitleEditor.SelectAll();
-    }
-
-    private void CommitFolderTitleEdit()
-    {
-        if (!_isEditingFolderTitle)
-        {
-            return;
-        }
-
-        string? folderId = _openFolderId;
-        string updatedTitle = FolderOverlayTitleEditor.Text;
-        _isEditingFolderTitle = false;
-        _suppressFolderTitleBlurCommit = true;
-        FolderOverlayTitleEditor.Visibility = Visibility.Collapsed;
-        FolderOverlayTitleButton.Visibility = Visibility.Visible;
-        _suppressFolderTitleBlurCommit = false;
-
-        if (!string.IsNullOrWhiteSpace(folderId))
-        {
-            _viewModel.RenameRecommendationFolder(folderId, updatedTitle);
-            if (_viewModel.FindRecommendedFolder(folderId) is { } folder)
-            {
-                FolderOverlayTitleText.Text = folder.Label;
-            }
-        }
-    }
-
-    private void CancelFolderTitleEdit()
-    {
-        if (!_isEditingFolderTitle)
-        {
-            return;
-        }
-
-        _isEditingFolderTitle = false;
-        _suppressFolderTitleBlurCommit = true;
-        FolderOverlayTitleEditor.Visibility = Visibility.Collapsed;
-        FolderOverlayTitleButton.Visibility = Visibility.Visible;
-        _suppressFolderTitleBlurCommit = false;
+        RecommendedAppsGrid.HideSelected();
     }
 
     private void HiddenAppsEntryButton_Click(object sender, RoutedEventArgs e)
     {
-        OpenHiddenAppsOverlay();
-    }
-
-    private void FolderOverlayScrim_PointerPressed(object sender, PointerRoutedEventArgs e)
-    {
-        if (_isEditingFolderTitle)
-        {
-            CommitFolderTitleEdit();
-        }
-
-        CloseRecommendationOverlays();
-        e.Handled = true;
-    }
-
-    private void FolderOverlayTitleButton_Click(object sender, RoutedEventArgs e)
-    {
-        BeginFolderTitleEdit();
-    }
-
-    private long _folderTitleEditOpenedAtTick;
-
-    private void FolderOverlayTitleEditor_KeyDown(object sender, KeyRoutedEventArgs e)
-    {
-        if (DeskBox.Helpers.ImeCompositionGuard.IsImeCompositionKeyEvent(e))
-        {
-            return;
-        }
-
-        if (e.Key == Windows.System.VirtualKey.Enter)
-        {
-            CommitFolderTitleEdit();
-            SearchTextBox.Focus(FocusState.Programmatic);
-            e.Handled = true;
-        }
-        else if (e.Key == Windows.System.VirtualKey.Escape)
-        {
-            CancelFolderTitleEdit();
-            SearchTextBox.Focus(FocusState.Programmatic);
-            e.Handled = true;
-        }
-    }
-
-    private void FolderOverlayTitleEditor_LostFocus(object sender, RoutedEventArgs e)
-    {
-        if (_suppressFolderTitleBlurCommit || !_isEditingFolderTitle)
-        {
-            return;
-        }
-
-        if (DeskBox.Helpers.TransientInputFocusGuard.ShouldDeferInlineEditorBlurCommit(
-                FolderOverlayTitleEditor,
-                _folderTitleEditOpenedAtTick,
-                _hwnd,
-                () => _isEditingFolderTitle,
-                () =>
-                {
-                    CommitFolderTitleEdit();
-                    return Task.CompletedTask;
-                }))
-        {
-            return;
-        }
-
-        CommitFolderTitleEdit();
-    }
-
-    private void HiddenAppsOverlayScrim_PointerPressed(object sender, PointerRoutedEventArgs e)
-    {
-        CloseRecommendationOverlays();
-        e.Handled = true;
-    }
-
-    private void UnhideAllButton_Click(object sender, RoutedEventArgs e)
-    {
-        _viewModel.UnhideAllRecommendations();
-        CloseRecommendationOverlays();
-    }
-
-    private void CloseHiddenOverlayButton_Click(object sender, RoutedEventArgs e)
-    {
-        CloseRecommendationOverlays();
-    }
-
-    // ── Overlay tile interactions (folder app launch/drag & hidden app unhide) ──
-
-    private void OverlayAppCard_PointerPressed(object sender, PointerRoutedEventArgs e)
-    {
-        if (sender is not Grid card || card.DataContext is not SearchResultItem item)
-        {
-            return;
-        }
-
-        bool inFolderOverlay = FolderOverlayHost.Visibility == Visibility.Visible &&
-                               IsVisualDescendantOf(card, FolderOverlayHost);
-        UIElement hostElement = inFolderOverlay ? FolderOverlayHost : HiddenAppsOverlayHost;
-        var pointInHost = e.GetCurrentPoint(hostElement);
-        if (!pointInHost.Properties.IsLeftButtonPressed)
-        {
-            return;
-        }
-
-        if (_isEditingFolderTitle)
-        {
-            CommitFolderTitleEdit();
-        }
-
-        _overlayPointerCard = card;
-        _overlayPressedItem = item;
-        _overlayPointerStartInHost = pointInHost.Position;
-        _overlayIsDragging = false;
-        _overlayPressedInFolder = inFolderOverlay;
-        _overlayExternalDragAttempted = false;
-        card.CapturePointer(e.Pointer);
-        e.Handled = true;
-    }
-
-    private void OverlayAppCard_PointerMoved(object sender, PointerRoutedEventArgs e)
-    {
-        if (_overlayPressedItem is null ||
-            _overlayPointerCard is null ||
-            !ReferenceEquals(sender, _overlayPointerCard))
-        {
-            return;
-        }
-
-        UIElement hostElement = _overlayPressedInFolder ? FolderOverlayHost : HiddenAppsOverlayHost;
-        var pointInHost = e.GetCurrentPoint(hostElement);
-        if (!pointInHost.Properties.IsLeftButtonPressed)
-        {
-            CancelOverlayDrag();
-            return;
-        }
-
-        double dx = pointInHost.Position.X - _overlayPointerStartInHost.X;
-        double dy = pointInHost.Position.Y - _overlayPointerStartInHost.Y;
-        if (!_overlayIsDragging)
-        {
-            if ((dx * dx) + (dy * dy) < RecommendationDragThreshold * RecommendationDragThreshold)
-            {
-                return;
-            }
-
-            ClearHoveredOverlayCard();
-            _overlayIsDragging = true;
-            _overlayPointerCard.Background = s_transparentCardBrush;
-            _overlayPointerCard.Opacity = 0.36;
-            if (_overlayPressedInFolder)
-            {
-                FolderDragGhostTitle.Text = _overlayPressedItem.AppDisplayName;
-                FolderDragGhostImage.Source = _overlayPressedItem.Icon;
-                FolderDragGhostBorder.Visibility = Visibility.Visible;
-                AnimateDragGhostPickup(FolderDragGhostBorder);
-            }
-        }
-
-        Point pointInRoot = e.GetCurrentPoint(RootGrid).Position;
-        double rootWidth = RootGrid.ActualWidth;
-        double rootHeight = RootGrid.ActualHeight;
-        if (IsPointLeavingPopupDragBounds(pointInRoot, rootWidth, rootHeight))
-        {
-            if (!_overlayExternalDragAttempted)
-            {
-                _overlayExternalDragAttempted = true;
-                Grid dragCard = _overlayPointerCard;
-                string? detailPath = _overlayPressedItem.DetailPath;
-                string originTag = _overlayPressedInFolder ? "folder-overlay" : "hidden-overlay";
-                if (!string.IsNullOrWhiteSpace(detailPath) &&
-                    TryStartRecommendedExternalDragOut(
-                        dragCard,
-                        e,
-                        [detailPath],
-                        originTag,
-                        SuspendOverlayDragForExternalHandoff))
-                {
-                    e.Handled = true;
-                    return;
-                }
-            }
-
-            if (pointInRoot.X < 0 ||
-                pointInRoot.Y < 0 ||
-                pointInRoot.X > rootWidth ||
-                pointInRoot.Y > rootHeight)
-            {
-                if (_overlayPressedInFolder)
-                {
-                    FolderDragGhostTransform.X = pointInHost.Position.X - (FolderDragGhostBorder.Width / 2);
-                    FolderDragGhostTransform.Y = pointInHost.Position.Y - (FolderDragGhostBorder.Height / 2);
-                    FolderDropInsertIndicator.Visibility = Visibility.Collapsed;
-                }
-
-                e.Handled = true;
-                return;
-            }
-        }
-        else
-        {
-            _overlayExternalDragAttempted = false;
-        }
-
-        if (!_overlayPressedInFolder)
-        {
-            e.Handled = true;
-            return;
-        }
-
-        FolderDragGhostTransform.X = pointInHost.Position.X - (FolderDragGhostBorder.Width / 2);
-        FolderDragGhostTransform.Y = pointInHost.Position.Y - (FolderDragGhostBorder.Height / 2);
-
-        Point pointInCard = e.GetCurrentPoint(FolderOverlayCard).Position;
-        var folderCardBounds = new Rect(0, 0, FolderOverlayCard.ActualWidth, FolderOverlayCard.ActualHeight);
-        if (!folderCardBounds.Contains(pointInCard))
-        {
-            // Dragging outside the folder card (within the popup) extracts the app back to the main grid on release.
-            FolderDropInsertIndicator.Visibility = Visibility.Collapsed;
-            e.Handled = true;
-            return;
-        }
-
-        AutoScrollScrollViewerOnDrag(
-            FolderOverlayScrollViewer,
-            e.GetCurrentPoint(FolderOverlayScrollViewer).Position);
-
-        (int reorderIndex, Point barPos) = EvaluateOverlayFolderReorderIndex(
-            e.GetCurrentPoint(FolderOverlaySurface).Position,
-            _overlayPressedItem);
-        if (reorderIndex >= 0)
-        {
-            FolderDropInsertTransform.X = barPos.X;
-            FolderDropInsertTransform.Y = barPos.Y;
-            FolderDropInsertIndicator.Visibility = Visibility.Visible;
-        }
-        else
-        {
-            FolderDropInsertIndicator.Visibility = Visibility.Collapsed;
-        }
-
-        e.Handled = true;
-    }
-
-    private void OverlayAppCard_PointerReleased(object sender, PointerRoutedEventArgs e)
-    {
-        if (_overlayPressedItem is not { } pressedItem ||
-            _overlayPointerCard is not { } pressedCard ||
-            !ReferenceEquals(sender, pressedCard))
-        {
-            return;
-        }
-
-        // Snapshot gesture state before ReleasePointerCapture synchronously
-        // fires OverlayAppCard_PointerCaptureLost -> CancelOverlayDrag().
-        bool wasDragging = _overlayIsDragging;
-        bool inFolder = _overlayPressedInFolder;
-        string? openFolderId = _openFolderId;
-        Point pointInRoot = e.GetCurrentPoint(RootGrid).Position;
-        var popupBounds = new Rect(0, 0, RootGrid.ActualWidth, RootGrid.ActualHeight);
-        Point pointInTile = e.GetCurrentPoint(pressedCard).Position;
-        var tileBounds = new Rect(0, 0, pressedCard.ActualWidth, pressedCard.ActualHeight);
-        Point pointInFolderCard = inFolder
-            ? e.GetCurrentPoint(FolderOverlayCard).Position
-            : default;
-        Point pointInFolderSurface = inFolder
-            ? e.GetCurrentPoint(FolderOverlaySurface).Position
-            : default;
-        int reorderIndex = wasDragging && inFolder && !string.IsNullOrWhiteSpace(openFolderId)
-            ? EvaluateOverlayFolderReorderIndex(pointInFolderSurface, pressedItem).TargetIndex
-            : -1;
-        pressedCard.ReleasePointerCapture(e.Pointer);
-
-        if (wasDragging && inFolder && !string.IsNullOrWhiteSpace(openFolderId))
-        {
-            var folderBounds = new Rect(0, 0, FolderOverlayCard.ActualWidth, FolderOverlayCard.ActualHeight);
-            CancelOverlayDrag();
-
-            if (!folderBounds.Contains(pointInFolderCard) && popupBounds.Contains(pointInRoot))
-            {
-                bool removed = _viewModel.RemoveRecommendationFromFolder(
-                    openFolderId,
-                    pressedItem,
-                    out bool folderStillExists);
-                App.Log(
-                    $"[RecDrag] drag-out folder={openFolderId} removed={removed} " +
-                    $"folderStillExists={folderStillExists}");
-                // Any successful extraction closes the overlay: the folder
-                // card blocks the main grid, hiding where the app landed.
-                // (Previously it closed only when the folder dissolved.)
-                if (removed || !folderStillExists)
-                {
-                    CloseRecommendationOverlays();
-                }
-            }
-            else if (folderBounds.Contains(pointInFolderCard) && reorderIndex >= 0)
-            {
-                string draggedKey = Helpers.AppRecommendationIdentity.GetCanonicalKey(pressedItem);
-                _viewModel.ReorderFolderRecommendation(openFolderId, draggedKey, reorderIndex);
-            }
-
-            e.Handled = true;
-            return;
-        }
-
-        CancelOverlayDrag();
-        if (!wasDragging && tileBounds.Contains(pointInTile))
-        {
-            if (inFolder)
-            {
-                if (!_isRecommendationEditMode)
-                {
-                    _viewModel.ExecuteItem(pressedItem);
-                }
-            }
-            else
-            {
-                _viewModel.UnhideRecommendation(pressedItem);
-                if (!_viewModel.HasHiddenRecommendations)
-                {
-                    CloseRecommendationOverlays();
-                }
-            }
-        }
-        else if (!wasDragging)
-        {
-            ClearHoveredOverlayCard();
-        }
-
-        e.Handled = true;
-    }
-
-    private void OverlayAppCard_PointerCaptureLost(object sender, PointerRoutedEventArgs e)
-    {
-        if (_overlayPointerCard is not null && ReferenceEquals(sender, _overlayPointerCard))
-        {
-            CancelOverlayDrag();
-        }
-    }
-
-    private void ClearHoveredOverlayCard()
-    {
-        if (_hoveredOverlayCard is not null)
-        {
-            _hoveredOverlayCard.Background = s_transparentCardBrush;
-            _hoveredOverlayCard = null;
-        }
-    }
-
-    private void OverlayAppCard_PointerEntered(object sender, PointerRoutedEventArgs e)
-    {
-        if (_overlayIsDragging || _dragOutInProgress || sender is not Grid card)
-        {
-            return;
-        }
-
-        if (_hoveredOverlayCard is not null && !ReferenceEquals(_hoveredOverlayCard, card))
-        {
-            _hoveredOverlayCard.Background = s_transparentCardBrush;
-        }
-
-        _hoveredOverlayCard = card;
-        card.Background = ResolveThemeBrush("SubtleFillColorSecondaryBrush");
-    }
-
-    private void OverlayAppCard_PointerExited(object sender, PointerRoutedEventArgs e)
-    {
-        if (sender is not Grid card)
-        {
-            return;
-        }
-
-        if (ReferenceEquals(_hoveredOverlayCard, card))
-        {
-            _hoveredOverlayCard = null;
-        }
-
-        card.Background = s_transparentCardBrush;
-    }
-
-    private void SuspendOverlayDragForExternalHandoff()
-    {
-        if (_overlayPointerCard is not null)
-        {
-            _overlayPointerCard.Opacity = 1;
-            _overlayPointerCard.Background = s_transparentCardBrush;
-            _overlayPointerCard = null;
-        }
-
-        _overlayPressedItem = null;
-        _overlayIsDragging = false;
-        _overlayPressedInFolder = false;
-        _overlayExternalDragAttempted = false;
-        FolderDragGhostBorder.Visibility = Visibility.Collapsed;
-        FolderDragGhostImage.Source = null;
-        FolderDropInsertIndicator.Visibility = Visibility.Collapsed;
-    }
-
-    private void CancelOverlayDrag()
-    {
-        if (_overlayPointerCard is not null)
-        {
-            _overlayPointerCard.Opacity = 1;
-            _overlayPointerCard.ReleasePointerCaptures();
-            _overlayPointerCard = null;
-        }
-
-        _overlayPressedItem = null;
-        _overlayIsDragging = false;
-        _overlayPressedInFolder = false;
-        _overlayExternalDragAttempted = false;
-        FolderDragGhostBorder.Visibility = Visibility.Collapsed;
-        FolderDragGhostImage.Source = null;
-        FolderDropInsertIndicator.Visibility = Visibility.Collapsed;
-    }
-
-    private (int TargetIndex, Point BarPosition) EvaluateOverlayFolderReorderIndex(
-        Point pointInSurface,
-        SearchResultItem draggedItem)
-    {
-        int count = _folderOverlayItems.Count;
-        if (count <= 1)
-        {
-            return (-1, default);
-        }
-
-        string draggedKey = Helpers.AppRecommendationIdentity.GetCanonicalKey(draggedItem);
-        int sourceIndex = -1;
-        for (int i = 0; i < count; i++)
-        {
-            if (string.Equals(
-                    Helpers.AppRecommendationIdentity.GetCanonicalKey(_folderOverlayItems[i]),
-                    draggedKey,
-                    StringComparison.OrdinalIgnoreCase))
-            {
-                sourceIndex = i;
-                break;
-            }
-        }
-
-        if (sourceIndex < 0)
-        {
-            return (-1, default);
-        }
-
-        FrameworkElement? lastTile = null;
-        Rect lastRect = default;
-        int matchedIndex = -1;
-        Rect matchedRect = default;
-        double bestCenterDistanceSq = double.MaxValue;
-        for (int i = 0; i < count; i++)
-        {
-            if (FolderAppsRepeater.TryGetElement(i) is not FrameworkElement tile ||
-                tile.ActualWidth <= 0 ||
-                tile.ActualHeight <= 0)
-            {
-                continue;
-            }
-
-            var rect = new Rect(
-                tile.TransformToVisual(FolderOverlaySurface).TransformPoint(new Point(0, 0)),
-                new Size(tile.ActualWidth, tile.ActualHeight));
-            lastTile = tile;
-            lastRect = rect;
-
-            // Expand by half the 6px inter-tile spacing (+2px overlap) so gaps never blink off.
-            var hitRect = new Rect(rect.X - 5, rect.Y - 5, rect.Width + 10, rect.Height + 10);
-            if (!hitRect.Contains(pointInSurface))
-            {
-                continue;
-            }
-
-            double cx = rect.X + (rect.Width * 0.5);
-            double cy = rect.Y + (rect.Height * 0.5);
-            double distSq = ((pointInSurface.X - cx) * (pointInSurface.X - cx)) +
-                            ((pointInSurface.Y - cy) * (pointInSurface.Y - cy));
-            if (distSq < bestCenterDistanceSq)
-            {
-                bestCenterDistanceSq = distSq;
-                matchedIndex = i;
-                matchedRect = rect;
-            }
-        }
-
-        if (matchedIndex >= 0)
-        {
-            if (matchedIndex == sourceIndex)
-            {
-                return (-1, default);
-            }
-
-            bool beforeTile = (pointInSurface.X - matchedRect.X) < (matchedRect.Width * 0.5);
-            int slotIndex = beforeTile ? matchedIndex : matchedIndex + 1;
-            if (slotIndex == sourceIndex || slotIndex == sourceIndex + 1)
-            {
-                return (-1, default);
-            }
-
-            int targetIndex = slotIndex > sourceIndex ? slotIndex - 1 : slotIndex;
-            double barX = beforeTile ? Math.Max(0, matchedRect.X - 4.5) : matchedRect.Right + 1.5;
-            double barY = matchedRect.Y + ((matchedRect.Height - FolderDropInsertIndicator.Height) / 2);
-            return (targetIndex, new Point(barX, barY));
-        }
-
-        if (lastTile is not null &&
-            sourceIndex < count - 1 &&
-            (pointInSurface.Y > lastRect.Bottom - 8 ||
-             (pointInSurface.Y >= lastRect.Y - 4 && pointInSurface.X >= lastRect.Right)))
-        {
-            double barX = lastRect.Right + 2;
-            double barY = lastRect.Y + ((lastRect.Height - FolderDropInsertIndicator.Height) / 2);
-            return (count - 1, new Point(barX, barY));
-        }
-
-        return (-1, default);
-    }
-
-    /// <summary>
-    /// Handles keyboard navigation for the recommended-apps panel.
-    /// Called from RootGrid_KeyDown when the panel is visible.
-    /// Returns true if the key was consumed.
-    /// </summary>
-    private bool HandleRecommendedAppsKey(KeyRoutedEventArgs e)
-    {
-        var itemsSource = RecommendedAppsRepeater.ItemsSource as System.Collections.IList;
-        if (itemsSource is null || itemsSource.Count == 0) return false;
-
-        int count = itemsSource.Count;
-
-        switch (e.Key)
-        {
-            case Windows.System.VirtualKey.Left:
-            case Windows.System.VirtualKey.Right:
-            case Windows.System.VirtualKey.Up:
-            case Windows.System.VirtualKey.Down:
-                if (_selectedAppIndex < 0)
-                {
-                    SelectRecommendedAppByIndex(0);
-                }
-                else
-                {
-                    int columns = ComputeRecommendedAppsColumnCount();
-                    int newIndex = e.Key switch
-                    {
-                        Windows.System.VirtualKey.Left => Math.Max(0, _selectedAppIndex - 1),
-                        Windows.System.VirtualKey.Right => Math.Min(count - 1, _selectedAppIndex + 1),
-                        Windows.System.VirtualKey.Up => Math.Max(0, _selectedAppIndex - columns),
-                        Windows.System.VirtualKey.Down => Math.Min(count - 1, _selectedAppIndex + columns),
-                        _ => _selectedAppIndex
-                    };
-                    if (newIndex != _selectedAppIndex && newIndex >= 0 && newIndex < count)
-                    {
-                        SelectRecommendedAppByIndex(newIndex);
-                    }
-                }
-                return true;
-
-            case Windows.System.VirtualKey.Enter:
-                if (_isRecommendationEditMode)
-                {
-                    if (_selectedAppIndex >= 0 && _selectedAppIndex < count &&
-                        itemsSource[_selectedAppIndex] is RecommendedGridEntry editSelected)
-                    {
-                        if (!_recMultiSelectedKeys.Add(editSelected.EntryKey))
-                        {
-                            _recMultiSelectedKeys.Remove(editSelected.EntryKey);
-                        }
-
-                        RefreshAllRecommendedCardEditVisuals();
-                        UpdateRecommendationEditStatusHint();
-                    }
-
-                    return true;
-                }
-
-                if (_selectedAppIndex >= 0 && _selectedAppIndex < count &&
-                    itemsSource[_selectedAppIndex] is RecommendedGridEntry selected)
-                {
-                    if (selected.IsFolder)
-                    {
-                        OpenFolderOverlay(selected);
-                        return true;
-                    }
-
-                    if (selected.AppItem is { } appItem)
-                    {
-                        _viewModel.ExecuteItem(appItem);
-                        return true;
-                    }
-                }
-                return false; // No selection -> let Enter fall through to execute first result.
-
-            case Windows.System.VirtualKey.Space:
-                if (_isRecommendationEditMode &&
-                    _selectedAppIndex >= 0 &&
-                    _selectedAppIndex < count &&
-                    itemsSource[_selectedAppIndex] is RecommendedGridEntry editSpaceEntry)
-                {
-                    if (!_recMultiSelectedKeys.Add(editSpaceEntry.EntryKey))
-                    {
-                        _recMultiSelectedKeys.Remove(editSpaceEntry.EntryKey);
-                    }
-
-                    RefreshAllRecommendedCardEditVisuals();
-                    UpdateRecommendationEditStatusHint();
-                    return true;
-                }
-
-                if (_selectedAppIndex >= 0 && _selectedAppIndex < count &&
-                    itemsSource[_selectedAppIndex] is RecommendedGridEntry spaceEntry)
-                {
-                    if (spaceEntry.IsFolder)
-                    {
-                        OpenFolderOverlay(spaceEntry);
-                    }
-                    else
-                    {
-                        TryPreviewSelectedItem();
-                    }
-                }
-                return true; // Always consume Space when panel is visible.
-
-            case Windows.System.VirtualKey.Delete when _isRecommendationEditMode && _recMultiSelectedKeys.Count > 0:
-                HideSelectedRecommendations();
-                return true;
-
-            case Windows.System.VirtualKey.A when _isRecommendationEditMode &&
-                                                  Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control):
-                _recMultiSelectedKeys.Clear();
-                foreach (RecommendedGridEntry entry in _viewModel.RecommendedEntries)
-                {
-                    _recMultiSelectedKeys.Add(entry.EntryKey);
-                }
-                RefreshAllRecommendedCardEditVisuals();
-                UpdateRecommendationEditStatusHint();
-                return true;
-        }
-        return false;
-    }
-
-    private void SelectRecommendedEntry(Grid card, RecommendedGridEntry entry)
-    {
-        ClearRecommendedAppSelection();
-        _selectedAppCard = card;
-
-        // Sync ViewModel selection for preview/action bar when an app tile is active.
-        // Card background stays transparent until hovered (hover-only highlight policy).
-        _viewModel.SelectedItem = entry.IsFolder
-            ? entry.FolderItems.FirstOrDefault()
-            : entry.AppItem;
-
-        var itemsSource = RecommendedAppsRepeater.ItemsSource as System.Collections.IList;
-        if (itemsSource is not null)
-        {
-            _selectedAppIndex = itemsSource.IndexOf(entry);
-        }
-    }
-
-    private void SelectRecommendedAppByIndex(int index)
-    {
-        var itemsSource = RecommendedAppsRepeater.ItemsSource as System.Collections.IList;
-        if (itemsSource is null || index < 0 || index >= itemsSource.Count ||
-            itemsSource[index] is not RecommendedGridEntry targetEntry)
-        {
-            return;
-        }
-
-        Grid? matchedCard = null;
-        int childCount = VisualTreeHelper.GetChildrenCount(RecommendedAppsRepeater);
-        for (int i = 0; i < childCount; i++)
-        {
-            if (VisualTreeHelper.GetChild(RecommendedAppsRepeater, i) is Grid candidate &&
-                candidate.DataContext is RecommendedGridEntry candidateEntry &&
-                string.Equals(candidateEntry.EntryKey, targetEntry.EntryKey, StringComparison.OrdinalIgnoreCase))
-            {
-                matchedCard = candidate;
-                break;
-            }
-        }
-
-        matchedCard ??= RecommendedAppsRepeater.GetOrCreateElement(index) as Grid;
-        if (matchedCard is not null)
-        {
-            SelectRecommendedEntry(matchedCard, targetEntry);
-            matchedCard.StartBringIntoView();
-        }
-    }
-
-    private void ClearRecommendedAppSelection()
-    {
-        if (_selectedAppCard is not null)
-        {
-            if (!ReferenceEquals(_selectedAppCard, _hoveredAppCard))
-            {
-                _selectedAppCard.Background = s_transparentCardBrush;
-            }
-
-            _selectedAppCard = null;
-        }
-        _selectedAppIndex = -1;
-    }
-
-    // ── Skeleton screen ─────────────────────────────────────────────────────────
-
-    private async Task ShowAppsSkeletonAfterDelayAsync(
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            await Task.Delay(250, cancellationToken);
-        }
-        catch (OperationCanceledException)
-        {
-            return;
-        }
-
-        if (!cancellationToken.IsCancellationRequested && IsPopupVisible)
-        {
-            DispatcherQueue.TryEnqueue(ShowAppsSkeleton);
-        }
-    }
-
-    private void ShowAppsSkeleton()
-    {
-        // Populate skeleton items to match the grid layout.
-        int count = Math.Max(8, _viewModel.CurrentResults.Count);
-        AppsSkeletonRepeater.ItemsSource = Enumerable.Range(0, count).Select(_ => new object()).ToList();
-        AppsSkeletonPanel.Visibility = Visibility.Visible;
-        RecommendedAppsPanel.Visibility = Visibility.Collapsed;
-
-        var visual = ElementCompositionPreview.GetElementVisual(AppsSkeletonPanel);
-        visual.StopAnimation("Opacity");
-        if (!AreSystemAnimationsEnabled())
-        {
-            visual.Opacity = 0.62f;
-            return;
-        }
-
-        var animation = visual.Compositor.CreateScalarKeyFrameAnimation();
-        animation.InsertKeyFrame(0, 0.42f);
-        animation.InsertKeyFrame(1, 0.7f);
-        animation.Duration = TimeSpan.FromMilliseconds(900);
-        animation.IterationBehavior =
-            Microsoft.UI.Composition.AnimationIterationBehavior.Forever;
-        animation.Direction =
-            Microsoft.UI.Composition.AnimationDirection.Alternate;
-        visual.StartAnimation("Opacity", animation);
-    }
-
-    private void HideAppsSkeleton()
-    {
-        ElementCompositionPreview
-            .GetElementVisual(AppsSkeletonPanel)
-            .StopAnimation("Opacity");
-        AppsSkeletonRepeater.ItemsSource = null;
-        AppsSkeletonPanel.Visibility = Visibility.Collapsed;
-        AppsSkeletonPanel.Opacity = 1;
-    }
-
-    // ── Icon entrance animations ────────────────────────────────────────────────
-
-    /// <summary>
-    /// Plays the configured icon entrance animation on all realized app cards.
-    /// Each card's opacity is explicitly reset to 0 first, so re-entering the
-    /// home tab replays the animation cleanly instead of no-oping (Composition
-    /// animations only fire on the start, not on completion).
-    /// </summary>
-    private void AnimateAppIconsEntrance()
-    {
-        int style = _settingsService.Settings.SearchAppIconAnimation;
-        if (!AreSystemAnimationsEnabled())
-        {
-            int staticIndex = 0;
-            foreach (var _ in RecommendedAppsRepeater.ItemsSource as
-                         System.Collections.IEnumerable ?? Array.Empty<object>())
-            {
-                if (RecommendedAppsRepeater.TryGetElement(staticIndex)
-                    is FrameworkElement element)
-                {
-                    ElementCompositionPreview.GetElementVisual(element).Opacity = 1;
-                }
-                staticIndex++;
-            }
-            return;
-        }
-
-        // Signal pending entrance so that any cards realized AFTER this point
-        // (ItemsRepeater is virtualized; TryGetElement is null until the layout
-        // pass realizes them) are animated as soon as ElementPrepared fires.
-        _pendingEntranceStyle = style;
-
-        // Safety net: clear the pending flag shortly after the longest possible
-        // entrance window so a late/aborted realization can never leave a card
-        // stuck at opacity 0. Covers the worst-case stagger + duration.
-        StopAndClearEntranceGuardTimer();
-        _entranceGuardTimer = new DispatcherTimer
-        {
-            Interval = TimeSpan.FromMilliseconds(1200)
-        };
-        _entranceGuardTimer.Tick += OnEntranceGuardTick;
-        _entranceGuardTimer.Start();
-
-        // Animate any cards that are already realized right now.
-        int index = 0;
-        var itemsSource = RecommendedAppsRepeater.ItemsSource as System.Collections.IEnumerable
-            ?? Array.Empty<object>();
-
-        foreach (var _ in itemsSource)
-        {
-            if (RecommendedAppsRepeater.TryGetElement(index)
-                is FrameworkElement card)
-            {
-                AnimateSingleAppCard(card, index, style);
-            }
-            index++;
-        }
-    }
-
-    private void StopAndClearEntranceGuardTimer()
-    {
-        if (_entranceGuardTimer is not { } timer)
-        {
-            return;
-        }
-
-        _entranceGuardTimer = null;
-        timer.Tick -= OnEntranceGuardTick;
-        try
-        {
-            timer.Stop();
-        }
-        catch
-        {
-        }
-    }
-
-    private void OnEntranceGuardTick(object? sender, object e)
-    {
-        StopAndClearEntranceGuardTimer();
-        _pendingEntranceStyle = null;
-    }
-
-    private void AnimateSingleAppCard(FrameworkElement card, int index, int style)
-    {
-        var visual = ElementCompositionPreview.GetElementVisual(card);
-        if (visual is null) return;
-
-        ElementCompositionPreview.SetIsTranslationEnabled(card, true);
-        var compositor = visual.Compositor;
-        if (!AreSystemAnimationsEnabled())
-        {
-            visual.Opacity = 1;
-            visual.Scale = System.Numerics.Vector3.One;
-            visual.StopAnimation("Translation.Y");
-            return;
-        }
-
-        // WinUI deceleration curve.
-        var decel = compositor.CreateCubicBezierEasingFunction(
-            new System.Numerics.Vector2(0.0f, 0.0f),
-            new System.Numerics.Vector2(0.1f, 1.0f));
-
-        var spring = compositor.CreateCubicBezierEasingFunction(
-            new System.Numerics.Vector2(0.34f, 1.56f),
-            new System.Numerics.Vector2(0.64f, 1.0f));
-
-        int columnsForStagger = Math.Max(1, ComputeRecommendedAppsColumnCount());
-        int staggerRow = index / columnsForStagger;
-        int staggerCol = index % columnsForStagger;
-        int delayMs = style == 2
-            ? 0
-            : Math.Min(160, (staggerRow * 20) + (staggerCol * 12));
-        var delay = TimeSpan.FromMilliseconds(delayMs);
-
-        var opacityAnim = compositor.CreateScalarKeyFrameAnimation();
-        opacityAnim.InsertKeyFrame(0f, 0f);
-        opacityAnim.InsertKeyFrame(1f, 1f, decel);
-        opacityAnim.Duration = TimeSpan.FromMilliseconds(style switch
-        {
-            0 => 200,
-            1 => 220,
-            2 => 260,
-            3 => 200,
-            _ => 200
-        });
-        opacityAnim.DelayTime = delay;
-        visual.Opacity = 0f;
-        visual.StartAnimation("Opacity", opacityAnim);
-
-        // Anchor scale to the card's center so it grows in place. Prefer the
-        // visual's realized Size (post-layout); fall back to ActualWidth/Height
-        // when the element hasn't been measured yet (e.g. realized during load).
-        float cx = visual.Size.X > 0 ? visual.Size.X / 2 : (float)(card.ActualWidth > 0 ? card.ActualWidth : 46) / 2;
-        float cy = visual.Size.Y > 0 ? visual.Size.Y / 2 : (float)(card.ActualHeight > 0 ? card.ActualHeight : 92) / 2;
-        visual.CenterPoint = new System.Numerics.Vector3(cx, cy, 0);
-
-        switch (style)
-        {
-            case 0:
-            {
-                StartScalarAnim(
-                    compositor,
-                    visual,
-                    "Scale.X",
-                    delay,
-                    350,
-                    decel,
-                    0.92f,
-                    1.0f);
-                StartScalarAnim(
-                    compositor,
-                    visual,
-                    "Scale.Y",
-                    delay,
-                    350,
-                    decel,
-                    0.92f,
-                    1.0f);
-                break;
-            }
-            case 1:
-            {
-                var translateAnim = compositor.CreateScalarKeyFrameAnimation();
-                translateAnim.InsertKeyFrame(0f, 18f);
-                translateAnim.InsertKeyFrame(1f, 0f, decel);
-                translateAnim.Duration = TimeSpan.FromMilliseconds(400);
-                translateAnim.DelayTime = delay;
-                visual.StartAnimation("Translation.Y", translateAnim);
-
-                StartScalarAnim(
-                    compositor,
-                    visual,
-                    "Scale.X",
-                    delay,
-                    400,
-                    decel,
-                    0.95f,
-                    1.0f);
-                StartScalarAnim(
-                    compositor,
-                    visual,
-                    "Scale.Y",
-                    delay,
-                    400,
-                    decel,
-                    0.95f,
-                    1.0f);
-                break;
-            }
-            case 2:
-            {
-                int columns = ComputeRecommendedAppsColumnCount();
-                int column = columns <= 0 ? 0 : index % columns;
-                int row = columns <= 0 ? 0 : index / columns;
-                float startY =
-                    (column * 10f) + (Math.Min(row, 3) * 3f);
-
-                var translateAnim = compositor.CreateScalarKeyFrameAnimation();
-                translateAnim.InsertKeyFrame(0f, startY);
-                translateAnim.InsertKeyFrame(1f, 0f, decel);
-                translateAnim.Duration = TimeSpan.FromMilliseconds(450);
-                translateAnim.DelayTime = delay;
-                visual.StartAnimation("Translation.Y", translateAnim);
-
-                StartScalarAnim(
-                    compositor,
-                    visual,
-                    "Scale.X",
-                    delay,
-                    450,
-                    decel,
-                    0.95f,
-                    1.0f);
-                StartScalarAnim(
-                    compositor,
-                    visual,
-                    "Scale.Y",
-                    delay,
-                    450,
-                    decel,
-                    0.95f,
-                    1.0f);
-                break;
-            }
-            case 3:
-            {
-                var scaleAnim =
-                    compositor.CreateScalarKeyFrameAnimation();
-                scaleAnim.InsertKeyFrame(0f, 0.92f);
-                scaleAnim.InsertKeyFrame(0.7f, 1.06f, spring);
-                scaleAnim.InsertKeyFrame(1f, 1.0f, decel);
-                scaleAnim.Duration = TimeSpan.FromMilliseconds(500);
-                scaleAnim.DelayTime = delay;
-                visual.StartAnimation("Scale.X", scaleAnim);
-                visual.StartAnimation("Scale.Y", scaleAnim);
-
-                var translateAnim =
-                    compositor.CreateScalarKeyFrameAnimation();
-                translateAnim.InsertKeyFrame(0f, 12f);
-                translateAnim.InsertKeyFrame(0.7f, -4f, spring);
-                translateAnim.InsertKeyFrame(1f, 0f, decel);
-                translateAnim.Duration = TimeSpan.FromMilliseconds(500);
-                translateAnim.DelayTime = delay;
-                visual.StartAnimation("Translation.Y", translateAnim);
-                break;
-            }
-        }
-    }
-
-    private static void StartScalarAnim(
-        Microsoft.UI.Composition.Compositor compositor,
-        Microsoft.UI.Composition.Visual visual,
-        string property,
-        TimeSpan delay,
-        int durationMs,
-        Microsoft.UI.Composition.CompositionEasingFunction easing,
-        float from,
-        float to)
-    {
-        var anim = compositor.CreateScalarKeyFrameAnimation();
-        anim.InsertKeyFrame(0f, from);
-        anim.InsertKeyFrame(1f, to, easing);
-        anim.Duration = TimeSpan.FromMilliseconds(durationMs);
-        anim.DelayTime = delay;
-        visual.StartAnimation(property, anim);
-    }
-
-    private int ComputeRecommendedAppsColumnCount()
-    {
-        double width = RecommendedAppsScrollViewer.ActualWidth > 0
-            ? RecommendedAppsScrollViewer.ActualWidth
-                - RecommendedAppsScrollViewer.Padding.Left
-                - RecommendedAppsScrollViewer.Padding.Right
-            : RecommendedAppsPanel.ActualWidth;
-        if (width <= 0)
-        {
-            return 1;
-        }
-        return Math.Max(1, (int)Math.Floor((width + 6) / 104));
-    }
-
-    private Microsoft.UI.Xaml.Media.Brush? ResolveThemeBrush(string key) =>
-        NeutralInteractionBrush.ResolveThemedResource(key, RootGrid);
-
-    private void RecommendedAppsPanel_RightTapped(object sender, RightTappedRoutedEventArgs e)
-    {
-        CancelRecommendedDrag();
-        var source = e.OriginalSource as DependencyObject;
-        var entry = FindDataContext<RecommendedGridEntry>(source);
-        bool showBatchMenu =
-            _isRecommendationEditMode &&
-            _recMultiSelectedKeys.Count > 1 &&
-            (entry is null || _recMultiSelectedKeys.Contains(entry.EntryKey));
-        if (showBatchMenu)
-        {
-            UIElement batchAnchor = (UIElement?)FindVisualAncestor<Grid>(source) ?? RecommendedAppsScrollViewer;
-            MenuFlyout batchFlyout = BuildBatchRecommendedAppsContextMenu();
-            if (batchFlyout.Items.Count > 0)
-            {
-                batchFlyout.Closed += (_, _) => ClearHoveredRecommendedCard();
-                batchFlyout.ShowAt(batchAnchor, e.GetPosition(batchAnchor));
-                e.Handled = true;
-            }
-
-            return;
-        }
-
-        if (entry is null)
-        {
-            return;
-        }
-
-        UIElement anchor = (UIElement?)FindVisualAncestor<Grid>(source) ?? RecommendedAppsScrollViewer;
-        MenuFlyout flyout = entry.IsFolder
-            ? BuildRecommendedFolderContextMenu(entry)
-            : BuildRecommendedAppContextMenu(entry);
-        if (flyout.Items.Count > 0)
-        {
-            flyout.Closed += (_, _) => ClearHoveredRecommendedCard();
-            flyout.ShowAt(anchor, e.GetPosition(anchor));
-            e.Handled = true;
-        }
-    }
-
-    private MenuFlyout BuildBatchRecommendedAppsContextMenu()
-    {
-        var flyout = new MenuFlyout();
-        var selectedEntries = _viewModel.RecommendedEntries
-            .Where(entry => _recMultiSelectedKeys.Contains(entry.EntryKey))
-            .ToList();
-        if (selectedEntries.Count < 2)
-        {
-            return flyout;
-        }
-
-        bool hasSelectedFolder = selectedEntries.Any(entry => entry.IsFolder);
-        var selectedApps = selectedEntries
-            .Where(entry => !entry.IsFolder && entry.AppItem is not null)
-            .Select(entry => entry.AppItem!)
-            .ToList();
-        var allHideableItems = new List<SearchResultItem>();
-        foreach (RecommendedGridEntry entry in selectedEntries)
-        {
-            if (entry.IsFolder)
-            {
-                allHideableItems.AddRange(entry.FolderItems);
-            }
-            else if (entry.AppItem is { } appItem)
-            {
-                allHideableItems.Add(appItem);
-            }
-        }
-
-        if (!hasSelectedFolder && selectedApps.Count >= 2)
-        {
-            var moveSubItem = new MenuFlyoutSubItem
-            {
-                Text = _localizationService.T("Search.Recommend.MoveToFolder"),
-                Icon = new FontIcon { Glyph = "\uE8F4" }
-            };
-
-            var newFolderItem = new MenuFlyoutItem
-            {
-                Text = _localizationService.T("Search.Recommend.NewFolder"),
-                Icon = new FontIcon { Glyph = "\uE8F4" }
-            };
-            newFolderItem.Click += (_, _) =>
-            {
-                string targetEntryKey = $"app:{Helpers.AppRecommendationIdentity.GetCanonicalKey(selectedApps[0])}";
-                var remainingKeys = selectedApps
-                    .Skip(1)
-                    .Select(Helpers.AppRecommendationIdentity.GetCanonicalKey)
-                    .ToList();
-                _recMultiSelectedKeys.Clear();
-                string? createdFolderId = _viewModel.MergeRecommendationsIntoFolder(remainingKeys, targetEntryKey);
-                RefreshAllRecommendedCardEditVisuals();
-                UpdateRecommendationEditStatusHint();
-                if (_viewModel.FindRecommendedFolder(createdFolderId) is { } createdFolder)
-                {
-                    OpenFolderOverlay(createdFolder, startRename: true);
-                }
-            };
-            moveSubItem.Items.Add(newFolderItem);
-
-            IReadOnlyList<RecommendationFolderSummary> existingFolders = _viewModel.GetRecommendationFolders();
-            if (existingFolders.Count > 0)
-            {
-                moveSubItem.Items.Add(new MenuFlyoutSeparator());
-                var selectedKeys = selectedApps
-                    .Select(Helpers.AppRecommendationIdentity.GetCanonicalKey)
-                    .ToList();
-                foreach (RecommendationFolderSummary folder in existingFolders)
-                {
-                    string targetFolderId = folder.FolderId;
-                    var targetItem = new MenuFlyoutItem
-                    {
-                        Text = folder.Name,
-                        Icon = new FontIcon { Glyph = "\uE8B7" }
-                    };
-                    targetItem.Click += (_, _) =>
-                    {
-                        _recMultiSelectedKeys.Clear();
-                        _viewModel.MergeRecommendationsIntoFolder(selectedKeys, $"folder:{targetFolderId}");
-                        RefreshAllRecommendedCardEditVisuals();
-                        UpdateRecommendationEditStatusHint();
-                    };
-                    moveSubItem.Items.Add(targetItem);
-                }
-            }
-
-            flyout.Items.Add(moveSubItem);
-        }
-
-        if (allHideableItems.Count > 0)
-        {
-            var hideItem = new MenuFlyoutItem
-            {
-                Text = _localizationService.T("Search.Recommend.Hide"),
-                Icon = new FontIcon { Glyph = "\uED1A" }
-            };
-            hideItem.Click += (_, _) =>
-            {
-                _recMultiSelectedKeys.Clear();
-                _viewModel.HideRecommendations(allHideableItems);
-                RefreshAllRecommendedCardEditVisuals();
-                UpdateRecommendationEditStatusHint();
-            };
-            flyout.Items.Add(hideItem);
-        }
-
-        return flyout;
-    }
-
-    private void FolderOverlayScrollViewer_RightTapped(object sender, RightTappedRoutedEventArgs e)
-    {
-        CancelOverlayDrag();
-        var source = e.OriginalSource as DependencyObject;
-        var item = FindDataContext<SearchResultItem>(source);
-        if (item is null || string.IsNullOrWhiteSpace(_openFolderId))
-        {
-            return;
-        }
-
-        string folderId = _openFolderId;
-        UIElement anchor = (UIElement?)FindVisualAncestor<Grid>(source) ?? FolderOverlayScrollViewer;
-        MenuFlyout flyout = BuildFolderOverlayItemContextMenu(folderId, item);
-        if (flyout.Items.Count > 0)
-        {
-            flyout.Closed += (_, _) => ClearHoveredOverlayCard();
-            flyout.ShowAt(anchor, e.GetPosition(anchor));
-            e.Handled = true;
-        }
-    }
-
-    private void HiddenOverlayScrollViewer_RightTapped(object sender, RightTappedRoutedEventArgs e)
-    {
-        var source = e.OriginalSource as DependencyObject;
-        var item = FindDataContext<SearchResultItem>(source);
-        if (item is null)
-        {
-            return;
-        }
-
-        UIElement anchor = (UIElement?)FindVisualAncestor<Grid>(source) ?? HiddenOverlayScrollViewer;
-        MenuFlyout flyout = BuildHiddenOverlayItemContextMenu(item);
-        if (flyout.Items.Count > 0)
-        {
-            flyout.Closed += (_, _) => ClearHoveredOverlayCard();
-            flyout.ShowAt(anchor, e.GetPosition(anchor));
-            e.Handled = true;
-        }
-    }
-
-    private MenuFlyout BuildRecommendedFolderContextMenu(RecommendedGridEntry folderEntry)
-    {
-        var flyout = new MenuFlyout();
-        if (!folderEntry.IsFolder || string.IsNullOrWhiteSpace(folderEntry.FolderId))
-        {
-            return flyout;
-        }
-
-        string folderId = folderEntry.FolderId;
-
-        var openFolderItem = new MenuFlyoutItem
-        {
-            Text = _localizationService.T("Search.Menu.Open"),
-            Icon = new FontIcon { Glyph = "\uE8B7" }
-        };
-        openFolderItem.Click += (_, _) => OpenFolderOverlay(folderEntry);
-        flyout.Items.Add(openFolderItem);
-
-        var renameFolderItem = new MenuFlyoutItem
-        {
-            Text = _localizationService.T("Search.Recommend.RenameFolder"),
-            Icon = new FontIcon { Glyph = "\uE8AC" }
-        };
-        renameFolderItem.Click += (_, _) => OpenFolderOverlay(folderEntry, startRename: true);
-        flyout.Items.Add(renameFolderItem);
-
-        flyout.Items.Add(new MenuFlyoutSeparator());
-
-        var dissolveItem = new MenuFlyoutItem
-        {
-            Text = _localizationService.T("Search.Recommend.DissolveFolder"),
-            Icon = new FontIcon { Glyph = "\uE8F1" }
-        };
-        dissolveItem.Click += (_, _) => _viewModel.DissolveRecommendationFolder(folderId);
-        flyout.Items.Add(dissolveItem);
-
-        return flyout;
-    }
-
-    private MenuFlyout BuildRecommendedAppContextMenu(RecommendedGridEntry appEntry)
-    {
-        var flyout = new MenuFlyout();
-        if (appEntry.AppItem is not { } item)
-        {
-            return flyout;
-        }
-
-        AppendCommonRecommendedAppActions(flyout, item);
-        flyout.Items.Add(new MenuFlyoutSeparator());
-
-        var moveSubItem = new MenuFlyoutSubItem
-        {
-            Text = _localizationService.T("Search.Recommend.MoveToFolder"),
-            Icon = new FontIcon { Glyph = "\uE8F4" }
-        };
-
-        var newFolderItem = new MenuFlyoutItem
-        {
-            Text = _localizationService.T("Search.Recommend.NewFolder"),
-            Icon = new FontIcon { Glyph = "\uE8F4" }
-        };
-        newFolderItem.Click += (_, _) =>
-        {
-            string? createdFolderId = _viewModel.CreateFolderFromRecommendation(item);
-            if (_viewModel.FindRecommendedFolder(createdFolderId) is { } createdFolder)
-            {
-                OpenFolderOverlay(createdFolder, startRename: true);
-            }
-        };
-        moveSubItem.Items.Add(newFolderItem);
-
-        IReadOnlyList<RecommendationFolderSummary> existingFolders = _viewModel.GetRecommendationFolders();
-        if (existingFolders.Count > 0)
-        {
-            moveSubItem.Items.Add(new MenuFlyoutSeparator());
-            string appKey = Helpers.AppRecommendationIdentity.GetCanonicalKey(item);
-            foreach (RecommendationFolderSummary folder in existingFolders)
-            {
-                string targetFolderId = folder.FolderId;
-                var targetItem = new MenuFlyoutItem
-                {
-                    Text = folder.Name,
-                    Icon = new FontIcon { Glyph = "\uE8B7" }
-                };
-                targetItem.Click += (_, _) =>
-                    _viewModel.MergeRecommendationIntoFolder(appKey, $"folder:{targetFolderId}");
-                moveSubItem.Items.Add(targetItem);
-            }
-        }
-
-        flyout.Items.Add(moveSubItem);
-
-        var hideItem = new MenuFlyoutItem
-        {
-            Text = _localizationService.T("Search.Recommend.Hide"),
-            Icon = new FontIcon { Glyph = "\uED1A" }
-        };
-        hideItem.Click += (_, _) => _viewModel.HideRecommendation(item);
-        flyout.Items.Add(hideItem);
-
-        return flyout;
-    }
-
-    private MenuFlyout BuildFolderOverlayItemContextMenu(string folderId, SearchResultItem item)
-    {
-        var flyout = new MenuFlyout();
-        AppendCommonRecommendedAppActions(flyout, item);
-        flyout.Items.Add(new MenuFlyoutSeparator());
-
-        var removeFromFolderItem = new MenuFlyoutItem
-        {
-            Text = _localizationService.T("Search.Recommend.RemoveFromFolder"),
-            Icon = new FontIcon { Glyph = "\uE8F1" }
-        };
-        removeFromFolderItem.Click += (_, _) =>
-        {
-            _viewModel.RemoveRecommendationFromFolder(folderId, item, out bool stillExists);
-            if (!stillExists)
-            {
-                CloseRecommendationOverlays();
-            }
-        };
-        flyout.Items.Add(removeFromFolderItem);
-
-        var hideItem = new MenuFlyoutItem
-        {
-            Text = _localizationService.T("Search.Recommend.Hide"),
-            Icon = new FontIcon { Glyph = "\uED1A" }
-        };
-        hideItem.Click += (_, _) => _viewModel.HideRecommendation(item);
-        flyout.Items.Add(hideItem);
-
-        return flyout;
-    }
-
-    private MenuFlyout BuildHiddenOverlayItemContextMenu(SearchResultItem item)
-    {
-        var flyout = new MenuFlyout();
-
-        var unhideItem = new MenuFlyoutItem
-        {
-            Text = _localizationService.T("Search.Recommend.Unhide"),
-            Icon = new FontIcon { Glyph = "\uE7B3" }
-        };
-        unhideItem.Click += (_, _) =>
-        {
-            _viewModel.UnhideRecommendation(item);
-            if (!_viewModel.HasHiddenRecommendations)
-            {
-                CloseRecommendationOverlays();
-            }
-        };
-        flyout.Items.Add(unhideItem);
-
-        flyout.Items.Add(new MenuFlyoutSeparator());
-        AppendCommonRecommendedAppActions(flyout, item);
-        return flyout;
-    }
-
-    private void AppendCommonRecommendedAppActions(MenuFlyout flyout, SearchResultItem item)
-    {
-        var openItem = new MenuFlyoutItem
-        {
-            Text = _localizationService.T("Search.Menu.Open"),
-            Icon = new FontIcon { Glyph = "\uE8E5" }
-        };
-        openItem.Click += (_, _) => _viewModel.ExecuteItem(item);
-        flyout.Items.Add(openItem);
-
-        bool hasExistingPath = !string.IsNullOrWhiteSpace(item.DetailPath) &&
-                               (File.Exists(item.DetailPath) || Directory.Exists(item.DetailPath));
-        if (!hasExistingPath)
-        {
-            return;
-        }
-
-        if (ElevatedFileLauncher.CanRunAsAdministrator(item.DetailPath!))
-        {
-            var runAsAdminItem = new MenuFlyoutItem
-            {
-                Text = _localizationService.T("Widget.RunAsAdministrator"),
-                Icon = new FontIcon { Glyph = "\uE7EF" }
-            };
-            runAsAdminItem.Click += (_, _) =>
-            {
-                ElevatedFileLaunchResult result =
-                    ElevatedFileLauncher.RunAsAdministrator(_hwnd, item.DetailPath!);
-                if (result.Status is not (ElevatedFileLaunchStatus.Launched
-                    or ElevatedFileLaunchStatus.Cancelled))
-                {
-                    ShowTransientStatus(_localizationService.T(
-                        result.Status == ElevatedFileLaunchStatus.AlreadyRunningUnelevated
-                            ? "Widget.RunAsAdministrator.AlreadyRunning"
-                            : "Widget.Error.OperationIncomplete"));
-                }
-            };
-            flyout.Items.Add(runAsAdminItem);
-        }
-
-        var openLocationItem = new MenuFlyoutItem
-        {
-            Text = _localizationService.T("Search.Menu.OpenLocation"),
-            Icon = new FontIcon { Glyph = "\uE838" }
-        };
-        openLocationItem.Click += (_, _) =>
-        {
-            Win32Helper.ShowInExplorer(item.DetailPath!);
-            HidePopup();
-        };
-        flyout.Items.Add(openLocationItem);
-    }
-
-    private void OnAppIcon_ImageOpened(object sender, RoutedEventArgs e)
-    {
-        // Icon loaded successfully.
-    }
-
-    private void OnAppIcon_ImageFailed(object sender, ExceptionRoutedEventArgs e)
-    {
-        // Icon failed to load — the glyph fallback handles this.
+        RecommendationOverlays.OpenHiddenApps();
     }
 
     private void OnLanguageChanged()
@@ -7432,2597 +3260,7 @@ public sealed partial class SearchPopupWindow : Window
         ClearMultiSelection();
     }
 
-    // ── Sort headers ────────────────────────────────────────────────────────
-
-    private void SortNameHeader_Click(object sender, RoutedEventArgs e)
-    {
-        _viewModel.ToggleSort(ResultSortColumn.Name);
-    }
-
-    private void SortTypeHeader_Click(object sender, RoutedEventArgs e)
-    {
-        _viewModel.ToggleSort(ResultSortColumn.Type);
-    }
-
-    private void SortSizeHeader_Click(object sender, RoutedEventArgs e)
-    {
-        _viewModel.ToggleSort(ResultSortColumn.Size);
-    }
-
-    private void SortDateHeader_Click(object sender, RoutedEventArgs e)
-    {
-        _viewModel.ToggleSort(ResultSortColumn.Date);
-    }
-
-    private void UpdateSortHeaders()
-    {
-        var column = _viewModel.SortColumn;
-        bool ascending = _viewModel.SortAscending;
-        SetSortIndicator(SortNameDirection, SortNameLabel, column == ResultSortColumn.Name, ascending);
-        SetSortIndicator(SortTypeDirection, SortTypeLabel, column == ResultSortColumn.Type, ascending);
-        SetSortIndicator(SortSizeDirection, SortSizeLabel, column == ResultSortColumn.Size, ascending);
-        SetSortIndicator(SortDateDirection, SortDateLabel, column == ResultSortColumn.Date, ascending);
-    }
-
-    private static void SetSortIndicator(
-        FontIcon icon,
-        TextBlock label,
-        bool active,
-        bool ascending)
-    {
-        icon.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
-        icon.Glyph = ascending ? "\uE74A" : "\uE74B";
-        label.FontWeight = active
-            ? Microsoft.UI.Text.FontWeights.SemiBold
-            : Microsoft.UI.Text.FontWeights.Normal;
-        label.Foreground = NeutralInteractionBrush.ResolveThemedResource(
-            active
-                ? "TextFillColorPrimaryBrush"
-                : "TextFillColorTertiaryBrush",
-            label);
-    }
-
     // Result row interaction (hover, click, drag, and context menu).
-
-    private void ResultsPanel_PointerPressed(object sender, PointerRoutedEventArgs e)
-    {
-        var point = e.GetCurrentPoint(ResultsPanel);
-        var source = e.OriginalSource as DependencyObject;
-        var row = FindItemRow(source);
-        var item = ResolveResultItem(source);
-        _pressedItem = null;
-
-        if (row is not null && row.IsElementInsideActionButtons(source))
-        {
-            DisarmDragOutCandidate();
-            return;
-        }
-
-        bool isCtrlPressed = Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control);
-        bool isShiftPressed = Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Shift);
-        bool isLeft = point.Properties.IsLeftButtonPressed;
-
-        // Ctrl-click / Shift-click on a row: modify or preserve multi-selection
-        // WITHOUT returning early before _dragOutCandidate is armed so Ctrl+Drag
-        // (Copy) and Shift+Drag (Move) work just like Windows Explorer.
-        _pendingCtrlToggleOffOnRelease = null;
-        bool modifierHandledSelection = false;
-        if (item is not null && isLeft && (isCtrlPressed || isShiftPressed))
-        {
-            int anchorIndex = _selectionAnchorIndex >= 0
-                ? _selectionAnchorIndex
-                : _viewModel.SelectedIndex;
-            var modDecision = EvaluateSearchRowModifierPress(
-                isCtrlPressed,
-                isShiftPressed,
-                _multiSelectedItems.Contains(item),
-                ReferenceEquals(_viewModel.SelectedItem, item),
-                anchorIndex >= 0);
-
-            if (modDecision.DeferToggleOffToRelease)
-            {
-                // Keep the clicked item in _multiSelectedItems while dragging;
-                // only toggle it off on PointerReleased when no drag started.
-                _pendingCtrlToggleOffOnRelease = item;
-                SelectResultItem(item, row);
-                _selectionAnchorIndex = _viewModel.CurrentResults.IndexOf(item);
-                modifierHandledSelection = true;
-                e.Handled = true;
-            }
-            else if (isCtrlPressed)
-            {
-                SelectResultItem(item, row);
-                _selectionAnchorIndex = _viewModel.CurrentResults.IndexOf(item);
-                ToggleMultiSelectionItem(item);
-                modifierHandledSelection = true;
-                e.Handled = true;
-            }
-            else if (modDecision.PreserveExistingSelection)
-            {
-                if (!_multiSelectedItems.Contains(item))
-                {
-                    ToggleMultiSelectionItem(item);
-                }
-
-                SelectResultItem(item, row);
-                modifierHandledSelection = true;
-                e.Handled = true;
-            }
-            else if (modDecision.RangeSelect && anchorIndex >= 0)
-            {
-                _selectionAnchorIndex = anchorIndex;
-                RangeSelectItems(anchorIndex, item);
-                modifierHandledSelection = true;
-                e.Handled = true;
-            }
-        }
-
-        // Details-view rows are interactive across their complete width. Marquee
-        // selection starts only from actual empty result-surface space, never from
-        // a padding or inter-column gap inside a row.
-        if (SearchResultSelectionPolicy.ShouldStartRubberBand(
-                isLeft,
-                isOverResultRow: row is not null || item is not null,
-                isShiftPressed))
-        {
-            _pressedItem = null;
-            DisarmDragOutCandidate();
-            StartRubberBand(e);
-            e.Handled = true;
-            return;
-        }
-
-        bool pointerIsOnDragHandle =
-            item is not null &&
-            row is not null &&
-            !row.IsElementInsideActionButtons(source) &&
-            item.Kind is SearchResultKind.File or SearchResultKind.Folder &&
-            !string.IsNullOrWhiteSpace(item.DetailPath);
-        bool preserveSelectionForDrag =
-            item is not null &&
-            SearchResultSelectionPolicy.ShouldPreserveSelectionForDrag(
-                _multiSelectedItems.Contains(item),
-                _multiSelectedItems.Count,
-                pointerIsOnDragHandle);
-
-        if (item is not null && isLeft && !modifierHandledSelection)
-        {
-            if (!preserveSelectionForDrag)
-            {
-                ClearMultiSelection();
-            }
-            SelectResultItem(item, row);
-            _selectionAnchorIndex = _viewModel.CurrentResults.IndexOf(item);
-        }
-
-        if (!point.Properties.IsLeftButtonPressed)
-        {
-            _pressedItem = null;
-            DisarmDragOutCandidate();
-            return;
-        }
-
-        _pressedItem = item;
-
-        // Allow dragging file/folder results from anywhere on the row
-        // (excluding inline quick-action buttons), never in an elevated
-        // process, and only from a physical-button pointer: touch/pen contact
-        // reports IsLeftButtonPressed too but has never carried this mouse
-        // drag pipeline's semantics (the grid's manual drag filters them the
-        // same way). Capturing the panel pointer is part of arming — without
-        // it a release outside the panel never reaches us and the stale
-        // candidate would arm a phantom drag on the next hover move.
-        PointerPoint pressedPoint = e.GetCurrentPoint(ResultsPanel);
-        if (item is not null && row is not null && pointerIsOnDragHandle &&
-            !IsCurrentProcessElevatedForDrag() &&
-            pressedPoint.PointerDeviceType is
-                PointerDeviceType.Mouse or PointerDeviceType.Touchpad &&
-            ResultsPanel.CapturePointer(e.Pointer))
-        {
-            _dragOutCandidate = new SearchDragOutCandidate(
-                e.Pointer.PointerId,
-                item,
-                row,
-                pressedPoint.Position);
-        }
-        else
-        {
-            DisarmDragOutCandidate();
-        }
-    }
-
-    private void DisarmDragOutCandidate(PointerRoutedEventArgs? pointerArgs = null)
-    {
-        if (_dragOutCandidate is not { } candidate)
-        {
-            return;
-        }
-
-        _dragOutCandidate = null;
-        if (pointerArgs is not null &&
-            new Rect(0, 0, candidate.Row.ActualWidth, candidate.Row.ActualHeight)
-                .Contains(pointerArgs.GetCurrentPoint(candidate.Row).Position))
-        {
-            candidate.Row.ClearPressedState();
-        }
-        else
-        {
-            candidate.Row.ClearTransientPointerStates();
-        }
-
-        // Releasing our own capture re-enters ResultsPanel_PointerCaptureLost,
-        // which finds no candidate and stays a no-op.
-        ResultsPanel.ReleasePointerCaptures();
-    }
-
-    private void ResultsPanel_PointerMoved(object sender, PointerRoutedEventArgs e)
-    {
-        // Update rubber-band selection if active.
-        if (_isRubberBanding)
-        {
-            _rubberBandPointerInViewport = e.GetCurrentPoint(ResultsPanel).Position;
-            UpdateRubberBand(e.GetCurrentPoint(ResultsSurface).Position);
-            e.Handled = true;
-            return;
-        }
-
-        if (_dragOutCandidate is not { } candidate)
-        {
-            return;
-        }
-
-        PointerPoint current = e.GetCurrentPoint(ResultsPanel);
-        var decision = SearchResultSelectionPolicy.EvaluateDragOutMove(
-            candidateArmed: true,
-            samePointer: e.Pointer.PointerId == candidate.PointerId,
-            leftButtonPressed: current.Properties.IsLeftButtonPressed,
-            distanceUnits: Math.Sqrt(
-                Math.Pow(current.Position.X - candidate.StartPoint.X, 2) +
-                Math.Pow(current.Position.Y - candidate.StartPoint.Y, 2)));
-        if (decision == SearchResultSelectionPolicy.DragOutMoveDecision.Disarm)
-        {
-            DisarmDragOutCandidate();
-            return;
-        }
-        if (decision != SearchResultSelectionPolicy.DragOutMoveDecision.Start ||
-            string.IsNullOrWhiteSpace(candidate.Item.DetailPath))
-        {
-            return;
-        }
-
-        // The gesture is consumed: the panel pointer capture hands control to
-        // the platform drag loop, and the in-flight flag blocks re-arming
-        // until the session completes.
-        _dragOutCandidate = null;
-        ResultsPanel.ReleasePointerCaptures();
-        _dragOutInProgress = true;
-
-        StartDragOut(candidate, e);
-    }
-
-    internal static (bool DeferToggleOffToRelease, bool RangeSelect, bool PreserveExistingSelection) EvaluateSearchRowModifierPress(
-        bool ctrlDown,
-        bool shiftDown,
-        bool itemAlreadyMultiSelected,
-        bool itemIsPrimarySelected,
-        bool hasValidAnchor)
-    {
-        if (ctrlDown)
-        {
-            return (DeferToggleOffToRelease: itemAlreadyMultiSelected, RangeSelect: false, PreserveExistingSelection: false);
-        }
-
-        if (shiftDown)
-        {
-            if (itemAlreadyMultiSelected || itemIsPrimarySelected)
-            {
-                return (DeferToggleOffToRelease: false, RangeSelect: false, PreserveExistingSelection: true);
-            }
-
-            if (hasValidAnchor)
-            {
-                return (DeferToggleOffToRelease: false, RangeSelect: true, PreserveExistingSelection: false);
-            }
-        }
-
-        return (false, false, false);
-    }
-
-    private void StartDragOut(SearchDragOutCandidate candidate, PointerRoutedEventArgs e)
-    {
-        _pendingCtrlToggleOffOnRelease = null;
-        IReadOnlyList<SearchResultItem> draggedItems =
-            SearchResultSelectionPolicy.ResolveDraggedItems(
-                candidate.Item,
-                _viewModel.CurrentResults
-                    .Where(_multiSelectedItems.Contains)
-                    .ToList());
-        // Same rule as the grid pipeline: members that no longer exist drop
-        // out silently, but whatever remains must all make it into the
-        // payload (TryPreparePaths cancels otherwise) — never a text ghost
-        // of a deleted file, never a silent collapse to a single item.
-        string[] draggedPaths = draggedItems
-            .Select(result => result.DetailPath)
-            .Where(path =>
-                !string.IsNullOrWhiteSpace(path) &&
-                (File.Exists(path) || Directory.Exists(path)))
-            .Select(path => path!)
-            .ToArray();
-        if (draggedPaths.Length == 0)
-        {
-            candidate.Row.ClearTransientPointerStates();
-            _dragOutInProgress = false;
-            App.Log(
-                $"[SearchDragOut] canceled reason=no-existing-paths " +
-                $"items={draggedItems.Count}");
-            return;
-        }
-
-        candidate.Row.ClearTransientPointerStates();
-        UIElement dragSource = candidate.Row;
-        _activeDragOutPaths = draggedPaths;
-        dragSource.DragStarting += ResultsRow_DragStarting;
-        StartExternalDragFadeTimer();
-        App.SafeFireAndForget(
-            () => RunDragOutAsync(candidate, draggedItems.Count, dragSource, e),
-            nameof(RunDragOutAsync));
-    }
-
-    private async Task RunDragOutAsync(
-        SearchDragOutCandidate candidate,
-        int draggedItemCount,
-        UIElement dragSource,
-        PointerRoutedEventArgs e)
-    {
-        DataPackageOperation dropResult = DataPackageOperation.None;
-        bool shouldAutoHide = false;
-        try
-        {
-            dropResult = await dragSource.StartDragAsync(
-                e.GetCurrentPoint(dragSource));
-            shouldAutoHide = dropResult != DataPackageOperation.None &&
-                             !Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Menu);
-        }
-        catch (Exception ex)
-        {
-            // StartDragAsync has known throw paths (elevated processes at the
-            // very least), and an exception escaping this async boundary
-            // fail-fasts the process through DispatcherQueue — the boundary
-            // always catches and attributes.
-            App.Log(
-                $"[SearchDragOut] StartDragAsync failed " +
-                $"hresult=0x{ex.HResult:X8} type={ex.GetType().Name} " +
-                $"item='{candidate.Item.DetailPath}'");
-        }
-        finally
-        {
-            StopExternalDragFadeTimer(restoreOpacity: !shouldAutoHide);
-            dragSource.DragStarting -= ResultsRow_DragStarting;
-            candidate.Row.ClearTransientPointerStates();
-            ClearAllResultRowTransientStates();
-            _dragOutInProgress = false;
-            _activeDragOutPaths = null;
-        }
-
-        App.Log(
-            $"[SearchDragOut] completed drop={dropResult} items={draggedItemCount}");
-
-        // Default auto-collapse after a successful file drag-out drop (hold Alt to keep open).
-        if (shouldAutoHide)
-        {
-            HidePopup();
-        }
-    }
-
-    private void ResultsRow_DragStarting(UIElement sender, DragStartingEventArgs args)
-    {
-        string[] paths = _activeDragOutPaths ?? [];
-        if (paths.Length == 0 || IsCurrentProcessElevatedForDrag())
-        {
-            args.Cancel = true;
-            App.Log(
-                $"[SearchDragOut] canceled " +
-                $"reason={(paths.Length == 0 ? "no-paths" : "elevated")}");
-            return;
-        }
-
-        // Same payload pipeline as the grid's file drag-out: a native Shell
-        // IDataObject when attachable (Explorer-identical formats; .lnk
-        // results are no longer degraded to text), a complete StorageItems
-        // payload otherwise, never a partial one. Search drags deliberately
-        // skip the DeskBox origin stamps — receivers must treat them as
-        // plain external file transfers, not widget-internal associations.
-        var fileService = (App.Current as App)?.FileService;
-        bool prepared = FileItemDragPackage.TryPreparePaths(
-            args.Data,
-            paths,
-            candidatePaths => fileService?.GetStorageItems(candidatePaths) ?? [],
-            list => list.Count == 1
-                ? Path.GetFileName(list[0])
-                : list.Count.ToString(),
-            "search",
-            out FileItemDragPackageResult result);
-        if (!prepared)
-        {
-            args.Cancel = true;
-            return;
-        }
-
-        // Visuals and capability flags are set before the handler returns —
-        // DragUI setters are only legal before the drag starts. With this
-        // handler fully synchronous that ordering is structural rather than
-        // discipline: the 2026-11-06 fail-fast crashes were an await-ordered
-        // SetContentFromDataPackage call (0x800710DD once the deferral let
-        // the drag start mid-handler).
-        _hasEnteredPlatformDragLoop = true;
-        // Decision 1A: global search results span arbitrary disk/USB/UNC paths
-        // rather than managed file-box slots, so decouple search drag-out from
-        // FileWidget.ManagedDragOutAction == Move and protect external/system
-        // paths as Copy-only.
-        bool forceCopyOnly = Platform.DriveMediaInterop.ContainsProtectedInboundCopySource(
-            result.SourcePaths);
-        if (forceCopyOnly)
-        {
-            args.AllowedOperations = Services.WindowsCompatibilityService.IsWindows11OrLater
-                ? FileItemDragPackage.ProtectedWin11Operations
-                : DataPackageOperation.Copy;
-            args.Data.RequestedOperation = DataPackageOperation.Copy;
-        }
-        else
-        {
-            args.AllowedOperations =
-                FileItemDragPackage.ResolveDragOutAllowedOperations(
-                    Services.SettingsService.ManagedDragOutActionFollowWindows,
-                    sourcePaths: result.SourcePaths);
-            args.Data.RequestedOperation =
-                FileItemDragPackage.ResolveDragOutPreferredOperation(
-                    Services.SettingsService.ManagedDragOutActionFollowWindows,
-                    sourcePaths: result.SourcePaths);
-        }
-        args.DragUI.SetContentFromDataPackage();
-        App.Log(
-            $"[SearchDragOut] prepared paths={result.SourcePaths.Count} " +
-            $"native={result.UsesNativeShellDataObject} " +
-            $"allowed={args.AllowedOperations}");
-    }
-
-    private bool TryStartRecommendedExternalDragOut(
-        UIElement dragSource,
-        PointerRoutedEventArgs e,
-        IReadOnlyList<string> candidatePaths,
-        string originTag,
-        Action suspendInternalDrag)
-    {
-        if (_dragOutInProgress ||
-            IsCurrentProcessElevatedForDrag() ||
-            e.Pointer.PointerDeviceType is not (PointerDeviceType.Mouse or PointerDeviceType.Touchpad))
-        {
-            return false;
-        }
-
-        string[] existingPaths = candidatePaths
-            .Where(static path =>
-                !string.IsNullOrWhiteSpace(path) &&
-                (File.Exists(path) || Directory.Exists(path)))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-        if (existingPaths.Length == 0)
-        {
-            return false;
-        }
-
-        // Sample the pointer point on dragSource BEFORE suspending internal drag
-        // state, and keep pointer capture on dragSource until StartDragAsync
-        // enters the platform drag loop so fast flicks across the window edge
-        // never drop the XAML pointer contact.
-        PointerPoint dragPoint = e.GetCurrentPoint(dragSource);
-        suspendInternalDrag();
-        _dragOutInProgress = true;
-        _activeDragOutPaths = existingPaths;
-        dragSource.DragStarting += RecommendedApp_DragStarting;
-        StartExternalDragFadeTimer();
-        App.Log(
-            $"[SearchDragOut] handoff source={originTag} paths={existingPaths.Length}");
-        App.SafeFireAndForget(
-            () => RunRecommendedDragOutAsync(dragSource, dragPoint, existingPaths, originTag),
-            nameof(RunRecommendedDragOutAsync));
-        return true;
-    }
-
-    private async Task RunRecommendedDragOutAsync(
-        UIElement dragSource,
-        PointerPoint dragPoint,
-        string[] draggedPaths,
-        string originTag)
-    {
-        DataPackageOperation dropResult = DataPackageOperation.None;
-        bool shouldAutoHide = false;
-        try
-        {
-            dropResult = await dragSource.StartDragAsync(dragPoint);
-            shouldAutoHide = dropResult != DataPackageOperation.None &&
-                             !_isRecommendationEditMode &&
-                             !Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Menu);
-        }
-        catch (Exception ex)
-        {
-            App.Log(
-                $"[SearchDragOut] StartDragAsync failed " +
-                $"hresult=0x{ex.HResult:X8} type={ex.GetType().Name} " +
-                $"source={originTag} item='{draggedPaths[0]}'");
-        }
-        finally
-        {
-            StopExternalDragFadeTimer(restoreOpacity: !shouldAutoHide);
-            dragSource.DragStarting -= RecommendedApp_DragStarting;
-            dragSource.ReleasePointerCaptures();
-            _dragOutInProgress = false;
-            _activeDragOutPaths = null;
-        }
-
-        App.Log(
-            $"[SearchDragOut] completed source={originTag} drop={dropResult} items={draggedPaths.Length}");
-
-        // Keep edit mode open so batch-organizing users can continue dragging
-        // icons; in normal mode auto-collapse after drop unless Alt is held.
-        if (shouldAutoHide)
-        {
-            HidePopup();
-        }
-    }
-
-    private void RecommendedApp_DragStarting(UIElement sender, DragStartingEventArgs args)
-    {
-        string[] paths = _activeDragOutPaths ?? [];
-        if (paths.Length == 0 || IsCurrentProcessElevatedForDrag())
-        {
-            args.Cancel = true;
-            App.Log(
-                $"[SearchDragOut] canceled source=recommend " +
-                $"reason={(paths.Length == 0 ? "no-paths" : "elevated")}");
-            return;
-        }
-
-        var fileService = (App.Current as App)?.FileService;
-        bool prepared = FileItemDragPackage.TryPreparePaths(
-            args.Data,
-            paths,
-            candidatePaths => fileService?.GetStorageItems(candidatePaths) ?? [],
-            list => list.Count == 1
-                ? Path.GetFileNameWithoutExtension(list[0])
-                : list.Count.ToString(),
-            "search-recommend",
-            out FileItemDragPackageResult result);
-        if (!prepared)
-        {
-            args.Cancel = true;
-            return;
-        }
-
-        // Launcher shortcuts always advertise Copy so dropping into a widget or
-        // onto Desktop copies/references the shortcut instead of moving it out
-        // of Start Menu or another widget.
-        _hasEnteredPlatformDragLoop = true;
-        args.AllowedOperations = Services.WindowsCompatibilityService.IsWindows11OrLater
-            ? FileItemDragPackage.ProtectedWin11Operations
-            : DataPackageOperation.Copy;
-        args.Data.RequestedOperation = DataPackageOperation.Copy;
-        args.DragUI.SetContentFromDataPackage();
-        App.Log(
-            $"[SearchDragOut] prepared source=recommend paths={result.SourcePaths.Count} " +
-            $"native={result.UsesNativeShellDataObject} " +
-            $"allowed={args.AllowedOperations}");
-    }
-
-    private void StartExternalDragFadeTimer()
-    {
-        // Release PopupShowStoryboard's HoldEnd animation lock on RootGrid.Opacity
-        // and lock the local baseline at 1.0 so the fade timer can drive Opacity
-        // down to 0.20 once the pointer leaves the popup bounds.
-        PopupShowStoryboard.Stop();
-        RootGrid.Opacity = 1.0;
-        PopupScaleTransform.ScaleX = 1.0;
-        PopupScaleTransform.ScaleY = 1.0;
-
-        _isExternalFileDragActive = true;
-        _externalDragLeftPopupOnce = false;
-        _hasEnteredPlatformDragLoop = false;
-        DispatcherQueue? queue = DispatcherQueue;
-        if (queue is null)
-        {
-            return;
-        }
-
-        if (_externalDragFadeTimer is null)
-        {
-            DispatcherQueueTimer timer = queue.CreateTimer();
-            timer.IsRepeating = true;
-            timer.Interval = TimeSpan.FromMilliseconds(40);
-            timer.Tick += ExternalDragFadeTimer_Tick;
-            _externalDragFadeTimer = timer;
-            PerformanceLogger.RecordTransientUiTimerCreated();
-        }
-
-        _externalDragFadeTimer.Start();
-    }
-
-    private void ExternalDragFadeTimer_Tick(DispatcherQueueTimer sender, object args)
-    {
-        if (!_isExternalFileDragActive || !IsPopupVisible || _isWindowClosed || _hwnd == IntPtr.Zero)
-        {
-            return;
-        }
-
-        if (Win32Helper.GetCursorPos(out var cursor) &&
-            Win32Helper.GetWindowRect(_hwnd, out var rect))
-        {
-            bool insidePopup = cursor.X >= rect.Left && cursor.X < rect.Right &&
-                               cursor.Y >= rect.Top && cursor.Y < rect.Bottom;
-            if (!insidePopup)
-            {
-                _externalDragLeftPopupOnce = true;
-            }
-
-            // Once the drag has left the popup bounds, keep the popup faded and
-            // drop-through (WS_EX_TRANSPARENT) for the rest of the drag session
-            // so widgets positioned behind SearchPopupWindow remain visible and
-            // directly accept OLE drops without popup hit-test interference.
-            bool passthrough = _externalDragLeftPopupOnce && _hasEnteredPlatformDragLoop;
-            SetExternalDragWindowPassthrough(passthrough);
-
-            double targetOpacity = (_externalDragLeftPopupOnce || !insidePopup) ? 0.20 : 1.0;
-            if (Math.Abs(RootGrid.Opacity - targetOpacity) > 0.01)
-            {
-                RootGrid.Opacity = targetOpacity;
-            }
-        }
-    }
-
-    private void SetExternalDragWindowPassthrough(bool enabled)
-    {
-        if (_externalDragPassthroughApplied == enabled || _hwnd == IntPtr.Zero || _isWindowClosed)
-        {
-            return;
-        }
-
-        int extendedStyle = Win32Helper.GetWindowLong(_hwnd, Win32Helper.GWL_EXSTYLE);
-        if (enabled)
-        {
-            if ((extendedStyle & Win32Helper.WS_EX_TRANSPARENT) == 0)
-            {
-                _ = Win32Helper.SetWindowLong(
-                    _hwnd,
-                    Win32Helper.GWL_EXSTYLE,
-                    extendedStyle | Win32Helper.WS_EX_TRANSPARENT);
-                _ = Win32Helper.SetWindowPos(
-                    _hwnd,
-                    IntPtr.Zero,
-                    0,
-                    0,
-                    0,
-                    0,
-                    Win32Helper.SWP_NOMOVE |
-                    Win32Helper.SWP_NOSIZE |
-                    Win32Helper.SWP_NOZORDER |
-                    Win32Helper.SWP_NOACTIVATE |
-                    Win32Helper.SWP_FRAMECHANGED);
-            }
-
-            _externalDragPassthroughApplied = true;
-        }
-        else
-        {
-            _ = Win32Helper.SetWindowLong(
-                _hwnd,
-                Win32Helper.GWL_EXSTYLE,
-                extendedStyle & ~Win32Helper.WS_EX_TRANSPARENT);
-            _ = Win32Helper.SetWindowPos(
-                _hwnd,
-                IntPtr.Zero,
-                0,
-                0,
-                0,
-                0,
-                Win32Helper.SWP_NOMOVE |
-                Win32Helper.SWP_NOSIZE |
-                Win32Helper.SWP_NOZORDER |
-                Win32Helper.SWP_NOACTIVATE |
-                Win32Helper.SWP_FRAMECHANGED);
-            _externalDragPassthroughApplied = false;
-        }
-    }
-
-    private void StopExternalDragFadeTimer(bool restoreOpacity)
-    {
-        _isExternalFileDragActive = false;
-        _externalDragLeftPopupOnce = false;
-        _hasEnteredPlatformDragLoop = false;
-        _externalDragFadeTimer?.Stop();
-        SetExternalDragWindowPassthrough(false);
-        if (restoreOpacity && IsPopupVisible && !_isWindowClosed)
-        {
-            RootGrid.Opacity = 1.0;
-        }
-    }
-
-    private void DisposeExternalDragFadeTimer()
-    {
-        _isExternalFileDragActive = false;
-        _externalDragLeftPopupOnce = false;
-        _hasEnteredPlatformDragLoop = false;
-        SetExternalDragWindowPassthrough(false);
-        if (_externalDragFadeTimer is not { } timer)
-        {
-            return;
-        }
-
-        _externalDragFadeTimer = null;
-        timer.Tick -= ExternalDragFadeTimer_Tick;
-        try
-        {
-            timer.Stop();
-        }
-        catch
-        {
-        }
-        PerformanceLogger.RecordTransientUiTimerReleased();
-    }
-
-    /// <summary>
-    /// Returns the icon container within a result row. It is both the only drag
-    /// handle and the source of the compact system drag visual.
-    /// </summary>
-    private static UIElement? FindIconDragSource(SearchResultRowControl row)
-    {
-        return FindVisualChild<Grid>(row, "IconColumn");
-    }
-
-    /// <summary>
-    /// Recursively walks descendants of <paramref name="root"/> and returns the
-    /// first <typeparamref name="T"/> whose <see cref="FrameworkElement.Name"/>
-    /// equals <paramref name="childName"/>.
-    /// </summary>
-    private static T? FindVisualChild<T>(DependencyObject root, string childName)
-        where T : FrameworkElement
-    {
-        int count = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(root);
-        for (int i = 0; i < count; i++)
-        {
-            var child = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(root, i);
-            if (child is T fe && string.Equals(fe.Name, childName, StringComparison.Ordinal))
-            {
-                return fe;
-            }
-            var nested = FindVisualChild<T>(child, childName);
-            if (nested is not null)
-            {
-                return nested;
-            }
-        }
-        return null;
-    }
-
-    private void ResultsPanel_PointerReleased(object sender, PointerRoutedEventArgs e)
-    {
-        // Finalize rubber-band selection.
-        if (_isRubberBanding)
-        {
-            EndRubberBand();
-            e.Handled = true;
-            return;
-        }
-
-        // A normal click selects the row in ResultsPanel_PointerPressed. Opening is
-        // intentionally reserved for DoubleTapped or Enter, matching Explorer and
-        // Everything and preventing the first click of a double-click from hiding
-        // the popup before the second click arrives.
-        if (_pendingCtrlToggleOffOnRelease is { } pendingToggleOff && !_dragOutInProgress)
-        {
-            _pendingCtrlToggleOffOnRelease = null;
-            ToggleMultiSelectionItem(pendingToggleOff);
-        }
-        else
-        {
-            _pendingCtrlToggleOffOnRelease = null;
-        }
-
-        _pressedItem = null;
-        DisarmDragOutCandidate(e);
-    }
-
-    private void ResultsPanel_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
-    {
-        var source = e.OriginalSource as DependencyObject;
-        var pressedRow = FindItemRow(source);
-        if (pressedRow is not null && pressedRow.IsElementInsideActionButtons(source))
-        {
-            return;
-        }
-
-        var item = ResolveResultItem(e.OriginalSource as DependencyObject);
-        if (item is null)
-        {
-            return;
-        }
-
-        SelectResultItem(item, FindItemRow(e.OriginalSource as DependencyObject));
-        if (_viewModel.ExecuteItem(item))
-        {
-            e.Handled = true;
-        }
-    }
-
-    private void SelectResultItem(SearchResultItem item, SearchResultRowControl? row = null)
-    {
-        int index = _viewModel.CurrentResults.IndexOf(item);
-        if (index >= 0)
-        {
-            _viewModel.SelectedIndex = index;
-        }
-
-        _viewModel.SelectedItem = item;
-        row ??= FindRowByDataContext(ResultsRepeater, item);
-        if (row is not null)
-        {
-            row.IsTabStop = true;
-            row.Focus(FocusState.Pointer);
-        }
-    }
-
-    private void OnCurrentResultsCollectionChanged(
-        object? sender,
-        System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
-    {
-        if (IsPopupVisible && !_isWindowClosed)
-        {
-            UpdatePopupDynamicBounds();
-        }
-    }
-
-    private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
-    {
-        switch (e.PropertyName)
-        {
-            case nameof(SearchPopupViewModel.SelectedItem):
-                UpdateSelectionHighlight();
-                UpdateSelectionActions();
-                break;
-
-            case nameof(SearchPopupViewModel.ActiveScopeBadgeText):
-                UpdateScopePrefixBadge(SearchTextBox.Text);
-                break;
-
-            case nameof(SearchPopupViewModel.EffectiveHighlightQuery):
-                RefreshPreparedResultRows();
-                break;
-
-            case nameof(SearchPopupViewModel.ShouldShowCategoryBar):
-                UpdatePanelVisibility();
-                break;
-
-            case nameof(SearchPopupViewModel.IsSearching):
-            case nameof(SearchPopupViewModel.HasResults):
-            case nameof(SearchPopupViewModel.HasCurrentResults):
-                UpdatePanelVisibility();
-                if (e.PropertyName == nameof(SearchPopupViewModel.HasResults) &&
-                    _viewModel.HasResults)
-                {
-                    if (_viewModel.IsApplyingBackgroundResultRefresh)
-                    {
-                        ResultsPanel.Opacity = 1;
-                    }
-                }
-                break;
-
-            case nameof(SearchPopupViewModel.SelectedTab):
-                ResultsPanel.ChangeView(null, 0, null, disableAnimation: true);
-                _measuredResultRowHeight = null;
-                SyncTabSelection();
-                RefreshPreparedResultRows();
-                UpdatePanelVisibility();
-                UpdateSelectionHighlight();
-                QueueTabSelectionRefreshAndFocus();
-                break;
-
-            case nameof(SearchPopupViewModel.ResultFilter):
-                UpdatePanelVisibility();
-                break;
-
-            case nameof(SearchPopupViewModel.SortColumn):
-            case nameof(SearchPopupViewModel.SortAscending):
-                UpdateSortHeaders();
-                break;
-
-            case nameof(SearchPopupViewModel.HasRecommendedEntries):
-            case nameof(SearchPopupViewModel.HasHiddenRecommendations):
-            case nameof(SearchPopupViewModel.HiddenRecommendationCount):
-                UpdateRecommendationHeaderState();
-                UpdatePanelVisibility();
-                break;
-
-            case nameof(SearchPopupViewModel.IsEverythingPromptVisible):
-            case nameof(SearchPopupViewModel.EverythingPromptText):
-            case nameof(SearchPopupViewModel.EverythingPromptActionText):
-            case nameof(SearchPopupViewModel.IsEverythingPromptWarning):
-                UpdateEverythingPromptBanner();
-                break;
-
-            case nameof(SearchPopupViewModel.StatusText):
-                // Result counts and timing remain diagnostic data, not persistent UI.
-                break;
-        }
-    }
-
-    private void QueueTabSelectionRefreshAndFocus()
-    {
-        int generation = ++_tabFocusRestoreGeneration;
-        DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
-        {
-            if (generation != _tabFocusRestoreGeneration || !IsPopupVisible)
-            {
-                return;
-            }
-
-            UpdateSelectionHighlight();
-
-            // SelectionChanged runs inside ListView pointer handling. Restoring
-            // focus synchronously can be overwritten when that pointer route
-            // finishes, so perform it on the next low-priority dispatcher pass.
-            SearchTextBox.Focus(FocusState.Programmatic);
-        });
-    }
-
-    /// <summary>
-    /// Highlights the row for the keyboard-selected result and brings it into view.
-    /// </summary>
-    private void UpdateSelectionHighlight()
-    {
-        ++_selectedRowHighlightGeneration;
-        if (_selectedRow is not null)
-        {
-            _selectedRow.IsSelected = false;
-            _selectedRow.IsTabStop = false;
-            _selectedRow = null;
-        }
-
-        if (_viewModel.SelectedItem is not { } selected)
-        {
-            ScheduleSelectedItemDetailsRefresh();
-            return;
-        }
-
-        if (FindRowByDataContext(ResultsRepeater, selected) is { } row)
-        {
-            SetSelectedRow(row);
-            EnsureSelectedRowVisible(row);
-        }
-        else if (_viewModel.SelectedIndex >= 0)
-        {
-            // Element not realized (off-screen). Scroll the ScrollViewer
-            // so the ItemsRepeater realizes it, then keep retrying the
-            // highlight — realization completes asynchronously.
-            ScrollToSelectedIndex();
-            ScheduleSelectedRowHighlight();
-        }
-
-        ScheduleSelectedItemDetailsRefresh();
-    }
-
-    private void EnsureSelectedRowVisible(SearchResultRowControl row)
-    {
-        // Use the row's real viewport-relative position: arithmetic from a
-        // cached row height drifts once heights vary or virtualization
-        // realizes past the viewport, which made navigation skip rows.
-        Windows.Foundation.Rect bounds = row.TransformToVisual(ResultsPanel)
-            .TransformBounds(new Windows.Foundation.Rect(0, 0, row.ActualWidth, row.ActualHeight));
-        double viewportHeight = ResultsPanel.ViewportHeight;
-
-        if (bounds.Y >= 0 && (bounds.Y + bounds.Height) <= viewportHeight)
-        {
-            // Fully visible: keyboard moves must not scroll the list.
-            return;
-        }
-
-        double scrollTarget = bounds.Y < 0
-            ? Math.Max(0, ResultsPanel.VerticalOffset + bounds.Y)
-            : ResultsPanel.VerticalOffset + bounds.Y + bounds.Height - viewportHeight;
-        ResultsPanel.ChangeView(null, scrollTarget, null, disableAnimation: true);
-    }
-
-    private void SetSelectedRow(SearchResultRowControl row)
-    {
-        _selectedRow = row;
-        row.IsSelected = true;
-        row.IsTabStop = true;
-        _measuredResultRowHeight = row.ActualHeight > 0
-            ? row.ActualHeight + row.Margin.Top + row.Margin.Bottom
-            : _measuredResultRowHeight;
-    }
-
-    private void ScheduleSelectedRowHighlight()
-    {
-        int generation = ++_selectedRowHighlightGeneration;
-        App.UiDispatcherQueue?.TryEnqueue(async () =>
-        {
-            // Virtualization realizes the selected row a few frames after the
-            // scroll lands; retry until it appears or the selection moves on.
-            for (int attempt = 0; attempt < 8; attempt++)
-            {
-                await Task.Delay(24);
-                if (generation != _selectedRowHighlightGeneration ||
-                    _viewModel.SelectedItem is not { } selected)
-                {
-                    return;
-                }
-
-                if (FindRowByDataContext(ResultsRepeater, selected) is { } row)
-                {
-                    if (_selectedRow is null)
-                    {
-                        SetSelectedRow(row);
-                    }
-
-                    EnsureSelectedRowVisible(row);
-
-                    return;
-                }
-            }
-        });
-    }
-
-    /// <summary>
-    /// Scrolls the results ScrollViewer to bring the selected index into view.
-    /// Used when the ItemsRepeater has not realized the element yet.
-    /// </summary>
-    private void ScrollToSelectedIndex()
-    {
-        int index = _viewModel.SelectedIndex;
-        if (index < 0)
-        {
-            return;
-        }
-
-        double rowHeight = GetMeasuredResultRowHeight();
-        double targetTop = index * rowHeight;
-        double targetBottom = targetTop + rowHeight;
-        double viewTop = ResultsPanel.VerticalOffset;
-        double viewBottom = viewTop + ResultsPanel.ViewportHeight;
-
-        if (targetTop >= viewTop && targetBottom <= viewBottom)
-        {
-            // Already inside the viewport: scrolling would make the list jump.
-            // Realization is handled by the highlight retry.
-            return;
-        }
-
-        // Selection moves one row at a time, so align the row's edge with the
-        // matching viewport edge — exactly one row of travel per keypress.
-        double scrollTarget = targetTop < viewTop
-            ? Math.Max(0, targetTop)
-            : targetBottom - ResultsPanel.ViewportHeight;
-
-        ResultsPanel.ChangeView(null, scrollTarget, null, disableAnimation: true);
-    }
-
-    private double GetMeasuredResultRowHeight()
-    {
-        if (_measuredResultRowHeight is { } cached && cached > 0)
-        {
-            return cached;
-        }
-
-        if (ResultsRepeater.ItemsSource is System.Collections.ICollection coll)
-        {
-            for (int i = 0; i < Math.Min(coll.Count, 5); i++)
-            {
-                if (ResultsRepeater.TryGetElement(i) is FrameworkElement fe && fe.ActualHeight > 0)
-                {
-                    double measured = fe.ActualHeight + fe.Margin.Top + fe.Margin.Bottom;
-                    _measuredResultRowHeight = measured;
-                    return measured;
-                }
-            }
-        }
-
-        return 48; // Fallback estimate
-    }
-
-    /// <summary>
-    /// Freshly populated results are realized one layout pass after the collection
-    /// changes, so a selection made before that finds no row. Re-apply the highlight
-    /// and the lazy icon visuals as each row element is prepared.
-    /// </summary>
-    private void OnResultsElementPrepared(ItemsRepeater sender, ItemsRepeaterElementPreparedEventArgs args)
-    {
-        if (args.Element is not SearchResultRowControl row)
-        {
-            return;
-        }
-
-        // ElementPrepared can run before the DataTemplate root receives its inherited
-        // DataContext. Resolve the item from the repeater index so the one-time compiled
-        // bindings never get refreshed against a transient null value. The DataContext
-        // fallback keeps this safe if the source changes while an element is recycled.
-        SearchResultItem? preparedItem = args.Index >= 0 &&
-                                         args.Index < _viewModel.CurrentResults.Count
-            ? _viewModel.CurrentResults[args.Index]
-            : row.DataContext as SearchResultItem;
-        row.PrimaryActionRequested -= OnRowPrimaryActionRequested;
-        row.OpenLocationRequested -= OnRowOpenLocationRequested;
-        row.MoreActionsRequested -= OnRowMoreActionsRequested;
-        row.PrimaryActionRequested += OnRowPrimaryActionRequested;
-        row.OpenLocationRequested += OnRowOpenLocationRequested;
-        row.MoreActionsRequested += OnRowMoreActionsRequested;
-
-        bool isCopyItem = preparedItem?.Kind == SearchResultKind.Clipboard ||
-                          (preparedItem?.Kind == SearchResultKind.Action &&
-                           preparedItem.ActionId?.StartsWith("copy-calc:", StringComparison.Ordinal) == true);
-        row.DataContext = preparedItem;
-        row.PrepareItem(preparedItem);
-        row.ConfigureRowPresentation(
-            _viewModel.EffectiveHighlightQuery,
-            openTooltip: _localizationService.T(isCopyItem ? "Common.Copy" : "Search.Menu.Open"),
-            openLocationTooltip: _localizationService.T("Search.Menu.OpenLocation"),
-            moreTooltip: _localizationService.T("Search.Row.MoreActions"));
-
-        // Lazy shell icon: show the real icon once resolved, otherwise the glyph block.
-        // Recycled rows can be re-bound to the same item instance (no DataContextChanged),
-        // so this must run on every prepare.
-        row.RefreshIconVisuals();
-        row.SetFileColumnsVisible(AreFileColumnsVisible());
-        if (row.Item is { IconResolved: false } item)
-        {
-            _ = EnrichPreparedResultRowAsync(row, item);
-        }
-
-        bool isSelectedRow = _viewModel.SelectedItem is { } selected &&
-                             ReferenceEquals(row.Item, selected);
-        if (isSelectedRow && !ReferenceEquals(row, _selectedRow))
-        {
-            if (_selectedRow is not null)
-            {
-                _selectedRow.IsSelected = false;
-            }
-
-            _selectedRow = row;
-            row.IsSelected = true;
-            row.IsTabStop = true;
-        }
-        else if (!isSelectedRow && row.IsSelected)
-        {
-            // A recycled element may still carry stale selection visuals.
-            row.IsSelected = false;
-            row.IsTabStop = false;
-        }
-
-        // Sync multi-selection state on recycled elements.
-        row.IsMultiSelected = row.Item is { } rowItem && _multiSelectedItems.Contains(rowItem);
-    }
-
-    private void OnResultsElementClearing(ItemsRepeater sender, ItemsRepeaterElementClearingEventArgs args)
-    {
-        if (args.Element is not SearchResultRowControl row)
-        {
-            return;
-        }
-
-        if (ReferenceEquals(_selectedRow, row))
-        {
-            _selectedRow = null;
-        }
-
-        if (_dragOutCandidate is { } dragCandidate &&
-            ReferenceEquals(dragCandidate.Row, row))
-        {
-            DisarmDragOutCandidate();
-        }
-
-        row.PrimaryActionRequested -= OnRowPrimaryActionRequested;
-        row.OpenLocationRequested -= OnRowOpenLocationRequested;
-        row.MoreActionsRequested -= OnRowMoreActionsRequested;
-        row.IsSelected = false;
-        row.IsMultiSelected = false;
-        row.IsTabStop = false;
-        row.PrepareItem(null);
-        row.RefreshIconVisuals();
-        row.DataContext = null;
-    }
-
-    private void OnRowPrimaryActionRequested(SearchResultRowControl row, SearchResultItem item)
-    {
-        SelectResultItem(item, row);
-        if (_viewModel.ExecuteItem(item))
-        {
-            HidePopup();
-        }
-    }
-
-    private void OnRowOpenLocationRequested(SearchResultRowControl row, SearchResultItem item)
-    {
-        SelectResultItem(item, row);
-        if (_viewModel.OpenSelectedLocation())
-        {
-            HidePopup();
-        }
-    }
-
-    private void OnRowMoreActionsRequested(
-        SearchResultRowControl row,
-        SearchResultItem item,
-        FrameworkElement anchorButton)
-    {
-        ClearMultiSelection();
-        SelectResultItem(item, row);
-        _selectionAnchorIndex = _viewModel.CurrentResults.IndexOf(item);
-        ShowResultFlyout(item, anchorButton, new Windows.Foundation.Point(0, anchorButton.ActualHeight));
-    }
-
-    private async Task EnrichPreparedResultRowAsync(
-        SearchResultRowControl row,
-        SearchResultItem item)
-    {
-        await _viewModel.EnsureResultMetadataAsync(item);
-        if (!DispatcherQueue.HasThreadAccess)
-        {
-            DispatcherQueue.TryEnqueue(() => RefreshPreparedResultRow(row, item));
-            return;
-        }
-
-        RefreshPreparedResultRow(row, item);
-    }
-
-    private void RefreshPreparedResultRow(
-        SearchResultRowControl row,
-        SearchResultItem item)
-    {
-        if (ReferenceEquals(row.Item, item))
-        {
-            row.RefreshIconVisuals();
-        }
-
-        if (ReferenceEquals(_displayedDetailsItem, item) &&
-            DetailsPaneCard.Visibility == Visibility.Visible)
-        {
-            PopulateDetailsPane(item, immediate: true);
-        }
-    }
-
-    private void ResultsPanel_RightTapped(object sender, RightTappedRoutedEventArgs e)
-    {
-        DisarmDragOutCandidate();
-
-        var item = ResolveResultItem(e.OriginalSource as DependencyObject);
-        if (item is null)
-        {
-            // Right-click on empty area with multi-selection: show batch context menu.
-            if (_multiSelectedItems.Count > 0)
-            {
-                ShowBatchResultFlyout(ResultsPanel, e.GetPosition(ResultsPanel));
-            }
-            return;
-        }
-
-        // If the right-clicked item is already in multi-selection, show batch menu.
-        if (_multiSelectedItems.Contains(item))
-        {
-            var batchAnchor = FindItemRow(e.OriginalSource as DependencyObject)
-                              as UIElement ?? ResultsPanel;
-            ShowBatchResultFlyout(batchAnchor, e.GetPosition(batchAnchor));
-            e.Handled = true;
-            return;
-        }
-
-        ClearMultiSelection();
-        var row = FindItemRow(e.OriginalSource as DependencyObject);
-        SelectResultItem(item, row);
-        _selectionAnchorIndex = _viewModel.CurrentResults.IndexOf(item);
-        var anchor = (UIElement?)row ?? ResultsPanel;
-        ShowResultFlyout(item, anchor, e.GetPosition(anchor));
-        e.Handled = true;
-    }
-
-    // ── Icon-only drag detection ──
-
-    /// <summary>
-    /// Checks whether the pointer press originated within the icon column of the row.
-    /// </summary>
-    private static bool IsPointerOnIcon(DependencyObject? element, SearchResultRowControl row)
-    {
-        while (element is not null)
-        {
-            if (element is FrameworkElement { Name: "IconColumn" })
-            {
-                return true;
-            }
-            if (ReferenceEquals(element, row))
-            {
-                return false;
-            }
-            element = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(element);
-        }
-        return false;
-    }
-
-    // ── Rubber-band multi-selection ──
-
-    private void ClearAllResultRowTransientStates()
-    {
-        int childCount = VisualTreeHelper.GetChildrenCount(ResultsRepeater);
-        for (int i = 0; i < childCount; i++)
-        {
-            if (VisualTreeHelper.GetChild(ResultsRepeater, i) is SearchResultRowControl row)
-            {
-                row.ClearTransientPointerStates();
-            }
-        }
-    }
-
-    private void StartRubberBand(PointerRoutedEventArgs e)
-    {
-        ClearAllResultRowTransientStates();
-        _isRubberBanding = true;
-        bool isAdditive = Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control);
-        _rubberBandBaseSelection.Clear();
-        if (isAdditive)
-        {
-            _rubberBandBaseSelection.UnionWith(_multiSelectedItems);
-        }
-        else
-        {
-            _multiSelectedItems.Clear();
-            _selectionAnchorIndex = -1;
-            SyncMultiSelectionVisuals();
-            UpdateSelectionActions();
-        }
-
-        var position = e.GetCurrentPoint(ResultsSurface).Position;
-        _rubberBandStart = position;
-        _rubberBandCurrent = position;
-        _rubberBandPointerInViewport = e.GetCurrentPoint(ResultsPanel).Position;
-        RubberBandRect.Visibility = Visibility.Visible;
-        UpdateRubberBandRect(position, position);
-        ResultsPanel.CapturePointer(e.Pointer);
-        EnsureRubberBandAutoScrollTimer();
-        _rubberBandAutoScrollTimer!.Start();
-    }
-
-    private void UpdateRubberBand(Point position)
-    {
-        _rubberBandCurrent = position;
-        UpdateRubberBandRect(_rubberBandStart, position);
-        SelectItemsIntersectingRubberBand(_rubberBandStart, position);
-    }
-
-    private void EndRubberBand()
-    {
-        _isRubberBanding = false;
-        _rubberBandAutoScrollTimer?.Stop();
-        _rubberBandBaseSelection.Clear();
-        RubberBandRect.Visibility = Visibility.Collapsed;
-        ResultsPanel.ReleasePointerCaptures();
-    }
-
-    private void ResultsPanel_PointerCaptureLost(object sender, PointerRoutedEventArgs e)
-    {
-        // Losing the panel capture ends the armed drag gesture: whatever took
-        // the pointer owns it now, and a later move must not start a drag.
-        DisarmDragOutCandidate();
-
-        if (!_isRubberBanding)
-        {
-            return;
-        }
-
-        _isRubberBanding = false;
-        _rubberBandAutoScrollTimer?.Stop();
-        _rubberBandBaseSelection.Clear();
-        RubberBandRect.Visibility = Visibility.Collapsed;
-    }
-
-    private void EnsureRubberBandAutoScrollTimer()
-    {
-        if (_rubberBandAutoScrollTimer is not null)
-        {
-            return;
-        }
-
-        _rubberBandAutoScrollTimer = new DispatcherTimer
-        {
-            Interval = TimeSpan.FromMilliseconds(32)
-        };
-        _rubberBandAutoScrollTimer.Tick += OnRubberBandAutoScrollTick;
-    }
-
-    private void OnRubberBandAutoScrollTick(object? sender, object e)
-    {
-        if (!_isRubberBanding)
-        {
-            _rubberBandAutoScrollTimer?.Stop();
-            return;
-        }
-
-        double delta = SearchResultSelectionPolicy.GetAutoScrollDelta(
-            _rubberBandPointerInViewport.Y,
-            ResultsPanel.ViewportHeight);
-        if (Math.Abs(delta) < 0.1)
-        {
-            return;
-        }
-
-        double previousOffset = ResultsPanel.VerticalOffset;
-        double targetOffset = Math.Clamp(
-            previousOffset + delta,
-            0,
-            ResultsPanel.ScrollableHeight);
-        if (Math.Abs(targetOffset - previousOffset) < 0.1)
-        {
-            return;
-        }
-
-        ResultsPanel.ChangeView(
-            null,
-            targetOffset,
-            null,
-            disableAnimation: true);
-        _rubberBandCurrent = new Point(
-            _rubberBandCurrent.X,
-            _rubberBandCurrent.Y + targetOffset - previousOffset);
-        UpdateRubberBand(_rubberBandCurrent);
-    }
-
-    private void ResultsPanel_SizeChanged(object sender, SizeChangedEventArgs e)
-    {
-        // Keep the transparent selection surface at least as tall as the viewport,
-        // so blank space below a short result list can also start a selection box.
-        ResultsSurface.MinHeight = Math.Max(
-            0,
-            e.NewSize.Height - ResultsPanel.Padding.Top - ResultsPanel.Padding.Bottom);
-    }
-
-    private void ResultsPanel_ViewChanged(object sender, ScrollViewerViewChangedEventArgs e)
-    {
-        // The keyboard-selected row may finish realizing a frame after the
-        // scroll lands; re-check the highlight whenever the view settles.
-        if (_selectedRow is null && _viewModel.SelectedItem is not null)
-        {
-            ScheduleSelectedRowHighlight();
-        }
-
-        if (_isRubberBanding || !_viewModel.HasMoreResults || _viewModel.IsLoadingMore)
-        {
-            return;
-        }
-
-        double remaining = ResultsPanel.ScrollableHeight - ResultsPanel.VerticalOffset;
-        double threshold = Math.Max(320, ResultsPanel.ViewportHeight * 0.75);
-        if (remaining <= threshold)
-        {
-            _ = _viewModel.LoadMoreResultsAsync();
-        }
-    }
-
-    private void UpdateRubberBandRect(Point start, Point end)
-    {
-        double x = Math.Min(start.X, end.X);
-        double y = Math.Min(start.Y, end.Y);
-        double w = Math.Abs(end.X - start.X);
-        double h = Math.Abs(end.Y - start.Y);
-        RubberBandRect.Width = w;
-        RubberBandRect.Height = h;
-        // Pointer, rows, and rectangle all use ResultsSurface coordinates. This
-        // stays correct across scrolling and avoids hard-coded padding offsets.
-        RubberBandRect.RenderTransform = new TranslateTransform { X = x, Y = y };
-    }
-
-    private static bool Intersects(Rect a, Rect b)
-    {
-        return a.X < b.X + b.Width &&
-               a.X + a.Width > b.X &&
-               a.Y < b.Y + b.Height &&
-               a.Y + a.Height > b.Y;
-    }
-
-    private void SelectItemsIntersectingRubberBand(Point start, Point end)
-    {
-        var rubberRect = new Rect(
-            Math.Min(start.X, end.X),
-            Math.Min(start.Y, end.Y),
-            Math.Abs(end.X - start.X),
-            Math.Abs(end.Y - start.Y));
-
-        // If the rubber band is too small, don't select anything yet.
-        if (rubberRect.Width < 3 && rubberRect.Height < 3)
-        {
-            return;
-        }
-
-        _suppressMultiSelectSync = true;
-        _multiSelectedItems.Clear();
-        _multiSelectedItems.UnionWith(_rubberBandBaseSelection);
-
-        if (_viewModel.CurrentResults is { } results)
-        {
-            for (int i = 0; i < results.Count; i++)
-            {
-                if (ResultsRepeater.TryGetElement(i) is not FrameworkElement fe)
-                {
-                    continue;
-                }
-
-                var elementRect = new Rect(
-                    fe.TransformToVisual(ResultsSurface).TransformPoint(new Point(0, 0)),
-                    new Size(fe.ActualWidth, fe.ActualHeight));
-
-                if (Intersects(rubberRect, elementRect))
-                {
-                    _multiSelectedItems.Add(results[i]);
-                }
-            }
-        }
-
-        _suppressMultiSelectSync = false;
-        SyncMultiSelectionVisuals();
-        UpdateSelectionActions();
-    }
-
-    // ── Multi-selection helpers ──
-
-    private void ToggleMultiSelectionItem(SearchResultItem item)
-    {
-        if (!_multiSelectedItems.Add(item))
-        {
-            _multiSelectedItems.Remove(item);
-        }
-        SyncMultiSelectionVisuals();
-        UpdateSelectionActions();
-    }
-
-    private void RangeSelectItems(int fromIndex, SearchResultItem toItem)
-    {
-        int toIndex = _viewModel.CurrentResults.IndexOf(toItem);
-        var range = SearchResultSelectionPolicy.GetRange(
-            fromIndex,
-            toIndex,
-            _viewModel.CurrentResults.Count);
-        if (range.Start < 0)
-        {
-            return;
-        }
-
-        _multiSelectedItems.Clear();
-        for (int i = range.Start; i <= range.End; i++)
-        {
-            _multiSelectedItems.Add(_viewModel.CurrentResults[i]);
-        }
-
-        SelectResultItem(toItem);
-        SyncMultiSelectionVisuals();
-        UpdateSelectionActions();
-    }
-
-    private void ClearMultiSelection()
-    {
-        _selectionAnchorIndex = -1;
-        if (_multiSelectedItems.Count == 0)
-        {
-            return;
-        }
-        _multiSelectedItems.Clear();
-        SyncMultiSelectionVisuals();
-        UpdateSelectionActions();
-    }
-
-    private void SyncMultiSelectionVisuals()
-    {
-        if (_suppressMultiSelectSync)
-        {
-            return;
-        }
-
-        if (_viewModel.CurrentResults is { } results)
-        {
-            for (int i = 0; i < results.Count; i++)
-            {
-                if (ResultsRepeater.TryGetElement(i) is SearchResultRowControl row)
-                {
-                    row.IsMultiSelected = _multiSelectedItems.Contains(results[i]);
-                }
-            }
-        }
-    }
-
-    // ── Batch operations ──
-
-    private void ShowBatchResultFlyout(UIElement anchor, Point point)
-    {
-        var flyout = BuildBatchContextMenu();
-        if (flyout.Items.Count == 0)
-        {
-            return;
-        }
-        _restoreResultFocusAfterFlyout = true;
-        flyout.Closed += (_, _) =>
-        {
-            ClearAllResultRowTransientStates();
-            _restoreResultFocusAfterFlyout = false;
-        };
-        flyout.ShowAt(anchor, point);
-    }
-
-    private MenuFlyout BuildBatchContextMenu()
-    {
-        var flyout = new MenuFlyout();
-        int count = _multiSelectedItems.Count;
-        bool allFileSystem = count > 0 && _multiSelectedItems.All(i =>
-            i.Kind is SearchResultKind.File or SearchResultKind.Folder &&
-            !string.IsNullOrWhiteSpace(i.DetailPath) &&
-            (File.Exists(i.DetailPath) || Directory.Exists(i.DetailPath)));
-
-        if (!allFileSystem)
-        {
-            var openAll = new MenuFlyoutItem
-            {
-                Text = string.Format(_localizationService.T("Search.Batch.OpenAll"), count),
-                Icon = new FontIcon { Glyph = "\uE8E5" }
-            };
-            openAll.Click += (_, _) => _ = OpenSelectedItemsWithGuardAsync();
-            flyout.Items.Add(openAll);
-            return flyout;
-        }
-
-        var copyItem = new MenuFlyoutItem
-        {
-            Text = _localizationService.T("Common.Copy"),
-            Icon = new FontIcon { Glyph = "\uE8C8" }
-        };
-        copyItem.Click += async (_, _) => await CopySelectedItemsAsync(DataPackageOperation.Copy);
-        flyout.Items.Add(copyItem);
-
-        var cutItem = new MenuFlyoutItem
-        {
-            Text = _localizationService.T("Common.Cut"),
-            Icon = new FontIcon { Glyph = "\uE8C6" }
-        };
-        cutItem.Click += async (_, _) => await CopySelectedItemsAsync(DataPackageOperation.Move);
-        flyout.Items.Add(cutItem);
-
-        flyout.Items.Add(new MenuFlyoutSeparator());
-
-        var deleteItem = new MenuFlyoutItem
-        {
-            Text = _localizationService.T("Search.Delete.Action"),
-            Icon = new FontIcon { Glyph = "\uE74D" }
-        };
-        deleteItem.Click += async (_, _) => await DeleteSelectedItemsAsync();
-        flyout.Items.Add(deleteItem);
-
-        return flyout;
-    }
-
-    private void OpenSelectedItems()
-    {
-        foreach (var item in _multiSelectedItems.ToList())
-        {
-            _viewModel.ExecuteItem(item);
-        }
-        ClearMultiSelection();
-    }
-
-    private async Task OpenSelectedItemsWithGuardAsync()
-    {
-        // Deep review R18 (item C): the batch menu only appears for mixed
-        // selections, where "open all" launches N Shell operations one by
-        // one with no ceiling — a wide query's Ctrl+A could reach hundreds
-        // of items. Explorer confirms past 15; match that precedent.
-        var items = _multiSelectedItems.ToList();
-        const int OpenAllConfirmationThreshold = 15;
-        if (items.Count > OpenAllConfirmationThreshold)
-        {
-            var dialog = new ContentDialog
-            {
-                XamlRoot = RootGrid.XamlRoot,
-                Title = _localizationService.Format("Search.Batch.OpenAll.ConfirmTitle", items.Count),
-                Content = _localizationService.Format("Search.Batch.OpenAll.ConfirmBody", items.Count),
-                PrimaryButtonText = _localizationService.T("Common.Open"),
-                CloseButtonText = _localizationService.T("Common.Cancel"),
-                DefaultButton = ContentDialogButton.Primary
-            };
-            if (await dialog.ShowAsync() != ContentDialogResult.Primary)
-            {
-                return;
-            }
-        }
-
-        OpenSelectedItems();
-    }
-
-    private async Task CopySelectedItemsAsync(DataPackageOperation operation)
-    {
-        var paths = _multiSelectedItems
-            .Where(i => !string.IsNullOrWhiteSpace(i.DetailPath))
-            .Select(i => i.DetailPath!)
-            .ToList();
-        if (paths.Count == 0)
-        {
-            return;
-        }
-
-        try
-        {
-            bool cut = operation == DataPackageOperation.Move &&
-                !Platform.DriveMediaInterop.IsProtectedDragOutSource(paths);
-            if (!ShellClipboardHelper.TrySetFileDropList(paths, cut))
-            {
-                var data = new DataPackage
-                {
-                    RequestedOperation = cut ? DataPackageOperation.Move : DataPackageOperation.Copy
-                };
-                await SetDragPayloadAsync(data, paths);
-                Clipboard.SetContent(data);
-                Clipboard.Flush();
-            }
-
-            ShowTransientStatus(_localizationService.T(
-                cut
-                    ? "Search.Action.CutReady"
-                    : "Search.Action.CopyReady"));
-        }
-        catch (Exception ex)
-        {
-            App.Log($"[SearchPopup] Batch clipboard failed: {ex.Message}");
-            ShowTransientStatus(_localizationService.T("Search.Action.FileOperationFailed"));
-        }
-    }
-
-    private async Task DeleteSelectedItemsAsync()
-    {
-        var items = _multiSelectedItems
-            .Where(i => !string.IsNullOrWhiteSpace(i.DetailPath))
-            .ToList();
-        if (items.Count == 0)
-        {
-            return;
-        }
-
-        await DeleteFileSystemItemsCoreAsync(
-            items.Select(i => i.DetailPath!),
-            clearMultiSelectionOnSuccess: true);
-    }
-
-    /// <summary>
-    /// Deletes search-result entries through the Shell with an owner window,
-    /// so the native confirmation (recycle or permanent, per the user's own
-    /// Explorer settings) replaces the retired self-drawn dialog: that dialog
-    /// promised a Recycle Bin while the underlying flags silently degraded to
-    /// a permanent delete on volumes without one.
-    /// </summary>
-    private async Task DeleteFileSystemItemsCoreAsync(
-        IEnumerable<string> paths,
-        bool clearMultiSelectionOnSuccess)
-    {
-        var fileService = (App.Current as App)?.FileService;
-        if (fileService is null || _hwnd == IntPtr.Zero)
-        {
-            ShowTransientStatus(_localizationService.T("Search.Action.FileOperationFailed"));
-            return;
-        }
-
-        try
-        {
-            IReadOnlySet<string> deletedPaths = await fileService.DeleteEntriesWithShellAsync(
-                paths,
-                recycle: true,
-                _hwnd);
-            if (deletedPaths.Count > 0)
-            {
-                ShowTransientStatus(_localizationService.T("Search.Action.Deleted"));
-                if (clearMultiSelectionOnSuccess)
-                {
-                    ClearMultiSelection();
-                }
-            }
-
-            await RefreshResultsAfterFileOperationAsync();
-        }
-        catch (Exception ex)
-        {
-            App.Log($"[SearchPopup] Delete failed: {ex.Message}");
-            ShowTransientStatus(_localizationService.T("Search.Action.FileOperationFailed"));
-        }
-    }
-
-    private async void CopySelectedButton_Click(object sender, RoutedEventArgs e)
-    {
-        await CopySelectedItemsAsync(DataPackageOperation.Copy);
-    }
-
-    private async void CutSelectedButton_Click(object sender, RoutedEventArgs e)
-    {
-        await CopySelectedItemsAsync(DataPackageOperation.Move);
-    }
-
-    private async void DeleteSelectedButton_Click(object sender, RoutedEventArgs e)
-    {
-        await DeleteSelectedItemsAsync();
-    }
-
-    private void ShowResultFlyout(SearchResultItem item, UIElement anchor, Windows.Foundation.Point point)
-    {
-        var flyout = BuildResultContextMenu(item);
-        if (flyout.Items.Count == 0)
-        {
-            return;
-        }
-
-        _restoreResultFocusAfterFlyout = true;
-        flyout.Closed += (_, _) =>
-        {
-            ClearAllResultRowTransientStates();
-            if (_restoreResultFocusAfterFlyout && IsPopupVisible && _viewModel.SelectedItem is not null)
-            {
-                DispatcherQueue.TryEnqueue(() => FocusSelectedResult());
-            }
-
-            _restoreResultFocusAfterFlyout = false;
-        };
-        flyout.ShowAt(anchor, point);
-    }
-
-    /// <summary>
-    /// Builds a context menu of secondary actions for a search result row.
-    /// </summary>
-    private MenuFlyout BuildResultContextMenu(SearchResultItem item)
-    {
-        var flyout = new MenuFlyout();
-
-        bool isCopyAction = item.Kind == SearchResultKind.Clipboard ||
-                            (item.Kind == SearchResultKind.Action &&
-                             item.ActionId?.StartsWith("copy-calc:", StringComparison.Ordinal) == true);
-        ImageSource? nativeSvg = Controls.SearchResultRowControl.ResolveNativeWidgetSvgIcon(item);
-        var openItem = new MenuFlyoutItem
-        {
-            Text = isCopyAction ? _localizationService.T("Common.Copy") : ResolvePrimaryActionVerb(item),
-            Icon = nativeSvg is not null
-                ? new ImageIcon { Source = nativeSvg }
-                : new FontIcon { Glyph = isCopyAction ? "\uE8C8" : "\uE8E5" }
-        };
-        openItem.Click += (_, _) =>
-        {
-            if (_viewModel.ExecuteItem(item))
-            {
-                HidePopup();
-            }
-        };
-        flyout.Items.Add(openItem);
-
-        if (IsQuickTodoCreateAction(item, out string ctxTodoText))
-        {
-            var openAfterSaveTodoItem = new MenuFlyoutItem
-            {
-                Text = _localizationService.T("Search.QuickCreate.CmdSaveAndOpenTodo"),
-                Icon = new ImageIcon { Source = Controls.SearchResultRowControl.GetTodoSvgIcon() }
-            };
-            openAfterSaveTodoItem.Click += (_, _) =>
-            {
-                _viewModel.InvokeAction($"quick-todo-open:{ctxTodoText}");
-                HidePopup();
-            };
-            flyout.Items.Add(openAfterSaveTodoItem);
-            return flyout;
-        }
-
-        if (IsQuickNoteCreateAction(item, out string ctxNoteText))
-        {
-            var openAfterSaveNoteItem = new MenuFlyoutItem
-            {
-                Text = _localizationService.T("Search.QuickCreate.CmdSaveAndOpenNote"),
-                Icon = new ImageIcon { Source = Controls.SearchResultRowControl.GetQuickCaptureSvgIcon() }
-            };
-            openAfterSaveNoteItem.Click += (_, _) =>
-            {
-                _viewModel.InvokeAction($"quick-note-open:{ctxNoteText}");
-                HidePopup();
-            };
-            flyout.Items.Add(openAfterSaveNoteItem);
-            return flyout;
-        }
-
-        bool isFileSystemItem = item.Kind is SearchResultKind.File or SearchResultKind.Folder &&
-                                !string.IsNullOrWhiteSpace(item.DetailPath) &&
-                                (File.Exists(item.DetailPath) || Directory.Exists(item.DetailPath));
-        if (!isFileSystemItem)
-        {
-            return flyout;
-        }
-
-        if (CanAttachItem(item) || CanSaveItem(item))
-        {
-            flyout.Items.Add(new MenuFlyoutSeparator());
-            if (CanAttachItem(item))
-            {
-                var attachTodoItem = new MenuFlyoutItem
-                {
-                    Text = _localizationService.T("Search.Menu.AttachToTodo"),
-                    Icon = new ImageIcon { Source = Controls.SearchResultRowControl.GetTodoSvgIcon() }
-                };
-                attachTodoItem.Click += async (_, _) => await AttachItemToTodoAsync(item);
-                flyout.Items.Add(attachTodoItem);
-            }
-
-            if (CanSaveItem(item))
-            {
-                var saveNoteItem = new MenuFlyoutItem
-                {
-                    Text = _localizationService.T("Search.Menu.SaveToNote"),
-                    Icon = new ImageIcon { Source = Controls.SearchResultRowControl.GetQuickCaptureSvgIcon() }
-                };
-                saveNoteItem.Click += async (_, _) => await SaveItemToNoteAsync(item);
-                flyout.Items.Add(saveNoteItem);
-            }
-        }
-
-        // Executables and administrator-requiring shortcuts keep the same
-        // entry point here as the grid items menu (#381, #228).
-        if (ElevatedFileLauncher.CanRunAsAdministrator(item.DetailPath!))
-        {
-            var runAsAdminItem = new MenuFlyoutItem
-            {
-                Text = _localizationService.T("Widget.RunAsAdministrator"),
-                Icon = new FontIcon { Glyph = "\uE7EF" }
-            };
-            runAsAdminItem.Click += (_, _) =>
-            {
-                ElevatedFileLaunchResult result =
-                    ElevatedFileLauncher.RunAsAdministrator(
-                        _hwnd,
-                        item.DetailPath!);
-                if (result.Status is not (ElevatedFileLaunchStatus.Launched
-                    or ElevatedFileLaunchStatus.Cancelled))
-                {
-                    ShowTransientStatus(_localizationService.T(
-                        result.Status ==
-                        ElevatedFileLaunchStatus.AlreadyRunningUnelevated
-                            ? "Widget.RunAsAdministrator.AlreadyRunning"
-                            : "Widget.Error.OperationIncomplete"));
-                }
-            };
-            flyout.Items.Add(runAsAdminItem);
-        }
-
-        flyout.Items.Add(new MenuFlyoutSeparator());
-
-        var cutItem = new MenuFlyoutItem
-        {
-            Text = _localizationService.T("Common.Cut"),
-            Icon = new FontIcon { Glyph = "\uE8C6" }
-        };
-        cutItem.Click += async (_, _) => await CopyFileSystemItemAsync(item, DataPackageOperation.Move);
-        flyout.Items.Add(cutItem);
-
-        var copyItem = new MenuFlyoutItem
-        {
-            Text = _localizationService.T("Common.Copy"),
-            Icon = new FontIcon { Glyph = "\uE8C8" }
-        };
-        copyItem.Click += async (_, _) => await CopyFileSystemItemAsync(item, DataPackageOperation.Copy);
-        flyout.Items.Add(copyItem);
-
-        var renameItem = new MenuFlyoutItem
-        {
-            Text = _localizationService.T("Common.Rename"),
-            Icon = new FontIcon { Glyph = "\uE8AC" }
-        };
-        renameItem.Click += async (_, _) =>
-        {
-            _restoreResultFocusAfterFlyout = false;
-            await RenameFileSystemItemAsync(item);
-        };
-        flyout.Items.Add(renameItem);
-
-        flyout.Items.Add(new MenuFlyoutSeparator());
-
-        var copyPathItem = new MenuFlyoutItem
-        {
-            Text = _localizationService.T("Search.Menu.CopyPath"),
-            Icon = new FontIcon { Glyph = "\uE8C8" }
-        };
-        copyPathItem.Click += (_, _) => CopyPathToClipboard(item);
-        flyout.Items.Add(copyPathItem);
-
-        var openLocationItem = new MenuFlyoutItem
-        {
-            Text = _localizationService.T("Search.Menu.OpenLocation"),
-            Icon = new FontIcon { Glyph = "\uE838" }
-        };
-        openLocationItem.Click += (_, _) => Win32Helper.ShowInExplorer(item.DetailPath!);
-        flyout.Items.Add(openLocationItem);
-
-        var propertiesItem = new MenuFlyoutItem
-        {
-            Text = _localizationService.T("Common.Properties"),
-            Icon = new FontIcon { Glyph = "\uE946" }
-        };
-        propertiesItem.Click += (_, _) =>
-        {
-            _restoreResultFocusAfterFlyout = false;
-            ShowFileSystemItemProperties(item);
-        };
-        flyout.Items.Add(propertiesItem);
-
-        flyout.Items.Add(new MenuFlyoutSeparator());
-
-        var deleteItem = new MenuFlyoutItem
-        {
-            Text = _localizationService.T("Search.Delete.Action"),
-            Icon = new FontIcon { Glyph = "\uE74D" }
-        };
-        deleteItem.Click += async (_, _) =>
-        {
-            _restoreResultFocusAfterFlyout = false;
-            await DeleteFileSystemItemAsync(item);
-        };
-        flyout.Items.Add(deleteItem);
-
-        return flyout;
-    }
-
-    private async Task CopyFileSystemItemAsync(SearchResultItem item, DataPackageOperation operation)
-    {
-        if (string.IsNullOrWhiteSpace(item.DetailPath))
-        {
-            return;
-        }
-
-        try
-        {
-            bool cut = operation == DataPackageOperation.Move &&
-                !Platform.DriveMediaInterop.IsProtectedDragOutSource([item.DetailPath]);
-            if (!ShellClipboardHelper.TrySetFileDropList([item.DetailPath], cut))
-            {
-                var data = new DataPackage
-                {
-                    RequestedOperation = cut ? DataPackageOperation.Move : DataPackageOperation.Copy
-                };
-                await SetDragPayloadAsync(data, item.DetailPath);
-                Clipboard.SetContent(data);
-                Clipboard.Flush();
-            }
-
-            ShowTransientStatus(_localizationService.T(
-                cut
-                    ? "Search.Action.CutReady"
-                    : "Search.Action.CopyReady"));
-        }
-        catch (Exception ex)
-        {
-            App.Log($"[SearchPopup] Clipboard operation failed: {ex.Message}");
-            ShowTransientStatus(_localizationService.T("Search.Action.FileOperationFailed"));
-        }
-    }
-
-    private async Task RenameFileSystemItemAsync(SearchResultItem item)
-    {
-        string path = item.DetailPath ?? string.Empty;
-        if (!File.Exists(path) && !Directory.Exists(path))
-        {
-            return;
-        }
-
-        string initialName = Path.GetFileName(path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-        bool isDirectory = Directory.Exists(path);
-        var nameBox = new TextBox
-        {
-            Text = initialName,
-            MinWidth = 320
-        };
-        DeskBox.Helpers.ImeCompositionGuard.AttachAncestors(nameBox);
-
-        var dialog = new ContentDialog
-        {
-            XamlRoot = RootGrid.XamlRoot,
-            Title = _localizationService.T("Search.Rename.Title"),
-            Content = nameBox,
-            PrimaryButtonText = _localizationService.T("Common.Rename"),
-            CloseButtonText = _localizationService.T("Common.Cancel"),
-            DefaultButton = ContentDialogButton.Primary
-        };
-        dialog.Opened += (_, _) =>
-        {
-            DeskBox.Helpers.InlineEditorFocus.FocusWhenLoaded(
-                nameBox,
-                tb =>
-                {
-                    int stemLength = !isDirectory && Path.GetFileNameWithoutExtension(tb.Text) is { Length: > 0 } stem
-                        ? stem.Length
-                        : tb.Text.Length;
-                    tb.Select(0, stemLength);
-                },
-                DispatcherQueue,
-                "SearchRenameDialog");
-        };
-        dialog.Closing += (_, args) =>
-        {
-            if (DeskBox.Helpers.ImeCompositionGuard.IsComposingOrWithinGrace())
-            {
-                args.Cancel = true;
-            }
-        };
-
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
-        {
-            return;
-        }
-
-        string newName = nameBox.Text.Trim();
-        if (string.IsNullOrWhiteSpace(newName) ||
-            newName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
-        {
-            ShowTransientStatus(_localizationService.T("Search.Action.InvalidName"));
-            return;
-        }
-
-        string? parent = Path.GetDirectoryName(path.TrimEnd(
-            Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
-        if (string.IsNullOrWhiteSpace(parent))
-        {
-            return;
-        }
-
-        string targetPath = Path.Combine(parent, newName);
-        if (string.Equals(path, targetPath, StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        try
-        {
-            await Task.Run(() =>
-            {
-                if (File.Exists(path))
-                {
-                    File.Move(path, targetPath);
-                }
-                else
-                {
-                    Directory.Move(path, targetPath);
-                }
-            });
-            ShowTransientStatus(_localizationService.T("Search.Action.Renamed"));
-            await RefreshResultsAfterFileOperationAsync();
-        }
-        catch (Exception ex)
-        {
-            App.Log($"[SearchPopup] Rename failed: {ex.Message}");
-            ShowTransientStatus(_localizationService.T("Search.Action.FileOperationFailed"));
-        }
-    }
-
-    private async Task DeleteFileSystemItemAsync(SearchResultItem item)
-    {
-        string path = item.DetailPath ?? string.Empty;
-        if (!File.Exists(path) && !Directory.Exists(path))
-        {
-            return;
-        }
-
-        await DeleteFileSystemItemsCoreAsync(
-            [path],
-            clearMultiSelectionOnSuccess: false);
-    }
-
-    private void ShowFileSystemItemProperties(SearchResultItem item)
-    {
-        if (string.IsNullOrWhiteSpace(item.DetailPath))
-        {
-            return;
-        }
-
-        try
-        {
-            if (!ShellContextMenuHelper.ShowProperties(_hwnd, item.DetailPath))
-            {
-                App.Log($"[SearchPopup] Properties failed for '{item.DetailPath}'.");
-            }
-        }
-        catch (Exception ex)
-        {
-            App.Log($"[SearchPopup] Properties failed: {ex.Message}");
-        }
-    }
-
-    private async Task RefreshResultsAfterFileOperationAsync()
-    {
-        await Task.Delay(120);
-        await _viewModel.RefreshSearchAsync();
-    }
-
-    private bool CanAttachItem(SearchResultItem item) =>
-        FeatureWidgetSettings.IsEnabled(_settingsService.Settings, WidgetKind.Todo) &&
-        item.Kind == SearchResultKind.File &&
-        !string.IsNullOrWhiteSpace(item.DetailPath) &&
-        File.Exists(item.DetailPath);
-
-    private bool CanSaveItem(SearchResultItem item) =>
-        FeatureWidgetSettings.IsEnabled(_settingsService.Settings, WidgetKind.QuickCapture) &&
-        item.Kind == SearchResultKind.File &&
-        !string.IsNullOrWhiteSpace(item.DetailPath) &&
-        File.Exists(item.DetailPath);
-
-    private void TryPreviewSelectedItem()
-    {
-        var item = _viewModel.SelectedItem;
-        if (item is not null)
-        {
-            _ = PreviewItemAsync(item);
-        }
-    }
-
-    private async Task PreviewItemAsync(SearchResultItem item)
-    {
-        if (string.IsNullOrWhiteSpace(item.DetailPath))
-        {
-            return;
-        }
-
-        bool shown = await _spacePreviewService.TryToggleAsync(item.DetailPath);
-        if (!shown)
-        {
-            App.Log($"[SearchPopup] Space preview unavailable for '{item.DetailPath}'.");
-        }
-    }
-
-    private async Task AttachItemToTodoAsync(SearchResultItem item)
-    {
-        var app = App.Current as App;
-        var actionService = app?.SearchActionService;
-        if (actionService is null)
-        {
-            return;
-        }
-
-        var result = await actionService.AttachFileToTodoWithResultAsync(item.DetailPath);
-        ShowTransientStatus(_localizationService.T(
-            result.Succeeded ? "Search.Action.AttachedToTodo" : "Search.Action.AttachFailed"));
-        if (result.Succeeded && app is not null)
-        {
-            app.TryShowSearchQuickCreateHudForTodo(
-                result.FileName,
-                result.WidgetId,
-                result.ItemId);
-        }
-    }
-
-    private async Task SaveItemToNoteAsync(SearchResultItem item)
-    {
-        var app = App.Current as App;
-        var actionService = app?.SearchActionService;
-        if (actionService is null)
-        {
-            return;
-        }
-
-        var result = await actionService.SaveFileToNoteWithResultAsync(item.DetailPath);
-        ShowTransientStatus(_localizationService.T(
-            result.Succeeded ? "Search.Action.SavedToNote" : "Search.Action.SaveFailed"));
-        if (result.Succeeded && app is not null)
-        {
-            app.TryShowSearchQuickCreateHudForNote(
-                result.FileName,
-                result.ItemId);
-        }
-    }
-
-    private void CopyPathToClipboard(SearchResultItem item)
-    {
-        if (string.IsNullOrWhiteSpace(item.DetailPath))
-        {
-            return;
-        }
-
-        try
-        {
-            var dataPackage = new DataPackage();
-            dataPackage.SetText(item.DetailPath);
-            Clipboard.SetContent(dataPackage);
-            ShowTransientStatus(_localizationService.T("Search.Action.PathCopied"));
-        }
-        catch (Exception ex)
-        {
-            App.Log($"[SearchPopup] Failed to copy path: {ex.Message}");
-        }
-    }
-
-    // File-system clipboard and status helpers.
-
-    /// <summary>
-    /// Shows a transient status message in the footer, auto-hiding after a delay.
-    /// </summary>
-    private void ShowTransientStatus(string message)
-    {
-        SearchFeedbackPresenter.Show(new WidgetFeedbackRequest(
-            message,
-            WidgetFeedbackSeverity.Info,
-            "search-status"));
-    }
-
-    private void AnimateResultsFirstExpand()
-    {
-        if (!AreSystemAnimationsEnabled() ||
-            ResultsPanel.Visibility != Visibility.Visible)
-        {
-            ResultsPanel.Opacity = 1;
-            ResultsTranslateTransform.Y = 0;
-            return;
-        }
-
-        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
-        var storyboard = new Storyboard();
-
-        var opacityAnim = new DoubleAnimation
-        {
-            From = 0.0,
-            To = 1.0,
-            Duration = TimeSpan.FromMilliseconds(135),
-            EasingFunction = ease
-        };
-        Storyboard.SetTarget(opacityAnim, ResultsPanel);
-        Storyboard.SetTargetProperty(opacityAnim, "Opacity");
-
-        var slideAnim = new DoubleAnimation
-        {
-            From = -5.0,
-            To = 0.0,
-            Duration = TimeSpan.FromMilliseconds(145),
-            EasingFunction = ease
-        };
-        Storyboard.SetTarget(slideAnim, ResultsTranslateTransform);
-        Storyboard.SetTargetProperty(slideAnim, "Y");
-
-        storyboard.Children.Add(opacityAnim);
-        storyboard.Children.Add(slideAnim);
-        storyboard.Begin();
-    }
-
-    /// <summary>
-    /// Populates the drag payload with the result's file or folder, falling back to
-    /// the raw path as text when the item cannot be resolved.
-    /// </summary>
-    private static async Task SetDragPayloadAsync(DataPackage data, string path)
-    {
-        try
-        {
-            if (Directory.Exists(path))
-            {
-                var folder = await StorageFolder.GetFolderFromPathAsync(path);
-                data.SetStorageItems(new IStorageItem[] { folder });
-                return;
-            }
-
-            if (File.Exists(path))
-            {
-                var file = await StorageFile.GetFileFromPathAsync(path);
-                data.SetStorageItems(new IStorageItem[] { file });
-                return;
-            }
-        }
-        catch
-        {
-            // Fall through to a plain-text path payload.
-        }
-
-        data.SetText(path);
-    }
-
-    private static async Task SetDragPayloadAsync(DataPackage data, List<string> paths)
-    {
-        var items = new List<IStorageItem>();
-        var fallbackText = new StringBuilder();
-        foreach (var path in paths)
-        {
-            try
-            {
-                if (Directory.Exists(path))
-                {
-                    items.Add(await StorageFolder.GetFolderFromPathAsync(path));
-                }
-                else if (File.Exists(path))
-                {
-                    items.Add(await StorageFile.GetFileFromPathAsync(path));
-                }
-                else
-                {
-                    fallbackText.AppendLine(path);
-                }
-            }
-            catch
-            {
-                fallbackText.AppendLine(path);
-            }
-        }
-
-        if (items.Count > 0)
-        {
-            data.SetStorageItems(items);
-        }
-        if (fallbackText.Length > 0 && items.Count == 0)
-        {
-            data.SetText(fallbackText.ToString().TrimEnd());
-        }
-    }
-
-    private static SearchResultRowControl? FindItemRow(DependencyObject? element)
-    {
-        while (element is not null)
-        {
-            if (element is SearchResultRowControl row)
-            {
-                return row;
-            }
-
-            element = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(element);
-        }
-
-        return null;
-    }
-
-    private static SearchResultItem? ResolveResultItem(DependencyObject? element)
-    {
-        // ItemsRepeater can prepare a row before its inherited DataContext settles.
-        // The typed Item bridge is the authoritative projection in that window and
-        // remains correct when a row is recycled. DataContext is retained only for
-        // non-row surfaces such as recommendation buttons.
-        return FindItemRow(element)?.Item ?? FindDataContext<SearchResultItem>(element);
-    }
-
-    private static SearchResultRowControl? FindRowByDataContext(DependencyObject root, object data)
-    {
-        int count = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(root);
-        for (int i = 0; i < count; i++)
-        {
-            var child = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(root, i);
-            if (child is SearchResultRowControl row &&
-                (ReferenceEquals(row.Item, data) || ReferenceEquals(row.DataContext, data)))
-            {
-                return row;
-            }
-
-            if (FindRowByDataContext(child, data) is { } found)
-            {
-                return found;
-            }
-        }
-
-        return null;
-    }
-
-    private static T? FindDataContext<T>(DependencyObject? element) where T : class
-    {
-        while (element is not null)
-        {
-            if (element is FrameworkElement { DataContext: T data })
-            {
-                return data;
-            }
-
-            element = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(element);
-        }
-
-        return null;
-    }
-
-    private void OnViewModelActionRequested(object? sender, string actionId)
-    {
-        HidePopup();
-        ActionRequested?.Invoke(this, actionId);
-    }
-
-    private bool AreFileColumnsVisible() =>
-        _viewModel.SelectedTab?.SupportsFileSort == true &&
-        _settingsService.Settings.Search.SearchShowSortHeader;
-
-    private void RefreshPreparedResultRows()
-    {
-        RefreshPreparedResultRows(ResultsRepeater);
-    }
-
-    private void RefreshPreparedResultRows(DependencyObject root)
-    {
-        int count = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(root);
-        for (int index = 0; index < count; index++)
-        {
-            var child = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(root, index);
-            if (child is SearchResultRowControl row)
-            {
-                row.SetFileColumnsVisible(AreFileColumnsVisible());
-                row.ApplyQueryHighlight(_viewModel.EffectiveHighlightQuery);
-            }
-
-            RefreshPreparedResultRows(child);
-        }
-    }
-
-    private void UpdateSelectionActions()
-    {
-        bool hasMulti = _multiSelectedItems.Count > 0;
-        bool showBatchBar = hasMulti &&
-                            ResultsPanel.Visibility == Visibility.Visible &&
-                            StatusBar.Visibility != Visibility.Visible;
-        SelectionActionBar.Visibility = showBatchBar ? Visibility.Visible : Visibility.Collapsed;
-
-        bool showSingleResultCmdBar = !showBatchBar &&
-                                      StatusBar.Visibility != Visibility.Visible &&
-                                      ResultsPanel.Visibility == Visibility.Visible &&
-                                      _viewModel.SelectedItem is not null;
-        CmdPalResultFooterGrid.Visibility = showSingleResultCmdBar
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-        RecommendationFooterRightPanel.Visibility = showSingleResultCmdBar
-            ? Visibility.Collapsed
-            : Visibility.Visible;
-        if (showSingleResultCmdBar)
-        {
-            UpdateCommandBarForSelectedItem();
-        }
-
-        bool showFooter = RecommendedAppsPanel.Visibility == Visibility.Visible ||
-                          showBatchBar ||
-                          StatusBar.Visibility == Visibility.Visible ||
-                          showSingleResultCmdBar;
-        Visibility targetFooterVisibility = showFooter ? Visibility.Visible : Visibility.Collapsed;
-        bool footerChanged = FooterBar.Visibility != targetFooterVisibility;
-        FooterBar.Visibility = targetFooterVisibility;
-
-        if (showBatchBar)
-        {
-            CopySelectedButton.Visibility = Visibility.Visible;
-            CutSelectedButton.Visibility = Visibility.Visible;
-            DeleteSelectedButton.Visibility = Visibility.Visible;
-            CopySelectedLabel.Text = _localizationService.T("Common.Copy");
-            CutSelectedLabel.Text = _localizationService.T("Common.Cut");
-            DeleteSelectedLabel.Text = _localizationService.T("Search.Delete.Action");
-            OpenSelectedButton.Visibility = Visibility.Collapsed;
-            OpenLocationButton.Visibility = Visibility.Collapsed;
-            AttachSelectedButton.Visibility = Visibility.Collapsed;
-            SaveSelectedButton.Visibility = Visibility.Collapsed;
-        }
-
-        if (footerChanged && IsPopupVisible && !_isWindowClosed)
-        {
-            UpdatePopupDynamicBounds();
-        }
-    }
-
-    private void OpenSelectedButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (_viewModel.ExecuteSelectedItem())
-        {
-            HidePopup();
-        }
-    }
-
-    private void OpenLocationButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (_viewModel.OpenSelectedLocation())
-        {
-            HidePopup();
-        }
-    }
-
-    private async void AttachSelectedButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (_viewModel.SelectedItem is { } item)
-        {
-            await AttachItemToTodoAsync(item);
-        }
-    }
-
-    private async void SaveSelectedButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (_viewModel.SelectedItem is { } item)
-        {
-            await SaveItemToNoteAsync(item);
-        }
-    }
 
     private void OnViewModelContentRequested(object? sender, SearchResultItem item)
     {
@@ -10050,12 +3288,7 @@ public sealed partial class SearchPopupWindow : Window
         _viewModel.CurrentResults.CollectionChanged -= OnCurrentResultsCollectionChanged;
         ResultsRepeater.ElementPrepared -= OnResultsElementPrepared;
         ResultsRepeater.ElementClearing -= OnResultsElementClearing;
-        RecommendedAppsRepeater.ElementPrepared -= OnRecommendedAppsElementPrepared;
-        RecommendedAppsRepeater.ElementClearing -= OnRecommendedAppsElementClearing;
-        FolderAppsRepeater.ElementPrepared -= OnOverlayAppsElementPrepared;
-        FolderAppsRepeater.ElementClearing -= OnOverlayAppsElementClearing;
-        HiddenAppsRepeater.ElementPrepared -= OnOverlayAppsElementPrepared;
-        HiddenAppsRepeater.ElementClearing -= OnOverlayAppsElementClearing;
+
         _viewModel.RecommendationIconsResolved -= OnRecommendationIconsResolved;
         _viewModel.RecommendationLayoutUpdated -= OnRecommendationLayoutUpdated;
         _settingsService.SettingsChanged -= OnAppearanceSettingsChanged;
@@ -10086,11 +3319,7 @@ public sealed partial class SearchPopupWindow : Window
             }
         }
 
-        _skeletonDelayCancellation?.Cancel();
-        _skeletonDelayCancellation?.Dispose();
-        _skeletonDelayCancellation = null;
         SearchFeedbackPresenter.Clear();
-        StopAndClearEntranceGuardTimer();
         if (_rubberBandAutoScrollTimer is { } autoScrollTimer)
         {
             _rubberBandAutoScrollTimer = null;
@@ -10104,41 +3333,19 @@ public sealed partial class SearchPopupWindow : Window
             }
         }
 
-        if (_recRubberBandAutoScrollTimer is { } recAutoScrollTimer)
-        {
-            _recRubberBandAutoScrollTimer = null;
-            recAutoScrollTimer.Tick -= OnRecommendationRubberBandAutoScrollTick;
-            try
-            {
-                recAutoScrollTimer.Stop();
-            }
-            catch
-            {
-            }
-        }
-
         DisposeUnfocusedAutoHideTimer();
         DisposeColdHiddenCleanupTimer();
         DisposeExternalDragFadeTimer();
+        StopHeightMorphTimer();
         _detailsUpdateCoalesceTimer?.Stop();
         _detailsUpdateCoalesceTimer = null;
-        CancelRecommendedDrag();
-        EndRecommendationRubberBand();
-        _isRecommendationEditMode = false;
-        _recMultiSelectedKeys.Clear();
-        _recRubberBandBaseKeys.Clear();
-        CloseRecommendationOverlays(immediate: true);
         ClearSelectedResultRow();
-        ClearRecommendedAppSelection();
         _multiSelectedItems.Clear();
         _rubberBandBaseSelection.Clear();
         ClearRealizedRepeaterVisuals();
+        RecommendedAppsGrid.Dispose();
+        RecommendationOverlays.Dispose();
         ResultsRepeater.ItemsSource = null;
-        RecommendedAppsRepeater.ItemsSource = null;
-        FolderAppsRepeater.ItemsSource = null;
-        HiddenAppsRepeater.ItemsSource = null;
-        _folderOverlayItems.Clear();
-        AppsSkeletonRepeater.ItemsSource = null;
         TabsList.ItemsSource = null;
         DisposeAcrylicController();
         DisposeMicaController();
@@ -10149,14 +3356,139 @@ public sealed partial class SearchPopupWindow : Window
         ContentRequested = null;
         PopupShown = null;
         PopupHidden = null;
+        PopupDeactivated = null;
         SearchEngineService.ReleaseActiveColdHiddenCaches();
         _viewModel.Dispose();
+        Bindings?.StopTracking();
+        RootGrid.Children.Clear();
+        Content = null;
     }
 
-    private static bool AreSystemAnimationsEnabled()
+    private static bool AreSystemAnimationsEnabled() =>
+        WindowsCompatibilityService.ShouldAnimate;
+
+    // Host contracts for extracted recommendation grid & overlay controls
+    bool ISearchRecommendationGridHost.IsPopupVisible => IsPopupVisible;
+    bool ISearchRecommendationGridHost.IsWindowClosed => _isWindowClosed;
+    bool ISearchRecommendationGridHost.IsDragOutInProgress => _dragOutInProgress;
+    FrameworkElement ISearchRecommendationGridHost.PopupBoundsRoot => RootGrid;
+    bool ISearchRecommendationGridHost.IsAnyOverlayOpen => RecommendationOverlays.IsAnyOverlayOpen;
+    void ISearchRecommendationGridHost.HidePopup() => HidePopup();
+    void ISearchRecommendationGridHost.FocusSearchBox() => SearchTextBox.Focus(FocusState.Programmatic);
+    void ISearchRecommendationGridHost.FocusPopupRoot() => RootGrid.Focus(FocusState.Programmatic);
+    void ISearchRecommendationGridHost.OpenFolderOverlay(RecommendedGridEntry folderEntry, bool startRename) =>
+        RecommendationOverlays.OpenFolder(folderEntry, startRename);
+    void ISearchRecommendationGridHost.CloseOverlays(bool immediate) =>
+        RecommendationOverlays.CloseOverlays(immediate);
+    void ISearchRecommendationGridHost.CancelOverlayDrag() =>
+        RecommendationOverlays.CancelDrag();
+    void ISearchRecommendationGridHost.RefreshOverlayIcons() =>
+        RecommendationOverlays.RefreshIcons();
+    void ISearchRecommendationGridHost.UpdateRecommendationHeaderState() =>
+        UpdateRecommendationHeaderState();
+    void ISearchRecommendationGridHost.SyncEditModeChrome(bool isEditMode, int multiSelectedCount)
     {
-        return WindowsCompatibilityService.ShouldAnimate;
+        SyncEditRecommendationsButtonVisuals();
+        UpdateRecommendationEditStatusHint();
     }
+    void ISearchRecommendationGridHost.TryPreviewSelectedItem() => TryPreviewSelectedItem();
+    bool ISearchRecommendationGridHost.TryStartRecommendedExternalDragOut(
+        UIElement dragSource,
+        PointerRoutedEventArgs e,
+        IReadOnlyList<string> candidatePaths,
+        string originTag,
+        Action suspendInternalDrag) =>
+        TryStartRecommendedExternalDragOut(dragSource, e, candidatePaths, originTag, suspendInternalDrag);
+    void ISearchRecommendationGridHost.QueueRunItemAsAdministrator(SearchResultItem item) =>
+        QueueRunItemAsAdministrator(item, hideOnLaunch: true);
+
+    bool ISearchRecommendationOverlayHost.IsRecommendationEditMode => RecommendedAppsGrid.IsEditMode;
+    bool ISearchRecommendationOverlayHost.IsDragOutInProgress => _dragOutInProgress;
+    bool ISearchRecommendationOverlayHost.IsPopupVisible => IsPopupVisible;
+    bool ISearchRecommendationOverlayHost.IsWindowClosed => _isWindowClosed;
+    IntPtr ISearchRecommendationOverlayHost.OwnerWindowHandle => _hwnd;
+    FrameworkElement ISearchRecommendationOverlayHost.PopupBoundsRoot => RootGrid;
+    FrameworkElement ISearchRecommendationOverlayHost.SearchHeaderElement => SearchBoxRow;
+    void ISearchRecommendationOverlayHost.HidePopup() => HidePopup();
+    void ISearchRecommendationOverlayHost.FocusSearchBox() => SearchTextBox.Focus(FocusState.Programmatic);
+    void ISearchRecommendationOverlayHost.FocusPopupRoot() => RootGrid.Focus(FocusState.Programmatic);
+    void ISearchRecommendationOverlayHost.CancelRecommendedGridDrag() => RecommendedAppsGrid.CancelDrag();
+    void ISearchRecommendationOverlayHost.EndRecommendedGridRubberBand() => RecommendedAppsGrid.EndRubberBand();
+    void ISearchRecommendationOverlayHost.UpdatePopupDynamicBounds() => UpdatePopupDynamicBounds();
+    bool ISearchRecommendationOverlayHost.TryStartRecommendedExternalDragOut(
+        UIElement dragSource,
+        PointerRoutedEventArgs e,
+        IReadOnlyList<string> candidatePaths,
+        string originTag,
+        Action suspendInternalDrag) =>
+        TryStartRecommendedExternalDragOut(dragSource, e, candidatePaths, originTag, suspendInternalDrag);
+    void ISearchRecommendationOverlayHost.AppendCommonRecommendedAppActions(MenuFlyout flyout, SearchResultItem item) =>
+        RecommendedAppsGrid.AppendCommonRecommendedAppActions(flyout, item);
+
+    // Pure geometry / projection forwarders preserved for unit tests
+    internal const double DropAnchorDeadband = SearchRecommendationLayoutEngine.DropAnchorDeadband;
+    internal static Rect InflateDropAnchorRect(Rect anchor, double margin) =>
+        SearchRecommendationLayoutEngine.InflateDropAnchorRect(anchor, margin);
+    internal static Rect ComputeTileMergeAnchorRect(Rect tileRect, bool targetIsFolder) =>
+        SearchRecommendationLayoutEngine.ComputeTileMergeAnchorRect(tileRect, targetIsFolder);
+    internal static Rect ComputeTileReorderAnchorRect(
+        Rect tileRect,
+        double relX,
+        double relY,
+        bool beforeTile,
+        bool canMergeOntoTarget,
+        bool targetIsFolder) =>
+        SearchRecommendationLayoutEngine.ComputeTileReorderAnchorRect(
+            tileRect,
+            relX,
+            relY,
+            beforeTile,
+            canMergeOntoTarget,
+            targetIsFolder);
+    internal static Rect ComputeTrailingAppendAnchorRect(
+        Point pointInSurface,
+        Rect lastTileRect,
+        double surfaceWidth,
+        double surfaceHeight) =>
+        SearchRecommendationLayoutEngine.ComputeTrailingAppendAnchorRect(
+            pointInSurface,
+            lastTileRect,
+            surfaceWidth,
+            surfaceHeight);
+    internal static bool IsPointLeavingPopupDragBounds(
+        Point pointInRoot,
+        double rootWidth,
+        double rootHeight) =>
+        SearchRecommendationLayoutEngine.IsPointLeavingPopupDragBounds(
+            pointInRoot,
+            rootWidth,
+            rootHeight);
+    internal static bool WouldBatchReorderChangeOrder(
+        IReadOnlyList<RecommendedGridEntry> entries,
+        IReadOnlySet<string> draggedEntryKeys,
+        int targetVisibleIndex) =>
+        SearchRecommendationLayoutEngine.WouldBatchReorderChangeOrder(
+            entries,
+            draggedEntryKeys,
+            targetVisibleIndex);
+    internal static List<string> ProjectReorderedEntryKeys(
+        IReadOnlyList<RecommendedGridEntry> entries,
+        IReadOnlySet<string> draggedEntryKeys,
+        int insertIndexInRemaining) =>
+        SearchRecommendationLayoutEngine.ProjectReorderedEntryKeys(
+            entries,
+            draggedEntryKeys,
+            insertIndexInRemaining);
+    internal static bool ShouldMergeOntoTile(
+        double relX,
+        double relY,
+        bool targetIsFolder,
+        bool isBatchDrag) =>
+        SearchRecommendationLayoutEngine.ShouldMergeOntoTile(
+            relX,
+            relY,
+            targetIsFolder,
+            isBatchDrag);
 }
 
 // ────────────────────────────────────────────────────────────────────────────

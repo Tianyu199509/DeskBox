@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using DeskBox.Helpers;
 using DeskBox.Platform;
+using DeskBox.Services.DragDrop;
 using Windows.ApplicationModel.DataTransfer;
 
 namespace DeskBox.Controls;
@@ -28,8 +29,16 @@ internal static partial class NativeShellFileDragProvider
 
     internal static bool TryAttach(
         DataPackage dataPackage,
-        IReadOnlyList<string> sourcePaths)
+        IReadOnlyList<string> sourcePaths) =>
+        TryAttach(dataPackage, sourcePaths, out _);
+
+    internal static bool TryAttach(
+        DataPackage dataPackage,
+        IReadOnlyList<string> sourcePaths,
+        out string[] attachedPhysicalPaths,
+        bool networkReachabilityVerified = false)
     {
+        attachedPhysicalPaths = [];
         ArgumentNullException.ThrowIfNull(dataPackage);
         if (!CanAttachPaths(sourcePaths))
         {
@@ -38,9 +47,14 @@ internal static partial class NativeShellFileDragProvider
 
         nint shellDataObject = 0;
         nint filterDataObject = 0;
+        bool attachedToDataPackage = false;
         try
         {
-            shellDataObject = CreateShellDataObject(sourcePaths);
+            shellDataObject = DesktopOutboundDropCoordinator.TryCreateShellDataObjectWithTimeout(
+                sourcePaths,
+                timeoutMs: 650,
+                out string[] resolvedPhysicalPaths,
+                networkReachabilityVerified);
             if (shellDataObject == 0 ||
                 !HasFileDropFormat(shellDataObject))
             {
@@ -49,7 +63,7 @@ internal static partial class NativeShellFileDragProvider
                 return false;
             }
 
-            filterDataObject = FileDragSourceGuardDataObject.CreateInterfacePointer(
+            filterDataObject = FileDragSourceGuardDataObject.CreateTargetAwareInterfacePointer(
                 shellDataObject);
             // End-to-end self-check: the guard wrapper must still answer
             // CF_HDROP. If the IDataObject ABI assumptions break under a new
@@ -73,6 +87,8 @@ internal static partial class NativeShellFileDragProvider
                 return false;
             }
 
+            attachedToDataPackage = true;
+            attachedPhysicalPaths = resolvedPhysicalPaths;
             App.LogVerbose(
                 $"[DragStart] Attached native Shell file data object " +
                 $"paths={sourcePaths.Count} sourceGuard=True");
@@ -88,7 +104,8 @@ internal static partial class NativeShellFileDragProvider
         finally
         {
             FileDragSourceGuardDataObject.ReleaseInterfacePointer(
-                filterDataObject);
+                filterDataObject,
+                keepManagedRootForActiveDrag: attachedToDataPackage);
             ReleaseInterface(shellDataObject);
         }
     }
@@ -97,7 +114,10 @@ internal static partial class NativeShellFileDragProvider
         IReadOnlyList<string> sourcePaths,
         Func<string, bool>? pathExists = null)
     {
-        pathExists ??= path => File.Exists(path) || Directory.Exists(path);
+        pathExists ??= static path =>
+            DesktopOutboundDropCoordinator.IsFastNetworkCandidatePath(path) ||
+            File.Exists(path) ||
+            Directory.Exists(path);
         if (sourcePaths.Count == 0)
         {
             return false;
@@ -121,13 +141,26 @@ internal static partial class NativeShellFileDragProvider
             }
 
             string? currentParent = Path.GetDirectoryName(fullPath);
-            if (string.IsNullOrWhiteSpace(currentParent))
+            if (string.IsNullOrWhiteSpace(currentParent) &&
+                !IsNetworkShareRoot(fullPath))
             {
                 return false;
             }
         }
 
         return true;
+    }
+
+    private static bool IsNetworkShareRoot(string fullPath)
+    {
+        if (fullPath.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return fullPath.StartsWith(@"\\", StringComparison.Ordinal) &&
+               !fullPath.StartsWith(@"\\?\", StringComparison.Ordinal) &&
+               !fullPath.StartsWith(@"\\.\", StringComparison.Ordinal);
     }
 
     internal static bool AreExistingShortcuts(
@@ -167,22 +200,31 @@ internal static partial class NativeShellFileDragProvider
     }
 
     internal static unsafe nint CreateShellDataObject(
-        IReadOnlyList<string> sourcePaths)
+        IReadOnlyList<string> sourcePaths) =>
+        CreateShellDataObject(sourcePaths, out _);
+
+    internal static unsafe nint CreateShellDataObject(
+        IReadOnlyList<string> sourcePaths,
+        out string[] resolvedPhysicalPaths)
     {
         string[] normalizedPaths = sourcePaths
-            .Select(Path.GetFullPath)
+            .Select(path => StoreVirtualizedPathPolicy.ResolveOutboundShellSourcePath(path))
             .ToArray();
-        string firstParent = Path.GetDirectoryName(normalizedPaths[0])!;
-        bool singleParent = true;
-        for (int i = 1; i < normalizedPaths.Length; i++)
+        resolvedPhysicalPaths = normalizedPaths;
+        string firstParent = Path.GetDirectoryName(normalizedPaths[0]) ?? string.Empty;
+        bool singleParent = !string.IsNullOrWhiteSpace(firstParent);
+        if (singleParent)
         {
-            if (!string.Equals(
-                    Path.GetDirectoryName(normalizedPaths[i]),
-                    firstParent,
-                    StringComparison.OrdinalIgnoreCase))
+            for (int i = 1; i < normalizedPaths.Length; i++)
             {
-                singleParent = false;
-                break;
+                if (!string.Equals(
+                        Path.GetDirectoryName(normalizedPaths[i]),
+                        firstParent,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    singleParent = false;
+                    break;
+                }
             }
         }
 
@@ -306,6 +348,24 @@ internal static partial class NativeShellFileDragProvider
             out itemIdList,
             0,
             out _);
+        if (result < 0 &&
+            path.Length >= 248 &&
+            !path.StartsWith(@"\\?\", StringComparison.Ordinal))
+        {
+            string extended = StorageMigrationNativeMethods.Extended(path);
+            int extendedResult = ShellItemDragNativeMethods.SHParseDisplayName(
+                extended,
+                0,
+                out nint extendedPidl,
+                0,
+                out _);
+            if (extendedResult >= 0 && extendedPidl != 0)
+            {
+                itemIdList = extendedPidl;
+                return extendedResult;
+            }
+        }
+
         if (result >= 0 && itemIdList == 0)
         {
             return unchecked((int)0x80004005);

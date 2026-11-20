@@ -36,4 +36,46 @@ public sealed class DeskBoxDragDataTests
             Directory.Delete(tempDirectory, recursive: true);
         }
     }
+
+    [Fact]
+    public void TryCreateInternetShortcutFile_CreatesSafeUrlFileWithMotwAndRejectsNonHttpSchemes()
+    {
+        string tempDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "DeskBox.Tests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDirectory);
+
+        try
+        {
+            string? createdPath = DeskBoxDragData.TryCreateInternetShortcutFile(
+                "https://example.com/docs/guide?id=1",
+                "Guide Title",
+                tempDirectory);
+            Assert.NotNull(createdPath);
+            Assert.True(File.Exists(createdPath));
+            Assert.Equal(".url", Path.GetExtension(createdPath), ignoreCase: true);
+
+            string contents = File.ReadAllText(createdPath);
+            Assert.Contains("[InternetShortcut]", contents, StringComparison.Ordinal);
+            Assert.Contains("URL=https://example.com/docs/guide?id=1", contents, StringComparison.Ordinal);
+
+            Assert.Null(DeskBoxDragData.TryCreateInternetShortcutFile(
+                "file:///C:/Windows/System32/cmd.exe",
+                "bad",
+                tempDirectory));
+            Assert.Null(DeskBoxDragData.TryCreateInternetShortcutFile(
+                "javascript:alert(1)",
+                "bad",
+                tempDirectory));
+            Assert.Null(DeskBoxDragData.TryCreateInternetShortcutFile(
+                "https://example.com/\r\nIconFile=\\\\evil\\share\\a.ico",
+                "bad",
+                tempDirectory));
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, recursive: true);
+        }
+    }
 }

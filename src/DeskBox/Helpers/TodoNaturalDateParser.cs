@@ -18,51 +18,40 @@ internal readonly record struct TodoNaturalDateMatch(
     public bool HasAny => HasDueDate || HasRecurrence;
 }
 
-internal static class TodoNaturalDateParser
+internal static partial class TodoNaturalDateParser
 {
-    private static readonly Regex UrlSpanRegex = new(
-        @"https?://[^\s<>""']+",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    [GeneratedRegex(@"https?://[^\s<>""']+", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex UrlSpanRegex { get; }
 
-    private static readonly Regex IsoFullDateRegex = new(
-        @"(?<![0-9])(?<year>20\d{2})[-/](?<month>1[0-2]|0?[1-9])[-/](?<day>3[01]|[12]\d|0?[1-9])(?![0-9])",
-        RegexOptions.CultureInvariant);
+    [GeneratedRegex(@"(?<![0-9])(?<year>20\d{2})[-/](?<month>1[0-2]|0?[1-9])[-/](?<day>3[01]|[12]\d|0?[1-9])(?![0-9])", RegexOptions.CultureInvariant)]
+    private static partial Regex IsoFullDateRegex { get; }
 
-    private static readonly Regex ChineseFullDateRegex = new(
-        @"(?:(?<year>20\d{2})\s*年\s*)?(?<month>1[0-2]|0?[1-9])\s*月\s*(?<day>3[01]|[12]\d|0?[1-9])(?![0-9])\s*[日号]?",
-        RegexOptions.CultureInvariant);
+    [GeneratedRegex(@"(?:(?<year>20\d{2})\s*年\s*)?(?<month>1[0-2]|0?[1-9])\s*月\s*(?<day>3[01]|[12]\d|0?[1-9])(?![0-9])\s*[日号]?", RegexOptions.CultureInvariant)]
+    private static partial Regex ChineseFullDateRegex { get; }
 
-    private static readonly Regex SlashMonthDayRegex = new(
-        @"(?<![0-9A-Za-z/.-])(?<month>1[0-2]|0?[1-9])/(?<day>3[01]|[12]\d|0?[1-9])(?![0-9A-Za-z/.-])",
-        RegexOptions.CultureInvariant);
+    [GeneratedRegex(@"(?<![0-9A-Za-z/.-])(?<month>1[0-2]|0?[1-9])/(?<day>3[01]|[12]\d|0?[1-9])(?![0-9A-Za-z/.-])", RegexOptions.CultureInvariant)]
+    private static partial Regex SlashMonthDayRegex { get; }
 
-    private static readonly Regex MonthlyDayRegex = new(
-        @"每(?:个)?月\s*(?<day>3[01]|[12]\d|0?[1-9])(?![0-9])\s*[日号]",
-        RegexOptions.CultureInvariant);
+    [GeneratedRegex(@"每(?:个)?月\s*(?<day>3[01]|[12]\d|0?[1-9])(?![0-9])\s*[日号]", RegexOptions.CultureInvariant)]
+    private static partial Regex MonthlyDayRegex { get; }
 
-    private static readonly Regex RecurringWeekdayRegex = new(
-        @"每(?:周|星期|礼拜)(?<dow>[一二三四五六日天])",
-        RegexOptions.CultureInvariant);
+    [GeneratedRegex(@"每(?:周|星期|礼拜)(?<dow>[一二三四五六日天])", RegexOptions.CultureInvariant)]
+    private static partial Regex RecurringWeekdayRegex { get; }
 
-    private static readonly Regex NextWeekWeekdayRegex = new(
-        @"下(?:周|星期|礼拜)(?<dow>[一二三四五六日天])",
-        RegexOptions.CultureInvariant);
+    [GeneratedRegex(@"下(?:周|星期|礼拜)(?<dow>[一二三四五六日天])", RegexOptions.CultureInvariant)]
+    private static partial Regex NextWeekWeekdayRegex { get; }
 
-    private static readonly Regex CurrentOrUpcomingWeekdayRegex = new(
-        @"(?<prefix>本周|这周|周|星期|礼拜)(?<dow>[一二三四五六日天])",
-        RegexOptions.CultureInvariant);
+    [GeneratedRegex(@"(?<prefix>本周|这周|周|星期|礼拜)(?<dow>[一二三四五六日天])", RegexOptions.CultureInvariant)]
+    private static partial Regex CurrentOrUpcomingWeekdayRegex { get; }
 
-    private static readonly Regex ColonTimeRegex = new(
-        @"(?:(?<period>凌晨|早上|上午|中午|下午|傍晚|晚上)\s*)?(?<![0-9:])(?<hour>[01]?\d|2[0-3]):(?<minute>[0-5]\d)(?![0-9:])(?:\s*(?<ampm>am|pm))?",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    [GeneratedRegex(@"(?:(?<period>凌晨|早上|上午|中午|下午|傍晚|晚上)\s*)?(?<![0-9:])(?<hour>[01]?\d|2[0-3]):(?<minute>[0-5]\d)(?![0-9:])(?:\s*(?<ampm>am|pm))?", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex ColonTimeRegex { get; }
 
-    private static readonly Regex ChineseSpokenTimeRegex = new(
-        @"(?:(?<period>凌晨|早上|上午|中午|下午|傍晚|晚上)\s*)?(?<![0-9])(?<hour>[01]?\d|2[0-3])\s*点(?:\s*(?:(?<half>半)|(?<minute>[0-5]?\d)\s*分?))?",
-        RegexOptions.CultureInvariant);
+    [GeneratedRegex(@"(?:(?<period>凌晨|早上|上午|中午|下午|傍晚|晚上)\s*)?(?<![0-9])(?<hour>[01]?\d|2[0-3])\s*点(?:\s*(?:(?<half>半)|(?<minute>[0-5]?\d)\s*分?))?", RegexOptions.CultureInvariant)]
+    private static partial Regex ChineseSpokenTimeRegex { get; }
 
-    private static readonly Regex EnglishWordTokenRegex = new(
-        @"\b(?<token>every\s+day|every\s+week|every\s+weekday|every\s+month|daily|weekly|weekdays|monthly|tonight|tomorrow|tmr|today)\b",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    [GeneratedRegex(@"\b(?<token>every\s+day|every\s+week|every\s+weekday|every\s+month|daily|weekly|weekdays|monthly|tonight|tomorrow|tmr|today)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex EnglishWordTokenRegex { get; }
 
     public static bool TryParse(string? input, DateTimeOffset now, out TodoNaturalDateMatch match)
     {
@@ -341,7 +330,7 @@ internal static class TodoNaturalDateParser
 
         foreach (Match tokenMatch in EnglishWordTokenRegex.Matches(sanitized))
         {
-            string normalized = Regex.Replace(tokenMatch.Groups["token"].Value.Trim().ToLowerInvariant(), @"\s+", " ");
+            string normalized = WhitespaceRunRegex.Replace(tokenMatch.Groups["token"].Value.Trim().ToLowerInvariant(), " ");
             switch (normalized)
             {
                 case "daily":
@@ -530,4 +519,7 @@ internal static class TodoNaturalDateParser
                 return false;
         }
     }
+
+    [GeneratedRegex(@"\s+", RegexOptions.CultureInvariant)]
+    private static partial Regex WhitespaceRunRegex { get; }
 }

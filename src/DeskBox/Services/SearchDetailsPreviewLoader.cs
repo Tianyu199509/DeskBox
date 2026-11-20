@@ -34,27 +34,33 @@ internal static class SearchDetailsPreviewLoader
     private const int MaxSnippetChars = 420;
     private const int PreviewDecodeWidth = 360;
 
-    private static readonly HashSet<string> s_rasterImageExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".ico", ".tif", ".tiff"
-    };
+    private static readonly System.Collections.Frozen.FrozenSet<string> s_rasterImageExtensions =
+        System.Collections.Frozen.FrozenSet.ToFrozenSet(
+        [
+            ".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".ico", ".tif", ".tiff"
+        ],
+        StringComparer.OrdinalIgnoreCase);
 
-    private static readonly HashSet<string> s_shellThumbnailDocumentExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".pptx", ".ppt", ".xlsx", ".xls", ".doc", ".svg", ".heic", ".heif", ".psd"
-    };
+    private static readonly System.Collections.Frozen.FrozenSet<string> s_shellThumbnailDocumentExtensions =
+        System.Collections.Frozen.FrozenSet.ToFrozenSet(
+        [
+            ".pptx", ".ppt", ".xlsx", ".xls", ".doc", ".svg", ".heic", ".heif", ".psd"
+        ],
+        StringComparer.OrdinalIgnoreCase);
 
-    private static readonly HashSet<string> s_textAndCodeExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".txt", ".md", ".markdown", ".log", ".json", ".jsonc", ".yaml", ".yml", ".toml",
-        ".ini", ".cfg", ".conf", ".xml", ".csv", ".tsv", ".sql", ".env", ".gitignore",
-        ".gitattributes", ".editorconfig", ".bat", ".cmd", ".ps1", ".psm1", ".sh",
-        ".cs", ".csproj", ".sln", ".slnx", ".props", ".targets", ".xaml",
-        ".c", ".cpp", ".cc", ".cxx", ".h", ".hpp", ".rs", ".go", ".py", ".pyw",
-        ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".vue", ".svelte",
-        ".html", ".htm", ".css", ".scss", ".less", ".java", ".kt", ".kts",
-        ".swift", ".rb", ".php", ".lua", ".r", ".dart", ".gradle", ".dockerfile"
-    };
+    private static readonly System.Collections.Frozen.FrozenSet<string> s_textAndCodeExtensions =
+        System.Collections.Frozen.FrozenSet.ToFrozenSet(
+        [
+            ".txt", ".md", ".markdown", ".log", ".json", ".jsonc", ".yaml", ".yml", ".toml",
+            ".ini", ".cfg", ".conf", ".xml", ".csv", ".tsv", ".sql", ".env", ".gitignore",
+            ".gitattributes", ".editorconfig", ".bat", ".cmd", ".ps1", ".psm1", ".sh",
+            ".cs", ".csproj", ".sln", ".slnx", ".props", ".targets", ".xaml",
+            ".c", ".cpp", ".cc", ".cxx", ".h", ".hpp", ".rs", ".go", ".py", ".pyw",
+            ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".vue", ".svelte",
+            ".html", ".htm", ".css", ".scss", ".less", ".java", ".kt", ".kts",
+            ".swift", ".rb", ".php", ".lua", ".r", ".dart", ".gradle", ".dockerfile"
+        ],
+        StringComparer.OrdinalIgnoreCase);
 
     public static bool CanAttemptAsyncFilePreview(SearchResultItem? item)
     {
@@ -195,7 +201,8 @@ internal static class SearchDetailsPreviewLoader
     {
         try
         {
-            if (!File.Exists(filePath))
+            if (!File.Exists(filePath) ||
+                DeskBox.Platform.DriveMediaInterop.HasUnhydratedCloudAttributesOnDisk(filePath))
             {
                 return null;
             }
@@ -287,6 +294,11 @@ internal static class SearchDetailsPreviewLoader
     {
         try
         {
+            if (DeskBox.Platform.DriveMediaInterop.HasUnhydratedCloudAttributesOnDisk(filePath))
+            {
+                return null;
+            }
+
             var info = new FileInfo(filePath);
             if (!info.Exists || info.Length <= 0 || info.Length > MaxDocxArchiveBytes)
             {
@@ -504,6 +516,11 @@ internal static class SearchDetailsPreviewLoader
     {
         try
         {
+            if (DeskBox.Platform.DriveMediaInterop.HasUnhydratedCloudAttributesOnDisk(filePath))
+            {
+                return await TryLoadIsolatedShellThumbnailBitmapAsync(filePath, cancellationToken);
+            }
+
             byte[]? bytes = await Task.Run(() =>
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -586,6 +603,11 @@ internal static class SearchDetailsPreviewLoader
     {
         try
         {
+            if (DeskBox.Platform.DriveMediaInterop.HasUnhydratedCloudAttributesOnDisk(filePath))
+            {
+                return null;
+            }
+
             var info = new FileInfo(filePath);
             if (!info.Exists || info.Length <= 0 || info.Length > MaxPdfDirectBytes || cancellationToken.IsCancellationRequested)
             {

@@ -136,6 +136,7 @@ public sealed class NativeAppNotificationService : IDisposable
             AppNotificationManager.Default.NotificationInvoked += OnNotificationInvoked;
             AppNotificationManager.Default.Register();
             _isRegistered = true;
+            TrySyncStartMenuToastActivatorForUnpackaged();
             App.Log("[Notification] Native app notification registered");
             return true;
         }
@@ -300,6 +301,30 @@ public sealed class NativeAppNotificationService : IDisposable
         }
     }
 
+    private static void TrySyncStartMenuToastActivatorForUnpackaged()
+    {
+        if (AppDistributionService.Current.IsPackaged)
+        {
+            return;
+        }
+
+        try
+        {
+            using Microsoft.Win32.RegistryKey? key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
+                $@"Software\Classes\AppUserModelId\{JumpListService.AppUserModelId}");
+            if (key?.GetValue("CustomActivator") is string rawGuid &&
+                Guid.TryParse(rawGuid.Trim(), out Guid activatorClsid) &&
+                activatorClsid != Guid.Empty)
+            {
+                JumpListService.SyncStartMenuShortcutToastActivator(activatorClsid);
+            }
+        }
+        catch (Exception ex)
+        {
+            App.LogVerbose($"[Notification] Start Menu ToastActivatorCLSID sync skipped: {ex.Message}");
+        }
+    }
+
     public async Task<IReadOnlyList<NativeAppNotificationSnapshot>> GetAllAsync()
     {
         if (_isDisposed)
@@ -307,15 +332,28 @@ public sealed class NativeAppNotificationService : IDisposable
             throw new ObjectDisposedException(nameof(NativeAppNotificationService));
         }
 
-        IList<AppNotification> notifications =
-            await AppNotificationManager.Default.GetAllAsync();
-        return notifications
-            .Select(notification => new NativeAppNotificationSnapshot(
-                notification.Id,
-                notification.Tag ?? string.Empty,
-                notification.Group ?? string.Empty,
-                notification.Payload ?? string.Empty))
-            .ToArray();
+        if (!_isRegistered)
+        {
+            return [];
+        }
+
+        try
+        {
+            IList<AppNotification> notifications =
+                await AppNotificationManager.Default.GetAllAsync();
+            return notifications
+                .Select(notification => new NativeAppNotificationSnapshot(
+                    notification.Id,
+                    notification.Tag ?? string.Empty,
+                    notification.Group ?? string.Empty,
+                    notification.Payload ?? string.Empty))
+                .ToArray();
+        }
+        catch (Exception ex)
+        {
+            App.LogVerbose($"[Notification] GetAllAsync failed: {ex.Message}");
+            return [];
+        }
     }
 
     public async Task RemoveByTagAndGroupAsync(string tag, string group)
@@ -343,8 +381,15 @@ public sealed class NativeAppNotificationService : IDisposable
             return;
         }
 
-        await AppNotificationManager.Default.RemoveByTagAndGroupAsync(tag, group);
-        App.Log($"[Notification] Removed native app notification tag={tag} group={group}");
+        try
+        {
+            await AppNotificationManager.Default.RemoveByTagAndGroupAsync(tag, group);
+            App.Log($"[Notification] Removed native app notification tag={tag} group={group}");
+        }
+        catch (Exception ex)
+        {
+            App.LogVerbose($"[Notification] RemoveByTagAndGroupAsync failed tag={tag} group={group}: {ex.Message}");
+        }
     }
 
     public bool Unregister()

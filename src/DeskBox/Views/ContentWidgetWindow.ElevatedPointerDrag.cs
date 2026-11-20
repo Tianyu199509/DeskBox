@@ -15,8 +15,28 @@ public sealed partial class ContentWidgetWindow
             QuickCaptureWidgetContentAdapter or
             ClipboardWidgetContentAdapter ||
         (CurrentContent is CustomWidgetContentAdapter custom &&
-         custom.ViewModel.AcceptsFileDrops) ||
+         custom.ViewModel.AcceptsDrops) ||
+        AnyGroupedMemberAcceptsFileDrops() ||
         base.SupportsCompactDropExpansion;
+
+    private bool AnyGroupedMemberAcceptsFileDrops()
+    {
+        if (App.Current?.WidgetManager?.GetWidgetGroupPresentation(_config.Id) is not
+            { Members.Count: > 1 } presentation)
+        {
+            return false;
+        }
+
+        foreach (var member in presentation.Members)
+        {
+            if (DoesGroupMemberAcceptFileDrop(member.WidgetId))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     internal bool CanObserveElevatedPointerDrag =>
         !IsClosing &&
@@ -29,7 +49,8 @@ public sealed partial class ContentWidgetWindow
         int screenY,
         IReadOnlyList<string> sourcePaths,
         LocalizationService localizationService,
-        out bool canDrop)
+        out bool canDrop,
+        bool forceCopyUnlessExplicit = false)
     {
         canDrop = false;
         if (!CanObserveElevatedPointerDrag || sourcePaths.Count == 0)
@@ -139,10 +160,38 @@ public sealed partial class ContentWidgetWindow
                     return localizationService.T("Widget.Error.UnsafeFolderTransfer");
                 }
 
+                HashSet<string> stackMemberPaths = targetStack.Members
+                    .Where(static m => !string.IsNullOrWhiteSpace(m.Path))
+                    .Select(static m => Path.GetFullPath(m.Path))
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                if (!string.IsNullOrWhiteSpace(stackDest) &&
+                    FileSurfaceContent.AreAllSourcesAlreadyInDestinationLexically(sourcePaths, stackDest) &&
+                    sourcePaths.All(path => stackMemberPaths.Contains(Path.GetFullPath(path))))
+                {
+                    canDrop = false;
+                    return localizationService.T("Widget.DragCaption.CurrentWidget");
+                }
+
+                FileDropIntent stackIntent = ResolveElevatedDropIntent(
+                    sourcePaths,
+                    stackDest,
+                    hasMappedFolder: !string.IsNullOrWhiteSpace(stackDest),
+                    forceCopyUnlessExplicit: forceCopyUnlessExplicit);
+                if (stackIntent == FileDropIntent.None)
+                {
+                    canDrop = false;
+                    return string.Empty;
+                }
+
                 canDrop = true;
-                return localizationService.Format(
-                    "Widget.Stack.DragCaption.Add",
-                    targetStack.Name);
+                return stackIntent == FileDropIntent.Shortcut
+                    ? FormatElevatedDropCaption(
+                        localizationService,
+                        FileDropIntent.Shortcut,
+                        targetStack.Name)
+                    : localizationService.Format(
+                        "Widget.Stack.DragCaption.Add",
+                        targetStack.Name);
             }
 
             if (nativeTarget is { } binTile &&
@@ -167,10 +216,21 @@ public sealed partial class ContentWidgetWindow
                     return localizationService.T("Widget.CannotMoveToFolder");
                 }
 
+                if (FileSurfaceContent.AreAllSourcesAlreadyInDestinationLexically(
+                        sourcePaths,
+                        folderDestination))
+                {
+                    canDrop = false;
+                    return ReferenceEquals(folder, navFolderItem)
+                        ? localizationService.T("Widget.CannotMoveToFolder")
+                        : localizationService.T("Widget.DragCaption.CurrentWidget");
+                }
+
                 FileDropIntent folderIntent = ResolveElevatedDropIntent(
                     sourcePaths,
                     folderDestination,
-                    hasMappedFolder: true);
+                    hasMappedFolder: true,
+                    forceCopyUnlessExplicit: forceCopyUnlessExplicit);
                 canDrop = folderIntent != FileDropIntent.None;
                 return FormatElevatedDropCaption(
                     localizationService,
@@ -190,10 +250,18 @@ public sealed partial class ContentWidgetWindow
                 return localizationService.T("Widget.Error.UnsafeFolderTransfer");
             }
 
+            if (!string.IsNullOrWhiteSpace(destination) &&
+                FileSurfaceContent.AreAllSourcesAlreadyInDestinationLexically(sourcePaths, destination))
+            {
+                canDrop = false;
+                return localizationService.T("Widget.DragCaption.CurrentWidget");
+            }
+
             FileDropIntent surfaceIntent = ResolveElevatedDropIntent(
                 sourcePaths,
                 destination,
-                hasMappedFolder: mapped);
+                hasMappedFolder: mapped,
+                forceCopyUnlessExplicit: forceCopyUnlessExplicit);
             canDrop = surfaceIntent != FileDropIntent.None;
             if (!mapped && surfaceIntent == FileDropIntent.Reference)
             {
@@ -238,7 +306,8 @@ public sealed partial class ContentWidgetWindow
         int screenY,
         bool? controlDown = null,
         bool? shiftDown = null,
-        bool? altDown = null)
+        bool? altDown = null,
+        bool isSecondaryButtonDrag = false)
     {
         if (IsClosing || sourcePaths.Count == 0)
         {
@@ -255,7 +324,9 @@ public sealed partial class ContentWidgetWindow
             return false;
         }
 
-        bool canSourceMove = CanElevatedDragSourceMove(sourcePaths);
+        bool canSourceMove = CanElevatedDragSourceMove(
+            sourcePaths,
+            PathOriginClassifier.DefaultDropProbeBudget);
         uint allowedEffects = canSourceMove
             ? NativeDropEffectPolicy.Copy |
               NativeDropEffectPolicy.Move |
@@ -273,26 +344,86 @@ public sealed partial class ContentWidgetWindow
                 ArmCollapsedContentHibernationIfSettled();
             }
 
-            if (_nativeFileDropLaunchTarget is { Path.Length: > 0 } launchItem &&
-                IsNativeDropPointOverItemIcon(screenX, screenY, launchItem))
-            {
-                LeaveElevatedPointerDrag();
-                fileAdapter.Surface?.MarkNativeLaunchConsumed();
-                bool launched = ShortcutFileLauncher.TryLaunchWithFiles(
-                    launchItem.Path,
-                    sourcePaths);
-                if (!launched)
-                {
-                    fileAdapter.Surface?.ShowShortcutLaunchRefusedFeedback(
-                        launchItem.Name);
-                }
-
-                return launched;
-            }
-
+            WidgetItem? launchItem = _nativeFileDropLaunchTarget is { Path.Length: > 0 } activeLaunch &&
+                IsNativeDropPointOverItemIcon(screenX, screenY, activeLaunch)
+                ? activeLaunch
+                : null;
             WidgetItem? capturedTarget =
                 fileAdapter.TryResolveFolderNavigationDropTarget(screenX, screenY) ??
                 _nativeFileDropItemTarget;
+
+            if (isSecondaryButtonDrag)
+            {
+                var rightArgs = new NativeDropIntentEventArgs(
+                    Paths: sourcePaths,
+                    ScreenX: screenX,
+                    ScreenY: screenY,
+                    ContainsTemporaryFiles: false,
+                    CopyRequested: false,
+                    ShortcutRequested: false,
+                    RightButtonDrag: true,
+                    FeedbackEffect: allowedEffects,
+                    KeyState: 0,
+                    AllowedEffects: allowedEffects);
+                LeaveElevatedPointerDrag();
+                NativeRightDropChoice choice = await ShowNativeRightButtonDropChoiceAsync(
+                    rightArgs,
+                    launchItem,
+                    capturedTarget);
+                if (choice == NativeRightDropChoice.Cancel)
+                {
+                    NotifyCompactDropCompletedFromHost();
+                    return false;
+                }
+
+                if (choice == NativeRightDropChoice.OpenWithApp && launchItem is not null)
+                {
+                    NotifyCompactDropCompletedFromHost();
+                    return TryLaunchElevatedShortcutDrop(
+                        fileAdapter,
+                        launchItem,
+                        sourcePaths);
+                }
+
+                WidgetItem? effectiveTarget = launchItem is not null &&
+                    ReferenceEquals(capturedTarget, launchItem)
+                    ? null
+                    : capturedTarget;
+                if (effectiveTarget is null)
+                {
+                    fileAdapter.Surface?.CaptureNativeDropInsertion(screenX, screenY);
+                }
+
+                FileDropIntent? forcedChoiceIntent = choice switch
+                {
+                    NativeRightDropChoice.Copy => FileDropIntent.Copy,
+                    NativeRightDropChoice.Move => FileDropIntent.Move,
+                    NativeRightDropChoice.Shortcut => FileDropIntent.Shortcut,
+                    _ => null,
+                };
+                NotifyCompactDropCompletedFromHost();
+                await ImportNativeFileDropAsync(
+                    sourcePaths,
+                    containsTemporaryFiles: false,
+                    copyWhenMapped: choice != NativeRightDropChoice.Move,
+                    screenX: screenX,
+                    screenY: screenY,
+                    forcedIntent: forcedChoiceIntent,
+                    allowedEffects: allowedEffects,
+                    capturedItemTarget: effectiveTarget,
+                    hasCapturedItemTarget: effectiveTarget is not null);
+                return true;
+            }
+
+            if (launchItem is not null)
+            {
+                LeaveElevatedPointerDrag();
+                return TryLaunchElevatedShortcutDrop(
+                    fileAdapter,
+                    launchItem,
+                    sourcePaths);
+            }
+
             if (capturedTarget is null)
             {
                 fileAdapter.Surface?.CaptureNativeDropInsertion(screenX, screenY);
@@ -313,7 +444,8 @@ public sealed partial class ContentWidgetWindow
                 hasMappedFolder: !string.IsNullOrWhiteSpace(destination),
                 controlDown: controlDown,
                 shiftDown: shiftDown,
-                altDown: altDown);
+                altDown: altDown,
+                probeBudget: PathOriginClassifier.DefaultDropProbeBudget);
             if (snapshotIntent == FileDropIntent.None)
             {
                 LeaveElevatedPointerDrag();
@@ -344,6 +476,47 @@ public sealed partial class ContentWidgetWindow
             return false;
         }
 
+        if (isSecondaryButtonDrag)
+        {
+            var rightArgs = new NativeDropIntentEventArgs(
+                Paths: sourcePaths,
+                ScreenX: screenX,
+                ScreenY: screenY,
+                ContainsTemporaryFiles: false,
+                CopyRequested: false,
+                ShortcutRequested: false,
+                RightButtonDrag: true,
+                FeedbackEffect: allowedEffects,
+                KeyState: 0,
+                AllowedEffects: allowedEffects);
+            LeaveElevatedPointerDrag();
+            NativeRightDropChoice choice = await ShowNativeRightButtonDropChoiceAsync(
+                rightArgs,
+                launchTarget: null,
+                itemTarget: null);
+            NotifyCompactDropCompletedFromHost();
+            if (choice == NativeRightDropChoice.Cancel)
+            {
+                return false;
+            }
+
+            await ImportNativeFileDropAsync(
+                sourcePaths,
+                containsTemporaryFiles: false,
+                copyWhenMapped: choice != NativeRightDropChoice.Move,
+                screenX: screenX,
+                screenY: screenY,
+                forcedIntent: choice switch
+                {
+                    NativeRightDropChoice.Copy => FileDropIntent.Copy,
+                    NativeRightDropChoice.Move => FileDropIntent.Move,
+                    NativeRightDropChoice.Shortcut => FileDropIntent.Shortcut,
+                    _ => null,
+                },
+                allowedEffects: allowedEffects);
+            return true;
+        }
+
         NotifyCompactDropCompletedFromHost();
         LeaveElevatedPointerDrag();
         await ImportNativeFileDropAsync(
@@ -357,11 +530,53 @@ public sealed partial class ContentWidgetWindow
         return true;
     }
 
-    private bool CanElevatedDragSourceMove(IReadOnlyList<string> sourcePaths)
+    private bool TryLaunchElevatedShortcutDrop(
+        FileWidgetContentAdapter fileAdapter,
+        WidgetItem launchItem,
+        IReadOnlyList<string> sourcePaths)
     {
-        return !PathOriginClassifier
-            .ClassifySources(sourcePaths, TimeSpan.FromMilliseconds(80))
-            .IsMoveProtectedSystemOrSharedSource;
+        fileAdapter.Surface?.MarkNativeLaunchConsumed();
+        if (!ShortcutFileLauncher.CanLaunchWithFiles(launchItem.Path, sourcePaths))
+        {
+            fileAdapter.Surface?.ShowShortcutLaunchRefusedFeedback(
+                launchItem.Name);
+            return false;
+        }
+
+        string shortcutPath = launchItem.Path;
+        string shortcutName = launchItem.Name;
+        string[] capturedPaths = sourcePaths.ToArray();
+        IntPtr ownerHwnd = HWnd;
+        UiDispatch.PostAfterCallback(async () =>
+        {
+            if (IsClosing)
+            {
+                return;
+            }
+
+            ShellLaunchOutcome launchOutcome = await ShortcutFileLauncher.LaunchWithFilesAsync(
+                shortcutPath,
+                capturedPaths,
+                ownerHwnd);
+            if (launchOutcome == ShellLaunchOutcome.Failed && !IsClosing)
+            {
+                fileAdapter.Surface?.ShowShortcutLaunchRefusedFeedback(
+                    shortcutName);
+            }
+        });
+        return true;
+    }
+
+    private bool CanElevatedDragSourceMove(
+        IReadOnlyList<string> sourcePaths,
+        TimeSpan? probeBudget = null)
+    {
+        return !DriveMediaInterop.IsProtectedDragOutSource(sourcePaths) &&
+            !PathOriginClassifier
+                .ClassifySources(
+                    sourcePaths,
+                    probeBudget ?? PathOriginClassifier.DefaultHoverProbeBudget)
+                .IsMoveProtectedSystemOrSharedSource;
     }
 
     private FileDropIntent ResolveElevatedDropIntent(
@@ -370,22 +585,30 @@ public sealed partial class ContentWidgetWindow
         bool hasMappedFolder,
         bool? controlDown = null,
         bool? shiftDown = null,
-        bool? altDown = null)
+        bool? altDown = null,
+        TimeSpan? probeBudget = null,
+        bool forceCopyUnlessExplicit = false)
     {
+        TimeSpan budget = probeBudget ?? PathOriginClassifier.DefaultHoverProbeBudget;
         bool sameVolume = sourcePaths.Count == 0 ||
             (destinationFolderPath.Length > 0 &&
              PathOriginClassifier.AreAllOnSameVolume(
                  sourcePaths,
                  destinationFolderPath,
-                 TimeSpan.FromMilliseconds(80)));
+                 budget));
         string action = SettingsService.Settings.FileWidget.ManagedDropAction;
-        bool followWindows = string.Equals(
+        bool followWindows = !forceCopyUnlessExplicit && string.Equals(
             action,
             Services.SettingsService.ManagedDropActionFollowWindows,
             StringComparison.Ordinal);
         SourceOriginSnapshot origin = PathOriginClassifier.ClassifySources(
             sourcePaths,
-            TimeSpan.FromMilliseconds(80));
+            budget);
+        bool canSourceMove = !DriveMediaInterop.IsProtectedDragOutSource(sourcePaths) &&
+            !origin.IsMoveProtectedSystemOrSharedSource;
+        uint allowedEffects = canSourceMove
+            ? NativeDropEffectPolicy.Copy | NativeDropEffectPolicy.Move | NativeDropEffectPolicy.Link
+            : NativeDropEffectPolicy.Copy | NativeDropEffectPolicy.Link;
         return TransferIntentEngine.Evaluate(new TransferIntentRequest(
             Domain: TransferDomain.InternalDeskBox,
             TargetKind: TransferTargetKind.DirectorySurface,
@@ -394,12 +617,12 @@ public sealed partial class ContentWidgetWindow
             HasShellApplicationOrNamespaceData: false,
             ForceCopy: false,
             HasMappedFolder: hasMappedFolder,
-            ControlDown: controlDown ?? Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control),
-            ShiftDown: shiftDown ?? Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Shift),
-            AltDown: altDown ?? Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Menu),
-            AllowedEffects: NativeDropEffectPolicy.Copy | NativeDropEffectPolicy.Move | NativeDropEffectPolicy.Link,
+            ControlDown: controlDown ?? Win32Helper.IsAsyncKeyPressed(Windows.System.VirtualKey.Control),
+            ShiftDown: shiftDown ?? Win32Helper.IsAsyncKeyPressed(Windows.System.VirtualKey.Shift),
+            AltDown: altDown ?? Win32Helper.IsAsyncKeyPressed(Windows.System.VirtualKey.Menu),
+            AllowedEffects: allowedEffects,
             NoOperationMetadata: false,
-            DefaultMove: string.Equals(
+            DefaultMove: !forceCopyUnlessExplicit && string.Equals(
                 action,
                 Services.SettingsService.ManagedDropActionMove,
                 StringComparison.Ordinal),

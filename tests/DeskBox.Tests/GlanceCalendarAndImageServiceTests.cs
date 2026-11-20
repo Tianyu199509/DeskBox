@@ -143,15 +143,15 @@ public sealed class GlanceCalendarAndImageServiceTests : IDisposable
         Assert.Contains("x:Name=\"ChineseFestivalCard\"", settingsXaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"ShowChineseFestivalsToggle\"", settingsXaml, StringComparison.Ordinal);
         Assert.Contains("ShowChineseFestivalsToggle_Toggled", settingsCodeBehind, StringComparison.Ordinal);
-        Assert.Contains("x:Name=\"DisplayContentDropDownButton\"", settingsXaml, StringComparison.Ordinal);
-        Assert.Contains("Click=\"DisplayContentDropDown_Click\"", settingsXaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"DisplayContentCheckBoxesPanel\"", settingsXaml, StringComparison.Ordinal);
+        Assert.Contains("Click=\"DisplayContentCheckBox_Click\"", settingsXaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"LocalSourceCard\"", settingsXaml, StringComparison.Ordinal);
         Assert.Contains("svc:Localized.HeaderKey=\"Glance.Background.Files\"", settingsXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("svc:Localized.HeaderKey=\"Glance.Background.LocalSummary\"", settingsXaml, StringComparison.Ordinal);
-        Assert.Contains("SettingsMultiSelectMenu.Show", settingsCodeBehind, StringComparison.Ordinal);
         Assert.Contains("when _settings.LocalImagePaths.Count > 0", settingsCodeBehind, StringComparison.Ordinal);
         Assert.Contains("Localization.T(\"Glance.Status.NoLocalImages\")", settingsCodeBehind, StringComparison.Ordinal);
-        Assert.DoesNotContain("<CheckBox", settingsXaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"ShowTimeCheckBox\"", settingsXaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"ShowWeekdayCheckBox\"", settingsXaml, StringComparison.Ordinal);
         Assert.Contains("<toolkit:SettingsExpander", settingsXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Glance.LayoutGroup.Title", settingsXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Glance.AppearanceGroup.Title", settingsXaml, StringComparison.Ordinal);
@@ -168,7 +168,7 @@ public sealed class GlanceCalendarAndImageServiceTests : IDisposable
             "Localization.T(\"Glance.TraditionalCalendar.Auto\")",
             StringComparison.Ordinal);
         Assert.True(traditionalNoneOption >= 0 && traditionalNoneOption < traditionalAutoOption);
-        Assert.DoesNotContain("SliderSettingValueTextStyle", settingsXaml, StringComparison.Ordinal);
+        Assert.Contains("SliderSettingValueTextStyle", settingsXaml, StringComparison.Ordinal);
         Assert.Contains("Glance.CalendarMaterial.FollowImage", settingsCodeBehind, StringComparison.Ordinal);
         int styleCard = settingsXaml.IndexOf("x:Name=\"StyleCard\"", StringComparison.Ordinal);
         int traditionalCalendarOption = settingsXaml.IndexOf("x:Name=\"TraditionalCalendarCard\"", StringComparison.Ordinal);

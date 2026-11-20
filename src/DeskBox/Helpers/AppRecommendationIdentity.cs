@@ -10,24 +10,26 @@ namespace DeskBox.Helpers;
 /// </summary>
 internal static class AppRecommendationIdentity
 {
-    private static readonly HashSet<string> s_sharedHostExecutables = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "Update.exe",
-        "chrome_proxy.exe",
-        "msedge_proxy.exe",
-        "brave_proxy.exe",
-        "cmd.exe",
-        "powershell.exe",
-        "pwsh.exe",
-        "wscript.exe",
-        "cscript.exe",
-        "mshta.exe",
-        "rundll32.exe",
-        "msiexec.exe",
-        "explorer.exe",
-        "javaw.exe",
-        "java.exe"
-    };
+    private static readonly System.Collections.Frozen.FrozenSet<string> s_sharedHostExecutables =
+        System.Collections.Frozen.FrozenSet.ToFrozenSet(
+        [
+            "Update.exe",
+            "chrome_proxy.exe",
+            "msedge_proxy.exe",
+            "brave_proxy.exe",
+            "cmd.exe",
+            "powershell.exe",
+            "pwsh.exe",
+            "wscript.exe",
+            "cscript.exe",
+            "mshta.exe",
+            "rundll32.exe",
+            "msiexec.exe",
+            "explorer.exe",
+            "javaw.exe",
+            "java.exe"
+        ],
+        StringComparer.OrdinalIgnoreCase);
 
     internal readonly record struct Keys(
         string CanonicalKey,

@@ -975,9 +975,19 @@ public sealed partial class WeatherWidgetViewModel : ObservableObject, IDisposab
             return;
         }
 
+        if (_dispatcherQueue is { HasThreadAccess: false } dq)
+        {
+            dq.TryEnqueue(OnLanguageChanged);
+            return;
+        }
+
         OnPropertyChanged(nameof(DisplayName));
         OnPropertyChanged(nameof(LoadingText));
         OnPropertyChanged(nameof(RefreshTooltip));
+        OnPropertyChanged(nameof(LocationFallbackTooltip));
+        OnPropertyChanged(nameof(ErrorTitle));
+        OnPropertyChanged(nameof(ErrorBody));
+        OnPropertyChanged(nameof(ErrorRetryText));
         OnPropertyChanged(nameof(HumidityLabel));
         OnPropertyChanged(nameof(WindLabel));
         OnPropertyChanged(nameof(PrecipitationLabel));

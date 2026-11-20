@@ -1,9 +1,11 @@
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Services;
 using DeskBox.Services.Lyrics;
+using DeskBox.Services.Media;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
@@ -21,6 +23,8 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
     private const int MaxTransientEmptyInfoRetries = 4;
     private const int ExpandedProgressRefreshMs = 1000;
     private const int CompactProgressRefreshMs = 2000;
+    private const int ExpandedIdleProbeRefreshMs = 4500;
+    private const int CompactIdleProbeRefreshMs = 8000;
     private const int MediaPropertiesSettleDelayMs = 220;
     private const int LyricsLookupDebounceMs = 300;
     private static readonly TimeSpan RevealFullRefreshFreshness =
@@ -59,6 +63,7 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
     private readonly WidgetConfig _config;
     private readonly Microsoft.UI.Dispatching.DispatcherQueue? _dispatcherQueue;
     private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer? _progressTimer;
+    private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer? _idleReconcileTimer;
     private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer? _lyricTimer;
     private readonly MusicTimelineExtrapolator _timelineExtrapolator = new();
     private readonly Action _memoryReclaimCompletedHandler;
@@ -84,6 +89,8 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
     private bool _isRefreshing;
     private Task? _activeRefreshTask;
     private bool _hasCurrentMediaInfo;
+    private bool _isMediaServiceUnavailable;
+    private bool _isRetryingMediaService;
     private int _hiddenMediaStateDirty;
     private long _lastFullRefreshCompletedUtcTicks;
     private int _timelineRefreshGeneration;
@@ -249,6 +256,12 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
             _progressTimer.Tick += ProgressTimer_Tick;
             PerformanceLogger.RecordTransientUiTimerCreated();
 
+            _idleReconcileTimer = _dispatcherQueue.CreateTimer();
+            _idleReconcileTimer.Interval = TimeSpan.FromMilliseconds(ExpandedIdleProbeRefreshMs);
+            _idleReconcileTimer.IsRepeating = true;
+            _idleReconcileTimer.Tick += IdleReconcileTimer_Tick;
+            PerformanceLogger.RecordTransientUiTimerCreated();
+
             _lyricTimer = _dispatcherQueue.CreateTimer();
             _lyricTimer.IsRepeating = false;
             _lyricTimer.Tick += LyricTimer_Tick;
@@ -256,6 +269,8 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
         }
 
         RefreshSubtitleState(notify: false);
+        _isMediaServiceUnavailable = _musicSessionService.ConnectionState == MediaSessionConnectionState.Unavailable;
+        RetryMediaServiceConnectionCommand = new AsyncRelayCommand(RetryMediaServiceConnectionAsync);
         AttachServiceEvents();
     }
 
@@ -322,6 +337,8 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _title, value))
             {
                 OnPropertyChanged(nameof(LyricsHeaderSubtitle));
+                OnPropertyChanged(nameof(ControlsArtistText));
+                OnPropertyChanged(nameof(ControlsArtistVisibility));
                 RefreshSubtitleState();
             }
         }
@@ -336,6 +353,8 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
             {
                 OnPropertyChanged(nameof(LyricsHeaderSubtitle));
                 OnPropertyChanged(nameof(SourceBadgeTextVisibility));
+                OnPropertyChanged(nameof(ControlsArtistText));
+                OnPropertyChanged(nameof(ControlsArtistVisibility));
             }
         }
     }
@@ -347,6 +366,8 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
         {
             if (SetProperty(ref _album, value))
             {
+                OnPropertyChanged(nameof(ControlsArtistText));
+                OnPropertyChanged(nameof(ControlsArtistVisibility));
                 RefreshSubtitleState();
             }
         }
@@ -363,10 +384,27 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
                 OnPropertyChanged(nameof(LyricsHeaderSubtitle));
                 OnPropertyChanged(nameof(SourceBadgeText));
                 OnPropertyChanged(nameof(SourceBadgeTextVisibility));
+                OnPropertyChanged(nameof(ControlsSourceHeaderText));
+                OnPropertyChanged(nameof(ControlsArtistText));
+                OnPropertyChanged(nameof(ControlsArtistVisibility));
                 RefreshSubtitleState();
             }
         }
     }
+
+    public string ControlsSourceHeaderText => SourceDisplayName;
+
+    public string ControlsArtistText =>
+        !HasSession
+            ? StatusText
+            : !string.IsNullOrWhiteSpace(_artist)
+                ? _artist
+                : !string.IsNullOrWhiteSpace(_album)
+                    ? _album
+                    : string.Empty;
+
+    public Visibility ControlsArtistVisibility =>
+        string.IsNullOrWhiteSpace(ControlsArtistText) ? Visibility.Collapsed : Visibility.Visible;
 
     public string SourceBadgeText => !string.IsNullOrWhiteSpace(_sourceDisplayName)
         ? _sourceDisplayName
@@ -610,6 +648,8 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
                 OnPropertyChanged(nameof(StatusText));
                 OnPropertyChanged(nameof(HasSession));
                 OnPropertyChanged(nameof(LyricsToggleVisibility));
+                OnPropertyChanged(nameof(ControlsArtistText));
+                OnPropertyChanged(nameof(ControlsArtistVisibility));
                 RefreshSubtitleState();
 
                 // Start or stop the progress timer based on playback state.
@@ -690,8 +730,10 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _textSize, value))
             {
                 OnPropertyChanged(nameof(TitleTextSize));
+                OnPropertyChanged(nameof(ControlsTitleTextSize));
                 OnPropertyChanged(nameof(MinimalTitleTextSize));
                 OnPropertyChanged(nameof(SecondaryTextSize));
+                OnPropertyChanged(nameof(ControlsSecondaryTextSize));
                 OnPropertyChanged(nameof(LyricTextSize));
                 OnPropertyChanged(nameof(MinimalLyricTextSize));
                 OnPropertyChanged(nameof(CaptionTextSize));
@@ -701,6 +743,10 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
     }
 
     public double TitleTextSize => Math.Min(SettingsService.MaxTextSize + 3, TextSize + 4);
+
+    public double ControlsSecondaryTextSize => TextSize < 11.0 ? 11.5 : (TextSize > 14.0 ? 12.5 : 12.0);
+
+    public double ControlsTitleTextSize => ControlsSecondaryTextSize + (TextSize >= 13.0 ? 3.0 : 2.5);
 
     public double MinimalTitleTextSize => Math.Min(SettingsService.MaxTextSize + 1, TextSize + 1.5);
 
@@ -782,6 +828,7 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _canChangeShuffle, value))
             {
                 OnPropertyChanged(nameof(CanChangePlaybackMode));
+                OnPropertyChanged(nameof(PlaybackModeButtonVisibility));
             }
         }
     }
@@ -794,11 +841,15 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _canChangeRepeat, value))
             {
                 OnPropertyChanged(nameof(CanChangePlaybackMode));
+                OnPropertyChanged(nameof(PlaybackModeButtonVisibility));
             }
         }
     }
 
     public bool CanChangePlaybackMode => CanChangeShuffle || CanChangeRepeat;
+
+    public Visibility PlaybackModeButtonVisibility =>
+        CanChangePlaybackMode ? Visibility.Visible : Visibility.Collapsed;
 
     public MusicPlaybackMode PlaybackMode
     {
@@ -890,15 +941,47 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
         }
     }
 
-    public string StatusText => PlaybackState switch
-    {
-        MusicPlaybackState.Playing => _localizationService.T("Music.Status.Playing"),
-        MusicPlaybackState.Paused => _localizationService.T("Music.Status.Paused"),
-        MusicPlaybackState.Stopped => _localizationService.T("Music.Status.Stopped"),
-        _ => HasSession ? _localizationService.T("Music.Status.Ready") : _localizationService.T("Music.Status.NoSession")
-    };
+    public IAsyncRelayCommand RetryMediaServiceConnectionCommand { get; }
 
-    public string PlayPauseGlyph => IsPlaying ? "\uE769" : "\uE102";
+    public bool IsMediaServiceUnavailable
+    {
+        get => _isMediaServiceUnavailable;
+        private set
+        {
+            if (SetProperty(ref _isMediaServiceUnavailable, value))
+            {
+                OnPropertyChanged(nameof(MediaServiceUnavailableVisibility));
+                OnPropertyChanged(nameof(StatusText));
+                OnPropertyChanged(nameof(ControlsArtistText));
+                OnPropertyChanged(nameof(ControlsArtistVisibility));
+            }
+        }
+    }
+
+    public Visibility MediaServiceUnavailableVisibility =>
+        _isMediaServiceUnavailable ? Visibility.Visible : Visibility.Collapsed;
+
+    public string MediaServiceUnavailableText =>
+        _localizationService.T("Music.Status.ServiceUnavailable");
+
+    public string RetryMediaServiceText =>
+        _localizationService.T("Music.Action.RetryConnection");
+
+    public string StatusText => IsMediaServiceUnavailable
+        ? _localizationService.T("Music.Status.ServiceUnavailable")
+        : PlaybackState switch
+        {
+            MusicPlaybackState.Playing => _localizationService.T("Music.Status.Playing"),
+            MusicPlaybackState.Paused => _localizationService.T("Music.Status.Paused"),
+            MusicPlaybackState.Stopped => _localizationService.T("Music.Status.Stopped"),
+            _ => HasSession ? _localizationService.T("Music.Status.Ready") : _localizationService.T("Music.Status.NoSession")
+        };
+
+    public string PlayPauseGlyph => DeskBox.Controls.WidgetContents.MusicTransportIcon.ResolveGlyph(
+        IsPlaying
+            ? DeskBox.Controls.WidgetContents.MusicTransportIconKind.Pause
+            : DeskBox.Controls.WidgetContents.MusicTransportIconKind.Play,
+        WindowsCompatibilityService.IsWindows11OrLater);
 
     public Visibility PlayIconVisibility => IsPlaying ? Visibility.Collapsed : Visibility.Visible;
 
@@ -1063,6 +1146,13 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
             PerformanceLogger.RecordTransientUiTimerReleased();
         }
 
+        if (_idleReconcileTimer is not null)
+        {
+            _idleReconcileTimer.Stop();
+            _idleReconcileTimer.Tick -= IdleReconcileTimer_Tick;
+            PerformanceLogger.RecordTransientUiTimerReleased();
+        }
+
         if (_lyricTimer is not null)
         {
             _lyricTimer.Stop();
@@ -1143,23 +1233,19 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
         Visibility nextSubtitleVis;
         double nextSubtitleOpacity;
 
-        if (!HasSession)
-        {
-            nextSubtitleText = StatusText;
-            nextSubtitleVis = Visibility.Visible;
-            nextSubtitleOpacity = 0.82;
-        }
-        else if (ShowLyrics)
-        {
-            nextSubtitleText = nextInlineText;
-            nextSubtitleVis = Visibility.Visible;
-            nextSubtitleOpacity = nextInlineOpacity;
-        }
-        else
+        if (!HasSession || !ShowLyrics)
         {
             nextSubtitleText = string.Empty;
             nextSubtitleVis = Visibility.Collapsed;
             nextSubtitleOpacity = 0.0;
+        }
+        else
+        {
+            nextSubtitleText = nextInlineText;
+            nextSubtitleVis = Visibility.Visible;
+            nextSubtitleOpacity = !string.IsNullOrWhiteSpace(_currentLyricLine)
+                ? (_isLyricIntroPreview ? 0.45 : 0.50)
+                : (_currentLyrics.IsInstrumental ? 0.45 : 0.40);
         }
 
         bool inlineTextChanged = !string.Equals(_cachedInlineLyricText, nextInlineText, StringComparison.Ordinal);
@@ -1268,6 +1354,7 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
         _musicSessionService.PlaybackInfoChanged += OnPlaybackInfoChanged;
         _musicSessionService.MediaPropertiesChanged += OnMediaPropertiesChanged;
         _musicSessionService.TimelinePropertiesChanged += OnTimelineChanged;
+        _musicSessionService.ConnectionStateChanged += OnConnectionStateChanged;
     }
 
     private void DetachServiceEvents()
@@ -1277,14 +1364,98 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
         _musicSessionService.PlaybackInfoChanged -= OnPlaybackInfoChanged;
         _musicSessionService.MediaPropertiesChanged -= OnMediaPropertiesChanged;
         _musicSessionService.TimelinePropertiesChanged -= OnTimelineChanged;
+        _musicSessionService.ConnectionStateChanged -= OnConnectionStateChanged;
+    }
+
+    private void OnConnectionStateChanged(object? sender, EventArgs e)
+    {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        bool unavailable = _musicSessionService.ConnectionState == MediaSessionConnectionState.Unavailable;
+        if (_dispatcherQueue is not null && !_dispatcherQueue.HasThreadAccess)
+        {
+            _dispatcherQueue.TryEnqueue(() => ApplyConnectionState(unavailable));
+            return;
+        }
+
+        ApplyConnectionState(unavailable);
+    }
+
+    private void ApplyConnectionState(bool unavailable)
+    {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        IsMediaServiceUnavailable = unavailable;
+        if (!unavailable)
+        {
+            ScheduleFullRefresh();
+        }
+    }
+
+    public async Task RetryMediaServiceConnectionAsync()
+    {
+        if (_isDisposed || _isRetryingMediaService)
+        {
+            return;
+        }
+
+        _isRetryingMediaService = true;
+        try
+        {
+            bool connected = await _musicSessionService.RetryConnectionAsync();
+            if (_isDisposed)
+            {
+                return;
+            }
+
+            IsMediaServiceUnavailable = !connected &&
+                _musicSessionService.ConnectionState == MediaSessionConnectionState.Unavailable;
+            if (connected)
+            {
+                await RefreshAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            if (!_isDisposed)
+            {
+                App.Log($"[MusicWidget] Manual media service retry failed: {ex.Message}");
+                IsMediaServiceUnavailable =
+                    _musicSessionService.ConnectionState == MediaSessionConnectionState.Unavailable;
+            }
+        }
+        finally
+        {
+            _isRetryingMediaService = false;
+        }
     }
 
     private int _mediaPropertiesPendingGeneration;
     private int? _pendingFullRefreshMediaGeneration;
-    private void OnSessionsChanged(object? sender, EventArgs e) => ScheduleFullRefresh();
-    private void OnCurrentSessionChanged(object? sender, EventArgs e) => ScheduleFullRefresh();
+    private int _consecutiveEmptyIdleProbes;
+    private const int MaxConsecutiveEmptyIdleProbesBeforeSleep = 3;
+
+    private void OnSessionsChanged(object? sender, EventArgs e)
+    {
+        _consecutiveEmptyIdleProbes = 0;
+        ScheduleFullRefresh();
+    }
+
+    private void OnCurrentSessionChanged(object? sender, EventArgs e)
+    {
+        _consecutiveEmptyIdleProbes = 0;
+        ScheduleFullRefresh();
+    }
+
     private void OnMediaPropertiesChanged(object? sender, EventArgs e)
     {
+        _consecutiveEmptyIdleProbes = 0;
         ScheduleDebouncedMediaRefresh();
     }
 
@@ -1569,6 +1740,7 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
                 unknownBufferingExpired))
         {
             sender.Stop();
+            UpdateIdleReconcileTimerState(isProgressTimerRunning: false);
             UpdateMusicTimerDiagnostics();
             if (!_isDisposed &&
                 PlaybackState == MusicPlaybackState.Unknown &&
@@ -1737,6 +1909,16 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
             }
 
             DateTimeOffset nowUtc = DateTimeOffset.UtcNow;
+            if (liveTimeline is not null || _hasCurrentMediaInfo)
+            {
+                _consecutiveEmptyIdleProbes = 0;
+            }
+            else if (++_consecutiveEmptyIdleProbes >= MaxConsecutiveEmptyIdleProbesBeforeSleep)
+            {
+                _idleReconcileTimer?.Stop();
+                UpdateMusicTimerDiagnostics();
+            }
+
             MusicPlaybackState resolvedPlaybackState = liveTimeline is null
                 ? MusicPlaybackState.Unknown
                 : ResolvePlaybackStateWithPendingIntent(liveTimeline.PlaybackState, nowUtc);
@@ -1778,7 +1960,7 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
         try
         {
             MusicSessionInfo? liveInfo =
-                await _musicSessionService.GetCurrentSessionInfoAsync(_preferredSessionId);
+                await _musicSessionService.GetCurrentSessionInfoAsync(_preferredSessionId, _lastCoverFingerprint);
             if (_isDisposed)
             {
                 return;
@@ -1839,7 +2021,8 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
             return true;
         }
 
-        if (!_hasAppliedCoverForCurrentTrack && liveInfo.Thumbnail is not null)
+        if (!_hasAppliedCoverForCurrentTrack &&
+            (liveInfo.ThumbnailBytes is { Length: > 0 } || liveInfo.ThumbnailFingerprint != 0))
         {
             return true;
         }
@@ -1906,9 +2089,31 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
         _pendingCommandTargetUntilUtc = default;
     }
 
+    private void IdleReconcileTimer_Tick(Microsoft.UI.Dispatching.DispatcherQueueTimer sender, object args)
+    {
+        if (!CanRunWindowMediaRefresh() || _progressTimer?.IsRunning == true)
+        {
+            sender.Stop();
+            UpdateMusicTimerDiagnostics();
+            return;
+        }
+
+        if (ConsumeMemoryEpochChanges())
+        {
+            DateTimeOffset nowUtc = DateTimeOffset.UtcNow;
+            _lastLiveReconcileUtc = nowUtc;
+            _lastLiveTimelineProbeUtc = nowUtc;
+            _ = ReconcileLiveSessionStateAsync();
+            return;
+        }
+
+        _ = ProbeLiveTimelineStateAsync();
+    }
+
     private void UpdateMusicTimerDiagnostics()
     {
         int activeTimers = (_progressTimer?.IsRunning == true ? 1 : 0) +
+                           (_idleReconcileTimer?.IsRunning == true ? 1 : 0) +
                            (_lyricTimer?.IsRunning == true ? 1 : 0);
         PerformanceLogger.ActiveMusicTimerCount = activeTimers;
         PerformanceLogger.MusicProgressTimerIntervalMs = _progressTimer is null
@@ -1916,10 +2121,41 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
             : ResolveProgressRefreshIntervalMs(_isCompactCollapsed);
     }
 
+    private void UpdateIdleReconcileTimerState(bool isProgressTimerRunning)
+    {
+        if (_idleReconcileTimer is null)
+        {
+            return;
+        }
+
+        bool shouldRunIdleProbe = !_isDisposed &&
+            _isWindowVisible &&
+            _isWindowRevealCompleted &&
+            !isProgressTimerRunning &&
+            (_hasCurrentMediaInfo || _consecutiveEmptyIdleProbes < MaxConsecutiveEmptyIdleProbesBeforeSleep);
+        if (!shouldRunIdleProbe)
+        {
+            if (_idleReconcileTimer.IsRunning)
+            {
+                _idleReconcileTimer.Stop();
+            }
+
+            return;
+        }
+
+        _idleReconcileTimer.Interval = TimeSpan.FromMilliseconds(
+            _isCompactCollapsed ? CompactIdleProbeRefreshMs : ExpandedIdleProbeRefreshMs);
+        if (!_idleReconcileTimer.IsRunning)
+        {
+            _idleReconcileTimer.Start();
+        }
+    }
+
     private void UpdateProgressTimerState()
     {
         if (_progressTimer is null)
         {
+            UpdateIdleReconcileTimerState(isProgressTimerRunning: false);
             UpdateMusicTimerDiagnostics();
             return;
         }
@@ -1928,17 +2164,19 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
         _progressTimer.Interval = TimeSpan.FromMilliseconds(
             ResolveProgressRefreshIntervalMs(_isCompactCollapsed));
 
-        if (!_isDisposed &&
+        bool runProgress = !_isDisposed &&
             _isWindowVisible &&
             _isWindowRevealCompleted &&
             ShouldRunProgressTimer(
                 PlaybackState,
                 _hasCurrentMediaInfo,
-                _timelineExtrapolator.IsUnknownBufferingExpired(DateTimeOffset.UtcNow)))
+                _timelineExtrapolator.IsUnknownBufferingExpired(DateTimeOffset.UtcNow));
+        if (runProgress)
         {
             _progressTimer.Start();
         }
 
+        UpdateIdleReconcileTimerState(isProgressTimerRunning: runProgress);
         UpdateMusicTimerDiagnostics();
     }
 
@@ -1954,6 +2192,9 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(Artist));
         OnPropertyChanged(nameof(LyricsHeaderSubtitle));
         OnPropertyChanged(nameof(SourceDisplayName));
+        OnPropertyChanged(nameof(ControlsSourceHeaderText));
+        OnPropertyChanged(nameof(ControlsArtistText));
+        OnPropertyChanged(nameof(ControlsArtistVisibility));
         OnPropertyChanged(nameof(SourcePickerTooltip));
         OnPropertyChanged(nameof(FollowSystemSourceLabel));
         OnPropertyChanged(nameof(NoAvailableSourcesLabel));
@@ -1967,6 +2208,8 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(SessionVolumeText));
         OnPropertyChanged(nameof(RefreshTooltip));
         OnPropertyChanged(nameof(StatusText));
+        OnPropertyChanged(nameof(MediaServiceUnavailableText));
+        OnPropertyChanged(nameof(RetryMediaServiceText));
         OnPropertyChanged(nameof(LyricsPlaceholderText));
         OnPropertyChanged(nameof(LyricsToggleTooltip));
         OnPropertyChanged(nameof(LyricsOffsetEarlierTooltip));

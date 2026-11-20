@@ -255,9 +255,10 @@ public sealed partial class ClipboardItemViewModel : ObservableObject
                 return string.Empty;
             }
 
+            string alpha = Math.Round(c.A / 255.0, 2).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
             string rgb = c.A == 255
                 ? $"RGB({c.R}, {c.G}, {c.B})"
-                : $"RGBA({c.R}, {c.G}, {c.B}, {Math.Round(c.A / 255.0, 2):0.##})";
+                : $"RGBA({c.R}, {c.G}, {c.B}, {alpha})";
             string hex6 = c.A == 255
                 ? $"#{c.R:X2}{c.G:X2}{c.B:X2}"
                 : $"#{c.A:X2}{c.R:X2}{c.G:X2}{c.B:X2}";
@@ -584,7 +585,39 @@ public sealed partial class ClipboardItemViewModel : ObservableObject
         bool sourceAppChanged = !string.Equals(_model.SourceAppPath, model.SourceAppPath, StringComparison.OrdinalIgnoreCase);
         bool colorChanged = !string.Equals(_model.ColorHex, model.ColorHex, StringComparison.Ordinal);
 
+        bool modelUnchanged =
+            !imageChanged &&
+            !sourceAppChanged &&
+            !colorChanged &&
+            string.Equals(_model.Id, model.Id, StringComparison.Ordinal) &&
+            _model.UpdatedAtUtcTicks == model.UpdatedAtUtcTicks &&
+            _model.IsPinned == model.IsPinned &&
+            _model.UseCount == model.UseCount &&
+            _model.IsSensitive == model.IsSensitive &&
+            string.Equals(_model.Summary, model.Summary, StringComparison.Ordinal) &&
+            string.Equals(_model.Note, model.Note, StringComparison.Ordinal) &&
+            string.Equals(_model.UrlTitle, model.UrlTitle, StringComparison.Ordinal) &&
+            string.Equals(_model.OcrText, model.OcrText, StringComparison.Ordinal);
+
+        bool presentationUnchanged =
+            string.Equals(_secretProtectionMode, secretProtectionMode, StringComparison.Ordinal) &&
+            _showSourceApp == showSourceApp &&
+            _textSize == textSize &&
+            _secondaryTextSize == secondaryTextSize &&
+            _previewMaxLines == previewMaxLines &&
+            _cardPadding.Equals(cardPadding) &&
+            _cardMinHeight == cardMinHeight &&
+            _imageBannerMaxHeight == imageBannerMaxHeight &&
+            _isCurrentClipboard == isCurrentClipboard &&
+            _quickSlotIndex == quickSlotIndex &&
+            _isCompactView == isCompactView;
+
         _model = model;
+        if (modelUnchanged && presentationUnchanged)
+        {
+            return;
+        }
+
         _secretProtectionMode = secretProtectionMode;
         _showSourceApp = showSourceApp;
         _textSize = textSize;
@@ -1105,6 +1138,9 @@ public sealed partial class ClipboardWidgetViewModel : ObservableObject, IDispos
     private bool _isMultiSelectMode;
     private ClipboardFilterKind _activeFilter = ClipboardFilterKind.All;
     private string _searchText = string.Empty;
+    private string? _pendingDebouncedSearchText;
+    private CancellationTokenSource? _searchDebounceCts;
+    private const int SearchInputDebounceMs = 35;
     private bool _isSearchOpen;
     private bool _useShortFilterLabels;
     private bool _isInitialized;
@@ -1149,6 +1185,7 @@ public sealed partial class ClipboardWidgetViewModel : ObservableObject, IDispos
 
         _settingsService.SettingsChanged += SettingsService_SettingsChanged;
         _localizationService.LanguageChanged += LocalizationService_LanguageChanged;
+        _activeFilter = GetFirstVisibleFilterTab();
     }
 
     public event EventHandler? SummaryChanged;
@@ -1180,6 +1217,7 @@ public sealed partial class ClipboardWidgetViewModel : ObservableObject, IDispos
         get => _searchText;
         set
         {
+            CancelSearchDebounce();
             string next = value ?? string.Empty;
             if (string.Equals(_searchText, next, StringComparison.Ordinal))
             {
@@ -1189,6 +1227,78 @@ public sealed partial class ClipboardWidgetViewModel : ObservableObject, IDispos
             _searchText = next;
             OnPropertyChanged();
             RebuildVisibleItems();
+        }
+    }
+
+    public void UpdateSearchTextDebounced(string? value)
+    {
+        string next = value ?? string.Empty;
+        if (string.IsNullOrEmpty(next) || !_isViewAttached || _uiDispatch is null)
+        {
+            SearchText = next;
+            return;
+        }
+
+        if (string.Equals(_searchText, next, StringComparison.Ordinal) && _pendingDebouncedSearchText is null)
+        {
+            return;
+        }
+
+        CancelSearchDebounce();
+        _pendingDebouncedSearchText = next;
+        var cts = new CancellationTokenSource();
+        _searchDebounceCts = cts;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(SearchInputDebounceMs, cts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+
+            if (_isDisposed || cts.IsCancellationRequested)
+            {
+                return;
+            }
+
+            DispatchToUi(() =>
+            {
+                if (!_isDisposed && ReferenceEquals(_searchDebounceCts, cts))
+                {
+                    FlushPendingSearchText();
+                }
+            });
+        });
+    }
+
+    public void FlushPendingSearchText()
+    {
+        string? pending = _pendingDebouncedSearchText;
+        CancelSearchDebounce();
+        if (pending is not null && !string.Equals(_searchText, pending, StringComparison.Ordinal))
+        {
+            _searchText = pending;
+            OnPropertyChanged(nameof(SearchText));
+            RebuildVisibleItems();
+        }
+    }
+
+    private void CancelSearchDebounce()
+    {
+        _pendingDebouncedSearchText = null;
+        if (Interlocked.Exchange(ref _searchDebounceCts, null) is { } cts)
+        {
+            try
+            {
+                cts.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+            cts.Dispose();
         }
     }
 
@@ -1203,6 +1313,10 @@ public sealed partial class ClipboardWidgetViewModel : ObservableObject, IDispos
             }
 
             _isSearchOpen = value;
+            if (!value)
+            {
+                CancelSearchDebounce();
+            }
             if (!value && !string.IsNullOrEmpty(_searchText))
             {
                 _searchText = string.Empty;
@@ -1273,6 +1387,56 @@ public sealed partial class ClipboardWidgetViewModel : ObservableObject, IDispos
         ClipboardSettingsSlice.NormalizeTabDisplayMode(
             _settingsService.Settings.Clipboard.ClipboardTabDisplayMode);
 
+    public string TabLayout =>
+        ClipboardSettingsSlice.NormalizeTabLayout(
+            _settingsService.Settings.Clipboard.ClipboardTabLayout);
+
+    public IReadOnlyList<ClipboardTabEntry> GetConfiguredTabEntries() =>
+        ClipboardSettingsSlice.ParseTabLayout(_settingsService.Settings.Clipboard.ClipboardTabLayout);
+
+    public ClipboardFilterKind GetFirstVisibleFilterTab()
+    {
+        foreach (ClipboardTabEntry entry in GetConfiguredTabEntries())
+        {
+            if (entry.Enabled &&
+                Enum.TryParse<ClipboardFilterKind>(entry.Id, ignoreCase: true, out ClipboardFilterKind kind))
+            {
+                return kind;
+            }
+        }
+
+        return ClipboardFilterKind.All;
+    }
+
+    public bool IsFilterTabVisible(ClipboardFilterKind filter)
+    {
+        string targetId = filter.ToString();
+        foreach (ClipboardTabEntry entry in GetConfiguredTabEntries())
+        {
+            if (string.Equals(entry.Id, targetId, StringComparison.OrdinalIgnoreCase))
+            {
+                return entry.Enabled;
+            }
+        }
+
+        return true;
+    }
+
+    private void EnsureActiveFilterVisible()
+    {
+        if (IsFilterTabVisible(_activeFilter))
+        {
+            return;
+        }
+
+        ClipboardFilterKind fallback = GetFirstVisibleFilterTab();
+        if (_activeFilter != fallback)
+        {
+            _activeFilter = fallback;
+            OnPropertyChanged(nameof(ActiveFilter));
+        }
+    }
+
     public Visibility FilterIconVisibility =>
         string.Equals(TabDisplayMode, ClipboardSettingsSlice.TabDisplayTextOnly, StringComparison.Ordinal)
             ? Visibility.Collapsed
@@ -1340,7 +1504,8 @@ public sealed partial class ClipboardWidgetViewModel : ObservableObject, IDispos
     public bool CanPasteOrSkipQueue => PasteQueueCount > 0;
     public string PasteQueueToggleTooltip => _localizationService.T(
         IsPasteQueueActive ? "Clipboard.PasteQueue.StopTooltip" : "Clipboard.PasteQueue.StartTooltip");
-    public string PasteQueuePasteText => _localizationService.T("Clipboard.Action.Paste");
+    public string PasteQueuePasteText => _localizationService.T("Clipboard.PasteQueue.PasteNext");
+    public string PasteQueuePasteTooltip => _localizationService.T("Clipboard.Action.Paste");
     public string PasteQueueSkipText => _localizationService.T("Clipboard.PasteQueue.Skip");
     public string PasteQueueStopTooltip => _localizationService.T("Clipboard.PasteQueue.StopTooltip");
 
@@ -1923,13 +2088,6 @@ public sealed partial class ClipboardWidgetViewModel : ObservableObject, IDispos
             ?? _service?.GetAbsolutePath(item.ImageRelativePath);
     }
 
-    public Task<string?> PrepareDragExportImageAsync(ClipboardHistoryItem item)
-    {
-        return _service is not null
-            ? _service.PrepareDragExportImageAsync(item)
-            : Task.FromResult<string?>(null);
-    }
-
     public void SetViewAttached(bool isAttached)
     {
         if (_isDisposed || _isViewAttached == isAttached)
@@ -2108,6 +2266,8 @@ public sealed partial class ClipboardWidgetViewModel : ObservableObject, IDispos
         OnPropertyChanged(nameof(ViewMode));
         OnPropertyChanged(nameof(ViewModeToggleGlyph));
         OnPropertyChanged(nameof(ViewModeToggleTooltip));
+        EnsureActiveFilterVisible();
+        OnPropertyChanged(nameof(TabLayout));
         NotifyFilterTabDisplayModeChanged();
         RebuildVisibleItems();
     }
@@ -2523,6 +2683,10 @@ public sealed partial class ClipboardWidgetViewModel : ObservableObject, IDispos
         OnPropertyChanged(nameof(BatchPinTooltip));
         OnPropertyChanged(nameof(BatchDeleteTooltip));
         OnPropertyChanged(nameof(ExitMultiSelectTooltip));
+        OnPropertyChanged(nameof(PasteQueuePasteText));
+        OnPropertyChanged(nameof(PasteQueuePasteTooltip));
+        OnPropertyChanged(nameof(PasteQueueSkipText));
+        OnPropertyChanged(nameof(PasteQueueStopTooltip));
         NotifyPasteQueueChanged();
     }
 
@@ -2551,6 +2715,7 @@ public sealed partial class ClipboardWidgetViewModel : ObservableObject, IDispos
         }
 
         _isDisposed = true;
+        CancelSearchDebounce();
         if (_service is not null)
         {
             _service.ItemsChanged -= Service_ItemsChanged;

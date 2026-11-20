@@ -17,6 +17,9 @@ public sealed class WeatherData
     [JsonPropertyName("timezone")]
     public string Timezone { get; set; } = string.Empty;
 
+    [JsonPropertyName("utc_offset_seconds")]
+    public int? UtcOffsetSeconds { get; set; }
+
     [JsonPropertyName("current")]
     public WeatherCurrent? Current { get; set; }
 

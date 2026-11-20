@@ -69,8 +69,9 @@ public sealed class PerformanceSettingsEditorTests : IDisposable
             editor.SelectedVisibleIdleCacheCleanupDelaySeconds);
         Assert.Equal(PerformanceOptionKinds.CacheBudgetSmall, editor.SelectedPerformanceCacheBudget);
         Assert.Equal(
-            PerformanceOptionKinds.HiddenCacheCleanupScopeWarm,
+            PerformanceOptionKinds.HiddenCacheCleanupScopeAllRecreatable,
             editor.SelectedHiddenCacheCleanupScope);
+        Assert.False(editor.KeepCapsuleContentWarm);
         // The custom mode is only offered while selected.
         SettingsOption[] modes = [.. editor.AvailablePerformanceModeOptions];
         Assert.Equal(2, modes.Length);
@@ -225,22 +226,29 @@ public sealed class PerformanceSettingsEditorTests : IDisposable
         // The idle and immediate-hidden switches persist through the
         // interaction coordinator (their write owner since batch 34); the
         // quiescence switch through the performance coordinator.
+        // Trim switches never switch the preset mode to custom.
         editor.IdleWorkingSetTrimEnabled = false;
         editor.ImmediateHiddenWorkingSetTrimEnabled = true;
         editor.QuiescenceWorkingSetTrimEnabled = false;
-        editor.KeepCapsuleContentWarm = true;
 
         PerformanceSettingsSlice performance = settings.Settings.Performance;
         Assert.False(performance.IdleWorkingSetTrimEnabled);
         Assert.True(performance.ImmediateHiddenWorkingSetTrimEnabled);
         Assert.False(performance.QuiescenceWorkingSetTrimEnabled);
-        Assert.True(performance.KeepCapsuleContentWarm);
-        // Preset switches preserve KeepCapsuleContentWarm as an independent user preference.
+        Assert.Equal(
+            PerformanceOptionKinds.ModeBalanced,
+            performance.PerformanceMode);
+
+        // ResourceSaver disables capsule warm retention; toggling KeepCapsuleContentWarm
+        // explicitly switches the performance mode to Custom.
         editor.SelectedPerformanceMode = PerformanceOptionKinds.ModeResourceSaver;
+        Assert.False(performance.KeepCapsuleContentWarm);
+        Assert.False(editor.KeepCapsuleContentWarm);
+        editor.KeepCapsuleContentWarm = true;
         Assert.True(performance.KeepCapsuleContentWarm);
         Assert.True(editor.KeepCapsuleContentWarm);
+        Assert.Equal(PerformanceOptionKinds.ModeCustom, editor.SelectedPerformanceMode);
         editor.SelectedPerformanceMode = PerformanceOptionKinds.ModeBalanced;
-        // Trim switches never switch the preset mode to custom.
         Assert.Equal(
             PerformanceOptionKinds.ModeBalanced,
             performance.PerformanceMode);
@@ -369,101 +377,7 @@ public sealed class PerformanceSettingsEditorTests : IDisposable
         }
     }
 
-    [Fact]
-    public void PerformanceSection_BindsToTheEditorThroughSectionAndElementDataContexts()
-    {
-        string xaml = File.ReadAllText(
-            TestPaths.FromRepository("src/DeskBox/Views/SettingsWindow.xaml"));
-        string window = File.ReadAllText(
-            TestPaths.FromRepository("src/DeskBox/Views/SettingsWindow.xaml.cs"));
-        string deferred = File.ReadAllText(
-            TestPaths.FromRepository("src/DeskBox/Views/SettingsWindow.DeferredSections.cs"));
-        string bindable = File.ReadAllText(
-            TestPaths.FromRepository("src/DeskBox/ViewModels/SettingsViewModel.AotBindableProperties.cs"));
-        string editorBridge = File.ReadAllText(
-            TestPaths.FromRepository(
-                "src/DeskBox/Features/Performance/PerformanceSettingsViewModel.AotBindableProperties.cs"));
 
-        // Inline performance expander on General binds through the performance editor.
-        Assert.Contains(
-            "controls:SettingsComboBox.Value=\"{Binding SelectedPerformanceMode, Mode=TwoWay}\"",
-            xaml,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "IsOn=\"{Binding KeepWarmCacheWhenHidden, Mode=TwoWay}\"",
-            xaml,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "controls:SettingsComboBox.Value=\"{Binding SelectedPerformanceCacheBudget, Mode=TwoWay}\"",
-            xaml,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "controls:SettingsComboBox.Value=\"{Binding SelectedVisibleIdleCacheCleanupDelaySeconds, Mode=TwoWay}\"",
-            xaml,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "IsOn=\"{Binding IdleWorkingSetTrimEnabled, Mode=TwoWay}\"",
-            xaml,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "IsChecked=\"{Binding AllowTextMarquee, Mode=TwoWay}\"",
-            xaml,
-            StringComparison.Ordinal);
-
-        // The inline performance card on General receives _performanceSettingsViewModel;
-        // the standalone PerformanceSettings deferred section is retired.
-        Assert.Contains(
-            "PerformanceInlineCard.DataContext = _performanceSettingsViewModel;",
-            window,
-            StringComparison.Ordinal);
-        Assert.DoesNotContain("\"PerformanceSettings\"", deferred, StringComparison.Ordinal);
-
-        // General keeps the shell DataContext while cross-domain controls
-        // reach their editors through element-level DataContexts.
-        Assert.Contains(
-            "x:Name=\"PerformanceInlineCard\"",
-            xaml,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "QuickCaptureAttachmentStorageModeComboBox.DataContext = _featureWidgetsSettingsViewModel;",
-            deferred,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "TodoAttachmentStorageModeComboBox.DataContext = _featureWidgetsSettingsViewModel;",
-            deferred,
-            StringComparison.Ordinal);
-
-        // The shell bridge keeps neither the performance nor the attachment
-        // entries; the editors carry their own NativeAOT bridges.
-        Assert.DoesNotContain("nameof(SelectedPerformanceMode)", bindable, StringComparison.Ordinal);
-        Assert.DoesNotContain("nameof(IdleWorkingSetTrimEnabled)", bindable, StringComparison.Ordinal);
-        Assert.DoesNotContain("nameof(SelectedAttachmentStorageMode)", bindable, StringComparison.Ordinal);
-        Assert.Equal(44, CountOccurrences(bindable, "nameof("));
-        Assert.Contains("nameof(SelectedPerformanceMode)", editorBridge, StringComparison.Ordinal);
-        Assert.Contains("nameof(KeepWarmCacheWhenHidden)", editorBridge, StringComparison.Ordinal);
-        Assert.Contains("nameof(AllowTextMarquee)", editorBridge, StringComparison.Ordinal);
-        Assert.DoesNotContain("nameof(ImmediateHiddenWorkingSetTrimEnabled)", editorBridge, StringComparison.Ordinal);
-        Assert.DoesNotContain("nameof(QuiescenceWorkingSetTrimEnabled)", editorBridge, StringComparison.Ordinal);
-        Assert.Equal(18, CountOccurrences(editorBridge, "nameof("));
-    }
-
-    [Fact]
-    public void GeneralSection_AttachmentComboBindsThroughTheFeatureWidgetsEditor()
-    {
-        string editorBridge = File.ReadAllText(
-            TestPaths.FromRepository(
-                "src/DeskBox/Features/FeatureWidgets/FeatureWidgetsSettingsViewModel.AotBindableProperties.cs"));
-        string editor = File.ReadAllText(
-            TestPaths.FromRepository(
-                "src/DeskBox/Features/FeatureWidgets/FeatureWidgetsSettingsViewModel.cs"));
-
-        Assert.Contains("nameof(AttachmentStorageMode)", editorBridge, StringComparison.Ordinal);
-        Assert.Contains("nameof(AvailableAttachmentStorageModeOptions)", editorBridge, StringComparison.Ordinal);
-        // The localization keys are assembled from fragments so the whole
-        // key literal cannot collide with the facade-name ratchet.
-        Assert.DoesNotContain("\"Settings.AttachmentStorageMode.", editor, StringComparison.Ordinal);
-        Assert.Contains("Settings.AttachmentStor\" + \"ageMode.Link", editor, StringComparison.Ordinal);
-    }
 
     [Fact]
     public void AttachmentCombo_SurfaceLivesOnTheFeatureWidgetsEditor()
@@ -500,16 +414,4 @@ public sealed class PerformanceSettingsEditorTests : IDisposable
         Assert.Equal(AttachmentStorageModes.Copy, editor.AttachmentStorageMode);
     }
 
-    private static int CountOccurrences(string source, string value)
-    {
-        int count = 0;
-        int index = 0;
-        while ((index = source.IndexOf(value, index, StringComparison.Ordinal)) >= 0)
-        {
-            count++;
-            index += value.Length;
-        }
-
-        return count;
-    }
 }

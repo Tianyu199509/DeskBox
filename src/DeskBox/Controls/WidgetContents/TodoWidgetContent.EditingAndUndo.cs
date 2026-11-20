@@ -46,8 +46,7 @@ public sealed partial class TodoWidgetContent
         DateTimeOffset dueDate = initialDueDate ?? GetDefaultCustomDueDate();
         if (CustomDueDatePicker is not null)
         {
-            CustomDueDatePicker.MinDate = DateTimeOffset.Now.Date;
-            CustomDueDatePicker.Date = dueDate;
+            ConfigureCustomDueDatePicker(CustomDueDatePicker, dueDate);
         }
 
         ConfigureCustomDueTimeState(dueDate, includeTime: initialDueDate is not null && initialHasDueTime);
@@ -61,6 +60,25 @@ public sealed partial class TodoWidgetContent
     private void CustomDueDateCancelButton_Click(object sender, RoutedEventArgs e)
     {
         CloseCustomDueDateOverlay();
+    }
+
+    internal static DateTimeOffset ResolveCustomDuePickerMinDate(DateTimeOffset dueDate, DateTime localToday)
+    {
+        DateTimeOffset todayOffset = new(localToday.Date);
+        DateTimeOffset localDueDay = new(dueDate.ToLocalTime().Date);
+        return localDueDay < todayOffset ? localDueDay : todayOffset;
+    }
+
+    internal static void ConfigureCustomDueDatePicker(CalendarDatePicker picker, DateTimeOffset dueDate)
+    {
+        ArgumentNullException.ThrowIfNull(picker);
+        picker.CalendarIdentifier = Windows.Globalization.CalendarIdentifiers.Gregorian;
+
+        DateTimeOffset effectiveMinDate = ResolveCustomDuePickerMinDate(dueDate, DateTime.Today);
+
+        picker.Date = null;
+        picker.MinDate = effectiveMinDate;
+        picker.Date = dueDate;
     }
 
     private void CustomDueIncludeTimeToggle_Toggled(object sender, RoutedEventArgs e)

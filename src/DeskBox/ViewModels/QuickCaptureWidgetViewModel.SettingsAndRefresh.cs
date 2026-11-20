@@ -75,10 +75,23 @@ public sealed partial class QuickCaptureWidgetViewModel
         OnPropertyChanged(nameof(MaterialBlueText));
         OnPropertyChanged(nameof(SearchScopeText));
         OnPropertyChanged(nameof(SearchScopeVisibility));
-        foreach (var item in Items)
+        var refreshed = new HashSet<QuickCaptureItemViewModel>(ReferenceEqualityComparer.Instance);
+        foreach (QuickCaptureItemViewModel item in Items)
         {
-            item.Update(item.ToModel());
-            item.UpdateSearchText(SearchText);
+            if (refreshed.Add(item))
+            {
+                item.RefreshLocalization();
+                item.UpdateSearchText(SearchText);
+            }
+        }
+
+        foreach (QuickCaptureItemViewModel cached in _itemViewModelCache.Values)
+        {
+            if (refreshed.Add(cached))
+            {
+                cached.RefreshLocalization();
+                cached.UpdateSearchText(SearchText);
+            }
         }
     }
 

@@ -51,6 +51,7 @@ public sealed partial class HotkeyRecorderDialog : ContentDialog
     private bool _isDoubleTapMode;
     private bool _isSyncingToggle;
     private bool _isApplying;
+    private bool _areHotkeysSuspended;
 
     /// <summary>
     /// The one recorder currently capturing (a XamlRoot hosts a single
@@ -68,36 +69,15 @@ public sealed partial class HotkeyRecorderDialog : ContentDialog
         GlobalHotkeyActivation initialActivation,
         IReadOnlyList<Preset> presets,
         Func<GlobalHotkeyActivation, Task<string?>> applyAsync,
-        Func<GlobalHotkeyGesture, string?> conflictChecker)
-        : this(
-            xamlRoot,
-            localization,
-            hotkeyActions,
-            scope,
-            initialActivation,
-            presets,
-            applyAsync,
-            activation => GlobalHotkeyService.IsValidActivation(activation) &&
-                          activation.Kind is HotkeyActivationKind.Chord or HotkeyActivationKind.DoubleTap &&
-                          !activation.IsModifierOnlyDoubleTap
-                ? conflictChecker(activation.Gesture)
-                : null)
-    {
-    }
-
-    public HotkeyRecorderDialog(
-        XamlRoot xamlRoot,
-        LocalizationService localization,
-        ISettingsHotkeyActions hotkeyActions,
-        Scope scope,
-        GlobalHotkeyActivation initialActivation,
-        IReadOnlyList<Preset> presets,
-        Func<GlobalHotkeyActivation, Task<string?>> applyAsync,
         Func<GlobalHotkeyActivation, string?> conflictChecker)
     {
         InitializeComponent();
         XamlRoot = xamlRoot;
-        _hook = new HotkeyRecorderHookService(DispatcherQueue);
+        RequestedTheme = NeutralInteractionBrush.ResolveEffectiveElementTheme(xamlRoot?.Content);
+        _hook = new HotkeyRecorderHookService(DispatcherQueue)
+        {
+            TargetWindowHandle = ResolveHostWindowHandle(xamlRoot)
+        };
         // Any command button (presets, Save/Cancel/Reset/Clear/DoubleTap) that owns
         // focus must keep bare Enter/Space for itself while modifier+Space chords
         // continue to capture inside HotkeyRecorderHookService.
@@ -157,13 +137,25 @@ public sealed partial class HotkeyRecorderDialog : ContentDialog
             new SolidColorBrush(Windows.UI.Color.FromArgb(0xFF, 0x9E, 0x9E, 0x9E));
     }
 
+    private static IntPtr ResolveHostWindowHandle(XamlRoot? xamlRoot)
+    {
+        if (xamlRoot?.ContentIslandEnvironment is { } env && env.AppWindowId.Value != 0)
+        {
+            return Microsoft.UI.Win32Interop.GetWindowFromWindowId(env.AppWindowId);
+        }
+
+        return IntPtr.Zero;
+    }
+
     private void OnOpened(ContentDialog sender, ContentDialogOpenedEventArgs args)
     {
         _activeRecorder = this;
+        _hook.TargetWindowHandle = ResolveHostWindowHandle(XamlRoot);
+        _hook.IsHostWindowActive = true;
 
         // Suspend the live registrations first so neither hotkey fires nor its
         // reserved hook eats the keys we are about to record.
-        _hotkeyActions.SuspendHotkeysForRecording();
+        SetHotkeysSuspended(true);
 
         _hook.KeyCaptured += OnKeyCaptured;
         if (!_hook.TryStart(out int errorCode))
@@ -194,7 +186,51 @@ public sealed partial class HotkeyRecorderDialog : ContentDialog
 
         _hook.KeyCaptured -= OnKeyCaptured;
         _hook.Stop();
-        _hotkeyActions.ResumeHotkeysAfterRecording();
+        SetHotkeysSuspended(false);
+    }
+
+    private void SetHotkeysSuspended(bool suspended)
+    {
+        if (_areHotkeysSuspended == suspended)
+        {
+            return;
+        }
+
+        _areHotkeysSuspended = suspended;
+        if (suspended)
+        {
+            _hotkeyActions.SuspendHotkeysForRecording();
+        }
+        else
+        {
+            _hotkeyActions.ResumeHotkeysAfterRecording();
+        }
+    }
+
+    internal static void NotifyHostWindowActivationChanged(bool isActive)
+    {
+        _activeRecorder?.OnHostWindowActivationChanged(isActive);
+    }
+
+    private void OnHostWindowActivationChanged(bool isActive)
+    {
+        _hook.IsHostWindowActive = isActive;
+        if (!isActive)
+        {
+            SetHotkeysSuspended(false);
+            if (_session.HeldModifiers != HotkeyModifierKeys.None)
+            {
+                _session.AbortHeldModifiers();
+                RevalidateAndRender();
+            }
+
+            return;
+        }
+
+        if (_hook.IsActive)
+        {
+            SetHotkeysSuspended(true);
+        }
     }
 
     /// <summary>
@@ -209,6 +245,9 @@ public sealed partial class HotkeyRecorderDialog : ContentDialog
             return;
         }
 
+        // Release the hook and resume hotkeys synchronously up front in case
+        // Hide() is invoked during window teardown and never fires Closing.
+        recorder.TeardownCapture();
         try
         {
             recorder.Hide();
@@ -216,12 +255,25 @@ public sealed partial class HotkeyRecorderDialog : ContentDialog
         catch (Exception ex)
         {
             App.Log($"[HotkeyRecorder] Forced shutdown failed: {ex.Message}");
-            recorder.TeardownCapture();
         }
     }
 
     private void OnKeyCaptured(HotkeyRecorderHookService.RecordedKeyEvent captured)
     {
+        if (captured.IsFocusLostReset)
+        {
+            if (_session.HeldModifiers != HotkeyModifierKeys.None)
+            {
+                _session.AbortHeldModifiers();
+                RevalidateAndRender();
+            }
+
+            return;
+        }
+
+        HotkeyModifierKeys previousHeldModifiers = _session.HeldModifiers;
+        GlobalHotkeyActivation? previousActivation = _selectedActivation;
+
         _session.ProcessKey(captured.VirtualKey, captured.IsKeyDown);
         if (_session.CancelRequested)
         {
@@ -250,6 +302,12 @@ public sealed partial class HotkeyRecorderDialog : ContentDialog
                     new GlobalHotkeyGesture(_session.LastStandaloneModifier, 0));
         }
 
+        if (_selectedActivation == previousActivation &&
+            _session.HeldModifiers == previousHeldModifiers)
+        {
+            return;
+        }
+
         _selectedPresetIndex = FindPresetIndex(_selectedActivation);
         UpdatePresetChecks();
         RevalidateAndRender();
@@ -275,7 +333,7 @@ public sealed partial class HotkeyRecorderDialog : ContentDialog
         RevalidateAndRender();
     }
 
-    private static GlobalHotkeyActivation ConvertActivationForDoubleTapMode(
+    internal static GlobalHotkeyActivation ConvertActivationForDoubleTapMode(
         GlobalHotkeyActivation current,
         bool doubleTapEnabled)
     {
@@ -540,7 +598,9 @@ public sealed partial class HotkeyRecorderDialog : ContentDialog
 
         KeyVisualState visualState = error is not null
             ? KeyVisualState.Error
-            : KeyVisualState.Normal;
+            : warning is not null
+                ? KeyVisualState.Warning
+                : KeyVisualState.Normal;
         RenderKeys(visualState);
     }
 

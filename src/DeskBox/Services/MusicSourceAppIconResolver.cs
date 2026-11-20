@@ -24,17 +24,19 @@ internal static class MusicSourceAppIconResolver
     private static readonly ConcurrentDictionary<string, long> s_negativeCacheUntilTick =
         new(StringComparer.OrdinalIgnoreCase);
 
-    private static readonly HashSet<string> s_excludedSystemProcesses = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "svchost.exe",
-        "explorer.exe",
-        "rundll32.exe",
-        "conhost.exe",
-        "dllhost.exe",
-        "RuntimeBroker.exe",
-        "ApplicationFrameHost.exe",
-        "DeskBox.exe"
-    };
+    private static readonly System.Collections.Frozen.FrozenSet<string> s_excludedSystemProcesses =
+        System.Collections.Frozen.FrozenSet.ToFrozenSet(
+        [
+            "svchost.exe",
+            "explorer.exe",
+            "rundll32.exe",
+            "conhost.exe",
+            "dllhost.exe",
+            "RuntimeBroker.exe",
+            "ApplicationFrameHost.exe",
+            "DeskBox.exe"
+        ],
+        StringComparer.OrdinalIgnoreCase);
 
     public static async Task<BitmapImage?> ResolveIconAsync(
         Microsoft.UI.Dispatching.DispatcherQueue? dispatcher,

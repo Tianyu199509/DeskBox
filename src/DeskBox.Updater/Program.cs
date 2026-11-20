@@ -2,6 +2,7 @@ using System.Collections.Frozen;
 using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.CompilerServices;
+using System.Security.Cryptography;
 using Microsoft.Win32;
 
 [assembly: InternalsVisibleTo("DeskBox.Tests")]
@@ -141,6 +142,11 @@ internal static class Program
         {
             Log("Current installation directory is missing or invalid; refusing to run a silent update without /DIR.");
             return 4;
+        }
+
+        if (!VerifyInstallerIntegrityBeforeLaunch(options.InstallerPath, options.ExpectedSha256))
+        {
+            return 6;
         }
 
         DirectInstallScope installScope = ResolveInstallScope(installDirectory);
@@ -625,10 +631,64 @@ internal static class Program
         }
     }
 
+    private static bool VerifyInstallerIntegrityBeforeLaunch(string installerPath, string expectedSha256)
+    {
+        try
+        {
+            string fullPath = Path.GetFullPath(installerPath);
+            if ((File.GetAttributes(fullPath) & FileAttributes.ReparsePoint) != 0)
+            {
+                Log($"Refusing to launch reparse-point installer '{fullPath}'.");
+                return false;
+            }
+
+            string? parentDir = Path.GetDirectoryName(fullPath);
+            if (!string.IsNullOrWhiteSpace(parentDir) &&
+                Directory.Exists(parentDir) &&
+                (File.GetAttributes(parentDir) & FileAttributes.ReparsePoint) != 0)
+            {
+                Log($"Refusing to launch installer inside reparse-point directory '{parentDir}'.");
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(expectedSha256))
+            {
+                return true;
+            }
+
+            using var stream = new FileStream(
+                fullPath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                bufferSize: 1024 * 128);
+            string actualSha256 = Convert.ToHexString(SHA256.HashData(stream));
+            string normalizedExpected = expectedSha256.Trim();
+            if (normalizedExpected.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase))
+            {
+                normalizedExpected = normalizedExpected["sha256:".Length..].Trim();
+            }
+
+            if (!string.Equals(actualSha256, normalizedExpected, StringComparison.OrdinalIgnoreCase))
+            {
+                Log($"Installer SHA-256 mismatch before launch (expected={normalizedExpected}, actual={actualSha256}).");
+                return false;
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Log($"Installer integrity verification failed: {ex.Message}");
+            return false;
+        }
+    }
+
     private sealed class UpdateOptions
     {
         public int ParentProcessId { get; private init; }
         public string InstallerPath { get; private init; } = string.Empty;
+        public string ExpectedSha256 { get; private init; } = string.Empty;
         public string AppPath { get; private init; } = string.Empty;
         public string InstallDirectory { get; private init; } = string.Empty;
         public string InstallerLanguage { get; private init; } = string.Empty;
@@ -639,6 +699,7 @@ internal static class Program
         {
             int parentProcessId = 0;
             string installerPath = string.Empty;
+            string expectedSha256 = string.Empty;
             string appPath = string.Empty;
             string installDirectory = string.Empty;
             string installerLanguage = string.Empty;
@@ -675,6 +736,10 @@ internal static class Program
                 {
                     installerPath = value;
                 }
+                else if (string.Equals(arg, "--sha256", StringComparison.OrdinalIgnoreCase))
+                {
+                    expectedSha256 = value;
+                }
                 else if (string.Equals(arg, "--app", StringComparison.OrdinalIgnoreCase))
                 {
                     appPath = value;
@@ -693,6 +758,7 @@ internal static class Program
             {
                 ParentProcessId = parentProcessId,
                 InstallerPath = installerPath,
+                ExpectedSha256 = expectedSha256,
                 AppPath = appPath,
                 InstallDirectory = installDirectory,
                 InstallerLanguage = installerLanguage,

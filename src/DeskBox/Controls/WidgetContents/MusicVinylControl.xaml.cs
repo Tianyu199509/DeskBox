@@ -116,6 +116,7 @@ public sealed partial class MusicVinylControl : UserControl
         CoverBrush.ImageSource = source;
         bool hasCover = source is not null;
         CoverEllipse.Visibility = hasCover ? Visibility.Visible : Visibility.Collapsed;
+        CoverShade.Visibility = hasCover ? Visibility.Visible : Visibility.Collapsed;
         CoverRim.Visibility = hasCover ? Visibility.Visible : Visibility.Collapsed;
         PlaceholderLabel.Visibility = hasCover ? Visibility.Collapsed : Visibility.Visible;
     }

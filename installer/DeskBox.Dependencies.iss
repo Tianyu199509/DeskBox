@@ -1,10 +1,18 @@
 ﻿[Code]
+#if DeskBoxBundledRuntime
+function PrepareDeskBoxDependencies(var NeedsRestart: Boolean): String;
+begin
+  Result := '';
+  NeedsRestart := False;
+  Log('DeskBox bundled-runtime installer: external runtime dependency setup skipped.');
+end;
+#else
 const
-  DotNetRuntimeUrl = 'https://builds.dotnet.microsoft.com/dotnet/Runtime/10.0.14/dotnet-runtime-10.0.14-win-x64.exe';
+  DotNetRuntimeUrl = 'https://builds.dotnet.microsoft.com/dotnet/Runtime/10.0.15/dotnet-runtime-10.0.15-win-x64.exe';
   DotNetRuntimeFallbackUrl = 'https://aka.ms/dotnet/10.0/dotnet-runtime-win-x64.exe';
-  DotNetRuntimeInstallerName = 'dotnet-runtime-10.0.14-win-x64.exe';
-  WindowsAppRuntimeUrl = 'https://aka.ms/windowsappsdk/2.6/2.6.5/windowsappruntimeinstall-x64.exe';
-  WindowsAppRuntimeFallbackUrl = 'https://download.microsoft.com/download/81f35163-9c63-4b4d-a293-6dcf1b32320a/WindowsAppRuntimeInstall-x64.exe';
+  DotNetRuntimeInstallerName = 'dotnet-runtime-10.0.15-win-x64.exe';
+  WindowsAppRuntimeUrl = 'https://aka.ms/windowsappsdk/2.7/2.7.0/windowsappruntimeinstall-x64.exe';
+  WindowsAppRuntimeFallbackUrl = 'https://download.microsoft.com/download/b79f2091-5e42-4955-91b2-44d1b3f2f845/WindowsAppRuntimeInstall-x64.exe';
   WindowsAppRuntimeInstallerName = 'WindowsAppRuntimeInstall-x64.exe';
 
 var
@@ -107,14 +115,14 @@ begin
     IsDotNet10RuntimeInstalledAt(ExpandConstant('{pf}'));
 end;
 
-function IsWindowsAppRuntime26Installed: Boolean;
+function IsWindowsAppRuntime27Installed: Boolean;
 var
   ResultCode: Integer;
 begin
   Result :=
     Exec(
       ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
-      '-NoProfile -ExecutionPolicy Bypass -Command "$pkg = Get-AppxPackage -Name Microsoft.WindowsAppRuntime.2 -ErrorAction SilentlyContinue | Where-Object { $_.Architecture -eq ''X64'' -and [version]$_.Version -ge [version]''2.6.5.0'' } | Select-Object -First 1; if (-not $pkg) { $pkg = Get-AppxPackage -AllUsers -Name Microsoft.WindowsAppRuntime.2 -ErrorAction SilentlyContinue | Where-Object { $_.Architecture -eq ''X64'' -and [version]$_.Version -ge [version]''2.6.5.0'' } | Select-Object -First 1 }; if ($pkg) { exit 0 } exit 1"',
+      '-NoProfile -ExecutionPolicy Bypass -Command "$pkg = Get-AppxPackage -Name Microsoft.WindowsAppRuntime.2 -ErrorAction SilentlyContinue | Where-Object { $_.Architecture -eq ''X64'' -and [version]$_.Version -ge [version]''2.7.0.0'' } | Select-Object -First 1; if (-not $pkg) { $pkg = Get-AppxPackage -AllUsers -Name Microsoft.WindowsAppRuntime.2 -ErrorAction SilentlyContinue | Where-Object { $_.Architecture -eq ''X64'' -and [version]$_.Version -ge [version]''2.7.0.0'' } | Select-Object -First 1 }; if ($pkg) { exit 0 } exit 1"',
       '',
       SW_HIDE,
       ewWaitUntilTerminated,
@@ -129,7 +137,7 @@ begin
 #else
   ShouldInstallDotNetRuntime := not IsDotNet10RuntimeInstalled;
 #endif
-  ShouldInstallWindowsAppRuntime := not IsWindowsAppRuntime26Installed;
+  ShouldInstallWindowsAppRuntime := not IsWindowsAppRuntime27Installed;
 
   Log('DeskBox dependency check: dotnet10Missing=' + IntToStr(Integer(ShouldInstallDotNetRuntime)));
   Log('DeskBox dependency check: windowsAppRuntimeMissing=' + IntToStr(Integer(ShouldInstallWindowsAppRuntime)));
@@ -362,12 +370,6 @@ end;
 function PrepareDeskBoxDependencies(var NeedsRestart: Boolean): String;
 begin
   Result := '';
-#if DeskBoxBundledRuntime
-  NeedsRestart := False;
-  DependenciesPrepared := True;
-  Log('DeskBox bundled-runtime installer: external runtime dependency setup skipped.');
-  Exit;
-#endif
   if DependenciesPrepared then
     Exit;
 
@@ -401,3 +403,4 @@ begin
 
   DependenciesPrepared := True;
 end;
+#endif

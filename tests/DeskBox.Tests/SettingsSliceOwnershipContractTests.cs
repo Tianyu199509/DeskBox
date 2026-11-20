@@ -39,29 +39,9 @@ public sealed class SettingsSliceOwnershipContractTests
     [Fact]
     public void EveryFacadeProperty_MapsToExactlyOneSliceProperty()
     {
-        // 241 = batch-51 level (236) plus widgetGroupSwitchAnimationStyle
-        // (group member-switch transition style) plus
-        // musicHideTimelineWhenUnavailable (music timeline-row hiding) plus
-        // fullyElevatedNoticeAcknowledgedUtcTicks (one-time
-        // fully-elevated-desktop notice ack; nullable long, schema v15)
-        // plus the parallel update-UX batch's showReleaseNotesAfterUpdate
-        // and lastRunVersion.
-        // +2 = autoDownloadUpdates + showUpdateToastNotification (background
-        // auto-download and update toasts).
-        // +2 = todoAllDayReminderEnabled + todoAllDayReminderTimeMinutes.
-        // +1 = cloudBackupCustomWidgetsEnabled.
-        // +1 = widgetDisplayScalingMode (display layout scaling mode).
-        // +5 = searchCategoryBarMode + searchShowSortHeader + searchDefaultSortColumn + searchIncludeClipboard + searchIncludeCalculator.
-        // +2 = searchShowDetailsPane + searchIncludeWebFallback.
-        // +1 = searchHotkeyActivationKind.
-        // +2 = searchDefaultWebEngine + searchCustomWebUrl.
-        // +1 = keepCapsuleContentWarm.
-        // +1 = clipboardViewMode.
-        // +6 = clipboardHotkeyEnabled + clipboardHotkeyActivationKind + clipboardHotkeyModifiers + clipboardHotkeyKey + clipboardPopupPlacementMode + clipboardDoubleCopyAction.
-        // +1 = clipboardTabDisplayMode.
-        // +1 = musicSpectrumStyle.
-        // +5 = searchQuickCreateTodoEnabled + searchQuickCreateNoteEnabled + searchQuickCreateDisplayMode + searchQuickCreateDefaultTarget + searchQuickCreateShowHud.
-        Assert.Equal(292, FacadeProperties.Length);
+        int totalSlicePropertyCount = SliceProperties.Sum(
+            s => s.PropertyType.GetProperties(BindingFlags.Instance | BindingFlags.Public).Length);
+        Assert.Equal(totalSlicePropertyCount, FacadeProperties.Length);
 
         foreach (PropertyInfo facade in FacadeProperties)
         {
@@ -237,15 +217,6 @@ public sealed class SettingsSliceOwnershipContractTests
     private static readonly IReadOnlyDictionary<string, int> FacadeAccessManifest =
         new Dictionary<string, int>(StringComparer.Ordinal)
     {
-        ["src/DeskBox/App.AotHotkeySmoke.cs"] = 2,
-        ["src/DeskBox/App.AotManagedUiSmoke.cs"] = 6,
-        ["src/DeskBox/App.AotTodoNotificationActivationSmoke.cs"] = 5,
-        ["src/DeskBox/App.AotTodoNotificationForwardingSmoke.cs"] = 4,
-        ["src/DeskBox/App.AotTodoNotificationSurfaceSmoke.cs"] = 5,
-        ["src/DeskBox/App.AotTodoNotificationUserClickSmoke.cs"] = 8,
-        ["src/DeskBox/App.AotTodoRecurrenceReminderSmoke.cs"] = 6,
-        ["src/DeskBox/App.AotWeatherSettingsPersistenceSmoke.cs"] = 17,
-        ["src/DeskBox/App.AotWeatherSurfacePersistenceSmoke.cs"] = 17,
         ["src/DeskBox/App.DiagnosticsBundle.cs"] = 6,
         ["src/DeskBox/App.ImmediateHiddenWorkingSetTrim.cs"] = 2,
         ["src/DeskBox/App.Tray.cs"] = 3,

@@ -73,6 +73,7 @@ CloseApplicationsFilter={#MyAppExeName},DeskBox.Settings.exe,DeskBox.ThumbnailPr
 RestartApplications=no
 SetupLogging=yes
 UninstallLogging=yes
+ChangesAssociations=yes
 OutputDir=..\Output
 #if DeskBoxBundledRuntime
 OutputBaseFilename={#MyAppOutputBaseName}_{#MyAppVersion}_x64
@@ -83,7 +84,13 @@ SetupIconFile=..\src\DeskBox\Assets\deskbox.ico
 VersionInfoVersion={#MyAppVersionInfo}
 VersionInfoProductVersion={#MyAppVersionInfo}
 VersionInfoTextVersion={#MyAppVersion}
-Compression=lzma
+; LZMA2 ultra with a dictionary large enough to span DeskBox.exe (the
+; largest payload file) lets solid compression dedupe across the whole
+; Native AOT payload. Decompression needs roughly the dictionary size in RAM.
+Compression=lzma2/ultra64
+LZMADictionarySize=65536
+LZMANumFastBytes=273
+LZMAUseSeparateProcess=yes
 SolidCompression=yes
 WizardStyle=modern
 ; Let the user pick the installer language; the dialog pre-selects the
@@ -147,6 +154,11 @@ english.PerUserUpgradeScopeMismatch=An existing per-user DeskBox installation wa
 japanese.PerUserUpgradeScopeMismatch=現在のアカウントに個人用モードの DeskBox インストールが見つかりました：%n%n%1%n%n「すべてのユーザー用にインストール」では個人のプロファイル フォルダーをそのまま上書きできません（個人用パスがシステム全体のレジストリに登録されてしまいます）。セットアップをキャンセルして再実行し、「自分用にのみインストール」（または /CURRENTUSER）を選択するか、既存の個人用フォルダーを削除してから再度インストールしてください。
 german.PerUserUpgradeScopeMismatch=Im aktuellen Benutzerprofil wurde eine benutzerspezifische DeskBox-Installation gefunden:%n%n%1%n%nDer Modus „Für alle Benutzer installieren“ kann keinen privaten Profilordner direkt aktualisieren, ohne ihn systemweit zu registrieren. Brechen Sie Setup ab und wählen Sie beim erneuten Start „Nur für mich installieren“ (oder /CURRENTUSER) oder entfernen Sie zuerst die alte benutzerspezifische Kopie.
 brazilianportuguese.PerUserUpgradeScopeMismatch=Foi encontrada uma instalação por usuário do DeskBox no perfil atual:%n%n%1%n%nO modo "Instalar para todos os usuários" não pode atualizar uma pasta privada do perfil sem registrá-la para todo o sistema. Cancele e execute o instalador novamente escolhendo "Instalar somente para mim" (ou /CURRENTUSER), ou remova a cópia antiga antes de instalar para todos os usuários.
+chinesesimplified.AllUsersUpgradeScopeMismatch=检测到系统范围内已安装所有用户模式的 DeskBox：%n%n%1%n%n“仅为我安装”无法直接覆盖系统级安装目录。请取消后重新运行安装程序并选择“为所有用户安装”（或使用 /ALLUSERS 参数）。
+english.AllUsersUpgradeScopeMismatch=An existing all-users DeskBox installation was found:%n%n%1%n%nPer-user mode cannot upgrade a machine-wide installation in place. Cancel Setup and run it again choosing "Install for all users" (or pass /ALLUSERS).
+japanese.AllUsersUpgradeScopeMismatch=すべてのユーザー用の DeskBox インストールが見つかりました：%n%n%1%n%n「自分用にのみインストール」ではシステム全体のインストールを上書きできません。セットアップをキャンセルして再実行し、「すべてのユーザー用にインストール」（または /ALLUSERS）を選択してください。
+german.AllUsersUpgradeScopeMismatch=Es wurde eine systemweite DeskBox-Installation gefunden:%n%n%1%n%nDer Modus „Nur für mich installieren“ kann eine Installation für alle Benutzer nicht direkt aktualisieren. Brechen Sie Setup ab und wählen Sie beim erneuten Start „Für alle Benutzer installieren“ (oder /ALLUSERS).
+brazilianportuguese.AllUsersUpgradeScopeMismatch=Foi encontrada uma instalação do DeskBox para todos os usuários:%n%n%1%n%nO modo "Instalar somente para mim" não pode atualizar uma instalação para todo o sistema. Cancele e execute o instalador novamente escolhendo "Instalar para todos os usuários" (ou /ALLUSERS).
 chinesesimplified.ConfirmStorageTitle=检测到 DeskBox 收纳目录中仍有内容
 chinesesimplified.ConfirmStorageBody=当前包含 %1 个文件夹、%2 个文件。
 chinesesimplified.ConfirmStorageFooter=卸载 DeskBox 不会删除这个目录，也不会删除里面的用户文件。%n请确认你已经知道这些文件的位置。是否继续卸载？
@@ -260,12 +272,17 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 
 [InstallDelete]
 Type: files; Name: "{autodesktop}\{#MyAppName}.lnk"; Tasks: desktopicon
-; Remove legacy startup shortcut from previous versions that created it via Inno Setup.
-Type: files; Name: "{autostartup}\{#MyAppName}.lnk"
+; Legacy startup shortcuts are ownership-checked and migrated/cleaned by
+; DeskBox's startup service and uninstaller rather than deleted blindly here.
+; Remove retired settings companion payload from older installations.
+Type: files; Name: "{app}\DeskBox.Settings.exe"
+Type: files; Name: "{app}\DeskBox.Settings.pri"
+Type: files; Name: "{app}\DeskBox.Settings.dll"
+Type: files; Name: "{app}\DeskBox.Settings.deps.json"
+Type: files; Name: "{app}\DeskBox.Settings.runtimeconfig.json"
 
 [Files]
 #if DeskBoxBundledRuntime
-Source: "..\scripts\cleanup-deskbox-install.ps1"; Flags: dontcopy
 Source: "DeskBox.LegacyBundledRuntimeFiles.txt"; Flags: dontcopy
 Source: "{#MyAppReleaseDir}\DeskBox.InstallManifest.txt"; DestDir: "{tmp}"; DestName: "DeskBox.InstallManifest.current.txt"; Flags: ignoreversion deleteafterinstall
 Source: "{#MyAppReleaseDir}\*"; DestDir: "{app}"; Excludes: "DeskBox.Updater.*,deskbox_native.dll,*.pdb,DeskBox.InstallManifest.txt,.mimosa\*,*\.mimosa\*"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -305,6 +322,10 @@ Root: HKA; Subkey: "Software\Classes\deskbox"; ValueType: string; ValueName: "";
 Root: HKA; Subkey: "Software\Classes\deskbox"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""; Flags: uninsdeletekey
 Root: HKA; Subkey: "Software\Classes\deskbox\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"",0"; Flags: uninsdeletekey
 Root: HKA; Subkey: "Software\Classes\deskbox\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"" ""%1"""; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\.dbxwidget"; ValueType: string; ValueName: ""; ValueData: "DeskBox.WidgetPackage"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\DeskBox.WidgetPackage"; ValueType: string; ValueName: ""; ValueData: "DeskBox Widget Package"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\DeskBox.WidgetPackage\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"",0"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\DeskBox.WidgetPackage\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"" ""%1"""; Flags: uninsdeletekey
 
 [Code]
 function InstallLanguageCode(Value: string): string;

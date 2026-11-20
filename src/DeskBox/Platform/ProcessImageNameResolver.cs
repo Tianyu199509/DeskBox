@@ -2,7 +2,7 @@ using System.Runtime.InteropServices;
 
 namespace DeskBox.Platform;
 
-internal static class ProcessImageNameResolver
+internal static partial class ProcessImageNameResolver
 {
     private const uint ProcessQueryLimitedInformation = 0x1000;
 
@@ -13,6 +13,30 @@ internal static class ProcessImageNameResolver
             ? string.Empty
             : Path.GetFileNameWithoutExtension(fullPath);
     }
+
+    internal static bool IsSystemExplorerExecutablePath(string? fullPath)
+    {
+        if (string.IsNullOrWhiteSpace(fullPath))
+        {
+            return false;
+        }
+
+        string trimmed = DriveMediaInterop.StripExtendedPathPrefix(fullPath.Trim());
+        string windowsDir = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+        if (string.IsNullOrWhiteSpace(windowsDir))
+        {
+            return string.Equals(
+                Path.GetFileName(trimmed),
+                "explorer.exe",
+                StringComparison.OrdinalIgnoreCase);
+        }
+
+        string expectedExplorer = Path.Combine(windowsDir, "explorer.exe");
+        return string.Equals(trimmed, expectedExplorer, StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static bool IsExplorerProcess(uint processId) =>
+        processId != 0 && IsSystemExplorerExecutablePath(GetProcessExecutablePath(processId));
 
     internal static unsafe string GetProcessExecutablePath(uint processId)
     {
@@ -44,21 +68,21 @@ internal static class ProcessImageNameResolver
         }
     }
 
-    [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
-    private static extern IntPtr OpenProcess(
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    private static partial IntPtr OpenProcess(
         uint dwDesiredAccess,
         [MarshalAs(UnmanagedType.Bool)] bool bInheritHandle,
         uint dwProcessId);
 
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+    [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern unsafe bool QueryFullProcessImageNameW(
+    private static unsafe partial bool QueryFullProcessImageNameW(
         IntPtr hProcess,
         uint dwFlags,
         char* lpExeName,
         ref uint lpdwSize);
 
-    [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
+    [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool CloseHandle(IntPtr hObject);
+    private static partial bool CloseHandle(IntPtr hObject);
 }

@@ -113,9 +113,11 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
     protected override bool IsSizeLocked => _config.IsSizeLocked;
     protected override bool IsPositionLocked => _config.IsPositionLocked;
     protected override bool IsCollapsedContentHibernated =>
-        _contentHost.IsCurrentContentHibernated;
+        _contentHost.IsCurrentContentHibernated &&
+        !HasMaterializedCachedGroupContentViews;
     protected override bool TryHibernateCollapsedContent() =>
-        _contentHost.TryHibernateCurrentContentView();
+        _contentHost.TryHibernateCurrentContentView() |
+        HibernateCollapsedInactiveGroupContents() > 0;
     protected override bool EnsureCollapsedContentViewAttached() =>
         _contentHost.EnsureCurrentContentViewAttached();
     protected override bool IsCompactExpansionWarmupContentReady =>
@@ -137,6 +139,22 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
     protected override void OnCompactBoundsTransitionActiveChanged(bool isActive)
     {
         CurrentContent?.OnCompactBoundsTransitionActiveChanged(isActive);
+    }
+
+    protected override SizeInt32 GetPhysicalMinimumWindowSize(int x, int y, int width, int height)
+    {
+        if (CurrentContent is CustomWidgetContentAdapter customAdapter &&
+            customAdapter.ViewModel.Manifest.MinSize is { Width: > 0, Height: > 0 } minSize)
+        {
+            double minW = Math.Clamp(minSize.Width, SettingsService.MinWidgetWidth, 640);
+            double minH = Math.Clamp(minSize.Height, SettingsService.MinWidgetHeight, 640);
+            return WidgetPositioningService.GetPhysicalMinimumSizeForBounds(
+                new RectInt32(x, y, Math.Max(1, width), Math.Max(1, height)),
+                minW,
+                minH);
+        }
+
+        return base.GetPhysicalMinimumWindowSize(x, y, width, height);
     }
 
     protected override void OnResizeStart()
@@ -557,18 +575,18 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
         if (localDueDate.Date == today)
         {
             return item.HasDueTime
-                ? localization.Format("Todo.Due.TodayAt", localDueDate.ToString("HH:mm"))
+                ? localization.Format("Todo.Due.TodayAt", localDueDate.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture))
                 : localization.T("Todo.Due.Today");
         }
 
         if (localDueDate.Date == today.AddDays(1))
         {
             return item.HasDueTime
-                ? localization.Format("Todo.Due.TomorrowAt", localDueDate.ToString("HH:mm"))
+                ? localization.Format("Todo.Due.TomorrowAt", localDueDate.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture))
                 : localization.T("Todo.Due.Tomorrow");
         }
 
-        return localDueDate.ToString("M/d");
+        return localDueDate.ToString("M/d", System.Globalization.CultureInfo.InvariantCulture);
     }
 
     private static TodoItemViewModel? GetNextCompactTodoItem(TodoWidgetContentAdapter todo)
@@ -887,6 +905,9 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
         _contentHost.ApplyAppearance(invalidate: invalidateContent);
     }
 
+    protected override void OnWidgetForegroundChanged() =>
+        _contentHost.ApplyAppearance(invalidate: true);
+
     private bool _prepareAsSingleWidgetLifecycle;
 
     public void SetTrayAnimationOffsetOverride(double? offsetX, double? offsetY)
@@ -970,6 +991,7 @@ private bool PrepareTrayShowAnimationCore(bool restoreBoundsForCurrentTopology)
             var profile = _prepareAsSingleWidgetLifecycle
                 ? GetSingleWidgetAnimationProfile(isShowing: true)
                 : GetTrayAnimationProfile(isShowing: true);
+            IsTrayShowAnimationInFlight = profile.IsEnabled;
             LogTrayWindow(
                 $"PrepareShow gen={TrayAnimation.Generation} topologyRetarget={restoreBoundsForCurrentTopology} " +
                 $"boundsRestored={boundsRestored} effect={options.Effect} " +
@@ -1082,6 +1104,15 @@ private bool PrepareTrayShowAnimationCore(bool restoreBoundsForCurrentTopology)
         PerformanceLogger.RecordTransientUiTimerReleased();
     }
 
+    protected override void OnWidgetBoundsInteractionStarting()
+    {
+        base.OnWidgetBoundsInteractionStarting();
+        if (CurrentContent is FileWidgetContentAdapter fileAdapter)
+        {
+            fileAdapter.CloseOpenStackPopover();
+        }
+    }
+
     public bool PrepareTrayHideAnimation(bool persistVisibility = true)
     {
         if (!Visible || IsHideAnimationRunning)
@@ -1109,6 +1140,7 @@ else
     TrayAnimation.Stop();
 }
 IsHideAnimationRunning = true;
+        IsTrayShowAnimationInFlight = false;
         _isHidePrepared = true;
         SetTrayHideInputSuppressed(true);
         Visible = false;
@@ -1139,6 +1171,11 @@ IsHideAnimationRunning = true;
             return;
         }
 
+        if (IsSuspendedForMonitorOcclusion)
+        {
+            ResumeContentFromMonitorOcclusion();
+        }
+
         HoldTemporaryTopMost();
         base.Activate();
         Win32Helper.SetForegroundWindow(HWnd);
@@ -1151,6 +1188,11 @@ IsHideAnimationRunning = true;
         if (!Visible)
         {
             return;
+        }
+
+        if (IsSuspendedForMonitorOcclusion)
+        {
+            ResumeContentFromMonitorOcclusion();
         }
 
         AppWindow.Show();
@@ -1227,6 +1269,10 @@ IsHideAnimationRunning = true;
         }
 
         IsAtDesktopLayer = false;
+        if (IsSuspendedForMonitorOcclusion)
+        {
+            ResumeContentFromMonitorOcclusion();
+        }
     }
 
     public void HideWindow()
@@ -1277,6 +1323,7 @@ IsHideAnimationRunning = true;
 
     private void OnLanguageChanged()
     {
+        ApplyLocalizedFlowDirection();
         _titleViewModel.RefreshDisplayName();
         ApplyLocalizedTitleActionTooltips();
         RefreshCompactPresentation();
@@ -1293,9 +1340,10 @@ IsHideAnimationRunning = true;
         AttachCompactPresentationSource(content);
         AttachFeedbackSource(content);
         AttachHostContextMenuSource(content);
+        AttachCustomSurfaceChromeBridge(content);
         ArmCollapsedContentHibernationIfSettled();
         RefreshCompactPresentation();
-        ApplyTitleActionButtonConfiguration();
+        ApplyTitleBarLayout();
     }
 
     private void AttachFeedbackSource(IWidgetContent content)
@@ -1510,6 +1558,7 @@ IsHideAnimationRunning = true;
         ToolTipService.SetToolTip(ContentWidgetShell.PositionLockActionButton, localization.T("Widget.LockPosition"));
         ToolTipService.SetToolTip(ContentWidgetShell.SizeLockActionButton, localization.T("Widget.LockSize"));
         ToolTipService.SetToolTip(ContentWidgetShell.AddActionButton, localization.T("Widget.Tooltip.Add"));
+        ToolTipService.SetToolTip(ContentWidgetShell.QuickSettingsActionButton, localization.T("CustomWidget.QuickSettings.ButtonTip"));
         ToolTipService.SetToolTip(ContentWidgetShell.MoreActionButton, localization.T("Widget.Tooltip.More"));
         ToolTipService.SetToolTip(ContentWidgetShell.CloseActionButton, localization.T("Widget.FeatureWidget.Disable"));
         ApplyTitleActionAccessibleNames();
@@ -1530,6 +1579,7 @@ IsHideAnimationRunning = true;
             ContentWidgetShell.SizeLockActionButton,
             localization.T(_config.IsSizeLocked ? "Widget.UnlockSize" : "Widget.LockSize"));
         AutomationProperties.SetName(ContentWidgetShell.AddActionButton, localization.T("Widget.Tooltip.Add"));
+        AutomationProperties.SetName(ContentWidgetShell.QuickSettingsActionButton, localization.T("CustomWidget.QuickSettings.ButtonTip"));
         AutomationProperties.SetName(ContentWidgetShell.MoreActionButton, localization.T("Widget.Tooltip.More"));
         AutomationProperties.SetName(ContentWidgetShell.CloseActionButton, localization.T("Widget.FeatureWidget.Disable"));
         AutomationProperties.SetName(ContentWidgetShell.CollapseActionButton, localization.T("Widget.Shell.Collapse"));
@@ -1556,50 +1606,65 @@ IsHideAnimationRunning = true;
             }
         }
 
-        Closed += (_, _) =>
-        {
-            IsClosing = true;
-            Visible = false;
-            ReleaseAutoRestoreTimer();
-            try { RemoveGroupFileDropFallbackHandlers(); } catch (Exception ex) { App.Log($"[ContentWidget] Remove group drop fallback failed during close: {ex.Message}"); }
-            try { RemoveNativeFileDropBridge(); } catch (Exception ex) { App.Log($"[ContentWidget] Remove native file drop bridge failed during close: {ex.Message}"); }
-            App.Current.LocalizationService.LanguageChanged -= OnLanguageChanged;
-            SettingsService.SettingsChanged -= OnSettingsChanged;
-            Activated -= ContentWidgetWindow_Activated;
-            AppWindow.Changed -= OnAppWindowChanged;
-            ContentWidgetShell.RightTapped -= ContentWidgetShell_RightTapped;
-            ContentWidgetShell.TitleDoubleTapped -= ContentWidgetShell_TitleDoubleTapped;
-            if (_feedbackSource is not null)
-            {
-                _feedbackSource.FeedbackRequested -= FeedbackSource_FeedbackRequested;
-                _feedbackSource = null;
-            }
-            if (_hostContextMenuSource is not null)
-            {
-                _hostContextMenuSource.HostContextMenuOpening -= HostContextMenuSource_HostContextMenuOpening;
-                _hostContextMenuSource = null;
-            }
-            if (_compactPresentationSource is not null)
-            {
-                _compactPresentationSource.PropertyChanged -= CompactPresentationSource_PropertyChanged;
-                _compactPresentationSource = null;
-            }
-            try { TrayAnimation.RevealWindowForTrayShow(); } catch { }
-            try { CleanupBase(); } catch (Exception ex) { App.Log($"[ContentWidget] CleanupBase failed during close: {ex.Message}"); }
-            try { _contentHost.DisposeContent(); } catch (Exception ex) { App.Log($"[ContentWidget] DisposeContent failed during close: {ex.Message}"); }
-            try { DisposeCachedGroupContents(); } catch (Exception ex) { App.Log($"[ContentWidget] Dispose cached group content failed during close: {ex.Message}"); }
+        Closed += ContentWidgetWindow_Closed;
+    }
 
-            foreach (var child in ResizeGrid.Children.OfType<FrameworkElement>())
+    private void ContentWidgetWindow_Closed(object sender, WindowEventArgs args)
+    {
+        Closed -= ContentWidgetWindow_Closed;
+        IsClosing = true;
+        Visible = false;
+        ReleaseAutoRestoreTimer();
+        try { RemoveGroupFileDropFallbackHandlers(); } catch (Exception ex) { App.Log($"[ContentWidget] Remove group drop fallback failed during close: {ex.Message}"); }
+        try { RemoveNativeFileDropBridge(); } catch (Exception ex) { App.Log($"[ContentWidget] Remove native file drop bridge failed during close: {ex.Message}"); }
+        App.Current.LocalizationService.LanguageChanged -= OnLanguageChanged;
+        SettingsService.SettingsChanged -= OnSettingsChanged;
+        Activated -= ContentWidgetWindow_Activated;
+        AppWindow.Changed -= OnAppWindowChanged;
+        RootGrid.DragOver -= RootGrid_DragOver;
+        RootGrid.Drop -= RootGrid_Drop;
+        RootGrid.PreviewKeyDown -= RootGrid_PreviewKeyDown;
+        RootGrid.PreviewKeyUp -= RootGrid_PreviewKeyUp;
+        RootGrid.KeyDown -= RootGrid_KeyDown;
+        ContentWidgetShell.RightTapped -= ContentWidgetShell_RightTapped;
+        ContentWidgetShell.TitleDoubleTapped -= ContentWidgetShell_TitleDoubleTapped;
+        if (_feedbackSource is not null)
+        {
+            _feedbackSource.FeedbackRequested -= FeedbackSource_FeedbackRequested;
+            _feedbackSource = null;
+        }
+        if (_hostContextMenuSource is not null)
+        {
+            _hostContextMenuSource.HostContextMenuOpening -= HostContextMenuSource_HostContextMenuOpening;
+            _hostContextMenuSource = null;
+        }
+        DetachCustomSurfaceChromeBridge();
+        if (_compactPresentationSource is not null)
+        {
+            _compactPresentationSource.PropertyChanged -= CompactPresentationSource_PropertyChanged;
+            _compactPresentationSource = null;
+        }
+        try { TrayAnimation.RevealWindowForTrayShow(); } catch { }
+        try { CleanupBase(); } catch (Exception ex) { App.Log($"[ContentWidget] CleanupBase failed during close: {ex.Message}"); }
+        try { _contentHost.DisposeContent(); } catch (Exception ex) { App.Log($"[ContentWidget] DisposeContent failed during close: {ex.Message}"); }
+        try { DisposeCachedGroupContents(); } catch (Exception ex) { App.Log($"[ContentWidget] Dispose cached group content failed during close: {ex.Message}"); }
+
+        foreach (var child in ResizeGrid.Children.OfType<FrameworkElement>())
+        {
+            if (child.Tag is string tag && !string.IsNullOrWhiteSpace(tag))
             {
-                if (child.Tag is string tag && !string.IsNullOrWhiteSpace(tag))
-                {
-                    child.PointerMoved -= ResizeBorder_PointerMoved;
-                    child.PointerReleased -= ResizeBorder_PointerReleased;
-                    child.PointerEntered -= ResizeBorder_PointerEntered;
-                    child.PointerCaptureLost -= ResizeBorder_PointerCaptureLost;
-                }
+                child.PointerPressed -= ResizeBorder_PointerPressed;
+                child.PointerMoved -= ResizeBorder_PointerMoved;
+                child.PointerReleased -= ResizeBorder_PointerReleased;
+                child.PointerEntered -= ResizeBorder_PointerEntered;
+                child.PointerCaptureLost -= ResizeBorder_PointerCaptureLost;
             }
-        };
+        }
+
+        ContentWidgetShell.DataContext = null;
+        ResizeGrid.Children.Clear();
+        RootGrid.Children.Clear();
+        Content = null;
     }
 
     internal void DisposeHostedContentEarly() => _contentHost.DisposeContent();
@@ -1653,6 +1718,12 @@ IsHideAnimationRunning = true;
     private sealed partial class ContentWidgetTitleViewModel : System.ComponentModel.INotifyPropertyChanged
     {
         private readonly SettingsService _settingsService;
+        private string? _cachedDisplayName;
+        private string? _cachedName;
+        private string? _cachedCultureName;
+        private string? _cachedTemplateId;
+        private bool _cachedIsDefaultTitle;
+        private WidgetKind _cachedWidgetKind;
 
         public ContentWidgetTitleViewModel(WidgetConfig config, SettingsService settingsService)
         {
@@ -1668,50 +1739,34 @@ IsHideAnimationRunning = true;
         {
             get
             {
-                if (Config.IsDefaultTitle)
+                var localization = App.Current.LocalizationService;
+                string currentCulture = localization.CurrentCultureName;
+                string? currentName = Config.Name;
+                bool isDefaultTitle = Config.IsDefaultTitle;
+                WidgetKind kind = Config.WidgetKind;
+                string? tplId = kind == WidgetKind.Custom &&
+                                Config.Metadata.TryGetValue(CustomWidgetViewModel.TemplateMetadataKey, out string? rawTpl)
+                    ? rawTpl
+                    : null;
+
+                if (_cachedDisplayName is not null &&
+                    _cachedIsDefaultTitle == isDefaultTitle &&
+                    _cachedWidgetKind == kind &&
+                    string.Equals(_cachedName, currentName, StringComparison.Ordinal) &&
+                    string.Equals(_cachedCultureName, currentCulture, StringComparison.Ordinal) &&
+                    string.Equals(_cachedTemplateId, tplId, StringComparison.Ordinal))
                 {
-                    var localization = App.Current.LocalizationService;
-                    var key = Config.WidgetKind switch
-                    {
-                        WidgetKind.Todo => "Todo.Title",
-                        WidgetKind.Weather => "Weather.Title",
-                        WidgetKind.Tags => "Tags.Title",
-                        WidgetKind.Music => "Music.Title",
-                        WidgetKind.Glance => "Glance.Title",
-                        WidgetKind.Custom => "CustomWidget.Title",
-                        WidgetKind.Clipboard => "Clipboard.Title",
-                        WidgetKind.SystemMonitor => "SystemMonitor.Title",
-                        _ => ""
-                    };
-                    if (!string.IsNullOrEmpty(key))
-                    {
-                        var localized = localization.T(key);
-                        if (!string.IsNullOrEmpty(localized))
-                            return localized;
-                    }
+                    return _cachedDisplayName;
                 }
 
-                if (Config.WidgetKind == WidgetKind.Custom &&
-                    Config.Metadata.TryGetValue(CustomWidgetViewModel.TemplateMetadataKey, out string? tplId) &&
-                    CustomWidgetTemplates.MatchPresetOrNull(tplId) is { } matchedPreset &&
-                    (string.IsNullOrWhiteSpace(Config.Name) ||
-                     string.Equals(Config.Name, matchedPreset.DefaultTitle, StringComparison.Ordinal) ||
-                     LocalizationService.SupportedLanguageCodes.Any(code =>
-                         string.Equals(
-                             Config.Name,
-                             LocalizationService.TranslateForCulture(code, matchedPreset.NameKey),
-                             StringComparison.Ordinal))))
-                {
-                    string presetTitle = App.Current.LocalizationService.T(matchedPreset.NameKey);
-                    if (!string.IsNullOrWhiteSpace(presetTitle))
-                    {
-                        return presetTitle;
-                    }
-                }
-
-                return string.IsNullOrWhiteSpace(Config.Name)
-                    ? Config.WidgetKind.ToString()
-                    : Config.Name;
+                string resolved = CustomWidgetTemplates.ResolveAutoDisplayTitle(Config, localization);
+                _cachedDisplayName = resolved;
+                _cachedIsDefaultTitle = isDefaultTitle;
+                _cachedWidgetKind = kind;
+                _cachedName = currentName;
+                _cachedCultureName = currentCulture;
+                _cachedTemplateId = tplId;
+                return resolved;
             }
         }
 
@@ -1741,6 +1796,7 @@ IsHideAnimationRunning = true;
 
         public void RefreshDisplayName()
         {
+            _cachedDisplayName = null;
             PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(nameof(DisplayName)));
         }
 

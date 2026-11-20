@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using DeskBox.Contracts;
 using DeskBox.Features.Appearance;
 using DeskBox.Features.FeatureWidgets;
@@ -46,7 +47,7 @@ public sealed partial class FileWidgetSettingsSection : UserControl
             nameof(ManagedStorage),
             typeof(ManagedStorageSettingsViewModel),
             typeof(FileWidgetSettingsSection),
-            new PropertyMetadata(null));
+            new PropertyMetadata(null, OnManagedStorageChanged));
 
     public static readonly DependencyProperty FileDisplayProperty =
         DependencyProperty.Register(
@@ -64,14 +65,77 @@ public sealed partial class FileWidgetSettingsSection : UserControl
 
     private bool _isSyncingQuickAccessToggle;
     private bool _isSyncingDesktopShortcutToggle;
+    private ManagedStorageSettingsViewModel? _subscribedManagedStorage;
 
     public FileWidgetSettingsSection()
     {
         InitializeComponent();
         DesktopOrganizationPart.SubPageChanged += OnDesktopOrganizationSubPageChanged;
+        Loaded += FileWidgetSettingsSection_Loaded;
+        Unloaded += FileWidgetSettingsSection_Unloaded;
+    }
+
+    private static void OnManagedStorageChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is FileWidgetSettingsSection section)
+        {
+            section.RebindManagedStorage(e.NewValue as ManagedStorageSettingsViewModel);
+        }
+    }
+
+    private void FileWidgetSettingsSection_Loaded(object sender, RoutedEventArgs e)
+    {
+        RebindManagedStorage(ManagedStorage);
+    }
+
+    private void FileWidgetSettingsSection_Unloaded(object sender, RoutedEventArgs e)
+    {
+        if (_subscribedManagedStorage is not null)
+        {
+            _subscribedManagedStorage.PropertyChanged -= OnManagedStoragePropertyChanged;
+            _subscribedManagedStorage = null;
+        }
+    }
+
+    private void RebindManagedStorage(ManagedStorageSettingsViewModel? viewModel)
+    {
+        if (!ReferenceEquals(_subscribedManagedStorage, viewModel))
+        {
+            if (_subscribedManagedStorage is not null)
+            {
+                _subscribedManagedStorage.PropertyChanged -= OnManagedStoragePropertyChanged;
+            }
+
+            _subscribedManagedStorage = viewModel;
+            if (_subscribedManagedStorage is not null)
+            {
+                _subscribedManagedStorage.PropertyChanged += OnManagedStoragePropertyChanged;
+            }
+        }
+
+        if (viewModel is { IsDragOutCustomized: true } && DragBehaviorExpander is not null)
+        {
+            DragBehaviorExpander.IsExpanded = true;
+        }
+    }
+
+    private void OnManagedStoragePropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if ((e.PropertyName is nameof(ManagedStorageSettingsViewModel.IsDragOutCustomized) or "" or null) &&
+            ManagedStorage is { IsDragOutCustomized: true } &&
+            DragBehaviorExpander is not null)
+        {
+            DragBehaviorExpander.IsExpanded = true;
+        }
     }
 
     public DesktopOrganizationSettingsSection OrganizationSection => DesktopOrganizationPart;
+
+    public bool IsWin10DragNoteVisible => !Services.WindowsCompatibilityService.IsWindows11OrLater;
+
+    public Visibility Win10DragNoteVisibility => IsWin10DragNoteVisible
+        ? Visibility.Visible
+        : Visibility.Collapsed;
 
     public bool IsFileDisplaySubPageOpen => FileDisplaySubPagePanel.Visibility == Visibility.Visible;
 
@@ -195,12 +259,6 @@ public sealed partial class FileWidgetSettingsSection : UserControl
         ManageOrphanFoldersButton.Visibility = count > 0
             ? Visibility.Visible
             : Visibility.Collapsed;
-    }
-
-    public void SetDragOutWin10State(bool modifiersReachExternalTargets, string dragOutDescription)
-    {
-        DragOutActionCard.Description = dragOutDescription;
-        DragOutModifierTipToggle.IsEnabled = modifiersReachExternalTargets;
     }
 
     /// <summary>

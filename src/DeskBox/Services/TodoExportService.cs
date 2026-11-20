@@ -252,7 +252,7 @@ public static class TodoExportService
         if (isSelectionSubset)
         {
             string selectedTag = SanitizeFileSegment(localizationService.T("Todo.Export.Scope.SelectedShort"));
-            return $"{prefix}_{selectedTag}_{localNow:yyyyMMdd}";
+            return FormattableString.Invariant($"{prefix}_{selectedTag}_{localNow:yyyyMMdd}");
         }
 
         string scopePart = options.StatusScope switch
@@ -265,11 +265,11 @@ public static class TodoExportService
         (DateOnly? start, DateOnly? end) = ResolveDateRange(options, now);
         string datePart = options.DatePreset switch
         {
-            TodoExportDatePreset.ThisMonth when start is { } s => $"{s:yyyy-MM}",
-            TodoExportDatePreset.LastMonth when start is { } s => $"{s:yyyy-MM}",
-            TodoExportDatePreset.ThisYear when start is { } s => $"{s.Year}",
-            _ when start is { } s && end is { } e => $"{s:yyyyMMdd}-{e:yyyyMMdd}",
-            _ => $"{localNow:yyyyMMdd}"
+            TodoExportDatePreset.ThisMonth when start is { } s => FormattableString.Invariant($"{s:yyyy-MM}"),
+            TodoExportDatePreset.LastMonth when start is { } s => FormattableString.Invariant($"{s:yyyy-MM}"),
+            TodoExportDatePreset.ThisYear when start is { } s => FormattableString.Invariant($"{s.Year}"),
+            _ when start is { } s && end is { } e => FormattableString.Invariant($"{s:yyyyMMdd}-{e:yyyyMMdd}"),
+            _ => FormattableString.Invariant($"{localNow:yyyyMMdd}")
         };
 
         return $"{prefix}_{scopePart}_{datePart}";
@@ -1122,12 +1122,12 @@ public static class TodoExportService
         int totalSteps = items.Sum(i => i.Steps?.Count ?? 0);
         int completedSteps = items.Sum(i => i.Steps?.Count(s => s.IsCompleted) ?? 0);
         string completionRate = total > 0
-            ? $"{(completed * 100.0 / total):0.0}%"
+            ? FormattableString.Invariant($"{(completed * 100.0 / total):0.0}%")
             : "0.0%";
 
         (DateOnly? rangeStart, DateOnly? rangeEnd) = ResolveDateRange(options, now);
         string rangeDisplay = rangeStart is { } rs && rangeEnd is { } re
-            ? $"{rs:yyyy-MM-dd} ~ {re:yyyy-MM-dd}"
+            ? FormattableString.Invariant($"{rs:yyyy-MM-dd} ~ {re:yyyy-MM-dd}")
             : loc.T("Todo.Export.DateRange.AllTime");
 
         WriteKeyValueStringRow(writer, row++, loc.T("Todo.Export.Summary.ExportedAt"), FormatTimestamp(now));
@@ -1170,7 +1170,7 @@ public static class TodoExportService
 
             int bucketDone = bucket.Count(i => i.IsCompleted);
             int bucketActive = bucket.Length - bucketDone;
-            string bucketRate = $"{(bucketDone * 100.0 / bucket.Length):0.0}%";
+            string bucketRate = FormattableString.Invariant($"{(bucketDone * 100.0 / bucket.Length):0.0}%");
             string colorLabel = color is null
                 ? loc.T("Todo.Color.None")
                 : loc.T(TodoItem.GetColorMarkerLocalizationKey(color));

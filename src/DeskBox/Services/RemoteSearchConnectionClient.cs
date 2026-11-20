@@ -67,8 +67,7 @@ public sealed class RemoteSearchConnectionClient : ISearchConnectionClient
     /// <summary>Warm the cache once at construction (first synchronous read).</summary>
     public RemoteSearchConnectionClient Prime()
     {
-        (bool ok, string? payload, _) = _client.RequestAsync(SettingsIpcMethods.SearchEverythingState)
-            .GetAwaiter().GetResult();
+        (bool ok, string? payload, _) = SettingsIpcShell.RequestSyncSafe(_client, SettingsIpcMethods.SearchEverythingState);
         UpdateFromPayload(ok, payload);
         return this;
     }

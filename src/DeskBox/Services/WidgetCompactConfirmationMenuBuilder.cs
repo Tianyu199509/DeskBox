@@ -67,7 +67,17 @@ public static class WidgetCompactConfirmationMenuBuilder
         {
             WidgetDangerActionStyle.Apply(confirmItem);
         }
-        confirmItem.Click += async (_, _) => await options.ConfirmedAction();
+        confirmItem.Click += async (_, _) =>
+        {
+            try
+            {
+                await options.ConfirmedAction();
+            }
+            catch (Exception ex)
+            {
+                App.Log($"[CompactConfirm] ConfirmedAction failed: {ex}");
+            }
+        };
         flyout.Items.Add(confirmItem);
 
         if (!options.CancelFirst && cancelItem is not null)

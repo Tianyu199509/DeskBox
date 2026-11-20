@@ -14,6 +14,7 @@ public abstract partial class WidgetWindowBase
     private string? _groupDetachDragMemberId;
     private int _groupDetachDragOffsetX;
     private int _groupDetachDragOffsetY;
+    private SizeInt32 _groupDetachPreviewSize;
     private CancellationTokenSource? _groupDetachPreviewCancellation;
     private WidgetDetachPlacementPreviewWindow? _groupDetachPlacementPreview;
     private bool _groupDetachCommitInProgress;
@@ -57,12 +58,34 @@ public abstract partial class WidgetWindowBase
         RefreshWidgetGroupPresentation();
     }
 
-    public void SetGroupDropPreview(
-        bool visible,
-        bool ready,
-        string? messageKey = null)
+    public void PrewarmGroupDropPreview()
     {
-        WidgetShellControl.SetGroupDropPreview(visible, ready, messageKey);
+        WidgetShellControl.PrewarmGroupDropPreview();
+    }
+
+    public void SetGroupDropPreview(WidgetGroupDropPreviewState state)
+    {
+        WidgetShellControl.SetGroupDropPreview(state);
+    }
+
+    /// <summary>
+    /// Shrinks this window into a crisp GPU thumbnail around the pointer grab
+    /// anchor while hovering a joinable merge target.
+    /// </summary>
+    public void SetGroupDragSourcePreview(
+        bool active,
+        double anchorNormalizedX = 0.5,
+        double anchorNormalizedY = 0.06)
+    {
+        WidgetShellControl.SetGroupDragSourcePreview(
+            active,
+            anchorNormalizedX,
+            anchorNormalizedY);
+    }
+
+    public void SetGroupDragSourceCommitting(bool committing)
+    {
+        WidgetShellControl.SetGroupDragSourceCommitting(committing);
     }
 
     /// <summary>
@@ -75,29 +98,33 @@ public abstract partial class WidgetWindowBase
         WidgetShellControl.NotifyGroupInteractionInterrupted();
     }
 
-    public RectInt32? GetGroupMergeTitleScreenBounds()
+    public RectInt32? GetGroupMergeTitleScreenBounds() =>
+        GetElementScreenBounds(WidgetShellControl.GroupMergeTitleTargetElement);
+
+    public RectInt32? GetGroupMergeSurfaceScreenBounds() =>
+        GetElementScreenBounds(WidgetShellControl.GroupMergeSurfaceElement);
+
+    private RectInt32? GetElementScreenBounds(Microsoft.UI.Xaml.FrameworkElement? element)
     {
-        Microsoft.UI.Xaml.FrameworkElement? titleTarget =
-            WidgetShellControl.GroupMergeTitleTargetElement;
-        if (titleTarget?.XamlRoot is null ||
-            titleTarget.ActualWidth <= 0 ||
-            titleTarget.ActualHeight <= 0)
+        if (element?.XamlRoot is null ||
+            element.ActualWidth <= 0 ||
+            element.ActualHeight <= 0)
         {
             return null;
         }
 
         try
         {
-            Windows.Foundation.Point topLeft = titleTarget.TransformToVisual(null)
+            Windows.Foundation.Point topLeft = element.TransformToVisual(null)
                 .TransformPoint(new Windows.Foundation.Point(0, 0));
-            double scale = titleTarget.XamlRoot.RasterizationScale;
+            double scale = element.XamlRoot.RasterizationScale;
             PointInt32 windowPosition = AppWindow.Position;
             int left = windowPosition.X + (int)Math.Floor(topLeft.X * scale);
             int top = windowPosition.Y + (int)Math.Floor(topLeft.Y * scale);
             int right = windowPosition.X +
-                (int)Math.Ceiling((topLeft.X + titleTarget.ActualWidth) * scale);
+                (int)Math.Ceiling((topLeft.X + element.ActualWidth) * scale);
             int bottom = windowPosition.Y +
-                (int)Math.Ceiling((topLeft.Y + titleTarget.ActualHeight) * scale);
+                (int)Math.Ceiling((topLeft.Y + element.ActualHeight) * scale);
             return new RectInt32(
                 left,
                 top,
@@ -463,11 +490,14 @@ public abstract partial class WidgetWindowBase
 
         _groupDetachCommitInProgress = true;
         StopGroupDetachPreviewPolling();
+        SizeInt32 previewSize = _groupDetachPreviewSize is { Width: > 0, Height: > 0 }
+            ? _groupDetachPreviewSize
+            : AppWindow.Size;
         var detachedBounds = new RectInt32(
             detachedPosition.Value.X,
             detachedPosition.Value.Y,
-            AppWindow.Size.Width,
-            AppWindow.Size.Height);
+            previewSize.Width,
+            previewSize.Height);
         _groupDetachPlacementPreview?.MarkCommitted(detachedBounds);
         ClearGroupDetachDragAnchor();
         try
@@ -488,10 +518,7 @@ public abstract partial class WidgetWindowBase
             WidgetDetachPlacementPreviewWindow? preview =
                 _groupDetachPlacementPreview;
             _groupDetachPlacementPreview = null;
-            if (preview is not null)
-            {
-                await preview.FadeOutAndHideAsync();
-            }
+            preview?.Hide();
         }
     }
 
@@ -500,17 +527,34 @@ public abstract partial class WidgetWindowBase
         WidgetGroupMemberEventArgs e)
     {
         _groupDetachDragCanceled = false;
-        App.Current?.WidgetManager?.CancelWidgetSurfaceSwitch(Config.Id);
+        WidgetManager? manager = App.Current?.WidgetManager;
+        manager?.CancelWidgetSurfaceSwitch(Config.Id);
         if (!Win32Helper.GetCursorPos(out Win32Helper.POINT cursor))
         {
             ClearGroupDetachDragAnchor();
             return;
         }
 
-        var position = AppWindow.Position;
+        double dpiScale = Win32Helper.GetDpiScaleForPoint(cursor.X, cursor.Y);
+        if (!double.IsFinite(dpiScale) || dpiScale <= 0)
+        {
+            dpiScale = RootElement.XamlRoot?.RasterizationScale ?? 1.0;
+        }
+
+        SizeInt32 previewSize = manager?.ResolveDetachedMemberPhysicalSize(
+            e.WidgetId,
+            dpiScale,
+            AppWindow.Size) ?? AppWindow.Size;
         _groupDetachDragMemberId = e.WidgetId;
-        _groupDetachDragOffsetX = cursor.X - position.X;
-        _groupDetachDragOffsetY = cursor.Y - position.Y;
+        _groupDetachPreviewSize = previewSize;
+        // Anchor the cursor horizontally centered on the preview's simulated
+        // title strip so dragging a right-side tab never projects a wide box
+        // far off to the left.
+        _groupDetachDragOffsetX = Math.Max(24, previewSize.Width / 2);
+        _groupDetachDragOffsetY = Math.Clamp(
+            (int)Math.Round(19 * dpiScale),
+            12,
+            Math.Max(12, previewSize.Height / 2));
         StartGroupDetachPlacementPreview(cursor);
     }
 
@@ -541,7 +585,7 @@ public abstract partial class WidgetWindowBase
                 "Widget.Group.DetachDragCaption");
             preview = manager
                 .AcquireWidgetDetachPlacementPreview(
-                    BuildDetachPreviewAppearance(caption));
+                    BuildDetachPreviewAppearance(caption, _groupDetachDragMemberId));
         }
         catch (Exception ex)
         {
@@ -552,14 +596,17 @@ public abstract partial class WidgetWindowBase
         _groupDetachPlacementPreview = preview;
         var sourcePosition = AppWindow.Position;
         var sourceSize = AppWindow.Size;
+        SizeInt32 previewSize = _groupDetachPreviewSize is { Width: > 0, Height: > 0 }
+            ? _groupDetachPreviewSize
+            : sourceSize;
         int offsetX = _groupDetachDragOffsetX;
         int offsetY = _groupDetachDragOffsetY;
         preview.Update(
             new RectInt32(
                 cursor.X - offsetX,
                 cursor.Y - offsetY,
-                sourceSize.Width,
-                sourceSize.Height),
+                previewSize.Width,
+                previewSize.Height),
             visible: false);
 
         var cancellation = new CancellationTokenSource();
@@ -589,8 +636,8 @@ public abstract partial class WidgetWindowBase
                             new RectInt32(
                                 point.X - offsetX,
                                 point.Y - offsetY,
-                                sourceSize.Width,
-                                sourceSize.Height),
+                                previewSize.Width,
+                                previewSize.Height),
                             outside && !_groupDetachDragCanceled);
                     }
 
@@ -678,14 +725,12 @@ public abstract partial class WidgetWindowBase
             });
     }
 
-    private WidgetDetachPreviewAppearance BuildDetachPreviewAppearance(string caption)
+    private WidgetDetachPreviewAppearance BuildDetachPreviewAppearance(
+        string caption,
+        string? memberId = null)
     {
         bool isDark = RootElement.ActualTheme == Microsoft.UI.Xaml.ElementTheme.Dark;
         double cornerRadius = GetCurrentSurfaceCornerRadius();
-        double surfaceOpacity = Math.Clamp(WidgetOpacity, 0.0, 1.0);
-        string materialType = WindowsCompatibilityService.ResolveWidgetMaterialType(
-            SettingsService.Settings.WidgetShell.WidgetMaterialType);
-        double materialIntensity = SettingsService.Settings.WidgetShell.WidgetMaterialIntensity;
         Windows.UI.Color accentColor = App.Current?.ThemeService?.GetEffectiveAccentColor()
             ?? AccentColorHelper.DefaultAccentColor;
         Windows.UI.Color? customBackgroundColor = null;
@@ -695,18 +740,34 @@ public abstract partial class WidgetWindowBase
             customBackgroundColor = parsedCustom;
         }
 
+        WidgetGroupMemberPresentation? member = null;
+        if (!string.IsNullOrWhiteSpace(memberId) &&
+            WidgetShellControl.CurrentGroupPresentation?.Members is { } members)
+        {
+            for (int i = 0; i < members.Count; i++)
+            {
+                if (string.Equals(members[i].WidgetId, memberId, StringComparison.Ordinal))
+                {
+                    member = members[i];
+                    break;
+                }
+            }
+        }
+
         var (borderThickness, borderColor, _) = GetWidgetBorderVisuals(isDark, accentColor);
         return new WidgetDetachPreviewAppearance(
             caption,
             cornerRadius,
-            materialType,
             isDark,
             accentColor,
-            surfaceOpacity,
-            materialIntensity,
             customBackgroundColor,
             borderThickness,
-            borderColor);
+            borderColor,
+            MemberTitle: member?.Name ?? string.Empty,
+            MemberGlyph: member?.Glyph ?? WidgetShellControl.TitleGlyph,
+            MemberIconKind: member?.IconKind ?? WidgetShellControl.TitleIconKind,
+            MemberIconMode: WidgetShellControl.TitleIconMode,
+            MemberCustomEmoji: member?.CustomTitleIconEmoji ?? string.Empty);
     }
 
     private PointInt32? TryResolveDetachedPosition(
@@ -731,6 +792,7 @@ public abstract partial class WidgetWindowBase
         _groupDetachDragMemberId = null;
         _groupDetachDragOffsetX = 0;
         _groupDetachDragOffsetY = 0;
+        _groupDetachPreviewSize = default;
     }
 
     private bool IsCursorOutsideGroupWindow(Win32Helper.POINT cursor)

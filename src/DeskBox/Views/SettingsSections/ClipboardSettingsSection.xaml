@@ -90,6 +90,7 @@
                 <ComboBox svc:Localized.AutomationNameKey="Settings.Clipboard.ClickBehavior.Title"
                     x:Name="ClickBehaviorComboBox"
                     MinWidth="{StaticResource SettingsControlMinWidth}"
+                    MaxWidth="{StaticResource SettingsControlMaxWidth}"
                     SelectionChanged="ClickBehaviorComboBox_SelectionChanged">
                     <ComboBoxItem Tag="CopyOnSinglePasteOnDouble">
                         <TextBlock svc:Localized.Key="Settings.Clipboard.ClickBehavior.CopySinglePasteDouble" />
@@ -146,6 +147,7 @@
                 <ComboBox svc:Localized.AutomationNameKey="Clipboard.Settings.CardStyle.Title"
                     x:Name="CardStyleComboBox"
                     MinWidth="{StaticResource SettingsControlMinWidth}"
+                    MaxWidth="{StaticResource SettingsControlMaxWidth}"
                     SelectionChanged="CardStyleComboBox_SelectionChanged">
                     <ComboBoxItem Tag="Minimalist">
                         <TextBlock svc:Localized.Key="Clipboard.Settings.CardStyle.Minimalist" />
@@ -162,16 +164,17 @@
                 </ComboBox>
             </toolkit:SettingsCard>
 
-            <toolkit:SettingsCard
-                HorizontalContentAlignment="Right"
-                svc:Localized.DescriptionKey="Clipboard.Settings.TabDisplayMode.Description"
+            <toolkit:SettingsExpander
+                x:Name="TopTabsExpander"
+                IsExpanded="False"
                 svc:Localized.HeaderKey="Clipboard.Settings.TabDisplayMode.Title">
-                <toolkit:SettingsCard.HeaderIcon>
+                <toolkit:SettingsExpander.HeaderIcon>
                     <FontIcon Glyph="&#xE71D;" />
-                </toolkit:SettingsCard.HeaderIcon>
+                </toolkit:SettingsExpander.HeaderIcon>
                 <ComboBox svc:Localized.AutomationNameKey="Clipboard.Settings.TabDisplayMode.Title"
                     x:Name="TabDisplayModeComboBox"
                     MinWidth="{StaticResource SettingsControlMinWidth}"
+                    MaxWidth="{StaticResource SettingsControlMaxWidth}"
                     SelectionChanged="TabDisplayModeComboBox_SelectionChanged">
                     <ComboBoxItem Tag="IconAndText">
                         <TextBlock svc:Localized.Key="Clipboard.Settings.TabDisplayMode.IconAndText" />
@@ -183,7 +186,49 @@
                         <TextBlock svc:Localized.Key="Clipboard.Settings.TabDisplayMode.TextOnly" />
                     </ComboBoxItem>
                 </ComboBox>
-            </toolkit:SettingsCard>
+                <toolkit:SettingsExpander.Items>
+                    <toolkit:SettingsCard
+                        x:Name="TabLayoutCard"
+                        ContentAlignment="Vertical"
+                        HorizontalContentAlignment="Stretch">
+                        <StackPanel Spacing="6">
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
+                                    <TextBlock
+                                        Style="{StaticResource SettingTitleTextStyle}"
+                                        svc:Localized.Key="Settings.Clipboard.TabLayout.Title" />
+                                    <TextBlock
+                                        Style="{StaticResource SettingDescriptionTextStyle}"
+                                        svc:Localized.Key="Settings.Clipboard.TabLayout.Description" />
+                                </StackPanel>
+                                <Button
+                                    x:Name="ResetTabLayoutButton"
+                                    Grid.Column="1"
+                                    VerticalAlignment="Center"
+                                    Click="ResetTabLayoutButton_Click"
+                                    Style="{StaticResource ActionButtonStyle}"
+                                    svc:Localized.AutomationNameKey="Settings.Clipboard.TabLayout.Reset">
+                                    <TextBlock svc:Localized.Key="Settings.Clipboard.TabLayout.Reset" />
+                                </Button>
+                            </Grid>
+
+                            <ListView
+                                x:Name="TabLayoutListView"
+                                Padding="0,2"
+                                AllowDrop="True"
+                                Background="Transparent"
+                                CanDragItems="True"
+                                CanReorderItems="True"
+                                DragItemsCompleted="TabLayoutListView_DragItemsCompleted"
+                                IsItemClickEnabled="False"
+                                ReorderMode="Enabled"
+                                SelectionMode="None"
+                                ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                ScrollViewer.VerticalScrollBarVisibility="Disabled" />
+                        </StackPanel>
+                    </toolkit:SettingsCard>
+                </toolkit:SettingsExpander.Items>
+            </toolkit:SettingsExpander>
 
             <toolkit:SettingsCard
                 x:Name="ShowSourceAppCard"
@@ -230,12 +275,10 @@
                         HorizontalContentAlignment="Right"
                         svc:Localized.DescriptionKey="Settings.Clipboard.PopupPlacement.Description"
                         svc:Localized.HeaderKey="Settings.Clipboard.PopupPlacement.Title">
-                        <toolkit:SettingsCard.HeaderIcon>
-                            <FontIcon Glyph="&#xE740;" />
-                        </toolkit:SettingsCard.HeaderIcon>
                         <ComboBox svc:Localized.AutomationNameKey="Settings.Clipboard.PopupPlacement.Title"
                             x:Name="PopupPlacementComboBox"
                             MinWidth="{StaticResource SettingsControlMinWidth}"
+                            MaxWidth="{StaticResource SettingsControlMaxWidth}"
                             SelectionChanged="PopupPlacementComboBox_SelectionChanged">
                             <ComboBoxItem Tag="FollowCaret">
                                 <TextBlock svc:Localized.Key="Settings.Clipboard.PopupPlacement.FollowCaret" />
@@ -254,12 +297,10 @@
                         HorizontalContentAlignment="Right"
                         svc:Localized.DescriptionKey="Settings.Clipboard.DoubleCopy.Description"
                         svc:Localized.HeaderKey="Settings.Clipboard.DoubleCopy.Title">
-                        <toolkit:SettingsCard.HeaderIcon>
-                            <FontIcon Glyph="&#xE8C8;" />
-                        </toolkit:SettingsCard.HeaderIcon>
                         <ComboBox svc:Localized.AutomationNameKey="Settings.Clipboard.DoubleCopy.Title"
                             x:Name="DoubleCopyComboBox"
                             MinWidth="{StaticResource SettingsControlMinWidth}"
+                            MaxWidth="{StaticResource SettingsControlMaxWidth}"
                             SelectionChanged="DoubleCopyComboBox_SelectionChanged">
                             <ComboBoxItem Tag="None">
                                 <TextBlock svc:Localized.Key="Settings.Clipboard.DoubleCopy.None" />
@@ -298,9 +339,6 @@
                         HorizontalContentAlignment="Right"
                         svc:Localized.DescriptionKey="Settings.Clipboard.IgnorePrivacyFormats.Description"
                         svc:Localized.HeaderKey="Settings.Clipboard.IgnorePrivacyFormats.Title">
-                        <toolkit:SettingsCard.HeaderIcon>
-                            <FontIcon Glyph="&#xE72E;" />
-                        </toolkit:SettingsCard.HeaderIcon>
                         <ToggleSwitch svc:Localized.AutomationNameKey="Settings.Clipboard.IgnorePrivacyFormats.Title"
                             x:Name="IgnorePrivacyFormatsToggle"
                             MinWidth="0"
@@ -313,12 +351,10 @@
                         HorizontalContentAlignment="Right"
                         svc:Localized.DescriptionKey="Settings.Clipboard.SecretProtection.Description"
                         svc:Localized.HeaderKey="Settings.Clipboard.SecretProtection.Title">
-                        <toolkit:SettingsCard.HeaderIcon>
-                            <FontIcon Glyph="&#xEA18;" />
-                        </toolkit:SettingsCard.HeaderIcon>
                         <ComboBox svc:Localized.AutomationNameKey="Settings.Clipboard.SecretProtection.Title"
                             x:Name="SecretProtectionComboBox"
                             MinWidth="{StaticResource SettingsControlMinWidth}"
+                            MaxWidth="{StaticResource SettingsControlMaxWidth}"
                             SelectionChanged="SecretProtectionComboBox_SelectionChanged">
                             <ComboBoxItem Tag="Mask">
                                 <TextBlock svc:Localized.Key="Settings.Clipboard.SecretProtection.Mask" />
@@ -337,9 +373,6 @@
                         HorizontalContentAlignment="Stretch"
                         svc:Localized.DescriptionKey="Settings.Clipboard.ExcludedApps.Description"
                         svc:Localized.HeaderKey="Settings.Clipboard.ExcludedApps.Title">
-                        <toolkit:SettingsCard.HeaderIcon>
-                            <FontIcon Glyph="&#xE8F8;" />
-                        </toolkit:SettingsCard.HeaderIcon>
                         <StackPanel Margin="0,4,0,2" Spacing="8">
                             <Button
                                 x:Name="BrowseExcludedAppButton"
@@ -389,12 +422,10 @@
                         HorizontalContentAlignment="Right"
                         svc:Localized.DescriptionKey="Settings.Clipboard.MaxItems.Description"
                         svc:Localized.HeaderKey="Settings.Clipboard.MaxItems.Title">
-                        <toolkit:SettingsCard.HeaderIcon>
-                            <FontIcon Glyph="&#xE8FD;" />
-                        </toolkit:SettingsCard.HeaderIcon>
                         <ComboBox svc:Localized.AutomationNameKey="Settings.Clipboard.MaxItems.Title"
                             x:Name="MaxItemsComboBox"
                             MinWidth="{StaticResource SettingsControlMinWidth}"
+                            MaxWidth="{StaticResource SettingsControlMaxWidth}"
                             SelectionChanged="MaxItemsComboBox_SelectionChanged">
                             <ComboBoxItem Tag="100" Content="100" />
                             <ComboBoxItem Tag="200" Content="200" />
@@ -408,12 +439,10 @@
                         HorizontalContentAlignment="Right"
                         svc:Localized.DescriptionKey="Settings.Clipboard.RetentionDays.Description"
                         svc:Localized.HeaderKey="Settings.Clipboard.RetentionDays.Title">
-                        <toolkit:SettingsCard.HeaderIcon>
-                            <FontIcon Glyph="&#xE823;" />
-                        </toolkit:SettingsCard.HeaderIcon>
                         <ComboBox svc:Localized.AutomationNameKey="Settings.Clipboard.RetentionDays.Title"
                             x:Name="RetentionDaysComboBox"
                             MinWidth="{StaticResource SettingsControlMinWidth}"
+                            MaxWidth="{StaticResource SettingsControlMaxWidth}"
                             SelectionChanged="RetentionDaysComboBox_SelectionChanged">
                             <ComboBoxItem Tag="1">
                                 <TextBlock svc:Localized.Key="Settings.Clipboard.RetentionDays.Days1" />
@@ -438,12 +467,10 @@
                         HorizontalContentAlignment="Right"
                         svc:Localized.DescriptionKey="Settings.Clipboard.MaxImageSize.Description"
                         svc:Localized.HeaderKey="Settings.Clipboard.MaxImageSize.Title">
-                        <toolkit:SettingsCard.HeaderIcon>
-                            <FontIcon Glyph="&#xEB9F;" />
-                        </toolkit:SettingsCard.HeaderIcon>
                         <ComboBox svc:Localized.AutomationNameKey="Settings.Clipboard.MaxImageSize.Title"
                             x:Name="MaxImageSizeComboBox"
                             MinWidth="{StaticResource SettingsControlMinWidth}"
+                            MaxWidth="{StaticResource SettingsControlMaxWidth}"
                             SelectionChanged="MaxImageSizeComboBox_SelectionChanged">
                             <ComboBoxItem Tag="8" Content="8 MB" />
                             <ComboBoxItem Tag="16" Content="16 MB" />
@@ -456,9 +483,6 @@
                         x:Name="StorageSummaryCard"
                         HorizontalContentAlignment="Right"
                         svc:Localized.HeaderKey="Settings.Clipboard.StorageSummary.Title">
-                        <toolkit:SettingsCard.HeaderIcon>
-                            <FontIcon Glyph="&#xEDA2;" />
-                        </toolkit:SettingsCard.HeaderIcon>
                         <Button
                             x:Name="ClearUnpinnedButton"
                             Style="{StaticResource DangerActionButtonStyle}">
@@ -497,9 +521,6 @@
                         HorizontalContentAlignment="Right"
                         svc:Localized.DescriptionKey="Clipboard.Settings.Reset.Description"
                         svc:Localized.HeaderKey="Clipboard.Settings.Reset.Title">
-                        <toolkit:SettingsCard.HeaderIcon>
-                            <FontIcon Glyph="&#xE777;" />
-                        </toolkit:SettingsCard.HeaderIcon>
                         <Button
                             x:Name="ResetClipboardButton"
                             Click="ResetClipboardButton_Click"

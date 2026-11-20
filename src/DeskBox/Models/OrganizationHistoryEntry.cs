@@ -3,13 +3,15 @@ using DeskBox.Services;
 
 namespace DeskBox.Models;
 
-public class OrganizationHistoryEntry
+public sealed class OrganizationHistoryEntry
 {
     public string Id { get; set; } = Guid.NewGuid().ToString();
 
     public DateTime TimestampUtc { get; set; } = DateTime.UtcNow;
 
     public string WidgetId { get; set; } = string.Empty;
+
+    public string? SourceWidgetId { get; set; }
 
     public string WidgetName { get; set; } = string.Empty;
 
@@ -87,7 +89,7 @@ public class OrganizationHistoryEntry
     }
 
     [JsonIgnore]
-    public string DisplayTimeText => TimestampUtc.ToLocalTime().ToString("MM-dd HH:mm");
+    public string DisplayTimeText => TimestampUtc.ToLocalTime().ToString("MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture);
 
     [JsonIgnore]
     public string DisplayDetail
@@ -148,7 +150,7 @@ public class OrganizationHistoryEntry
     }
 }
 
-public class OrganizationHistoryItem
+public sealed class OrganizationHistoryItem
 {
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public DesktopOrganizationSourceScope SourceScope { get; set; }
@@ -216,4 +218,6 @@ public sealed class OrganizerOperationResult
     public OrganizationHistoryEntry History { get; init; } = new();
 
     public List<OrganizationHistoryItem> CompletedItems { get; init; } = [];
+
+    public int SkippedItemCount { get; init; }
 }

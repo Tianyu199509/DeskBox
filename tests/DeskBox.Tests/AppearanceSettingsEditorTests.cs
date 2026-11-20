@@ -534,88 +534,8 @@ public sealed class AppearanceSettingsEditorTests : IDisposable
     }
 
     [Fact]
-    public void XamlAndBridge_WireTheAppearanceFamilyToTheEditor()
-    {
-        string window = File.ReadAllText(
-            Path.Combine(TestPaths.FromRepository("src/DeskBox"), "Views/SettingsWindow.xaml"));
-        string section = File.ReadAllText(
-            Path.Combine(TestPaths.FromRepository("src/DeskBox"), "Views/SettingsSections/AppearanceSettingsSection.xaml"));
-        string deferred = File.ReadAllText(
-            Path.Combine(TestPaths.FromRepository("src/DeskBox"), "Views/SettingsWindow.DeferredSections.cs"));
-        string bridge = File.ReadAllText(
-            Path.Combine(TestPaths.FromRepository("src/DeskBox"), "Features/Appearance/AppearanceSettingsViewModel.AotBindableProperties.cs"));
-        string shellBridge = File.ReadAllText(
-            Path.Combine(TestPaths.FromRepository("src/DeskBox"), "ViewModels/SettingsViewModel.AotBindableProperties.cs"));
-
-        // Editor binding paths on the section family ({Binding} markers kept).
-        string fileSection = File.ReadAllText(
-            Path.Combine(TestPaths.FromRepository("src/DeskBox"), "Views/SettingsSections/FileWidgetSettingsSection.xaml"));
-        Assert.Contains("controls:SettingsSegmented.Options=\"{Binding AvailableThemeOptions}\"", section);
-        Assert.Contains("controls:SettingsSegmented.Value=\"{Binding Theme, Mode=TwoWay}\"", section);
-        Assert.Contains("Value=\"{x:Bind Appearance.IconSize, Mode=TwoWay}\"", fileSection);
-        Assert.Contains("controls:SettingsSegmented.Value=\"{x:Bind Appearance.FileNameLineCount, Mode=TwoWay}\"", fileSection);
-        Assert.Contains("controls:SettingsComboBox.Value=\"{Binding TrayIconStyle, Mode=TwoWay}\"", section);
-        Assert.Contains(
-            "SelectedColor=\"{Binding SelectedAccentColorHex, Mode=TwoWay, Converter={StaticResource SettingsColorStringConverter}}\"",
-            section);
-        Assert.Contains("controls:SettingsComboBox.Value=\"{Binding MaterialType, Mode=TwoWay}\"", section);
-        Assert.Contains("controls:SettingsComboBox.Value=\"{Binding LayoutDensity, Mode=TwoWay}\"", section);
-        Assert.Contains("controls:SettingsComboBox.Value=\"{Binding TitleIconMode, Mode=TwoWay}\"", section);
-        Assert.Contains("controls:SettingsComboBox.Value=\"{Binding AnimationEffect, Mode=TwoWay}\"", section);
-        Assert.Contains("Description=\"{Binding AnimationSummaryText}\"", section);
-        Assert.Contains("Value=\"{Binding WidgetTransparency, Mode=TwoWay}\"", section);
-        Assert.Contains("Value=\"{Binding TextSize, Mode=TwoWay}\"", section);
-        // Dual-entry contract (2026-11-05 UX call): the entry card keeps an
-        // inline material combo for direct edits, while the advanced material
-        // page heads itself with the same selector — both write the editor
-        // and stay in sync.
-        Assert.DoesNotContain("controls:SettingsComboBox.Value=\"{Binding MaterialType, Mode=TwoWay}\"", window);
-        Assert.DoesNotContain("controls:SettingsComboBox.Value=\"{Binding LayoutDensity, Mode=TwoWay}\"", window);
-        Assert.DoesNotContain("controls:SettingsComboBox.Value=\"{Binding TitleIconMode, Mode=TwoWay}\"", window);
-        Assert.DoesNotContain("controls:SettingsComboBox.Value=\"{Binding AnimationEffect, Mode=TwoWay}\"", window);
-        Assert.Contains("IsEnabled=\"{Binding ShowOpacitySlider}\"", section);
-        Assert.Contains("IsEnabled=\"{Binding ShowMaterialIntensitySlider}\"", section);
-        Assert.Contains("Visibility=\"{Binding ShowForegroundCustomColor, Converter={StaticResource SettingsBoolToVisibilityConverter}}\"", section);
-        Assert.Contains("IsOpen=\"{Binding Windows10Compatibility}\"", section);
-        Assert.Contains("IsEnabled=\"{Binding NativeCornersSupported}\"", section);
-
-        // The legacy shell paths are gone from the appearance family.
-        Assert.DoesNotContain("{Binding SelectedTheme", section + window);
-        Assert.DoesNotContain("{Binding SelectedWidgetMaterialType", section + window);
-        Assert.DoesNotContain("{Binding SelectedLayoutDensity", section + window);
-        Assert.DoesNotContain("{Binding SelectedAnimationPreset", section + window);
-        Assert.DoesNotContain("{Binding SelectedWidgetTitleIconMode", section + window);
-        Assert.DoesNotContain("{Binding WidgetOpacityVisibility", window);
-        Assert.DoesNotContain("{Binding IsWindows10VisualCompatibilityMode", window);
-
-        // Section-level DataContext switch covers Appearance and AppearanceMaterialSettings;
-        // the three folded sub-pages are retired.
-        Assert.Contains("if (sectionTag == \"Appearance\")", deferred);
-        Assert.Contains("fileSettings.Appearance = _appearanceSettingsViewModel;", deferred);
-        Assert.DoesNotContain("\"AppearanceMaterialSettings\"", deferred);
-        Assert.DoesNotContain("\"AppearanceDensitySettings\"", deferred);
-        Assert.DoesNotContain("\"AppearanceWindowSettings\"", deferred);
-        Assert.DoesNotContain("\"AppearanceAnimationSettings\"", deferred);
-        Assert.Contains("section.DataContext = _appearanceSettingsViewModel;", deferred);
-
-        // The editor exposes an AOT bridge and the shell bridge dropped the
-        // migrated names.
-        Assert.Contains("[WinRT.GeneratedBindableCustomProperty([", bridge);
-        Assert.Contains("nameof(WidgetTransparency)", bridge);
-        Assert.Contains("nameof(AnimationSummaryText)", bridge);
-        Assert.Contains("nameof(IsAnimationEnabled)", bridge);
-        Assert.Contains("nameof(ShowAnimationDirection)", bridge);
-        Assert.DoesNotContain("nameof(SelectedWidgetMaterialType)", shellBridge);
-        Assert.DoesNotContain("nameof(WidgetTransparency)", shellBridge);
-        Assert.DoesNotContain("nameof(SelectedTheme)", shellBridge);
-    }
-
-    [Fact]
     public void RefreshLocalization_ClearsEveryCachedNameArray()
     {
-        // After a language change the option tables must re-localize: every
-        // "_cached*Names" array has to be nulled inside RefreshLocalization,
-        // otherwise a lazily built cache (??=) keeps serving the old language.
         System.Reflection.FieldInfo[] cachedNameFields = typeof(AppearanceSettingsViewModel)
             .GetFields(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
             .Where(field => field.FieldType == typeof(string[]) &&
@@ -624,20 +544,18 @@ public sealed class AppearanceSettingsEditorTests : IDisposable
             .ToArray();
         Assert.NotEmpty(cachedNameFields);
 
-        string source = File.ReadAllText(
-            Path.Combine(TestPaths.FromRepository("src/DeskBox"), "Features/Appearance/AppearanceSettingsViewModel.cs"));
-        int methodStart = source.IndexOf("public void RefreshLocalization()", StringComparison.Ordinal);
-        Assert.True(methodStart >= 0, "AppearanceSettingsViewModel.RefreshLocalization not found.");
-        int methodEnd = source.IndexOf("private static string NormalizeHexColor", StringComparison.Ordinal);
-        Assert.True(methodEnd > methodStart, "RefreshLocalization method bounds not found.");
-        string body = source.Substring(methodStart, methodEnd - methodStart);
+        (_, AppearanceSettingsViewModel editor) = CreateEditor(_root);
+        string[] stale = ["stale-sentinel"];
+        foreach (System.Reflection.FieldInfo field in cachedNameFields)
+        {
+            field.SetValue(editor, stale);
+        }
+
+        editor.RefreshLocalization();
 
         foreach (System.Reflection.FieldInfo field in cachedNameFields)
         {
-            Assert.True(
-                body.Contains($"{field.Name} = null;", StringComparison.Ordinal),
-                $"RefreshLocalization must null the {field.Name} cache, otherwise its " +
-                "combo box keeps the previous language's option text.");
+            Assert.NotSame(stale, field.GetValue(editor));
         }
     }
 }

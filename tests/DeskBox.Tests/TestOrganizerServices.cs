@@ -1,4 +1,5 @@
 using DeskBox.Services;
+using DeskBox.Services.DesktopOrganization;
 
 namespace DeskBox.Tests;
 
@@ -17,7 +18,8 @@ internal static class TestOrganizerServices
         SettingsService settingsService,
         FileService fileService,
         Func<string>? desktopPathProvider = null,
-        string? recoveryJournalPath = null)
+        string? recoveryJournalPath = null,
+        DesktopIconPositionService? desktopIconPositions = null)
     {
         return new OrganizerService(
             settingsService,
@@ -25,7 +27,8 @@ internal static class TestOrganizerServices
             desktopPathProvider,
             new DesktopAutoOrganizationSuppressionRegistry(
                 ledgerPath: NewTempStorePath("suppressions")),
-            recoveryJournalPath ?? NewTempStorePath("recovery"));
+            recoveryJournalPath ?? NewTempStorePath("recovery"),
+            desktopIconPositions);
     }
 
     private static string NewTempStorePath(string role) => Path.Combine(

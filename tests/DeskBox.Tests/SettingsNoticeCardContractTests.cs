@@ -85,7 +85,7 @@ public sealed class SettingsNoticeCardContractTests
         Assert.Contains("NoticeInfoBackgroundDark", code, StringComparison.Ordinal);
         Assert.Contains("0x08, 0xFF, 0xFF, 0xFF", code, StringComparison.Ordinal);
         Assert.Contains("infoBar.ActualTheme == ElementTheme.Dark", code, StringComparison.Ordinal);
-        Assert.Contains("AccessibilitySettings().HighContrast", code, StringComparison.Ordinal);
+        Assert.Contains("WindowsCompatibilityService.IsHighContrast", code, StringComparison.Ordinal);
         // WinRT activation must stay lazy: static initializers would run on
         // headless test hosts without WinAppSDK activation.
         Assert.DoesNotContain("static readonly Windows.UI.ViewManagement", code, StringComparison.Ordinal);

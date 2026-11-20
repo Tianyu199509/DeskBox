@@ -22,6 +22,9 @@ public sealed partial class FileSurfaceContent
 
     private async Task OpenFileItemAsync(WidgetItem item)
     {
+        CancelPendingSlowClickRename();
+        HideAllNameExpansions();
+
         // Keep the gate identity stable even if the item is renamed while a
         // Shell request is still in flight.
         string requestPath = item.Path;
@@ -55,10 +58,12 @@ public sealed partial class FileSurfaceContent
             // block the same UI queue before the toast is painted.
             await Task.Yield();
 
-            FileService.OpenItemResult result = await ViewModel.OpenItemAsync(
+            FileService.OpenItemResult result = await RunWithDialogOwnerAsync(
                 item,
-                _hostWindowHandle,
-                _lifetimeCancellation.Token);
+                async ownerHwnd => await ViewModel.OpenItemAsync(
+                    item,
+                    ownerHwnd,
+                    _lifetimeCancellation.Token));
             dispatched = result == FileService.OpenItemResult.OpenedOrHandled;
 
             if (_isDisposed || generation != _openStateGeneration)
@@ -101,27 +106,12 @@ public sealed partial class FileSurfaceContent
                 // here, because every Shell dispatch path reports a dismissed
                 // picker as a silent success. The launcher reports a real
                 // launch (true) versus a user dismissal (false).
-                bool launched = false;
-                bool pickerFailed = false;
-                try
-                {
-                    Windows.Storage.StorageFile file = await Windows.Storage
-                        .StorageFile
-                        .GetFileFromPathAsync(item.Path);
-                    launched = await Windows.System.Launcher.LaunchFileAsync(
-                        file,
-                        new Windows.System.LauncherOptions
-                        {
-                            DisplayApplicationPicker = true
-                        });
-                }
-                catch (Exception ex)
-                {
-                    pickerFailed = true;
-                    App.Log(
-                        "[FileSurface] Open With picker failed " +
-                        $"widget={WidgetId} kind={kind}: {ex}");
-                }
+                (bool launched, bool pickerFailed) = await RunWithDialogOwnerAsync(
+                    item,
+                    ownerHwnd => ShellLaunchService.ShowOpenWithPickerAsync(
+                        ownerHwnd,
+                        item.Path,
+                        _lifetimeCancellation.Token));
 
                 if (_isDisposed || generation != _openStateGeneration)
                 {

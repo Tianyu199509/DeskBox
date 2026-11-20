@@ -22,10 +22,11 @@ public sealed record ClipboardDoubleCopyEventArgs(
 /// Singleton system clipboard history manager and persistence coordinator
 /// backing <see cref="WidgetKind.Clipboard"/>.
 /// </summary>
-public sealed class ClipboardHistoryService : IDisposable
+public sealed partial class ClipboardHistoryService : IDisposable
 {
     private const uint ThumbnailMaxPixelSize = 320;
     private const int MaxObservedApps = 24;
+    private const int MaxLivePasteQueueItems = 200;
     private const long MaxBackgroundAutoOcrImageBytes = 8L * 1024L * 1024L;
     private static readonly TimeSpan CaptureDebounceDelay = TimeSpan.FromMilliseconds(100);
     private static readonly TimeSpan SaveDebounceDelay = TimeSpan.FromMilliseconds(350);
@@ -34,6 +35,8 @@ public sealed class ClipboardHistoryService : IDisposable
     private readonly SettingsService _settingsService;
     private readonly Action<string>? _log;
     private readonly SemaphoreSlim _storeLock = new(1, 1);
+    private readonly SemaphoreSlim _backgroundOcrGate = new(1, 1);
+    private readonly SemaphoreSlim _backgroundUrlTitleGate = new(2, 2);
     private readonly object _foregroundTrackingGate = new();
     private readonly HashSet<object> _activeForegroundTrackingViews = [];
     private readonly object _pasteQueueGate = new();
@@ -43,6 +46,7 @@ public sealed class ClipboardHistoryService : IDisposable
 
     private ClipboardPlatformInterop.ListenerSession? _listenerSession;
     private CancellationTokenSource? _captureDebounceCts;
+    private CancellationTokenSource? _monitoringCts;
     private CancellationTokenSource? _saveDebounceCts;
     private ClipboardStoreDocument? _cachedDocument;
     private volatile IReadOnlyList<ClipboardHistoryItem> _itemsSnapshot = Array.Empty<ClipboardHistoryItem>();
@@ -52,6 +56,7 @@ public sealed class ClipboardHistoryService : IDisposable
     private static readonly Lazy<HttpClient> s_safeTitleHttpClient = new(CreateSafeUrlTitleHttpClient);
     private int _capturePendingCount;
     private int _captureInFlight;
+    private int _capturePendingAfterInFlight;
     private long _lastExternalCaptureSuccessTickMs;
     private long _lastExternalCaptureSkipTickMs;
     private bool _isMonitoring;
@@ -77,11 +82,8 @@ public sealed class ClipboardHistoryService : IDisposable
     }
 
     public event EventHandler? HistoryChanged;
-
     public event EventHandler? PauseStateChanged;
-
     public event EventHandler? PasteQueueChanged;
-
     public event EventHandler<ClipboardDoubleCopyEventArgs>? DoubleCopyActionExecuted;
 
     public event EventHandler? ItemsChanged
@@ -97,71 +99,23 @@ public sealed class ClipboardHistoryService : IDisposable
     }
 
     public IReadOnlyList<ClipboardHistoryItem> Items => _itemsSnapshot;
-
     public string? CurrentClipboardContentHash => _currentClipboardContentHash;
-
     public IReadOnlyList<ClipboardObservedApp> ObservedApps => _observedAppsSnapshot;
-
     public bool IsMonitoring => _isMonitoring;
-
     public bool IsPaused => _isPaused;
 
-    public bool IsPasteQueueActive
-    {
-        get
-        {
-            lock (_pasteQueueGate)
-            {
-                return _isPasteQueueActive;
-            }
-        }
-    }
+    public bool IsPasteQueueActive { get { lock (_pasteQueueGate) { return _isPasteQueueActive; } } }
+    public bool IsPasteQueueLiveCapture { get { lock (_pasteQueueGate) { return _isPasteQueueActive && _isPasteQueueLiveCapture; } } }
+    public int PasteQueueCount { get { lock (_pasteQueueGate) { return _pasteQueueIds.Count; } } }
 
-    public bool IsPasteQueueLiveCapture
-    {
-        get
-        {
-            lock (_pasteQueueGate)
-            {
-                return _isPasteQueueActive && _isPasteQueueLiveCapture;
-            }
-        }
-    }
-
-    public int PasteQueueCount
-    {
-        get
-        {
-            lock (_pasteQueueGate)
-            {
-                return _pasteQueueIds.Count;
-            }
-        }
-    }
-
-    internal IntPtr LastExternalForegroundWindow =>
-        _listenerSession?.LastExternalForegroundWindow ?? IntPtr.Zero;
-
+    internal IntPtr LastExternalForegroundWindow => _listenerSession?.LastExternalForegroundWindow ?? IntPtr.Zero;
     public string ImageDirectory => _store.ImageDirectory;
-
     public string ThumbnailDirectory => _store.ThumbnailDirectory;
-
     public string PayloadDirectory => _store.PayloadDirectory;
-
     public string ExportDirectory => _store.ExportDirectory;
-
     internal bool IsStoreLoadedInMemory => _cachedDocument is not null;
 
-    private bool IsForegroundTrackingWanted
-    {
-        get
-        {
-            lock (_foregroundTrackingGate)
-            {
-                return !_isDisposed && _activeForegroundTrackingViews.Count > 0;
-            }
-        }
-    }
+    private bool IsForegroundTrackingWanted { get { lock (_foregroundTrackingGate) { return !_isDisposed && _activeForegroundTrackingViews.Count > 0; } } }
 
     public void SetViewForegroundTracking(object viewToken, bool isActive)
     {
@@ -203,6 +157,9 @@ public sealed class ClipboardHistoryService : IDisposable
         }
 
         _isMonitoring = true;
+        _monitoringCts?.Cancel();
+        _monitoringCts?.Dispose();
+        _monitoringCts = new CancellationTokenSource();
         ReconcileChordObserver();
         UiDispatch.RunOrDefer(() =>
         {
@@ -237,8 +194,16 @@ public sealed class ClipboardHistoryService : IDisposable
         }
 
         _isMonitoring = false;
+        Interlocked.Exchange(ref _capturePendingAfterInFlight, 0);
         ReconcileChordObserver();
         CancelCaptureDebounce();
+        CancellationTokenSource? monitoringCts = Interlocked.Exchange(ref _monitoringCts, null);
+        if (monitoringCts is not null)
+        {
+            try { monitoringCts.Cancel(); }
+            catch (ObjectDisposedException) { }
+            monitoringCts.Dispose();
+        }
         UiDispatch.RunOrDefer(() =>
         {
             _listenerSession?.Dispose();
@@ -301,9 +266,6 @@ public sealed class ClipboardHistoryService : IDisposable
         return File.Exists(candidate) ? candidate : null;
     }
 
-    public Task<string?> PrepareDragExportImageAsync(ClipboardHistoryItem item) =>
-        PrepareExportImagePathAsync(item);
-
     public string? ResolveImagePath(ClipboardHistoryItem item)
     {
         if (string.IsNullOrWhiteSpace(item.ImageFileName))
@@ -343,7 +305,7 @@ public sealed class ClipboardHistoryService : IDisposable
             : DateTime.Now;
         string exportPath = Path.Combine(
             _store.ExportDirectory,
-            $"DeskBox_Clip_{timestamp:yyyyMMdd_HHmmss}_{item.Id[..Math.Min(6, item.Id.Length)]}.png");
+            FormattableString.Invariant($"DeskBox_Clip_{timestamp:yyyyMMdd_HHmmss}_{item.Id[..Math.Min(6, item.Id.Length)]}.png"));
 
         if (!File.Exists(exportPath))
         {
@@ -433,7 +395,8 @@ public sealed class ClipboardHistoryService : IDisposable
             {
                 if (_isPasteQueueActive && _isPasteQueueLiveCapture)
                 {
-                    if (fromExternalCapture || !_pasteQueueIds.Contains(result.Id, StringComparer.Ordinal))
+                    if (_pasteQueueIds.Count < MaxLivePasteQueueItems &&
+                        (fromExternalCapture || !_pasteQueueIds.Contains(result.Id, StringComparer.Ordinal)))
                     {
                         _pasteQueueIds.Add(result.Id);
                         queueChanged = true;
@@ -566,8 +529,7 @@ public sealed class ClipboardHistoryService : IDisposable
                 out string? codeLanguage);
 
             bool isSecret = ClipboardClassifier.IsHighConfidenceSecret(trimmed);
-            string normalizedKey = trimmed.Replace("\r\n", "\n", StringComparison.Ordinal);
-            string contentHash = $"txt:{Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(normalizedKey)))}";
+            string contentHash = ComputeNormalizedTextContentHash(trimmed);
 
             item.SubKind = subKind;
             item.ColorHex = colorHex;
@@ -1206,6 +1168,7 @@ public sealed class ClipboardHistoryService : IDisposable
                 (int imgCount, long imgBytes) = ClipboardStorageFileOps.MeasureDirectoryFiles(_store.ImageDirectory);
                 (_, long thumbBytes) = ClipboardStorageFileOps.MeasureDirectoryFiles(_store.ThumbnailDirectory);
                 (_, long payloadBytes) = ClipboardStorageFileOps.MeasureDirectoryFiles(_store.PayloadDirectory);
+                (_, long droppedBytes) = ClipboardStorageFileOps.MeasureDirectoryFilesRecursive(_store.DroppedDirectory);
                 var observed = _cachedDocument.ObservedApps
                     .OrderByDescending(a => a.LastSeenUtcTicks)
                     .Take(MaxObservedApps)
@@ -1214,7 +1177,7 @@ public sealed class ClipboardHistoryService : IDisposable
                     activeCount,
                     pinnedCount,
                     imgCount,
-                    imgBytes + thumbBytes + payloadBytes,
+                    imgBytes + thumbBytes + payloadBytes + droppedBytes,
                     observed);
             }
         }
@@ -1287,16 +1250,81 @@ public sealed class ClipboardHistoryService : IDisposable
                             return false;
                         }
 
-                        StorageFile file = await StorageFile.GetFileFromPathAsync(imgPath);
                         var pkg = new DataPackage();
-                        pkg.SetBitmap(RandomAccessStreamReference.CreateFromFile(file));
+                        try
+                        {
+                            string resolvedImgPath = Win32Helper.ResolveUnvirtualizedPhysicalPath(imgPath);
+                            StorageFile file = await StorageFile.GetFileFromPathAsync(resolvedImgPath);
+                            pkg.SetBitmap(RandomAccessStreamReference.CreateFromFile(file));
+                        }
+                        catch
+                        {
+                            byte[] bytes = await File.ReadAllBytesAsync(imgPath).ConfigureAwait(false);
+                            var memStream = new InMemoryRandomAccessStream();
+                            using (var writer = new DataWriter(memStream.GetOutputStreamAt(0)))
+                            {
+                                writer.WriteBytes(bytes);
+                                await writer.StoreAsync();
+                                await writer.FlushAsync();
+                                writer.DetachStream();
+                            }
+
+                            memStream.Seek(0);
+                            pkg.SetBitmap(RandomAccessStreamReference.CreateFromStream(memStream));
+                        }
 
                         string? exportPath = await PrepareExportImagePathAsync(item);
                         if (!string.IsNullOrWhiteSpace(exportPath) && File.Exists(exportPath))
                         {
-                            StorageFile exportFile = await StorageFile.GetFileFromPathAsync(exportPath);
-                            pkg.SetStorageItems([exportFile]);
-                            DeskBoxClipboardWriteScope.MarkWrite(hasImage: true, paths: [exportPath]);
+                            string effectiveExportPath = exportPath;
+                            if (AppDistributionService.Current.IsPackaged ||
+                                AppDistributionService.Current.IsMicrosoftStore)
+                            {
+                                try
+                                {
+                                    effectiveExportPath = StoreUserAssetMigrationFileOps.StageTemporaryDragExportCopy(
+                                        exportPath,
+                                        "ClipboardCopy");
+                                }
+                                catch
+                                {
+                                    effectiveExportPath = Win32Helper.ResolveUnvirtualizedPhysicalPath(exportPath);
+                                }
+                            }
+                            else
+                            {
+                                effectiveExportPath = Win32Helper.ResolveUnvirtualizedPhysicalPath(exportPath);
+                            }
+
+                            StorageFile? exportFile = null;
+                            try
+                            {
+                                exportFile = await StorageFile.GetFileFromPathAsync(effectiveExportPath);
+                            }
+                            catch
+                            {
+                                try
+                                {
+                                    effectiveExportPath = StoreUserAssetMigrationFileOps.StageTemporaryDragExportCopy(
+                                        exportPath,
+                                        "ClipboardCopy");
+                                    exportFile = await StorageFile.GetFileFromPathAsync(effectiveExportPath);
+                                }
+                                catch
+                                {
+                                    exportFile = null;
+                                }
+                            }
+
+                            if (exportFile is not null)
+                            {
+                                pkg.SetStorageItems([exportFile]);
+                                DeskBoxClipboardWriteScope.MarkWrite(hasImage: true, paths: [effectiveExportPath]);
+                            }
+                            else
+                            {
+                                DeskBoxClipboardWriteScope.MarkWrite(hasImage: true);
+                            }
                         }
                         else
                         {
@@ -1413,7 +1441,7 @@ public sealed class ClipboardHistoryService : IDisposable
             return 0;
         }
 
-        string durableRoot = Path.Combine(ExportDirectory, "Dropped");
+        string durableRoot = _store.DroppedDirectory;
         IReadOnlyList<string> durablePaths = await Task.Run(() =>
             DropStagingFileOps.PersistTemporaryDroppedFiles(files, durableRoot)).ConfigureAwait(false);
         return await ImportDroppedFilesAsync((IEnumerable<string>)durablePaths).ConfigureAwait(false);
@@ -1425,7 +1453,7 @@ public sealed class ClipboardHistoryService : IDisposable
             .Where(p => !string.IsNullOrWhiteSpace(p) && (File.Exists(p) || Directory.Exists(p)))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
-        if (valid.Length == 0)
+        if (valid.Length == 0 || IsInternalClipboardCacheDrop(valid))
         {
             return 0;
         }
@@ -1518,42 +1546,65 @@ public sealed class ClipboardHistoryService : IDisposable
         }
 
         CancelCaptureDebounce();
-        var cts = new CancellationTokenSource();
-        _captureDebounceCts = cts;
+        var debounceCts = new CancellationTokenSource();
+        _captureDebounceCts = debounceCts;
         Interlocked.Increment(ref _capturePendingCount);
-        _ = DebouncedCaptureAsync(cts.Token);
+        _ = DebouncedCaptureAsync(debounceCts.Token);
     }
 
-    private async Task DebouncedCaptureAsync(CancellationToken token)
+    private async Task DebouncedCaptureAsync(CancellationToken debounceToken)
     {
         try
         {
             try
             {
-                await Task.Delay(CaptureDebounceDelay, token).ConfigureAwait(false);
+                await Task.Delay(CaptureDebounceDelay, debounceToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
                 return;
             }
 
-            if (token.IsCancellationRequested || _isDisposed || !_isMonitoring || _isPaused)
+            if (debounceToken.IsCancellationRequested || _isDisposed || !_isMonitoring || _isPaused)
             {
                 return;
             }
 
             if (Interlocked.CompareExchange(ref _captureInFlight, 1, 0) != 0)
             {
+                Interlocked.Exchange(ref _capturePendingAfterInFlight, 1);
                 return;
             }
 
             try
             {
-                await UiDispatch.RunAsync(() => CaptureCurrentClipboardOnUiThreadAsync(token)).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                _log?.Invoke($"[Clipboard] Capture failed: {ex.Message}");
+                while (!_isDisposed && _isMonitoring && !_isPaused)
+                {
+                    Interlocked.Exchange(ref _capturePendingAfterInFlight, 0);
+                    CancellationToken executionToken = _monitoringCts?.Token ?? CancellationToken.None;
+                    if (executionToken.IsCancellationRequested)
+                    {
+                        break;
+                    }
+
+                    try
+                    {
+                        await UiDispatch.RunAsync(() => CaptureCurrentClipboardOnUiThreadAsync(executionToken)).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) when (executionToken.IsCancellationRequested || _isDisposed)
+                    {
+                        break;
+                    }
+                    catch (Exception ex)
+                    {
+                        _log?.Invoke($"[Clipboard] Capture failed: {ex.Message}");
+                    }
+
+                    if (Interlocked.Exchange(ref _capturePendingAfterInFlight, 0) == 0)
+                    {
+                        break;
+                    }
+                }
             }
             finally
             {
@@ -1856,7 +1907,11 @@ public sealed class ClipboardHistoryService : IDisposable
             if (!IsPathInsideDirectory(full, _store.ExportDirectory) &&
                 !IsPathInsideDirectory(full, _store.ImageDirectory) &&
                 !IsPathInsideDirectory(full, _store.ThumbnailDirectory) &&
-                !IsPathInsideDirectory(full, _store.PayloadDirectory))
+                !IsPathInsideDirectory(full, _store.PayloadDirectory) &&
+                !IsPathInsideDirectory(full, _store.DroppedDirectory) &&
+                !IsPathInsideDirectory(full, Path.Combine(DropStagingFileOps.GetStagingRootDirectory(), "ClipboardExports")) &&
+                !IsPathInsideDirectory(full, Path.Combine(DropStagingFileOps.GetStagingRootDirectory(), "ClipboardDragExports")) &&
+                !IsPathInsideDirectory(full, Path.Combine(DropStagingFileOps.GetStagingRootDirectory(), "ClipboardCopy")))
             {
                 return false;
             }
@@ -2059,7 +2114,7 @@ public sealed class ClipboardHistoryService : IDisposable
                 if (skipGroupDepth < 0 && i < span.Length && span[i] == '\\')
                 {
                     ReadOnlySpan<char> rest = span[(i + 1)..];
-                    if (rest.StartsWith("*") ||
+                    if (rest.StartsWith("*", StringComparison.Ordinal) ||
                         rest.StartsWith("fonttbl", StringComparison.OrdinalIgnoreCase) ||
                         rest.StartsWith("colortbl", StringComparison.OrdinalIgnoreCase) ||
                         rest.StartsWith("stylesheet", StringComparison.OrdinalIgnoreCase) ||
@@ -2155,7 +2210,7 @@ public sealed class ClipboardHistoryService : IDisposable
                 }
                 else if (word.Equals("u", StringComparison.OrdinalIgnoreCase) &&
                          numStart < span.Length &&
-                         int.TryParse(span[numStart..(i > 0 && span[i - 1] == ' ' ? i - 1 : i)], out int codeUnit))
+                         int.TryParse(span[numStart..(i > 0 && span[i - 1] == ' ' ? i - 1 : i)], System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int codeUnit))
                 {
                     ushort u16 = unchecked((ushort)(short)codeUnit);
                     if (u16 != 0)
@@ -2289,8 +2344,7 @@ public sealed class ClipboardHistoryService : IDisposable
             _ = ClipboardClassifier.TryExtractHtmlAnchorTitle(htmlContent, trimmed, out urlTitle);
         }
 
-        string normalizedKey = trimmed.Replace("\r\n", "\n", StringComparison.Ordinal);
-        string contentHash = $"txt:{Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(normalizedKey)))}";
+        string contentHash = ComputeNormalizedTextContentHash(trimmed);
 
         return new ClipboardHistoryItem
         {
@@ -2309,6 +2363,70 @@ public sealed class ClipboardHistoryService : IDisposable
             SourceAppName = sourceApp?.DisplayName,
             SourceAppPath = sourceApp?.ExecutablePath
         };
+    }
+
+    internal static string ComputeNormalizedTextContentHash(ReadOnlySpan<char> text)
+    {
+        const int ChunkChars = 4096;
+        Span<byte> digest = stackalloc byte[SHA256.HashSizeInBytes];
+        if (text.Length <= 512 && text.IndexOf('\r') < 0)
+        {
+            Span<byte> utf8Small = stackalloc byte[text.Length * 3];
+            SHA256.HashData(utf8Small[..Encoding.UTF8.GetBytes(text, utf8Small)], digest);
+        }
+        else
+        {
+            byte[] rentedUtf8 = System.Buffers.ArrayPool<byte>.Shared.Rent(ChunkChars * 3);
+            try
+            {
+                using var hasher = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+                Span<char> normChars = stackalloc char[ChunkChars];
+                ReadOnlySpan<char> rem = text;
+                while (!rem.IsEmpty)
+                {
+                    if (rem.IndexOf('\r') < 0)
+                    {
+                        int take = Math.Min(rem.Length, ChunkChars);
+                        if (take < rem.Length && char.IsHighSurrogate(rem[take - 1]) && char.IsLowSurrogate(rem[take])) take--;
+                        hasher.AppendData(rentedUtf8.AsSpan(0, Encoding.UTF8.GetBytes(rem[..take], rentedUtf8)));
+                        rem = rem[take..];
+                        continue;
+                    }
+
+                    int normLen = 0;
+                    while (!rem.IsEmpty && normLen < ChunkChars - 1)
+                    {
+                        int cr = rem.IndexOf('\r');
+                        if (cr != 0)
+                        {
+                            int take = Math.Min(cr < 0 ? rem.Length : cr, ChunkChars - normLen);
+                            if (take < rem.Length && take > 0 && char.IsHighSurrogate(rem[take - 1]) && char.IsLowSurrogate(rem[take])) take--;
+                            rem[..take].CopyTo(normChars[normLen..]);
+                            normLen += take;
+                            rem = rem[take..];
+                            if (cr < 0 || take < cr || normLen >= ChunkChars - 1) break;
+                        }
+
+                        bool isCrLf = rem.Length >= 2 && rem[1] == '\n';
+                        normChars[normLen++] = isCrLf ? '\n' : '\r';
+                        rem = rem[(isCrLf ? 2 : 1)..];
+                    }
+
+                    hasher.AppendData(rentedUtf8.AsSpan(0, Encoding.UTF8.GetBytes(normChars[..normLen], rentedUtf8)));
+                }
+
+                hasher.GetHashAndReset(digest);
+            }
+            finally
+            {
+                System.Buffers.ArrayPool<byte>.Shared.Return(rentedUtf8);
+            }
+        }
+
+        Span<char> outChars = stackalloc char[4 + (SHA256.HashSizeInBytes * 2)];
+        "txt:".CopyTo(outChars);
+        Convert.TryToHexStringLower(digest, outChars[4..], out _);
+        return new string(outChars);
     }
 
     private async Task TryResolveUrlTitleInBackgroundAsync(string itemId, string rawUrl)
@@ -2331,75 +2449,95 @@ public sealed class ClipboardHistoryService : IDisposable
 
         try
         {
-            using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(2600));
-            using var req = new HttpRequestMessage(HttpMethod.Get, uri);
-            req.Headers.TryAddWithoutValidation("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) DeskBox/1.0");
-            req.Headers.TryAddWithoutValidation("Accept", "text/html,application/xhtml+xml;q=0.9,*/*;q=0.1");
-
-            using HttpResponseMessage resp = await s_safeTitleHttpClient.Value
-                .SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cts.Token)
-                .ConfigureAwait(false);
-            if (!resp.IsSuccessStatusCode)
-            {
-                return;
-            }
-
-            string? mediaType = resp.Content.Headers.ContentType?.MediaType;
-            if (!string.IsNullOrEmpty(mediaType) &&
-                !mediaType.Contains("html", StringComparison.OrdinalIgnoreCase) &&
-                !mediaType.Contains("xml", StringComparison.OrdinalIgnoreCase))
-            {
-                return;
-            }
-
-            await using Stream stream = await resp.Content.ReadAsStreamAsync(cts.Token).ConfigureAwait(false);
-            byte[] buf = new byte[32768];
-            int total = 0;
-            while (total < buf.Length)
-            {
-                int r = await stream.ReadAsync(buf.AsMemory(total, buf.Length - total), cts.Token).ConfigureAwait(false);
-                if (r <= 0)
-                {
-                    break;
-                }
-
-                total += r;
-            }
-
-            if (total <= 0)
-            {
-                return;
-            }
-
-            string snippet = Encoding.UTF8.GetString(buf, 0, total);
-            if (!ClipboardClassifier.TryExtractHtmlDocumentTitle(snippet, out string? pageTitle) ||
-                string.IsNullOrWhiteSpace(pageTitle))
-            {
-                return;
-            }
-
-            await _storeLock.WaitAsync(cts.Token).ConfigureAwait(false);
+            await _backgroundUrlTitleGate.WaitAsync().ConfigureAwait(false);
             try
             {
-                if (_isDisposed || _cachedDocument is null)
+                if (_isDisposed)
                 {
                     return;
                 }
 
-                ClipboardHistoryItem? target = _cachedDocument.Items.FirstOrDefault(
-                    x => string.Equals(x.Id, itemId, StringComparison.Ordinal));
-                if (target is null || !string.IsNullOrWhiteSpace(target.UrlTitle))
+                using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(2600));
+                using HttpResponseMessage? resp = await SendUrlTitleGetWithValidatedRedirectsAsync(
+                    uri,
+                    maxRedirects: 3,
+                    cts.Token).ConfigureAwait(false);
+                if (resp is null || !resp.IsSuccessStatusCode)
                 {
                     return;
                 }
 
-                target.UrlTitle = pageTitle;
-                ScheduleSave();
-                RaiseHistoryChanged();
+                string? mediaType = resp.Content.Headers.ContentType?.MediaType;
+                if (!string.IsNullOrEmpty(mediaType) &&
+                    !mediaType.Contains("html", StringComparison.OrdinalIgnoreCase) &&
+                    !mediaType.Contains("xml", StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+
+                await using Stream stream = await resp.Content.ReadAsStreamAsync(cts.Token).ConfigureAwait(false);
+                byte[] buf = System.Buffers.ArrayPool<byte>.Shared.Rent(32768);
+                string snippet;
+                try
+                {
+                    int total = 0;
+                    const int maxSnippetBytes = 32768;
+                    while (total < maxSnippetBytes)
+                    {
+                        int r = await stream.ReadAsync(buf.AsMemory(total, maxSnippetBytes - total), cts.Token).ConfigureAwait(false);
+                        if (r <= 0)
+                        {
+                            break;
+                        }
+
+                        total += r;
+                    }
+
+                    if (total <= 0)
+                    {
+                        return;
+                    }
+
+                    snippet = Encoding.UTF8.GetString(buf, 0, total);
+                }
+                finally
+                {
+                    System.Buffers.ArrayPool<byte>.Shared.Return(buf);
+                }
+
+                if (!ClipboardClassifier.TryExtractHtmlDocumentTitle(snippet, out string? pageTitle) ||
+                    string.IsNullOrWhiteSpace(pageTitle))
+                {
+                    return;
+                }
+
+                await _storeLock.WaitAsync(cts.Token).ConfigureAwait(false);
+                try
+                {
+                    if (_isDisposed || _cachedDocument is null)
+                    {
+                        return;
+                    }
+
+                    ClipboardHistoryItem? target = _cachedDocument.Items.FirstOrDefault(
+                        x => string.Equals(x.Id, itemId, StringComparison.Ordinal));
+                    if (target is null || !string.IsNullOrWhiteSpace(target.UrlTitle))
+                    {
+                        return;
+                    }
+
+                    target.UrlTitle = pageTitle;
+                    ScheduleSave();
+                    RaiseHistoryChanged();
+                }
+                finally
+                {
+                    _storeLock.Release();
+                }
             }
             finally
             {
-                _storeLock.Release();
+                _backgroundUrlTitleGate.Release();
             }
         }
         catch
@@ -2408,42 +2546,63 @@ public sealed class ClipboardHistoryService : IDisposable
         }
     }
 
+    private static async Task<HttpResponseMessage?> SendUrlTitleGetWithValidatedRedirectsAsync(
+        Uri initialUri,
+        int maxRedirects,
+        CancellationToken cancellationToken)
+    {
+        Uri currentUri = initialUri;
+        for (int hop = 0; ; hop++)
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Get, currentUri);
+            req.Headers.TryAddWithoutValidation("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) DeskBox/1.0");
+            req.Headers.TryAddWithoutValidation("Accept", "text/html,application/xhtml+xml;q=0.9,*/*;q=0.1");
+
+            HttpResponseMessage resp = await s_safeTitleHttpClient.Value
+                .SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+                .ConfigureAwait(false);
+
+            int status = (int)resp.StatusCode;
+            if (status is 301 or 302 or 303 or 307 or 308 &&
+                resp.Headers.Location is { } location)
+            {
+                if (hop >= maxRedirects)
+                {
+                    resp.Dispose();
+                    return null;
+                }
+
+                Uri nextCandidate = location.IsAbsoluteUri
+                    ? location
+                    : new Uri(currentUri, location);
+                resp.Dispose();
+
+                if ((!string.Equals(nextCandidate.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) &&
+                     !string.Equals(nextCandidate.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)) ||
+                    !string.IsNullOrEmpty(nextCandidate.UserInfo) ||
+                    IsDisallowedHostName(nextCandidate.IdnHost))
+                {
+                    return null;
+                }
+
+                currentUri = nextCandidate;
+                continue;
+            }
+
+            return resp;
+        }
+    }
+
     private static HttpClient CreateSafeUrlTitleHttpClient()
     {
         var handler = new SocketsHttpHandler
         {
-            AllowAutoRedirect = true,
-            MaxAutomaticRedirections = 3,
+            AllowAutoRedirect = false,
             AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli,
             UseCookies = false,
             PooledConnectionLifetime = TimeSpan.FromMinutes(2),
             ConnectTimeout = TimeSpan.FromMilliseconds(1800),
-            ConnectCallback = static async (context, cancellationToken) =>
-            {
-                string host = context.DnsEndPoint.Host;
-                if (IsDisallowedHostName(host))
-                {
-                    throw new InvalidOperationException("Loopback and private hosts are blocked.");
-                }
-
-                IPAddress[] addresses = await Dns.GetHostAddressesAsync(host, cancellationToken).ConfigureAwait(false);
-                if (addresses.Length == 0 || addresses.Any(IsPrivateOrLoopbackAddress))
-                {
-                    throw new InvalidOperationException("Private IP address blocked.");
-                }
-
-                var socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
-                try
-                {
-                    await socket.ConnectAsync(addresses, context.DnsEndPoint.Port, cancellationToken).ConfigureAwait(false);
-                    return new NetworkStream(socket, ownsSocket: true);
-                }
-                catch
-                {
-                    socket.Dispose();
-                    throw;
-                }
-            }
+            ConnectCallback = CustomWidgetNetworkSecurity.ConnectToValidatedPublicIpAsync
         };
 
         return new HttpClient(handler, disposeHandler: true)
@@ -2459,48 +2618,18 @@ public sealed class ClipboardHistoryService : IDisposable
             return true;
         }
 
-        if (string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase) ||
-            host.EndsWith(".local", StringComparison.OrdinalIgnoreCase) ||
-            host.EndsWith(".internal", StringComparison.OrdinalIgnoreCase))
+        string trimmed = host.Trim().TrimEnd('.');
+        if (string.Equals(trimmed, "localhost", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.EndsWith(".localhost", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.EndsWith(".local", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.EndsWith(".internal", StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }
 
-        return IPAddress.TryParse(host, out IPAddress? ip) && IsPrivateOrLoopbackAddress(ip);
-    }
-
-    private static bool IsPrivateOrLoopbackAddress(IPAddress ip)
-    {
-        if (IPAddress.IsLoopback(ip))
-        {
-            return true;
-        }
-
-        if (ip.IsIPv4MappedToIPv6)
-        {
-            ip = ip.MapToIPv4();
-        }
-
-        byte[] bytes = ip.GetAddressBytes();
-        if (ip.AddressFamily == AddressFamily.InterNetwork && bytes.Length == 4)
-        {
-            return bytes[0] == 0 ||
-                   bytes[0] == 10 ||
-                   bytes[0] == 127 ||
-                   (bytes[0] == 100 && bytes[1] >= 64 && bytes[1] <= 127) ||
-                   (bytes[0] == 169 && bytes[1] == 254) ||
-                   (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31) ||
-                   (bytes[0] == 192 && bytes[1] == 168);
-        }
-
-        if (ip.AddressFamily == AddressFamily.InterNetworkV6 && bytes.Length == 16)
-        {
-            return ip.IsIPv6LinkLocal ||
-                   ip.IsIPv6SiteLocal ||
-                   (bytes[0] & 0xFE) == 0xFC;
-        }
-
-        return true;
+        return IPAddress.TryParse(trimmed, out IPAddress? ip) &&
+               (CustomWidgetNetworkSecurity.IsBlockedIpAddress(ip) ||
+                CustomWidgetNetworkSecurity.IsBenchmarkTunIpAddress(ip));
     }
 
     private async Task TryCaptureAndPersistImageOnUiThreadAsync(
@@ -2517,7 +2646,7 @@ public sealed class ClipboardHistoryService : IDisposable
         // Path 1: Native PNG buffer already captured without decoding.
         if (rawPngBytes is { Length: > 0 } && rawPngWidth > 0 && rawPngHeight > 0)
         {
-            await PersistCapturedPngAndThumbnailAsync(
+            await Task.Run(() => PersistCapturedPngAndThumbnailAsync(
                 rawPngBytes,
                 rawPngWidth,
                 rawPngHeight,
@@ -2526,12 +2655,11 @@ public sealed class ClipboardHistoryService : IDisposable
                     : null,
                 effectiveSourceApp,
                 observedApp,
-                token).ConfigureAwait(false);
+                token), token).ConfigureAwait(false);
             return;
         }
 
-        // Path 2: WinRT StandardDataFormats.Bitmap (decoded ONCE for both full PNG and 320px thumbnail,
-        // avoiding any 33 MB CF_DIB buffer copy when WinRT Bitmap is available).
+        // Path 2: WinRT StandardDataFormats.Bitmap (decoded ONCE off the UI thread).
         if (dataViewWithBitmap is not null)
         {
             try
@@ -2540,8 +2668,9 @@ public sealed class ClipboardHistoryService : IDisposable
                 using IRandomAccessStreamWithContentType stream = await bmpRef.OpenReadAsync();
                 if (stream.Size > 0 && (long)stream.Size <= maxImageBytes * 4)
                 {
-                    var decoded = await DecodeOnceAndEncodeImageWithThumbnailAsync(stream, maxImageBytes, token)
-                        .ConfigureAwait(true);
+                    var decoded = await Task.Run(
+                        () => DecodeOnceAndEncodeImageWithThumbnailAsync(stream, maxImageBytes, token),
+                        token).ConfigureAwait(false);
                     if (decoded.PngBytes is { Length: > 0 })
                     {
                         await PersistCapturedPngAndThumbnailAsync(
@@ -2558,32 +2687,38 @@ public sealed class ClipboardHistoryService : IDisposable
             }
             catch
             {
-                // Fall through to single-buffer CF_DIB fallback on UI thread.
+                // Fall through to pooled CF_DIB fallback on UI thread.
             }
         }
 
-        // Path 3: Single-buffer CF_DIB -> BMP fallback (WeChat / QQ / DingTalk / Snipaste),
-        // decoded ONCE into SoftwareBitmap for both full PNG and 320px thumbnail.
+        // Path 3: Pooled CF_DIB -> BMP fallback (zero LOH allocation; transcoded off the UI thread).
         if (!hasDibFormat || token.IsCancellationRequested)
         {
             return;
         }
 
-        byte[]? dibBmpBytes = null;
+        byte[]? rentedDibBmp = null;
+        int dibBmpLength = 0;
         bool dibOpened = await RunClipboardAttemptWithAsyncRetryAsync(
-            () => ClipboardPlatformInterop.TryReadClipboardDibAsBmpOnce(maxImageBytes, out dibBmpBytes),
+            () => ClipboardPlatformInterop.TryRentClipboardDibAsBmpOnce(maxImageBytes, out rentedDibBmp, out dibBmpLength),
             token).ConfigureAwait(true);
-        if (!dibOpened || dibBmpBytes is not { Length: > 0 } || token.IsCancellationRequested)
+        if (!dibOpened || rentedDibBmp is null || dibBmpLength <= 0 || token.IsCancellationRequested)
         {
+            if (rentedDibBmp is not null)
+            {
+                System.Buffers.ArrayPool<byte>.Shared.Return(rentedDibBmp);
+            }
+
             return;
         }
 
         try
         {
-            using var ms = new MemoryStream(dibBmpBytes, writable: false);
-            using IRandomAccessStream winrtStream = ms.AsRandomAccessStream();
-            var decoded = await DecodeOnceAndEncodeImageWithThumbnailAsync(winrtStream, maxImageBytes, token)
-                .ConfigureAwait(false);
+            var decoded = await TranscodeRentedBmpBufferOffUiThreadAsync(
+                rentedDibBmp,
+                dibBmpLength,
+                maxImageBytes,
+                token).ConfigureAwait(false);
             if (decoded.PngBytes is { Length: > 0 })
             {
                 await PersistCapturedPngAndThumbnailAsync(
@@ -2598,7 +2733,7 @@ public sealed class ClipboardHistoryService : IDisposable
         }
         catch
         {
-            // Ignore malformed DIB buffers.
+            // Ignore malformed DIB buffers (TranscodeRentedBmpBufferOffUiThreadAsync returns the buffer).
         }
     }
 
@@ -2661,111 +2796,6 @@ public sealed class ClipboardHistoryService : IDisposable
             string.IsNullOrWhiteSpace(ingested.OcrText))
         {
             _ = TryPopulateImageOcrInBackgroundAsync(ingested.Id);
-        }
-    }
-
-    private static async Task<(byte[]? PngBytes, byte[]? ThumbBytes, int Width, int Height)> DecodeOnceAndEncodeImageWithThumbnailAsync(
-        IRandomAccessStream inputStream,
-        long maxImageBytes,
-        CancellationToken token)
-    {
-        BitmapDecoder decoder = await BitmapDecoder.CreateAsync(inputStream);
-        uint pixelWidth = decoder.PixelWidth;
-        uint pixelHeight = decoder.PixelHeight;
-        if (pixelWidth == 0 || pixelHeight == 0)
-        {
-            return (null, null, 0, 0);
-        }
-
-        using SoftwareBitmap softwareBitmap = await decoder.GetSoftwareBitmapAsync(
-            BitmapPixelFormat.Bgra8,
-            BitmapAlphaMode.Premultiplied);
-
-        byte[]? fullPngBytes = await EncodeSoftwareBitmapToPngBytesAsync(
-            softwareBitmap,
-            scaledWidth: 0,
-            scaledHeight: 0,
-            maxImageBytes,
-            token).ConfigureAwait(false);
-        if (fullPngBytes is not { Length: > 0 })
-        {
-            return (null, null, 0, 0);
-        }
-
-        if (pixelWidth <= ThumbnailMaxPixelSize && pixelHeight <= ThumbnailMaxPixelSize)
-        {
-            return (fullPngBytes, fullPngBytes, (int)pixelWidth, (int)pixelHeight);
-        }
-
-        ComputeScaledDimensions(pixelWidth, pixelHeight, ThumbnailMaxPixelSize, out uint thumbW, out uint thumbH);
-        byte[]? thumbPngBytes = await EncodeSoftwareBitmapToPngBytesAsync(
-            softwareBitmap,
-            thumbW,
-            thumbH,
-            maxImageBytes,
-            token).ConfigureAwait(false);
-
-        return (fullPngBytes, thumbPngBytes, (int)pixelWidth, (int)pixelHeight);
-    }
-
-    private static async Task<byte[]?> EncodeSoftwareBitmapToPngBytesAsync(
-        SoftwareBitmap softwareBitmap,
-        uint scaledWidth,
-        uint scaledHeight,
-        long maxBytes,
-        CancellationToken token)
-    {
-        using var outMemory = new InMemoryRandomAccessStream();
-        BitmapEncoder encoder = await BitmapEncoder.CreateAsync(BitmapEncoder.PngEncoderId, outMemory);
-        encoder.SetSoftwareBitmap(softwareBitmap);
-        if (scaledWidth > 0 && scaledHeight > 0)
-        {
-            encoder.BitmapTransform.InterpolationMode = BitmapInterpolationMode.Fant;
-            encoder.BitmapTransform.ScaledWidth = scaledWidth;
-            encoder.BitmapTransform.ScaledHeight = scaledHeight;
-        }
-
-        await encoder.FlushAsync();
-        if (outMemory.Size == 0 || (long)outMemory.Size > maxBytes)
-        {
-            return null;
-        }
-
-        var bytes = new byte[(int)outMemory.Size];
-        outMemory.Seek(0);
-        using Stream netStream = outMemory.AsStreamForRead();
-        int offset = 0;
-        while (offset < bytes.Length)
-        {
-            int read = await netStream.ReadAsync(bytes.AsMemory(offset, bytes.Length - offset), token)
-                .ConfigureAwait(false);
-            if (read <= 0)
-            {
-                break;
-            }
-
-            offset += read;
-        }
-
-        return bytes;
-    }
-
-    private static void ComputeScaledDimensions(
-        uint pixelWidth,
-        uint pixelHeight,
-        uint maxSide,
-        out uint scaledWidth,
-        out uint scaledHeight)
-    {
-        if (pixelWidth >= pixelHeight)
-        {
-            scaledWidth = Math.Min(pixelWidth, maxSide);
-            scaledHeight = Math.Max(1, (uint)Math.Round(pixelHeight * (scaledWidth / (double)pixelWidth)));
-        }
-        else
-        {
-            scaledHeight = Math.Min(pixelHeight, maxSide);
-            scaledWidth = Math.Max(1, (uint)Math.Round(pixelWidth * (scaledHeight / (double)pixelHeight)));
         }
     }
 
@@ -2969,6 +2999,7 @@ public sealed class ClipboardHistoryService : IDisposable
         ClipboardStorageFileOps.DeleteOrphanedFiles(_store.ImageDirectory, referencedImages);
         ClipboardStorageFileOps.DeleteOrphanedFiles(_store.ThumbnailDirectory, referencedThumbs);
         ClipboardStorageFileOps.DeleteOrphanedFiles(_store.PayloadDirectory, referencedPayloads);
+        ClipboardStore.CleanupOrphanedDroppedStorage(_store, doc.Items);
     }
 
     private async Task<ClipboardStoreDocument> EnsureLoadedLockedAsync()
@@ -3296,8 +3327,21 @@ public sealed class ClipboardHistoryService : IDisposable
     {
         try
         {
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(6));
-            _ = await ExtractAndCacheOcrTextAsync(itemId, cts.Token).ConfigureAwait(false);
+            await _backgroundOcrGate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                if (_isDisposed)
+                {
+                    return;
+                }
+
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(6));
+                _ = await ExtractAndCacheOcrTextAsync(itemId, cts.Token).ConfigureAwait(false);
+            }
+            finally
+            {
+                _backgroundOcrGate.Release();
+            }
         }
         catch
         {

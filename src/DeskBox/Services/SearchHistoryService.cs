@@ -349,7 +349,7 @@ public sealed partial class SearchHistoryService
         _writeGate.Wait();
         try
         {
-            if (version < Volatile.Read(ref _flushedVersion))
+            if (version <= Volatile.Read(ref _flushedVersion))
             {
                 return;
             }
@@ -477,6 +477,8 @@ public sealed partial class SearchHistoryService
         public string? TodoWidgetId { get; set; }
         public string? TodoItemId { get; set; }
         public string? QuickCaptureItemId { get; set; }
+        public string? CustomWidgetId { get; set; }
+        public string? CustomWidgetItemId { get; set; }
         public int UseCount { get; set; } = 1;
         public long LastUsedUtcTicks { get; set; }
 
@@ -490,7 +492,9 @@ public sealed partial class SearchHistoryService
             Glyph = item.Glyph,
             TodoWidgetId = item.TodoWidgetId,
             TodoItemId = item.TodoItemId,
-            QuickCaptureItemId = item.QuickCaptureItemId
+            QuickCaptureItemId = item.QuickCaptureItemId,
+            CustomWidgetId = item.CustomWidgetId,
+            CustomWidgetItemId = item.CustomWidgetItemId
         };
 
         public SearchRecommendationItem ToRecommendation() => new()
@@ -502,7 +506,9 @@ public sealed partial class SearchHistoryService
             Glyph = Glyph,
             TodoWidgetId = TodoWidgetId,
             TodoItemId = TodoItemId,
-            QuickCaptureItemId = QuickCaptureItemId
+            QuickCaptureItemId = QuickCaptureItemId,
+            CustomWidgetId = CustomWidgetId,
+            CustomWidgetItemId = CustomWidgetItemId
         };
     }
 

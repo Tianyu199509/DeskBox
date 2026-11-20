@@ -69,7 +69,8 @@ public abstract partial class WidgetWindowBase
     private const int CompactHoverRecoveryProbeMs = 120;
     internal const int PostCollapseSoftTrimDelayMs = 15_000;
     internal const int PostCollapseHibernationDelayMs = 90_000;
-    private const int MaxPooledOneShotTimers = 12;
+    private const int CompactHoverIntentPrewarmDelayMs = 120;
+    private const int MaxPooledOneShotTimers = 13;
     private const int CompactDragSessionRecoveryProbeMs = 120;
     private const int CompactLayerRestoreFallbackMs = 120;
     private static readonly int[] CompactBoundsSettleDelaysMs = [80, 320, 900];
@@ -89,6 +90,7 @@ public abstract partial class WidgetWindowBase
     private OwnedOneShotDispatcherTimer? _deferredContentHydrationFallbackTimer;
     private OwnedOneShotDispatcherTimer? _collapsedSoftTrimTimer;
     private OwnedOneShotDispatcherTimer? _collapsedContentHibernationTimer;
+    private OwnedOneShotDispatcherTimer? _compactHoverPrewarmTimer;
     private OneShotTimerPool<DispatcherQueueTimer>? _oneShotTimerPool;
     private bool _isNativeCompactMouseTracking;
     private bool _nativeCompactMouseActivityQueued;
@@ -888,8 +890,44 @@ public abstract partial class WidgetWindowBase
 
     internal bool IsTargetCollapsed => _targetCollapsed;
 
-    private bool IsKeepCapsuleContentWarmEnabled =>
-        SettingsService?.Settings.Performance.KeepCapsuleContentWarm == true;
+    private bool IsKeepCapsuleContentWarmEnabled => ResolveKeepCapsuleContentWarm();
+
+    private void ScheduleCompactHoverIntentPrewarmIfNeeded()
+    {
+        if (!_collapseInitialized ||
+            !_targetCollapsed ||
+            IsClosing ||
+            IsCompactExpansionReady ||
+            IsKeepCapsuleContentWarmEnabled ||
+            _compactHoverPrewarmTimer is not null)
+        {
+            return;
+        }
+
+        ScheduleTimer(
+            ref _compactHoverPrewarmTimer,
+            CompactHoverIntentPrewarmDelayMs,
+            OnCompactHoverPrewarmTimerElapsed);
+    }
+
+    private void OnCompactHoverPrewarmTimerElapsed()
+    {
+        _compactHoverPrewarmTimer = null;
+        if (!_collapseInitialized ||
+            !_targetCollapsed ||
+            IsClosing ||
+            !_isPointerOverWidget ||
+            _isCollapseAnimationRendering ||
+            _isShellTransitionActive ||
+            _isBoundsInteractionActive ||
+            IsCompactExpansionReady)
+        {
+            return;
+        }
+
+        if (IsAnyTrayOrSharedAnimationActive) { ScheduleCompactHoverIntentPrewarmIfNeeded(); return; }
+        QueueCompactExpansionWarmup(urgent: true, attachHibernated: true);
+    }
 
     internal void ReconcileCollapsedContentWarmthPreference()
     {
@@ -928,6 +966,7 @@ public abstract partial class WidgetWindowBase
     {
         CancelTimer(ref _collapsedSoftTrimTimer);
         CancelTimer(ref _collapsedContentHibernationTimer);
+        CancelTimer(ref _compactHoverPrewarmTimer);
     }
 
     protected void ArmCollapsedContentHibernationIfSettled()
@@ -1056,6 +1095,10 @@ public abstract partial class WidgetWindowBase
         bool hasPendingReadyCallbacks = _compactExpansionReadyCallbacks.Count > 0;
         if (!urgent && !hasPendingReadyCallbacks && !keepWarm)
         {
+            if (!hasUserIntent)
+            {
+                ArmCollapsedContentHibernationTimer();
+            }
             return;
         }
 
@@ -1078,6 +1121,7 @@ public abstract partial class WidgetWindowBase
         }
 
         if (!keepWarm &&
+            !attachHibernated &&
             urgent &&
             _isPointerOverWidget &&
             _pendingCompactExpansion is null &&
@@ -1280,7 +1324,7 @@ public abstract partial class WidgetWindowBase
             IsCollapsed: _targetCollapsed && WidgetShellControl.IsCollapsed,
             IsExpansionWarmed: IsCompactExpansionReady,
             IsClosing: IsClosing,
-            IsAnimationActive: _isCollapseAnimationRendering || _isShellTransitionActive,
+            IsAnimationActive: _isCollapseAnimationRendering || _isShellTransitionActive || IsAnyTrayOrSharedAnimationActive,
             IsPointerOverWidget: urgent ? false : _isPointerOverWidget,
             HasActiveInteraction:
                 _isBoundsInteractionActive ||
@@ -1858,16 +1902,19 @@ public abstract partial class WidgetWindowBase
             RefreshCompactPresentation();
         }
 
-        // Visibility notifications can be coalesced when AppWindow.Show and
-        // ShowWindow(SW_SHOWNOACTIVATE) are used together. Always rebuild the
-        // pointer state from the real cursor instead of trusting routed state
-        // left over from the previous visible lifetime.
         WidgetShellControl.ResetTransientCompactPointerState();
         ResetCompactPointerStateAfterHide();
-        // The host is now visible and its content is present, so the expansion
-        // layout warm-up can finally run. Promote it to urgent once so the first
-        // user-triggered expand does not have to wait on the background warm-up
-        // (which would otherwise race the first hover and cause first-expand jank).
+        if (IsTrayShowAnimationInFlight)
+        {
+            return;
+        }
+
+        CompleteDeferredCompactHostShow();
+    }
+
+    protected void CompleteDeferredCompactHostShow()
+    {
+        if (IsClosing) return;
         QueueCompactExpansionWarmup(urgent: true);
         StartCompactHoverRecoveryProbe();
         SynchronizeCompactHoverFromCurrentCursor();
@@ -2339,6 +2386,7 @@ public abstract partial class WidgetWindowBase
         CancelTimer(ref _collapseLeaveTimer);
         UpdateCompactViewState();
         QueueCompactExpansionWarmup(urgent: true);
+        ScheduleCompactHoverIntentPrewarmIfNeeded();
         TryScheduleCompactHoverExpansion();
 
         if (recoveredMissingRoutedEntry)
@@ -2404,6 +2452,7 @@ public abstract partial class WidgetWindowBase
         _suppressSmartExpansionUntilPointerExit = false;
         _suppressHoverExpansionAfterDragUntilPointerExit = false;
         CancelTimer(ref _collapseHoverTimer);
+        CancelTimer(ref _compactHoverPrewarmTimer);
         UpdateCompactViewState();
     }
 
@@ -2418,6 +2467,7 @@ public abstract partial class WidgetWindowBase
         _suppressHoverExpansionAfterDragUntilPointerExit = false;
         CancelTimer(ref _collapseHoverTimer);
         CancelTimer(ref _collapseLeaveTimer);
+        CancelTimer(ref _compactHoverPrewarmTimer);
         UpdateCompactViewState();
     }
 
@@ -2723,6 +2773,10 @@ public abstract partial class WidgetWindowBase
         {
             CancelTimer(ref _collapseHoverTimer);
         }
+        else
+        {
+            ScheduleCompactHoverIntentPrewarmIfNeeded();
+        }
         if (!_targetCollapsed && UsesSmartCollapseBehavior())
         {
             _compactState = _isSmartPinnedOpen
@@ -2830,6 +2884,7 @@ public abstract partial class WidgetWindowBase
         // animation clock's cold-start cost here instead of on frame one.
         WidgetCompactAnimationCoordinator.PreArmFrameClock(HWnd);
         QueueCompactExpansionWarmup(urgent: true);
+        ScheduleCompactHoverIntentPrewarmIfNeeded();
         TryScheduleCompactHoverExpansion();
     }
 
@@ -2854,6 +2909,7 @@ public abstract partial class WidgetWindowBase
         _suppressSmartExpansionUntilPointerExit = false;
         _suppressHoverExpansionAfterDragUntilPointerExit = false;
         CancelTimer(ref _collapseHoverTimer);
+        CancelTimer(ref _compactHoverPrewarmTimer);
         if (_targetCollapsed)
         {
             _compactState = WidgetCompactState.Collapsed;
@@ -3134,7 +3190,9 @@ public abstract partial class WidgetWindowBase
     {
         bool clearedShellDrag = WidgetShellControl.TryClearStaleShellDragSessionAfterPointerRelease();
         if (!clearedShellDrag &&
-            (!_isCompactDragInside || Win32Helper.IsAnyMouseButtonDown()))
+            (!_isCompactDragInside ||
+             Win32Helper.IsAnyMouseButtonDown() ||
+             Services.ActiveDeskBoxDragRegistry.HasActivePointerDragSession))
         {
             return;
         }
@@ -3245,7 +3303,8 @@ public abstract partial class WidgetWindowBase
             return;
         }
 
-        if (Win32Helper.IsAnyMouseButtonDown())
+        if (Win32Helper.IsAnyMouseButtonDown() ||
+            Services.ActiveDeskBoxDragRegistry.HasActivePointerDragSession)
         {
             ScheduleCompactDragSessionRecoveryProbe();
             return;
@@ -5498,34 +5557,13 @@ public abstract partial class WidgetWindowBase
                     WS_MINIMIZE) == 0 &&
                 !App.Current.IsDeskBoxWindow(current))
             {
-                return WindowHasShellClass(current, ["Progman", "WorkerW"]);
+                return DesktopBlankHitTest.IsVerifiedDesktopShellWindow(current, allowDefView: true);
             }
 
             current = Win32Helper.GetWindow(current, Win32Helper.GW_HWNDNEXT);
         }
 
         return true;
-    }
-
-    private static bool WindowHasShellClass(IntPtr hWnd, string[] classNames)
-    {
-        var buffer = new System.Text.StringBuilder(256);
-        int length = Win32Helper.GetClassName(hWnd, buffer, buffer.Capacity);
-        if (length <= 0)
-        {
-            return false;
-        }
-
-        string actual = buffer.ToString();
-        foreach (string className in classNames)
-        {
-            if (string.Equals(actual, className, StringComparison.Ordinal))
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     private void ScheduleExpandedLayerRestoreAfterFrameCommit(long generation)

@@ -54,6 +54,7 @@ internal static class DesktopOrganizationAbandonDialog
         var dialog = new ContentDialog
         {
             XamlRoot = xamlRoot,
+            RequestedTheme = NeutralInteractionBrush.ResolveEffectiveElementTheme(xamlRoot.Content),
             Title = localization.T("DesktopOrganization.Public.AbandonConfirmTitle"),
             PrimaryButtonText = localization.T("DesktopOrganization.Public.AbandonRestore"),
             CloseButtonText = localization.T("Common.Cancel"),

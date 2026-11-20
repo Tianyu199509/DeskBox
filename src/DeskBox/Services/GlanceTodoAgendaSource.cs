@@ -15,7 +15,9 @@ public sealed class GlanceTodoAgendaSource
     public GlanceTodoAgendaSource(SettingsService? settingsService)
         : this(
             () => ResolveTodoWidgetIds(settingsService),
-            widgetId => new TodoWidgetStore(widgetId))
+            widgetId => new TodoWidgetStore(
+                CustomWidgetHostSnapshotService.ResolveWidgetsRootForSettings(settingsService),
+                widgetId))
     {
     }
 
@@ -108,21 +110,36 @@ public sealed class GlanceTodoAgendaSource
 
     private static IEnumerable<string> ResolveTodoWidgetIds(SettingsService? settingsService)
     {
-        if (settingsService is null ||
-            !FeatureWidgetSettings.IsEnabled(settingsService.Settings, WidgetKind.Todo))
+        if (settingsService is null)
         {
-            return [];
+            return CustomWidgetHostSnapshotService.HasHeadlessDefaultTodoStore()
+                ? [CustomWidgetHostSnapshotService.FallbackTodoWidgetId]
+                : [];
         }
 
         try
         {
-            return settingsService.Settings.WidgetLayout.Widgets
-                .Where(config => config.WidgetKind == WidgetKind.Todo &&
-                    !config.IsDisabled &&
-                    !string.IsNullOrWhiteSpace(config.Id))
-                .Select(config => config.Id)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToArray();
+            AppSettings settings = settingsService.Settings;
+            if (FeatureWidgetSettings.IsEnabled(settings, WidgetKind.Todo))
+            {
+                string[] enabledIds = settings.WidgetLayout.Widgets
+                    .Where(config => config.WidgetKind == WidgetKind.Todo &&
+                        !config.IsDisabled &&
+                        !settings.WidgetLayout.DeletedWidgetIds.Contains(config.Id) &&
+                        !string.IsNullOrWhiteSpace(config.Id))
+                    .Select(config => config.Id)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+                if (enabledIds.Length > 0)
+                {
+                    return enabledIds;
+                }
+            }
+
+            string widgetsRoot = CustomWidgetHostSnapshotService.ResolveWidgetsRootForSettings(settingsService);
+            return CustomWidgetHostSnapshotService.HasHeadlessDefaultTodoStore(widgetsRoot)
+                ? [CustomWidgetHostSnapshotService.FallbackTodoWidgetId]
+                : [];
         }
         catch (Exception ex)
         {

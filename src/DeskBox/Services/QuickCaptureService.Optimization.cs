@@ -448,7 +448,7 @@ public sealed partial class QuickCaptureService
         }
 
         string fileName = string.IsNullOrWhiteSpace(displayName)
-            ? $"Screenshot-{DateTime.Now:yyyyMMdd-HHmmss}.png"
+            ? FormattableString.Invariant($"Screenshot-{DateTime.Now:yyyyMMdd-HHmmss}.png")
             : displayName;
         if (!IsImageFile(fileName))
         {

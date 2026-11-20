@@ -242,7 +242,15 @@ public sealed partial class ContentWidgetWindow
         TrayAnimation.Stop();
         WidgetLayerService.ClearTopMost(HWnd);
         Win32Helper.ShowWindow(HWnd, Win32Helper.SW_HIDE);
-        AppWindow.Hide();
+        SuppressAppWindowCompactVisibilityNotification = true;
+        try
+        {
+            AppWindow.Hide();
+        }
+        finally
+        {
+            SuppressAppWindowCompactVisibilityNotification = false;
+        }
         SetTrayHideInputSuppressed(false);
         WidgetShellControl.SuspendVisualActivity();
         NotifyCompactHostVisibilityChanged(false);

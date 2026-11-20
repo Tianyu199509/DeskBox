@@ -6,7 +6,7 @@ using Microsoft.UI.Xaml.Media.Imaging;
 
 namespace DeskBox.ViewModels;
 
-public sealed class TodoAttachmentViewModel : ObservableObject
+public sealed partial class TodoAttachmentViewModel : ObservableObject
 {
     internal const string PreviewCacheScope = "attachment-preview";
     internal const string TodoPreviewCacheScope = "attachment-preview:todo";

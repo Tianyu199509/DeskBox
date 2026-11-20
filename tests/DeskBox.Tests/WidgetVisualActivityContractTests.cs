@@ -20,15 +20,18 @@ public sealed class WidgetVisualActivityContractTests
     [Fact]
     public void MusicTitleMarquee_UsesCompositionWithOriginalDelaySpeedAndGap()
     {
-        string source = Read("src/DeskBox/Controls/WidgetContents/MusicWidgetContent.xaml.cs");
+        string marqueeSource = Read("src/DeskBox/Controls/WidgetContents/MusicWidgetContent.Marquee.cs");
+        string mainSource = Read("src/DeskBox/Controls/WidgetContents/MusicWidgetContent.xaml.cs");
 
-        Assert.Contains("TitleMarqueeGap = 32.0", source, StringComparison.Ordinal);
-        Assert.Contains("TitleMarqueeStartDelayMs = 900.0", source, StringComparison.Ordinal);
-        Assert.Contains("TitleMarqueeSpeedPixelsPerSecond = 50.0", source, StringComparison.Ordinal);
-        Assert.Contains("CreateScalarKeyFrameAnimation()", source, StringComparison.Ordinal);
-        Assert.Contains("visual.StartAnimation(\"Translation.X\", animation);", source, StringComparison.Ordinal);
-        Assert.DoesNotContain("_titleMarqueeTimer", source, StringComparison.Ordinal);
-        Assert.DoesNotContain("TimeSpan.FromMilliseconds(33)", source, StringComparison.Ordinal);
+        Assert.Contains("CreateCubicBezierEasingFunction(", marqueeSource, StringComparison.Ordinal);
+        Assert.Contains("new Vector2(0.42f, 0.0f)", marqueeSource, StringComparison.Ordinal);
+        Assert.Contains("new Vector2(0.18f, 1.0f)", marqueeSource, StringComparison.Ordinal);
+        Assert.Contains("CreateScalarKeyFrameAnimation()", marqueeSource, StringComparison.Ordinal);
+        Assert.Contains("visual.StartAnimation(\"Translation.X\", animation);", marqueeSource, StringComparison.Ordinal);
+        Assert.DoesNotContain("_titleMarqueeTimer", marqueeSource, StringComparison.Ordinal);
+        Assert.DoesNotContain("_titleMarqueeTimer", mainSource, StringComparison.Ordinal);
+        Assert.DoesNotContain("TimeSpan.FromMilliseconds(33)", marqueeSource, StringComparison.Ordinal);
+        Assert.DoesNotContain("TimeSpan.FromMilliseconds(33)", mainSource, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -302,7 +305,7 @@ public sealed class WidgetVisualActivityContractTests
     {
         string window = Read("src/DeskBox/Views/SettingsWindow.xaml.cs");
         string navigation = Read("src/DeskBox/Views/SettingsWindow.Navigation.cs");
-        string app = Read("src/DeskBox/App.xaml.cs");
+        string app = Read("tests/DeskBox.AotSmoke/App.AotHarnessBootstrapSmoke.cs");
 
         Assert.Contains(
             "ClearFeatureSettingsExpanderCallbacks();",

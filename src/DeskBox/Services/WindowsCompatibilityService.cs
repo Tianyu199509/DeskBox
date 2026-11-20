@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using DeskBox.Helpers;
 using Microsoft.UI.Composition.SystemBackdrops;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
@@ -29,8 +30,12 @@ public static class WindowsCompatibilityService
     {
         try
         {
+            window.SetTitleBar(null);
             window.ExtendsContentIntoTitleBar = false;
-            appWindow?.TitleBar.ResetToDefault();
+            if (appWindow is not null && AppWindowTitleBar.IsCustomizationSupported())
+            {
+                appWindow.TitleBar.ResetToDefault();
+            }
         }
         catch (Exception ex)
         {
@@ -204,13 +209,25 @@ public static class WindowsCompatibilityService
             }
 
             ApplySolidThemeBackground(rootPanel);
-            rootPanel.ActualThemeChanged += static (sender, _) =>
+            Windows.Foundation.TypedEventHandler<FrameworkElement, object> themeChangedHandler = static (sender, _) =>
             {
                 if (sender is Panel panel)
                 {
                     ApplySolidThemeBackground(panel);
                 }
             };
+            rootPanel.ActualThemeChanged += themeChangedHandler;
+
+            Windows.Foundation.TypedEventHandler<object, WindowEventArgs>? closedHandler = null;
+            closedHandler = (sender, _) =>
+            {
+                rootPanel.ActualThemeChanged -= themeChangedHandler;
+                if (sender is Window closingWindow && closedHandler is not null)
+                {
+                    closingWindow.Closed -= closedHandler;
+                }
+            };
+            window.Closed += closedHandler;
         }
         catch (Exception ex)
         {
@@ -220,15 +237,21 @@ public static class WindowsCompatibilityService
 
     private static void ApplySolidThemeBackground(Panel rootPanel)
     {
-        bool isDark = rootPanel.ActualTheme switch
+        if (IsHighContrast)
         {
-            ElementTheme.Dark => true,
-            ElementTheme.Light => false,
-            _ => Application.Current?.RequestedTheme == ApplicationTheme.Dark
-        };
-        Windows.UI.Color fallbackColor = isDark
-            ? Windows.UI.Color.FromArgb(255, 32, 32, 32)
-            : Windows.UI.Color.FromArgb(255, 243, 243, 243);
+            rootPanel.Background =
+                NeutralInteractionBrush.ResolveThemedResource("SolidBackgroundFillColorBaseBrush", rootPanel) ??
+                new SolidColorBrush(new Windows.UI.ViewManagement.UISettings().GetColorValue(
+                    Windows.UI.ViewManagement.UIColorType.Background));
+            return;
+        }
+
+        bool isDark = NeutralInteractionBrush.IsDarkTheme(rootPanel);
+        Windows.UI.Color fallbackColor = IsHighContrast
+            ? ResolveHighContrastBackgroundColor(isDark)
+            : isDark
+                ? Windows.UI.Color.FromArgb(255, 32, 32, 32)
+                : Windows.UI.Color.FromArgb(255, 243, 243, 243);
         rootPanel.Background = new SolidColorBrush(fallbackColor);
     }
 
@@ -323,6 +346,18 @@ public static class WindowsCompatibilityService
             return null;
         }
     }
+
+    public static Windows.UI.Color ResolveHighContrastBackgroundColor(bool isDark) =>
+        TryGetUiColor(Windows.UI.ViewManagement.UIColorType.Background)
+        ?? (isDark
+            ? Windows.UI.Color.FromArgb(0xFF, 0x20, 0x20, 0x20)
+            : Windows.UI.Color.FromArgb(0xFF, 0xF3, 0xF3, 0xF3));
+
+    public static Windows.UI.Color ResolveHighContrastForegroundColor(bool isDark) =>
+        TryGetUiColor(Windows.UI.ViewManagement.UIColorType.Foreground)
+        ?? (isDark
+            ? Windows.UI.Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF)
+            : Windows.UI.Color.FromArgb(0xFF, 0x00, 0x00, 0x00));
 
     public static bool ShouldAnimate
     {

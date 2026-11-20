@@ -9,6 +9,7 @@ internal enum ElevatedOutboundTargetKind
     ExplorerFolder,
     UnsupportedShellNamespace,
     ForeignWindow,
+    RecycleBin,
 }
 
 internal readonly record struct ElevatedOutboundTargetInfo(
@@ -39,7 +40,12 @@ internal static unsafe partial class ElevatedShellOutboundDropInterop
     private const uint SvsiSelect = 0x00000001;
     private const uint SvsiDeselectOthers = 0x00000004;
     private const uint SvsiEnsureVisible = 0x00000008;
+    private const uint SvsiTranslatePt = 0x00000020;
     private const uint SvsiPositionItem = 0x00000080;
+    private const uint SigdnNormalDisplay = 0x00000000;
+    private const uint SigdnDesktopAbsoluteParsing = 0x80028000;
+    private const uint SvgioAllView = 0x00000002;
+    private const string RecycleBinParsingPrefix = "::{645FF040-";
     private const int MaxAncestorDepth = 16;
 
     private static readonly Guid ClsidShellWindows =
@@ -119,6 +125,16 @@ internal static unsafe partial class ElevatedShellOutboundDropInterop
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool ScreenToClient(nint hWnd, ref NativePoint lpPoint);
 
+    [LibraryImport("user32.dll", EntryPoint = "GetWindowDpiAwarenessContext")]
+    private static partial nint GetWindowDpiAwarenessContext(nint hwnd);
+
+    [LibraryImport("user32.dll", EntryPoint = "SetThreadDpiAwarenessContext")]
+    private static partial nint SetThreadDpiAwarenessContext(nint dpiContext);
+
+    [LibraryImport("user32.dll", EntryPoint = "PhysicalToLogicalPointForPerMonitorDPI")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool PhysicalToLogicalPointForPerMonitorDPI(nint hWnd, ref NativePoint lpPoint);
+
     [LibraryImport("ole32.dll", EntryPoint = "CoInitializeEx")]
     private static partial int CoInitializeEx(nint pvReserved, uint dwCoInit);
 
@@ -150,8 +166,28 @@ internal static unsafe partial class ElevatedShellOutboundDropInterop
         StringMarshalling = StringMarshalling.Utf16)]
     private static partial nint ILCreateFromPathW(string pszPath);
 
+    [LibraryImport(
+        "shell32.dll",
+        EntryPoint = "SHParseDisplayName",
+        StringMarshalling = StringMarshalling.Utf16)]
+    private static partial int SHParseDisplayName(
+        string pszName,
+        nint pbc,
+        out nint ppidl,
+        uint sfgaoIn,
+        out uint psfgaoOut);
+
     [LibraryImport("shell32.dll", EntryPoint = "ILFindLastID")]
     private static partial nint ILFindLastID(nint pidl);
+
+    [LibraryImport("shell32.dll", EntryPoint = "ILCombine")]
+    private static partial nint ILCombine(nint pidl1, nint pidl2);
+
+    [LibraryImport("shell32.dll", EntryPoint = "SHGetNameFromIDList")]
+    private static partial int SHGetNameFromIDList(
+        nint pidl,
+        uint sigdnName,
+        out nint ppszName);
 
     [LibraryImport(
         "shell32.dll",
@@ -293,8 +329,9 @@ internal static unsafe partial class ElevatedShellOutboundDropInterop
     private static nint s_pendingProbeRootHwnd;
     private static nint s_pendingProbeTabHwnd;
     private static Action<nint, nint, ElevatedOutboundTargetInfo>? s_pendingProbeCallback;
-    private static int s_syncStaCallInFlight;
-    private static string? s_cachedDesktopPath;
+    private static int s_explorerQueryInFlight;
+    private static int s_desktopPositioningInFlight;
+    private static int s_desktopHitQueryInFlight;
 
     internal static bool TryClassifyImmediateOutboundTarget(
         IntPtr hitHwnd,
@@ -381,7 +418,7 @@ internal static unsafe partial class ElevatedShellOutboundDropInterop
 
             case ElevatedOutboundTargetKind.Desktop:
             {
-                string desktopPath = GetCachedDesktopDirectoryPath();
+                string desktopPath = GetCurrentDesktopDirectoryPath();
                 if (string.IsNullOrWhiteSpace(desktopPath))
                 {
                     immediateTarget = new ElevatedOutboundTargetInfo(
@@ -400,6 +437,28 @@ internal static unsafe partial class ElevatedShellOutboundDropInterop
 
             case ElevatedOutboundTargetKind.ExplorerFolder:
                 targetTabHwnd = ResolveTargetTabWindow(hit, root);
+                // FL-14: when the cursor hits a distinct non-tab Explorer child
+                // (e.g. Win11 tab strip, command bar, address bar, status bar,
+                // preview pane), ResolveTargetTabWindow returns 0. Do not proceed
+                // into IShellWindows with tab==0 and silently fall back to Tab 1.
+                // Also guard the Explorer title bar / non-client border where
+                // WindowFromPoint hits root directly (hit == root): verify the
+                // cursor actually lies within the resolved ShellTabWindowClass rect.
+                if ((hit != 0 && hit != root && targetTabHwnd == IntPtr.Zero) ||
+                    (hit == root &&
+                     targetTabHwnd != IntPtr.Zero &&
+                     Win32Helper.GetCursorPos(out Win32Helper.POINT cursorPt) &&
+                     Win32Helper.GetWindowRect(targetTabHwnd, out Win32Helper.RECT tabRect) &&
+                     (cursorPt.X < tabRect.Left || cursorPt.X >= tabRect.Right ||
+                      cursorPt.Y < tabRect.Top || cursorPt.Y >= tabRect.Bottom)))
+                {
+                    immediateTarget = new ElevatedOutboundTargetInfo(
+                        ElevatedOutboundTargetKind.UnsupportedShellNamespace,
+                        string.Empty,
+                        string.Empty);
+                    return true;
+                }
+
                 immediateTarget = default;
                 return false;
 
@@ -502,13 +561,8 @@ internal static unsafe partial class ElevatedShellOutboundDropInterop
         }
     }
 
-    private static string GetCachedDesktopDirectoryPath()
+    private static string GetCurrentDesktopDirectoryPath()
     {
-        if (s_cachedDesktopPath is { } cached)
-        {
-            return cached;
-        }
-
         try
         {
             string raw = Environment.GetFolderPath(
@@ -518,9 +572,7 @@ internal static unsafe partial class ElevatedShellOutboundDropInterop
                 return string.Empty;
             }
 
-            string normalized = Path.GetFullPath(raw);
-            s_cachedDesktopPath = normalized;
-            return normalized;
+            return Path.GetFullPath(raw);
         }
         catch
         {
@@ -531,7 +583,10 @@ internal static unsafe partial class ElevatedShellOutboundDropInterop
     internal static ElevatedOutboundTargetInfo ResolveOutboundTarget(
         IntPtr hitHwnd,
         IntPtr rootHwnd,
-        int explorerQueryTimeoutMs = 450)
+        int explorerQueryTimeoutMs = 450,
+        int? screenX = null,
+        int? screenY = null,
+        bool allowDesktopRecycleBinHit = true)
     {
         if (TryClassifyImmediateOutboundTarget(
                 hitHwnd,
@@ -540,6 +595,19 @@ internal static unsafe partial class ElevatedShellOutboundDropInterop
                 out IntPtr targetTabHwnd,
                 out ElevatedOutboundTargetInfo immediate))
         {
+            if (allowDesktopRecycleBinHit &&
+                immediate.Kind == ElevatedOutboundTargetKind.Desktop &&
+                screenX is { } sx &&
+                screenY is { } sy &&
+                TryResolveDesktopRecycleBinAtPointOnSta(
+                    sx,
+                    sy,
+                    explorerQueryTimeoutMs,
+                    out ElevatedOutboundTargetInfo recycleBinTarget))
+            {
+                return recycleBinTarget;
+            }
+
             return immediate;
         }
 
@@ -548,6 +616,48 @@ internal static unsafe partial class ElevatedShellOutboundDropInterop
             targetTabHwnd,
             explorerQueryTimeoutMs);
     }
+
+    internal static bool IsDesktopIconListViewVisible(
+        nint listViewHwnd,
+        nint defViewHwnd,
+        Func<IntPtr, bool>? isWindowVisibleProbe = null)
+    {
+        if (listViewHwnd == 0)
+        {
+            return false;
+        }
+
+        Func<IntPtr, bool> probe = isWindowVisibleProbe ?? Win32Helper.IsWindowVisible;
+        if (!probe((IntPtr)listViewHwnd))
+        {
+            return false;
+        }
+
+        return defViewHwnd == 0 || probe((IntPtr)defViewHwnd);
+    }
+
+    internal static bool ShouldAllowDesktopRecycleBinDrop(
+        bool controlHeld,
+        bool altHeld) =>
+        !controlHeld && !altHeld;
+
+    internal static bool ShouldReuseCachedExplorerFolderTarget(
+        IntPtr cachedRootHwnd,
+        IntPtr cachedTabHwnd,
+        long cachedResolvedTickMs,
+        ElevatedOutboundTargetKind cachedKind,
+        IntPtr currentRootHwnd,
+        IntPtr currentTabHwnd,
+        long nowTickMs,
+        long maxCacheAgeMs = 2_000) =>
+        cachedKind == ElevatedOutboundTargetKind.ExplorerFolder &&
+        cachedRootHwnd != IntPtr.Zero &&
+        cachedRootHwnd == currentRootHwnd &&
+        currentTabHwnd != IntPtr.Zero &&
+        cachedTabHwnd == currentTabHwnd &&
+        cachedResolvedTickMs > 0 &&
+        nowTickMs >= cachedResolvedTickMs &&
+        nowTickMs - cachedResolvedTickMs <= maxCacheAgeMs;
 
     internal static bool TryPositionDesktopItemsNearCursor(
         IReadOnlyList<string> destinationPaths,
@@ -572,53 +682,67 @@ internal static unsafe partial class ElevatedShellOutboundDropInterop
             return false;
         }
 
-        if (Interlocked.CompareExchange(ref s_syncStaCallInFlight, 1, 0) != 0)
+        if (Interlocked.CompareExchange(ref s_desktopPositioningInFlight, 1, 0) != 0)
         {
             return false;
         }
 
-        string desktopDir = Environment.GetFolderPath(
-            Environment.SpecialFolder.DesktopDirectory);
-        if (!string.IsNullOrWhiteSpace(desktopDir))
+        try
         {
-            SHChangeNotify(
-                ShcneUpdateDir,
-                ShcnfPathW | ShcnfFlush,
-                desktopDir,
-                0);
+            string desktopDir = Environment.GetFolderPath(
+                Environment.SpecialFolder.DesktopDirectory);
+            if (!string.IsNullOrWhiteSpace(desktopDir))
+            {
+                try
+                {
+                    SHChangeNotify(
+                        ShcneUpdateDir,
+                        ShcnfPathW | ShcnfFlush,
+                        desktopDir,
+                        0);
+                }
+                catch
+                {
+                }
+            }
+
+            var completion = new TaskCompletionSource<bool>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            var worker = new Thread(() =>
+            {
+                bool positioned = false;
+                try
+                {
+                    positioned = ExecuteDesktopPositioningCore(
+                        existingPaths,
+                        screenX,
+                        screenY);
+                }
+                catch
+                {
+                    positioned = false;
+                }
+                finally
+                {
+                    Interlocked.Exchange(ref s_desktopPositioningInFlight, 0);
+                    completion.TrySetResult(positioned);
+                }
+            })
+            {
+                IsBackground = true,
+                Name = "DeskBox.ElevatedDesktopPosition",
+            };
+            worker.SetApartmentState(ApartmentState.STA);
+            worker.Start();
+
+            return completion.Task.Wait(Math.Max(100, timeoutMs)) &&
+                   completion.Task.Result;
         }
-
-        var completion = new TaskCompletionSource<bool>(
-            TaskCreationOptions.RunContinuationsAsynchronously);
-        var worker = new Thread(() =>
+        catch
         {
-            bool positioned = false;
-            try
-            {
-                positioned = ExecuteDesktopPositioningCore(
-                    existingPaths,
-                    screenX,
-                    screenY);
-            }
-            catch
-            {
-                positioned = false;
-            }
-            finally
-            {
-                Interlocked.Exchange(ref s_syncStaCallInFlight, 0);
-                completion.TrySetResult(positioned);
-            }
-        })
-        {
-            IsBackground = true,
-            Name = "DeskBox.ElevatedDesktopPosition",
-        };
-        worker.SetApartmentState(ApartmentState.STA);
-        worker.Start();
-
-        return completion.Task.Wait(Math.Max(100, timeoutMs)) &&
-               completion.Task.Result;
+            Interlocked.Exchange(ref s_desktopPositioningInFlight, 0);
+            return false;
+        }
     }
 
     private static ElevatedOutboundTargetInfo QueryExplorerWindowTargetOnSta(
@@ -626,7 +750,7 @@ internal static unsafe partial class ElevatedShellOutboundDropInterop
         nint targetTabHwnd,
         int timeoutMs)
     {
-        if (Interlocked.CompareExchange(ref s_syncStaCallInFlight, 1, 0) != 0)
+        if (Interlocked.CompareExchange(ref s_explorerQueryInFlight, 1, 0) != 0)
         {
             return new ElevatedOutboundTargetInfo(
                 ElevatedOutboundTargetKind.UnsupportedShellNamespace,
@@ -636,45 +760,56 @@ internal static unsafe partial class ElevatedShellOutboundDropInterop
 
         var completion = new TaskCompletionSource<ElevatedOutboundTargetInfo>(
             TaskCreationOptions.RunContinuationsAsynchronously);
-        var worker = new Thread(() =>
+        try
         {
-            var resolved = new ElevatedOutboundTargetInfo(
-                ElevatedOutboundTargetKind.UnsupportedShellNamespace,
-                string.Empty,
-                string.Empty);
-            try
+            var worker = new Thread(() =>
             {
-                resolved = QueryExplorerWindowTargetCore(rootHwnd, targetTabHwnd);
-            }
-            catch
+                var resolved = new ElevatedOutboundTargetInfo(
+                    ElevatedOutboundTargetKind.UnsupportedShellNamespace,
+                    string.Empty,
+                    string.Empty);
+                try
+                {
+                    resolved = QueryExplorerWindowTargetCore(rootHwnd, targetTabHwnd);
+                }
+                catch
+                {
+                    resolved = new ElevatedOutboundTargetInfo(
+                        ElevatedOutboundTargetKind.UnsupportedShellNamespace,
+                        string.Empty,
+                        string.Empty);
+                }
+                finally
+                {
+                    Interlocked.Exchange(ref s_explorerQueryInFlight, 0);
+                    completion.TrySetResult(resolved);
+                }
+            })
             {
-                resolved = new ElevatedOutboundTargetInfo(
+                IsBackground = true,
+                Name = "DeskBox.ElevatedExplorerTarget",
+            };
+            worker.SetApartmentState(ApartmentState.STA);
+            worker.Start();
+
+            if (!completion.Task.Wait(Math.Max(80, timeoutMs)))
+            {
+                return new ElevatedOutboundTargetInfo(
                     ElevatedOutboundTargetKind.UnsupportedShellNamespace,
                     string.Empty,
                     string.Empty);
             }
-            finally
-            {
-                Interlocked.Exchange(ref s_syncStaCallInFlight, 0);
-                completion.TrySetResult(resolved);
-            }
-        })
-        {
-            IsBackground = true,
-            Name = "DeskBox.ElevatedExplorerTarget",
-        };
-        worker.SetApartmentState(ApartmentState.STA);
-        worker.Start();
 
-        if (!completion.Task.Wait(Math.Max(80, timeoutMs)))
+            return completion.Task.Result;
+        }
+        catch
         {
+            Interlocked.Exchange(ref s_explorerQueryInFlight, 0);
             return new ElevatedOutboundTargetInfo(
                 ElevatedOutboundTargetKind.UnsupportedShellNamespace,
                 string.Empty,
                 string.Empty);
         }
-
-        return completion.Task.Result;
     }
 
     private static ElevatedOutboundTargetInfo QueryExplorerWindowTargetCore(
@@ -726,6 +861,7 @@ internal static unsafe partial class ElevatedShellOutboundDropInterop
             }
 
             ElevatedOutboundTargetInfo? fallbackRootMatch = null;
+            int fallbackMatchCount = 0;
             int maxItems = Math.Min(count, 128);
             for (int index = 0; index < maxItems; index++)
             {
@@ -754,7 +890,8 @@ internal static unsafe partial class ElevatedShellOutboundDropInterop
                             return candidate;
                         }
 
-                        fallbackRootMatch ??= candidate;
+                        fallbackRootMatch = candidate;
+                        fallbackMatchCount++;
                     }
                 }
                 finally
@@ -763,7 +900,17 @@ internal static unsafe partial class ElevatedShellOutboundDropInterop
                 }
             }
 
-            return fallbackRootMatch ?? new ElevatedOutboundTargetInfo(
+            // TryInspectExplorerBrowserItem already filters out hidden views
+            // (inactive Win11 tabs), so a single visible root match safely covers
+            // classic Win10 Explorer frames where IShellBrowser::GetWindow returns
+            // CabinetWClass rather than the child ShellTabWindowClass.
+            if (fallbackMatchCount == 1 &&
+                fallbackRootMatch is { } singleFallback)
+            {
+                return singleFallback;
+            }
+
+            return new ElevatedOutboundTargetInfo(
                 ElevatedOutboundTargetKind.UnsupportedShellNamespace,
                 string.Empty,
                 string.Empty);
@@ -949,6 +1096,15 @@ internal static unsafe partial class ElevatedShellOutboundDropInterop
                     1024,
                     GpfidlDefault))
             {
+                if (TryIsRecycleBinPidl(folderPidl, out string binDisplayName))
+                {
+                    info = new ElevatedOutboundTargetInfo(
+                        ElevatedOutboundTargetKind.RecycleBin,
+                        string.Empty,
+                        binDisplayName);
+                    return true;
+                }
+
                 info = new ElevatedOutboundTargetInfo(
                     ElevatedOutboundTargetKind.UnsupportedShellNamespace,
                     string.Empty,
@@ -1117,19 +1273,15 @@ internal static unsafe partial class ElevatedShellOutboundDropInterop
                 ? listViewHwnd
                 : (defViewHwnd != 0 ? defViewHwnd : desktopHwndInt);
 
-            NativePoint anchorClient = new() { X = screenX, Y = screenY };
-            if (coordHwnd != 0)
-            {
-                _ = ScreenToClient(coordHwnd, ref anchorClient);
-            }
+            NativePoint anchorClient = ConvertScreenPointToViewClient(coordHwnd, screenX, screenY);
 
-            anchorClient.X = Math.Max(8, anchorClient.X - 24);
-            anchorClient.Y = Math.Max(8, anchorClient.Y - 24);
+            anchorClient.X -= 24;
+            anchorClient.Y -= 24;
 
             var childPidls = new List<nint>(destinationPaths.Length);
             foreach (string path in destinationPaths)
             {
-                nint fullPidl = ILCreateFromPathW(path);
+                nint fullPidl = CreateFullPidlForPath(path);
                 if (fullPidl == 0)
                 {
                     continue;
@@ -1146,6 +1298,42 @@ internal static unsafe partial class ElevatedShellOutboundDropInterop
             if (childPidls.Count == 0)
             {
                 return false;
+            }
+
+            static nint CreateFullPidlForPath(string rawPath)
+            {
+                if (string.IsNullOrWhiteSpace(rawPath))
+                {
+                    return 0;
+                }
+
+                nint direct = ILCreateFromPathW(rawPath);
+                if (direct != 0)
+                {
+                    return direct;
+                }
+
+                string stripped = rawPath.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase)
+                    ? string.Concat(@"\\", rawPath.AsSpan(8))
+                    : rawPath.StartsWith(@"\\?\", StringComparison.Ordinal)
+                        ? rawPath[4..]
+                        : rawPath;
+                string extended = stripped.StartsWith(@"\\", StringComparison.Ordinal)
+                    ? @"\\?\UNC\" + stripped[2..]
+                    : (stripped.Length >= 2 && stripped[1] == ':')
+                        ? @"\\?\" + stripped
+                        : stripped;
+
+                foreach (string candidate in new[] { rawPath, stripped, extended })
+                {
+                    if (SHParseDisplayName(candidate, 0, out nint parsedPidl, 0, out _) == 0 &&
+                        parsedPidl != 0)
+                    {
+                        return parsedPidl;
+                    }
+                }
+
+                return 0;
             }
 
             nint* fvVtbl = *(nint**)folderView;
@@ -1195,7 +1383,7 @@ internal static unsafe partial class ElevatedShellOutboundDropInterop
             uint flags = SvsiSelect | SvsiDeselectOthers | SvsiEnsureVisible;
             if (!autoArrangeEnabled)
             {
-                flags |= SvsiPositionItem;
+                flags |= SvsiPositionItem | SvsiTranslatePt;
             }
 
             fixed (nint* pChildren = childArray)
@@ -1256,16 +1444,347 @@ internal static unsafe partial class ElevatedShellOutboundDropInterop
         string.Equals(className, "CabinetWClass", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(className, "ExploreWClass", StringComparison.OrdinalIgnoreCase);
 
+    private static bool TryResolveDesktopRecycleBinAtPointOnSta(
+        int screenX,
+        int screenY,
+        int timeoutMs,
+        out ElevatedOutboundTargetInfo binTarget)
+    {
+        binTarget = default;
+        if (Interlocked.CompareExchange(ref s_desktopHitQueryInFlight, 1, 0) != 0)
+        {
+            return false;
+        }
+
+        var completion = new TaskCompletionSource<(bool Found, ElevatedOutboundTargetInfo Info)>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        try
+        {
+            var worker = new Thread(() =>
+            {
+                bool found = false;
+                ElevatedOutboundTargetInfo resolved = default;
+                try
+                {
+                    found = TryResolveDesktopRecycleBinAtPointCore(screenX, screenY, out resolved);
+                }
+                catch
+                {
+                    found = false;
+                }
+                finally
+                {
+                    Interlocked.Exchange(ref s_desktopHitQueryInFlight, 0);
+                    completion.TrySetResult((found, resolved));
+                }
+            })
+            {
+                IsBackground = true,
+                Name = "DeskBox.ElevatedDesktopHitProbe",
+            };
+            worker.SetApartmentState(ApartmentState.STA);
+            worker.Start();
+
+            if (!completion.Task.Wait(Math.Max(80, Math.Min(timeoutMs, 350))) ||
+                !completion.Task.Result.Found)
+            {
+                return false;
+            }
+
+            binTarget = completion.Task.Result.Info;
+            return true;
+        }
+        catch
+        {
+            Interlocked.Exchange(ref s_desktopHitQueryInFlight, 0);
+            return false;
+        }
+    }
+
+    private static bool TryResolveDesktopRecycleBinAtPointCore(
+        int screenX,
+        int screenY,
+        out ElevatedOutboundTargetInfo binTarget)
+    {
+        binTarget = default;
+        int coInitHr = CoInitializeEx(0, CoInitApartmentThreaded);
+        bool shouldUninit = coInitHr is 0 or 1;
+        if (coInitHr < 0)
+        {
+            return false;
+        }
+
+        nint shellWindows = 0;
+        nint desktopDispatch = 0;
+        nint serviceProvider = 0;
+        nint shellBrowser = 0;
+        nint shellView = 0;
+        nint folderView = 0;
+        nint persistFolder2 = 0;
+        nint desktopPidl = 0;
+        try
+        {
+            int hr = CoCreateInstance(
+                in ClsidShellWindows,
+                0,
+                ClsctxLocalServer | ClsctxInprocServer,
+                in IidIShellWindows,
+                out shellWindows);
+            if (hr < 0 || shellWindows == 0)
+            {
+                return false;
+            }
+
+            NativeVariant varLoc = default;
+            NativeVariant varLocRoot = default;
+            int desktopHwndInt = 0;
+            nint* swVtbl = *(nint**)shellWindows;
+            var findWindowSw = (delegate* unmanaged[Stdcall]<
+                nint,
+                NativeVariant*,
+                NativeVariant*,
+                int,
+                int*,
+                int,
+                nint*,
+                int>)swVtbl[15];
+            nint foundDesktop = 0;
+            if (findWindowSw(
+                    shellWindows,
+                    &varLoc,
+                    &varLocRoot,
+                    SwcDesktop,
+                    &desktopHwndInt,
+                    SwfoNeedDispatch,
+                    &foundDesktop) < 0 ||
+                foundDesktop == 0)
+            {
+                return false;
+            }
+
+            desktopDispatch = foundDesktop;
+            Guid iidServiceProvider = IidIServiceProvider;
+            if (ComVtable.QueryInterface(desktopDispatch, ref iidServiceProvider, out serviceProvider) < 0 ||
+                serviceProvider == 0)
+            {
+                return false;
+            }
+
+            nint* spVtbl = *(nint**)serviceProvider;
+            var queryService = (delegate* unmanaged[Stdcall]<nint, Guid*, Guid*, nint*, int>)spVtbl[3];
+            Guid sidTopBrowser = SidSTopLevelBrowser;
+            Guid iidShellBrowser = IidIShellBrowser;
+            nint foundBrowser = 0;
+            if (queryService(serviceProvider, &sidTopBrowser, &iidShellBrowser, &foundBrowser) < 0 ||
+                foundBrowser == 0)
+            {
+                return false;
+            }
+
+            shellBrowser = foundBrowser;
+            nint* sbVtbl = *(nint**)shellBrowser;
+            var queryActiveShellView = (delegate* unmanaged[Stdcall]<nint, nint*, int>)sbVtbl[15];
+            nint foundView = 0;
+            if (queryActiveShellView(shellBrowser, &foundView) < 0 || foundView == 0)
+            {
+                return false;
+            }
+
+            shellView = foundView;
+            Guid iidFolderView = IidIFolderView;
+            if (ComVtable.QueryInterface(shellView, ref iidFolderView, out folderView) < 0 ||
+                folderView == 0)
+            {
+                return false;
+            }
+
+            nint* svVtbl = *(nint**)shellView;
+            var getViewWindow = (delegate* unmanaged[Stdcall]<nint, nint*, int>)svVtbl[3];
+            nint defViewHwnd = 0;
+            _ = getViewWindow(shellView, &defViewHwnd);
+            nint listViewHwnd = defViewHwnd != 0
+                ? FindWindowExW(defViewHwnd, 0, "SysListView32", null)
+                : 0;
+            if (!IsDesktopIconListViewVisible(listViewHwnd, defViewHwnd))
+            {
+                return false;
+            }
+
+            nint coordHwnd = listViewHwnd;
+            NativePoint clientPt = ConvertScreenPointToViewClient(coordHwnd, screenX, screenY);
+
+            nint* fvVtbl = *(nint**)folderView;
+            var getFolder = (delegate* unmanaged[Stdcall]<nint, Guid*, nint*, int>)fvVtbl[5];
+            var getItem = (delegate* unmanaged[Stdcall]<nint, int, nint*, int>)fvVtbl[6];
+            var getItemCount = (delegate* unmanaged[Stdcall]<nint, uint, int*, int>)fvVtbl[7];
+            var getItemPosition = (delegate* unmanaged[Stdcall]<nint, nint, NativePoint*, int>)fvVtbl[11];
+            var getDefaultSpacing = (delegate* unmanaged[Stdcall]<nint, NativePoint*, int>)fvVtbl[13];
+
+            Guid iidPersistFolder2 = IidIPersistFolder2;
+            nint foundPersist = 0;
+            if (getFolder(folderView, &iidPersistFolder2, &foundPersist) < 0 || foundPersist == 0)
+            {
+                return false;
+            }
+
+            persistFolder2 = foundPersist;
+            nint* pfVtbl = *(nint**)persistFolder2;
+            var getCurFolder = (delegate* unmanaged[Stdcall]<nint, nint*, int>)pfVtbl[5];
+            if (getCurFolder(persistFolder2, &desktopPidl) < 0 || desktopPidl == 0)
+            {
+                return false;
+            }
+
+            int itemCount = 0;
+            if (getItemCount(folderView, SvgioAllView, &itemCount) < 0 || itemCount <= 0)
+            {
+                return false;
+            }
+
+            NativePoint spacing = new() { X = 96, Y = 96 };
+            if (getDefaultSpacing(folderView, &spacing) < 0 ||
+                spacing.X <= 16 ||
+                spacing.Y <= 16)
+            {
+                spacing = new NativePoint { X = 96, Y = 96 };
+            }
+
+            int maxItems = Math.Min(itemCount, 1024);
+            for (int index = 0; index < maxItems; index++)
+            {
+                nint childPidl = 0;
+                if (getItem(folderView, index, &childPidl) < 0 || childPidl == 0)
+                {
+                    continue;
+                }
+
+                nint fullPidl = 0;
+                try
+                {
+                    NativePoint itemPos = default;
+                    if (getItemPosition(folderView, childPidl, &itemPos) < 0)
+                    {
+                        continue;
+                    }
+
+                    if (clientPt.X < itemPos.X ||
+                        clientPt.X >= itemPos.X + spacing.X ||
+                        clientPt.Y < itemPos.Y ||
+                        clientPt.Y >= itemPos.Y + spacing.Y)
+                    {
+                        continue;
+                    }
+
+                    fullPidl = ILCombine(desktopPidl, childPidl);
+                    if (fullPidl != 0 && TryIsRecycleBinPidl(fullPidl, out string binDisplayName))
+                    {
+                        binTarget = new ElevatedOutboundTargetInfo(
+                            ElevatedOutboundTargetKind.RecycleBin,
+                            string.Empty,
+                            binDisplayName);
+                        return true;
+                    }
+                }
+                finally
+                {
+                    if (fullPidl != 0) CoTaskMemFree(fullPidl);
+                    CoTaskMemFree(childPidl);
+                }
+            }
+
+            return false;
+        }
+        finally
+        {
+            if (desktopPidl != 0) CoTaskMemFree(desktopPidl);
+            if (persistFolder2 != 0) Marshal.Release(persistFolder2);
+            if (folderView != 0) Marshal.Release(folderView);
+            if (shellView != 0) Marshal.Release(shellView);
+            if (shellBrowser != 0) Marshal.Release(shellBrowser);
+            if (serviceProvider != 0) Marshal.Release(serviceProvider);
+            if (desktopDispatch != 0) Marshal.Release(desktopDispatch);
+            if (shellWindows != 0) Marshal.Release(shellWindows);
+            if (shouldUninit) CoUninitialize();
+        }
+    }
+
+    private static NativePoint ConvertScreenPointToViewClient(
+        nint coordHwnd,
+        int screenX,
+        int screenY)
+    {
+        NativePoint point = new() { X = screenX, Y = screenY };
+        if (coordHwnd == 0)
+        {
+            return point;
+        }
+
+        nint windowDpiContext = GetWindowDpiAwarenessContext(coordHwnd);
+        nint previousDpiContext = windowDpiContext != 0
+            ? SetThreadDpiAwarenessContext(windowDpiContext)
+            : 0;
+        try
+        {
+            _ = PhysicalToLogicalPointForPerMonitorDPI(coordHwnd, ref point);
+            _ = ScreenToClient(coordHwnd, ref point);
+        }
+        finally
+        {
+            if (previousDpiContext != 0)
+            {
+                _ = SetThreadDpiAwarenessContext(previousDpiContext);
+            }
+        }
+
+        return point;
+    }
+
+    private static bool TryIsRecycleBinPidl(nint pidl, out string displayName)
+    {
+        displayName = string.Empty;
+        if (pidl == 0)
+        {
+            return false;
+        }
+
+        string parsingName = ReadShellItemName(pidl, SigdnDesktopAbsoluteParsing);
+        if (!parsingName.StartsWith(RecycleBinParsingPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        displayName = ReadShellItemName(pidl, SigdnNormalDisplay);
+        return true;
+    }
+
+    private static string ReadShellItemName(nint pidl, uint sigdnName)
+    {
+        if (pidl == 0 || SHGetNameFromIDList(pidl, sigdnName, out nint pszName) < 0 || pszName == 0)
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            return Marshal.PtrToStringUni(pszName) ?? string.Empty;
+        }
+        finally
+        {
+            CoTaskMemFree(pszName);
+        }
+    }
+
     private static bool IsExplorerNonFolderChromeHierarchy(IReadOnlyList<string> ancestorClasses)
     {
-        bool insideShellTab = false;
+        bool insideShellDefView = false;
         bool hasXamlIslandBridge = false;
+        bool hasDuiView = false;
         for (int i = 0; i < ancestorClasses.Count; i++)
         {
             string cls = ancestorClasses[i];
-            if (string.Equals(cls, "ShellTabWindowClass", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(cls, "SHELLDLL_DefView", StringComparison.OrdinalIgnoreCase))
             {
-                insideShellTab = true;
+                insideShellDefView = true;
             }
             else if (string.Equals(cls, "SysTreeView32", StringComparison.OrdinalIgnoreCase) ||
                      string.Equals(cls, "NamespaceTreeControl", StringComparison.OrdinalIgnoreCase) ||
@@ -1273,18 +1792,33 @@ internal static unsafe partial class ElevatedShellOutboundDropInterop
                      string.Equals(cls, "Breadcrumb Parent", StringComparison.OrdinalIgnoreCase) ||
                      string.Equals(cls, "ReBarWindow32", StringComparison.OrdinalIgnoreCase) ||
                      string.Equals(cls, "ToolbarWindow32", StringComparison.OrdinalIgnoreCase) ||
-                     string.Equals(cls, "TravelBand", StringComparison.OrdinalIgnoreCase))
+                     string.Equals(cls, "TravelBand", StringComparison.OrdinalIgnoreCase) ||
+                     // Windows 10 Explorer Ribbon & Search Box chrome
+                     string.Equals(cls, "UIRibbonCommandBarDock", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(cls, "UIRibbonCommandBar", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(cls, "UIRibbonWorkPane", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(cls, "NUIPane", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(cls, "NetUIHWND", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(cls, "UniversalSearchBand", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(cls, "Search Box", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(cls, "SearchEditBoxWrapperClass", StringComparison.OrdinalIgnoreCase))
             {
                 return true;
             }
-            else if (cls.EndsWith(".Content.DesktopChildSiteBridge", StringComparison.OrdinalIgnoreCase) ||
+            else if (string.Equals(cls, "DUIViewWndClassName", StringComparison.OrdinalIgnoreCase))
+            {
+                hasDuiView = true;
+            }
+            else if (string.Equals(cls, "DesktopWindowXamlSource", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(cls, "InputSiteWindowClass", StringComparison.OrdinalIgnoreCase) ||
+                     cls.EndsWith(".Content.DesktopChildSiteBridge", StringComparison.OrdinalIgnoreCase) ||
                      cls.EndsWith(".InputSite.WindowClass", StringComparison.OrdinalIgnoreCase))
             {
                 hasXamlIslandBridge = true;
             }
         }
 
-        return hasXamlIslandBridge && !insideShellTab;
+        return (hasXamlIslandBridge || hasDuiView) && !insideShellDefView;
     }
 
     private static bool IsDesktopHostClass(string className) =>

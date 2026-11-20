@@ -9,7 +9,8 @@ internal readonly record struct SourceOriginSnapshot(
     bool HasUnhydratedCloudPlaceholder,
     bool HasApplicationCacheSource,
     bool HasTransientTempOrMsixCacheSource,
-    bool PrefersShortcutByDefault = false)
+    bool PrefersShortcutByDefault = false,
+    bool HasAppExecutionAliasSource = false)
 {
     public static SourceOriginSnapshot Empty => default;
 
@@ -21,7 +22,8 @@ internal readonly record struct SourceOriginSnapshot(
 
     public bool IsMoveProtectedSystemOrSharedSource =>
         InboundProtection == InboundSourceProtectionKind.SystemOrSharedProtected ||
-        HasMoveProtectedRoot;
+        HasMoveProtectedRoot ||
+        HasAppExecutionAliasSource;
 }
 
 /// <summary>
@@ -32,8 +34,11 @@ internal readonly record struct SourceOriginSnapshot(
 /// and MSIX/archive transient staging roots while bounding hover-path latency
 /// so UI/OLE <c>DragOver</c> frames remain zero-I/O after initial resolution.
 /// </summary>
-internal static class PathOriginClassifier
+internal static partial class PathOriginClassifier
 {
+    internal static readonly TimeSpan DefaultHoverProbeBudget = TimeSpan.FromMilliseconds(80);
+    internal static readonly TimeSpan DefaultDropProbeBudget = TimeSpan.FromMilliseconds(1500);
+
     private const long VolumeCacheTtlMs = 30_000;
     private const long DosDeviceCacheTtlMs = 30_000;
     private const long GestureSnapshotTtlMs = 5_000;
@@ -63,16 +68,16 @@ internal static class PathOriginClassifier
 
     private static volatile GestureSnapshotCacheEntry? s_gestureSnapshot;
 
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [LibraryImport("kernel32.dll", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern unsafe bool GetVolumePathNameW(
+    private static unsafe partial bool GetVolumePathNameW(
         string lpszFileName,
         char* lpszVolumePathName,
         uint cchBufferLength);
 
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [LibraryImport("kernel32.dll", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern unsafe bool GetVolumeNameForVolumeMountPointW(
+    private static unsafe partial bool GetVolumeNameForVolumeMountPointW(
         string lpszVolumeMountPoint,
         char* lpszVolumeName,
         uint cchBufferLength);
@@ -302,7 +307,18 @@ internal static class PathOriginClassifier
                 dosDeviceProbe,
                 volumeMountPointProbe,
                 volumeGuidProbe));
-            return probeTask.Wait(timeout) && probeTask.GetAwaiter().GetResult();
+            if (probeTask.Wait(timeout))
+            {
+                return probeTask.GetAwaiter().GetResult();
+            }
+
+            if (dosDeviceProbe is null && volumeMountPointProbe is null && volumeGuidProbe is null)
+            {
+                RecordNegativeVolumeTimeout(sourcePath);
+                RecordNegativeVolumeTimeout(destinationPath);
+            }
+
+            return false;
         }
         catch
         {
@@ -371,6 +387,14 @@ internal static class PathOriginClassifier
             return true;
         }
 
+        if (dosDeviceProbe is null &&
+            volumeMountPointProbe is null &&
+            volumeGuidProbe is null &&
+            HasRecentNegativeVolumeTimeout(materialized, destinationPath))
+        {
+            return false;
+        }
+
         try
         {
             Task<bool> probeTask = Task.Run(() => AreAllOnSameVolume(
@@ -380,7 +404,21 @@ internal static class PathOriginClassifier
                 dosDeviceProbe,
                 volumeMountPointProbe,
                 volumeGuidProbe));
-            return probeTask.Wait(timeout) && probeTask.GetAwaiter().GetResult();
+            if (probeTask.Wait(timeout))
+            {
+                return probeTask.GetAwaiter().GetResult();
+            }
+
+            if (dosDeviceProbe is null && volumeMountPointProbe is null && volumeGuidProbe is null)
+            {
+                RecordNegativeVolumeTimeout(destinationPath);
+                foreach (string src in materialized)
+                {
+                    RecordNegativeVolumeTimeout(src);
+                }
+            }
+
+            return false;
         }
         catch
         {
@@ -522,6 +560,7 @@ internal static class PathOriginClassifier
         bool hasCloudPlaceholder = false;
         bool hasAppCache = false;
         bool hasTransientTemp = false;
+        bool hasAppExecutionAlias = false;
         int inspectedCount = 0;
         bool allBundledExecutables = true;
 
@@ -536,10 +575,17 @@ internal static class PathOriginClassifier
             }
 
             inspectedCount++;
+            bool isAppExecutionAlias =
+                driveTypeProbe is null &&
+                busProbe is null &&
+                StorageMigrationNativeMethods.IsAppExecutionAliasReparsePoint(substResolved);
+            Func<string, bool>? appExecProbe = driveTypeProbe is null && busProbe is null
+                ? _ => isAppExecutionAlias
+                : null;
             if (allBundledExecutables &&
                 (driveTypeProbe is not null ||
                  busProbe is not null ||
-                 !DriveMediaInterop.IsInstalledOrBundledExecutablePath(substResolved)))
+                 !DriveMediaInterop.IsInstalledOrBundledExecutablePath(substResolved, appExecProbe)))
             {
                 allBundledExecutables = false;
             }
@@ -547,7 +593,9 @@ internal static class PathOriginClassifier
             InboundSourceProtectionKind itemProtection = DriveMediaInterop.ClassifyInboundDropSources(
                 [substResolved],
                 driveTypeProbe,
-                busProbe);
+                busProbe,
+                appExecProbe,
+                skipCacheAndCloudChecks: true);
             if (itemProtection == InboundSourceProtectionKind.SystemOrSharedProtected)
             {
                 protection = InboundSourceProtectionKind.SystemOrSharedProtected;
@@ -560,7 +608,7 @@ internal static class PathOriginClassifier
             }
 
             if (!hasMoveProtectedRoot &&
-                DriveMediaInterop.IsProtectedDragOutSource([substResolved]))
+                DriveMediaInterop.IsProtectedDragOutSource([substResolved], appExecProbe))
             {
                 hasMoveProtectedRoot = true;
             }
@@ -575,7 +623,8 @@ internal static class PathOriginClassifier
             }
 
             if (DropStagingFileOps.IsMsixPackageTransientDropPath(substResolved) ||
-                DropStagingFileOps.IsExternalTransientTempDropPath(substResolved, hasShellIdList: true))
+                DropStagingFileOps.IsExternalTransientTempDropPath(substResolved, hasShellIdList: true) ||
+                DropStagingFileOps.IsAnyDeskBoxStagingPath(substResolved))
             {
                 hasTransientTemp = true;
                 if (protection == InboundSourceProtectionKind.None)
@@ -592,6 +641,16 @@ internal static class PathOriginClassifier
             if (isCloudPlaceholder)
             {
                 hasCloudPlaceholder = true;
+                if (protection == InboundSourceProtectionKind.None)
+                {
+                    protection = InboundSourceProtectionKind.ExternalRemovableOrNetwork;
+                }
+            }
+
+            if (isAppExecutionAlias)
+            {
+                hasAppExecutionAlias = true;
+                hasMoveProtectedRoot = true;
                 if (protection == InboundSourceProtectionKind.None)
                 {
                     protection = InboundSourceProtectionKind.ExternalRemovableOrNetwork;
@@ -622,7 +681,8 @@ internal static class PathOriginClassifier
             hasCloudPlaceholder,
             hasAppCache,
             hasTransientTemp,
-            PrefersShortcutByDefault: inspectedCount > 0 && allBundledExecutables);
+            PrefersShortcutByDefault: inspectedCount > 0 && allBundledExecutables,
+            HasAppExecutionAliasSource: hasAppExecutionAlias);
     }
 
     private static bool CompareVolumeIdentitiesCore(
@@ -796,6 +856,84 @@ internal static class PathOriginClassifier
         return true;
     }
 
+    private readonly record struct CachedDirectoryLookup(string LookupKey, long ExpiresTick64);
+
+    private const int DirectoryLookupCacheTtlMs = 3_000;
+    private const int NegativeTimeoutCacheTtlMs = 3_000;
+    private const int MaxDirectoryLookupCacheEntries = 512;
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, CachedDirectoryLookup> s_directoryLookupCache =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, long> s_negativeVolumeTimeoutCache =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    private static void RecordNegativeVolumeTimeout(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return;
+        }
+
+        try
+        {
+            string normalized = Path.GetFullPath(path.Trim());
+            string key = Path.GetDirectoryName(normalized) ?? normalized;
+            if (s_negativeVolumeTimeoutCache.Count >= MaxDirectoryLookupCacheEntries)
+            {
+                s_negativeVolumeTimeoutCache.Clear();
+            }
+
+            s_negativeVolumeTimeoutCache[key] = Environment.TickCount64 + NegativeTimeoutCacheTtlMs;
+        }
+        catch
+        {
+        }
+    }
+
+    private static bool IsNegativelyCachedTimeout(string? path, long now)
+    {
+        if (string.IsNullOrWhiteSpace(path) || s_negativeVolumeTimeoutCache.IsEmpty)
+        {
+            return false;
+        }
+
+        try
+        {
+            string normalized = Path.GetFullPath(path.Trim());
+            string key = Path.GetDirectoryName(normalized) ?? normalized;
+            return s_negativeVolumeTimeoutCache.TryGetValue(key, out long expires) && now < expires;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool HasRecentNegativeVolumeTimeout(IReadOnlyList<string> sources, string destinationPath)
+    {
+        if (s_negativeVolumeTimeoutCache.IsEmpty)
+        {
+            return false;
+        }
+
+        long now = Environment.TickCount64;
+        if (IsNegativelyCachedTimeout(destinationPath, now))
+        {
+            return true;
+        }
+
+        for (int i = 0; i < sources.Count; i++)
+        {
+            if (IsNegativelyCachedTimeout(sources[i], now))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     internal static string GetDirectoryLookupKey(string fullPath, Func<string, bool>? directoryExistsProbe = null)
     {
         if (fullPath.EndsWith(Path.DirectorySeparatorChar) ||
@@ -805,21 +943,49 @@ internal static class PathOriginClassifier
         }
 
         string trimmed = Path.TrimEndingDirectorySeparator(fullPath);
+        long now = 0;
+        if (directoryExistsProbe is null)
+        {
+            now = Environment.TickCount64;
+            if (s_directoryLookupCache.TryGetValue(trimmed, out CachedDirectoryLookup cached) &&
+                now < cached.ExpiresTick64)
+            {
+                return cached.LookupKey;
+            }
+        }
+
         bool isDirectory = directoryExistsProbe is not null
             ? directoryExistsProbe(trimmed)
             : Directory.Exists(trimmed);
+        string resolved;
         if (isDirectory)
         {
             // Keep the directory itself as the cache key so an NTFS volume mount
             // point (e.g. C:\Mounts\CameraSD -> USB SD card) never poisons its
             // parent key (C:\Mounts\) for sibling local directories.
-            return EnsureTrailingBackslash(trimmed);
+            resolved = EnsureTrailingBackslash(trimmed);
+        }
+        else
+        {
+            string? parent = Path.GetDirectoryName(trimmed);
+            resolved = string.IsNullOrWhiteSpace(parent)
+                ? EnsureTrailingBackslash(fullPath)
+                : EnsureTrailingBackslash(parent);
         }
 
-        string? parent = Path.GetDirectoryName(trimmed);
-        return string.IsNullOrWhiteSpace(parent)
-            ? EnsureTrailingBackslash(fullPath)
-            : EnsureTrailingBackslash(parent);
+        if (directoryExistsProbe is null)
+        {
+            if (s_directoryLookupCache.Count >= MaxDirectoryLookupCacheEntries)
+            {
+                s_directoryLookupCache.Clear();
+            }
+
+            s_directoryLookupCache[trimmed] = new CachedDirectoryLookup(
+                resolved,
+                now + DirectoryLookupCacheTtlMs);
+        }
+
+        return resolved;
     }
 
     private static string NormalizeDriveRootFallback(string fullPath)

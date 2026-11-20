@@ -116,12 +116,12 @@ public sealed class AutostartBootReliabilityTests
     [Fact]
     public void ApplyDefaultOnce_DoesNotConsumeTheDefaultOnFailure()
     {
-        string app = File.ReadAllText(
-            TestPaths.FromRepository("src/DeskBox/App.xaml.cs"));
+        string appStartup = File.ReadAllText(
+            TestPaths.FromRepository("src/DeskBox/App.Startup.cs"));
 
         Assert.Contains(
-            "if (AutoStartDefaultPolicy.ShouldMarkApplied(effective))",
-            app,
+            "if (AutoStartDefaultPolicy.ShouldMarkApplied(resolved.State))",
+            appStartup,
             StringComparison.Ordinal);
     }
 }

@@ -126,6 +126,53 @@ public sealed class TrayContextMenuResilienceTests
     }
 
     [Fact]
+    public async Task BuildTrayMenuEntriesCore_IncludesGlobalSearchBelowOrganizeDesktopAndInvokesCallback()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), $"deskbox-tray-search-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var settingsService = new SettingsService(Path.Combine(tempDir, "settings.json"));
+            var localization = new LocalizationService(settingsService);
+            bool searchInvoked = false;
+
+            IReadOnlyList<NativeTrayMenuEntry> entries = App.BuildTrayMenuEntriesCore(
+                localization,
+                canCreateWidget: false,
+                hasUpdateAvailable: false,
+                availableUpdateVersion: null,
+                () => Task.CompletedTask,
+                _ => Task.CompletedTask,
+                () => Task.CompletedTask,
+                () => Task.CompletedTask,
+                () => Task.CompletedTask,
+                () => Task.CompletedTask,
+                () => Task.CompletedTask,
+                () => Task.CompletedTask,
+                onCreateAiWidget: () => Task.CompletedTask,
+                onOpenGlobalSearch: () =>
+                {
+                    searchInvoked = true;
+                    return Task.CompletedTask;
+                });
+
+            Assert.True(entries.Count >= 3);
+            Assert.Equal(localization.T("Tray.OrganizeDesktop"), entries[0].Text);
+            Assert.Equal(localization.T("Tray.GlobalSearch"), entries[1].Text);
+            Assert.Equal("\uE721", entries[1].Glyph);
+            Assert.True(entries[1].IsEnabled);
+            Assert.True(entries[2].IsSeparator);
+
+            await entries[1].Action!();
+            Assert.True(searchInvoked);
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, recursive: true); } catch { }
+        }
+    }
+
+    [Fact]
     public void RunTraySettingsActionAsync_HasNoSecondWindowSettleDelay()
     {
         string tray = Read("src/DeskBox/App.Tray.cs");

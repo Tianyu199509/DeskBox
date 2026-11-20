@@ -459,32 +459,14 @@ public sealed class ModuleBoundaryContractTests
     private static readonly IReadOnlyDictionary<string, int> DestructiveFileOpExpectedViolations =
         new Dictionary<string, int>(StringComparer.Ordinal)
     {
-        ["src/DeskBox/App.AotHotkeySmoke.cs"] = 1,
         // Settings app facade: 1 = deleting the feedback diagnostics archive
         // after upload (moved verbatim from the feedback window partial).
         ["src/DeskBox/Services/InProcessSettingsAppActions.cs"] = 1,
-        ["src/DeskBox/App.AotLocalFilePersistenceSmoke.cs"] = 3,
-        ["src/DeskBox/App.AotManagedUiSmoke.cs"] = 1,
-        ["src/DeskBox/App.AotMusicVolumeMutationSmoke.cs"] = 3,
-        ["src/DeskBox/App.AotMusicVolumeReadSmoke.cs"] = 2,
-        ["src/DeskBox/App.AotMusicVolumeSessionMutationSmoke.cs"] = 3,
-        // +1: the 5B-4C1C2A managed-card probe deletes the destination file
-        // it just created inside the owned native-drop fixture widget root.
-        ["src/DeskBox/App.AotNativeDropSmoke.cs"] = 5,
-        ["src/DeskBox/App.AotQuickAccessMutationSmoke.cs"] = 2,
-        ["src/DeskBox/App.AotShellMoveSmoke.cs"] = 2,
-        ["src/DeskBox/App.AotShellSmoke.cs"] = 2,
-        ["src/DeskBox/App.AotShortcutSmoke.cs"] = 5,
-        ["src/DeskBox/App.AotTodoNotificationActivationSmoke.cs"] = 1,
-        ["src/DeskBox/App.AotTodoNotificationForwardingSmoke.cs"] = 1,
-        ["src/DeskBox/App.AotTodoNotificationLifecycleSmoke.cs"] = 1,
-        ["src/DeskBox/App.AotTodoRecurrenceReminderSmoke.cs"] = 1,
         // +1: the secondary-instance update-result forwarder deletes its
         // pending marker file under the app data root after the primary
         // consumes it (TakePendingUpdateInstallResult).
         ["src/DeskBox/App.xaml.cs"] = 4,
         ["src/DeskBox/Helpers/NativeDropTarget.cs"] = 5,
-        ["src/DeskBox/Services/AotShellMoveFixture.cs"] = 1,
         // +1: retiring a downloaded installer reclaims its version-scoped
         // directory under the updates root (TryDeleteRetiredInstallerDirectory).
         // +2: the startup sweep (PruneStaleInstallerDirectories) deletes
@@ -506,7 +488,6 @@ public sealed class ModuleBoundaryContractTests
         ["src/DeskBox/Services/DesktopOrganizationCoordinator.cs"] = 1,
         ["src/DeskBox/Services/DesktopOrganizationRecoveryStore.cs"] = 2,
         ["src/DeskBox/Services/DesktopOrganizationTransaction.cs"] = 1,
-        ["src/DeskBox/Services/DirectStartupTaskBackend.cs"] = 2,
         // 2 = the anonymous client-id persist plus the #449 success-only
         // cooldown persist; both are app-state tmp+move atomic writes, not
         // user-file mutations.
@@ -547,7 +528,7 @@ public sealed class ModuleBoundaryContractTests
         // Relocation, not a new violation — total unchanged, whitelist guard
         // included in the moved code.
         ["src/DeskBox/Helpers/NativeDropMaterializationWorker.cs"] = 1,
-        ["src/DeskBox/Views/SearchPopupWindow.xaml.cs"] = 2,
+        ["src/DeskBox/Views/SearchPopupWindow.ResultsAndPreview.cs"] = 2,
         ["src/DeskBox/Views/SettingsWindow.Feedback.cs"] = 1,
     };
 

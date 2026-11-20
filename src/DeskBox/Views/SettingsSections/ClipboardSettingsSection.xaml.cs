@@ -38,6 +38,10 @@ public sealed partial class ClipboardSettingsSection : UserControl
     private string? _clipboardHotkeyError;
     private int _statsRefreshGeneration;
     private int _hotkeyRefreshGeneration;
+    private bool _suppressTabSwitchEvents;
+    private string _renderedTabLayout = string.Empty;
+    private readonly Dictionary<string, (FontIcon TabIcon, TextBlock Label, Button UpButton, Button DownButton, ToggleSwitch Switch)> _tabRowRefs =
+        new(StringComparer.OrdinalIgnoreCase);
     private IReadOnlyList<ClipboardObservedApp> _observedApps = Array.Empty<ClipboardObservedApp>();
 
     public ClipboardSettingsSection()
@@ -49,6 +53,7 @@ public sealed partial class ClipboardSettingsSection : UserControl
         {
             if (IsLoaded)
             {
+                RebuildTabLayoutList(forceRebuild: true);
                 RebuildExcludedAppLists();
             }
         };
@@ -200,6 +205,7 @@ public sealed partial class ClipboardSettingsSection : UserControl
             MoveToTopToggle.IsOn = slice.ClipboardMoveToTopOnReuse;
             SelectByTag(CardStyleComboBox, ResolveCardStyleTag(slice));
             SelectByTag(TabDisplayModeComboBox, ClipboardSettingsSlice.NormalizeTabDisplayMode(slice.ClipboardTabDisplayMode));
+            RebuildTabLayoutList(forceRebuild: true);
             ShowSourceAppToggle.IsOn = slice.ClipboardShowSourceApp;
             IgnorePrivacyFormatsToggle.IsOn = slice.ClipboardIgnoreSystemPrivacyFormats;
             SelectByTag(SecretProtectionComboBox, slice.ClipboardSensitiveProtectionMode);
@@ -469,6 +475,10 @@ public sealed partial class ClipboardSettingsSection : UserControl
         bool captureImages = CaptureImagesCheckBox.IsChecked == true;
         MaxImageSizeCard.IsEnabled = featureEnabled && captureImages;
         MaxImageSizeComboBox.IsEnabled = featureEnabled && captureImages;
+
+        bool isDefaultTabLayout = _settingsService is null ||
+            ClipboardSettingsSlice.IsDefaultTabLayout(_settingsService.Settings.Clipboard.ClipboardTabLayout);
+        ResetTabLayoutButton.IsEnabled = featureEnabled && !isDefaultTabLayout;
 
         ResetClipboardButton.IsEnabled = featureEnabled && (_widgetActions?.IsHostAvailable ?? false);
     }
@@ -876,6 +886,321 @@ public sealed partial class ClipboardSettingsSection : UserControl
         await SaveSliceMutationAsync(slice => slice.ClipboardTabDisplayMode = normalized);
     }
 
+    private void RebuildTabLayoutList(bool forceRebuild = false)
+    {
+        if (_settingsService is null || _localization is null)
+        {
+            return;
+        }
+
+        string currentLayout = ClipboardSettingsSlice.NormalizeTabLayout(
+            _settingsService.Settings.Clipboard.ClipboardTabLayout);
+        if (!forceRebuild &&
+            string.Equals(_renderedTabLayout, currentLayout, StringComparison.Ordinal) &&
+            TabLayoutListView.Items.Count == ClipboardSettingsSlice.DefaultTabOrder.Count)
+        {
+            RefreshTabLayoutSummaryAndRowStates(currentLayout);
+            return;
+        }
+
+        bool allowDragReorder = !DragDropPermissionService.IsCurrentProcessElevatedCached();
+        TabLayoutListView.AllowDrop = allowDragReorder;
+        TabLayoutListView.CanDragItems = allowDragReorder;
+        TabLayoutListView.CanReorderItems = allowDragReorder;
+        TabLayoutListView.ReorderMode = allowDragReorder
+            ? ListViewReorderMode.Enabled
+            : ListViewReorderMode.Disabled;
+
+        var itemContainerStyle = new Style(typeof(ListViewItem));
+        if (Application.Current?.Resources is { } appRes &&
+            appRes.TryGetValue("DefaultListViewItemStyle", out object? baseObj) &&
+            baseObj is Style baseItemStyle)
+        {
+            itemContainerStyle.BasedOn = baseItemStyle;
+        }
+
+        itemContainerStyle.Setters.Add(new Setter(Control.HorizontalContentAlignmentProperty, HorizontalAlignment.Stretch));
+        itemContainerStyle.Setters.Add(new Setter(Control.VerticalContentAlignmentProperty, VerticalAlignment.Center));
+        itemContainerStyle.Setters.Add(new Setter(FrameworkElement.MinHeightProperty, 42d));
+        itemContainerStyle.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(8, 2, 8, 2)));
+        itemContainerStyle.Setters.Add(new Setter(FrameworkElement.MarginProperty, new Thickness(0, 1, 0, 1)));
+        TabLayoutListView.ItemContainerStyle = itemContainerStyle;
+
+        TabLayoutListView.Items.Clear();
+        _tabRowRefs.Clear();
+
+        IReadOnlyList<ClipboardTabEntry> entries = ClipboardSettingsSlice.ParseTabLayout(currentLayout);
+        int enabledCount = entries.Count(static entry => entry.Enabled);
+        Style? iconButtonStyle = Resources.TryGetValue("IconActionButtonStyle", out object? btnStyleObj)
+            ? btnStyleObj as Style
+            : null;
+
+        for (int i = 0; i < entries.Count; i++)
+        {
+            ClipboardTabEntry entry = entries[i];
+            string tabId = entry.Id;
+            string tabLabel = _localization.T(ClipboardSettingsSlice.GetTabLocalizationKey(tabId));
+
+            var rowGrid = new Grid
+            {
+                ColumnSpacing = 10,
+                Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent)
+            };
+            rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var gripIcon = new FontIcon
+            {
+                Glyph = "\uE784",
+                FontSize = 14,
+                Opacity = 0.45,
+                VerticalAlignment = VerticalAlignment.Center,
+                Visibility = allowDragReorder ? Visibility.Visible : Visibility.Collapsed
+            };
+            ToolTipService.SetToolTip(gripIcon, _localization.T("CustomWidget.Module.DragHint"));
+            rowGrid.PointerEntered += (_, _) => gripIcon.Opacity = 0.88;
+            rowGrid.PointerExited += (_, _) => gripIcon.Opacity = 0.45;
+
+            var tabIcon = new FontIcon
+            {
+                Glyph = ClipboardSettingsSlice.GetTabGlyph(tabId),
+                FontSize = 13.5,
+                Opacity = entry.Enabled ? 0.9 : 0.45,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+
+            var labelTextBlock = new TextBlock
+            {
+                Text = tabLabel,
+                FontSize = 13.5,
+                Opacity = entry.Enabled ? 1.0 : 0.52,
+                VerticalAlignment = VerticalAlignment.Center,
+                TextTrimming = TextTrimming.CharacterEllipsis
+            };
+
+            var moveButtonsPanel = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Spacing = 2,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+
+            string moveUpText = _localization.T("Settings.Clipboard.TabLayout.MoveUp");
+            var upButton = new Button
+            {
+                Tag = tabId,
+                IsEnabled = i > 0,
+                Content = new FontIcon { Glyph = "\uE70E", FontSize = 12 }
+            };
+            if (iconButtonStyle is not null)
+            {
+                upButton.Style = iconButtonStyle;
+            }
+            ToolTipService.SetToolTip(upButton, moveUpText);
+            AutomationProperties.SetName(upButton, $"{tabLabel} - {moveUpText}");
+            upButton.Click += MoveTabUpButton_Click;
+
+            string moveDownText = _localization.T("Settings.Clipboard.TabLayout.MoveDown");
+            var downButton = new Button
+            {
+                Tag = tabId,
+                IsEnabled = i < entries.Count - 1,
+                Content = new FontIcon { Glyph = "\uE70D", FontSize = 12 }
+            };
+            if (iconButtonStyle is not null)
+            {
+                downButton.Style = iconButtonStyle;
+            }
+            ToolTipService.SetToolTip(downButton, moveDownText);
+            AutomationProperties.SetName(downButton, $"{tabLabel} - {moveDownText}");
+            downButton.Click += MoveTabDownButton_Click;
+
+            moveButtonsPanel.Children.Add(upButton);
+            moveButtonsPanel.Children.Add(downButton);
+
+            var toggleSwitch = new ToggleSwitch
+            {
+                Tag = tabId,
+                MinWidth = 0,
+                OnContent = string.Empty,
+                OffContent = string.Empty,
+                IsOn = entry.Enabled,
+                IsEnabled = !entry.Enabled || enabledCount > 1,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            AutomationProperties.SetName(toggleSwitch, tabLabel);
+            toggleSwitch.Toggled += TabVisibilitySwitch_Toggled;
+
+            Grid.SetColumn(gripIcon, 0);
+            Grid.SetColumn(tabIcon, 1);
+            Grid.SetColumn(labelTextBlock, 2);
+            Grid.SetColumn(moveButtonsPanel, 3);
+            Grid.SetColumn(toggleSwitch, 4);
+
+            rowGrid.Children.Add(gripIcon);
+            rowGrid.Children.Add(tabIcon);
+            rowGrid.Children.Add(labelTextBlock);
+            rowGrid.Children.Add(moveButtonsPanel);
+            rowGrid.Children.Add(toggleSwitch);
+
+            _tabRowRefs[tabId] = (tabIcon, labelTextBlock, upButton, downButton, toggleSwitch);
+
+            var listViewItem = new ListViewItem
+            {
+                Tag = tabId,
+                Content = rowGrid
+            };
+            AutomationProperties.SetName(listViewItem, tabLabel);
+            TabLayoutListView.Items.Add(listViewItem);
+        }
+
+        _renderedTabLayout = currentLayout;
+        RefreshTabLayoutSummaryAndRowStates(currentLayout);
+    }
+
+    private void RefreshTabLayoutSummaryAndRowStates(string currentLayout)
+    {
+        if (_localization is null)
+        {
+            return;
+        }
+
+        IReadOnlyList<ClipboardTabEntry> entries = ClipboardSettingsSlice.ParseTabLayout(currentLayout);
+        int enabledCount = entries.Count(static entry => entry.Enabled);
+
+        TopTabsExpander.Description = string.Join(
+            " · ",
+            entries
+                .Where(static entry => entry.Enabled)
+                .Select(entry => _localization.T(ClipboardSettingsSlice.GetTabLocalizationKey(entry.Id))));
+
+        _suppressTabSwitchEvents = true;
+        try
+        {
+            for (int i = 0; i < entries.Count; i++)
+            {
+                ClipboardTabEntry entry = entries[i];
+                if (_tabRowRefs.TryGetValue(entry.Id, out var row))
+                {
+                    row.TabIcon.Opacity = entry.Enabled ? 0.9 : 0.45;
+                    row.Label.Opacity = entry.Enabled ? 1.0 : 0.52;
+                    row.UpButton.IsEnabled = i > 0;
+                    row.DownButton.IsEnabled = i < entries.Count - 1;
+                    if (row.Switch.IsOn != entry.Enabled)
+                    {
+                        row.Switch.IsOn = entry.Enabled;
+                    }
+
+                    row.Switch.IsEnabled = !entry.Enabled || enabledCount > 1;
+                }
+            }
+        }
+        finally
+        {
+            _suppressTabSwitchEvents = false;
+        }
+
+        ApplyDependentControlGating();
+    }
+
+    private async void TabVisibilitySwitch_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_isLoading || _suppressTabSwitchEvents || _settingsService is null ||
+            sender is not ToggleSwitch { Tag: string tabId } toggleSwitch)
+        {
+            return;
+        }
+
+        string nextLayout = ClipboardSettingsSlice.SetTabEnabled(
+            _settingsService.Settings.Clipboard.ClipboardTabLayout,
+            tabId,
+            toggleSwitch.IsOn);
+        _renderedTabLayout = nextLayout;
+        await SaveSliceMutationAsync(slice => slice.ClipboardTabLayout = nextLayout);
+        RefreshTabLayoutSummaryAndRowStates(nextLayout);
+    }
+
+    private async void MoveTabUpButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: string tabId })
+        {
+            await MoveTabByOffsetAsync(tabId, -1);
+        }
+    }
+
+    private async void MoveTabDownButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: string tabId })
+        {
+            await MoveTabByOffsetAsync(tabId, 1);
+        }
+    }
+
+    private async Task MoveTabByOffsetAsync(string tabId, int delta)
+    {
+        if (_isLoading || _settingsService is null)
+        {
+            return;
+        }
+
+        string currentLayout = _settingsService.Settings.Clipboard.ClipboardTabLayout;
+        string nextLayout = ClipboardSettingsSlice.MoveTab(currentLayout, tabId, delta);
+        if (string.Equals(
+                ClipboardSettingsSlice.NormalizeTabLayout(currentLayout),
+                nextLayout,
+                StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        await SaveSliceMutationAsync(slice => slice.ClipboardTabLayout = nextLayout);
+        RebuildTabLayoutList(forceRebuild: true);
+    }
+
+    private async void TabLayoutListView_DragItemsCompleted(ListViewBase sender, DragItemsCompletedEventArgs args)
+    {
+        if (_isLoading || _settingsService is null)
+        {
+            return;
+        }
+
+        var orderedIds = new List<string>(TabLayoutListView.Items.Count);
+        foreach (object? item in TabLayoutListView.Items)
+        {
+            if (item is ListViewItem { Tag: string id })
+            {
+                orderedIds.Add(id);
+            }
+        }
+
+        string currentLayout = _settingsService.Settings.Clipboard.ClipboardTabLayout;
+        string nextLayout = ClipboardSettingsSlice.ReorderTabs(currentLayout, orderedIds);
+        _renderedTabLayout = nextLayout;
+        if (!string.Equals(
+                ClipboardSettingsSlice.NormalizeTabLayout(currentLayout),
+                nextLayout,
+                StringComparison.Ordinal))
+        {
+            await SaveSliceMutationAsync(slice => slice.ClipboardTabLayout = nextLayout);
+        }
+
+        RefreshTabLayoutSummaryAndRowStates(nextLayout);
+    }
+
+    private async void ResetTabLayoutButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_isLoading || _settingsService is null)
+        {
+            return;
+        }
+
+        await SaveSliceMutationAsync(slice => slice.ClipboardTabLayout = ClipboardSettingsSlice.DefaultTabLayout);
+        RebuildTabLayoutList(forceRebuild: true);
+    }
+
     private async void ShowSourceAppToggle_Toggled(object sender, RoutedEventArgs e)
     {
         if (_isLoading)
@@ -1045,6 +1370,7 @@ public sealed partial class ClipboardSettingsSection : UserControl
         var dialog = new ContentDialog
         {
             XamlRoot = XamlRoot,
+            RequestedTheme = NeutralInteractionBrush.ResolveEffectiveElementTheme(this),
             Title = _localization.Format(
                 "Settings.FeatureWidgets.ResetDialogTitle",
                 _localization.T("Clipboard.Title")),

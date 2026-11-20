@@ -513,7 +513,7 @@ internal sealed partial class TodoExportPanel : UserControl
 
             if (CurrentPreview.RangeStart is { } start && CurrentPreview.RangeEnd is { } end)
             {
-                PreviewSecondaryText.Text = $"{start:yyyy-MM-dd} – {end:yyyy-MM-dd}";
+                PreviewSecondaryText.Text = FormattableString.Invariant($"{start:yyyy-MM-dd} – {end:yyyy-MM-dd}");
                 PreviewSecondaryText.Visibility = Visibility.Visible;
             }
             else

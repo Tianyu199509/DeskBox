@@ -55,6 +55,9 @@ public sealed class OpenWithHandlerEntry : IDisposable
 
         try
         {
+            using IDisposable? childScope =
+                DeskBox.Services.ProcessEnvironmentSyncService.AcquireChildLaunchContaminationScope();
+            _ = Win32Helper.AllowSetForegroundWindow(uint.MaxValue);
             int hr = ShellOpenWithInterop.HandlerInvoke(_handler, dataObject);
             if (hr < 0)
             {
@@ -113,9 +116,9 @@ public static class ShellOpenWithHelper
             return [];
         }
 
+        var entries = new List<OpenWithHandlerEntry>();
         try
         {
-            var entries = new List<OpenWithHandlerEntry>();
             var seen = new HashSet<string>(StringComparer.CurrentCulture);
             var buffer = new IntPtr[1];
             while (entries.Count < MaxEntries)
@@ -148,6 +151,11 @@ public static class ShellOpenWithHelper
         }
         catch (Exception ex)
         {
+            foreach (OpenWithHandlerEntry leaked in entries)
+            {
+                leaked.Dispose();
+            }
+            entries.Clear();
             App.Log(
                 $"[OpenWith] enumeration failed ext='{extension}': " +
                 ex.Message);

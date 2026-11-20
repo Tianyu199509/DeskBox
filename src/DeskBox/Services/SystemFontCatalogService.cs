@@ -1,5 +1,6 @@
-using DeskBox.Platform;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using DeskBox.Platform;
 
 namespace DeskBox.Services;
 
@@ -57,32 +58,25 @@ public sealed class SystemFontCatalogService
             var logFont = new Win32Helper.LogFont
             {
                 CharSet = DefaultCharSetValue,
-                FaceName = string.Empty
             };
-            Win32Helper.EnumFontFamilyDelegate callback = (fontInfo, _, _, _) =>
+
+            GCHandle listHandle = GCHandle.Alloc(names);
+            try
             {
-                try
+                unsafe
                 {
-                    var logFontInfo = Marshal.PtrToStructure<Win32Helper.LogFont>(fontInfo);
-                    if (!string.IsNullOrWhiteSpace(logFontInfo.FaceName))
-                    {
-                        names.Add(logFontInfo.FaceName);
-                    }
+                    _ = Win32Helper.EnumFontFamiliesExW(
+                        deviceContext,
+                        ref logFont,
+                        &OnEnumFontFamilyCallback,
+                        GCHandle.ToIntPtr(listHandle),
+                        0);
                 }
-                catch
-                {
-                    // A malformed provider must not make the settings page fail.
-                }
-
-                return 1;
-            };
-
-            _ = Win32Helper.EnumFontFamiliesExW(
-                deviceContext,
-                ref logFont,
-                callback,
-                IntPtr.Zero,
-                0);
+            }
+            finally
+            {
+                listHandle.Free();
+            }
 
             return NormalizeFontFamilies(names);
         }
@@ -96,5 +90,32 @@ public sealed class SystemFontCatalogService
         {
             _ = Win32Helper.DeleteDC(deviceContext);
         }
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvStdcall)])]
+    private static unsafe int OnEnumFontFamilyCallback(
+        Win32Helper.LogFont* fontInfo,
+        IntPtr textMetrics,
+        uint fontType,
+        IntPtr parameter)
+    {
+        try
+        {
+            if (fontInfo != null && parameter != IntPtr.Zero)
+            {
+                string faceName = fontInfo->GetFaceName();
+                if (!string.IsNullOrWhiteSpace(faceName) &&
+                    GCHandle.FromIntPtr(parameter).Target is List<string> names)
+                {
+                    names.Add(faceName);
+                }
+            }
+        }
+        catch
+        {
+            // A malformed provider must not make the settings page fail.
+        }
+
+        return 1;
     }
 }

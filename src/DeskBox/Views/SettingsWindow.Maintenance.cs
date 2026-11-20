@@ -33,6 +33,14 @@ public sealed partial class SettingsWindow
             return;
         }
 
+        if (Services.DragDrop.StoreVirtualizedPathPolicy.IsWriteBlockedDestination(folderPath))
+        {
+            await ShowInfoDialogAsync(
+                _localizationService.T("Settings.Diagnostics.FailedTitle"),
+                _localizationService.T("Widget.DropBlocked.StoreVirtualizedAppData"));
+            return;
+        }
+
         ExportDiagnosticsButton.IsEnabled = false;
         try
         {
@@ -40,7 +48,7 @@ public sealed partial class SettingsWindow
             await ShowInfoDialogAsync(
                 _localizationService.T("Settings.Diagnostics.SuccessTitle"),
                 _localizationService.Format("Settings.Diagnostics.SuccessBody", archivePath));
-            Win32Helper.ShowInExplorer(archivePath);
+            ShellLaunchService.FireAndForgetRevealInExplorer(archivePath);
         }
         catch (Exception ex)
         {
@@ -68,6 +76,7 @@ public sealed partial class SettingsWindow
             var dialog = new ContentDialog
             {
                 XamlRoot = SettingsRoot.XamlRoot,
+                RequestedTheme = NeutralInteractionBrush.ResolveEffectiveElementTheme(SettingsRoot),
                 Title = _localizationService.T("Settings.AutoStart.Title"),
                 PrimaryButtonText = _localizationService.T(
                     "Settings.AutoStart.OpenSystemSettings"),
@@ -94,6 +103,7 @@ public sealed partial class SettingsWindow
             var dialog = new ContentDialog
             {
                 XamlRoot = SettingsRoot.XamlRoot,
+                RequestedTheme = NeutralInteractionBrush.ResolveEffectiveElementTheme(SettingsRoot),
                 Title = _localizationService.T("Settings.DragDropPermission.RelaunchTitle"),
                 PrimaryButtonText = _localizationService.T("Settings.DragDropPermission.RelaunchButton"),
                 CloseButtonText = _localizationService.T("Common.Cancel"),
@@ -107,8 +117,8 @@ public sealed partial class SettingsWindow
 
             if (await dialog.ShowAsync() == ContentDialogResult.Primary)
             {
-                if (_appActions.TryRelaunchAsExplorerUser(
-                        $"--await-parent-exit {Environment.ProcessId}"))
+                string relaunchArgs = $"--await-parent-exit {Environment.ProcessId}";
+                if (await Task.Run(() => _appActions.TryRelaunchAsExplorerUser(relaunchArgs)))
                 {
                     // Same trap as the elevation notice: a bare inline
                     // Application.Exit() is deferred through the XAML message
@@ -155,6 +165,14 @@ public sealed partial class SettingsWindow
             return;
         }
 
+        if (Services.DragDrop.StoreVirtualizedPathPolicy.IsWriteBlockedDestination(folderPath))
+        {
+            await ShowInfoDialogAsync(
+                _localizationService.T("Settings.DataBackup.FailedTitle"),
+                _localizationService.T("Widget.DropBlocked.StoreVirtualizedAppData"));
+            return;
+        }
+
         ExportDataBackupButton.IsEnabled = false;
         try
         {
@@ -163,7 +181,7 @@ public sealed partial class SettingsWindow
             await ShowInfoDialogAsync(
                 _localizationService.T("Settings.DataBackup.SuccessTitle"),
                 _localizationService.Format("Settings.DataBackup.SuccessBody", backupPath));
-            Win32Helper.ShowInExplorer(backupPath);
+            ShellLaunchService.FireAndForgetRevealInExplorer(backupPath);
         }
         catch (OperationCanceledException) when (_backupCommands.IsStopping) { }
         catch (Exception ex)
@@ -237,6 +255,7 @@ public sealed partial class SettingsWindow
             var dialog = new ContentDialog
             {
                 XamlRoot = SettingsRoot.XamlRoot,
+                RequestedTheme = NeutralInteractionBrush.ResolveEffectiveElementTheme(SettingsRoot),
                 Title = _localizationService.T("Settings.DataBackup.RestoreConfirmTitle"),
                 PrimaryButtonText = _localizationService.T("Settings.DataBackup.RestoreConfirmButton"),
                 CloseButtonText = _localizationService.T("Common.Cancel"),
@@ -330,7 +349,7 @@ public sealed partial class SettingsWindow
             }
 
             await RefreshBackupSnapshotInventoryAsync();
-            Win32Helper.ShowInExplorer(snapshotPath);
+            ShellLaunchService.FireAndForgetRevealInExplorer(snapshotPath);
         }
         catch (OperationCanceledException) when (_backupCommands.IsStopping) { }
         catch (Exception ex)
@@ -391,7 +410,7 @@ public sealed partial class SettingsWindow
         // default "automatic" snapshot folder.
         string directory = _backupSettingsViewModel.State.LocalOpenDirectory;
         Directory.CreateDirectory(directory);
-        Win32Helper.ShowInExplorer(directory);
+        ShellLaunchService.FireAndForgetRevealInExplorer(directory);
     }
 
     private async void RefreshBackupSnapshotsButton_Click(object sender, RoutedEventArgs e)
@@ -480,7 +499,7 @@ public sealed partial class SettingsWindow
             }
         };
 
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        if (await ShowDialogWhenFreeAsync(() => dialog) != ContentDialogResult.Primary)
         {
             return;
         }
@@ -553,12 +572,19 @@ public sealed partial class SettingsWindow
             }
         };
 
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        if (await ShowDialogWhenFreeAsync(() => dialog) != ContentDialogResult.Primary)
         {
             return;
         }
 
-        await ViewModel.RestoreDefaultPreferencesAsync();
+        try
+        {
+            await ViewModel.RestoreDefaultPreferencesAsync();
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[SettingsWindow] RestoreDefaultPreferences failed: {ex.Message}");
+        }
     }
 
 }

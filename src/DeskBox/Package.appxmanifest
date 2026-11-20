@@ -67,6 +67,14 @@
             <uap:DisplayName>DeskBox</uap:DisplayName>
           </uap:Protocol>
         </uap:Extension>
+        <uap:Extension Category="windows.fileTypeAssociation">
+          <uap:FileTypeAssociation Name="dbxwidget">
+            <uap:DisplayName>DeskBox Widget</uap:DisplayName>
+            <uap:SupportedFileTypes>
+              <uap:FileType>.dbxwidget</uap:FileType>
+            </uap:SupportedFileTypes>
+          </uap:FileTypeAssociation>
+        </uap:Extension>
         <uap5:Extension Category="windows.startupTask">
           <uap5:StartupTask
             TaskId="DeskBoxStartupTask"
@@ -99,5 +107,6 @@
     <Capability Name="internetClient" />
     <rescap:Capability Name="runFullTrust" />
     <DeviceCapability Name="location" />
+    <DeviceCapability Name="radios" />
   </Capabilities>
 </Package>

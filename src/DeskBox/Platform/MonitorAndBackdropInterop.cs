@@ -90,6 +90,13 @@ internal static unsafe class MonitorAndBackdropInterop
     [DllImport("user32.dll", ExactSpelling = true)]
     internal static extern IntPtr GetWindowLongPtrW(IntPtr hWnd, int nIndex);
 
+    [DllImport("user32.dll", ExactSpelling = true)]
+    internal static extern int GetLayeredWindowAttributes(
+        IntPtr hwnd,
+        out uint pcrKey,
+        out byte pbAlpha,
+        out uint pdwFlags);
+
     [DllImport("dwmapi.dll", ExactSpelling = true)]
     internal static extern int DwmGetWindowAttribute(
         IntPtr hwnd,

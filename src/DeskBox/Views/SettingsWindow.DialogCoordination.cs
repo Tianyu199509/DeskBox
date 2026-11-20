@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using DeskBox.Helpers;
 using Microsoft.UI.Xaml.Controls;
 
 namespace DeskBox.Views;
@@ -38,6 +39,8 @@ public sealed partial class SettingsWindow
             {
                 return ContentDialogResult.None;
             }
+
+            dialog.RequestedTheme = NeutralInteractionBrush.ResolveEffectiveElementTheme(SettingsRoot);
 
             try
             {

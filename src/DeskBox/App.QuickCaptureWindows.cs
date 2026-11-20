@@ -345,7 +345,7 @@ public partial class App
             SettingsService);
     }
 
-    private static string FormatHudSnippet(string? rawText)
+    internal static string FormatHudSnippet(string? rawText)
     {
         if (string.IsNullOrWhiteSpace(rawText))
         {
@@ -356,10 +356,25 @@ public partial class App
             .Replace("\r\n", " ", StringComparison.Ordinal)
             .Replace('\r', ' ')
             .Replace('\n', ' ')
+            .Replace('\u2028', ' ') // LINE SEPARATOR — also breaks TextBlock lines
+            .Replace('\u2029', ' ') // PARAGRAPH SEPARATOR — also breaks TextBlock lines
+            .Replace('\u0085', ' ') // NEL — also breaks TextBlock lines
             .Trim();
-        return singleLine.Length > 28
-            ? string.Concat(singleLine.AsSpan(0, 28), "…")
-            : singleLine;
+        if (singleLine.Length <= 28)
+        {
+            return singleLine;
+        }
+
+        int cut = 28;
+        // Never split a surrogate pair: when position 28 lands on a high
+        // surrogate (emoji, extended ideographs), back off one code unit so
+        // the pair is excluded as a whole instead of rendering U+FFFD.
+        if (char.IsHighSurrogate(singleLine[cut - 1]))
+        {
+            cut--;
+        }
+
+        return string.Concat(singleLine.AsSpan(0, cut), "…");
     }
 
     public async Task<bool> CreateTodoItemFromTextAsync(string todoText)

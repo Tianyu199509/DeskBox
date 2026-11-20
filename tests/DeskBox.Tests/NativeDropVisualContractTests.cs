@@ -327,6 +327,25 @@ public sealed class NativeDropVisualContractTests
             StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void NativeDropBridge_TracksSurfaceCleanupWithoutWindowHighlight()
+    {
+        string source = ReadRepositoryFile(
+            "src/DeskBox/Views/ContentWidgetWindow.NativeDragDrop.cs");
+
+        Assert.Contains("DragEnterEvent +=", source, StringComparison.Ordinal);
+        Assert.Contains("DragOverEvent +=", source, StringComparison.Ordinal);
+        Assert.Contains("DragLeaveEvent +=", source, StringComparison.Ordinal);
+        Assert.Contains("ObserveNativeDragPointer", source, StringComparison.Ordinal);
+        Assert.Contains("ClearDragSessionVisualState", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("ClearNativeFileDropHighlight", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("SetExclusiveWindowDropTarget", source, StringComparison.Ordinal);
+        Assert.Contains("UIElement.DragLeaveEvent", source, StringComparison.Ordinal);
+        Assert.Contains("GroupFileDrop_DragLeave", source, StringComparison.Ordinal);
+        Assert.Contains("IsPointerOverContentWindow()", source, StringComparison.Ordinal);
+        Assert.Contains("Group drag leave cleared tracking", source, StringComparison.Ordinal);
+    }
+
     private static string ReadRepositoryFile(string relativePath)
     {
         return File.ReadAllText(TestPaths.FromRepository(relativePath));

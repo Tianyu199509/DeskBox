@@ -96,7 +96,8 @@ internal static class WicBuiltInThumbnailDecoder
         Guid decoderId,
         int requestedSize)
     {
-        if (!File.Exists(path))
+        if (!File.Exists(path) ||
+            DeskBox.Platform.DriveMediaInterop.HasUnhydratedCloudAttributesOnDisk(path))
         {
             return null;
         }

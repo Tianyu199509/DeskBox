@@ -44,7 +44,7 @@
 
             <TextBox
                 x:Name="EditorTextBoxElement"
-                AutomationProperties.LabeledBy="{Binding ElementName=TitleTextBlockElement}"
+                AutomationProperties.LabeledBy="{x:Bind TitleTextBlockElement, Mode=OneTime}"
                 Grid.Row="1"
                 FontSize="{x:Bind EditorFontSize, Mode=OneWay}"
                 Style="{StaticResource WidgetEditorTextBoxStyle}"

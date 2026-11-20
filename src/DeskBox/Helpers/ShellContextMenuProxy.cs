@@ -521,7 +521,7 @@ internal static class ShellContextMenuProxy
         using var process = new Process { StartInfo = startInfo };
         try
         {
-            if (!process.Start())
+            if (!StartProxyProcess(process))
             {
                 App.Log("[ShellContextMenuProxy] One-shot proxy did not start");
                 return new RoundOutcome(MenuResult.Failed, TransportFailure: false);
@@ -623,7 +623,7 @@ internal static class ShellContextMenuProxy
         startInfo.ArgumentList.Add(MenuThemeToken());
 
         var process = new Process { StartInfo = startInfo };
-        if (!process.Start())
+        if (!StartProxyProcess(process))
         {
             process.Dispose();
             throw new InvalidOperationException("Native proxy did not start");
@@ -714,6 +714,13 @@ internal static class ShellContextMenuProxy
             App.LogVerbose(
                 $"[ShellContextMenuProxy] Foreground grant failed: {ex.Message}");
         }
+    }
+
+    private static bool StartProxyProcess(Process process)
+    {
+        using IDisposable? childScope =
+            DeskBox.Services.ProcessEnvironmentSyncService.AcquireChildLaunchContaminationScope();
+        return process.Start();
     }
 
     private static string ResolveProxyExecutablePath() => Path.Combine(

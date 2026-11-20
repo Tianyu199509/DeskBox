@@ -539,7 +539,7 @@ public sealed partial class WidgetManager
     private static string GetAnimationWorkAreaKey(IDesktopWidgetWindow window)
     {
         var workArea = GetAnimationWorkArea(window);
-        return $"{workArea.X}:{workArea.Y}:{workArea.Width}:{workArea.Height}";
+        return WidgetPositioningService.CreateMonitorKey(workArea);
     }
 
     private static Windows.Graphics.RectInt32 GetAnimationWorkArea(IDesktopWidgetWindow window)

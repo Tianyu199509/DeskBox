@@ -17,12 +17,14 @@ public partial class WidgetViewModel
 
     public Task<OrganizationHistoryEntry?> RecordSubfolderMoveUndoAsync(
         IReadOnlyList<FileService.FileTransferResult> results,
-        IReadOnlyDictionary<string, HashSet<string>?>? preExistingMergeSnapshots = null) =>
+        IReadOnlyDictionary<string, HashSet<string>?> preExistingMergeSnapshots,
+        string? sourceWidgetId = null) =>
         _organizerService.RecordCompletedMoveHistoryAsync(
             Config,
             Name,
             results,
-            preExistingMergeSnapshots);
+            preExistingMergeSnapshots,
+            sourceWidgetId);
 
     public async Task<int> UndoHistoryEntryAsync(string historyId)
     {
@@ -99,6 +101,9 @@ public partial class WidgetViewModel
         bool activateManualSortOnSuccess = false,
         WidgetVisibleInsertionAnchor? preferredStackAnchor = null)
     {
+        LastImportSkippedConflictCount = 0;
+        LastImportUndoHistoryId = null;
+        LastImportDestinationPaths = [];
         var normalizedPaths = paths
             .Where(path => !string.IsNullOrWhiteSpace(path))
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -163,6 +168,10 @@ public partial class WidgetViewModel
         catch (Exception ex) when (
             ex is FileService.IFileTransferWithCompletedResults partial)
         {
+            LastImportDestinationPaths = partial.CompletedResults
+                .Select(static item => Path.GetFullPath(item.DestinationPath))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
             await ApplyImportedTransferResultsAsync(
                 partial.CompletedResults,
                 shouldMove,
@@ -170,9 +179,23 @@ public partial class WidgetViewModel
                 preferredManualIndex,
                 activateManualSortOnSuccess,
                 preferredStackAnchor);
+            if (ex.Data[OrganizerService.PartialHistoryEntryIdDataKey] is string partialHistoryId)
+            {
+                LastImportUndoHistoryId = partialHistoryId;
+            }
+
             throw;
         }
 
+        LastImportSkippedConflictCount = operation.SkippedItemCount;
+        LastImportUndoHistoryId =
+            operation.History is { CanUndo: true, IsUndone: false } undoableHistory
+                ? undoableHistory.Id
+                : null;
+        LastImportDestinationPaths = operation.CompletedItems
+            .Select(static item => Path.GetFullPath(item.DestinationPath))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
         // CompletedItems (not the persisted History entry) carries this
         // run's receipts: oversized batches are compacted to a summary
         // before the entry is returned.
@@ -199,6 +222,23 @@ public partial class WidgetViewModel
     /// success for files that were never transferred.
     /// </summary>
     internal int LastImportSkippedUndisplayableCount { get; private set; }
+    internal int LastImportSkippedConflictCount { get; private set; }
+
+    /// <summary>
+    /// The exact undoable history-entry id produced by the most recent
+    /// <see cref="ImportPathsAsync"/> run (null for copies, unsafe merges, and
+    /// failed imports). HUD undo receipts bind THIS id — the global
+    /// "latest undoable entry" can belong to another widget or batch.
+    /// </summary>
+    internal string? LastImportUndoHistoryId { get; private set; }
+
+    /// <summary>
+    /// Normalized destination paths written, created, or overwritten during the
+    /// most recent <see cref="ImportPathsAsync"/> run so stack-drop commit paths
+    /// can include overwritten same-name files instead of relying solely on set
+    /// difference against pre-drop items.
+    /// </summary>
+    internal IReadOnlyList<string> LastImportDestinationPaths { get; private set; } = [];
 
     private static (List<string> DisplayablePaths, int SkippedUndisplayableCount)
         PartitionDisplayableImportPaths(IReadOnlyList<string> paths)
@@ -275,9 +315,19 @@ public partial class WidgetViewModel
                 originalSortState = CaptureCurrentFolderSortStateAndActivateManual();
             }
 
-            foreach (string destinationPath in materialized.Select(
+            var seenTopLevelDestinations = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (string rawDestinationPath in materialized.Select(
                          result => result.DestinationPath))
             {
+                string? destinationPath = ResolveDirectChildDestinationPath(
+                    rawDestinationPath,
+                    destinationFolderPath);
+                if (string.IsNullOrWhiteSpace(destinationPath) ||
+                    !seenTopLevelDestinations.Add(destinationPath))
+                {
+                    continue;
+                }
+
                 if (!File.Exists(destinationPath) &&
                     !Directory.Exists(destinationPath))
                 {
@@ -341,6 +391,48 @@ public partial class WidgetViewModel
             {
                 RestoreCurrentFolderSortState(capturedSortState);
             }
+        }
+    }
+
+    /// <summary>
+    /// Returns the normalized destination path only when it is a direct child
+    /// of <paramref name="destinationFolderPath"/>. Nested leaf paths returned
+    /// by partial directory merges (e.g. <c>Box\Sub\file.txt</c>) must never be
+    /// upserted as phantom top-level tiles in <c>Box</c> (FL-12).
+    /// </summary>
+    internal static string? ResolveDirectChildDestinationPath(
+        string? destinationPath,
+        string? destinationFolderPath)
+    {
+        if (string.IsNullOrWhiteSpace(destinationPath) ||
+            string.IsNullOrWhiteSpace(destinationFolderPath))
+        {
+            return null;
+        }
+
+        try
+        {
+            string normalizedDestination = Path.TrimEndingDirectorySeparator(
+                Path.GetFullPath(destinationPath));
+            string normalizedFolder = Path.TrimEndingDirectorySeparator(
+                Path.GetFullPath(destinationFolderPath));
+            string? parent = Path.GetDirectoryName(normalizedDestination);
+            if (string.IsNullOrWhiteSpace(parent))
+            {
+                return null;
+            }
+
+            string normalizedParent = Path.TrimEndingDirectorySeparator(parent);
+            return string.Equals(
+                normalizedParent,
+                normalizedFolder,
+                StringComparison.OrdinalIgnoreCase)
+                ? normalizedDestination
+                : null;
+        }
+        catch
+        {
+            return null;
         }
     }
 

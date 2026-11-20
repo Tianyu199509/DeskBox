@@ -167,8 +167,9 @@ public sealed class ImeCompatibilityTests
     [InlineData("src/DeskBox/Views/ContentWidgetWindow.Commands.cs", "ShouldDeferInlineEditorBlurCommit")]
     [InlineData("src/DeskBox/Controls/WidgetContents/CustomWidgetNativeRenderer.cs", "ImeCompositionGuard")]
     [InlineData("src/DeskBox/Controls/WidgetContents/CustomWidgetNativeRenderer.Primitives.cs", "ImeCompositionGuard")]
-    [InlineData("src/DeskBox/Views/CustomWidgetStudioWindow.Pages.cs", "ImeCompositionGuard")]
+    [InlineData("src/DeskBox/Controls/Studio/StudioComposerCardBuilder.cs", "ImeCompositionGuard")]
     [InlineData("src/DeskBox/Views/CustomWidgetStudioWindow.xaml.cs", "ImeCompositionGuard")]
+    [InlineData("src/DeskBox/Services/CustomWidgetRuntime/CustomWidgetSettingsFormBuilder.cs", "ImeCompositionGuard")]
     [InlineData("src/DeskBox/Views/SettingsWindow.Navigation.cs", "ImeCompositionGuard")]
     [InlineData("src/DeskBox/Views/SettingsWindow.HotkeyAndAppearance.cs", "ImeCompositionGuard")]
     [InlineData("src/DeskBox/Views/SettingsSections/CustomWidgetSettingsSection.xaml.cs", "ShouldDeferInlineEditorBlurCommit")]
@@ -187,12 +188,17 @@ public sealed class ImeCompatibilityTests
     [Fact]
     public void EmojiInputs_AllowZwjGraphemeSequencesAndPinyinPreedit()
     {
-        string studioPages = File.ReadAllText(TestPaths.FromRepository("src/DeskBox/Views/CustomWidgetStudioWindow.Pages.cs"));
+        string studioPages = string.Join(
+            "\n",
+            Directory.GetFiles(TestPaths.FromRepository("src/DeskBox/Controls/Studio"), "*.cs")
+                .OrderBy(static path => path, StringComparer.Ordinal)
+                .Select(File.ReadAllText));
         string settingsSection = File.ReadAllText(TestPaths.FromRepository("src/DeskBox/Views/SettingsSections/CustomWidgetSettingsSection.xaml.cs"));
+        string emojiPickerHelper = File.ReadAllText(TestPaths.FromRepository("src/DeskBox/Helpers/EmojiPickerFlyoutHelper.cs"));
 
         Assert.DoesNotContain("MaxLength = 8", studioPages, StringComparison.Ordinal);
         Assert.DoesNotContain("MaxLength = 12", settingsSection, StringComparison.Ordinal);
-        Assert.Contains("MaxLength = 32", studioPages, StringComparison.Ordinal);
-        Assert.Contains("MaxLength = 32", settingsSection, StringComparison.Ordinal);
+        Assert.DoesNotContain("MaxLength = 12", emojiPickerHelper, StringComparison.Ordinal);
+        Assert.Contains("MaxLength = 32", emojiPickerHelper, StringComparison.Ordinal);
     }
 }

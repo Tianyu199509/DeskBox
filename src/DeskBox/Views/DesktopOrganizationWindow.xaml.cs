@@ -191,6 +191,11 @@ public sealed partial class DesktopOrganizationWindow : Window
         }
 
         e.Handled = true;
+        if (TaskView.TryCancelActiveInteraction())
+        {
+            return;
+        }
+
         if (TaskView.IsExecutionRunning)
         {
             TaskView.CancelExecutionAndCloseWhenSafe();
@@ -206,7 +211,7 @@ public sealed partial class DesktopOrganizationWindow : Window
                 var dialog = new ContentDialog
                 {
                     XamlRoot = RootGrid.XamlRoot,
-                    RequestedTheme = App.Current.ThemeService.CurrentTheme,
+                    RequestedTheme = NeutralInteractionBrush.ResolveEffectiveElementTheme(RootGrid),
                     Title = loc.T("DesktopOrganization.Layout.DiscardChangesTitle"),
                     Content = loc.T("DesktopOrganization.Layout.DiscardChangesBody"),
                     PrimaryButtonText = loc.T("DesktopOrganization.Layout.DiscardAndClose"),
@@ -239,19 +244,9 @@ public sealed partial class DesktopOrganizationWindow : Window
 
     private void ApplyTitleBarColors()
     {
-        bool isDark = RootGrid.ActualTheme switch
-        {
-            ElementTheme.Dark => true,
-            ElementTheme.Light => false,
-            _ => Win32Helper.IsSystemDarkMode()
-        };
-        AppWindowTitleBar titleBar = _appWindow.TitleBar;
-        titleBar.ButtonBackgroundColor = Colors.Transparent;
-        titleBar.ButtonInactiveBackgroundColor = Colors.Transparent;
-        titleBar.ButtonForegroundColor = isDark ? Colors.White : Colors.Black;
-        titleBar.ButtonInactiveForegroundColor = isDark
-            ? Windows.UI.Color.FromArgb(0xA0, 0xFF, 0xFF, 0xFF)
-            : Windows.UI.Color.FromArgb(0xA0, 0x10, 0x10, 0x10);
+        bool isDark = NeutralInteractionBrush.IsDarkTheme(RootGrid);
+        Win32Helper.SetWindowTheme(_hWnd, isDark);
+        WindowShellState.TryApplyExtendedTitleBarButtonColors(_appWindow, isDark);
     }
 
     private void InstallMinimumSizeHook()
@@ -285,18 +280,16 @@ public sealed partial class DesktopOrganizationWindow : Window
         UIntPtr subclassId,
         UIntPtr refData)
     {
-        if (message == WmGetMinMaxInfo)
+        if (message == WmGetMinMaxInfo && lParam != IntPtr.Zero)
         {
-            var minMaxInfo = Marshal.PtrToStructure<MinMaxInfo>(lParam);
-            double scale = Win32Helper.GetDpiScaleForWindow(_hWnd, RootGrid.XamlRoot);
-            minMaxInfo.MinTrackSize.X = Math.Max(
-                minMaxInfo.MinTrackSize.X,
-                ToPhysicalPixels(MinimumWidth, scale));
-            minMaxInfo.MinTrackSize.Y = Math.Max(
-                minMaxInfo.MinTrackSize.Y,
-                ToPhysicalPixels(MinimumHeight, scale));
-            Marshal.StructureToPtr(minMaxInfo, lParam, false);
-            return IntPtr.Zero;
+            return WindowShellState.ApplyMinTrackSizeWithWorkAreaClamp(
+                hWnd,
+                message,
+                wParam,
+                lParam,
+                Win32Helper.GetDpiScaleForWindow(_hWnd, RootGrid.XamlRoot),
+                MinimumWidth,
+                MinimumHeight);
         }
 
         if (message == WmNcDestroy)
@@ -335,18 +328,22 @@ public sealed partial class DesktopOrganizationWindow : Window
     private void DesktopOrganizationWindow_Closed(object sender, WindowEventArgs args)
     {
         RemoveMinimumSizeHook();
-        TaskView.CancelPendingWork();
+        TaskView.CleanupForWindowClosed();
         TaskView.CloseRequested -= TaskView_CloseRequested;
         TaskView.OrganizationCompleted -= TaskView_OrganizationCompleted;
         TaskView.OrganizationUndone -= TaskView_OrganizationUndone;
         _appWindow.Closing -= AppWindow_Closing;
         AppTitleBar.ActualThemeChanged -= AppTitleBar_ActualThemeChanged;
         Closed -= DesktopOrganizationWindow_Closed;
+        ContentLayer.Child = null;
+        RootGrid.Children.Clear();
+        Content = null;
     }
 
     private void DesktopOrganizationWindow_ClosedInternal(object sender, WindowEventArgs args)
     {
         WindowsCompatibilityService.ReleaseTitleBarExtensions(this, _appWindow);
+        SystemBackdrop = null;
 
         // This window closes for real (no hide-and-reuse), so leaving the
         // quick-reveal raised band happens on teardown; the manager skips

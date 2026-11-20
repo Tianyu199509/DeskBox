@@ -20,7 +20,7 @@ public sealed class CloudBackupPasswordBoxAotGuardTests
     private const string CloudBackupPath =
         "src/DeskBox/Views/SettingsWindow.CloudBackup.cs";
     private const string DeepSmokePath =
-        "src/DeskBox/Views/SettingsWindow.AotDeepSmoke.cs";
+        "tests/DeskBox.AotSmoke/Views/SettingsWindow.AotDeepSmoke.cs";
 
     [Fact]
     public void TypedLookup_RootsTheProjectedPasswordBoxForAotNameResolution()

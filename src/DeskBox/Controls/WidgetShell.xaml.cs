@@ -343,6 +343,13 @@ public sealed partial class WidgetShell : UserControl
             typeof(WidgetShell),
             new PropertyMetadata(false, OnShowAddButtonChanged));
 
+    public static readonly DependencyProperty ShowQuickSettingsButtonProperty =
+        DependencyProperty.Register(
+            nameof(ShowQuickSettingsButton),
+            typeof(bool),
+            typeof(WidgetShell),
+            new PropertyMetadata(false, OnShowQuickSettingsButtonChanged));
+
     public static readonly DependencyProperty ChromeModeProperty =
         DependencyProperty.Register(
             nameof(ChromeMode),
@@ -400,7 +407,6 @@ public sealed partial class WidgetShell : UserControl
     private string _capturedCompactOverlayTitle = string.Empty;
     private double _capturedCompactIconSize = 14;
     private bool _compactTextViewportUpdateQueued;
-    private ScalarKeyFrameAnimation? _groupDropBreathingAnimation;
     private DispatcherQueueTimer? _compactMarqueeDelayTimer;
     private ScalarKeyFrameAnimation? _compactMarqueeAnimation;
     private TranslateTransform? _rightButtonsTransform;
@@ -485,6 +491,7 @@ public sealed partial class WidgetShell : UserControl
     }
 
     public event EventHandler<RoutedEventArgs>? AddRequested;
+    public event EventHandler<RoutedEventArgs>? QuickSettingsRequested;
     public event EventHandler<RoutedEventArgs>? PositionLockRequested;
     public event EventHandler<RoutedEventArgs>? SizeLockRequested;
     public event EventHandler<WidgetMenuRequestedEventArgs>? MoreRequested;
@@ -606,7 +613,7 @@ public sealed partial class WidgetShell : UserControl
             StopTransientCompactStoryboards();
             StopDeferredExpandedContentRevealAnimation();
             _compactTextViewportUpdateQueued = false;
-            StopGroupDropPreviewBreathing();
+            SetGroupDropPreview(WidgetGroupDropPreviewState.Hidden);
             EndShellDragSession(notifyCompact: true);
             ClearPendingMoreMenuPointerPosition();
         };
@@ -949,11 +956,36 @@ public sealed partial class WidgetShell : UserControl
         return OverlayDragHandle!;
     }
 
+    private Microsoft.UI.Xaml.Controls.ToolTip? _overlayDragHandleToolTip;
+    private bool _isDragHandleToolTipSuppressed;
+    private bool _isGroupDragSourceShrunk;
+
+    public void PrewarmGroupDropPreview() => EnsureGroupDropPreview();
+
     private void EnsureGroupDropPreview()
     {
         if (GroupDropPreview is null)
         {
             _ = FindName(nameof(GroupDropPreview));
+        }
+    }
+
+    public void SetDragHandleToolTipSuppressed(bool suppressed)
+    {
+        _isDragHandleToolTipSuppressed = suppressed;
+        if (_overlayDragHandleToolTip is not null)
+        {
+            if (suppressed)
+            {
+                _overlayDragHandleToolTip.IsOpen = false;
+            }
+
+            _overlayDragHandleToolTip.IsEnabled = !suppressed;
+        }
+
+        if (suppressed)
+        {
+            HideCompactHint();
         }
     }
 
@@ -970,9 +1002,12 @@ public sealed partial class WidgetShell : UserControl
             return;
         }
 
+        _overlayDragHandleToolTip ??= new Microsoft.UI.Xaml.Controls.ToolTip();
+        _overlayDragHandleToolTip.Content = _overlayDragHandleLabel;
+        _overlayDragHandleToolTip.IsEnabled = !_isDragHandleToolTipSuppressed;
         Microsoft.UI.Xaml.Controls.ToolTipService.SetToolTip(
             OverlayDragHandle,
-            _overlayDragHandleLabel);
+            _overlayDragHandleToolTip);
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(
             OverlayDragHandle,
             _overlayDragHandleLabel);
@@ -1016,6 +1051,12 @@ public sealed partial class WidgetShell : UserControl
         set => SetValue(ShowAddButtonProperty, value);
     }
 
+    public bool ShowQuickSettingsButton
+    {
+        get => (bool)GetValue(ShowQuickSettingsButtonProperty);
+        set => SetValue(ShowQuickSettingsButtonProperty, value);
+    }
+
     public WidgetChromeMode ChromeMode
     {
         get => (WidgetChromeMode)GetValue(ChromeModeProperty);
@@ -1035,6 +1076,7 @@ public sealed partial class WidgetShell : UserControl
     }
 
     public Visibility AddButtonVisibility => ShowAddButton ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility QuickSettingsButtonVisibility => ShowQuickSettingsButton ? Visibility.Visible : Visibility.Collapsed;
 
     /// <summary>
     /// Custom title bar content for migrated legacy widgets that still own title interactions.
@@ -1061,6 +1103,7 @@ public sealed partial class WidgetShell : UserControl
     public Button PositionLockActionButton => PositionLockButton;
     public Button SizeLockActionButton => SizeLockButton;
     public Button AddActionButton => AddButton;
+    public Button QuickSettingsActionButton => QuickSettingsButton;
     public Button CollapseActionButton => CollapseButton;
     public Button? CompactExpandActionButton => CompactExpandButton;
     public FrameworkElement? OverlayDragHandleElement => OverlayDragHandle;
@@ -1103,6 +1146,7 @@ public sealed partial class WidgetShell : UserControl
     public FrameworkElement SizeLockActionIcon => SizeLockButtonIcon;
     public FrameworkElement SizeLockFilledActionIcon => SizeLockButtonFilledIcon;
     public FrameworkElement AddActionIcon => AddButtonIcon;
+    public FrameworkElement QuickSettingsActionIcon => QuickSettingsButtonIcon;
     public FrameworkElement MoreActionIcon => MoreButtonIcon;
     public FrameworkElement CloseActionIcon => CloseButtonIcon;
     public FrameworkElement DragHandleElement => _isCollapsed
@@ -1216,7 +1260,7 @@ public sealed partial class WidgetShell : UserControl
         _isContentSnapshotTransitionActive ||
         _isResponsiveLayoutTransitionActive ||
         OutgoingContentPresenter.Content is not null ||
-        _groupDropBreathingAnimation is not null;
+        GroupDropPreview?.IsShowing == true;
 
     // Looping ambient decoration (compact marquee, vinyl rotation) is
     // steady-state, not transient work — it is excluded from
@@ -1227,6 +1271,8 @@ public sealed partial class WidgetShell : UserControl
         _isCompactVinylRotating;
 
     public bool HasWidgetGroup => _groupPresentation is not null;
+
+    public WidgetGroupPresentation? CurrentGroupPresentation => _groupPresentation;
 
     internal void SetGroupTitleForegroundColors(Color primary, Color secondary, Color disabled, bool highContrast)
     {
@@ -1376,6 +1422,18 @@ public sealed partial class WidgetShell : UserControl
         GroupTitleSwitcher?.ObserveNativeDragHoverMember(memberId);
     }
 
+    internal void ObserveGroupTitleDragAutoScroll(
+        FrameworkElement coordinateSpace,
+        Windows.Foundation.Point point)
+    {
+        GroupTitleSwitcher?.ObserveNativeDragAutoScroll(coordinateSpace, point);
+    }
+
+    internal void StopGroupTitleDragAutoScroll()
+    {
+        GroupTitleSwitcher?.StopNativeDragAutoScroll();
+    }
+
     internal string? HitTestGroupTitleDropTargetMemberId(
         FrameworkElement coordinateSpace,
         Windows.Foundation.Point point)
@@ -1409,137 +1467,82 @@ public sealed partial class WidgetShell : UserControl
         GroupTitleSwitcher?.SetFileDragStripFreeze(active);
     }
 
-    public void SetGroupDropPreview(
-        bool visible,
-        bool ready,
-        string? messageKey = null)
+    public void SetGroupDropPreview(WidgetGroupDropPreviewState state)
     {
-        StopGroupDropPreviewBreathing();
-        if (!visible)
+        Visual contentVisual = ElementCompositionPreview.GetElementVisual(ContentCornerClipHost);
+        if (!state.Visible)
         {
-            if (GroupDropPreview is not null)
-            {
-                GroupDropPreview.Visibility = Visibility.Collapsed;
-                GroupDropPreview.Opacity = 0;
-                GroupDropPreviewTransform.Y = 0;
-            }
-
+            contentVisual.Opacity = 1f;
+            GroupDropPreview?.Hide();
             return;
         }
 
+        contentVisual.Opacity = state.Blocked ? 0.42f : 0.18f;
         EnsureGroupDropPreview();
-        if (GroupDropPreview is null || !TryPlaceGroupDropPreviewOverTitle())
-        {
-            if (GroupDropPreview is not null)
-            {
-                GroupDropPreview.Visibility = Visibility.Collapsed;
-                GroupDropPreview.Opacity = 0;
-                GroupDropPreviewTransform.Y = 0;
-            }
+        GroupDropPreview?.Apply(state, GroupMergeTitleTargetElement, ShellRoot.CornerRadius);
+    }
 
+    /// <summary>The whole visible surface; its inner half is the drag-merge drop zone.</summary>
+    public FrameworkElement GroupMergeSurfaceElement => ShellRoot;
+
+    public void SetGroupDragSourcePreview(
+        bool active,
+        double anchorNormalizedX = 0.5,
+        double anchorNormalizedY = 0.06)
+    {
+        Visual visual = ElementCompositionPreview.GetElementVisual(this);
+        if (active)
+        {
+            float cx = (float)(Math.Clamp(anchorNormalizedX, 0.05, 0.95) * Math.Max(1.0, ActualWidth));
+            float cy = (float)(Math.Clamp(anchorNormalizedY, 0.0, 0.95) * Math.Max(1.0, ActualHeight));
+            visual.CenterPoint = new System.Numerics.Vector3(cx, cy, 0f);
+        }
+
+        if (_isGroupDragSourceShrunk == active)
+        {
             return;
         }
 
-        bool blocked =
-            !ready &&
-            !string.IsNullOrWhiteSpace(messageKey);
-        GroupDropPreviewIcon.Glyph = blocked ? "\uE7BA" : "\uE8F1";
-        ApplyGroupDropPreviewAppearance(ready, blocked);
-        GroupDropPreview.Visibility = Visibility.Visible;
-        GroupDropPreview.Opacity = 1;
-        GroupDropPreviewTransform.Y = 0;
-        StartGroupDropPreviewBreathing(ready);
-    }
+        _isGroupDragSourceShrunk = active;
+        var targetScale = active
+            ? new System.Numerics.Vector3(0.55f, 0.55f, 1f)
+            : System.Numerics.Vector3.One;
+        float targetOpacity = active ? 0.94f : 1f;
 
-    private bool TryPlaceGroupDropPreviewOverTitle()
-    {
-        FrameworkElement? target = GroupMergeTitleTargetElement;
-        if (target is null)
-        {
-            return false;
-        }
-
-        try
-        {
-            Windows.Foundation.Point topLeft = target.TransformToVisual(ShellRoot)
-                .TransformPoint(new Windows.Foundation.Point(0, 0));
-            GroupDropPreview.Margin = new Thickness(topLeft.X, topLeft.Y, 0, 0);
-            GroupDropPreview.Width = target.ActualWidth;
-            GroupDropPreview.Height = target.ActualHeight;
-            return GroupDropPreview.Width > 0 && GroupDropPreview.Height > 0;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    private void ApplyGroupDropPreviewAppearance(bool ready, bool blocked)
-    {
-        // Where a dragged widget group would land is a drag state, so the
-        // preview outline and its icon draw the neutral interaction tone; ready
-        // and blocked still read differently through opacity.
-        Color neutral = NeutralInteractionBrush.Line(this);
-        byte toneAlpha = ready ? (byte)0xF0 : blocked ? (byte)0xA8 : (byte)0xD0;
-        GroupDropPreview.Background = SharedBrushCache.GetOrCreate(Colors.Transparent);
-        GroupDropPreview.BorderBrush = SharedBrushCache.GetOrCreate(Color.FromArgb(
-            (byte)(neutral.A * toneAlpha / 255),
-            neutral.R,
-            neutral.G,
-            neutral.B));
-        GroupDropPreviewIcon.Foreground = SharedBrushCache.GetOrCreate(Color.FromArgb(
-            0xFF,
-            neutral.R,
-            neutral.G,
-            neutral.B));
-
-        if (WindowsCompatibilityService.IsHighContrast)
-        {
-            GroupDropPreview.Background = SharedBrushCache.GetOrCreate(Colors.Transparent);
-        }
-    }
-
-    private void StartGroupDropPreviewBreathing(bool ready)
-    {
-        Visual visual = ElementCompositionPreview.GetElementVisual(
-            GroupDropPreview);
+        visual.StopAnimation("Scale");
         visual.StopAnimation("Opacity");
         if (!SystemAnimationsEnabled())
         {
-            visual.Opacity = WindowsCompatibilityService.IsHighContrast
-                ? 1
-                : ready
-                    ? 1
-                    : 0.72f;
+            visual.Scale = targetScale;
+            visual.Opacity = targetOpacity;
             return;
         }
 
-        ScalarKeyFrameAnimation animation =
-            _compositionResources.GetScalar(visual.Compositor, WidgetAnimationTemplate.GroupDropBreathing);
-        animation.Duration = TimeSpan.FromMilliseconds(1500);
-        animation.IterationBehavior = AnimationIterationBehavior.Forever;
-        CubicBezierEasingFunction easing =
-            _compositionResources.GetBreathingEasing(visual.Compositor);
-        animation.InsertKeyFrame(0, ready ? 0.42f : 0.3f);
-        animation.InsertKeyFrame(0.5f, ready ? 1 : 0.78f, easing);
-        animation.InsertKeyFrame(1, ready ? 0.42f : 0.3f, easing);
-        _groupDropBreathingAnimation = animation;
-        visual.StartAnimation("Opacity", animation);
+        Compositor compositor = visual.Compositor;
+        CubicBezierEasingFunction easing = compositor.CreateCubicBezierEasingFunction(
+            new System.Numerics.Vector2(0.2f, 0.8f),
+            new System.Numerics.Vector2(0.2f, 1f));
+        TimeSpan duration = TimeSpan.FromMilliseconds(active ? 135 : 115);
+
+        Vector3KeyFrameAnimation scaleAnim = compositor.CreateVector3KeyFrameAnimation();
+        scaleAnim.InsertKeyFrame(1f, targetScale, easing);
+        scaleAnim.Duration = duration;
+        visual.StartAnimation("Scale", scaleAnim);
+
+        ScalarKeyFrameAnimation opacityAnim = compositor.CreateScalarKeyFrameAnimation();
+        opacityAnim.InsertKeyFrame(1f, targetOpacity, easing);
+        opacityAnim.Duration = duration;
+        visual.StartAnimation("Opacity", opacityAnim);
     }
 
-    private void StopGroupDropPreviewBreathing()
+    public void SetGroupDragSourceCommitting(bool committing)
     {
-        if (GroupDropPreview is null)
-        {
-            _groupDropBreathingAnimation = null;
-            return;
-        }
-
-        Visual visual = ElementCompositionPreview.GetElementVisual(
-            GroupDropPreview);
+        _isGroupDragSourceShrunk = false;
+        Visual visual = ElementCompositionPreview.GetElementVisual(this);
+        visual.StopAnimation("Scale");
         visual.StopAnimation("Opacity");
-        visual.Opacity = 0;
-        _groupDropBreathingAnimation = null;
+        visual.Scale = System.Numerics.Vector3.One;
+        visual.Opacity = committing ? 0f : 1f;
     }
 
     public void SetCompactReorderEnabled(bool enabled)
@@ -2150,6 +2153,8 @@ public sealed partial class WidgetShell : UserControl
     internal bool IsHostedContentHibernated =>
         _hostedContent is not null && ShellContent is null;
 
+    internal bool IsHostWindowVisible { get; set; } = true;
+
     internal void TrimCollapsedTransientVisuals()
     {
         if (!_isCollapsed || _isCompactTransitionActive || _isContentSnapshotTransitionActive)
@@ -2169,7 +2174,7 @@ public sealed partial class WidgetShell : UserControl
 
     internal bool HibernateHostedContentView()
     {
-        if (!_isCollapsed ||
+        if ((!_isCollapsed && IsHostWindowVisible) ||
             _isCompactTransitionActive ||
             _isContentSnapshotTransitionActive ||
             OutgoingContentPresenter.Content is not null ||
@@ -2201,6 +2206,21 @@ public sealed partial class WidgetShell : UserControl
             ContentTransitionViewport.ActualWidth,
             ContentTransitionViewport.ActualHeight));
         return true;
+    }
+
+    internal bool HibernateDetachedGroupMemberView(IWidgetContent content)
+    {
+        if (_isCompactTransitionActive ||
+            _isContentSnapshotTransitionActive ||
+            OutgoingContentPresenter.Content is not null ||
+            ReferenceEquals(content, _hostedContent) ||
+            content is not DeskBox.Controls.WidgetContents.WidgetContentAdapterBase adapter ||
+            !adapter.HasMaterializedView)
+        {
+            return false;
+        }
+
+        return adapter.HibernateCollapsedView();
     }
 
     public void ClearContent()
@@ -3449,6 +3469,10 @@ public sealed partial class WidgetShell : UserControl
             CompactSummaryMarqueeClone.Text = presentation.Summary;
         }
         CompactTitleIcon.Glyph = presentation.Glyph;
+        CompactTitleIcon.PreferGlyphEmoji =
+            TitleIconCustomSource is null &&
+            DeskBox.Services.CustomWidgetTemplates.IsEmojiIcon(presentation.Glyph) &&
+            !string.Equals(presentation.Glyph?.Trim(), TitleIconCustomEmoji?.Trim(), StringComparison.Ordinal);
         CompactTitleIcon.LabelText = presentation.Title;
 
         bool useFullBleed = presentation.UseFullBleedBackground && presentation.Thumbnail is not null;
@@ -4963,69 +4987,33 @@ public sealed partial class WidgetShell : UserControl
         using StepEasingFunction holdStep = compositor.CreateStepEasingFunction();
         holdStep.IsFinalStepSingleFrame = true;
 
-        if (isMusicCapsuleLyric)
-        {
-            double travel = Math.Max(0, marquee.NaturalWidth - marquee.Viewport.Width) + 2.0;
-            marquee.Primary.Width = marquee.NaturalWidth + 2.0;
-            marquee.Clone.Visibility = Visibility.Collapsed;
-            marquee.Clone.Margin = default;
-            marquee.Track.Width = marquee.NaturalWidth + 2.0;
+        double travel = Math.Max(0, marquee.NaturalWidth - marquee.Viewport.Width) + 2.0;
+        marquee.Primary.Width = marquee.NaturalWidth + 2.0;
+        marquee.Clone.Visibility = Visibility.Collapsed;
+        marquee.Clone.Margin = default;
+        marquee.Track.Width = marquee.NaturalWidth + 2.0;
 
-            const double startHoldSec = 0.65;
-            const double endHoldSec = 1.35;
-            double glideForwardSec = Math.Clamp(1.05 + (travel / 64.0), 1.15, 4.20);
-            double glideBackSec = Math.Clamp(0.90 + (travel / 85.0), 1.00, 3.30);
-            double totalSec = startHoldSec + glideForwardSec + endHoldSec + glideBackSec;
+        double startHoldSec = isMusicCapsuleLyric ? 0.65 : 0.90;
+        double endHoldSec = isMusicCapsuleLyric ? 1.35 : 1.50;
+        double glideForwardSec = Math.Clamp(1.05 + (travel / 64.0), 1.15, 4.40);
+        double glideBackSec = Math.Clamp(0.90 + (travel / 85.0), 1.00, 3.40);
+        double totalSec = startHoldSec + glideForwardSec + endHoldSec + glideBackSec;
 
-            using CubicBezierEasingFunction smoothGlide = compositor.CreateCubicBezierEasingFunction(
-                new Vector2(0.42f, 0.0f),
-                new Vector2(0.18f, 1.0f));
+        using CubicBezierEasingFunction smoothGlide = compositor.CreateCubicBezierEasingFunction(
+            new Vector2(0.42f, 0.0f),
+            new Vector2(0.18f, 1.0f));
 
-            float p1 = (float)(startHoldSec / totalSec);
-            float p2 = (float)((startHoldSec + glideForwardSec) / totalSec);
-            float p3 = (float)((startHoldSec + glideForwardSec + endHoldSec) / totalSec);
+        float p1 = (float)(startHoldSec / totalSec);
+        float p2 = (float)((startHoldSec + glideForwardSec) / totalSec);
+        float p3 = (float)((startHoldSec + glideForwardSec + endHoldSec) / totalSec);
 
-            animation.InsertKeyFrame(0f, 0f);
-            animation.InsertKeyFrame(p1, 0f, holdStep);
-            animation.InsertKeyFrame(p2, (float)-travel, smoothGlide);
-            animation.InsertKeyFrame(p3, (float)-travel, holdStep);
-            animation.InsertKeyFrame(1f, 0f, smoothGlide);
-            animation.Duration = TimeSpan.FromSeconds(totalSec);
-            animation.IterationBehavior = AnimationIterationBehavior.Forever;
-        }
-        else
-        {
-            marquee.Primary.Width = marquee.NaturalWidth;
-            marquee.Clone.Width = marquee.NaturalWidth;
-            marquee.Clone.Text = marquee.Primary.Text;
-            marquee.Clone.Visibility = Visibility.Visible;
-            // A Grid keeps both copies vertically centered, including while the
-            // track scrolls. Canvas children ignore VerticalAlignment.
-            marquee.Clone.Margin = new Thickness(marquee.NaturalWidth + CompactMarqueeGap, 0, 0, 0);
-
-            double distance = marquee.NaturalWidth + CompactMarqueeGap;
-            // Grid children can never exceed the track's arrange slot: a
-            // viewport-sized track would clip the primary to the visible
-            // width and collapse the offset clone to zero, so the marquee
-            // would only ever show the first part of the text. The track
-            // must span both copies; the viewport clip does the cropping.
-            marquee.Track.Width = distance + marquee.NaturalWidth;
-            TimeSpan startDelay = TimeSpan.FromMilliseconds(CompactMarqueeStartDelayMs);
-            TimeSpan travelDuration = TimeSpan.FromSeconds(
-                distance / CompactMarqueeSpeedPixelsPerSecond);
-            TimeSpan cycleDuration = startDelay + travelDuration;
-
-            float holdFraction = (float)Math.Clamp(
-                startDelay.TotalMilliseconds / cycleDuration.TotalMilliseconds,
-                0.01,
-                0.95);
-            using LinearEasingFunction linear = compositor.CreateLinearEasingFunction();
-            animation.InsertKeyFrame(0f, 0f);
-            animation.InsertKeyFrame(holdFraction, 0f, holdStep);
-            animation.InsertKeyFrame(1f, (float)-distance, linear);
-            animation.Duration = cycleDuration;
-            animation.IterationBehavior = AnimationIterationBehavior.Forever;
-        }
+        animation.InsertKeyFrame(0f, 0f);
+        animation.InsertKeyFrame(p1, 0f, holdStep);
+        animation.InsertKeyFrame(p2, (float)-travel, smoothGlide);
+        animation.InsertKeyFrame(p3, (float)-travel, holdStep);
+        animation.InsertKeyFrame(1f, 0f, smoothGlide);
+        animation.Duration = TimeSpan.FromSeconds(totalSec);
+        animation.IterationBehavior = AnimationIterationBehavior.Forever;
 
         _compactMarqueePrimary = marquee.Primary;
         _compactMarqueeClone = marquee.Clone;
@@ -5261,12 +5249,14 @@ public sealed partial class WidgetShell : UserControl
         WidgetTitleBarMetricsCalculator.ApplyActionButton(PositionLockButton, metrics);
         WidgetTitleBarMetricsCalculator.ApplyActionButton(SizeLockButton, metrics);
         WidgetTitleBarMetricsCalculator.ApplyActionButton(AddButton, metrics);
+        WidgetTitleBarMetricsCalculator.ApplyActionButton(QuickSettingsButton, metrics);
         WidgetTitleBarMetricsCalculator.ApplyActionButton(MoreButton, metrics);
         WidgetTitleBarMetricsCalculator.ApplyActionButton(CloseButton, metrics);
         WidgetTitleBarMetricsCalculator.ApplyActionButton(CollapseButton, metrics);
         WidgetActionIconHelper.ApplyPairSize(PositionLockButtonIcon, PositionLockButtonFilledIcon, metrics);
         WidgetActionIconHelper.ApplyPairSize(SizeLockButtonIcon, SizeLockButtonFilledIcon, metrics);
         WidgetTitleBarMetricsCalculator.ApplyActionIcon(AddButtonIcon, metrics);
+        WidgetTitleBarMetricsCalculator.ApplyActionIcon(QuickSettingsButtonIcon, metrics);
         WidgetTitleBarMetricsCalculator.ApplyActionIcon(MoreButtonIcon, metrics);
         WidgetTitleBarMetricsCalculator.ApplyActionIcon(CloseButtonIcon, metrics);
         if (CollapseButton.Content is FrameworkElement collapseIcon)
@@ -5562,6 +5552,15 @@ public sealed partial class WidgetShell : UserControl
         }
     }
 
+    private static void OnShowQuickSettingsButtonChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is WidgetShell shell)
+        {
+            shell.Bindings.Update();
+            shell.RefreshActionButtonVisibility();
+        }
+    }
+
     private static void OnShowHoverButtonsChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
         if (d is WidgetShell shell)
@@ -5651,6 +5650,9 @@ public sealed partial class WidgetShell : UserControl
         double resolvedTitleBarMinHeight = ResolveTitleBarMinimumHeight();
         double titleContentHeight = resolvedTitleBarMinHeight -
             _titleBarPadding.Top - _titleBarPadding.Bottom;
+        double groupTabStripMinHeight = Math.Max(
+            34,
+            resolvedTitleBarMinHeight - _titleBarPadding.Bottom);
         if (_groupPresentation is not null)
         {
             EnsureGroupTitleSwitcher();
@@ -5659,7 +5661,7 @@ public sealed partial class WidgetShell : UserControl
         if (GroupTitleSwitcher is not null)
         {
             GroupTitleSwitcher.ApplyTitleBarMetrics(
-                usesGroupTabs ? resolvedTitleBarMinHeight : titleContentHeight,
+                usesGroupTabs ? groupTabStripMinHeight : titleContentHeight,
                 TitleText.FontSize,
                 _currentOuterSurfaceCornerRadius);
         }
@@ -5671,7 +5673,9 @@ public sealed partial class WidgetShell : UserControl
 
         ShellRoot.RowDefinitions[0].MinHeight = usesOverlay
             ? 0
-            : resolvedTitleBarMinHeight;
+            : usesGroupTabs
+                ? groupTabStripMinHeight
+                : resolvedTitleBarMinHeight;
         ShellRoot.RowDefinitions[0].Height = usesOverlay
             ? new GridLength(0)
             : GridLength.Auto;
@@ -5688,7 +5692,7 @@ public sealed partial class WidgetShell : UserControl
             ? new Thickness(2, 0, 0, 0)
             : usesGroupTabs
                 ? new Thickness(
-                    usesEqualTabs ? 0 : 5,
+                    usesEqualTabs ? 0 : (6 + (cornerHorizontalInset > 0 ? 1 : 0)),
                     0,
                     usesEqualTabs
                         ? (hasRightActions ? (6 + cornerHorizontalInset) : 0)
@@ -5791,6 +5795,7 @@ public sealed partial class WidgetShell : UserControl
             (PositionLockButton.Visibility == Visibility.Visible ||
              SizeLockButton.Visibility == Visibility.Visible ||
              AddButton.Visibility == Visibility.Visible ||
+             QuickSettingsButton.Visibility == Visibility.Visible ||
              MoreButton.Visibility == Visibility.Visible ||
              CloseButton.Visibility == Visibility.Visible ||
              _isCollapseActionAvailable);
@@ -5838,7 +5843,7 @@ public sealed partial class WidgetShell : UserControl
         var border = isOverlay ? CreateOpaqueOverlayButtonBorder() : transparent;
         var thickness = isOverlay ? new Thickness(0.8) : new Thickness(0);
 
-        foreach (var button in new[] { PositionLockButton, SizeLockButton, AddButton, CollapseButton, MoreButton, CloseButton })
+        foreach (var button in new[] { PositionLockButton, SizeLockButton, AddButton, QuickSettingsButton, CollapseButton, MoreButton, CloseButton })
         {
             button.Background = background;
             button.BorderBrush = border;
@@ -6970,6 +6975,11 @@ public sealed partial class WidgetShell : UserControl
     private void AddButton_Click(object sender, RoutedEventArgs e)
     {
         AddRequested?.Invoke(this, e);
+    }
+
+    private void QuickSettingsButton_Click(object sender, RoutedEventArgs e)
+    {
+        QuickSettingsRequested?.Invoke(this, e);
     }
 
     private void PositionLockButton_Click(object sender, RoutedEventArgs e)

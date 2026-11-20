@@ -105,6 +105,28 @@ public static class WidgetTextShadow
         bool active = enabled && !WindowsCompatibilityService.IsHighContrast;
         if (active == _isActive)
         {
+            if (active)
+            {
+                AdoptPendingTexts();
+                for (int index = KnownAttachments.Count - 1; index >= 0; index--)
+                {
+                    if (KnownAttachments[index].TryGetTarget(out ShadowAttachment? attachment))
+                    {
+                        if (!attachment.IsOutOfScope &&
+                            attachment.Sprite is null &&
+                            attachment.Element.IsLoaded)
+                        {
+                            attachment.RetryAttempts = 0;
+                            Sync(attachment);
+                        }
+                    }
+                    else
+                    {
+                        KnownAttachments.RemoveAt(index);
+                    }
+                }
+            }
+
             return;
         }
 
@@ -118,6 +140,11 @@ public static class WidgetTextShadow
         {
             if (KnownAttachments[index].TryGetTarget(out ShadowAttachment? attachment))
             {
+                if (active)
+                {
+                    attachment.RetryAttempts = 0;
+                }
+
                 Sync(attachment);
             }
             else
@@ -177,6 +204,26 @@ public static class WidgetTextShadow
                effectiveWidgetOpacity >= OpaquePlateThreshold;
     }
 
+    private static UIElement? TryResolveScopeOwner(FrameworkElement text)
+    {
+        if (text.XamlRoot?.Content is UIElement root && GetScope(root))
+        {
+            return root;
+        }
+
+        DependencyObject? current = text;
+        for (int depth = 0; depth < MaxVisibilityDepth && current is not null; depth++)
+        {
+            current = VisualTreeHelper.GetParent(current);
+            if (current is UIElement ancestor && GetScope(ancestor))
+            {
+                return ancestor;
+            }
+        }
+
+        return null;
+    }
+
     public static bool IsActiveFor(FrameworkElement element)
     {
         if (!_isActive)
@@ -189,15 +236,14 @@ public static class WidgetTextShadow
             return true;
         }
 
-        return element.XamlRoot?.Content is UIElement root &&
-               GetScope(root) &&
-               !GetPlateOpaque(root);
+        return TryResolveScopeOwner(element) is UIElement scopeOwner &&
+               !GetPlateOpaque(scopeOwner);
     }
 
     private static bool IsScopePlateOpaque(FrameworkElement text) =>
         text.IsLoaded &&
-        text.XamlRoot?.Content is UIElement root &&
-        GetPlateOpaque(root);
+        TryResolveScopeOwner(text) is UIElement scopeOwner &&
+        GetPlateOpaque(scopeOwner);
 
     private static void OnPlateOpaqueChanged(
         DependencyObject d,
@@ -219,8 +265,13 @@ public static class WidgetTextShadow
             if (KnownAttachments[index].TryGetTarget(out ShadowAttachment? attachment))
             {
                 if (!attachment.Element.IsLoaded ||
-                    ReferenceEquals(attachment.Element.XamlRoot?.Content, root))
+                    ReferenceEquals(TryResolveScopeOwner(attachment.Element), root))
                 {
+                    if (!isPlateOpaque)
+                    {
+                        attachment.RetryAttempts = 0;
+                    }
+
                     Sync(attachment);
                 }
             }
@@ -308,8 +359,7 @@ public static class WidgetTextShadow
 
     private static void Defer(FrameworkElement text)
     {
-        if (text.IsLoaded &&
-            !(text.XamlRoot?.Content is UIElement root && GetScope(root)))
+        if (text.IsLoaded && TryResolveScopeOwner(text) is null)
         {
             return;
         }
@@ -340,7 +390,7 @@ public static class WidgetTextShadow
             return true;
         }
 
-        if (text.IsLoaded && !(text.XamlRoot?.Content is UIElement root && GetScope(root)))
+        if (text.IsLoaded && TryResolveScopeOwner(text) is null)
         {
             ReleaseDeferredPin(text);
             return true;
@@ -432,7 +482,7 @@ public static class WidgetTextShadow
         if (text.IsLoaded && !attachment.IsScopeResolved)
         {
             attachment.IsScopeResolved = true;
-            if (!(text.XamlRoot?.Content is UIElement root && GetScope(root)))
+            if (TryResolveScopeOwner(text) is null)
             {
                 // Settings, dialogs and other non-widget windows: let go of
                 // the text for good instead of tracking it.
@@ -453,15 +503,14 @@ public static class WidgetTextShadow
             return;
         }
 
-        if (!TryResolvePlacement(text, out Panel? panel, out List<UIElement>? chain))
+        List<UIElement> visibilityChain = EnsureVisibilityWatch(attachment);
+        if (!IsAncestorChainVisible(visibilityChain))
         {
-            UnwatchVisibility(attachment);
             Deactivate(attachment, deferred: false);
             return;
         }
 
-        List<UIElement> visibilityChain = EnsureVisibilityWatch(attachment);
-        if (!IsAncestorChainVisible(visibilityChain))
+        if (!TryResolvePlacement(text, out Panel? panel, out List<UIElement>? chain))
         {
             Deactivate(attachment, deferred: false);
             return;
@@ -542,6 +591,18 @@ public static class WidgetTextShadow
             WatchText(attachment);
             ApplyEdge(attachment);
             ElementCompositionPreview.SetElementChildVisual(host, attachment.Sprite);
+
+            // Hand-out Visuals created lazily via GetElementVisual on an idle,
+            // already-arranged subtree do not synchronize Offset/Size until an
+            // arrange pass touches the elements; inserting the 0x0 host leaves
+            // child arrange rects unchanged, so dirty the chain once on attach.
+            host.InvalidateArrange();
+            for (int index = 0; index < chain.Count; index++)
+            {
+                chain[index].InvalidateArrange();
+            }
+
+            panel.InvalidateArrange();
         }
         catch (Exception ex)
         {
@@ -852,7 +913,7 @@ public static class WidgetTextShadow
 
     private static List<UIElement> BuildVisibilityChain(FrameworkElement text)
     {
-        UIElement? scopeRoot = text.XamlRoot?.Content as UIElement;
+        UIElement? scopeRoot = TryResolveScopeOwner(text) ?? (text.XamlRoot?.Content as UIElement);
         List<UIElement> visibilityChain = [text];
         DependencyObject? current = text;
         for (int depth = 0; depth < MaxVisibilityDepth && !ReferenceEquals(current, scopeRoot); depth++)
@@ -879,7 +940,7 @@ public static class WidgetTextShadow
             return false;
         }
 
-        UIElement? scopeRoot = text.XamlRoot?.Content as UIElement;
+        UIElement? scopeRoot = TryResolveScopeOwner(text) ?? (text.XamlRoot?.Content as UIElement);
         int index = 1;
         DependencyObject? current = text;
         for (int depth = 0; depth < MaxVisibilityDepth && !ReferenceEquals(current, scopeRoot); depth++)
@@ -1150,7 +1211,7 @@ public static class WidgetTextShadow
 
         private void OnLoaded(object sender, RoutedEventArgs e)
         {
-            if (!(Element.XamlRoot?.Content is UIElement root && GetScope(root)))
+            if (TryResolveScopeOwner(Element) is not UIElement root)
             {
                 ReleaseDeferredPin(Element);
                 return;

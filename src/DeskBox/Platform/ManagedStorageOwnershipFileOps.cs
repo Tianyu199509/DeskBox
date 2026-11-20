@@ -22,17 +22,19 @@ internal static class ManagedStorageOwnershipFileOps
 
     private static readonly object Gate = new();
 
-    private static readonly HashSet<string> ReservedDirectoryNames = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "$RECYCLE.BIN",
-        "$WinREAgent",
-        "System Volume Information",
-        "Config.Msi",
-        "Recovery",
-        "PerfLogs",
-        "MSOCache",
-        "Documents and Settings",
-    };
+    private static readonly System.Collections.Frozen.FrozenSet<string> ReservedDirectoryNames =
+        System.Collections.Frozen.FrozenSet.ToFrozenSet(
+        [
+            "$RECYCLE.BIN",
+            "$WinREAgent",
+            "System Volume Information",
+            "Config.Msi",
+            "Recovery",
+            "PerfLogs",
+            "MSOCache",
+            "Documents and Settings",
+        ],
+        StringComparer.OrdinalIgnoreCase);
 
     internal static bool HasManifestFile(string rootPath)
     {
@@ -504,6 +506,104 @@ internal static class ManagedStorageOwnershipFileOps
 
             File.Move(tempPath, manifestPath, overwrite: true);
             File.SetAttributes(manifestPath, FileAttributes.Hidden);
+        }
+        catch
+        {
+        }
+    }
+
+    internal static void TryClearEmptyOwnedDestinationFolder(
+        string rootPath,
+        string managedFolderName,
+        string destinationFolderPath)
+    {
+        if (string.IsNullOrWhiteSpace(rootPath) ||
+            string.IsNullOrWhiteSpace(managedFolderName) ||
+            string.IsNullOrWhiteSpace(destinationFolderPath))
+        {
+            return;
+        }
+
+        ManagedStorageOwnershipSnapshot ownership = ReadSnapshot(rootPath);
+        if (ownership.ForeignFolders.Contains(managedFolderName) ||
+            !Directory.Exists(destinationFolderPath))
+        {
+            return;
+        }
+
+        try
+        {
+            if ((File.GetAttributes(destinationFolderPath) & FileAttributes.ReparsePoint) == 0 &&
+                !Directory.EnumerateFileSystemEntries(destinationFolderPath).Any())
+            {
+                Directory.Delete(destinationFolderPath, recursive: false);
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    internal static void TryPruneEmptyAbandonedOriginRoot(
+        string oldRoot,
+        IReadOnlyList<string> migratedFolderNames,
+        string temporaryMigrationFolderName)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(oldRoot) ||
+                !Directory.Exists(oldRoot) ||
+                (File.GetAttributes(oldRoot) & FileAttributes.ReparsePoint) != 0)
+            {
+                return;
+            }
+
+            ManagedStorageOwnershipSnapshot originOwnership = ReadSnapshot(oldRoot);
+            foreach (string folderName in migratedFolderNames)
+            {
+                if (originOwnership.ForeignFolders.Contains(folderName))
+                {
+                    continue;
+                }
+
+                string oldFolder = Path.Combine(oldRoot, folderName);
+                if (!Directory.Exists(oldFolder) ||
+                    (File.GetAttributes(oldFolder) & FileAttributes.ReparsePoint) != 0 ||
+                    Directory.EnumerateFileSystemEntries(oldFolder).Any())
+                {
+                    continue;
+                }
+
+                if (StorageMigrationNativeMethods.TryDeleteEmptyDirectory(oldFolder))
+                {
+                    UnregisterRemovedOrphanFolder(oldRoot, folderName);
+                }
+            }
+
+            if (HasExistingUserEntries(oldRoot, temporaryMigrationFolderName))
+            {
+                return;
+            }
+
+            string manifestPath = Path.Combine(oldRoot, ManifestFileName);
+            if (File.Exists(manifestPath))
+            {
+                File.SetAttributes(manifestPath, FileAttributes.Normal);
+                File.Delete(manifestPath);
+            }
+
+            string tempRoot = Path.Combine(oldRoot, temporaryMigrationFolderName);
+            if (Directory.Exists(tempRoot) &&
+                (File.GetAttributes(tempRoot) & FileAttributes.ReparsePoint) == 0 &&
+                !Directory.EnumerateFileSystemEntries(tempRoot).Any())
+            {
+                StorageMigrationNativeMethods.TryDeleteEmptyDirectory(tempRoot);
+            }
+
+            if (!Directory.EnumerateFileSystemEntries(oldRoot).Any())
+            {
+                StorageMigrationNativeMethods.TryDeleteEmptyDirectory(oldRoot);
+            }
         }
         catch
         {

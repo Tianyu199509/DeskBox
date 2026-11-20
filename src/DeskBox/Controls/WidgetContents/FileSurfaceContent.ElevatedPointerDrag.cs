@@ -31,6 +31,7 @@ public sealed partial class FileSurfaceContent
         SameSurfaceStackHeaderReorder,
         SameSurfaceItemsReorder,
         SameSurfaceJoinStack,
+        SameSurfaceCreateManualStack,
         SameSurfaceDetachFromStack,
         SameSurfaceFolderDrop,
         SameSurfaceRecycleBinDrop,
@@ -61,6 +62,10 @@ public sealed partial class FileSurfaceContent
 
         public required Windows.Foundation.Point StartPointOnHost { get; init; }
 
+        public required PointerDeviceType DeviceType { get; init; }
+
+        public bool IsSecondaryButtonDrag { get; init; }
+
         public required WidgetItem[] PrePressSelection { get; init; }
     }
 
@@ -69,6 +74,13 @@ public sealed partial class FileSurfaceContent
         public required string SessionId { get; init; }
 
         public required uint PointerId { get; init; }
+
+        public required PointerDeviceType DeviceType { get; init; }
+
+        public bool IsSecondaryButtonDrag { get; init; }
+
+        public bool PointerDragRegistered { get; set; }
+        public bool ResourcesReleased { get; set; }
 
         public required bool IsStackHeader { get; init; }
 
@@ -80,9 +92,13 @@ public sealed partial class FileSurfaceContent
 
         public required WidgetItem[] DraggedItems { get; init; }
 
+        public WidgetItem[] DraggedDisplayUnits { get; init; } = [];
+
         public required string[] SourcePaths { get; init; }
 
         public required UIElement CaptureHost { get; init; }
+
+        public WeakReference<FrameworkElement>? HostWindowRootAnchor { get; init; }
 
         public required ListViewBase OriginView { get; init; }
 
@@ -135,6 +151,7 @@ public sealed partial class FileSurfaceContent
     private PointerEventHandler? _elevatedRootPointerCaptureLostHandler;
     private ElevatedPointerDragCandidate? _elevatedDragCandidate;
     private ElevatedPointerDragSession? _elevatedDragSession;
+    private int _activeAsyncOutboundCommits;
     private ElevatedItemDragGhostWindow? _elevatedDragGhostWindow;
     private DispatcherTimer? _elevatedDragWatchTimer;
 
@@ -272,10 +289,7 @@ public sealed partial class FileSurfaceContent
             return;
         }
 
-        if (e.OriginalSource is DependencyObject source &&
-            (FileItemSelectionGeometry.HasAncestor<ScrollBar>(source) ||
-             FileItemSelectionGeometry.HasAncestor<ButtonBase>(source) ||
-             FileItemSelectionGeometry.HasAncestor<TextBox>(source)))
+        if (IsBlockedPointerDragOrigin(e))
         {
             return;
         }
@@ -306,7 +320,12 @@ public sealed partial class FileSurfaceContent
             (pointOnHost.PointerDeviceType is
                 PointerDeviceType.Touch or PointerDeviceType.Pen &&
              pointOnHost.IsInContact);
-        if (!isPrimaryContact)
+        bool isSecondaryMouseContact =
+            !isPrimaryContact &&
+            pointOnHost.PointerDeviceType is
+                PointerDeviceType.Mouse or PointerDeviceType.Touchpad &&
+            pointOnHost.Properties.IsRightButtonPressed;
+        if (!isPrimaryContact && !isSecondaryMouseContact)
         {
             return;
         }
@@ -314,7 +333,6 @@ public sealed partial class FileSurfaceContent
         WidgetItem[] prePressSelection = originView.SelectedItems.Contains(item)
             ? originView.SelectedItems
                 .OfType<WidgetItem>()
-                .Where(selected => selected is not WidgetStackItem)
                 .Distinct()
                 .ToArray()
             : [];
@@ -329,6 +347,8 @@ public sealed partial class FileSurfaceContent
             CaptureHost = captureHost,
             OriginView = originView,
             StartPointOnHost = pointOnHost.Position,
+            DeviceType = pointOnHost.PointerDeviceType,
+            IsSecondaryButtonDrag = isSecondaryMouseContact,
             PrePressSelection = prePressSelection,
         };
     }
@@ -347,19 +367,34 @@ public sealed partial class FileSurfaceContent
             return;
         }
 
-        if (e.OriginalSource is DependencyObject source &&
-            (FileItemSelectionGeometry.HasAncestor<ScrollBar>(source) ||
-             FileItemSelectionGeometry.HasAncestor<ButtonBase>(source) ||
-             FileItemSelectionGeometry.HasAncestor<TextBox>(source)))
+        if (IsBlockedPointerDragOrigin(e))
         {
             return;
         }
 
         PointerPoint pointOnRoot = e.GetCurrentPoint(Root);
-        if (!pointOnRoot.Properties.IsLeftButtonPressed)
+        bool isPrimaryContact =
+            pointOnRoot.Properties.IsLeftButtonPressed ||
+            (pointOnRoot.PointerDeviceType is
+                PointerDeviceType.Touch or PointerDeviceType.Pen &&
+             pointOnRoot.IsInContact);
+        bool isSecondaryMouseContact =
+            !isPrimaryContact &&
+            pointOnRoot.PointerDeviceType is
+                PointerDeviceType.Mouse or PointerDeviceType.Touchpad &&
+            pointOnRoot.Properties.IsRightButtonPressed;
+        if (!isPrimaryContact && !isSecondaryMouseContact)
         {
             return;
         }
+
+        ListViewBase originView = GetMainSurfaceItemsView();
+        WidgetItem[] prePressSelection = originView.SelectedItems.Contains(stack)
+            ? originView.SelectedItems
+                .OfType<WidgetItem>()
+                .Distinct()
+                .ToArray()
+            : [];
 
         _elevatedDragCandidate = new ElevatedPointerDragCandidate
         {
@@ -369,9 +404,11 @@ public sealed partial class FileSurfaceContent
             FromStackPopover = false,
             SourceStackKey = null,
             CaptureHost = Root,
-            OriginView = GetMainSurfaceItemsView(),
+            OriginView = originView,
             StartPointOnHost = pointOnRoot.Position,
-            PrePressSelection = [],
+            DeviceType = pointOnRoot.PointerDeviceType,
+            IsSecondaryButtonDrag = isSecondaryMouseContact,
+            PrePressSelection = prePressSelection,
         };
     }
 
@@ -421,14 +458,22 @@ public sealed partial class FileSurfaceContent
                 return false;
             }
 
-            if (Win32Helper.IsKeyPressed(VirtualKey.Escape))
+            if (Win32Helper.IsAsyncKeyPressed(VirtualKey.Escape))
             {
                 CancelElevatedPointerDrag();
                 e.Handled = true;
                 return true;
             }
 
-            UpdateActiveElevatedPointerDragFromCursor();
+            if (activeSession.DeviceType is PointerDeviceType.Touch or PointerDeviceType.Pen &&
+                !e.GetCurrentPoint(null).IsInContact)
+            {
+                CompleteElevatedPointerDragOnRelease(e.Pointer, e);
+                e.Handled = true;
+                return true;
+            }
+
+            UpdateActiveElevatedPointerDragFromCursor(e);
             e.Handled = true;
             return true;
         }
@@ -440,11 +485,12 @@ public sealed partial class FileSurfaceContent
         }
 
         PointerPoint currentPoint = e.GetCurrentPoint(candidate.CaptureHost);
-        bool stillInContact =
-            currentPoint.Properties.IsLeftButtonPressed ||
-            (currentPoint.PointerDeviceType is
-                PointerDeviceType.Touch or PointerDeviceType.Pen &&
-             currentPoint.IsInContact);
+        bool stillInContact = candidate.IsSecondaryButtonDrag
+            ? currentPoint.Properties.IsRightButtonPressed
+            : currentPoint.Properties.IsLeftButtonPressed ||
+              (currentPoint.PointerDeviceType is
+                  PointerDeviceType.Touch or PointerDeviceType.Pen &&
+               currentPoint.IsInContact);
         if (!stillInContact)
         {
             _elevatedDragCandidate = null;
@@ -464,7 +510,7 @@ public sealed partial class FileSurfaceContent
             return false;
         }
 
-        UpdateActiveElevatedPointerDragFromCursor();
+        UpdateActiveElevatedPointerDragFromCursor(e);
         e.Handled = true;
         return true;
     }
@@ -479,14 +525,14 @@ public sealed partial class FileSurfaceContent
             return false;
         }
 
-        if (Win32Helper.IsKeyPressed(VirtualKey.Escape))
+        if (Win32Helper.IsAsyncKeyPressed(VirtualKey.Escape))
         {
             CancelElevatedPointerDrag();
             e.Handled = true;
             return true;
         }
 
-        CompleteElevatedPointerDragOnRelease(e.Pointer);
+        CompleteElevatedPointerDragOnRelease(e.Pointer, e);
         e.Handled = true;
         return true;
     }
@@ -499,11 +545,11 @@ public sealed partial class FileSurfaceContent
         {
             if (!_isDisposed &&
                 !IsLoaded &&
-                Win32Helper.IsAnyMouseButtonDown())
+                IsSessionDragButtonDown(activeSession))
             {
                 // Tab switch inside a Widget Group detaches CaptureHost while
-                // the user still holds the mouse button. Hand off tracking and
-                // release detection to _elevatedDragWatchTimer instead of
+                // the user still holds the pointer contact/button. Hand off tracking
+                // and release detection to _elevatedDragWatchTimer instead of
                 // aborting the drag mid-gesture.
                 activeSession.PointerCaptured = false;
                 activeSession.DetachedContinueByPolling = true;
@@ -538,6 +584,7 @@ public sealed partial class FileSurfaceContent
 
         string sessionId = Guid.NewGuid().ToString("N");
         WidgetItem[] draggedItems;
+        WidgetItem[] draggedDisplayUnits;
         string[] sourcePaths;
         string? stackReorderKey = null;
         ImageSource? previewIcon;
@@ -545,7 +592,25 @@ public sealed partial class FileSurfaceContent
         string previewTitle;
         int previewCount;
 
-        if (candidate.IsStackHeader &&
+        IReadOnlyList<WidgetItem> pointerSelection =
+            candidate.PrePressSelection.Length > 1
+                ? candidate.PrePressSelection
+                : candidate.OriginView.SelectedItems
+                    .OfType<WidgetItem>()
+                    .Distinct()
+                    .ToArray();
+        IReadOnlyList<WidgetItem> resolvedUnits =
+            FileItemDragPackage.ResolveDraggedItems(
+                [candidate.PressedItem],
+                pointerSelection);
+        bool singleCollapsedStackLeftDrag =
+            candidate.IsStackHeader &&
+            candidate.PressedItem is WidgetStackItem &&
+            resolvedUnits.Count <= 1 &&
+            !candidate.IsSecondaryButtonDrag;
+        bool effectiveIsStackHeader = singleCollapsedStackLeftDrag;
+
+        if (singleCollapsedStackLeftDrag &&
             candidate.PressedItem is WidgetStackItem stack)
         {
             if (stack.Members.Any(member => GetTransferState(member).BlocksMutation))
@@ -556,10 +621,30 @@ public sealed partial class FileSurfaceContent
                 return false;
             }
 
+            var seenStackPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            draggedItems = stack.Members
+                .Where(item =>
+                    item is not WidgetStackItem &&
+                    !string.IsNullOrWhiteSpace(item.Path) &&
+                    (DesktopOutboundDropCoordinator.IsFastNetworkCandidatePath(item.Path) ||
+                     File.Exists(item.Path) ||
+                     Directory.Exists(item.Path)) &&
+                    seenStackPaths.Add(Path.GetFullPath(item.Path)))
+                .ToArray();
+            sourcePaths = draggedItems
+                .Select(item => Path.GetFullPath(item.Path))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            if (sourcePaths.Length > 0 && HasActiveTransferSource(sourcePaths))
+            {
+                ShowTransferBlockedFeedback(
+                    _fileService.TransferSessions.GetState(sourcePaths[0]));
+                return false;
+            }
+
             _stackPointerDragStarted = true;
             _stackInputActivation.CancelPointer();
-            draggedItems = [stack];
-            sourcePaths = [];
+            draggedDisplayUnits = [stack];
             stackReorderKey = stack.StackKey;
             previewIcon = stack.Members.FirstOrDefault()?.Icon ?? stack.Icon;
             fallbackGlyph = "\uE8F1";
@@ -568,23 +653,31 @@ public sealed partial class FileSurfaceContent
         }
         else
         {
-            IReadOnlyList<WidgetItem> pointerSelection =
-                candidate.PrePressSelection.Length > 1
-                    ? candidate.PrePressSelection
-                    : candidate.OriginView.SelectedItems
-                        .OfType<WidgetItem>()
-                        .Where(selected => selected is not WidgetStackItem)
-                        .Distinct()
-                        .ToArray();
-            IReadOnlyList<WidgetItem> resolved =
-                FileItemDragPackage.ResolveDraggedItems(
-                    [candidate.PressedItem],
-                    pointerSelection);
-            draggedItems = resolved
+            draggedDisplayUnits = resolvedUnits.Count > 0
+                ? resolvedUnits.ToArray()
+                : [candidate.PressedItem];
+            WidgetItem[] expandedCandidates = resolvedUnits
+                .SelectMany(item => item is WidgetStackItem stackItem
+                    ? (IEnumerable<WidgetItem>)stackItem.Members
+                    : [item])
+                .Where(static item => item is not WidgetStackItem)
+                .ToArray();
+            if (expandedCandidates.Any(member => GetTransferState(member).BlocksMutation))
+            {
+                WidgetItem busyMember = expandedCandidates.First(member =>
+                    GetTransferState(member).BlocksMutation);
+                ShowTransferBlockedFeedback(GetTransferState(busyMember));
+                return false;
+            }
+
+            var seenDraggedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            draggedItems = expandedCandidates
                 .Where(item =>
-                    item is not WidgetStackItem &&
                     !string.IsNullOrWhiteSpace(item.Path) &&
-                    (File.Exists(item.Path) || Directory.Exists(item.Path)))
+                    (DesktopOutboundDropCoordinator.IsFastNetworkCandidatePath(item.Path) ||
+                     File.Exists(item.Path) ||
+                     Directory.Exists(item.Path)) &&
+                    seenDraggedPaths.Add(Path.GetFullPath(item.Path)))
                 .ToArray();
             if (draggedItems.Length == 0 ||
                 TryBlockTransferMutation(draggedItems))
@@ -608,33 +701,53 @@ public sealed partial class FileSurfaceContent
                 return false;
             }
 
-            // Ensure the dragged item(s) reflect in the ListView selection when
+            if (candidate.PressedItem is WidgetStackItem)
+            {
+                _stackPointerDragStarted = true;
+                _stackInputActivation.CancelPointer();
+            }
+
+            // Ensure the dragged unit(s) reflect in the ListView selection when
             // dragging an unselected item, matching standard Explorer drag.
-            if (!candidate.OriginView.SelectedItems.Contains(draggedItems[0]))
+            if (!candidate.OriginView.SelectedItems.Contains(candidate.PressedItem))
             {
                 candidate.OriginView.SelectedItems.Clear();
-                foreach (WidgetItem dragged in draggedItems)
+                foreach (WidgetItem draggedUnit in draggedDisplayUnits)
                 {
-                    candidate.OriginView.SelectedItems.Add(dragged);
+                    if (candidate.OriginView.Items.Contains(draggedUnit))
+                    {
+                        candidate.OriginView.SelectedItems.Add(draggedUnit);
+                    }
                 }
 
                 UpdateSelectionCommandBar();
                 RefreshItemSelectionVisuals();
             }
 
-            previewIcon = draggedItems[0].Icon;
-            fallbackGlyph = draggedItems[0].FallbackGlyph;
-            previewTitle = draggedItems.Length == 1
-                ? draggedItems[0].Name
-                : _localizationService.Format(
-                    "Widget.SelectionCount",
-                    draggedItems.Length);
-            if (string.Equals(previewTitle, "Widget.SelectionCount", StringComparison.Ordinal))
+            if (draggedDisplayUnits.Length == 1 &&
+                draggedDisplayUnits[0] is WidgetStackItem singleRightStack)
             {
-                previewTitle = draggedItems[0].Name;
+                previewIcon = singleRightStack.Members.FirstOrDefault()?.Icon ?? singleRightStack.Icon;
+                fallbackGlyph = "\uE8F1";
+                previewTitle = singleRightStack.Name;
+                previewCount = Math.Max(1, singleRightStack.Members.Count);
             }
+            else
+            {
+                previewIcon = draggedItems[0].Icon;
+                fallbackGlyph = draggedItems[0].FallbackGlyph;
+                previewTitle = draggedItems.Length == 1
+                    ? draggedItems[0].Name
+                    : _localizationService.Format(
+                        "Widget.SelectionCount",
+                        draggedItems.Length);
+                if (string.Equals(previewTitle, "Widget.SelectionCount", StringComparison.Ordinal))
+                {
+                    previewTitle = draggedItems[0].Name;
+                }
 
-            previewCount = draggedItems.Length;
+                previewCount = draggedItems.Length;
+            }
         }
 
         bool restoreItemClick = candidate.OriginView.IsItemClickEnabled;
@@ -644,6 +757,11 @@ public sealed partial class FileSurfaceContent
         {
             candidate.OriginView.IsItemClickEnabled = restoreItemClick;
             return false;
+        }
+
+        if (candidate.IsSecondaryButtonDrag)
+        {
+            _suppressNextRightTap = true;
         }
 
         if (candidate.FromStackPopover)
@@ -662,30 +780,39 @@ public sealed partial class FileSurfaceContent
                 sourcePaths,
                 candidate.FromStackPopover);
             bool isProtectedCopyOnly = FileItemDragPackage.IsProtectedCopyOnlySource(sourcePaths);
-            DataPackageOperation allowedOperations = FileItemDragPackage.ResolveDragOutAllowedOperations(
-                _settingsService.Settings.FileWidget.ManagedDragOutAction,
-                sourcePaths: sourcePaths,
-                isProtectedCopyOnly: isProtectedCopyOnly);
-            MaybeShowDragOutModifierTip(allowedOperations);
+            DataPackageOperation allowedOperations = isProtectedCopyOnly
+                ? DataPackageOperation.Copy
+                : DataPackageOperation.Copy |
+                  DataPackageOperation.Move |
+                  DataPackageOperation.Link;
+            ArmOutboundModifierTipWatch(allowedOperations);
         }
 
+        ActiveDeskBoxDragRegistry.BeginPointerDragSession();
         _elevatedDragSession = new ElevatedPointerDragSession
         {
             SessionId = sessionId,
             PointerId = candidate.PointerId,
-            IsStackHeader = candidate.IsStackHeader,
+            DeviceType = candidate.DeviceType,
+            IsSecondaryButtonDrag = candidate.IsSecondaryButtonDrag,
+            PointerDragRegistered = true,
+            IsStackHeader = effectiveIsStackHeader,
             StackReorderKey = stackReorderKey,
             FromStackPopover = candidate.FromStackPopover,
             SourceStackKey = candidate.SourceStackKey,
             DraggedItems = draggedItems,
+            DraggedDisplayUnits = draggedDisplayUnits,
             SourcePaths = sourcePaths,
             CaptureHost = candidate.CaptureHost,
+            HostWindowRootAnchor = Root.XamlRoot?.Content as FrameworkElement is { } hostRoot
+                ? new WeakReference<FrameworkElement>(hostRoot)
+                : null,
             OriginView = candidate.OriginView,
             RestoreOriginItemClickEnabled = restoreItemClick,
             PointerCaptured = true,
-            LastCtrlDown = Win32Helper.IsKeyPressed(VirtualKey.Control),
-            LastShiftDown = Win32Helper.IsKeyPressed(VirtualKey.Shift),
-            LastAltDown = Win32Helper.IsKeyPressed(VirtualKey.Menu),
+            LastCtrlDown = Win32Helper.IsAsyncKeyPressed(VirtualKey.Control),
+            LastShiftDown = Win32Helper.IsAsyncKeyPressed(VirtualKey.Shift),
+            LastAltDown = Win32Helper.IsAsyncKeyPressed(VirtualKey.Menu),
         };
 
         EnsureElevatedDragGhostWindow().BeginSession(
@@ -698,7 +825,7 @@ public sealed partial class FileSurfaceContent
         App.Log(
             $"[DragProtocol] stage=ElevatedPointerDragStarted widget={WidgetId} " +
             $"session={FormatDragSessionId(sessionId)} " +
-            $"kind={(candidate.IsStackHeader ? "stack" : "file")} " +
+            $"kind={(effectiveIsStackHeader ? "stack" : "file")} " +
             $"popover={candidate.FromStackPopover} paths={sourcePaths.Length}");
         return true;
     }
@@ -749,28 +876,36 @@ public sealed partial class FileSurfaceContent
             return;
         }
 
-        if (_isDisposed || Win32Helper.IsKeyPressed(VirtualKey.Escape))
+        if (_isDisposed || Win32Helper.IsAsyncKeyPressed(VirtualKey.Escape))
         {
             CancelElevatedPointerDrag();
             return;
         }
 
-        if (!Win32Helper.IsAnyMouseButtonDown())
+        if (session.DeviceType is PointerDeviceType.Mouse or PointerDeviceType.Touchpad ||
+            session.DetachedContinueByPolling)
         {
-            if (session.DetachedContinueByPolling)
+            if (!IsSessionDragButtonDown(session))
             {
-                CompleteElevatedPointerDragOnRelease(pointer: null);
-                return;
-            }
+                if (session.DetachedContinueByPolling)
+                {
+                    CompleteElevatedPointerDragOnRelease(pointer: null);
+                    return;
+                }
 
-            session.MissingButtonTicks++;
-            if (session.MissingButtonTicks >= 2)
+                session.MissingButtonTicks++;
+                if (session.MissingButtonTicks >= 2)
+                {
+                    // Safety net if an OS modal switch swallowed PointerReleased
+                    // without raising PointerCaptureLost: cancel cleanly rather
+                    // than leaving a stranded ghost or mutating unexpectedly.
+                    CancelElevatedPointerDrag();
+                    return;
+                }
+            }
+            else
             {
-                // Safety net if an OS modal switch swallowed PointerReleased
-                // without raising PointerCaptureLost: cancel cleanly rather
-                // than leaving a stranded ghost or mutating unexpectedly.
-                CancelElevatedPointerDrag();
-                return;
+                session.MissingButtonTicks = 0;
             }
         }
         else
@@ -778,9 +913,9 @@ public sealed partial class FileSurfaceContent
             session.MissingButtonTicks = 0;
         }
 
-        bool ctrl = Win32Helper.IsKeyPressed(VirtualKey.Control);
-        bool shift = Win32Helper.IsKeyPressed(VirtualKey.Shift);
-        bool alt = Win32Helper.IsKeyPressed(VirtualKey.Menu);
+        bool ctrl = Win32Helper.IsAsyncKeyPressed(VirtualKey.Control);
+        bool shift = Win32Helper.IsAsyncKeyPressed(VirtualKey.Shift);
+        bool alt = Win32Helper.IsAsyncKeyPressed(VirtualKey.Menu);
         bool modifiersChanged =
             ctrl != session.LastCtrlDown ||
             shift != session.LastShiftDown ||
@@ -886,10 +1021,70 @@ public sealed partial class FileSurfaceContent
             disableAnimation: true);
     }
 
-    private void UpdateActiveElevatedPointerDragFromCursor()
+    private static bool IsSessionDragButtonDown(ElevatedPointerDragSession session) =>
+        session.IsSecondaryButtonDrag
+            ? Win32Helper.IsSecondaryMouseButtonDown()
+            : Win32Helper.IsPrimaryMouseButtonDown();
+
+    private bool TryResolveElevatedDragScreenPoint(
+        ElevatedPointerDragSession session,
+        PointerRoutedEventArgs? pointerArgs,
+        out Win32Helper.POINT cursor)
+    {
+        IntPtr referenceHwnd = ResolveElevatedDragReferenceHwnd(session.FromStackPopover);
+        if (pointerArgs is not null &&
+            session.DeviceType is PointerDeviceType.Touch or PointerDeviceType.Pen &&
+            Win32Helper.TryGetPointerScreenPoint(
+                referenceHwnd,
+                session.CaptureHost,
+                pointerArgs,
+                out cursor))
+        {
+            return true;
+        }
+
+        if (pointerArgs is null &&
+            session.DeviceType is PointerDeviceType.Touch or PointerDeviceType.Pen &&
+            session.HasLastScreenPoint)
+        {
+            cursor = new Win32Helper.POINT
+            {
+                X = session.LastScreenX,
+                Y = session.LastScreenY,
+            };
+            return true;
+        }
+
+        return Win32Helper.GetCursorPos(out cursor) ||
+            (pointerArgs is not null &&
+             Win32Helper.TryGetPointerScreenPoint(
+                 referenceHwnd,
+                 session.CaptureHost,
+                 pointerArgs,
+                 out cursor));
+    }
+
+    private IntPtr ResolveElevatedDragReferenceHwnd(bool fromStackPopover)
+    {
+        if (fromStackPopover)
+        {
+            IntPtr popoverHwnd = ActiveStackPopoverWindowHandle;
+            if (popoverHwnd != IntPtr.Zero)
+            {
+                return popoverHwnd;
+            }
+        }
+
+        return _hostWindowHandle;
+    }
+
+    private void UpdateActiveElevatedPointerDragFromCursor(PointerRoutedEventArgs? pointerArgs = null)
     {
         if (_elevatedDragSession is not { } session ||
-            !Win32Helper.GetCursorPos(out Win32Helper.POINT cursor))
+            !TryResolveElevatedDragScreenPoint(
+                session,
+                pointerArgs,
+                out Win32Helper.POINT cursor))
         {
             return;
         }
@@ -934,6 +1129,22 @@ public sealed partial class FileSurfaceContent
             rootHwnd = hitHwnd;
         }
 
+        // Empty payloads have no right-drag file actions; regular and collapsed
+        // stack file drags permit folder, bin, launch, cross-widget, and external
+        // drop targets and show the right-drag choice menu on release.
+        if (session.IsSecondaryButtonDrag &&
+            (rootHwnd == IntPtr.Zero ||
+             session.SourcePaths.Length == 0 ||
+             (session.IsStackHeader && session.SourcePaths.Length == 0)))
+        {
+            ClearHoveredOtherStackPopover(session);
+            ClearHoveredOtherWindow(session);
+            ClearSameSurfaceHoverVisuals(keepStackPopoverIndicator: false);
+            HideStackPopoverReorderIndicator();
+            session.Route = ElevatedDragTargetRoute.Blocked;
+            return string.Empty;
+        }
+
         // 1. Open stack popover window owned by this surface.
         if (_stackPopoverHostWindow is { IsVisible: true } popoverHost &&
             rootHwnd == popoverHost.WindowHandle)
@@ -947,8 +1158,7 @@ public sealed partial class FileSurfaceContent
         HideStackPopoverReorderIndicator();
 
         // 1b. Open stack popover window owned by ANOTHER file widget.
-        if (!session.IsStackHeader &&
-            session.SourcePaths.Length > 0 &&
+        if (session.SourcePaths.Length > 0 &&
             TryGetActiveStackPopoverOwner(rootHwnd) is { } otherPopoverOwner &&
             !ReferenceEquals(otherPopoverOwner, this))
         {
@@ -991,10 +1201,8 @@ public sealed partial class FileSurfaceContent
         ClearSameSurfaceHoverVisuals(keepStackPopoverIndicator: false);
 
         // 3. Another open DeskBox ContentWidgetWindow — or our own host window's
-        // inactive group title switcher outside Root (only file drags, never a
-        // collapsed stack header).
-        if (!session.IsStackHeader &&
-            session.SourcePaths.Length > 0 &&
+        // inactive group title switcher outside Root.
+        if (session.SourcePaths.Length > 0 &&
             FindTargetContentWidgetWindow(rootHwnd, screenX, screenY) is { } otherWindow)
         {
             if (!ReferenceEquals(session.HoveredOtherWindow, otherWindow))
@@ -1018,8 +1226,7 @@ public sealed partial class FileSurfaceContent
         ClearHoveredOtherWindow(session);
 
         // 4. Non-DeskBox window (Desktop, File Explorer, or third-party app).
-        if (!session.IsStackHeader &&
-            session.SourcePaths.Length > 0 &&
+        if (session.SourcePaths.Length > 0 &&
             rootHwnd != IntPtr.Zero &&
             App.Current?.IsDeskBoxWindow(rootHwnd) != true)
         {
@@ -1119,6 +1326,13 @@ public sealed partial class FileSurfaceContent
             {
                 HideStackPopoverReorderIndicator();
                 ClearLaunchDropTarget();
+                if (!string.IsNullOrWhiteSpace(session.StackReorderKey))
+                {
+                    ClearFolderDropTarget();
+                    session.Route = ElevatedDragTargetRoute.Blocked;
+                    return string.Empty;
+                }
+
                 SetFolderDropTarget(childBorder);
                 session.Route = ElevatedDragTargetRoute.SameSurfaceRecycleBinDrop;
                 session.TargetChildItem = childTarget;
@@ -1143,6 +1357,13 @@ public sealed partial class FileSurfaceContent
 
         ClearFolderDropTarget();
         ClearLaunchDropTarget();
+
+        if (session.IsSecondaryButtonDrag)
+        {
+            HideStackPopoverReorderIndicator();
+            session.Route = ElevatedDragTargetRoute.Blocked;
+            return string.Empty;
+        }
 
         if (session.FromStackPopover &&
             string.Equals(session.SourceStackKey, popoverKey, StringComparison.Ordinal))
@@ -1231,37 +1452,13 @@ public sealed partial class FileSurfaceContent
         canDrop = false;
         ListViewBase mainView = GetMainSurfaceItemsView();
 
-        // Collapsed stack header reorder on main surface.
-        if (session.IsStackHeader &&
-            session.StackReorderKey is { Length: > 0 } stackKey)
-        {
-            ClearFolderDropTarget();
-            ClearLaunchDropTarget();
-            ClearStackMemberDropTarget();
-            if (!TryGetScreenPointInElement(
-                    mainView,
-                    _hostWindowHandle,
-                    screenX,
-                    screenY,
-                    out Windows.Foundation.Point stackPoint))
-            {
-                PersistSurfaceReorder();
-                session.Route = ElevatedDragTargetRoute.Blocked;
-                return string.Empty;
-            }
-
-            BeginOrUpdateElevatedStackHeaderReorderPreview(stackKey, stackPoint);
-            session.Route = ElevatedDragTargetRoute.SameSurfaceStackHeaderReorder;
-            canDrop = true;
-            return T("Widget.DragCaption.Reorder");
-        }
-
         // Member dragged out of an open stack popover onto the parent widget.
         if (session.FromStackPopover)
         {
             PersistSurfaceReorder();
 
-            if (FindHitStackSurfaceBorder(screenX, screenY, out WidgetStackItem? hitStack)
+            if (!session.IsSecondaryButtonDrag &&
+                FindHitStackSurfaceBorder(screenX, screenY, out WidgetStackItem? hitStack)
                 is { } stackBorder &&
                 hitStack is not null)
             {
@@ -1320,6 +1517,12 @@ public sealed partial class FileSurfaceContent
                     out canDrop);
             }
 
+            if (session.IsSecondaryButtonDrag)
+            {
+                session.Route = ElevatedDragTargetRoute.Blocked;
+                return string.Empty;
+            }
+
             if (TryGetScreenPointInElement(
                     mainView,
                     _hostWindowHandle,
@@ -1335,10 +1538,13 @@ public sealed partial class FileSurfaceContent
             return T("Widget.Stack.RemoveItem");
         }
 
-        // Main-surface file item(s) dragged over a collapsed stack tile.
-        if (FindHitStackSurfaceBorder(screenX, screenY, out WidgetStackItem? targetStack)
+        // Main-surface file item(s) or collapsed stack tile dragged over another collapsed stack tile.
+        if (!session.IsSecondaryButtonDrag &&
+            FindHitStackSurfaceBorder(screenX, screenY, out WidgetStackItem? targetStack)
             is { } targetStackBorder &&
             targetStack is not null &&
+            (!session.IsStackHeader ||
+             !string.Equals(targetStack.StackKey, session.StackReorderKey, StringComparison.Ordinal)) &&
             TryResolveSameWidgetStackJoinItems(
                 session.SourcePaths,
                 targetStack,
@@ -1397,14 +1603,18 @@ public sealed partial class FileSurfaceContent
                 return T("Widget.CannotMoveToFolder");
             }
 
+            FileDropIntent navIntent = ResolveElevatedInternalFolderIntent(
+                session.SourcePaths,
+                navFolder.Path);
+            if (navIntent == FileDropIntent.None)
+            {
+                session.Route = ElevatedDragTargetRoute.Blocked;
+                return string.Empty;
+            }
+
             session.Route = ElevatedDragTargetRoute.SameSurfaceFolderDrop;
             session.TargetChildItem = navFolder;
             canDrop = true;
-            FileDropIntent navIntent = Win32Helper.IsKeyPressed(VirtualKey.Menu)
-                ? FileDropIntent.Shortcut
-                : Win32Helper.IsKeyPressed(VirtualKey.Control)
-                    ? FileDropIntent.Copy
-                    : FileDropIntent.Move;
             return FormatDropCaption(navIntent, navFolder.Name);
         }
 
@@ -1421,6 +1631,40 @@ public sealed partial class FileSurfaceContent
                 out canDrop);
         }
 
+        if (session.IsSecondaryButtonDrag)
+        {
+            PersistSurfaceReorder();
+            ClearSameSurfaceHoverVisuals(keepStackPopoverIndicator: false);
+            session.Route = ElevatedDragTargetRoute.Blocked;
+            return string.Empty;
+        }
+
+        // Collapsed stack header reorder on main surface (checked after join/folder/launch/nav
+        // targets so dragging a stack tile over those targets still triggers drop actions).
+        if (session.IsStackHeader &&
+            session.StackReorderKey is { Length: > 0 } stackKey)
+        {
+            ClearFolderDropTarget();
+            ClearLaunchDropTarget();
+            ClearStackMemberDropTarget();
+            if (!TryGetScreenPointInElement(
+                    mainView,
+                    _hostWindowHandle,
+                    screenX,
+                    screenY,
+                    out Windows.Foundation.Point stackPoint))
+            {
+                PersistSurfaceReorder();
+                session.Route = ElevatedDragTargetRoute.Blocked;
+                return string.Empty;
+            }
+
+            BeginOrUpdateElevatedStackHeaderReorderPreview(stackKey, stackPoint);
+            session.Route = ElevatedDragTargetRoute.SameSurfaceStackHeaderReorder;
+            canDrop = true;
+            return T("Widget.DragCaption.Reorder");
+        }
+
         if (!TryGetScreenPointInElement(
                 mainView,
                 _hostWindowHandle,
@@ -1435,7 +1679,8 @@ public sealed partial class FileSurfaceContent
 
         if (!BeginOrUpdateElevatedFileItemsReorderPreview(
                 session.SourcePaths,
-                pointInMainView))
+                pointInMainView,
+                session.DraggedDisplayUnits))
         {
             session.Route = ElevatedDragTargetRoute.Blocked;
             return string.Empty;
@@ -1554,6 +1799,13 @@ public sealed partial class FileSurfaceContent
         {
             PersistSurfaceReorder();
             ClearLaunchDropTarget();
+            if (!string.IsNullOrWhiteSpace(session.StackReorderKey))
+            {
+                ClearFolderDropTarget();
+                session.Route = ElevatedDragTargetRoute.Blocked;
+                return true;
+            }
+
             SetFolderDropTarget(iconBorder);
             session.Route = ElevatedDragTargetRoute.SameSurfaceRecycleBinDrop;
             session.TargetChildItem = iconHitItem;
@@ -1582,6 +1834,31 @@ public sealed partial class FileSurfaceContent
             return true;
         }
 
+        if (behavior == ItemDropBehavior.None &&
+            !session.IsStackHeader &&
+            !session.FromStackPopover &&
+            ViewModel.UsesStackProjection &&
+            iconHitItem is not WidgetStackItem &&
+            !iconHitItem.IsFolder &&
+            !iconHitItem.IsStackChild &&
+            session.DraggedItems.Any(static item =>
+                item is not WidgetStackItem &&
+                !item.IsFolder &&
+                !string.IsNullOrWhiteSpace(item.Path)))
+        {
+            PersistSurfaceReorder();
+            ClearFolderDropTarget();
+            ClearLaunchDropTarget();
+            SetStackMemberDropTarget(iconBorder);
+            session.Route = ElevatedDragTargetRoute.SameSurfaceCreateManualStack;
+            session.TargetChildItem = iconHitItem;
+            canDrop = true;
+            caption = _localizationService.Format(
+                "Widget.Stack.DragCaption.CreateWith",
+                iconHitItem.Name);
+            return true;
+        }
+
         return false;
     }
 
@@ -1589,6 +1866,7 @@ public sealed partial class FileSurfaceContent
         string stackKey,
         Windows.Foundation.Point position)
     {
+        ViewModel.BeginInteractiveLayoutUndoBatch();
         if (!string.Equals(
                 _surfaceReorderStackKey,
                 stackKey,
@@ -1609,19 +1887,25 @@ public sealed partial class FileSurfaceContent
 
     private bool BeginOrUpdateElevatedFileItemsReorderPreview(
         string[] paths,
-        Windows.Foundation.Point position)
+        Windows.Foundation.Point position,
+        WidgetItem[]? draggedDisplayUnits = null)
     {
-        if (paths.Length == 0)
+        WidgetItem[] explicitUnits = draggedDisplayUnits ?? [];
+        if (paths.Length == 0 && explicitUnits.Length == 0)
         {
             return false;
         }
 
-        _surfaceReorderPathSet ??= paths
-            .Select(Path.GetFullPath)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        _surfaceReorderPathSet ??= paths.Length > 0
+            ? paths
+                .Select(Path.GetFullPath)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase)
+            : null;
         WidgetItem[] draggedItems = _surfaceReorderDraggedItems.Length > 0
             ? _surfaceReorderDraggedItems
-            : ResolveSurfaceReorderItems();
+            : explicitUnits.Length > 0
+                ? explicitUnits
+                : ResolveSurfaceReorderItems();
         if (draggedItems.Length == 0)
         {
             return false;
@@ -1629,6 +1913,7 @@ public sealed partial class FileSurfaceContent
 
         if (!_isSurfaceReorderDragActive)
         {
+            ViewModel.BeginInteractiveLayoutUndoBatch();
             if (ViewModel.UsesStackProjection)
             {
                 if (!draggedItems.All(ViewModel.PrepareVisibleItemReorder))
@@ -1776,6 +2061,11 @@ public sealed partial class FileSurfaceContent
         SourceOriginSnapshot origin = PathOriginClassifier.ClassifySources(
             sourcePaths,
             TimeSpan.FromMilliseconds(80));
+        bool canSourceMove = !DriveMediaInterop.IsProtectedDragOutSource(sourcePaths) &&
+            !origin.IsMoveProtectedSystemOrSharedSource;
+        uint allowedEffects = canSourceMove
+            ? NativeDropEffectPolicy.Copy | NativeDropEffectPolicy.Move | NativeDropEffectPolicy.Link
+            : NativeDropEffectPolicy.Copy | NativeDropEffectPolicy.Link;
         return TransferIntentEngine.Evaluate(new TransferIntentRequest(
             Domain: TransferDomain.InternalDeskBox,
             TargetKind: TransferTargetKind.DirectorySurface,
@@ -1784,10 +2074,10 @@ public sealed partial class FileSurfaceContent
             HasShellApplicationOrNamespaceData: false,
             ForceCopy: false,
             HasMappedFolder: true,
-            ControlDown: controlDown ?? Win32Helper.IsKeyPressed(VirtualKey.Control),
-            ShiftDown: shiftDown ?? Win32Helper.IsKeyPressed(VirtualKey.Shift),
-            AltDown: altDown ?? Win32Helper.IsKeyPressed(VirtualKey.Menu),
-            AllowedEffects: NativeDropEffectPolicy.Copy | NativeDropEffectPolicy.Move | NativeDropEffectPolicy.Link,
+            ControlDown: controlDown ?? Win32Helper.IsAsyncKeyPressed(VirtualKey.Control),
+            ShiftDown: shiftDown ?? Win32Helper.IsAsyncKeyPressed(VirtualKey.Shift),
+            AltDown: altDown ?? Win32Helper.IsAsyncKeyPressed(VirtualKey.Menu),
+            AllowedEffects: allowedEffects,
             NoOperationMetadata: false,
             DefaultMove: string.Equals(
                 action,
@@ -1805,7 +2095,8 @@ public sealed partial class FileSurfaceContent
         bool controlDown,
         bool shiftDown,
         bool altDown,
-        IEnumerable<string>? sourcePaths = null)
+        IEnumerable<string>? sourcePaths = null,
+        bool isDesktopTarget = true)
     {
         string[] materializedPaths = sourcePaths?
             .Where(static path => !string.IsNullOrWhiteSpace(path))
@@ -1816,17 +2107,23 @@ public sealed partial class FileSurfaceContent
         bool protectedCopyOnly =
             DriveMediaInterop.IsProtectedDragOutSource(materializedPaths) ||
             origin.IsMoveProtectedSystemOrSharedSource;
+        bool configuredMove = string.Equals(
+            managedDragOutAction,
+            SettingsService.ManagedDragOutActionMove,
+            StringComparison.Ordinal);
+        // Mirror TargetAwareDropEffectPolicy: Move crosses drives only for Desktop;
+        // ordinary Explorer folders (which may be USB sticks or NAS shares) follow
+        // Windows native same-volume Move / cross-volume Copy unless Shift is held.
         bool followWindows =
             string.IsNullOrWhiteSpace(managedDragOutAction) ||
             string.Equals(
                 managedDragOutAction,
                 SettingsService.ManagedDragOutActionFollowWindows,
-                StringComparison.Ordinal);
+                StringComparison.Ordinal) ||
+            (configuredMove && !isDesktopTarget);
         bool defaultMove = !protectedCopyOnly &&
-            string.Equals(
-                managedDragOutAction,
-                SettingsService.ManagedDragOutActionMove,
-                StringComparison.Ordinal);
+            configuredMove &&
+            isDesktopTarget;
         return FileDropIntentPolicy.ResolveMappedTransfer(
             hasMappedFolder: true,
             forceCopy: false,
@@ -1906,6 +2203,7 @@ public sealed partial class FileSurfaceContent
 
     private void ClearSameSurfaceHoverVisuals(bool keepStackPopoverIndicator)
     {
+        CancelFolderNavigationSpringBack();
         CancelStackSpringLoadTimer();
         ClearFolderDropTarget();
         ClearLaunchDropTarget();
@@ -1930,6 +2228,7 @@ public sealed partial class FileSurfaceContent
         _elevatedDragGhostWindow?.Hide();
         ClearHoveredOtherStackPopover(session);
         ClearHoveredOtherWindow(session);
+        ViewModel.RevertAndClearInteractiveLayoutUndoBatch();
         ClearSameSurfaceHoverVisuals(keepStackPopoverIndicator: false);
         if (session.FromStackPopover)
         {
@@ -1941,23 +2240,41 @@ public sealed partial class FileSurfaceContent
         }
 
         ReleaseElevatedSessionResources(session, releasePointer: null);
+        DesktopToastHudService.Shared.HideIfMatchingHint("drag-out-modifier-tip");
 
         App.Log(
             $"[DragProtocol] stage=ElevatedPointerDragCancelled widget={WidgetId} " +
             $"session={FormatDragSessionId(session.SessionId)}");
     }
 
-    private void CompleteElevatedPointerDragOnRelease(Pointer? pointer)
+    private static void ReleasePhysicalPointerDragLock(ElevatedPointerDragSession session)
+    {
+        if (!session.PointerDragRegistered)
+        {
+            return;
+        }
+
+        session.PointerDragRegistered = false;
+        ActiveDeskBoxDragRegistry.EndPointerDragSession();
+    }
+
+    private void CompleteElevatedPointerDragOnRelease(
+        Pointer? pointer,
+        PointerRoutedEventArgs? pointerArgs = null)
     {
         if (_elevatedDragSession is not { } session)
         {
             return;
         }
 
-        session.LastCtrlDown = Win32Helper.IsKeyPressed(VirtualKey.Control);
-        session.LastShiftDown = Win32Helper.IsKeyPressed(VirtualKey.Shift);
-        session.LastAltDown = Win32Helper.IsKeyPressed(VirtualKey.Menu);
-        if (Win32Helper.GetCursorPos(out Win32Helper.POINT cursor))
+        ReleasePhysicalPointerDragLock(session);
+        session.LastCtrlDown = Win32Helper.IsAsyncKeyPressed(VirtualKey.Control);
+        session.LastShiftDown = Win32Helper.IsAsyncKeyPressed(VirtualKey.Shift);
+        session.LastAltDown = Win32Helper.IsAsyncKeyPressed(VirtualKey.Menu);
+        if (TryResolveElevatedDragScreenPoint(
+                session,
+                pointerArgs,
+                out Win32Helper.POINT cursor))
         {
             session.LastScreenX = cursor.X;
             session.LastScreenY = cursor.Y;
@@ -2010,6 +2327,11 @@ public sealed partial class FileSurfaceContent
                     FinalizeElevatedSessionAfterSyncCommit(session);
                     break;
 
+                case ElevatedDragTargetRoute.SameSurfaceCreateManualStack:
+                    CommitElevatedSameSurfaceCreateManualStack(session);
+                    FinalizeElevatedSessionAfterSyncCommit(session);
+                    break;
+
                 case ElevatedDragTargetRoute.SameSurfaceDetachFromStack:
                     CommitElevatedSameSurfaceDetachFromStack(session, releaseX, releaseY);
                     FinalizeElevatedSessionAfterSyncCommit(session);
@@ -2026,8 +2348,15 @@ public sealed partial class FileSurfaceContent
                     break;
 
                 case ElevatedDragTargetRoute.SameSurfaceShortcutLaunch:
-                    CommitElevatedSameSurfaceShortcutLaunch(session);
-                    FinalizeElevatedSessionAfterSyncCommit(session);
+                    if (session.IsSecondaryButtonDrag)
+                    {
+                        QueueElevatedAsyncDropCommit(session, route, releaseX, releaseY);
+                    }
+                    else
+                    {
+                        CommitElevatedSameSurfaceShortcutLaunch(session);
+                        FinalizeElevatedSessionAfterSyncCommit(session);
+                    }
                     break;
 
                 case ElevatedDragTargetRoute.SameSurfaceFolderDrop:
@@ -2041,6 +2370,7 @@ public sealed partial class FileSurfaceContent
                 default:
                     ClearHoveredOtherStackPopover(session);
                     ClearHoveredOtherWindow(session);
+                    ViewModel.RevertAndClearInteractiveLayoutUndoBatch();
                     ClearSameSurfaceHoverVisuals(keepStackPopoverIndicator: false);
                     FinalizeElevatedSessionAfterSyncCommit(session);
                     break;
@@ -2050,6 +2380,7 @@ public sealed partial class FileSurfaceContent
         {
             ClearHoveredOtherStackPopover(session);
             ClearHoveredOtherWindow(session);
+            ViewModel.RevertAndClearInteractiveLayoutUndoBatch();
             ClearSameSurfaceHoverVisuals(keepStackPopoverIndicator: false);
             FinalizeElevatedSessionAfterSyncCommit(session);
             App.Log(
@@ -2090,6 +2421,7 @@ public sealed partial class FileSurfaceContent
                 stack,
                 out WidgetItem[] items))
         {
+            ViewModel.RevertAndClearInteractiveLayoutUndoBatch();
             return;
         }
 
@@ -2099,6 +2431,7 @@ public sealed partial class FileSurfaceContent
             .Where(path => !string.IsNullOrWhiteSpace(path))
             .ToArray();
 
+        ViewModel.BeginInteractiveLayoutUndoBatch();
         bool added = false;
         string resolvedStackKey = targetStackKey;
         if (session.FromStackPopover)
@@ -2119,6 +2452,7 @@ public sealed partial class FileSurfaceContent
 
         if (added)
         {
+            ViewModel.CommitInteractiveLayoutUndoBatch();
             if (string.Equals(_stackPopoverKey, targetStackKey, StringComparison.Ordinal))
             {
                 _stackPopoverKey = resolvedStackKey;
@@ -2130,6 +2464,51 @@ public sealed partial class FileSurfaceContent
             {
                 CloseStackPopover();
             }
+        }
+        else
+        {
+            ViewModel.RevertAndClearInteractiveLayoutUndoBatch();
+        }
+    }
+
+    private void CommitElevatedSameSurfaceCreateManualStack(ElevatedPointerDragSession session)
+    {
+        ClearStackMemberDropTarget();
+        PersistSurfaceReorder();
+        if (session.TargetChildItem is not { } targetItem ||
+            targetItem is WidgetStackItem ||
+            targetItem.IsFolder ||
+            targetItem.IsStackChild)
+        {
+            ViewModel.RevertAndClearInteractiveLayoutUndoBatch();
+            return;
+        }
+
+        WidgetItem[] looseDragged = session.DraggedItems
+            .Where(item =>
+                item is not WidgetStackItem &&
+                !item.IsFolder &&
+                !string.IsNullOrWhiteSpace(item.Path) &&
+                !string.Equals(item.Path, targetItem.Path, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        if (looseDragged.Length == 0)
+        {
+            ViewModel.RevertAndClearInteractiveLayoutUndoBatch();
+            return;
+        }
+
+        ViewModel.BeginInteractiveLayoutUndoBatch();
+        bool created = ViewModel.CreateManualStack(
+            [targetItem, .. looseDragged],
+            anchorTargetItem: targetItem);
+        if (created)
+        {
+            ClearSelection();
+            ViewModel.CommitInteractiveLayoutUndoBatch();
+        }
+        else
+        {
+            ViewModel.RevertAndClearInteractiveLayoutUndoBatch();
         }
     }
 
@@ -2162,25 +2541,19 @@ public sealed partial class FileSurfaceContent
             return;
         }
 
-        bool removed = false;
-        ApplyStackProjectionChange(() =>
-        {
-            removed = ViewModel.RemoveItemsFromStack(
-                sourceStack.StackKey,
-                detachItems);
-            if (removed && detachInsertionIndex >= 0)
-            {
-                for (int i = 0; i < detachItems.Length; i++)
-                {
-                    ViewModel.MoveVisibleItemForReorder(
-                        detachItems[i],
-                        detachInsertionIndex + i);
-                }
-            }
-        });
+        ViewModel.BeginInteractiveLayoutUndoBatch();
+        bool removed = DetachStackItemsToSurfaceIndex(
+            sourceStack.StackKey,
+            detachItems,
+            detachInsertionIndex);
         if (removed)
         {
+            ViewModel.CommitInteractiveLayoutUndoBatch();
             CloseStackPopover();
+        }
+        else
+        {
+            ViewModel.RevertAndClearInteractiveLayoutUndoBatch();
         }
     }
 
@@ -2198,6 +2571,7 @@ public sealed partial class FileSurfaceContent
                 out WidgetStackItem sourceStack,
                 out WidgetItem[] items))
         {
+            ViewModel.RevertAndClearInteractiveLayoutUndoBatch();
             HideStackPopoverReorderIndicator();
             return;
         }
@@ -2212,13 +2586,19 @@ public sealed partial class FileSurfaceContent
             : ResolveStackPopoverMemberInsertionIndex(
                 view,
                 _stackPopoverReorderInsertionIndex);
+        ViewModel.BeginInteractiveLayoutUndoBatch();
         bool reordered = ReorderStackPopoverMembers(
             sourceStack,
             items,
             insertionIndex);
         HideStackPopoverReorderIndicator();
-        if (!reordered)
+        if (reordered)
         {
+            ViewModel.CommitInteractiveLayoutUndoBatch();
+        }
+        else
+        {
+            ViewModel.RevertAndClearInteractiveLayoutUndoBatch();
             QueueStackPopoverReconciliation();
         }
     }
@@ -2252,6 +2632,7 @@ public sealed partial class FileSurfaceContent
                 stack,
                 out WidgetItem[] items))
         {
+            ViewModel.RevertAndClearInteractiveLayoutUndoBatch();
             return;
         }
 
@@ -2260,6 +2641,7 @@ public sealed partial class FileSurfaceContent
             .Select(member => member.Path)
             .Where(path => !string.IsNullOrWhiteSpace(path))
             .ToArray();
+        ViewModel.BeginInteractiveLayoutUndoBatch();
         bool added = ViewModel.AddItemsToStack(
             targetStackKey,
             items,
@@ -2279,14 +2661,20 @@ public sealed partial class FileSurfaceContent
                     memberIndex);
             }
 
+            ViewModel.CommitInteractiveLayoutUndoBatch();
             ClearSelection();
             QueueStackPopoverReconciliation(targetStackKey, targetAnchors);
+        }
+        else
+        {
+            ViewModel.RevertAndClearInteractiveLayoutUndoBatch();
         }
     }
 
     private void CommitElevatedSameSurfaceShortcutLaunch(
         ElevatedPointerDragSession session)
     {
+        ViewModel.RevertAndClearInteractiveLayoutUndoBatch();
         ClearSameSurfaceHoverVisuals(keepStackPopoverIndicator: false);
         if (session.TargetChildItem is not { Path.Length: > 0 } shortcut ||
             session.SourcePaths.Length == 0)
@@ -2294,14 +2682,33 @@ public sealed partial class FileSurfaceContent
             return;
         }
 
-        bool launched = ShortcutFileLauncher.TryLaunchWithFiles(
-            shortcut.Path,
-            session.SourcePaths);
         MarkNativeLaunchConsumed();
-        if (!launched)
+        if (!ShortcutFileLauncher.CanLaunchWithFiles(shortcut.Path, session.SourcePaths))
         {
             ShowShortcutLaunchRefusedFeedback(shortcut.Name);
+            return;
         }
+
+        string shortcutPath = shortcut.Path;
+        string shortcutName = shortcut.Name;
+        string[] sourcePaths = session.SourcePaths;
+        UiDispatch.PostAfterCallback(async () =>
+        {
+            if (_isDisposed)
+            {
+                return;
+            }
+
+            ShellLaunchOutcome launchOutcome = await ShortcutFileLauncher.LaunchWithFilesAsync(
+                shortcutPath,
+                sourcePaths,
+                _hostWindowHandle,
+                _lifetimeCancellation.Token);
+            if (launchOutcome == ShellLaunchOutcome.Failed && !_isDisposed)
+            {
+                ShowShortcutLaunchRefusedFeedback(shortcutName);
+            }
+        });
     }
 
     private void QueueElevatedAsyncDropCommit(
@@ -2313,13 +2720,38 @@ public sealed partial class FileSurfaceContent
         // Clear same-surface hover chrome immediately while keeping
         // ActiveDeskBoxDragRegistry alive across the async transfer so target
         // widgets recognize our own DeskBox-sourced move semantics.
+        CancelFolderNavigationSpringBack();
         ClearFolderDropTarget();
         ClearLaunchDropTarget();
         ClearStackMemberDropTarget();
+        ViewModel.RevertAndClearInteractiveLayoutUndoBatch();
         PersistSurfaceReorder();
         HideStackPopoverReorderIndicator();
 
-        if (!DispatcherQueue.TryEnqueue(async () =>
+        bool TryEnqueueTracked(Func<Task> work)
+        {
+            Interlocked.Increment(ref _activeAsyncOutboundCommits);
+            if (DispatcherQueue.TryEnqueue(async () =>
+                {
+                    try
+                    {
+                        await work();
+                    }
+                    finally
+                    {
+                        Interlocked.Decrement(ref _activeAsyncOutboundCommits);
+                        NotifyOutboundDragCompletedIfIdle();
+                    }
+                }))
+            {
+                return true;
+            }
+
+            Interlocked.Decrement(ref _activeAsyncOutboundCommits);
+            return false;
+        }
+
+        if (!TryEnqueueTracked(async () =>
             {
                 try
                 {
@@ -2360,34 +2792,70 @@ public sealed partial class FileSurfaceContent
 
         switch (route)
         {
-            case ElevatedDragTargetRoute.SameSurfaceFolderDrop:
-                if (session.TargetChildItem is { } folder &&
-                    ItemDropBehaviorPolicy.TryGetFolderDropDestinationPath(
-                        folder,
-                        out string folderDestination))
+            case ElevatedDragTargetRoute.SameSurfaceShortcutLaunch:
+                if (session.TargetChildItem is { Path.Length: > 0 } launchShortcut)
                 {
-                    FileDropIntent intent = ResolveElevatedInternalFolderIntent(
+                    (FrameworkElement launchTarget, IntPtr launchHwnd, bool launchInPopover) =
+                        ResolveRightButtonMenuPlacement(
+                            releaseX,
+                            releaseY,
+                            session.HostWindowRootAnchor);
+                    string currentDestination = TransferIntentEngine.ResolveProspectiveManagedDestination(
+                        ViewModel.CurrentFolderPath,
+                        ViewModel.MappedFolderPath,
+                        _settingsService.Settings.FileWidget.DefaultManagedStorageRootPath);
+                    bool canOfferFolderChoices = !string.IsNullOrWhiteSpace(currentDestination) &&
+                        !AreAllSourcesAlreadyInDestinationLexically(session.SourcePaths, currentDestination);
+                    SourceOriginSnapshot launchOrigin = PathOriginClassifier.ClassifySources(
                         session.SourcePaths,
-                        folderDestination,
-                        session.LastCtrlDown,
-                        session.LastShiftDown,
-                        session.LastAltDown);
-                    if (intent != FileDropIntent.None)
+                        PathOriginClassifier.DefaultDropProbeBudget);
+                    bool canSourceMove = !DriveMediaInterop.IsProtectedDragOutSource(session.SourcePaths) &&
+                        !launchOrigin.IsMoveProtectedSystemOrSharedSource;
+                    uint launchAllowedEffects = canSourceMove
+                        ? NativeDropEffectPolicy.Copy | NativeDropEffectPolicy.Move | NativeDropEffectPolicy.Link
+                        : NativeDropEffectPolicy.Copy | NativeDropEffectPolicy.Link;
+                    StackPopoverRightDropChoice launchChoice = await ShowRightButtonDropMenuAsync(
+                        launchTarget,
+                        launchHwnd,
+                        releaseX,
+                        releaseY,
+                        session.SourcePaths,
+                        launchShortcut,
+                        isRecycleBinTarget: false,
+                        allowLaunchShortcut: true,
+                        hasTargetFolder: canOfferFolderChoices,
+                        destinationFolder: currentDestination,
+                        isDeskBoxOwnedSource: true,
+                        containsTemporaryFiles: false,
+                        allItemsTemporary: false,
+                        sourceCanCopy: canOfferFolderChoices,
+                        sourceCanMove: canOfferFolderChoices && canSourceMove,
+                        allowedEffects: launchAllowedEffects,
+                        trackPopoverContextMenu: launchInPopover);
+                    if (launchChoice == StackPopoverRightDropChoice.OpenWithApp)
                     {
-                        DroppedFilePath[] dropped = session.SourcePaths
-                            .Select(path => new DroppedFilePath(
-                                path,
-                                Path.GetFileName(path),
-                                ForceManagedCopy: false))
-                            .ToArray();
-                        bool imported = await ImportNativeDroppedFilesIntoFolderAsync(
-                            dropped,
-                            folder,
-                            move: intent == FileDropIntent.Move,
-                            intentOverride: intent == FileDropIntent.Shortcut
-                                ? FileDropIntent.Shortcut
-                                : null);
-                        if (imported && intent == FileDropIntent.Move)
+                        CommitElevatedSameSurfaceShortcutLaunch(session);
+                    }
+                    else if (launchChoice is StackPopoverRightDropChoice.Copy
+                        or StackPopoverRightDropChoice.Move
+                        or StackPopoverRightDropChoice.Shortcut)
+                    {
+                        FileDropIntent forcedLaunchFolderIntent = launchChoice switch
+                        {
+                            StackPopoverRightDropChoice.Move => FileDropIntent.Move,
+                            StackPopoverRightDropChoice.Shortcut => FileDropIntent.Shortcut,
+                            _ => FileDropIntent.Copy,
+                        };
+                        await ImportNativeDroppedFilesAsync(
+                            session.SourcePaths,
+                            containsTemporaryFiles: false,
+                            copyWhenMapped: launchChoice != StackPopoverRightDropChoice.Move,
+                            targetItem: null,
+                            forcedIntent: forcedLaunchFolderIntent,
+                            screenX: releaseX,
+                            screenY: releaseY,
+                            allowedEffects: launchAllowedEffects);
+                        if (launchChoice == StackPopoverRightDropChoice.Move)
                         {
                             await ReconcileElevatedMovedOutPathsAsync(
                                 session.SourcePaths,
@@ -2397,9 +2865,155 @@ public sealed partial class FileSurfaceContent
                 }
                 break;
 
+            case ElevatedDragTargetRoute.SameSurfaceFolderDrop:
+                if (session.TargetChildItem is { } folder &&
+                    ItemDropBehaviorPolicy.TryGetFolderDropDestinationPath(
+                        folder,
+                        out string folderDestination))
+                {
+                    FileDropIntent intent;
+                    if (session.IsSecondaryButtonDrag)
+                    {
+                        (FrameworkElement folderTarget, IntPtr folderHwnd, bool folderInPopover) =
+                            ResolveRightButtonMenuPlacement(
+                                releaseX,
+                                releaseY,
+                                session.HostWindowRootAnchor);
+                        SourceOriginSnapshot folderOrigin = PathOriginClassifier.ClassifySources(
+                            session.SourcePaths,
+                            PathOriginClassifier.DefaultDropProbeBudget);
+                        bool canSourceMove = !DriveMediaInterop.IsProtectedDragOutSource(session.SourcePaths) &&
+                            !folderOrigin.IsMoveProtectedSystemOrSharedSource;
+                        uint folderAllowedEffects = canSourceMove
+                            ? NativeDropEffectPolicy.Copy | NativeDropEffectPolicy.Move | NativeDropEffectPolicy.Link
+                            : NativeDropEffectPolicy.Copy | NativeDropEffectPolicy.Link;
+                        StackPopoverRightDropChoice folderChoice = await ShowRightButtonDropMenuAsync(
+                            folderTarget,
+                            folderHwnd,
+                            releaseX,
+                            releaseY,
+                            session.SourcePaths,
+                            folder,
+                            isRecycleBinTarget: false,
+                            allowLaunchShortcut: false,
+                            hasTargetFolder: true,
+                            destinationFolder: folderDestination,
+                            isDeskBoxOwnedSource: true,
+                            containsTemporaryFiles: false,
+                            allItemsTemporary: false,
+                            sourceCanCopy: true,
+                            sourceCanMove: canSourceMove,
+                            allowedEffects: folderAllowedEffects,
+                            trackPopoverContextMenu: folderInPopover);
+                        intent = folderChoice switch
+                        {
+                            StackPopoverRightDropChoice.Copy => FileDropIntent.Copy,
+                            StackPopoverRightDropChoice.Move => FileDropIntent.Move,
+                            StackPopoverRightDropChoice.Shortcut => FileDropIntent.Shortcut,
+                            _ => FileDropIntent.None,
+                        };
+                    }
+                    else
+                    {
+                        intent = ResolveElevatedInternalFolderIntent(
+                            session.SourcePaths,
+                            folderDestination,
+                            session.LastCtrlDown,
+                            session.LastShiftDown,
+                            session.LastAltDown);
+                    }
+
+                    if (intent != FileDropIntent.None)
+                    {
+                        DroppedFilePath[] dropped = session.SourcePaths
+                            .Select(path => new DroppedFilePath(
+                                path,
+                                Path.GetFileName(path),
+                                ForceManagedCopy: false))
+                            .ToArray();
+                        FolderImportOutcome folderOutcome =
+                            await ImportNativeDroppedFilesIntoFolderAsync(
+                                dropped,
+                                folder,
+                                move: intent == FileDropIntent.Move,
+                                intentOverride: intent == FileDropIntent.Shortcut
+                                    ? FileDropIntent.Shortcut
+                                    : null);
+                        if (folderOutcome.Imported && intent == FileDropIntent.Move)
+                        {
+                            await ReconcileElevatedMovedOutPathsAsync(
+                                session.SourcePaths,
+                                session.FromStackPopover);
+                        }
+
+                        if (folderOutcome.CompletedCount > 0 &&
+                            !folderOutcome.ShowedDedicatedWarning &&
+                            intent is FileDropIntent.Move or FileDropIntent.Copy)
+                        {
+                            // Receipt-only (deterministic flags): the internal
+                            // source short-circuits the protection branches and
+                            // no persisted once-only quota is consumed here.
+                            TryShowSubfolderDropHudReceipt(
+                                intent,
+                                session.SourcePaths,
+                                isDeskBoxOwnedSource: true,
+                                moved: intent == FileDropIntent.Move,
+                                folderOutcome.CompletedCount,
+                                folderOutcome.UndoHistoryId,
+                                sourceWidgetId: WidgetId,
+                                folderDestination,
+                                containsTemporaryFiles: false,
+                                hadExplicitModifierOrChoice:
+                                    session.IsSecondaryButtonDrag ||
+                                    session.LastCtrlDown ||
+                                    session.LastShiftDown ||
+                                    session.LastAltDown,
+                                autoProtectedExternalCopy: false,
+                                fallbackMessage: intent == FileDropIntent.Copy
+                                    ? _localizationService.Format(
+                                        "Widget.CopiedToFolder",
+                                        folder.Name,
+                                        folderOutcome.CompletedCount)
+                                    : null);
+                        }
+                    }
+                }
+                break;
+
             case ElevatedDragTargetRoute.SameSurfaceRecycleBinDrop:
                 if (session.TargetChildItem is { } binTile)
                 {
+                    if (session.IsSecondaryButtonDrag)
+                    {
+                        (FrameworkElement binTarget, IntPtr binHwnd, bool binInPopover) =
+                            ResolveRightButtonMenuPlacement(
+                                releaseX,
+                                releaseY,
+                                session.HostWindowRootAnchor);
+                        StackPopoverRightDropChoice binChoice = await ShowRightButtonDropMenuAsync(
+                            binTarget,
+                            binHwnd,
+                            releaseX,
+                            releaseY,
+                            session.SourcePaths,
+                            binTile,
+                            isRecycleBinTarget: true,
+                            allowLaunchShortcut: false,
+                            hasTargetFolder: false,
+                            destinationFolder: null,
+                            isDeskBoxOwnedSource: true,
+                            containsTemporaryFiles: false,
+                            allItemsTemporary: false,
+                            sourceCanCopy: false,
+                            sourceCanMove: true,
+                            allowedEffects: NativeDropEffectPolicy.Move,
+                            trackPopoverContextMenu: binInPopover);
+                        if (binChoice != StackPopoverRightDropChoice.Move)
+                        {
+                            break;
+                        }
+                    }
+
                     await DeleteDroppedFilesForBinAsync(
                         session.SourcePaths,
                         binTile.Path);
@@ -2420,7 +3034,8 @@ public sealed partial class FileSurfaceContent
                             releaseY,
                             session.LastCtrlDown,
                             session.LastShiftDown,
-                            session.LastAltDown);
+                            session.LastAltDown,
+                            isSecondaryButtonDrag: session.IsSecondaryButtonDrag);
                     if (popoverAccepted)
                     {
                         await ReconcileElevatedMovedOutPathsAsync(
@@ -2440,7 +3055,8 @@ public sealed partial class FileSurfaceContent
                         releaseY,
                         session.LastCtrlDown,
                         session.LastShiftDown,
-                        session.LastAltDown);
+                        session.LastAltDown,
+                        isSecondaryButtonDrag: session.IsSecondaryButtonDrag);
                     if (accepted)
                     {
                         await ReconcileElevatedMovedOutPathsAsync(
@@ -2463,6 +3079,41 @@ public sealed partial class FileSurfaceContent
                 }
                 break;
         }
+    }
+
+    private (FrameworkElement Target, IntPtr WindowHandle, bool InStackPopover)
+        ResolveRightButtonMenuPlacement(
+            int screenX,
+            int screenY,
+            WeakReference<FrameworkElement>? fallbackHostAnchor = null)
+    {
+        if (_stackPopoverPopupOpen &&
+            _stackPopoverHostWindow is { IsVisible: true, WindowHandle: not 0 } popHost &&
+            _stackPopoverSurface is { XamlRoot: not null } popSurface)
+        {
+            IntPtr hitHwnd = Win32Helper.WindowFromPoint(new Win32Helper.POINT
+            {
+                X = screenX,
+                Y = screenY,
+            });
+            IntPtr rootHwnd = hitHwnd != IntPtr.Zero
+                ? Win32Helper.GetAncestor(hitHwnd, Win32Helper.GA_ROOT)
+                : IntPtr.Zero;
+            if (rootHwnd == popHost.WindowHandle)
+            {
+                return (popSurface, popHost.WindowHandle, true);
+            }
+        }
+
+        if ((!Root.IsLoaded || Root.XamlRoot is null) &&
+            fallbackHostAnchor is not null &&
+            fallbackHostAnchor.TryGetTarget(out FrameworkElement? hostAnchor) &&
+            hostAnchor is { IsLoaded: true, XamlRoot: not null })
+        {
+            return (hostAnchor, _hostWindowHandle, false);
+        }
+
+        return (Root, _hostWindowHandle, false);
     }
 
     private async Task ReconcileElevatedMovedOutPathsAsync(
@@ -2516,9 +3167,23 @@ public sealed partial class FileSurfaceContent
             }
         }
 
+        if (session.ResourcesReleased)
+        {
+            return;
+        }
+
+        session.ResourcesReleased = true;
+        StopOutboundModifierTipWatch();
+        ReleasePhysicalPointerDragLock(session);
+
         if (session.SourcePaths.Length > 0)
         {
             ActiveDeskBoxDragRegistry.End(session.SessionId);
+        }
+
+        if (session.Route != ElevatedDragTargetRoute.OutboundExternal)
+        {
+            DesktopToastHudService.Shared.HideIfMatchingHint("drag-out-modifier-tip");
         }
 
         ResetDragPayloadCache();
@@ -2529,6 +3194,22 @@ public sealed partial class FileSurfaceContent
         if (session.FromStackPopover)
         {
             CompleteStackPopoverDrag();
+        }
+
+        if (session.IsSecondaryButtonDrag)
+        {
+            if (!DispatcherQueue.TryEnqueue(
+                    Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
+                    () =>
+                    {
+                        if (!_isDisposed)
+                        {
+                            _suppressNextRightTap = false;
+                        }
+                    }))
+            {
+                _suppressNextRightTap = false;
+            }
         }
 
         if (session.RestoreOriginItemClickEnabled)
@@ -2580,6 +3261,7 @@ public sealed partial class FileSurfaceContent
                 }
 
                 if (HasTransferConflict(sourcePaths, destinationFolder) ||
+                    Services.DragDrop.StoreVirtualizedPathPolicy.IsWriteBlockedDestination(destinationFolder) ||
                     IsUnsafeFolderDrop(sourcePaths, destinationFolder))
                 {
                     return T("Widget.CannotMoveToFolder");
@@ -2598,10 +3280,11 @@ public sealed partial class FileSurfaceContent
                 FileDropIntent intent = ResolveElevatedOutboundDropIntent(
                     _settingsService.Settings.FileWidget.ManagedDragOutAction,
                     sameVolume,
-                    Win32Helper.IsKeyPressed(VirtualKey.Control),
-                    Win32Helper.IsKeyPressed(VirtualKey.Shift),
-                    Win32Helper.IsKeyPressed(VirtualKey.Menu),
-                    sourcePaths);
+                    Win32Helper.IsAsyncKeyPressed(VirtualKey.Control),
+                    Win32Helper.IsAsyncKeyPressed(VirtualKey.Shift),
+                    Win32Helper.IsAsyncKeyPressed(VirtualKey.Menu),
+                    sourcePaths,
+                    isDesktopTarget: target.Kind == ElevatedOutboundTargetKind.Desktop);
                 if (intent == FileDropIntent.None)
                 {
                     return string.Empty;
@@ -2609,6 +3292,20 @@ public sealed partial class FileSurfaceContent
 
                 canDrop = true;
                 return FormatDropCaption(intent, GetOutboundTargetDisplayName(target));
+            }
+
+            case ElevatedOutboundTargetKind.RecycleBin:
+            {
+                if (FileItemDragPackage.IsProtectedCopyOnlySource(sourcePaths) ||
+                    PathOriginClassifier.ClassifySources(
+                        sourcePaths,
+                        TimeSpan.FromMilliseconds(80)).HasAppExecutionAliasSource)
+                {
+                    return T("Widget.CannotMoveToFolder");
+                }
+
+                canDrop = true;
+                return T("Widget.DropOnRecycleBinHint");
             }
 
             case ElevatedOutboundTargetKind.UnsupportedShellNamespace:
@@ -2720,17 +3417,25 @@ public sealed partial class FileSurfaceContent
 
         try
         {
-            string desktopPath = Environment.GetFolderPath(
+            string normalized = Path.TrimEndingDirectorySeparator(Path.GetFullPath(folderPath));
+            string userDesktop = Environment.GetFolderPath(
                 Environment.SpecialFolder.DesktopDirectory);
-            if (string.IsNullOrWhiteSpace(desktopPath))
+            if (!string.IsNullOrWhiteSpace(userDesktop) &&
+                string.Equals(
+                    normalized,
+                    Path.TrimEndingDirectorySeparator(Path.GetFullPath(userDesktop)),
+                    StringComparison.OrdinalIgnoreCase))
             {
-                return false;
+                return true;
             }
 
-            return string.Equals(
-                Path.TrimEndingDirectorySeparator(Path.GetFullPath(folderPath)),
-                Path.TrimEndingDirectorySeparator(Path.GetFullPath(desktopPath)),
-                StringComparison.OrdinalIgnoreCase);
+            string publicDesktop = Environment.GetFolderPath(
+                Environment.SpecialFolder.CommonDesktopDirectory);
+            return !string.IsNullOrWhiteSpace(publicDesktop) &&
+                string.Equals(
+                    normalized,
+                    Path.TrimEndingDirectorySeparator(Path.GetFullPath(publicDesktop)),
+                    StringComparison.OrdinalIgnoreCase);
         }
         catch
         {
@@ -2743,26 +3448,64 @@ public sealed partial class FileSurfaceContent
         int screenX,
         int screenY)
     {
-        string[] validPaths = session.SourcePaths
-            .Where(path =>
-                !string.IsNullOrWhiteSpace(path) &&
-                (File.Exists(path) || Directory.Exists(path)))
+        string[] candidatePaths = session.SourcePaths;
+        if (candidatePaths.Any(DesktopOutboundDropCoordinator.MightTouchNetworkPath))
+        {
+            DesktopOutboundDropCoordinator.BoundedSourcePathProbeResult probe =
+                await Task.Run(() => DesktopOutboundDropCoordinator.FilterExistingPathsWithBoundedNetworkProbe(
+                    candidatePaths,
+                    timeoutMs: 650));
+            if (probe.TimedOut)
+            {
+                DesktopToastHudService.Shared.HideIfMatchingHint("drag-out-modifier-tip");
+                return false;
+            }
+
+            candidatePaths = probe.ExistingPaths;
+        }
+        else
+        {
+            candidatePaths = candidatePaths
+                .Where(path =>
+                    !string.IsNullOrWhiteSpace(path) &&
+                    (File.Exists(path) || Directory.Exists(path)))
+                .ToArray();
+        }
+
+        string[] validPaths = candidatePaths
             .Select(Path.GetFullPath)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
         if (validPaths.Length == 0 || session.LastOutboundRootHwnd == IntPtr.Zero)
         {
+            DesktopToastHudService.Shared.HideIfMatchingHint("drag-out-modifier-tip");
             return false;
         }
 
+        bool allowDesktopRecycleBinHit =
+            ElevatedShellOutboundDropInterop.ShouldAllowDesktopRecycleBinDrop(
+                Win32Helper.IsAsyncKeyPressed(VirtualKey.Control),
+                Win32Helper.IsAsyncKeyPressed(VirtualKey.Menu));
         ElevatedOutboundTargetInfo target = await Task.Run(() =>
             ElevatedShellOutboundDropInterop.ResolveOutboundTarget(
                 session.LastOutboundHitHwnd,
                 session.LastOutboundRootHwnd,
-                explorerQueryTimeoutMs: 1500));
+                explorerQueryTimeoutMs: 1500,
+                screenX: screenX,
+                screenY: screenY,
+                allowDesktopRecycleBinHit: allowDesktopRecycleBinHit));
+        IntPtr currentTabHwnd = ElevatedShellOutboundDropInterop.ResolveTargetTabWindow(
+            session.LastOutboundHitHwnd,
+            session.LastOutboundRootHwnd);
         if (target.Kind == ElevatedOutboundTargetKind.UnsupportedShellNamespace &&
-            session.CachedOutboundRootHwnd == session.LastOutboundRootHwnd &&
-            session.CachedOutboundTarget.Kind == ElevatedOutboundTargetKind.ExplorerFolder)
+            ElevatedShellOutboundDropInterop.ShouldReuseCachedExplorerFolderTarget(
+                session.CachedOutboundRootHwnd,
+                session.CachedOutboundTabHwnd,
+                session.CachedOutboundResolvedTickMs,
+                session.CachedOutboundTarget.Kind,
+                session.LastOutboundRootHwnd,
+                currentTabHwnd,
+                Environment.TickCount64))
         {
             target = session.CachedOutboundTarget;
         }
@@ -2778,11 +3521,20 @@ public sealed partial class FileSurfaceContent
                     screenX,
                     screenY);
 
+            case ElevatedOutboundTargetKind.RecycleBin:
+                return await ExecuteElevatedRecycleBinDropAsync(
+                    session,
+                    validPaths,
+                    screenX,
+                    screenY);
+
             case ElevatedOutboundTargetKind.ForeignWindow:
+                DesktopToastHudService.Shared.HideIfMatchingHint("drag-out-modifier-tip");
                 await StageElevatedOutboundClipboardAsync(validPaths);
                 return false;
 
             case ElevatedOutboundTargetKind.UnsupportedShellNamespace:
+                DesktopToastHudService.Shared.HideIfMatchingHint("drag-out-modifier-tip");
                 ShowFeedback(new WidgetFeedbackRequest(
                     T("Widget.ElevatedDragOut.UnsupportedShellTarget"),
                     WidgetFeedbackSeverity.Warning,
@@ -2790,8 +3542,73 @@ public sealed partial class FileSurfaceContent
                 return false;
 
             default:
+                DesktopToastHudService.Shared.HideIfMatchingHint("drag-out-modifier-tip");
                 return false;
         }
+    }
+
+    private async Task<bool> ExecuteElevatedRecycleBinDropAsync(
+        ElevatedPointerDragSession session,
+        string[] validPaths,
+        int screenX,
+        int screenY)
+    {
+        DesktopToastHudService.Shared.HideIfMatchingHint("drag-out-modifier-tip");
+        if (validPaths.Length == 0)
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(session.StackReorderKey))
+        {
+            ShowCollapsedStackRecycleBinBlockedFeedback();
+            return false;
+        }
+
+        SourceOriginSnapshot origin = PathOriginClassifier.ClassifySources(
+            validPaths,
+            PathOriginClassifier.DefaultDropProbeBudget);
+        if (FileItemDragPackage.IsProtectedCopyOnlySource(validPaths) ||
+            origin.HasAppExecutionAliasSource ||
+            origin.IsMoveProtectedSystemOrSharedSource)
+        {
+            return false;
+        }
+
+        if (session.IsSecondaryButtonDrag)
+        {
+            (FrameworkElement binTarget, IntPtr binHwnd, bool binInPopover) =
+                ResolveRightButtonMenuPlacement(
+                    screenX,
+                    screenY,
+                    session.HostWindowRootAnchor);
+            StackPopoverRightDropChoice binChoice = await ShowRightButtonDropMenuAsync(
+                binTarget,
+                binHwnd,
+                screenX,
+                screenY,
+                validPaths,
+                targetItem: null,
+                isRecycleBinTarget: true,
+                allowLaunchShortcut: false,
+                hasTargetFolder: false,
+                destinationFolder: null,
+                isDeskBoxOwnedSource: true,
+                containsTemporaryFiles: false,
+                allItemsTemporary: false,
+                sourceCanCopy: false,
+                sourceCanMove: true,
+                allowedEffects: NativeDropEffectPolicy.Move,
+                trackPopoverContextMenu: binInPopover);
+            if (binChoice != StackPopoverRightDropChoice.Move)
+            {
+                return false;
+            }
+        }
+
+        await DeleteDroppedFilesForBinAsync(validPaths, string.Empty);
+        await ReconcileElevatedMovedOutPathsAsync(validPaths, session.FromStackPopover);
+        return true;
     }
 
     private async Task<bool> ExecuteElevatedShellFolderDropAsync(
@@ -2802,14 +3619,19 @@ public sealed partial class FileSurfaceContent
         int screenY)
     {
         string destinationFolder = target.DestinationFolderPath;
-        if (string.IsNullOrWhiteSpace(destinationFolder) ||
-            !Directory.Exists(destinationFolder))
+        bool destinationReachable = !string.IsNullOrWhiteSpace(destinationFolder) &&
+            (DesktopOutboundDropCoordinator.MightTouchNetworkPath(destinationFolder)
+                ? await DesktopOutboundDropCoordinator.IsDestinationDirectoryReachableAsync(destinationFolder, 800)
+                : Directory.Exists(destinationFolder));
+        if (!destinationReachable)
         {
+            DesktopToastHudService.Shared.HideIfMatchingHint("drag-out-modifier-tip");
             return false;
         }
 
         if (HasTransferConflict(validPaths, destinationFolder))
         {
+            DesktopToastHudService.Shared.HideIfMatchingHint("drag-out-modifier-tip");
             FileTransferPathState destState =
                 _fileService.TransferSessions.GetState(destinationFolder);
             ShowTransferBlockedFeedback(
@@ -2819,11 +3641,19 @@ public sealed partial class FileSurfaceContent
             return false;
         }
 
+        if (Services.DragDrop.StoreVirtualizedPathPolicy.IsWriteBlockedDestination(destinationFolder))
+        {
+            DesktopToastHudService.Shared.HideIfMatchingHint("drag-out-modifier-tip");
+            ShowStoreVirtualizedDestinationBlockedFeedback();
+            return false;
+        }
+
         if (IsUnsafeFolderDrop(validPaths, destinationFolder) ||
             await Task.Run(() => FileService.IsUnsafeDirectoryTransfer(
                 validPaths,
                 destinationFolder)))
         {
+            DesktopToastHudService.Shared.HideIfMatchingHint("drag-out-modifier-tip");
             ShowFeedback(new WidgetFeedbackRequest(
                 T("Widget.CannotMoveToFolder"),
                 WidgetFeedbackSeverity.Warning,
@@ -2835,37 +3665,99 @@ public sealed partial class FileSurfaceContent
                 validPaths,
                 destinationFolder))
         {
+            DesktopToastHudService.Shared.HideIfMatchingHint("drag-out-modifier-tip");
             ShowSameDirectoryDropFeedback();
-            return false;
-        }
-
-        bool sameVolume = FileDropIntentPolicy.AreAllOnSameVolume(
-            validPaths,
-            destinationFolder);
-        FileDropIntent intent = ResolveElevatedOutboundDropIntent(
-            _settingsService.Settings.FileWidget.ManagedDragOutAction,
-            sameVolume,
-            session.LastCtrlDown,
-            session.LastShiftDown,
-            session.LastAltDown,
-            validPaths);
-        if (intent == FileDropIntent.None)
-        {
             return false;
         }
 
         bool isDesktop = target.Kind == ElevatedOutboundTargetKind.Desktop ||
             IsUserDesktopFolder(destinationFolder);
+        bool sameVolume = FileDropIntentPolicy.AreAllOnSameVolume(
+            validPaths,
+            destinationFolder);
+        FileDropIntent intent;
+        if (session.IsSecondaryButtonDrag)
+        {
+            (FrameworkElement placementTarget, IntPtr placementHwnd, _) =
+                ResolveRightButtonMenuPlacement(
+                    screenX,
+                    screenY,
+                    session.HostWindowRootAnchor);
+            bool hasAppAlias = PathOriginClassifier
+                .ClassifySources(validPaths, PathOriginClassifier.DefaultDropProbeBudget)
+                .HasAppExecutionAliasSource;
+            bool isProtectedCopyOnly =
+                hasAppAlias ||
+                FileItemDragPackage.IsProtectedCopyOnlySource(validPaths);
+            StackPopoverRightDropChoice rightChoice = await ShowRightButtonDropMenuAsync(
+                placementTarget,
+                placementHwnd,
+                screenX,
+                screenY,
+                validPaths,
+                targetItem: null,
+                isRecycleBinTarget: false,
+                allowLaunchShortcut: false,
+                hasTargetFolder: true,
+                destinationFolder: destinationFolder,
+                isDeskBoxOwnedSource: true,
+                containsTemporaryFiles: false,
+                allItemsTemporary: false,
+                sourceCanCopy: !hasAppAlias,
+                sourceCanMove: !isProtectedCopyOnly,
+                allowedEffects: NativeDropEffectPolicy.Copy |
+                    NativeDropEffectPolicy.Move |
+                    NativeDropEffectPolicy.Link);
+            intent = rightChoice switch
+            {
+                StackPopoverRightDropChoice.Copy => FileDropIntent.Copy,
+                StackPopoverRightDropChoice.Move => FileDropIntent.Move,
+                StackPopoverRightDropChoice.Shortcut => FileDropIntent.Shortcut,
+                _ => FileDropIntent.None,
+            };
+        }
+        else
+        {
+            intent = ResolveElevatedOutboundDropIntent(
+                _settingsService.Settings.FileWidget.ManagedDragOutAction,
+                sameVolume,
+                session.LastCtrlDown,
+                session.LastShiftDown,
+                session.LastAltDown,
+                validPaths,
+                isDesktopTarget: isDesktop);
+        }
+
+        if (intent == FileDropIntent.None)
+        {
+            DesktopToastHudService.Shared.HideIfMatchingHint("drag-out-modifier-tip");
+            return false;
+        }
+
         bool move = intent == FileDropIntent.Move;
         bool createShortcuts = intent == FileDropIntent.Shortcut;
 
         if (isDesktop)
         {
-            SuppressDesktopDragOutArrivals(validPaths);
+            if (createShortcuts)
+            {
+                string[] prospectiveShortcuts = validPaths
+                    .Select(path => Path.Combine(
+                        destinationFolder,
+                        GetShortcutDisplayName(path, Directory.Exists(path))))
+                    .ToArray();
+                SuppressDesktopDragOutArrivals(prospectiveShortcuts);
+            }
+            else
+            {
+                SuppressDesktopDragOutArrivals(validPaths);
+            }
         }
 
         BeginTrackedImport();
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        IReadOnlyDictionary<string, HashSet<string>?> preExistingMergeSnapshots =
+            new Dictionary<string, HashSet<string>?>(StringComparer.OrdinalIgnoreCase);
         App.Log(
             $"[DragProtocol] stage=ElevatedOutboundTransferStart widget={WidgetId} " +
             $"kind={target.Kind} target='{destinationFolder}' " +
@@ -2873,10 +3765,20 @@ public sealed partial class FileSurfaceContent
         try
         {
             EnsureTrackedImportStarted();
+            if (move)
+            {
+                preExistingMergeSnapshots = await Task.Run(
+                    () => OrganizerService.SnapshotPreExistingMergeDestinations(
+                        validPaths,
+                        destinationFolder),
+                    ActiveImportCancellationToken);
+            }
+
             IProgress<FileService.FileTransferProgress> progress =
                 new CallbackProgress<FileService.FileTransferProgress>(
                     ReportImportProgress);
             var results = new List<FileService.FileTransferResult>();
+            int userSkippedCount = 0;
 
             if (createShortcuts)
             {
@@ -2902,7 +3804,7 @@ public sealed partial class FileSurfaceContent
             }
             else
             {
-                results.AddRange(await _fileService.TransferItemsWithResultAsync(
+                userSkippedCount += AppendTransferResults(results, await _fileService.TransferItemsWithResultAsync(
                     validPaths,
                     destinationFolder,
                     move,
@@ -2912,19 +3814,17 @@ public sealed partial class FileSurfaceContent
                     ownerWindowHandle: _hostWindowHandle));
             }
 
+            OrganizationHistoryEntry? undoEntry = null;
             if (move)
             {
                 _cutClipboardPaths = [];
                 ApplyCutState();
-                (string SourcePath, string DestinationPath)[] movedPairs = results
-                    .Where(static item =>
-                        !string.IsNullOrWhiteSpace(item.SourcePath) &&
-                        !string.IsNullOrWhiteSpace(item.DestinationPath))
-                    .Select(static item => (item.SourcePath, item.DestinationPath))
-                    .ToArray();
-                if (movedPairs.Length > 0)
+                if (results.Count > 0)
                 {
-                    _ = await Task.Run(() => ShortcutHelper.RebaseMovedShortcuts(movedPairs));
+                    undoEntry = await ViewModel.RecordSubfolderMoveUndoAsync(
+                        results,
+                        preExistingMergeSnapshots,
+                        sourceWidgetId: WidgetId);
                 }
             }
 
@@ -2936,6 +3836,11 @@ public sealed partial class FileSurfaceContent
             if (isDesktop && createdDestinations.Length > 0)
             {
                 SuppressDesktopDragOutArrivals(createdDestinations);
+            }
+
+            if (target.Kind == ElevatedOutboundTargetKind.Desktop &&
+                createdDestinations.Length > 0)
+            {
                 _ = await Task.Run(() =>
                     ElevatedShellOutboundDropInterop.TryPositionDesktopItemsNearCursor(
                         createdDestinations,
@@ -2943,20 +3848,84 @@ public sealed partial class FileSurfaceContent
                         screenY));
             }
 
-            if (results.Count > 0)
+            if (!ShowSkippedTransferFeedback(userSkippedCount) && results.Count > 0)
             {
                 string displayName = GetOutboundTargetDisplayName(target);
-                ShowFeedback(new WidgetFeedbackRequest(
-                    _localizationService.Format(
+                string feedbackMessage = createShortcuts
+                    ? _localizationService.Format(
+                        "Widget.ShortcutsCreatedInFolder",
+                        displayName,
+                        results.Count)
+                    : _localizationService.Format(
                         move
                             ? "Widget.MovedToFolder"
                             : "Widget.CopiedToFolder",
                         displayName,
-                        results.Count),
-                    WidgetFeedbackSeverity.Success,
-                    move
+                        results.Count);
+                string feedbackId = createShortcuts
+                    ? "elevated-outbound-shortcut"
+                    : move
                         ? "elevated-outbound-move"
-                        : "elevated-outbound-copy"));
+                        : "elevated-outbound-copy";
+                ShowFeedback(new WidgetFeedbackRequest(
+                    feedbackMessage,
+                    WidgetFeedbackSeverity.Success,
+                    feedbackId));
+
+                if (createShortcuts)
+                {
+                    DesktopToastHudService.Shared.HideIfMatchingHint("drag-out-modifier-tip");
+                }
+                else
+                {
+                    DataPackageOperation dropOp = move
+                        ? DataPackageOperation.Move
+                        : DataPackageOperation.Copy;
+                    DataPackageOperation elevatedAllowedOps =
+                        FileItemDragPackage.IsProtectedCopyOnlySource(validPaths)
+                            ? DataPackageOperation.Copy
+                            : DataPackageOperation.Copy |
+                              DataPackageOperation.Move |
+                              DataPackageOperation.Link;
+                    var releaseSnapshot = new DropReleaseSnapshot(
+                        DropTargetWindowKind.ExplorerFileView,
+                        EscapePressed: false,
+                        CursorPoint: new Win32Helper.POINT { X = screenX, Y = screenY },
+                        IsDesktopShellView: target.Kind == ElevatedOutboundTargetKind.Desktop);
+                    bool showedGuide = TryShowContextualDragOutGuide(
+                        dropOp,
+                        _settingsService.Settings.FileWidget.ManagedDragOutAction,
+                        WindowsCompatibilityService.IsWindows11OrLater,
+                        releaseSnapshot,
+                        validPaths,
+                        handledAsStackMembership: false,
+                        hasStorageItems: true);
+                    if (!showedGuide &&
+                        move &&
+                        undoEntry is { CanUndo: true, IsUndone: false })
+                    {
+                        string undoHistoryId = undoEntry.Id;
+                        DesktopToastHudService.Shared.TryShow(
+                            new DesktopToastRequest(
+                                HintId: "elevated-outbound-move-undo-receipt",
+                                Message: feedbackMessage,
+                                Severity: DesktopToastSeverity.Success,
+                                Priority: DesktopToastPriority.ContextualGuide,
+                                ActionButtonText: T("Widget.DragHud.Action.Undo"),
+                                OnActionAsync: () => ExecuteUndoByHistoryIdAsync(undoHistoryId),
+                                DurationMs: 5000),
+                            _settingsService);
+                    }
+                    else if (!showedGuide)
+                    {
+                        MaybeShowDragOutResultHint(
+                            dropOp,
+                            elevatedAllowedOps,
+                            move ? ExternalDragObservation.Full : ExternalDragObservation.Brief,
+                            handledAsStackMembership: false,
+                            DropTargetWindowKind.ExplorerFileView);
+                    }
+                }
             }
 
             await CompleteTrackedImportAsync(ImportCompletionState.Completed);
@@ -2966,8 +3935,29 @@ public sealed partial class FileSurfaceContent
                 $"elapsedMs={stopwatch.ElapsedMilliseconds}");
             return move && results.Count > 0;
         }
+        catch (FileService.FileTransferCanceledException canceledEx)
+        {
+            DesktopToastHudService.Shared.HideIfMatchingHint("drag-out-modifier-tip");
+            await ReconcilePartialElevatedOutboundResultsAsync(
+                canceledEx.CompletedResults,
+                move,
+                isDesktop,
+                preExistingMergeSnapshots);
+            await RefreshAfterInterruptedFolderImportAsync();
+            if (_activeImportCancellation is not null)
+            {
+                await CompleteTrackedImportAsync(ImportCompletionState.Canceled);
+            }
+
+            App.Log(
+                $"[DragProtocol] stage=ElevatedOutboundTransferCanceled widget={WidgetId} " +
+                $"completed={canceledEx.CompletedResults.Count} " +
+                $"elapsedMs={stopwatch.ElapsedMilliseconds}");
+            return move && canceledEx.CompletedResults.Count > 0;
+        }
         catch (OperationCanceledException)
         {
+            DesktopToastHudService.Shared.HideIfMatchingHint("drag-out-modifier-tip");
             await RefreshAfterInterruptedFolderImportAsync();
             if (_activeImportCancellation is not null)
             {
@@ -2977,10 +3967,23 @@ public sealed partial class FileSurfaceContent
             App.Log(
                 $"[DragProtocol] stage=ElevatedOutboundTransferCanceled widget={WidgetId} " +
                 $"elapsedMs={stopwatch.ElapsedMilliseconds}");
-            return move;
+            return false;
         }
         catch (Exception ex)
         {
+            DesktopToastHudService.Shared.HideIfMatchingHint("drag-out-modifier-tip");
+            if (ex is FileService.IFileTransferWithCompletedResults
+                {
+                    CompletedResults: { Count: > 0 } partialResults,
+                })
+            {
+                await ReconcilePartialElevatedOutboundResultsAsync(
+                    partialResults,
+                    move,
+                    isDesktop,
+                    preExistingMergeSnapshots);
+            }
+
             await RefreshAfterInterruptedFolderImportAsync();
             if (_activeImportCancellation is not null)
             {
@@ -3010,6 +4013,38 @@ public sealed partial class FileSurfaceContent
                 CancelAndResetTrackedImport();
             }
         }
+    }
+
+    private async Task ReconcilePartialElevatedOutboundResultsAsync(
+        IReadOnlyList<FileService.FileTransferResult> completedResults,
+        bool move,
+        bool isDesktop,
+        IReadOnlyDictionary<string, HashSet<string>?> preExistingMergeSnapshots)
+    {
+        if (completedResults.Count == 0)
+        {
+            return;
+        }
+
+        string[] destinations = completedResults
+            .Select(static item => item.DestinationPath)
+            .Where(static path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (isDesktop && destinations.Length > 0)
+        {
+            SuppressDesktopDragOutArrivals(destinations);
+        }
+
+        if (!move)
+        {
+            return;
+        }
+
+        await ViewModel.RecordSubfolderMoveUndoAsync(
+            completedResults,
+            preExistingMergeSnapshots,
+            sourceWidgetId: WidgetId);
     }
 
     private async Task StageElevatedOutboundClipboardAsync(string[] validPaths)

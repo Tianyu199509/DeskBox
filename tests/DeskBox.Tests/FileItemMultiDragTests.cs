@@ -51,11 +51,11 @@ public sealed class FileItemMultiDragTests
         DataPackageOperation.Copy)]
     [InlineData(null, false,
         DataPackageOperation.Copy)]
-    // Explicit Copy-only mode strictly advertises single-bit Copy on both
-    // Win11 and Win10 so same-volume Explorer or Recycle Bin drops can never
-    // remove the source.
+    // Decision 1B: Explicit Copy mode advertises Copy|Move (+ Preferred Copy) on
+    // Win11 so Explorer defaults to Copy while holding Shift temporarily overrides
+    // to Move; Win10 collapses to single-bit Copy to avoid Explorer's #32768 menu.
     [InlineData(SettingsService.ManagedDragOutActionCopy, true,
-        DataPackageOperation.Copy)]
+        DataPackageOperation.Copy | DataPackageOperation.Move)]
     [InlineData(SettingsService.ManagedDragOutActionCopy, false,
         DataPackageOperation.Copy)]
     // Explicit Move mode advertises Copy|Move (+ Preferred Move) on Win11 for
@@ -102,15 +102,21 @@ public sealed class FileItemMultiDragTests
                 FileItemDragPackage.ResolveDragOutPreferredOperation(action));
         }
 
-        foreach (bool isWin11 in new[] { true, false })
-        {
-            DataPackageOperation copyOnly =
-                FileItemDragPackage.ResolveDragOutAllowedOperations(
-                    SettingsService.ManagedDragOutActionCopy,
-                    isWindows11OrLater: isWin11);
-            Assert.Equal(DataPackageOperation.Copy, copyOnly);
-            Assert.False(copyOnly.HasFlag(DataPackageOperation.Move));
-        }
+        DataPackageOperation win11CopyDefault =
+            FileItemDragPackage.ResolveDragOutAllowedOperations(
+                SettingsService.ManagedDragOutActionCopy,
+                isWindows11OrLater: true);
+        Assert.Equal(FileItemDragPackage.SupportedOperations, win11CopyDefault);
+        Assert.Equal(
+            DataPackageOperation.Copy,
+            FileItemDragPackage.ResolveDragOutPreferredOperation(SettingsService.ManagedDragOutActionCopy));
+
+        DataPackageOperation win10CopyOnly =
+            FileItemDragPackage.ResolveDragOutAllowedOperations(
+                SettingsService.ManagedDragOutActionCopy,
+                isWindows11OrLater: false);
+        Assert.Equal(DataPackageOperation.Copy, win10CopyOnly);
+        Assert.False(win10CopyOnly.HasFlag(DataPackageOperation.Move));
     }
 
     [Fact]
@@ -528,18 +534,22 @@ public sealed class FileItemMultiDragTests
     }
 
     [Theory]
-    [InlineData(SettingsService.ManagedDragOutActionMove, false)]
-    [InlineData(SettingsService.ManagedDragOutActionCopy, false)]
-    [InlineData(SettingsService.ManagedDragOutActionCopy, true)]
-    public void GetDragOutResultHintKey_SingleEffectAdvertisementNeverTeachesModifiers(
+    [InlineData(SettingsService.ManagedDragOutActionMove, false, false)]
+    [InlineData(SettingsService.ManagedDragOutActionCopy, false, false)]
+    [InlineData(SettingsService.ManagedDragOutActionCopy, true, true)]
+    public void GetDragOutResultHintKey_SingleOrProtectedMovelessAdvertisementNeverTeachesMoveModifier(
         string action,
-        bool isWindows11OrLater)
+        bool isWindows11OrLater,
+        bool isProtectedCopyOnly)
     {
-        // Copy-only (on Win10/Win11) and Move-only (on Win10) advertise a
-        // single effect, so the receipt must never claim a modifier could have
-        // flipped the result.
+        // Win10 single-effect modes and protected sources (Copy | Link without Move)
+        // never advertise Move, so the receipt must never claim Shift/Ctrl could
+        // flip between Copy and Move.
         DataPackageOperation allowed =
-            FileItemDragPackage.ResolveDragOutAllowedOperations(action, isWindows11OrLater);
+            FileItemDragPackage.ResolveDragOutAllowedOperations(
+                action,
+                isWindows11OrLater,
+                isProtectedCopyOnly: isProtectedCopyOnly);
 
         string? copyKey = FileSurfaceContent.GetDragOutResultHintKey(
             DataPackageOperation.Copy,
@@ -552,6 +562,24 @@ public sealed class FileItemMultiDragTests
             copyKey.EndsWith(".NoModifiers", StringComparison.Ordinal));
         Assert.True(moveKey is null ||
             moveKey.EndsWith(".NoModifiers", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void GetDragOutResultHintKey_Win11CopyModeAdvertisesCopyAndMoveAndTeachesModifiers()
+    {
+        DataPackageOperation allowed =
+            FileItemDragPackage.ResolveDragOutAllowedOperations(
+                SettingsService.ManagedDragOutActionCopy,
+                isWindows11OrLater: true,
+                isProtectedCopyOnly: false);
+
+        Assert.Equal(FileItemDragPackage.SupportedOperations, allowed);
+        Assert.Equal(
+            "Widget.DragOutTip.AfterCopy",
+            FileSurfaceContent.GetDragOutResultHintKey(DataPackageOperation.Copy, allowed));
+        Assert.Equal(
+            "Widget.DragOutTip.AfterMove",
+            FileSurfaceContent.GetDragOutResultHintKey(DataPackageOperation.Move, allowed));
     }
 
     [Theory]
@@ -775,6 +803,22 @@ public sealed class FileItemMultiDragTests
             FileSurfaceContent.ShouldShowEmptyState(
                 isLoading,
                 sourceItemCount));
+    }
+
+    [Fact]
+    public void EmptyStateTitle_UsesExplorerFolderEmptyNormallyAndElevatedWarningWhenAboveShell()
+    {
+        LocalizationService zhCn = TestServices.CreateLocalizationService(SettingsService.LanguageChinese);
+        Assert.Equal("此文件夹为空。", WidgetViewModel.ResolveEmptyStateTitle(zhCn, isElevatedAboveShell: false));
+        Assert.Equal(
+            zhCn.T("Widget.Empty.ElevatedWarning"),
+            WidgetViewModel.ResolveEmptyStateTitle(zhCn, isElevatedAboveShell: true));
+
+        LocalizationService enUs = TestServices.CreateLocalizationService(SettingsService.LanguageEnglish);
+        Assert.Equal("This folder is empty.", WidgetViewModel.ResolveEmptyStateTitle(enUs, isElevatedAboveShell: false));
+        Assert.Equal(
+            enUs.T("Widget.Empty.ElevatedWarning"),
+            WidgetViewModel.ResolveEmptyStateTitle(enUs, isElevatedAboveShell: true));
     }
 
     [Fact]
@@ -1178,5 +1222,58 @@ public sealed class FileItemMultiDragTests
         {
             Directory.Delete(tempDirectory, recursive: true);
         }
+    }
+
+    [Fact]
+    public void ResolveElevatedOutboundDropIntent_Win11CopyDefaultAllowsShiftOverrideToMove_UnlessProtected()
+    {
+        Assert.Equal(
+            DeskBox.Helpers.FileDropIntent.Copy,
+            FileSurfaceContent.ResolveElevatedOutboundDropIntent(
+                SettingsService.ManagedDragOutActionCopy,
+                sameVolume: true,
+                controlDown: false,
+                shiftDown: false,
+                altDown: false));
+        Assert.Equal(
+            DeskBox.Helpers.FileDropIntent.Move,
+            FileSurfaceContent.ResolveElevatedOutboundDropIntent(
+                SettingsService.ManagedDragOutActionCopy,
+                sameVolume: true,
+                controlDown: false,
+                shiftDown: true,
+                altDown: false));
+        Assert.Equal(
+            DeskBox.Helpers.FileDropIntent.Shortcut,
+            FileSurfaceContent.ResolveElevatedOutboundDropIntent(
+                SettingsService.ManagedDragOutActionCopy,
+                sameVolume: true,
+                controlDown: false,
+                shiftDown: false,
+                altDown: true));
+
+        string internalCacheFile = Path.Combine(
+            DeskBox.Services.DeskBoxDataPathService.Current.DataDirectory,
+            "attachments",
+            "note.png");
+        Assert.True(DeskBox.Platform.DriveMediaInterop.IsProtectedDragOutSource([internalCacheFile]));
+        Assert.Equal(
+            DeskBox.Helpers.FileDropIntent.Copy,
+            FileSurfaceContent.ResolveElevatedOutboundDropIntent(
+                SettingsService.ManagedDragOutActionMove,
+                sameVolume: true,
+                controlDown: false,
+                shiftDown: false,
+                altDown: false,
+                sourcePaths: [internalCacheFile]));
+        Assert.Equal(
+            DeskBox.Helpers.FileDropIntent.None,
+            FileSurfaceContent.ResolveElevatedOutboundDropIntent(
+                SettingsService.ManagedDragOutActionCopy,
+                sameVolume: true,
+                controlDown: false,
+                shiftDown: true,
+                altDown: false,
+                sourcePaths: [internalCacheFile]));
     }
 }

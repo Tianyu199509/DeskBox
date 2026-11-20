@@ -169,7 +169,7 @@ public sealed class SettingsSliceContractBaselineTests
         Assert.Empty(s.FileStackCustomRules);
         Assert.Equal("KeepLoose", s.FileStackUnmatchedBehavior);
         Assert.Equal("Move", s.ManagedDropAction);
-        Assert.Equal("FollowWindows", s.ManagedDragOutAction);
+        Assert.Equal("Move", s.ManagedDragOutAction);
         Assert.True(s.DragOutModifierTipEnabled);
         Assert.True(s.DragOutResultHintEnabled);
         Assert.Equal(string.Empty, s.DefaultManagedStorageRootPath);
@@ -278,6 +278,8 @@ public sealed class SettingsSliceContractBaselineTests
         Assert.False(s.ClipboardDefaultPastePlainText);
         Assert.False(s.ClipboardMoveToTopOnReuse);
         Assert.Equal("Standard", s.ClipboardViewMode);
+        Assert.Equal("IconAndText", s.ClipboardTabDisplayMode);
+        Assert.Equal("All,Text,Images,Links,Files,Pinned", s.ClipboardTabLayout);
         Assert.Equal("Standard", s.ClipboardCardDensity);
         Assert.True(s.ClipboardShowSourceApp);
         Assert.True(s.ClipboardIgnoreSystemPrivacyFormats);
@@ -583,6 +585,7 @@ public sealed class SettingsSliceContractBaselineTests
         "clipboardMoveToTopOnReuse",
         "clipboardViewMode",
         "clipboardTabDisplayMode",
+        "clipboardTabLayout",
         "clipboardCardDensity",
         "clipboardShowSourceApp",
         "clipboardIgnoreSystemPrivacyFormats",

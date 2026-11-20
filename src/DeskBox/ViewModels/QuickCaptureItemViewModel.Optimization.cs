@@ -92,13 +92,13 @@ public sealed partial class QuickCaptureItemViewModel
         {
             string created = _localizationService.Format(
                 "QuickCapture.Detail.Created",
-                _model.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss"));
+                _model.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture));
             if ((_model.UpdatedAt - _model.CreatedAt).Duration() < TimeSpan.FromSeconds(2))
             {
                 return created;
             }
 
-            string updated = _model.UpdatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
+            string updated = _model.UpdatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
             return $"{created}\n{updated}";
         }
     }
@@ -107,6 +107,23 @@ public sealed partial class QuickCaptureItemViewModel
     {
         OnPropertyChanged(nameof(CreatedAtText));
         OnPropertyChanged(nameof(UpdatedAtText));
+    }
+
+    public void RefreshLocalization()
+    {
+        _displayText = null;
+        InvalidateSplitDisplayLines();
+        OnPropertyChanged(nameof(DisplayText));
+        OnPropertyChanged(nameof(DisplayTitleLine));
+        OnPropertyChanged(nameof(DisplaySummaryText));
+        OnPropertyChanged(nameof(HasDisplaySummary));
+        OnPropertyChanged(nameof(DisplaySummaryVisibility));
+        OnPropertyChanged(nameof(PinTooltip));
+        OnPropertyChanged(nameof(MoveUpTooltip));
+        OnPropertyChanged(nameof(MoveDownTooltip));
+        OnPropertyChanged(nameof(CreatedAtText));
+        OnPropertyChanged(nameof(UpdatedAtText));
+        OnPropertyChanged(nameof(TimestampTooltipText));
     }
 
     internal void InvalidateSplitDisplayLines()
@@ -182,15 +199,15 @@ public sealed partial class QuickCaptureItemViewModel
 
         if (local.Date == now.Date)
         {
-            return local.ToString("HH:mm");
+            return local.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture);
         }
 
         if (local.Year == now.Year)
         {
-            return local.ToString("MM-dd HH:mm");
+            return local.ToString("MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture);
         }
 
-        return local.ToString("yyyy-MM-dd HH:mm");
+        return local.ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture);
     }
 
     private void EnsureSplitDisplayLines()

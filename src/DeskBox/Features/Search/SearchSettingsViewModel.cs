@@ -7,7 +7,7 @@ namespace DeskBox.Features.Search;
 public enum SearchSettingsFailure { None, Connection, InvalidExecutable, Launch }
 
 /// <summary>Owns one visible settings visit and its probes, not the global search session.</summary>
-public sealed class SearchSettingsViewModel : ObservableObject, IDisposable
+public sealed partial class SearchSettingsViewModel : ObservableObject, IDisposable
 {
     private readonly ISearchSettings _settings;
     private readonly Func<Action, bool> _tryEnqueue;

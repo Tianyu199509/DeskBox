@@ -89,7 +89,7 @@ public sealed class SettingsCopyAndHierarchyTests
         Assert.DoesNotContain("Settings.WidgetGroups.PageDescription", windowXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Settings.WidgetGroups.Default.Title", windowXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Settings.WidgetGroups.Default.Description", windowXaml, StringComparison.Ordinal);
-        Assert.Contains("WidgetGroupNavigationComboBox_SelectionChanged", windowXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("WidgetGroupDetailSubPagePanel", windowXaml, StringComparison.Ordinal);
         Assert.Contains("DissolveWidgetGroupButton_Click", windowXaml, StringComparison.Ordinal);
 
         string interaction = SliceSection(
@@ -166,7 +166,7 @@ public sealed class SettingsCopyAndHierarchyTests
             windowXaml,
             StringComparison.Ordinal);
         Assert.Contains(
-            "controls:SettingsSegmented.Value=\"{x:Bind OpenMode, Mode=TwoWay}\"",
+            "controls:SettingsComboBox.Value=\"{x:Bind OpenMode, Mode=TwoWay}\"",
             windowXaml,
             StringComparison.Ordinal);
         Assert.Contains(
@@ -303,8 +303,8 @@ public sealed class SettingsCopyAndHierarchyTests
             root,
             "src/DeskBox/Views/SettingsSections/AppearanceSettingsSection.xaml"));
 
-        Assert.Contains(
-            "Description=\"{Binding WindowChromeSummaryText}\"",
+        Assert.DoesNotContain(
+            "svc:Localized.HeaderKey=\"Settings.Group.AppVisual.Title\"",
             appearanceXaml,
             StringComparison.Ordinal);
         Assert.Contains(
@@ -483,7 +483,10 @@ public sealed class SettingsCopyAndHierarchyTests
             windowXaml,
             "x:Name=\"AboutSection\"",
             "x:Name=\"GeneralSection\"");
-        Assert.Contains("svc:Localized.HeaderKey=\"Settings.Onboarding.Title\"", about, StringComparison.Ordinal);
+        Assert.DoesNotContain("svc:Localized.HeaderKey=\"Settings.Onboarding.Title\"", about, StringComparison.Ordinal);
+        Assert.DoesNotContain("DistributionChannelAndArchText", about, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"AboutDiagnosticsEntryCard\"", about, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"AboutDiagnosticsSubPagePanel\"", about, StringComparison.Ordinal);
 
         int generalSection = windowXaml.IndexOf(
             "x:Name=\"GeneralSection\"",
@@ -504,12 +507,17 @@ public sealed class SettingsCopyAndHierarchyTests
             "Tag=\"AiSettings\"",
             generalSection,
             StringComparison.Ordinal);
+        int onboarding = windowXaml.IndexOf(
+            "svc:Localized.HeaderKey=\"Settings.Onboarding.Title\"",
+            generalSection,
+            StringComparison.Ordinal);
 
         Assert.True(generalSection >= 0);
         Assert.True(generalSection < language);
         Assert.True(language < autoStart);
         Assert.True(autoStart < performance);
         Assert.True(performance < aiSettings);
+        Assert.True(aiSettings < onboarding);
         Assert.DoesNotContain("InteractionHotkeySettings", windowXaml, StringComparison.Ordinal);
         // Two occurrences are expected: the expander HeaderKey plus the combo box
         // AutomationNameKey, which deliberately reuses the same header key so
@@ -649,7 +657,13 @@ public sealed class SettingsCopyAndHierarchyTests
             "Settings.Weather.LocationMode.Auto",
             "Settings.Weather.LocationMode.Manual",
             "Settings.FileStacks.Status.Manual",
-            "Settings.HoverButtonActions.None"
+            "Settings.HoverButtonActions.None",
+            "Settings.Animation.Direction.Auto",
+            "Settings.Search.CategoryBar.Auto",
+            "Settings.Search.QuickCreate.DisplayMode.Always",
+            "Settings.Search.QuickCreate.DisplayMode.Fallback",
+            "Settings.Search.QuickCreate.DisplayMode.Prefix",
+            "Settings.Music.SpectrumStyle.Auto"
         ];
 
         foreach (string path in Directory.EnumerateFiles(stringsDirectory, "*.json"))
@@ -722,8 +736,8 @@ public sealed class SettingsCopyAndHierarchyTests
         Assert.Contains("IsChecked=\"{x:Bind ShowAllTab, Mode=TwoWay}\"", todo, StringComparison.Ordinal);
         Assert.Contains("IsChecked=\"{x:Bind ShowFooterStats, Mode=TwoWay}\"", todo, StringComparison.Ordinal);
         Assert.Contains("SelectedIndex=\"{x:Bind NewTaskPositionIndex, Mode=TwoWay}\"", todo, StringComparison.Ordinal);
-        Assert.Contains("controls:SettingsSegmented.Options=\"{Binding AvailableDefaultViewOptionItems}\"", quickCapture, StringComparison.Ordinal);
-        Assert.Contains("controls:SettingsSegmented.Value=\"{Binding SelectedDefaultViewKey, Mode=TwoWay}\"", quickCapture, StringComparison.Ordinal);
+        Assert.Contains("ItemsSource=\"{Binding AvailableDefaultViewOptionItems}\"", quickCapture, StringComparison.Ordinal);
+        Assert.Contains("controls:SettingsComboBox.Value=\"{Binding SelectedDefaultViewKey, Mode=TwoWay}\"", quickCapture, StringComparison.Ordinal);
         Assert.Contains("ItemsSource=\"{Binding AllDefaultFilterOptions}\"", todo, StringComparison.Ordinal);
 
         Assert.DoesNotContain("IsOn=\"{Binding ShowRecordsTab", quickCapture, StringComparison.Ordinal);
@@ -803,6 +817,75 @@ public sealed class SettingsCopyAndHierarchyTests
         Assert.Contains("_appActions.HasManagedStorageDesktopShortcut()", storageCode, StringComparison.Ordinal);
         Assert.Contains("_appActions.CreateManagedStorageDesktopShortcutAsync()", storageCode, StringComparison.Ordinal);
         Assert.Contains("_appActions.RemoveManagedStorageDesktopShortcutAsync()", storageCode, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SettingsViews_DoNotUseToolkitSegmentedControls()
+    {
+        string root = FindRepositoryRoot();
+        System.Xml.Linq.XNamespace toolkit = "using:CommunityToolkit.WinUI.Controls";
+        List<string> settingsXamlFiles =
+        [
+            Path.Combine(root, "src/DeskBox/Views/SettingsWindow.xaml"),
+            .. Directory.EnumerateFiles(
+                Path.Combine(root, "src/DeskBox/Views/SettingsSections"),
+                "*.xaml",
+                SearchOption.TopDirectoryOnly)
+        ];
+
+        foreach (string path in settingsXamlFiles)
+        {
+            System.Xml.Linq.XDocument doc = System.Xml.Linq.XDocument.Load(path);
+            int segmentedCount = doc.Descendants(toolkit + "Segmented").Count();
+            Assert.True(
+                segmentedCount == 0,
+                $"{Path.GetFileName(path)} still contains {segmentedCount} toolkit:Segmented control(s). Use ComboBox or SelectorBar instead so long localized labels do not overflow.");
+        }
+    }
+
+    [Fact]
+    public void SettingsChineseCopy_AvoidsHalfWidthPunctuationAndCornerBrackets()
+    {
+        string root = FindRepositoryRoot();
+        using JsonDocument strings = JsonDocument.Parse(File.ReadAllText(Path.Combine(
+            root,
+            "src/DeskBox/Strings/zh-CN.json")));
+
+        HashSet<string> referencedKeys = new(StringComparer.Ordinal);
+        List<string> settingsXamlFiles =
+        [
+            Path.Combine(root, "src/DeskBox/Views/SettingsWindow.xaml"),
+            .. Directory.EnumerateFiles(
+                Path.Combine(root, "src/DeskBox/Views/SettingsSections"),
+                "*.xaml",
+                SearchOption.TopDirectoryOnly)
+        ];
+
+        foreach (string path in settingsXamlFiles)
+        {
+            System.Xml.Linq.XDocument doc = System.Xml.Linq.XDocument.Load(path);
+            foreach (System.Xml.Linq.XAttribute attr in doc.Descendants().SelectMany(element => element.Attributes()))
+            {
+                string localName = attr.Name.LocalName;
+                if (localName is "Localized.HeaderKey" or "Localized.DescriptionKey" or "InfoTip.TitleKey" or "InfoTip.BodyKey")
+                {
+                    referencedKeys.Add(attr.Value);
+                }
+            }
+        }
+
+        var cjkHalfWidthQuestion = new System.Text.RegularExpressions.Regex(
+            @"[\u4e00-\u9fff”》）]\?",
+            System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
+        foreach (string key in referencedKeys)
+        {
+            Assert.True(strings.RootElement.TryGetProperty(key, out JsonElement element), $"Missing zh-CN key '{key}'.");
+            string value = element.GetString()!;
+            Assert.DoesNotContain('「', value);
+            Assert.DoesNotContain('」', value);
+            Assert.DoesNotMatch(cjkHalfWidthQuestion, value);
+        }
     }
 
     private static string SliceSection(string xaml, string startToken, string endToken)

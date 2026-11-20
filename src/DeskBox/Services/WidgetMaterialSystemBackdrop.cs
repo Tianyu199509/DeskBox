@@ -395,6 +395,25 @@ internal sealed partial class WidgetMaterialSystemBackdrop : SystemBackdrop, IDi
             : SettingsService.IsAcrylicMaterial(materialType) &&
               WindowsCompatibilityService.SupportsDesktopAcrylic;
 
+    internal bool HasActiveController =>
+        _micaController is not null ||
+        _acrylicController is { IsClosed: false };
+
+    internal static bool ShouldReleaseStateOnTargetDisconnected(
+        object? currentRawTarget,
+        object? disconnectedTarget) =>
+        currentRawTarget is not null &&
+        ReferenceEquals(currentRawTarget, disconnectedTarget);
+
+    internal static bool ShouldSkipAppearanceUpdate(
+        WidgetMaterialBackdropAppearance currentAppearance,
+        WidgetMaterialBackdropAppearance requestedAppearance,
+        bool isDisposed,
+        bool isSuspended,
+        bool hasActiveController) =>
+        isDisposed ||
+        (currentAppearance == requestedAppearance && !isSuspended && hasActiveController);
+
     internal void SetCornerRadius(double cornerRadiusDip)
     {
         _cornerRadiusDip = Math.Max(0.0, cornerRadiusDip);
@@ -404,7 +423,12 @@ internal sealed partial class WidgetMaterialSystemBackdrop : SystemBackdrop, IDi
     internal void UpdateAppearance(
         WidgetMaterialBackdropAppearance appearance)
     {
-        if (_isDisposed || (_appearance == appearance && !_isSuspended))
+        if (ShouldSkipAppearanceUpdate(
+                _appearance,
+                appearance,
+                _isDisposed,
+                _isSuspended,
+                HasActiveController))
         {
             return;
         }
@@ -464,10 +488,10 @@ internal sealed partial class WidgetMaterialSystemBackdrop : SystemBackdrop, IDi
         }
         finally
         {
-            DisposeControllers();
-            DetachXamlRoot();
-            if (ReferenceEquals(_rawTarget, disconnectedTarget))
+            if (ShouldReleaseStateOnTargetDisconnected(_rawTarget, disconnectedTarget))
             {
+                DisposeControllers();
+                DetachXamlRoot();
                 _maskedProxy?.Dispose();
                 _maskedProxy = null;
                 _rawTarget = null;

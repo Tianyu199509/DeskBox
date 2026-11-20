@@ -143,6 +143,11 @@ public sealed partial class WidgetManager
 
         foreach ((IntPtr handle, ContentWidgetWindow window) in liveWindowsByHandle)
         {
+            if (!window.IsSuspendedForMonitorOcclusion)
+            {
+                _occludedSuspendedWindowHandles.Remove(handle);
+            }
+
             bool isVisibleAtDesktopLayer =
                 window.Visible &&
                 !window.IsClosing &&
@@ -271,19 +276,61 @@ public sealed partial class WidgetManager
         return new LongHiddenWidgetMaintenanceResult(contentHostCount);
     }
 
+    private bool IsKeepCapsuleContentWarmEnabled() =>
+        string.Equals(
+            PerformanceSettingsPolicy.NormalizeMode(_settingsService.Settings.Performance.PerformanceMode),
+            PerformanceSettingsPolicy.ModeCustom,
+            StringComparison.Ordinal)
+            ? _settingsService.Settings.Performance.KeepCapsuleContentWarm
+            : PerformanceSettingsPolicy.ResolveEffectiveKeepCapsuleContentWarm(_settingsService.Settings);
+
+    private void OnContentWindowLongHiddenCleanupElapsed(ContentWidgetWindow window)
+    {
+        // Option A: preserve warm ContentWidgetWindow host shells while hidden so
+        // subsequent batch reveals never pay synchronous HWND + XAML tree creation
+        // on the UI thread; per-window bitmap/inactive-tab release already ran.
+        _ = window;
+    }
+
     internal LongHiddenWidgetResourceReleaseResult
         ReleaseLongHiddenInactiveContent()
     {
         int contentHostCount = 0;
         int cachedContentCount = 0;
-        foreach (var window in _contentWidgets.Values
-                     .DistinctBy(window => window.WindowHandle)
-                     .ToArray())
+        bool keepCapsuleWarm = IsKeepCapsuleContentWarmEnabled();
+        EffectivePerformanceSettings performance =
+            PerformanceSettingsPolicy.Resolve(_settingsService.Settings);
+        long hiddenCleanupThresholdMs =
+            Math.Max(30, performance.HiddenCacheCleanupDelaySeconds) * 1000L;
+        long nowTickMs = Environment.TickCount64;
+        ContentWidgetWindow[] distinctHosts = _contentWidgets.Values
+            .DistinctBy(window => window.WindowHandle)
+            .ToArray();
+        bool hasAnyVisibleWindow = distinctHosts.Any(window =>
+            window.Visible ||
+            (window.WindowHandle != IntPtr.Zero &&
+             Win32Helper.IsWindowVisible(window.WindowHandle)));
+
+        foreach (var window in distinctHosts)
         {
             if (window.Visible ||
                 (window.WindowHandle != IntPtr.Zero &&
                  Win32Helper.IsWindowVisible(window.WindowHandle)))
             {
+                if (!keepCapsuleWarm)
+                {
+                    cachedContentCount += window.IsTargetCollapsed
+                        ? window.HibernateCollapsedInactiveGroupContents(evictIdleAdapters: true)
+                        : window.HibernateDetachedInactiveGroupContents(evictIdleAdapters: false);
+                }
+                continue;
+            }
+
+            if (hasAnyVisibleWindow &&
+                window.HiddenSinceTickMs > 0 &&
+                nowTickMs - window.HiddenSinceTickMs < hiddenCleanupThresholdMs)
+            {
+                cachedContentCount += window.HibernateDetachedInactiveGroupContents(evictIdleAdapters: false);
                 continue;
             }
 
@@ -291,17 +338,79 @@ public sealed partial class WidgetManager
             cachedContentCount += window.ReleaseLongHiddenContentResources();
         }
 
-        int evictedHostCount = EvictExcessLongHiddenContentHosts();
         return new LongHiddenWidgetResourceReleaseResult(
             contentHostCount,
             cachedContentCount,
-            evictedHostCount);
+            EvictedHostCount: 0);
+    }
+
+    internal int HibernateIdleNonPresentingGroupViews()
+    {
+        if (App.IsShuttingDown ||
+            _trayBatchAnimationDriver.IsRunning ||
+            WidgetCompactAnimationCoordinator.HasActiveAnimations)
+        {
+            return 0;
+        }
+
+        int released = 0;
+        bool keepCapsuleWarm = IsKeepCapsuleContentWarmEnabled();
+        EffectivePerformanceSettings performance =
+            PerformanceSettingsPolicy.Resolve(_settingsService.Settings);
+        long hiddenCleanupThresholdMs =
+            Math.Max(30, performance.HiddenCacheCleanupDelaySeconds) * 1000L;
+        long nowTickMs = Environment.TickCount64;
+        bool releaseRecreatableHidden = string.Equals(
+            performance.HiddenCacheCleanupScope,
+            PerformanceSettingsPolicy.HiddenCacheCleanupScopeAllRecreatable,
+            StringComparison.Ordinal);
+
+        foreach (var window in _contentWidgets.Values
+                     .DistinctBy(window => window.WindowHandle)
+                     .ToArray())
+        {
+            if (window.IsClosing)
+            {
+                continue;
+            }
+
+            bool isVisible = window.Visible ||
+                (window.WindowHandle != IntPtr.Zero &&
+                 Win32Helper.IsWindowVisible(window.WindowHandle));
+            if (!isVisible)
+            {
+                if (window.HiddenSinceTickMs > 0 &&
+                    nowTickMs - window.HiddenSinceTickMs >= hiddenCleanupThresholdMs)
+                {
+                    if (releaseRecreatableHidden)
+                    {
+                        released += window.ReleaseLongHiddenContentResources();
+                    }
+                    else
+                    {
+                        window.RunLongHiddenNoRebuildMaintenance();
+                        released += window.HibernateDetachedInactiveGroupContents(evictIdleAdapters: false);
+                    }
+                }
+                else
+                {
+                    released += window.HibernateDetachedInactiveGroupContents(evictIdleAdapters: false);
+                }
+            }
+            else if (!keepCapsuleWarm)
+            {
+                released += window.IsTargetCollapsed
+                    ? window.HibernateCollapsedInactiveGroupContents(evictIdleAdapters: true)
+                    : window.HibernateDetachedInactiveGroupContents(evictIdleAdapters: false);
+            }
+        }
+
+        return released;
     }
 
     private int EvictExcessLongHiddenContentHosts()
     {
         if (App.IsShuttingDown ||
-            _settingsService.Settings.Performance.KeepCapsuleContentWarm ||
             _trayBatchAnimationDriver.IsRunning ||
             WidgetCompactAnimationCoordinator.HasActiveAnimations)
         {

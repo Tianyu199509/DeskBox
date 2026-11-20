@@ -1,37 +1,15 @@
-using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 namespace DeskBox.Helpers;
 
 internal enum MusicVolumeBackendMode
 {
-    CSharp,
     Rust
 }
 
 internal static class MusicVolumeBackendPolicy
 {
-    internal const string EnvironmentVariable = "DESKBOX_MUSIC_VOLUME_BACKEND";
-
-#if DESKBOX_NATIVE_AOT
-    internal static MusicVolumeBackendMode Current { get; } = MusicVolumeBackendMode.Rust;
-#else
-    internal static MusicVolumeBackendMode Current { get; } = Resolve(
-        Environment.GetEnvironmentVariable(EnvironmentVariable),
-        RuntimeFeature.IsDynamicCodeSupported);
-
-    internal static MusicVolumeBackendMode Resolve(string? configuredValue, bool isDynamicCodeSupported)
-    {
-        if (!isDynamicCodeSupported)
-        {
-            return MusicVolumeBackendMode.Rust;
-        }
-
-        return string.Equals(configuredValue?.Trim(), "rust", StringComparison.OrdinalIgnoreCase)
-            ? MusicVolumeBackendMode.Rust
-            : MusicVolumeBackendMode.CSharp;
-    }
-#endif
+    internal static MusicVolumeBackendMode Current => MusicVolumeBackendMode.Rust;
 }
 
 internal enum MusicVolumeNativeCallFailure

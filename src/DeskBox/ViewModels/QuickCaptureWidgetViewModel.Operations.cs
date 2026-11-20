@@ -216,26 +216,34 @@ public sealed partial class QuickCaptureWidgetViewModel
             .ToArray();
 
         bool addPinned = IsPinnedView;
-        QuickCaptureItem? created = regularPaths.Length > 0
-            ? await _quickCaptureService.AddItemWithAttachmentsAsync(
-                regularPaths,
-                copyLinkedFiles,
-                pin: addPinned)
-            : await _quickCaptureService.AddItemWithAttachmentsAsync(
-                managedPaths,
-                copyToManagedStorage: true,
-                pin: addPinned);
-        if (created is null)
+        QuickCaptureItem? created;
+        try
         {
-            return null;
-        }
+            created = regularPaths.Length > 0
+                ? await _quickCaptureService.AddItemWithAttachmentsAsync(
+                    regularPaths,
+                    copyLinkedFiles,
+                    pin: addPinned)
+                : await _quickCaptureService.AddItemWithAttachmentsAsync(
+                    managedPaths,
+                    copyToManagedStorage: true,
+                    pin: addPinned);
+            if (created is null)
+            {
+                return null;
+            }
 
-        if (regularPaths.Length > 0 && managedPaths.Length > 0)
+            if (regularPaths.Length > 0 && managedPaths.Length > 0)
+            {
+                created = await _quickCaptureService.AddAttachmentsAsync(
+                    created.Id,
+                    managedPaths,
+                    copyToManagedStorage: true) ?? created;
+            }
+        }
+        finally
         {
-            created = await _quickCaptureService.AddAttachmentsAsync(
-                created.Id,
-                managedPaths,
-                copyToManagedStorage: true) ?? created;
+            TryCleanupTempPasteFiles(managedPaths);
         }
 
         await RefreshVisibleItemsAsync();
@@ -275,10 +283,17 @@ public sealed partial class QuickCaptureWidgetViewModel
         }
         if (managedPaths.Length > 0)
         {
-            updated = await _quickCaptureService.AddAttachmentsAsync(
-                item.Id,
-                managedPaths,
-                copyToManagedStorage: true) ?? updated;
+            try
+            {
+                updated = await _quickCaptureService.AddAttachmentsAsync(
+                    item.Id,
+                    managedPaths,
+                    copyToManagedStorage: true) ?? updated;
+            }
+            finally
+            {
+                TryCleanupTempPasteFiles(managedPaths);
+            }
         }
 
         if (updated is null)

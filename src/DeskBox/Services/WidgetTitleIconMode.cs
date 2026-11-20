@@ -127,16 +127,28 @@ public static class WidgetTitleIconKindNames
         }
 
         string trimmed = templateOrManifestId.Trim();
-        string normalized = trimmed.StartsWith("deskbox.", StringComparison.OrdinalIgnoreCase)
-            ? trimmed["deskbox.".Length..]
-            : trimmed;
+        string normalized = trimmed.StartsWith("deskbox.template.", StringComparison.OrdinalIgnoreCase)
+            ? trimmed["deskbox.template.".Length..]
+            : trimmed.StartsWith("deskbox.", StringComparison.OrdinalIgnoreCase)
+                ? trimmed["deskbox.".Length..]
+                : trimmed;
 
         return normalized.ToLowerInvariant() switch
         {
-            CustomWidgetTemplates.SystemPulseTemplateId => SystemMonitor,
-            CustomWidgetTemplates.PomodoroTemplateId => Pomodoro,
-            CustomWidgetTemplates.CountdownTemplateId => Countdown,
-            CustomWidgetTemplates.AiPulseTemplateId => AiMonitor,
+            "sys-pulse" or "system-pulse" => SystemMonitor,
+            "pomodoro" => Pomodoro,
+            "countdown" => Countdown,
+            "ai-pulse" => AiMonitor,
+            "todo-agenda" => Todo,
+            "weather-desk" => Weather,
+            "focus-dial" => Music,
+            "snippet-grid" => Clipboard,
+            "world-clock" => Pomodoro,
+            "dev-toolbox" => Tags,
+            "hydration" => Todo,
+            "ai-inbox" => QuickCapture,
+            "news-rss" => QuickCapture,
+            "agent-hud" => AiMonitor,
             _ => null
         };
     }

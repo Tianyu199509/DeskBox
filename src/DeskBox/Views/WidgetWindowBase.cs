@@ -79,6 +79,7 @@ public abstract partial class WidgetWindowBase : Window
     protected Win32Helper.POINT InitialPointerPt;
     protected PointInt32 InitialWindowPos;
     protected SizeInt32 InitialWindowSize;
+    private double _initialDragDpiScale = 1.0;
     protected FrameworkElement? DragCaptureElement;
     private bool _isCoordinatedMoveDrag;
     private bool _deferTitleBarDragConfigUpdates;
@@ -105,6 +106,8 @@ public abstract partial class WidgetWindowBase : Window
     protected bool KeepRaisedUntilDeactivate;
     protected bool RestoreDesktopLayerWhenIdle;
     protected bool IsHideAnimationRunning;
+    protected bool IsTrayShowAnimationInFlight;
+    protected bool SuppressAppWindowCompactVisibilityNotification;
     protected DateTime LastElevateForInteractionUtc = DateTime.MinValue;
     protected DispatcherQueueTimer? TopMostSafetyTimer;
     private Win32Helper.SubclassProc? _desktopPinnedActivationSubclassProc;
@@ -367,6 +370,8 @@ public abstract partial class WidgetWindowBase : Window
         App.Current?.ResizeGuideOverlay?.EndResize();
         RemoveDesktopPinnedPointerRouting();
         RemoveDesktopPinnedActivationGuard();
+        RootElement.Loaded -= WidgetRootElement_Loaded;
+        RootElement.ActualThemeChanged -= WidgetRootElement_ActualThemeChanged;
         WidgetShellControl.HostedContentChanged -= WidgetShellControl_HostedContentChanged;
         CleanupWidgetGrouping();
         CleanupWidgetCollapse();
@@ -535,4 +540,14 @@ public abstract partial class WidgetWindowBase : Window
         PerformanceLogger.TrackWindowClose(LogPrefix);
         _isTrackedForDiagnostics = false;
     }
+
+    private protected bool ResolveKeepCapsuleContentWarm() =>
+        SettingsService is { } settingsService &&
+        PerformanceSettingsPolicy.ResolveEffectiveKeepCapsuleContentWarm(settingsService.Settings);
+
+    private protected bool IsAnyTrayOrSharedAnimationActive =>
+        IsTrayShowAnimationInFlight ||
+        IsHideAnimationRunning ||
+        TrayAnimation.IsPositionTransitionActive ||
+        WidgetCompactAnimationCoordinator.HasActiveAnimations;
 }

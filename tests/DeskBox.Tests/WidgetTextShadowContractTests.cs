@@ -403,6 +403,19 @@ public sealed class WidgetTextShadowContractTests
             Assert.False(WidgetTextShadow.ShouldSuppressForOpaquePlate(
                 micaOpacity,
                 SettingsService.WidgetMaterialTypeMica));
+
+            double detachedMicaOpacity = WidgetMaterialVisualCalculator.ResolveEffectivePlateOpacity(
+                SettingsService.WidgetMaterialTypeMica,
+                isDark,
+                surfaceOpacity: 1.0,
+                materialIntensity: 1.0,
+                acrylicControllerAttached: false,
+                micaControllerAttached: false,
+                legacyAccentBackdropActive: false);
+            Assert.Equal(0.0, detachedMicaOpacity);
+            Assert.False(WidgetTextShadow.ShouldSuppressForOpaquePlate(
+                detachedMicaOpacity,
+                SettingsService.WidgetMaterialTypeMica));
         }
 
         // Solid plates at >= 0.85 and opaque per-widget custom colors still suppress
@@ -449,6 +462,47 @@ public sealed class WidgetTextShadowContractTests
         Assert.Contains("ReleaseDeferredPin(text);", helper, StringComparison.Ordinal);
         Assert.Contains("WidgetMaterialVisualCalculator.ResolveEffectivePlateOpacity(", contentWindow, StringComparison.Ordinal);
         Assert.Contains("WidgetTextShadow.SetEnabled(SettingsService.Settings.WidgetShell.WidgetTextShadowEnabled);", app, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CustomWidgetCardShadowHost_AssignsBorderChildOnce_AndGuardsAgainstPreParentedElements()
+    {
+        string renderer =
+            File.ReadAllText(TestPaths.FromRepository("src/DeskBox/Controls/WidgetContents/CustomWidgetNativeRenderer.cs")) +
+            "\n" +
+            File.ReadAllText(TestPaths.FromRepository("src/DeskBox/Controls/WidgetContents/CustomWidgetNativeRenderer.Styling.cs"));
+
+        int start = renderer.IndexOf("private FrameworkElement BuildCard(", StringComparison.Ordinal);
+        Assert.True(start >= 0);
+        int nextMethod = renderer.IndexOf("private FrameworkElement Build", start + 1, StringComparison.Ordinal);
+        Assert.True(nextMethod > start);
+
+        string buildCard = renderer[start..nextMethod];
+        Assert.DoesNotContain("Child = inner", buildCard, StringComparison.Ordinal);
+        Assert.Contains("cardBorder.Child = useShadowHostGrid", buildCard, StringComparison.Ordinal);
+
+        int wrapStart = renderer.IndexOf("internal static UIElement WrapInShadowHostGrid(", StringComparison.Ordinal);
+        Assert.True(wrapStart >= 0);
+        int wrapEnd = renderer.IndexOf("private static bool IsSeeThroughShadowBrush(", wrapStart, StringComparison.Ordinal);
+        Assert.True(wrapEnd > wrapStart);
+
+        string wrapBody = renderer[wrapStart..wrapEnd];
+        Assert.Contains("case Border parentBorder when ReferenceEquals(parentBorder.Child, content):", wrapBody, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FirstTimeEnableOnIdleSubtree_InvalidatesArrangeAndResyncsDormantAttachments()
+    {
+        string helper = ReadHelper();
+        string app = File.ReadAllText(TestPaths.FromRepository("src/DeskBox/App.xaml.cs"));
+
+        Assert.Contains("host.InvalidateArrange();", helper, StringComparison.Ordinal);
+        Assert.Contains("chain[index].InvalidateArrange();", helper, StringComparison.Ordinal);
+        Assert.Contains("panel.InvalidateArrange();", helper, StringComparison.Ordinal);
+        Assert.Contains("attachment.Sprite is null &&", helper, StringComparison.Ordinal);
+        Assert.True(CountOccurrences(
+            app,
+            "WidgetTextShadow.SetEnabled(SettingsService.Settings.WidgetShell.WidgetTextShadowEnabled);") >= 2);
     }
 
     private static string ReadHelper() => File.ReadAllText(TestPaths.FromRepository(

@@ -1,8 +1,11 @@
+using DeskBox.Helpers;
 using DeskBox.Platform;
 using DeskBox.Models;
 using DeskBox.Services;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 
 namespace DeskBox.Views;
 
@@ -14,18 +17,23 @@ public sealed partial class OnboardingWindow
     private const string StatusVisibleGlyph = "\uE8A7";
 
     private int _summonToggleCount;
-    private bool _isSynchronizingDropMode;
     private bool _isSynchronizingDoubleClick;
+    private bool _isChangingStoragePath;
     private readonly Dictionary<WidgetKind, bool> _featureTileStates = new();
 
     // ════════════════════════════════════════════════════════════
-    //  Step 2: moving changes the path. The drop behavior is edited
-    //  inline (FileWidget slice, same normalization as the settings
-    //  page); the storage root itself only changes in Settings, which
-    //  owns the verified copy-migration flow.
+    //  Step 2: moving changes the path. Quick drive switching and
+    //  custom folder selection work in place; drag-drop mode stays
+    //  adjustable later in Settings.
     // ════════════════════════════════════════════════════════════
 
     private void SetupDropStep()
+    {
+        RefreshDropStepPathAndDrives();
+        _dropSceneShowsCopy = IsCurrentDropModeCopy();
+    }
+
+    private void RefreshDropStepPathAndDrives()
     {
         // Slice reads (never the AppSettings facade passthroughs — the
         // facade-access contract test pins this file's budget).
@@ -36,15 +44,118 @@ public sealed partial class OnboardingWindow
         ToolTipService.SetToolTip(Step2PathValue, fullPath);
 
         string fileName = _localizationService.T("Onboarding.Scene.FileName1");
-        string rootTail = PathTail(root);
         string desktopTail = PathTail(Environment.GetFolderPath(Environment.SpecialFolder.Desktop));
         ScenePathOldText.Text = $"…\\{(string.IsNullOrWhiteSpace(desktopTail) ? "Desktop" : desktopTail)}\\{fileName}";
-        ScenePathChipText.Text = string.IsNullOrWhiteSpace(rootTail)
-            ? System.IO.Path.Combine(fullPath, fileName)
-            : $"…\\{rootTail}\\{subfolder}\\{fileName}";
+        ScenePathChipText.Text = FormatSceneStorageChipPath(root, fullPath, subfolder, fileName);
 
-        bool copy = SynchronizeDropModeControls();
-        _dropSceneShowsCopy = copy;
+        RefreshStep2DriveButtons(root);
+    }
+
+    private static string FormatSceneStorageChipPath(
+        string root,
+        string fullPath,
+        string subfolder,
+        string fileName)
+    {
+        string? pathRoot = System.IO.Path.GetPathRoot(root);
+        string? parentDir = System.IO.Path.GetDirectoryName(
+            System.IO.Path.TrimEndingDirectorySeparator(root));
+        if (!string.IsNullOrWhiteSpace(pathRoot) &&
+            !string.IsNullOrWhiteSpace(parentDir) &&
+            string.Equals(
+                System.IO.Path.TrimEndingDirectorySeparator(parentDir),
+                System.IO.Path.TrimEndingDirectorySeparator(pathRoot),
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return System.IO.Path.Combine(fullPath, fileName);
+        }
+
+        string rootTail = PathTail(root);
+        string drivePrefix = string.IsNullOrWhiteSpace(pathRoot)
+            ? string.Empty
+            : pathRoot.TrimEnd(
+                System.IO.Path.DirectorySeparatorChar,
+                System.IO.Path.AltDirectorySeparatorChar);
+        if (string.IsNullOrWhiteSpace(rootTail))
+        {
+            return System.IO.Path.Combine(fullPath, fileName);
+        }
+
+        return string.IsNullOrWhiteSpace(drivePrefix)
+            ? $"…\\{rootTail}\\{subfolder}\\{fileName}"
+            : $"{drivePrefix}\\…\\{rootTail}\\{subfolder}\\{fileName}";
+    }
+
+    private void RefreshStep2DriveButtons(string currentRoot)
+    {
+        if (Step2DriveButtonsHost is null || Step2DriveStrip is null)
+        {
+            return;
+        }
+
+        IReadOnlyList<ManagedStorageSelectableDriveOption> options =
+            ManagedStoragePathService.GetSelectableStorageDriveOptions();
+        Step2DriveButtonsHost.Children.Clear();
+        if (options.Count < 2)
+        {
+            Step2DriveStrip.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        foreach (ManagedStorageSelectableDriveOption option in options)
+        {
+            bool isSelected = ManagedStorageMigrationService.Same(currentRoot, option.TargetRootPath);
+            var button = new ToggleButton
+            {
+                Content = $"{option.DriveLabel} · {FormatDriveFreeSpace(option.AvailableFreeSpace)}",
+                Tag = option.TargetRootPath,
+                IsChecked = isSelected,
+                IsEnabled = !_isChangingStoragePath,
+                MinHeight = 30,
+                Padding = new Thickness(11, 4, 11, 4),
+                CornerRadius = new CornerRadius(6)
+            };
+            ToolTipService.SetToolTip(button, option.TargetRootPath);
+            AutomationProperties.SetName(button, $"{option.DriveLabel} {option.TargetRootPath}");
+            button.Click += Step2DriveButton_Click;
+            Step2DriveButtonsHost.Children.Add(button);
+        }
+
+        Step2DriveStrip.Visibility = Visibility.Visible;
+    }
+
+    private static string FormatDriveFreeSpace(long bytes)
+    {
+        string[] units = ["B", "KB", "MB", "GB", "TB"];
+        double size = Math.Max(0, bytes);
+        int unit = 0;
+        while (size >= 1024 && unit < units.Length - 1)
+        {
+            size /= 1024;
+            unit++;
+        }
+
+        if (unit == 0)
+        {
+            return $"{bytes} {units[0]}";
+        }
+
+        return size >= 10
+            ? $"{size:0} {units[unit]}"
+            : $"{size:0.#} {units[unit]}";
+    }
+
+    private void SetStoragePathControlsEnabled(bool enabled)
+    {
+        Step2OpenFolderButton.IsEnabled = enabled;
+        Step2PathChangeButton.IsEnabled = enabled;
+        foreach (UIElement child in Step2DriveButtonsHost.Children)
+        {
+            if (child is Control control)
+            {
+                control.IsEnabled = enabled;
+            }
+        }
     }
 
     private string CurrentManagedStorageRoot() =>
@@ -57,61 +168,14 @@ public sealed partial class OnboardingWindow
             System.IO.Path.AltDirectorySeparatorChar));
 
     /// <summary>
-    /// Mirrors the persisted drop action into the radio pair and the
-    /// explanation line. "Follow Windows" leaves both radios clear (the
-    /// scene then tells the Move story, the same-drive Windows default).
-    /// Returns whether the current action is Copy.
+    /// Returns whether the persisted unified drag-drop preference is Copy so
+    /// the Step 2 stage animation mirrors external Settings changes while open.
     /// </summary>
-    private bool SynchronizeDropModeControls()
-    {
-        string action = _settingsService.Settings.FileWidget.ManagedDropAction;
-        bool copy = string.Equals(action, SettingsService.ManagedDropActionCopy, StringComparison.Ordinal);
-        bool move = string.Equals(action, SettingsService.ManagedDropActionMove, StringComparison.Ordinal);
-        _isSynchronizingDropMode = true;
-        try
-        {
-            Step2MoveRadio.IsChecked = move;
-            Step2CopyRadio.IsChecked = copy;
-        }
-        finally
-        {
-            _isSynchronizingDropMode = false;
-        }
-
-        Step2ModeExplainText.Text = copy
-            ? _localizationService.T("Onboarding.Step2.CopyExplain")
-            : _localizationService.T("Onboarding.Step2.MoveExplain");
-        return copy;
-    }
-
-    private void Step2DropMode_Checked(object sender, RoutedEventArgs e)
-    {
-        if (_isSynchronizingDropMode || sender is not RadioButton radio)
-        {
-            return;
-        }
-
-        bool copy = ReferenceEquals(radio, Step2CopyRadio);
-        string value = copy
-            ? SettingsService.ManagedDropActionCopy
-            : SettingsService.ManagedDropActionMove;
-
-        Step2ModeExplainText.Text = copy
-            ? _localizationService.T("Onboarding.Step2.CopyExplain")
-            : _localizationService.T("Onboarding.Step2.MoveExplain");
-
-        // The stage answers the choice at once: replay the story in the
-        // newly selected mode (before persisting, so the settings echo
-        // finds the scene already in sync).
-        SetDropSceneMode(copy, replay: true);
-
-        FileWidgetSettingsSlice fileWidget = _settingsService.Settings.FileWidget;
-        if (!string.Equals(fileWidget.ManagedDropAction, value, StringComparison.Ordinal))
-        {
-            fileWidget.ManagedDropAction = value;
-            _settingsService.SaveDebounced();
-        }
-    }
+    private bool IsCurrentDropModeCopy() =>
+        string.Equals(
+            _settingsService.Settings.FileWidget.ManagedDropAction,
+            SettingsService.ManagedDropActionCopy,
+            StringComparison.Ordinal);
 
     private void Step2OpenFolder_Click(object sender, RoutedEventArgs e)
     {
@@ -119,7 +183,7 @@ public sealed partial class OnboardingWindow
         {
             string root = CurrentManagedStorageRoot();
             System.IO.Directory.CreateDirectory(root);
-            Win32Helper.OpenFile(root);
+            Services.ShellLaunchService.FireAndForgetOpenPath(root);
         }
         catch (Exception ex)
         {
@@ -127,10 +191,295 @@ public sealed partial class OnboardingWindow
         }
     }
 
+    private void Step2DriveButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_isChangingStoragePath || sender is not ToggleButton { Tag: string targetRoot })
+        {
+            RefreshStep2DriveButtons(CurrentManagedStorageRoot());
+            return;
+        }
+
+        string currentRoot = CurrentManagedStorageRoot();
+        if (ManagedStorageMigrationService.Same(currentRoot, targetRoot))
+        {
+            RefreshStep2DriveButtons(currentRoot);
+            return;
+        }
+
+        RefreshStep2DriveButtons(currentRoot);
+        _storagePathUpdateTask = ApplyOnboardingStorageRootAfterAsync(
+            _storagePathUpdateTask,
+            targetRoot);
+    }
+
     private void Step2PathChange_Click(object sender, RoutedEventArgs e)
     {
-        App.Current.ShowSettings("AppearanceDetail");
+        if (_isChangingStoragePath)
+        {
+            return;
+        }
+
+        _storagePathUpdateTask = PickAndApplyOnboardingStorageRootAfterAsync(
+            _storagePathUpdateTask);
     }
+
+    private async Task ApplyOnboardingStorageRootAfterAsync(
+        Task previousTask,
+        string targetRootPath)
+    {
+        await previousTask;
+        if (_isClosed)
+        {
+            return;
+        }
+
+        _isChangingStoragePath = true;
+        SetStoragePathControlsEnabled(false);
+        try
+        {
+            await ApplyOnboardingStorageRootCoreAsync(targetRootPath);
+        }
+        finally
+        {
+            _isChangingStoragePath = false;
+            if (!_isClosed)
+            {
+                SetStoragePathControlsEnabled(true);
+                RefreshDropStepPathAndDrives();
+            }
+        }
+    }
+
+    private async Task PickAndApplyOnboardingStorageRootAfterAsync(Task previousTask)
+    {
+        await previousTask;
+        if (_isClosed)
+        {
+            return;
+        }
+
+        _isChangingStoragePath = true;
+        SetStoragePathControlsEnabled(false);
+        try
+        {
+            while (!_isClosed)
+            {
+                string? folderPath = await FolderPickerService.PickFolderAsync(_hWnd);
+                if (_isClosed || string.IsNullOrWhiteSpace(folderPath))
+                {
+                    return;
+                }
+
+                string scopedPath = ManagedStoragePathService.ResolvePickedStorageRootPath(
+                    folderPath,
+                    ManagedStorageMigrationService.TemporaryFolderName);
+                bool chooseAnother = await ApplyOnboardingStorageRootCoreAsync(scopedPath);
+                if (!chooseAnother)
+                {
+                    return;
+                }
+            }
+        }
+        finally
+        {
+            _isChangingStoragePath = false;
+            if (!_isClosed)
+            {
+                SetStoragePathControlsEnabled(true);
+                RefreshDropStepPathAndDrives();
+            }
+        }
+    }
+
+    private async Task<bool> ApplyOnboardingStorageRootCoreAsync(string candidatePath)
+    {
+        string normalizedPath = SettingsService.NormalizeManagedStorageRootPath(candidatePath);
+        string currentRoot = CurrentManagedStorageRoot();
+        if (ManagedStorageMigrationService.Same(normalizedPath, currentRoot))
+        {
+            return false;
+        }
+
+        if (ManagedStoragePathService.OverlapsDesktop(normalizedPath))
+        {
+            await ShowOnboardingDesktopOverlapDialogAsync();
+            return true;
+        }
+
+        ManagedStorageRootValidationResult validation =
+            ManagedStoragePathService.ValidateStorageRootCandidate(
+                normalizedPath,
+                AppDistributionService.Current.IsMicrosoftStore);
+        if (!validation.IsValid)
+        {
+            if (validation.Problem == ManagedStorageRootValidationProblem.DesktopOverlap)
+            {
+                await ShowOnboardingDesktopOverlapDialogAsync();
+            }
+            else
+            {
+                await ShowOnboardingStorageProblemDialogAsync(StorageMigrationProblem.Unsupported);
+            }
+
+            return true;
+        }
+
+        if (_widgetManager is null)
+        {
+            _settingsService.Settings.FileWidget.DefaultManagedStorageRootPath = normalizedPath;
+            _settingsService.SaveDebounced();
+            RefreshDropStepPathAndDrives();
+            return false;
+        }
+
+        try
+        {
+            ManagedStorageMigrationResult? emptySwitch =
+                await _widgetManager.TrySwitchEmptyManagedStorageRootAsync(normalizedPath);
+            if (emptySwitch is not null)
+            {
+                await TrySyncOnboardingDesktopShortcutAsync(emptySwitch.OldRootPath);
+                RefreshDropStepPathAndDrives();
+                return false;
+            }
+        }
+        catch (Exception ex)
+        {
+            StorageMigrationProblem problem = ManagedStorageMigrationPresentation.Classify(ex);
+            App.Log($"[Onboarding] Storage root switch failed ({problem}): {ex}");
+            await ShowOnboardingStorageProblemDialogAsync(problem);
+            return ManagedStorageMigrationPresentation.NeedsNewLocation(problem);
+        }
+
+        if (_isClosed || RootGrid.XamlRoot is null)
+        {
+            return false;
+        }
+
+        StorageMigrationConfirmOutcome? confirm = await ManagedStorageMigrationDialog.ConfirmAsync(
+            RootGrid.XamlRoot,
+            _localizationService,
+            _widgetManager.GetDefaultManagedStorageWidgetCount(),
+            currentRoot,
+            normalizedPath,
+            token => _widgetManager.PreviewManagedStorageMigrationAsync(normalizedPath, token),
+            token => _widgetManager.CleanupInterruptedMigrationCopiesAsync(normalizedPath, token));
+        if (confirm is null)
+        {
+            return false;
+        }
+
+        if (confirm.Choice == StorageMigrationStartChoice.ChooseLocation)
+        {
+            return true;
+        }
+
+        StorageMigrationDialogResult outcome = await ManagedStorageMigrationDialog.RunAsync(
+            RootGrid.XamlRoot,
+            RootGrid.DispatcherQueue,
+            _localizationService,
+            currentRoot,
+            normalizedPath,
+            options => _widgetManager.UpdateDefaultManagedStorageRootAsync(normalizedPath, options),
+            restart: confirm.Choice == StorageMigrationStartChoice.Restart,
+            retainOriginals: confirm.RetainOriginals,
+            includeOrphanFolders: confirm.IncludeOrphanFolders,
+            retrySourceCleanup: token => _widgetManager.RetryManagedStorageSourceCleanupAsync(normalizedPath, token),
+            cleanupInterruptedCopies: token => _widgetManager.CleanupInterruptedMigrationCopiesAsync(normalizedPath, token));
+        if (outcome.ChooseLocation)
+        {
+            return true;
+        }
+
+        if (outcome.Migration is { } migrated)
+        {
+            await TrySyncOnboardingDesktopShortcutAsync(migrated.OldRootPath);
+            RefreshDropStepPathAndDrives();
+        }
+
+        return false;
+    }
+
+    private async Task TrySyncOnboardingDesktopShortcutAsync(string oldRootPath)
+    {
+        if (_desktopShortcutService is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _desktopShortcutService.SyncAsync(oldRootPath);
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[Onboarding] Desktop shortcut sync deferred: {ex.Message}");
+        }
+    }
+
+    private async Task ShowOnboardingDesktopOverlapDialogAsync()
+    {
+        if (_isClosed || RootGrid.XamlRoot is null)
+        {
+            return;
+        }
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = RootGrid.XamlRoot,
+            RequestedTheme = NeutralInteractionBrush.ResolveEffectiveElementTheme(RootGrid),
+            Title = _localizationService.T("Settings.ManagedPath.Error.DesktopOverlapTitle"),
+            CloseButtonText = _localizationService.T("Common.Close"),
+            DefaultButton = ContentDialogButton.Close,
+            Content = new TextBlock
+            {
+                Text = _localizationService.T("Settings.ManagedPath.Error.DesktopOverlapBody"),
+                TextWrapping = TextWrapping.Wrap
+            }
+        };
+
+        await dialog.ShowAsync();
+    }
+
+    private async Task ShowOnboardingStorageProblemDialogAsync(StorageMigrationProblem problem)
+    {
+        if (_isClosed || RootGrid.XamlRoot is null)
+        {
+            return;
+        }
+
+        string messageKey = GetMigrationProblemMessageKey(problem);
+        var dialog = new ContentDialog
+        {
+            XamlRoot = RootGrid.XamlRoot,
+            RequestedTheme = NeutralInteractionBrush.ResolveEffectiveElementTheme(RootGrid),
+            Title = _localizationService.T("Settings.Dialog.MigrateFailedTitle"),
+            CloseButtonText = _localizationService.T("Common.Close"),
+            DefaultButton = ContentDialogButton.Close,
+            Content = new TextBlock
+            {
+                Text = _localizationService.T(messageKey),
+                TextWrapping = TextWrapping.Wrap
+            }
+        };
+
+        await dialog.ShowAsync();
+    }
+
+    private static string GetMigrationProblemMessageKey(StorageMigrationProblem problem) => problem switch
+    {
+        StorageMigrationProblem.CopiesRemoved => "Settings.Dialog.SafeMigrationError.CopiesRemoved",
+        StorageMigrationProblem.DestinationChanged => "Settings.Dialog.SafeMigrationError.DestinationChanged",
+        StorageMigrationProblem.DestinationConflict => "Settings.Dialog.SafeMigrationError.DestinationConflict",
+        StorageMigrationProblem.RootsOverlap => "Settings.Dialog.SafeMigrationError.RootsOverlap",
+        StorageMigrationProblem.VolumeUnavailable => "Settings.Dialog.SafeMigrationError.VolumeUnavailable",
+        StorageMigrationProblem.SourceChanged => "Settings.Dialog.SafeMigrationError.SourceChanged",
+        StorageMigrationProblem.Unsupported => "Settings.Dialog.SafeMigrationError.Unsupported",
+        StorageMigrationProblem.InUse => "Settings.Dialog.SafeMigrationError.InUse",
+        StorageMigrationProblem.AccessDenied => "Settings.Dialog.SafeMigrationError.AccessDenied",
+        StorageMigrationProblem.DiskFull => "Settings.Dialog.SafeMigrationError.DiskFull",
+        _ => "Settings.Dialog.SafeMigrationError.Unknown"
+    };
 
     // ════════════════════════════════════════════════════════════
     //  Step 3: summon / dismiss (live, wired to the real toggle path)
@@ -296,7 +645,9 @@ public sealed partial class OnboardingWindow
             "Smart" => _localizationService.T("Onboarding.Quick.Collapse.Smart"),
             _ => _localizationService.T("Onboarding.Quick.Collapse.Expanded"),
         };
-        Step4AppearanceValue.Text = _settingsService.Settings.WidgetShell.WidgetMaterialType switch
+        string effectiveMaterial = WindowsCompatibilityService.ResolveWidgetMaterialType(
+            _settingsService.Settings.WidgetShell.WidgetMaterialType);
+        Step4AppearanceValue.Text = effectiveMaterial switch
         {
             "MicaAlt" => _localizationService.T("Onboarding.Quick.Material.MicaAlt"),
             "Acrylic" => _localizationService.T("Onboarding.Quick.Material.Acrylic"),
@@ -316,6 +667,11 @@ public sealed partial class OnboardingWindow
         {
             App.Current.ShowSettings(sectionTag);
         }
+    }
+
+    private void Step4Organize_Click(object sender, RoutedEventArgs e)
+    {
+        _showDesktopOrganization?.Invoke();
     }
 
     // ════════════════════════════════════════════════════════════
@@ -450,7 +806,12 @@ public sealed partial class OnboardingWindow
 
         // Keep the inline controls honest when the same values change in
         // Settings (or another process) while the guide is open.
-        bool copy = SynchronizeDropModeControls();
+        if (!_isChangingStoragePath)
+        {
+            RefreshDropStepPathAndDrives();
+        }
+
+        bool copy = IsCurrentDropModeCopy();
         if (copy != _dropSceneShowsCopy)
         {
             SetDropSceneMode(copy, replay: true);

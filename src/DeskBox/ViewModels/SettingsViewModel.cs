@@ -15,7 +15,7 @@ namespace DeskBox.ViewModels;
 /// <summary>
 /// ViewModel for the settings window.
 /// </summary>
-public partial class SettingsViewModel : ObservableObject, IDisposable
+public sealed partial class SettingsViewModel : ObservableObject, IDisposable
 {
     private const string ThemeSystem = "System";
     private const string ThemeLight = "Light";
@@ -115,43 +115,39 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     [ObservableProperty] public partial bool AutoStart { get; set; }
     private bool _autoStartUsedFallback;
     private bool _autoStartOperationFailed;
-    // Captured before ApplyAutoStartState's first overwrite so "persisted
-    // preference was on, but the registration is gone" can be told apart
-    // from an ordinary user-off: security/cleanup tools remove the registry
-    // entry on reboot (feedback 376/481) and the switch would otherwise
-    // silently flip with no explanation.
+    private long _autoStartOperationSequence;
+    private int _autoStartMutationInFlight;
+    // Captured from persisted settings BEFORE the first live OS status probe
+    // arrives so "persisted preference was ON, but the OS registration is gone"
+    // surfaces ExternallyRemoved without misfiring when the user turns it OFF.
     private bool? _autoStartPreferenceAtLoad;
-    [ObservableProperty] public partial string SelectedAutoStartMode { get; set; } = nameof(StartupMode.Standard);
-    public object[] AvailableAutoStartModeOptions =>
-    [
-        new SettingsOption(nameof(StartupMode.Standard), _localizationService.T("Settings.AutoStart.Mode.Standard")),
-        new SettingsOption(nameof(StartupMode.ScheduledTask), _localizationService.T("Settings.AutoStart.Mode.ScheduledTask"))
-    ];
-    // Keep the choice available while off, including when Standard cannot be
-    // registered (for example an executable command longer than Run's limit).
-    // SetMode only records a preference while startup is disabled.
-    public Visibility AutoStartModeVisibility => StartupService.Current is DirectStartupService
-        ? Visibility.Visible : Visibility.Collapsed;
-    public string AutoStartStatusText => _autoStartState switch
-    {
-        StartupRegistrationState.DisabledByUser =>
-            _localizationService.T("Settings.AutoStart.WindowsDisabled"),
-        StartupRegistrationState.DisabledByTaskScheduler =>
-            _localizationService.T("Settings.AutoStart.TaskDisabled"),
-        StartupRegistrationState.Pending =>
-            _localizationService.T("Settings.AutoStart.Pending"),
-        StartupRegistrationState.Enabled when _autoStartUsedFallback =>
-            _localizationService.T("Settings.AutoStart.Fallback"),
-        _ when _autoStartOperationFailed =>
-            _localizationService.T("Settings.AutoStart.ChangeFailed"),
-        StartupRegistrationState.PathMismatch or
-        StartupRegistrationState.BlockedOrFailed =>
-            _localizationService.T("Settings.AutoStart.Failed"),
-        StartupRegistrationState.NotRegistered
-            when _autoStartPreferenceAtLoad == true =>
-            _localizationService.T("Settings.AutoStart.ExternallyRemoved"),
-        _ => string.Empty
-    };
+    public string AutoStartStatusText =>
+        ResolveAutoStartStatusKey(
+            _autoStartState,
+            _autoStartUsedFallback,
+            _autoStartOperationFailed,
+            _autoStartPreferenceAtLoad) is { } key
+            ? _localizationService.T(key)
+            : string.Empty;
+
+    internal static string? ResolveAutoStartStatusKey(
+        StartupRegistrationState state,
+        bool usedFallback,
+        bool operationFailed,
+        bool? preferenceAtLoad) =>
+        state switch
+        {
+            StartupRegistrationState.DisabledByUser => "Settings.AutoStart.WindowsDisabled",
+            StartupRegistrationState.DisabledByTaskScheduler => "Settings.AutoStart.TaskDisabled",
+            StartupRegistrationState.Pending => "Settings.AutoStart.Pending",
+            StartupRegistrationState.Enabled when usedFallback => "Settings.AutoStart.Fallback",
+            _ when operationFailed => "Settings.AutoStart.ChangeFailed",
+            StartupRegistrationState.PathMismatch or
+            StartupRegistrationState.BlockedOrFailed => "Settings.AutoStart.Failed",
+            StartupRegistrationState.NotRegistered when preferenceAtLoad == true =>
+                "Settings.AutoStart.ExternallyRemoved",
+            _ => null
+        };
     public Visibility AutoStartStatusVisibility => string.IsNullOrEmpty(AutoStartStatusText)
         ? Visibility.Collapsed : Visibility.Visible;
     public Visibility AutoStartSystemSettingsVisibility =>
@@ -247,12 +243,11 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         _selectedLanguage = LocalizationService.NormalizeLanguageSetting(settings.Language);
 
         _useSystemAccentColor = !string.Equals(settings.AccentColorMode, ThemeService.AccentModeCustom, StringComparison.OrdinalIgnoreCase);
-        AutoStart = StartupService.IsEnabled();
-        _autoStartState = AutoStart
+        _autoStartPreferenceAtLoad = settings.Core.AutoStart;
+        AutoStart = settings.Core.AutoStart;
+        _autoStartState = settings.Core.AutoStart
             ? StartupRegistrationState.Enabled
-            : StartupService.GetState();
-        if (StartupService.Current is DirectStartupService directStartup)
-            SelectedAutoStartMode = directStartup.Mode.ToString();
+            : StartupRegistrationState.NotRegistered;
         AutoCheckForUpdates = settings.AutoCheckForUpdates;
         ShowReleaseNotesAfterUpdate = settings.ShowReleaseNotesAfterUpdate;
         AutoDownloadUpdates = settings.AutoDownloadUpdates;
@@ -348,8 +343,26 @@ _ = RefreshQuickAccessStateAsync();
         // the explicit widget-group presentation notification and rebuilds
         // the pushed existing-groups / override projections.
         _groupNavigationSettings.PresentationUserChanged += OnGroupNavigationPresentationUserChanged;
+        _appActions.AutoStartStateChanged += OnStartupServiceStateChanged;
+        _ = RefreshAutoStartStateAsync();
         NotifyExistingWidgetGroupPropertiesChanged();
         NotifyCapsuleOverridePropertiesChanged();
+    }
+
+    private void OnStartupServiceStateChanged()
+    {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        DeskBox.Platform.UiDispatch.RunOrDefer(() =>
+        {
+            if (!_isDisposed)
+            {
+                RefreshAutoStartState();
+            }
+        });
     }
 
     [RelayCommand]
@@ -378,6 +391,7 @@ _ = RefreshQuickAccessStateAsync();
         _themeService.AppearanceChanged -= OnAppearanceChanged;
         _localizationService.LanguageChanged -= OnLanguageChanged;
         _weatherSettings.AutoLocationUserChanged -= OnWeatherAutoLocationUserChanged;
+        _appActions.AutoStartStateChanged -= OnStartupServiceStateChanged;
         // Cancel the live city search; its owning invocation disposes the
         // source in its own finally once it unwinds on the canceled token
         // (the field is only non-null while a search invocation runs).

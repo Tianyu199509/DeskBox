@@ -20,7 +20,8 @@ public enum SearchResultKind
     Folder,
     History,
     Favorite,
-    Clipboard
+    Clipboard,
+    CustomWidget
 }
 
 /// <summary>
@@ -86,51 +87,75 @@ public enum EverythingConnectionState
 /// </summary>
 public static class FileCategoryHelper
 {
-    private static readonly HashSet<string> s_appExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".exe", ".lnk", ".msi", ".appx", ".msix", ".bat", ".cmd", ".com", ".scr", ".ps1", ".url"
-    };
+    private static readonly System.Collections.Frozen.FrozenSet<string> s_appExtensions =
+        System.Collections.Frozen.FrozenSet.ToFrozenSet(
+        [
+            ".exe", ".lnk", ".msi", ".appx", ".msix", ".bat", ".cmd", ".com", ".scr", ".ps1", ".url"
+        ],
+        StringComparer.OrdinalIgnoreCase);
+    private static readonly System.Collections.Frozen.FrozenSet<string>.AlternateLookup<ReadOnlySpan<char>> s_appExtensionsLookup =
+        s_appExtensions.GetAlternateLookup<ReadOnlySpan<char>>();
 
-    private static readonly HashSet<string> s_documentExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".doc", ".docx", ".pdf", ".txt", ".md", ".xls", ".xlsx", ".ppt", ".pptx",
-        ".csv", ".rtf", ".odt", ".json", ".xml", ".html", ".htm", ".ini", ".log"
-    };
+    private static readonly System.Collections.Frozen.FrozenSet<string> s_documentExtensions =
+        System.Collections.Frozen.FrozenSet.ToFrozenSet(
+        [
+            ".doc", ".docx", ".pdf", ".txt", ".md", ".xls", ".xlsx", ".ppt", ".pptx",
+            ".csv", ".rtf", ".odt", ".json", ".xml", ".html", ".htm", ".ini", ".log"
+        ],
+        StringComparer.OrdinalIgnoreCase);
+    private static readonly System.Collections.Frozen.FrozenSet<string>.AlternateLookup<ReadOnlySpan<char>> s_documentExtensionsLookup =
+        s_documentExtensions.GetAlternateLookup<ReadOnlySpan<char>>();
 
-    private static readonly HashSet<string> s_imageExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".svg", ".webp", ".ico", ".tif", ".tiff", ".heic", ".raw"
-    };
+    private static readonly System.Collections.Frozen.FrozenSet<string> s_imageExtensions =
+        System.Collections.Frozen.FrozenSet.ToFrozenSet(
+        [
+            ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".svg", ".webp", ".ico", ".tif", ".tiff", ".heic", ".raw"
+        ],
+        StringComparer.OrdinalIgnoreCase);
+    private static readonly System.Collections.Frozen.FrozenSet<string>.AlternateLookup<ReadOnlySpan<char>> s_imageExtensionsLookup =
+        s_imageExtensions.GetAlternateLookup<ReadOnlySpan<char>>();
 
-    private static readonly HashSet<string> s_videoExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".mp4", ".avi", ".mkv", ".mov", ".wmv", ".flv", ".webm", ".m4v", ".mpg", ".mpeg", ".3gp"
-    };
+    private static readonly System.Collections.Frozen.FrozenSet<string> s_videoExtensions =
+        System.Collections.Frozen.FrozenSet.ToFrozenSet(
+        [
+            ".mp4", ".avi", ".mkv", ".mov", ".wmv", ".flv", ".webm", ".m4v", ".mpg", ".mpeg", ".3gp"
+        ],
+        StringComparer.OrdinalIgnoreCase);
+    private static readonly System.Collections.Frozen.FrozenSet<string>.AlternateLookup<ReadOnlySpan<char>> s_videoExtensionsLookup =
+        s_videoExtensions.GetAlternateLookup<ReadOnlySpan<char>>();
 
-    private static readonly HashSet<string> s_musicExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".mp3", ".wav", ".flac", ".aac", ".ogg", ".wma", ".m4a", ".opus", ".mid", ".midi"
-    };
+    private static readonly System.Collections.Frozen.FrozenSet<string> s_musicExtensions =
+        System.Collections.Frozen.FrozenSet.ToFrozenSet(
+        [
+            ".mp3", ".wav", ".flac", ".aac", ".ogg", ".wma", ".m4a", ".opus", ".mid", ".midi"
+        ],
+        StringComparer.OrdinalIgnoreCase);
+    private static readonly System.Collections.Frozen.FrozenSet<string>.AlternateLookup<ReadOnlySpan<char>> s_musicExtensionsLookup =
+        s_musicExtensions.GetAlternateLookup<ReadOnlySpan<char>>();
 
-    private static readonly HashSet<string> s_archiveExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz", ".iso", ".cab"
-    };
+    private static readonly System.Collections.Frozen.FrozenSet<string> s_archiveExtensions =
+        System.Collections.Frozen.FrozenSet.ToFrozenSet(
+        [
+            ".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz", ".iso", ".cab"
+        ],
+        StringComparer.OrdinalIgnoreCase);
+    private static readonly System.Collections.Frozen.FrozenSet<string>.AlternateLookup<ReadOnlySpan<char>> s_archiveExtensionsLookup =
+        s_archiveExtensions.GetAlternateLookup<ReadOnlySpan<char>>();
 
     public static FileCategory Categorize(string fileName)
     {
-        string extension = Path.GetExtension(fileName);
-        if (string.IsNullOrEmpty(extension))
+        ReadOnlySpan<char> extension = Path.GetExtension(fileName.AsSpan());
+        if (extension.IsEmpty)
         {
             return FileCategory.Other;
         }
 
-        if (s_appExtensions.Contains(extension)) return FileCategory.App;
-        if (s_documentExtensions.Contains(extension)) return FileCategory.Document;
-        if (s_imageExtensions.Contains(extension)) return FileCategory.Image;
-        if (s_videoExtensions.Contains(extension)) return FileCategory.Video;
-        if (s_musicExtensions.Contains(extension)) return FileCategory.Music;
-        if (s_archiveExtensions.Contains(extension)) return FileCategory.Archive;
+        if (s_appExtensionsLookup.Contains(extension)) return FileCategory.App;
+        if (s_documentExtensionsLookup.Contains(extension)) return FileCategory.Document;
+        if (s_imageExtensionsLookup.Contains(extension)) return FileCategory.Image;
+        if (s_videoExtensionsLookup.Contains(extension)) return FileCategory.Video;
+        if (s_musicExtensionsLookup.Contains(extension)) return FileCategory.Music;
+        if (s_archiveExtensionsLookup.Contains(extension)) return FileCategory.Archive;
         return FileCategory.Other;
     }
 }
@@ -151,6 +176,7 @@ public sealed class SearchResultItem
         {
             SearchResultKind.Folder => "\uE8B7",
             SearchResultKind.Clipboard => "\uE77F",
+            SearchResultKind.CustomWidget => "\uE71D",
             _ => "\uE8A5"
         };
     public DateTimeOffset? ModifiedAt { get; set; }
@@ -193,6 +219,12 @@ public sealed class SearchResultItem
     public string? QuickCaptureItemId { get; init; }
 
     /// <summary>
+    /// For CustomWidget results: the desktop custom widget ID and optional collection record ID.
+    /// </summary>
+    public string? CustomWidgetId { get; init; }
+    public string? CustomWidgetItemId { get; init; }
+
+    /// <summary>
     /// For Clipboard results: the clipboard history item ID.
     /// </summary>
     public string? ClipboardItemId { get; init; }
@@ -230,6 +262,9 @@ public sealed class SearchResultItem
 
     /// <summary>Whether this action item is a low-priority fallback suggestion (such as fallback web search).</summary>
     public bool IsFallback { get; init; }
+
+    /// <summary>Memoized canonical identity key computed from immutable init properties.</summary>
+    internal string? CachedIdentityKey { get; set; }
 }
 
 /// <summary>
@@ -275,6 +310,8 @@ public sealed class SearchRecommendationItem
     public string? TodoWidgetId { get; init; }
     public string? TodoItemId { get; init; }
     public string? QuickCaptureItemId { get; init; }
+    public string? CustomWidgetId { get; init; }
+    public string? CustomWidgetItemId { get; init; }
 
     /// <summary>
     /// For History/Favorite recommendations: the query text to re-run when activated.
@@ -302,7 +339,7 @@ public sealed class SearchHistoryEntry
 /// extension-semantic tabs (Apps/Documents/...) when a query is active, Kind-semantic
 /// tabs (Todo/Note/File/Folder) plus recent-content tabs in the empty state.
 /// </summary>
-public sealed class SearchTabItem : INotifyPropertyChanged
+public sealed partial class SearchTabItem : INotifyPropertyChanged
 {
     public required string Id { get; init; }
     public required string DisplayName { get; init; }

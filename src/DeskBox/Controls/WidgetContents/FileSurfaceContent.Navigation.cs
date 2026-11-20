@@ -39,6 +39,9 @@ public sealed partial class FileSurfaceContent
 
     private async Task ActivateItemAsync(WidgetItem item)
     {
+        CancelPendingSlowClickRename();
+        HideAllNameExpansions();
+
         if (TryBlockTransferOpen(item))
         {
             return;
@@ -512,18 +515,26 @@ public sealed partial class FileSurfaceContent
             return;
         }
 
-        await NavigateUpFromSurfaceAsync();
-        // If still deeper than root and user keeps hovering over Up, re-arm next level.
-        if (!_isDisposed && ViewModel.CanNavigateUp &&
-            Win32Helper.IsAnyMouseButtonDown() &&
-            Win32Helper.GetCursorPos(out Win32Helper.POINT afterCursor) &&
-            IsScreenPointInsideElement(FolderNavigationUpButton, afterCursor.X, afterCursor.Y))
+        try
         {
-            _folderNavigationSpringBackTimer?.Start();
+            await NavigateUpFromSurfaceAsync();
+            // If still deeper than root and user keeps hovering over Up, re-arm next level.
+            if (!_isDisposed && ViewModel.CanNavigateUp &&
+                Win32Helper.IsAnyMouseButtonDown() &&
+                Win32Helper.GetCursorPos(out Win32Helper.POINT afterCursor) &&
+                IsScreenPointInsideElement(FolderNavigationUpButton, afterCursor.X, afterCursor.Y))
+            {
+                _folderNavigationSpringBackTimer?.Start();
+            }
+            else
+            {
+                ClearHighlightedFolderNavigationButton();
+            }
         }
-        else
+        catch (Exception ex)
         {
             ClearHighlightedFolderNavigationButton();
+            App.Log($"[FileSurface] Spring-back navigate up failed: {ex}");
         }
     }
 
@@ -616,11 +627,7 @@ public sealed partial class FileSurfaceContent
         }
 
         FileDropIntent intent = payload.IsInternalReorder
-            ? (Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Menu)
-                ? FileDropIntent.Shortcut
-                : Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control)
-                    ? FileDropIntent.Copy
-                    : FileDropIntent.Move)
+            ? ResolveElevatedInternalFolderIntent(hoverPaths, targetPath)
             : ResolveSurfaceDropIntent(
                 payload.DataView,
                 e.AllowedOperations,
@@ -688,7 +695,6 @@ public sealed partial class FileSurfaceContent
             IsFolder = true,
         };
         var deferral = e.GetDeferral();
-        BeginTrackedImport();
         try
         {
             using DroppedFileBatch batch = await GetSurfaceDropFilesAsync(e.DataView);
@@ -698,53 +704,86 @@ public sealed partial class FileSurfaceContent
             }
 
             bool containsTemp = batch.Files.Any(static f => f.ForceManagedCopy);
-            FileDropIntent intent = payload.IsInternalReorder
-                ? (Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Menu)
-                    ? FileDropIntent.Shortcut
-                    : Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control)
-                        ? FileDropIntent.Copy
-                        : FileDropIntent.Move)
-                : ResolveSurfaceDropIntent(
-                    e.DataView,
-                    e.AllowedOperations,
-                    forceCopy: containsTemp,
-                    destinationFolderPath: targetPath,
-                    sourcePathsOverride: batch.Files.Select(static f => f.Path));
-            if (intent == FileDropIntent.None)
+            string[] batchPaths = batch.Files.Select(static f => f.Path).ToArray();
+            try
             {
-                return;
-            }
-
-            bool move = intent == FileDropIntent.Move;
-            bool imported = await ImportNativeDroppedFilesIntoFolderAsync(
-                batch.Files,
-                targetFolder,
-                move: move,
-                intentOverride: intent == FileDropIntent.Shortcut ? FileDropIntent.Shortcut : null);
-            if (imported)
-            {
-                string? sourceWidgetId = TryGetString(e.DataView.Properties, DeskBoxDragData.SourceWidgetIdProperty);
-                if (move && !string.IsNullOrWhiteSpace(sourceWidgetId) &&
-                    !string.Equals(sourceWidgetId, WidgetId, StringComparison.OrdinalIgnoreCase) &&
-                    App.Current?.WidgetManager is { } manager)
+                FileDropIntent intent = payload.IsInternalReorder
+                    ? ResolveElevatedInternalFolderIntent(batchPaths, targetPath)
+                    : ResolveSurfaceDropIntent(
+                        e.DataView,
+                        e.AllowedOperations,
+                        forceCopy: containsTemp,
+                        destinationFolderPath: targetPath,
+                        sourcePathsOverride: batchPaths,
+                        probeBudget: PathOriginClassifier.DefaultDropProbeBudget);
+                if (intent == FileDropIntent.None)
                 {
-                    await manager.NotifyItemsMovedOutAsync(
-                        sourceWidgetId,
-                        batch.Files.Select(static f => f.Path).ToArray());
+                    return;
                 }
 
-                DataPackageOperation desiredOp = ToDataPackageOperation(intent);
-                int reqCount = batch.Files.Count(static f => !f.ForceManagedCopy);
-                e.AcceptedOperation = ResolveSafeDropCompletionOperation(
-                    desiredOp,
-                    payload.IsDeskBoxFileDrag,
-                    reqCount,
-                    reqCount,
-                    e.AllowedOperations.HasFlag(DataPackageOperation.Copy));
-                e.AcceptedOperation = DeskBoxDragData.ResolveFileDragFeedbackOperation(
-                    e.DataView,
-                    e.AcceptedOperation);
+                bool move = intent == FileDropIntent.Move;
+                string? sourceWidgetId = TryGetString(
+                    e.DataView.Properties,
+                    DeskBoxDragData.SourceWidgetIdProperty);
+                FolderImportOutcome folderOutcome = await ImportNativeDroppedFilesIntoFolderAsync(
+                    batch.Files,
+                    targetFolder,
+                    move: move,
+                    intentOverride: intent == FileDropIntent.Shortcut ? FileDropIntent.Shortcut : null,
+                    sourceWidgetIdOverride: sourceWidgetId);
+                if (folderOutcome.Imported)
+                {
+                    DataPackageOperation desiredOp = ToDataPackageOperation(intent);
+                    int reqCount = batch.Files.Count(static f => !f.ForceManagedCopy);
+                    e.AcceptedOperation = ResolveSafeDropCompletionOperation(
+                        desiredOp,
+                        payload.IsDeskBoxFileDrag,
+                        reqCount,
+                        folderOutcome.CompletedCount,
+                        e.AllowedOperations.HasFlag(DataPackageOperation.Copy));
+                    e.AcceptedOperation = DeskBoxDragData.ResolveFileDropCompletionFeedbackOperation(
+                        e.DataView,
+                        e.AcceptedOperation,
+                        e.AllowedOperations);
+                }
+
+                if (folderOutcome.CompletedCount > 0 &&
+                    !folderOutcome.ShowedDedicatedWarning &&
+                    intent is FileDropIntent.Move or FileDropIntent.Copy)
+                {
+                    // Receipt-only for navigation drops: no modifier-key context is
+                    // available here to justify the educational hints, and the
+                    // deterministic flags keep this path from consuming any
+                    // persisted once-only hint quota.
+                    TryShowSubfolderDropHudReceipt(
+                        intent,
+                        batchPaths,
+                        payload.IsDeskBoxFileDrag,
+                        moved: move,
+                        folderOutcome.CompletedCount,
+                        folderOutcome.UndoHistoryId,
+                        sourceWidgetId,
+                        targetPath,
+                        containsTemp,
+                        hadExplicitModifierOrChoice: true,
+                        autoProtectedExternalCopy: false,
+                        fallbackMessage: intent == FileDropIntent.Copy
+                            ? _localizationService.Format(
+                                "Widget.CopiedToFolder",
+                                targetFolder.Name,
+                                folderOutcome.CompletedCount)
+                            : null);
+                }
             }
+            finally
+            {
+                Platform.DropStagingFileOps.CleanupConsumedStagedPaths(batchPaths);
+            }
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[FileSurface] Folder navigation drop failed: {ex}");
+            e.AcceptedOperation = DataPackageOperation.None;
         }
         finally
         {

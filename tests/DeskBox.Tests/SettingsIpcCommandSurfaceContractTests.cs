@@ -28,6 +28,7 @@ public sealed class SettingsIpcCommandSurfaceContractTests
         nameof(SettingsIpcMethods.HotkeyRegistrationChanged),
         nameof(SettingsIpcMethods.AppDisplayTopologyChanged),
         nameof(SettingsIpcMethods.AppScreenHomeChanged),
+        nameof(SettingsIpcMethods.AppAutoStartStateChanged),
         nameof(SettingsIpcMethods.BackupUploadCompleted),
         nameof(SettingsIpcMethods.UpdateCheckCompleted),
         nameof(SettingsIpcMethods.UpdateDownloadProgress),

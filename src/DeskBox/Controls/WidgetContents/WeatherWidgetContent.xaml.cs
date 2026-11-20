@@ -39,6 +39,7 @@ public sealed partial class WeatherWidgetContent : UserControl, IDisposable
     {
         _viewModel = viewModel;
         InitializeComponent();
+        UpdateRichSkinColors();
         DataContext = _viewModel;
 
         _viewModel.PropertyChanged += ViewModel_PropertyChanged;

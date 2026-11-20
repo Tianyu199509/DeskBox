@@ -127,11 +127,12 @@ internal interface IDesktopWidgetWindow
     void CompleteGroupDesktopRestoreFromManager(bool placedAtDesktopLayer);
     void MarkRaisedAboveDesktopLayerFromManager();
     Task WaitForFirstPresentedFrameAsync(CancellationToken cancellationToken);
-    void SetGroupDropPreview(
-        bool visible,
-        bool ready,
-        string? messageKey = null);
+    void PrewarmGroupDropPreview();
+    void SetGroupDropPreview(WidgetGroupDropPreviewState state);
+    void SetGroupDragSourcePreview(bool active, double anchorNormalizedX = 0.5, double anchorNormalizedY = 0.06);
+    void SetGroupDragSourceCommitting(bool committing);
     Windows.Graphics.RectInt32? GetGroupMergeTitleScreenBounds();
+    Windows.Graphics.RectInt32? GetGroupMergeSurfaceScreenBounds();
     void HideWindow();
     void CloseWindow();
 }
@@ -285,12 +286,21 @@ public sealed partial class WidgetManager
             nativeVisibleCount);
     }
 
+    private int _batchHideReconcileSuppressionDepth;
+
     internal void ReconcileBackgroundMemoryCleanupForWidgetVisibility(
         string reason,
         bool forceScheduleWhenHidden = false,
         bool? observedNativeVisibility = null)
     {
         if (App.IsShuttingDown)
+        {
+            return;
+        }
+
+        if (_batchHideReconcileSuppressionDepth > 0 &&
+            !forceScheduleWhenHidden &&
+            observedNativeVisibility == false)
         {
             return;
         }
@@ -610,8 +620,10 @@ public sealed partial class WidgetManager
         IconHelper.ConfigurePerformanceCacheBudget(
             _lastPerformanceSettings.CacheBudget);
         _lastKeepCapsuleContentWarm =
-            _settingsService.Settings.Performance.KeepCapsuleContentWarm;
+            PerformanceSettingsPolicy.ResolveEffectiveKeepCapsuleContentWarm(_settingsService.Settings);
         InitializeWidgetGroupPresentationDefaults();
+        CustomWidgetHostSnapshotService.RegisterTodoWidgetRefresher(RefreshTodoWidgetAsync);
+        CustomWidgetHostSnapshotService.RegisterTodoLiveMutationBridge(CreateTodoLiveMutationBridge());
         _settingsService.SettingsChanged += OnSettingsChanged;
         _settingsService.AppearancePreviewChanged += ApplyAppearancePreview;
         _themeService.AppearanceChanged += ApplyAppearancePreview;
@@ -784,7 +796,7 @@ public sealed partial class WidgetManager
             _settingsService.Settings.Performance.IdleWorkingSetTrimEnabled;
         bool policyChanged = current != _lastPerformanceSettings;
         bool keepCapsuleContentWarm =
-            _settingsService.Settings.Performance.KeepCapsuleContentWarm;
+            PerformanceSettingsPolicy.ResolveEffectiveKeepCapsuleContentWarm(_settingsService.Settings);
         bool trimChanged = idleTrimEnabled != _lastIdleWorkingSetTrimEnabled;
         bool keepWarmChanged = keepCapsuleContentWarm != _lastKeepCapsuleContentWarm;
         if (!policyChanged && !trimChanged && !keepWarmChanged)
@@ -1082,11 +1094,16 @@ public sealed partial class WidgetManager
 
     internal Task CreateInitialManagedWidgetAsync(string? name = null)
     {
-        return CreateManagedWidgetCoreAsync(name, placeForFirstRun: true);
+        return CreateInitialManagedWidgetWithFallbackAsync(name);
     }
 
     private async Task CreateManagedWidgetCoreAsync(string? name, bool placeForFirstRun)
     {
+        if (_isStorageMigrationRunning)
+        {
+            throw new InvalidOperationException(LocalizeOrKey("Widget.Error.StorageMigrationInProgress"));
+        }
+
         name = string.IsNullOrWhiteSpace(name)
             ? _localizationService.T("Widget.DefaultName")
             : name;
@@ -1165,6 +1182,12 @@ public sealed partial class WidgetManager
                     Height = _settingsService.Settings.DefaultWidgetHeight
                 };
                 ApplyNewWidgetPlacement(config);
+                if (!_settingsService.Settings.WidgetLayout.Widgets.Any(w => string.Equals(w.Id, config.Id, StringComparison.Ordinal)))
+                {
+                    _settingsService.Settings.WidgetLayout.Widgets.Add(config);
+                    await _settingsService.SaveAsync();
+                }
+
                 await CreateRegisteredWidgetFromConfigAsync(config, revealAfterCreate: true);
                 break;
         }
@@ -1777,21 +1800,29 @@ public sealed partial class WidgetManager
                 $"[QuickReveal] Holding topmost through hide animation count={orderedWindows.Count}");
         }
 
-        PlayPreparedTrayHideAnimations(windowsToHide);
+        _batchHideReconcileSuppressionDepth++;
+        try
+        {
+            PlayPreparedTrayHideAnimations(windowsToHide);
 
-        ClearTemporaryRaiseLease("set-all-hidden");
-        SetWidgetsRaisedFromTray(false);
-        _sessionManager.MarkHidden("set-all-hidden");
-        long endedRaiseGeneration = _trayRaiseBatchGeneration;
-        _trayRaiseBatchGeneration++;
-        StopTrayLayerRestoreMonitor();
-        await _trayBatchAnimationDriver.WaitForIdleAsync();
-        SaveBatchVisibilityState();
-        // Guests are demoted only after the hide animations settle: doing it
-        // at the flag flip would sink them below widgets that are still
-        // fading out in the topmost band. The generation guard keeps guests
-        // re-held by a fast reraise during the await.
-        SweepRaisedBandGuests("set-all-hidden", endedRaiseGeneration);
+            ClearTemporaryRaiseLease("set-all-hidden");
+            SetWidgetsRaisedFromTray(false);
+            _sessionManager.MarkHidden("set-all-hidden");
+            long endedRaiseGeneration = _trayRaiseBatchGeneration;
+            _trayRaiseBatchGeneration++;
+            StopTrayLayerRestoreMonitor();
+            await _trayBatchAnimationDriver.WaitForIdleAsync();
+            SaveBatchVisibilityState();
+            // Guests are demoted only after the hide animations settle: doing it
+            // at the flag flip would sink them below widgets that are still
+            // fading out in the topmost band. The generation guard keeps guests
+            // re-held by a fast reraise during the await.
+            SweepRaisedBandGuests("set-all-hidden", endedRaiseGeneration);
+        }
+        finally
+        {
+            _batchHideReconcileSuppressionDepth--;
+        }
         App.LogVerbose($"[TrayBatch] SetAllVisible completed visible=false prepared={windowsToHide.Count}");
 
         ReconcileBackgroundMemoryCleanupForWidgetVisibility(
@@ -1870,7 +1901,7 @@ public sealed partial class WidgetManager
         PlacePendingInitialWidgets();
         ApplyDisconnectCollapsePolicy(
             Win32Helper.GetMonitorWorkAreaInfos()
-                .Select(area => Win32Helper.ResolveStableMonitorId(area.DeviceName))
+                .Select(area => string.IsNullOrWhiteSpace(area.StableId) ? Win32Helper.ResolveStableMonitorId(area.DeviceName) : area.StableId)
                 .ToList());
         // Per-window restore can strand two bar members on one slot with no
         // later event to heal it (feedback 327). The debounced check
@@ -1931,6 +1962,10 @@ public sealed partial class WidgetManager
         // (spec 5.6 user action).
         EndRemovalGraceByUserAction?.Invoke();
         _placementGeneration++;
+        DateTimeOffset placedAtUtc = DateTimeOffset.UtcNow;
+        string? activeTopologyKey = _settingsService.Settings.WidgetLayout.ActiveWidgetTopologyKey;
+        config.LastUserPlacementUtc = placedAtUtc;
+        config.LastUserPlacementTopologyKey = activeTopologyKey;
         config.ScreenBindingMode = mode;
         config.BoundScreenId = normalizedBound;
         string? boundLabel = ResolveBoundScreenLabel(mode, normalizedBound);
@@ -1948,6 +1983,8 @@ public sealed partial class WidgetManager
             group.ScreenBindingMode = mode;
             group.BoundScreenId = normalizedBound;
             group.BoundScreenLabel = boundLabel;
+            group.LastUserPlacementUtc = placedAtUtc;
+            group.LastUserPlacementTopologyKey = activeTopologyKey;
             foreach (string memberId in group.MemberIds)
             {
                 surfaceMemberIds.Add(memberId);
@@ -1956,6 +1993,8 @@ public sealed partial class WidgetManager
                     member.ScreenBindingMode = mode;
                     member.BoundScreenId = normalizedBound;
                     member.BoundScreenLabel = boundLabel;
+                    member.LastUserPlacementUtc = placedAtUtc;
+                    member.LastUserPlacementTopologyKey = activeTopologyKey;
                 }
             }
 
@@ -1994,7 +2033,8 @@ public sealed partial class WidgetManager
         // the resulting entry becomes authoritative.
         MarkSurfaceEntryAuthoritative(
             config,
-            stableIdOverride: mode == WidgetScreenBindingMode.Pinned ? boundScreenId : null);
+            stableIdOverride: mode == WidgetScreenBindingMode.Pinned ? boundScreenId : null,
+            authoredAtUtc: placedAtUtc);
         // persistImmediately=false: a batch caller (move-all) saves the whole
         // batch once at its end; the in-memory binding, window reposition,
         // and topology capture above are already complete at this point.
@@ -2231,9 +2271,20 @@ public sealed partial class WidgetManager
         WidgetRemovalAction removalAction = WidgetRemovalAction.RemoveWidgetOnly,
         IntPtr ownerWindowHandle = default)
     {
+        if (!HasUiThreadAccess())
+        {
+            await RunOnUiThreadAsync(() => RemoveWidgetAsync(widgetId, removalAction, ownerWindowHandle));
+            return;
+        }
+
         var config = FindConfig(widgetId);
         if (config is not null)
         {
+            if (_isStorageMigrationRunning && config.FollowsDefaultStoragePath)
+            {
+                throw new InvalidOperationException(LocalizeOrKey("Widget.Error.StorageMigrationInProgress"));
+            }
+
             // Managed-folder cleanup runs before any irreversible removal
             // step: a failed move-back or recycle throws here and leaves the
             // widget fully intact, so the close flow can surface the error
@@ -2374,6 +2425,11 @@ public sealed partial class WidgetManager
 
         if (config.FollowsDefaultStoragePath)
         {
+            if (_isStorageMigrationRunning)
+            {
+                throw new InvalidOperationException(LocalizeOrKey("Widget.Error.StorageMigrationInProgress"));
+            }
+
             await RenameManagedWidgetFolderAsync(config, newName);
         }
         else
@@ -2898,17 +2954,26 @@ public sealed partial class WidgetManager
         return null;
     }
 
-    public async Task RefreshFileWidgetAsync(string widgetId)
+    public async Task RefreshFileWidgetAsync(
+        string widgetId,
+        IReadOnlyCollection<string>? restoredPaths = null,
+        IReadOnlyDictionary<string, string>? sourceToRestoredPathMap = null)
     {
         if (!HasUiThreadAccess())
         {
-            await RunOnUiThreadAsync(() => RefreshFileWidgetAsync(widgetId));
+            await RunOnUiThreadAsync(() => RefreshFileWidgetAsync(widgetId, restoredPaths, sourceToRestoredPathMap));
             return;
         }
 
         if (FindLoadedFileWidgetAdapter(widgetId) is { } fileSurface)
         {
             await fileSurface.ViewModel.RefreshFromConfigAsync(clearIconCacheBeforeHydration: false);
+            if (restoredPaths is { Count: > 0 } || sourceToRestoredPathMap is { Count: > 0 })
+            {
+                _ = fileSurface.ViewModel.RestoreDepartedStackMemberships(
+                    restoredPaths ?? Array.Empty<string>(),
+                    sourceToRestoredPathMap);
+            }
         }
     }
 
@@ -3136,6 +3201,7 @@ public sealed partial class WidgetManager
         {
             _themeService.TrackWindow(window);
             _contentWindowRegistration.Register(config.Id, window);
+            window.LongHiddenCleanupElapsed += OnContentWindowLongHiddenCleanupElapsed;
             RegisterStandaloneUnifiedFileSessionIfNeeded(
                 config,
                 window,
@@ -3146,8 +3212,9 @@ public sealed partial class WidgetManager
                 prepareSurfacePromotionCandidate);
             ApplyCapsuleArrangementIfChanged(force: true);
 
-            window.Closed += (_, _) =>
+            App.SubscribeWindowClosedOnce(window, () =>
             {
+                window.LongHiddenCleanupElapsed -= OnContentWindowLongHiddenCleanupElapsed;
                 IReadOnlyList<string> registeredIds = _contentWindowRegistration.Unregister(window);
 
                 RemoveFileWidgetSessionsForHost(window);
@@ -3176,7 +3243,7 @@ public sealed partial class WidgetManager
                 closedConfig.IsVisible = false;
                 SetWidgetGroupVisibility(closedConfig, isVisible: false);
                 _settingsService.SaveDebounced();
-            };
+            });
 
             if (keepPreparedForAnimation && showRaisedWhileInitializing)
             {

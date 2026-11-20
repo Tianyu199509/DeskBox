@@ -51,27 +51,12 @@ public sealed class ShellDialogDelegationContractTests
     [Fact]
     public void ShellMove_KeepsTheNameConflictDialogAvailable()
     {
-        string shellTransfer = Read("src/DeskBox/Services/FileService.ShellTransfer.cs");
-
-        // The modern engine's operation flags must skip the confirmation
-        // suppression so a plan/execute race surfaces the native
-        // Replace/Keep-both dialog instead of a silent overwrite. (The
-        // legacy FoMove flag lists were retired with the SHFileOperation
-        // bridge, 2026-10-13.)
-        int flags = shellTransfer.IndexOf(
-            "fileOperation.SetOperationFlags(",
-            StringComparison.Ordinal);
-        Assert.True(flags >= 0, "The modern engine no longer sets operation flags.");
-        int flagsEnd = shellTransfer.IndexOf(");", flags, StringComparison.Ordinal);
-        string flagList = shellTransfer[flags..flagsEnd];
-        Assert.Contains(
-            "ShellFileOperationNoConfirmMakeDirectory",
-            flagList,
-            StringComparison.Ordinal);
-        Assert.DoesNotContain(
-            "NoConfirmation",
-            flagList,
-            StringComparison.Ordinal);
+        uint flags = DeskBox.Services.FileService.ResolveShellTransferFlags(
+            keepBoth: false, showElevationPrompt: false);
+        Assert.Equal(0x0200u, flags);
+        uint elevated = DeskBox.Services.FileService.ResolveShellTransferFlags(
+            keepBoth: false, showElevationPrompt: true);
+        Assert.Equal(0x00040200u, elevated);
     }
 
     [Fact]

@@ -111,7 +111,6 @@ public sealed partial class QuickCapturePopoutWindow : Window
         _localizationService = localizationService;
 
         InitializeComponent();
-        WindowsCompatibilityService.ApplySafeBackdrop(this);
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
 
@@ -556,7 +555,7 @@ public sealed partial class QuickCapturePopoutWindow : Window
         {
             StatusTimestampText.Text = _localizationService.Format(
                 "QuickCapture.Detail.Created",
-                _item.CreatedAt.ToLocalTime().ToString("yyyy/M/d HH:mm"));
+                _item.CreatedAt.ToLocalTime().ToString("yyyy/M/d HH:mm", System.Globalization.CultureInfo.InvariantCulture));
         }
 
         _ = LoadPrimaryImageAsync(hasPrimaryImage ? _item!.ImagePath : null);
@@ -902,7 +901,14 @@ public sealed partial class QuickCapturePopoutWindow : Window
 
             if (managedPaths.Length > 0)
             {
-                updated = await _quickCaptureService.AddAttachmentsAsync(_item.Id, managedPaths, copyToManagedStorage: true) ?? updated;
+                try
+                {
+                    updated = await _quickCaptureService.AddAttachmentsAsync(_item.Id, managedPaths, copyToManagedStorage: true) ?? updated;
+                }
+                finally
+                {
+                    QuickCaptureWidgetViewModel.TryCleanupTempPasteFiles(managedPaths);
+                }
             }
 
             if (updated is not null)
@@ -931,7 +937,14 @@ public sealed partial class QuickCapturePopoutWindow : Window
         sender.Stop();
         if (!_isClosed && !_isQuickJotMode && _hasUnsavedChanges)
         {
-            await SaveAsync(completeEditing: false);
+            try
+            {
+                await SaveAsync(completeEditing: false);
+            }
+            catch (Exception ex)
+            {
+                App.Log($"[QuickCapturePopout] Auto-save failed: {ex.Message}");
+            }
         }
     }
 
@@ -994,7 +1007,7 @@ public sealed partial class QuickCapturePopoutWindow : Window
                 }
                 else if (_item is not null)
                 {
-                    string displayName = $"Screenshot_{DateTimeOffset.Now:yyyyMMdd_HHmmss}.png";
+                    string displayName = FormattableString.Invariant($"Screenshot_{DateTimeOffset.Now:yyyyMMdd_HHmmss}.png");
                     QuickCaptureItem? updated =
                         await _quickCaptureService.AddImageBytesAttachmentAsync(_item.Id, pngBytes, displayName);
                     if (updated is not null)
@@ -1135,9 +1148,16 @@ public sealed partial class QuickCapturePopoutWindow : Window
 
             if (managedPaths.Length > 0)
             {
-                created = created is null
-                    ? await _quickCaptureService.AddItemWithAttachmentsAsync(managedPaths, copyToManagedStorage: true, pin: false)
-                    : await _quickCaptureService.AddAttachmentsAsync(created.Id, managedPaths, copyToManagedStorage: true) ?? created;
+                try
+                {
+                    created = created is null
+                        ? await _quickCaptureService.AddItemWithAttachmentsAsync(managedPaths, copyToManagedStorage: true, pin: false)
+                        : await _quickCaptureService.AddAttachmentsAsync(created.Id, managedPaths, copyToManagedStorage: true) ?? created;
+                }
+                finally
+                {
+                    QuickCaptureWidgetViewModel.TryCleanupTempPasteFiles(managedPaths);
+                }
             }
 
             if (created is not null && !string.IsNullOrWhiteSpace(body))
@@ -1245,24 +1265,11 @@ public sealed partial class QuickCapturePopoutWindow : Window
         }
     }
 
-    private static async Task LaunchAttachmentFileAsync(string path)
+    private async Task LaunchAttachmentFileAsync(string path)
     {
         try
         {
-            bool launched = false;
-            try
-            {
-                StorageFile file = await StorageFile.GetFileFromPathAsync(path);
-                launched = await Launcher.LaunchFileAsync(file);
-            }
-            catch
-            {
-            }
-
-            if (!launched)
-            {
-                Win32Helper.OpenFileOrChooseApp(IntPtr.Zero, path);
-            }
+            _ = await ShellLaunchService.OpenPathAsync(path, _hWnd);
         }
         catch (Exception ex)
         {
@@ -1369,9 +1376,10 @@ public sealed partial class QuickCapturePopoutWindow : Window
                 batch = await DeskBoxDragData.TryGetDroppedFilesAsync(e.DataView);
                 await AttachDroppedFilesAsync(batch.Files);
                 e.AcceptedOperation = batch.Files.Count > 0
-                    ? DeskBoxDragData.GetFileAssociationOperation(
+                    ? DeskBoxDragData.GetFileAssociationDropCompletionOperation(
                         e.DataView,
-                        allowedOperations)
+                        allowedOperations,
+                        "quick-capture-popout")
                     : DataPackageOperation.None;
                 if (_isQuickJotMode && batch.Files.Count > 0)
                 {
@@ -1558,19 +1566,9 @@ public sealed partial class QuickCapturePopoutWindow : Window
 
     private void ApplyTitleBarColors()
     {
-        bool isDark = RootGrid.ActualTheme switch
-        {
-            ElementTheme.Dark => true,
-            ElementTheme.Light => false,
-            _ => Win32Helper.IsSystemDarkMode()
-        };
-        AppWindowTitleBar titleBar = _appWindow.TitleBar;
-        titleBar.ButtonBackgroundColor = Colors.Transparent;
-        titleBar.ButtonInactiveBackgroundColor = Colors.Transparent;
-        titleBar.ButtonForegroundColor = isDark ? Colors.White : Colors.Black;
-        titleBar.ButtonInactiveForegroundColor = isDark
-            ? Windows.UI.Color.FromArgb(0xA0, 0xFF, 0xFF, 0xFF)
-            : Windows.UI.Color.FromArgb(0xA0, 0x10, 0x10, 0x10);
+        bool isDark = NeutralInteractionBrush.IsDarkTheme(RootGrid);
+        Win32Helper.SetWindowTheme(_hWnd, isDark);
+        WindowShellState.TryApplyExtendedTitleBarButtonColors(_appWindow, isDark);
     }
 
     private void AppWindow_Changed(AppWindow sender, AppWindowChangedEventArgs args)
@@ -1603,12 +1601,19 @@ public sealed partial class QuickCapturePopoutWindow : Window
             }
             else if (!string.IsNullOrWhiteSpace(_itemId))
             {
-                await _quickCaptureService.UpdatePopoutBoundsAsync(
-                    _itemId,
-                    bounds.X,
-                    bounds.Y,
-                    bounds.Width,
-                    bounds.Height);
+                try
+                {
+                    await _quickCaptureService.UpdatePopoutBoundsAsync(
+                        _itemId,
+                        bounds.X,
+                        bounds.Y,
+                        bounds.Width,
+                        bounds.Height);
+                }
+                catch (Exception ex)
+                {
+                    App.Log($"[QuickCapturePopout] Bounds auto-save failed: {ex.Message}");
+                }
             }
         }
     }
@@ -1867,16 +1872,18 @@ public sealed partial class QuickCapturePopoutWindow : Window
         UIntPtr subclassId,
         UIntPtr refData)
     {
-        if (message == WmGetMinMaxInfo)
+        if (message == WmGetMinMaxInfo && lParam != IntPtr.Zero)
         {
-            var minMaxInfo = Marshal.PtrToStructure<MinMaxInfo>(lParam);
-            double scale = Win32Helper.GetDpiScaleForWindow(_hWnd, RootGrid.XamlRoot);
             int minW = _isQuickJotMode ? QuickJotMinWidth : PopoutMinWidth;
             int minH = _isQuickJotMode ? QuickJotMinHeight : PopoutMinHeight;
-            minMaxInfo.MinTrackSize.X = Math.Max(minMaxInfo.MinTrackSize.X, ToPhysicalPixels(minW, scale));
-            minMaxInfo.MinTrackSize.Y = Math.Max(minMaxInfo.MinTrackSize.Y, ToPhysicalPixels(minH, scale));
-            Marshal.StructureToPtr(minMaxInfo, lParam, false);
-            return IntPtr.Zero;
+            return WindowShellState.ApplyMinTrackSizeWithWorkAreaClamp(
+                hWnd,
+                message,
+                wParam,
+                lParam,
+                Win32Helper.GetDpiScaleForWindow(_hWnd, RootGrid.XamlRoot),
+                minW,
+                minH);
         }
 
         if (message == WmNcDestroy)
@@ -1936,6 +1943,7 @@ public sealed partial class QuickCapturePopoutWindow : Window
         }
 
         WindowsCompatibilityService.ReleaseTitleBarExtensions(this, _appWindow);
+        SystemBackdrop = null;
         _appWindow.Changed -= AppWindow_Changed;
         _localizationService.LanguageChanged -= OnLanguageChanged;
         _settingsService.SettingsChanged -= OnSettingsChanged;
@@ -2002,6 +2010,8 @@ public sealed partial class QuickCapturePopoutWindow : Window
         finally
         {
             DisposeStagedQuickJotDropBatches();
+            RootGrid.Children.Clear();
+            Content = null;
         }
     }
 

@@ -61,6 +61,12 @@ internal static class TodoExportWorkflow
             return null;
         }
 
+        if (Services.DragDrop.StoreVirtualizedPathPolicy.IsWriteBlockedDestination(destination.Path))
+        {
+            throw new InvalidOperationException(
+                localizationService.T("Widget.DropBlocked.StoreVirtualizedAppData"));
+        }
+
         await TodoExportService.ExportToFileAsync(
             destination.Path,
             items,
@@ -79,26 +85,7 @@ internal static class TodoExportWorkflow
             return;
         }
 
-        try
-        {
-            Process.Start(new ProcessStartInfo
-            {
-                FileName = filePath,
-                UseShellExecute = true
-            });
-        }
-        catch (Exception ex)
-        {
-            App.LogVerbose($"[TodoExport] Shell open failed for '{filePath}', falling back: {ex.Message}");
-            try
-            {
-                Win32Helper.OpenFileOrChooseApp(IntPtr.Zero, filePath);
-            }
-            catch (Exception innerEx)
-            {
-                App.Log($"[TodoExport] Fallback open failed for '{filePath}': {innerEx.Message}");
-            }
-        }
+        Services.ShellLaunchService.FireAndForgetOpenPath(filePath);
     }
 
     public static void RevealExportedFile(string filePath)
@@ -108,13 +95,6 @@ internal static class TodoExportWorkflow
             return;
         }
 
-        try
-        {
-            Win32Helper.ShowInExplorer(filePath);
-        }
-        catch (Exception ex)
-        {
-            App.Log($"[TodoExport] ShowInExplorer failed for '{filePath}': {ex.Message}");
-        }
+        Services.ShellLaunchService.FireAndForgetRevealInExplorer(filePath);
     }
 }

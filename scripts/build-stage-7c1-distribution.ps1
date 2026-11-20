@@ -166,17 +166,16 @@ $directFiles | Set-Content -LiteralPath (Join-Path $OutputDirectory "direct-publ
 
 $directRequiredFiles = @(
     "DeskBox.exe",
-    "DeskBox.Settings.exe",
     "DeskBox.Updater.exe",
     "DeskBox.ThumbnailProxy.exe",
     "deskbox_native.dll",
     "deskbox_qjs.dll",
     "Microsoft.UI.Input.dll",
+    "Microsoft.UI.Xaml.Phone.dll",
     "Microsoft.ui.xaml.dll",
     "Microsoft.WindowsAppRuntime.dll",
     "Microsoft.WindowsAppRuntime.Insights.Resource.dll",
     "DeskBox.pri",
-    "DeskBox.Settings.pri",
     "DeskBox.InstallManifest.txt",
     "Strings/ar-SA.json",
     "Strings/bn-BD.json",
@@ -195,16 +194,18 @@ $directRequiredFiles = @(
 $missingDirectFiles = @($directRequiredFiles | Where-Object { $directFiles -notcontains $_ })
 $directForbiddenPatterns = @(
     '\.pdb$',
+    '\.winmd$',
     '(^|/)DeskBox\.dll$',
     '(^|/)DeskBox\.deps\.json$',
     '(^|/)DeskBox\.runtimeconfig\.json$',
-    '(^|/)DeskBox\.Settings\.dll$',
+    '(^|/)DeskBox\.Settings\.(?:exe|pri|dll)$',
     '(^|/)DeskBox\.Settings\.deps\.json$',
     '(^|/)DeskBox\.Settings\.runtimeconfig\.json$',
     '(^|/)(?:coreclr|clrjit|hostfxr|hostpolicy)\.dll$',
     '(^|/)EverythingSdk\.dll$',
     '(^|/)H\.NotifyIcon(?:\.WinUI)?\.dll$',
     '(^|/)deskbox_search_core(?:\.|$)',
+    '(^|/)Microsoft\.Windows\.(?:AI\.|Search\.|Widgets\.|Workloads\.)',
     '(^|/)Assets/Store/',
     'store-assets-html',
     '(^|/)\.mimosa(/|$)'
@@ -229,13 +230,12 @@ if ($forbiddenDirectFiles.Count -gt 0) {
 }
 
 $deskBoxMachine = Get-PeMachine -Path (Join-Path $directPublishDirectory "DeskBox.exe")
-$settingsMachine = Get-PeMachine -Path (Join-Path $directPublishDirectory "DeskBox.Settings.exe")
 $updaterMachine = Get-PeMachine -Path (Join-Path $directPublishDirectory "DeskBox.Updater.exe")
 $thumbnailProxyMachine = Get-PeMachine -Path (
     Join-Path $directPublishDirectory "DeskBox.ThumbnailProxy.exe")
 $windowsAppRuntimeInsightsMachine = Get-PeMachine -Path (
     Join-Path $directPublishDirectory "Microsoft.WindowsAppRuntime.Insights.Resource.dll")
-if ($deskBoxMachine -ne $expectedMachine -or $settingsMachine -ne $expectedMachine -or
+if ($deskBoxMachine -ne $expectedMachine -or
     $updaterMachine -ne $expectedMachine -or
     $thumbnailProxyMachine -ne $expectedMachine -or
     $windowsAppRuntimeInsightsMachine -ne $expectedMachine) {
@@ -292,7 +292,7 @@ $canRunDirectSmoke =
     ($Platform -eq "x64" -and $osArch -eq [System.Runtime.InteropServices.Architecture]::X64) -or
     ($Platform -eq "ARM64" -and $osArch -eq [System.Runtime.InteropServices.Architecture]::Arm64)
 if ($canRunDirectSmoke) {
-    Write-Host "Running Direct Native AOT --mcp & companion smoke against '$directPublishDirectory'..." -ForegroundColor Cyan
+    Write-Host "Running Direct Native AOT --mcp & settings-host smoke against '$directPublishDirectory'..." -ForegroundColor Cyan
     & (Join-Path $PSScriptRoot "run-aot-agent-clipboard-companion-smoke.ps1") -PublishDir $directPublishDirectory | Out-Host
 }
 

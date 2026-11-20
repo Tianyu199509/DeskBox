@@ -766,4 +766,123 @@ public sealed class AppUpdateServiceTests : IDisposable
         Assert.True(AppUpdateService.IsVersionBlockedForReleaseNotes("1.6.0", normalized));
         Assert.False(AppUpdateService.IsVersionBlockedForReleaseNotes("1.5.2", normalized));
     }
+
+    [Fact]
+    public void PruneStaleInstallerDirectories_PreservesNewerPendingUpdateAndLog_AndReclaimsInstalledAndOlderVersions()
+    {
+        string olderDir = Directory.CreateDirectory(Path.Combine(_tempRoot, "1.5.8")).FullName;
+        string installedDir = Directory.CreateDirectory(Path.Combine(_tempRoot, "1.6.0")).FullName;
+        string pendingDir = Directory.CreateDirectory(Path.Combine(_tempRoot, "1.6.1")).FullName;
+        string blockedDir = Directory.CreateDirectory(Path.Combine(_tempRoot, "1.6.2")).FullName;
+        string helperDir = Directory.CreateDirectory(Path.Combine(_tempRoot, "helper")).FullName;
+        string notesDir = Directory.CreateDirectory(Path.Combine(_tempRoot, "release-notes")).FullName;
+
+        string olderLog = Path.Combine(_tempRoot, "installer-1.5.8.log");
+        string currentLog = Path.Combine(_tempRoot, "installer-1.6.0.log");
+        string failedPendingLog = Path.Combine(_tempRoot, "installer-1.6.1.log");
+        File.WriteAllText(olderLog, "old");
+        File.WriteAllText(currentLog, "current");
+        File.WriteAllText(failedPendingLog, "failed-upgrade");
+        File.WriteAllText(Path.Combine(_tempRoot, "blocked-versions.txt"), "1.6.2");
+
+        var service = new AppUpdateService(updateRootPath: _tempRoot);
+        service.PruneStaleInstallerDirectories("1.6.0");
+
+        Assert.False(Directory.Exists(olderDir));
+        Assert.False(Directory.Exists(installedDir));
+        Assert.False(Directory.Exists(blockedDir));
+        Assert.True(Directory.Exists(pendingDir));
+        Assert.True(Directory.Exists(helperDir));
+        Assert.True(Directory.Exists(notesDir));
+
+        Assert.False(File.Exists(olderLog));
+        Assert.True(File.Exists(currentLog));
+        Assert.True(File.Exists(failedPendingLog));
+    }
+
+    [Fact]
+    public async Task DownloadUpdateAsync_ReusesExistingVerifiedInstallerWithoutNetworkRequest()
+    {
+        int downloadRequests = 0;
+        byte[] installerBytes = Encoding.UTF8.GetBytes("already-downloaded-installer");
+        string sha256 = Convert.ToHexString(SHA256.HashData(installerBytes));
+        string arch = AppUpdateService.CurrentInstallerArchitectureSuffix;
+
+        string versionDir = Directory.CreateDirectory(Path.Combine(_tempRoot, "1.6.1")).FullName;
+        string fileName = $"DeskBox_Setup_1.6.1_{arch}.exe";
+        string existingPath = Path.Combine(versionDir, fileName);
+        await File.WriteAllBytesAsync(existingPath, installerBytes);
+
+        using var httpClient = CreateHttpClient(_ =>
+        {
+            downloadRequests++;
+            return new HttpResponseMessage(HttpStatusCode.InternalServerError);
+        });
+
+        var service = new AppUpdateService(httpClient, updateRootPath: _tempRoot);
+        var manifest = new AppUpdateManifest
+        {
+            SchemaVersion = 1,
+            Version = "1.6.1",
+            DownloadUrl = $"https://deskbox.fun/update/{fileName}",
+            Sha256 = sha256,
+            Size = installerBytes.Length
+        };
+
+        var result = await service.DownloadUpdateAsync(manifest);
+
+        Assert.True(result.Success);
+        Assert.Equal(existingPath, result.FilePath);
+        Assert.Equal(existingPath, service.LastDownloadedInstallerPath);
+        Assert.Equal(0, downloadRequests);
+    }
+
+    [Fact]
+    public async Task CheckForUpdatesAsync_TreatsPushPausedManifestWithoutInstallerUrlAsUpToDateWithoutGitHubFallback()
+    {
+        int githubCalls = 0;
+        using var httpClient = CreateHttpClient(request =>
+        {
+            string url = request.RequestUri!.ToString();
+            if (url.Contains("api.github.com", StringComparison.OrdinalIgnoreCase))
+            {
+                githubCalls++;
+                return new HttpResponseMessage(HttpStatusCode.OK);
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """
+                    {
+                      "schemaVersion": 1,
+                      "channel": "stable",
+                      "version": "1.6.1",
+                      "publicVersion": "1.6.0",
+                      "pushPaused": true
+                    }
+                    """,
+                    Encoding.UTF8,
+                    "application/json")
+            };
+        });
+
+        var service = new AppUpdateService(
+            httpClient,
+            "https://example.test/update/stable.json",
+            _tempRoot,
+            "https://api.github.com/repos/Tianyu199509/DeskBox/releases/latest");
+
+        var result = await service.CheckForUpdatesAsync("1.6.0");
+
+        Assert.Equal(AppUpdateCheckStatus.UpToDate, result.Status);
+        Assert.Equal(0, githubCalls);
+    }
+
+    [Fact]
+    public void StoreVersionFormatting_TrimsZeroRevisionAndKeepsNonZeroRevision()
+    {
+        Assert.Equal("1.6.0", StoreAppUpdateService.FormatStorePackageVersion(1, 6, 0, 0));
+        Assert.Equal("1.6.0.2", StoreAppUpdateService.FormatStorePackageVersion(1, 6, 0, 2));
+    }
 }

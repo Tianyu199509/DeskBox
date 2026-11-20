@@ -130,6 +130,9 @@ public sealed class WidgetForegroundContractTests
         Assert.Contains("x:Key=\"TextControlPlaceholderForeground\"", xaml, StringComparison.Ordinal);
         Assert.Contains("x:Key=\"GridViewItemForeground\"", xaml, StringComparison.Ordinal);
         Assert.Contains("x:Key=\"ListViewItemForeground\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Key=\"SegmentedItemForeground\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Key=\"ButtonItemForeground\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Key=\"PivotItemForeground\"", xaml, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -142,9 +145,22 @@ public sealed class WidgetForegroundContractTests
             "src/DeskBox/Controls/WidgetContents/QuickCaptureSurfaceContent.xaml.cs");
         string todo = Read(
             "src/DeskBox/Controls/WidgetContents/TodoWidgetContent.EditingAndUndo.cs");
+        string clipboard = Read(
+            "src/DeskBox/Controls/WidgetContents/ClipboardWidgetContent.xaml.cs");
+        string clipboardAdapter = Read(
+            "src/DeskBox/Controls/WidgetContents/ClipboardWidgetContentAdapter.cs");
+        string foregroundWindow = Read(
+            "src/DeskBox/Views/WidgetWindowBase.Foreground.cs");
+        string contentWindow = Read(
+            "src/DeskBox/Views/ContentWidgetWindow.xaml.cs");
+        string groupSwitcherXaml = Read(
+            "src/DeskBox/Controls/WidgetGroupTitleSwitcher.xaml");
+        string groupSwitcherTabs = Read(
+            "src/DeskBox/Controls/WidgetGroupTitleSwitcher.Tabs.cs");
         string neutralBrush = Read("src/DeskBox/Helpers/NeutralInteractionBrush.cs");
 
         Assert.Contains("_contentForeground = Foreground ??", markdown, StringComparison.Ordinal);
+        Assert.Contains("SolidColorBrush.ColorProperty", markdown, StringComparison.Ordinal);
         Assert.Contains(
             "NeutralInteractionBrush.ResolveThemedResource",
             markdown,
@@ -157,6 +173,38 @@ public sealed class WidgetForegroundContractTests
         Assert.Contains(
             "NeutralInteractionBrush.ResolveThemedResource",
             todo,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "NeutralInteractionBrush.ResolveThemedResource(key, this)",
+            clipboard,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "Application.Current.Resources.ThemeDictionaries",
+            clipboard,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "content.ApplyAppearanceVisuals();",
+            clipboardAdapter,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "OnWidgetForegroundChanged();",
+            foregroundWindow,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "protected override void OnWidgetForegroundChanged()",
+            contentWindow,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "<Setter Property=\"Foreground\" Value=\"{ThemeResource TextFillColorPrimaryBrush}\" />",
+            groupSwitcherXaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "CurrentTitle.Foreground = primaryBrush;",
+            groupSwitcherTabs,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "OutgoingTitle.Foreground = primaryBrush;",
+            groupSwitcherTabs,
             StringComparison.Ordinal);
         Assert.Contains("VisualTreeHelper.GetParent(current)", neutralBrush, StringComparison.Ordinal);
         Assert.Contains("candidate.Resources.TryGetValue(key", neutralBrush, StringComparison.Ordinal);

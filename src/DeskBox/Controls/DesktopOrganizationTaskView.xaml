@@ -106,25 +106,10 @@
         </Style>
     </UserControl.Resources>
 
-    <Grid Padding="20,0,20,14" RowSpacing="10" RowDefinitions="Auto,*,Auto">
+    <Grid x:Name="WorkspaceRootGrid" Padding="20,0,20,14" RowSpacing="10" RowDefinitions="Auto,*,Auto">
         <!-- Row 0: Fluent 2 Command Row + Contextual InfoBars -->
         <StackPanel Spacing="6">
             <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                <!-- Retained hidden elements for XAML field compatibility -->
-                <StackPanel Visibility="Collapsed">
-                    <TextBlock x:Name="PageHeaderTitleText" />
-                    <Border x:Name="HeaderSafetyDot" />
-                    <TextBlock x:Name="PageHeaderSubtitleText" />
-                    <TextBlock x:Name="SummaryDescription" />
-                    <TextBlock x:Name="CanvasHintText" />
-                    <SelectorBar x:Name="PreviewSections" SelectionChanged="PreviewSections_SelectionChanged">
-                        <SelectorBarItem x:Name="SummaryTitle" IsSelected="True" />
-                        <SelectorBarItem x:Name="ExcludedItemsButton" />
-                    </SelectorBar>
-                    <Button x:Name="ViewModeButton" Click="ViewModeButton_Click">
-                        <FontIcon x:Name="ViewModeIcon" Glyph="&#xF0E2;" />
-                    </Button>
-                </StackPanel>
 
                 <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                     <ContentControl x:Name="SourceSelectionHost" VerticalAlignment="Center"
@@ -282,12 +267,7 @@
                             </StackPanel>
                         </Border>
 
-                        <StackPanel x:Name="RetainedItemsPanel" Spacing="10" Visibility="Collapsed">
-                            <StackPanel x:Name="RetainedRows" Spacing="10" />
-                            <Border x:Name="RetainedEmptyCard" Visibility="Collapsed">
-                                <TextBlock x:Name="RetainedEmptyText" />
-                            </Border>
-                        </StackPanel>
+
 
                         <StackPanel x:Name="CompletedViewPanel" Spacing="12" Visibility="Collapsed">
                             <Border x:Name="CompletedHeroCard"
@@ -333,11 +313,7 @@
                 CornerRadius="8"
                 Background="{ThemeResource SubtleFillColorTertiaryBrush}"
                 BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                BorderThickness="1"
-                AllowDrop="True"
-                DragOver="StayOnDesktopTray_DragOver"
-                DragLeave="StayOnDesktopTray_DragLeave"
-                Drop="StayOnDesktopTray_Drop">
+                BorderThickness="1">
                 <Grid RowDefinitions="38,*">
                     <Border
                         Height="38"
@@ -442,7 +418,8 @@
                 BorderThickness="1">
                 <StackPanel Orientation="Horizontal" Spacing="6">
                     <FontIcon
-                        Glyph="&#xE8C8;"
+                        x:Name="PointerDragBadgeIcon"
+                        Glyph="&#xE8DE;"
                         FontSize="12"
                         VerticalAlignment="Center"
                         Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />

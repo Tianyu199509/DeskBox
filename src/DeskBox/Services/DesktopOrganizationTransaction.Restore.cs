@@ -392,6 +392,7 @@ public sealed partial class DesktopOrganizationTransaction
             string suppressionId = Guid.NewGuid().ToString("N");
             var plans = batch.Select(item => new FileService.FileTransferPlan(item.DestinationPath, item.RestorePath!)).ToList();
             AutoOrganizationSuppressions?.BeginOperation(suppressionId, plans);
+            var batchRestored = new List<FileService.FileTransferResult>();
             void Record(FileService.FileTransferResult result)
             {
                 var item = batch.FirstOrDefault(candidate => string.Equals(candidate.DestinationPath, result.SourcePath, StringComparison.OrdinalIgnoreCase));
@@ -400,6 +401,9 @@ public sealed partial class DesktopOrganizationTransaction
                 item.RestorePath = result.DestinationPath;
                 item.Completed = true;
                 item.ShortcutRebaseInProgress = false;
+                batchRestored.Add(new FileService.FileTransferResult(
+                    item.DestinationPath,
+                    result.DestinationPath));
                 // The undo journal's receipts also carry the restored object's
                 // identity so a later reconcile can verify them the same way.
                 RecordDestinationIdentity(item, result.DestinationPath);
@@ -422,6 +426,11 @@ public sealed partial class DesktopOrganizationTransaction
                 AutoOrganizationSuppressions?.CompleteOperation(suppressionId,
                     batch.Where(item => item.Completed).Select(item => item.RestorePath!)
                         .Concat(plans.Select(plan => plan.DestinationPath)));
+            }
+
+            if (DesktopIconPositions is not null && batchRestored.Count > 0)
+            {
+                await DesktopIconPositions.RestoreAfterMoveToDesktopAsync(batchRestored);
             }
         }
 

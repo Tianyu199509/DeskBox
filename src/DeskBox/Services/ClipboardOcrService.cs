@@ -211,21 +211,44 @@ public static class ClipboardOcrService
         (ch >= '\u3000' && ch <= '\u303F') ||   // CJK Symbols and Punctuation
         (ch >= '\uFF00' && ch <= '\uFFEF');     // Halfwidth and Fullwidth Forms
 
+    private static readonly object s_ocrEngineLock = new();
+    private static OcrEngine? s_cachedOcrEngine;
+    private static string? s_cachedOcrLanguageStamp;
+
     private static OcrEngine? CreateBestOcrEngine()
     {
         try
         {
-            OcrEngine? profileEngine = OcrEngine.TryCreateFromUserProfileLanguages();
-            if (profileEngine is not null)
+            string stamp = string.Join('|', Windows.System.UserProfile.GlobalizationPreferences.Languages);
+            lock (s_ocrEngineLock)
             {
-                return profileEngine;
+                if (s_cachedOcrEngine is not null &&
+                    string.Equals(s_cachedOcrLanguageStamp, stamp, StringComparison.Ordinal))
+                {
+                    return s_cachedOcrEngine;
+                }
             }
 
-            IReadOnlyList<Language> available = OcrEngine.AvailableRecognizerLanguages;
-            if (available.Count > 0)
+            OcrEngine? resolved = OcrEngine.TryCreateFromUserProfileLanguages();
+            if (resolved is null)
             {
-                return OcrEngine.TryCreateFromLanguage(available[0]);
+                IReadOnlyList<Language> available = OcrEngine.AvailableRecognizerLanguages;
+                if (available.Count > 0)
+                {
+                    resolved = OcrEngine.TryCreateFromLanguage(available[0]);
+                }
             }
+
+            if (resolved is not null)
+            {
+                lock (s_ocrEngineLock)
+                {
+                    s_cachedOcrEngine = resolved;
+                    s_cachedOcrLanguageStamp = stamp;
+                }
+            }
+
+            return resolved;
         }
         catch
         {

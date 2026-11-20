@@ -8,12 +8,56 @@ const
   DeskBoxInstallStartupRunKey = 'Software\Microsoft\Windows\CurrentVersion\Run';
   DeskBoxInstallWowStartupRunKey = 'Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run';
   DeskBoxInstallStartupTaskPrefix = 'DeskBox User Startup';
+  DeskBoxProcessTerminateAccess = $0001;
+  DeskBoxProcessQueryLimitedInfoAccess = $1000;
+  DeskBoxProcessSynchronizeAccess = $00100000;
+  DeskBoxProcessStillActiveExitCode = 259;
+  DeskBoxProcessWaitTimeoutMs = 5000;
+  DeskBoxPidBufferCapacity = 8192;
+
+type
+  TDeskBoxPidBuffer = record
+    Ids: array[0..8191] of Cardinal;
+  end;
 
 var
   DirectInstallUpgrade: Boolean;
   ExistingInstallPath: string;
   ExistingInstallCount: Integer;
   ExistingInstallCandidates: string;
+  RunningUnregisteredProcessPaths: TArrayOfString;
+
+function K32EnumProcesses(var lpidProcess: TDeskBoxPidBuffer; cb: Cardinal; var lpcbNeeded: Cardinal): Cardinal;
+  external 'K32EnumProcesses@kernel32.dll stdcall';
+function OpenProcess(dwDesiredAccess: Cardinal; bInheritHandle: Cardinal; dwProcessId: Cardinal): THandle;
+  external 'OpenProcess@kernel32.dll stdcall';
+function QueryFullProcessImageNameW(hProcess: THandle; dwFlags: Cardinal; lpExeName: string; var lpdwSize: Cardinal): Cardinal;
+  external 'QueryFullProcessImageNameW@kernel32.dll stdcall';
+function GetExitCodeProcess(hProcess: THandle; var lpExitCode: Cardinal): Cardinal;
+  external 'GetExitCodeProcess@kernel32.dll stdcall';
+function TerminateProcess(hProcess: THandle; uExitCode: Cardinal): Cardinal;
+  external 'TerminateProcess@kernel32.dll stdcall';
+function WaitForSingleObject(hHandle: THandle; dwMilliseconds: Cardinal): Cardinal;
+  external 'WaitForSingleObject@kernel32.dll stdcall';
+function CloseHandle(hObject: THandle): Cardinal;
+  external 'CloseHandle@kernel32.dll stdcall';
+function GetCurrentProcessId: Cardinal;
+  external 'GetCurrentProcessId@kernel32.dll stdcall';
+function GetFileAttributesW(lpFileName: string): Cardinal;
+  external 'GetFileAttributesW@kernel32.dll stdcall';
+
+function IsPathReparsePoint(Path: string): Boolean;
+var
+  Attrs: Cardinal;
+begin
+  Result := False;
+  if Trim(Path) = '' then
+    Exit;
+  Attrs := GetFileAttributesW(Path);
+  if Attrs = $FFFFFFFF then
+    Exit;
+  Result := (Attrs and $0400) <> 0;
+end;
 
 function NormalizeDirPath(Path: string): string;
 var
@@ -110,11 +154,63 @@ begin
     Result := ExtractExecutablePath(Result);
 end;
 
-function EscapePowerShellString(Value: string): string;
+function TryQueryProcessExecutablePath(ProcessId: Cardinal; var ExecutablePath: string): Boolean;
+var
+  ProcessHandle: THandle;
+  Buffer: string;
+  CharCount: Cardinal;
 begin
-  Result := Value;
-  StringChangeEx(Result, '"', '', True);
-  StringChangeEx(Result, '''', '''''', True);
+  Result := False;
+  ExecutablePath := '';
+  if ProcessId = 0 then
+    Exit;
+
+  ProcessHandle := OpenProcess(DeskBoxProcessQueryLimitedInfoAccess, 0, ProcessId);
+  if ProcessHandle = 0 then
+    Exit;
+
+  try
+    SetLength(Buffer, 4096);
+    CharCount := Length(Buffer);
+    if (QueryFullProcessImageNameW(ProcessHandle, 0, Buffer, CharCount) <> 0) and (CharCount > 0) then
+    begin
+      ExecutablePath := Copy(Buffer, 1, Integer(CharCount));
+      Result := True;
+    end;
+  finally
+    CloseHandle(ProcessHandle);
+  end;
+end;
+
+function IsProcessStillActive(ProcessId: Cardinal): Boolean;
+var
+  ProcessHandle: THandle;
+  ExitCode: Cardinal;
+begin
+  Result := False;
+  if ProcessId = 0 then
+    Exit;
+
+  ProcessHandle := OpenProcess(DeskBoxProcessQueryLimitedInfoAccess, 0, ProcessId);
+  if ProcessHandle = 0 then
+    Exit;
+
+  try
+    Result :=
+      (GetExitCodeProcess(ProcessHandle, ExitCode) <> 0) and
+      (ExitCode = DeskBoxProcessStillActiveExitCode);
+  finally
+    CloseHandle(ProcessHandle);
+  end;
+end;
+
+function IsManagedDeskBoxProcessName(FileName: string): Boolean;
+begin
+  Result :=
+    (CompareText(FileName, DeskBoxLegacyExeName) = 0) or
+    (CompareText(FileName, 'DeskBox.Settings.exe') = 0) or
+    (CompareText(FileName, 'DeskBox.ThumbnailProxy.exe') = 0) or
+    (CompareText(FileName, 'RestartAgent.exe') = 0);
 end;
 
 function IsDeskBoxInstallPath(Path: string): Boolean;
@@ -602,30 +698,34 @@ begin
 
     for TaskIndex := 1 to RegisteredTasks.Count do
     begin
-      RegisteredTask := RegisteredTasks.Item(TaskIndex);
-      TaskName := RegisteredTask.Name;
-      if IsInstallStartupTaskName(TaskName) then
-      begin
-        TaskDefinition := RegisteredTask.Definition;
-        Actions := TaskDefinition.Actions;
-        for ActionIndex := 1 to Actions.Count do
+      try
+        RegisteredTask := RegisteredTasks.Item(TaskIndex);
+        TaskName := RegisteredTask.Name;
+        if IsInstallStartupTaskName(TaskName) then
         begin
-          ActionPath := '';
-          try
-            Action := Actions.Item(ActionIndex);
-            ActionPath := Action.Path;
-          except
+          TaskDefinition := RegisteredTask.Definition;
+          Actions := TaskDefinition.Actions;
+          for ActionIndex := 1 to Actions.Count do
+          begin
             ActionPath := '';
-          end;
+            try
+              Action := Actions.Item(ActionIndex);
+              ActionPath := Action.Path;
+            except
+              ActionPath := '';
+            end;
 
-          ExecutablePath := UnquoteExecutablePath(ActionPath);
-          if (ExecutablePath <> '') and
-             (CompareText(ExtractFileName(ExecutablePath), DeskBoxLegacyExeName) = 0) then
-            AddHeuristicInstallCandidate(
-              ExtractFileDir(ExecutablePath),
-              'startup scheduled task ' + TaskName,
-              True);
+            ExecutablePath := UnquoteExecutablePath(ActionPath);
+            if (ExecutablePath <> '') and
+               (CompareText(ExtractFileName(ExecutablePath), DeskBoxLegacyExeName) = 0) then
+              AddHeuristicInstallCandidate(
+                ExtractFileDir(ExecutablePath),
+                'startup scheduled task ' + TaskName,
+                True);
+          end;
         end;
+      except
+        // Skip unreadable/other-user tasks without aborting discovery of remaining tasks.
       end;
     end;
   except
@@ -675,61 +775,102 @@ begin
   end;
 end;
 
+function HasAnyInstallFootprintForPath(CandidatePath: string): Boolean;
+var
+  NormalizedPath: string;
+begin
+  NormalizedPath := NormalizeDirPath(CandidatePath);
+  Result :=
+    (NormalizedPath <> '') and
+    (HasMachineRegistrationForPath(NormalizedPath) or
+     HasCurrentUserRegistrationForPath(NormalizedPath) or
+     HasLoadedUserHiveRegistrationForPath(NormalizedPath) or
+     FileExists(AddBackslash(NormalizedPath) + 'unins000.dat') or
+     FileExists(AddBackslash(NormalizedPath) + 'unins000.exe') or
+     SameInstallPath(NormalizedPath, ExpandConstant('{commonpf}\DeskBox')) or
+     SameInstallPath(NormalizedPath, ExpandConstant('{commonpf32}\DeskBox')) or
+     SameInstallPath(NormalizedPath, ExpandConstant('{localappdata}\Programs\DeskBox')) or
+     SameInstallPath(NormalizedPath, ExpandConstant('{localappdata}\DeskBox')));
+end;
+
+procedure AddRunningUnregisteredProcessPath(CandidatePath: string; Source: string);
+var
+  NormalizedPath: string;
+  Count: Integer;
+  Index: Integer;
+begin
+  NormalizedPath := NormalizeDirPath(CandidatePath);
+  if NormalizedPath = '' then
+    Exit;
+
+  Count := GetArrayLength(RunningUnregisteredProcessPaths);
+  for Index := 0 to Count - 1 do
+  begin
+    if SameInstallPath(RunningUnregisteredProcessPaths[Index], NormalizedPath) then
+      Exit;
+  end;
+
+  SetArrayLength(RunningUnregisteredProcessPaths, Count + 1);
+  RunningUnregisteredProcessPaths[Count] := NormalizedPath;
+  Log('DeskBox unregistered running process queued for pre-install shutdown from ' + Source + ': ' + NormalizedPath);
+end;
+
 procedure AddRunningExecutableCandidate(RawExecutablePath: string; Source: string);
 var
   ExecutablePath: string;
+  CandidateDir: string;
 begin
   ExecutablePath := UnquoteExecutablePath(RawExecutablePath);
   if (ExecutablePath = '') or
      (CompareText(ExtractFileName(ExecutablePath), DeskBoxLegacyExeName) <> 0) then
     Exit;
 
-  AddHeuristicInstallCandidate(ExtractFileDir(ExecutablePath), Source, True);
+  CandidateDir := NormalizeDirPath(ExtractFileDir(ExecutablePath));
+  if IsExcludedHeuristicInstallPath(CandidateDir) then
+  begin
+    Log('DeskBox ignored excluded running process from ' + Source + ': ' + CandidateDir);
+    Exit;
+  end;
+
+  if HasAnyInstallFootprintForPath(CandidateDir) then
+    AddHeuristicInstallCandidate(CandidateDir, Source, True)
+  else
+    AddRunningUnregisteredProcessPath(CandidateDir, Source);
 end;
 
-procedure AddRunningProcessCandidatesViaPowerShell;
+function AddRunningProcessCandidatesViaWin32: Boolean;
 var
-  PowerShellPath: string;
-  TempOutputFile: string;
-  CommandLine: string;
-  Parameters: string;
-  ResultCode: Integer;
-  Lines: TArrayOfString;
+  Pids: TDeskBoxPidBuffer;
+  BytesReturned: Cardinal;
+  Count: Integer;
   Index: Integer;
+  SelfPid: Cardinal;
+  Pid: Cardinal;
+  ExecutablePath: string;
 begin
+  Result := False;
   if IsUninstaller then
     Exit;
 
-  PowerShellPath := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
-  if not FileExists(PowerShellPath) then
+  BytesReturned := 0;
+  if K32EnumProcesses(Pids, DeskBoxPidBufferCapacity * 4, BytesReturned) = 0 then
     Exit;
 
-  try
-    TempOutputFile := ExpandConstant('{tmp}\deskbox-running-paths.txt');
-  except
-    Exit;
-  end;
+  Result := True;
+  SelfPid := GetCurrentProcessId;
+  Count := Integer(BytesReturned div 4);
+  if Count > DeskBoxPidBufferCapacity then
+    Count := DeskBoxPidBufferCapacity;
 
-  DeleteFile(TempOutputFile);
-  CommandLine :=
-    '$out = ''' + EscapePowerShellString(TempOutputFile) + '''; ' +
-    '$paths = New-Object System.Collections.Generic.List[string]; ' +
-    'Get-Process -Name ''DeskBox'' -ErrorAction SilentlyContinue | ForEach-Object { ' +
-      'try { if ($_.Path) { [void]$paths.Add([string]$_.Path) } } catch {} ' +
-    '}; ' +
-    '[System.IO.File]::WriteAllLines($out, $paths, [System.Text.Encoding]::UTF8); ' +
-    'exit 0';
-  Parameters := '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "' + CommandLine + '"';
-
-  if Exec(PowerShellPath, Parameters, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and
-     (ResultCode = 0) and
-     LoadStringsFromFile(TempOutputFile, Lines) then
+  for Index := 0 to Count - 1 do
   begin
-    for Index := 0 to GetArrayLength(Lines) - 1 do
-      AddRunningExecutableCandidate(Lines[Index], 'running DeskBox.exe process (PowerShell fallback)');
-  end;
+    Pid := Pids.Ids[Index];
+    if (Pid = 0) or (Pid = SelfPid) then
+      Continue;
 
-  DeleteFile(TempOutputFile);
+    if TryQueryProcessExecutablePath(Pid, ExecutablePath) then
+      AddRunningExecutableCandidate(ExecutablePath, 'running DeskBox.exe process (Win32)');
+  end;
 end;
 
 procedure AddRunningProcessInstallCandidates;
@@ -742,9 +883,12 @@ var
   ExecutablePath: string;
   Count: Integer;
   Index: Integer;
-  HadUnreadableProcessPath: Boolean;
+  Win32Succeeded: Boolean;
 begin
-  HadUnreadableProcessPath := False;
+  Win32Succeeded := AddRunningProcessCandidatesViaWin32;
+  if Win32Succeeded then
+    Exit;
+
   try
     Locator := CreateOleObject('WbemScripting.SWbemLocator');
     Service := Locator.ConnectServer('.', 'root\cimv2');
@@ -758,16 +902,10 @@ begin
       begin
         ExecutablePath := ExecutablePathValue;
         AddRunningExecutableCandidate(ExecutablePath, 'running DeskBox.exe process');
-      end
-      else
-        HadUnreadableProcessPath := True;
+      end;
     end;
-
-    if HadUnreadableProcessPath then
-      AddRunningProcessCandidatesViaPowerShell;
   except
-    Log('DeskBox WMI running-process probe failed (' + GetExceptionMessage + '); trying PowerShell fallback.');
-    AddRunningProcessCandidatesViaPowerShell;
+    Log('DeskBox WMI running-process fallback failed (' + GetExceptionMessage + ').');
   end;
 end;
 
@@ -776,6 +914,7 @@ begin
   ExistingInstallPath := '';
   ExistingInstallCount := 0;
   ExistingInstallCandidates := '';
+  SetArrayLength(RunningUnregisteredProcessPaths, 0);
 
   AddRegistryInstallCandidate(HKEY_CURRENT_USER, DeskBoxUninstallKey, 'HKCU uninstall');
   AddRegistryInstallCandidate(HKEY_CURRENT_USER, DeskBoxWowUninstallKey, 'HKCU 32-bit uninstall');
@@ -932,6 +1071,63 @@ begin
   end;
 end;
 
+function HasStoreDeskBoxUnderRegistryRoot(RootKey: Integer; SubKeyPath: string; SourceLabel: string): Boolean;
+var
+  SubkeyNames: TArrayOfString;
+  Index: Integer;
+  PackageName: string;
+begin
+  Result := False;
+  if not RegGetSubkeyNames(RootKey, SubKeyPath, SubkeyNames) then
+    Exit;
+
+  for Index := 0 to GetArrayLength(SubkeyNames) - 1 do
+  begin
+    PackageName := SubkeyNames[Index];
+    if (CompareText(PackageName, 'D1FC332A.DeskBoxWidgets') = 0) or
+       (CompareText(Copy(PackageName, 1, Length('D1FC332A.DeskBoxWidgets_')), 'D1FC332A.DeskBoxWidgets_') = 0) then
+    begin
+      Result := True;
+      Log('DeskBox setup detected existing Microsoft Store edition (' + SourceLabel + '): ' + PackageName);
+      Exit;
+    end;
+  end;
+end;
+
+function IsStoreDeskBoxInstalledForSetup: Boolean;
+var
+  UserSids: TArrayOfString;
+  Index: Integer;
+  Sid: string;
+begin
+  Result := HasStoreDeskBoxUnderRegistryRoot(
+    HKEY_CURRENT_USER,
+    'Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\Repository\Packages',
+    'HKCU');
+  if Result or (not IsAdminInstallMode) then
+    Exit;
+
+  // Under Over-the-Shoulder UAC elevation (standard user elevating with a
+  // separate admin account), HKCU belongs to the admin; scan loaded user hives
+  // so the standard user's Store DeskBox installation is still detected.
+  if not RegGetSubkeyNames(HKEY_USERS, '', UserSids) then
+    Exit;
+
+  for Index := 0 to GetArrayLength(UserSids) - 1 do
+  begin
+    Sid := UserSids[Index];
+    if IsLoadedUserAccountSid(Sid) and
+       HasStoreDeskBoxUnderRegistryRoot(
+         HKEY_USERS,
+         Sid + '\Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\Repository\Packages',
+         'HKU\' + Sid) then
+    begin
+      Result := True;
+      Exit;
+    end;
+  end;
+end;
+
 function PrepareDirectInstallPlan: Boolean;
 var
   ExplicitDirectory: string;
@@ -986,6 +1182,17 @@ begin
       Exit;
     end;
 
+    if (not IsAdminInstallMode) and
+       HasMachineRegistrationForPath(ExistingInstallPath) then
+    begin
+      MessageText := FmtMessage(ExpandConstant('{cm:AllUsersUpgradeScopeMismatch}'), [ExistingInstallPath]);
+      Log('DeskBox installation blocked: existing all-users installation cannot be upgraded in per-user mode: ' + ExistingInstallPath);
+      if not ShouldSuppressDirectInstallMessages then
+        MsgBox(MessageText, mbError, MB_OK);
+      DirectInstallUpgrade := False;
+      Exit;
+    end;
+
     // Architecture guard: silently replacing a native ARM64 install with
     // the emulated x64 build strands every future update on the x64 channel
     // (the running x64 process always selects x64 assets). The deliberate
@@ -1006,71 +1213,123 @@ begin
     Log('DeskBox upgrade locked to existing install directory: ' + ExistingInstallPath);
   end
   else
+  begin
     Log('DeskBox installation plan: first install.');
+    if IsStoreDeskBoxInstalledForSetup and (not ShouldSuppressDirectInstallMessages) then
+    begin
+      if MsgBox(ExpandConstant('{cm:StoreEditionInstallNotice}'), mbConfirmation, MB_YESNO) <> IDYES then
+      begin
+        Log('DeskBox installation cancelled by user because Microsoft Store edition is already installed.');
+        Exit;
+      end;
+      Log('User chose to continue Direct installation alongside an existing Microsoft Store edition.');
+    end;
+  end;
 
   Result := True;
 end;
 
 function StopDeskBoxProcessesAtPath(InstallPath: string): Boolean;
 var
-  PowerShellPath: string;
-  CommandLine: string;
-  Parameters: string;
-  ResultCode: Integer;
+  Pids: TDeskBoxPidBuffer;
+  BytesReturned: Cardinal;
+  Count: Integer;
+  Pass: Integer;
+  Index: Integer;
+  PollAttempt: Integer;
+  SelfPid: Cardinal;
+  Pid: Cardinal;
+  ExecutablePath: string;
+  ProcessHandle: THandle;
+  HadFailure: Boolean;
+  StoppedAnyInPass: Boolean;
 begin
   Result := True;
   InstallPath := NormalizeDirPath(InstallPath);
   if InstallPath = '' then
     Exit;
 
-  PowerShellPath := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
-  if not FileExists(PowerShellPath) then
-  begin
-    Log('DeskBox could not find Windows PowerShell for path-scoped process shutdown.');
-    Result := False;
-    Exit;
-  end;
-
-  CommandLine :=
-    '$names = @(''DeskBox.exe'', ''DeskBox.Settings.exe'', ''DeskBox.ThumbnailProxy.exe''); ' +
-    '$stemNames = @(''DeskBox'', ''DeskBox.Settings'', ''DeskBox.ThumbnailProxy''); ' +
-    '$target = [System.IO.Path]::GetFullPath(''' + EscapePowerShellString(InstallPath) + ''').TrimEnd(''\''); ' +
-    '$ids = New-Object System.Collections.Generic.List[int]; ' +
-    'try { ' +
-      'Get-CimInstance Win32_Process -ErrorAction Stop | ' +
-      'Where-Object { ($names -icontains $_.Name) -and $_.ExecutablePath -and ' +
-        '([System.IO.Path]::GetDirectoryName($_.ExecutablePath)).TrimEnd(''\'') -ieq $target } | ' +
-      'ForEach-Object { [void]$ids.Add([int]$_.ProcessId) } ' +
-    '} catch { ' +
-      'Get-Process -Name $stemNames -ErrorAction SilentlyContinue | ' +
-      'ForEach-Object { ' +
-        'try { ' +
-          '$p = $_.Path; ' +
-          'if ($p -and ([System.IO.Path]::GetDirectoryName($p)).TrimEnd(''\'') -ieq $target) { [void]$ids.Add([int]$_.Id) } ' +
-        '} catch {} ' +
-      '} ' +
-    '}; ' +
-    '$failed = $false; ' +
-    'foreach ($id in ($ids | Select-Object -Unique)) { ' +
-      'try { ' +
-        'Stop-Process -Id $id -Force -ErrorAction Stop; ' +
-        'Wait-Process -Id $id -Timeout 5 -ErrorAction SilentlyContinue ' +
-      '} catch { ' +
-        'if (Get-Process -Id $id -ErrorAction SilentlyContinue) { $failed = $true } ' +
-      '} ' +
-    '}; ' +
-    'if ($failed) { exit 1 }; ' +
-    'exit 0';
-  Parameters := '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "' + CommandLine + '"';
-
   Log('DeskBox stopping processes under: ' + InstallPath);
-  if not Exec(PowerShellPath, Parameters, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+  HadFailure := False;
+  SelfPid := GetCurrentProcessId;
+
+  // Run at most two passes so any child companion (such as ThumbnailProxy or
+  // Studio/Settings host) spawned while the main process was terminating in
+  // pass 1 is also caught cleanly before file replacement.
+  for Pass := 1 to 2 do
   begin
-    Log('DeskBox path-scoped process shutdown could not be started.');
-    Result := False;
-    Exit;
+    StoppedAnyInPass := False;
+    BytesReturned := 0;
+    if K32EnumProcesses(Pids, DeskBoxPidBufferCapacity * 4, BytesReturned) = 0 then
+    begin
+      Log('DeskBox K32EnumProcesses failed during path-scoped process shutdown.');
+      Result := False;
+      Exit;
+    end;
+
+    Count := Integer(BytesReturned div 4);
+    if Count > DeskBoxPidBufferCapacity then
+      Count := DeskBoxPidBufferCapacity;
+
+    for Index := 0 to Count - 1 do
+    begin
+      Pid := Pids.Ids[Index];
+      if (Pid = 0) or (Pid = SelfPid) then
+        Continue;
+
+      if not TryQueryProcessExecutablePath(Pid, ExecutablePath) then
+        Continue;
+
+      if (not IsManagedDeskBoxProcessName(ExtractFileName(ExecutablePath))) or
+         (not SameInstallPath(ExtractFileDir(ExecutablePath), InstallPath)) then
+        Continue;
+
+      StoppedAnyInPass := True;
+      ProcessHandle := OpenProcess(
+        DeskBoxProcessTerminateAccess or DeskBoxProcessSynchronizeAccess,
+        0,
+        Pid);
+      if ProcessHandle <> 0 then
+      begin
+        try
+          if TerminateProcess(ProcessHandle, 0) <> 0 then
+            WaitForSingleObject(ProcessHandle, DeskBoxProcessWaitTimeoutMs);
+        finally
+          CloseHandle(ProcessHandle);
+        end;
+      end
+      else
+      begin
+        ProcessHandle := OpenProcess(DeskBoxProcessTerminateAccess, 0, Pid);
+        if ProcessHandle <> 0 then
+        begin
+          try
+            TerminateProcess(ProcessHandle, 0);
+          finally
+            CloseHandle(ProcessHandle);
+          end;
+
+          for PollAttempt := 1 to 50 do
+          begin
+            if not IsProcessStillActive(Pid) then
+              Break;
+            Sleep(100);
+          end;
+        end;
+      end;
+
+      if IsProcessStillActive(Pid) then
+      begin
+        HadFailure := True;
+        Log('DeskBox process did not exit within timeout: PID=' + IntToStr(Integer(Pid)) + ' Path=' + ExecutablePath);
+      end
+      else
+        Log('DeskBox stopped process: PID=' + IntToStr(Integer(Pid)) + ' Path=' + ExecutablePath);
+    end;
+
+    if (not StoppedAnyInPass) or HadFailure then
+      Break;
   end;
 
-  Log('DeskBox path-scoped process shutdown exit code: ' + IntToStr(ResultCode));
-  Result := ResultCode = 0;
+  Result := not HadFailure;
 end;

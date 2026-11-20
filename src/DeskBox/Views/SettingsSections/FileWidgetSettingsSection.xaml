@@ -13,18 +13,6 @@
             <ResourceDictionary.MergedDictionaries>
                 <ResourceDictionary Source="ms-appx:///Styles/SettingsOverviewResources.xaml" />
             </ResourceDictionary.MergedDictionaries>
-            <Style x:Key="InlineMetricSliderStyle" TargetType="Slider" BasedOn="{StaticResource DefaultSliderStyle}">
-                <Setter Property="Width" Value="200" />
-                <Setter Property="MinWidth" Value="160" />
-                <Setter Property="VerticalAlignment" Value="Center" />
-                <Setter Property="IsThumbToolTipEnabled" Value="False" />
-                <Setter Property="ManipulationMode" Value="All" />
-            </Style>
-            <Style x:Key="SliderSettingValueTextStyle" TargetType="TextBlock" BasedOn="{StaticResource SettingValueTextStyle}">
-                <Setter Property="MinWidth" Value="42" />
-                <Setter Property="TextAlignment" Value="Right" />
-                <Setter Property="VerticalAlignment" Value="Center" />
-            </Style>
         </ResourceDictionary>
     </UserControl.Resources>
 
@@ -137,33 +125,24 @@
 
             <!-- Row 2: 文件拖放行为 -->
             <toolkit:SettingsExpander
+                x:Name="DragBehaviorExpander"
                 HorizontalContentAlignment="Stretch"
                 IsExpanded="False"
                 svc:Localized.DescriptionKey="Settings.DragBehavior.Group.Description"
-                svc:Localized.HeaderKey="Settings.DragBehavior.Group.Title">
+                svc:Localized.HeaderKey="Settings.DragBehavior.Group.Title"
+                svc:InfoTip.TitleKey="Settings.DropAction.InfoTip.Title"
+                svc:InfoTip.BodyKey="Settings.DropAction.InfoTip.Description">
                 <toolkit:SettingsExpander.HeaderIcon>
                     <FontIcon Glyph="&#xE82F;" />
                 </toolkit:SettingsExpander.HeaderIcon>
-                <TextBlock
-                    VerticalAlignment="Center"
-                    Style="{StaticResource SettingDescriptionTextStyle}"
-                    Text="{x:Bind ManagedStorage.DragBehaviorSummaryText, Mode=OneWay}" />
+                <ComboBox
+                    svc:Localized.AutomationNameKey="Settings.DragBehavior.Group.Title"
+                    MinWidth="{StaticResource SettingsControlMinWidth}"
+                    MaxWidth="{StaticResource SettingsControlMaxWidth}"
+                    ItemsSource="{x:Bind ManagedStorage.AvailableDragInBehaviorOptionItems, Mode=OneWay}"
+                    controls:SettingsComboBox.Value="{x:Bind ManagedStorage.DropAction, Mode=TwoWay}" />
                 <toolkit:SettingsExpander.Items>
                     <toolkit:SettingsCard
-                        HorizontalContentAlignment="Right"
-                        svc:Localized.DescriptionKey="Settings.DropAction.Description"
-                        svc:Localized.HeaderKey="Settings.DropAction.Title"
-                        svc:InfoTip.TitleKey="Settings.DropAction.InfoTip.Title"
-                        svc:InfoTip.BodyKey="Settings.DropAction.InfoTip.Description">
-                        <ComboBox
-                            svc:Localized.AutomationNameKey="Settings.DropAction.Title"
-                            MinWidth="{StaticResource SettingsControlMinWidth}"
-                            ItemsSource="{x:Bind ManagedStorage.AvailableDragInBehaviorOptionItems, Mode=OneWay}"
-                            controls:SettingsComboBox.Value="{x:Bind ManagedStorage.DropAction, Mode=TwoWay}" />
-                    </toolkit:SettingsCard>
-
-                    <toolkit:SettingsCard
-                        x:Name="DragOutActionCard"
                         HorizontalContentAlignment="Right"
                         svc:Localized.DescriptionKey="Settings.DragOutAction.Description"
                         svc:Localized.HeaderKey="Settings.DragOutAction.Title"
@@ -172,7 +151,7 @@
                         <ComboBox
                             svc:Localized.AutomationNameKey="Settings.DragOutAction.Title"
                             MinWidth="{StaticResource SettingsControlMinWidth}"
-                            HorizontalAlignment="Right"
+                            MaxWidth="{StaticResource SettingsControlMaxWidth}"
                             ItemsSource="{x:Bind ManagedStorage.AvailableDragOutBehaviorOptionItems, Mode=OneWay}"
                             controls:SettingsComboBox.Value="{x:Bind ManagedStorage.DragOutAction, Mode=TwoWay}" />
                     </toolkit:SettingsCard>
@@ -203,6 +182,15 @@
                     </toolkit:SettingsCard>
                 </toolkit:SettingsExpander.Items>
             </toolkit:SettingsExpander>
+
+            <InfoBar
+                x:Name="Win10DragBehaviorInfoBar"
+                IsClosable="False"
+                IsOpen="{x:Bind IsWin10DragNoteVisible, Mode=OneTime}"
+                Severity="Informational"
+                Visibility="{x:Bind Win10DragNoteVisibility, Mode=OneTime}"
+                svc:Localized.HeaderKey="Settings.DragBehavior.Win10Note.Title"
+                svc:Localized.DescriptionKey="Settings.DragBehavior.Win10Note.Description" />
 
             <!-- Row 3: 文件与图标显示 -->
             <toolkit:SettingsCard
@@ -238,11 +226,12 @@
                 <toolkit:SettingsCard.HeaderIcon>
                     <FontIcon Glyph="&#xE8B0;" />
                 </toolkit:SettingsCard.HeaderIcon>
-                <toolkit:Segmented
+                <ComboBox
                     svc:Localized.AutomationNameKey="Settings.OpenMethod.Title"
-                    SelectionMode="Single"
-                    controls:SettingsSegmented.Options="{x:Bind Interaction.AvailableFileOpenMethodOptions, Mode=OneWay}"
-                    controls:SettingsSegmented.Value="{x:Bind Interaction.FileOpenMethod, Mode=TwoWay}" />
+                    MinWidth="{StaticResource SettingsControlMinWidth}"
+                    MaxWidth="{StaticResource SettingsControlMaxWidth}"
+                    ItemsSource="{x:Bind Interaction.AvailableFileOpenMethodOptions, Mode=OneWay}"
+                    controls:SettingsComboBox.Value="{x:Bind Interaction.FileOpenMethod, Mode=TwoWay}" />
             </toolkit:SettingsCard>
 
             <toolkit:SettingsCard
@@ -252,11 +241,12 @@
                 <toolkit:SettingsCard.HeaderIcon>
                     <FontIcon Glyph="&#xE838;" />
                 </toolkit:SettingsCard.HeaderIcon>
-                <toolkit:Segmented
+                <ComboBox
                     svc:Localized.AutomationNameKey="Settings.FileWidget.FolderOpenBehavior.Title"
-                    SelectionMode="Single"
-                    controls:SettingsSegmented.Options="{x:Bind FeatureWidgets.AvailableFolderOpenBehaviorOptionItems, Mode=OneWay}"
-                    controls:SettingsSegmented.Value="{x:Bind FeatureWidgets.FolderOpenBehavior, Mode=TwoWay}" />
+                    MinWidth="{StaticResource SettingsControlMinWidth}"
+                    MaxWidth="{StaticResource SettingsControlMaxWidth}"
+                    ItemsSource="{x:Bind FeatureWidgets.AvailableFolderOpenBehaviorOptionItems, Mode=OneWay}"
+                    controls:SettingsComboBox.Value="{x:Bind FeatureWidgets.FolderOpenBehavior, Mode=TwoWay}" />
             </toolkit:SettingsCard>
 
             <toolkit:SettingsCard
@@ -390,11 +380,12 @@
                         HorizontalContentAlignment="Right"
                         svc:Localized.DescriptionKey="Settings.FileNameLines.Description"
                         svc:Localized.HeaderKey="Settings.FileNameLines.Title">
-                        <toolkit:Segmented
+                        <ComboBox
                             svc:Localized.AutomationNameKey="Settings.FileNameLines.Title"
-                            SelectionMode="Single"
-                            controls:SettingsSegmented.Options="{x:Bind Appearance.AvailableFileNameLineCountOptions, Mode=OneWay}"
-                            controls:SettingsSegmented.Value="{x:Bind Appearance.FileNameLineCount, Mode=TwoWay}" />
+                            MinWidth="{StaticResource SettingsControlMinWidth}"
+                            MaxWidth="{StaticResource SettingsControlMaxWidth}"
+                            ItemsSource="{x:Bind Appearance.AvailableFileNameLineCountOptions, Mode=OneWay}"
+                            controls:SettingsComboBox.Value="{x:Bind Appearance.FileNameLineCount, Mode=TwoWay}" />
                     </toolkit:SettingsCard>
                 </toolkit:SettingsExpander.Items>
             </toolkit:SettingsExpander>

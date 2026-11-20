@@ -1,5 +1,4 @@
 using System.IO;
-using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Platform;
 using DeskBox.Services;
@@ -14,18 +13,20 @@ public sealed partial class DesktopOrganizationTaskView
 
     private async void ExecuteButton_Click(object sender, RoutedEventArgs e)
     {
-        if (!_isPreviewReady || _isScanning || _isExecuting || _hasCompletedExecution || !ExecuteButton.IsEnabled || _plan is not { EligibleItemCount: > 0 } previewPlan)
+        DesktopOrganizationPlan? previewPlan = Session.EffectivePlan;
+        if (!_isPreviewReady || _isScanning || _isExecuting || _hasCompletedExecution || !ExecuteButton.IsEnabled || previewPlan is not { EligibleItemCount: > 0 })
         {
             return;
         }
 
+        _dragController.CancelActiveDrag();
         DesktopOrganizationPlan plan;
         try
         {
             plan = Coordinator.CreateExecutionPlan(
                 previewPlan,
-                _targetSelections.Values.ToList(),
-                _excludedSourcePaths);
+                Session.BuildTargetSelectionsForExecution().Values.ToList(),
+                Session.ExcludedSourcePaths);
             if (plan.EligibleItemCount == 0)
             {
                 ResultInfo.Severity = InfoBarSeverity.Warning;
@@ -57,7 +58,6 @@ public sealed partial class DesktopOrganizationTaskView
         _isExecuting = true;
         SelectionFeedbackInfo.IsOpen = false;
         PreviewContent.IsEnabled = false;
-        ViewModeButton.IsEnabled = false;
         MoreButton.IsEnabled = false;
         SourceSelectionHost.IsEnabled = false;
         TargetSelectionHost.IsEnabled = false;
@@ -66,7 +66,6 @@ public sealed partial class DesktopOrganizationTaskView
         CompletedUndoButton.IsEnabled = false;
         AbandonUndoButton.IsEnabled = false;
         DoneButton.IsEnabled = false;
-        ExcludedItemsButton.IsEnabled = false;
         RefreshButton.IsEnabled = false;
         ChangePathButton.IsEnabled = false;
         CancelButton.IsEnabled = false;
@@ -90,6 +89,7 @@ public sealed partial class DesktopOrganizationTaskView
             });
             DesktopOrganizationExecutionResult result =
                 await Coordinator.ExecuteAsync(plan, progress, cts.Token, OwnerWindowHandle);
+            Session.LastExecutionResult = result;
             var attempted = plan.Targets.SelectMany(target => target.Items).Select(item => item.SourcePath).ToHashSet(StringComparer.OrdinalIgnoreCase);
             _runtimeRetainedItems.RemoveAll(item => attempted.Contains(item.SourcePath));
             _runtimeRetainedItems.AddRange(result.RetainedItems);
@@ -122,7 +122,6 @@ public sealed partial class DesktopOrganizationTaskView
 
             ExecutionProgressPanel.Visibility = Visibility.Collapsed;
             _hasCompletedExecution = true;
-            _optionalIncludedPaths.Clear();
             RenderExecutionResult(result.CompletedItems);
             RetryPublicButton.Visibility = _runtimeRetainedItems.Any(item => item.Reason != DesktopOrganizationRetentionReason.SourceChanged)
                 ? Visibility.Visible : Visibility.Collapsed;
@@ -191,7 +190,6 @@ public sealed partial class DesktopOrganizationTaskView
         {
             _isExecuting = false;
             PreviewContent.IsEnabled = true;
-            ViewModeButton.IsEnabled = true;
             MoreButton.IsEnabled = true;
             RefreshButton.IsEnabled = true;
             ChangePathButton.IsEnabled = !_hasCompletedExecution;
@@ -202,10 +200,9 @@ public sealed partial class DesktopOrganizationTaskView
             CompletedUndoButton.IsEnabled = true;
             AbandonUndoButton.IsEnabled = true;
             DoneButton.IsEnabled = true;
-            ExcludedItemsButton.IsEnabled = true;
             CancelButton.IsEnabled = true;
             UpdateRecoveryState();
-            UpdateSummary(_plan);
+            UpdateSummary();
             if (_closeAfterExecutionStops)
             {
                 _closeAfterExecutionStops = false;
@@ -221,6 +218,7 @@ public sealed partial class DesktopOrganizationTaskView
             return;
         }
 
+        _dragController.CancelActiveDrag();
         _isExecuting = true;
         UndoButton.IsEnabled = false;
         CompletedUndoButton.IsEnabled = false;
@@ -288,7 +286,7 @@ public sealed partial class DesktopOrganizationTaskView
             // An interrupted undo can leave a recovery journal behind; refresh
             // the cached hint so the banner and execute button reflect it.
             UpdateRecoveryState();
-            UpdateSummary(_plan);
+            UpdateSummary();
         }
     }
 
@@ -354,7 +352,7 @@ public sealed partial class DesktopOrganizationTaskView
         // The desktop itself did not change; refresh the gates without a
         // rescan, which would wipe this confirmation message.
         UpdateRecoveryState();
-        UpdateSummary(_plan);
+        UpdateSummary();
     }
 
     private async void AbandonRecoveryButton_Click(object sender, RoutedEventArgs e)
@@ -398,25 +396,14 @@ public sealed partial class DesktopOrganizationTaskView
             RecoverButton.IsEnabled = true;
             AbandonRecoveryButton.IsEnabled = true;
             UpdateRecoveryState();
-            UpdateSummary(_plan);
+            UpdateSummary();
         }
-    }
-
-    private void ViewModeButton_Click(object sender, RoutedEventArgs e)
-    {
-        _itemViewMode = _itemViewMode == DesktopOrganizationItemViewMode.Tiles
-            ? DesktopOrganizationItemViewMode.CompactGrid
-            : DesktopOrganizationItemViewMode.Tiles;
-        UpdateViewModeToggleVisuals();
-        foreach (var card in _targetCards) card.SetViewMode(_itemViewMode);
-        foreach (var card in _retainedCards) card.SetViewMode(_itemViewMode);
-        foreach (var card in _completedCards) card.SetViewMode(_itemViewMode);
     }
 
     private void OpenStorageFolder_Click(object sender, RoutedEventArgs e)
     {
         LocationsFlyout.Hide();
-        string configuredRoot = (_hasCompletedExecution ? _lastExecutionPlan : _plan)?.StorageRootPath
+        string configuredRoot = (_hasCompletedExecution ? _lastExecutionPlan : Session.EffectivePlan)?.StorageRootPath
             ?? StoragePathText.Text;
         if (string.IsNullOrWhiteSpace(configuredRoot))
         {
@@ -439,7 +426,7 @@ public sealed partial class DesktopOrganizationTaskView
         string pathToOpen = FileService.TryResolveExistingPathForTraversal(candidate, out string resolvedPath)
             ? resolvedPath
             : candidate;
-        Win32Helper.OpenFile(pathToOpen);
+        ShellLaunchService.FireAndForgetOpenPath(pathToOpen);
     }
 
     private void ChangePathButton_Click(object sender, RoutedEventArgs e)
@@ -456,19 +443,17 @@ public sealed partial class DesktopOrganizationTaskView
 
     private void ResetSelectionMenuItem_Click(object sender, RoutedEventArgs e)
     {
-        if (_isExecuting || _isScanning || _hasCompletedExecution || _basePlan is null || _plan is null) return;
+        if (_isExecuting || _isScanning || _hasCompletedExecution || Session.BasePlan is null || Session.EffectivePlan is null)
+        {
+            return;
+        }
+
         try
         {
-            var plan = Coordinator.CreatePreviewPlanWithOptionalItems(_basePlan, [],
-                _plan.IncludePersonalDesktop, _plan.IncludePublicDesktop);
-            _excludedSourcePaths.Clear();
-            _optionalIncludedPaths.Clear();
-            _retainedSelection.Clear();
-            _targetSelections.Clear();
-            _newPaths.Clear();
-            ClearBoxCustomizations();
-            _plan = plan;
-            RenderPlan(plan);
+            _dragController.CancelActiveDrag();
+            _pendingEmptyCustomBoxRenameId = null;
+            Session.ResetCustomizations();
+            RenderSessionPlan();
             ShowSelectionFeedback(T("DesktopOrganization.Layout.ResetDone"), showPendingLink: false);
         }
         catch (Exception ex)

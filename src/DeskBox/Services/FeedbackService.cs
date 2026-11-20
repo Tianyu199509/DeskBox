@@ -134,7 +134,15 @@ public sealed partial class FeedbackService
         string? cooldownStateFilePath = null,
         Func<DateTimeOffset>? utcClock = null)
     {
-        _httpClient = httpClient ?? new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
+        _httpClient = httpClient ?? new HttpClient(new SocketsHttpHandler
+        {
+            PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+            PooledConnectionIdleTimeout = TimeSpan.FromMinutes(1),
+            AutomaticDecompression = System.Net.DecompressionMethods.All
+        })
+        {
+            Timeout = TimeSpan.FromSeconds(60)
+        };
         _apiBaseUrl = apiBaseAddress ?? DefaultApiBaseUrl;
         _clientStateFilePath = clientStateFilePath ?? Path.Combine(
             DeskBoxDataPathService.Current.DataDirectory,

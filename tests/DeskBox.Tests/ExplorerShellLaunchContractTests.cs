@@ -7,15 +7,19 @@ public sealed class ExplorerShellLaunchContractTests
     [Fact]
     public void ExplorerLaunch_UsesDesktopHostedShellInsteadOfLocalShellApplication()
     {
-        string source = File.ReadAllText(TestPaths.FromRepository(
+        string service = File.ReadAllText(TestPaths.FromRepository(
             "src/DeskBox/Helpers/ExplorerShellLaunchService.cs"));
+        string rust = File.ReadAllText(TestPaths.FromRepository(
+            "native/deskbox-native/src/explorer_shell_launch.rs"));
 
-        Assert.Contains("FindWindowSW", source, StringComparison.Ordinal);
-        Assert.Contains("ShellWindowClassDesktop", source, StringComparison.Ordinal);
-        Assert.Contains("desktop.Document", source, StringComparison.Ordinal);
-        Assert.Contains("document.Application", source, StringComparison.Ordinal);
-        Assert.Contains("explorerShell.ShellExecute", source, StringComparison.Ordinal);
-        Assert.DoesNotContain("shell.ShellExecute", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("#if !DESKBOX_NATIVE_AOT", service, StringComparison.Ordinal);
+        Assert.DoesNotContain("Shell.Application", service, StringComparison.Ordinal);
+        Assert.Contains("ExplorerShellLaunchNativeBackend.TryOpen(", service, StringComparison.Ordinal);
+        Assert.Contains("FindWindowSW", rust, StringComparison.Ordinal);
+        Assert.Contains("SWC_DESKTOP", rust, StringComparison.Ordinal);
+        Assert.Contains("desktop.Document()", rust, StringComparison.Ordinal);
+        Assert.Contains("document.Application()", rust, StringComparison.Ordinal);
+        Assert.Contains("explorer_shell.ShellExecute(", rust, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -35,8 +39,6 @@ public sealed class ExplorerShellLaunchContractTests
 
         Assert.True(processGrant >= 0 && processGrant < nativeLaunch);
         Assert.Contains("AllowSetForegroundWindow(explorerProcessId)", service, StringComparison.Ordinal);
-        Assert.Contains("Marshal.GetIUnknownForObject", service, StringComparison.Ordinal);
-        Assert.Contains("CoAllowSetForegroundWindow(", service, StringComparison.Ordinal);
         Assert.Contains(
             "CoAllowSetForegroundWindow(&explorer_shell, None)",
             rust,
@@ -56,7 +58,9 @@ public sealed class ExplorerShellLaunchContractTests
         int explorerLaunch = method.IndexOf(
             "ExplorerShellLaunchService.TryOpen",
             StringComparison.Ordinal);
-        int localFallback = method.IndexOf("Process.Start(startInfo)", StringComparison.Ordinal);
+        int localFallback = method.IndexOf(
+            "ElevatedLaunchNativeMethods.ShellExecuteEx(ref executeInfo)",
+            StringComparison.Ordinal);
 
         Assert.True(explorerLaunch >= 0, "Missing Explorer-hosted launch.");
         Assert.True(localFallback > explorerLaunch, "Local launch must remain a fallback.");

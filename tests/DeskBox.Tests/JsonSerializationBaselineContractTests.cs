@@ -17,35 +17,21 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
     {
         var expected = new Dictionary<string, int>(StringComparer.Ordinal)
         {
-            ["src/DeskBox/App.AotHotkeySmoke.cs"] = 1,
-            // Batch R11: the appearance-preview forwarder now serializes
-            // through SettingsService.SerializeCurrentSettings (lock-held,
-            // same as the persistence sink), so the raw call left this
-            // file — the file dropped out of the live inventory.
-            ["src/DeskBox/App.AotShortcutSmoke.cs"] = 1,
-            ["src/DeskBox/App.AotShellSmoke.cs"] = 1,
-            ["src/DeskBox/App.AotQuickAccessMutationSmoke.cs"] = 1,
-            ["src/DeskBox/App.AotMusicVolumeReadSmoke.cs"] = 1,
-            ["src/DeskBox/App.AotMusicVolumeMutationSmoke.cs"] = 2,
-            ["src/DeskBox/App.AotMusicVolumeSessionMutationSmoke.cs"] = 2,
-            ["src/DeskBox/App.AotManagedUiSmoke.cs"] = 1,
-            ["src/DeskBox/App.AotTodoRecurrenceReminderSmoke.cs"] = 1,
-            ["src/DeskBox/App.AotTodoNotificationLifecycleSmoke.cs"] = 1,
-            ["src/DeskBox/App.AotTodoNotificationActivationSmoke.cs"] = 1,
-            ["src/DeskBox/App.AotTodoNotificationForwardingSmoke.cs"] = 1,
+            ["src/DeskBox/App.PgoSeed.cs"] = 2,
             // 3: update-check manifest, GitHub release fallback, and the
             // display-only content-manifest fetch (release-notes window).
             ["src/DeskBox/Services/AppUpdateService.cs"] = 3,
             ["src/DeskBox/Services/CitySearchService.cs"] = 1,
             ["src/DeskBox/Services/ClipboardStore.cs"] = 2,
-            ["src/DeskBox/Services/CustomWidgetDataStore.cs"] = 4,
-            ["src/DeskBox/Services/CustomWidgetNetworkSourceEngine.cs"] = 2,
-            ["src/DeskBox/Services/CustomWidgetRemoteCatalogService.cs"] = 5,
-            ["src/DeskBox/Services/CustomWidgetRemotePromptService.cs"] = 4,
+            ["src/DeskBox/Services/CustomWidgets/CustomWidgetDataStore.cs"] = 4,
+            ["src/DeskBox/Services/CustomWidgets/CustomWidgetNetworkSourceEngine.cs"] = 2,
+            ["src/DeskBox/Services/CustomWidgets/CustomWidgetRemoteCatalogService.cs"] = 5,
+            ["src/DeskBox/Services/Ai/CustomWidgetRemotePromptService.cs"] = 4,
             ["src/DeskBox/Services/DeskBoxAttachmentHealthService.cs"] = 1,
             ["src/DeskBox/Services/DeskBoxDataBackupService.cs"] = 20,
             ["src/DeskBox/Services/DeskBoxDiagnosticsBundleService.cs"] = 1,
             ["src/DeskBox/Services/DesktopAutoOrganizationSuppressionRegistry.cs"] = 2,
+            ["src/DeskBox/Services/DesktopOrganization/DesktopIconPositionLedgerStore.cs"] = 2,
             ["src/DeskBox/Services/DesktopOrganizationHistoryStore.cs"] = 2,
             ["src/DeskBox/Services/DesktopOrganizationRecoveryStore.cs"] = 2,
             ["src/DeskBox/Services/FeedbackService.cs"] = 6,
@@ -55,6 +41,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             ["src/DeskBox/Services/Lyrics/LrclibLyricsProvider.cs"] = 1,
             ["src/DeskBox/Services/Lyrics/LyricsCacheStore.cs"] = 4,
             ["src/DeskBox/Services/ManagedStorageMigrationService.cs"] = 2,
+            ["src/DeskBox/Services/Media/MediaSessionProxyProtocol.cs"] = 2,
             ["src/DeskBox/Services/NativeNotificationActivationEnvelopeStore.cs"] = 2,
             ["src/DeskBox/Services/QuickCaptureStore.cs"] = 2,
             // 2: the wipe-recovery offer marker (read deserialize, atomic save serialize).
@@ -82,7 +69,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             ["src/DeskBox/Services/SyncRevisionsStore.cs"] = 2,
             ["src/DeskBox/Services/SyncStateStore.cs"] = 2,
             ["src/DeskBox/Services/TodoWidgetStore.cs"] = 3,
-            ["src/DeskBox/Services/WeatherService.cs"] = 5,
+            ["src/DeskBox/Services/WeatherService.cs"] = 9,
             ["src/DeskBox/Services/WidgetFileStackSettings.cs"] = 11,
             ["src/DeskBox/Services/WidgetLayoutStore.cs"] = 2,
             // 3: the title-icon asset store's recent-emoji state file
@@ -107,31 +94,20 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             Assert.Equal(expectedCount, actual[path]);
         }
 
-        Assert.Equal(52, actual.Count);
-        Assert.Equal(149, actual.Values.Sum());
+        Assert.Equal(43, actual.Count);
+        Assert.Equal(145, actual.Values.Sum());
 
         string[] expectedContextOwners =
         [
-            "src/DeskBox/App.AotHotkeySmoke.cs",
-            "src/DeskBox/App.AotManagedUiSmoke.cs",
-            "src/DeskBox/App.AotMusicVolumeMutationSmoke.cs",
-            "src/DeskBox/App.AotMusicVolumeReadSmoke.cs",
-            "src/DeskBox/App.AotMusicVolumeSessionMutationSmoke.cs",
-            "src/DeskBox/App.AotQuickAccessMutationSmoke.cs",
-            "src/DeskBox/App.AotShellSmoke.cs",
-            "src/DeskBox/App.AotShortcutSmoke.cs",
-            "src/DeskBox/App.AotTodoNotificationActivationSmoke.cs",
-            "src/DeskBox/App.AotTodoNotificationForwardingSmoke.cs",
-            "src/DeskBox/App.AotTodoNotificationLifecycleSmoke.cs",
-            "src/DeskBox/App.AotTodoRecurrenceReminderSmoke.cs",
+            "src/DeskBox/Services/Ai/CustomWidgetRemotePromptService.cs",
             "src/DeskBox/Services/AppUpdateService.cs",
             "src/DeskBox/Services/ClipboardStore.cs",
-            "src/DeskBox/Services/CustomWidgetDataStore.cs",
-            "src/DeskBox/Services/CustomWidgetNetworkSourceEngine.cs",
-            "src/DeskBox/Services/CustomWidgetRemoteCatalogService.cs",
-            "src/DeskBox/Services/CustomWidgetRemotePromptService.cs",
+            "src/DeskBox/Services/CustomWidgets/CustomWidgetDataStore.cs",
+            "src/DeskBox/Services/CustomWidgets/CustomWidgetNetworkSourceEngine.cs",
+            "src/DeskBox/Services/CustomWidgets/CustomWidgetRemoteCatalogService.cs",
             "src/DeskBox/Services/DeskBoxDataBackupService.cs",
             "src/DeskBox/Services/DeskBoxDiagnosticsBundleService.cs",
+            "src/DeskBox/Services/DesktopOrganization/DesktopIconPositionLedgerStore.cs",
             "src/DeskBox/Services/DesktopOrganizationHistoryStore.cs",
             "src/DeskBox/Services/DesktopOrganizationRecoveryStore.cs",
             "src/DeskBox/Services/FeedbackService.cs",
@@ -140,6 +116,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             "src/DeskBox/Services/LocalizationService.cs",
             "src/DeskBox/Services/Lyrics/LyricsJsonContext.cs",
             "src/DeskBox/Services/ManagedStorageMigrationModels.cs",
+            "src/DeskBox/Services/Media/MediaSessionProxyProtocol.cs",
             "src/DeskBox/Services/NativeNotificationActivationEnvelopeStore.cs",
             "src/DeskBox/Services/QuickCaptureStore.cs",
             "src/DeskBox/Services/RecoveryOfferStore.cs",
@@ -166,8 +143,26 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             .Order()
             .ToArray();
 
-        Assert.Equal(45, actualContextOwners.Length);
+        Assert.Equal(35, actualContextOwners.Length);
         Assert.Equal(expectedContextOwners, actualContextOwners);
+
+        // External AOT smoke sources must also stay reflection-free and source-generated.
+        foreach (string smokePath in Directory.EnumerateFiles(
+                     TestPaths.FromRepository("tests/DeskBox.AotSmoke"),
+                     "*.cs",
+                     SearchOption.AllDirectories))
+        {
+            string smokeSource = File.ReadAllText(smokePath);
+            if (Regex.IsMatch(
+                    smokeSource,
+                    @"JsonSerializer\.(?:SerializeToUtf8Bytes|Serialize|Deserialize)(?:Async)?\b"))
+            {
+                Assert.Contains("JsonSerializerContext", smokeSource, StringComparison.Ordinal);
+            }
+            Assert.False(
+                Regex.IsMatch(smokeSource, @"new\s+JsonStringEnumConverter\s*(?:<|\(\s*\))"),
+                $"{smokePath} must not construct JsonStringEnumConverter.");
+        }
     }
 
     [Fact]

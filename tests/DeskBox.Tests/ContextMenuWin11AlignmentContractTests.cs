@@ -230,22 +230,13 @@ public sealed class ContextMenuWin11AlignmentContractTests
         // GetDefaultSystemBackdropConfiguration stays pinned to the startup OS
         // theme (painting dark #2C2C2C acrylic behind black Light-mode text).
         string appXaml = ReadRepositoryFile("src/DeskBox/App.xaml");
-        string settingsAppXaml = ReadRepositoryFile("src/DeskBox.Settings/SettingsHostApp.xaml");
         Assert.Contains(
             "<helpers:ThemedMenuAcrylicBackdrop />",
             appXaml,
             StringComparison.Ordinal);
-        Assert.Contains(
-            "<helpers:ThemedMenuAcrylicBackdrop />",
-            settingsAppXaml,
-            StringComparison.Ordinal);
         Assert.DoesNotContain(
             "<media:DesktopAcrylicBackdrop />",
             appXaml,
-            StringComparison.Ordinal);
-        Assert.DoesNotContain(
-            "<media:DesktopAcrylicBackdrop />",
-            settingsAppXaml,
             StringComparison.Ordinal);
         Assert.DoesNotContain(
             "DeskBoxMenuFallbackBackgroundBrush",
@@ -396,7 +387,7 @@ public sealed class ContextMenuWin11AlignmentContractTests
     public void SearchResultsMenu_KeepsRunAsAdministratorEntry()
     {
         string searchWindow = ReadRepositoryFile(
-            "src/DeskBox/Views/SearchPopupWindow.xaml.cs");
+            "src/DeskBox/Views/SearchPopupWindow.ResultsAndPreview.cs");
 
         Assert.Contains(
             "ElevatedFileLauncher.CanRunAsAdministrator(item.DetailPath",

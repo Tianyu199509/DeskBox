@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using DeskBox.Helpers;
 using DeskBox.Platform;
 using Microsoft.UI.Dispatching;
@@ -131,12 +132,27 @@ public sealed class DisplayAreaWatcherService : IDisposable
         {
             PollForChanges();
         }
+        else if (IsEnvironmentSettingChange(message, lParam))
+        {
+            ProcessEnvironmentSyncService.ScheduleRefreshFromSettingChange();
+        }
         else if (message == WmNcDestroy)
         {
             Dispose();
         }
 
         return Win32Helper.DefSubclassProc(hWnd, message, wParam, lParam);
+    }
+
+    internal static bool IsEnvironmentSettingChange(uint message, IntPtr lParam)
+    {
+        if (message != WmSettingChange || (nuint)lParam <= 0xFFFF)
+        {
+            return false;
+        }
+
+        string? area = Marshal.PtrToStringUni(lParam);
+        return string.Equals(area, "Environment", StringComparison.OrdinalIgnoreCase);
     }
 
     private void PollTimer_Tick(DispatcherQueueTimer sender, object args)
@@ -209,9 +225,7 @@ public sealed class DisplayAreaWatcherService : IDisposable
                 .ThenBy(a => a.Monitor.Left)
                 .ThenBy(a => a.Monitor.Top)
                 .Select(a =>
-                $"{a.DeviceName};{a.IsPrimary};{a.DpiScale:F3};" +
-                $"{a.Monitor.Left},{a.Monitor.Top},{a.Monitor.Right},{a.Monitor.Bottom};" +
-                $"{a.WorkArea.Left},{a.WorkArea.Top},{a.WorkArea.Right},{a.WorkArea.Bottom}"));
+                FormattableString.Invariant($"{a.DeviceName};{a.IsPrimary};{a.DpiScale:F3};{a.Monitor.Left},{a.Monitor.Top},{a.Monitor.Right},{a.Monitor.Bottom};{a.WorkArea.Left},{a.WorkArea.Top},{a.WorkArea.Right},{a.WorkArea.Bottom}")));
         }
         catch
         {

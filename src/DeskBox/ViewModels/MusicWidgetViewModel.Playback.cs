@@ -66,7 +66,9 @@ public sealed partial class MusicWidgetViewModel
                     }
 
                     RefreshSessionList();
-                    MusicSessionInfo? info = await _musicSessionService.GetCurrentSessionInfoAsync(_preferredSessionId);
+                    MusicSessionInfo? info = await _musicSessionService.GetCurrentSessionInfoAsync(
+                        _preferredSessionId,
+                        _lastCoverFingerprint);
                     if (_isDisposed)
                     {
                         return;

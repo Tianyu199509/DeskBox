@@ -57,9 +57,10 @@ public abstract class WidgetContentAdapterBase : IWidgetContent, IDisposable
             if (_view is null)
             {
                 ObjectDisposedException.ThrowIf(_isDisposed, this);
+                bool restoreTransientState = _hasHibernatedTransientState;
+                OnBeforeViewMaterializing(restoreTransientState);
                 FrameworkElement createdView = _viewFactory();
                 _view = createdView;
-                bool restoreTransientState = _hasHibernatedTransientState;
                 object? savedState = _hibernatedTransientState;
                 _hasHibernatedTransientState = false;
                 _hibernatedTransientState = null;
@@ -143,6 +144,14 @@ public abstract class WidgetContentAdapterBase : IWidgetContent, IDisposable
         ReleaseView();
         OnHibernatingView(view);
         return true;
+    }
+
+    /// <summary>
+    /// Raised immediately before the leaf view factory runs so adapters can
+    /// bound initial synchronous collection hydration after hibernation.
+    /// </summary>
+    protected virtual void OnBeforeViewMaterializing(bool isRematerializingAfterHibernation)
+    {
     }
 
     /// <summary>

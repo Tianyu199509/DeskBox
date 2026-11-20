@@ -11,6 +11,13 @@ internal readonly record struct ManagedStorageDriveCandidate(
     long AvailableFreeSpace,
     bool IsTransientBus);
 
+internal readonly record struct ManagedStorageSelectableDriveOption(
+    string DriveLabel,
+    string DriveRootPath,
+    string TargetRootPath,
+    long AvailableFreeSpace,
+    bool IsSystemDrive);
+
 internal readonly record struct ManagedStoragePathAssessment(
     bool IsSystemDrive,
     bool IsCloudSynced,
@@ -39,25 +46,58 @@ internal readonly record struct ManagedStorageRootValidationResult(
 
 internal static class ManagedStoragePathService
 {
+    internal const string PreferredNonSystemDriveRoot = @"D:\";
     internal const long MinimumRecommendedFreeSpaceBytes = 10L * 1024 * 1024 * 1024;
+    internal const long MinimumInteractiveDriveFreeSpaceBytes = 1L * 1024 * 1024 * 1024;
 
     /// <summary>
-    /// The default storage root for new profiles. It must never depend on the
-    /// hardware that happens to be attached at first launch: drives reporting
-    /// as fixed (portable SSDs, UASP enclosures) can vanish later and take the
-    /// managed storage with them. Suitable non-system drives are only offered
-    /// as an explicit suggestion during onboarding.
+    /// Resolves the default storage root for new profiles. Prefers <c>D:\DeskBox</c>
+    /// when <c>D:\</c> is an internal fixed non-system drive with at least 10 GB
+    /// free, otherwise the largest suitable internal non-system drive, falling back
+    /// to <c>%USERPROFILE%\DeskBox</c> when only the system drive (or detachable
+    /// media) is available.
     /// </summary>
     public static string GetRecommendedPath()
     {
         string userProfilePath = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        return Path.Combine(userProfilePath, "DeskBox");
+        string systemDriveRoot = GetSystemDriveRoot(userProfilePath);
+        bool isStoreChannel = AppDistributionService.Current.IsMicrosoftStore;
+        return SelectRecommendedPath(
+            userProfilePath,
+            systemDriveRoot,
+            EnumerateDriveCandidates(),
+            candidatePath => ValidateStorageRootCandidate(candidatePath, isStoreChannel).IsValid);
+    }
+
+    internal static string BuildDriveStorageRootPath(string driveRootPath)
+    {
+        return Path.Combine(driveRootPath, "DeskBox");
+    }
+
+    internal static string SelectRecommendedPath(
+        string userProfilePath,
+        string systemDriveRoot,
+        IEnumerable<ManagedStorageDriveCandidate> drives,
+        Func<string, bool>? isCandidatePathValid = null)
+    {
+        string fallbackPath = Path.Combine(userProfilePath, "DeskBox");
+        IEnumerable<ManagedStorageDriveCandidate> candidateDrives = isCandidatePathValid is null
+            ? drives
+            : drives.Where(drive => isCandidatePathValid(BuildDriveStorageRootPath(drive.RootPath)));
+
+        ManagedStorageDriveCandidate? selected =
+            SelectSuitableNonSystemDrive(systemDriveRoot, candidateDrives);
+
+        return selected is null
+            ? fallbackPath
+            : BuildDriveStorageRootPath(selected.Value.RootPath);
     }
 
     /// <summary>
-    /// Picks the best internal non-system drive for an opt-in migration
-    /// suggestion, or null when no such drive exists. Detachable buses that
-    /// report as fixed disks are excluded.
+    /// Picks the best internal non-system drive: always prefers <c>D:\</c> when
+    /// it qualifies as a suitable internal fixed drive, otherwise the largest
+    /// qualifying internal non-system drive. Detachable buses that report as
+    /// fixed disks are excluded.
     /// </summary>
     internal static ManagedStorageDriveCandidate? SelectSuitableNonSystemDrive(
         string systemDriveRoot,
@@ -65,10 +105,69 @@ internal static class ManagedStoragePathService
     {
         return drives
             .Where(drive => IsSuitableNonSystemCandidate(drive, systemDriveRoot))
-            .OrderByDescending(drive => drive.AvailableFreeSpace)
+            .OrderByDescending(drive => SameDriveRoot(drive.RootPath, PreferredNonSystemDriveRoot))
+            .ThenByDescending(drive => drive.AvailableFreeSpace)
             .ThenBy(drive => drive.RootPath, StringComparer.OrdinalIgnoreCase)
             .Select(drive => (ManagedStorageDriveCandidate?)drive)
             .FirstOrDefault();
+    }
+
+    internal static IReadOnlyList<ManagedStorageSelectableDriveOption> GetSelectableStorageDriveOptions()
+    {
+        string userProfilePath = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        string systemDriveRoot = GetSystemDriveRoot(userProfilePath);
+        bool isStoreChannel = AppDistributionService.Current.IsMicrosoftStore;
+        return BuildSelectableStorageDriveOptions(
+            userProfilePath,
+            systemDriveRoot,
+            EnumerateDriveCandidates(),
+            candidatePath => ValidateStorageRootCandidate(candidatePath, isStoreChannel).IsValid);
+    }
+
+    internal static IReadOnlyList<ManagedStorageSelectableDriveOption> BuildSelectableStorageDriveOptions(
+        string userProfilePath,
+        string systemDriveRoot,
+        IEnumerable<ManagedStorageDriveCandidate> drives,
+        Func<string, bool>? isCandidatePathValid = null)
+    {
+        var options = new List<ManagedStorageSelectableDriveOption>();
+        var seenRoots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (ManagedStorageDriveCandidate drive in drives
+                     .Where(d => d.IsReady && d.DriveType == DriveType.Fixed)
+                     .OrderBy(d => d.RootPath, StringComparer.OrdinalIgnoreCase))
+        {
+            string? normalizedRoot = TryGetPathRoot(drive.RootPath);
+            if (string.IsNullOrWhiteSpace(normalizedRoot) || !seenRoots.Add(normalizedRoot))
+            {
+                continue;
+            }
+
+            bool isSystem = SameDriveRoot(normalizedRoot, systemDriveRoot);
+            if (!isSystem &&
+                (drive.IsTransientBus || drive.AvailableFreeSpace < MinimumInteractiveDriveFreeSpaceBytes))
+            {
+                continue;
+            }
+
+            string targetPath = isSystem
+                ? Path.Combine(userProfilePath, "DeskBox")
+                : BuildDriveStorageRootPath(normalizedRoot);
+            if (isCandidatePathValid is not null && !isCandidatePathValid(targetPath))
+            {
+                continue;
+            }
+
+            string label = normalizedRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            options.Add(new ManagedStorageSelectableDriveOption(
+                label,
+                normalizedRoot,
+                targetPath,
+                drive.AvailableFreeSpace,
+                isSystem));
+        }
+
+        return options;
     }
 
     internal static bool IsSuitableNonSystemCandidate(
@@ -263,7 +362,12 @@ internal static class ManagedStoragePathService
 
         if (isStoreChannel &&
             (PathsOverlapEitherDirection(trimmed, localAppDataPath) ||
-             PathsOverlapEitherDirection(trimmed, roamingAppDataPath)))
+             PathsOverlapEitherDirection(trimmed, roamingAppDataPath) ||
+             DragDrop.StoreVirtualizedPathPolicy.IsVirtualizedAppDataPath(
+                 trimmed,
+                 localAppDataOverride: localAppDataPath,
+                 roamingAppDataOverride: roamingAppDataPath,
+                 userProfileOverride: userProfilePath)))
         {
             return new ManagedStorageRootValidationResult(
                 ManagedStorageRootValidationProblem.StoreVirtualizedAppData,
@@ -374,14 +478,17 @@ internal static class ManagedStoragePathService
                 StorageBusTypeHelper.TryGetBusType(pathRoot));
         }
 
+        bool isStoreChannel = AppDistributionService.Current.IsMicrosoftStore;
         ManagedStorageDriveCandidate? suitableNonSystemDrive =
-            SelectSuitableNonSystemDrive(systemDriveRoot, EnumerateDriveCandidates());
+            SelectSuitableNonSystemDrive(
+                systemDriveRoot,
+                EnumerateDriveCandidates().Where(drive =>
+                    ValidateStorageRootCandidate(
+                        BuildDriveStorageRootPath(drive.RootPath),
+                        isStoreChannel).IsValid));
         string? suitableNonSystemDrivePath = suitableNonSystemDrive is null
             ? null
-            : Path.Combine(
-                suitableNonSystemDrive.Value.RootPath,
-                "DeskBox",
-                BuildAccountSubfolder(userProfilePath, Environment.UserName));
+            : BuildDriveStorageRootPath(suitableNonSystemDrive.Value.RootPath);
 
         return new ManagedStoragePathAssessment(
             isSystemDrive,
@@ -391,6 +498,147 @@ internal static class ManagedStoragePathService
             suitableNonSystemDrive is not null,
             suitableNonSystemDrivePath,
             isTransientBusDrive);
+    }
+
+    internal static bool IsDirectChildOfRoot(string? path, string? rootPath)
+    {
+        if (string.IsNullOrWhiteSpace(path) || string.IsNullOrWhiteSpace(rootPath))
+        {
+            return false;
+        }
+
+        try
+        {
+            string normalizedRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(rootPath));
+            string normalizedPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+            if (string.Equals(normalizedRoot, normalizedPath, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            string? parent = Path.GetDirectoryName(normalizedPath);
+            if (string.IsNullOrWhiteSpace(parent))
+            {
+                return false;
+            }
+
+            return string.Equals(
+                Path.TrimEndingDirectorySeparator(parent),
+                normalizedRoot,
+                StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Detects when <paramref name="currentRootPath"/> has drifted away from
+    /// every live managed file widget (e.g. after <c>settings.json</c> was
+    /// recovered/reset while <c>widget-layout.json</c> survived intact) and
+    /// all live managed widgets unanimously live directly under one valid
+    /// parent directory. Returns <c>false</c> whenever any live managed widget
+    /// already resides under <paramref name="currentRootPath"/> or when
+    /// managed widgets span multiple parent directories.
+    /// </summary>
+    internal static bool TryInferUnanimousManagedStorageRoot(
+        IEnumerable<Models.WidgetConfig> widgets,
+        IEnumerable<string>? deletedWidgetIds,
+        string? currentRootPath,
+        bool isStoreChannel,
+        bool requireExistingDirectory,
+        out string inferredRoot)
+    {
+        inferredRoot = string.Empty;
+        HashSet<string>? deletedSet = deletedWidgetIds is null
+            ? null
+            : new HashSet<string>(deletedWidgetIds, StringComparer.Ordinal);
+        string normalizedCurrentRoot = string.Empty;
+        if (!string.IsNullOrWhiteSpace(currentRootPath))
+        {
+            try
+            {
+                normalizedCurrentRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(currentRootPath));
+            }
+            catch
+            {
+                normalizedCurrentRoot = string.Empty;
+            }
+        }
+
+        string? commonParent = null;
+        int managedWidgetCount = 0;
+
+        foreach (Models.WidgetConfig widget in widgets)
+        {
+            if (widget is null ||
+                widget.WidgetKind != Models.WidgetKind.File ||
+                !widget.FollowsDefaultStoragePath ||
+                (deletedSet is not null && deletedSet.Contains(widget.Id)) ||
+                string.IsNullOrWhiteSpace(widget.MappedFolderPath))
+            {
+                continue;
+            }
+
+            string normalizedMapped;
+            string? parent;
+            try
+            {
+                normalizedMapped = Path.TrimEndingDirectorySeparator(Path.GetFullPath(widget.MappedFolderPath));
+                parent = Path.GetDirectoryName(normalizedMapped);
+            }
+            catch
+            {
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(parent))
+            {
+                return false;
+            }
+
+            string normalizedParent = Path.TrimEndingDirectorySeparator(parent);
+            if (string.Equals(normalizedParent, normalizedMapped, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            // Never override a root that already owns at least one live managed widget.
+            if (!string.IsNullOrEmpty(normalizedCurrentRoot) &&
+                string.Equals(normalizedParent, normalizedCurrentRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            managedWidgetCount++;
+            if (commonParent is null)
+            {
+                commonParent = normalizedParent;
+            }
+            else if (!string.Equals(commonParent, normalizedParent, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+        }
+
+        if (managedWidgetCount == 0 || string.IsNullOrWhiteSpace(commonParent))
+        {
+            return false;
+        }
+
+        if (!ValidateStorageRootCandidate(commonParent, isStoreChannel).IsValid)
+        {
+            return false;
+        }
+
+        if (requireExistingDirectory && !Directory.Exists(commonParent))
+        {
+            return false;
+        }
+
+        inferredRoot = commonParent;
+        return true;
     }
 
     internal static bool IsSameOrDescendant(string path, string directory)

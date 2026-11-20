@@ -424,6 +424,27 @@ public sealed class InProcessSettingsWidgetActions : ISettingsWidgetActions
             ? manager.UpdateDefaultManagedStorageRootAsync(newRootPath, options)
             : Task.FromResult(new ManagedStorageMigrationResult(0, string.Empty, newRootPath, 0, 0, false));
 
+    public Task<ManagedStorageMigrationResult?> TrySwitchEmptyManagedStorageRootAsync(
+        string newRootPath,
+        CancellationToken token) =>
+        _widgetManager is { } manager
+            ? manager.TrySwitchEmptyManagedStorageRootAsync(newRootPath, token)
+            : Task.FromResult<ManagedStorageMigrationResult?>(null);
+
+    public Task<ManagedStorageMigrationCleanupResult> RetryManagedStorageSourceCleanupAsync(
+        string newRootPath,
+        CancellationToken token) =>
+        _widgetManager is { } manager
+            ? manager.RetryManagedStorageSourceCleanupAsync(newRootPath, token)
+            : Task.FromResult(new ManagedStorageMigrationCleanupResult(0, 0, 0, false));
+
+    public Task<ManagedStorageMigrationCleanupResult> CleanupInterruptedMigrationCopiesAsync(
+        string newRootPath,
+        CancellationToken token) =>
+        _widgetManager is { } manager
+            ? manager.CleanupInterruptedMigrationCopiesAsync(newRootPath, token)
+            : Task.FromResult(new ManagedStorageMigrationCleanupResult(0, 0, 0, false));
+
     public IReadOnlyList<GlanceWidgetInstanceInfo> GetGlanceWidgetInstances() =>
         _widgetManager?.GetGlanceWidgetInstances() ?? [];
 

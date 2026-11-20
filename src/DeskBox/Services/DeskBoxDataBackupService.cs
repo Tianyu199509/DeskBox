@@ -17,9 +17,10 @@ namespace DeskBox.Services;
 public sealed partial class DeskBoxDataBackupService
 {
     private const int BackupSchemaVersion = 2;
+    private const int ScopedCustomWidgetsBackupSchemaVersion = 3;
     // Upper bound the wipe-recovery peek shares so its offer never proposes
     // an archive the restore validator's schema gate would refuse.
-    internal const int CurrentBackupSchemaVersion = BackupSchemaVersion;
+    internal const int CurrentBackupSchemaVersion = ScopedCustomWidgetsBackupSchemaVersion;
     private const int MinimumSupportedBackupSchemaVersion = 1;
     private const int MaxPreRestoreBackupCount = 5;
     private const int MaxRestoreFileCount = 100_000;
@@ -30,6 +31,7 @@ public sealed partial class DeskBoxDataBackupService
     private const long MaxRestoreTotalSizeBytes = 16L * 1024 * 1024 * 1024;
     private const int MaxSnapshotCopyAttempts = 4;
     private const int MaxScopedRestoreApplyAttempts = 3;
+    private static readonly JsonSerializerOptions s_indentedJsonOptions = new() { WriteIndented = true };
     /// <summary>
     /// <see cref="Exception.Data"/> key stamped on the InvalidDataException
     /// for an unsupported schema version so the UI can localize the
@@ -185,6 +187,12 @@ public sealed partial class DeskBoxDataBackupService
                 return false;
             }
 
+            if (DragDrop.StoreVirtualizedPathPolicy.IsWriteBlockedDestination(fullPath))
+            {
+                rejectionReasonKey = "Widget.DropBlocked.StoreVirtualizedAppData";
+                return false;
+            }
+
             return true;
         }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
@@ -323,7 +331,7 @@ public sealed partial class DeskBoxDataBackupService
 
             string snapshotPath = GetAvailableArchivePath(
                 target.Directory,
-                $"DeskBox-Auto-{DateTime.Now:yyyyMMdd-HHmmss}.zip");
+                FormattableString.Invariant($"DeskBox-Auto-{DateTime.Now:yyyyMMdd-HHmmss}.zip"));
             await CreateArchiveCoreAsync(snapshotPath, "automatic", cancellationToken);
             _cachedLatestAutoSnapshotPathByDir[target.Directory] = snapshotPath;
             // Deep review R15 (F7 audit): the archive is durable at this
@@ -374,6 +382,7 @@ public sealed partial class DeskBoxDataBackupService
         }
         finally
         {
+            ClearStartupMetadataPin();
             _gate.Release();
         }
     }
@@ -396,7 +405,7 @@ public sealed partial class DeskBoxDataBackupService
             Directory.CreateDirectory(destinationDirectory);
             string backupPath = GetAvailableArchivePath(
                 destinationDirectory,
-                $"DeskBox-Backup-{DateTime.Now:yyyyMMdd-HHmmss}.zip");
+                FormattableString.Invariant($"DeskBox-Backup-{DateTime.Now:yyyyMMdd-HHmmss}.zip"));
             await CreateArchiveCoreAsync(backupPath, "manual", cancellationToken);
             App.Log($"[DataBackup] Exported backup '{backupPath}'.");
             return backupPath;
@@ -457,7 +466,7 @@ public sealed partial class DeskBoxDataBackupService
 
             string backupPath = GetAvailableArchivePath(
                 destinationDirectory,
-                $"DeskBox-CloudBackup-{DateTime.Now:yyyyMMdd-HHmmss}.zip");
+                FormattableString.Invariant($"DeskBox-CloudBackup-{DateTime.Now:yyyyMMdd-HHmmss}.zip"));
             // The manifest must only claim domains that actually shipped —
             // WidgetStyle without a produced document does not count.
             CloudBackupDomain shippedScope = rootEntries is null
@@ -513,27 +522,12 @@ public sealed partial class DeskBoxDataBackupService
         // the destination's remap: each foreign id lands as data no widget
         // displays. An empty live set means "cannot tell" — keep everything
         // rather than silently drop data.
-        HashSet<string>? liveTodoIds = null;
-        if (scope.HasFlag(CloudBackupDomain.TodoData))
-        {
-            HashSet<string> live = await ReadLiveTodoWidgetIdsAsync(cancellationToken);
-            if (live.Count > 0)
-            {
-                liveTodoIds = live;
-            }
-        }
-
-        HashSet<string>? liveCustomIds = null;
-        if (scope.HasFlag(CloudBackupDomain.CustomWidgets))
-        {
-            HashSet<string> live = await ReadLiveWidgetIdsByKindAsync(
-                nameof(WidgetKind.Custom),
-                cancellationToken);
-            if (live.Count > 0)
-            {
-                liveCustomIds = live;
-            }
-        }
+        HashSet<string>? liveTodoIds = scope.HasFlag(CloudBackupDomain.TodoData)
+            ? await ReadLiveTodoWidgetIdsAsync(cancellationToken)
+            : null;
+        HashSet<string>? liveCustomIds = scope.HasFlag(CloudBackupDomain.CustomWidgets)
+            ? await ReadLiveWidgetIdsByKindAsync(nameof(WidgetKind.Custom), cancellationToken)
+            : null;
 
         foreach (string sourcePath in Directory
                      .EnumerateFiles(DataDirectory, "*", SearchOption.AllDirectories)
@@ -705,14 +699,11 @@ public sealed partial class DeskBoxDataBackupService
                     "The backup does not contain any of the requested domains.");
             }
 
+            bool hasUnknownManifestDomains = archiveInfo.Manifest.Domains is { Count: > 0 } rawDomains &&
+                rawDomains.Any(static name => !CloudBackupDomains.TryFromManifestName(name, out _));
             string stagedDataDirectory = Path.Combine(stagingRoot, "data");
             if (Directory.Exists(stagedDataDirectory))
             {
-                // The archive must not carry files outside its own manifest
-                // domains — a forged manifest could otherwise make the
-                // scoped apply overwrite non-domain data. Files from a
-                // manifest domain the user did not request are staged but
-                // simply not applied.
                 foreach (string stagedFile in Directory.EnumerateFiles(
                              stagedDataDirectory, "*", SearchOption.AllDirectories))
                 {
@@ -721,6 +712,10 @@ public sealed partial class DeskBoxDataBackupService
                         .Replace(Path.DirectorySeparatorChar, '/');
                     if (!CloudBackupDomains.IsInScope(manifestScope, stagedRelative))
                     {
+                        if (hasUnknownManifestDomains)
+                        {
+                            continue;
+                        }
                         throw new InvalidDataException(
                             $"Scoped backup entry '{stagedRelative}' is outside the manifest domains.");
                     }
@@ -1113,7 +1108,8 @@ public sealed partial class DeskBoxDataBackupService
             .Where(id => !authoritativeSet.Contains(id))
             .ToList();
 
-        HashSet<string> liveTodoIds = await ReadLiveTodoWidgetIdsAsync(cancellationToken);
+        HashSet<string> liveTodoIds = await ReadLiveTodoWidgetIdsAsync(cancellationToken)
+            ?? new HashSet<string>(StringComparer.Ordinal);
         List<string> orphans = stagedIds
             .Where(id => authoritativeSet.Contains(id) && !liveTodoIds.Contains(id))
             .OrderBy(id => id, StringComparer.Ordinal)
@@ -1294,10 +1290,10 @@ public sealed partial class DeskBoxDataBackupService
     /// empty set just leaves every orphan unmapped, which is the honest
     /// answer.
     /// </summary>
-    private Task<HashSet<string>> ReadLiveTodoWidgetIdsAsync(CancellationToken cancellationToken) =>
+    private Task<HashSet<string>?> ReadLiveTodoWidgetIdsAsync(CancellationToken cancellationToken) =>
         ReadLiveWidgetIdsByKindAsync(nameof(WidgetKind.Todo), cancellationToken);
 
-    private async Task<HashSet<string>> ReadLiveWidgetIdsByKindAsync(
+    private async Task<HashSet<string>?> ReadLiveWidgetIdsByKindAsync(
         string expectedKind,
         CancellationToken cancellationToken)
     {
@@ -1311,21 +1307,31 @@ public sealed partial class DeskBoxDataBackupService
             if (File.Exists(layoutPath))
             {
                 byte[] layoutJson = await File.ReadAllBytesAsync(layoutPath, cancellationToken);
-                widgets = JsonNode.Parse(layoutJson)?["layout"]?["widgets"] as JsonArray;
+                ReadOnlySpan<byte> utf8 = layoutJson;
+                if (utf8.Length >= 3 && utf8[0] == 0xEF && utf8[1] == 0xBB && utf8[2] == 0xBF)
+                {
+                    utf8 = utf8[3..];
+                }
+                widgets = JsonNode.Parse(utf8)?["layout"]?["widgets"] as JsonArray;
             }
             else if (File.Exists(settingsPath))
             {
                 byte[] json = await File.ReadAllBytesAsync(settingsPath, cancellationToken);
-                widgets = JsonNode.Parse(json)?["widgets"] as JsonArray;
+                ReadOnlySpan<byte> utf8 = json;
+                if (utf8.Length >= 3 && utf8[0] == 0xEF && utf8[1] == 0xBB && utf8[2] == 0xBF)
+                {
+                    utf8 = utf8[3..];
+                }
+                widgets = JsonNode.Parse(utf8)?["widgets"] as JsonArray;
             }
             else
             {
-                return ids;
+                return null;
             }
 
             if (widgets is null)
             {
-                return ids;
+                return null;
             }
 
             foreach (JsonNode? node in widgets)
@@ -1343,13 +1349,13 @@ public sealed partial class DeskBoxDataBackupService
 
                 ids.Add(id);
             }
+            return ids;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             App.Log($"[DataBackup] Could not enumerate live '{expectedKind}' widgets: {ex.Message}");
+            return null;
         }
-
-        return ids;
     }
 
     public async Task CancelPendingRestoreAsync(CancellationToken cancellationToken = default)
@@ -1933,6 +1939,7 @@ public sealed partial class DeskBoxDataBackupService
         }
 
         string liveWidgetsDirectory = Path.Combine(DataDirectory, CustomWidgetDataStore.SubdirectoryName);
+        var trustStore = new CustomWidgetTrustStore(DataDirectory);
         foreach (string stagedWidgetDir in Directory.EnumerateDirectories(stagedWidgetsDirectory))
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -2029,6 +2036,7 @@ public sealed partial class DeskBoxDataBackupService
                 CustomWidgetStorageFileOps.CopyFileOverwrite(stagedRevisionsPath, liveRevisionsPath);
             }
 
+            EnsureRestoredCustomWidgetProvenance(trustStore, widgetId);
             string stagedStorePath = Path.Combine(stagedWidgetDir, "store.json");
             string liveStorePath = Path.Combine(liveWidgetDir, "store.json");
             if (!File.Exists(stagedStorePath))
@@ -2063,6 +2071,11 @@ public sealed partial class DeskBoxDataBackupService
                 if (stagedManifestWon || !liveStore.State.ContainsKey(key))
                 {
                     liveStore.State[key] = value;
+                    if (stagedStore.StateJson.TryGetValue(key, out JsonElement stagedEl) &&
+                        stagedEl.ValueKind != JsonValueKind.Undefined)
+                    {
+                        liveStore.StateJson[key] = stagedEl.Clone();
+                    }
                 }
             }
 
@@ -2162,8 +2175,8 @@ public sealed partial class DeskBoxDataBackupService
             return true;
         }
 
-        bool hasRemoteTime = DateTimeOffset.TryParse(remoteParsed.Manifest.UpdatedAtUtc, out DateTimeOffset remoteTime);
-        bool hasLocalTime = DateTimeOffset.TryParse(localParsed.Manifest.UpdatedAtUtc, out DateTimeOffset localTime);
+        bool hasRemoteTime = DateTimeOffset.TryParse(remoteParsed.Manifest.UpdatedAtUtc, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out DateTimeOffset remoteTime);
+        bool hasLocalTime = DateTimeOffset.TryParse(localParsed.Manifest.UpdatedAtUtc, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out DateTimeOffset localTime);
         if (hasRemoteTime && hasLocalTime)
         {
             return remoteTime > localTime;
@@ -2183,6 +2196,7 @@ public sealed partial class DeskBoxDataBackupService
         }
 
         var restoredIds = new List<string>();
+        var trustStore = new CustomWidgetTrustStore(DataDirectory);
         foreach (string stagedWidgetDir in Directory.EnumerateDirectories(stagedWidgetsDirectory))
         {
             string widgetId = Path.GetFileName(stagedWidgetDir);
@@ -2197,6 +2211,7 @@ public sealed partial class DeskBoxDataBackupService
             if (File.Exists(liveManifestPath) || File.Exists(liveStorePath))
             {
                 restoredIds.Add(widgetId);
+                EnsureRestoredCustomWidgetProvenance(trustStore, widgetId);
             }
         }
 
@@ -2267,6 +2282,12 @@ public sealed partial class DeskBoxDataBackupService
         }
 
         bool settingsChanged = false;
+        if (settingsDom["deletedWidgetIds"] is JsonArray deletedArray)
+        {
+            for (int i = deletedArray.Count - 1; i >= 0; i--)
+                if (deletedArray[i] is JsonValue dv && dv.TryGetValue(out string? delId) && restoredIds.Contains(delId, StringComparer.Ordinal))
+                { deletedArray.RemoveAt(i); settingsChanged = true; }
+        }
         int cascadeIndex = existingIds.Count;
         foreach (string widgetId in restoredIds)
         {
@@ -2298,7 +2319,7 @@ public sealed partial class DeskBoxDataBackupService
             statesObj[nameof(WidgetKind.Custom)] = true;
             await ResilientJsonStore.SaveAsync(
                 settingsPath,
-                settingsDom.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+                settingsDom.ToJsonString(s_indentedJsonOptions));
         }
     }
 
@@ -2340,6 +2361,22 @@ public sealed partial class DeskBoxDataBackupService
         return changed;
     }
 
+    private void EnsureRestoredCustomWidgetProvenance(CustomWidgetTrustStore trustStore, string widgetId)
+    {
+        string path = Path.Combine(DataDirectory, CustomWidgetDataStore.SubdirectoryName, widgetId, "manifest.json");
+        bool isOfficialBuiltIn = !File.Exists(path) && CustomWidgetTemplates.IsKnownBuiltInTemplate(widgetId);
+        if (File.Exists(path))
+        {
+            try { string raw = File.ReadAllText(path); isOfficialBuiltIn = CustomWidgetManifestParser.Parse(raw).Manifest is { } m && CustomWidgetTemplates.IsKnownBuiltInTemplate(m.Id) && CustomWidgetManifestMetadataStamper.ShouldAllowAutomaticOfficialUpgrade(raw); }
+            catch { }
+        }
+        if (!isOfficialBuiltIn)
+        {
+            trustStore.RegisterWidgetProvenance(widgetId, trustedLocalAuthoring: false);
+            CustomWidgetTrustStore.Shared.InvalidateCache();
+        }
+    }
+
     private WidgetConfig BuildRestoredCustomWidgetConfig(string widgetId, int cascadeIndex)
     {
         CustomWidgetManifest? manifest = null;
@@ -2357,11 +2394,19 @@ public sealed partial class DeskBoxDataBackupService
         }
 
         string templateId = !string.IsNullOrWhiteSpace(manifest?.Id) ? manifest!.Id : widgetId;
+        string culture = LocalizationService.ResolveAmbientCultureName();
+        var locales = CustomWidgetLocaleCatalog.LoadFromDirectory(Path.Combine(Path.GetDirectoryName(manifestPath)!, CustomWidgetLocaleCatalog.DirectoryName));
+        bool isBuiltIn = CustomWidgetTemplates.IsKnownBuiltInTemplate(templateId) && !string.Equals(manifest?.Origin, CustomWidgetOriginKinds.Community, StringComparison.OrdinalIgnoreCase);
+        if (locales.IsEmpty && isBuiltIn) locales = CustomWidgetTemplates.ResolveEffectiveTemplateBundle(templateId, culture).Locales;
+        string? localizedName = (manifest is not null && locales is { IsEmpty: false } ? manifest.WithLocales(locales) : manifest)?.ResolveLocalizedName(culture);
+        if ((string.IsNullOrWhiteSpace(localizedName) || localizedName.Contains("${", StringComparison.Ordinal)) && isBuiltIn)
+        { localizedName = CustomWidgetTemplates.ResolveOfficialLocalizedName(templateId, culture); }
+        bool hasLocalizedTitle = !string.IsNullOrWhiteSpace(localizedName) && !localizedName.Contains("${", StringComparison.Ordinal);
         var config = new WidgetConfig
         {
             Id = widgetId,
-            Name = !string.IsNullOrWhiteSpace(manifest?.Name) ? manifest!.Name : widgetId,
-            IsDefaultTitle = false,
+            Name = hasLocalizedTitle ? localizedName! : widgetId,
+            IsDefaultTitle = isBuiltIn && hasLocalizedTitle,
             WidgetKind = WidgetKind.Custom,
             BoundsCoordinateVersion = WidgetConfig.CurrentBoundsCoordinateVersion,
             X = 120 + ((cascadeIndex % 6) * 28),
@@ -2480,7 +2525,7 @@ public sealed partial class DeskBoxDataBackupService
         }
 
         if (manifest.SchemaVersion < MinimumSupportedBackupSchemaVersion ||
-            manifest.SchemaVersion > BackupSchemaVersion)
+            manifest.SchemaVersion > CurrentBackupSchemaVersion)
         {
             throw new InvalidDataException(
                 $"Unsupported DeskBox backup schema version {manifest.SchemaVersion}.")
@@ -3560,7 +3605,7 @@ public sealed partial class DeskBoxDataBackupService
         try
         {
             await CreateDataSnapshotAsync(
-                snapshotDataDirectory, cancellationToken, requireSettings);
+                snapshotDataDirectory, cancellationToken, requireSettings, backupKind);
             ValidateRestoreData(snapshotDataDirectory, requireSettings);
             await CreateArchiveFromSnapshotAsync(
                 archivePath,
@@ -3866,12 +3911,10 @@ public sealed partial class DeskBoxDataBackupService
     private async Task CreateDataSnapshotAsync(
         string snapshotDataDirectory,
         CancellationToken cancellationToken,
-        bool requireSettings = true)
+        bool requireSettings = true,
+        string backupKind = "manual")
     {
         string settingsPath = Path.Combine(DataDirectory, "settings.json");
-        // The pre-restore safety net must not require settings.json: a device
-        // whose settings were lost or quarantined still has widget stores
-        // worth preserving before a restore overwrites them.
         if (requireSettings && !File.Exists(settingsPath))
         {
             throw new InvalidOperationException("DeskBox settings are not available for backup.");
@@ -3889,56 +3932,10 @@ public sealed partial class DeskBoxDataBackupService
 
         Directory.CreateDirectory(snapshotDataDirectory);
 
-        // FileSafety metadata must come from a single transaction epoch:
-        // settings, the device-layout store, the organization-history store
-        // and the recovery journal are committed as a unit under
-        // OperationGate. The file SET is resolved inside the gate — a journal
-        // created while we waited for the gate must land in the snapshot, or
-        // the backup would hold settings@T1 with history@T0 and no WAL to
-        // converge them. Hold the gate only for these few small files; the
-        // rest still copies one by one from the pre-enumerated list.
-        //
-        // settings.json and widget-layout.json additionally commit under the
-        // settings write gate — a plain settings save does not take
-        // OperationGate, so without it the snapshot could tear mid-save into
-        // a pair that never existed on disk (settings@S0 with layout@S1).
-        // Lock order is OperationGate-then-write-gate everywhere, matching
-        // DesktopOrganizationTransaction's own save path.
-        string[] fileSafetyMetadata =
-        [
-            "settings.json",
-            "widget-layout.json",
-            "desktop-organization-history.json",
-            "desktop-organization-recovery.json"
-        ];
-        var metadataSet = new HashSet<string>(fileSafetyMetadata, StringComparer.OrdinalIgnoreCase);
-        await DesktopOrganizationTransaction.OperationGate.WaitAsync(cancellationToken);
-        try
-        {
-            SemaphoreSlim settingsWriteLock = SettingsService.FileWriteLockFor(DataDirectory);
-            await settingsWriteLock.WaitAsync(cancellationToken);
-            try
-            {
-                foreach (string relativePath in fileSafetyMetadata)
-                {
-                    string sourcePath = Path.Combine(DataDirectory, relativePath);
-                    if (!File.Exists(sourcePath)) continue;
-                    await CopyStableSnapshotFileAsync(
-                        sourcePath,
-                        Path.Combine(snapshotDataDirectory, relativePath),
-                        cancellationToken);
-                }
-            }
-            finally
-            {
-                settingsWriteLock.Release();
-            }
-        }
-        finally
-        {
-            DesktopOrganizationTransaction.OperationGate.Release();
-        }
-
+        HashSet<string> metadataSet = await WriteSnapshotMetadataFilesAsync(
+            snapshotDataDirectory,
+            backupKind,
+            cancellationToken);
         foreach ((string sourcePath, string relativePath) in sourceFiles)
         {
             if (metadataSet.Contains(relativePath)) continue;
@@ -4031,8 +4028,14 @@ public sealed partial class DeskBoxDataBackupService
                         }
                     }
 
+                    int archiveSchemaVersion = manifestDomains is not null &&
+                        manifestDomains.Contains(
+                            CloudBackupDomains.ToManifestName(CloudBackupDomain.CustomWidgets),
+                            StringComparer.OrdinalIgnoreCase)
+                        ? ScopedCustomWidgetsBackupSchemaVersion
+                        : BackupSchemaVersion;
                     var manifest = new DeskBoxBackupManifest(
-                        BackupSchemaVersion,
+                        archiveSchemaVersion,
                         backupKind,
                         DateTimeOffset.UtcNow,
                         typeof(DeskBoxDataBackupService).Assembly.GetName().Version?.ToString() ?? "unknown",
@@ -4184,7 +4187,7 @@ public sealed partial class DeskBoxDataBackupService
         Directory.CreateDirectory(PreRestoreBackupDirectory);
         string preRestorePath = GetAvailableArchivePath(
             PreRestoreBackupDirectory,
-            $"DeskBox-PreRestore-{DateTime.Now:yyyyMMdd-HHmmss}.zip");
+            FormattableString.Invariant($"DeskBox-PreRestore-{DateTime.Now:yyyyMMdd-HHmmss}.zip"));
         await WritePendingRestoreMarkerAtomicallyAsync(
             PendingRestoreMarkerPath,
             marker with { SafetyBackupPath = preRestorePath },

@@ -317,49 +317,46 @@ public sealed class WeatherService : IDisposable
         }
     }
 
+    private static System.Text.Json.Serialization.Metadata.JsonTypeInfo<WeatherGeocodingResult> GeocodingTypeInfo =>
+        WeatherJsonContext.Default.GeocodingResult;
+
+    private static System.Text.Json.Serialization.Metadata.JsonTypeInfo<WeatherData> OpenMeteoTypeInfo =>
+        WeatherJsonContext.Default.OpenMeteoWeather;
+
+    private static System.Text.Json.Serialization.Metadata.JsonTypeInfo<MsnWeatherResponse> MsnTypeInfo =>
+        WeatherJsonContext.Default.MsnWeather;
+
     internal static ValueTask<WeatherGeocodingResult?> DeserializeGeocodingResponseAsync(
         Stream stream,
         CancellationToken cancellationToken = default) =>
-        JsonSerializer.DeserializeAsync(stream, WeatherJsonContext.Default.GeocodingResult, cancellationToken);
+        JsonSerializer.DeserializeAsync(stream, GeocodingTypeInfo, cancellationToken);
 
-    internal static WeatherGeocodingResult? DeserializeGeocodingResponse(string json)
-    {
-        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
-        return DeserializeGeocodingResponseAsync(stream).GetAwaiter().GetResult();
-    }
+    internal static WeatherGeocodingResult? DeserializeGeocodingResponse(string json) =>
+        JsonSerializer.Deserialize(json, GeocodingTypeInfo);
 
     internal static ValueTask<WeatherData?> DeserializeOpenMeteoResponseAsync(
         Stream stream,
         CancellationToken cancellationToken = default) =>
-        JsonSerializer.DeserializeAsync(stream, WeatherJsonContext.Default.OpenMeteoWeather, cancellationToken);
+        JsonSerializer.DeserializeAsync(stream, OpenMeteoTypeInfo, cancellationToken);
 
-    internal static WeatherData? DeserializeOpenMeteoResponse(string json)
-    {
-        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
-        return DeserializeOpenMeteoResponseAsync(stream).GetAwaiter().GetResult();
-    }
+    internal static WeatherData? DeserializeOpenMeteoResponse(string json) =>
+        JsonSerializer.Deserialize(json, OpenMeteoTypeInfo);
 
     internal static ValueTask<MsnWeatherResponse?> DeserializeMsnResponseAsync(
         Stream stream,
         CancellationToken cancellationToken = default) =>
-        JsonSerializer.DeserializeAsync(stream, WeatherJsonContext.Default.MsnWeather, cancellationToken);
+        JsonSerializer.DeserializeAsync(stream, MsnTypeInfo, cancellationToken);
 
-    internal static MsnWeatherResponse? DeserializeMsnResponse(string json)
-    {
-        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
-        return DeserializeMsnResponseAsync(stream).GetAwaiter().GetResult();
-    }
+    internal static MsnWeatherResponse? DeserializeMsnResponse(string json) =>
+        JsonSerializer.Deserialize(json, MsnTypeInfo);
 
     internal static ValueTask<WeatherCacheState?> DeserializeCacheStateAsync(
         Stream stream,
         CancellationToken cancellationToken = default) =>
         JsonSerializer.DeserializeAsync(stream, WeatherJsonContext.Default.CacheState, cancellationToken);
 
-    internal static WeatherCacheState? DeserializeCacheState(string json)
-    {
-        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
-        return DeserializeCacheStateAsync(stream).GetAwaiter().GetResult();
-    }
+    internal static WeatherCacheState? DeserializeCacheState(string json) =>
+        JsonSerializer.Deserialize(json, WeatherJsonContext.Default.CacheState);
 
     internal static Task SerializeCacheStateAsync(
         Stream stream,
@@ -371,7 +368,7 @@ public sealed class WeatherService : IDisposable
     {
         try
         {
-            return App.Current?.Services?.GetService(typeof(SettingsService)) is SettingsService svc
+            return App.Current?.Services?.SettingsService is { } svc
                 ? svc.Settings.WeatherDataSource
                 : SettingsService.WeatherDataSourceMsn;
         }
@@ -471,7 +468,7 @@ public sealed class WeatherService : IDisposable
         {
             Latitude = lat,
             Longitude = lon,
-            Timezone = string.Empty, // MSN doesn't return timezone; UI uses local time
+            Timezone = string.Empty, // MSN doesn't return IANA timezone; UtcOffsetSeconds carries city offset
             Current = current is not null
                 ? new WeatherCurrent
                 {
@@ -500,9 +497,13 @@ public sealed class WeatherService : IDisposable
                 // Parse date from "valid" field (ISO 8601)
                 string dateStr = string.Empty;
                 if (!string.IsNullOrEmpty(day.Daily.Valid) &&
-                    DateTimeOffset.TryParse(day.Daily.Valid, out var dt))
+                    DateTimeOffset.TryParse(
+                        day.Daily.Valid,
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        System.Globalization.DateTimeStyles.None,
+                        out var dt))
                 {
-                    dateStr = dt.ToString("yyyy-MM-dd");
+                    dateStr = dt.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
                 }
 
                 daily.Time.Add(dateStr);
@@ -526,10 +527,23 @@ public sealed class WeatherService : IDisposable
                 string sunset = string.Empty;
                 if (day.Almanac is not null)
                 {
-                    if (DateTimeOffset.TryParse(day.Almanac.Sunrise, out var sr))
-                        sunrise = sr.ToString("yyyy-MM-ddTHH:mm");
-                    if (DateTimeOffset.TryParse(day.Almanac.Sunset, out var ss))
-                        sunset = ss.ToString("yyyy-MM-ddTHH:mm");
+                    if (DateTimeOffset.TryParse(
+                            day.Almanac.Sunrise,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            System.Globalization.DateTimeStyles.None,
+                            out var sr))
+                    {
+                        sunrise = sr.ToString("yyyy-MM-ddTHH:mm", System.Globalization.CultureInfo.InvariantCulture);
+                    }
+
+                    if (DateTimeOffset.TryParse(
+                            day.Almanac.Sunset,
+                            System.Globalization.CultureInfo.InvariantCulture,
+                            System.Globalization.DateTimeStyles.None,
+                            out var ss))
+                    {
+                        sunset = ss.ToString("yyyy-MM-ddTHH:mm", System.Globalization.CultureInfo.InvariantCulture);
+                    }
                 }
                 daily.Sunrise.Add(sunrise);
                 daily.Sunset.Add(sunset);
@@ -550,7 +564,11 @@ public sealed class WeatherService : IDisposable
             .GroupBy(hour => hour.Valid, StringComparer.Ordinal)
             .Select(group => group.First())
             .OrderBy(hour =>
-                DateTimeOffset.TryParse(hour.Valid, out var parsed)
+                DateTimeOffset.TryParse(
+                    hour.Valid,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.None,
+                    out var parsed)
                     ? parsed
                     : DateTimeOffset.MaxValue)
             .ToList();
@@ -560,9 +578,18 @@ public sealed class WeatherService : IDisposable
             foreach (var h in forecastHours)
             {
                 // Parse time from "valid" field
-                if (DateTimeOffset.TryParse(h.Valid, out var ht))
+                if (DateTimeOffset.TryParse(
+                        h.Valid,
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        System.Globalization.DateTimeStyles.None,
+                        out var ht))
                 {
-                    hourly.Time.Add(ht.ToString("yyyy-MM-ddTHH:mm"));
+                    hourly.Time.Add(ht.ToString("yyyy-MM-ddTHH:mm", System.Globalization.CultureInfo.InvariantCulture));
+                    if (data.UtcOffsetSeconds is null &&
+                        TryExtractExplicitUtcOffsetSeconds(h.Valid, out int hourOffset))
+                    {
+                        data.UtcOffsetSeconds = hourOffset;
+                    }
                 }
                 else
                 {
@@ -582,7 +609,73 @@ public sealed class WeatherService : IDisposable
             }
         }
 
+        if (data.UtcOffsetSeconds is null && forecastDays is { Count: > 0 })
+        {
+            foreach (var day in forecastDays)
+            {
+                if (TryExtractExplicitUtcOffsetSeconds(day.Daily?.Valid, out int dayOffset) ||
+                    TryExtractExplicitUtcOffsetSeconds(day.Almanac?.Sunrise, out dayOffset) ||
+                    TryExtractExplicitUtcOffsetSeconds(day.Almanac?.Sunset, out dayOffset))
+                {
+                    data.UtcOffsetSeconds = dayOffset;
+                    break;
+                }
+            }
+        }
+
+        if (data.UtcOffsetSeconds is null &&
+            TryExtractExplicitUtcOffsetSeconds(current?.Created, out int currentOffset, allowZuluZeroOffset: false))
+        {
+            data.UtcOffsetSeconds = currentOffset;
+        }
+
         return data;
+    }
+
+    private static bool TryExtractExplicitUtcOffsetSeconds(
+        string? isoTimestamp,
+        out int offsetSeconds,
+        bool allowZuluZeroOffset = true)
+    {
+        offsetSeconds = 0;
+        if (string.IsNullOrWhiteSpace(isoTimestamp))
+        {
+            return false;
+        }
+
+        int tIndex = isoTimestamp.IndexOf('T');
+        if (tIndex < 0 || tIndex + 1 >= isoTimestamp.Length)
+        {
+            return false;
+        }
+
+        ReadOnlySpan<char> timePart = isoTimestamp.AsSpan(tIndex + 1);
+        bool isZulu = timePart[^1] is 'Z' or 'z';
+        if (isZulu && !allowZuluZeroOffset)
+        {
+            return false;
+        }
+
+        bool hasExplicitOffset =
+            isZulu ||
+            timePart.IndexOf('+') >= 0 ||
+            timePart.IndexOf('-') >= 0;
+        if (!hasExplicitOffset)
+        {
+            return false;
+        }
+
+        if (!DateTimeOffset.TryParse(
+                isoTimestamp,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out DateTimeOffset parsed))
+        {
+            return false;
+        }
+
+        offsetSeconds = (int)Math.Round(parsed.Offset.TotalSeconds);
+        return true;
     }
 
     public void Dispose()

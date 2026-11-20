@@ -1,3 +1,4 @@
+using DeskBox.Controls;
 using DeskBox.Helpers;
 using DeskBox.Platform;
 using DeskBox.Services;
@@ -15,30 +16,29 @@ namespace DeskBox.Views;
 internal readonly record struct WidgetDetachPreviewAppearance(
     string Caption,
     double CornerRadius,
-    string MaterialType,
     bool IsDark,
     Color AccentColor,
-    double SurfaceOpacity,
-    double MaterialIntensity,
     Color? CustomBackgroundColor,
     double BorderThickness,
-    Color BorderColor)
+    Color BorderColor,
+    string MemberTitle = "",
+    string MemberGlyph = "\uE8A5",
+    string MemberIconKind = WidgetTitleIconKindNames.Default,
+    string MemberIconMode = WidgetTitleIconModeNames.Color,
+    string MemberCustomEmoji = "")
 {
     public static WidgetDetachPreviewAppearance CreateDefault(
         string caption,
         double cornerRadius)
     {
-        bool isDark = Application.Current?.RequestedTheme == ApplicationTheme.Dark;
+        bool isDark = NeutralInteractionBrush.IsDarkTheme(null);
         Color accent = AccentColorHelper.DefaultAccentColor;
         Color tone = NeutralInteractionBrush.Line(null);
         return new WidgetDetachPreviewAppearance(
             caption,
             cornerRadius,
-            SettingsService.WidgetMaterialTypeMica,
             isDark,
             accent,
-            SurfaceOpacity: 0.72,
-            MaterialIntensity: SettingsService.DefaultWidgetMaterialIntensity,
             CustomBackgroundColor: null,
             BorderThickness: 1.0,
             BorderColor: Color.FromArgb(0x68, tone.R, tone.G, tone.B));
@@ -47,26 +47,31 @@ internal readonly record struct WidgetDetachPreviewAppearance(
 
 /// <summary>
 /// A click-through, non-activating placement silhouette used while a member is
-/// dragged out of a widget group. Native positioning keeps it responsive while
-/// OLE owns the UI thread's modal drag loop.
+/// dragged out of a widget group. Draws a lightweight translucent landing frame
+/// with a simulated member header strip and a centered solid pill badge, avoiding
+/// live Mica/Acrylic backdrop controllers so cross-thread native positioning stays
+/// silky-smooth while OLE or pointer capture drives the drag.
 /// </summary>
 internal sealed class WidgetDetachPlacementPreviewWindow : IDisposable
 {
-    private const byte TrackingOpacity = 228;
-    private const byte CommittedOpacity = 242;
+    private const byte TrackingOpacity = 255;
+    private const byte CommittedOpacity = 255;
+
     private readonly object _gate = new();
     private readonly Window _window;
     private readonly AppWindow _appWindow;
     private readonly IntPtr _hWnd;
-    private readonly SystemBackdropElement _backdropElement;
     private readonly Border _surfaceBorder;
+    private readonly Grid _headerRow;
+    private readonly Border _headerDivider;
+    private readonly WidgetTitleIcon _memberIcon;
+    private readonly TextBlock _memberTitleTextBlock;
     private readonly Border _badgeBorder;
+    private readonly FontIcon _badgeIcon;
     private readonly TextBlock _captionTextBlock;
     private readonly SolidTintSystemBackdrop _transparentBackdrop;
-    private WidgetMaterialSystemBackdrop? _materialBackdrop;
     private RectInt32 _lastBounds;
     private byte _opacity = TrackingOpacity;
-    private int _animationGeneration;
     private bool _hasBounds;
     private bool _visible;
     private bool _closed;
@@ -75,42 +80,95 @@ internal sealed class WidgetDetachPlacementPreviewWindow : IDisposable
         WidgetDetachPreviewAppearance appearance)
     {
         double surfaceRadius = Math.Clamp(appearance.CornerRadius, 0, 32);
-        var root = new Grid();
-        _backdropElement = new SystemBackdropElement
+        var innerLayout = new Grid();
+        innerLayout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(38) });
+        innerLayout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
+
+        _memberIcon = new WidgetTitleIcon
         {
-            CornerRadius = new CornerRadius(0),
-            IsHitTestVisible = false,
-            Visibility = Visibility.Collapsed
+            IconSize = 14,
+            VerticalAlignment = VerticalAlignment.Center
         };
-        _surfaceBorder = new Border
+        _memberTitleTextBlock = new TextBlock
         {
-            CornerRadius = new CornerRadius(surfaceRadius),
-            IsHitTestVisible = false
-        };
-        _captionTextBlock = new TextBlock
-        {
-            Text = appearance.Caption,
-            MaxWidth = 260,
-            Foreground = new SolidColorBrush(Colors.White),
-            FontSize = 12,
-            FontWeight = Microsoft.UI.Text.FontWeights.Normal,
+            FontSize = 13,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             MaxLines = 1,
             TextTrimming = TextTrimming.CharacterEllipsis,
             VerticalAlignment = VerticalAlignment.Center
         };
+
+        var headerIdentity = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 8,
+            Margin = new Thickness(14, 0, 14, 0),
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        headerIdentity.Children.Add(_memberIcon);
+        headerIdentity.Children.Add(_memberTitleTextBlock);
+
+        _headerDivider = new Border
+        {
+            Height = 1,
+            Margin = new Thickness(12, 0, 12, 0),
+            VerticalAlignment = VerticalAlignment.Bottom
+        };
+
+        _headerRow = new Grid();
+        _headerRow.Children.Add(headerIdentity);
+        _headerRow.Children.Add(_headerDivider);
+        Grid.SetRow(_headerRow, 0);
+
+        _badgeIcon = new FontIcon
+        {
+            Glyph = "\uE8A7",
+            FontSize = 12,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        _captionTextBlock = new TextBlock
+        {
+            Text = appearance.Caption,
+            MaxWidth = 240,
+            FontSize = 13,
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            MaxLines = 1,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        var badgeRow = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 8,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        badgeRow.Children.Add(_badgeIcon);
+        badgeRow.Children.Add(_captionTextBlock);
+
         _badgeBorder = new Border
         {
-            Margin = new Thickness(10, 0, 10, 8),
-            Padding = new Thickness(8, 3, 8, 4),
-            HorizontalAlignment = HorizontalAlignment.Left,
-            VerticalAlignment = VerticalAlignment.Bottom,
+            Margin = new Thickness(12),
+            Padding = new Thickness(14, 8, 16, 8),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
             BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(Math.Clamp(surfaceRadius * 0.45, 4, 6)),
-            Child = _captionTextBlock
+            CornerRadius = new CornerRadius(20),
+            Child = badgeRow
         };
-        root.Children.Add(_backdropElement);
+        Grid.SetRow(_badgeBorder, 1);
+
+        innerLayout.Children.Add(_headerRow);
+        innerLayout.Children.Add(_badgeBorder);
+
+        _surfaceBorder = new Border
+        {
+            CornerRadius = new CornerRadius(surfaceRadius),
+            IsHitTestVisible = false,
+            Child = innerLayout
+        };
+
+        var root = new Grid();
         root.Children.Add(_surfaceBorder);
-        root.Children.Add(_badgeBorder);
         _window = new Window
         {
             Title = "DeskBox Detach Preview",
@@ -127,11 +185,17 @@ internal sealed class WidgetDetachPlacementPreviewWindow : IDisposable
         int extendedStyle = Win32Helper.GetWindowLong(
             _hWnd,
             Win32Helper.GWL_EXSTYLE);
+        // WS_EX_LAYERED is deliberately excluded: mixing LWA_ALPHA with
+        // EnableTransparentWindowHost + SolidTintSystemBackdrop(Transparent)
+        // breaks DWM per-pixel alpha on Win10 and renders black rectangular
+        // corners outside rounded XAML borders. Opacity is applied on
+        // _surfaceBorder, and mouse passthrough uses WS_EX_TRANSPARENT across
+        // the window tree (matching DesktopToastHudInterop).
         extendedStyle |= Win32Helper.WS_EX_TOOLWINDOW |
                          Win32Helper.WS_EX_NOACTIVATE |
                          Win32Helper.WS_EX_TRANSPARENT |
-                         Win32Helper.WS_EX_LAYERED |
                          Win32Helper.WS_EX_TOPMOST;
+        extendedStyle &= ~Win32Helper.WS_EX_LAYERED;
         _ = Win32Helper.SetWindowLongPtr(
             _hWnd,
             Win32Helper.GWL_EXSTYLE,
@@ -142,11 +206,20 @@ internal sealed class WidgetDetachPlacementPreviewWindow : IDisposable
                    Win32Helper.WS_DLGFRAME |
                    Win32Helper.WS_THICKFRAME);
         _ = Win32Helper.SetWindowLong(_hWnd, Win32Helper.GWL_STYLE, style);
-        _ = Win32Helper.SetLayeredWindowAttributes(
+        _ = Win32Helper.SetWindowPos(
             _hWnd,
+            IntPtr.Zero,
             0,
-            TrackingOpacity,
-            Win32Helper.LWA_ALPHA);
+            0,
+            0,
+            0,
+            Win32Helper.SWP_NOMOVE |
+            Win32Helper.SWP_NOSIZE |
+            Win32Helper.SWP_NOZORDER |
+            Win32Helper.SWP_NOACTIVATE |
+            Win32Helper.SWP_FRAMECHANGED);
+        DesktopToastHudInterop.SetWindowTreeMousePassthrough(_hWnd, passthrough: true);
+        _surfaceBorder.Opacity = TrackingOpacity / 255.0;
         Win32Helper.DisableWindowFrameShadow(_hWnd);
         Win32Helper.EnableTransparentWindowHost(_hWnd);
         _transparentBackdrop = new SolidTintSystemBackdrop(Colors.Transparent);
@@ -163,7 +236,6 @@ internal sealed class WidgetDetachPlacementPreviewWindow : IDisposable
                 return;
             }
 
-            _animationGeneration++;
             ApplyAppearanceNoLock(appearance);
             SetOpacityNoLock(TrackingOpacity);
             HideNoLock();
@@ -203,48 +275,7 @@ internal sealed class WidgetDetachPlacementPreviewWindow : IDisposable
             }
 
             SetOpacityNoLock(CommittedOpacity);
-            MoveAndShowNoLock(NormalizeBounds(new RectInt32(
-                bounds.X - 2,
-                bounds.Y - 2,
-                bounds.Width + 4,
-                bounds.Height + 4)));
-        }
-    }
-
-    public async Task FadeOutAndHideAsync()
-    {
-        int generation;
-        lock (_gate)
-        {
-            if (_closed)
-            {
-                return;
-            }
-
-            generation = ++_animationGeneration;
-        }
-
-        foreach (byte opacity in new byte[] { 176, 118, 58, 16 })
-        {
-            lock (_gate)
-            {
-                if (_closed || generation != _animationGeneration)
-                {
-                    return;
-                }
-
-                SetOpacityNoLock(opacity);
-            }
-
-            await Task.Delay(28);
-        }
-
-        lock (_gate)
-        {
-            if (!_closed && generation == _animationGeneration)
-            {
-                HideNoLock();
-            }
+            MoveAndShowNoLock(NormalizeBounds(bounds));
         }
     }
 
@@ -268,7 +299,6 @@ internal sealed class WidgetDetachPlacementPreviewWindow : IDisposable
                 return;
             }
 
-            _animationGeneration++;
             HideNoLock();
         }
     }
@@ -283,12 +313,9 @@ internal sealed class WidgetDetachPlacementPreviewWindow : IDisposable
             }
 
             _closed = true;
-            _animationGeneration++;
             HideNoLock();
         }
 
-        _materialBackdrop?.Dispose();
-        _materialBackdrop = null;
         _window.SystemBackdrop = null;
         _transparentBackdrop.Dispose();
         Win32Helper.DisableTransparentWindowHost(_hWnd);
@@ -353,11 +380,7 @@ internal sealed class WidgetDetachPlacementPreviewWindow : IDisposable
             return;
         }
 
-        _ = Win32Helper.SetLayeredWindowAttributes(
-            _hWnd,
-            0,
-            opacity,
-            Win32Helper.LWA_ALPHA);
+        _surfaceBorder.Opacity = opacity / 255.0;
         _opacity = opacity;
     }
 
@@ -373,114 +396,85 @@ internal sealed class WidgetDetachPlacementPreviewWindow : IDisposable
                 : ElementTheme.Light;
         }
 
+        // Lightweight translucent landing frame (~34% alpha) instead of a heavy
+        // opaque block so the desktop and neighboring widgets stay legible.
+        Color basePlate = appearance.CustomBackgroundColor ??
+            (appearance.IsDark
+                ? Color.FromArgb(0xFF, 28, 30, 36)
+                : Color.FromArgb(0xFF, 246, 248, 252));
+        byte surfaceAlpha = appearance.IsDark ? (byte)0x58 : (byte)0x66;
+        _surfaceBorder.Background = SharedBrushCache.GetOrCreate(
+            Color.FromArgb(surfaceAlpha, basePlate.R, basePlate.G, basePlate.B));
+
+        Color headerWash = appearance.IsDark
+            ? Color.FromArgb(0x36, 255, 255, 255)
+            : Color.FromArgb(0x28, 0, 0, 0);
+        _headerRow.Background = SharedBrushCache.GetOrCreate(
+            Color.FromArgb(
+                appearance.IsDark ? (byte)0x42 : (byte)0x38,
+                basePlate.R,
+                basePlate.G,
+                basePlate.B));
+        _headerDivider.Background = SharedBrushCache.GetOrCreate(
+            Color.FromArgb(appearance.IsDark ? (byte)0x34 : (byte)0x26, tone.R, tone.G, tone.B));
+        _ = headerWash;
+
+        bool hasMemberTitle = !string.IsNullOrWhiteSpace(appearance.MemberTitle);
+        _headerRow.Visibility = hasMemberTitle ? Visibility.Visible : Visibility.Collapsed;
+        if (hasMemberTitle)
+        {
+            _memberTitleTextBlock.Text = appearance.MemberTitle;
+            _memberIcon.LabelText = appearance.MemberTitle;
+            _memberIcon.Glyph = string.IsNullOrWhiteSpace(appearance.MemberGlyph)
+                ? "\uE8A5"
+                : appearance.MemberGlyph;
+            _memberIcon.IconKind = string.IsNullOrWhiteSpace(appearance.MemberIconKind)
+                ? WidgetTitleIconKindNames.Default
+                : appearance.MemberIconKind;
+            _memberIcon.Mode = string.IsNullOrWhiteSpace(appearance.MemberIconMode)
+                ? WidgetTitleIconModeNames.Color
+                : appearance.MemberIconMode;
+            _memberIcon.AccentColor = appearance.AccentColor;
+            _memberIcon.CustomEmoji = appearance.MemberCustomEmoji ?? string.Empty;
+        }
+
+        Color primaryText = appearance.IsDark
+            ? Colors.White
+            : Color.FromArgb(0xF2, 20, 22, 26);
+        SolidColorBrush textBrush = SharedBrushCache.GetOrCreate(primaryText);
+        _memberTitleTextBlock.Foreground = textBrush;
         _captionTextBlock.Text = appearance.Caption;
-        _captionTextBlock.Foreground = new SolidColorBrush(
-            appearance.IsDark
-                ? Colors.White
-                : Color.FromArgb(0xEC, 20, 22, 26));
+        _captionTextBlock.Foreground = textBrush;
+        _badgeIcon.Foreground = textBrush;
 
-        bool hasCustomColor = appearance.CustomBackgroundColor.HasValue;
-        bool useSystemMaterial = !hasCustomColor &&
-            WidgetMaterialSystemBackdrop.IsSupported(appearance.MaterialType);
-
-        if (useSystemMaterial)
-        {
-            double materialSurfaceOpacity = SettingsService.IsAcrylicMaterial(appearance.MaterialType) &&
-                appearance.SurfaceOpacity <= 0.08
-                    ? 0.42
-                    : appearance.SurfaceOpacity;
-            var backdropAppearance = new WidgetMaterialBackdropAppearance(
-                appearance.MaterialType,
-                appearance.IsDark,
-                appearance.AccentColor,
-                materialSurfaceOpacity,
-                appearance.MaterialIntensity);
-            _materialBackdrop ??= new WidgetMaterialSystemBackdrop(
-                backdropAppearance,
-                closeElementTargetOnDisconnect: true);
-            _materialBackdrop.SetCornerRadius(surfaceRadius);
-            _materialBackdrop.UpdateAppearance(backdropAppearance);
-            _backdropElement.Visibility = Visibility.Visible;
-            if (!ReferenceEquals(_backdropElement.SystemBackdrop, _materialBackdrop))
-            {
-                _backdropElement.SystemBackdrop = _materialBackdrop;
-            }
-
-            // Provide a gentle theme-tinted backing plate so the material silhouette
-            // reads immediately on the first frame even before the composition target settles.
-            Color backingColor = WidgetMaterialVisualCalculator.BuildContentSolidSurfaceColor(
-                appearance.IsDark,
-                appearance.AccentColor,
-                surfaceOpacity: appearance.IsDark ? 0.24 : 0.30);
-            _surfaceBorder.Background = new SolidColorBrush(backingColor);
-        }
-        else
-        {
-            _materialBackdrop?.Suspend();
-            _backdropElement.Visibility = Visibility.Collapsed;
-
-            // In Solid Color mode (or custom background color / fallback),
-            // when in fully transparent mode (surfaceOpacity <= 0.05), render
-            // a semi-transparent surface of the corresponding theme/custom color.
-            bool isFullyTransparent = appearance.SurfaceOpacity <= 0.05;
-            double effectiveSolidOpacity = isFullyTransparent
-                ? (appearance.IsDark ? 0.56 : 0.64)
-                : Math.Clamp(appearance.SurfaceOpacity, 0.28, 0.94);
-
-            Color surfaceColor;
-            if (appearance.CustomBackgroundColor is { } customColor)
-            {
-                byte alpha = (byte)Math.Clamp(Math.Round(effectiveSolidOpacity * 255), 0, 255);
-                surfaceColor = Color.FromArgb(alpha, customColor.R, customColor.G, customColor.B);
-            }
-            else
-            {
-                surfaceColor = WidgetMaterialVisualCalculator.BuildContentSolidSurfaceColor(
-                    appearance.IsDark,
-                    appearance.AccentColor,
-                    effectiveSolidOpacity);
-            }
-
-            _surfaceBorder.Background = new SolidColorBrush(surfaceColor);
-        }
-
-        Color resolvedBorderColor;
-        double resolvedBorderThickness;
-        if (appearance.BorderThickness > 0 && appearance.BorderColor.A > 0)
-        {
-            resolvedBorderThickness = Math.Max(1.0, appearance.BorderThickness);
-            byte minBorderAlpha = appearance.IsDark ? (byte)0x5C : (byte)0x48;
-            resolvedBorderColor = Color.FromArgb(
-                Math.Max(appearance.BorderColor.A, minBorderAlpha),
+        double resolvedBorderThickness = appearance.BorderThickness > 0 && appearance.BorderColor.A > 0
+            ? Math.Max(1.5, appearance.BorderThickness)
+            : 1.5;
+        Color resolvedBorderColor = appearance.BorderThickness > 0 && appearance.BorderColor.A > 0
+            ? Color.FromArgb(
+                Math.Max(appearance.BorderColor.A, appearance.IsDark ? (byte)0x96 : (byte)0x7A),
                 appearance.BorderColor.R,
                 appearance.BorderColor.G,
-                appearance.BorderColor.B);
-        }
-        else
-        {
-            resolvedBorderThickness = 1.0;
-            resolvedBorderColor = Color.FromArgb(
-                appearance.IsDark ? (byte)0x48 : (byte)0x38,
+                appearance.BorderColor.B)
+            : Color.FromArgb(
+                appearance.IsDark ? (byte)0x92 : (byte)0x72,
                 tone.R,
                 tone.G,
                 tone.B);
-        }
 
-        _surfaceBorder.BorderBrush = new SolidColorBrush(resolvedBorderColor);
+        _surfaceBorder.BorderBrush = SharedBrushCache.GetOrCreate(resolvedBorderColor);
         _surfaceBorder.BorderThickness = new Thickness(resolvedBorderThickness);
         _surfaceBorder.CornerRadius = new CornerRadius(surfaceRadius);
 
-        _badgeBorder.Background = new SolidColorBrush(
+        _badgeBorder.Background = SharedBrushCache.GetOrCreate(
             appearance.IsDark
-                ? Color.FromArgb(0xE8, 26, 28, 34)
-                : Color.FromArgb(0xEE, 248, 249, 252));
-        _badgeBorder.BorderBrush = new SolidColorBrush(Color.FromArgb(
-            appearance.IsDark ? (byte)0x68 : (byte)0x48,
+                ? Color.FromArgb(0xF0, 28, 30, 36)
+                : Color.FromArgb(0xF4, 250, 251, 253));
+        _badgeBorder.BorderBrush = SharedBrushCache.GetOrCreate(Color.FromArgb(
+            appearance.IsDark ? (byte)0x90 : (byte)0x68,
             tone.R,
             tone.G,
             tone.B));
-        _badgeBorder.CornerRadius = new CornerRadius(
-            Math.Clamp(surfaceRadius * 0.45, 4, 6));
     }
 
     private static RectInt32 NormalizeBounds(RectInt32 bounds)
@@ -500,11 +494,6 @@ internal sealed class WidgetDetachPlacementPreviewWindow : IDisposable
                left.Height == right.Height;
     }
 
-    /// <summary>
-    /// The neutral interaction tone this window draws its drag silhouette with.
-    /// The window owns no visual tree yet when the constructor builds one, so it
-    /// reads the application theme resources directly.
-    /// </summary>
     private static Color ResolveNeutralTone() =>
         NeutralInteractionBrush.Line(null);
 }

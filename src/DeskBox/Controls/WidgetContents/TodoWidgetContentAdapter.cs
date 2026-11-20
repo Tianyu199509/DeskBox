@@ -79,7 +79,8 @@ public sealed class TodoWidgetContentAdapter :
     private bool _isHostActivated;
 
     private bool ShouldKeepCollapsedViewWarm =>
-        (ViewModel.SettingsService ?? App.Current?.SettingsService)?.Settings.Performance.KeepCapsuleContentWarm == true;
+        (ViewModel.SettingsService ?? App.Current?.SettingsService) is { } settingsService &&
+        PerformanceSettingsPolicy.ResolveEffectiveKeepCapsuleContentWarm(settingsService.Settings);
 
     private bool ShouldKeepHiddenViewWarm
     {
@@ -126,6 +127,35 @@ public sealed class TodoWidgetContentAdapter :
     {
         return ViewModel.InitializeAsync();
     }
+
+    internal Task<bool> AddExternalItemAsync(
+        string title,
+        DateTimeOffset? dueDate,
+        TodoPriority priority) =>
+        ViewModel.AddExternalItemAsync(title, dueDate, priority);
+
+    internal Task<bool> ToggleExternalItemAsync(string itemId) =>
+        ViewModel.ToggleExternalItemAsync(itemId);
+
+    internal Task<bool> RemoveExternalItemAsync(string itemId) =>
+        ViewModel.RemoveExternalItemAsync(itemId);
+
+    internal Task<bool> CycleExternalItemPriorityAsync(string itemId) =>
+        ViewModel.CycleExternalItemPriorityAsync(itemId);
+
+    internal Task<int> ClearCompletedExternalAsync(DateOnly? filterDueDate) =>
+        ViewModel.ClearCompletedExternalAsync(filterDueDate);
+
+    internal Task<bool> UpdateExternalItemAsync(
+        string itemId,
+        string? title,
+        DateTimeOffset? dueDate,
+        bool updateDueDate,
+        TodoPriority? priority) =>
+        ViewModel.UpdateExternalItemAsync(itemId, title, dueDate, updateDueDate, priority);
+
+    internal Task<int> RolloverOverdueExternalAsync(DateOnly targetDate) =>
+        ViewModel.RolloverOverdueExternalAsync(targetDate);
 
     public override void ApplyAppearance()
     {

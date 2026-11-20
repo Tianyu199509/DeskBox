@@ -78,7 +78,7 @@ public sealed class NeutralInteractionPaletteContractTests
         string todo = Read("src/DeskBox/Controls/WidgetContents/TodoWidgetContent.EditingAndUndo.cs");
         string titleSwitcher = Read("src/DeskBox/Controls/WidgetGroupTitleSwitcher.xaml.cs");
         string styleCache = Read("src/DeskBox/Controls/FileItemSurfaceStyleCache.cs");
-        string groupDrop = Read("src/DeskBox/Controls/WidgetShell.xaml.cs");
+        string groupDrop = Read("src/DeskBox/Controls/WidgetGroupDropOverlay.xaml.cs");
 
         string todoHover = MethodBody(todo, "void SetTodoItemHoverState(");
         Assert.Contains("NeutralInteractionBrush.Fill(", todoHover, StringComparison.Ordinal);

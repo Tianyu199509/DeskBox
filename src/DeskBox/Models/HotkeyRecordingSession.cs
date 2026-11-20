@@ -114,6 +114,14 @@ internal sealed class HotkeyRecordingSession
         CancelRequested = false;
     }
 
+    public void AbortHeldModifiers()
+    {
+        _heldModifierKeys.Clear();
+        HeldModifiers = HotkeyModifierKeys.None;
+        _candidateStandaloneModifier = HotkeyModifierKeys.None;
+        _candidateStandaloneAborted = false;
+    }
+
     private HotkeyModifierKeys RecomputeHeldModifiers()
     {
         var modifiers = HotkeyModifierKeys.None;

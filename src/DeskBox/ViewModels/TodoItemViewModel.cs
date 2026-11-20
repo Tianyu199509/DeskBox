@@ -175,7 +175,7 @@ public sealed partial class TodoItemViewModel : ObservableObject
             ? Visibility.Visible
             : Visibility.Collapsed;
 
-    public string CreatedText => Format("Todo.Detail.Created", CreatedAt.ToLocalTime().ToString("yyyy/M/d HH:mm"));
+    public string CreatedText => Format("Todo.Detail.Created", CreatedAt.ToLocalTime().ToString("yyyy/M/d HH:mm", System.Globalization.CultureInfo.InvariantCulture));
 
     public DateTimeOffset UpdatedAt
     {
@@ -548,8 +548,8 @@ public sealed partial class TodoItemViewModel : ObservableObject
                 if (localNextDue.Date > today.AddDays(1))
                 {
                     string formattedNextDate = localNextDue.Date.Year == today.Year
-                        ? localNextDue.ToString("M/d")
-                        : localNextDue.ToString("yyyy/M/d");
+                        ? localNextDue.ToString("M/d", System.Globalization.CultureInfo.InvariantCulture)
+                        : localNextDue.ToString("yyyy/M/d", System.Globalization.CultureInfo.InvariantCulture);
                     return Format("Todo.Recurrence.CompletedTodayNextDate", RecurrenceSummaryText, formattedNextDate);
                 }
             }
@@ -586,8 +586,8 @@ public sealed partial class TodoItemViewModel : ObservableObject
                 else
                 {
                     string formattedDate = due.Year == today.Year
-                        ? localDueDate.ToString("M/d")
-                        : localDueDate.ToString("yyyy/M/d");
+                        ? localDueDate.ToString("M/d", System.Globalization.CultureInfo.InvariantCulture)
+                        : localDueDate.ToString("yyyy/M/d", System.Globalization.CultureInfo.InvariantCulture);
                     statusText = Format("Todo.Due.Date", formattedDate);
                 }
             }
@@ -636,14 +636,14 @@ public sealed partial class TodoItemViewModel : ObservableObject
             if (due == today)
             {
                 return HasDueTime
-                    ? Format("Todo.Due.TodayAt", local.ToString("HH:mm"))
+                    ? Format("Todo.Due.TodayAt", local.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture))
                     : LocalizedText("Todo.Due.Today");
             }
 
             if (due == today.AddDays(1))
             {
                 return HasDueTime
-                    ? Format("Todo.Due.TomorrowAt", local.ToString("HH:mm"))
+                    ? Format("Todo.Due.TomorrowAt", local.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture))
                     : LocalizedText("Todo.Due.Tomorrow");
             }
 
@@ -849,15 +849,15 @@ public sealed partial class TodoItemViewModel : ObservableObject
     private static string FormatDueDateTime(DateTimeOffset dueDate)
     {
         return dueDate.Second == 0
-            ? dueDate.ToString("yyyy/M/d HH:mm")
-            : dueDate.ToString("yyyy/M/d HH:mm:ss");
+            ? dueDate.ToString("yyyy/M/d HH:mm", System.Globalization.CultureInfo.InvariantCulture)
+            : dueDate.ToString("yyyy/M/d HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
     }
 
     private static string FormatDueTime(DateTimeOffset dueDate)
     {
         return dueDate.Second == 0
-            ? dueDate.ToString("HH:mm")
-            : dueDate.ToString("HH:mm:ss");
+            ? dueDate.ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture)
+            : dueDate.ToString("HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
     }
 
     private string FormatSnoozeDateTime(DateTimeOffset snoozedUntil)
@@ -875,17 +875,17 @@ public sealed partial class TodoItemViewModel : ObservableObject
         }
 
         return snoozedUntil.Second == 0
-            ? snoozedUntil.ToString("yyyy/M/d HH:mm")
-            : snoozedUntil.ToString("yyyy/M/d HH:mm:ss");
+            ? snoozedUntil.ToString("yyyy/M/d HH:mm", System.Globalization.CultureInfo.InvariantCulture)
+            : snoozedUntil.ToString("yyyy/M/d HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
     }
 
     private static Windows.UI.Color ParseColor(string hex)
     {
         string value = hex.TrimStart('#');
         if (value.Length != 6 ||
-            !byte.TryParse(value[..2], System.Globalization.NumberStyles.HexNumber, null, out byte red) ||
-            !byte.TryParse(value.Substring(2, 2), System.Globalization.NumberStyles.HexNumber, null, out byte green) ||
-            !byte.TryParse(value.Substring(4, 2), System.Globalization.NumberStyles.HexNumber, null, out byte blue))
+            !byte.TryParse(value[..2], System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture, out byte red) ||
+            !byte.TryParse(value.Substring(2, 2), System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture, out byte green) ||
+            !byte.TryParse(value.Substring(4, 2), System.Globalization.NumberStyles.HexNumber, System.Globalization.CultureInfo.InvariantCulture, out byte blue))
         {
             return Colors.Gray;
         }

@@ -42,15 +42,39 @@ public sealed partial class QuickCaptureSurfaceContent
 
     private void StartRelativeTimestampTimer()
     {
-        if (!_isDisposed)
+        if (!_isDisposed && IsLoaded && _isWindowVisible && !_isCompactCollapsed)
         {
             _relativeTimestampTimer?.Start();
+        }
+        else
+        {
+            _relativeTimestampTimer?.Stop();
         }
     }
 
     private void StopRelativeTimestampTimer()
     {
         _relativeTimestampTimer?.Stop();
+    }
+
+    internal void UpdateRelativeTimestampTimerState(bool refreshNowIfActive = false)
+    {
+        if (!_isDisposed && IsLoaded && _isWindowVisible && !_isCompactCollapsed)
+        {
+            if (_relativeTimestampTimer is { IsRunning: false })
+            {
+                _relativeTimestampTimer.Start();
+            }
+
+            if (refreshNowIfActive)
+            {
+                ViewModel.RefreshVisibleRelativeTimestamps();
+            }
+        }
+        else
+        {
+            _relativeTimestampTimer?.Stop();
+        }
     }
 
     private void DisposeOptimizationResources()

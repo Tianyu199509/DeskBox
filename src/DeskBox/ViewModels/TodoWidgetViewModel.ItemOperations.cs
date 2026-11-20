@@ -137,9 +137,8 @@ public sealed partial class TodoWidgetViewModel
         return viewModel;
     }
 
-    private static readonly Regex MarkdownTaskPrefixRegex = new(
-        @"^\s*(?:[-*+]\s*\[(?<checked>[xX ])\]\s*|(?<box>[☐☑✓✔✅])\s*|[-*+•]\s+|\d{1,3}[.)]\s+)",
-        RegexOptions.CultureInvariant);
+    [GeneratedRegex(@"^\s*(?:[-*+]\s*\[(?<checked>[xX ])\]\s*|(?<box>[☐☑✓✔✅])\s*|[-*+•]\s+|\d{1,3}[.)]\s+)", RegexOptions.CultureInvariant)]
+    private static partial Regex MarkdownTaskPrefixRegex { get; }
 
     internal static (string Text, bool IsCompleted) StripPastedTaskPrefix(string line)
     {

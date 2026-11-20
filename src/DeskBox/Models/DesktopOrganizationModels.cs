@@ -139,6 +139,8 @@ public sealed class DesktopOrganizationTargetPlan
 
     public bool CreatesWidget { get; init; }
 
+    public bool AutoBindCategoryRule { get; init; } = true;
+
     public List<DesktopOrganizationFileSnapshot> Items { get; init; } = [];
 
     public DesktopOrganizationRect? PlannedBounds { get; set; }
@@ -148,7 +150,8 @@ public sealed class DesktopOrganizationTargetPlan
         string displayName,
         string targetDirectoryPath,
         bool createsWidget,
-        IEnumerable<DesktopOrganizationFileSnapshot> items) => new()
+        IEnumerable<DesktopOrganizationFileSnapshot> items,
+        bool? autoBindCategoryRule = null) => new()
         {
             SourceBucketId = SourceBucketId,
             CategoryId = CategoryId,
@@ -156,6 +159,7 @@ public sealed class DesktopOrganizationTargetPlan
             SuggestedDisplayName = displayName,
             TargetDirectoryPath = targetDirectoryPath,
             CreatesWidget = createsWidget,
+            AutoBindCategoryRule = autoBindCategoryRule ?? AutoBindCategoryRule,
             Items = items.ToList(),
             PlannedBounds = PlannedBounds
         };

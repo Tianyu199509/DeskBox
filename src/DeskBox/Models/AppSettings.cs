@@ -21,7 +21,7 @@ namespace DeskBox.Models;
 /// SettingsSliceOwnershipContractTests access ratchet keeps facade references
 /// shrinking toward that end state.
 /// </remarks>
-public class AppSettings
+public sealed class AppSettings
 {
     /// <summary>
     /// Settings schema version for migration purposes.
@@ -941,6 +941,9 @@ public class AppSettings
 
     /// <inheritdoc cref="ClipboardSettingsSlice.ClipboardTabDisplayMode"/>
     public string ClipboardTabDisplayMode { get => Clipboard.ClipboardTabDisplayMode; set => Clipboard.ClipboardTabDisplayMode = value; }
+
+    /// <inheritdoc cref="ClipboardSettingsSlice.ClipboardTabLayout"/>
+    public string ClipboardTabLayout { get => Clipboard.ClipboardTabLayout; set => Clipboard.ClipboardTabLayout = value; }
 
     /// <inheritdoc cref="ClipboardSettingsSlice.ClipboardCardDensity"/>
     public string ClipboardCardDensity { get => Clipboard.ClipboardCardDensity; set => Clipboard.ClipboardCardDensity = value; }

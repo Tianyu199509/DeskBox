@@ -16,7 +16,10 @@ public static class AttachmentStorageService
         }
 
         string normalizedSourcePath = Path.GetFullPath(sourcePath);
-        if (!copyToManagedStorage)
+        if (!copyToManagedStorage ||
+            StorageMigrationNativeMethods.IsFileSystemLinkOrMountPoint(normalizedSourcePath) ||
+            StorageMigrationNativeMethods.IsAppExecutionAliasReparsePoint(normalizedSourcePath) ||
+            DriveMediaInterop.HasUnhydratedCloudAttributesOnDisk(normalizedSourcePath))
         {
             return CreateAttachment(normalizedSourcePath, TodoAttachment.LinkedStorageMode);
         }
@@ -43,7 +46,7 @@ public static class AttachmentStorageService
         string normalizedName = FileService.SanitizeFileSystemName(Path.GetFileName(fileName));
         if (string.IsNullOrWhiteSpace(normalizedName))
         {
-            normalizedName = $"Attachment-{DateTime.Now:yyyyMMdd-HHmmss}";
+            normalizedName = FormattableString.Invariant($"Attachment-{DateTime.Now:yyyyMMdd-HHmmss}");
         }
 
         string destinationPath = FileService.GetAvailablePath(Path.Combine(managedDirectory, normalizedName));

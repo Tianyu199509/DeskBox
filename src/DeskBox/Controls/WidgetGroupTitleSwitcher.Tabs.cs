@@ -25,7 +25,6 @@ public sealed partial class WidgetGroupTitleSwitcher
     private Windows.UI.Color _tabDisabledColor = Windows.UI.Color.FromArgb(0x66, 0xFF, 0xFF, 0xFF);
     private bool _tabHighContrast;
     private bool _hasExplicitTabColors;
-    private bool _isTabDragDisabledByElevation;
     private bool _isSavingTabOrder;
     private bool _tabPointerDown;
     private bool _tabDragCanceled;
@@ -68,6 +67,11 @@ public sealed partial class WidgetGroupTitleSwitcher
     private const double TabHoldHorizontalCreepToleranceDips = 10.0;
     private const int NeighborSlideDurationMilliseconds = 160;
     private const int DropSettleDurationMilliseconds = 140;
+    internal const double ConnectedTabFootRadius = 6.0;
+    internal const byte DefaultConnectedTabContourAlpha = 0x1A;
+    internal const byte DefaultInactiveSeparatorAlpha = 0x14;
+    internal const byte DefaultConnectedTabFillAlpha = 0x17;
+    internal const byte HoverConnectedTabFillAlpha = 0x1F;
 
     private bool UsesTabs => WidgetGroupNavigationStyles.UsesTabStrip(
         WidgetGroupNavigationStyles.Normalize(NavigationStyle, allowFollowDefault: false));
@@ -156,17 +160,32 @@ public sealed partial class WidgetGroupTitleSwitcher
         return (primary, secondary);
     }
 
+    internal static Windows.UI.Text.FontWeight ResolveTabTitleFontWeight(
+        bool isSelected,
+        bool isEqualTabs,
+        bool isHighContrast) =>
+        new(400);
+
     private void UpdateTabVisuals()
     {
         var (primary, secondary) = ResolveEffectiveTabColors();
         bool equalTabs = UsesEqualTabs;
+        SolidColorBrush primaryBrush = SharedBrushCache.GetOrCreate(primary);
+        if (CurrentTitle is not null)
+        {
+            CurrentTitle.Foreground = primaryBrush;
+        }
+        if (OutgoingTitle is not null)
+        {
+            OutgoingTitle.Foreground = primaryBrush;
+        }
         if (ScrollLeftButtonIcon is not null)
         {
-            ScrollLeftButtonIcon.Foreground = SharedBrushCache.GetOrCreate(primary);
+            ScrollLeftButtonIcon.Foreground = primaryBrush;
         }
         if (ScrollRightButtonIcon is not null)
         {
-            ScrollRightButtonIcon.Foreground = SharedBrushCache.GetOrCreate(primary);
+            ScrollRightButtonIcon.Foreground = primaryBrush;
         }
 
         foreach (var (memberId, row) in _tabs)
@@ -190,9 +209,7 @@ public sealed partial class WidgetGroupTitleSwitcher
                 row.Tab.Background = SharedBrushCache.GetOrCreate(Colors.Transparent);
                 row.Title.Foreground = SharedBrushCache.GetOrCreate(
                     isSelected || isHovered || isLiveDragged ? primary : secondary);
-                row.Title.FontWeight = isSelected
-                    ? Microsoft.UI.Text.FontWeights.SemiBold
-                    : Microsoft.UI.Text.FontWeights.Normal;
+                row.Title.FontWeight = ResolveTabTitleFontWeight(isSelected, equalTabs, isHighContrast: true);
                 row.Title.Opacity = 1;
                 row.Icon.Opacity = 1;
                 row.Header.Opacity = 1;
@@ -214,14 +231,12 @@ public sealed partial class WidgetGroupTitleSwitcher
                         Windows.UI.Color.FromArgb(bgAlpha, primary.R, primary.G, primary.B));
                 row.Title.Foreground = SharedBrushCache.GetOrCreate(
                     isSelected || isHovered || isPressed || isLiveDragged ? primary : secondary);
-                row.Title.FontWeight = isSelected
-                    ? Microsoft.UI.Text.FontWeights.SemiBold
-                    : Microsoft.UI.Text.FontWeights.Normal;
+                row.Title.FontWeight = ResolveTabTitleFontWeight(isSelected, equalTabs, isHighContrast: false);
                 row.Title.Opacity = isSelected || isLiveDragged
                     ? 1.0
                     : isHovered || isPressed
                         ? 0.88
-                        : 0.56;
+                        : 0.58;
                 row.Icon.Opacity = isSelected || isLiveDragged
                     ? 1.0
                     : isHovered || isPressed
@@ -236,11 +251,11 @@ public sealed partial class WidgetGroupTitleSwitcher
                 byte bgAlpha = isSelected
                     ? (byte)0x00
                     : isLiveDragged
-                        ? (byte)0x1C
+                        ? (byte)0x18
                         : isPressed
-                            ? (byte)0x14
+                            ? (byte)0x09
                             : isHovered
-                                ? (byte)0x0E
+                                ? (byte)0x0C
                                 : (byte)0x00;
                 row.Tab.Background = bgAlpha == 0
                     ? SharedBrushCache.GetOrCreate(Colors.Transparent)
@@ -248,14 +263,12 @@ public sealed partial class WidgetGroupTitleSwitcher
                         Windows.UI.Color.FromArgb(bgAlpha, primary.R, primary.G, primary.B));
                 row.Title.Foreground = SharedBrushCache.GetOrCreate(
                     isSelected || isHovered || isPressed || isLiveDragged ? primary : secondary);
-                row.Title.FontWeight = isSelected
-                    ? Microsoft.UI.Text.FontWeights.SemiBold
-                    : Microsoft.UI.Text.FontWeights.Normal;
+                row.Title.FontWeight = ResolveTabTitleFontWeight(isSelected, equalTabs, isHighContrast: false);
                 row.Title.Opacity = isSelected || isLiveDragged
                     ? 1.0
                     : isHovered || isPressed
                         ? 0.92
-                        : 0.64;
+                        : 0.66;
                 row.Icon.Opacity = isSelected || isLiveDragged
                     ? 1.0
                     : isHovered || isPressed
@@ -394,7 +407,7 @@ public sealed partial class WidgetGroupTitleSwitcher
         TabsView.HorizontalAlignment = equalTabs
             ? HorizontalAlignment.Stretch
             : HorizontalAlignment.Left;
-        TabsView.ColumnSpacing = equalTabs ? 0 : 2;
+        TabsView.ColumnSpacing = equalTabs ? 0 : 1;
         if (equalTabs && TabsScrollViewer.HorizontalOffset > 0)
         {
             TabsScrollViewer.ChangeView(0, null, null, disableAnimation: true);
@@ -473,7 +486,7 @@ public sealed partial class WidgetGroupTitleSwitcher
             row.Icon.IconSize = IconSize;
             row.Icon.Visibility = showIcon ? Visibility.Visible : Visibility.Collapsed;
             row.Icon.Margin = showIcon && showText
-                ? new Thickness(0, 0, 6, 0)
+                ? new Thickness(0, 0, 5, 0)
                 : new Thickness(0);
             row.Title.Text = member.Name;
             row.Title.FontSize = CurrentTitle.FontSize;
@@ -517,9 +530,9 @@ public sealed partial class WidgetGroupTitleSwitcher
         {
             row.Tab.HorizontalAlignment = HorizontalAlignment.Left;
             row.Tab.Margin = new Thickness(0, TabsModeOuterInset, 0, 0);
-            row.Tab.MinWidth = 64;
+            row.Tab.MinWidth = 56;
             row.Tab.MaxWidth = 160;
-            row.Tab.Padding = new Thickness(11, 0, 11, 0);
+            row.Tab.Padding = new Thickness(10, 0, 10, 0);
             row.Header.HorizontalAlignment = HorizontalAlignment.Center;
             row.Title.MaxWidth = MaximumTitleWidth;
         }
@@ -952,13 +965,14 @@ public sealed partial class WidgetGroupTitleSwitcher
 
         double scale = XamlRoot?.RasterizationScale is > 0 ? XamlRoot.RasterizationScale : 1.0;
         var (primary, _) = ResolveEffectiveTabColors();
-        byte contourAlpha = _tabHighContrast ? (byte)0xFF : (byte)0x2E;
-        byte separatorAlpha = _tabHighContrast ? (byte)0xFF : (byte)0x22;
+        byte contourAlpha = _tabHighContrast ? (byte)0xFF : DefaultConnectedTabContourAlpha;
+        byte separatorAlpha = _tabHighContrast ? (byte)0xFF : DefaultInactiveSeparatorAlpha;
         ConnectedTabContourPath.Stroke = SharedBrushCache.GetOrCreate(
             Windows.UI.Color.FromArgb(contourAlpha, primary.R, primary.G, primary.B));
         InactiveSeparatorsPath.Stroke = SharedBrushCache.GetOrCreate(
             Windows.UI.Color.FromArgb(separatorAlpha, primary.R, primary.G, primary.B));
 
+        double borderInset = 1.0 / scale;
         double lineStartX = 0;
         double lineEndX = TabsRoot.ActualWidth;
         if (FindAncestorTitleBarGrid() is { ActualWidth: > 0 } titleBarGrid)
@@ -966,8 +980,10 @@ public sealed partial class WidgetGroupTitleSwitcher
             try
             {
                 GeneralTransform titleTransform = titleBarGrid.TransformToVisual(TabsRoot);
-                lineStartX = titleTransform.TransformPoint(new Windows.Foundation.Point(0, 0)).X;
-                lineEndX = titleTransform.TransformPoint(new Windows.Foundation.Point(titleBarGrid.ActualWidth, 0)).X;
+                lineStartX = titleTransform.TransformPoint(new Windows.Foundation.Point(0, 0)).X + borderInset;
+                lineEndX = Math.Max(
+                    lineStartX,
+                    titleTransform.TransformPoint(new Windows.Foundation.Point(titleBarGrid.ActualWidth, 0)).X - borderInset);
             }
             catch (InvalidOperationException)
             {
@@ -1074,8 +1090,8 @@ public sealed partial class WidgetGroupTitleSwitcher
                 double rawLeft = tabTransform.TransformPoint(new Windows.Foundation.Point(0, 0)).X;
                 double rawRight = tabTransform.TransformPoint(new Windows.Foundation.Point(selectedRow.Tab.ActualWidth, 0)).X;
 
-                double clipLeft = ScrollLeftButton.Visibility == Visibility.Visible ? viewportLeft + 1 : lineStartX + 1;
-                double clipRight = ScrollRightButton.Visibility == Visibility.Visible ? viewportRight - 1 : lineEndX - 1;
+                double clipLeft = ScrollLeftButton.Visibility == Visibility.Visible ? viewportLeft + 1 : lineStartX;
+                double clipRight = ScrollRightButton.Visibility == Visibility.Visible ? viewportRight - 1 : lineEndX;
                 double archLeft = SnapToDevicePixelCenter(Math.Clamp(rawLeft, clipLeft, clipRight), scale);
                 double archRight = SnapToDevicePixelCenter(Math.Clamp(rawRight, clipLeft, clipRight), scale);
 
@@ -1086,8 +1102,8 @@ public sealed partial class WidgetGroupTitleSwitcher
                     double tabWidth = archRight - archLeft;
                     double desiredTopR = ComputeTabsConcentricCornerRadius();
                     double topR = Math.Min(desiredTopR, Math.Max(3.0, (tabWidth - 6.0) * 0.5));
-                    double leftFootR = Math.Min(4.0, Math.Max(0.0, archLeft - lineStartX));
-                    double rightFootR = Math.Min(4.0, Math.Max(0.0, lineEndX - archRight));
+                    double leftFootR = Math.Min(ConnectedTabFootRadius, Math.Max(0.0, archLeft - lineStartX));
+                    double rightFootR = Math.Min(ConnectedTabFootRadius, Math.Max(0.0, lineEndX - archRight));
 
                     var contourGeometry = new PathGeometry();
                     var contourFigure = new PathFigure
@@ -1160,7 +1176,7 @@ public sealed partial class WidgetGroupTitleSwitcher
                     else
                     {
                         bool selectedHovered = string.Equals(_pointerOverTabId, _selectedTabId, StringComparison.Ordinal);
-                        byte fillAlpha = selectedHovered ? (byte)0x1A : (byte)0x12;
+                        byte fillAlpha = selectedHovered ? HoverConnectedTabFillAlpha : DefaultConnectedTabFillAlpha;
                         ConnectedTabFillPath.Fill = SharedBrushCache.GetOrCreate(
                             Windows.UI.Color.FromArgb(fillAlpha, primary.R, primary.G, primary.B));
 
@@ -1315,6 +1331,13 @@ public sealed partial class WidgetGroupTitleSwitcher
     // Pointer-Captured Live Reorder, Neighbor Slide-Aside & Tear-Out Detach
     // =========================================================================
 
+    private static bool IsPrimaryPointerPressed(Microsoft.UI.Input.PointerPoint point) =>
+        point.Properties.IsLeftButtonPressed ||
+        (point.PointerDeviceType is
+            Microsoft.UI.Input.PointerDeviceType.Touch or
+            Microsoft.UI.Input.PointerDeviceType.Pen &&
+         point.IsInContact);
+
     private void TabsView_PointerPressed(object sender, PointerRoutedEventArgs e)
     {
         ExitFileDragStripFreeze();
@@ -1323,13 +1346,13 @@ public sealed partial class WidgetGroupTitleSwitcher
             return;
         }
 
-        if (!e.GetCurrentPoint(TabsView).Properties.IsLeftButtonPressed ||
+        if (!IsPrimaryPointerPressed(e.GetCurrentPoint(TabsView)) ||
             FindGroupTabBorder(e.OriginalSource) is not { Tag: string memberId })
         {
             return;
         }
 
-        FlushPendingCtrlWheelReorderNow();
+        _ = FlushPendingCtrlWheelReorderNowAsync();
         CancelTabPress(releasePointerCapture: false);
         _tabPointerDown = true;
         _pressedTabId = memberId;
@@ -1353,9 +1376,7 @@ public sealed partial class WidgetGroupTitleSwitcher
         _tabLongPressCancellation?.Cancel();
         _tabLongPressCancellation?.Dispose();
         _tabLongPressCancellation = null;
-        if (_isTabDragDisabledByElevation ||
-            DragDropPermissionService.IsCurrentProcessElevatedCached() ||
-            _presentation is not { Members.Count: >= 2 })
+        if (_presentation is not { Members.Count: >= 2 })
         {
             return;
         }
@@ -1470,8 +1491,6 @@ public sealed partial class WidgetGroupTitleSwitcher
             Canvas.SetZIndex(row.Tab, string.Equals(id, memberId, StringComparison.Ordinal) ? 20 : 1);
         }
 
-        _liveReorderState.DetachDragStartedRaised = true;
-        DetachDragStarted?.Invoke(this, new WidgetGroupMemberEventArgs(memberId));
         AnimateTabScale(draggedRow, 1.03, 110);
         UpdateTabVisuals();
     }
@@ -1483,7 +1502,7 @@ public sealed partial class WidgetGroupTitleSwitcher
         if (_liveReorderState is { } liveState)
         {
             Microsoft.UI.Input.PointerPoint pointInRoot = e.GetCurrentPoint(TabsRoot);
-            if (!pointInRoot.Properties.IsLeftButtonPressed)
+            if (!IsPrimaryPointerPressed(pointInRoot))
             {
                 _ = CompleteLiveTabReorderAsync(canceled: _tabDragCanceled);
                 return;
@@ -1502,7 +1521,7 @@ public sealed partial class WidgetGroupTitleSwitcher
         }
 
         Microsoft.UI.Input.PointerPoint currentPointInStrip = e.GetCurrentPoint(TabsView);
-        if (!currentPointInStrip.Properties.IsLeftButtonPressed)
+        if (!IsPrimaryPointerPressed(currentPointInStrip))
         {
             CancelTabPress(releasePointerCapture: true);
             UpdateTabVisuals();
@@ -1538,8 +1557,6 @@ public sealed partial class WidgetGroupTitleSwitcher
         {
             // Finger is holding horizontally in place preparing to reorder; arm early if near threshold.
             if (elapsedMs >= 170 &&
-                !_isTabDragDisabledByElevation &&
-                !DragDropPermissionService.IsCurrentProcessElevatedCached() &&
                 _presentation is { Members.Count: >= 2 })
             {
                 _isTabDragLongPressArmed = true;
@@ -1578,7 +1595,8 @@ public sealed partial class WidgetGroupTitleSwitcher
         double exitMarginY = state.IsDetachingOutside ? 18.0 : 30.0;
         bool outsideVertically = pointInRoot.Y < -exitMarginY || pointInRoot.Y > rootHeight + exitMarginY;
         bool outsideHorizontally = pointInRoot.X < -160 || pointInRoot.X > Math.Max(TabsRoot.ActualWidth, 120) + 160;
-        bool shouldDetachOutside = outsideVertically || outsideHorizontally;
+        bool shouldDetachOutside = state.OriginalOrder.Length > 1 &&
+            (outsideVertically || outsideHorizontally);
 
         if (shouldDetachOutside)
         {
@@ -1603,6 +1621,11 @@ public sealed partial class WidgetGroupTitleSwitcher
         {
             state.IsDetachingOutside = false;
             state.DraggedRow.Tab.Opacity = 1.0;
+            if (state.DetachDragStartedRaised)
+            {
+                state.DetachDragStartedRaised = false;
+                DetachDragCompleted?.Invoke(this, new WidgetGroupMemberEventArgs(state.DraggedMemberId));
+            }
             AnimateNeighborsToCurrentOrder(state, animate: true);
         }
 
@@ -1639,7 +1662,7 @@ public sealed partial class WidgetGroupTitleSwitcher
             double currentSlotLeft = ComputeSlotLeftAt(state, state.CurrentTargetIndex, spacing);
             string rightNeighborId = state.CurrentOrder[state.CurrentTargetIndex + 1];
             double rightNeighborWidth = GetTabSlotWidth(rightNeighborId, state.DraggedWidth);
-            double nextTriggerLeft = currentSlotLeft + ((rightNeighborWidth + spacing) * 0.48);
+            double nextTriggerLeft = currentSlotLeft + ((rightNeighborWidth + spacing) * 0.55);
             if (draggedLeft > nextTriggerLeft)
             {
                 state.CurrentOrder.RemoveAt(state.CurrentTargetIndex);
@@ -1659,7 +1682,7 @@ public sealed partial class WidgetGroupTitleSwitcher
             double prevSlotLeft = ComputeSlotLeftAt(state, state.CurrentTargetIndex - 1, spacing);
             string leftNeighborId = state.CurrentOrder[state.CurrentTargetIndex - 1];
             double leftNeighborWidth = GetTabSlotWidth(leftNeighborId, state.DraggedWidth);
-            double prevTriggerLeft = prevSlotLeft + ((leftNeighborWidth + spacing) * 0.52);
+            double prevTriggerLeft = prevSlotLeft + ((leftNeighborWidth + spacing) * 0.45);
             if (draggedLeft < prevTriggerLeft)
             {
                 state.CurrentOrder.RemoveAt(state.CurrentTargetIndex);
@@ -1791,7 +1814,7 @@ public sealed partial class WidgetGroupTitleSwitcher
 
     private void DragEdgeScrollTimer_Tick(DispatcherQueueTimer sender, object args)
     {
-        if (_liveReorderState is not { } state ||
+        if ((_liveReorderState is null && !_isFileDragStripFreeze) ||
             UsesEqualTabs ||
             TabsScrollViewer is null ||
             _dragEdgeScrollDirection == 0)
@@ -1811,7 +1834,10 @@ public sealed partial class WidgetGroupTitleSwitcher
         }
 
         TabsScrollViewer.ChangeView(nextOffset, null, null, disableAnimation: true);
-        UpdateLiveTabReorder(state, state.LastPointerInRoot);
+        if (_liveReorderState is { } state)
+        {
+            UpdateLiveTabReorder(state, state.LastPointerInRoot);
+        }
     }
 
     private void StopDragEdgeScrollTimer()
@@ -2045,8 +2071,6 @@ public sealed partial class WidgetGroupTitleSwitcher
     internal bool TryHandleCtrlWheelReorder(double delta)
     {
         if (!UsesTabs ||
-            _isTabDragDisabledByElevation ||
-            DragDropPermissionService.IsCurrentProcessElevatedCached() ||
             _liveReorderState is not null ||
             _isSavingTabOrder ||
             _pickerOpen ||
@@ -2167,14 +2191,19 @@ public sealed partial class WidgetGroupTitleSwitcher
 
     private void CtrlWheelCommitTimer_Tick(DispatcherQueueTimer sender, object args)
     {
-        FlushPendingCtrlWheelReorderNow();
+        _ = FlushPendingCtrlWheelReorderNowAsync();
     }
 
-    private async void FlushPendingCtrlWheelReorderNow()
+    private async Task FlushPendingCtrlWheelReorderNowAsync()
     {
         if (_ctrlWheelCommitTimer is not null)
         {
             _ctrlWheelCommitTimer.Stop();
+        }
+
+        if (_isSavingTabOrder)
+        {
+            return;
         }
 
         List<string>? workingOrder = _ctrlWheelOrder;
@@ -2447,7 +2476,46 @@ public sealed partial class WidgetGroupTitleSwitcher
         }
 
         EnterFileDragStripFreeze();
+        UpdateDragEdgeAutoScroll(args.GetPosition(TabsRoot));
         ObserveDragHoverSwitch(FindTabMemberUnderDrag(args), native: false);
+    }
+
+    internal void ObserveNativeDragAutoScroll(
+        FrameworkElement coordinateSpace,
+        Windows.Foundation.Point point)
+    {
+        if (!UsesTabs || TabsRoot.ActualWidth <= 0 || TabsRoot.ActualHeight <= 0)
+        {
+            StopDragEdgeScrollTimer();
+            return;
+        }
+
+        try
+        {
+            Windows.Foundation.Point rootPoint = coordinateSpace
+                .TransformToVisual(TabsRoot)
+                .TransformPoint(point);
+            if (rootPoint.Y < -4 || rootPoint.Y > TabsRoot.ActualHeight + 4)
+            {
+                StopDragEdgeScrollTimer();
+                return;
+            }
+
+            EnterFileDragStripFreeze();
+            UpdateDragEdgeAutoScroll(rootPoint);
+        }
+        catch (InvalidOperationException)
+        {
+            StopDragEdgeScrollTimer();
+        }
+    }
+
+    internal void StopNativeDragAutoScroll()
+    {
+        if (_liveReorderState is null)
+        {
+            StopDragEdgeScrollTimer();
+        }
     }
 
     private void TabsView_DragLeave(object sender, DragEventArgs args)
@@ -2724,6 +2792,7 @@ public sealed partial class WidgetGroupTitleSwitcher
     private void ExitFileDragStripFreeze()
     {
         _fileDragFreezeExitGeneration++;
+        StopNativeDragAutoScroll();
         if (!_isFileDragStripFreeze)
         {
             return;
@@ -2856,7 +2925,8 @@ public sealed partial class WidgetGroupTitleSwitcher
         {
             return "missing";
         }
-        if (!Win32Helper.IsAnyMouseButtonDown())
+        if (!Win32Helper.IsAnyMouseButtonDown() &&
+            !Services.ActiveDeskBoxDragRegistry.HasActivePointerDragSession)
         {
             return "button";
         }
@@ -2868,6 +2938,7 @@ public sealed partial class WidgetGroupTitleSwitcher
 
     internal void CancelDragHoverSwitch()
     {
+        StopNativeDragAutoScroll();
         if (_dragHoverSwitchTimer is not null)
         {
             _dragHoverSwitchTimer.Stop();

@@ -11,7 +11,7 @@ public sealed class SearchPopupVisualContractTests
             "src/DeskBox/ViewModels/SearchPopupViewModel.cs"));
         string popup = File.ReadAllText(Path.Combine(
             root,
-            "src/DeskBox/Views/SearchPopupWindow.xaml.cs"));
+            "src/DeskBox/Views/SearchPopupWindow.ResultsAndPreview.cs"));
 
         Assert.Contains("ProviderRefreshDebounceDelay = TimeSpan.FromSeconds(1)", viewModel, StringComparison.Ordinal);
         Assert.Contains("SearchRefreshKind.ProviderUpdate && !response.IsComplete", viewModel, StringComparison.Ordinal);
@@ -26,7 +26,7 @@ public sealed class SearchPopupVisualContractTests
         string root = FindRepositoryRoot();
         string popup = File.ReadAllText(Path.Combine(
             root,
-            "src/DeskBox/Views/SearchPopupWindow.xaml.cs"));
+            "src/DeskBox/Views/SearchPopupWindow.ResultsAndPreview.cs"));
 
         Assert.Contains("var item = ResolveResultItem(source);", popup, StringComparison.Ordinal);
         Assert.Contains("var item = ResolveResultItem(e.OriginalSource as DependencyObject);", popup, StringComparison.Ordinal);
@@ -103,7 +103,7 @@ public sealed class SearchPopupVisualContractTests
             "src/DeskBox/Views/SearchPopupWindow.xaml"));
         string searchInteractions = File.ReadAllText(Path.Combine(
             root,
-            "src/DeskBox/Views/SearchPopupWindow.xaml.cs"));
+            "src/DeskBox/Views/SearchPopupWindow.ResultsAndPreview.cs"));
 
         Assert.Contains("Tag=\"InteractiveSurface\"", fileSurface, StringComparison.Ordinal);
         Assert.Contains("CornerRadius=\"2\"", fileSurface, StringComparison.Ordinal);
@@ -163,9 +163,14 @@ public sealed class SearchPopupVisualContractTests
         string popupXaml = File.ReadAllText(Path.Combine(
             root,
             "src/DeskBox/Views/SearchPopupWindow.xaml"));
-        string popupCode = File.ReadAllText(Path.Combine(
-            root,
-            "src/DeskBox/Views/SearchPopupWindow.xaml.cs"));
+        string popupCode =
+            File.ReadAllText(Path.Combine(
+                root,
+                "src/DeskBox/Views/SearchPopupWindow.xaml.cs")) +
+            "\n" +
+            File.ReadAllText(Path.Combine(
+                root,
+                "src/DeskBox/Views/SearchPopupWindow.ResultsAndPreview.cs"));
         string models = File.ReadAllText(Path.Combine(
             root,
             "src/DeskBox/Models/SearchModels.cs"));

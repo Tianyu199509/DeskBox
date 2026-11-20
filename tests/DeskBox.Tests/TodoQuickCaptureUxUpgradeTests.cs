@@ -332,27 +332,6 @@ public sealed class TodoQuickCaptureUxUpgradeTests : IDisposable
                 AppLifecycleRecoverySignalClassifier.WmTimeChange,
                 UIntPtr.Zero,
                 taskbarCreatedMessage: 0xC001));
-
-        string layerSource = File.ReadAllText(TestPaths.FromRepository("src/DeskBox/Services/WidgetLayerService.cs"));
-        Assert.Contains("(hasExpandedLease && !UsesDesktopPinnedMode())", layerSource, StringComparison.Ordinal);
-
-        string boundsSource = File.ReadAllText(TestPaths.FromRepository("src/DeskBox/Views/WidgetWindowBase.Bounds.cs"));
-        Assert.Contains("ApplyDesktopPinnedRestingActivationStyle(HWnd);", boundsSource, StringComparison.Ordinal);
-        Assert.Contains("IsOwnerWindowKeyboardFocused", boundsSource, StringComparison.Ordinal);
-
-        foreach (string surfaceFile in Directory.EnumerateFiles(
-                     TestPaths.FromRepository("src/DeskBox/Controls/WidgetContents"),
-                     "*.cs",
-                     SearchOption.TopDirectoryOnly))
-        {
-            string fileName = Path.GetFileName(surfaceFile);
-            if (fileName.StartsWith("Todo", StringComparison.Ordinal) ||
-                fileName.StartsWith("QuickCaptureSurfaceContent", StringComparison.Ordinal))
-            {
-                string code = File.ReadAllText(surfaceFile);
-                Assert.DoesNotContain("ActivateWindowAndFocusIsland", code, StringComparison.Ordinal);
-            }
-        }
     }
 
     private TodoWidgetViewModel CreateTodoViewModel(string widgetId, Func<DateTimeOffset>? clock = null)

@@ -892,7 +892,7 @@ unsafe fn validate_explorer_shell_launch_request(
             is_valid_explorer_shell_input_string(&request_ref.working_directory, true)
         }
         // SAFETY: Request pointer readability is an ABI caller contract.
-        || !unsafe { is_valid_explorer_shell_input_string(&request_ref.verb, false) }
+        || !unsafe { is_valid_explorer_shell_input_string(&request_ref.verb, true) }
     {
         return DESKBOX_NATIVE_STATUS_INVALID_ARGUMENT;
     }
@@ -2156,6 +2156,17 @@ mod tests {
     }
 
     #[test]
+    fn explorer_shell_launch_accepts_empty_default_verb_in_request_validation() {
+        let path: Vec<u16> = r"C:\Windows\System32\Fonts\segoeui.ttf".encode_utf16().collect();
+        let request = valid_explorer_shell_launch_request(&path, &[], &[]);
+
+        // SAFETY: The test supplies a valid request structure.
+        let status = unsafe { validate_explorer_shell_launch_request(&request) };
+
+        assert_eq!(status, DESKBOX_NATIVE_STATUS_OK);
+    }
+
+    #[test]
     fn explorer_shell_launch_rejects_embedded_nul_before_com_is_attempted() {
         let path = [b'a' as u16, 0, b'b' as u16];
         let verb: Vec<u16> = "open".encode_utf16().collect();
@@ -2511,7 +2522,7 @@ mod tests {
             let (status, result) = write_shortcut_file(&fixture.link_path, &values);
 
             assert_eq!(status, DESKBOX_NATIVE_STATUS_OK);
-            assert_eq!(result.com_hresult, RPC_E_CHANGED_MODE.0);
+            assert_eq!(result.com_hresult, DESKBOX_NATIVE_S_FALSE);
             assert_eq!(result.attempted_phases, WRITE_PHASES);
         })
         .join()
@@ -2697,7 +2708,7 @@ mod tests {
             let call = resolve_shortcut_file(&fixture.link_path, 100, [520; 5], 0);
 
             assert_eq!(call.status, DESKBOX_NATIVE_STATUS_OK);
-            assert_eq!(call.result.com_hresult, RPC_E_CHANGED_MODE.0);
+            assert_eq!(call.result.com_hresult, DESKBOX_NATIVE_S_FALSE);
             assert_eq!(call.result.attempted_phases, RESOLVE_PHASES);
         })
         .join()
@@ -2927,7 +2938,7 @@ mod tests {
     }
 
     #[test]
-    fn nested_mta_call_records_s_false_and_balances_its_com_count() {
+    fn existing_mta_call_records_changed_mode_and_reuses_the_apartment() {
         thread::spawn(|| {
             let fixture = ShortcutFixture::new("--mta");
             let _outer_com_guard = initialize_com(COINIT_MULTITHREADED);
@@ -2939,14 +2950,14 @@ mod tests {
             );
 
             assert_eq!(call.status, DESKBOX_NATIVE_STATUS_OK);
-            assert_eq!(call.result.com_hresult, DESKBOX_NATIVE_S_FALSE);
+            assert_eq!(call.result.com_hresult, RPC_E_CHANGED_MODE.0);
         })
         .join()
         .expect("MTA shortcut read thread");
     }
 
     #[test]
-    fn existing_sta_call_records_changed_mode_and_reuses_the_apartment() {
+    fn nested_sta_call_records_s_false_and_balances_its_com_count() {
         thread::spawn(|| {
             let fixture = ShortcutFixture::new("--sta");
             let _outer_com_guard = initialize_com(COINIT_APARTMENTTHREADED);
@@ -2958,7 +2969,7 @@ mod tests {
             );
 
             assert_eq!(call.status, DESKBOX_NATIVE_STATUS_OK);
-            assert_eq!(call.result.com_hresult, RPC_E_CHANGED_MODE.0);
+            assert_eq!(call.result.com_hresult, DESKBOX_NATIVE_S_FALSE);
         })
         .join()
         .expect("STA shortcut read thread");
@@ -2966,17 +2977,17 @@ mod tests {
 
     #[test]
     fn stored_raw_argument_source_boundary_is_reported_conservatively() {
-        for length in [259, 260, 261] {
+        for length in [4095, 4096, 4097] {
             let fixture = ShortcutFixture::new(&"x".repeat(length));
             let call = read_shortcut_file(
                 &fixture.link_path,
                 DESKBOX_SHORTCUT_READ_MODE_STORED_RAW,
-                [600; 5],
+                [5000; 5],
                 0,
             );
 
             assert_eq!(call.status, DESKBOX_NATIVE_STATUS_OK, "length {length}");
-            assert_eq!(call.arguments_text(), "x".repeat(length.min(259)));
+            assert_eq!(call.arguments_text(), "x".repeat(length.min(4095)));
             assert_eq!(
                 call.result.source_truncated_fields, DESKBOX_SHORTCUT_FIELD_ARGUMENTS,
                 "length {length}"
@@ -2986,17 +2997,17 @@ mod tests {
 
     #[test]
     fn diagnostic_argument_source_boundary_is_reported_conservatively() {
-        for length in [511, 512, 513] {
+        for length in [4095, 4096, 4097] {
             let fixture = ShortcutFixture::new(&"y".repeat(length));
             let call = read_shortcut_file(
                 &fixture.link_path,
                 DESKBOX_SHORTCUT_READ_MODE_EFFECTIVE_DIAGNOSTIC,
-                [600; 5],
+                [5000; 5],
                 0,
             );
 
             assert_eq!(call.status, DESKBOX_NATIVE_STATUS_OK, "length {length}");
-            assert_eq!(call.arguments_text(), "y".repeat(length.min(511)));
+            assert_eq!(call.arguments_text(), "y".repeat(length.min(4095)));
             assert_eq!(
                 call.result.source_truncated_fields, DESKBOX_SHORTCUT_FIELD_ARGUMENTS,
                 "length {length}"
@@ -3006,12 +3017,12 @@ mod tests {
 
     #[test]
     fn long_unicode_arguments_are_preserved_in_both_read_modes() {
-        let stored_arguments = "\u{53c2}\u{6570}\u{1f980}".repeat(60);
+        let stored_arguments = "\u{53c2}\u{6570}\u{1f980}".repeat(600);
         let stored_fixture = ShortcutFixture::new(&stored_arguments);
         let stored_call = read_shortcut_file(
             &stored_fixture.link_path,
             DESKBOX_SHORTCUT_READ_MODE_STORED_RAW,
-            [600; 5],
+            [5000; 5],
             0,
         );
 
@@ -3019,13 +3030,13 @@ mod tests {
         assert_eq!(stored_call.arguments_text(), stored_arguments);
         assert_eq!(stored_call.result.source_truncated_fields, 0);
 
-        let diagnostic_value = "\u{8def}\u{5f84}\u{1f680}".repeat(110);
+        let diagnostic_value = "\u{8def}\u{5f84}\u{1f680}".repeat(600);
         let diagnostic_arguments = format!("\u{3000}{diagnostic_value}\u{2003}");
         let diagnostic_fixture = ShortcutFixture::new(&diagnostic_arguments);
         let diagnostic_call = read_shortcut_file(
             &diagnostic_fixture.link_path,
             DESKBOX_SHORTCUT_READ_MODE_EFFECTIVE_DIAGNOSTIC,
-            [600; 5],
+            [5000; 5],
             0,
         );
 

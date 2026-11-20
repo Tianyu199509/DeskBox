@@ -10,7 +10,9 @@ internal readonly record struct LegacyDropFilesPayload(
     IReadOnlyList<DroppedItemOriginKind> ItemOrigins,
     bool ContainsTemporaryFiles,
     int? ScreenX,
-    int? ScreenY);
+    int? ScreenY,
+    FileDropIntent? ForcedIntent = null,
+    int MaterializationSkippedCount = 0);
 
 internal interface INativeDropHostBridge : IDisposable
 {
@@ -162,6 +164,58 @@ internal sealed class NativeDropHostBridge : INativeDropHostBridge
         }
     }
 
+    internal static FileDropIntent? CaptureLegacyDropFilesForcedIntent(bool stagedTemporary)
+    {
+        bool ctrl = Win32Helper.IsAsyncKeyPressed(Windows.System.VirtualKey.Control);
+        bool shift = Win32Helper.IsAsyncKeyPressed(Windows.System.VirtualKey.Shift);
+        bool alt = Win32Helper.IsAsyncKeyPressed(Windows.System.VirtualKey.Menu);
+        if (!stagedTemporary && (alt || (ctrl && shift)))
+        {
+            return FileDropIntent.Shortcut;
+        }
+
+        if (ctrl && !shift)
+        {
+            return FileDropIntent.Copy;
+        }
+
+        if (shift && !ctrl && !stagedTemporary)
+        {
+            return FileDropIntent.Move;
+        }
+
+        return stagedTemporary ? FileDropIntent.Copy : null;
+    }
+
+    internal static bool IsDuplicateOfRecentNativeDrop(
+        IReadOnlyList<string> legacyPaths,
+        string? lastNativeDropFirstPath,
+        long lastNativeDropTick64,
+        long nowTick64,
+        long windowMs = 250)
+    {
+        if (legacyPaths.Count == 0 ||
+            string.IsNullOrWhiteSpace(lastNativeDropFirstPath) ||
+            nowTick64 - lastNativeDropTick64 >= windowMs)
+        {
+            return false;
+        }
+
+        if (string.Equals(legacyPaths[0], lastNativeDropFirstPath, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return DropStagingFileOps.IsAnyDeskBoxStagingPath(lastNativeDropFirstPath) &&
+            string.Equals(
+                Path.GetFileName(legacyPaths[0]),
+                Path.GetFileName(lastNativeDropFirstPath),
+                StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static bool ShouldSkipOleDropTargetForUipiFallback() =>
+        ShellUnelevatedLaunch.ShouldRestartAtShellIntegrity();
+
     private void InstallTargets()
     {
         if (_disposed || !Win32Helper.IsWindow(_hostWindowHandle))
@@ -170,10 +224,31 @@ internal sealed class NativeDropHostBridge : INativeDropHostBridge
         }
 
         PruneDestroyedTargets();
-        foreach (IntPtr targetWindow in EnumerateDropWindowHandles())
+        IReadOnlyList<IntPtr> windows = EnumerateDropWindowHandles();
+        foreach (IntPtr childWindow in windows)
         {
+            if (childWindow != _hostWindowHandle)
+            {
+                Win32Helper.AllowShellDragDropMessageFilterOnly(childWindow);
+            }
+        }
+
+        if (ShouldSkipOleDropTargetForUipiFallback())
+        {
+            // DeskBox is elevated while Explorer is Medium-IL: registering
+            // OleDropTargetInterface blocks Explorer from falling back to
+            // WM_DROPFILES across UIPI. Rely on WM_DROPFILES until relaunched.
+            return;
+        }
+
+        bool replaceExistingChildBridge = Services.DragDrop.OutboundDragRoutePolicy
+            .ShouldUseWin10NativeShellForProcess();
+        foreach (IntPtr targetWindow in windows)
+        {
+            bool replaceExisting = replaceExistingChildBridge && targetWindow != _hostWindowHandle;
             if (_targets.TryGetValue(targetWindow, out NativeDropTarget? existing))
             {
+                existing.ReplaceExistingRegistration = replaceExisting;
                 existing.Register();
                 continue;
             }
@@ -181,6 +256,7 @@ internal sealed class NativeDropHostBridge : INativeDropHostBridge
             try
             {
                 NativeDropTarget created = _targetFactory(targetWindow);
+                created.ReplaceExistingRegistration = replaceExisting;
                 created.Register();
                 _targets[targetWindow] = created;
             }
@@ -200,16 +276,10 @@ internal sealed class NativeDropHostBridge : INativeDropHostBridge
             _hostWindowHandle,
             (childWindow, _) =>
             {
-                var className = new StringBuilder(128);
-                int length = Win32Helper.GetClassName(
-                    childWindow,
-                    className,
-                    className.Capacity);
+                Span<char> className = stackalloc char[128];
+                int length = Win32Helper.GetClassName(childWindow, className);
                 if (length > 0 &&
-                    string.Equals(
-                        className.ToString(),
-                        ContentBridgeWindowClass,
-                        StringComparison.Ordinal))
+                    className[..length].SequenceEqual(ContentBridgeWindowClass))
                 {
                     handles.Add(childWindow);
                 }
@@ -222,11 +292,16 @@ internal sealed class NativeDropHostBridge : INativeDropHostBridge
 
     private bool HasRegisteredContentBridgeTarget()
     {
+        if (ShouldSkipOleDropTargetForUipiFallback())
+        {
+            return true;
+        }
+
         foreach ((IntPtr window, NativeDropTarget target) in _targets)
         {
             if (window != _hostWindowHandle &&
                 Win32Helper.IsWindow(window) &&
-                target.IsRegistered)
+                target.IsRegistrationResolved)
             {
                 return true;
             }
@@ -288,13 +363,17 @@ internal sealed class NativeDropHostBridge : INativeDropHostBridge
                         paths,
                         hasShellIdList: false,
                         out IReadOnlyList<DroppedItemOriginKind> itemOrigins,
-                        out bool stagedAny);
+                        out bool stagedAny,
+                        out int skippedCount);
+                FileDropIntent? forcedIntent = CaptureLegacyDropFilesForcedIntent(stagedAny);
                 var payload = new LegacyDropFilesPayload(
                     stagedPaths,
                     itemOrigins,
                     stagedAny,
                     screenX,
-                    screenY);
+                    screenY,
+                    forcedIntent,
+                    skippedCount);
                 UiDispatch.PostAfterCallback(() =>
                 {
                     if (_disposed)

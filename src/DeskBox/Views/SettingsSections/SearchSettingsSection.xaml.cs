@@ -2,6 +2,7 @@ using System.ComponentModel;
 using DeskBox.Contracts;
 using DeskBox.Controls;
 using DeskBox.Features.Search;
+using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Services;
 using DeskBox.Views.Dialogs;
@@ -110,6 +111,7 @@ public sealed partial class SearchSettingsSection : UserControl
         // text block must be retargeted from code-behind.
         SettingsWindow.ApplyNoticeMessageTypography(SearchHotkeyReservedWarning);
         SettingsWindow.ApplyNoticeMessageTypography(EverythingStatusInfoBar);
+        SettingsWindow.EnsureInformationalSeverityPinned(EverythingStatusInfoBar);
         SynchronizeActivity();
     }
 
@@ -175,14 +177,14 @@ public sealed partial class SearchSettingsSection : UserControl
             SearchQuickCreateTodoToggle.IsOn = todoFeatureEnabled && settings.QuickCreateTodoEnabled;
             SearchQuickCreateTodoCard.Description = todoFeatureEnabled
                 ? Localization.T("Settings.Search.QuickCreate.Todo.Description")
-                : Localization.T("Settings.Search.QuickCreate.FeatureDisabledHint");
+                : Localization.T("Settings.Search.QuickCreate.Todo.DisabledByFeature");
 
             SearchQuickCreateNoteCard.IsEnabled = featureEnabled && noteFeatureEnabled;
             SearchQuickCreateNoteToggle.IsEnabled = featureEnabled && noteFeatureEnabled;
             SearchQuickCreateNoteToggle.IsOn = noteFeatureEnabled && settings.QuickCreateNoteEnabled;
             SearchQuickCreateNoteCard.Description = noteFeatureEnabled
                 ? Localization.T("Settings.Search.QuickCreate.Note.Description")
-                : Localization.T("Settings.Search.QuickCreate.FeatureDisabledHint");
+                : Localization.T("Settings.Search.QuickCreate.Note.DisabledByFeature");
 
             bool anyQuickCreateEnabled = featureEnabled &&
                 ((todoFeatureEnabled && settings.QuickCreateTodoEnabled) ||
@@ -238,7 +240,7 @@ public sealed partial class SearchSettingsSection : UserControl
                 : Visibility.Collapsed;
 
             SearchRecommendationsToggle.IsOn = settings.ShowRecommendations;
-            SearchRecommendationsExpander.IsEnabled = featureEnabled;
+            SearchRecommendationsCard.IsEnabled = featureEnabled;
             bool recommendationsEnabled = featureEnabled && settings.ShowRecommendations;
             SearchIconAnimationCard.IsEnabled = recommendationsEnabled;
             SearchIconAnimationComboBox.IsEnabled = recommendationsEnabled;
@@ -741,7 +743,8 @@ public sealed partial class SearchSettingsSection : UserControl
             Title = Localization.T("Settings.Search.Everything.About.Title"),
             CloseButtonText = Localization.T("Settings.Dialog.SupportClose"),
             DefaultButton = ContentDialogButton.Close,
-            XamlRoot = XamlRoot
+            XamlRoot = XamlRoot,
+            RequestedTheme = NeutralInteractionBrush.ResolveEffectiveElementTheme(this)
         };
 
         var body = new StackPanel { Spacing = 12, MaxWidth = 420 };
@@ -898,7 +901,7 @@ public sealed partial class SearchSettingsSection : UserControl
                 Localization.T("Settings.GlobalHotkey.Preset.DoubleControl"),
                 new GlobalHotkeyActivation(
                     HotkeyActivationKind.DoubleControl,
-                    current.Gesture)),
+                    new GlobalHotkeyGesture(HotkeyModifierKeys.Control, 0))),
             new(
                 Localization.T("Settings.GlobalHotkey.Preset.DoubleShift"),
                 GlobalHotkeyActivation.FromDoubleTapModifier(HotkeyModifierKeys.Shift)),

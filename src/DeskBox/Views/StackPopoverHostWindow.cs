@@ -25,7 +25,7 @@ namespace DeskBox.Views;
 /// stays realized — no container churn, no island churn, and no offscreen
 /// TopMost swapchain compositing while closed.
 /// </summary>
-internal sealed class StackPopoverHostWindow : Window
+internal sealed partial class StackPopoverHostWindow : Window
 {
     private const int DwmwaCloak = 13;
     private const int SwShowNoActivate = 4;
@@ -228,6 +228,8 @@ internal sealed class StackPopoverHostWindow : Window
                     UIElement.KeyDownEvent,
                     _keyDownHandler);
             }
+
+            _hostRoot?.Children.Remove(_content);
         }
 
         _content = content;
@@ -242,23 +244,39 @@ internal sealed class StackPopoverHostWindow : Window
             _keyDownHandler,
             handledEventsToo: false);
 
-        _backdropElement = new SystemBackdropElement
+        if (_hostRoot is null || _backdropElement is null)
         {
-            IsHitTestVisible = false,
-            Visibility = Visibility.Collapsed
-        };
-        _hostRoot = new Grid();
-        WidgetTextShadow.SetScope(_hostRoot, true);
+            _backdropElement = new SystemBackdropElement
+            {
+                IsHitTestVisible = false,
+                Visibility = Visibility.Collapsed
+            };
+            _hostRoot = new Grid();
+            WidgetTextShadow.SetScope(_hostRoot, true);
+            _hostRoot.Children.Add(_backdropElement);
+            _hostRoot.Children.Add(content);
+            if (_savedAppearance is { } initialAppearance)
+            {
+                WidgetTextShadow.SetPlateOpaque(
+                    _hostRoot,
+                    ResolvePopoverPlateOpaque(initialAppearance, _savedFollowMaterialStyle));
+            }
+            SyncBackdropElementCornerRadius();
+            Content = _hostRoot;
+            return;
+        }
+
         if (_savedAppearance is { } savedAppearance)
         {
             WidgetTextShadow.SetPlateOpaque(
                 _hostRoot,
                 ResolvePopoverPlateOpaque(savedAppearance, _savedFollowMaterialStyle));
         }
-        _hostRoot.Children.Add(_backdropElement);
-        _hostRoot.Children.Add(content);
+        if (!_hostRoot.Children.Contains(content))
+        {
+            _hostRoot.Children.Add(content);
+        }
         SyncBackdropElementCornerRadius();
-        Content = _hostRoot;
     }
 
     internal void ShowAt(RectInt32 bounds)
@@ -422,6 +440,9 @@ internal sealed class StackPopoverHostWindow : Window
         _nativeDropBridge?.EnsureRegistered();
     }
 
+    private const uint WmNcHitTest = 0x0084;
+    private static readonly IntPtr HtTransparent = new(-1);
+
     internal void SetExternalDragPassthrough(bool enabled)
     {
         if (_closed || WindowHandle == IntPtr.Zero)
@@ -440,27 +461,10 @@ internal sealed class StackPopoverHostWindow : Window
             return;
         }
 
-        int extendedStyle = Win32Helper.GetWindowLong(WindowHandle, Win32Helper.GWL_EXSTYLE);
-        int updatedStyle = enabled
-            ? (extendedStyle | Win32Helper.WS_EX_TRANSPARENT)
-            : (extendedStyle & ~Win32Helper.WS_EX_TRANSPARENT);
-        if (updatedStyle != extendedStyle)
-        {
-            _ = Win32Helper.SetWindowLong(WindowHandle, Win32Helper.GWL_EXSTYLE, updatedStyle);
-            _ = Win32Helper.SetWindowPos(
-                WindowHandle,
-                IntPtr.Zero,
-                0,
-                0,
-                0,
-                0,
-                Win32Helper.SWP_NOMOVE |
-                    Win32Helper.SWP_NOSIZE |
-                    Win32Helper.SWP_NOZORDER |
-                    Win32Helper.SWP_NOACTIVATE |
-                    Win32Helper.SWP_FRAMECHANGED);
-        }
-
+        // Apply WS_EX_TRANSPARENT across both the top-level popover HWND and
+        // its child DesktopChildSiteBridge HWNDs (without adding WS_EX_LAYERED,
+        // which would interfere with DWM Acrylic SystemBackdrop).
+        DesktopToastHudInterop.SetWindowTreeMousePassthrough(WindowHandle, enabled);
         _externalDragPassthroughApplied = enabled;
     }
 
@@ -582,6 +586,19 @@ internal sealed class StackPopoverHostWindow : Window
         _materialBackdrop?.SetCornerRadius(Math.Max(0, radius));
     }
 
+    internal static bool HasReadyBackdropAttachment(
+        bool hasWindowBackdrop,
+        bool expectsMaterialBackdrop,
+        bool isBackdropElementVisible,
+        bool backdropMatchesMaterialInstance,
+        bool isBackdropElementConnectedToTree,
+        bool hasActiveMaterialController) =>
+        hasWindowBackdrop &&
+        (!expectsMaterialBackdrop ||
+         (isBackdropElementVisible &&
+          backdropMatchesMaterialInstance &&
+          (!isBackdropElementConnectedToTree || hasActiveMaterialController)));
+
     private void EnsureBackdropAttached()
     {
         if (_closed || _savedAppearance is not { } appearance)
@@ -590,9 +607,17 @@ internal sealed class StackPopoverHostWindow : Window
         }
 
         SyncBackdropElementCornerRadius();
-        if (SystemBackdrop is not null &&
-            (_backdropElement is null || _backdropElement.Visibility == Visibility.Visible ||
-             (_savedFollowMaterialStyle && !WidgetMaterialSystemBackdrop.IsSupported(appearance.MaterialType))))
+        bool expectsMaterialBackdrop = _savedFollowMaterialStyle
+            ? WidgetMaterialSystemBackdrop.IsSupported(appearance.MaterialType)
+            : WindowsCompatibilityService.SupportsDesktopAcrylic;
+        if (HasReadyBackdropAttachment(
+                hasWindowBackdrop: SystemBackdrop is not null,
+                expectsMaterialBackdrop,
+                isBackdropElementVisible: _backdropElement is { Visibility: Visibility.Visible },
+                backdropMatchesMaterialInstance: _backdropElement is not null &&
+                    ReferenceEquals(_backdropElement.SystemBackdrop, _materialBackdrop),
+                isBackdropElementConnectedToTree: _backdropElement?.XamlRoot is not null,
+                hasActiveMaterialController: _materialBackdrop?.HasActiveController == true))
         {
             return;
         }
@@ -836,6 +861,11 @@ internal sealed class StackPopoverHostWindow : Window
         UIntPtr uIdSubclass,
         UIntPtr dwRefData)
     {
+        if (message == WmNcHitTest && _externalDragPassthroughApplied)
+        {
+            return HtTransparent;
+        }
+
         // Every press inside the popover closes an open native context menu:
         // the menu is hosted by another process, and this window's permanent
         // TOPMOST placement means the click would otherwise never reach it.

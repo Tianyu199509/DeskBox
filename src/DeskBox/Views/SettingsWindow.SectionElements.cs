@@ -46,14 +46,6 @@ public sealed partial class SettingsWindow
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("WidgetGroups", "WidgetGroupsSection")!;
     private global::Microsoft.UI.Xaml.Controls.StackPanel? WidgetGroupsOverviewPanel =>
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("WidgetGroups", "WidgetGroupsOverviewPanel");
-    private global::Microsoft.UI.Xaml.Controls.StackPanel? WidgetGroupDetailSubPagePanel =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("WidgetGroups", "WidgetGroupDetailSubPagePanel");
-    [DynamicDependency(
-        DynamicallyAccessedMemberTypes.All,
-        typeof(global::Microsoft.UI.Xaml.Controls.ContentControl))]
-    private global::Microsoft.UI.Xaml.Controls.ContentControl? FindWidgetGroupDetailPresenter() =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.ContentControl>("WidgetGroups", "WidgetGroupDetailPresenter");
-    private global::Microsoft.UI.Xaml.Controls.ContentControl? WidgetGroupDetailPresenter => FindWidgetGroupDetailPresenter();
     private global::DeskBox.Views.SettingsSections.FileWidgetSettingsSection AppearanceDetailSection =>
         FindCreatedSectionElement<global::DeskBox.Views.SettingsSections.FileWidgetSettingsSection>("AppearanceDetail", "AppearanceDetailSection")!;
     private global::DeskBox.Views.SettingsSections.DisplaySettingsSection DisplaysSection =>
@@ -92,13 +84,8 @@ public sealed partial class SettingsWindow
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("FeatureWidgets", "FeatureWidgetsHubHeaderPanel")!;
     private global::Microsoft.UI.Xaml.Controls.TextBlock FeatureWidgetsHubTitleText =>
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.TextBlock>("FeatureWidgets", "FeatureWidgetsHubTitleText")!;
-    // Segmented is a managed C# control instantiated via XamlTypeInfo and
-    // directly referenced by SettingsWindow.g.cs (SelectionChanged + x:Bind);
-    // unlike the unreferenced native PasswordBox below, rooting All members
-    // here is unnecessary and pulls dead net8.0 reflection helpers into
-    // Native AOT codegen (IL3050).
-    private global::CommunityToolkit.WinUI.Controls.Segmented FeatureWidgetsHubSegmented =>
-        FindCreatedSectionElement<global::CommunityToolkit.WinUI.Controls.Segmented>("FeatureWidgets", "FeatureWidgetsHubSegmented")!;
+    private global::Microsoft.UI.Xaml.Controls.SelectorBar FeatureWidgetsHubSelectorBar =>
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.SelectorBar>("FeatureWidgets", "FeatureWidgetsHubSelectorBar")!;
     private global::Microsoft.UI.Xaml.Controls.StackPanel CustomWidgetsToolbarPanel =>
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("FeatureWidgets", "CustomWidgetsToolbarPanel")!;
     private global::Microsoft.UI.Xaml.Controls.StackPanel FeatureWidgetListHost =>
@@ -185,8 +172,10 @@ public sealed partial class SettingsWindow
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Button>("About", "OpenManualUpdateDownloadButton")!;
     private global::Microsoft.UI.Xaml.Controls.Button StoreSupportButton =>
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Button>("About", "StoreSupportButton")!;
-    private global::CommunityToolkit.WinUI.Controls.SettingsExpander? AboutDiagnosticsExpander =>
-        FindCreatedSectionElement<global::CommunityToolkit.WinUI.Controls.SettingsExpander>("About", "AboutDiagnosticsExpander");
+    private global::Microsoft.UI.Xaml.Controls.StackPanel? AboutOverviewPanel =>
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("About", "AboutOverviewPanel");
+    private global::Microsoft.UI.Xaml.Controls.StackPanel? AboutDiagnosticsSubPagePanel =>
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("About", "AboutDiagnosticsSubPagePanel");
     private global::Microsoft.UI.Xaml.Controls.TextBlock AttachmentHealthSummaryText =>
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.TextBlock>("About", "AttachmentHealthSummaryText")!;
     private global::Microsoft.UI.Xaml.Controls.Button CheckAttachmentHealthButton =>

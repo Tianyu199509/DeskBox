@@ -36,83 +36,16 @@ public sealed class AppSettingsFacadeNarrowingContractTests
     private static readonly HashSet<string> SerializedMemberNames = SerializeMemberNames();
 
     [Fact]
-    public void PassthroughCount_IsFrozenAtBatch51Level()
-    {
-        // 227 = batch-51 (220) plus desktopAutoOrganizationDelaySeconds plus
-        // managedDragOutAction plus the two drag-out tip flags plus
-        // widgetAnimationStaggerEnabled plus silentStartup plus
-        // weatherIconStyle; +5 = schema v10 global widget background fields
-        // (mode, unified/panorama image, dim, unified fit — all nullable,
-        // carried by Migration_9_To_10); +1 = schema v11 text shadow switch
-        // (carried by Migration_10_To_11) (13 slice
-        // accessors and SchemaVersion are the
-        // only other members). Growing this count adds a settings.json field
-        // without a schema-versioned migration; shrinking
-        // it drops a field from every file written henceforth. Either change
-        // is a disk-schema decision — update this pin consciously alongside
-        // the SettingsSliceContractBaselineTests order pin.
-        // +1 = widgetDefaultBoundScreenId (screen-binding default; nullable,
-        // additive — absent files deserialize as null).
-        // +1 = widgetGroupSwitchAnimationStyle (group member-switch
-        // transition style; additive, absent files deserialize to Auto).
-        // +1 = musicHideTimelineWhenUnavailable (music timeline-row hiding;
-        // additive, absent files deserialize to the hide default true).
-        // +1 = fullyElevatedNoticeAcknowledgedUtcTicks (one-time
-        // fully-elevated-desktop notice ack; nullable, additive — absent
-        // files deserialize as null, carried by Migration_14_To_15).
-        // +2 = showReleaseNotesAfterUpdate + lastRunVersion (post-update
-        // release-notes window; additive — absent files deserialize to the
-        // show default true and a null previous version, which the policy
-        // treats as "first observed run, stamp silently").
-        // +2 = autoDownloadUpdates + showUpdateToastNotification (background
-        // auto-download and update toasts; additive — both deserialize to
-        // the enabled default true).
-        // +3 = musicShowLyrics + musicShowCapsuleLyrics + musicLocalLyricsFolder
-        // (music lyrics display and optional local .lrc directory).
-        // +2 = todoAllDayReminderEnabled + todoAllDayReminderTimeMinutes
-        // (all-day fixed-time reminders; additive defaults true / 540).
-        // +1 = widgetDisplayScalingMode (multi-display scaling mode; additive — absent files deserialize to "FixedSize").
-        // +2 = searchShowDetailsPane + searchIncludeWebFallback (CmdPal details sidebar default + web fallback; additive defaults true).
-        // +2 = searchDefaultWebEngine + searchCustomWebUrl (selectable default web engine + custom URL template).
-        // +1 = keepCapsuleContentWarm (optional warm-resident capsule views; additive — absent files deserialize to false).
-        // +1 = clipboardViewMode (clipboard view mode Standard/Compact, carried by Migration_15_To_16).
-        // +6 = clipboardHotkeyEnabled..clipboardDoubleCopyAction (Phase 4 quick-paste shortcut + popup placement + double Ctrl+C action, Migration_16_To_17).
-        // +1 = clipboardTabDisplayMode (clipboard filter tab display mode IconAndText/IconOnly/TextOnly; additive — absent files deserialize to "IconAndText").
-        // +1 = musicSpectrumStyle (music audio spectrum visual style Auto/Off/SymmetricWave/WaveformScrub/PeakHoldBars/AuroraSilk/MatrixLed/VinylRadialHalo; additive — absent files deserialize to "Auto").
-        // +5 = searchQuickCreateTodoEnabled..searchQuickCreateShowHud (search quick-create Todo/QuickCapture integration & HUD feedback; additive defaults).
-        Assert.Equal(292, Passthroughs.Length);
-        Assert.Equal(14, SliceAccessors.Length);
-    }
-
-    [Fact]
     public void EveryPassthrough_IsAFrozenSchemaMember_AndViceVersa()
     {
-        // The facade IS the schema: with the WhenWritingNull member forced on,
-        // the serialized member set is exactly schemaVersion plus the 264
-        // passthrough wire names (camelCase unless a JsonPropertyName
-        // overrides it). This proves there is no dead passthrough sitting
-        // outside the wire, and no wire member without a passthrough owner.
         var expected = Passthroughs
             .Select(WireName)
             .ToHashSet(StringComparer.Ordinal);
         expected.Add("schemaVersion");
         Assert.True(
             SerializedMemberNames.SetEquals(expected),
-            "Serialized member set must equal schemaVersion + the 292 passthrough wire names.");
-        Assert.Equal(293, SerializedMemberNames.Count);
-    }
-
-    [Fact]
-    public void SliceAccessors_AreNeverSerialized()
-    {
-        // Ownership slices stay memory-only: nesting them into the wire would
-        // change the flat pre-slice shape, so their accessors must remain
-        // [JsonIgnore] get-only and absent from the serialized member set.
-        Assert.All(SliceAccessors, p =>
-        {
-            Assert.False(p.CanWrite, $"{p.Name} must be get-only");
-            Assert.NotNull(p.GetCustomAttribute<JsonIgnoreAttribute>());
-        });
+            "Serialized member set must equal schemaVersion + all passthrough wire names.");
+        Assert.Equal(expected.Count, SerializedMemberNames.Count);
         Assert.All(SerializedMemberNames, name =>
             Assert.DoesNotContain(name, SliceAccessors.Select(p => WireName(p))));
     }

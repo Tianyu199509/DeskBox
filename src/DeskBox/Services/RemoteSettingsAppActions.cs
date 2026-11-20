@@ -76,6 +76,8 @@ public sealed class RemoteSettingsAppActions : ISettingsAppActions
 
     public event Action? ScreenHomeChanged;
 
+    public event Action? AutoStartStateChanged;
+
     private void OnEventReceived(string method, string? payload)
     {
         switch (method)
@@ -92,6 +94,9 @@ public sealed class RemoteSettingsAppActions : ISettingsAppActions
             case SettingsIpcMethods.AppScreenHomeChanged:
                 RaiseOnUi(() => ScreenHomeChanged?.Invoke());
                 break;
+            case SettingsIpcMethods.AppAutoStartStateChanged:
+                RaiseOnUi(() => AutoStartStateChanged?.Invoke());
+                break;
         }
     }
 
@@ -103,8 +108,7 @@ public sealed class RemoteSettingsAppActions : ISettingsAppActions
 
     public AppRelaunchScheduleResult ScheduleRestartAfterCurrentProcessExit()
     {
-        (bool ok, string? payload, _) = _client.RequestAsync(SettingsIpcMethods.AppScheduleRestart)
-            .GetAwaiter().GetResult();
+        (bool ok, string? payload, _) = SettingsIpcShell.RequestSyncSafe(_client, SettingsIpcMethods.AppScheduleRestart);
         return ok && SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.AppRelaunchScheduleResult)
             is { } schedule
                 ? schedule
@@ -113,10 +117,10 @@ public sealed class RemoteSettingsAppActions : ISettingsAppActions
 
     public bool TryRelaunchAsExplorerUser(string arguments)
     {
-        (bool ok, _, _) = _client.RequestAsync(
-                SettingsIpcMethods.AppRelaunchAsExplorerUser,
-                arguments)
-            .GetAwaiter().GetResult();
+        (bool ok, _, _) = SettingsIpcShell.RequestSyncSafe(
+            _client,
+            SettingsIpcMethods.AppRelaunchAsExplorerUser,
+            arguments);
         return ok;
     }
 
@@ -221,8 +225,7 @@ public sealed class RemoteSettingsAppActions : ISettingsAppActions
 
     public bool HasManagedStorageDesktopShortcut()
     {
-        (bool ok, string? payload, _) = _client.RequestAsync(SettingsIpcMethods.AppHasShortcut)
-            .GetAwaiter().GetResult();
+        (bool ok, string? payload, _) = SettingsIpcShell.RequestSyncSafe(_client, SettingsIpcMethods.AppHasShortcut);
         return ok && SettingsIpcPayload.DecodeBoolean(payload);
     }
 
@@ -266,8 +269,7 @@ public sealed class RemoteSettingsAppActions : ISettingsAppActions
 
     public AppRuntimeHealthSnapshot? GetRuntimeHealthSnapshot()
     {
-        (bool ok, string? payload, _) = _client.RequestAsync(SettingsIpcMethods.AppRuntimeHealth)
-            .GetAwaiter().GetResult();
+        (bool ok, string? payload, _) = SettingsIpcShell.RequestSyncSafe(_client, SettingsIpcMethods.AppRuntimeHealth);
         return ok
             ? SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.AppRuntimeHealthSnapshot)
             : null;
@@ -276,10 +278,34 @@ public sealed class RemoteSettingsAppActions : ISettingsAppActions
     public Task ForceExternalStateRecoveryAsync() =>
         RequestVoidAsync(SettingsIpcMethods.AppForceExternalRecovery);
 
+    public async Task<StartupOperationResult> GetAutoStartStatusAsync()
+    {
+        (bool ok, string? payload, string? error) = await _client.RequestAsync(
+            SettingsIpcMethods.AppGetAutoStartStatus);
+        return ok && SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.StartupOperationResult)
+            is { } result
+                ? result
+                : new StartupOperationResult(
+                    StartupRegistrationState.BlockedOrFailed,
+                    error ?? "autostart status request failed");
+    }
+
+    public async Task<StartupOperationResult> SetAutoStartEnabledAsync(bool enabled)
+    {
+        (bool ok, string? payload, string? error) = await _client.RequestAsync(
+            SettingsIpcMethods.AppSetAutoStartEnabled,
+            SettingsIpcPayload.EncodeBoolean(enabled));
+        return ok && SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.StartupOperationResult)
+            is { } result
+                ? result
+                : new StartupOperationResult(
+                    StartupRegistrationState.BlockedOrFailed,
+                    error ?? "autostart update request failed");
+    }
+
     public DragDropPermissionDiagnostic DiagnoseDragDropPermissions()
     {
-        (bool ok, string? payload, _) = _client.RequestAsync(SettingsIpcMethods.AppDiagnoseDragDrop)
-            .GetAwaiter().GetResult();
+        (bool ok, string? payload, _) = SettingsIpcShell.RequestSyncSafe(_client, SettingsIpcMethods.AppDiagnoseDragDrop);
         return SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.DragDropPermissionDiagnostic)
             ?? new DragDropPermissionDiagnostic(
                 DragDropDiagnosticSeverity.Error,
@@ -303,8 +329,7 @@ public sealed class RemoteSettingsAppActions : ISettingsAppActions
 
     public DragDropPermissionRepairResult RepairDragDropPermissions()
     {
-        (bool ok, string? payload, _) = _client.RequestAsync(SettingsIpcMethods.AppRepairDragDrop)
-            .GetAwaiter().GetResult();
+        (bool ok, string? payload, _) = SettingsIpcShell.RequestSyncSafe(_client, SettingsIpcMethods.AppRepairDragDrop);
         return SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.DragDropPermissionRepairResult)
             ?? new DragDropPermissionRepairResult(false, false, 0, "repair request failed", false);
     }

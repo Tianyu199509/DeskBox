@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -21,7 +22,7 @@ internal readonly record struct ClipboardSourceAppInfo(
 /// zero-loss extraction, source-process attribution, and safe Ctrl+V auto-paste.
 /// All P/Invoke stays inside <c>DeskBox.Platform</c>.
 /// </summary>
-internal static class ClipboardPlatformInterop
+internal static partial class ClipboardPlatformInterop
 {
     private const uint CF_DIB = 8;
     private const uint CF_UNICODETEXT = 13;
@@ -56,47 +57,53 @@ internal static class ClipboardPlatformInterop
     private static uint s_htmlFormat;
     private static uint s_rtfFormat;
 
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool AddClipboardFormatListener(IntPtr hwnd);
+    [LibraryImport("user32.dll", EntryPoint = "AddClipboardFormatListener", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool AddClipboardFormatListener(IntPtr hwnd);
 
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool RemoveClipboardFormatListener(IntPtr hwnd);
+    [LibraryImport("user32.dll", EntryPoint = "RemoveClipboardFormatListener", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool RemoveClipboardFormatListener(IntPtr hwnd);
 
-    [DllImport("user32.dll")]
-    internal static extern uint GetClipboardSequenceNumber();
+    [LibraryImport("user32.dll", EntryPoint = "GetClipboardSequenceNumber")]
+    internal static partial uint GetClipboardSequenceNumber();
 
-    [DllImport("user32.dll")]
-    private static extern IntPtr GetClipboardOwner();
+    [LibraryImport("user32.dll", EntryPoint = "GetClipboardOwner")]
+    private static partial IntPtr GetClipboardOwner();
 
-    [DllImport("user32.dll")]
-    internal static extern IntPtr GetForegroundWindow();
+    [LibraryImport("user32.dll", EntryPoint = "GetForegroundWindow")]
+    internal static partial IntPtr GetForegroundWindow();
 
-    [DllImport("user32.dll")]
-    private static extern bool SetForegroundWindow(IntPtr hWnd);
+    [LibraryImport("user32.dll", EntryPoint = "SetForegroundWindow")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool SetForegroundWindow(IntPtr hWnd);
 
-    [DllImport("user32.dll")]
-    private static extern bool IsWindow(IntPtr hWnd);
+    [LibraryImport("user32.dll", EntryPoint = "IsWindow")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool IsWindow(IntPtr hWnd);
 
-    [DllImport("user32.dll")]
-    private static extern bool IsWindowVisible(IntPtr hWnd);
+    [LibraryImport("user32.dll", EntryPoint = "IsWindowVisible")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool IsWindowVisible(IntPtr hWnd);
 
-    [DllImport("user32.dll")]
-    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+    [LibraryImport("user32.dll", EntryPoint = "GetWindowThreadProcessId")]
+    private static partial uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
 
-    [DllImport("user32.dll")]
-    private static extern IntPtr GetAncestor(IntPtr hwnd, uint gaFlags);
+    [LibraryImport("user32.dll", EntryPoint = "GetAncestor")]
+    private static partial IntPtr GetAncestor(IntPtr hwnd, uint gaFlags);
 
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    private static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
+    [LibraryImport("user32.dll", EntryPoint = "GetClassNameW")]
+    private static unsafe partial int GetClassName(IntPtr hWnd, char* lpClassName, int nMaxCount);
 
-    [DllImport("user32.dll")]
-    private static extern short GetAsyncKeyState(int vKey);
+    [LibraryImport("user32.dll", EntryPoint = "GetAsyncKeyState")]
+    private static partial short GetAsyncKeyState(int vKey);
 
-    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern ushort RegisterClassEx(ref WNDCLASSEX lpwcx);
+    [LibraryImport("user32.dll", EntryPoint = "RegisterClassExW", SetLastError = true)]
+    private static unsafe partial ushort RegisterClassExW(WNDCLASSEXW* lpwcx);
 
-    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern IntPtr CreateWindowEx(
+    [LibraryImport("user32.dll", EntryPoint = "CreateWindowExW",
+        SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
+    private static partial IntPtr CreateWindowEx(
         uint dwExStyle,
         string lpClassName,
         string lpWindowName,
@@ -110,72 +117,69 @@ internal static class ClipboardPlatformInterop
         IntPtr hInstance,
         IntPtr lpParam);
 
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool DestroyWindow(IntPtr hWnd);
+    [LibraryImport("user32.dll", EntryPoint = "DestroyWindow", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool DestroyWindow(IntPtr hWnd);
 
-    [DllImport("user32.dll")]
-    private static extern IntPtr DefWindowProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+    [LibraryImport("user32.dll", EntryPoint = "DefWindowProcW")]
+    private static partial IntPtr DefWindowProcW(IntPtr hWnd, uint msg, UIntPtr wParam, IntPtr lParam);
 
-    [DllImport("user32.dll")]
-    private static extern IntPtr SetWinEventHook(
+    [LibraryImport("user32.dll", EntryPoint = "SetWinEventHook")]
+    private static unsafe partial IntPtr SetWinEventHook(
         uint eventMin,
         uint eventMax,
         IntPtr hmodWinEventProc,
-        WinEventDelegate lpfnWinEventProc,
+        delegate* unmanaged[Stdcall]<IntPtr, uint, IntPtr, int, int, uint, uint, void> lpfnWinEventProc,
         uint idProcess,
         uint idThread,
         uint dwFlags);
 
-    [DllImport("user32.dll")]
-    private static extern bool UnhookWinEvent(IntPtr hWinEventHook);
+    [LibraryImport("user32.dll", EntryPoint = "UnhookWinEvent")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool UnhookWinEvent(IntPtr hWinEventHook);
 
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
-    private static extern IntPtr GetModuleHandle(string? lpModuleName);
+    [LibraryImport("kernel32.dll", EntryPoint = "GetModuleHandleW", StringMarshalling = StringMarshalling.Utf16)]
+    private static partial IntPtr GetModuleHandle(string? lpModuleName);
 
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern IntPtr OpenProcess(uint dwDesiredAccess, bool bInheritHandle, uint dwProcessId);
+    [LibraryImport("kernel32.dll", EntryPoint = "OpenProcess", SetLastError = true)]
+    private static partial IntPtr OpenProcess(
+        uint dwDesiredAccess,
+        [MarshalAs(UnmanagedType.Bool)] bool bInheritHandle,
+        uint dwProcessId);
 
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool CloseHandle(IntPtr hObject);
+    [LibraryImport("kernel32.dll", EntryPoint = "CloseHandle", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool CloseHandle(IntPtr hObject);
 
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern bool QueryFullProcessImageName(
+    [LibraryImport("kernel32.dll", EntryPoint = "QueryFullProcessImageNameW", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static unsafe partial bool QueryFullProcessImageName(
         IntPtr hProcess,
         uint dwFlags,
-        StringBuilder lpExeName,
+        char* lpExeName,
         ref uint lpdwSize);
 
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern unsafe uint SendInput(uint cInputs, INPUT* pInputs, int cbSize);
+    [LibraryImport("user32.dll", EntryPoint = "SendInput", SetLastError = true)]
+    private static unsafe partial uint SendInput(uint cInputs, INPUT* pInputs, int cbSize);
 
-    [DllImport("user32.dll")]
-    private static extern bool GetGUIThreadInfo(uint idThread, ref GUITHREADINFO lpgui);
+    [LibraryImport("user32.dll", EntryPoint = "GetGUIThreadInfo")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool GetGUIThreadInfo(uint idThread, ref GUITHREADINFO lpgui);
 
-    private delegate IntPtr WndProcDelegate(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
-
-    private delegate void WinEventDelegate(
-        IntPtr hWinEventHook,
-        uint eventType,
-        IntPtr hwnd,
-        int idObject,
-        int idChild,
-        uint dwEventThread,
-        uint dwmsEventTime);
-
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private struct WNDCLASSEX
+    [StructLayout(LayoutKind.Sequential)]
+    private struct WNDCLASSEXW
     {
         public uint cbSize;
         public uint style;
-        public WndProcDelegate lpfnWndProc;
+        public IntPtr lpfnWndProc;
         public int cbClsExtra;
         public int cbWndExtra;
         public IntPtr hInstance;
         public IntPtr hIcon;
         public IntPtr hCursor;
         public IntPtr hbrBackground;
-        public string? lpszMenuName;
-        public string lpszClassName;
+        public IntPtr lpszMenuName;
+        public IntPtr lpszClassName;
         public IntPtr hIconSm;
     }
 
@@ -230,20 +234,32 @@ internal static class ClipboardPlatformInterop
         public UIntPtr ExtraInfo;
     }
 
+    private static readonly object s_formatRegistrationGate = new();
+    private static volatile bool s_formatsRegistered;
+
     private static void EnsureFormatsRegistered()
     {
-        if (s_pngFormat != 0)
+        if (s_formatsRegistered)
         {
             return;
         }
 
-        s_excludeMonitorFormat = ClipboardNativeMethods.RegisterClipboardFormat("ExcludeClipboardContentFromMonitorProcessing");
-        s_canIncludeHistoryFormat = ClipboardNativeMethods.RegisterClipboardFormat("CanIncludeInClipboardHistory");
-        s_viewerIgnoreFormat = ClipboardNativeMethods.RegisterClipboardFormat("Clipboard Viewer Ignore");
-        s_preferredDropEffectFormat = ClipboardNativeMethods.RegisterClipboardFormat("Preferred DropEffect");
-        s_pngFormat = ClipboardNativeMethods.RegisterClipboardFormat("PNG");
-        s_htmlFormat = ClipboardNativeMethods.RegisterClipboardFormat("HTML Format");
-        s_rtfFormat = ClipboardNativeMethods.RegisterClipboardFormat("Rich Text Format");
+        lock (s_formatRegistrationGate)
+        {
+            if (s_formatsRegistered)
+            {
+                return;
+            }
+
+            s_excludeMonitorFormat = ClipboardNativeMethods.RegisterClipboardFormat("ExcludeClipboardContentFromMonitorProcessing");
+            s_canIncludeHistoryFormat = ClipboardNativeMethods.RegisterClipboardFormat("CanIncludeInClipboardHistory");
+            s_viewerIgnoreFormat = ClipboardNativeMethods.RegisterClipboardFormat("Clipboard Viewer Ignore");
+            s_preferredDropEffectFormat = ClipboardNativeMethods.RegisterClipboardFormat("Preferred DropEffect");
+            s_pngFormat = ClipboardNativeMethods.RegisterClipboardFormat("PNG");
+            s_htmlFormat = ClipboardNativeMethods.RegisterClipboardFormat("HTML Format");
+            s_rtfFormat = ClipboardNativeMethods.RegisterClipboardFormat("Rich Text Format");
+            s_formatsRegistered = true;
+        }
     }
 
     internal static bool IsShiftKeyPressed() =>
@@ -428,11 +444,12 @@ internal static class ClipboardPlatformInterop
                 return true;
             }
 
-            long dibSize = ClipboardNativeMethods.GlobalSize(handle).ToInt64();
-            if (dibSize < 12 || dibSize > maxImageBytes || 14L + dibSize > int.MaxValue)
+            nuint rawDibSize = ClipboardNativeMethods.GlobalSize(handle);
+            if (rawDibSize < 12 || rawDibSize > (nuint)maxImageBytes || 14UL + rawDibSize > int.MaxValue)
             {
                 return true;
             }
+            long dibSize = (long)rawDibSize;
 
             IntPtr locked = ClipboardNativeMethods.GlobalLock(handle);
             if (locked == IntPtr.Zero)
@@ -459,6 +476,84 @@ internal static class ClipboardPlatformInterop
                 Marshal.Copy(locked, result, 14, dibLength);
                 bmpBytes = result;
                 return true;
+            }
+            finally
+            {
+                ClipboardNativeMethods.GlobalUnlock(handle);
+            }
+        }
+        finally
+        {
+            ClipboardNativeMethods.CloseClipboard();
+        }
+    }
+
+    internal static unsafe bool TryRentClipboardDibAsBmpOnce(
+        long maxImageBytes,
+        out byte[]? rentedBuffer,
+        out int totalByteLength)
+    {
+        rentedBuffer = null;
+        totalByteLength = 0;
+        if (!TryOpenClipboardOnce())
+        {
+            return false;
+        }
+
+        try
+        {
+            if (!ClipboardNativeMethods.IsClipboardFormatAvailable(CF_DIB))
+            {
+                return true;
+            }
+
+            IntPtr handle = ClipboardNativeMethods.GetClipboardData(CF_DIB);
+            if (handle == IntPtr.Zero)
+            {
+                return true;
+            }
+
+            nuint rawDibSize = ClipboardNativeMethods.GlobalSize(handle);
+            if (rawDibSize < 12 || rawDibSize > (nuint)maxImageBytes || 14UL + rawDibSize > int.MaxValue)
+            {
+                return true;
+            }
+
+            IntPtr locked = ClipboardNativeMethods.GlobalLock(handle);
+            if (locked == IntPtr.Zero)
+            {
+                return true;
+            }
+
+            try
+            {
+                int dibLength = (int)rawDibSize;
+                int headerInspectLength = Math.Min(dibLength, 40);
+                var headerSpan = new ReadOnlySpan<byte>((void*)locked, headerInspectLength);
+                if (!TryComputeDibPixelOffset(headerSpan, dibLength, out uint pixelOffset))
+                {
+                    return true;
+                }
+
+                int totalLength = 14 + dibLength;
+                byte[] rented = System.Buffers.ArrayPool<byte>.Shared.Rent(totalLength);
+                try
+                {
+                    rented[0] = (byte)'B';
+                    rented[1] = (byte)'M';
+                    BinaryPrimitives.WriteUInt32LittleEndian(rented.AsSpan(2, 4), (uint)totalLength);
+                    BinaryPrimitives.WriteUInt32LittleEndian(rented.AsSpan(6, 4), 0u);
+                    BinaryPrimitives.WriteUInt32LittleEndian(rented.AsSpan(10, 4), pixelOffset);
+                    Marshal.Copy(locked, rented, 14, dibLength);
+                    rentedBuffer = rented;
+                    totalByteLength = totalLength;
+                    return true;
+                }
+                catch
+                {
+                    System.Buffers.ArrayPool<byte>.Shared.Return(rented);
+                    throw;
+                }
             }
             finally
             {
@@ -507,19 +602,30 @@ internal static class ClipboardPlatformInterop
             return false;
         }
 
-        var classBuilder = new StringBuilder(64);
-        int len = GetClassName(hwnd, classBuilder, classBuilder.Capacity);
-        if (len > 0)
+        Span<char> classBuffer = stackalloc char[64];
+        int len;
+        unsafe
         {
-            string className = classBuilder.ToString();
-            if (className is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd")
+            fixed (char* ptr = classBuffer)
             {
-                return false;
+                len = GetClassName(hwnd, ptr, classBuffer.Length);
             }
+        }
+        if (len > 0 && IsExcludedExternalPasteTargetClass(classBuffer[..len]))
+        {
+            return false;
         }
 
         return true;
     }
+
+    internal static bool IsExcludedExternalPasteTargetClass(ReadOnlySpan<char> className) =>
+        className.SequenceEqual("Progman") ||
+        className.SequenceEqual("WorkerW") ||
+        className.SequenceEqual("Shell_TrayWnd") ||
+        className.SequenceEqual("Shell_SecondaryTrayWnd") ||
+        className.SequenceEqual("NotifyIconOverflowWindow") ||
+        className.SequenceEqual("TopLevelWindowForOverflowXamlIsland");
 
     internal static unsafe ClipboardPasteOutcome TryPasteToActiveOrLastWindow(IntPtr lastExternalHwnd)
     {
@@ -701,9 +807,17 @@ internal static class ClipboardPlatformInterop
             return true;
         }
 
-        var sb = new StringBuilder(64);
-        return GetClassName(fg, sb, sb.Capacity) > 0 &&
-               sb.ToString().Contains("Popup", StringComparison.OrdinalIgnoreCase);
+        Span<char> classBuffer = stackalloc char[64];
+        int len;
+        unsafe
+        {
+            fixed (char* ptr = classBuffer)
+            {
+                len = GetClassName(fg, ptr, classBuffer.Length);
+            }
+        }
+        return len > 0 &&
+               classBuffer[..len].Contains("Popup".AsSpan(), StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -812,23 +926,52 @@ internal static class ClipboardPlatformInterop
 
         try
         {
-            var sb = new StringBuilder(1024);
-            uint size = (uint)sb.Capacity;
-            if (!QueryFullProcessImageName(hProcess, 0, sb, ref size) || size == 0)
+            Span<char> pathBuffer = stackalloc char[1024];
+            uint size = (uint)pathBuffer.Length;
+            bool ok;
+            unsafe
+            {
+                fixed (char* ptr = pathBuffer)
+                {
+                    ok = QueryFullProcessImageName(hProcess, 0, ptr, ref size);
+                }
+            }
+            if (!ok || size == 0 || size > (uint)pathBuffer.Length)
             {
                 return false;
             }
 
-            string exePath = sb.ToString(0, (int)size);
+            string exePath = new string(pathBuffer[..(int)size]);
             if (string.IsNullOrWhiteSpace(exePath))
             {
                 return false;
             }
 
-            // Skip UWP ApplicationFrameHost wrapper when it has no meaningful identity of its own.
+            // Resolve the real UWP app hosted inside ApplicationFrameHost.exe so source
+            // attribution and ClipboardExcludedApps match the actual UWP executable.
             string stem = Path.GetFileNameWithoutExtension(exePath);
             if (string.Equals(stem, "ApplicationFrameHost", StringComparison.OrdinalIgnoreCase))
             {
+                IntPtr coreWindow = Win32Helper.FindWindowEx(hwnd, IntPtr.Zero, "Windows.UI.Core.CoreWindow", null);
+                if (coreWindow != IntPtr.Zero && coreWindow != hwnd &&
+                    TryGetProcessInfoFromHwnd(coreWindow, allowOwnProcess, out info))
+                {
+                    return true;
+                }
+
+                IntPtr child = Win32Helper.FindWindowEx(hwnd, IntPtr.Zero, null, null);
+                for (int i = 0; i < 32 && child != IntPtr.Zero; i++)
+                {
+                    GetWindowThreadProcessId(child, out uint childPid);
+                    if (childPid != 0 && childPid != pid &&
+                        TryGetProcessInfoFromHwnd(child, allowOwnProcess, out info))
+                    {
+                        return true;
+                    }
+
+                    child = Win32Helper.FindWindowEx(hwnd, child, null, null);
+                }
+
                 return false;
             }
 
@@ -935,11 +1078,12 @@ internal static class ClipboardPlatformInterop
             return;
         }
 
-        long byteSize = ClipboardNativeMethods.GlobalSize(handle).ToInt64();
-        if (byteSize < sizeof(char))
+        nuint rawByteSize = ClipboardNativeMethods.GlobalSize(handle);
+        if (rawByteSize < sizeof(char))
         {
             return;
         }
+        long byteSize = rawByteSize > long.MaxValue ? long.MaxValue : (long)rawByteSize;
 
         IntPtr locked = ClipboardNativeMethods.GlobalLock(handle);
         if (locked == IntPtr.Zero)
@@ -950,44 +1094,113 @@ internal static class ClipboardPlatformInterop
         try
         {
             char* ptr = (char*)locked;
-            long maxCharsInBuffer = Math.Min(byteSize / sizeof(char), int.MaxValue);
-            int len = 0;
-            while (len < maxCharsInBuffer && ptr[len] != '\0')
+            int maxCharsInBuffer = (int)Math.Min(byteSize / sizeof(char), int.MaxValue);
+            ReadOnlySpan<char> fullBuffer = new(ptr, maxCharsInBuffer);
+
+            int scanLimitChars = maxTextBytes >= (long)maxCharsInBuffer * sizeof(char)
+                ? maxCharsInBuffer
+                : (int)Math.Max(0L, Math.Min(maxCharsInBuffer, (maxTextBytes / sizeof(char)) + 1));
+
+            ReadOnlySpan<char> bounded = fullBuffer[..scanLimitChars];
+            int nullIdx = bounded.IndexOf('\0');
+            if (nullIdx >= 0)
             {
-                if (!hasNonWhitespaceText && !char.IsWhiteSpace(ptr[len]))
+                ReadOnlySpan<char> textSpan = bounded[..nullIdx];
+                if (IndexOfFirstNonWhitespace(textSpan) < 0)
                 {
-                    hasNonWhitespaceText = true;
-                    if (!materializeText)
-                    {
-                        return;
-                    }
+                    return;
                 }
 
-                len++;
-                if (hasNonWhitespaceText && len > maxTextBytes)
+                hasNonWhitespaceText = true;
+                if (!materializeText)
+                {
+                    return;
+                }
+
+                if ((long)textSpan.Length * sizeof(char) > maxTextBytes)
                 {
                     exceededLimit = true;
                     return;
                 }
-            }
 
-            if (!hasNonWhitespaceText || !materializeText || len <= 0)
-            {
+                unicodeText = new string(textSpan);
                 return;
             }
 
-            if (len > maxTextBytes)
+            if (scanLimitChars == maxCharsInBuffer)
             {
-                exceededLimit = true;
+                if (IndexOfFirstNonWhitespace(fullBuffer) < 0)
+                {
+                    return;
+                }
+
+                hasNonWhitespaceText = true;
+                if (!materializeText)
+                {
+                    return;
+                }
+
+                if ((long)fullBuffer.Length * sizeof(char) > maxTextBytes)
+                {
+                    exceededLimit = true;
+                    return;
+                }
+
+                unicodeText = new string(fullBuffer);
                 return;
             }
 
-            unicodeText = new string(ptr, 0, len);
+            // No '\0' within maxAllowedChars + 1: length definitely exceeds maxTextBytes if non-whitespace exists.
+            if (IndexOfFirstNonWhitespace(bounded) >= 0)
+            {
+                hasNonWhitespaceText = true;
+                if (materializeText)
+                {
+                    exceededLimit = true;
+                }
+
+                return;
+            }
+
+            ReadOnlySpan<char> remaining = fullBuffer[scanLimitChars..];
+            int tailNull = remaining.IndexOf('\0');
+            ReadOnlySpan<char> validTail = tailNull >= 0 ? remaining[..tailNull] : remaining;
+            if (IndexOfFirstNonWhitespace(validTail) >= 0)
+            {
+                hasNonWhitespaceText = true;
+                if (materializeText)
+                {
+                    exceededLimit = true;
+                }
+            }
         }
         finally
         {
             ClipboardNativeMethods.GlobalUnlock(handle);
         }
+    }
+
+    private static int IndexOfFirstNonWhitespace(ReadOnlySpan<char> span)
+    {
+        int offset = 0;
+        while (offset < span.Length)
+        {
+            int rel = span[offset..].IndexOfAnyExcept(" \t\r\n");
+            if (rel < 0)
+            {
+                return -1;
+            }
+
+            int idx = offset + rel;
+            if (!char.IsWhiteSpace(span[idx]))
+            {
+                return idx;
+            }
+
+            offset = idx + 1;
+        }
+
+        return -1;
     }
 
     private static bool TryReadClipboardDword(uint format, out uint value)
@@ -999,7 +1212,7 @@ internal static class ClipboardPlatformInterop
             return false;
         }
 
-        long size = ClipboardNativeMethods.GlobalSize(handle).ToInt64();
+        nuint size = ClipboardNativeMethods.GlobalSize(handle);
         if (size < sizeof(uint))
         {
             return false;
@@ -1030,11 +1243,12 @@ internal static class ClipboardPlatformInterop
             return null;
         }
 
-        long size = ClipboardNativeMethods.GlobalSize(handle).ToInt64();
-        if (size <= 0 || size > maxBytes || size > int.MaxValue)
+        nuint rawSize = ClipboardNativeMethods.GlobalSize(handle);
+        if (rawSize == 0 || rawSize > (nuint)maxBytes || rawSize > int.MaxValue)
         {
             return null;
         }
+        long size = (long)rawSize;
 
         IntPtr locked = ClipboardNativeMethods.GlobalLock(handle);
         if (locked == IntPtr.Zero)
@@ -1386,9 +1600,13 @@ internal static class ClipboardPlatformInterop
     /// </summary>
     internal sealed class ListenerSession : IDisposable
     {
+        private const string WindowClassName = "DeskBoxClipboardListenerWindow";
+        private static readonly object s_classLock = new();
+        private static bool s_windowClassRegistered;
+        private static readonly ConcurrentDictionary<IntPtr, ListenerSession> s_sessionsByWindow = new();
+        private static readonly ConcurrentDictionary<ListenerSession, byte> s_foregroundTrackingSessions = new();
+
         private readonly Action _onClipboardUpdate;
-        private readonly WndProcDelegate _wndProc;
-        private readonly WinEventDelegate _winEventProc;
         private IntPtr _hwnd;
         private IntPtr _foregroundHook;
         private IntPtr _lastExternalHwnd;
@@ -1398,26 +1616,15 @@ internal static class ClipboardPlatformInterop
         public ListenerSession(Action onClipboardUpdate)
         {
             _onClipboardUpdate = onClipboardUpdate;
-            _wndProc = WndProc;
-            _winEventProc = OnForegroundWinEvent;
             _lastSequenceNumber = GetClipboardSequenceNumber();
 
             CaptureCurrentExternalForeground();
 
-            string className = $"DeskBoxClipboardListener_{Guid.NewGuid():N}";
+            EnsureWindowClassRegistered();
             IntPtr hInstance = GetModuleHandle(null);
-            var wc = new WNDCLASSEX
-            {
-                cbSize = (uint)Marshal.SizeOf<WNDCLASSEX>(),
-                lpfnWndProc = _wndProc,
-                hInstance = hInstance,
-                lpszClassName = className
-            };
-
-            _ = RegisterClassEx(ref wc);
             _hwnd = CreateWindowEx(
                 0,
-                className,
+                WindowClassName,
                 string.Empty,
                 0,
                 0,
@@ -1431,8 +1638,59 @@ internal static class ClipboardPlatformInterop
 
             if (_hwnd != IntPtr.Zero)
             {
+                s_sessionsByWindow[_hwnd] = this;
                 _ = AddClipboardFormatListener(_hwnd);
             }
+        }
+
+        private static unsafe void EnsureWindowClassRegistered()
+        {
+            lock (s_classLock)
+            {
+                if (s_windowClassRegistered)
+                {
+                    return;
+                }
+
+                IntPtr hInstance = GetModuleHandle(null);
+                fixed (char* classNamePtr = WindowClassName)
+                {
+                    WNDCLASSEXW wc = new()
+                    {
+                        cbSize = (uint)sizeof(WNDCLASSEXW),
+                        lpfnWndProc = (IntPtr)(delegate* unmanaged[Stdcall]<IntPtr, uint, UIntPtr, IntPtr, IntPtr>)&ListenerWindowProc,
+                        hInstance = hInstance,
+                        lpszClassName = (IntPtr)classNamePtr,
+                    };
+
+                    ushort atom = RegisterClassExW(&wc);
+                    if (atom != 0 || Marshal.GetLastWin32Error() == 1410)
+                    {
+                        s_windowClassRegistered = true;
+                    }
+                }
+            }
+        }
+
+        [UnmanagedCallersOnly(CallConvs = [typeof(CallConvStdcall)])]
+        private static IntPtr ListenerWindowProc(IntPtr hWnd, uint msg, UIntPtr wParam, IntPtr lParam)
+        {
+            if (msg == WM_CLIPBOARDUPDATE &&
+                s_sessionsByWindow.TryGetValue(hWnd, out ListenerSession? session) &&
+                !session._disposed)
+            {
+                try
+                {
+                    session.OnClipboardUpdateMessage();
+                }
+                catch
+                {
+                }
+
+                return IntPtr.Zero;
+            }
+
+            return DefWindowProcW(hWnd, msg, wParam, lParam);
         }
 
         public IntPtr LastExternalForegroundWindow => _lastExternalHwnd;
@@ -1453,7 +1711,7 @@ internal static class ClipboardPlatformInterop
             }
         }
 
-        public void SetForegroundTrackingEnabled(bool enabled)
+        public unsafe void SetForegroundTrackingEnabled(bool enabled)
         {
             if (_disposed)
             {
@@ -1465,41 +1723,41 @@ internal static class ClipboardPlatformInterop
                 CaptureCurrentExternalForeground();
                 if (_foregroundHook == IntPtr.Zero)
                 {
+                    s_foregroundTrackingSessions[this] = 1;
                     _foregroundHook = SetWinEventHook(
                         EVENT_SYSTEM_FOREGROUND,
                         EVENT_SYSTEM_FOREGROUND,
                         IntPtr.Zero,
-                        _winEventProc,
+                        &OnForegroundWinEventStatic,
                         0,
                         0,
                         WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+                    if (_foregroundHook == IntPtr.Zero)
+                    {
+                        s_foregroundTrackingSessions.TryRemove(this, out _);
+                    }
                 }
             }
             else if (_foregroundHook != IntPtr.Zero)
             {
+                s_foregroundTrackingSessions.TryRemove(this, out _);
                 _ = UnhookWinEvent(_foregroundHook);
                 _foregroundHook = IntPtr.Zero;
             }
         }
 
-        private IntPtr WndProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam)
+        private void OnClipboardUpdateMessage()
         {
-            if (msg == WM_CLIPBOARDUPDATE && !_disposed)
+            uint seq = GetClipboardSequenceNumber();
+            if (seq != _lastSequenceNumber)
             {
-                uint seq = GetClipboardSequenceNumber();
-                if (seq != _lastSequenceNumber)
-                {
-                    _lastSequenceNumber = seq;
-                    _onClipboardUpdate();
-                }
-
-                return IntPtr.Zero;
+                _lastSequenceNumber = seq;
+                _onClipboardUpdate();
             }
-
-            return DefWindowProc(hWnd, msg, wParam, lParam);
         }
 
-        private void OnForegroundWinEvent(
+        [UnmanagedCallersOnly(CallConvs = [typeof(CallConvStdcall)])]
+        private static void OnForegroundWinEventStatic(
             IntPtr hWinEventHook,
             uint eventType,
             IntPtr hwnd,
@@ -1508,9 +1766,24 @@ internal static class ClipboardPlatformInterop
             uint dwEventThread,
             uint dwmsEventTime)
         {
-            if (!_disposed && IsEligibleExternalPasteTarget(hwnd))
+            try
             {
-                _lastExternalHwnd = hwnd;
+                if (!IsEligibleExternalPasteTarget(hwnd))
+                {
+                    return;
+                }
+
+                foreach ((ListenerSession session, _) in s_foregroundTrackingSessions)
+                {
+                    if (!session._disposed &&
+                        (session._foregroundHook == hWinEventHook || session._foregroundHook == IntPtr.Zero))
+                    {
+                        session._lastExternalHwnd = hwnd;
+                    }
+                }
+            }
+            catch
+            {
             }
         }
 
@@ -1522,6 +1795,7 @@ internal static class ClipboardPlatformInterop
             }
 
             _disposed = true;
+            s_foregroundTrackingSessions.TryRemove(this, out _);
             if (_foregroundHook != IntPtr.Zero)
             {
                 _ = UnhookWinEvent(_foregroundHook);
@@ -1530,6 +1804,7 @@ internal static class ClipboardPlatformInterop
 
             if (_hwnd != IntPtr.Zero)
             {
+                s_sessionsByWindow.TryRemove(_hwnd, out _);
                 _ = RemoveClipboardFormatListener(_hwnd);
                 _ = DestroyWindow(_hwnd);
                 _hwnd = IntPtr.Zero;

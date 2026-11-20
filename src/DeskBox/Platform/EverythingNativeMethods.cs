@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
@@ -30,7 +31,10 @@ internal static unsafe partial class EverythingNativeMethods
     internal const uint ErrorOk = 0;
     internal const uint ErrorIpc = 2;
 
+    internal const uint SearchFlagMatchPath = 0x00000004;
+
     internal const uint SortNameAscending = 1;
+    internal const uint SortDateModifiedDescending = 14;
 
     internal const uint RequestFileName = 0x00000001;
     internal const uint RequestPath = 0x00000002;
@@ -56,12 +60,12 @@ internal static unsafe partial class EverythingNativeMethods
     private const nuint CopyDataQuery2W = 18;
 
     private const uint SmtoAbortIfHung = 0x0002;
-    private const uint WsPopup = 0x80000000;
     private const uint PmRemove = 0x0001;
     private const uint QsAllInput = 0x04FF;
     private const uint MsgfltAllow = 1;
     private const int GwlpUserData = -21;
     private const int MaxReplyPayloadBytes = 64 * 1024 * 1024;
+    private static readonly nint HwndMessage = new(-3);
 
     private static readonly object ClassRegistrationGate = new();
     private static bool s_replyClassRegistered;
@@ -113,7 +117,8 @@ internal static unsafe partial class EverythingNativeMethods
     private sealed class ReplyCaptureState(uint replyToken)
     {
         public uint ReplyToken { get; } = replyToken;
-        public byte[]? Payload { get; set; }
+        public byte[]? RentedBuffer { get; set; }
+        public int PayloadLength { get; set; }
         public volatile bool Received;
     }
 
@@ -154,6 +159,16 @@ internal static unsafe partial class EverythingNativeMethods
     [LibraryImport("user32.dll", EntryPoint = "DestroyWindow", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool DestroyWindow(nint hWnd);
+
+    [LibraryImport("user32.dll", EntryPoint = "IsWindow")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool IsWindow(nint hWnd);
+
+    [LibraryImport("user32.dll", EntryPoint = "GetWindowThreadProcessId")]
+    private static partial uint GetWindowThreadProcessId(nint hWnd, out uint lpdwProcessId);
+
+    [LibraryImport("kernel32.dll", EntryPoint = "GetCurrentThreadId")]
+    private static partial uint GetCurrentThreadId();
 
     [LibraryImport("user32.dll", EntryPoint = "DefWindowProcW")]
     private static partial nint DefWindowProc(nint hWnd, uint msg, nuint wParam, nint lParam);
@@ -231,7 +246,9 @@ internal static unsafe partial class EverythingNativeMethods
         out EverythingIpcQueryReply reply,
         out uint errorCode,
         string ipcWindowClass = DefaultIpcWindowClass,
-        int timeoutMilliseconds = 10_000)
+        int timeoutMilliseconds = 10_000,
+        uint searchFlags = 0,
+        uint sortType = SortNameAscending)
     {
         reply = new EverythingIpcQueryReply(0, []);
         errorCode = ErrorOk;
@@ -245,20 +262,7 @@ internal static unsafe partial class EverythingNativeMethods
         }
 
         EnsureReplyWindowClassRegistered();
-        nint hInstance = GetModuleHandle(null);
-        nint replyHwnd = CreateWindowEx(
-            0,
-            ReplyWindowClassName,
-            string.Empty,
-            WsPopup,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            hInstance,
-            0);
+        nint replyHwnd = CreateMessageOnlyReplyWindow();
         if (replyHwnd == 0)
         {
             errorCode = ErrorIpc;
@@ -275,17 +279,16 @@ internal static unsafe partial class EverythingNativeMethods
         GCHandle stateHandle = GCHandle.Alloc(state);
         try
         {
-            _ = ChangeWindowMessageFilterEx(replyHwnd, WmCopyData, MsgfltAllow, 0);
             _ = SetWindowLongPtr(replyHwnd, GwlpUserData, GCHandle.ToIntPtr(stateHandle));
 
             byte[] queryPacket = BuildQuery2Packet(
                 replyHwnd,
                 replyToken,
-                searchFlags: 0,
+                searchFlags,
                 offset,
                 maxResults,
                 DefaultRequestFlags,
-                SortNameAscending,
+                sortType,
                 searchText);
 
             uint sendTimeoutMs = (uint)Math.Clamp(timeoutMilliseconds, 500, 30_000);
@@ -337,8 +340,9 @@ internal static unsafe partial class EverythingNativeMethods
                 _ = MsgWaitForMultipleObjectsEx(0, 0, sliceMs, QsAllInput, 0);
             }
 
-            if (state.Payload is null ||
-                !TryParseList2Reply(state.Payload, out reply))
+            if (state.RentedBuffer is null ||
+                state.PayloadLength < 20 ||
+                !TryParseList2Reply(state.RentedBuffer.AsSpan(0, state.PayloadLength), out reply))
             {
                 errorCode = ErrorIpc;
                 return false;
@@ -350,11 +354,45 @@ internal static unsafe partial class EverythingNativeMethods
         {
             _ = SetWindowLongPtr(replyHwnd, GwlpUserData, 0);
             _ = DestroyWindow(replyHwnd);
+
+            if (state.RentedBuffer is { } rentedBuffer)
+            {
+                state.RentedBuffer = null;
+                ArrayPool<byte>.Shared.Return(rentedBuffer);
+            }
+
             if (stateHandle.IsAllocated)
             {
                 stateHandle.Free();
             }
         }
+    }
+
+    private static nint CreateMessageOnlyReplyWindow()
+    {
+        nint hInstance = GetModuleHandle(null);
+        // Use HWND_MESSAGE (-3) so the reply window never participates in top-level
+        // HWND_BROADCAST dispatches (WM_SETTINGCHANGE / DDE) and destroy per call
+        // so non-pumping CLR ThreadPool threads never retain live USER HWNDs.
+        nint created = CreateWindowEx(
+            0,
+            ReplyWindowClassName,
+            string.Empty,
+            0,
+            0,
+            0,
+            0,
+            0,
+            HwndMessage,
+            0,
+            hInstance,
+            0);
+        if (created != 0)
+        {
+            _ = ChangeWindowMessageFilterEx(created, WmCopyData, MsgfltAllow, 0);
+        }
+
+        return created;
     }
 
     internal static byte[] BuildQuery2Packet(
@@ -596,15 +634,15 @@ internal static unsafe partial class EverythingNativeMethods
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvStdcall)])]
     private static nint ReplyWndProc(nint hwnd, uint msg, nuint wParam, nint lParam)
     {
-        if (msg == WmCopyData && lParam != 0)
+        try
         {
-            nint statePtr = GetWindowLongPtr(hwnd, GwlpUserData);
-            if (statePtr != 0)
+            if (msg == WmCopyData && lParam != 0)
             {
-                try
+                nint statePtr = GetWindowLongPtr(hwnd, GwlpUserData);
+                if (statePtr != 0)
                 {
                     var handle = GCHandle.FromIntPtr(statePtr);
-                    if (handle.Target is ReplyCaptureState state)
+                    if (handle.Target is ReplyCaptureState { Received: false } state)
                     {
                         CopyDataStruct* cds = (CopyDataStruct*)lParam;
                         if (unchecked((uint)cds->dwData) == state.ReplyToken &&
@@ -612,20 +650,23 @@ internal static unsafe partial class EverythingNativeMethods
                             cds->cbData >= 20 &&
                             cds->cbData <= MaxReplyPayloadBytes)
                         {
-                            byte[] copy = new byte[cds->cbData];
-                            Marshal.Copy(cds->lpData, copy, 0, (int)cds->cbData);
-                            state.Payload = copy;
+                            int payloadLength = (int)cds->cbData;
+                            byte[] rented = ArrayPool<byte>.Shared.Rent(payloadLength);
+                            new ReadOnlySpan<byte>((void*)cds->lpData, payloadLength).CopyTo(rented);
+                            state.RentedBuffer = rented;
+                            state.PayloadLength = payloadLength;
                             state.Received = true;
                             return 1;
                         }
                     }
                 }
-                catch
-                {
-                }
             }
-        }
 
-        return DefWindowProc(hwnd, msg, wParam, lParam);
+            return DefWindowProc(hwnd, msg, wParam, lParam);
+        }
+        catch
+        {
+            return 0;
+        }
     }
 }

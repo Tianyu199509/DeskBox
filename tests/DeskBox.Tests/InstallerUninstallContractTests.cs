@@ -122,6 +122,8 @@ public sealed class InstallerUninstallContractTests
     public void Uninstall_RemovesOnlyTheStartupTaskOwnedByCurrentInstall()
     {
         string code = ReadRepositoryFile("installer/DeskBox.Uninstall.iss");
+        string installerX64 = ReadRepositoryFile("installer/DeskBox.iss");
+        string installerArm64 = ReadRepositoryFile("installer/DeskBox.arm64.iss");
 
         Assert.Contains(
             "DeskBoxStartupTaskNamePrefix = 'DeskBox User Startup'",
@@ -130,17 +132,25 @@ public sealed class InstallerUninstallContractTests
         Assert.Contains("CreateOleObject('Schedule.Service')", code, StringComparison.Ordinal);
         Assert.Contains("TaskDefinition.Actions", code, StringComparison.Ordinal);
         Assert.Contains(
+            "ActionPath := UnquoteExecutablePath(Action.Path);",
+            code,
+            StringComparison.Ordinal);
+        Assert.Contains(
             "SameInstallPath(ExtractFileDir(ActionPath), ExpandConstant('{app}'))",
             code,
             StringComparison.Ordinal);
         Assert.Contains(
-            "CompareText(ExtractFileName(ActionPath), DeskBoxProcessName)",
+            "IsOwnedStartupExecutableName(ExtractFileName(ActionPath))",
             code,
             StringComparison.Ordinal);
         Assert.Contains(
             "RootFolder.DeleteTask(TaskName, 0)",
             code,
             StringComparison.Ordinal);
+        Assert.Contains("HKEY_USERS", code, StringComparison.Ordinal);
+        Assert.Contains("{commonstartup}\\DeskBox.lnk", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("{autostartup}\\{#MyAppName}.lnk", installerX64, StringComparison.Ordinal);
+        Assert.DoesNotContain("{autostartup}\\{#MyAppName}.lnk", installerArm64, StringComparison.Ordinal);
         Assert.True(
             code.LastIndexOf("RemoveStartupScheduledTasks;", StringComparison.Ordinal) <
             code.LastIndexOf("RemoveStartupRegistryEntry;", StringComparison.Ordinal));
@@ -175,12 +185,23 @@ public sealed class InstallerUninstallContractTests
         Assert.DoesNotContain("DeskBoxAdminCleanupParam", migration, StringComparison.Ordinal);
         Assert.Equal(2, CountOccurrences(installer, "AppUserModelID: \"DeskBox.DeskBox\""));
         Assert.Contains("'DeskBox.Settings.exe'", installation, StringComparison.Ordinal);
-        Assert.Contains("Get-Process -Name", installation, StringComparison.Ordinal);
-        Assert.Contains("Wait-Process -Id", installation, StringComparison.Ordinal);
+        Assert.Contains("K32EnumProcesses@kernel32.dll", installation, StringComparison.Ordinal);
+        Assert.Contains("QueryFullProcessImageNameW@kernel32.dll", installation, StringComparison.Ordinal);
+        Assert.Contains("TerminateProcess@kernel32.dll", installation, StringComparison.Ordinal);
+        Assert.Contains("WaitForSingleObject@kernel32.dll", installation, StringComparison.Ordinal);
+        Assert.DoesNotContain("powershell", installation, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("powershell", migration, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("cleanup-deskbox-install.ps1", installer, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("DeskBox.Settings.exe", migration, StringComparison.Ordinal);
         string stage7c1 = ReadRepositoryFile("scripts/build-stage-7c1-distribution.ps1");
-        Assert.Contains(
+        // Legacy cleanup above stays for test builds that shipped the old
+        // companion; the distribution itself must never contain it again.
+        Assert.DoesNotContain(
             "Join-Path $directPublishDirectory \"DeskBox.Settings.exe\"",
+            stage7c1,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "'(^|/)DeskBox\\.Settings\\.(?:exe|pri|dll)$'",
             stage7c1,
             StringComparison.Ordinal);
     }
@@ -229,6 +250,25 @@ public sealed class InstallerUninstallContractTests
                     messages,
                     StringComparison.Ordinal);
             }
+        }
+    }
+
+    [Fact]
+    public void AllInstallerInnoScripts_StartWithUtf8ByteOrderMark()
+    {
+        string installerDir = Path.Combine(FindRepositoryRoot(), "installer");
+        string[] scripts = Directory.GetFiles(installerDir, "*.iss", SearchOption.TopDirectoryOnly);
+        Assert.NotEmpty(scripts);
+
+        foreach (string scriptPath in scripts)
+        {
+            byte[] bytes = File.ReadAllBytes(scriptPath);
+            Assert.True(
+                bytes.Length >= 3 &&
+                bytes[0] == 0xEF &&
+                bytes[1] == 0xBB &&
+                bytes[2] == 0xBF,
+                $"Inno Setup 6 requires UTF-8 BOM on '{Path.GetFileName(scriptPath)}' so localized messages never mojibake.");
         }
     }
 
@@ -334,10 +374,16 @@ public sealed class InstallerUninstallContractTests
             code,
             StringComparison.Ordinal);
 
-        // The PowerShell probe must stay scoped to the current user's
-        // package registration and keep its documented exit-code contract.
-        Assert.Contains("Get-AppxPackage -Name", code, StringComparison.Ordinal);
-        Assert.Contains("exit 1", code, StringComparison.Ordinal);
+        // The Store edition probe must inspect only the current user's AppModel
+        // package repository using native registry APIs without spawning PowerShell.
+        Assert.Contains(
+            "Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\CurrentVersion\\AppModel\\Repository\\Packages",
+            code,
+            StringComparison.Ordinal);
+        Assert.Contains("RegGetSubkeyNames(", code, StringComparison.Ordinal);
+        Assert.Contains("DeskBoxStorePackageIdentityName + '_'", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("powershell", code, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Get-AppxPackage", code, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -409,6 +455,7 @@ public sealed class InstallerUninstallContractTests
         HashSet<string> english = tables["english"];
         Assert.Contains("StoreEditionDataPreserved", english);
         Assert.Contains("StoreEditionStateUnknown", english);
+        Assert.Contains("StoreEditionInstallNotice", english);
         foreach ((string language, HashSet<string> keys) in tables)
         {
             Assert.Equal(
@@ -420,6 +467,9 @@ public sealed class InstallerUninstallContractTests
         {
             Assert.Contains("{cm:" + message + "}", code, StringComparison.Ordinal);
         }
+
+        string installationCode = ReadRepositoryFile("installer/DeskBox.Installation.iss");
+        Assert.Contains("{cm:StoreEditionInstallNotice}", installationCode, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -545,7 +595,7 @@ public sealed class InstallerUninstallContractTests
         Assert.Contains("AddStartupScheduledTaskCandidates", installation, StringComparison.Ordinal);
         Assert.Contains("AddAllUserProfileInstallCandidates", installation, StringComparison.Ordinal);
         Assert.Contains("AddRunningProcessInstallCandidates", installation, StringComparison.Ordinal);
-        Assert.Contains("AddRunningProcessCandidatesViaPowerShell", installation, StringComparison.Ordinal);
+        Assert.Contains("AddRunningProcessCandidatesViaWin32", installation, StringComparison.Ordinal);
         Assert.Contains("WbemScripting.SWbemLocator", installation, StringComparison.Ordinal);
         Assert.Contains("SELECT ExecutablePath FROM Win32_Process WHERE Name = ''DeskBox.exe''", installation, StringComparison.Ordinal);
 
@@ -602,6 +652,17 @@ public sealed class InstallerUninstallContractTests
                     ]);
             }
 
+            foreach (string compiledExe in Directory.GetFiles(compiledInstallerDir, "*.exe"))
+            {
+                byte[] compiledBytes = File.ReadAllBytes(compiledExe);
+                string asciiView = System.Text.Encoding.ASCII.GetString(compiledBytes);
+                string utf16View = System.Text.Encoding.Unicode.GetString(compiledBytes);
+                Assert.DoesNotContain("powershell.exe", asciiView, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain("powershell.exe", utf16View, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain("-ExecutionPolicy", asciiView, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain("-ExecutionPolicy", utf16View, StringComparison.OrdinalIgnoreCase);
+            }
+
             if (System.Runtime.InteropServices.RuntimeInformation.OSArchitecture ==
                 System.Runtime.InteropServices.Architecture.X64)
             {
@@ -646,6 +707,8 @@ public sealed class InstallerUninstallContractTests
             }
 
             string installationScriptPath = Path.Combine(repoRoot, "installer", "DeskBox.Installation.iss");
+            string uninstallScriptPath = Path.Combine(repoRoot, "installer", "DeskBox.Uninstall.iss");
+            string storeProbeRegBase = @"Software\DeskBoxInstallerProbe_" + Guid.NewGuid().ToString("N");
             string currentUserProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile).TrimEnd('\\');
             string usersRoot = Path.GetDirectoryName(currentUserProfile) ?? @"C:\Users";
             string probeScriptPath = Path.Combine(tempRoot, "DiscoveryProbe.iss");
@@ -674,8 +737,22 @@ public sealed class InstallerUninstallContractTests
                 UpgradeDirectoryMismatch=%1 vs %2
                 PerUserUpgradeScopeMismatch=%1
                 ArchitectureMismatchBody=%1
+                StoreEditionDataPreserved=Preserved
+                StoreEditionStateUnknown=Unknown
+                StoreEditionInstallNotice=StoreNotice
+                KeepUserDataPrompt=Keep
+                KeepUserDataButton=KeepBtn
+                DeleteUserDataButton=DelBtn
+                ManagedStoragePreservedBody=%1
+                ManagedStorageShortcutPrompt=Shortcut
 
                 #include "{{installationScriptPath}}"
+
+                [Code]
+                const
+                  DeskBoxAppCompatLayersKey = 'Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers';
+
+                #include "{{uninstallScriptPath}}"
 
                 [Code]
                 procedure LogBool(Tag: string; Value: Boolean);
@@ -687,6 +764,8 @@ public sealed class InstallerUninstallContractTests
                 end;
 
                 function InitializeSetup: Boolean;
+                var
+                  SelfExePath: string;
                 begin
                   Log('PROBE:BRACE=' + NormalizeDirPath('C:\Portable\{LiteralBrace}\DeskBox\'));
                   Log('PROBE:UNQUOTE_SPACE=' + UnquoteExecutablePath('C:\Program Files\DeskBox\DeskBox.exe'));
@@ -711,8 +790,36 @@ public sealed class InstallerUninstallContractTests
                   LogBool('TASK_EXACT', IsInstallStartupTaskName('DeskBox User Startup'));
                   LogBool('TASK_SID', IsInstallStartupTaskName('DeskBox User Startup-S-1-5-21-2861986738-4030568935-1047302796-1000'));
                   LogBool('TASK_UNRELATED', IsInstallStartupTaskName('Other Startup Task'));
+                  LogBool('WIN32_SELF_PATH', TryQueryProcessExecutablePath(GetCurrentProcessId, SelfExePath) and FileExists(SelfExePath));
+                  LogBool('WIN32_SELF_ACTIVE', IsProcessStillActive(GetCurrentProcessId));
+                  try
+                    RegWriteStringValue(HKEY_CURRENT_USER, '{{storeProbeRegBase}}\Installed\AppModel\Repository\Packages\D1FC332A.DeskBoxWidgets_1.6.0.0_x64__abc', '', '');
+                    RegWriteStringValue(HKEY_CURRENT_USER, '{{storeProbeRegBase}}\NotInstalled\AppModel\Repository\Packages\OtherVendor.OtherApp_1.0.0.0_x64__xyz', '', '');
+                    RegWriteStringValue(HKEY_CURRENT_USER, '{{storeProbeRegBase}}\FreshProfile\Explorer', '', '');
+                    Log('PROBE:STORE_INSTALLED=' + IntToStr(ProbeStoreDeskBoxRegistryKey(HKEY_CURRENT_USER, '{{storeProbeRegBase}}\Installed\AppModel\Repository\Packages', '{{storeProbeRegBase}}\Installed')));
+                    Log('PROBE:STORE_NOT_INSTALLED=' + IntToStr(ProbeStoreDeskBoxRegistryKey(HKEY_CURRENT_USER, '{{storeProbeRegBase}}\NotInstalled\AppModel\Repository\Packages', '{{storeProbeRegBase}}\NotInstalled')));
+                    Log('PROBE:STORE_FRESH_PROFILE=' + IntToStr(ProbeStoreDeskBoxRegistryKey(HKEY_CURRENT_USER, '{{storeProbeRegBase}}\FreshProfile\AppModel\Repository\Packages', '{{storeProbeRegBase}}\FreshProfile')));
+                    Log('PROBE:STORE_UNKNOWN=' + IntToStr(ProbeStoreDeskBoxRegistryKey(HKEY_CURRENT_USER, '{{storeProbeRegBase}}\MissingAncestor\AppModel\Repository\Packages', '{{storeProbeRegBase}}\MissingAncestor')));
+                  finally
+                    RegDeleteKeyIncludingSubkeys(HKEY_CURRENT_USER, '{{storeProbeRegBase}}');
+                  end;
                   AddRunningProcessInstallCandidates;
                   AddStartupScheduledTaskCandidates;
+                  ExistingInstallCount := 0;
+                  ExistingInstallPath := '';
+                  SetArrayLength(RunningUnregisteredProcessPaths, 0);
+                  ForceDirectories('{{tempRoot}}\PortableUnregistered');
+                  SaveStringToFile('{{tempRoot}}\PortableUnregistered\DeskBox.exe', 'stub', False);
+                  ForceDirectories('{{tempRoot}}\RegisteredWithUninstaller');
+                  SaveStringToFile('{{tempRoot}}\RegisteredWithUninstaller\DeskBox.exe', 'stub', False);
+                  SaveStringToFile('{{tempRoot}}\RegisteredWithUninstaller\unins000.dat', 'stub', False);
+                  LogBool('FOOTPRINT_PORTABLE', HasAnyInstallFootprintForPath('{{tempRoot}}\PortableUnregistered'));
+                  LogBool('FOOTPRINT_UNINS', HasAnyInstallFootprintForPath('{{tempRoot}}\RegisteredWithUninstaller'));
+                  // Excluded temp root is bypassed only when probing outside %TEMP%; testHasAnyInstallFootprint directly above,
+                  // and test AddRunningUnregisteredProcessPath + AddHeuristicInstallCandidate separation:
+                  AddRunningUnregisteredProcessPath('D:\PortableApps\DeskBox', 'probe');
+                  Log('PROBE:UNREG_COUNT=' + IntToStr(GetArrayLength(RunningUnregisteredProcessPaths)));
+                  Log('PROBE:INSTALL_COUNT_AFTER_UNREG=' + IntToStr(ExistingInstallCount));
                   Log('PROBE:DONE');
                   Result := False;
                 end;
@@ -756,6 +863,16 @@ public sealed class InstallerUninstallContractTests
             Assert.Contains("PROBE:TASK_EXACT=1", log, StringComparison.Ordinal);
             Assert.Contains("PROBE:TASK_SID=1", log, StringComparison.Ordinal);
             Assert.Contains("PROBE:TASK_UNRELATED=0", log, StringComparison.Ordinal);
+            Assert.Contains("PROBE:WIN32_SELF_PATH=1", log, StringComparison.Ordinal);
+            Assert.Contains("PROBE:WIN32_SELF_ACTIVE=1", log, StringComparison.Ordinal);
+            Assert.Contains("PROBE:STORE_INSTALLED=1", log, StringComparison.Ordinal);
+            Assert.Contains("PROBE:STORE_NOT_INSTALLED=0", log, StringComparison.Ordinal);
+            Assert.Contains("PROBE:STORE_FRESH_PROFILE=0", log, StringComparison.Ordinal);
+            Assert.Contains("PROBE:STORE_UNKNOWN=2", log, StringComparison.Ordinal);
+            Assert.Contains("PROBE:FOOTPRINT_PORTABLE=0", log, StringComparison.Ordinal);
+            Assert.Contains("PROBE:FOOTPRINT_UNINS=1", log, StringComparison.Ordinal);
+            Assert.Contains("PROBE:UNREG_COUNT=1", log, StringComparison.Ordinal);
+            Assert.Contains("PROBE:INSTALL_COUNT_AFTER_UNREG=0", log, StringComparison.Ordinal);
             Assert.Contains("PROBE:DONE", log, StringComparison.Ordinal);
         }
         finally

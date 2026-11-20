@@ -50,9 +50,10 @@ internal static class MaterialCapabilityAdvisor
                     "Display.Material.TransparencyOff.Body");
             }
 
-            // Battery saver only degrades the Win11 system-backdrop
-            // controllers; the Win10 legacy accent path is unaffected.
-            if (WindowsCompatibilityService.IsWindows11OrLater &&
+            // Battery saver degrades system-backdrop controllers on both Win11
+            // (Mica/Acrylic) and Win10 19041+ (DesktopAcrylicController).
+            if ((WindowsCompatibilityService.SupportsMica ||
+                 WindowsCompatibilityService.SupportsDesktopAcrylic) &&
                 IsBatterySaverActive() &&
                 WarnOnce("battery-saver"))
             {

@@ -67,11 +67,24 @@ public sealed partial class FileService
             CancellationToken cancellationToken,
             Func<FileTransferItemError, Task<FileTransferItemAction>>? onItemError = null,
             ICollection<FileTransferSkippedItem>? skippedItems = null,
-            Action<FileTransferResult>? itemCompleted = null)
+            Action<FileTransferResult>? itemCompleted = null,
+            IntPtr ownerWindowHandle = default)
     {
         var reporter = new TransferProgressReporter(progress, operations.Count);
         var completedOperations = new List<TransferOperation>(operations.Count);
         var completedResults = new List<FileTransferResult>(operations.Count);
+        Func<string, string, CancellationToken, Task>? interactiveSameVolumeLockDelegate =
+            ownerWindowHandle != IntPtr.Zero && onItemError is null
+                ? (src, dst, ct) => ExecuteModernShellTransferPlanAsync(
+                    [new TransferOperation(src, dst, SourceIsDirectory: true)],
+                    move: true,
+                    ownerWindowHandle,
+                    progress: null,
+                    ct,
+                    keepBoth: false,
+                    itemCompleted: null,
+                    showElevationPrompt: true)
+                : null;
         try
         {
             reporter.Report(FileTransferPhase.Preparing, force: true);
@@ -108,7 +121,8 @@ public sealed partial class FileService
                                 operation.DestinationPath,
                                 estimate,
                                 reporter,
-                                cancellationToken);
+                                cancellationToken,
+                                interactiveSameVolumeLockDelegate);
                         }
                         else
                         {
@@ -375,7 +389,8 @@ public sealed partial class FileService
         string destinationPath,
         TransferWorkEstimate? estimate,
         TransferProgressReporter reporter,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<string, string, CancellationToken, Task>? interactiveSameVolumeLockDelegate = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (File.Exists(sourcePath))
@@ -395,7 +410,8 @@ public sealed partial class FileService
                 destinationPath,
                 estimate,
                 reporter,
-                cancellationToken);
+                cancellationToken,
+                interactiveSameVolumeLockDelegate);
         }
 
         return null;
@@ -441,7 +457,7 @@ public sealed partial class FileService
 
                 throw new IOException(
                     $"The source '{sourceFilePath}' could not be opened for copying (win32={openError}).",
-                    openError);
+                    HResultFromWin32Error(openError));
             }
 
             await using var source = new FileStream(
@@ -698,7 +714,7 @@ public sealed partial class FileService
             throw new IOException(
                 $"The source '{sourceFilePath}' {refusal} and cannot be " +
                 "moved safely.",
-                openError);
+                HResultFromWin32Error(openError));
         }
 
         FileStream? destination = null;
@@ -797,17 +813,17 @@ public sealed partial class FileService
     {
         try
         {
-            string? sourceRoot = GetComparableVolumeRoot(
+            string? sourceIdentity = GetComparableVolumeIdentity(
                 sourcePath,
                 useParentPath: false);
-            string? destinationRoot = GetComparableVolumeRoot(
+            string? destinationIdentity = GetComparableVolumeIdentity(
                 destinationPath,
                 useParentPath: true);
-            return !string.IsNullOrWhiteSpace(sourceRoot) &&
-                   !string.IsNullOrWhiteSpace(destinationRoot) &&
+            return !string.IsNullOrWhiteSpace(sourceIdentity) &&
+                   !string.IsNullOrWhiteSpace(destinationIdentity) &&
                    string.Equals(
-                       Path.TrimEndingDirectorySeparator(sourceRoot),
-                       Path.TrimEndingDirectorySeparator(destinationRoot),
+                       Path.TrimEndingDirectorySeparator(sourceIdentity),
+                       Path.TrimEndingDirectorySeparator(destinationIdentity),
                        StringComparison.OrdinalIgnoreCase);
         }
         catch (Exception ex) when (
@@ -827,22 +843,88 @@ public sealed partial class FileService
             ? Path.GetDirectoryName(fullPath) ?? fullPath
             : fullPath;
 
-        // UNC share roots already identify the effective volume and should not
-        // trigger a network probe just to compare two paths.
-        if (OperatingSystem.IsWindows() &&
-            !candidatePath.StartsWith(@"\\", StringComparison.Ordinal))
+        // Strip extended-length \\?\ prefix on local drive paths so GetVolumePathNameW
+        // still resolves the true mount root, while preserving \\?\UNC\ and \\server\share
+        // as UNC roots (avoiding blocking network probes).
+        string probePath = candidatePath;
+        bool isUnc = false;
+        if (probePath.StartsWith(@"\\?\UNC\", StringComparison.OrdinalIgnoreCase))
         {
-            var volumePath = new StringBuilder(512);
+            isUnc = true;
+            probePath = @"\\" + probePath[8..];
+        }
+        else if (probePath.StartsWith(@"\\?\", StringComparison.Ordinal))
+        {
+            probePath = probePath[4..];
+        }
+        else if (probePath.StartsWith(@"\\", StringComparison.Ordinal))
+        {
+            isUnc = true;
+        }
+
+        if (OperatingSystem.IsWindows() && !isUnc)
+        {
+            Span<char> volumePath = stackalloc char[512];
             if (Kernel32NativeMethods.GetVolumePathName(
-                    candidatePath,
+                    StorageMigrationNativeMethods.Extended(probePath),
                     volumePath,
-                    (uint)volumePath.Capacity))
+                    (uint)volumePath.Length))
             {
-                return volumePath.ToString();
+                int nullIndex = volumePath.IndexOf('\0');
+                ReadOnlySpan<char> mountSlice = nullIndex >= 0 ? volumePath[..nullIndex] : volumePath;
+                if (!mountSlice.IsEmpty)
+                {
+                    string mountPoint = DriveMediaInterop.StripExtendedPathPrefix(new string(mountSlice));
+                    if (!string.IsNullOrWhiteSpace(mountPoint))
+                    {
+                        return mountPoint;
+                    }
+                }
             }
         }
 
-        return Path.GetPathRoot(fullPath);
+        return Path.GetPathRoot(probePath);
+    }
+
+    /// <summary>
+    /// Resolves <paramref name="path"/> to its canonical volume identity
+    /// (<c>\\?\Volume{GUID}\</c> on Windows when resolvable, falling back to
+    /// <see cref="GetComparableVolumeRoot"/>) so <c>SUBST</c> drives on the same
+    /// NTFS volume compare equal while NTFS directory mount points across
+    /// different volumes compare distinct.
+    /// </summary>
+    internal static string? GetComparableVolumeIdentity(
+        string path,
+        bool useParentPath)
+    {
+        string? mountRoot = GetComparableVolumeRoot(path, useParentPath);
+        if (string.IsNullOrWhiteSpace(mountRoot) ||
+            mountRoot.StartsWith(@"\\", StringComparison.Ordinal))
+        {
+            return mountRoot;
+        }
+
+        if (OperatingSystem.IsWindows())
+        {
+            string mountPoint = mountRoot.EndsWith(Path.DirectorySeparatorChar)
+                ? mountRoot
+                : mountRoot + Path.DirectorySeparatorChar;
+            Span<char> volumeGuid = stackalloc char[128];
+            if (Kernel32NativeMethods.GetVolumeNameForVolumeMountPoint(
+                    mountPoint,
+                    volumeGuid,
+                    (uint)volumeGuid.Length))
+            {
+                int guidNull = volumeGuid.IndexOf('\0');
+                ReadOnlySpan<char> guidSlice = guidNull >= 0 ? volumeGuid[..guidNull] : volumeGuid;
+                if (!guidSlice.IsEmpty)
+                {
+                    return new string(guidSlice);
+                }
+            }
+        }
+
+        return mountRoot;
     }
 
     private static Task CopyDirectoryWithProgressAsync(
@@ -877,7 +959,8 @@ public sealed partial class FileService
         ISet<string> visitedSourceDirectories,
         List<CopiedSourceFileRecord> copiedSourceFiles,
         List<CopiedDestinationFileRecord>? copiedDestinationFiles = null,
-        List<string>? createdDestinationDirectories = null)
+        List<string>? createdDestinationDirectories = null,
+        List<FileTransferResult>? copiedSubDirectories = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         EnsureSafeRecursiveDirectoryCopy(
@@ -932,6 +1015,9 @@ public sealed partial class FileService
             string destinationSubDirectory = ResolveNestedDirectoryDestinationPath(
                 destinationDirectory,
                 Path.GetFileName(subDirectory));
+            copiedSubDirectories?.Add(new FileTransferResult(
+                subDirectory,
+                destinationSubDirectory));
             await CopyDirectoryWithProgressAsync(
                 subDirectory,
                 destinationSubDirectory,
@@ -940,7 +1026,8 @@ public sealed partial class FileService
                 visitedSourceDirectories,
                 copiedSourceFiles,
                 copiedDestinationFiles,
-                createdDestinationDirectories);
+                createdDestinationDirectories,
+                copiedSubDirectories);
         }
     }
 
@@ -1001,43 +1088,102 @@ public sealed partial class FileService
             new System.ComponentModel.Win32Exception(error));
     }
 
+    internal static bool IsCrossVolumeMoveError(Exception exception)
+    {
+        const int HResultErrorNotSameDevice = unchecked((int)0x80070011);
+        for (Exception? current = exception; current is not null; current = current.InnerException)
+        {
+            if (current.HResult == HResultErrorNotSameDevice)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    internal static bool IsSameVolumeLockOrAccessError(Exception exception)
+    {
+        const int HResultAccessDenied = unchecked((int)0x80070005);
+        const int HResultSharingViolation = unchecked((int)0x80070020);
+        const int HResultLockViolation = unchecked((int)0x80070021);
+        for (Exception? current = exception; current is not null; current = current.InnerException)
+        {
+            if (current is UnauthorizedAccessException ||
+                current.HResult is HResultAccessDenied or HResultSharingViolation or HResultLockViolation)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private static async Task<IReadOnlyList<FileTransferResult>?> MoveDirectoryWithProgressAsync(
         string sourceDirectory,
         string destinationDirectory,
         TransferWorkEstimate? estimate,
         TransferProgressReporter reporter,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<string, string, CancellationToken, Task>? interactiveSameVolumeLockDelegate = null)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(destinationDirectory)!);
         cancellationToken.ThrowIfCancellationRequested();
         bool canUseAtomicMove = CanUseAtomicMove(
             sourceDirectory,
             destinationDirectory);
+        TransferWorkEstimate? computedWork = estimate;
         try
         {
             if (canUseAtomicMove && !Directory.Exists(destinationDirectory))
             {
-                TransferWorkEstimate work = estimate ?? EstimateTransferWork(
+                computedWork = estimate ?? EstimateTransferWork(
                     sourceDirectory,
                     cancellationToken);
                 await Task.Run(
                     () => Directory.Move(sourceDirectory, destinationDirectory),
                     cancellationToken);
                 reporter.AddBytes(
-                    work.Bytes,
+                    computedWork.Bytes,
                     Path.GetFileName(sourceDirectory),
                     force: true);
                 Win32Helper.NotifyShellItemMoved(sourceDirectory, destinationDirectory);
                 return null;
             }
         }
-        catch (IOException)
+        catch (IOException ex) when (
+            IsCrossVolumeMoveError(ex) ||
+            Directory.Exists(destinationDirectory))
         {
-            // Cross-volume directory move. Fall through to controlled moves.
+            // Genuine cross-volume / mount-point move (ERROR_NOT_SAME_DEVICE=17)
+            // or destination directory appeared concurrently for merge. Fall through
+            // to copy-first + manifest-verified source cleanup.
         }
-        catch (UnauthorizedAccessException)
+        catch (Exception ex) when (IsSameVolumeLockOrAccessError(ex))
         {
-            // Preserve the existing fallback for paths requiring per-entry work.
+            // Same-volume lock (ERROR_SHARING_VIOLATION / ERROR_ACCESS_DENIED):
+            // NEVER degrade to Copy + DeleteSourceTreeByManifest, which would
+            // split the directory across source and destination. Interactive
+            // transfers delegate to Windows native IFileOperation (Retry/Skip/Cancel);
+            // headless callers fail cleanly with the source tree intact (FL-06/D5).
+            if (interactiveSameVolumeLockDelegate is not null)
+            {
+                await interactiveSameVolumeLockDelegate(
+                    sourceDirectory,
+                    destinationDirectory,
+                    cancellationToken);
+                if (computedWork is not null)
+                {
+                    reporter.AddBytes(
+                        computedWork.Bytes,
+                        Path.GetFileName(sourceDirectory),
+                        force: true);
+                }
+
+                return null;
+            }
+
+            throw;
         }
 
         // A directory fallback must preserve a complete copy before changing
@@ -1072,6 +1218,7 @@ public sealed partial class FileService
         var copiedSourceFiles = new List<CopiedSourceFileRecord>();
         var copiedDestinationFiles = new List<CopiedDestinationFileRecord>();
         var createdDestinationDirectories = new List<string>();
+        var copiedSubDirectories = new List<FileTransferResult>();
         try
         {
             await CopyDirectoryWithProgressAsync(
@@ -1082,7 +1229,8 @@ public sealed partial class FileService
                 new HashSet<string>(StringComparer.OrdinalIgnoreCase),
                 copiedSourceFiles,
                 copiedDestinationFiles,
-                createdDestinationDirectories);
+                createdDestinationDirectories,
+                copiedSubDirectories);
         }
         catch (Exception copyFailure)
         {
@@ -1149,10 +1297,7 @@ public sealed partial class FileService
 
         Win32Helper.NotifyShellItemMoved(sourceDirectory, destinationDirectory);
         return destinationExistedBefore
-            ? copiedSourceFiles
-                .Where(static r => !string.IsNullOrWhiteSpace(r.DestinationFilePath))
-                .Select(static r => new FileTransferResult(r.SourceFilePath, r.DestinationFilePath))
-                .ToArray()
+            ? BuildManagedMergedLeafResults(copiedSubDirectories, copiedSourceFiles)
             : null;
     }
 
@@ -1194,7 +1339,7 @@ public sealed partial class FileService
             string directory = createdDestinationDirectories[index];
             try
             {
-                if ((File.GetAttributes(directory) & FileAttributes.ReparsePoint) != 0)
+                if (StorageMigrationNativeMethods.IsFileSystemLinkOrMountPoint(directory))
                 {
                     // Our directory was swapped for a junction/symlink: the
                     // object at the path is foreign now — fail closed.
@@ -1291,7 +1436,7 @@ public sealed partial class FileService
             // fails the copy untouched.
             throw new IOException(
                 $"The destination '{destinationFilePath}' could not be created.",
-                Marshal.GetLastWin32Error());
+                HResultFromWin32Error(Marshal.GetLastWin32Error()));
         }
 
         if (encryptDestination)
@@ -1413,4 +1558,9 @@ public sealed partial class FileService
                 remaining));
         }
     }
+
+    private static int HResultFromWin32Error(int win32Error) =>
+        win32Error <= 0
+            ? win32Error
+            : unchecked((int)0x80070000) | (win32Error & 0xFFFF);
 }

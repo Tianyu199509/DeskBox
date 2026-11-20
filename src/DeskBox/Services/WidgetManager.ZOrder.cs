@@ -1857,9 +1857,9 @@ public sealed partial class WidgetManager
             return false;
         }
 
-        var className = new System.Text.StringBuilder(256);
-        int length = Win32Helper.GetClassName(hWnd, className, className.Capacity);
-        return length > 0 && predicate(className.ToString());
+        Span<char> className = stackalloc char[256];
+        int length = Win32Helper.GetClassName(hWnd, className);
+        return length > 0 && predicate(new string(className[..length]));
     }
 
     private static Win32Helper.POINT? TryGetCursorPosition()

@@ -707,8 +707,19 @@ public sealed class ResizeGuideOverlayService
     /// within threshold, and shows edge highlights.
     /// Returns the (possibly snapped) bounds to apply.
     /// </summary>
-    public RectInt32 UpdateGuidesAndSnapForDrag(RectInt32 proposedBounds)
+    public RectInt32 UpdateGuidesAndSnapForDrag(RectInt32 proposedBounds, bool suspendSnap = false)
     {
+        if (suspendSnap && IsDragActive)
+        {
+            // A merge target is engaged: edge snapping would drag the window
+            // away from the drop zone, so hide the bands and drop the
+            // hysteresis lock to start fresh once the pointer leaves it.
+            ClearAllHighlights();
+            _currentDragHorizontalMatch = null;
+            _currentDragVerticalMatch = null;
+            return proposedBounds;
+        }
+
         if (!IsDragActive || !IsSnapEnabled)
         {
             // Snap toggled off mid-drag must still converge the bands.

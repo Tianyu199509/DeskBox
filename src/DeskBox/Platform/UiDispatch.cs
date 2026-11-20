@@ -382,6 +382,19 @@ internal static class UiDispatch
         }
     }
 
+    /// <summary>
+    /// Async-safe overload of <see cref="PostAfterCallback(Action)"/> so callers
+    /// passing <c>async () =&gt; await ...</c> never compile into an unprotected
+    /// <c>async void</c> delegate whose cancellation or fault crashes the UI loop.
+    /// </summary>
+    public static void PostAfterCallback(
+        Func<Task> asyncAction,
+        [System.Runtime.CompilerServices.CallerMemberName] string caller = "")
+    {
+        ArgumentNullException.ThrowIfNull(asyncAction);
+        PostAfterCallback(() => App.SafeFireAndForget(asyncAction, caller));
+    }
+
     public static long PostAfterCallbackDroppedCount =>
         Volatile.Read(ref _postAfterCallbackDroppedCount);
 

@@ -105,37 +105,25 @@ internal static class SearchCalculatorEvaluator
         for (int i = 0; i < input.Length; i++)
         {
             char c = input[i];
-            if (c is >= '0' and <= '9')
+            if (IsNumberTokenChar(c))
             {
-                hasDigit = true;
-                builder.Append(c);
-                continue;
-            }
+                int start = i;
+                while (i + 1 < input.Length && IsNumberTokenChar(input[i + 1]))
+                {
+                    i++;
+                }
 
-            if (c is >= '０' and <= '９')
-            {
-                hasDigit = true;
-                builder.Append((char)('0' + (c - '０')));
+                if (!TryAppendNormalizedNumberToken(input[start..(i + 1)], builder, out bool tokenHasDigit))
+                {
+                    return false;
+                }
+
+                hasDigit |= tokenHasDigit;
                 continue;
             }
 
             switch (c)
             {
-                case '.':
-                case '．':
-                    builder.Append('.');
-                    break;
-                case ',':
-                case '，':
-                case '_':
-                    // Allow numeric group separators only between digits (e.g. 1,000,000).
-                    if (i == 0 || i + 1 >= input.Length ||
-                        !IsAsciiOrFullWidthDigit(input[i - 1]) ||
-                        !IsAsciiOrFullWidthDigit(input[i + 1]))
-                    {
-                        return false;
-                    }
-                    break;
                 case '+':
                 case '＋':
                     builder.Append('+');
@@ -187,6 +175,195 @@ internal static class SearchCalculatorEvaluator
 
         normalized = builder.ToString();
         return builder.Length > 0;
+    }
+
+    private static bool IsNumberTokenChar(char c) =>
+        IsAsciiOrFullWidthDigit(c) || c is '.' or '．' or ',' or '，' or '_';
+
+    private static bool TryAppendNormalizedNumberToken(
+        ReadOnlySpan<char> rawToken,
+        StringBuilder destination,
+        out bool hasDigit)
+    {
+        hasDigit = false;
+        var cleanedBuilder = new StringBuilder(rawToken.Length);
+        int dotCount = 0;
+        int commaCount = 0;
+
+        for (int k = 0; k < rawToken.Length; k++)
+        {
+            char c = rawToken[k];
+            if (c is >= '0' and <= '9')
+            {
+                hasDigit = true;
+                cleanedBuilder.Append(c);
+            }
+            else if (c is >= '０' and <= '９')
+            {
+                hasDigit = true;
+                cleanedBuilder.Append((char)('0' + (c - '０')));
+            }
+            else if (c is '.' or '．')
+            {
+                dotCount++;
+                cleanedBuilder.Append('.');
+            }
+            else if (c is ',' or '，')
+            {
+                commaCount++;
+                cleanedBuilder.Append(',');
+            }
+            else if (c == '_')
+            {
+                if (k == 0 || k + 1 >= rawToken.Length ||
+                    !IsAsciiOrFullWidthDigit(rawToken[k - 1]) ||
+                    !IsAsciiOrFullWidthDigit(rawToken[k + 1]))
+                {
+                    return false;
+                }
+            }
+        }
+
+        if (!hasDigit)
+        {
+            return false;
+        }
+
+        string cleaned = cleanedBuilder.ToString();
+        ReadOnlySpan<char> span = cleaned.AsSpan();
+
+        if (commaCount == 0)
+        {
+            if (dotCount <= 1)
+            {
+                destination.Append(span);
+                return true;
+            }
+
+            if (!IsValidThousandsGrouping(span, '.'))
+            {
+                return false;
+            }
+
+            AppendWithoutChar(destination, span, '.');
+            return true;
+        }
+
+        if (dotCount == 0)
+        {
+            if (commaCount >= 2)
+            {
+                if (!IsValidThousandsGrouping(span, ','))
+                {
+                    return false;
+                }
+
+                AppendWithoutChar(destination, span, ',');
+                return true;
+            }
+
+            int commaIndex = span.IndexOf(',');
+            ReadOnlySpan<char> before = span[..commaIndex];
+            ReadOnlySpan<char> after = span[(commaIndex + 1)..];
+            if (after.IsEmpty)
+            {
+                return false;
+            }
+
+            // Treat [1-9]d{0,2},ddd (e.g. 1,000 or 12,500) as thousands grouping;
+            // treat 1,5 / 19,99 / 0,125 / ,5 / 1000,5 as decimal comma.
+            if (before.Length is >= 1 and <= 3 && before[0] != '0' && after.Length == 3)
+            {
+                destination.Append(before);
+                destination.Append(after);
+                return true;
+            }
+
+            destination.Append(before);
+            destination.Append('.');
+            destination.Append(after);
+            return true;
+        }
+
+        // Mixed '.' and ',': either 1,234.56 (',' grouping + '.' decimal) or 1.234,56 ('.' grouping + ',' decimal).
+        int lastDot = span.LastIndexOf('.');
+        int lastComma = span.LastIndexOf(',');
+        if (lastDot > lastComma)
+        {
+            if (dotCount != 1 || lastDot + 1 >= span.Length || !IsValidThousandsGrouping(span[..lastDot], ','))
+            {
+                return false;
+            }
+
+            AppendWithoutChar(destination, span[..lastDot], ',');
+            destination.Append('.');
+            destination.Append(span[(lastDot + 1)..]);
+            return true;
+        }
+
+        if (commaCount != 1 || lastComma + 1 >= span.Length || !IsValidThousandsGrouping(span[..lastComma], '.'))
+        {
+            return false;
+        }
+
+        AppendWithoutChar(destination, span[..lastComma], '.');
+        destination.Append('.');
+        destination.Append(span[(lastComma + 1)..]);
+        return true;
+    }
+
+    private static bool IsValidThousandsGrouping(ReadOnlySpan<char> text, char separator)
+    {
+        if (text.IsEmpty)
+        {
+            return false;
+        }
+
+        int firstSep = text.IndexOf(separator);
+        if (firstSep is <= 0 or > 3 || text[0] == '0')
+        {
+            return false;
+        }
+
+        for (int i = 0; i < firstSep; i++)
+        {
+            if (text[i] is < '0' or > '9')
+            {
+                return false;
+            }
+        }
+
+        int pos = firstSep;
+        while (pos < text.Length)
+        {
+            if (text[pos] != separator || pos + 4 > text.Length)
+            {
+                return false;
+            }
+
+            for (int j = 1; j <= 3; j++)
+            {
+                if (text[pos + j] is < '0' or > '9')
+                {
+                    return false;
+                }
+            }
+
+            pos += 4;
+        }
+
+        return true;
+    }
+
+    private static void AppendWithoutChar(StringBuilder destination, ReadOnlySpan<char> span, char skip)
+    {
+        foreach (char ch in span)
+        {
+            if (ch != skip)
+            {
+                destination.Append(ch);
+            }
+        }
     }
 
     private static bool IsAsciiOrFullWidthDigit(char c) =>

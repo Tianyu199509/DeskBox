@@ -3,14 +3,14 @@ use std::slice;
 use windows::{
     Win32::{
         Foundation::{HWND, RPC_E_CHANGED_MODE},
-        Storage::FileSystem::WIN32_FIND_DATAW,
+        Storage::FileSystem::{GetShortPathNameW, WIN32_FIND_DATAW},
         System::Com::{
-            CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx,
-            CoUninitialize, IPersistFile, STGM_READ,
+            CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
+            CoTaskMemFree, CoUninitialize, IPersistFile, STGM_READ,
         },
         UI::Shell::{Common::ITEMIDLIST, ILFree, IShellLinkW, SHParseDisplayName, ShellLink},
     },
-    core::{Interface, PCWSTR, PWSTR},
+    core::{GUID, Interface, PCWSTR, PWSTR},
 };
 
 use crate::{
@@ -32,12 +32,282 @@ use crate::{
 };
 
 const STORED_FIELD_CAPACITY: usize = 260;
-const DIAGNOSTIC_ARGUMENT_CAPACITY: usize = 512;
+const ARGUMENT_FIELD_CAPACITY: usize = 4096;
+const DIAGNOSTIC_ARGUMENT_CAPACITY: usize = ARGUMENT_FIELD_CAPACITY;
 const SLGP_RAWPATH: u32 = 0x0004;
 const SLR_NO_UI: u32 = 0x0001;
 const SLR_UPDATE: u32 = 0x0004;
 const SLR_NOSEARCH: u32 = 0x0010;
 const SLR_OFFER_DELETE_WITHOUT_FILE: u32 = 0x0200;
+const WIN32_PATH_THRESHOLD: usize = 248;
+const SHELL_LINK_LONG_PATH_THRESHOLD: usize = 258;
+const VT_LPWSTR: u16 = 31;
+
+const IID_IPROPERTY_STORE: GUID = GUID::from_u128(0x886d8eeb_8cf2_4446_8d02_cdba1dbdcf99);
+const FMTID_LINK_TARGET_PARSING_PATH: GUID =
+    GUID::from_u128(0xb9b4b3fc_2b51_4a42_b5d8_324146afcf25);
+
+#[repr(C)]
+struct PropertyKey {
+    fmtid: GUID,
+    pid: u32,
+}
+
+#[repr(C)]
+struct PropVariantLpwstr {
+    vt: u16,
+    reserved1: u16,
+    reserved2: u16,
+    reserved3: u16,
+    ptr: *const u16,
+    padding: usize,
+}
+
+struct ComRawGuard(*mut core::ffi::c_void);
+
+impl Drop for ComRawGuard {
+    fn drop(&mut self) {
+        if !self.0.is_null() {
+            // SAFETY: COM vtable slot 2 is always IUnknown::Release.
+            unsafe {
+                let vtbl = *(self.0 as *const *const *const core::ffi::c_void);
+                let release: unsafe extern "system" fn(*mut core::ffi::c_void) -> u32 =
+                    core::mem::transmute(*vtbl.add(2));
+                let _ = release(self.0);
+            }
+        }
+    }
+}
+
+fn to_extended_dos_path(nul_terminated: &[u16]) -> Option<Vec<u16>> {
+    let body = nul_terminated.strip_suffix(&[0]).unwrap_or(nul_terminated);
+    if body.len() < 3 {
+        return None;
+    }
+
+    // Already \\?\ prefixed.
+    if body.len() >= 4
+        && body[0] == b'\\' as u16
+        && body[1] == b'\\' as u16
+        && body[2] == b'?' as u16
+        && body[3] == b'\\' as u16
+    {
+        return None;
+    }
+
+    // Drive-letter absolute path: X:\... -> \\?\X:\...
+    let is_drive = ((body[0] >= b'A' as u16 && body[0] <= b'Z' as u16)
+        || (body[0] >= b'a' as u16 && body[0] <= b'z' as u16))
+        && body[1] == b':' as u16
+        && (body[2] == b'\\' as u16 || body[2] == b'/' as u16);
+    if is_drive {
+        let mut out = Vec::with_capacity(4 + body.len() + 1);
+        out.extend_from_slice(&[b'\\' as u16, b'\\' as u16, b'?' as u16, b'\\' as u16]);
+        for &ch in body {
+            out.push(if ch == b'/' as u16 { b'\\' as u16 } else { ch });
+        }
+        out.push(0);
+        return Some(out);
+    }
+
+    // UNC path: \\server\share -> \\?\UNC\server\share
+    if body[0] == b'\\' as u16 && body[1] == b'\\' as u16 && body[2] != b'\\' as u16 {
+        let mut out = Vec::with_capacity(8 + body.len() + 1);
+        out.extend_from_slice(&[
+            b'\\' as u16,
+            b'\\' as u16,
+            b'?' as u16,
+            b'\\' as u16,
+            b'U' as u16,
+            b'N' as u16,
+            b'C' as u16,
+            b'\\' as u16,
+        ]);
+        for &ch in &body[2..] {
+            out.push(if ch == b'/' as u16 { b'\\' as u16 } else { ch });
+        }
+        out.push(0);
+        return Some(out);
+    }
+
+    None
+}
+
+unsafe fn try_load_persist_file(persist_file: &IPersistFile, path: &[u16]) -> windows::core::HRESULT {
+    // SAFETY: Caller passes valid COM interface and NUL-terminated path slice.
+    let hr = unsafe {
+        (Interface::vtable(persist_file).Load)(
+            Interface::as_raw(persist_file),
+            PCWSTR(path.as_ptr()),
+            STGM_READ,
+        )
+    };
+    if hresult_succeeded(hr.0) {
+        return hr;
+    }
+
+    let char_len = path.len().saturating_sub(1);
+    if char_len >= WIN32_PATH_THRESHOLD
+        && let Some(extended) = to_extended_dos_path(path)
+    {
+        // SAFETY: Extended path buffer is NUL-terminated and alive for the call.
+        return unsafe {
+            (Interface::vtable(persist_file).Load)(
+                Interface::as_raw(persist_file),
+                PCWSTR(extended.as_ptr()),
+                STGM_READ,
+            )
+        };
+    }
+
+    hr
+}
+
+unsafe fn try_stamp_long_target_parsing_property(shell_link: &IShellLinkW, target_path: &[u16]) {
+    let raw_link = Interface::as_raw(shell_link);
+    let mut prop_store: *mut core::ffi::c_void = core::ptr::null_mut();
+    // SAFETY: Vtable slot 0 is IUnknown::QueryInterface on IShellLinkW.
+    let qi_hr: i32 = unsafe {
+        let vtbl = *(raw_link as *const *const *const core::ffi::c_void);
+        let qi: unsafe extern "system" fn(
+            *mut core::ffi::c_void,
+            *const GUID,
+            *mut *mut core::ffi::c_void,
+        ) -> i32 = core::mem::transmute(*vtbl);
+        qi(raw_link, &IID_IPROPERTY_STORE, &mut prop_store)
+    };
+    if qi_hr < 0 || prop_store.is_null() {
+        return;
+    }
+
+    let _guard = ComRawGuard(prop_store);
+    let key = PropertyKey {
+        fmtid: FMTID_LINK_TARGET_PARSING_PATH,
+        pid: 2,
+    };
+    let pv = PropVariantLpwstr {
+        vt: VT_LPWSTR,
+        reserved1: 0,
+        reserved2: 0,
+        reserved3: 0,
+        ptr: target_path.as_ptr(),
+        padding: 0,
+    };
+    // SAFETY: IPropertyStore slot 6 is SetValue and slot 7 is Commit.
+    unsafe {
+        let vtbl = *(prop_store as *const *const *const core::ffi::c_void);
+        let set_value: unsafe extern "system" fn(
+            *mut core::ffi::c_void,
+            *const PropertyKey,
+            *const PropVariantLpwstr,
+        ) -> i32 = core::mem::transmute(*vtbl.add(6));
+        if set_value(prop_store, &key, &pv) >= 0 {
+            let commit: unsafe extern "system" fn(*mut core::ffi::c_void) -> i32 =
+                core::mem::transmute(*vtbl.add(7));
+            let _ = commit(prop_store);
+        }
+    }
+}
+
+unsafe fn try_read_long_target_parsing_property(shell_link: &IShellLinkW) -> Option<Vec<u16>> {
+    const MAX_LONG_TARGET_CHARS: usize = 32_768;
+
+    let raw_link = Interface::as_raw(shell_link);
+    let mut prop_store: *mut core::ffi::c_void = core::ptr::null_mut();
+    // SAFETY: Vtable slot 0 is IUnknown::QueryInterface on IShellLinkW.
+    let qi_hr: i32 = unsafe {
+        let vtbl = *(raw_link as *const *const *const core::ffi::c_void);
+        let qi: unsafe extern "system" fn(
+            *mut core::ffi::c_void,
+            *const GUID,
+            *mut *mut core::ffi::c_void,
+        ) -> i32 = core::mem::transmute(*vtbl);
+        qi(raw_link, &IID_IPROPERTY_STORE, &mut prop_store)
+    };
+    if qi_hr < 0 || prop_store.is_null() {
+        return None;
+    }
+
+    let _guard = ComRawGuard(prop_store);
+    let key = PropertyKey {
+        fmtid: FMTID_LINK_TARGET_PARSING_PATH,
+        pid: 2,
+    };
+    let mut pv = PropVariantLpwstr {
+        vt: 0,
+        reserved1: 0,
+        reserved2: 0,
+        reserved3: 0,
+        ptr: core::ptr::null(),
+        padding: 0,
+    };
+    // SAFETY: IPropertyStore slot 5 is GetValue.
+    let get_hr: i32 = unsafe {
+        let vtbl = *(prop_store as *const *const *const core::ffi::c_void);
+        let get_value: unsafe extern "system" fn(
+            *mut core::ffi::c_void,
+            *const PropertyKey,
+            *mut PropVariantLpwstr,
+        ) -> i32 = core::mem::transmute(*vtbl.add(5));
+        get_value(prop_store, &key, &mut pv)
+    };
+    if get_hr < 0 {
+        return None;
+    }
+    if pv.vt != VT_LPWSTR || pv.ptr.is_null() {
+        #[link(name = "ole32")]
+        unsafe extern "system" {
+            fn PropVariantClear(pvar: *mut PropVariantLpwstr) -> i32;
+        }
+        unsafe {
+            let _ = PropVariantClear(&mut pv);
+        }
+        return None;
+    }
+
+    let mut len = 0_usize;
+    // SAFETY: VT_LPWSTR is a NUL-terminated UTF-16 buffer allocated via CoTaskMemAlloc.
+    unsafe {
+        while len < MAX_LONG_TARGET_CHARS && *pv.ptr.add(len) != 0 {
+            len += 1;
+        }
+    }
+
+    let out = if len >= SHELL_LINK_LONG_PATH_THRESHOLD && len < MAX_LONG_TARGET_CHARS {
+        let mut buf = Vec::with_capacity(len + 2);
+        // SAFETY: Validated `len` UTF-16 code units before the NUL terminator.
+        let chars = unsafe { slice::from_raw_parts(pv.ptr, len) };
+        buf.extend_from_slice(chars);
+        // Append two NULs so `capture_field` observes `source_length < source.len() - 1`
+        // and knows the value was not truncated by a fixed source buffer.
+        buf.push(0);
+        buf.push(0);
+        Some(buf)
+    } else {
+        None
+    };
+
+    // SAFETY: Free the CoTaskMemAlloc-backed LPWSTR returned in PROPVARIANT.
+    unsafe { CoTaskMemFree(Some(pv.ptr.cast())) };
+    out
+}
+
+unsafe fn try_get_short_path(path: &[u16]) -> Option<Vec<u16>> {
+    let extended = to_extended_dos_path(path);
+    let query_ptr = extended
+        .as_ref()
+        .map_or(path.as_ptr(), |buf| buf.as_ptr());
+    let mut short_buf = [0_u16; 320];
+    // SAFETY: Both input and output buffers are NUL-terminated / sized accurately.
+    let written = unsafe { GetShortPathNameW(PCWSTR(query_ptr), Some(&mut short_buf)) };
+    if written > 0 && (written as usize) < short_buf.len() {
+        let mut out = short_buf[..written as usize].to_vec();
+        out.push(0);
+        return Some(out);
+    }
+
+    None
+}
 
 struct ComUninitializeGuard {
     active: bool,
@@ -156,7 +426,7 @@ pub(crate) unsafe fn resolve_shortcut_with_ui(
     result.resolve_flags = resolve_with_ui_flags();
     result.attempted_phases |= DESKBOX_SHORTCUT_PHASE_COM_INITIALIZE;
     // SAFETY: COM initialization is balanced by the guard for S_OK and S_FALSE.
-    let com_hresult = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
+    let com_hresult = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
     result.com_hresult = com_hresult.0;
     let should_uninitialize = hresult_succeeded(com_hresult.0);
     if !should_uninitialize && com_hresult.0 != RPC_E_CHANGED_MODE.0 {
@@ -201,13 +471,7 @@ pub(crate) unsafe fn resolve_shortcut_with_ui(
 
     result.attempted_phases |= DESKBOX_SHORTCUT_PHASE_LOAD;
     // SAFETY: The path is NUL-terminated and remains alive for the call.
-    let load_hresult = unsafe {
-        (Interface::vtable(&persist_file).Load)(
-            Interface::as_raw(&persist_file),
-            PCWSTR(shortcut_path.as_ptr()),
-            STGM_READ,
-        )
-    };
+    let load_hresult = unsafe { try_load_persist_file(&persist_file, &shortcut_path) };
     result.load_hresult = load_hresult.0;
     if !hresult_succeeded(load_hresult.0) {
         return finish_ui_resolve(result, DESKBOX_NATIVE_STATUS_LOAD_FAILED, load_hresult.0);
@@ -285,7 +549,7 @@ pub(crate) unsafe fn write_shortcut(
 
     result.attempted_phases |= DESKBOX_SHORTCUT_PHASE_COM_INITIALIZE;
     // SAFETY: COM initialization is balanced by the guard for S_OK and S_FALSE.
-    let com_hresult = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
+    let com_hresult = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
     result.com_hresult = com_hresult.0;
     let should_uninitialize = hresult_succeeded(com_hresult.0);
     if !should_uninitialize && com_hresult.0 != RPC_E_CHANGED_MODE.0 {
@@ -330,6 +594,8 @@ pub(crate) unsafe fn write_shortcut(
 
     let shell_namespace_target =
         request.flags & DESKBOX_SHORTCUT_WRITE_FLAG_SHELL_NAMESPACE_TARGET != 0;
+    let is_long_target =
+        !shell_namespace_target && target_path.len().saturating_sub(1) >= SHELL_LINK_LONG_PATH_THRESHOLD;
     let target_hresult = if shell_namespace_target {
         let mut item_id_list: *mut ITEMIDLIST = std::ptr::null_mut();
         // SAFETY: The parsing name is NUL-terminated and the output pointer is
@@ -356,6 +622,71 @@ pub(crate) unsafe fn write_shortcut(
             }
             Ok(()) => windows::core::HRESULT(DESKBOX_NATIVE_E_INVALIDARG),
             Err(error) => error.code(),
+        }
+    } else if is_long_target {
+        let mut item_id_list: *mut ITEMIDLIST = std::ptr::null_mut();
+        // SAFETY: Both target_path and extended buffer are NUL-terminated for SHParseDisplayName.
+        let parsed = unsafe {
+            SHParseDisplayName(
+                PCWSTR(target_path.as_ptr()),
+                None,
+                &mut item_id_list,
+                0,
+                None,
+            )
+        };
+        if (parsed.is_err() || item_id_list.is_null())
+            && let Some(extended_target) = to_extended_dos_path(&target_path)
+        {
+            item_id_list = std::ptr::null_mut();
+            let _ = unsafe {
+                SHParseDisplayName(
+                    PCWSTR(extended_target.as_ptr()),
+                    None,
+                    &mut item_id_list,
+                    0,
+                    None,
+                )
+            };
+        }
+
+        if !item_id_list.is_null() {
+            let _item_id_list_guard = ItemIdListGuard(item_id_list);
+            // SAFETY: IShellLinkW::SetIDList accepts the PIDL parsed above.
+            let id_hr = unsafe {
+                (Interface::vtable(&shell_link).SetIDList)(
+                    Interface::as_raw(&shell_link),
+                    item_id_list,
+                )
+            };
+            if hresult_succeeded(id_hr.0) {
+                unsafe { try_stamp_long_target_parsing_property(&shell_link, &target_path) };
+            }
+            id_hr
+        } else {
+            let path_hr = unsafe {
+                (Interface::vtable(&shell_link).SetPath)(
+                    Interface::as_raw(&shell_link),
+                    PCWSTR(target_path.as_ptr()),
+                )
+            };
+            if hresult_succeeded(path_hr.0) {
+                unsafe { try_stamp_long_target_parsing_property(&shell_link, &target_path) };
+                path_hr
+            } else if let Some(extended_target) = to_extended_dos_path(&target_path) {
+                let ext_hr = unsafe {
+                    (Interface::vtable(&shell_link).SetPath)(
+                        Interface::as_raw(&shell_link),
+                        PCWSTR(extended_target.as_ptr()),
+                    )
+                };
+                if hresult_succeeded(ext_hr.0) {
+                    unsafe { try_stamp_long_target_parsing_property(&shell_link, &target_path) };
+                }
+                ext_hr
+            } else {
+                path_hr
+            }
         }
     } else {
         // SAFETY: The target path is NUL-terminated and alive for the call.
@@ -398,11 +729,35 @@ pub(crate) unsafe fn write_shortcut(
         }
 
         // SAFETY: Each UTF-16 value is NUL-terminated and alive for the call.
-        let working_directory_hresult = unsafe {
-            (Interface::vtable(&shell_link).SetWorkingDirectory)(
-                Interface::as_raw(&shell_link),
-                PCWSTR(working_directory.as_ptr()),
-            )
+        let working_directory_hresult = if working_directory.len().saturating_sub(1)
+            >= SHELL_LINK_LONG_PATH_THRESHOLD
+        {
+            let short_dir = unsafe { try_get_short_path(&working_directory) };
+            let candidate = short_dir.as_ref().unwrap_or(&working_directory);
+            let hr = unsafe {
+                (Interface::vtable(&shell_link).SetWorkingDirectory)(
+                    Interface::as_raw(&shell_link),
+                    PCWSTR(candidate.as_ptr()),
+                )
+            };
+            if hresult_succeeded(hr.0) {
+                hr
+            } else {
+                let empty = [0_u16; 1];
+                unsafe {
+                    (Interface::vtable(&shell_link).SetWorkingDirectory)(
+                        Interface::as_raw(&shell_link),
+                        PCWSTR(empty.as_ptr()),
+                    )
+                }
+            }
+        } else {
+            unsafe {
+                (Interface::vtable(&shell_link).SetWorkingDirectory)(
+                    Interface::as_raw(&shell_link),
+                    PCWSTR(working_directory.as_ptr()),
+                )
+            }
         };
         if let Err(hresult) = record_write_field(
             result,
@@ -433,13 +788,26 @@ pub(crate) unsafe fn write_shortcut(
 
     result.attempted_phases |= DESKBOX_SHORTCUT_PHASE_SAVE;
     // SAFETY: The save path is NUL-terminated and alive for the call.
-    let save_hresult = unsafe {
+    let mut save_hresult = unsafe {
         (Interface::vtable(&persist_file).Save)(
             Interface::as_raw(&persist_file),
             PCWSTR(shortcut_path.as_ptr()),
             true.into(),
         )
     };
+    if save_hresult.0 != DESKBOX_NATIVE_S_OK
+        && shortcut_path.len().saturating_sub(1) >= WIN32_PATH_THRESHOLD
+        && let Some(extended_shortcut) = to_extended_dos_path(&shortcut_path)
+    {
+        // SAFETY: Extended save path is NUL-terminated and alive for the call.
+        save_hresult = unsafe {
+            (Interface::vtable(&persist_file).Save)(
+                Interface::as_raw(&persist_file),
+                PCWSTR(extended_shortcut.as_ptr()),
+                true.into(),
+            )
+        };
+    }
     result.save_hresult = save_hresult.0;
     if save_hresult.0 != DESKBOX_NATIVE_S_OK {
         return finish_write(
@@ -526,7 +894,7 @@ unsafe fn execute_shortcut(
 
     result.attempted_phases |= DESKBOX_SHORTCUT_PHASE_COM_INITIALIZE;
     // SAFETY: COM initialization is balanced by the guard for S_OK and S_FALSE.
-    let com_hresult = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
+    let com_hresult = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
     result.com_hresult = com_hresult.0;
     let should_uninitialize = hresult_succeeded(com_hresult.0);
     if !should_uninitialize && com_hresult.0 != RPC_E_CHANGED_MODE.0 {
@@ -571,13 +939,7 @@ unsafe fn execute_shortcut(
 
     result.attempted_phases |= DESKBOX_SHORTCUT_PHASE_LOAD;
     // SAFETY: The path is NUL-terminated and remains alive for the call.
-    let load_hresult = unsafe {
-        (Interface::vtable(&persist_file).Load)(
-            Interface::as_raw(&persist_file),
-            PCWSTR(nul_terminated_path.as_ptr()),
-            STGM_READ,
-        )
-    };
+    let load_hresult = unsafe { try_load_persist_file(&persist_file, &nul_terminated_path) };
     result.load_hresult = load_hresult.0;
     if !hresult_succeeded(load_hresult.0) {
         return finish(result, DESKBOX_NATIVE_STATUS_LOAD_FAILED, load_hresult.0);
@@ -652,17 +1014,35 @@ unsafe fn read_stored_raw(
             SLGP_RAWPATH,
         )
     };
-    // SAFETY: The caller-owned output buffer passed ABI validation.
-    unsafe {
-        capture_field(
-            ShortcutField::Target,
-            request,
-            result,
-            &target,
-            target_hresult.0,
-            false,
-        )
-    }?;
+    // SAFETY: Queries optional PKEY_Link_TargetParsingPath from the loaded shell link;
+    // returns Some(...) only when a stamped >260-char target property exists, preventing
+    // Windows 8.3 short-path PIDLs from masking full long target paths.
+    let long_target_fallback = unsafe { try_read_long_target_parsing_property(shell_link) };
+    if let Some(long_target) = long_target_fallback.as_deref() {
+        // SAFETY: The caller-owned output buffer passed ABI validation.
+        unsafe {
+            capture_field(
+                ShortcutField::Target,
+                request,
+                result,
+                long_target,
+                DESKBOX_NATIVE_S_OK,
+                false,
+            )
+        }?;
+    } else {
+        // SAFETY: The caller-owned output buffer passed ABI validation.
+        unsafe {
+            capture_field(
+                ShortcutField::Target,
+                request,
+                result,
+                &target,
+                target_hresult.0,
+                false,
+            )
+        }?;
+    }
 
     let mut description = [0_u16; STORED_FIELD_CAPACITY];
     attempt_field(result, ShortcutField::Description);
@@ -686,7 +1066,7 @@ unsafe fn read_stored_raw(
         )
     }?;
 
-    let mut arguments = [0_u16; STORED_FIELD_CAPACITY];
+    let mut arguments = [0_u16; ARGUMENT_FIELD_CAPACITY];
     attempt_field(result, ShortcutField::Arguments);
     // SAFETY: The generated vtable signature matches IShellLinkW::GetArguments.
     let arguments_hresult = unsafe {
@@ -776,17 +1156,35 @@ unsafe fn read_effective_diagnostic(
             0,
         )
     };
-    // SAFETY: The caller-owned output buffer passed ABI validation.
-    unsafe {
-        capture_field(
-            ShortcutField::Target,
-            request,
-            result,
-            &target,
-            target_hresult.0,
-            true,
-        )
-    }?;
+    // SAFETY: Queries optional PKEY_Link_TargetParsingPath from the loaded shell link;
+    // returns Some(...) only when a stamped >260-char target property exists, preventing
+    // Windows 8.3 short-path PIDLs from masking full long target paths.
+    let long_target_fallback = unsafe { try_read_long_target_parsing_property(shell_link) };
+    if let Some(long_target) = long_target_fallback.as_deref() {
+        // SAFETY: The caller-owned output buffer passed ABI validation.
+        unsafe {
+            capture_field(
+                ShortcutField::Target,
+                request,
+                result,
+                long_target,
+                DESKBOX_NATIVE_S_OK,
+                true,
+            )
+        }?;
+    } else {
+        // SAFETY: The caller-owned output buffer passed ABI validation.
+        unsafe {
+            capture_field(
+                ShortcutField::Target,
+                request,
+                result,
+                &target,
+                target_hresult.0,
+                true,
+            )
+        }?;
+    }
 
     let mut arguments = [0_u16; DIAGNOSTIC_ARGUMENT_CAPACITY];
     attempt_field(result, ShortcutField::Arguments);

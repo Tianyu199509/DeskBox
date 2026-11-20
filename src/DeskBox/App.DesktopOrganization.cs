@@ -53,8 +53,8 @@ public partial class App
             _desktopOrganizationWindow = null;
         }
 
-#if DESKBOX_AOT_SMOKE_HARNESS
-        _settingsWindow?.RefreshDesktopOrganizationState();
+#if DESKBOX_NATIVE_AOT && DESKBOX_AOT_SMOKE_HARNESS
+        RefreshInProcessSettingsDesktopOrganizationForSmoke();
 #endif
         _ = PushSettingsIpcEventAsync(SettingsIpcMethods.HostDesktopOrgRefresh, null);
         ScheduleLightMemoryCleanup(completedHeavyOperation: true);

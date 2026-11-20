@@ -28,15 +28,20 @@ public sealed class InProcessSettingsAppActions : ISettingsAppActions
         // facade event, not the App event.
         _app.DisplayTopologyChanged += OnDisplayTopologyChanged;
         _app.ScreenHomeChanged += OnScreenHomeChanged;
+        StartupService.StateChanged += OnAutoStartStateChanged;
     }
 
     public event Action? DisplayTopologyChanged;
 
     public event Action? ScreenHomeChanged;
 
+    public event Action? AutoStartStateChanged;
+
     private void OnDisplayTopologyChanged() => DisplayTopologyChanged?.Invoke();
 
     private void OnScreenHomeChanged() => ScreenHomeChanged?.Invoke();
+
+    private void OnAutoStartStateChanged() => AutoStartStateChanged?.Invoke();
 
     public Task ShutdownForRestartAsync() => _app.ShutdownForRestartAsync();
 
@@ -158,6 +163,12 @@ public sealed class InProcessSettingsAppActions : ISettingsAppActions
 
     public Task ForceExternalStateRecoveryAsync() =>
         _app.ForceExternalStateRecoveryAsync();
+
+    public Task<StartupOperationResult> GetAutoStartStatusAsync() =>
+        _app.GetAutoStartStatusAsync();
+
+    public Task<StartupOperationResult> SetAutoStartEnabledAsync(bool enabled) =>
+        _app.SetAutoStartEnabledAsync(enabled);
 
     public DragDropPermissionDiagnostic DiagnoseDragDropPermissions() =>
         DragDropPermissionService.Diagnose(_localizationService);

@@ -234,7 +234,7 @@ public sealed partial class QuickCaptureWidgetViewModel
         QuickCaptureItemViewModel item,
         byte[] pngBytes)
     {
-        string displayName = $"Screenshot_{DateTimeOffset.Now:yyyyMMdd_HHmmss}.png";
+        string displayName = FormattableString.Invariant($"Screenshot_{DateTimeOffset.Now:yyyyMMdd_HHmmss}.png");
         QuickCaptureItem? updated = await _quickCaptureService.AddImageBytesAttachmentAsync(
             item.Id,
             pngBytes,
@@ -248,6 +248,14 @@ public sealed partial class QuickCaptureWidgetViewModel
         return Items.FirstOrDefault(entry => string.Equals(entry.Id, item.Id, StringComparison.Ordinal));
     }
 
+    internal static string GetQuickCapturePasteTempDirectory() =>
+        Path.Combine(Path.GetTempPath(), "DeskBox", "QuickCapturePaste");
+
+    internal static void TryCleanupTempPasteFiles(IEnumerable<string> paths) =>
+        DeskBox.Platform.QuickCaptureStorageFileOps.TryCleanupTempPasteFiles(
+            GetQuickCapturePasteTempDirectory(),
+            paths);
+
     public static async Task<DroppedFilePath?> SaveClipboardImageBytesToTempFileAsync(byte[] pngBytes)
     {
         if (pngBytes is null || pngBytes.Length == 0)
@@ -255,9 +263,10 @@ public sealed partial class QuickCaptureWidgetViewModel
             return null;
         }
 
-        string tempDir = Path.Combine(Path.GetTempPath(), "DeskBox", "QuickCapturePaste");
+        string tempDir = GetQuickCapturePasteTempDirectory();
         Directory.CreateDirectory(tempDir);
-        string fileName = $"Screenshot_{DateTimeOffset.Now:yyyyMMdd_HHmmss_fff}.png";
+        DeskBox.Platform.QuickCaptureStorageFileOps.TryPruneStaleTempPasteFiles(tempDir, DateTime.UtcNow.AddHours(-24));
+        string fileName = FormattableString.Invariant($"Screenshot_{DateTimeOffset.Now:yyyyMMdd_HHmmss_fff}.png");
         string tempPath = Path.Combine(tempDir, fileName);
         await File.WriteAllBytesAsync(tempPath, pngBytes);
         return new DroppedFilePath(tempPath, fileName, ForceManagedCopy: true);

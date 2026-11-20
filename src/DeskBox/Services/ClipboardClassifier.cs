@@ -28,10 +28,10 @@ public static partial class ClipboardClassifier
     [GeneratedRegex(@"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,24}$", RegexOptions.CultureInvariant)]
     private static partial Regex EmailRegex();
 
-    [GeneratedRegex(@"(?:sk-(?:proj-|ant-|live-|test-)?[A-Za-z0-9_\-]{20,}|gh[pousr]_[A-Za-z0-9]{24,}|github_pat_[A-Za-z0-9_]{28,}|xox[baprs]-[A-Za-z0-9\-]{20,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z\-_]{35}|eyJ[A-Za-z0-9_\-]{12,}\.eyJ[A-Za-z0-9_\-]{12,}\.[A-Za-z0-9_\-]{12,})", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"(?:sk-(?:proj-|ant-|live-|test-)?[A-Za-z0-9_\-]{20,}|gh[pousr]_[A-Za-z0-9]{24,}|github_pat_[A-Za-z0-9_]{28,}|xox[baprs]-[A-Za-z0-9\-]{20,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z\-_]{35}|eyJ[A-Za-z0-9_\-]{12,}\.eyJ[A-Za-z0-9_\-]{12,}\.[A-Za-z0-9_\-]{12,})", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 250)]
     private static partial Regex HighConfidenceTokenRegex();
 
-    [GeneratedRegex(@"(?i)(?<![A-Za-z0-9])(?:[A-Za-z0-9_]*_)?(?:api[_-]?key|access[_-]?token|client[_-]?secret|secret[_-]?key|authorization\s*:\s*bearer)\s*[:=]\s*['""]?([A-Za-z0-9_\-\.~+/=]{16,})", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"(?i)(?<![A-Za-z0-9_])(?:[A-Za-z0-9_]*_)?(?:api[_-]?key|access[_-]?token|client[_-]?secret|secret[_-]?key|authorization\s*:\s*bearer)\s*[:=]\s*['""]?([A-Za-z0-9_\-\.~+/=]{16,})", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 250)]
     private static partial Regex LabeledSecretRegex();
 
     public static string BuildSummary(string? plainText)
@@ -236,7 +236,13 @@ public static partial class ClipboardClassifier
             return string.Empty;
         }
 
-        string trimmed = text.Trim();
+        ReadOnlySpan<char> trimmedSpan = text.AsSpan().Trim();
+        if (trimmedSpan.Length > 32768)
+        {
+            trimmedSpan = trimmedSpan[..32768];
+        }
+
+        string trimmed = trimmedSpan.ToString();
         if (trimmed.Contains("PRIVATE KEY-----", StringComparison.Ordinal))
         {
             int firstNewline = trimmed.IndexOf('\n');
@@ -457,7 +463,9 @@ public static partial class ClipboardClassifier
 
         if (path.Contains(@"\MsgAttach\", StringComparison.OrdinalIgnoreCase) ||
             path.Contains(@"\nt_qq\nt_data\Pic\", StringComparison.OrdinalIgnoreCase) ||
-            path.Contains(@"\ClipboardExports\", StringComparison.OrdinalIgnoreCase))
+            path.Contains(@"\ClipboardExports\", StringComparison.OrdinalIgnoreCase) ||
+            path.Contains(@"\ClipboardDragExports\", StringComparison.OrdinalIgnoreCase) ||
+            path.Contains(@"\ClipboardCopy\", StringComparison.OrdinalIgnoreCase))
         {
             return true;
         }

@@ -118,6 +118,13 @@ internal static class MemoryReclaimer
                 GCCollectionMode.Aggressive,
                 blocking: true,
                 compacting: true);
+            GC.WaitForPendingFinalizers();
+
+            // WinUI 3 / DirectComposition free their C++ visual and shader peers
+            // onto the process's Win32 NT/LFH heaps during finalization above.
+            // Without HeapOptimizeResources, freed pages stay committed inside
+            // 16 MB NT heap segments and inflate Commit Size indefinitely.
+            _ = Platform.Win32Helper.OptimizeProcessHeaps();
 
             if (updateCooldown)
             {

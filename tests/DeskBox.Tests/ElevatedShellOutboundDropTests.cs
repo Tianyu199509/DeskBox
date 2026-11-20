@@ -115,6 +115,27 @@ public sealed class ElevatedShellOutboundDropTests
             alt);
 
         Assert.Equal(expected, actual);
+
+        // Explorer folder target (non-Desktop, e.g. USB drive) under unified Move follows
+        // Windows native volume semantics: same-volume Move, cross-volume Copy.
+        Assert.Equal(
+            FileDropIntent.Copy,
+            FileSurfaceContent.ResolveElevatedOutboundDropIntent(
+                SettingsService.ManagedDropActionMove,
+                sameVolume: false,
+                controlDown: false,
+                shiftDown: false,
+                altDown: false,
+                isDesktopTarget: false));
+        Assert.Equal(
+            FileDropIntent.Move,
+            FileSurfaceContent.ResolveElevatedOutboundDropIntent(
+                SettingsService.ManagedDropActionMove,
+                sameVolume: true,
+                controlDown: false,
+                shiftDown: false,
+                altDown: false,
+                isDesktopTarget: false));
     }
 
     [Fact]

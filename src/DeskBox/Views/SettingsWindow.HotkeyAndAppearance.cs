@@ -116,7 +116,7 @@ public sealed partial class SettingsWindow
                 _localizationService.T("Settings.GlobalHotkey.Preset.DoubleControl"),
                 new GlobalHotkeyActivation(
                     HotkeyActivationKind.DoubleControl,
-                    current.Gesture)),
+                    new GlobalHotkeyGesture(HotkeyModifierKeys.Control, 0))),
             new(
                 _localizationService.T("Settings.GlobalHotkey.Preset.DoubleShift"),
                 GlobalHotkeyActivation.FromDoubleTapModifier(HotkeyModifierKeys.Shift)),
@@ -134,7 +134,7 @@ public sealed partial class SettingsWindow
                 _localizationService.T("Settings.GlobalHotkey.Preset.WindowsTap"),
                 new GlobalHotkeyActivation(
                     HotkeyActivationKind.WindowsTap,
-                    current.Gesture)),
+                    new GlobalHotkeyGesture(HotkeyModifierKeys.Windows, 0))),
             new(
                 _localizationService.T("Settings.GlobalHotkey.Preset.CopilotKey"),
                 GlobalHotkeyActivation.FromChord(GlobalHotkeyService.CopilotKeyGesture),

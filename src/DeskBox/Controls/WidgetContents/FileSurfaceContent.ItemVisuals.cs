@@ -40,6 +40,11 @@ public sealed partial class FileSurfaceContent
     // Set by ItemSurface_PointerPressed for the same gesture's ItemClick, so
     // the slow-click rename entry can require the press to land on the label.
     private bool _lastItemPressOnLabel;
+    private long _lastItemPointerPressTick64;
+    private DispatcherTimer? _nameExpansionTimer;
+    private WidgetItem? _pendingNameExpansionItem;
+    private bool _pendingNameExpansionIsPopover;
+    private WidgetItem? _activeNameExpansionItem;
 
     internal bool IsSurfaceWindowKeyboardFocused()
     {
@@ -80,6 +85,14 @@ public sealed partial class FileSurfaceContent
     /// </summary>
     private bool ShouldExpandItemName(ListViewBase view, WidgetItem item)
     {
+        bool isOpenOrRecentDoubleTap =
+            _openRequestGate.IsActive(item.Path) ||
+            IsOpenSelectionSuppressed(item) ||
+            SelectedNameExpansionPolicy.IsWithinRecentDoubleTapSuppressionWindow(
+                Environment.TickCount64,
+                _lastDoubleTapTick,
+                Win32Helper.GetDoubleClickTime(),
+                (int)SlowClickRenameGraceMs);
         if (item is WidgetStackItem ||
             (IsStackPopoverInteractionActive &&
              !ReferenceEquals(view, _stackPopoverItemsView)) ||
@@ -88,7 +101,8 @@ public sealed partial class FileSurfaceContent
                 view.SelectedItems.Count,
                 _isBoxSelecting,
                 IsSurfaceDragActive(),
-                isWindowFocused: IsSurfaceWindowKeyboardFocused()))
+                isWindowFocused: IsSurfaceWindowKeyboardFocused(),
+                isOpenInFlightOrSuppressed: isOpenOrRecentDoubleTap))
         {
             return false;
         }
@@ -122,12 +136,87 @@ public sealed partial class FileSurfaceContent
             FileItemSurface.FindOwner(border) is { Mode: FileItemSurfaceMode.Icon } surface &&
             surface.ItemNameText is { IsTextTrimmed: true } nameText)
         {
+            Border? currentOverlay = isPopoverView
+                ? _stackPopoverNameExpansionOverlay
+                : NameExpansionOverlay;
+            bool alreadyExpandedForSameItem =
+                ReferenceEquals(_activeNameExpansionItem, soleItem) &&
+                currentOverlay is { Visibility: Visibility.Visible };
+            long sincePointerPress = Environment.TickCount64 - _lastItemPointerPressTick64;
+            bool isFreshPointerSelection =
+                !alreadyExpandedForSameItem &&
+                _lastItemPointerPressTick64 > 0 &&
+                sincePointerPress >= 0 &&
+                sincePointerPress <= 400;
+            if (isFreshPointerSelection)
+            {
+                if (!ReferenceEquals(_pendingNameExpansionItem, soleItem) ||
+                    _pendingNameExpansionIsPopover != isPopoverView)
+                {
+                    HideNameExpansion(isPopoverView);
+                    ArmDeferredNameExpansion(isPopoverView, soleItem);
+                }
+                return;
+            }
+
+            CancelPendingNameExpansion();
             ShowNameExpansion(isPopoverView, soleItem, surface, nameText);
         }
         else
         {
             HideNameExpansion(isPopoverView);
         }
+    }
+
+    private void ArmDeferredNameExpansion(bool isPopoverView, WidgetItem item)
+    {
+        CancelPendingNameExpansion();
+        _pendingNameExpansionItem = item;
+        _pendingNameExpansionIsPopover = isPopoverView;
+        _nameExpansionTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(
+                SelectedNameExpansionPolicy.ComputePointerNameExpansionDelayMs(
+                    Win32Helper.GetDoubleClickTime()))
+        };
+        _nameExpansionTimer.Tick += OnNameExpansionTimerTick;
+        _nameExpansionTimer.Start();
+    }
+
+    private void CancelPendingNameExpansion()
+    {
+        if (_nameExpansionTimer is not null)
+        {
+            _nameExpansionTimer.Stop();
+            _nameExpansionTimer.Tick -= OnNameExpansionTimerTick;
+            _nameExpansionTimer = null;
+        }
+
+        _pendingNameExpansionItem = null;
+    }
+
+    private void OnNameExpansionTimerTick(object? sender, object e)
+    {
+        WidgetItem? pendingItem = _pendingNameExpansionItem;
+        bool isPopoverView = _pendingNameExpansionIsPopover;
+        CancelPendingNameExpansion();
+        if (pendingItem is null || _isDisposed)
+        {
+            return;
+        }
+
+        ListViewBase? activeView = isPopoverView ? _stackPopoverItemsView : GetActiveItemsView();
+        if (activeView is null ||
+            !ShouldExpandItemName(activeView, pendingItem) ||
+            activeView.ContainerFromItem(pendingItem) is not SelectorItem container ||
+            FindDescendantByTag(container, "InteractiveSurface") is not Border border ||
+            FileItemSurface.FindOwner(border) is not { Mode: FileItemSurfaceMode.Icon } surface ||
+            surface.ItemNameText is not { IsTextTrimmed: true } nameText)
+        {
+            return;
+        }
+
+        ShowNameExpansion(isPopoverView, pendingItem, surface, nameText);
     }
 
     private void ShowNameExpansion(
@@ -220,6 +309,7 @@ public sealed partial class FileSurfaceContent
         // testing, so a click on the expanded label still reaches the slow-
         // click rename entry.
         RestoreNameExpansionSuppression();
+        _activeNameExpansionItem = item;
         _nameExpansionSuppressedTile = tile;
         _nameExpansionNameText = nameText;
         tile.Background = null;
@@ -229,6 +319,12 @@ public sealed partial class FileSurfaceContent
 
     private void HideNameExpansion(bool isPopoverView)
     {
+        if (_pendingNameExpansionItem is not null &&
+            _pendingNameExpansionIsPopover == isPopoverView)
+        {
+            CancelPendingNameExpansion();
+        }
+
         Border? overlay = isPopoverView
             ? _stackPopoverNameExpansionOverlay
             : NameExpansionOverlay;
@@ -243,6 +339,7 @@ public sealed partial class FileSurfaceContent
             overlay.Visibility = Visibility.Collapsed;
         }
 
+        _activeNameExpansionItem = null;
         RestoreNameExpansionSuppression();
     }
 
@@ -268,6 +365,7 @@ public sealed partial class FileSurfaceContent
 
     private void HideAllNameExpansions()
     {
+        CancelPendingNameExpansion();
         HideNameExpansion(isPopoverView: false);
         HideNameExpansion(isPopoverView: true);
     }
@@ -450,9 +548,29 @@ public sealed partial class FileSurfaceContent
             pointerPoint.PointerDeviceType is
                 PointerDeviceType.Touch or PointerDeviceType.Pen &&
             pointerPoint.IsInContact;
-        if (!isPrimaryContact)
+        bool isSecondaryMouseContact =
+            !isPrimaryContact &&
+            pointerPoint.PointerDeviceType is
+                PointerDeviceType.Mouse or PointerDeviceType.Touchpad &&
+            pointerPoint.Properties.IsRightButtonPressed;
+        if (!isPrimaryContact && !isSecondaryMouseContact)
         {
             return;
+        }
+
+        if (isSecondaryMouseContact)
+        {
+            TryArmElevatedItemPointerDrag(sender, item, e);
+            return;
+        }
+
+        _lastItemPointerPressTick64 = Environment.TickCount64;
+        if (ReferenceEquals(item, _pendingNameExpansionItem))
+        {
+            // Second primary stroke on the item before the deferred expansion
+            // fired (double-click in progress): disarm immediately so the
+            // label never flashes between press and DoubleTapped.
+            CancelPendingNameExpansion();
         }
 
         // Slow-click rename reads this flag in ItemClick: a click only enters
@@ -469,6 +587,7 @@ public sealed partial class FileSurfaceContent
             listView.SelectedItems.OfType<WidgetItem>().ToArray(),
             Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Shift));
         TryArmElevatedItemPointerDrag(sender, item, e);
+        TryArmWin10ShellItemDrag(sender, item, e);
         // Keep pointer-down selection read-only. The native selector commits
         // its final state after ItemClick; changing SelectedItems here makes
         // the same click toggle twice and can leave a stale custom highlight.
@@ -484,7 +603,6 @@ public sealed partial class FileSurfaceContent
         if (currentSelectedItems.Contains(pressedItem))
         {
             return currentSelectedItems
-                .Where(static selected => selected is not WidgetStackItem)
                 .Distinct()
                 .ToArray();
         }
@@ -494,8 +612,7 @@ public sealed partial class FileSurfaceContent
         // range-select 0..N before DragStarting fires. Snapshotting [pressedItem]
         // ensures anchorless Shift+Drag drags only the pressed item.
         if (shiftPressed &&
-            currentSelectedItems.Count == 0 &&
-            pressedItem is not WidgetStackItem)
+            currentSelectedItems.Count == 0)
         {
             return [pressedItem];
         }
@@ -731,6 +848,10 @@ public sealed partial class FileSurfaceContent
                     return;
                 }
 
+                if (hostedInPopover)
+                {
+                    MarkStackPopoverXamlDropClaimed(e.DataView);
+                }
                 await HandleRecycleBinDropAsync(e, binTile);
                 return;
             }
@@ -756,6 +877,10 @@ public sealed partial class FileSurfaceContent
             : targetFolder.Path;
 
         e.Handled = true;
+        if (hostedInPopover)
+        {
+            MarkStackPopoverXamlDropClaimed(e.DataView);
+        }
         // DragOver may have advertised Move. Do not complete the drag with that
         // result until the destination transfer has actually succeeded.
         e.AcceptedOperation = DataPackageOperation.None;
@@ -786,6 +911,17 @@ public sealed partial class FileSurfaceContent
         var deferral = e.GetDeferral();
         bool move = false;
         string? sourceWidgetId = null;
+        string[] sourcePaths = [];
+        bool containsTempFiles = false;
+        bool hadDropModifier = false;
+        bool autoProtectedExternalCopy = false;
+        FileDropIntent resolvedIntent = FileDropIntent.None;
+        var preExistingMergeSnapshots =
+            new Dictionary<string, HashSet<string>?>(StringComparer.OrdinalIgnoreCase);
+        _lastImportSkippedUndisplayableCount = 0;
+        _lastImportShowedDedicatedWarning = false;
+        _lastImportCompletedItemCount = 0;
+        _lastImportUndoHistoryId = null;
         // Surface-level and folder-target drops share the same acquisition
         // phase. Show preparation feedback before resolving StorageItems so a
         // large external payload never leaves the widget looking frozen.
@@ -802,7 +938,7 @@ public sealed partial class FileSurfaceContent
                 .GroupBy(file => file.Path, StringComparer.OrdinalIgnoreCase)
                 .Select(group => group.First())
                 .ToArray();
-            string[] sourcePaths = droppedFiles
+            sourcePaths = droppedFiles
                 .Select(file => file.Path)
                 .ToArray();
             bool transferConflict = HasTransferConflict(
@@ -847,16 +983,17 @@ public sealed partial class FileSurfaceContent
 
             // Re-read Ctrl/Shift at Drop so releasing or pressing a modifier
             // during the drag changes the actual transfer, not only its glyph.
-            bool containsTempFiles = droppedFiles.Any(static file => file.ForceManagedCopy);
-            bool hadDropModifier = Win32Helper.IsKeyPressed(VirtualKey.Control) ||
+            containsTempFiles = droppedFiles.Any(static file => file.ForceManagedCopy);
+            hadDropModifier = Win32Helper.IsKeyPressed(VirtualKey.Control) ||
                 Win32Helper.IsKeyPressed(VirtualKey.Shift) ||
                 Win32Helper.IsKeyPressed(VirtualKey.Menu);
-            FileDropIntent resolvedIntent = ResolveSurfaceDropIntent(
+            resolvedIntent = ResolveSurfaceDropIntent(
                 e.DataView,
                 e.AllowedOperations,
                 forceCopy: containsTempFiles,
                 destinationFolderPath: targetFolderPath,
-                sourcePathsOverride: droppedFiles.Select(file => file.Path));
+                sourcePathsOverride: droppedFiles.Select(file => file.Path),
+                probeBudget: PathOriginClassifier.DefaultDropProbeBudget);
             DataPackageOperation operation =
                 ToDataPackageOperation(resolvedIntent);
             if (operation == DataPackageOperation.None)
@@ -866,6 +1003,14 @@ public sealed partial class FileSurfaceContent
 
             move = operation == DataPackageOperation.Move;
             bool createShortcuts = resolvedIntent == FileDropIntent.Shortcut;
+            // Snapshot the protection classification at drop time (modifier
+            // keys are still held here); recomputing after the awaited
+            // transfer would misclassify once the user releases the keys.
+            autoProtectedExternalCopy = IsAutoProtectedExternalCopyDrop(
+                sourcePaths,
+                payload.IsDeskBoxFileDrag,
+                resolvedIntent,
+                targetFolderPath);
             sourceWidgetId = TryGetString(
                 e.DataView.Properties,
                 DeskBoxDragData.SourceWidgetIdProperty);
@@ -877,6 +1022,7 @@ public sealed partial class FileSurfaceContent
             try
             {
                 var results = new List<FileService.FileTransferResult>();
+                int userSkippedCount = 0;
                 string[] regularPaths = droppedFiles
                     .Where(file => !file.ForceManagedCopy)
                     .Select(file => file.Path)
@@ -903,7 +1049,16 @@ public sealed partial class FileSurfaceContent
                     }
                     else
                     {
-                        results.AddRange(await _fileService.TransferItemsWithResultAsync(
+                        if (move)
+                        {
+                            preExistingMergeSnapshots = await Task.Run(
+                                () => OrganizerService.SnapshotPreExistingMergeDestinations(
+                                    regularPaths,
+                                    targetFolderPath),
+                                ActiveImportCancellationToken);
+                        }
+
+                        userSkippedCount += AppendTransferResults(results, await _fileService.TransferItemsWithResultAsync(
                             regularPaths,
                             targetFolderPath,
                             move,
@@ -922,12 +1077,12 @@ public sealed partial class FileSurfaceContent
                     forcedCopyPaths);
                 if (forcedCopyPaths.Length > 0)
                 {
-                    results.AddRange(await _fileService.TransferItemsWithResultAsync(
+                    userSkippedCount += AppendTransferResults(results, await _fileService.TransferItemsWithResultAsync(
                         forcedCopyPaths,
                         targetFolderPath,
                         move: false,
                         progress: progress,
-                        cancellationToken: ActiveImportCancellationToken));
+                        cancellationToken: ActiveImportCancellationToken, useShellProgress: true, ownerWindowHandle: _hostWindowHandle));
                 }
 
                 if (!string.IsNullOrWhiteSpace(ViewModel.MappedFolderPath))
@@ -943,9 +1098,14 @@ public sealed partial class FileSurfaceContent
                         .Select(result => result.SourcePath)
                         .ToArray()
                     : [];
+                string? routedUndoHistoryId = null;
                 if (move && results.Count > 0)
                 {
-                    await ViewModel.RecordSubfolderMoveUndoAsync(results);
+                    routedUndoHistoryId = ResolveUndoEntryId(
+                        await ViewModel.RecordSubfolderMoveUndoAsync(
+                            results,
+                            preExistingMergeSnapshots,
+                            sourceWidgetId));
                 }
 
                 await NotifyFolderDropMovedOutAsync(
@@ -959,8 +1119,8 @@ public sealed partial class FileSurfaceContent
                     regularPaths.Length,
                     movedSourcePaths.Length,
                     e.AllowedOperations.HasFlag(DataPackageOperation.Copy));
-                e.AcceptedOperation = DeskBoxDragData.ResolveFileDragFeedbackOperation(
-                    e.DataView, e.AcceptedOperation);
+                e.AcceptedOperation = DeskBoxDragData.ResolveFileDropCompletionFeedbackOperation(
+                    e.DataView, e.AcceptedOperation, e.AllowedOperations);
 
                 if (move)
                 {
@@ -968,27 +1128,43 @@ public sealed partial class FileSurfaceContent
                     ApplyCutState();
                 }
 
-                if (results.Count > 0)
+                bool routedShowedSkipWarning = ShowSkippedTransferFeedback(userSkippedCount);
+                if (!routedShowedSkipWarning && results.Count > 0 && createShortcuts)
                 {
+                    // Shortcut wording stays in-widget (exact); move/copy
+                    // success flows through the HUD receipt chain below.
                     ShowFeedback(new(
                         _localizationService.Format(
-                            move
-                                ? "Widget.MovedToFolder"
-                                : "Widget.CopiedToFolder",
+                            "Widget.ShortcutsCreatedInFolder",
                             targetFolder.Name,
                             results.Count),
                         WidgetFeedbackSeverity.Success,
-                        move ? "folder-drop-move" : "folder-drop-copy"));
-                    if (!move && !createShortcuts)
-                    {
-                        TryShowInboundCrossVolumeDesktopCopyGuide(
-                            sourcePaths,
-                            payload.IsDeskBoxFileDrag,
-                            containsTempFiles,
-                            resolvedIntent,
-                            targetFolderPath,
-                            hadDropModifier);
-                    }
+                        "folder-drop-shortcut"));
+                }
+
+                if (!routedShowedSkipWarning &&
+                    results.Count > 0 &&
+                    !createShortcuts &&
+                    resolvedIntent is FileDropIntent.Move or FileDropIntent.Copy)
+                {
+                    TryShowSubfolderDropHudReceipt(
+                        resolvedIntent,
+                        sourcePaths,
+                        payload.IsDeskBoxFileDrag,
+                        moved: move,
+                        results.Count,
+                        routedUndoHistoryId,
+                        sourceWidgetId,
+                        targetFolderPath,
+                        containsTempFiles,
+                        hadDropModifier,
+                        autoProtectedExternalCopy,
+                        fallbackMessage: !move
+                            ? _localizationService.Format(
+                                "Widget.CopiedToFolder",
+                                targetFolder.Name,
+                                results.Count)
+                            : null);
                 }
 
                 await CompleteTrackedImportAsync(
@@ -1011,15 +1187,16 @@ public sealed partial class FileSurfaceContent
         {
             e.AcceptedOperation = DataPackageOperation.None;
             App.Log($"[WidgetSurface] Folder drop canceled id={WidgetId}");
-            if (move && canceledEx is FileService.IFileTransferWithCompletedResults partialCancel)
+            int cancelCompletedCount = 0;
+            string? cancelUndoHistoryId = null;
+            if (move &&
+                canceledEx is FileService.IFileTransferWithCompletedResults partialCancel &&
+                partialCancel.CompletedResults.Count > 0)
             {
-                string[] completedPaths = partialCancel.CompletedResults
-                    .Select(result => result.SourcePath)
-                    .Where(path => !string.IsNullOrWhiteSpace(path))
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .ToArray();
-                await NotifyFolderDropMovedOutAsync(
-                    completedPaths,
+                cancelCompletedCount = partialCancel.CompletedResults.Count;
+                cancelUndoHistoryId = await HandlePartialSubfolderMoveCompletionAsync(
+                    partialCancel.CompletedResults,
+                    preExistingMergeSnapshots,
                     sourceWidgetId,
                     payload.IsStackPopoverMemberDrag);
             }
@@ -1029,6 +1206,28 @@ public sealed partial class FileSurfaceContent
                 await CompleteTrackedImportAsync(
                     ImportCompletionState.Canceled);
             }
+            if (cancelCompletedCount > 0 &&
+                resolvedIntent is FileDropIntent.Move or FileDropIntent.Copy)
+            {
+                TryShowSubfolderDropHudReceipt(
+                    resolvedIntent,
+                    sourcePaths,
+                    payload.IsDeskBoxFileDrag,
+                    moved: move,
+                    cancelCompletedCount,
+                    cancelUndoHistoryId,
+                    sourceWidgetId,
+                    targetFolderPath,
+                    containsTempFiles,
+                    hadDropModifier,
+                    autoProtectedExternalCopy,
+                    fallbackMessage: !move
+                        ? _localizationService.Format(
+                            "Widget.CopiedToFolder",
+                            targetFolder.Name,
+                            cancelCompletedCount)
+                        : null);
+            }
         }
         catch (Exception ex)
         {
@@ -1036,13 +1235,9 @@ public sealed partial class FileSurfaceContent
             App.Log($"[WidgetSurface] Folder drop failed id={WidgetId}: {ex}");
             if (move && ex is FileService.IFileTransferWithCompletedResults partialFailure)
             {
-                string[] completedPaths = partialFailure.CompletedResults
-                    .Select(result => result.SourcePath)
-                    .Where(path => !string.IsNullOrWhiteSpace(path))
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .ToArray();
-                await NotifyFolderDropMovedOutAsync(
-                    completedPaths,
+                await HandlePartialSubfolderMoveCompletionAsync(
+                    partialFailure.CompletedResults,
+                    preExistingMergeSnapshots,
                     sourceWidgetId,
                     payload.IsStackPopoverMemberDrag);
             }
@@ -1131,12 +1326,38 @@ public sealed partial class FileSurfaceContent
         return displayable;
     }
 
-    private async Task<bool> ImportNativeDroppedFilesIntoFolderAsync(
+    /// <summary>
+    /// Outcome of a subfolder import, shared by all four subfolder drop entry
+    /// points: <see cref="Imported"/> keeps the legacy bool semantics, while
+    /// the remaining fields let the callers build exact HUD receipts —
+    /// including partial batches, which record undo history but used to
+    /// return a bare false and lose the receipt entirely.
+    /// </summary>
+    internal readonly record struct FolderImportOutcome(
+        bool Imported,
+        int CompletedCount,
+        bool ShowedDedicatedWarning,
+        string? UndoHistoryId);
+
+    private static string? ResolveUndoEntryId(OrganizationHistoryEntry? entry) =>
+        entry is { CanUndo: true, IsUndone: false } undoable ? undoable.Id : null;
+
+    private async Task<FolderImportOutcome> ImportNativeDroppedFilesIntoFolderAsync(
         IReadOnlyList<DroppedFilePath> droppedFiles,
         WidgetItem targetFolder,
         bool move,
-        FileDropIntent? intentOverride = null)
+        FileDropIntent? intentOverride = null,
+        string? sourceWidgetIdOverride = null)
     {
+        // Reset the shared import bookkeeping: subfolder imports do not flow
+        // through ImportDroppedFilesAsync, so stale counters or a stale undo
+        // id from a previous (main-surface) import must not gate or bind this
+        // batch's receipt.
+        _lastImportSkippedUndisplayableCount = 0;
+        _lastImportShowedDedicatedWarning = false;
+        _lastImportCompletedItemCount = 0;
+        _lastImportUndoHistoryId = null;
+
         string targetFolderPath = ItemDropBehaviorPolicy.TryGetFolderDropDestinationPath(
             targetFolder,
             out string resolvedFolderPath)
@@ -1147,6 +1368,16 @@ public sealed partial class FileSurfaceContent
             .Where(path => !string.IsNullOrWhiteSpace(path))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
+        string? matchedSourceWidgetId = sourceWidgetIdOverride;
+        if (string.IsNullOrWhiteSpace(matchedSourceWidgetId) &&
+            ActiveDeskBoxDragRegistry.TryMatch(
+                sourcePaths,
+                out _,
+                out string registryWidgetId,
+                out _))
+        {
+            matchedSourceWidgetId = registryWidgetId;
+        }
         if (HasTransferConflict(sourcePaths, targetFolderPath))
         {
             FileTransferPathState targetState = GetTransferState(targetFolder);
@@ -1155,7 +1386,7 @@ public sealed partial class FileSurfaceContent
                     ? targetState
                     : _fileService.TransferSessions.GetState(
                         sourcePaths.FirstOrDefault()));
-            return false;
+            return new FolderImportOutcome(false, 0, false, null);
         }
 
         if (sourcePaths.Length == 0 ||
@@ -1169,9 +1400,11 @@ public sealed partial class FileSurfaceContent
                     "native-folder-drop-unsafe"));
             }
 
-            return false;
+            return new FolderImportOutcome(false, 0, false, null);
         }
 
+        var preExistingMergeSnapshots =
+            new Dictionary<string, HashSet<string>?>(StringComparer.OrdinalIgnoreCase);
         BeginTrackedImport();
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         App.Log(
@@ -1185,6 +1418,7 @@ public sealed partial class FileSurfaceContent
                 new CallbackProgress<FileService.FileTransferProgress>(
                     ReportImportProgress);
             var results = new List<FileService.FileTransferResult>();
+            int userSkippedCount = 0;
             bool createShortcuts = intentOverride == FileDropIntent.Shortcut;
             string[] regularPaths = droppedFiles
                 .Where(file => !file.ForceManagedCopy)
@@ -1213,7 +1447,16 @@ public sealed partial class FileSurfaceContent
                 }
                 else
                 {
-                    results.AddRange(await _fileService.TransferItemsWithResultAsync(
+                    if (move)
+                    {
+                        preExistingMergeSnapshots = await Task.Run(
+                            () => OrganizerService.SnapshotPreExistingMergeDestinations(
+                                regularPaths,
+                                targetFolderPath),
+                            ActiveImportCancellationToken);
+                    }
+
+                    userSkippedCount += AppendTransferResults(results, await _fileService.TransferItemsWithResultAsync(
                         regularPaths,
                         targetFolderPath,
                         move,
@@ -1233,12 +1476,12 @@ public sealed partial class FileSurfaceContent
                 forcedCopyPaths);
             if (forcedCopyPaths.Length > 0)
             {
-                results.AddRange(await _fileService.TransferItemsWithResultAsync(
+                userSkippedCount += AppendTransferResults(results, await _fileService.TransferItemsWithResultAsync(
                     forcedCopyPaths,
                     targetFolderPath,
                     move: false,
                     progress: progress,
-                    cancellationToken: ActiveImportCancellationToken));
+                    cancellationToken: ActiveImportCancellationToken, useShellProgress: true, ownerWindowHandle: _hostWindowHandle));
             }
 
             if (!string.IsNullOrWhiteSpace(ViewModel.MappedFolderPath))
@@ -1246,60 +1489,37 @@ public sealed partial class FileSurfaceContent
                 await ViewModel.RefreshFromConfigAsync(clearIconCacheBeforeHydration: false);
             }
 
+            string? undoHistoryId = null;
             if (move)
             {
                 if (results.Count > 0)
                 {
-                    await ViewModel.RecordSubfolderMoveUndoAsync(results);
+                    undoHistoryId = ResolveUndoEntryId(
+                        await ViewModel.RecordSubfolderMoveUndoAsync(
+                            results,
+                            preExistingMergeSnapshots,
+                            matchedSourceWidgetId));
                 }
 
                 _cutClipboardPaths = [];
                 ApplyCutState();
-                string[] movedSourcePaths = results
-                    .Where(static r =>
-                        !string.IsNullOrWhiteSpace(r.SourcePath) &&
-                        !File.Exists(r.SourcePath) &&
-                        !Directory.Exists(r.SourcePath))
-                    .Select(static r => r.SourcePath)
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .ToArray();
-                if (movedSourcePaths.Length > 0)
-                {
-                    await ViewModel.HandleItemsMovedOutAsync(movedSourcePaths);
-                    if (_stackPopoverHostWindow is not null)
-                    {
-                        QueueStackPopoverReconciliation();
-                    }
-
-                    if (ActiveDeskBoxDragRegistry.TryMatch(
-                            movedSourcePaths,
-                            out _,
-                            out string? sourceWidgetId,
-                            out _) &&
-                        !string.IsNullOrWhiteSpace(sourceWidgetId) &&
-                        !string.Equals(sourceWidgetId, WidgetId, StringComparison.OrdinalIgnoreCase) &&
-                        App.Current?.WidgetManager is { } manager)
-                    {
-                        await manager.NotifyItemsMovedOutAsync(
-                            sourceWidgetId,
-                            movedSourcePaths);
-                    }
-                }
+                await NotifyNativeSubfolderMovedOutAsync(results, matchedSourceWidgetId);
             }
 
-            if (results.Count > 0)
+            bool showedSkipWarning = ShowSkippedTransferFeedback(userSkippedCount);
+            if (!showedSkipWarning && results.Count > 0 && createShortcuts)
             {
+                // Shortcut drops keep the in-widget feedback (its wording is
+                // exact); move/copy success now goes through the HUD receipt
+                // chain at the caller, matching main-surface behavior of a
+                // single success channel.
                 ShowFeedback(new(
                     _localizationService.Format(
-                        move
-                            ? "Widget.MovedToFolder"
-                            : "Widget.CopiedToFolder",
+                        "Widget.ShortcutsCreatedInFolder",
                         targetFolder.Name,
                         results.Count),
                     WidgetFeedbackSeverity.Success,
-                    move
-                        ? "native-folder-drop-move"
-                        : "native-folder-drop-copy"));
+                    "native-folder-drop-shortcut"));
             }
 
             await CompleteTrackedImportAsync(
@@ -1308,10 +1528,32 @@ public sealed partial class FileSurfaceContent
                 $"[Import] Native folder import completed widget={WidgetId} " +
                 $"target='{targetFolder.Path}' count={results.Count} " +
                 $"elapsedMs={stopwatch.ElapsedMilliseconds}");
-            return results.Count > 0;
+            return new FolderImportOutcome(
+                results.Count > 0,
+                results.Count,
+                showedSkipWarning,
+                undoHistoryId);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException canceledEx)
         {
+            int cancelCompletedCount = 0;
+            string? cancelUndoId = null;
+            if (move && canceledEx is FileService.IFileTransferWithCompletedResults partialCancel &&
+                partialCancel.CompletedResults.Count > 0)
+            {
+                cancelCompletedCount = partialCancel.CompletedResults.Count;
+                cancelUndoId = ResolveUndoEntryId(
+                    await ViewModel.RecordSubfolderMoveUndoAsync(
+                        partialCancel.CompletedResults,
+                        preExistingMergeSnapshots,
+                        matchedSourceWidgetId));
+                _cutClipboardPaths = [];
+                ApplyCutState();
+                await NotifyNativeSubfolderMovedOutAsync(
+                    partialCancel.CompletedResults,
+                    matchedSourceWidgetId);
+            }
+
             await RefreshAfterInterruptedFolderImportAsync();
             if (_activeImportCancellation is not null)
             {
@@ -1322,11 +1564,32 @@ public sealed partial class FileSurfaceContent
             App.Log(
                 $"[Import] Native folder import canceled widget={WidgetId} " +
                 $"target='{targetFolder.Path}' " +
+                $"completed={cancelCompletedCount} " +
                 $"elapsedMs={stopwatch.ElapsedMilliseconds}");
-            return false;
+            // A cancelled move already applied its completed set and recorded
+            // undo history — the caller shows the (partial) receipt for it.
+            return new FolderImportOutcome(false, cancelCompletedCount, false, cancelUndoId);
         }
         catch (Exception ex)
         {
+            int failureCompletedCount = 0;
+            string? failureUndoId = null;
+            if (move && ex is FileService.IFileTransferWithCompletedResults partialFailure &&
+                partialFailure.CompletedResults.Count > 0)
+            {
+                failureCompletedCount = partialFailure.CompletedResults.Count;
+                failureUndoId = ResolveUndoEntryId(
+                    await ViewModel.RecordSubfolderMoveUndoAsync(
+                        partialFailure.CompletedResults,
+                        preExistingMergeSnapshots,
+                        matchedSourceWidgetId));
+                _cutClipboardPaths = [];
+                ApplyCutState();
+                await NotifyNativeSubfolderMovedOutAsync(
+                    partialFailure.CompletedResults,
+                    matchedSourceWidgetId);
+            }
+
             await RefreshAfterInterruptedFolderImportAsync();
             if (_activeImportCancellation is not null)
             {
@@ -1341,7 +1604,8 @@ public sealed partial class FileSurfaceContent
                 $"{T("Widget.MoveToFolderFailed")}: {ex.Message}",
                 WidgetFeedbackSeverity.Error,
                 "native-folder-drop-error"));
-            return false;
+            // The error toast owns this outcome; no success receipt on top.
+            return new FolderImportOutcome(false, failureCompletedCount, true, failureUndoId);
         }
         finally
         {
@@ -1349,6 +1613,83 @@ public sealed partial class FileSurfaceContent
             {
                 CancelAndResetTrackedImport();
             }
+        }
+    }
+
+    private async Task<string?> HandlePartialSubfolderMoveCompletionAsync(
+        IReadOnlyList<FileService.FileTransferResult> completedResults,
+        IReadOnlyDictionary<string, HashSet<string>?> preExistingMergeSnapshots,
+        string? sourceWidgetId,
+        bool isStackPopoverMemberDrag)
+    {
+        if (completedResults.Count == 0)
+        {
+            return null;
+        }
+
+        string? undoHistoryId = ResolveUndoEntryId(
+            await ViewModel.RecordSubfolderMoveUndoAsync(
+                completedResults,
+                preExistingMergeSnapshots,
+                sourceWidgetId));
+        _cutClipboardPaths = [];
+        ApplyCutState();
+        string[] completedPaths = completedResults
+            .Where(static r =>
+                !string.IsNullOrWhiteSpace(r.SourcePath) &&
+                !File.Exists(r.SourcePath) &&
+                !Directory.Exists(r.SourcePath))
+            .Select(static r => r.SourcePath)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        await NotifyFolderDropMovedOutAsync(
+            completedPaths,
+            sourceWidgetId,
+            isStackPopoverMemberDrag);
+        return undoHistoryId;
+    }
+
+    private async Task NotifyNativeSubfolderMovedOutAsync(
+        IReadOnlyList<FileService.FileTransferResult> results,
+        string? sourceWidgetIdOverride = null)
+    {
+        string[] movedSourcePaths = results
+            .Where(static r =>
+                !string.IsNullOrWhiteSpace(r.SourcePath) &&
+                !File.Exists(r.SourcePath) &&
+                !Directory.Exists(r.SourcePath))
+            .Select(static r => r.SourcePath)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (movedSourcePaths.Length == 0)
+        {
+            return;
+        }
+
+        await ViewModel.HandleItemsMovedOutAsync(movedSourcePaths);
+        if (_stackPopoverHostWindow is not null)
+        {
+            QueueStackPopoverReconciliation();
+        }
+
+        string? sourceWidgetId = sourceWidgetIdOverride;
+        if (string.IsNullOrWhiteSpace(sourceWidgetId) &&
+            ActiveDeskBoxDragRegistry.TryMatch(
+                movedSourcePaths,
+                out _,
+                out string registryWidgetId,
+                out _))
+        {
+            sourceWidgetId = registryWidgetId;
+        }
+
+        if (!string.IsNullOrWhiteSpace(sourceWidgetId) &&
+            !string.Equals(sourceWidgetId, WidgetId, StringComparison.OrdinalIgnoreCase) &&
+            App.Current?.WidgetManager is { } manager)
+        {
+            await manager.NotifyItemsMovedOutAsync(
+                sourceWidgetId,
+                movedSourcePaths);
         }
     }
 
@@ -1376,13 +1717,34 @@ public sealed partial class FileSurfaceContent
         WidgetStackItem stack,
         bool? moveWhenMapped,
         FileDropIntent? intentOverride = null,
-        int? preferredStackMemberIndex = null)
+        int? preferredStackMemberIndex = null,
+        string? sourceWidgetIdOverride = null)
     {
+        // Reset the shared import bookkeeping at entry: a metadata-only stack
+        // add (items already in this folder) performs no transfer, and stale
+        // counters/undo ids from a previous import must not leak into receipt
+        // gating — a stale undo id would bind the undo button to the wrong
+        // batch.
+        _lastImportSkippedUndisplayableCount = 0;
+        _lastImportShowedDedicatedWarning = false;
+        _lastImportCompletedItemCount = 0;
+        _lastImportUndoHistoryId = null;
+
         string[] sourcePaths = droppedFiles
             .Select(file => file.Path)
             .Where(path => !string.IsNullOrWhiteSpace(path))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
+        string? matchedSourceWidgetId = sourceWidgetIdOverride;
+        if (string.IsNullOrWhiteSpace(matchedSourceWidgetId) &&
+            ActiveDeskBoxDragRegistry.TryMatch(
+                sourcePaths,
+                out _,
+                out string registryWidgetId,
+                out _))
+        {
+            matchedSourceWidgetId = registryWidgetId;
+        }
         if (HasTransferConflict(sourcePaths, ViewModel.CurrentFolderPath))
         {
             ShowTransferBlockedFeedback(
@@ -1448,43 +1810,49 @@ public sealed partial class FileSurfaceContent
             $"move={moveWhenMapped == true}");
         try
         {
-            await ImportDroppedFilesAsync(
-                droppedFiles,
-                moveWhenMapped,
-                intentOverride);
-            WidgetItem[] importedItems = ViewModel.Items
-                .Where(item => !existingPaths.Contains(
-                    Path.GetFullPath(item.Path)))
-                .ToArray();
-            bool added = importedItems.Length > 0 &&
+            bool added;
+            using (ViewModel.SuppressLayoutUndoScope())
+            {
+                IReadOnlyList<string> movedSourcePaths = await ImportDroppedFilesAsync(
+                    droppedFiles,
+                    moveWhenMapped,
+                    intentOverride);
+                if (movedSourcePaths.Count > 0 &&
+                    !string.IsNullOrWhiteSpace(matchedSourceWidgetId) &&
+                    !string.Equals(matchedSourceWidgetId, WidgetId, StringComparison.OrdinalIgnoreCase) &&
+                    App.Current?.WidgetManager is { } manager)
+                {
+                    await manager.NotifyItemsMovedOutAsync(
+                        matchedSourceWidgetId,
+                        movedSourcePaths);
+                }
+            }
+
+            WidgetItem[] importedItems = SelectImportedStackItems(existingPaths);
+            ViewModel.BeginInteractiveLayoutUndoBatch();
+            added = importedItems.Length > 0 &&
                 ViewModel.AddItemsToStack(targetStackKey, importedItems);
-            string resolvedStackKey = ViewModel.LastResolvedStackKey ?? targetStackKey;
             if (added)
             {
-                if (string.Equals(_stackPopoverKey, targetStackKey, StringComparison.Ordinal))
-                {
-                    _stackPopoverKey = resolvedStackKey;
-                }
-                targetStackKey = resolvedStackKey;
-                if (preferredStackMemberIndex is { } stackMemberIndex &&
-                    ViewModel.FindStackByKey(targetStackKey) is { } updatedStack)
-                {
-                    ApplyImportedStackMemberInsertion(
-                        updatedStack,
-                        importedItems,
-                        stackMemberIndex);
-                }
-
+                targetStackKey = SynchronizeResolvedStackKeyAndInsertMembers(
+                    targetStackKey,
+                    importedItems,
+                    preferredStackMemberIndex);
+                ViewModel.CommitInteractiveLayoutUndoBatch();
                 ClearSelection();
                 QueueStackPopoverReconciliation(
                     targetStackKey,
                     targetStackMemberAnchors);
             }
+            else
+            {
+                ViewModel.RevertAndClearInteractiveLayoutUndoBatch();
+            }
 
             App.Log(
                 $"[Import] Native stack import completed widget={WidgetId} " +
-                $"stack='{targetStackKey}' imported={importedItems.Length} " +
-                $"added={added} elapsedMs={stopwatch.ElapsedMilliseconds}");
+                $"stack='{targetStackKey}' added={added} " +
+                $"elapsedMs={stopwatch.ElapsedMilliseconds}");
             return added;
         }
         catch (OperationCanceledException)
@@ -1655,11 +2023,13 @@ public sealed partial class FileSurfaceContent
 
         if (_isImportBusy ||
             !payload.HasSurfacePathData ||
+            !string.IsNullOrWhiteSpace(payload.StackReorderKey) ||
             GetEffectiveHoverPaths(payload).Contains(
                 binTile.Path,
                 StringComparer.OrdinalIgnoreCase))
         {
-            // Dropping the bin on itself, or nothing usable to recycle.
+            // Dropping the bin on itself, a collapsed stack tile (D6 bulk-delete
+            // guard), or nothing usable to recycle.
             e.AcceptedOperation = DataPackageOperation.None;
             ClearFolderDropTarget();
             return;
@@ -1702,8 +2072,15 @@ public sealed partial class FileSurfaceContent
 
         DragPayloadSnapshot payload = GetDragPayload(e.DataView);
         TraceTargetDropEntered("recycle-bin", payload, e);
-        if (_isImportBusy || !payload.HasSurfacePathData)
+        if (_isImportBusy ||
+            !payload.HasSurfacePathData ||
+            !string.IsNullOrWhiteSpace(payload.StackReorderKey))
         {
+            if (!string.IsNullOrWhiteSpace(payload.StackReorderKey))
+            {
+                ShowCollapsedStackRecycleBinBlockedFeedback();
+            }
+
             ResetExternalDropPreview();
             ResetDragPayloadCache();
             return;
@@ -1764,6 +2141,11 @@ public sealed partial class FileSurfaceContent
         }
 
         DragPayloadSnapshot payload = GetDragPayload(e.DataView);
+        if (!string.IsNullOrWhiteSpace(payload.StackReorderKey))
+        {
+            DisarmLaunchHover(launchTile);
+            return;
+        }
         bool hostedInPopover = IsHostedInStackPopover(sender);
         bool internalLaunch =
             ShortcutLaunchPolicy.EvaluateInternalDrag(
@@ -1964,9 +2346,17 @@ public sealed partial class FileSurfaceContent
             return false;
         }
 
-        if (FindLaunchHoverIconHost(hoverItem) is not { } iconHost ||
-            !TryGetScreenPointInElement(
+        if (FindLaunchHoverIconHost(hoverItem) is not { } iconHost)
+        {
+            return false;
+        }
+
+        IntPtr targetWindowHandle = IsHostedInStackPopover(iconHost)
+            ? ActiveStackPopoverWindowHandle
+            : _hostWindowHandle;
+        if (!TryGetScreenPointInElement(
                 iconHost,
+                targetWindowHandle,
                 cursor.X,
                 cursor.Y,
                 out Windows.Foundation.Point local))
@@ -2014,6 +2404,10 @@ public sealed partial class FileSurfaceContent
     private bool TryLaunchInternalDragOnShortcut(string[] movedPaths)
     {
         WidgetItem? launchTarget = _internalLaunchHoverItem;
+        IntPtr launchOwnerHwnd = _internalLaunchHoverBorder is { } hoverBorder &&
+            IsHostedInStackPopover(hoverBorder)
+                ? ActiveStackPopoverWindowHandle
+                : _hostWindowHandle;
         ClearInternalLaunchHover();
         if (launchTarget is not { Path.Length: > 0 } shortcut ||
             movedPaths.Length == 0)
@@ -2028,19 +2422,37 @@ public sealed partial class FileSurfaceContent
         // The completion does not raise the tile's DragLeave, so the launch
         // hover would otherwise stay painted on the shortcut tile.
         ClearLaunchDropTarget();
-        bool launched = ShortcutFileLauncher.TryLaunchWithFiles(
-            shortcut.Path,
-            movedPaths);
         MarkNativeLaunchConsumed();
-        if (!launched)
+        if (!ShortcutFileLauncher.CanLaunchWithFiles(shortcut.Path, movedPaths))
         {
             ShowShortcutLaunchRefusedFeedback(shortcut.Name);
+            return true;
         }
 
-        App.Log(
-            $"[ShortcutLaunch] Internal drag resolved on completion " +
-            $"widget={WidgetId} target='{shortcut.Path}' " +
-            $"paths={movedPaths.Length} launched={launched}");
+        string shortcutPath = shortcut.Path;
+        string shortcutName = shortcut.Name;
+        UiDispatch.PostAfterCallback(async () =>
+        {
+            if (_isDisposed)
+            {
+                return;
+            }
+
+            ShellLaunchOutcome launchOutcome = await ShortcutFileLauncher.LaunchWithFilesAsync(
+                shortcutPath,
+                movedPaths,
+                launchOwnerHwnd,
+                _lifetimeCancellation.Token);
+            if (launchOutcome == ShellLaunchOutcome.Failed && !_isDisposed)
+            {
+                ShowShortcutLaunchRefusedFeedback(shortcutName);
+            }
+
+            App.Log(
+                $"[ShortcutLaunch] Internal drag resolved on completion " +
+                $"widget={WidgetId} target='{shortcutPath}' " +
+                $"paths={movedPaths.Length} outcome={launchOutcome}");
+        });
         return true;
     }
 
@@ -2061,6 +2473,11 @@ public sealed partial class FileSurfaceContent
         }
 
         DragPayloadSnapshot payload = GetDragPayload(e.DataView);
+        if (!string.IsNullOrWhiteSpace(payload.StackReorderKey))
+        {
+            DisarmLaunchHover(launchItem);
+            return;
+        }
         bool hostedInPopover = IsHostedInStackPopover(sender);
         bool internalLaunch =
             ShortcutLaunchPolicy.EvaluateInternalDrag(
@@ -2142,14 +2559,29 @@ public sealed partial class FileSurfaceContent
             // user asked to open the files with this shortcut's application.
             MarkNativeLaunchConsumed();
             e.Handled = true;
-            if (ShortcutFileLauncher.TryLaunchWithFiles(launchItem.Path, paths))
+            if (hostedInPopover)
+            {
+                MarkStackPopoverXamlDropClaimed(e.DataView);
+            }
+            IntPtr dropOwnerHwnd = hostedInPopover
+                ? ActiveStackPopoverWindowHandle
+                : _hostWindowHandle;
+            ShellLaunchOutcome launchOutcome = await ShortcutFileLauncher.LaunchWithFilesAsync(
+                launchItem.Path,
+                paths,
+                dropOwnerHwnd,
+                _lifetimeCancellation.Token);
+            if (launchOutcome == ShellLaunchOutcome.Launched)
             {
                 e.AcceptedOperation = DataPackageOperation.Link;
             }
             else
             {
                 e.AcceptedOperation = DataPackageOperation.None;
-                ShowShortcutLaunchRefusedFeedback(launchItem.Name);
+                if (launchOutcome == ShellLaunchOutcome.Failed && !_isDisposed)
+                {
+                    ShowShortcutLaunchRefusedFeedback(launchItem.Name);
+                }
             }
         }
         finally
@@ -2446,11 +2878,34 @@ public sealed partial class FileSurfaceContent
         PointerRoutedEventArgs e)
     {
         if (sender is not Border border ||
-            border.DataContext is not WidgetStackItem { IsExpanded: false } stack ||
-            !e.GetCurrentPoint(border).Properties.IsLeftButtonPressed)
+            border.DataContext is not WidgetStackItem { IsExpanded: false } stack)
         {
             _pressedStack = null;
             _stackInputActivation.CancelPointer();
+            return;
+        }
+
+        var stackPoint = e.GetCurrentPoint(border);
+        bool isPrimaryStackContact =
+            stackPoint.Properties.IsLeftButtonPressed ||
+            (stackPoint.PointerDeviceType is
+                PointerDeviceType.Touch or PointerDeviceType.Pen &&
+             stackPoint.IsInContact);
+        bool isSecondaryStackContact =
+            !isPrimaryStackContact &&
+            stackPoint.PointerDeviceType is
+                PointerDeviceType.Mouse or PointerDeviceType.Touchpad &&
+            stackPoint.Properties.IsRightButtonPressed;
+        if (!isPrimaryStackContact && !isSecondaryStackContact)
+        {
+            _pressedStack = null;
+            _stackInputActivation.CancelPointer();
+            return;
+        }
+
+        if (isSecondaryStackContact)
+        {
+            TryArmElevatedStackPointerDrag(border, stack, e);
             return;
         }
 
@@ -2463,6 +2918,7 @@ public sealed partial class FileSurfaceContent
         border.Background =
             ResolveBrush("SubtleFillColorTertiaryBrush");
         TryArmElevatedStackPointerDrag(border, stack, e);
+        TryArmWin10ShellStackDrag(border, stack, e);
     }
 
     private void StackSurface_PointerReleased(
@@ -2470,6 +2926,7 @@ public sealed partial class FileSurfaceContent
         PointerRoutedEventArgs e)
     {
         DisarmElevatedPointerDragCandidate(e.Pointer.PointerId);
+        DisarmWin10ShellDragCandidate(e.Pointer.PointerId);
         if (sender is not Border border)
         {
             _pressedStack = null;
@@ -2529,6 +2986,21 @@ public sealed partial class FileSurfaceContent
         }
 
         DragPayloadSnapshot payload = GetDragPayload(e.DataView);
+        if (ReferenceEquals(border, _stackPopoverSurface))
+        {
+            ObserveStackPopoverXamlDragSession(payload.DragSessionId);
+        }
+        else if (payload.IsInternalReorder &&
+            !string.IsNullOrWhiteSpace(payload.StackReorderKey))
+        {
+            // D6: Same-widget collapsed-stack drags carry member paths for
+            // outbound/cross-widget drops, so hovering another stack tile or
+            // itself must bubble to Root_DragOver for surface reorder instead
+            // of absorbing the dragged stack or reporting "already in widget".
+            ClearStackMemberDropTarget();
+            e.Handled = false;
+            return;
+        }
         if (!payload.IsDeskBoxFileDrag && payload.HasSurfacePathData)
         {
             SuppressExternalDragOperationBadge(e);
@@ -2562,10 +3034,9 @@ public sealed partial class FileSurfaceContent
                     isStackHeader: !string.IsNullOrWhiteSpace(payload.StackReorderKey),
                     sourceStackKey: payload.SourceStackKey);
             }
-            DataPackageOperation internalOperation =
-                ResolveInternalArrangementFeedbackOperation(
-                    e.AllowedOperations,
-                    e.DataView.RequestedOperation);
+            DataPackageOperation internalOperation = ResolveInternalArrangementFeedbackOperation(
+                e.AllowedOperations,
+                !string.IsNullOrWhiteSpace(payload.StackReorderKey) ? e.DataView.RequestedOperation : DataPackageOperation.None);
             e.AcceptedOperation = internalOperation;
             TraceInternalDragDecision("stack-membership", payload, e);
             if (payload.IsDeskBoxFileDrag)
@@ -2720,6 +3191,14 @@ public sealed partial class FileSurfaceContent
             .ToArray();
 
         DragPayloadSnapshot payload = GetDragPayload(e.DataView);
+        if (!ReferenceEquals(sender, _stackPopoverSurface) &&
+            payload.IsInternalReorder &&
+            !string.IsNullOrWhiteSpace(payload.StackReorderKey))
+        {
+            ClearStackMemberDropTarget();
+            e.Handled = false;
+            return;
+        }
         TraceTargetDropEntered("stack-membership", payload, e);
 
         if (HasTransferConflict(payload.Paths, ViewModel.CurrentFolderPath))
@@ -2761,7 +3240,7 @@ public sealed partial class FileSurfaceContent
                     reorderTargetIndex);
                 e.AcceptedOperation = ResolveInternalArrangementCompletionOperation(
                     e.AllowedOperations,
-                    e.DataView.RequestedOperation);
+                    !string.IsNullOrWhiteSpace(payload.StackReorderKey) ? e.DataView.RequestedOperation : DataPackageOperation.None);
                 if (!reordered)
                 {
                     QueueStackPopoverReconciliation();
@@ -2793,6 +3272,8 @@ public sealed partial class FileSurfaceContent
             }
 
             ClearStackMemberDropTarget();
+            bool closeAfterAsyncSpringDrop = ReferenceEquals(sender, _stackPopoverSurface) &&
+                ConsumeSpringLoadedPopoverDrop();
             var deferral = e.GetDeferral();
             HashSet<string> existingPaths = ViewModel.Items
                 .Select(item => Path.GetFullPath(item.Path))
@@ -2812,9 +3293,9 @@ public sealed partial class FileSurfaceContent
                     return;
                 }
                 bool containsTempFiles = batch.Files.Any(static file => file.ForceManagedCopy);
-                bool hadDropModifier = Win32Helper.IsKeyPressed(VirtualKey.Control) ||
-                    Win32Helper.IsKeyPressed(VirtualKey.Shift) ||
-                    Win32Helper.IsKeyPressed(VirtualKey.Menu);
+                bool hadDropModifier = Win32Helper.IsAsyncKeyPressed(VirtualKey.Control) ||
+                    Win32Helper.IsAsyncKeyPressed(VirtualKey.Shift) ||
+                    Win32Helper.IsAsyncKeyPressed(VirtualKey.Menu);
                 string[] stackDropSourcePaths = batch.Files
                     .Select(static file => file.Path)
                     .Where(static path => !string.IsNullOrWhiteSpace(path))
@@ -2825,7 +3306,8 @@ public sealed partial class FileSurfaceContent
                     e.AllowedOperations,
                     forceCopy: containsTempFiles,
                     destinationFolderPath: ViewModel.CurrentFolderPath,
-                    sourcePathsOverride: stackDropSourcePaths);
+                    sourcePathsOverride: stackDropSourcePaths,
+                    probeBudget: PathOriginClassifier.DefaultDropProbeBudget);
                 DataPackageOperation accepted =
                     ToDataPackageOperation(resolvedIntent);
                 if (accepted == DataPackageOperation.None)
@@ -2848,27 +3330,30 @@ public sealed partial class FileSurfaceContent
                     payload.IsDeskBoxFileDrag,
                     resolvedIntent,
                     ViewModel.CurrentFolderPath);
-                IReadOnlyList<string> completedSourcePaths =
-                    await ImportDroppedFilesAsync(
-                        batch.Files,
-                        moveWhenMapped,
-                        intentOverride: ResolveShortcutIntentOverride(
-                            resolvedIntent));
-                WidgetItem[] importedItems = ViewModel.Items
-                    .Where(item => !existingPaths.Contains(
-                        Path.GetFullPath(item.Path)))
-                    .ToArray();
-                bool importedIntoStack = importedItems.Length > 0 &&
-                    ViewModel.AddItemsToStack(
-                        stack.StackKey,
-                        importedItems);
-                if (importedIntoStack &&
-                    preferredStackMemberIndex is { } stackMemberIndex)
+                IReadOnlyList<string> completedSourcePaths;
+                WidgetItem[] importedItems;
+                bool importedIntoStack;
+                using (ViewModel.SuppressLayoutUndoScope())
                 {
-                    ApplyImportedStackMemberInsertion(
-                        stack,
-                        importedItems,
-                        stackMemberIndex);
+                    completedSourcePaths =
+                        await ImportDroppedFilesAsync(
+                            batch.Files,
+                            moveWhenMapped,
+                            intentOverride: ResolveShortcutIntentOverride(
+                                resolvedIntent));
+                    importedItems = SelectImportedStackItems(existingPaths);
+                    importedIntoStack = importedItems.Length > 0 &&
+                        ViewModel.AddItemsToStack(
+                            stack.StackKey,
+                            importedItems);
+                    if (importedIntoStack)
+                    {
+                        targetStackKey = SynchronizeResolvedStackKeyAndInsertMembers(
+                            targetStackKey,
+                            importedItems,
+                            preferredStackMemberIndex,
+                            fallbackStack: stack);
+                    }
                 }
                 if (moveWhenMapped == true &&
                     sourceWidgetId is { Length: > 0 } &&
@@ -2889,8 +3374,8 @@ public sealed partial class FileSurfaceContent
                         completedSourcePaths.Count,
                         e.AllowedOperations.HasFlag(DataPackageOperation.Copy))
                     : DataPackageOperation.None;
-                e.AcceptedOperation = DeskBoxDragData.ResolveFileDragFeedbackOperation(
-                    e.DataView, e.AcceptedOperation);
+                e.AcceptedOperation = DeskBoxDragData.ResolveFileDropCompletionFeedbackOperation(
+                    e.DataView, e.AcceptedOperation, e.AllowedOperations);
                 if (importedIntoStack)
                 {
                     ClearSelection();
@@ -2909,12 +3394,12 @@ public sealed partial class FileSurfaceContent
                             autoProtectedExternalCopy,
                             destinationFolderPath: ViewModel.CurrentFolderPath ?? ViewModel.MappedFolderPath,
                             containsTemporaryFiles: containsTempFiles,
-                            hadExplicitModifierOrChoice: hadDropModifier);
+                            hadExplicitModifierOrChoice: hadDropModifier,
+                            undoHistoryId: _lastImportUndoHistoryId,
+                            sourceWidgetId: sourceWidgetId);
                     }
 
-                    if (ReferenceEquals(sender, _stackPopoverSurface) &&
-                        _stackPopoverOpenedBySpringLoad &&
-                        _stackPopoverPopupOpen)
+                    if (closeAfterAsyncSpringDrop && _stackPopoverPopupOpen)
                     {
                         HideStackPopoverForReuse(restoreOwnerForeground: false);
                     }
@@ -2952,6 +3437,8 @@ public sealed partial class FileSurfaceContent
         }
 
         ClearStackMemberDropTarget();
+        bool closeAfterSyncSpringDrop = ReferenceEquals(sender, _stackPopoverSurface) &&
+            ConsumeSpringLoadedPopoverDrop();
         try
         {
             _activeDragHandledAsStackMembership = true;
@@ -2972,22 +3459,18 @@ public sealed partial class FileSurfaceContent
             e.AcceptedOperation = added
                 ? ResolveInternalArrangementCompletionOperation(
                     e.AllowedOperations,
-                    e.DataView.RequestedOperation)
-                : Windows.ApplicationModel.DataTransfer
-                    .DataPackageOperation.None;
+                    !string.IsNullOrWhiteSpace(payload.StackReorderKey) ? e.DataView.RequestedOperation : DataPackageOperation.None)
+                : DataPackageOperation.None;
             // This is a stack-membership drop, not an ordering drop. Clear the
             // complete reorder session, including the cached insertion position.
             PersistSurfaceReorder();
             if (added)
             {
-                if (preferredStackMemberIndex is { } memberIndex)
-                {
-                    ApplyImportedStackMemberInsertion(
-                        stack,
-                        items,
-                        memberIndex);
-                }
-
+                targetStackKey = SynchronizeResolvedStackKeyAndInsertMembers(
+                    targetStackKey,
+                    items,
+                    preferredStackMemberIndex,
+                    fallbackStack: stack);
                 ClearSelection();
                 QueueStackPopoverReconciliation(
                     targetStackKey,
@@ -2996,9 +3479,7 @@ public sealed partial class FileSurfaceContent
                 {
                     CloseStackPopover();
                 }
-                else if (ReferenceEquals(sender, _stackPopoverSurface) &&
-                         _stackPopoverOpenedBySpringLoad &&
-                         _stackPopoverPopupOpen)
+                else if (closeAfterSyncSpringDrop && _stackPopoverPopupOpen)
                 {
                     HideStackPopoverForReuse(restoreOwnerForeground: false);
                 }
@@ -3086,7 +3567,7 @@ public sealed partial class FileSurfaceContent
         {
             if (ReferenceEquals(previous, _stackPopoverSurface))
             {
-                UpdateStackPopoverAppearance();
+                UpdateStackPopoverAppearance(force: true);
             }
             else
             {

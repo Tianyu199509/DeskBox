@@ -69,7 +69,7 @@
                     Background="Transparent"
                     BorderBrush="Transparent"
                     BorderThickness="0"
-                    FontFamily="Segoe UI Variable Text, Microsoft YaHei UI"
+                    FontFamily="Segoe UI Variable Text, Segoe UI, Microsoft YaHei UI"
                     FontSize="{x:Bind InputFontSize, Mode=OneWay}"
                     MaxLength="2000"
                     PlaceholderText="{x:Bind PlaceholderText, Mode=OneWay}"

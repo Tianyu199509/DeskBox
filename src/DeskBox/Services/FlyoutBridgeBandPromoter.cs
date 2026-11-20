@@ -46,9 +46,17 @@ internal sealed class FlyoutBridgeBandPromoter : IDisposable
 
     private void PromoteNewBridges()
     {
+        // Pause topmost bridge promotion while an OLE or pointer drag is active so
+        // popup bridges never paint over Explorer's SysDragImage / drag ghost.
+        if (ActiveDeskBoxDragRegistry.HasActiveDrag ||
+            ActiveDeskBoxDragRegistry.HasActivePointerDragSession)
+        {
+            return;
+        }
+
         foreach (IntPtr bridge in Win32Helper.GetVisiblePopupBridgeWindows())
         {
-            if (_promoted.Add(bridge))
+            if (!Win32Helper.IsWindowTopMost(bridge) && _promoted.Add(bridge))
             {
                 Win32Helper.SetWindowTopMost(bridge, showWindow: false);
             }

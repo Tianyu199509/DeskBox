@@ -1,5 +1,5 @@
 using System.Collections.Concurrent;
-
+using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
 using DeskBox.Helpers;
@@ -482,7 +482,7 @@ public sealed class FileMetaService : IDisposable
             probe,
             attributes,
             ref shinfo,
-            (uint)Marshal.SizeOf<ShellIconNativeMethods.SHFILEINFO>(),
+            ShellIconNativeMethods.ShFileInfoSize,
             ShellIconNativeMethods.SHGFI_ICON | ShellIconNativeMethods.SHGFI_LARGEICON | ShellIconNativeMethods.SHGFI_USEFILEATTRIBUTES);
 
         if (result == IntPtr.Zero || shinfo.hIcon == IntPtr.Zero)
@@ -608,8 +608,18 @@ public sealed class FileMetaService : IDisposable
     /// <summary>Formats a date as short date; older years stay visible for sorting context.</summary>
     public static string FormatDate(DateTime date)
     {
-        return date.Year == DateTime.Now.Year
-            ? date.ToString("M")
-            : date.ToString("d");
+        try
+        {
+            return date.Year == DateTime.Now.Year
+                ? date.ToString("M")
+                : date.ToString("d");
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            CultureInfo gregorian = LocalizationService.EnsureGregorianCalendar(CultureInfo.CurrentCulture);
+            return date.Year == DateTime.Now.Year
+                ? date.ToString("M", gregorian)
+                : date.ToString("d", gregorian);
+        }
     }
 }

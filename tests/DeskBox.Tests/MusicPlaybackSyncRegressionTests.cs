@@ -2,9 +2,9 @@ using DeskBox.Controls;
 using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Services;
+using DeskBox.Services.Media;
 using DeskBox.ViewModels;
 using Microsoft.UI.Xaml;
-using Windows.Storage.Streams;
 using Windows.UI;
 
 namespace DeskBox.Tests;
@@ -658,6 +658,8 @@ public sealed class MusicPlaybackSyncRegressionTests
 
             await Task.Delay(35);
         }
+
+        Assert.True(condition(), $"Condition was not met within {timeoutMs}ms.");
     }
 
     private static MusicWidgetViewModel CreateReadyMusicViewModel(
@@ -688,6 +690,132 @@ public sealed class MusicPlaybackSyncRegressionTests
         vm.OnWindowVisibilityChanged(true);
         vm.OnWindowRevealCompleted();
         return vm;
+    }
+
+    [Fact]
+    public async Task CrossProcessIpcTimeout_TryAwaitWithTimeoutReturnsDefaultPromptlyWithoutHanging()
+    {
+        var neverCompletes = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+
+        string? result = await MusicSessionService.TryAwaitWithTimeoutAsync(
+            neverCompletes.Task,
+            TimeSpan.FromMilliseconds(80));
+
+        sw.Stop();
+        Assert.Null(result);
+        Assert.True(sw.ElapsedMilliseconds < 1500, $"Expected fast timeout, took {sw.ElapsedMilliseconds}ms");
+    }
+
+    [Fact]
+    public async Task ActivatedVisibleWindowBeforeRevealCompletion_SelfHealsAndSynchronizesMissedPlaybackEvent()
+    {
+        var fakeService = new FakeMusicSessionController
+        {
+            Title = "Initial Track",
+            Artist = "Initial Artist",
+            PlaybackState = MusicPlaybackState.Paused
+        };
+        var config = new WidgetConfig
+        {
+            Id = "music-reveal-self-heal",
+            WidgetKind = WidgetKind.Music,
+            Name = "Music"
+        };
+        using var viewModel = new MusicWidgetViewModel(
+            config,
+            fakeService,
+            TestServices.CreateLocalizationService());
+
+        await viewModel.InitializeAsync();
+        viewModel.OnWindowVisibilityChanged(true);
+        // Simulate _isWindowRevealCompleted stuck false while external player switched track and started playing.
+        fakeService.Title = "Resumed Track";
+        fakeService.PlaybackState = MusicPlaybackState.Playing;
+        fakeService.RaisePlaybackInfoChanged();
+        Assert.False(viewModel.IsPlaying);
+
+        // Activating the visible widget self-heals reveal completion and immediately reconciles live state.
+        viewModel.OnActivated();
+        await WaitUntilAsync(() => viewModel.IsPlaying && viewModel.Title == "Resumed Track", timeoutMs: 1200);
+        Assert.True(viewModel.IsPlaying);
+        Assert.Equal("Resumed Track", viewModel.Title);
+    }
+
+    [Fact]
+    public async Task PausedWidgetWithDroppedSmtcEvent_RecoversViaLightweightTimelineProbe()
+    {
+        var fakeService = new FakeMusicSessionController
+        {
+            Title = "Paused Song",
+            Artist = "Singer",
+            PlaybackState = MusicPlaybackState.Paused
+        };
+        using var viewModel = CreateReadyMusicViewModel(fakeService);
+        await viewModel.InitializeAsync();
+        Assert.False(viewModel.IsPlaying);
+
+        // Player resumes externally and switches track, but Windows SMTC drops PlaybackInfoChanged & MediaPropertiesChanged.
+        fakeService.Title = "Silently Resumed Song";
+        fakeService.PlaybackState = MusicPlaybackState.Playing;
+
+        await viewModel.ProbeLiveTimelineStateForTestingAsync();
+
+        Assert.True(viewModel.IsPlaying);
+        Assert.Equal("Silently Resumed Song", viewModel.Title);
+    }
+
+    [Fact]
+    public void MonitorOcclusion_DoesCandidateOccludeMonitor_IgnoresSmallWindowWithStaleZoomedFlag()
+    {
+        IntPtr mon = (IntPtr)0x3001;
+        var bounds = new MonitorOcclusionTracker.MonitorBounds(mon, 0, 0, 1920, 1080, 0, 0, 1920, 1040);
+        var staleSmallZoomed = new MonitorOcclusionTracker.WindowOcclusionCandidate(
+            (IntPtr)0x4001,
+            mon,
+            IsVisible: true,
+            IsMinimized: false,
+            IsCloaked: false,
+            IsZoomed: true,
+            IsDeskBoxWindow: false,
+            IsToolOverlay: false,
+            "CustomBorderlessPlayer",
+            Left: 100,
+            Top: 100,
+            Right: 520,
+            Bottom: 420);
+        Assert.False(MonitorOcclusionTracker.DoesCandidateOccludeMonitor(staleSmallZoomed, bounds));
+    }
+
+    [Fact]
+    public async Task MediaServiceUnavailable_SurfacesDegradedStateAndManualRetryRecovers()
+    {
+        var fakeService = new FakeMusicSessionController
+        {
+            Title = "Recovered Song",
+            Artist = "Recovered Artist",
+            PlaybackState = MusicPlaybackState.Playing,
+            ConnectionState = MediaSessionConnectionState.Healthy
+        };
+        using var viewModel = CreateReadyMusicViewModel(fakeService);
+        await viewModel.InitializeAsync();
+
+        Assert.False(viewModel.IsMediaServiceUnavailable);
+        Assert.Equal(Visibility.Collapsed, viewModel.MediaServiceUnavailableVisibility);
+
+        fakeService.ConnectionState = MediaSessionConnectionState.Unavailable;
+        fakeService.RaiseConnectionStateChanged();
+
+        Assert.True(viewModel.IsMediaServiceUnavailable);
+        Assert.Equal(Visibility.Visible, viewModel.MediaServiceUnavailableVisibility);
+        Assert.Equal(viewModel.MediaServiceUnavailableText, viewModel.StatusText);
+
+        await viewModel.RetryMediaServiceConnectionAsync();
+
+        Assert.Equal(1, fakeService.RetryConnectionCallCount);
+        Assert.False(viewModel.IsMediaServiceUnavailable);
+        Assert.Equal(Visibility.Collapsed, viewModel.MediaServiceUnavailableVisibility);
+        Assert.Equal("Recovered Song", viewModel.Title);
     }
 
     private sealed class FakeMusicVolumeController : IMusicVolumeController
@@ -754,8 +882,11 @@ public sealed class MusicPlaybackSyncRegressionTests
         public bool UpdateStateImmediatelyOnCommand { get; set; } = true;
         public bool AcceptTransportCommands { get; set; } = true;
         public byte[]? ThumbnailBytes { get; set; }
+        public MediaSessionConnectionState ConnectionState { get; set; } = MediaSessionConnectionState.Healthy;
+        public bool RetryConnectionResult { get; set; } = true;
         public int PlayCallCount { get; private set; }
         public int PauseCallCount { get; private set; }
+        public int RetryConnectionCallCount { get; private set; }
         public int GetCurrentSessionInfoCallCount { get; private set; }
         public int GetCurrentTimelineCallCount { get; private set; }
 
@@ -764,18 +895,36 @@ public sealed class MusicPlaybackSyncRegressionTests
         public event EventHandler? PlaybackInfoChanged;
         public event EventHandler? MediaPropertiesChanged;
         public event EventHandler? TimelinePropertiesChanged;
+        public event EventHandler? ConnectionStateChanged;
 
         public Task InitializeAsync() => Task.CompletedTask;
+
+        public Task<bool> RetryConnectionAsync()
+        {
+            RetryConnectionCallCount++;
+            if (RetryConnectionResult)
+            {
+                ConnectionState = MediaSessionConnectionState.Healthy;
+            }
+
+            return Task.FromResult(RetryConnectionResult);
+        }
 
         public IReadOnlyList<MusicSessionOption> GetSessionOptions() =>
         [
             new MusicSessionOption(SessionId, SourceApp, "网易云音乐", PlaybackState, IsSystemCurrent: true)
         ];
 
-        public async Task<MusicSessionInfo?> GetCurrentSessionInfoAsync(string? preferredSessionId = null)
+        public Task<MusicSessionInfo?> GetCurrentSessionInfoAsync(
+            string? preferredSessionId = null,
+            ulong knownCoverFingerprint = 0)
         {
             GetCurrentSessionInfoCallCount++;
-            return new(
+            ulong fp = ThumbnailBytes is { Length: > 0 }
+                ? MusicWidgetViewModel.ComputeThumbnailFingerprint(ThumbnailBytes)
+                : 0;
+            bool unchanged = fp != 0 && knownCoverFingerprint != 0 && fp == knownCoverFingerprint;
+            return Task.FromResult<MusicSessionInfo?>(new MusicSessionInfo(
                 SessionId,
                 SourceApp,
                 "网易云音乐",
@@ -795,29 +944,28 @@ public sealed class MusicPlaybackSyncRegressionTests
                 CanChangeShuffle: true,
                 CanChangeRepeat: true,
                 MusicPlaybackMode.Normal,
-                Thumbnail: await CreateStreamReferenceAsync(ThumbnailBytes));
+                ThumbnailBytes: unchanged ? null : ThumbnailBytes,
+                ThumbnailFingerprint: fp,
+                ThumbnailUnchanged: unchanged,
+                ThumbnailContentType: ThumbnailBytes is { Length: > 0 } ? "image/png" : null));
         }
 
-        public Task<IRandomAccessStreamReference?> GetCurrentThumbnailAsync(string? preferredSessionId = null) =>
-            CreateStreamReferenceAsync(ThumbnailBytes);
-
-        private static async Task<IRandomAccessStreamReference?> CreateStreamReferenceAsync(byte[]? bytes)
+        public Task<MusicThumbnailSnapshot?> GetCurrentThumbnailAsync(
+            string? preferredSessionId = null,
+            ulong knownCoverFingerprint = 0)
         {
-            if (bytes is null)
+            if (ThumbnailBytes is null || ThumbnailBytes.Length == 0)
             {
-                return null;
+                return Task.FromResult<MusicThumbnailSnapshot?>(null);
             }
 
-            var stream = new InMemoryRandomAccessStream();
-            using (var writer = new DataWriter(stream.GetOutputStreamAt(0)))
-            {
-                writer.WriteBytes(bytes);
-                await writer.StoreAsync();
-                writer.DetachStream();
-            }
-
-            stream.Seek(0);
-            return RandomAccessStreamReference.CreateFromStream(stream);
+            ulong fp = MusicWidgetViewModel.ComputeThumbnailFingerprint(ThumbnailBytes);
+            bool unchanged = knownCoverFingerprint != 0 && fp == knownCoverFingerprint;
+            return Task.FromResult<MusicThumbnailSnapshot?>(new MusicThumbnailSnapshot(
+                unchanged ? null : ThumbnailBytes,
+                fp,
+                unchanged,
+                "image/png"));
         }
 
         public Task<MusicTimelineSnapshot?> GetCurrentTimelineAsync(string? preferredSessionId = null)
@@ -868,6 +1016,11 @@ public sealed class MusicPlaybackSyncRegressionTests
             return Task.FromResult(AcceptTransportCommands);
         }
 
+        public Task<bool> TryTogglePlayPauseAsync(string? sessionId) =>
+            PlaybackState == MusicPlaybackState.Playing
+                ? TryPauseAsync(sessionId)
+                : TryPlayAsync(sessionId);
+
         public Task<bool> TryPreviousAsync(string? sessionId) => Task.FromResult(AcceptTransportCommands);
 
         public Task<bool> TryNextAsync(string? sessionId) => Task.FromResult(AcceptTransportCommands);
@@ -894,6 +1047,8 @@ public sealed class MusicPlaybackSyncRegressionTests
         public void RaiseCurrentSessionChanged() => CurrentSessionChanged?.Invoke(this, EventArgs.Empty);
 
         public void RaiseMediaPropertiesChanged() => MediaPropertiesChanged?.Invoke(this, EventArgs.Empty);
+
+        public void RaiseConnectionStateChanged() => ConnectionStateChanged?.Invoke(this, EventArgs.Empty);
 
         public void Dispose()
         {

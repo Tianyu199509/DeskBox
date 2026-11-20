@@ -140,7 +140,7 @@ public sealed class WidgetLayoutStoreTests : IDisposable
         Assert.Same(seed, result.Data);
 
         JsonObject doc = await ReadObjectAsync(LayoutPath);
-        Assert.Equal(1, doc["schemaVersion"]!.GetValue<int>());
+        Assert.Equal(WidgetLayoutStore.CurrentSchemaVersion, doc["schemaVersion"]!.GetValue<int>());
         JsonObject layout = doc["layout"]!.AsObject();
         Assert.Single(layout["widgets"]!.AsArray());
         Assert.Single(layout["widgetGroups"]!.AsArray());

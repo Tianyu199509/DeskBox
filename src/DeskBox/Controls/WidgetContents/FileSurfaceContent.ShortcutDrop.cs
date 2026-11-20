@@ -15,13 +15,15 @@ public sealed partial class FileSurfaceContent
         bool forceCopy = false,
         string? destinationFolderPath = null,
         IEnumerable<string>? sourcePathsOverride = null,
-        FileDropIntent? precomputedIntent = null)
+        FileDropIntent? precomputedIntent = null,
+        TimeSpan? probeBudget = null)
     {
         if (precomputedIntent is { } cachedIntent)
         {
             return cachedIntent;
         }
 
+        TimeSpan effectiveBudget = probeBudget ?? PathOriginClassifier.DefaultHoverProbeBudget;
         DataPackageOperation supported =
             DeskBoxDragData.GetFileTransferOperations(dataView, allowedOperations);
         bool noOperationMetadata =
@@ -37,7 +39,7 @@ public sealed partial class FileSurfaceContent
              PathOriginClassifier.AreAllOnSameVolume(
                  sourcePaths,
                  destination,
-                 TimeSpan.FromMilliseconds(80)));
+                 effectiveBudget));
         string action = _settingsService.Settings.FileWidget.ManagedDropAction;
         bool followWindows = string.Equals(
             action,
@@ -46,7 +48,7 @@ public sealed partial class FileSurfaceContent
         bool isInternal = DeskBoxDragData.IsInternalFileDrag(dataView);
         SourceOriginSnapshot origin = PathOriginClassifier.ClassifySources(
             sourcePaths,
-            TimeSpan.FromMilliseconds(80));
+            effectiveBudget);
         uint effects = Views.ContentWidgetWindow.ToNativeAllowedEffects(supported);
 
         return TransferIntentEngine.Evaluate(new TransferIntentRequest(
@@ -57,9 +59,9 @@ public sealed partial class FileSurfaceContent
             HasShellApplicationOrNamespaceData: false,
             ForceCopy: forceCopy,
             HasMappedFolder: !string.IsNullOrWhiteSpace(destination),
-            ControlDown: Win32Helper.IsKeyPressed(VirtualKey.Control),
-            ShiftDown: Win32Helper.IsKeyPressed(VirtualKey.Shift),
-            AltDown: Win32Helper.IsKeyPressed(VirtualKey.Menu),
+            ControlDown: Win32Helper.IsAsyncKeyPressed(VirtualKey.Control),
+            ShiftDown: Win32Helper.IsAsyncKeyPressed(VirtualKey.Shift),
+            AltDown: Win32Helper.IsAsyncKeyPressed(VirtualKey.Menu),
             AllowedEffects: effects,
             NoOperationMetadata: noOperationMetadata,
             DefaultMove: string.Equals(
@@ -200,6 +202,7 @@ public sealed partial class FileSurfaceContent
         }
 
         string destination = Path.GetFullPath(destinationFolderPath);
+        Services.DragDrop.StoreVirtualizedPathPolicy.ThrowIfWriteBlockedDestination(destination);
         Directory.CreateDirectory(destination);
         var reserved = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         int created = 0;
@@ -265,6 +268,7 @@ public sealed partial class FileSurfaceContent
         }
 
         string destination = Path.GetFullPath(destinationFolderPath);
+        Services.DragDrop.StoreVirtualizedPathPolicy.ThrowIfWriteBlockedDestination(destination);
         Directory.CreateDirectory(destination);
         var reserved = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var created = new List<string>();

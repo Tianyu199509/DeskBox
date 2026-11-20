@@ -423,10 +423,13 @@ public sealed partial class TodoWidgetContent : UserControl, IDisposable
 
         _todoSegmentedRestoreQueued = true;
         _todoSegmentedStableFrameCount = 0;
+        _todoSegmentedPollBudgetRemaining = 45;
         _todoSegmentedLastCandidateWidth = 0;
         _todoSegmentedRenderingHandler = TodoSegmentedRestore_Rendering;
         CompositionTarget.Rendering += _todoSegmentedRenderingHandler;
     }
+
+    private int _todoSegmentedPollBudgetRemaining;
 
     private void TodoSegmentedRestore_Rendering(object? sender, object e)
     {
@@ -444,6 +447,12 @@ public sealed partial class TodoWidgetContent : UserControl, IDisposable
         if (_isResponsiveLayoutTransitionActive)
         {
             _todoSegmentedStableFrameCount = 0;
+            return;
+        }
+
+        if (--_todoSegmentedPollBudgetRemaining <= 0)
+        {
+            CancelTodoSegmentedRestore();
             return;
         }
 
@@ -1262,7 +1271,14 @@ public sealed partial class TodoWidgetContent : UserControl, IDisposable
     private async void TitleAutosaveTimer_Tick(object? sender, object e)
     {
         _titleAutosaveTimer.Stop();
-        await FlushDetailTitleAsync(finalizeBlankDraft: false, closeDetailOnFinalize: false);
+        try
+        {
+            await FlushDetailTitleAsync(finalizeBlankDraft: false, closeDetailOnFinalize: false);
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[Todo] Title auto-save failed: {ex.Message}");
+        }
     }
 
     private async Task<TodoItemViewModel?> FlushDetailTitleAsync(

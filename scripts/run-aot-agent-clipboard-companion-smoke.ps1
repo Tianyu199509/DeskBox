@@ -12,14 +12,16 @@ if ([string]::IsNullOrWhiteSpace($PublishDir)) {
 }
 
 $deskBoxExe = Join-Path $PublishDir "DeskBox.exe"
-$companionExe = Join-Path $PublishDir "DeskBox.Settings.exe"
+# The settings host is the same image relaunched as DeskBox.exe --settings;
+# a separate settings executable would statically duplicate the whole app.
+$legacyCompanionExe = Join-Path $PublishDir "DeskBox.Settings.exe"
 
 if (-not (Test-Path -LiteralPath $deskBoxExe -PathType Leaf)) {
     throw "NativeAOT DeskBox.exe not found at '$deskBoxExe'."
 }
 
-if (-not (Test-Path -LiteralPath $companionExe -PathType Leaf)) {
-    throw "NativeAOT companion DeskBox.Settings.exe not found at '$companionExe'."
+if (Test-Path -LiteralPath $legacyCompanionExe -PathType Leaf) {
+    throw "Unexpected legacy companion '$legacyCompanionExe': the settings host must be DeskBox.exe --settings."
 }
 
 function Assert-NativeAotExecutable {
@@ -75,11 +77,7 @@ function Assert-NativeAotExecutable {
     }
 }
 
-$deskBoxMachine = Assert-NativeAotExecutable -Path $deskBoxExe -MinBytes (5 * 1024 * 1024)
-$companionMachine = Assert-NativeAotExecutable -Path $companionExe -MinBytes (5 * 1024 * 1024)
-if ($deskBoxMachine -ne $companionMachine) {
-    throw "PE machine mismatch between DeskBox.exe (0x$($deskBoxMachine.ToString('X4'))) and DeskBox.Settings.exe (0x$($companionMachine.ToString('X4')))."
-}
+$null = Assert-NativeAotExecutable -Path $deskBoxExe -MinBytes (5 * 1024 * 1024)
 
 $rpcPayload = @(
     '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05"}}',
@@ -136,4 +134,129 @@ finally {
     $proc.Dispose()
 }
 
-Write-Host "[AOT-SMOKE] DeskBox.exe --mcp JSON-RPC & DeskBox.Settings.exe companion verified."
+if ([Environment]::UserInteractive) {
+    $smokeId = [Guid]::NewGuid().ToString("N").Substring(0, 10)
+    $smokeDataRoot = Join-Path ([System.IO.Path]::GetTempPath()) "DeskBox-AotSettingsSmoke-$smokeId"
+    $smokeRecoveryRoot = "$smokeDataRoot-Recovery"
+    New-Item -ItemType Directory -Path $smokeDataRoot -Force | Out-Null
+
+    $mainPsi = [System.Diagnostics.ProcessStartInfo]::new($deskBoxExe)
+    $mainPsi.UseShellExecute = $false
+    $mainPsi.WorkingDirectory = $PublishDir
+    $mainPsi.Environment["DESKBOX_AOT_PREVIEW_DATA_ROOT"] = $smokeDataRoot
+
+    $mainProc = $null
+    try {
+        $mainProc = [System.Diagnostics.Process]::Start($mainPsi)
+        $mainLogPath = Join-Path $smokeDataRoot "DeskBox.log"
+        $settingsLogPath = Join-Path $smokeDataRoot "DeskBox.Settings.log"
+
+        $launchDeadline = [DateTime]::UtcNow.AddSeconds(20)
+        $mainReady = $false
+        while ([DateTime]::UtcNow -lt $launchDeadline) {
+            if ($mainProc.HasExited) {
+                $mainLogTail = if (Test-Path -LiteralPath $mainLogPath -PathType Leaf) {
+                    (Get-Content -LiteralPath $mainLogPath -Tail 40) -join "`n"
+                }
+                else {
+                    "<no DeskBox.log>"
+                }
+                throw "Primary NativeAOT DeskBox.exe exited prematurely (code $($mainProc.ExitCode)):`n$mainLogTail"
+            }
+
+            if (Test-Path -LiteralPath $mainLogPath -PathType Leaf) {
+                $mainLogContent = Get-Content -LiteralPath $mainLogPath -Raw -ErrorAction SilentlyContinue
+                if ($null -ne $mainLogContent -and $mainLogContent.Contains("OnLaunched completed successfully")) {
+                    $mainReady = $true
+                    break
+                }
+            }
+            Start-Sleep -Milliseconds 200
+        }
+
+        if (-not $mainReady) {
+            throw "Timed out waiting for primary NativeAOT DeskBox.exe OnLaunched completion."
+        }
+
+        $openPsi = [System.Diagnostics.ProcessStartInfo]::new($deskBoxExe)
+        $openPsi.ArgumentList.Add("--open-settings")
+        $openPsi.UseShellExecute = $false
+        $openPsi.WorkingDirectory = $PublishDir
+        $openPsi.Environment["DESKBOX_AOT_PREVIEW_DATA_ROOT"] = $smokeDataRoot
+        $openProc = [System.Diagnostics.Process]::Start($openPsi)
+        try {
+            if (-not $openProc.WaitForExit(15000)) {
+                $openProc.Kill($true)
+                throw "DeskBox.exe --open-settings timed out after 15s."
+            }
+        }
+        finally {
+            $openProc.Dispose()
+        }
+
+        $settingsDeadline = [DateTime]::UtcNow.AddSeconds(20)
+        $settingsShown = $false
+        while ([DateTime]::UtcNow -lt $settingsDeadline) {
+            if (Test-Path -LiteralPath $settingsLogPath -PathType Leaf) {
+                $settingsLogContent = Get-Content -LiteralPath $settingsLogPath -Raw -ErrorAction SilentlyContinue
+                if ($null -ne $settingsLogContent) {
+                    if ($settingsLogContent.Contains("[SettingsHost] Boot failed") -or
+                        $settingsLogContent.Contains("[SettingsHost] Unhandled exception") -or
+                        $settingsLogContent.Contains("[SettingsHost] IPC connect failed")) {
+                        throw "NativeAOT Settings host failed during boot:`n$settingsLogContent"
+                    }
+                    if ($settingsLogContent.Contains("[SettingsHost] Window shown")) {
+                        $settingsShown = $true
+                        break
+                    }
+                }
+            }
+            Start-Sleep -Milliseconds 200
+        }
+
+        if (-not $settingsShown) {
+            $settingsTail = if (Test-Path -LiteralPath $settingsLogPath -PathType Leaf) {
+                Get-Content -LiteralPath $settingsLogPath -Raw
+            }
+            else {
+                "<no DeskBox.Settings.log created>"
+            }
+            throw "Timed out waiting for '[SettingsHost] Window shown' in NativeAOT settings host:`n$settingsTail"
+        }
+    }
+    finally {
+        $resolvedTargetExe = [System.IO.Path]::GetFullPath($deskBoxExe)
+        foreach ($running in @(Get-Process -Name "DeskBox" -ErrorAction SilentlyContinue)) {
+            try {
+                if ($null -ne $running.Path -and
+                    [string]::Equals(
+                        [System.IO.Path]::GetFullPath($running.Path),
+                        $resolvedTargetExe,
+                        [System.StringComparison]::OrdinalIgnoreCase)) {
+                    Stop-Process -Id $running.Id -Force -ErrorAction SilentlyContinue
+                }
+            }
+            catch {
+            }
+        }
+        if ($null -ne $mainProc) {
+            try {
+                if (-not $mainProc.HasExited) {
+                    $mainProc.Kill($true)
+                }
+                [void]$mainProc.WaitForExit(5000)
+            }
+            catch {
+            }
+            $mainProc.Dispose()
+        }
+        Start-Sleep -Milliseconds 300
+        foreach ($cleanupDir in @($smokeDataRoot, $smokeRecoveryRoot)) {
+            if (Test-Path -LiteralPath $cleanupDir) {
+                Remove-Item -LiteralPath $cleanupDir -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+}
+
+Write-Host "[AOT-SMOKE] DeskBox.exe --mcp JSON-RPC and live --settings host window boot verified."

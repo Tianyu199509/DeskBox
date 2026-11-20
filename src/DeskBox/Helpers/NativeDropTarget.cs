@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
 using DeskBox.Platform;
 using DeskBox.Services;
+using DeskBox.Services.DragDrop;
 
 namespace DeskBox.Helpers;
 
@@ -23,7 +24,8 @@ public sealed record NativeDropIntentEventArgs(
     uint KeyState,
     uint AllowedEffects,
     long GestureId = 0,
-    IReadOnlyList<DroppedItemOriginKind>? ItemOrigins = null);
+    IReadOnlyList<DroppedItemOriginKind>? ItemOrigins = null,
+    int MaterializationSkippedCount = 0);
 
 /// <summary>
 /// Everything a shortcut-launch consumer needs to delegate a drop to the
@@ -44,7 +46,7 @@ internal sealed record NativeDropLaunchRequest(
 /// COM IDropTarget implementation that bridges native OLE drag-drop to .NET events.
 /// Replaces the legacy WM_DROPFILES approach, providing real-time drag-over feedback.
 /// </summary>
-public sealed class NativeDropTarget : IDisposable
+public sealed partial class NativeDropTarget : IDisposable
 {
     [StructLayout(LayoutKind.Sequential)]
     public struct POINT
@@ -67,9 +69,11 @@ public sealed class NativeDropTarget : IDisposable
         public int y;
     }
 
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode, Pack = 4)]
-    internal struct FILEDESCRIPTORW
+    [StructLayout(LayoutKind.Sequential, Pack = 4)]
+    internal unsafe struct FILEDESCRIPTORW
     {
+        internal const int MaxPathChars = 260;
+
         public uint dwFlags;
         public Guid clsid;
         public SIZEL sizel;
@@ -80,9 +84,49 @@ public sealed class NativeDropTarget : IDisposable
         public FILETIME ftLastWriteTime;
         public uint nFileSizeHigh;
         public uint nFileSizeLow;
+        public fixed char cFileName[MaxPathChars];
 
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
-        public string cFileName;
+        internal readonly string GetFileName()
+        {
+            fixed (char* ptr = cFileName)
+            {
+                var span = new ReadOnlySpan<char>(ptr, MaxPathChars);
+                int nul = span.IndexOf('\0');
+                return new string(nul >= 0 ? span[..nul] : span);
+            }
+        }
+
+        internal void SetFileName(string? value)
+        {
+            fixed (char* ptr = cFileName)
+            {
+                var dest = new Span<char>(ptr, MaxPathChars);
+                dest.Clear();
+                if (!string.IsNullOrEmpty(value))
+                {
+                    int copyLen = Math.Min(value.Length, MaxPathChars - 1);
+                    value.AsSpan(0, copyLen).CopyTo(dest);
+                }
+            }
+        }
+
+        internal static FILEDESCRIPTORW Create(
+            string fileName,
+            uint dwFlags = 0,
+            uint dwFileAttributes = 0,
+            uint nFileSizeHigh = 0,
+            uint nFileSizeLow = 0)
+        {
+            var descriptor = new FILEDESCRIPTORW
+            {
+                dwFlags = dwFlags,
+                dwFileAttributes = dwFileAttributes,
+                nFileSizeHigh = nFileSizeHigh,
+                nFileSizeLow = nFileSizeLow,
+            };
+            descriptor.SetFileName(fileName);
+            return descriptor;
+        }
     }
 
     // ── Constants ──
@@ -93,14 +137,18 @@ public sealed class NativeDropTarget : IDisposable
     private const int S_OK = 0;
     private const int S_FALSE = 1;
     private const uint FILE_ATTRIBUTE_DIRECTORY = 0x10;
+    private const uint FD_ATTRIBUTES = 0x00000004;
     private const uint FD_FILESIZE = 0x00000040;
+    private const uint SfgaoFilesys = 0x40000000;
+    private const uint SfgaoFolder = 0x20000000;
+    private const uint SfgaoStream = 0x00400000;
+    private static readonly Guid s_iidIShellItem = new("43826d1e-e718-42ee-bc55-a1e261c37bfe");
+    private static readonly Guid s_bhidStream = new("1cebb3ab-7c10-499a-a417-92ca16c4cb83");
+    private static readonly Guid s_iidIStream = new("0000000c-0000-0000-c000-000000000046");
     private const uint SIGDN_NORMALDISPLAY = 0;
     private const uint SIGDN_DESKTOPABSOLUTEPARSING = 0x80028000;
     private const uint SIGDN_FILESYSPATH = 0x80058000;
     private const int MaxShellApplicationDropItems = 256;
-    // Per-drop ceiling for materialized virtual files. Legitimate browser
-    // drops stay far below this; a crafted payload cannot exhaust the disk.
-    private const long MaxVirtualDropBytes = 256L * 1024 * 1024;
     private const string AppsFolderPrefix = "shell:AppsFolder\\";
     private const string AppsFolderClsidPrefix =
         "shell:::{4234d49b-0245-4df3-b780-3893943456e1}\\";
@@ -130,19 +178,24 @@ public sealed class NativeDropTarget : IDisposable
     private uint _lastDropDescriptionEffect;
     private NativeDropDescriptionText? _lastDropDescriptionText;
     private bool _shellVisualActive;
+    private bool _shellVisualShown;
     private bool _registered;
+    private bool _blockedByExistingRegistration;
+    private volatile bool _disposed;
     private bool _rightButtonDragActive;
     private bool _hasVirtualDescriptorData;
     private bool _hasShellIdListFormat;
     private bool _isAsyncCapableSource;
     private long _activeGestureId;
     private IReadOnlyList<string> _dragPathHints = [];
+    private SourceOriginSnapshot? _cachedDragSourceOriginSnapshot;
 
     internal enum ShellIdListItemKind
     {
         Application,
         FileSystemPath,
         VirtualNamespace,
+        StreamObject,
     }
 
     internal sealed record ShellIdListDropItem(
@@ -208,6 +261,13 @@ public sealed class NativeDropTarget : IDisposable
     /// volume. When unset the feedback assumes same-volume semantics.
     /// </summary>
     internal Func<IReadOnlyList<string>, bool>? SameVolumeProbe { get; set; }
+
+    /// <summary>
+    /// Budget-aware same-volume probe allowing hover paths to stay bounded
+    /// (80ms) while Drop / right-drag menu resolution allows a deeper cold-disk
+    /// probe (1500ms).
+    /// </summary>
+    internal Func<IReadOnlyList<string>, TimeSpan, bool>? SameVolumeWithBudgetProbe { get; set; }
 
     /// <summary>
     /// Optional probe consulted inside DragEnter/DragOver/Drop to decide
@@ -295,6 +355,16 @@ public sealed class NativeDropTarget : IDisposable
 
     internal bool IsRegistered => _registered;
 
+    internal bool IsRegistrationResolved => _registered || _blockedByExistingRegistration;
+
+    /// <summary>
+    /// When true, a <c>DRAGDROP_E_ALREADYREGISTERED</c> collision revokes the
+    /// prior OLE drop target on this HWND and retries once (used on Win10
+    /// <c>DesktopChildSiteBridge</c> so Store MSIX cross-widget drops land on
+    /// <see cref="NativeDropTarget"/> rather than WinUI's StorageFile bridge).
+    /// </summary>
+    internal bool ReplaceExistingRegistration { get; set; }
+
     static NativeDropTarget()
     {
         s_fileGroupDescriptorFormat = (ushort)OleDropTargetNativeMethods.RegisterClipboardFormatW("FileGroupDescriptorW");
@@ -302,16 +372,6 @@ public sealed class NativeDropTarget : IDisposable
         s_shellIdListFormat = (ushort)OleDropTargetNativeMethods.RegisterClipboardFormatW("Shell IDList Array");
         s_performedDropEffectFormat = (ushort)OleDropTargetNativeMethods.RegisterClipboardFormatW("Performed DropEffect");
         s_logicalPerformedDropEffectFormat = (ushort)OleDropTargetNativeMethods.RegisterClipboardFormatW("Logical Performed DropEffect");
-
-        // Ensure OLE is initialized (WinUI 3 usually does this, but call
-        // again is harmless if already initialized).
-        try
-        {
-            OleDropTargetNativeMethods.OleInitialize(IntPtr.Zero);
-        }
-        catch
-        {
-        }
     }
 
     public NativeDropTarget(IntPtr hwnd, Func<bool>? defaultMoveProvider = null)
@@ -341,18 +401,36 @@ public sealed class NativeDropTarget : IDisposable
 
     public void Register()
     {
-        if (_registered)
+        bool replaceExisting = ReplaceExistingRegistration;
+        if (_registered || (_blockedByExistingRegistration && !replaceExisting))
         {
             return;
         }
 
         try
         {
-            NativeDropTargetComInterop.Register(_hwnd, _comObject);
-            _registered = true;
-            App.Log(
-                $"[DropTarget] Registered IDropTarget for hwnd=0x{_hwnd.ToInt64():X} " +
-                "shellImageHelper=shared");
+            // Ensure OLE is initialized on the HWND's owning UI STA thread
+            // rather than in the static constructor (which can run on an MTA worker).
+            _ = OleDropTargetNativeMethods.OleInitialize(IntPtr.Zero);
+            if (NativeDropTargetComInterop.TryRegister(
+                    _hwnd,
+                    _comObject,
+                    replaceExisting,
+                    out bool alreadyRegistered))
+            {
+                _registered = true;
+                _blockedByExistingRegistration = false;
+                App.Log(
+                    $"[DropTarget] Registered IDropTarget for hwnd=0x{_hwnd.ToInt64():X} " +
+                    $"shellImageHelper=shared replaced={replaceExisting}");
+            }
+            else if (alreadyRegistered)
+            {
+                _blockedByExistingRegistration = true;
+                App.LogVerbose(
+                    $"[DropTarget] HWND already has an OLE IDropTarget; standing down " +
+                    $"hwnd=0x{_hwnd.ToInt64():X}");
+            }
         }
         catch (Exception ex)
         {
@@ -380,6 +458,7 @@ public sealed class NativeDropTarget : IDisposable
 
     public void Dispose()
     {
+        _disposed = true;
         Unregister();
         DragEnterEvent = null;
         DragOverEvent = null;
@@ -391,6 +470,7 @@ public sealed class NativeDropTarget : IDisposable
         ImportBusyDropBlocked = null;
         UndisplayablePathProbe = null;
         SameVolumeProbe = null;
+        SameVolumeWithBudgetProbe = null;
         HasMappedFolderProbe = null;
         TargetKindProbe = null;
         ImportBusyProbe = null;
@@ -426,12 +506,48 @@ public sealed class NativeDropTarget : IDisposable
         }
     }
 
+    internal static uint AugmentWin10BrokeredModifierKeyState(
+        uint keyState,
+        bool? isWindows11OrLater = null,
+        Func<Windows.System.VirtualKey, bool>? isKeyPressed = null)
+    {
+        // On Windows 10, WinRT/UWP brokered drags arrive at IDropTarget with
+        // grfKeyState == 0 because DataExchange.dll strips mouse/modifier state.
+        // Supplement Ctrl/Shift/Alt from GetAsyncKeyState only when keyState is 0
+        // on Win10 so classic Win32 OLE drags (which populate accurate keyState)
+        // stay untouched.
+        if (keyState != 0 || (isWindows11OrLater ?? WindowsCompatibilityService.IsWindows11OrLater))
+        {
+            return keyState;
+        }
+
+        Func<Windows.System.VirtualKey, bool> probe = isKeyPressed ?? Win32Helper.IsAsyncKeyPressed;
+        uint augmented = 0;
+        if (probe(Windows.System.VirtualKey.Control))
+        {
+            augmented |= NativeDropEffectPolicy.ControlKeyState;
+        }
+
+        if (probe(Windows.System.VirtualKey.Shift))
+        {
+            augmented |= NativeDropEffectPolicy.ShiftKeyState;
+        }
+
+        if (probe(Windows.System.VirtualKey.Menu))
+        {
+            augmented |= NativeDropEffectPolicy.AltKeyState;
+        }
+
+        return augmented;
+    }
+
     private int OnDragEnterCore(
         nint dataObject,
         uint keyState,
         POINT point,
         ref uint effect)
     {
+        keyState = AugmentWin10BrokeredModifierKeyState(keyState);
         EndNativeDragVisual();
         _activeGestureId = AllocateGestureId();
         _rightButtonDragActive =
@@ -451,7 +567,8 @@ public sealed class NativeDropTarget : IDisposable
             : [];
         DragEnterEvent?.Invoke(point.X, point.Y, HasFileData);
 
-        SourceOriginSnapshot sourceOrigin = ClassifyHoverOrDropSources(_dragPathHints);
+        SourceOriginSnapshot sourceOrigin = _cachedDragSourceOriginSnapshot ??=
+            ClassifyHoverOrDropSources(_dragPathHints);
         effect = NativeDropEffectPolicy.ResolveFeedbackEffect(
             HasFileData,
             HasVirtualFileData,
@@ -495,12 +612,14 @@ public sealed class NativeDropTarget : IDisposable
         POINT point,
         ref uint effect)
     {
+        keyState = AugmentWin10BrokeredModifierKeyState(keyState);
         uint allowedEffects = effect;
         _rightButtonDragActive |=
             NativeDropEffectPolicy.IsRightButtonDrag(keyState);
         DragOverEvent?.Invoke(point.X, point.Y);
 
-        SourceOriginSnapshot sourceOrigin = ClassifyHoverOrDropSources(_dragPathHints);
+        SourceOriginSnapshot sourceOrigin = _cachedDragSourceOriginSnapshot ??=
+            ClassifyHoverOrDropSources(_dragPathHints);
         effect = NativeDropEffectPolicy.ResolveFeedbackEffect(
             HasFileData,
             HasVirtualFileData,
@@ -564,6 +683,7 @@ public sealed class NativeDropTarget : IDisposable
         POINT point,
         ref uint effect)
     {
+        keyState = AugmentWin10BrokeredModifierKeyState(keyState);
         long gestureId = _activeGestureId != 0 ? _activeGestureId : AllocateGestureId();
         uint allowedEffects = effect;
         bool shellApplicationDrop = HasShellApplicationData;
@@ -596,6 +716,7 @@ public sealed class NativeDropTarget : IDisposable
             {
                 NativeDropImageManager.DragLeave(this);
                 _shellVisualActive = false;
+                _shellVisualShown = false;
             }
 
             ClearActiveDropDescriptionAndReleaseDataObject();
@@ -647,7 +768,8 @@ public sealed class NativeDropTarget : IDisposable
             dataObject,
             hadShellIdListFormat,
             hadVirtualDescriptorData || hadAsyncCapableSource,
-            out bool deferVirtualFallback);
+            out bool deferVirtualFallback,
+            out int syncSkippedCount);
         if (deferVirtualFallback && dataObject != 0)
         {
             uint fallbackFeedbackEffect = NativeDropEffectPolicy.ResolveFeedbackEffect(
@@ -683,30 +805,60 @@ public sealed class NativeDropTarget : IDisposable
         // copy-only source whose files are moved would delete originals the
         // source never sanctioned for deletion.
         IReadOnlyList<string> effectivePaths = paths.Count > 0 ? paths : _dragPathHints;
-        SourceOriginSnapshot dropOrigin = ClassifyHoverOrDropSources(effectivePaths);
+        SourceOriginSnapshot dropOrigin = ClassifyHoverOrDropSources(
+            effectivePaths,
+            PathOriginClassifier.DefaultDropProbeBudget);
         TransferDomain dropDomain = ResolveDragDomain(effectivePaths);
         bool allItemsTemporary = itemOrigins.Count > 0
             ? itemOrigins.All(static kind => kind != DroppedItemOriginKind.RealFileSystemPath)
             : containsTemporaryFiles;
-        bool sourceCanCopy = dropDomain == TransferDomain.InternalDeskBox ||
-            (allowedEffects & NativeDropEffectPolicy.Copy) != 0;
+        bool sourceCanCopy = !dropOrigin.HasAppExecutionAliasSource &&
+            (dropDomain == TransferDomain.InternalDeskBox ||
+             (allowedEffects & NativeDropEffectPolicy.Copy) != 0);
         bool sourceCanMove = !allItemsTemporary &&
+            !dropOrigin.HasAppExecutionAliasSource &&
             !dropOrigin.IsMoveProtectedSystemOrSharedSource &&
             (dropDomain == TransferDomain.InternalDeskBox ||
              (allowedEffects & NativeDropEffectPolicy.Move) != 0);
+        bool dropSameVolume = GetSameVolume(
+            effectivePaths,
+            PathOriginClassifier.DefaultDropProbeBudget);
         bool copyRequested = NativeDropEffectPolicy.ShouldCopyMappedTransfer(
             allItemsTemporary,
             keyState,
             defaultMove,
             followWindows: followWindows,
-            sameVolume: GetSameVolume(effectivePaths),
+            sameVolume: dropSameVolume,
             canCopy: sourceCanCopy,
             canMove: sourceCanMove,
-            protectDefaultMoveAsCopy: dropOrigin.IsProtectedCopyByDefault);
+            protectDefaultMoveAsCopy: dropOrigin.IsProtectedCopyByDefault,
+            sourceOrigin: dropOrigin,
+            domain: dropDomain);
         bool shortcutRequested = createdShellApplicationLinks ||
             NativeDropEffectPolicy.ShouldCreateMappedShortcut(
                 allItemsTemporary,
-                keyState);
+                keyState,
+                followWindows: followWindows,
+                allowedEffects: allowedEffects,
+                sourceOrigin: dropOrigin);
+        uint hoverFeedbackEffect = feedbackEffect;
+        feedbackEffect = NativeDropEffectPolicy.ResolveFeedbackEffect(
+            hasFileData: true,
+            hasVirtualFileData: allItemsTemporary,
+            keyState,
+            allowedEffects,
+            hasShellApplicationData: shellApplicationDrop || shellNamespaceDrop,
+            defaultMove,
+            followWindows: followWindows,
+            sameVolume: dropSameVolume,
+            hasMappedFolder: GetHasMappedFolder(),
+            targetKind: targetKind,
+            domain: dropDomain,
+            sourceOrigin: dropOrigin);
+        App.Log($"[DropTarget] SourceDecision gesture={gestureId} hintCount={_dragPathHints.Count} " +
+            $"pathCount={effectivePaths.Count} hintProtection={hintOrigin.InboundProtection} " +
+            $"dropProtection={dropOrigin.InboundProtection} moveProtected={dropOrigin.IsMoveProtectedSystemOrSharedSource} " +
+            $"hoverEffect={hoverFeedbackEffect} dropEffect={feedbackEffect} copyRequested={copyRequested}");
         if (_shellVisualActive)
         {
             NativeDropImageManager.Drop(
@@ -717,6 +869,7 @@ public sealed class NativeDropTarget : IDisposable
         }
         ClearActiveDropDescriptionAndReleaseDataObject();
         _shellVisualActive = false;
+        _shellVisualShown = false;
         ResetDragDataState();
         _rightButtonDragActive = false;
 
@@ -828,7 +981,7 @@ public sealed class NativeDropTarget : IDisposable
             return S_OK;
         }
 
-        if (paths.Count > 0)
+        if (paths.Count > 0 && (rightButtonDrag || feedbackEffect != NativeDropEffectPolicy.None))
         {
             DropIntentEvent?.Invoke(new NativeDropIntentEventArgs(
                 paths,
@@ -842,7 +995,8 @@ public sealed class NativeDropTarget : IDisposable
                 keyState,
                 allowedEffects,
                 gestureId,
-                itemOrigins));
+                itemOrigins,
+                syncSkippedCount));
             DropEvent?.Invoke(
                 paths,
                 point.X,
@@ -852,19 +1006,38 @@ public sealed class NativeDropTarget : IDisposable
             effect = NativeDropEffectPolicy.ResolveCompletionEffect(
                 hasExtractedPaths: true,
                 allowedEffects,
-                createdShellApplicationLinks);
+                createdShellApplicationLinks || shortcutRequested);
         }
         else
         {
+            if (paths.Count > 0 && containsTemporaryFiles)
+            {
+                IReadOnlyList<string> refusedPaths = paths;
+                _ = Task.Run(() => NativeDropMaterializationWorker
+                    .CleanupVirtualDropDirectories(refusedPaths));
+            }
+            else if (paths.Count == 0 && syncSkippedCount > 0)
+            {
+                App.Log(
+                    $"[DropTarget] Sync staging produced zero items (skipped={syncSkippedCount}); " +
+                    "notifying zero-result drop blocked.");
+                try
+                {
+                    ZeroResultDropBlocked?.Invoke();
+                }
+                catch (Exception ex)
+                {
+                    App.Log($"[DropTarget] Zero-result notify failed: {ex.Message}");
+                }
+            }
+
             effect = NativeDropEffectPolicy.None;
         }
 
         WritePerformedDropEffect(dataObject, effect);
-        WriteLogicalPerformedDropEffect(
-            dataObject,
-            effect != NativeDropEffectPolicy.None && !rightButtonDrag
-                ? feedbackEffect
-                : effect);
+        // Never advertise Logical Performed DropEffect = Move before the async
+        // import actually finishes (user may still cancel a conflict dialog).
+        WriteLogicalPerformedDropEffect(dataObject, effect);
         return S_OK;
     }
 
@@ -987,8 +1160,7 @@ public sealed class NativeDropTarget : IDisposable
         uint completionEffect = NativeDropEffectPolicy.ResolveCompletionEffect(
             hasExtractedPaths: true,
             allowedEffects,
-            createdShellApplicationLinks: shellApplicationDrop ||
-                shellNamespaceDrop,
+            createdShellApplicationLinks: shortcutRequested,
             hasVirtualOnlyData: isVirtualStreamDrop);
         int dropX = point.X;
         int dropY = point.Y;
@@ -999,37 +1171,100 @@ public sealed class NativeDropTarget : IDisposable
 
         if (shellApplicationDrop || shellNamespaceDrop)
         {
+            if (!asyncStarted)
+            {
+                // Non-async Shell IDList sources only guarantee IDataObject
+                // validity until IDropTarget::Drop returns. Materialize
+                // synchronously on the UI STA inside the Drop frame, write
+                // receipts immediately, and hand the already-materialized paths
+                // to the UI import pipeline via PostAfterCallback.
+                IReadOnlyList<string> extractedPaths = [];
+                IReadOnlyList<DroppedItemOriginKind> extractedOrigins = [];
+                int shellSkippedCount = 0;
+                uint committedEffect = NativeDropEffectPolicy.None;
+                try
+                {
+                    extractedPaths = TryExtractShellIdListItems(
+                        dataObject,
+                        out extractedOrigins,
+                        out shellSkippedCount);
+                    committedEffect = extractedPaths.Count > 0
+                        ? completionEffect
+                        : NativeDropEffectPolicy.None;
+                }
+                catch (Exception ex)
+                {
+                    App.Log(
+                        "[DropTarget] Sync shell-object extraction failed: " +
+                        ex.Message);
+                    extractedPaths = [];
+                    extractedOrigins = [];
+                    committedEffect = NativeDropEffectPolicy.None;
+                }
+
+                FinishDragVisualAndState(dataObject, point, feedbackEffect);
+                effect = committedEffect;
+                WritePerformedDropEffect(dataObject, committedEffect);
+                WriteLogicalPerformedDropEffect(dataObject, committedEffect);
+                App.Log(
+                    $"[DropTarget] NativeDrop materialized non-async shell-object synchronously " +
+                    $"count={extractedPaths.Count} skipped={shellSkippedCount}");
+                PostShellIdListCompletion(
+                    extractedPaths,
+                    extractedOrigins,
+                    shellSkippedCount,
+                    dropX,
+                    dropY,
+                    copyRequested,
+                    capturedKeyState,
+                    capturedAllowedEffects,
+                    capturedFeedbackEffect,
+                    capturedRightButtonDrag,
+                    defaultMove,
+                    followWindows,
+                    sourceCanCopy,
+                    sourceCanMove,
+                    shellApplicationDrop,
+                    launchTargetPathAtDrop,
+                    gestureId);
+                return S_OK;
+            }
+
             // Shell namespace APIs used by the AppsFolder and namespace-item
             // extraction (SHGetNameFromIDList & friends) bind in-proc shell
             // COM objects that fail on the MTA worker (2026-10-15 field
             // incident: start-menu drags extracted zero items on the worker).
-            // The extraction therefore stays on the UI STA, one dispatcher
-            // turn out of the callback frame; a plain AddRef keeps the data
-            // object alive across the hop (same thread, no marshal needed)
-            // and the receipt/EndOperation run here too, satisfying the
-            // async protocol (everything happens after the Drop callback
-            // returned).
+            // Because asyncStarted == true, the source keeps the data object
+            // alive until EndOperation is called after extraction.
             _ = System.Runtime.InteropServices.Marshal.AddRef(dataObject);
             FinishDragVisualAndState(dataObject, point, feedbackEffect);
             App.Log(
-                "[DropTarget] NativeDrop deferred shell-object extraction " +
+                "[DropTarget] NativeDrop deferred async shell-object extraction " +
                 "to UI turn");
             UiDispatch.PostAfterCallback(() =>
             {
                 IReadOnlyList<string> extractedPaths = [];
+                IReadOnlyList<DroppedItemOriginKind> extractedOrigins = [];
+                int shellSkippedCount = 0;
                 try
                 {
-                    extractedPaths = TryExtractShellIdListItems(dataObject);
+                    extractedPaths = TryExtractShellIdListItems(
+                        dataObject,
+                        out extractedOrigins,
+                        out shellSkippedCount);
                     uint committedEffect = extractedPaths.Count > 0
                         ? completionEffect
                         : NativeDropEffectPolicy.None;
+                    int operationResult = committedEffect != NativeDropEffectPolicy.None
+                        ? S_OK
+                        : unchecked((int)0x80004005);
                     WritePerformedDropEffect(dataObject, committedEffect);
-                    WriteLogicalPerformedDropEffect(
+                    WriteLogicalPerformedDropEffect(dataObject, committedEffect);
+                    EndAsyncOperationIfStarted(
                         dataObject,
-                        committedEffect != NativeDropEffectPolicy.None && !capturedRightButtonDrag
-                            ? capturedFeedbackEffect
-                            : committedEffect);
-                    EndAsyncOperationIfStarted(dataObject, asyncStarted);
+                        asyncStarted,
+                        operationResult,
+                        committedEffect);
                 }
                 catch (Exception ex)
                 {
@@ -1057,45 +1292,88 @@ public sealed class NativeDropTarget : IDisposable
                     _ = System.Runtime.InteropServices.Marshal.Release(dataObject);
                 }
 
-                IReadOnlyList<DroppedItemOriginKind> shellOrigins =
-                    ClassifyShellIdListExtractedOrigins(extractedPaths);
-                bool hasShellTemporaryLinks = ContainsVirtualDropStagedPaths(extractedPaths);
-                SourceOriginSnapshot shellOriginSnapshot = ClassifyHoverOrDropSources(extractedPaths);
-                bool shellCopyRequested = hasShellTemporaryLinks
-                    ? copyRequested
-                    : NativeDropEffectPolicy.ShouldCopyMappedTransfer(
-                        containsTemporaryFiles: false,
-                        capturedKeyState,
-                        defaultMove,
-                        followWindows: followWindows,
-                        sameVolume: GetSameVolume(extractedPaths),
-                        canCopy: sourceCanCopy,
-                        canMove: !shellOriginSnapshot.IsMoveProtectedSystemOrSharedSource && sourceCanMove,
-                        protectDefaultMoveAsCopy: shellOriginSnapshot.IsProtectedCopyByDefault);
-                bool shellShortcutRequested = shellApplicationDrop ||
-                    hasShellTemporaryLinks ||
-                    NativeDropEffectPolicy.ShouldCreateMappedShortcut(
-                        containsTemporaryFiles: false,
-                        capturedKeyState);
-
-                OnDeferredMaterializationCompleted(
+                CompleteShellIdListExtraction(
                     extractedPaths,
+                    extractedOrigins,
+                    shellSkippedCount,
                     dropX,
                     dropY,
-                    shellCopyRequested,
-                    shellShortcutRequested,
+                    copyRequested,
                     capturedKeyState,
                     capturedAllowedEffects,
                     capturedFeedbackEffect,
                     capturedRightButtonDrag,
+                    defaultMove,
+                    followWindows,
+                    sourceCanCopy,
+                    sourceCanMove,
                     shellApplicationDrop,
                     launchTargetPathAtDrop,
-                    hasShellTemporaryLinks,
-                    gestureId,
-                    shellOrigins);
+                    gestureId);
             });
 
             effect = completionEffect;
+            return S_OK;
+        }
+
+        if (!asyncStarted)
+        {
+            // Non-async virtual sources (archivers, mail clients, legacy apps
+            // that do not advertise IDataObjectAsyncCapability) invalidate their
+            // IStream handles or purge temporary staging folders as soon as
+            // IDropTarget::Drop returns. Materialize synchronously before
+            // returning S_OK, then dispatch the import continuation via
+            // PostAfterCallback outside the OLE callback frame.
+            IReadOnlyList<string> extractedPaths = [];
+            IReadOnlyList<DroppedItemOriginKind> syncOrigins = [];
+            int syncMaterializationSkipped = 0;
+            uint committedEffect = NativeDropEffectPolicy.None;
+            try
+            {
+                extractedPaths = ExtractDeferredWorkerFilesWithOrigins(
+                    new NativeOleDataObject(dataObject),
+                    out syncOrigins,
+                    out syncMaterializationSkipped);
+                committedEffect = extractedPaths.Count > 0
+                    ? completionEffect
+                    : NativeDropEffectPolicy.None;
+            }
+            catch (Exception ex)
+            {
+                App.Log(
+                    "[DropTarget] Sync virtual-file extraction failed: " +
+                    ex.Message);
+                extractedPaths = [];
+                syncOrigins = [];
+                committedEffect = NativeDropEffectPolicy.None;
+            }
+
+            FinishDragVisualAndState(dataObject, point, feedbackEffect);
+            effect = committedEffect;
+            WritePerformedDropEffect(dataObject, committedEffect);
+            WriteLogicalPerformedDropEffect(dataObject, committedEffect);
+            App.Log(
+                $"[DropTarget] NativeDrop materialized non-async virtual payload synchronously " +
+                $"count={extractedPaths.Count} skipped={syncMaterializationSkipped}");
+            IReadOnlyList<string> capturedPaths = extractedPaths;
+            IReadOnlyList<DroppedItemOriginKind> capturedOrigins = syncOrigins;
+            int capturedSkipped = syncMaterializationSkipped;
+            UiDispatch.PostAfterCallback(() => OnDeferredMaterializationCompleted(
+                capturedPaths,
+                dropX,
+                dropY,
+                copyRequested,
+                shortcutRequested,
+                capturedKeyState,
+                capturedAllowedEffects,
+                capturedFeedbackEffect,
+                capturedRightButtonDrag,
+                shellApplicationDrop,
+                launchTargetPathAtDrop,
+                containsTemporaryFiles: true,
+                gestureId: gestureId,
+                itemOrigins: capturedOrigins,
+                materializationSkippedCount: capturedSkipped));
             return S_OK;
         }
 
@@ -1131,8 +1409,8 @@ public sealed class NativeDropTarget : IDisposable
                 marshalStream,
                 asyncStarted,
                 completionEffect,
-                !capturedRightButtonDrag ? capturedFeedbackEffect : completionEffect,
-                (extractedPaths, workerOrigins) => OnDeferredMaterializationCompleted(
+                completionEffect,
+                (extractedPaths, workerOrigins, workerSkippedCount) => OnDeferredMaterializationCompleted(
                     extractedPaths,
                     dropX,
                     dropY,
@@ -1146,7 +1424,24 @@ public sealed class NativeDropTarget : IDisposable
                     launchTargetPathAtDrop,
                     containsTemporaryFiles: true,
                     gestureId: gestureId,
-                    itemOrigins: workerOrigins)))
+                    itemOrigins: workerOrigins,
+                    materializationSkippedCount: workerSkippedCount),
+                confirmAcceptBeforeReceipt: () =>
+                {
+                    if (_disposed)
+                    {
+                        return false;
+                    }
+
+                    if (IsImportBusy())
+                    {
+                        App.Log("[DropTarget] Refused deferred virtual drop before receipt: import pipeline busy.");
+                        NotifyImportBusyRefused();
+                        return false;
+                    }
+
+                    return true;
+                }))
         {
             // Unreachable in practice (capacity pre-check above; only the UI
             // thread enqueues), kept as a hard stop: the marshal packet is
@@ -1171,6 +1466,170 @@ public sealed class NativeDropTarget : IDisposable
         return S_OK;
     }
 
+    private void PostShellIdListCompletion(
+        IReadOnlyList<string> extractedPaths,
+        IReadOnlyList<DroppedItemOriginKind> extractedOrigins,
+        int shellSkippedCount,
+        int dropX,
+        int dropY,
+        bool copyRequested,
+        uint capturedKeyState,
+        uint capturedAllowedEffects,
+        uint capturedFeedbackEffect,
+        bool capturedRightButtonDrag,
+        bool defaultMove,
+        bool followWindows,
+        bool sourceCanCopy,
+        bool sourceCanMove,
+        bool shellApplicationDrop,
+        string? launchTargetPathAtDrop,
+        long gestureId)
+    {
+        UiDispatch.PostAfterCallback(() => CompleteShellIdListExtraction(
+            extractedPaths,
+            extractedOrigins,
+            shellSkippedCount,
+            dropX,
+            dropY,
+            copyRequested,
+            capturedKeyState,
+            capturedAllowedEffects,
+            capturedFeedbackEffect,
+            capturedRightButtonDrag,
+            defaultMove,
+            followWindows,
+            sourceCanCopy,
+            sourceCanMove,
+            shellApplicationDrop,
+            launchTargetPathAtDrop,
+            gestureId));
+    }
+
+    private void CompleteShellIdListExtraction(
+        IReadOnlyList<string> extractedPaths,
+        IReadOnlyList<DroppedItemOriginKind> extractedOrigins,
+        int shellSkippedCount,
+        int dropX,
+        int dropY,
+        bool copyRequested,
+        uint capturedKeyState,
+        uint capturedAllowedEffects,
+        uint capturedFeedbackEffect,
+        bool capturedRightButtonDrag,
+        bool defaultMove,
+        bool followWindows,
+        bool sourceCanCopy,
+        bool sourceCanMove,
+        bool shellApplicationDrop,
+        string? launchTargetPathAtDrop,
+        long gestureId)
+    {
+        IReadOnlyList<DroppedItemOriginKind> shellOrigins =
+            extractedOrigins.Count == extractedPaths.Count
+                ? extractedOrigins
+                : ClassifyShellIdListExtractedOrigins(extractedPaths);
+        bool hasShellTemporaryLinks = shellOrigins.Any(
+            static origin => origin == DroppedItemOriginKind.ShellNamespaceLinkOnly);
+        bool hasShellTemporaryStreams = shellOrigins.Any(
+            static origin => origin == DroppedItemOriginKind.TransientArchiveOrCache);
+        bool containsShellTemporaryEntries = hasShellTemporaryLinks || hasShellTemporaryStreams;
+        SourceOriginSnapshot shellOriginSnapshot = ClassifyHoverOrDropSources(
+            extractedPaths,
+            PathOriginClassifier.DefaultDropProbeBudget);
+        (bool shellCopyRequested, bool shellShortcutRequested) =
+            ResolveShellIdListPostExtractionIntent(
+                shellApplicationDrop,
+                hasShellTemporaryLinks,
+                hasShellTemporaryStreams,
+                capturedRightButtonDrag,
+                capturedFeedbackEffect,
+                copyRequested,
+                capturedKeyState,
+                defaultMove,
+                followWindows,
+                sameVolume: GetSameVolume(
+                    extractedPaths,
+                    PathOriginClassifier.DefaultDropProbeBudget),
+                sourceCanCopy,
+                sourceCanMove: !shellOriginSnapshot.IsMoveProtectedSystemOrSharedSource && sourceCanMove,
+                protectDefaultMoveAsCopy: shellOriginSnapshot.IsProtectedCopyByDefault);
+
+        OnDeferredMaterializationCompleted(
+            extractedPaths,
+            dropX,
+            dropY,
+            shellCopyRequested,
+            shellShortcutRequested,
+            capturedKeyState,
+            capturedAllowedEffects,
+            capturedFeedbackEffect,
+            capturedRightButtonDrag,
+            shellApplicationDrop,
+            launchTargetPathAtDrop,
+            containsShellTemporaryEntries,
+            gestureId,
+            shellOrigins,
+            shellSkippedCount);
+    }
+
+    /// <summary>
+    /// Ensures Shell IDList-only drops that advertised and receipted Link or Copy
+    /// during hover/Drop never silently upgrade into a destructive Move when the
+    /// extracted PIDLs turn out to point at real filesystem items (FL-05).
+    /// </summary>
+    internal static (bool CopyRequested, bool ShortcutRequested) ResolveShellIdListPostExtractionIntent(
+        bool shellApplicationDrop,
+        bool hasShellTemporaryLinks,
+        bool hasShellTemporaryStreams,
+        bool rightButtonDrag,
+        uint feedbackEffect,
+        bool defaultCopyRequested,
+        uint keyState,
+        bool defaultMove,
+        bool followWindows,
+        bool sameVolume,
+        bool sourceCanCopy,
+        bool sourceCanMove,
+        bool protectDefaultMoveAsCopy)
+    {
+        if (shellApplicationDrop || hasShellTemporaryLinks)
+        {
+            return (CopyRequested: true, ShortcutRequested: true);
+        }
+
+        if (hasShellTemporaryStreams)
+        {
+            return (CopyRequested: true, ShortcutRequested: false);
+        }
+
+        if (!rightButtonDrag)
+        {
+            if (feedbackEffect == NativeDropEffectPolicy.Link)
+            {
+                return (CopyRequested: true, ShortcutRequested: true);
+            }
+
+            if (feedbackEffect == NativeDropEffectPolicy.Copy)
+            {
+                return (CopyRequested: true, ShortcutRequested: false);
+            }
+        }
+
+        bool copyRequested = NativeDropEffectPolicy.ShouldCopyMappedTransfer(
+            containsTemporaryFiles: false,
+            keyState,
+            defaultMove,
+            followWindows: followWindows,
+            sameVolume: sameVolume,
+            canCopy: sourceCanCopy,
+            canMove: sourceCanMove,
+            protectDefaultMoveAsCopy: protectDefaultMoveAsCopy);
+        bool shortcutRequested = NativeDropEffectPolicy.ShouldCreateMappedShortcut(
+            containsTemporaryFiles: false,
+            keyState);
+        return (copyRequested, shortcutRequested);
+    }
+
     /// <summary>
     /// The shared drag-visual/state teardown every exit of the drop path must
     /// run — success, refusal, and failure alike. Skipping it on a refusal
@@ -1186,11 +1645,16 @@ public sealed class NativeDropTarget : IDisposable
 
         ClearActiveDropDescriptionAndReleaseDataObject();
         _shellVisualActive = false;
+        _shellVisualShown = false;
         ResetDragDataState();
         _rightButtonDragActive = false;
     }
 
-    private static void EndAsyncOperationIfStarted(nint dataObject, bool asyncStarted)
+    private static void EndAsyncOperationIfStarted(
+        nint dataObject,
+        bool asyncStarted,
+        int operationResult = unchecked((int)0x80004005),
+        uint finalEffect = NativeDropEffectPolicy.None)
     {
         if (!asyncStarted)
         {
@@ -1202,8 +1666,8 @@ public sealed class NativeDropTarget : IDisposable
             try
             {
                 _ = capability.EndOperation(
-                    unchecked((int)0x80004005),
-                    NativeDropEffectPolicy.None);
+                    operationResult,
+                    finalEffect);
             }
             finally
             {
@@ -1233,7 +1697,8 @@ public sealed class NativeDropTarget : IDisposable
         string? launchTargetPathAtDrop,
         bool containsTemporaryFiles = true,
         long gestureId = 0,
-        IReadOnlyList<DroppedItemOriginKind>? itemOrigins = null)
+        IReadOnlyList<DroppedItemOriginKind>? itemOrigins = null,
+        int materializationSkippedCount = 0)
     {
         if (extractedPaths.Count == 0)
         {
@@ -1274,6 +1739,13 @@ public sealed class NativeDropTarget : IDisposable
                 ContainsTemporaryFiles: containsTemporaryFiles));
             if (launch.Consumed || launch.Handled)
             {
+                if (!launch.Handled && containsTemporaryFiles)
+                {
+                    IReadOnlyList<string> unlaunchedPaths = extractedPaths;
+                    _ = Task.Run(() => NativeDropMaterializationWorker
+                        .CleanupVirtualDropDirectories(unlaunchedPaths));
+                }
+
                 return;
             }
         }
@@ -1309,7 +1781,8 @@ public sealed class NativeDropTarget : IDisposable
             keyState,
             allowedEffects,
             gestureId,
-            itemOrigins));
+            itemOrigins,
+            materializationSkippedCount));
         DropEvent?.Invoke(
             extractedPaths,
             dropX,
@@ -1384,10 +1857,17 @@ public sealed class NativeDropTarget : IDisposable
         }
     }
 
-    private bool GetSameVolume(IReadOnlyList<string> paths)
+    private bool GetSameVolume(
+        IReadOnlyList<string> paths,
+        TimeSpan? probeBudget = null)
     {
         try
         {
+            if (SameVolumeWithBudgetProbe is { } budgetedProbe)
+            {
+                return budgetedProbe(paths, probeBudget ?? PathOriginClassifier.DefaultHoverProbeBudget);
+            }
+
             return SameVolumeProbe?.Invoke(paths) ?? true;
         }
         catch
@@ -1407,24 +1887,29 @@ public sealed class NativeDropTarget : IDisposable
         bool hasActiveDeskBoxDrag,
         bool isDevelopmentRoot)
     {
-        if (!hasFileData || hasVirtualFileData || hasVirtualDescriptorData)
+        if (!hasFileData || hasVirtualFileData)
         {
             return false;
         }
 
-        // Standard Shell filesystem drags (Desktop / Explorer CIDLData) always
-        // carry in-memory CF_HDROP alongside Shell IDList Array, while also
-        // implementing IDataObjectAsyncCapability (GetAsyncMode == true).
-        // Delayed-rendering CF_HDROP sources (7-Zip, WinRAR, Bandizip, PeaZip,
-        // WinSCP, FileZilla) omit Shell IDList Array, and hybrid/virtual sources
-        // (New Outlook, WebView2, browsers) advertise FileGroupDescriptorW or
-        // omit Shell IDList Array while enabling async mode. Allowing CF_HDROP
-        // probing when Shell IDList Array is present (with no virtual descriptor)
-        // resolves real Desktop/Explorer paths in microseconds with zero disk I/O
-        // while keeping archive/FTP/virtual sources untouched during hover.
-        return hasShellIdListFormat ||
-               hasActiveDeskBoxDrag ||
-               (!isAsyncCapableSource && isDevelopmentRoot);
+        // Standard Windows Shell filesystem drags (Desktop / Explorer CIDLData
+        // and DeskBox SHCreateDataObject) always carry in-memory CF_HDROP and
+        // Shell IDList Array alongside FileGroupDescriptorW and
+        // IDataObjectAsyncCapability. Probing CF_HDROP when Shell IDList Array
+        // is present (with CF_HDROP available, so zipfldr/Outlook virtual-only
+        // drags are excluded by hasVirtualFileData) or during an active DeskBox
+        // drag resolves real paths in microseconds with zero disk extraction.
+        // Delayed-rendering archive/FTP sources (7-Zip, WinRAR, Bandizip,
+        // PeaZip, WinSCP, FileZilla) and non-Shell hybrid browser/Outlook drags
+        // omit Shell IDList Array and remain blocked during hover.
+        if (hasActiveDeskBoxDrag || hasShellIdListFormat)
+        {
+            return true;
+        }
+
+        return !hasVirtualDescriptorData &&
+               !isAsyncCapableSource &&
+               isDevelopmentRoot;
     }
 
     private bool GetHasMappedFolder()
@@ -1458,10 +1943,14 @@ public sealed class NativeDropTarget : IDisposable
             : TransferDomain.ExternalInbound;
     }
 
-    private static SourceOriginSnapshot ClassifyHoverOrDropSources(IReadOnlyList<string> paths)
+    private static SourceOriginSnapshot ClassifyHoverOrDropSources(
+        IReadOnlyList<string> paths,
+        TimeSpan? probeBudget = null)
     {
         return paths.Count > 0
-            ? PathOriginClassifier.ClassifySources(paths, TimeSpan.FromMilliseconds(80))
+            ? PathOriginClassifier.ClassifySources(
+                paths,
+                probeBudget ?? PathOriginClassifier.DefaultHoverProbeBudget)
             : SourceOriginSnapshot.Empty;
     }
 
@@ -1549,6 +2038,7 @@ public sealed class NativeDropTarget : IDisposable
         _isAsyncCapableSource = false;
         _activeGestureId = 0;
         _dragPathHints = [];
+        _cachedDragSourceOriginSnapshot = null;
     }
 
     private static bool TryQueryAsyncModeEnabled(nint dataObject)
@@ -1598,6 +2088,7 @@ public sealed class NativeDropTarget : IDisposable
             {
                 NativeDropImageManager.DragLeave(this);
                 _shellVisualActive = false;
+                _shellVisualShown = false;
                 ClearActiveDropDescription();
             }
             return;
@@ -1611,6 +2102,7 @@ public sealed class NativeDropTarget : IDisposable
                 _activeDataObject,
                 point,
                 effect);
+            _shellVisualShown = false;
             UpdateActiveDropDescription(effect);
         }
         else
@@ -1619,9 +2111,10 @@ public sealed class NativeDropTarget : IDisposable
             NativeDropImageManager.DragOver(this, point, effect);
         }
 
-        if (_shellVisualActive)
+        if (_shellVisualActive && !_shellVisualShown)
         {
             NativeDropImageManager.Show(this, visible: true);
+            _shellVisualShown = true;
         }
     }
 
@@ -1670,6 +2163,7 @@ public sealed class NativeDropTarget : IDisposable
             return;
         }
 
+        bool wasAttempted = _hasDropDescriptionAttempt;
         bool hadCustomDescription = _lastDropDescriptionText.HasValue;
         _hasDropDescriptionAttempt = true;
         _lastDropDescriptionEffect = effect;
@@ -1684,7 +2178,8 @@ public sealed class NativeDropTarget : IDisposable
                 $"[DropTarget] Shell description effect={effect} " +
                 $"applied={applied} target={value.Insert}");
         }
-        else if (hadCustomDescription)
+        else if (hadCustomDescription ||
+                 (!wasAttempted && ActiveDeskBoxDragRegistry.HasActiveNativeShellDrag))
         {
             _ = NativeDropDescriptionWriter.TryClear(_activeDataObject);
         }
@@ -1697,6 +2192,7 @@ public sealed class NativeDropTarget : IDisposable
         {
             NativeDropImageManager.DragLeave(this);
             _shellVisualActive = false;
+            _shellVisualShown = false;
         }
     }
 
@@ -1787,17 +2283,17 @@ public sealed class NativeDropTarget : IDisposable
                 MediumType = TYMED_HGLOBAL,
             };
 
-            if (dataObject.GetData(
-                    ref format,
-                    out NativeStorageMedium medium) != S_OK ||
-                medium.Content == IntPtr.Zero)
+            int hr = dataObject.GetData(ref format, out NativeStorageMedium medium);
+            if (hr < 0)
             {
                 return [];
             }
 
             try
             {
-                return GetDroppedFiles(medium.Content);
+                return hr == S_OK && medium.Content != IntPtr.Zero
+                    ? GetDroppedFiles(medium.Content)
+                    : [];
             }
             finally
             {
@@ -1839,16 +2335,19 @@ public sealed class NativeDropTarget : IDisposable
                 Index = -1,
                 MediumType = TYMED_HGLOBAL,
             };
-            if (dataObject.GetData(
-                    ref format,
-                    out NativeStorageMedium medium) != S_OK ||
-                medium.Content == IntPtr.Zero)
+            int hr = dataObject.GetData(ref format, out NativeStorageMedium medium);
+            if (hr < 0)
             {
                 return;
             }
 
             try
             {
+                if (hr != S_OK || medium.Content == IntPtr.Zero)
+                {
+                    return;
+                }
+
                 foreach (ShellIdListDropItem item in ReadShellIdListDropItems(
                              medium.Content))
                 {
@@ -1912,9 +2411,11 @@ public sealed class NativeDropTarget : IDisposable
         IntPtr pDataObj,
         bool hasShellIdList,
         bool canDeferAsyncOrVirtualFallback,
-        out bool deferVirtualFallback)
+        out bool deferVirtualFallback,
+        out int skippedOrFailedCount)
     {
         deferVirtualFallback = false;
+        skippedOrFailedCount = 0;
         if (pDataObj == IntPtr.Zero)
         {
             return ([], [], false);
@@ -1933,20 +2434,24 @@ public sealed class NativeDropTarget : IDisposable
             };
 
             int hr = dataObject.GetData(ref format, out NativeStorageMedium medium);
-            if (hr == S_OK && medium.Content != IntPtr.Zero)
+            if (hr >= 0)
             {
                 try
                 {
-                    IReadOnlyList<string> paths = GetDroppedFiles(medium.Content);
-                    if (paths.Count > 0)
+                    if (hr == S_OK && medium.Content != IntPtr.Zero)
                     {
-                        IReadOnlyList<string> stagedPaths =
-                            DropStagingFileOps.StageExternalTempDropPathsWithOrigins(
-                                paths,
-                                hasShellIdList,
-                                out IReadOnlyList<DroppedItemOriginKind> itemOrigins,
-                                out bool stagedAny);
-                        return (stagedPaths, itemOrigins, stagedAny);
+                        IReadOnlyList<string> paths = GetDroppedFiles(medium.Content);
+                        if (paths.Count > 0)
+                        {
+                            IReadOnlyList<string> stagedPaths =
+                                DropStagingFileOps.StageExternalTempDropPathsWithOrigins(
+                                    paths,
+                                    hasShellIdList,
+                                    out IReadOnlyList<DroppedItemOriginKind> itemOrigins,
+                                    out bool stagedAny,
+                                    out skippedOrFailedCount);
+                            return (stagedPaths, itemOrigins, stagedAny);
+                        }
                     }
                 }
                 finally
@@ -1985,8 +2490,15 @@ public sealed class NativeDropTarget : IDisposable
 
     internal static IReadOnlyList<string> ExtractDeferredWorkerFilesWithOrigins(
         NativeOleDataObject dataObject,
-        out IReadOnlyList<DroppedItemOriginKind> itemOrigins)
+        out IReadOnlyList<DroppedItemOriginKind> itemOrigins) =>
+        ExtractDeferredWorkerFilesWithOrigins(dataObject, out itemOrigins, out _);
+
+    internal static IReadOnlyList<string> ExtractDeferredWorkerFilesWithOrigins(
+        NativeOleDataObject dataObject,
+        out IReadOnlyList<DroppedItemOriginKind> itemOrigins,
+        out int skippedOrFailedCount)
     {
+        skippedOrFailedCount = 0;
         try
         {
             var format = new NativeFormatEtc
@@ -1998,22 +2510,30 @@ public sealed class NativeDropTarget : IDisposable
                 MediumType = TYMED_HGLOBAL,
             };
 
-            if (dataObject.GetData(ref format, out NativeStorageMedium medium) == S_OK &&
-                medium.Content != IntPtr.Zero)
+            int hr = dataObject.GetData(ref format, out NativeStorageMedium medium);
+            if (hr >= 0)
             {
                 try
                 {
-                    IReadOnlyList<string> hdropPaths = GetDroppedFiles(medium.Content);
-                    if (hdropPaths.Count > 0)
+                    if (hr == S_OK && medium.Content != IntPtr.Zero)
                     {
-                        IReadOnlyList<string> staged =
-                            DropStagingFileOps.StageWorkerHDropPaths(hdropPaths);
-                        if (staged.Count > 0)
+                        IReadOnlyList<string> hdropPaths = GetDroppedFiles(medium.Content);
+                        if (hdropPaths.Count > 0)
                         {
-                            itemOrigins = DropStagingFileOps.CreateUniformOrigins(
-                                staged.Count,
-                                DroppedItemOriginKind.TransientArchiveOrCache);
-                            return staged;
+                            IReadOnlyList<string> staged =
+                                DropStagingFileOps.StageWorkerHDropPaths(
+                                    hdropPaths,
+                                    out int hdropSkipped);
+                            if (staged.Count > 0)
+                            {
+                                skippedOrFailedCount = hdropSkipped;
+                                itemOrigins = DropStagingFileOps.CreateUniformOrigins(
+                                    staged.Count,
+                                    DroppedItemOriginKind.TransientArchiveOrCache);
+                                return staged;
+                            }
+
+                            skippedOrFailedCount = hdropSkipped;
                         }
                     }
                 }
@@ -2028,7 +2548,11 @@ public sealed class NativeDropTarget : IDisposable
             App.LogVerbose($"[DropTarget] Worker CF_HDROP probe failed: {ex.Message}");
         }
 
-        IReadOnlyList<string> virtualPaths = ExtractVirtualFiles(dataObject);
+        IReadOnlyList<string> virtualPaths = ExtractVirtualFiles(
+            dataObject,
+            out int virtualSkipped,
+            out _);
+        skippedOrFailedCount += virtualSkipped;
         itemOrigins = DropStagingFileOps.CreateUniformOrigins(
             virtualPaths.Count,
             DroppedItemOriginKind.MaterializedVirtualStream);
@@ -2039,8 +2563,21 @@ public sealed class NativeDropTarget : IDisposable
     // STA one dispatcher turn out of the OLE callback (see
     // HandleDeferredDropMaterialization).
     internal static IReadOnlyList<string> TryExtractShellIdListItems(
-        IntPtr pDataObj)
+        IntPtr pDataObj) =>
+        TryExtractShellIdListItems(pDataObj, out _, out _);
+
+    internal static IReadOnlyList<string> TryExtractShellIdListItems(
+        IntPtr pDataObj,
+        out IReadOnlyList<DroppedItemOriginKind> itemOrigins) =>
+        TryExtractShellIdListItems(pDataObj, out itemOrigins, out _);
+
+    internal static IReadOnlyList<string> TryExtractShellIdListItems(
+        IntPtr pDataObj,
+        out IReadOnlyList<DroppedItemOriginKind> itemOrigins,
+        out int skippedOrFailedCount)
     {
+        itemOrigins = [];
+        skippedOrFailedCount = 0;
         if (pDataObj == IntPtr.Zero || s_shellIdListFormat == 0)
         {
             return [];
@@ -2060,6 +2597,11 @@ public sealed class NativeDropTarget : IDisposable
             int shellIdListHr = dataObject.GetData(ref format, out NativeStorageMedium medium);
             if (shellIdListHr != S_OK || medium.Content == IntPtr.Zero)
             {
+                if (shellIdListHr >= 0)
+                {
+                    OleDropTargetNativeMethods.ReleaseStgMedium(ref medium);
+                }
+
                 App.LogVerbose(
                     "[DropTarget] ShellIdList extraction: SHELLIDLIST GetData " +
                     $"failed hr=0x{shellIdListHr:X8} empty={medium.Content == IntPtr.Zero}");
@@ -2083,12 +2625,13 @@ public sealed class NativeDropTarget : IDisposable
                     "no items (structure or identity rejection)");
             }
 
-            return MaterializeShellIdListItems(items);
+            return MaterializeShellIdListItemsWithOrigins(items, out itemOrigins, out skippedOrFailedCount);
         }
         catch (Exception ex)
         {
             App.Log(
                 $"[DropTarget] Failed to extract Shell IDList items: {ex.Message}");
+            itemOrigins = [];
             return [];
         }
     }
@@ -2096,12 +2639,13 @@ public sealed class NativeDropTarget : IDisposable
     private static IReadOnlyList<ShellIdListDropItem> ReadShellIdListDropItems(
         IntPtr shellIdListHandle)
     {
-        long bufferSize = OleDropTargetNativeMethods.GlobalSize(shellIdListHandle).ToInt64();
-        if (bufferSize < sizeof(uint) + (2 * sizeof(uint)) ||
-            bufferSize > int.MaxValue)
+        nuint rawBufferSize = OleDropTargetNativeMethods.GlobalSize(shellIdListHandle);
+        if (rawBufferSize < sizeof(uint) + (2 * sizeof(uint)) ||
+            rawBufferSize > int.MaxValue)
         {
             return [];
         }
+        long bufferSize = (long)rawBufferSize;
 
         IntPtr bufferStart = OleDropTargetNativeMethods.GlobalLock(shellIdListHandle);
         if (bufferStart == IntPtr.Zero)
@@ -2221,10 +2765,14 @@ public sealed class NativeDropTarget : IDisposable
                         namespaceDisplayName = parsingName;
                     }
 
+                    ShellIdListItemKind namespaceKind = isFileSystemPath
+                        ? ShellIdListItemKind.FileSystemPath
+                        : TryIsNonFolderStreamShellItem(absolutePidl)
+                            ? ShellIdListItemKind.StreamObject
+                            : ShellIdListItemKind.VirtualNamespace;
+
                     items.Add(new ShellIdListDropItem(
-                        isFileSystemPath
-                            ? ShellIdListItemKind.FileSystemPath
-                            : ShellIdListItemKind.VirtualNamespace,
+                        namespaceKind,
                         AppUserModelId: string.Empty,
                         parsingName,
                         namespaceDisplayName,
@@ -2395,29 +2943,11 @@ public sealed class NativeDropTarget : IDisposable
             return false;
         }
 
-        string virtualDropsRoot = Path.TrimEndingDirectorySeparator(
-            Path.GetFullPath(
-                Path.Combine(Path.GetTempPath(), "DeskBox", "VirtualDrops"))) +
-            Path.DirectorySeparatorChar;
         foreach (string rawPath in paths)
         {
-            if (string.IsNullOrWhiteSpace(rawPath))
+            if (DropStagingFileOps.IsUnderVirtualDropsDirectory(rawPath))
             {
-                continue;
-            }
-
-            try
-            {
-                string fullPath = Path.GetFullPath(rawPath);
-                if (fullPath.StartsWith(
-                        virtualDropsRoot,
-                        StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
-            }
-            catch
-            {
+                return true;
             }
         }
 
@@ -2445,12 +2975,19 @@ public sealed class NativeDropTarget : IDisposable
 
     internal static IReadOnlyList<string> MaterializeShellIdListItems(
         IReadOnlyList<ShellIdListDropItem> items) =>
-        MaterializeShellIdListItemsWithOrigins(items, out _);
+        MaterializeShellIdListItemsWithOrigins(items, out _, out _);
 
     internal static IReadOnlyList<string> MaterializeShellIdListItemsWithOrigins(
         IReadOnlyList<ShellIdListDropItem> items,
-        out IReadOnlyList<DroppedItemOriginKind> itemOrigins)
+        out IReadOnlyList<DroppedItemOriginKind> itemOrigins) =>
+        MaterializeShellIdListItemsWithOrigins(items, out itemOrigins, out _);
+
+    internal static IReadOnlyList<string> MaterializeShellIdListItemsWithOrigins(
+        IReadOnlyList<ShellIdListDropItem> items,
+        out IReadOnlyList<DroppedItemOriginKind> itemOrigins,
+        out int skippedOrFailedCount)
     {
+        skippedOrFailedCount = 0;
         if (items.Count == 0)
         {
             itemOrigins = [];
@@ -2458,7 +2995,9 @@ public sealed class NativeDropTarget : IDisposable
         }
 
         string? temporaryDirectory = null;
-        int createdShortcutCount = 0;
+        int materializedTempCount = 0;
+        long remainingBudgetBytes = DropStagingBudgetPolicy.ResolveDynamicByteBudget(
+            DropStagingFileOps.GetVirtualDropsRootDirectory());
         var paths = new List<string>(items.Count);
         var origins = new List<DroppedItemOriginKind>(items.Count);
         foreach (ShellIdListDropItem item in items)
@@ -2474,10 +3013,11 @@ public sealed class NativeDropTarget : IDisposable
 
             if (temporaryDirectory is null)
             {
+                string virtualDropsRoot = DropStagingFileOps.GetVirtualDropsRootDirectory();
+                DropStagingFileOps.EnsureSafeStagingRootDirectory(DropStagingFileOps.GetStagingRootDirectory());
+                DropStagingFileOps.EnsureSafeStagingRootDirectory(virtualDropsRoot);
                 temporaryDirectory = Path.Combine(
-                    Path.GetTempPath(),
-                    "DeskBox",
-                    "VirtualDrops",
+                    virtualDropsRoot,
                     Guid.NewGuid().ToString("N"));
                 Directory.CreateDirectory(temporaryDirectory);
             }
@@ -2488,7 +3028,31 @@ public sealed class NativeDropTarget : IDisposable
             {
                 fileName = item.Kind == ShellIdListItemKind.Application
                     ? "Application"
-                    : "ShellObject";
+                    : item.Kind == ShellIdListItemKind.StreamObject
+                        ? "ShellStreamFile"
+                        : "ShellObject";
+            }
+
+            if (item.Kind == ShellIdListItemKind.StreamObject)
+            {
+                string streamDestPath = FileService.GetAvailablePath(
+                    Path.Combine(temporaryDirectory, fileName));
+                if (item.RawPidl is { Length: >= 4 } streamPidl &&
+                    TrySaveShellItemStream(streamPidl, streamDestPath, ref remainingBudgetBytes))
+                {
+                    App.Log(
+                        $"[DropTarget] Extracted Shell stream object " +
+                        $"target='{item.ParsingName}' name='{fileName}'");
+                    paths.Add(streamDestPath);
+                    origins.Add(DroppedItemOriginKind.TransientArchiveOrCache);
+                    materializedTempCount++;
+                }
+                else
+                {
+                    skippedOrFailedCount++;
+                }
+
+                continue;
             }
 
             string shortcutPath = FileService.GetAvailablePath(
@@ -2534,10 +3098,11 @@ public sealed class NativeDropTarget : IDisposable
 
                 paths.Add(shortcutPath);
                 origins.Add(DroppedItemOriginKind.ShellNamespaceLinkOnly);
-                createdShortcutCount++;
+                materializedTempCount++;
             }
             catch (Exception ex)
             {
+                skippedOrFailedCount++;
                 try { File.Delete(shortcutPath); } catch { }
                 App.Log(
                     $"[DropTarget] Failed to materialize Shell item " +
@@ -2545,402 +3110,124 @@ public sealed class NativeDropTarget : IDisposable
             }
         }
 
-        if (temporaryDirectory is not null && createdShortcutCount == 0)
+        if (temporaryDirectory is not null && materializedTempCount == 0)
         {
-            try { Directory.Delete(temporaryDirectory, recursive: true); } catch { }
+            DropStagingFileOps.CleanupVirtualDropBatchDirectory(temporaryDirectory);
         }
 
         itemOrigins = origins;
         return paths;
     }
 
-    private static IReadOnlyList<string> GetDroppedFiles(IntPtr hDrop)
+    private static unsafe bool TryIsNonFolderStreamShellItem(IntPtr absolutePidl)
     {
-        var paths = new List<string>();
-        uint count = OleDropTargetNativeMethods.DragQueryFile(hDrop, 0xFFFFFFFF, null, 0);
-        for (uint i = 0; i < count; i++)
+        if (absolutePidl == IntPtr.Zero)
         {
-            uint length = OleDropTargetNativeMethods.DragQueryFile(hDrop, i, null, 0);
-            if (length == 0)
-            {
-                continue;
-            }
-
-            var builder = new System.Text.StringBuilder((int)length + 1);
-            uint copied = OleDropTargetNativeMethods.DragQueryFile(hDrop, i, builder, (uint)builder.Capacity);
-            if (copied > 0)
-            {
-                paths.Add(builder.ToString());
-            }
+            return false;
         }
 
-        return paths;
-    }
-
-    // Internal for the materialization worker, which runs the whole stream
-    // read on its own apartment after the drop callback returned.
-    internal static IReadOnlyList<string> ExtractVirtualFiles(NativeOleDataObject dataObject)
-    {
-        var descriptorFormat = new NativeFormatEtc
+        Guid shellItemIid = s_iidIShellItem;
+        if (OleDropTargetNativeMethods.SHCreateItemFromIDList(absolutePidl, in shellItemIid, out IntPtr shellItem) < 0 ||
+            shellItem == IntPtr.Zero)
         {
-            ClipboardFormat = s_fileGroupDescriptorFormat,
-            TargetDevice = IntPtr.Zero,
-            Aspect = DVASPECT_CONTENT,
-            Index = -1,
-            MediumType = TYMED_HGLOBAL,
-        };
-        int descriptorHr = dataObject.GetData(
-            ref descriptorFormat,
-            out NativeStorageMedium descriptorMedium);
-        if (descriptorHr != S_OK || descriptorMedium.Content == IntPtr.Zero)
-        {
-            App.LogVerbose(
-                "[DropTarget] Virtual extraction: FILEGROUPDESCRIPTOR GetData " +
-                $"failed hr=0x{descriptorHr:X8} empty={descriptorMedium.Content == IntPtr.Zero}");
-            return [];
-        }
-
-        List<FILEDESCRIPTORW> descriptors;
-        try
-        {
-            descriptors = ReadVirtualFileDescriptors(descriptorMedium.Content);
-        }
-        finally
-        {
-            OleDropTargetNativeMethods.ReleaseStgMedium(ref descriptorMedium);
-        }
-
-        if (descriptors.Count == 0)
-        {
-            App.LogVerbose(
-                "[DropTarget] Virtual extraction: descriptor parse produced " +
-                "no entries");
-            return [];
-        }
-
-        string temporaryDirectory = Path.Combine(
-            Path.GetTempPath(),
-            "DeskBox",
-            "VirtualDrops",
-            Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(temporaryDirectory);
-        var paths = new List<string>();
-        var seenTopLevelEntries = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        // One drag can materialize many streams; the budget is per drop so a
-        // crafted multi-descriptor payload cannot multiply the cap.
-        long remainingBudgetBytes = MaxVirtualDropBytes;
-        for (int index = 0; index < descriptors.Count; index++)
-        {
-            FILEDESCRIPTORW descriptor = descriptors[index];
-            bool isDirectory = (descriptor.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
-            if (!DropStagingFileOps.TryBuildVirtualDropDestinationPath(
-                    temporaryDirectory,
-                    descriptor.cFileName,
-                    isDirectory,
-                    index,
-                    out string destinationPath,
-                    out string topLevelEntryPath))
-            {
-                App.Log(
-                    $"[DropTarget] Rejected unsafe or invalid virtual descriptor " +
-                    $"index={index} name='{descriptor.cFileName}'");
-                continue;
-            }
-
-            if (isDirectory)
-            {
-                if (seenTopLevelEntries.Add(topLevelEntryPath))
-                {
-                    paths.Add(topLevelEntryPath);
-                }
-
-                continue;
-            }
-
-            long? declaredFileSize = (descriptor.dwFlags & FD_FILESIZE) != 0
-                ? unchecked((long)(((ulong)descriptor.nFileSizeHigh << 32) | descriptor.nFileSizeLow))
-                : null;
-            if (TrySaveVirtualFileContents(
-                    dataObject,
-                    index,
-                    destinationPath,
-                    ref remainingBudgetBytes,
-                    out bool budgetExceeded,
-                    declaredFileSize))
-            {
-                bool isTopLevelFile = string.Equals(
-                    destinationPath,
-                    topLevelEntryPath,
-                    StringComparison.OrdinalIgnoreCase);
-                string resolvedPath = isTopLevelFile
-                    ? VirtualDropFileNameResolver.AddMissingExtensionFromContent(
-                        destinationPath)
-                    : destinationPath;
-                if (isTopLevelFile &&
-                    !string.Equals(
-                        resolvedPath,
-                        destinationPath,
-                        StringComparison.OrdinalIgnoreCase))
-                {
-                    App.Log(
-                        $"[DropTarget] Added missing virtual-file extension " +
-                        $"source='{destinationPath}' resolved='{resolvedPath}'");
-                }
-
-                // The stream came from a web context (browser drag); a local
-                // file without MOTW would bypass SmartScreen scrutiny.
-                ZoneIdentifierWriter.TryMarkFile(
-                    resolvedPath,
-                    ZoneIdentifierWriter.VirtualDropSource);
-                string entryToImport = isTopLevelFile ? resolvedPath : topLevelEntryPath;
-                if (seenTopLevelEntries.Add(entryToImport))
-                {
-                    paths.Add(entryToImport);
-                }
-            }
-            else if (budgetExceeded)
-            {
-                App.Log(
-                    "[DropTarget] Virtual drop aborted: payload exceeded " +
-                    $"materialization budget ({MaxVirtualDropBytes} bytes) at index={index}.");
-                DropStagingFileOps.CleanupVirtualDropBatchDirectory(temporaryDirectory);
-                return [];
-            }
-        }
-
-        if (paths.Count == 0)
-        {
-            App.LogVerbose(
-                $"[DropTarget] Virtual extraction: {descriptors.Count} " +
-                "descriptor(s) but no stream saved (FILECONTENTS reads all " +
-                "failed)");
-            try { Directory.Delete(temporaryDirectory, recursive: true); } catch { }
-        }
-
-        return paths;
-    }
-
-    internal static List<FILEDESCRIPTORW> ReadVirtualFileDescriptors(IntPtr descriptorHandle)
-    {
-        long bufferSize = OleDropTargetNativeMethods.GlobalSize(descriptorHandle).ToInt64();
-        IntPtr pointer = OleDropTargetNativeMethods.GlobalLock(descriptorHandle);
-        if (pointer == IntPtr.Zero)
-        {
-            return [];
-        }
-
-        try
-        {
-            int count = Marshal.ReadInt32(pointer);
-            if (count <= 0 || count > 4096)
-            {
-                return [];
-            }
-
-            // The declared count comes from the drag source and cannot be
-            // trusted: a small HGLOBAL with a large count would make the loop
-            // below read past the allocation. Clamp to what the buffer can
-            // actually hold, exactly like the Shell IDList reader above.
-            int descriptorSize = Marshal.SizeOf<FILEDESCRIPTORW>();
-            if (bufferSize > 0)
-            {
-                int capacity = (int)Math.Max(
-                    0,
-                    (bufferSize - sizeof(uint)) / descriptorSize);
-                if (capacity < count)
-                {
-                    App.Log(
-                        $"[DropTarget] FileGroupDescriptor count={count} exceeds " +
-                        $"buffer={bufferSize}; clamped to {capacity}.");
-                    count = capacity;
-                }
-            }
-
-            if (count == 0)
-            {
-                return [];
-            }
-
-            var descriptors = new List<FILEDESCRIPTORW>(count);
-            IntPtr descriptorPointer = IntPtr.Add(pointer, sizeof(uint));
-            for (int index = 0; index < count; index++)
-            {
-                descriptors.Add(Marshal.PtrToStructure<FILEDESCRIPTORW>(
-                    IntPtr.Add(descriptorPointer, index * descriptorSize)));
-            }
-
-            return descriptors;
-        }
-        finally
-        {
-            OleDropTargetNativeMethods.GlobalUnlock(descriptorHandle);
-        }
-    }
-
-    private static bool TrySaveVirtualFileContents(
-        NativeOleDataObject dataObject,
-        int index,
-        string destinationPath,
-        ref long remainingBudgetBytes,
-        out bool budgetExceeded,
-        long? declaredFileSize = null)
-    {
-        budgetExceeded = false;
-        // Try TYMED_ISTREAM first — FileContents from browser drag sources
-        // (Chrome / Edge / Firefox) is strictly an IStream. Asking for the
-        // combined mask TYMED_ISTREAM | TYMED_HGLOBAL in one FORMATETC is
-        // unreliable across OLE sources: some reject the combined mask
-        // outright (returning DV_E_FORMATETC), which made the widget silently
-        // ignore browser drops even though DragEnter/Drop fired. Fall back to
-        // TYMED_HGLOBAL for sources that provide the contents as a memory blob.
-        NativeStorageMedium contentsMedium = default;
-        uint actualTymed = 0;
-        IntPtr actualMedium = IntPtr.Zero;
-        foreach (uint tymed in new uint[] { TYMED_ISTREAM, TYMED_HGLOBAL })
-        {
-            var contentsFormat = new NativeFormatEtc
-            {
-                ClipboardFormat = s_fileContentsFormat,
-                TargetDevice = IntPtr.Zero,
-                Aspect = DVASPECT_CONTENT,
-                Index = index,
-                MediumType = tymed,
-            };
-            int hr = dataObject.GetData(ref contentsFormat, out contentsMedium);
-            if (hr == S_OK && contentsMedium.Content != IntPtr.Zero)
-            {
-                actualTymed = contentsMedium.MediumType;
-                actualMedium = contentsMedium.Content;
-                break;
-            }
-            // Release any partially populated medium before retrying with a
-            // different tymed (GetData may have set unionMember on failure).
-            if (contentsMedium.Content != IntPtr.Zero)
-            {
-                OleDropTargetNativeMethods.ReleaseStgMedium(ref contentsMedium);
-                contentsMedium = default;
-            }
-        }
-
-        if (actualMedium == IntPtr.Zero)
-        {
-            App.Log(
-                $"[DropTarget] No FileContents payload for virtual file index={index} " +
-                $"destination='{destinationPath}' (browser may not have provided a stream)");
             return false;
         }
 
         try
         {
-            if ((actualTymed & TYMED_ISTREAM) != 0)
-            {
-                SaveComStream(actualMedium, destinationPath, ref remainingBudgetBytes);
-                return true;
-            }
-
-            if ((actualTymed & TYMED_HGLOBAL) != 0)
-            {
-                SaveGlobalMemory(actualMedium, destinationPath, ref remainingBudgetBytes, declaredFileSize);
-                return true;
-            }
-
-            App.Log(
-                $"[DropTarget] Unexpected FileContents tymed=0x{actualTymed:X} " +
-                $"for index={index}");
-            return false;
-        }
-        catch (IOException ex) when (remainingBudgetBytes <= 0)
-        {
-            budgetExceeded = true;
-            App.Log(
-                $"[DropTarget] Virtual file index={index} exceeded the " +
-                $"materialization budget ({MaxVirtualDropBytes} bytes): {ex.Message}");
-            try { File.Delete(destinationPath); } catch { }
-            return false;
-        }
-        catch (Exception ex)
-        {
-            App.Log($"[DropTarget] Failed to save virtual file '{destinationPath}': {ex.Message}");
-            try { File.Delete(destinationPath); } catch { }
-            return false;
-        }
-        finally
-        {
-            OleDropTargetNativeMethods.ReleaseStgMedium(ref contentsMedium);
-        }
-    }
-
-    private static void SaveComStream(
-        IntPtr streamPointer,
-        string destinationPath,
-        ref long remainingBudgetBytes)
-    {
-        using var destination = new FileStream(destinationPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
-        long before = remainingBudgetBytes;
-        try
-        {
-            NativeComStreamReader.CopyTo(streamPointer, destination, remainingBudgetBytes);
-            remainingBudgetBytes = Math.Max(
-                0,
-                remainingBudgetBytes - destination.Length);
+            nint* vtbl = *(nint**)shellItem;
+            var getAttributes = (delegate* unmanaged[Stdcall]<nint, uint, uint*, int>)vtbl[6];
+            uint attrs = 0;
+            int hr = getAttributes(shellItem, SfgaoFilesys | SfgaoFolder | SfgaoStream, &attrs);
+            return hr >= 0 &&
+                   (attrs & SfgaoFilesys) == 0 &&
+                   (attrs & SfgaoFolder) == 0 &&
+                   (attrs & SfgaoStream) != 0;
         }
         catch
         {
-            remainingBudgetBytes = Math.Max(0, before - destination.Length);
-            throw;
-        }
-    }
-
-    internal static long ResolveEffectiveGlobalMemoryLength(long globalSize, long? declaredFileSize)
-    {
-        if (declaredFileSize is >= 0 && declaredFileSize.Value < globalSize)
-        {
-            return declaredFileSize.Value;
-        }
-
-        return globalSize;
-    }
-
-    private static void SaveGlobalMemory(
-        IntPtr memoryHandle,
-        string destinationPath,
-        ref long remainingBudgetBytes,
-        long? declaredFileSize = null)
-    {
-        long rawSize = OleDropTargetNativeMethods.GlobalSize(memoryHandle).ToInt64();
-        long size = ResolveEffectiveGlobalMemoryLength(rawSize, declaredFileSize);
-        if (size > remainingBudgetBytes)
-        {
-            remainingBudgetBytes = 0;
-            throw new IOException(
-                $"Virtual file memory payload of {size} bytes exceeds the budget.");
-        }
-
-        if (size < 0 || size > int.MaxValue)
-        {
-            throw new IOException("Virtual file memory payload is too large.");
-        }
-
-        IntPtr pointer = OleDropTargetNativeMethods.GlobalLock(memoryHandle);
-        if (pointer == IntPtr.Zero)
-        {
-            throw new IOException("Could not lock virtual file memory payload.");
-        }
-
-        try
-        {
-            var bytes = new byte[(int)size];
-            if (bytes.Length > 0)
-            {
-                Marshal.Copy(pointer, bytes, 0, bytes.Length);
-            }
-
-            File.WriteAllBytes(destinationPath, bytes);
-            remainingBudgetBytes -= size;
+            return false;
         }
         finally
         {
-            OleDropTargetNativeMethods.GlobalUnlock(memoryHandle);
+            _ = Marshal.Release(shellItem);
         }
+    }
+
+    private static unsafe bool TrySaveShellItemStream(
+        byte[] rawPidlBytes,
+        string destinationPath,
+        ref long remainingBudgetBytes)
+    {
+        if (!ShellLinkVtableInterop.IsValidPidlBytes(rawPidlBytes) ||
+            remainingBudgetBytes <= 0)
+        {
+            return false;
+        }
+
+        IntPtr shellItem = IntPtr.Zero;
+        IntPtr streamPointer = IntPtr.Zero;
+        try
+        {
+            fixed (byte* pidlPtr = rawPidlBytes)
+            {
+                Guid shellItemIid = s_iidIShellItem;
+                int hr = OleDropTargetNativeMethods.SHCreateItemFromIDList(
+                    (IntPtr)pidlPtr,
+                    in shellItemIid,
+                    out shellItem);
+                if (hr < 0 || shellItem == IntPtr.Zero)
+                {
+                    return false;
+                }
+            }
+
+            nint* vtbl = *(nint**)shellItem;
+            var bindToHandler = (delegate* unmanaged[Stdcall]<nint, nint, Guid*, Guid*, IntPtr*, int>)vtbl[3];
+            Guid bhidStream = s_bhidStream;
+            Guid streamIid = s_iidIStream;
+            int bindHr = bindToHandler(shellItem, 0, &bhidStream, &streamIid, &streamPointer);
+            if (bindHr < 0 || streamPointer == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            SaveComStream(streamPointer, destinationPath, ref remainingBudgetBytes);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[DropTarget] Failed to save Shell stream '{destinationPath}': {ex.Message}");
+            try { File.Delete(destinationPath); } catch { }
+            return false;
+        }
+        finally
+        {
+            if (streamPointer != IntPtr.Zero)
+            {
+                _ = Marshal.Release(streamPointer);
+            }
+
+            if (shellItem != IntPtr.Zero)
+            {
+                _ = Marshal.Release(shellItem);
+            }
+        }
+    }
+
+    private static IReadOnlyList<string> GetDroppedFiles(IntPtr hDrop)
+    {
+        var paths = new List<string>();
+        uint count = ClipboardNativeMethods.QueryDroppedFileCount(hDrop);
+        for (uint i = 0; i < count; i++)
+        {
+            string? path = ClipboardNativeMethods.TryQueryDroppedFilePath(hDrop, i);
+            if (!string.IsNullOrEmpty(path))
+            {
+                paths.Add(path);
+            }
+        }
+
+        return paths;
     }
 }

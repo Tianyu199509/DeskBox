@@ -99,6 +99,10 @@ public sealed partial class SettingsWindow
             SaveFailedInfoBar.Title = Localized.T("Settings.Persistence.SaveFailedTitle");
             SaveFailedInfoBar.Message = Localized.T("Settings.Persistence.SaveFailedBody");
         }
+        if (ChannelCoexistenceInfoBar.IsOpen)
+        {
+            ApplyChannelCoexistenceBannerText();
+        }
         RefreshSettingsSearchResults();
         ApplyToggleSwitchContentVisibility();
         RefreshFeatureWidgetList();
@@ -136,9 +140,6 @@ public sealed partial class SettingsWindow
         RefreshManagedStoragePathWarning();
         RefreshManagedStorageDesktopShortcutState();
         SyncManagedStorageQuickAccessToggleState();
-        // RefreshAll re-applied the static DescriptionKey text, dropping the
-        // Win10 note that RefreshDragOutWin10State appends to it.
-        RefreshDragOutWin10State();
         if (TryGetSectionRoute(_currentSettingsSection, out SettingsSectionRoute? route))
         {
             UpdateBreadcrumb(route);
@@ -158,14 +159,6 @@ public sealed partial class SettingsWindow
         foreach (var toggle in FindDescendants<ToggleSwitch>(SettingsRoot))
         {
             ClearToggleSwitchContent(toggle);
-        }
-    }
-
-    private static void ApplySegmentedNeutralStates(DependencyObject root)
-    {
-        foreach (Segmented segmented in FindDescendants<Segmented>(root))
-        {
-            WidgetSegmentedStyleHelper.ApplyNeutralPointerStates(segmented);
         }
     }
 

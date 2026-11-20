@@ -124,6 +124,9 @@ public static class SettingsIpcMethods
     public const string WidgetMigratePreview = "widget.migrate-preview";
     public const string WidgetMigrateRoot = "widget.migrate-root";
     public const string WidgetMigrateCancel = "widget.migrate-cancel";
+    public const string WidgetMigrateTryEmptySwitch = "widget.migrate-try-empty-switch";
+    public const string WidgetMigrateRetrySourceCleanup = "widget.migrate-retry-source-cleanup";
+    public const string WidgetMigrateCleanupCopies = "widget.migrate-cleanup-copies";
     public const string WidgetMigrationProgress = "widget.migration-progress";
     public const string WidgetGlanceList = "widget.glance-list";
     public const string WidgetGlanceFeatureEnabled = "widget.glance-feature-enabled";
@@ -144,6 +147,7 @@ public static class SettingsIpcMethods
     public const string WidgetCustomCreate = "widget.custom-create";
     public const string WidgetCustomCreateWithSetup = "widget.custom-create-with-setup";
     public const string WidgetCustomApplyMutation = "widget.custom-apply-mutation";
+    public const string WidgetCustomApplyStoreData = "widget.custom-apply-store-data";
     public const string WidgetCustomSetEnabled = "widget.custom-set-enabled";
     public const string WidgetCustomLocate = "widget.custom-locate";
     public const string WidgetCustomOpenStudio = "widget.custom-open-studio";
@@ -187,6 +191,9 @@ public static class SettingsIpcMethods
     public const string AppForceExternalRecovery = "app.force-external-recovery";
     public const string AppDiagnoseDragDrop = "app.diagnose-drag-drop";
     public const string AppRepairDragDrop = "app.repair-drag-drop";
+    public const string AppGetAutoStartStatus = "app.get-autostart-status";
+    public const string AppSetAutoStartEnabled = "app.set-autostart-enabled";
+    public const string AppAutoStartStateChanged = "app.autostart-state-changed";
     public const string AppDisplayTopologyChanged = "app.display-topology-changed";
     public const string AppScreenHomeChanged = "app.screen-home-changed";
 
@@ -361,7 +368,9 @@ public sealed record SettingsIpcMoveAllResult(
 public sealed record SettingsIpcMigrationRequest(
     string NewRootPath,
     bool RestartIfCopiesRemoved,
-    string? OperationId = null);
+    string? OperationId = null,
+    bool RetainOriginals = false,
+    bool IncludeOrphanFolders = false);
 
 public sealed record SettingsIpcMigrationPreviewRequest(
     string Path,
@@ -374,7 +383,10 @@ public sealed record SettingsIpcMigrationOutcome(
     bool Stopped = false,
     int? ProblemKind = null,
     string? ErrorMessage = null,
-    long? TemporaryBytes = null);
+    long? TemporaryBytes = null,
+    ManagedStorageMigrationCleanupResult? CleanupResult = null,
+    string? BlockingPath = null,
+    bool HasPartialCopies = false);
 
 public sealed record SettingsIpcReleaseNotes(
     string? ManifestJson,
@@ -461,6 +473,7 @@ public static class SettingsIpcPayload
 [JsonSerializable(typeof(ManagedStorageMigrationPreview))]
 [JsonSerializable(typeof(ManagedStorageMigrationResult))]
 [JsonSerializable(typeof(ManagedStorageMigrationProgress))]
+[JsonSerializable(typeof(ManagedStorageMigrationCleanupResult))]
 [JsonSerializable(typeof(GlanceWidgetInstanceInfo))]
 [JsonSerializable(typeof(List<GlanceWidgetInstanceInfo>))]
 [JsonSerializable(typeof(FolderWatcherHealthSnapshot))]
@@ -473,6 +486,7 @@ public static class SettingsIpcPayload
 [JsonSerializable(typeof(AppUpdateManifest))]
 [JsonSerializable(typeof(DragDropPermissionDiagnostic))]
 [JsonSerializable(typeof(DragDropPermissionRepairResult))]
+[JsonSerializable(typeof(StartupOperationResult))]
 [JsonSerializable(typeof(BackupEndpoint))]
 [JsonSerializable(typeof(LocalBackupResult))]
 [JsonSerializable(typeof(CloudBackupRunResult))]
@@ -506,4 +520,20 @@ public static class SettingsIpcPayload
 [JsonSerializable(typeof(ClipboardStorageStats))]
 [JsonSerializable(typeof(ClipboardObservedApp))]
 [JsonSerializable(typeof(List<ClipboardObservedApp>))]
+[JsonSerializable(typeof(ConnectedMcpClientInfo))]
+[JsonSerializable(typeof(Studio.StudioShowIntentPayload))]
+[JsonSerializable(typeof(Studio.StudioShowPreviewIntentPayload))]
+[JsonSerializable(typeof(Studio.StudioBootstrapResponse))]
+[JsonSerializable(typeof(Studio.StudioWindowStatePayload))]
+[JsonSerializable(typeof(Studio.StudioWindowBandPayload))]
+[JsonSerializable(typeof(Studio.StudioCreateWidgetRequest))]
+[JsonSerializable(typeof(Studio.StudioUpdateManifestRequest))]
+[JsonSerializable(typeof(Studio.StudioSetWidgetEnabledRequest))]
+[JsonSerializable(typeof(Studio.StudioNotificationPayload))]
+[JsonSerializable(typeof(Studio.StudioWidgetMutationResponse))]
+[JsonSerializable(typeof(Studio.StudioStageCommitResponse))]
+[JsonSerializable(typeof(Studio.StudioAgentUpsertEventPayload))]
+[JsonSerializable(typeof(Studio.StudioMcpActivityPayload))]
+[JsonSerializable(typeof(Studio.StudioContextRequestPayload))]
+[JsonSerializable(typeof(Studio.StudioContextReportPayload))]
 internal sealed partial class SettingsIpcJsonContext : JsonSerializerContext;

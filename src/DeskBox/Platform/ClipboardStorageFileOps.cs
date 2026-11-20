@@ -68,7 +68,15 @@ internal static class ClipboardStorageFileOps
         return false;
     }
 
-    public static (int FileCount, long TotalBytes) MeasureDirectoryFiles(string directoryPath)
+    public static (int FileCount, long TotalBytes) MeasureDirectoryFiles(string directoryPath) =>
+        MeasureDirectoryFiles(directoryPath, SearchOption.TopDirectoryOnly);
+
+    public static (int FileCount, long TotalBytes) MeasureDirectoryFilesRecursive(string directoryPath) =>
+        MeasureDirectoryFiles(directoryPath, SearchOption.AllDirectories);
+
+    private static (int FileCount, long TotalBytes) MeasureDirectoryFiles(
+        string directoryPath,
+        SearchOption searchOption)
     {
         if (!Directory.Exists(directoryPath))
         {
@@ -79,7 +87,7 @@ internal static class ClipboardStorageFileOps
         long bytes = 0;
         try
         {
-            foreach (string file in Directory.EnumerateFiles(directoryPath, "*", SearchOption.TopDirectoryOnly))
+            foreach (string file in Directory.EnumerateFiles(directoryPath, "*", searchOption))
             {
                 try
                 {
@@ -102,6 +110,112 @@ internal static class ClipboardStorageFileOps
         }
 
         return (count, bytes);
+    }
+
+    public static int DeleteOrphanedDroppedEntries(
+        string droppedDirectoryPath,
+        IReadOnlySet<string> referencedFullPaths)
+    {
+        if (!Directory.Exists(droppedDirectoryPath))
+        {
+            return 0;
+        }
+
+        var normalizedRefs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (string raw in referencedFullPaths)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                continue;
+            }
+
+            try
+            {
+                normalizedRefs.Add(Path.GetFullPath(raw).TrimEnd(
+                    Path.DirectorySeparatorChar,
+                    Path.AltDirectorySeparatorChar));
+            }
+            catch
+            {
+                // Ignore malformed paths.
+            }
+        }
+
+        int deleted = 0;
+        try
+        {
+            foreach (string file in Directory.EnumerateFiles(droppedDirectoryPath, "*", SearchOption.AllDirectories))
+            {
+                string fullFile;
+                try
+                {
+                    fullFile = Path.GetFullPath(file);
+                }
+                catch
+                {
+                    continue;
+                }
+
+                if (!IsPathReferencedByDroppedEntries(fullFile, normalizedRefs) &&
+                    TryDeleteFile(fullFile))
+                {
+                    deleted++;
+                }
+            }
+
+            // Prune emptied batch/folder trees deepest-first while keeping droppedDirectoryPath itself.
+            string[] dirs = Directory.EnumerateDirectories(droppedDirectoryPath, "*", SearchOption.AllDirectories)
+                .OrderByDescending(static d => d.Length)
+                .ToArray();
+            foreach (string dir in dirs)
+            {
+                try
+                {
+                    string fullDir = Path.GetFullPath(dir).TrimEnd(
+                        Path.DirectorySeparatorChar,
+                        Path.AltDirectorySeparatorChar);
+                    if (!IsPathReferencedByDroppedEntries(fullDir, normalizedRefs) &&
+                        Directory.Exists(dir) &&
+                        !Directory.EnumerateFileSystemEntries(dir).Any())
+                    {
+                        Directory.Delete(dir, recursive: false);
+                    }
+                }
+                catch
+                {
+                    // Best-effort empty directory cleanup.
+                }
+            }
+        }
+        catch
+        {
+            // Ignore directory enumeration errors.
+        }
+
+        return deleted;
+    }
+
+    private static bool IsPathReferencedByDroppedEntries(
+        string candidateFullPath,
+        HashSet<string> normalizedRefs)
+    {
+        if (normalizedRefs.Contains(candidateFullPath))
+        {
+            return true;
+        }
+
+        foreach (string referenced in normalizedRefs)
+        {
+            string prefix = referenced.EndsWith(Path.DirectorySeparatorChar)
+                ? referenced
+                : referenced + Path.DirectorySeparatorChar;
+            if (candidateFullPath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public static int DeleteOrphanedFiles(string directoryPath, IReadOnlySet<string> referencedFileNames)

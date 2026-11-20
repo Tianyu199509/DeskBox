@@ -108,7 +108,22 @@ public static class QuickCaptureDragPackage
             File.Exists(item.ImagePath))
         {
             string imagePath = Path.GetFullPath(item.ImagePath);
-            bool attachedNativeShellPayload = NativeShellFileDragProvider.TryAttach(dataPackage, [imagePath]);
+            string shellDragPath = imagePath;
+            if (DeskBox.Services.AppDistributionService.Current.IsPackaged ||
+                DeskBox.Services.AppDistributionService.Current.IsMicrosoftStore)
+            {
+                try
+                {
+                    shellDragPath = DeskBox.Platform.StoreUserAssetMigrationFileOps
+                        .StageTemporaryDragExportCopy(imagePath, "QuickCaptureExports");
+                }
+                catch
+                {
+                    shellDragPath = imagePath;
+                }
+            }
+
+            bool attachedNativeShellPayload = NativeShellFileDragProvider.TryAttach(dataPackage, [shellDragPath]);
             dataPackage.SetDataProvider(StandardDataFormats.Bitmap, async request =>
             {
                 var deferral = request.GetDeferral();
@@ -132,6 +147,7 @@ public static class QuickCaptureDragPackage
                             writer.WriteBytes(bytes);
                             await writer.StoreAsync();
                             await writer.FlushAsync();
+                            writer.DetachStream();
                         }
 
                         memStream.Seek(0);

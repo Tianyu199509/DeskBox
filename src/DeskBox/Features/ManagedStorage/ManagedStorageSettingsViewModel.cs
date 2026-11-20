@@ -38,27 +38,12 @@ public sealed partial class ManagedStorageSettingsViewModel : ObservableObject
         "Settings.DropAction.System"
     ];
 
-    private static readonly string[] DragOutActions =
-    [
-        ManagedDropActions.FollowWindows,
-        ManagedDropActions.Copy,
-        ManagedDropActions.Move
-    ];
-
-    private static readonly string[] DragOutActionNameKeys =
-    [
-        "Settings.DropAction.System",
-        "Settings.DropAction.Copy",
-        "Settings.DropAction.Move"
-    ];
-
     private readonly IManagedStorageSettings _settings;
     private readonly Func<string, string> _localize;
     private bool _isSyncingPresentation;
     private string[]? _cachedDropActionNames;
-    private string[]? _cachedDragOutActionNames;
     private string _dropAction = ManagedDropActions.Move;
-    private string _dragOutAction = ManagedDropActions.FollowWindows;
+    private string _dragOutAction = ManagedDropActions.Move;
     private bool _dragOutModifierTipEnabled = true;
     private bool _dragOutResultHintEnabled = true;
     private string _rootPath = string.Empty;
@@ -90,11 +75,20 @@ public sealed partial class ManagedStorageSettingsViewModel : ObservableObject
                 return;
             }
 
-            OnPropertyChanged(nameof(DragBehaviorSummaryText));
             if (!_isSyncingPresentation)
             {
                 _settings.SetManagedDropAction(value);
+                ManagedStoragePresentationSettings snapshot =
+                    _settings.ReadManagedStoragePresentation();
+                if (!string.Equals(_dragOutAction, snapshot.DragOutAction, StringComparison.Ordinal))
+                {
+                    _dragOutAction = snapshot.DragOutAction;
+                    OnPropertyChanged(nameof(DragOutAction));
+                }
             }
+
+            OnPropertyChanged(nameof(IsDragOutCustomized));
+            OnPropertyChanged(nameof(DragBehaviorSummaryText));
         }
     }
 
@@ -120,8 +114,10 @@ public sealed partial class ManagedStorageSettingsViewModel : ObservableObject
         AvailableDropActionOptions.Cast<object>().ToArray();
 
     /// <summary>
-    /// The preferred drop effect advertised to external targets when files
-    /// are dragged out of a file widget (FollowWindows/Copy/Move).
+    /// Independent outbound drag-out preference. Tracks <see cref="DropAction"/>
+    /// while they remain equal; once edited independently (via Settings, HUD, or
+    /// a preserved v1.5.9 upgrade), subsequent <see cref="DropAction"/> edits
+    /// leave this value intact.
     /// </summary>
     public string DragOutAction
     {
@@ -133,6 +129,7 @@ public sealed partial class ManagedStorageSettingsViewModel : ObservableObject
                 return;
             }
 
+            OnPropertyChanged(nameof(IsDragOutCustomized));
             OnPropertyChanged(nameof(DragBehaviorSummaryText));
             if (!_isSyncingPresentation)
             {
@@ -141,26 +138,35 @@ public sealed partial class ManagedStorageSettingsViewModel : ObservableObject
         }
     }
 
-    public IReadOnlyList<SettingsOption> AvailableDragOutActionOptions
+    /// <summary>
+    /// True when the user's outbound drag-out action differs from the inbound
+    /// drop action (for example after switching drag-out to FollowWindows via
+    /// the Win10 HUD or preserving a v1.5.9 Copy override).
+    /// </summary>
+    public bool IsDragOutCustomized =>
+        !string.Equals(_dropAction, _dragOutAction, StringComparison.Ordinal);
+
+    public IReadOnlyList<SettingsOption> AvailableDragOutActionOptions =>
+        AvailableDropActionOptions;
+
+    public object[] AvailableDragOutBehaviorOptionItems =>
+        AvailableDragInBehaviorOptionItems;
+
+    public string DragBehaviorSummaryText
     {
         get
         {
-            _cachedDragOutActionNames ??= DragOutActionNameKeys.Select(key => _localize(key)).ToArray();
-            var options = new SettingsOption[DragOutActions.Length];
-            for (int index = 0; index < DragOutActions.Length; index++)
+            IReadOnlyList<SettingsOption> options = AvailableDropActionOptions;
+            string dropDisplay = GetOptionDisplayName(options, _dropAction);
+            if (!IsDragOutCustomized)
             {
-                options[index] = new SettingsOption(DragOutActions[index], _cachedDragOutActionNames[index]);
+                return dropDisplay;
             }
 
-            return options;
+            string dragOutDisplay = GetOptionDisplayName(options, _dragOutAction);
+            return $"{dropDisplay} / {dragOutDisplay}";
         }
     }
-
-    public object[] AvailableDragOutBehaviorOptionItems =>
-        AvailableDragOutActionOptions.Cast<object>().ToArray();
-
-    public string DragBehaviorSummaryText =>
-        $"{GetOptionDisplayName(AvailableDropActionOptions, _dropAction)} · {GetOptionDisplayName(AvailableDragOutActionOptions, _dragOutAction)}";
 
     private static string GetOptionDisplayName(
         IReadOnlyList<SettingsOption> options,
@@ -292,6 +298,7 @@ public sealed partial class ManagedStorageSettingsViewModel : ObservableObject
             _isSyncingPresentation = false;
         }
 
+        OnPropertyChanged(nameof(IsDragOutCustomized));
         OnPropertyChanged(nameof(DragBehaviorSummaryText));
     }
 
@@ -302,7 +309,6 @@ public sealed partial class ManagedStorageSettingsViewModel : ObservableObject
     public void RefreshLocalization()
     {
         _cachedDropActionNames = null;
-        _cachedDragOutActionNames = null;
         OnPropertyChanged(nameof(AvailableDropActionOptions));
         OnPropertyChanged(nameof(AvailableDragInBehaviorOptionItems));
         OnPropertyChanged(nameof(AvailableDragOutActionOptions));

@@ -12,8 +12,8 @@
 
     <Grid
         x:Name="RootGrid"
-        MinWidth="700"
-        MinHeight="540">
+        MinWidth="320"
+        MinHeight="280">
 
         <Grid.Resources>
             <Style x:Key="StepTitleText" TargetType="TextBlock">
@@ -801,28 +801,6 @@
                     <StackPanel x:Name="Step2Panel" Spacing="14" Visibility="Collapsed">
                         <TextBlock Style="{StaticResource StepTitleText}" svc:Localized.Key="Onboarding.Step2.Title"/>
                         <TextBlock Style="{StaticResource StepBodyText}" svc:Localized.Key="Onboarding.Step2.Body"/>
-                        <!-- Drop behavior, editable right here; persists through
-                             the FileWidget slice exactly like the settings page. -->
-                        <Border Style="{StaticResource SettingCard}">
-                            <StackPanel Spacing="6">
-                                <TextBlock Style="{StaticResource CardTitleText}" svc:Localized.Key="Settings.DropAction.Title"/>
-                                <StackPanel Orientation="Horizontal" Spacing="20">
-                                    <RadioButton
-                                        x:Name="Step2MoveRadio"
-                                        GroupName="OnboardingDropAction"
-                                        MinWidth="0"
-                                        Checked="Step2DropMode_Checked"
-                                        svc:Localized.Key="Settings.DropAction.Move"/>
-                                    <RadioButton
-                                        x:Name="Step2CopyRadio"
-                                        GroupName="OnboardingDropAction"
-                                        MinWidth="0"
-                                        Checked="Step2DropMode_Checked"
-                                        svc:Localized.Key="Settings.DropAction.Copy"/>
-                                </StackPanel>
-                                <TextBlock x:Name="Step2ModeExplainText" Style="{StaticResource HintRow}"/>
-                            </StackPanel>
-                        </Border>
                         <InfoBar
                             x:Name="Step2WarningBar"
                             IsOpen="True"
@@ -831,35 +809,46 @@
                             svc:Localized.HeaderKey="Onboarding.Step2.WarningTitle"
                             svc:Localized.DescriptionKey="Onboarding.Step2.WarningBody"/>
                         <!-- Destination card: shows the real managed root plus a
-                             localized example subfolder. Path changes live in
-                             Settings → 文件格子 (the verified copy-migration flow),
-                             so that button only jumps there. -->
+                             localized example subfolder, quick drive switches on
+                             multi-drive PCs, and an in-place folder picker. -->
                         <Border Style="{StaticResource SettingCard}">
-                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="11">
-                                <StackPanel Spacing="3" VerticalAlignment="Center">
-                                    <TextBlock Style="{StaticResource HintRow}" svc:Localized.Key="Settings.ManagedPath.Title"/>
-                                    <TextBlock
-                                        x:Name="Step2PathValue"
-                                        FontSize="13.5"
-                                        FontWeight="SemiBold"
-                                        Foreground="{ThemeResource TextFillColorPrimaryBrush}"
-                                        TextTrimming="CharacterEllipsis"/>
+                            <StackPanel Spacing="10">
+                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="11">
+                                    <StackPanel Spacing="3" VerticalAlignment="Center">
+                                        <TextBlock Style="{StaticResource HintRow}" svc:Localized.Key="Settings.ManagedPath.Title"/>
+                                        <TextBlock
+                                            x:Name="Step2PathValue"
+                                            FontSize="13.5"
+                                            FontWeight="SemiBold"
+                                            Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                            TextTrimming="CharacterEllipsis"/>
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                        <Button
+                                            x:Name="Step2OpenFolderButton"
+                                            MinHeight="32"
+                                            Click="Step2OpenFolder_Click"
+                                            svc:Localized.AutomationNameKey="Common.Open"
+                                            svc:Localized.Key="Common.Open"/>
+                                        <Button
+                                            x:Name="Step2PathChangeButton"
+                                            MinHeight="32"
+                                            Click="Step2PathChange_Click"
+                                            svc:Localized.AutomationNameKey="Onboarding.Step2.ChooseFolder"
+                                            svc:Localized.Key="Onboarding.Step2.ChooseFolder"/>
+                                    </StackPanel>
+                                </Grid>
+                                <StackPanel x:Name="Step2DriveStrip" Spacing="8" Visibility="Collapsed">
+                                    <Rectangle Height="1" Fill="{ThemeResource DividerStrokeColorDefaultBrush}"/>
+                                    <ScrollViewer
+                                        HorizontalScrollBarVisibility="Hidden"
+                                        HorizontalScrollMode="Auto"
+                                        VerticalScrollBarVisibility="Disabled"
+                                        VerticalScrollMode="Disabled">
+                                        <StackPanel x:Name="Step2DriveButtonsHost" Orientation="Horizontal" Spacing="6"/>
+                                    </ScrollViewer>
                                 </StackPanel>
-                                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                                    <Button
-                                        x:Name="Step2OpenFolderButton"
-                                        MinHeight="32"
-                                        Click="Step2OpenFolder_Click"
-                                        svc:Localized.AutomationNameKey="Common.Open"
-                                        svc:Localized.Key="Common.Open"/>
-                                    <Button
-                                        x:Name="Step2PathChangeButton"
-                                        MinHeight="32"
-                                        Click="Step2PathChange_Click"
-                                        svc:Localized.AutomationNameKey="Onboarding.Step2.ChangeInSettings"
-                                        svc:Localized.Key="Onboarding.Step2.ChangeInSettings"/>
-                                </StackPanel>
-                            </Grid>
+                            </StackPanel>
                         </Border>
                     </StackPanel>
 
@@ -968,7 +957,7 @@
                                     <FontIcon Grid.Column="3" FontSize="12" VerticalAlignment="Center" Glyph="&#xE76C;" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
                                 </Grid>
                             </Button>
-                            <Button x:Name="Step4OrganizeRow" Style="{StaticResource QuickSettingRowButton}" Tag="DesktopOrganizationSettings" Click="Step4QuickSetting_Click" svc:Localized.AutomationNameKey="DesktopOrganization.Settings.Title">
+                            <Button x:Name="Step4OrganizeRow" Style="{StaticResource QuickSettingRowButton}" Click="Step4Organize_Click" svc:Localized.AutomationNameKey="DesktopOrganization.Settings.Title">
                                 <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
                                     <FontIcon FontSize="16" VerticalAlignment="Center" Glyph="&#xE74C;"/>
                                     <StackPanel Grid.Column="1" Spacing="1" VerticalAlignment="Center">

@@ -26,9 +26,23 @@ public sealed partial class WidgetManager
     public void ApplyNewWidgetPlacement(WidgetConfig config, NewWidgetPlacementContext? context = null)
     {
         ArgumentNullException.ThrowIfNull(config);
+        ApplyNewWidgetPlacementCore(
+            config,
+            WidgetScreenCatalog.Capture(),
+            context,
+            isRemoteSession: Win32Helper.GetSystemMetrics(Win32Helper.SM_REMOTESESSION) != 0);
+    }
+
+    internal void ApplyNewWidgetPlacementCore(
+        WidgetConfig config,
+        IReadOnlyList<WidgetScreenInfo> screens,
+        NewWidgetPlacementContext? context = null,
+        bool isRemoteSession = false)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        ArgumentNullException.ThrowIfNull(screens);
 
         context ??= new NewWidgetPlacementContext();
-        IReadOnlyList<WidgetScreenInfo> screens = WidgetScreenCatalog.Capture();
 
         // 1. Organizer-planned rect.
         if (context.ExplicitBounds is { } planned && screens.Count > 0)
@@ -37,7 +51,8 @@ public sealed partial class WidgetManager
             var workArea = ToRect(display.WorkArea);
             WidgetPositioningService.CaptureAnchor(config, planned, workArea);
             WidgetPositioningService.UpdateConfigFromPhysicalBounds(config, planned, workArea);
-            ApplyNewWidgetHome(config, display);
+            ApplyNewWidgetHome(config, display, isRemoteSession);
+            CommitInitialNewWidgetAuthority(config);
             return;
         }
 
@@ -69,7 +84,9 @@ public sealed partial class WidgetManager
                 SettingsService.WidgetNewPlacementSpecificDisplay =>
                     WidgetScreenCatalog.TryFindScreen(
                         screens,
-                        _settingsService.Settings.WidgetDefaultBoundScreenId),
+                        _settingsService.Settings.WidgetDefaultBoundScreenId) ??
+                    screens.FirstOrDefault(screen => screen.IsPrimary) ??
+                    screens.FirstOrDefault(),
                 _ => CursorScreen(screens)
             };
         }
@@ -91,21 +108,40 @@ public sealed partial class WidgetManager
         bounds = CascadeAwayFromExistingWidgets(config.Id, bounds, targetWorkArea, scale, target);
         WidgetPositioningService.CaptureAnchor(config, bounds, targetWorkArea);
         WidgetPositioningService.UpdateConfigFromPhysicalBounds(config, bounds, targetWorkArea);
-        ApplyNewWidgetHome(config, target);
+        ApplyNewWidgetHome(config, target, isRemoteSession);
+        CommitInitialNewWidgetAuthority(config);
     }
 
-    private void ApplyNewWidgetHome(WidgetConfig config, WidgetScreenInfo display)
+    /// <summary>
+    /// Spec 5.8: brand-new widget placements stamp placement lineage on the
+    /// config without mutating <c>WidgetTopologyLayouts</c> before the config
+    /// joins <c>Widgets</c> (so rolled-back organizer candidates leave no
+    /// orphan topology entries). Topology capture/seeding promotes this stamp
+    /// onto the matching topology profile automatically.
+    /// </summary>
+    private void CommitInitialNewWidgetAuthority(WidgetConfig config)
     {
-        if (Win32Helper.GetSystemMetrics(Win32Helper.SM_REMOTESESSION) != 0 ||
+        config.LastUserPlacementUtc = DateTimeOffset.UtcNow;
+        config.LastUserPlacementTopologyKey = _settingsService.Settings.WidgetLayout.ActiveWidgetTopologyKey;
+    }
+
+    private static void ApplyNewWidgetHome(
+        WidgetConfig config,
+        WidgetScreenInfo display,
+        bool isRemoteSession)
+    {
+        if (isRemoteSession ||
             DisplayPlacementResolver.IsDegenerateIdentity(display.StableId))
         {
             config.ScreenBindingMode = WidgetScreenBindingMode.Unbound;
             config.BoundScreenId = null;
+            config.BoundScreenLabel = null;
             return;
         }
 
         config.ScreenBindingMode = WidgetScreenBindingMode.Pinned;
         config.BoundScreenId = display.StableId;
+        config.BoundScreenLabel = LabelFromDisplay(display);
     }
 
     /// <summary>

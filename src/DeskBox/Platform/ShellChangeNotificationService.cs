@@ -237,13 +237,32 @@ internal sealed class ShellChangeNotificationService
                 registrationKey,
                 callback);
 
+            List<uint>? orphanedRegistrationIds = null;
             DispatcherQueue? targetDispatcher;
             try
             {
                 lock (_gate)
                 {
-                    if (_subscriptions.Length == 0 || _hostDispatcher is null)
+                    bool hostDispatcherDead =
+                        _hostDispatcher is not null &&
+                        dispatcher is not null &&
+                        !ReferenceEquals(_hostDispatcher, dispatcher) &&
+                        !_hostDispatcher.TryEnqueue(static () => { });
+                    if (_subscriptions.Length == 0 || _hostDispatcher is null || hostDispatcherDead)
                     {
+                        if (hostDispatcherDead)
+                        {
+                            _windowHandle = IntPtr.Zero;
+                            foreach (RootRegistrationState existingState in _rootRegistrations.Values)
+                            {
+                                if (existingState.NativeRegistrationId != 0)
+                                {
+                                    (orphanedRegistrationIds ??= []).Add(existingState.NativeRegistrationId);
+                                    existingState.NativeRegistrationId = 0;
+                                }
+                            }
+                        }
+
                         _hostDispatcher = dispatcher;
                     }
                     targetDispatcher = _hostDispatcher;
@@ -274,6 +293,14 @@ internal sealed class ShellChangeNotificationService
                 if (candidatePidl != IntPtr.Zero)
                 {
                     ILFree(candidatePidl);
+                }
+            }
+
+            if (orphanedRegistrationIds is not null)
+            {
+                for (int i = 0; i < orphanedRegistrationIds.Count; i++)
+                {
+                    _ = SHChangeNotifyDeregister(orphanedRegistrationIds[i]);
                 }
             }
 
@@ -597,7 +624,12 @@ internal sealed class ShellChangeNotificationService
         {
             if (_windowHandle != IntPtr.Zero)
             {
-                return _windowHandle;
+                if (Win32Helper.IsWindow(_windowHandle))
+                {
+                    return _windowHandle;
+                }
+
+                _windowHandle = IntPtr.Zero;
             }
         }
 
@@ -1137,7 +1169,7 @@ internal sealed class ShellChangeNotificationService
         }
     }
 
-    [StructLayout(LayoutKind.Sequential)]
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
     private struct SHChangeNotifyEntry
     {
         public IntPtr pidl;

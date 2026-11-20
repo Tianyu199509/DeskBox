@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.Intrinsics;
 
 namespace DeskBox.Services.Audio;
 
@@ -320,8 +321,79 @@ internal sealed class MusicSpectrumFft
 
     private float ComputeRmsAndLoadWindowed(ReadOnlySpan<float> samples)
     {
-        double sumSquares = 0.0;
+        Span<float> windowed = stackalloc float[FftSize];
+        double sumSquares = SanitizeWindowAndSumSquares(samples[..FftSize], s_hannWindow, windowed);
+
+        int[] bitRev = s_bitReversal;
+        float[] real = _real;
         for (int i = 0; i < FftSize; i++)
+        {
+            real[i] = windowed[bitRev[i]];
+        }
+
+        _imag.AsSpan(0, FftSize).Clear();
+        return (float)Math.Sqrt(sumSquares / FftSize);
+    }
+
+    internal static double SanitizeWindowAndSumSquares(
+        ReadOnlySpan<float> samples,
+        ReadOnlySpan<float> window,
+        Span<float> windowedOut)
+    {
+        int count = Math.Min(samples.Length, Math.Min(window.Length, windowedOut.Length));
+        if (Vector128.IsHardwareAccelerated)
+        {
+            if (count >= Vector128<float>.Count)
+            {
+                Vector128<double> sumLo = Vector128<double>.Zero;
+                Vector128<double> sumHi = Vector128<double>.Zero;
+                int i = 0;
+                int simdLimit = count - Vector128<float>.Count;
+                for (; i <= simdLimit; i += Vector128<float>.Count)
+                {
+                    Vector128<float> v = Vector128.Create(samples.Slice(i, 4));
+                    Vector128<float> clean = Vector128.ConditionalSelect(
+                        Vector128.IsFinite(v),
+                        v,
+                        Vector128<float>.Zero);
+                    (Vector128<double> lo, Vector128<double> hi) = Vector128.Widen(clean);
+                    sumLo += lo * lo;
+                    sumHi += hi * hi;
+
+                    Vector128<float> w = Vector128.Create(window.Slice(i, 4));
+                    (clean * w).CopyTo(windowedOut.Slice(i, 4));
+                }
+
+                double total = Vector128.Sum(sumLo + sumHi);
+                for (; i < count; i++)
+                {
+                    float s = samples[i];
+                    if (!float.IsFinite(s))
+                    {
+                        s = 0.0f;
+                    }
+
+                    total += (double)s * s;
+                    windowedOut[i] = s * window[i];
+                }
+
+                return total;
+            }
+
+            return SanitizeWindowAndSumSquaresScalar(samples, window, windowedOut, count);
+        }
+
+        return SanitizeWindowAndSumSquaresScalar(samples, window, windowedOut, count);
+    }
+
+    private static double SanitizeWindowAndSumSquaresScalar(
+        ReadOnlySpan<float> samples,
+        ReadOnlySpan<float> window,
+        Span<float> windowedOut,
+        int count)
+    {
+        double sumSquares = 0.0;
+        for (int i = 0; i < count; i++)
         {
             float s = samples[i];
             if (!float.IsFinite(s))
@@ -330,22 +402,10 @@ internal sealed class MusicSpectrumFft
             }
 
             sumSquares += (double)s * s;
+            windowedOut[i] = s * window[i];
         }
 
-        for (int i = 0; i < FftSize; i++)
-        {
-            int srcIndex = s_bitReversal[i];
-            float s = samples[srcIndex];
-            if (!float.IsFinite(s))
-            {
-                s = 0.0f;
-            }
-
-            _real[i] = s * s_hannWindow[srcIndex];
-            _imag[i] = 0.0f;
-        }
-
-        return (float)Math.Sqrt(sumSquares / FftSize);
+        return sumSquares;
     }
 
     private void ExecuteInPlaceFft()
@@ -385,12 +445,84 @@ internal sealed class MusicSpectrumFft
         }
 
         const float normScale = 4.0f / FftSize;
-        _magnitudes[0] = 0.0f;
-        for (int bin = 1; bin < HalfFftSize; bin++)
+        ComputeScaledMagnitudes(
+            real.AsSpan(0, HalfFftSize),
+            imag.AsSpan(0, HalfFftSize),
+            _magnitudes.AsSpan(0, HalfFftSize),
+            normScale);
+    }
+
+    internal static void ComputeScaledMagnitudes(
+        ReadOnlySpan<float> real,
+        ReadOnlySpan<float> imag,
+        Span<float> magnitudes,
+        float normScale)
+    {
+        if (magnitudes.IsEmpty)
         {
-            float r = real[bin];
-            float im = imag[bin];
-            _magnitudes[bin] = MathF.Sqrt((r * r) + (im * im)) * normScale;
+            return;
+        }
+
+        magnitudes[0] = 0.0f;
+        int count = Math.Min(magnitudes.Length, Math.Min(real.Length, imag.Length)) - 1;
+        if (count <= 0)
+        {
+            return;
+        }
+
+        ReadOnlySpan<float> rSpan = real.Slice(1, count);
+        ReadOnlySpan<float> iSpan = imag.Slice(1, count);
+        Span<float> mSpan = magnitudes.Slice(1, count);
+
+        if (Vector128.IsHardwareAccelerated)
+        {
+            if (count >= Vector128<float>.Count)
+            {
+                Vector128<float> vScale = Vector128.Create(normScale);
+                int tailOffset = count - Vector128<float>.Count;
+                ReadOnlySpan<float> rRem = rSpan;
+                ReadOnlySpan<float> iRem = iSpan;
+                Span<float> mRem = mSpan;
+
+                while (mRem.Length >= Vector128<float>.Count)
+                {
+                    Vector128<float> vr = Vector128.Create(rRem);
+                    Vector128<float> vi = Vector128.Create(iRem);
+                    (Vector128.Sqrt((vr * vr) + (vi * vi)) * vScale).CopyTo(mRem);
+
+                    rRem = rRem[Vector128<float>.Count..];
+                    iRem = iRem[Vector128<float>.Count..];
+                    mRem = mRem[Vector128<float>.Count..];
+                }
+
+                if (!mRem.IsEmpty)
+                {
+                    Vector128<float> vrTail = Vector128.Create(rSpan[tailOffset..]);
+                    Vector128<float> viTail = Vector128.Create(iSpan[tailOffset..]);
+                    (Vector128.Sqrt((vrTail * vrTail) + (viTail * viTail)) * vScale).CopyTo(mSpan[tailOffset..]);
+                }
+
+                return;
+            }
+
+            ComputeScaledMagnitudesScalar(rSpan, iSpan, mSpan, normScale);
+            return;
+        }
+
+        ComputeScaledMagnitudesScalar(rSpan, iSpan, mSpan, normScale);
+    }
+
+    private static void ComputeScaledMagnitudesScalar(
+        ReadOnlySpan<float> rSpan,
+        ReadOnlySpan<float> iSpan,
+        Span<float> mSpan,
+        float normScale)
+    {
+        for (int i = 0; i < mSpan.Length; i++)
+        {
+            float r = rSpan[i];
+            float im = iSpan[i];
+            mSpan[i] = MathF.Sqrt((r * r) + (im * im)) * normScale;
         }
     }
 

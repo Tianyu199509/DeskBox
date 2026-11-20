@@ -23,31 +23,35 @@ internal static class SearchWebAndUrlEvaluator
     public const string OpenUrlActionPrefix = "open-url:";
     public const string WebSearchActionPrefix = "web-search:";
 
-    private static readonly HashSet<string> s_knownWebTlds = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "com", "cn", "net", "org", "io", "dev", "ai", "app", "me", "co", "cc", "tv",
-        "xyz", "top", "tech", "site", "online", "store", "cloud", "info", "biz", "edu",
-        "gov", "mil", "int", "uk", "jp", "kr", "de", "fr", "ru", "au", "ca", "br", "in",
-        "hk", "tw", "sg", "gg", "sh", "so", "to", "ly", "gl", "fm", "im", "do", "design",
-        "tools", "run", "page", "link", "wiki", "news", "blog", "chat", "pub", "live",
-        "pro", "vip", "ltd", "work", "moe", "ink", "fun", "us", "eu", "nl", "ch", "se",
-        "no", "fi", "dk", "it", "es", "pl", "cz", "nz", "mx", "ar", "za", "id", "my",
-        "vn", "th", "ph"
-    };
+    private static readonly System.Collections.Frozen.FrozenSet<string> s_knownWebTlds =
+        System.Collections.Frozen.FrozenSet.ToFrozenSet(
+        [
+            "com", "cn", "net", "org", "io", "dev", "ai", "app", "me", "co", "cc", "tv",
+            "xyz", "top", "tech", "site", "online", "store", "cloud", "info", "biz", "edu",
+            "gov", "mil", "int", "uk", "jp", "kr", "de", "fr", "ru", "au", "ca", "br", "in",
+            "hk", "tw", "sg", "gg", "sh", "so", "to", "ly", "gl", "fm", "im", "do", "design",
+            "tools", "run", "page", "link", "wiki", "news", "blog", "chat", "pub", "live",
+            "pro", "vip", "ltd", "work", "moe", "ink", "fun", "us", "eu", "nl", "ch", "se",
+            "no", "fi", "dk", "it", "es", "pl", "cz", "nz", "mx", "ar", "za", "id", "my",
+            "vn", "th", "ph"
+        ],
+        StringComparer.OrdinalIgnoreCase);
 
-    private static readonly HashSet<string> s_localFileExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "exe", "lnk", "msi", "msix", "appx", "bat", "cmd", "ps1", "vbs", "dll", "sys",
-        "txt", "md", "markdown", "log", "ini", "cfg", "conf", "json", "jsonc", "xml",
-        "yaml", "yml", "toml", "csv", "tsv", "sql", "db", "sqlite",
-        "doc", "docx", "xls", "xlsx", "ppt", "pptx", "pdf", "rtf", "odt", "epub",
-        "png", "jpg", "jpeg", "gif", "bmp", "webp", "svg", "ico", "tif", "tiff", "heic", "psd",
-        "mp3", "wav", "flac", "aac", "ogg", "m4a", "mp4", "mkv", "avi", "mov", "wmv", "webm",
-        "zip", "rar", "7z", "tar", "gz", "bz2", "xz", "iso", "cab",
-        "cs", "csproj", "sln", "xaml", "cpp", "c", "h", "hpp", "rs", "py", "js", "ts",
-        "jsx", "tsx", "vue", "svelte", "java", "kt", "swift", "rb", "php", "css", "scss",
-        "less", "bak", "tmp", "old", "lock", "cer", "pfx", "pem", "key"
-    };
+    private static readonly System.Collections.Frozen.FrozenSet<string> s_localFileExtensions =
+        System.Collections.Frozen.FrozenSet.ToFrozenSet(
+        [
+            "exe", "lnk", "msi", "msix", "appx", "bat", "cmd", "ps1", "vbs", "dll", "sys",
+            "txt", "md", "markdown", "log", "ini", "cfg", "conf", "json", "jsonc", "xml",
+            "yaml", "yml", "toml", "csv", "tsv", "sql", "db", "sqlite",
+            "doc", "docx", "xls", "xlsx", "ppt", "pptx", "pdf", "rtf", "odt", "epub",
+            "png", "jpg", "jpeg", "gif", "bmp", "webp", "svg", "ico", "tif", "tiff", "heic", "psd",
+            "mp3", "wav", "flac", "aac", "ogg", "m4a", "mp4", "mkv", "avi", "mov", "wmv", "webm",
+            "zip", "rar", "7z", "tar", "gz", "bz2", "xz", "iso", "cab",
+            "cs", "csproj", "sln", "xaml", "cpp", "c", "h", "hpp", "rs", "py", "js", "ts",
+            "jsx", "tsx", "vue", "svelte", "java", "kt", "swift", "rb", "php", "css", "scss",
+            "less", "bak", "tmp", "old", "lock", "cer", "pfx", "pem", "key"
+        ],
+        StringComparer.OrdinalIgnoreCase);
 
     public static bool TryEvaluateDirectUrl(string? rawInput, out DirectUrlMatch match)
     {

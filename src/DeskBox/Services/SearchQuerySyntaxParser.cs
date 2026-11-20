@@ -202,6 +202,14 @@ internal static class SearchQuerySyntaxParser
         }
 
         ReadOnlySpan<char> trimmed = query.AsSpan().Trim();
+        if (trimmed.Length >= 2 &&
+            trimmed[0] == '"' &&
+            trimmed[^1] == '"' &&
+            trimmed[1..^1].IndexOf('"') < 0)
+        {
+            trimmed = trimmed[1..^1].Trim();
+        }
+
         return IsWindowsDrivePrefix(trimmed) ||
                trimmed.StartsWith(@"\\", StringComparison.Ordinal) ||
                trimmed.StartsWith(@"~\", StringComparison.Ordinal) ||

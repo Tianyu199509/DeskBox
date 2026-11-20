@@ -24,6 +24,7 @@ namespace DeskBox.Views;
 public abstract partial class WidgetWindowBase
 {
     private bool _desktopPinnedInputActivationInProgress;
+    private bool _hasDeferredDesktopPinnedRestoreForTextInput;
     private IntPtr _lastCornerPreferenceHwnd;
     private int _lastAppliedWindowCornerPreference = -1;
 
@@ -37,6 +38,14 @@ public abstract partial class WidgetWindowBase
     private static readonly long DesktopPinnedNativeSuppressionWindowTicks =
         TimeSpan.FromMilliseconds(150).Ticks;
 
+    protected void ApplyLocalizedFlowDirection()
+    {
+        string effectiveCulture = LocalizationService.ResolveEffectiveCultureName(SettingsService.Settings.Core.Language);
+        RootElement.FlowDirection = CustomWidgetLocaleCatalog.IsRightToLeftCulture(effectiveCulture)
+            ? FlowDirection.RightToLeft
+            : FlowDirection.LeftToRight;
+    }
+
     protected void ConfigureWindowCore()
     {
         if (!_isTrackedForDiagnostics)
@@ -45,13 +54,7 @@ public abstract partial class WidgetWindowBase
             _isTrackedForDiagnostics = true;
         }
 
-        if (AppWindow.Presenter is OverlappedPresenter presenter)
-        {
-            presenter.SetBorderAndTitleBar(false, false);
-            presenter.IsResizable = false;
-            presenter.IsMaximizable = false;
-            presenter.IsMinimizable = false;
-        }
+        WindowShellState.TryApplyBorderlessOverlappedPresenter(AppWindow);
 
         int exStyle = Win32Helper.GetWindowLong(HWnd, Win32Helper.GWL_EXSTYLE);
         exStyle |= Win32Helper.WS_EX_TOOLWINDOW;
@@ -59,6 +62,7 @@ public abstract partial class WidgetWindowBase
 
         InstallDesktopPinnedActivationGuard();
         InstallDesktopPinnedPointerRouting();
+        ApplyLocalizedFlowDirection();
         ConfigureWindowExtra();
 
         int style = Win32Helper.GetWindowLong(HWnd, Win32Helper.GWL_STYLE);
@@ -119,26 +123,32 @@ public abstract partial class WidgetWindowBase
         WidgetShellControl.HostedContentChanged -= WidgetShellControl_HostedContentChanged;
         WidgetShellControl.HostedContentChanged += WidgetShellControl_HostedContentChanged;
 
-        RootElement.Loaded += (_, _) =>
+        RootElement.Loaded -= WidgetRootElement_Loaded;
+        RootElement.Loaded += WidgetRootElement_Loaded;
+        RootElement.ActualThemeChanged -= WidgetRootElement_ActualThemeChanged;
+        RootElement.ActualThemeChanged += WidgetRootElement_ActualThemeChanged;
+    }
+
+    private void WidgetRootElement_Loaded(object sender, RoutedEventArgs e)
+    {
+        AttachXamlRootScaleWatcher();
+        _ = TryRestoreBoundsForCurrentTopology(allowHidden: true, updateConfig: false);
+        OnRootElementLoaded();
+        SettleCompactBoundsAfterHostShown();
+        ApplyWidgetForegroundAppearance();
+        ApplyBackdropPreference();
+        Win32Helper.DisableWindowFrameShadow(HWnd);
+        if (SupportsBackdropRefresh)
         {
-            AttachXamlRootScaleWatcher();
-            _ = TryRestoreBoundsForCurrentTopology(allowHidden: true, updateConfig: false);
-            OnRootElementLoaded();
-            SettleCompactBoundsAfterHostShown();
-            ApplyWidgetForegroundAppearance();
-            ApplyBackdropPreference();
-            Win32Helper.DisableWindowFrameShadow(HWnd);
-            if (SupportsBackdropRefresh)
-            {
-                QueueBackdropRefresh();
-            }
-        };
-        RootElement.ActualThemeChanged += (_, _) =>
-        {
-            ApplyWidgetForegroundAppearance();
-            ApplyBackdropPreference();
-            OnRootElementThemeChanged();
-        };
+            QueueBackdropRefresh();
+        }
+    }
+
+    private void WidgetRootElement_ActualThemeChanged(FrameworkElement sender, object args)
+    {
+        ApplyWidgetForegroundAppearance();
+        ApplyBackdropPreference();
+        OnRootElementThemeChanged();
     }
 
     private void InstallDesktopPinnedActivationGuard()
@@ -184,6 +194,8 @@ public abstract partial class WidgetWindowBase
             handledEventsToo: true);
         RootElement.GotFocus -= RootElement_GotFocusForDesktopPinnedLayer;
         RootElement.GotFocus += RootElement_GotFocusForDesktopPinnedLayer;
+        RootElement.LostFocus -= RootElement_LostFocusForDesktopPinnedLayer;
+        RootElement.LostFocus += RootElement_LostFocusForDesktopPinnedLayer;
         Microsoft.UI.Xaml.Input.FocusManager.GotFocus -= FocusManager_GotFocusForDesktopPinnedLayer;
         Microsoft.UI.Xaml.Input.FocusManager.GotFocus += FocusManager_GotFocusForDesktopPinnedLayer;
         Activated -= WidgetWindowBase_ActivatedForDesktopPinnedLayer;
@@ -202,7 +214,9 @@ public abstract partial class WidgetWindowBase
             _desktopPinnedPointerPressedHandler = null;
         }
 
+        _hasDeferredDesktopPinnedRestoreForTextInput = false;
         RootElement.GotFocus -= RootElement_GotFocusForDesktopPinnedLayer;
+        RootElement.LostFocus -= RootElement_LostFocusForDesktopPinnedLayer;
         Microsoft.UI.Xaml.Input.FocusManager.GotFocus -= FocusManager_GotFocusForDesktopPinnedLayer;
         Activated -= WidgetWindowBase_ActivatedForDesktopPinnedLayer;
         Activated -= WidgetWindowBase_ActivatedForCompactFocusSync;
@@ -305,6 +319,64 @@ public abstract partial class WidgetWindowBase
         return false;
     }
 
+    private bool ShouldDeferDesktopPinnedRestoreForFocusedTextInput()
+    {
+        if (HWnd == IntPtr.Zero || RootElement?.XamlRoot is not { } xamlRoot)
+        {
+            return false;
+        }
+
+        DependencyObject? focused;
+        try
+        {
+            focused = FocusManager.GetFocusedElement(xamlRoot) as DependencyObject;
+        }
+        catch
+        {
+            return false;
+        }
+
+        if (focused is null || !IsKeyboardInputTarget(focused))
+        {
+            return false;
+        }
+
+        IntPtr fg = Win32Helper.GetForegroundWindow();
+        return fg == HWnd ||
+               TransientInputFocusGuard.IsWindowsTextInputExperienceWindow(fg) ||
+               TransientInputFocusGuard.IsCurrentProcessPopupBridge(fg);
+    }
+
+    private void RootElement_LostFocusForDesktopPinnedLayer(
+        object sender,
+        RoutedEventArgs args)
+    {
+        if (!WidgetLayerService.UsesDesktopPinnedMode() ||
+            !_hasDeferredDesktopPinnedRestoreForTextInput)
+        {
+            return;
+        }
+
+        UiDispatch.PostAfterCallback(() =>
+        {
+            if (!_hasDeferredDesktopPinnedRestoreForTextInput ||
+                !Win32Helper.IsWindowInCurrentProcess(HWnd) ||
+                !WidgetLayerService.UsesDesktopPinnedMode() ||
+                (IsDragging && HasMovedTitleBarDrag))
+            {
+                return;
+            }
+
+            if (ShouldDeferDesktopPinnedRestoreForFocusedTextInput())
+            {
+                return;
+            }
+
+            _hasDeferredDesktopPinnedRestoreForTextInput = false;
+            RestoreDesktopPinnedBottomState("text-input-lost-focus");
+        });
+    }
+
     private void ActivateDesktopPinnedWindow(string reason)
     {
         if (_desktopPinnedInputActivationInProgress)
@@ -358,7 +430,15 @@ public abstract partial class WidgetWindowBase
             _desktopPinnedInputActivationInProgress = false;
         }
 
-        RestoreDesktopPinnedBottomState(reason);
+        if (isKeyboardReason || ShouldDeferDesktopPinnedRestoreForFocusedTextInput())
+        {
+            _hasDeferredDesktopPinnedRestoreForTextInput = true;
+        }
+        else
+        {
+            _hasDeferredDesktopPinnedRestoreForTextInput = false;
+            RestoreDesktopPinnedBottomState(reason);
+        }
         // The deliberate activation promoted the whole DefView owner band;
         // drop the siblings back under covering applications in this same
         // cycle so only the interacting window stays up (#574).
@@ -415,7 +495,16 @@ public abstract partial class WidgetWindowBase
                 return;
             }
 
-            RestoreDesktopPinnedBottomState($"window-{state}");
+            if (state is WindowActivationState.CodeActivated or WindowActivationState.PointerActivated &&
+                ShouldDeferDesktopPinnedRestoreForFocusedTextInput())
+            {
+                _hasDeferredDesktopPinnedRestoreForTextInput = true;
+            }
+            else
+            {
+                _hasDeferredDesktopPinnedRestoreForTextInput = false;
+                RestoreDesktopPinnedBottomState($"window-{state}");
+            }
             // A native activation also promoted the whole owner band; re-bed
             // the siblings in this same landing turn so the group never
             // lingers above covering applications (#574).
@@ -562,8 +651,10 @@ public abstract partial class WidgetWindowBase
                 TrayContextMenuWindow.DismissActiveIfOpen();
                 if (Win32Helper.IsWindowInCurrentProcess(hWnd) &&
                     !(IsDragging && HasMovedTitleBarDrag) &&
-                    Environment.TickCount64 - _lastDesktopPinnedKeyboardRequestTick >= 150)
+                    Environment.TickCount64 - _lastDesktopPinnedKeyboardRequestTick >= 150 &&
+                    !ShouldDeferDesktopPinnedRestoreForFocusedTextInput())
                 {
+                    _hasDeferredDesktopPinnedRestoreForTextInput = false;
                     RestoreDesktopPinnedBottomState("native-pointer-suppressed");
                 }
             });
@@ -746,7 +837,7 @@ public abstract partial class WidgetWindowBase
         Config.Y = y;
     }
 
-    protected SizeInt32 GetPhysicalMinimumWindowSize(int x, int y, int width, int height)
+    protected virtual SizeInt32 GetPhysicalMinimumWindowSize(int x, int y, int width, int height)
     {
         return WidgetPositioningService.GetPhysicalMinimumSizeForBounds(
             new RectInt32(x, y, Math.Max(1, width), Math.Max(1, height)));
@@ -902,7 +993,10 @@ public abstract partial class WidgetWindowBase
     {
         if (args.DidVisibilityChange)
         {
-            NotifyCompactHostVisibilityChanged(sender.IsVisible);
+            if (!SuppressAppWindowCompactVisibilityNotification)
+            {
+                NotifyCompactHostVisibilityChanged(sender.IsVisible);
+            }
             App.Current?.WidgetManager?
                 .ReconcileBackgroundMemoryCleanupForWidgetVisibility(
                     sender.IsVisible

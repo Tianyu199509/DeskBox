@@ -31,7 +31,9 @@ public sealed unsafe class MonitorOcclusionTracker : IDisposable
     private const long WsExToolWindow = 0x00000080L;
     private const long WsExAppWindow = 0x00040000L;
     private const long WsExTransparent = 0x00000020L;
+    private const long WsExLayered = 0x00080000L;
     private const long WsExNoActivate = 0x08000000L;
+    private const uint LwaAlpha = 0x00000002;
 
     private const int DwmwaExtendedFrameBounds = 9;
     private const int DwmwaCloaked = 14;
@@ -84,6 +86,12 @@ public sealed unsafe class MonitorOcclusionTracker : IDisposable
             return;
         }
 
+        if (!_dispatcherQueue.HasThreadAccess)
+        {
+            _dispatcherQueue.TryEnqueue(Start);
+            return;
+        }
+
         _started = true;
         Volatile.Write(ref s_activeInstance, this);
 
@@ -95,6 +103,8 @@ public sealed unsafe class MonitorOcclusionTracker : IDisposable
         uint flags = WinEventOutOfContext | WinEventSkipOwnProcess;
         delegate* unmanaged[Stdcall]<IntPtr, uint, IntPtr, int, int, uint, uint, void> callback = &OnWinEventCallback;
 
+        // Observe own-process foreground transitions too so raising or clicking a DeskBox
+        // widget while a foreign window was maximized immediately clears monitor occlusion.
         _foregroundHook = SetWinEventHook(
             EventSystemForeground,
             EventSystemForeground,
@@ -102,7 +112,7 @@ public sealed unsafe class MonitorOcclusionTracker : IDisposable
             callback,
             0,
             0,
-            flags);
+            WinEventOutOfContext);
         _minimizeHook = SetWinEventHook(
             EventSystemMinimizeStart,
             EventSystemMinimizeEnd,
@@ -167,17 +177,23 @@ public sealed unsafe class MonitorOcclusionTracker : IDisposable
         uint dwEventThread,
         uint dwmsEventTime)
     {
-        _ = hWinEventHook;
-        _ = dwEventThread;
-        _ = dwmsEventTime;
-
-        if (eventType >= EventObjectDestroy && (idObject != ObjIdWindow || idChild != 0))
+        try
         {
-            return;
-        }
+            _ = hWinEventHook;
+            _ = dwEventThread;
+            _ = dwmsEventTime;
 
-        MonitorOcclusionTracker? instance = Volatile.Read(ref s_activeInstance);
-        instance?.ScheduleDebouncedEvaluation();
+            if (eventType >= EventObjectDestroy && (idObject != ObjIdWindow || idChild != 0))
+            {
+                return;
+            }
+
+            MonitorOcclusionTracker? instance = Volatile.Read(ref s_activeInstance);
+            instance?.ScheduleDebouncedEvaluation();
+        }
+        catch
+        {
+        }
     }
 
     private void ScheduleDebouncedEvaluation()
@@ -315,6 +331,18 @@ public sealed unsafe class MonitorOcclusionTracker : IDisposable
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvStdcall)])]
     private static int EnumTopLevelWindowCallback(IntPtr hwnd, IntPtr lParam)
     {
+        try
+        {
+            return EnumTopLevelWindowCallbackCore(hwnd, lParam);
+        }
+        catch
+        {
+            return 1;
+        }
+    }
+
+    private static int EnumTopLevelWindowCallbackCore(IntPtr hwnd, IntPtr lParam)
+    {
         if (hwnd == IntPtr.Zero || lParam == IntPtr.Zero)
         {
             return 1;
@@ -348,6 +376,14 @@ public sealed unsafe class MonitorOcclusionTracker : IDisposable
         }
 
         bool isDeskBoxWindow = context.Owner._isDeskBoxWindow(hwnd);
+        if (!isDeskBoxWindow && (exStyle & WsExLayered) != 0 &&
+            GetLayeredWindowAttributes(hwnd, out _, out byte layeredAlpha, out uint layeredFlags) != 0 &&
+            (layeredFlags & LwaAlpha) != 0 &&
+            layeredAlpha <= 16)
+        {
+            return 1;
+        }
+
         bool isToolOverlay =
             !isDeskBoxWindow &&
             (((exStyle & WsExToolWindow) != 0 && (exStyle & WsExAppWindow) == 0) ||
@@ -479,9 +515,27 @@ public sealed unsafe class MonitorOcclusionTracker : IDisposable
         WindowOcclusionCandidate candidate,
         MonitorBounds bounds)
     {
+        long monitorArea = bounds.MonitorArea;
         if (candidate.IsZoomed)
         {
-            return true;
+            if (monitorArea <= 0)
+            {
+                return true;
+            }
+
+            long zoomedIntersection = ComputeIntersectionArea(
+                candidate.Left,
+                candidate.Top,
+                candidate.Right,
+                candidate.Bottom,
+                bounds.MonitorLeft,
+                bounds.MonitorTop,
+                bounds.MonitorRight,
+                bounds.MonitorBottom);
+            if (zoomedIntersection * 2 >= monitorArea)
+            {
+                return true;
+            }
         }
 
         long workArea = bounds.WorkArea;
@@ -502,7 +556,6 @@ public sealed unsafe class MonitorOcclusionTracker : IDisposable
             }
         }
 
-        long monitorArea = bounds.MonitorArea;
         if (monitorArea > 0)
         {
             long monitorIntersection = ComputeIntersectionArea(
@@ -626,40 +679,50 @@ public sealed unsafe class MonitorOcclusionTracker : IDisposable
         Interlocked.CompareExchange(ref s_activeInstance, null, this);
         Interlocked.Exchange(ref _debouncePending, 0);
 
-        UnhookAndClear(ref _foregroundHook);
-        UnhookAndClear(ref _minimizeHook);
-        UnhookAndClear(ref _objectVisibilityHook);
-        UnhookAndClear(ref _locationHook);
-        UnhookAndClear(ref _cloakHook);
+        IntPtr foregroundHook = Interlocked.Exchange(ref _foregroundHook, IntPtr.Zero);
+        IntPtr minimizeHook = Interlocked.Exchange(ref _minimizeHook, IntPtr.Zero);
+        IntPtr objectVisibilityHook = Interlocked.Exchange(ref _objectVisibilityHook, IntPtr.Zero);
+        IntPtr locationHook = Interlocked.Exchange(ref _locationHook, IntPtr.Zero);
+        IntPtr cloakHook = Interlocked.Exchange(ref _cloakHook, IntPtr.Zero);
+        DispatcherQueueTimer? timer = Interlocked.Exchange(ref _debounceTimer, null);
 
-        if (_debounceTimer is { } timer)
+        if (_dispatcherQueue.HasThreadAccess)
         {
-            _debounceTimer = null;
-            if (_dispatcherQueue.HasThreadAccess)
+            UnhookCapturedHandles(foregroundHook, minimizeHook, objectVisibilityHook, locationHook, cloakHook);
+            if (timer is not null)
             {
                 timer.Stop();
                 timer.Tick -= OnDebounceTimerTick;
             }
-            else
+        }
+        else
+        {
+            _dispatcherQueue.TryEnqueue(() =>
             {
-                _dispatcherQueue.TryEnqueue(() =>
+                UnhookCapturedHandles(foregroundHook, minimizeHook, objectVisibilityHook, locationHook, cloakHook);
+                if (timer is not null)
                 {
                     timer.Stop();
                     timer.Tick -= OnDebounceTimerTick;
-                });
-            }
+                }
+            });
         }
 
         _occludedMonitors = [];
     }
 
-    private static void UnhookAndClear(ref IntPtr hook)
+    private static void UnhookCapturedHandles(
+        IntPtr foregroundHook,
+        IntPtr minimizeHook,
+        IntPtr objectVisibilityHook,
+        IntPtr locationHook,
+        IntPtr cloakHook)
     {
-        IntPtr existing = Interlocked.Exchange(ref hook, IntPtr.Zero);
-        if (existing != IntPtr.Zero)
-        {
-            _ = UnhookWinEvent(existing);
-        }
+        if (foregroundHook != IntPtr.Zero) _ = UnhookWinEvent(foregroundHook);
+        if (minimizeHook != IntPtr.Zero) _ = UnhookWinEvent(minimizeHook);
+        if (objectVisibilityHook != IntPtr.Zero) _ = UnhookWinEvent(objectVisibilityHook);
+        if (locationHook != IntPtr.Zero) _ = UnhookWinEvent(locationHook);
+        if (cloakHook != IntPtr.Zero) _ = UnhookWinEvent(cloakHook);
     }
 
     internal readonly record struct MonitorBounds(

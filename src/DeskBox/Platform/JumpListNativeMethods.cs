@@ -17,9 +17,6 @@ internal static partial class JumpListNativeMethods
     internal static extern int SHGetPropertyStoreFromParsingName(
         string pszPath, IntPtr pbc, uint flags, ref Guid riid, out IntPtr ppv);
 
-    [DllImport("propsys.dll", CharSet = CharSet.Unicode)]
-    internal static extern int PropVariantFromString(string psz, IntPtr ppropvar);
-
     [DllImport("ole32.dll")]
     internal static extern int PropVariantClear(IntPtr ppropvar);
 }

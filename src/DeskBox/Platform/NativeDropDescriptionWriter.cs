@@ -213,7 +213,7 @@ internal static partial class NativeDropDescriptionWriter
         }
     }
 
-    private static void WriteBoundedUnicode(string value, nint destination)
+    private static unsafe void WriteBoundedUnicode(string value, nint destination)
     {
         int length = Math.Min(value.Length, MaxPath - 1);
         if (length <= 0)
@@ -221,8 +221,7 @@ internal static partial class NativeDropDescriptionWriter
             return;
         }
 
-        char[] characters = value.AsSpan(0, length).ToArray();
-        Marshal.Copy(characters, 0, destination, characters.Length);
+        value.AsSpan(0, length).CopyTo(new Span<char>((void*)destination, length));
     }
 
     private static void NotifyDragWindow(NativeOleDataObject dataObject)

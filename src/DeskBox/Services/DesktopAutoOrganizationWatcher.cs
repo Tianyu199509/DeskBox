@@ -249,8 +249,36 @@ public sealed class DesktopAutoOrganizationWatcher : IDisposable
                 return;
             }
 
-            _pumpCts = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCts.Token);
-            _retryPump = RetryPumpAsync(_pumpCts.Token);
+            CancellationTokenSource linkedCts = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCts.Token);
+            _pumpCts = linkedCts;
+            _retryPump = RunAndDisposeRetryPumpAsync(linkedCts);
+        }
+    }
+
+    private async Task RunAndDisposeRetryPumpAsync(CancellationTokenSource linkedCts)
+    {
+        try
+        {
+            await RetryPumpAsync(linkedCts.Token).ConfigureAwait(false);
+        }
+        finally
+        {
+            lock (_watcherSync)
+            {
+                if (ReferenceEquals(_pumpCts, linkedCts))
+                {
+                    _pumpCts = null;
+                    _retryPump = null;
+                }
+            }
+
+            try
+            {
+                linkedCts.Dispose();
+            }
+            catch (ObjectDisposedException)
+            {
+            }
         }
     }
 

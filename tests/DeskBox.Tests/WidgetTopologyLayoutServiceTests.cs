@@ -1347,6 +1347,492 @@ public sealed class WidgetTopologyLayoutServiceTests
         Assert.Equal(200, widget.Height);
     }
 
+    [Fact]
+    public void NewlyCreatedUndraggedWidget_UnplugAndNudgeOnFallback_RestoresOriginalDualSizeAndPosition()
+    {
+        var service = new WidgetTopologyLayoutService();
+        WidgetConfig existingLaptop = CreateRowWidget("laptop-1", WidgetPositionAnchors.LeftTop, 24, width: 320, height: 260);
+        existingLaptop.ScreenBindingMode = WidgetScreenBindingMode.Pinned;
+        existingLaptop.BoundScreenId = "laptop";
+        existingLaptop.PositionMonitorStableId = "laptop";
+        existingLaptop.PositionMonitorKey = "0:0:1920:1040";
+        var settings = new AppSettings { Widgets = [existingLaptop] };
+
+        WidgetDisplayTopologySnapshot dual = WidgetTopologyLayoutService.CreateSnapshotForTest(
+            Monitor("laptop", @"\\.\DISPLAY1", true, 0, 0, 1920, 1040, 1),
+            Monitor("external-qhd", @"\\.\DISPLAY2", false, 1920, 0, 2560, 1400, 1));
+        WidgetDisplayTopologySnapshot singleLaptop = WidgetTopologyLayoutService.CreateSnapshotForTest(
+            Monitor("laptop", @"\\.\DISPLAY1", true, 0, 0, 1920, 1040, 1));
+        WidgetDisplayTopologySnapshot triple = WidgetTopologyLayoutService.CreateSnapshotForTest(
+            Monitor("laptop", @"\\.\DISPLAY1", true, 0, 0, 1920, 1040, 1),
+            Monitor("external-qhd", @"\\.\DISPLAY2", false, 1920, 0, 2560, 1400, 1),
+            Monitor("tv", @"\\.\DISPLAY3", false, 4480, 0, 1920, 1040, 1));
+
+        service.Activate(settings, dual);
+
+        // User creates / organizes a widget onto external-qhd and never manually drags it.
+        var createdOnExternal = new WidgetConfig
+        {
+            Id = "organized-ext",
+            BoundsCoordinateVersion = WidgetConfig.CurrentBoundsCoordinateVersion,
+            X = 1920 + 1800,
+            Y = 80,
+            Width = 480,
+            Height = 520,
+            PositionAnchor = WidgetPositionAnchors.LeftTop,
+            PositionMarginX = 1800,
+            PositionMarginY = 80,
+            PositionMonitorStableId = "external-qhd",
+            PositionMonitorDeviceName = @"\\.\DISPLAY2",
+            PositionMonitorWasPrimary = false,
+            PositionMonitorKey = "1920:0:2560:1400",
+            ScreenBindingMode = WidgetScreenBindingMode.Pinned,
+            BoundScreenId = "external-qhd"
+        };
+        settings.Widgets.Add(createdOnExternal);
+
+        // Unplug external-qhd: dual profile captures the new widget as authoritative on its home screen.
+        service.Activate(settings, singleLaptop);
+        Assert.True(settings.WidgetTopologyLayouts[dual.Key].Surfaces["organized-ext"].IsAuthoritative);
+        Assert.InRange(createdOnExternal.X + createdOnExternal.Width, 1, 1920 + 1);
+
+        // User shrinks and nudges the borrowed widget on the single laptop screen.
+        DateTimeOffset fallbackDragTime = DateTimeOffset.UtcNow.AddMinutes(2);
+        createdOnExternal.Width = 300;
+        createdOnExternal.Height = 260;
+        createdOnExternal.PositionMarginX = 60;
+        createdOnExternal.PositionMarginY = 60;
+        createdOnExternal.X = 60;
+        createdOnExternal.Y = 60;
+        createdOnExternal.LastUserPlacementUtc = fallbackDragTime;
+        createdOnExternal.LastUserPlacementTopologyKey = singleLaptop.Key;
+        service.CaptureSurface(settings, createdOnExternal, singleLaptop);
+        settings.WidgetTopologyLayouts[singleLaptop.Key].Surfaces["organized-ext"].IsAuthoritative = true;
+        settings.WidgetTopologyLayouts[singleLaptop.Key].Surfaces["organized-ext"].AuthoredAtUtc = fallbackDragTime;
+
+        // Reconnecting external-qhd (both back to dual and into a brand-new triple set) restores 480x520 at MarginX=1800.
+        service.Activate(settings, dual);
+        Assert.Equal(480, createdOnExternal.Width, 6);
+        Assert.Equal(520, createdOnExternal.Height, 6);
+        Assert.Equal(1800, createdOnExternal.PositionMarginX, 6);
+        Assert.Equal(80, createdOnExternal.PositionMarginY, 6);
+        Assert.Equal(1920 + 1800, createdOnExternal.X);
+
+        service.Activate(settings, triple);
+        Assert.Equal(480, createdOnExternal.Width, 6);
+        Assert.Equal(520, createdOnExternal.Height, 6);
+        Assert.Equal(1800, createdOnExternal.PositionMarginX, 6);
+        Assert.Equal("external-qhd", createdOnExternal.PositionMonitorStableId);
+    }
+
+    [Fact]
+    public void SingleScreenRoomMakingMoveOfNativeWidget_RepluggingExternalMonitor_RestoresDualScreenNativeLayout()
+    {
+        var service = new WidgetTopologyLayoutService();
+        WidgetConfig nativeLaptop = CreateRowWidget("native-laptop", WidgetPositionAnchors.LeftTop, 48, width: 560, height: 640);
+        nativeLaptop.PositionMarginY = 48;
+        nativeLaptop.Y = 48;
+        nativeLaptop.ScreenBindingMode = WidgetScreenBindingMode.Pinned;
+        nativeLaptop.BoundScreenId = "laptop";
+        nativeLaptop.PositionMonitorStableId = "laptop";
+        nativeLaptop.PositionMonitorKey = "0:0:1920:1040";
+
+        WidgetConfig extWidget = CreateRowWidget("ext-widget", WidgetPositionAnchors.RightTop, 32, width: 420, height: 480);
+        extWidget.ScreenBindingMode = WidgetScreenBindingMode.Pinned;
+        extWidget.BoundScreenId = "external";
+        extWidget.PositionMonitorStableId = "external";
+        extWidget.PositionMonitorDeviceName = @"\\.\DISPLAY2";
+        extWidget.PositionMonitorWasPrimary = false;
+        extWidget.PositionMonitorKey = "1920:0:1920:1040";
+        extWidget.X = 3840 - 32 - 420;
+
+        var settings = new AppSettings { Widgets = [nativeLaptop, extWidget] };
+        WidgetDisplayTopologySnapshot dual = WidgetTopologyLayoutService.CreateSnapshotForTest(
+            Monitor("laptop", @"\\.\DISPLAY1", true, 0, 0, 1920, 1040, 1),
+            Monitor("external", @"\\.\DISPLAY2", false, 1920, 0, 1920, 1040, 1));
+        WidgetDisplayTopologySnapshot singleLaptop = WidgetTopologyLayoutService.CreateSnapshotForTest(
+            Monitor("laptop", @"\\.\DISPLAY1", true, 0, 0, 1920, 1040, 1));
+
+        service.Activate(settings, dual);
+        service.Activate(settings, singleLaptop);
+
+        // User shrinks/moves nativeLaptop on single screen to make room while external is unplugged.
+        DateTimeOffset singleEditUtc = DateTimeOffset.UtcNow.AddMinutes(3);
+        nativeLaptop.Width = 300;
+        nativeLaptop.Height = 280;
+        nativeLaptop.PositionMarginX = 12;
+        nativeLaptop.PositionMarginY = 12;
+        nativeLaptop.X = 12;
+        nativeLaptop.Y = 12;
+        nativeLaptop.LastUserPlacementUtc = singleEditUtc;
+        nativeLaptop.LastUserPlacementTopologyKey = singleLaptop.Key;
+        service.CaptureSurface(settings, nativeLaptop, singleLaptop);
+        settings.WidgetTopologyLayouts[singleLaptop.Key].Surfaces[nativeLaptop.Id].IsAuthoritative = true;
+        settings.WidgetTopologyLayouts[singleLaptop.Key].Surfaces[nativeLaptop.Id].AuthoredAtUtc = singleEditUtc;
+
+        // Replugging external restores the full dual-screen 560x640 layout on laptop.
+        service.Activate(settings, dual);
+        Assert.Equal(560, nativeLaptop.Width, 6);
+        Assert.Equal(640, nativeLaptop.Height, 6);
+        Assert.Equal(48, nativeLaptop.PositionMarginX, 6);
+        Assert.Equal(48, nativeLaptop.PositionMarginY, 6);
+
+        // Unplugging external again recalls the 300x280 single-screen arrangement.
+        service.Activate(settings, singleLaptop);
+        Assert.Equal(300, nativeLaptop.Width, 6);
+        Assert.Equal(280, nativeLaptop.Height, 6);
+        Assert.Equal(12, nativeLaptop.PositionMarginX, 6);
+        Assert.Equal(12, nativeLaptop.PositionMarginY, 6);
+    }
+
+    [Fact]
+    public void BorrowedWidgetDraggedOnSingleScreen_SurvivesRecalibrateAndSecondUnplug_AndReturnsHomeOnReconnect()
+    {
+        var service = new WidgetTopologyLayoutService();
+        WidgetConfig extWidget = CreateRowWidget("ext-s5", WidgetPositionAnchors.RightTop, 24, width: 400, height: 320);
+        extWidget.ScreenBindingMode = WidgetScreenBindingMode.Pinned;
+        extWidget.BoundScreenId = "external";
+        extWidget.PositionMonitorStableId = "external";
+        extWidget.PositionMonitorDeviceName = @"\\.\DISPLAY2";
+        extWidget.PositionMonitorWasPrimary = false;
+        extWidget.PositionMonitorKey = "1920:0:1920:1040";
+        extWidget.X = 3840 - 24 - 400;
+
+        var settings = new AppSettings { Widgets = [extWidget] };
+        WidgetDisplayTopologySnapshot dual = WidgetTopologyLayoutService.CreateSnapshotForTest(
+            Monitor("laptop", @"\\.\DISPLAY1", true, 0, 0, 1920, 1040, 1),
+            Monitor("external", @"\\.\DISPLAY2", false, 1920, 0, 1920, 1040, 1));
+        WidgetDisplayTopologySnapshot singleLaptop = WidgetTopologyLayoutService.CreateSnapshotForTest(
+            Monitor("laptop", @"\\.\DISPLAY1", true, 0, 0, 1920, 1040, 1));
+
+        service.Activate(settings, dual);
+        service.Activate(settings, singleLaptop);
+
+        // User drags borrowed extWidget to LeftTop (320, 180) on singleLaptop (Spec S5).
+        DateTimeOffset dragUtc = DateTimeOffset.UtcNow.AddMinutes(1);
+        extWidget.PositionAnchor = WidgetPositionAnchors.LeftTop;
+        extWidget.PositionMarginX = 320;
+        extWidget.PositionMarginY = 180;
+        extWidget.X = 320;
+        extWidget.Y = 180;
+        extWidget.LastUserPlacementUtc = dragUtc;
+        extWidget.LastUserPlacementTopologyKey = singleLaptop.Key;
+        service.CaptureSurface(settings, extWidget, singleLaptop);
+        settings.WidgetTopologyLayouts[singleLaptop.Key].Surfaces[extWidget.Id].IsAuthoritative = true;
+        settings.WidgetTopologyLayouts[singleLaptop.Key].Surfaces[extWidget.Id].AuthoredAtUtc = dragUtc;
+
+        // Recalibrating on singleLaptop must NOT wipe the user's fallback placement.
+        service.Recalibrate(settings, singleLaptop);
+        Assert.Equal(WidgetPositionAnchors.LeftTop, extWidget.PositionAnchor);
+        Assert.Equal(320, extWidget.PositionMarginX, 6);
+        Assert.Equal(180, extWidget.PositionMarginY, 6);
+
+        // Reconnecting external restores RightTop (24, 40) on external.
+        service.Activate(settings, dual);
+        Assert.Equal(WidgetPositionAnchors.RightTop, extWidget.PositionAnchor);
+        Assert.Equal(24, extWidget.PositionMarginX, 6);
+        Assert.Equal(3840 - 24 - 400, extWidget.X);
+
+        // Unplugging external a second time recalls LeftTop (320, 180) on singleLaptop.
+        service.Activate(settings, singleLaptop);
+        Assert.Equal(WidgetPositionAnchors.LeftTop, extWidget.PositionAnchor);
+        Assert.Equal(320, extWidget.PositionMarginX, 6);
+        Assert.Equal(180, extWidget.PositionMarginY, 6);
+    }
+
+    [Fact]
+    public void DegenerateMonitorIdsWithRealTaskbarWorkArea_KeepWidgetsOnSecondaryDisplay()
+    {
+        var primary = new WidgetTopologyMonitorProfile
+        {
+            StableId = @"\\.\DISPLAY1",
+            DeviceName = @"\\.\DISPLAY1",
+            IsPrimary = true,
+            MonitorX = 0,
+            MonitorY = 0,
+            MonitorWidth = 1920,
+            MonitorHeight = 1080,
+            WorkAreaX = 0,
+            WorkAreaY = 0,
+            WorkAreaWidth = 1920,
+            WorkAreaHeight = 1032,
+            DpiScale = 1.0,
+        };
+        var secondary = new WidgetTopologyMonitorProfile
+        {
+            StableId = @"\\.\DISPLAY2",
+            DeviceName = @"\\.\DISPLAY2",
+            IsPrimary = false,
+            MonitorX = 1920,
+            MonitorY = 0,
+            MonitorWidth = 2560,
+            MonitorHeight = 1440,
+            WorkAreaX = 1920,
+            WorkAreaY = 0,
+            WorkAreaWidth = 2560,
+            WorkAreaHeight = 1392,
+            DpiScale = 1.0,
+        };
+
+        var secondaryWidget = new WidgetConfig
+        {
+            Id = "deg-sec",
+            BoundsCoordinateVersion = WidgetConfig.CurrentBoundsCoordinateVersion,
+            X = 1920 + 120,
+            Y = 80,
+            Width = 360,
+            Height = 300,
+            PositionAnchor = WidgetPositionAnchors.LeftTop,
+            PositionMarginX = 120,
+            PositionMarginY = 80,
+            PositionMonitorStableId = @"\\.\DISPLAY2",
+            PositionMonitorDeviceName = @"\\.\DISPLAY2",
+            PositionMonitorWasPrimary = false,
+            PositionMonitorKey = "1920:0:2560:1392",
+        };
+        var settings = new AppSettings { Widgets = [secondaryWidget] };
+        var service = new WidgetTopologyLayoutService();
+
+        var initialDual = WidgetTopologyLayoutService.CreateSnapshotForTest(primary, secondary);
+        service.Activate(settings, initialDual);
+        Assert.Equal(1920 + 120, secondaryWidget.X);
+
+        // Windows renumbers \\.\DISPLAYn and auto-hides taskbar (1392 -> 1440) under the same v4 key.
+        var renumberedPrimary = new WidgetTopologyMonitorProfile
+        {
+            StableId = @"\\.\DISPLAY2",
+            DeviceName = @"\\.\DISPLAY2",
+            IsPrimary = true,
+            MonitorX = 0,
+            MonitorY = 0,
+            MonitorWidth = 1920,
+            MonitorHeight = 1080,
+            WorkAreaX = 0,
+            WorkAreaY = 0,
+            WorkAreaWidth = 1920,
+            WorkAreaHeight = 1080,
+            DpiScale = 1.0,
+        };
+        var renumberedSecondary = new WidgetTopologyMonitorProfile
+        {
+            StableId = @"\\.\DISPLAY1",
+            DeviceName = @"\\.\DISPLAY1",
+            IsPrimary = false,
+            MonitorX = 1920,
+            MonitorY = 0,
+            MonitorWidth = 2560,
+            MonitorHeight = 1440,
+            WorkAreaX = 1920,
+            WorkAreaY = 0,
+            WorkAreaWidth = 2560,
+            WorkAreaHeight = 1440,
+            DpiScale = 1.0,
+        };
+        var afterFlip = WidgetTopologyLayoutService.CreateSnapshotForTest(renumberedPrimary, renumberedSecondary);
+        Assert.Equal(initialDual.Key, afterFlip.Key);
+
+        service.Activate(settings, afterFlip);
+        Assert.Equal(1920 + 120, secondaryWidget.X);
+        Assert.Equal(@"\\.\DISPLAY1", secondaryWidget.PositionMonitorDeviceName);
+    }
+
+    [Fact]
+    public void SelectPreferredMonitorStableId_SkipsInactiveSlotZeroAndPrefersActiveMonitor()
+    {
+        string chosen = DeskBox.Platform.Win32Helper.SelectPreferredMonitorStableId(
+            [
+                (0x0u, @"\\?\DISPLAY#STALE_UNPLUGGED#1", @"Registry\Stale"),
+                (DeskBox.Platform.Win32Helper.DisplayDeviceActiveFlag, @"\\?\DISPLAY#ACTIVE_SECOND#2", @"Registry\Active")
+            ],
+            ccdDevicePathFallback: () => null,
+            fallback: @"\\.\DISPLAY1");
+        Assert.Equal(@"\\?\DISPLAY#ACTIVE_SECOND#2", chosen);
+
+        // Active slot lacks DeviceId while slot 0 holds a disconnected stale DeviceId: CCD wins, stale slot 0 never leaks.
+        string ccdChosen = DeskBox.Platform.Win32Helper.SelectPreferredMonitorStableId(
+            [
+                (0x0u, @"\\?\DISPLAY#STALE_UNPLUGGED#1", @"Registry\Stale"),
+                (DeskBox.Platform.Win32Helper.DisplayDeviceActiveFlag, "", "")
+            ],
+            ccdDevicePathFallback: () => @"\\?\DISPLAY#CCD_ACTIVE#3",
+            fallback: @"\\.\DISPLAY1");
+        Assert.Equal(@"\\?\DISPLAY#CCD_ACTIVE#3", ccdChosen);
+    }
+
+    [Fact]
+    public void FollowPrimaryWidget_AvoidsStackingCollisionWhenPrimaryMonitorUnplugged()
+    {
+        WidgetConfig followPrimary = CreateRowWidget("follow-main", WidgetPositionAnchors.RightTop, 24, width: 400, height: 320);
+        followPrimary.ScreenBindingMode = WidgetScreenBindingMode.FollowPrimary;
+        followPrimary.PositionMonitorStableId = "main-a";
+        followPrimary.PositionMonitorKey = "0:0:1920:1040";
+        followPrimary.X = 1920 - 24 - 400;
+
+        WidgetConfig nativeB = CreateRowWidget("native-b", WidgetPositionAnchors.RightTop, 24, width: 400, height: 320);
+        nativeB.ScreenBindingMode = WidgetScreenBindingMode.Pinned;
+        nativeB.BoundScreenId = "sub-b";
+        nativeB.PositionMonitorStableId = "sub-b";
+        nativeB.PositionMonitorDeviceName = @"\\.\DISPLAY2";
+        nativeB.PositionMonitorWasPrimary = false;
+        nativeB.PositionMonitorKey = "1920:0:1920:1040";
+        nativeB.X = 3840 - 24 - 400;
+
+        var settings = new AppSettings { Widgets = [followPrimary, nativeB] };
+        var service = new WidgetTopologyLayoutService();
+        WidgetDisplayTopologySnapshot dual = WidgetTopologyLayoutService.CreateSnapshotForTest(
+            Monitor("main-a", @"\\.\DISPLAY1", true, 0, 0, 1920, 1040, 1),
+            Monitor("sub-b", @"\\.\DISPLAY2", false, 1920, 0, 1920, 1040, 1));
+        WidgetDisplayTopologySnapshot singleB = WidgetTopologyLayoutService.CreateSnapshotForTest(
+            Monitor("sub-b", @"\\.\DISPLAY1", true, 0, 0, 1920, 1040, 1));
+
+        service.Activate(settings, dual);
+        service.Activate(settings, singleB);
+
+        Assert.Equal(1920 - 24 - 400, nativeB.X);
+        double interW = Math.Min(nativeB.X + nativeB.Width, followPrimary.X + followPrimary.Width) - Math.Max(nativeB.X, followPrimary.X);
+        double interH = Math.Min(nativeB.Y + nativeB.Height, followPrimary.Y + followPrimary.Height) - Math.Max(nativeB.Y, followPrimary.Y);
+        double overlapArea = Math.Max(0, interW) * Math.Max(0, interH);
+        Assert.True(overlapArea <= 400 * 320 * 0.10, $"Expected <=10% overlap, got {overlapArea}");
+    }
+
+    [Fact]
+    public void NewlyCreatedUndraggedWidget_ImmediateRecalibrateBeforeUnplug_StillRestoresDualLayout()
+    {
+        var service = new WidgetTopologyLayoutService();
+        WidgetConfig existingLaptop = CreateRowWidget("laptop-base", WidgetPositionAnchors.LeftTop, 24, width: 320, height: 260);
+        existingLaptop.ScreenBindingMode = WidgetScreenBindingMode.Pinned;
+        existingLaptop.BoundScreenId = "laptop";
+        existingLaptop.PositionMonitorStableId = "laptop";
+        existingLaptop.PositionMonitorKey = "0:0:1920:1040";
+        var settings = new AppSettings { Widgets = [existingLaptop] };
+
+        WidgetDisplayTopologySnapshot dual = WidgetTopologyLayoutService.CreateSnapshotForTest(
+            Monitor("laptop", @"\\.\DISPLAY1", true, 0, 0, 1920, 1040, 1),
+            Monitor("external-qhd", @"\\.\DISPLAY2", false, 1920, 0, 2560, 1400, 1));
+        WidgetDisplayTopologySnapshot singleLaptop = WidgetTopologyLayoutService.CreateSnapshotForTest(
+            Monitor("laptop", @"\\.\DISPLAY1", true, 0, 0, 1920, 1040, 1));
+
+        service.Activate(settings, dual);
+
+        DateTimeOffset createdUtc = DateTimeOffset.UtcNow.AddMinutes(1);
+        var createdOnExternal = new WidgetConfig
+        {
+            Id = "new-recalibrated",
+            BoundsCoordinateVersion = WidgetConfig.CurrentBoundsCoordinateVersion,
+            X = 1920 + 1600,
+            Y = 96,
+            Width = 460,
+            Height = 500,
+            PositionAnchor = WidgetPositionAnchors.LeftTop,
+            PositionMarginX = 1600,
+            PositionMarginY = 96,
+            PositionMonitorStableId = "external-qhd",
+            PositionMonitorDeviceName = @"\\.\DISPLAY2",
+            PositionMonitorWasPrimary = false,
+            PositionMonitorKey = "1920:0:2560:1400",
+            ScreenBindingMode = WidgetScreenBindingMode.Pinned,
+            BoundScreenId = "external-qhd",
+            LastUserPlacementUtc = createdUtc,
+            LastUserPlacementTopologyKey = dual.Key
+        };
+        settings.Widgets.Add(createdOnExternal);
+
+        // User recalibrates on dual BEFORE ever dragging or unplugging.
+        service.Recalibrate(settings, dual);
+        Assert.True(settings.WidgetTopologyLayouts[dual.Key].Surfaces["new-recalibrated"].IsAuthoritative);
+
+        service.Activate(settings, singleLaptop);
+        DateTimeOffset fallbackEditUtc = createdUtc.AddMinutes(2);
+        createdOnExternal.Width = 280;
+        createdOnExternal.Height = 240;
+        createdOnExternal.PositionMarginX = 40;
+        createdOnExternal.PositionMarginY = 40;
+        createdOnExternal.X = 40;
+        createdOnExternal.Y = 40;
+        createdOnExternal.LastUserPlacementUtc = fallbackEditUtc;
+        createdOnExternal.LastUserPlacementTopologyKey = singleLaptop.Key;
+        service.CaptureSurface(settings, createdOnExternal, singleLaptop);
+        settings.WidgetTopologyLayouts[singleLaptop.Key].Surfaces["new-recalibrated"].IsAuthoritative = true;
+        settings.WidgetTopologyLayouts[singleLaptop.Key].Surfaces["new-recalibrated"].AuthoredAtUtc = fallbackEditUtc;
+
+        service.Activate(settings, dual);
+        Assert.Equal(460, createdOnExternal.Width, 6);
+        Assert.Equal(500, createdOnExternal.Height, 6);
+        Assert.Equal(1600, createdOnExternal.PositionMarginX, 6);
+        Assert.Equal(96, createdOnExternal.PositionMarginY, 6);
+    }
+
+    [Fact]
+    public void MergedGroupOnDualScreen_RoomMakingMoveOnSingleScreen_RestoresDualGroupLayoutOnReconnect()
+    {
+        var service = new WidgetTopologyLayoutService();
+        WidgetConfig m1 = CreateRowWidget("gm-1", WidgetPositionAnchors.LeftTop, 64, width: 540, height: 600);
+        WidgetConfig m2 = CreateRowWidget("gm-2", WidgetPositionAnchors.LeftTop, 64, width: 540, height: 600);
+        var group = new WidgetGroupConfig
+        {
+            Id = "grp-1",
+            SurfaceId = "group:grp-1",
+            MemberIds = [m1.Id, m2.Id],
+            ActiveMemberId = m1.Id,
+            BoundsCoordinateVersion = WidgetConfig.CurrentBoundsCoordinateVersion,
+            X = 64,
+            Y = 40,
+            Width = 540,
+            Height = 600,
+            PositionAnchor = WidgetPositionAnchors.LeftTop,
+            PositionMarginX = 64,
+            PositionMarginY = 40,
+            PositionMonitorStableId = "laptop",
+            PositionMonitorDeviceName = @"\\.\DISPLAY1",
+            PositionMonitorWasPrimary = true,
+            PositionMonitorKey = "0:0:1920:1040",
+            ScreenBindingMode = WidgetScreenBindingMode.Pinned,
+            BoundScreenId = "laptop"
+        };
+        var settings = new AppSettings
+        {
+            Widgets = [m1, m2],
+            WidgetGroups = [group]
+        };
+
+        WidgetDisplayTopologySnapshot dual = WidgetTopologyLayoutService.CreateSnapshotForTest(
+            Monitor("laptop", @"\\.\DISPLAY1", true, 0, 0, 1920, 1040, 1),
+            Monitor("external", @"\\.\DISPLAY2", false, 1920, 0, 1920, 1040, 1));
+        WidgetDisplayTopologySnapshot singleLaptop = WidgetTopologyLayoutService.CreateSnapshotForTest(
+            Monitor("laptop", @"\\.\DISPLAY1", true, 0, 0, 1920, 1040, 1));
+
+        service.Activate(settings, dual);
+        service.Activate(settings, singleLaptop);
+
+        // User shrinks and moves the group on singleLaptop while external is unplugged.
+        DateTimeOffset singleEditUtc = DateTimeOffset.UtcNow.AddMinutes(3);
+        group.Width = 310;
+        group.Height = 290;
+        group.PositionMarginX = 16;
+        group.PositionMarginY = 16;
+        group.X = 16;
+        group.Y = 16;
+        group.LastUserPlacementUtc = singleEditUtc;
+        group.LastUserPlacementTopologyKey = singleLaptop.Key;
+        m1.LastUserPlacementUtc = singleEditUtc;
+        m1.LastUserPlacementTopologyKey = singleLaptop.Key;
+        service.CaptureSurface(settings, m1, singleLaptop);
+        settings.WidgetTopologyLayouts[singleLaptop.Key].Surfaces[group.SurfaceId].IsAuthoritative = true;
+        settings.WidgetTopologyLayouts[singleLaptop.Key].Surfaces[group.SurfaceId].AuthoredAtUtc = singleEditUtc;
+
+        // Reconnecting external restores the 540x600 dual-screen group layout.
+        service.Activate(settings, dual);
+        Assert.Equal(540, group.Width, 6);
+        Assert.Equal(600, group.Height, 6);
+        Assert.Equal(64, group.PositionMarginX, 6);
+
+        // Unplugging external again recalls the 310x290 single-screen group layout.
+        service.Activate(settings, singleLaptop);
+        Assert.Equal(310, group.Width, 6);
+        Assert.Equal(290, group.Height, 6);
+        Assert.Equal(16, group.PositionMarginX, 6);
+    }
+
     private static WidgetTopologyMonitorProfile Monitor(
         string stableId,
         string deviceName,
