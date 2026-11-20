@@ -37,7 +37,8 @@ public sealed class CustomWidgetCountdownV3Tests
         Assert.Equal(CustomWidgetHolidayDayType.Weekend, CustomWidgetHolidaySchedule.GetDayType(new DateOnly(2026, 9, 19)));
 
         // Beyond table coverage the classifier degrades to weekend detection only.
-        Assert.Equal(CustomWidgetHolidayDayType.Weekend, CustomWidgetHolidaySchedule.GetDayType(new DateOnly(2028, 1, 1)));
+        Assert.Equal(CustomWidgetHolidayDayType.StatutoryHoliday, CustomWidgetHolidaySchedule.GetDayType(new DateOnly(2028, 1, 1)));
+        Assert.Equal(CustomWidgetHolidayDayType.Weekend, CustomWidgetHolidaySchedule.GetDayType(new DateOnly(2100, 1, 2)));
         Assert.Equal(CustomWidgetHolidayDayType.Ordinary, CustomWidgetHolidaySchedule.GetDayType(new DateOnly(2028, 1, 3)));
     }
 
@@ -66,7 +67,10 @@ public sealed class CustomWidgetCountdownV3Tests
         Assert.Equal(2, national.SwapWorkdays.Count);
 
         // Beyond the supported table there is no holiday claim.
-        Assert.False(CustomWidgetHolidaySchedule.TryGetNextHoliday(new DateOnly(2028, 1, 1), out _));
+        Assert.True(CustomWidgetHolidaySchedule.TryGetNextHoliday(new DateOnly(2028, 1, 1), out CustomWidgetHolidayEntry alg2028));
+        Assert.Equal(CustomWidgetHolidaySchedule.NameKeyNewYear, alg2028.NameKey);
+        Assert.True(alg2028.IsProvisional);
+        Assert.False(CustomWidgetHolidaySchedule.TryGetNextHoliday(new DateOnly(2100, 1, 1), out _));
     }
 
     [Fact]
@@ -526,7 +530,7 @@ public sealed class CustomWidgetCountdownV3Tests
         Assert.Empty(parsed.Diagnostics);
 
         CustomWidgetManifest manifest = parsed.Manifest!;
-        Assert.Equal("3.0.0", manifest.Version);
+        Assert.Equal("5.0.0", manifest.Version);
 
         CustomWidgetSettingDefinition modules = Assert.Single(manifest.Settings, s => s.Key == "modules");
         Assert.Equal("hero:1,list:1,yearProgress:1", modules.DefaultValue);

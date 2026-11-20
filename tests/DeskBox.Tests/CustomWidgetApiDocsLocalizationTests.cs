@@ -114,7 +114,7 @@ public sealed class CustomWidgetApiDocsLocalizationTests
     private static string? FindRepositoryRoot()
     {
         string? dir = AppContext.BaseDirectory;
-        while (dir is not null && !File.Exists(Path.Combine(dir, "AGENTS.md")))
+        while (dir is not null && !File.Exists(Path.Combine(dir, "DeskBox.sln")))
         {
             dir = Path.GetDirectoryName(dir);
         }

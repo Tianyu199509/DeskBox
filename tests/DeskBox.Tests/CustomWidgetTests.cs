@@ -19,9 +19,13 @@ public sealed class CustomWidgetTests
     [InlineData(CustomWidgetTemplates.AiInboxStarterId)]
     [InlineData(CustomWidgetTemplates.NewsRssStarterId)]
     [InlineData(CustomWidgetTemplates.AgentHudTemplateId)]
+    [InlineData(CustomWidgetTemplates.FocusDialTemplateId)]
+    [InlineData(CustomWidgetTemplates.SnippetGridTemplateId)]
+    [InlineData(CustomWidgetTemplates.WeatherDeskTemplateId)]
+    [InlineData(CustomWidgetTemplates.TodoAgendaTemplateId)]
     public void BuiltInPresetTemplates_ParseWithoutErrors(string templateId)
     {
-        Assert.Equal(10, CustomWidgetTemplates.BuiltInTemplateIds.Count);
+        Assert.Equal(14, CustomWidgetTemplates.BuiltInTemplateIds.Count);
         CustomWidgetTemplateBundle bundle = CustomWidgetTemplates.GetTemplateBundle(templateId);
         Assert.DoesNotContain("\"i18n\"", bundle.ManifestJson, StringComparison.Ordinal);
         Assert.Equal(13, bundle.Locales.Locales.Count);
@@ -42,7 +46,7 @@ public sealed class CustomWidgetTests
         Assert.Equal(1, result.Manifest.SchemaVersion);
         Assert.NotEmpty(result.Manifest.Name);
         Assert.NotNull(result.Manifest.Capsule);
-        Assert.Contains(result.Manifest.View.Type, new[] { "Stack", "ModuleStack" });
+        Assert.Contains(result.Manifest.View.Type, new[] { "Stack", "ModuleStack", "Grid", "Tabs" });
         Assert.NotEmpty(result.Manifest.View.Children);
     }
 
@@ -57,7 +61,7 @@ public sealed class CustomWidgetTests
     }
 
     [Fact]
-    public void ManifestParser_ReportsDiagnosticWhenViewIsMissing()
+    public void ManifestParser_ReportsDiagnosticWhenRootAndElementsAreMissing()
     {
         const string json = """
         {
@@ -71,7 +75,8 @@ public sealed class CustomWidgetTests
 
         Assert.False(result.IsValid);
         Assert.NotNull(result.Manifest);
-        Assert.Contains(result.Diagnostics, d => d.Path == "$.view" && d.IsError);
+        Assert.Contains(result.Diagnostics, d => d.Path == "$.elements" && d.Code == "MissingElementsMap" && d.IsError);
+        Assert.Contains(result.Diagnostics, d => d.Path == "$.root" && d.Code == "ElementGraphMissingRoot" && d.IsError);
     }
 
     [Fact]
@@ -180,18 +185,20 @@ public sealed class CustomWidgetTests
             string externalFile = Path.Combine(tempRoot, "demo-note.txt");
             await File.WriteAllTextAsync(externalFile, "hello deskbox");
 
-            (string linkPath, string linkName, string linkMode) =
-                await store.ResolveDroppedFileAsync(externalFile, "link");
+            (string linkPath, string linkFullPath, string linkName, string linkMode) =
+                await store.ResolveDroppedFileWithPortablePathAsync(externalFile, "reference");
             Assert.Equal("link", linkMode);
             Assert.Equal("demo-note.txt", linkName);
             Assert.Equal(Path.GetFullPath(externalFile), linkPath);
+            Assert.Equal(Path.GetFullPath(externalFile), linkFullPath);
 
-            (string copyPath, string copyName, string copyMode) =
-                await store.ResolveDroppedFileAsync(externalFile, "copy");
+            (string copyPath, string copyFullPath, string copyName, string copyMode) =
+                await store.ResolveDroppedFileWithPortablePathAsync(externalFile, "copy");
             Assert.Equal("copy", copyMode);
             Assert.Equal("demo-note.txt", copyName);
             Assert.Equal("attachments/demo-note.txt", copyPath);
             string resolvedCopyPath = store.ResolveRuntimePath(copyPath);
+            Assert.Equal(copyFullPath, resolvedCopyPath);
             Assert.StartsWith(store.AttachmentsDirectory, resolvedCopyPath, StringComparison.OrdinalIgnoreCase);
             Assert.True(File.Exists(resolvedCopyPath));
 
@@ -224,7 +231,7 @@ public sealed class CustomWidgetTests
             string jsonPath = Path.Combine(tempRoot, "sample.json");
             await File.WriteAllTextAsync(
                 jsonPath,
-                CustomWidgetTemplates.GetTemplateJson(CustomWidgetTemplates.SystemPulseTemplateId));
+                CustomWidgetTemplates.GetTemplateBundle(CustomWidgetTemplates.SystemPulseTemplateId).ManifestJson);
 
             (CustomWidgetManifest manifest, string rawJson) = await CustomWidgetTemplates.ReadPackageOrJsonAsync(jsonPath);
             Assert.Equal("deskbox.sys-pulse", manifest.Id);
@@ -254,11 +261,16 @@ public sealed class CustomWidgetTests
             "title": "今日已喝 ${state.cups} 杯",
             "summary": "目标 {8} 杯"
           },
-          "view": {
-            "type": "Stack",
-            "children": [
-              { "type": "Text", "text": "已喝 ${state.cups} / 8 杯" }
-            ]
+          "root": "main",
+          "elements": {
+            "main": {
+              "type": "Stack",
+              "children": ["cups_text"]
+            },
+            "cups_text": {
+              "type": "Text",
+              "text": "已喝 ${state.cups} / 8 杯"
+            }
           }
         }
         ```
@@ -284,22 +296,26 @@ public sealed class CustomWidgetTests
     [Fact]
     public void AiPromptBuilders_IncludeSpecsExistingManifestAndRepairDiagnostics()
     {
-        string createPrompt = CustomWidgetTemplates.BuildChatAiPrompt("做一个番茄钟记录器");
-        Assert.Contains("做一个番茄钟记录器", createPrompt, StringComparison.Ordinal);
-        Assert.Contains("schemaVersion", createPrompt, StringComparison.Ordinal);
-        Assert.Contains("StatCard", createPrompt, StringComparison.Ordinal);
+        string createSystemPrompt = CustomWidgetTemplates.BuildStudioCoCreationSystemPrompt(uiLanguage: "zh-CN");
+        string createUserPrompt = CustomWidgetTemplates.BuildStudioCoCreationUserPrompt(
+            "做一个番茄钟记录器",
+            uiLanguage: "zh-CN");
+        Assert.Contains("做一个番茄钟记录器", createUserPrompt, StringComparison.Ordinal);
+        Assert.Contains("schemaVersion", createSystemPrompt, StringComparison.Ordinal);
+        Assert.Contains("StatCard", createSystemPrompt, StringComparison.Ordinal);
 
-        string editPrompt = CustomWidgetTemplates.BuildChatAiPrompt(
+        string editPrompt = CustomWidgetTemplates.BuildStudioCoCreationUserPrompt(
             "增加导出按钮",
-            CustomWidgetTemplates.GetTemplateJson(CustomWidgetTemplates.SystemPulseTemplateId));
+            CustomWidgetTemplates.GetTemplateBundle(CustomWidgetTemplates.SystemPulseTemplateId).ManifestJson,
+            uiLanguage: "zh-CN");
         Assert.Contains("增加导出按钮", editPrompt, StringComparison.Ordinal);
         Assert.Contains("deskbox.sys-pulse", editPrompt, StringComparison.Ordinal);
 
         string repairPrompt = CustomWidgetTemplates.BuildChatAiRepairPrompt(
             "{ \"schemaVersion\": 1 }",
-            [new CustomWidgetValidationDiagnostic("$.view", "Missing view root")]);
-        Assert.Contains("$.view", repairPrompt, StringComparison.Ordinal);
-        Assert.Contains("Missing view root", repairPrompt, StringComparison.Ordinal);
+            [new CustomWidgetValidationDiagnostic("$.elements", "Missing elements map")]);
+        Assert.Contains("$.elements", repairPrompt, StringComparison.Ordinal);
+        Assert.Contains("Missing elements map", repairPrompt, StringComparison.Ordinal);
 
         string agentPrompt = CustomWidgetTemplates.BuildLocalAgentPrompt(
             "优化卡片间距",
@@ -398,28 +414,34 @@ public sealed class CustomWidgetTests
         Assert.True(CustomWidgetTemplates.IsEmojiIcon("🗂️"));
         Assert.True(CustomWidgetTemplates.IsEmojiIcon("⏱️"));
 
-        // All 6 built-in presets carry distinct Segoe Fluent PUA glyphs (governed by global TitleIconMode)
+        // All 14 built-in presets carry distinct Emoji icons plus distinct Segoe Fluent PUA monochrome fallbacks
         string[] presetIcons = CustomWidgetTemplates.Presets.Select(p => p.IconGlyph).ToArray();
-        Assert.Equal(6, presetIcons.Length);
+        Assert.Equal(14, presetIcons.Length);
         Assert.Equal(presetIcons.Length, presetIcons.Distinct(StringComparer.Ordinal).Count());
         Assert.All(presetIcons, icon =>
         {
-            Assert.True(CustomWidgetTemplates.IsSegoeFluentGlyph(icon));
-            Assert.False(CustomWidgetTemplates.IsEmojiIcon(icon));
+            Assert.True(CustomWidgetTemplates.IsEmojiIcon(icon));
+            Assert.False(CustomWidgetTemplates.IsSegoeFluentGlyph(icon));
         });
+        string[] monoGlyphs = CustomWidgetTemplates.Presets.Select(p => p.MonochromeFallbackGlyph).ToArray();
+        Assert.Equal(monoGlyphs.Length, monoGlyphs.Distinct(StringComparer.Ordinal).Count());
+        Assert.All(monoGlyphs, glyph => Assert.True(CustomWidgetTemplates.IsSegoeFluentGlyph(glyph)));
 
         // WithUpdatedIconJson updates both top-level icon and static capsule.glyph without touching view
         string updated = CustomWidgetTemplates.WithUpdatedIconJson(
-            CustomWidgetTemplates.GetTemplateJson(CustomWidgetTemplates.HydrationStarterId),
+            CustomWidgetTemplates.GetTemplateBundle(CustomWidgetTemplates.HydrationStarterId).ManifestJson,
             "🚀");
         CustomWidgetParseResult parsed = CustomWidgetManifestParser.Parse(updated);
         Assert.True(parsed.IsValid);
         Assert.Equal("🚀", parsed.Manifest!.Icon);
         Assert.Equal("🚀", parsed.Manifest.Capsule!.Glyph);
-        Assert.Equal("custom.hydration-tracker", parsed.Manifest.Id);
+        Assert.Equal("deskbox.hydration", parsed.Manifest.Id);
 
-        // Preferred emoji is embedded into Chat AI and Local Agent prompts
-        string chatWithEmoji = CustomWidgetTemplates.BuildChatAiPrompt("喝水打卡", preferredEmoji: "💧");
+        // Preferred emoji is embedded into Studio Co-Creation and Local Agent prompts
+        string chatWithEmoji = CustomWidgetTemplates.BuildStudioCoCreationUserPrompt(
+            "喝水打卡",
+            preferredEmoji: "💧",
+            uiLanguage: "zh-CN");
         Assert.Contains("\"icon\"", chatWithEmoji, StringComparison.Ordinal);
         Assert.Contains("💧", chatWithEmoji, StringComparison.Ordinal);
 
@@ -478,23 +500,26 @@ public sealed class CustomWidgetTests
     [Fact]
     public void SystemMonitorPresetV2_DeclaresModuleStackGpuProcessesAndMultiDriveTokens()
     {
-        CustomWidgetParseResult parsed = CustomWidgetManifestParser.Parse(
-            CustomWidgetTemplates.GetTemplateJson(CustomWidgetTemplates.SystemPulseTemplateId));
+        CustomWidgetTemplateBundle sysBundle =
+            CustomWidgetTemplates.GetTemplateBundle(CustomWidgetTemplates.SystemPulseTemplateId);
+        CustomWidgetParseResult parsed = CustomWidgetManifestParser.Parse(sysBundle.ManifestJson);
         Assert.True(parsed.IsValid, string.Join("; ", parsed.Diagnostics.Select(d => d.Message)));
 
-        CustomWidgetManifest manifest = parsed.Manifest!;
+        CustomWidgetManifest manifest = parsed.Manifest!.WithLocales(sysBundle.Locales);
         Assert.Equal("deskbox.sys-pulse", manifest.Id);
-        Assert.Equal("系统监控", manifest.Name);
-        Assert.Equal("3.1.0", manifest.Version);
-        Assert.Equal("\uE9D9", manifest.Icon);
+        Assert.Equal("${$i18n.widgetName}", manifest.Name);
+        Assert.Equal("系统监控", manifest.ResolveLocalizedName("zh-CN"));
+        Assert.Equal("4.2.0", manifest.Version);
+        Assert.Equal("📊", manifest.Icon);
         Assert.Contains(manifest.Settings, s => s.Key == "modules" && s.Type == "moduleList");
+        Assert.Contains(manifest.Settings, s => s.Key == "chartBackdrop" && s.DefaultValue == "grid");
 
         CustomWidgetNodeSpec moduleStack = Assert.Single(manifest.View.Children);
         Assert.Equal("ModuleStack", moduleStack.Type);
         Assert.Contains(moduleStack.Children, c => c.Id == "cpu" && c.CompactPair);
         Assert.Contains(moduleStack.Children, c => c.Id == "memory" && c.CompactPair);
-        Assert.Contains(moduleStack.Children, c => c.Id == "gpu" && c.Type == "GpuCard");
-        Assert.Contains(moduleStack.Children, c => c.Id == "processes" && c.Type == "ProcessList");
+        Assert.Contains(moduleStack.Children, c => c.Id == "gpu" && c.Type == "Card");
+        Assert.Contains(moduleStack.Children, c => c.Id == "processes" && c.Type == "Card");
 
         // Verify $sys.gpu.*, $sys.disk.selected*, and $sys.status.* resolution
         var snapshot = new CustomWidgetSystemMetricsSnapshot
@@ -540,14 +565,17 @@ public sealed class CustomWidgetTests
               "id": "deskbox.sys-pulse",
               "name": "性能脉冲",
               "version": "1.0.0",
-              "view": { "type": "Stack", "children": [] }
+              "root": "main",
+              "elements": {
+                "main": { "type": "Stack", "children": [] }
+              }
             }
             """;
             await File.WriteAllTextAsync(store.ManifestPath, legacyV1);
 
             string loaded = await store.ReadOrCreateManifestJsonAsync(CustomWidgetTemplates.SystemPulseTemplateId);
-            Assert.Contains("\"version\": \"3.1.0\"", loaded, StringComparison.Ordinal);
-            Assert.Contains("\"name\": \"系统监控\"", loaded, StringComparison.Ordinal);
+            Assert.Contains("\"version\": \"4.2.0\"", loaded, StringComparison.Ordinal);
+            Assert.Contains("\"name\": \"${$i18n.widgetName}\"", loaded, StringComparison.Ordinal);
         }
         finally
         {
@@ -576,35 +604,39 @@ public sealed class CustomWidgetTests
     }
 
     [Fact]
-    public void PomodoroPresetV2_DefaultsOptionalModulesOffAndDeclaresPomodoroCard()
+    public void PomodoroPresetV2_DefaultsOptionalModulesOffAndDeclaresOrthogonalRadialGauge()
     {
         Assert.Contains(
             CustomWidgetTemplates.Presets,
-            p => p.Id == CustomWidgetTemplates.PomodoroTemplateId && p.IconGlyph == "\uE916");
+            p => p.Id == CustomWidgetTemplates.PomodoroTemplateId &&
+                 p.IconGlyph == "🍅" &&
+                 p.MonochromeFallbackGlyph == "\uE916");
 
-        CustomWidgetParseResult parsed = CustomWidgetManifestParser.Parse(
-            CustomWidgetTemplates.GetTemplateJson(CustomWidgetTemplates.PomodoroTemplateId));
+        CustomWidgetTemplateBundle bundle =
+            CustomWidgetTemplates.GetTemplateBundle(CustomWidgetTemplates.PomodoroTemplateId);
+        CustomWidgetParseResult parsed = CustomWidgetManifestParser.Parse(bundle.ManifestJson);
         Assert.True(parsed.IsValid, string.Join("; ", parsed.Diagnostics.Select(d => $"{d.Path}: {d.Message}")));
 
-        CustomWidgetManifest manifest = parsed.Manifest!;
+        CustomWidgetManifest manifest = parsed.Manifest!.WithLocales(bundle.Locales);
         Assert.Equal("deskbox.pomodoro", manifest.Id);
-        Assert.Equal("5.0.0", manifest.Version);
-        Assert.Equal("番茄专注 & 久坐提醒", manifest.Name);
-        Assert.Equal("\uE916", manifest.Icon);
+        Assert.Equal("8.0.0", manifest.Version);
+        Assert.Equal("${$i18n.widgetName}", manifest.Name);
+        Assert.Equal("专注时段", manifest.ResolveLocalizedName("zh-CN"));
+        Assert.Equal("🍅", manifest.Icon);
 
         CustomWidgetSettingDefinition modulesDef = Assert.Single(
             manifest.Settings,
             s => s.Key == "modules" && s.Type == "moduleList");
-        Assert.Equal("timer:1,task:0,goal:0,history:0,health:0", modulesDef.DefaultValue);
+        Assert.Equal("timer:1,task:1,goal:1,history:0,health:0", modulesDef.DefaultValue);
 
         IReadOnlyList<CustomWidgetModuleEntry> defaultEntries =
             CustomWidgetModuleListHelper.ParseEntries(modulesDef.DefaultValue, modulesDef.Options);
-        Assert.Equal(["timer"], defaultEntries.Where(e => e.Enabled).Select(e => e.Id).ToArray());
-        Assert.Equal(["task", "goal", "history", "health"], defaultEntries.Where(e => !e.Enabled).Select(e => e.Id).ToArray());
+        Assert.Equal(["timer", "task", "goal"], defaultEntries.Where(e => e.Enabled).Select(e => e.Id).ToArray());
+        Assert.Equal(["history", "health"], defaultEntries.Where(e => !e.Enabled).Select(e => e.Id).ToArray());
 
         CustomWidgetNodeSpec moduleStack = manifest.View;
         Assert.Equal("ModuleStack", moduleStack.Type);
-        Assert.Contains(moduleStack.Children, c => c.Id == "timer" && c.Type == "PomodoroCard");
+        Assert.Contains(moduleStack.Children, c => c.Id == "timer" && c.Type == "Card");
         Assert.Contains(moduleStack.Children, c => c.Id == "task");
         Assert.Contains(moduleStack.Children, c => c.Id == "goal");
         Assert.Contains(moduleStack.Children, c => c.Id == "history");
@@ -620,18 +652,18 @@ public sealed class CustomWidgetTests
             var store = new CustomWidgetDataStore("pomo-v2", tempRoot);
             await File.WriteAllTextAsync(
                 store.ManifestPath,
-                """{ "schemaVersion": 1, "id": "deskbox.pomodoro", "version": "2.0.0", "name": "番茄时钟", "view": { "type": "Stack" } }""");
+                """{ "schemaVersion": 1, "id": "deskbox.pomodoro", "version": "2.0.0", "name": "番茄时钟", "root": "main", "elements": { "main": { "type": "Stack", "children": [] } } }""");
 
             string upgraded = await store.ReadOrCreateManifestJsonAsync(CustomWidgetTemplates.PomodoroTemplateId);
-            Assert.Contains("\"version\": \"5.0.0\"", upgraded, StringComparison.Ordinal);
+            Assert.Contains("\"version\": \"8.0.0\"", upgraded, StringComparison.Ordinal);
             Assert.True(Directory.Exists(store.LocalesDirectoryPath));
             Assert.True(File.Exists(Path.Combine(store.LocalesDirectoryPath, "zh-CN.json")));
 
             await File.WriteAllTextAsync(
                 store.ManifestPath,
-                """{ "schemaVersion": 1, "id": "deskbox.pomodoro", "version": "3.1.0", "name": "番茄时钟", "view": { "type": "ModuleStack" } }""");
+                """{ "schemaVersion": 1, "id": "deskbox.pomodoro", "version": "3.1.0", "name": "番茄时钟", "root": "main", "elements": { "main": { "type": "ModuleStack", "children": [] } } }""");
             string upgradedFrom31 = await store.ReadOrCreateManifestJsonAsync(CustomWidgetTemplates.PomodoroTemplateId);
-            Assert.Contains("\"version\": \"5.0.0\"", upgradedFrom31, StringComparison.Ordinal);
+            Assert.Contains("\"version\": \"8.0.0\"", upgradedFrom31, StringComparison.Ordinal);
 
             var state = new Dictionary<string, string>(StringComparer.Ordinal);
             var settings = new Dictionary<string, string>(StringComparer.Ordinal)
@@ -761,7 +793,7 @@ public sealed class CustomWidgetTests
     [Fact]
     public void CustomWidgetContextMenuBuilder_ExposesModuleListDisplaySubmenuAndModifyWithAi()
     {
-        string src = File.ReadAllText(TestPaths.FromRepository("src/DeskBox/Services/CustomWidgetContextMenuBuilder.cs"));
+        string src = File.ReadAllText(TestPaths.FromRepository("src/DeskBox/Services/CustomWidgets/CustomWidgetContextMenuBuilder.cs"));
         Assert.Contains("Glance.Display.Title", src, StringComparison.Ordinal);
         Assert.Contains("CustomWidget.Menu.ModifyWithAi", src, StringComparison.Ordinal);
         Assert.DoesNotContain("CustomWidget.Menu.EditWithAi", src, StringComparison.Ordinal);
@@ -772,17 +804,21 @@ public sealed class CustomWidgetTests
     {
         Assert.Contains(
             CustomWidgetTemplates.Presets,
-            p => p.Id == CustomWidgetTemplates.CountdownTemplateId && p.IconGlyph == "\uE787");
+            p => p.Id == CustomWidgetTemplates.CountdownTemplateId &&
+                 p.IconGlyph == "📅" &&
+                 p.MonochromeFallbackGlyph == "\uE787");
 
-        CustomWidgetParseResult parsed = CustomWidgetManifestParser.Parse(
-            CustomWidgetTemplates.GetTemplateJson(CustomWidgetTemplates.CountdownTemplateId));
+        CustomWidgetTemplateBundle bundle =
+            CustomWidgetTemplates.GetTemplateBundle(CustomWidgetTemplates.CountdownTemplateId);
+        CustomWidgetParseResult parsed = CustomWidgetManifestParser.Parse(bundle.ManifestJson);
         Assert.True(parsed.IsValid, string.Join("; ", parsed.Diagnostics.Select(d => $"{d.Path}: {d.Message}")));
 
-        CustomWidgetManifest manifest = parsed.Manifest!;
+        CustomWidgetManifest manifest = parsed.Manifest!.WithLocales(bundle.Locales);
         Assert.Equal("deskbox.countdown", manifest.Id);
-        Assert.Equal("3.0.0", manifest.Version);
-        Assert.Equal("倒数日", manifest.Name);
-        Assert.Equal("\uE787", manifest.Icon);
+        Assert.Equal("5.0.0", manifest.Version);
+        Assert.Equal("${$i18n.widgetName}", manifest.Name);
+        Assert.Equal("倒数纪念日", manifest.ResolveLocalizedName("zh-CN"));
+        Assert.Equal("📅", manifest.Icon);
 
         CustomWidgetSettingDefinition modulesDef = Assert.Single(
             manifest.Settings,
@@ -795,9 +831,9 @@ public sealed class CustomWidgetTests
         Assert.Equal([], defaultEntries.Where(e => !e.Enabled).Select(e => e.Id).ToArray());
 
         Assert.Equal("ModuleStack", manifest.View.Type);
-        Assert.Contains(manifest.View.Children, c => c.Id == "hero" && c.Type == "CountdownHero");
-        Assert.Contains(manifest.View.Children, c => c.Id == "list" && c.Type == "CountdownList");
-        Assert.Contains(manifest.View.Children, c => c.Id == "yearProgress" && c.Type == "TimeProgressCard");
+        Assert.Contains(manifest.View.Children, c => c.Id == "hero" && c.Type == "Card");
+        Assert.Contains(manifest.View.Children, c => c.Id == "list" && c.Type == "Stack");
+        Assert.Contains(manifest.View.Children, c => c.Id == "yearProgress" && c.Type == "Card");
     }
 
     [Fact]
@@ -920,7 +956,7 @@ public sealed class CustomWidgetTests
     }
 
     [Fact]
-    public void AiPulsePreset_DefaultsFocusAndRadarOnWithRemainingSemantics()
+    public void AiPulsePreset_ConfiguresCountryAwareWalletCurrencyOptimalBalanceAndRemainingSemantics()
     {
         Assert.Equal(
             [
@@ -929,32 +965,106 @@ public sealed class CustomWidgetTests
                 CustomWidgetTemplates.CountdownTemplateId,
                 CustomWidgetTemplates.AiPulseTemplateId,
                 CustomWidgetTemplates.WorldClockTemplateId,
-                CustomWidgetTemplates.DevToolboxTemplateId
+                CustomWidgetTemplates.DevToolboxTemplateId,
+                CustomWidgetTemplates.FocusDialTemplateId,
+                CustomWidgetTemplates.SnippetGridTemplateId,
+                CustomWidgetTemplates.WeatherDeskTemplateId,
+                CustomWidgetTemplates.TodoAgendaTemplateId,
+                CustomWidgetTemplates.HydrationStarterId,
+                CustomWidgetTemplates.AiInboxStarterId,
+                CustomWidgetTemplates.NewsRssStarterId,
+                CustomWidgetTemplates.AgentHudTemplateId
             ],
             CustomWidgetTemplates.Presets.Select(static p => p.Id).ToArray());
 
-        CustomWidgetParseResult parsed = CustomWidgetManifestParser.Parse(
-            CustomWidgetTemplates.GetTemplateJson(CustomWidgetTemplates.AiPulseTemplateId));
+        CustomWidgetTemplateBundle zhBundle =
+            CustomWidgetTemplates.GetTemplateBundle(CustomWidgetTemplates.AiPulseTemplateId, "zh-CN");
+        CustomWidgetParseResult parsed = CustomWidgetManifestParser.Parse(zhBundle.ManifestJson);
         Assert.True(parsed.IsValid, string.Join("; ", parsed.Diagnostics.Select(d => $"{d.Path}: {d.Message}")));
 
-        CustomWidgetManifest manifest = parsed.Manifest!;
+        CustomWidgetManifest manifest = parsed.Manifest!.WithLocales(zhBundle.Locales);
         Assert.Equal("deskbox.ai-pulse", manifest.Id);
-        Assert.Equal("2.2.0", manifest.Version);
-        Assert.Equal("AI 监控", manifest.Name);
-        Assert.Equal("\uE950", manifest.Icon);
+        Assert.Equal("4.1.0", manifest.Version);
+        Assert.Equal("${$i18n.widgetName}", manifest.Name);
+        Assert.Equal("AI 监控", manifest.ResolveLocalizedName("zh-CN"));
+        Assert.Equal("🧠", manifest.Icon);
 
-        CustomWidgetSettingDefinition modulesDef = Assert.Single(
+        CustomWidgetSettingDefinition currencyDef = Assert.Single(
             manifest.Settings,
-            s => s.Key == "modules" && s.Type == "moduleList");
-        Assert.Equal("focus:1,radar:1,tokens:0,trend:0", modulesDef.DefaultValue);
+            s => s.Key == "walletCurrency" && s.Type == "choice");
+        Assert.Equal("CNY", currencyDef.DefaultValue);
 
-        IReadOnlyList<CustomWidgetModuleEntry> defaultEntries =
-            CustomWidgetModuleListHelper.ParseEntries(modulesDef.DefaultValue, modulesDef.Options);
-        Assert.Equal(["focus", "radar"], defaultEntries.Where(e => e.Enabled).Select(e => e.Id).ToArray());
-        Assert.Equal(["tokens", "trend"], defaultEntries.Where(e => !e.Enabled).Select(e => e.Id).ToArray());
+        CustomWidgetSettingDefinition targetDef = Assert.Single(
+            manifest.Settings,
+            s => s.Key == "walletTargetBalance" && s.Type == "number");
+        Assert.Equal("100", targetDef.DefaultValue);
 
         CustomWidgetSettingDefinition quotaMode = Assert.Single(manifest.Settings, s => s.Key == "quotaDisplayMode");
         Assert.Equal("remaining", quotaMode.DefaultValue);
+
+        // Country/culture-specific default wallet currencies
+        Assert.Equal("USD", CustomWidgetManifestParser.Parse(
+            CustomWidgetTemplates.GetTemplateBundle(CustomWidgetTemplates.AiPulseTemplateId, "en-US").ManifestJson)
+            .Manifest!.Settings.Single(s => s.Key == "walletCurrency").DefaultValue);
+        Assert.Equal("EUR", CustomWidgetManifestParser.Parse(
+            CustomWidgetTemplates.GetTemplateBundle(CustomWidgetTemplates.AiPulseTemplateId, "de-DE").ManifestJson)
+            .Manifest!.Settings.Single(s => s.Key == "walletCurrency").DefaultValue);
+        Assert.Equal("JPY", CustomWidgetManifestParser.Parse(
+            CustomWidgetTemplates.GetTemplateBundle(CustomWidgetTemplates.AiPulseTemplateId, "ja-JP").ManifestJson)
+            .Manifest!.Settings.Single(s => s.Key == "walletCurrency").DefaultValue);
+        Assert.Equal("TWD", CustomWidgetManifestParser.Parse(
+            CustomWidgetTemplates.GetTemplateBundle(CustomWidgetTemplates.AiPulseTemplateId, "zh-TW").ManifestJson)
+            .Manifest!.Settings.Single(s => s.Key == "walletCurrency").DefaultValue);
+
+        // Wallet optimal-balance scaling fixes DeepSeek ¥1.55 showing 100% bar
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        CustomWidgetAiProviderSnapshot deepSeekLow = CustomWidgetAiMonitorEngine.ParseDeepSeekBalanceJson(
+            """{"is_available":true,"balance_infos":[{"currency":"CNY","total_balance":"1.55","granted_balance":"0.00","topped_up_balance":"1.55"}]}""",
+            now,
+            "zh-CN");
+        var settingsCny100 = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["walletCurrency"] = "CNY",
+            ["walletTargetBalance"] = "100"
+        };
+        var (lowPct, lowHealth, lowTone, _) = CustomWidgetAiMonitorEngine.EvaluateEffectiveProviderMetrics(
+            deepSeekLow,
+            settingsCny100,
+            "zh-CN");
+        Assert.Equal(AiQuotaHealth.Critical, lowHealth);
+        Assert.Equal("danger", lowTone);
+        Assert.InRange(lowPct, 1.5, 1.6);
+
+        // Lowering optimal target to 2 CNY turns ¥1.55 into 77.5% Healthy emerald
+        var settingsCny2 = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["walletCurrency"] = "CNY",
+            ["walletTargetBalance"] = "2"
+        };
+        var (adjustedPct, adjustedHealth, adjustedTone, _) = CustomWidgetAiMonitorEngine.EvaluateEffectiveProviderMetrics(
+            deepSeekLow,
+            settingsCny2,
+            "zh-CN");
+        Assert.Equal(AiQuotaHealth.Healthy, adjustedHealth);
+        Assert.Equal("emerald", adjustedTone);
+        Assert.InRange(adjustedPct, 77.0, 78.0);
+
+        // Both ai-pulse v4.0.0 and agent-hud v4.0.0 have 0 DOM drift and 0 compiler hard/soft diagnostics
+        foreach (string tplId in new[] { CustomWidgetTemplates.AiPulseTemplateId, CustomWidgetTemplates.AgentHudTemplateId })
+        {
+            CustomWidgetTemplateBundle rawBundle = CustomWidgetTemplates.GetTemplateBundle(tplId, "zh-CN");
+            var ws = new StudioWorkspaceEngine(rawBundle.ManifestJson, rawBundle.LogicJs, rawBundle.Locales);
+            Assert.False(ws.NormalizeDomInPlace(), $"Template '{tplId}' had unexpected DOM normalization drift.");
+
+            CustomWidgetCompilerResult compiled = CustomWidgetCompilerPipeline.Compile(
+                rawBundle.ManifestJson,
+                rawBundle.LogicJs,
+                rawBundle.Locales,
+                runOnInitDryRun: true);
+            Assert.Empty(compiled.HardDiagnostics);
+            Assert.Empty(compiled.ActionableSoftDiagnostics);
+            Assert.Equal(13, rawBundle.Locales!.Locales.Count);
+        }
     }
 
     [Fact]
@@ -1028,12 +1138,12 @@ public sealed class CustomWidgetTests
             Assert.Equal(60.0, codexSnap.SecondaryWindow!.RemainingPercent);
 
             CustomWidgetAiLocalSummary localSummary = CustomWidgetAiMonitorEngine.BuildLocalSummary(
-                claudeTurns,
+                [new CustomWidgetAiMonitorEngine.CachedClaudeFileSummary(0, 0, claudeTurns)],
                 codexSessions,
                 claudeFileCount,
                 codexFileCount,
                 now);
-            Assert.Equal(14, localSummary.Last14Days.Count);
+            Assert.Equal(28, localSummary.Last28Days.Count);
             Assert.True(localSummary.TodayTokens > 150_000);
             Assert.True(localSummary.CacheHitPercent > 85.0);
 
@@ -1357,5 +1467,211 @@ public sealed class CustomWidgetTests
 
         TimeSpan nearMidnightDelay = CustomWidgetViewModel.ComputeCountdownNextMidnightDelay(nearMidnightOffset);
         Assert.InRange(nearMidnightDelay.TotalSeconds, 10.0, 10.5);
+    }
+
+    [Fact]
+    public void AiMonitor_SiliconFlowMiniMaxAndOneApiParsers_HandleBalancesWindowsAndUnlimitedQuotas()
+    {
+        DateTimeOffset now = new(2026, 11, 17, 14, 0, 0, TimeSpan.FromHours(8));
+
+        var sfCn = CustomWidgetAiMonitorEngine.ParseSiliconFlowBalanceJson(
+            """{"code":20000,"status":true,"data":{"balance":"2.50","chargeBalance":"86.00","totalBalance":"88.50"}}""",
+            "cn",
+            now,
+            "zh-CN");
+        Assert.True(sfCn.HasLiveData);
+        Assert.Equal(AiProviderBillingKind.WalletBalance, sfCn.BillingKind);
+        Assert.Equal(88.50, sfCn.WalletBalance, 2);
+        Assert.Equal("¥ 88.50", sfCn.WalletFormatted);
+        Assert.Equal("CNY", sfCn.PlanBadge);
+
+        var mmPlan = CustomWidgetAiMonitorEngine.ParseMiniMaxQuotaJson(
+            """
+            {
+              "code": 0,
+              "data": {
+                "current_interval_total_count": 5000000,
+                "current_interval_usage_count": 1000000,
+                "current_interval_reset_time": "2026-11-17T16:30:00+08:00",
+                "current_weekly_total_count": 35000000,
+                "current_weekly_usage_count": 3500000,
+                "current_weekly_reset_time": "2026-11-22T00:00:00+08:00"
+              }
+            }
+            """,
+            "cn",
+            now,
+            "zh-CN");
+        Assert.True(mmPlan.HasLiveData);
+        Assert.Equal(AiProviderBillingKind.WindowQuota, mmPlan.BillingKind);
+        Assert.NotNull(mmPlan.PrimaryWindow);
+        Assert.NotNull(mmPlan.SecondaryWindow);
+        Assert.Equal(80.0, mmPlan.PrimaryWindow!.RemainingPercent, 1);
+        Assert.Equal(90.0, mmPlan.SecondaryWindow!.RemainingPercent, 1);
+
+        var mmAuthErr = CustomWidgetAiMonitorEngine.ParseMiniMaxQuotaJson(
+            """{"base_resp":{"status_code":1004,"status_msg":"cookie is missing"}}""",
+            "cn",
+            now,
+            "en-US");
+        Assert.False(mmAuthErr.HasLiveData);
+        Assert.NotNull(mmAuthErr.ErrorMessage);
+
+        Assert.Equal(
+            "https://api.myrelay.com",
+            CustomWidgetAiMonitorEngine.NormalizeGatewayBaseUrl("https://api.myrelay.com/v1/chat/completions/"));
+
+        var oneApiFinite = CustomWidgetAiMonitorEngine.ParseOneApiBillingJson(
+            """{"hard_limit_usd":50.0,"used_usd":12.4,"host":"api.myrelay.com"}""",
+            now,
+            "zh-CN");
+        Assert.Equal(37.6, oneApiFinite.WalletBalance, 2);
+        Assert.Equal("$ 37.60", oneApiFinite.WalletFormatted);
+
+        var oneApiUnlimited = CustomWidgetAiMonitorEngine.ParseOneApiBillingJson(
+            """{"hard_limit_usd":100000000,"used_usd":18.5,"host":"api.myrelay.com"}""",
+            now,
+            "zh-CN");
+        Assert.Equal("∞", oneApiUnlimited.WalletFormatted);
+        var (unlimPct, unlimHealth, _, _) = CustomWidgetAiMonitorEngine.EvaluateEffectiveProviderMetrics(
+            oneApiUnlimited,
+            new Dictionary<string, string> { ["walletCurrency"] = "USD", ["walletTargetBalance"] = "500" },
+            "en-US");
+        Assert.Equal(100.0, unlimPct, 1);
+        Assert.Equal(AiQuotaHealth.Healthy, unlimHealth);
+    }
+
+    [Fact]
+    public void AiMonitor_GeminiCliLocalAnalyzer_ParsesSessionsWithoutDoubleCountingCacheAndBuilds28DayRollup()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "deskbox-gemini-test-" + Guid.NewGuid().ToString("N"));
+        string chatsDir = Path.Combine(tempDir, "proj-hash-01", "chats");
+        Directory.CreateDirectory(chatsDir);
+        try
+        {
+            DateTimeOffset now = new(2026, 11, 17, 15, 0, 0, TimeSpan.FromHours(8));
+            string sessionPath = Path.Combine(chatsDir, "session-001.json");
+            File.WriteAllText(
+                sessionPath,
+                """
+                {
+                  "sessionId": "s-1",
+                  "startTime": "2026-11-17T13:10:00+08:00",
+                  "messages": [
+                    {
+                      "type": "gemini",
+                      "timestamp": "2026-11-17T13:15:00+08:00",
+                      "model": "gemini-2.5-pro",
+                      "tokens": {
+                        "prompt": 100000,
+                        "cached": 80000,
+                        "candidates": 5000,
+                        "thoughts": 3000,
+                        "total": 108000
+                      }
+                    }
+                  ]
+                }
+                """);
+
+            var cache = new Dictionary<string, CustomWidgetAiMonitorEngine.CachedGeminiFileSummary>(StringComparer.OrdinalIgnoreCase);
+            var (snap, files, fileCount) = CustomWidgetAiMonitorEngine.AnalyzeGeminiCliDirectory(
+                tempDir,
+                enabled: true,
+                now: now,
+                fileCache: cache,
+                cultureName: "zh-CN");
+
+            Assert.Equal(1, fileCount);
+            Assert.True(snap.IsConfigured);
+            Assert.True(snap.HasLiveData);
+
+            // Uncached input = 100k - 80k = 20k; total = 20k + 80k + 5k + 3k = 108k (never 188k!)
+            CustomWidgetAiLocalSummary summary = CustomWidgetAiMonitorEngine.BuildLocalSummary(
+                Array.Empty<CustomWidgetAiMonitorEngine.CachedClaudeFileSummary>(),
+                [],
+                claudeFiles: 0,
+                codexFiles: 0,
+                now: now,
+                geminiSessions: files,
+                geminiFiles: fileCount);
+
+            Assert.Equal(108_000, summary.TodayTokens);
+            Assert.Equal(80.0, summary.CacheHitPercent, 1);
+            Assert.Equal(28, summary.EffectiveLast28Days.Count);
+            Assert.Equal(108_000, summary.EffectiveLast28Days[^1].TotalTokens);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void AiMonitor_WalletLedgerAndPaceDetector_TracksDailySpendAcrossTopUpsAndProjectsSchemeDLedger()
+    {
+        var ledger = new CustomWidgetAiWalletLedger(null, inMemoryOnly: true);
+        DateOnly d1 = new(2026, 11, 17);
+
+        Assert.Equal(0.0, ledger.RecordObservation("deepseek", d1, 50.00, "¥"), 3);
+        Assert.Equal(3.40, ledger.RecordObservation("deepseek", d1, 46.60, "¥"), 3);
+        // User tops up +100 -> spend accumulated earlier today must be preserved, not erased!
+        Assert.Equal(3.40, ledger.RecordObservation("deepseek", d1, 146.60, "¥"), 3);
+        Assert.Equal(5.00, ledger.RecordObservation("deepseek", d1, 145.00, "¥"), 3);
+
+        DateTimeOffset now = new(2026, 11, 17, 16, 0, 0, TimeSpan.FromHours(8));
+        // 55% used when only 30 minutes (10%) of 5h window elapsed -> pace is hot!
+        Assert.True(CustomWidgetAiMonitorEngine.EvaluateWindowPaceIsHot(
+            usedPercent: 55.0,
+            resetsAt: now.AddHours(4).AddMinutes(30),
+            now: now,
+            windowDuration: TimeSpan.FromHours(5)));
+        // 55% used when 4 hours (80%) of 5h window elapsed -> sustainable pace!
+        Assert.False(CustomWidgetAiMonitorEngine.EvaluateWindowPaceIsHot(
+            usedPercent: 55.0,
+            resetsAt: now.AddHours(1),
+            now: now,
+            windowDuration: TimeSpan.FromHours(5)));
+
+        var dsSnap = CustomWidgetAiMonitorEngine.ParseDeepSeekBalanceJson(
+            """{"is_available":true,"balance_infos":[{"currency":"CNY","total_balance":"1.55","granted_balance":"1.55","topped_up_balance":"0.00"}]}""",
+            now,
+            "zh-CN") with { WalletTodaySpend = 5.00 };
+
+        var settings = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["walletCurrency"] = "CNY",
+            ["walletTargetBalance"] = "100"
+        };
+        string walletLine = CustomWidgetAiMonitorEngine.BuildProviderLedgerSummary(dsSnap, settings, now, "zh-CN");
+        Assert.Contains("5.00", walletLine);
+        Assert.Contains("¥100", walletLine);
+
+        var buckets28 = Enumerable.Range(0, 28)
+            .Select(i => new CustomWidgetAiDailyBucket(
+                d1.AddDays(-(27 - i)),
+                i == 27 ? 65_000 : (i % 4 == 0 ? 0 : 40_000),
+                i == 16 ? 8.50 : (i % 4 == 0 ? 0.0 : 0.45)))
+            .ToArray();
+        var monSnap = new CustomWidgetAiMonitorSnapshot(
+            AllProviders: [dsSnap],
+            ActiveProviders: [dsSnap],
+            LocalSummary: new CustomWidgetAiLocalSummary(140_000, 1.20, 84.0, 2_100_000, 18.40, 2, 1, buckets28, 1),
+            UpdatedAt: now);
+
+        var evalCtx = new CustomWidgetEvaluationContext
+        {
+            AiMonitor = monSnap,
+            Settings = settings,
+            CultureName = "zh-CN"
+        };
+        Assert.True(CustomWidgetExpressionEvaluator.TryResolveVirtualCollection("$ai.daily28", evalCtx, out var d28Records));
+        Assert.Equal(28, d28Records.Count);
+        Assert.Equal("subtle", d28Records[0].GetField("tone"));
+        Assert.Equal("warning", d28Records[16].GetField("tone"));
+        Assert.Equal("emerald", d28Records[27].GetField("tone"));
     }
 }

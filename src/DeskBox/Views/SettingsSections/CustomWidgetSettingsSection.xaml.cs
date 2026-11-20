@@ -31,8 +31,16 @@ public sealed partial class CustomWidgetSettingsSection : UserControl
         CustomWidgetManifest? Manifest = null,
         string? LogicJs = null);
 
+    private readonly struct LocalizationAccess(CustomWidgetSettingsSection owner)
+    {
+        public string CurrentCultureName => AiProviderConfigFormController.ResolveCultureName(owner._localization);
+        public string T(string key) => AiProviderConfigFormController.Translate(owner._localization, key);
+        public string Format(string key, params object[] args) => AiProviderConfigFormController.Format(owner._localization, key, args);
+    }
+
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
     private ISettingsWidgetActions _widgetActions = null!;
+    private LocalizationService? _localization;
     private IntPtr _ownerWindow;
     private string? _highlightedWidgetId;
     private string? _detailWidgetId;
@@ -43,7 +51,6 @@ public sealed partial class CustomWidgetSettingsSection : UserControl
     private long _lastLocalDetailWriteTick;
     private readonly List<Action<IReadOnlyDictionary<string, string>>> _detailSyncHandlers = [];
     private bool _isSectionLoaded;
-    private bool _instanceRefreshQueued;
     private bool _isDialogOpen;
     private string _instanceStateSignature = string.Empty;
 
@@ -53,6 +60,7 @@ public sealed partial class CustomWidgetSettingsSection : UserControl
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
         ActualThemeChanged += OnActualThemeChanged;
+        RegisterPropertyChangedCallback(VisibilityProperty, OnVisibilityChanged);
     }
 
     public event EventHandler? SubPageChanged;
@@ -62,12 +70,25 @@ public sealed partial class CustomWidgetSettingsSection : UserControl
 
     public string? ActiveDetailTitle { get; private set; }
 
-    private LocalizationService Localization => App.Current.LocalizationService;
+    private LocalizationAccess Localization => new(this);
 
-    public void Configure(ISettingsWidgetActions widgetActions, IntPtr ownerWindow)
+    public void Configure(ISettingsWidgetActions widgetActions, IntPtr ownerWindow, LocalizationService? localization = null)
     {
         _widgetActions = widgetActions;
         _ownerWindow = ownerWindow;
+        if (localization is not null && !ReferenceEquals(_localization, localization))
+        {
+            if (_localization is not null)
+            {
+                _localization.LanguageChanged -= OnLanguageChanged;
+            }
+            _localization = localization;
+            if (_isSectionLoaded)
+            {
+                _localization.LanguageChanged -= OnLanguageChanged;
+                _localization.LanguageChanged += OnLanguageChanged;
+            }
+        }
     }
 
     public void SelectWidget(string widgetId)
@@ -175,10 +196,12 @@ public sealed partial class CustomWidgetSettingsSection : UserControl
         {
             _isSectionLoaded = true;
             SettingsWindow.ApplyNoticeMessageTypography(StudioStatusInfoBar);
-            App.Current.SettingsService.SettingsChanged -= OnAppSettingsChanged;
-            App.Current.SettingsService.SettingsChanged += OnAppSettingsChanged;
-            Localization.LanguageChanged -= OnLanguageChanged;
-            Localization.LanguageChanged += OnLanguageChanged;
+            SettingsWindow.EnsureInformationalSeverityPinned(StudioStatusInfoBar);
+            if (_localization is not null)
+            {
+                _localization.LanguageChanged -= OnLanguageChanged;
+                _localization.LanguageChanged += OnLanguageChanged;
+            }
             _ = CustomWidgetRemotePromptService.Shared.RefreshInBackgroundAsync();
             await RefreshFromStoreAsync();
         }
@@ -191,9 +214,19 @@ public sealed partial class CustomWidgetSettingsSection : UserControl
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
         _isSectionLoaded = false;
-        App.Current.SettingsService.SettingsChanged -= OnAppSettingsChanged;
-        Localization.LanguageChanged -= OnLanguageChanged;
+        if (_localization is not null)
+        {
+            _localization.LanguageChanged -= OnLanguageChanged;
+        }
         DisposeDetailWatcher();
+    }
+
+    private void OnVisibilityChanged(DependencyObject sender, DependencyProperty dp)
+    {
+        if (_isSectionLoaded && Visibility == Visibility.Visible)
+        {
+            _ = RefreshStudioAsync();
+        }
     }
 
     private void OnLanguageChanged()
@@ -214,45 +247,6 @@ public sealed partial class CustomWidgetSettingsSection : UserControl
         }
 
         _ = RefreshStudioAsync();
-    }
-
-    private void OnAppSettingsChanged()
-    {
-        if (!_isSectionLoaded || _instanceRefreshQueued)
-        {
-            return;
-        }
-
-        _instanceRefreshQueued = true;
-        if (!DispatcherQueue.TryEnqueue(async () =>
-        {
-            try
-            {
-                if (!_isSectionLoaded || _widgetActions is null || !_widgetActions.IsHostAvailable)
-                {
-                    return;
-                }
-
-                IReadOnlyList<GlanceWidgetInstanceInfo> instances =
-                    await _widgetActions.GetCustomWidgetInstancesAsync();
-                string nextSig = CreateInstanceStateSignature(instances);
-                if (!string.Equals(_instanceStateSignature, nextSig, StringComparison.Ordinal))
-                {
-                    await RefreshStudioAsync();
-                }
-            }
-            catch (Exception ex)
-            {
-                App.Log($"[CustomWidgetSettings] Refresh failed: {ex.Message}");
-            }
-            finally
-            {
-                _instanceRefreshQueued = false;
-            }
-        }))
-        {
-            _instanceRefreshQueued = false;
-        }
     }
 
     private async Task ProcessPendingDeepLinkModalAsync()
@@ -301,10 +295,20 @@ public sealed partial class CustomWidgetSettingsSection : UserControl
 
     private async Task RefreshStudioCoreAsync()
     {
+        if (!_isSectionLoaded)
+        {
+            return;
+        }
+
         IReadOnlyList<GlanceWidgetInstanceInfo> instances =
             _widgetActions is not null && _widgetActions.IsHostAvailable
                 ? await _widgetActions.GetCustomWidgetInstancesAsync()
                 : [];
+        if (!_isSectionLoaded)
+        {
+            return;
+        }
+
         _instanceStateSignature = CreateInstanceStateSignature(instances);
 
         bool animateDetailEnter = false;
@@ -327,6 +331,11 @@ public sealed partial class CustomWidgetSettingsSection : UserControl
             if (detailInstance is not null)
             {
                 InstanceCardMetadata detailMeta = await ReadInstanceMetadataAsync(detailInstance.Id);
+                if (!_isSectionLoaded)
+                {
+                    return;
+                }
+
                 RenderDetailSubviewCore(detailInstance, detailMeta, animateEnter: animateDetailEnter);
                 return;
             }
@@ -375,6 +384,11 @@ public sealed partial class CustomWidgetSettingsSection : UserControl
         foreach (GlanceWidgetInstanceInfo info in instances)
         {
             InstanceCardMetadata meta = await ReadInstanceMetadataAsync(info.Id);
+            if (!_isSectionLoaded)
+            {
+                return;
+            }
+
             metadataList.Add((info, meta));
         }
 
@@ -410,14 +424,6 @@ public sealed partial class CustomWidgetSettingsSection : UserControl
         }
     }
 
-    private static readonly string[] FeaturedWidgetEmojis =
-    [
-        "📊", "🍅", "🤖", "⏳", "📝", "🎯", "📋",
-        "💧", "🚀", "💡", "✅", "📅", "📌", "🗂️",
-        "💻", "⚡", "🔥", "🔔", "🛠️", "💰", "📈",
-        "📎", "🧠", "🏆", "🎨", "🌐", "⏱️", "✨"
-    ];
-
     private static FrameworkElement CreateIconGlyphContent(
         string? glyph,
         Brush fallbackForeground,
@@ -429,7 +435,7 @@ public sealed partial class CustomWidgetSettingsSection : UserControl
             var emojiTb = new TextBlock
             {
                 Text = glyph!.Trim(),
-                FontFamily = new FontFamily("Segoe UI Emoji"),
+                FontFamily = new FontFamily("Segoe UI Emoji, Segoe UI Symbol, Segoe UI"),
                 FontSize = emojiFontSize,
                 TextAlignment = TextAlignment.Center,
                 HorizontalAlignment = HorizontalAlignment.Center,
@@ -527,7 +533,10 @@ public sealed partial class CustomWidgetSettingsSection : UserControl
         bool isHighlighted)
     {
         string widgetId = info.Id;
-        string widgetName = info.Name;
+        string widgetName = !string.IsNullOrWhiteSpace(info.Name) &&
+                            !info.Name.Contains("$i18n", StringComparison.Ordinal)
+            ? info.Name
+            : (meta.Manifest?.ResolveLocalizedName(Localization.CurrentCultureName) ?? info.Name);
 
         var card = new SettingsCard
         {
@@ -706,6 +715,11 @@ public sealed partial class CustomWidgetSettingsSection : UserControl
 
     private async Task OpenWidgetDetailAsync(string widgetId)
     {
+        if (!_isSectionLoaded)
+        {
+            return;
+        }
+
         try
         {
             _highlightedWidgetId = widgetId;
@@ -716,6 +730,11 @@ public sealed partial class CustomWidgetSettingsSection : UserControl
                 _widgetActions is not null && _widgetActions.IsHostAvailable
                     ? await _widgetActions.GetCustomWidgetInstancesAsync()
                     : [];
+            if (!_isSectionLoaded)
+            {
+                return;
+            }
+
             GlanceWidgetInstanceInfo? info = instances.FirstOrDefault(i =>
                 string.Equals(i.Id, widgetId, StringComparison.Ordinal));
             if (info is null)
@@ -725,6 +744,11 @@ public sealed partial class CustomWidgetSettingsSection : UserControl
             }
 
             InstanceCardMetadata meta = await ReadInstanceMetadataAsync(widgetId);
+            if (!_isSectionLoaded)
+            {
+                return;
+            }
+
             RenderDetailSubviewCore(info, meta, animateEnter: true);
         }
         catch (Exception ex)
@@ -740,7 +764,10 @@ public sealed partial class CustomWidgetSettingsSection : UserControl
         bool animateEnter)
     {
         string widgetId = info.Id;
-        string liveName = info.Name;
+        string liveName = !string.IsNullOrWhiteSpace(info.Name) &&
+                          !info.Name.Contains("$i18n", StringComparison.Ordinal)
+            ? info.Name
+            : (meta.Manifest?.ResolveLocalizedName(Localization.CurrentCultureName) ?? info.Name);
         bool titleChanged = !string.Equals(ActiveDetailTitle, liveName, StringComparison.Ordinal);
         ActiveDetailTitle = liveName;
 
@@ -1160,797 +1187,60 @@ public sealed partial class CustomWidgetSettingsSection : UserControl
         }
     }
 
+    private CustomWidgetSettingsFormOptions CreateSettingsFormOptions(string widgetId) =>
+        new()
+        {
+            Localization = _localization!,
+            CultureName = Localization.CurrentCultureName,
+            OwnerWindowHandle = _ownerWindow,
+            ThemeScope = this,
+            CommitSettingAsync = (key, val) => SaveSingleWidgetSettingAsync(widgetId, key, val),
+            ReadSecret = key => CustomWidgetSecretStore.Shared.GetSecret(widgetId, key),
+            CommitSecretAsync = (key, val) => SaveWidgetSecretSettingAsync(widgetId, key, val),
+            RegisterExternalSync = handler => _detailSyncHandlers.Add(handler)
+        };
+
     private Border BuildModuleReorderGroupCard(
         string widgetId,
         CustomWidgetSettingDefinition def,
         string initialRaw)
     {
-        string settingKey = def.Key;
-        string liveRaw = initialRaw;
-
-        var groupBorder = new Border
-        {
-            Style = (Style)Resources["SettingsGroupStyle"]
-        };
-
-        var groupStack = new StackPanel();
-
-        // Top SettingsCard-aligned Header Row
-        var headerGrid = new Grid
-        {
-            MinHeight = 62,
-            Padding = new Thickness(16, 12, 16, 12),
-            ColumnSpacing = 20
-        };
-        headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-        headerGrid.Children.Add(new FontIcon
-        {
-            Glyph = "\uE8FD",
-            FontSize = 16,
-            VerticalAlignment = VerticalAlignment.Center
-        });
-
-        var headerTextStack = new StackPanel
-        {
-            Spacing = 2,
-            VerticalAlignment = VerticalAlignment.Center
-        };
-        headerTextStack.Children.Add(new TextBlock
-        {
-            Text = def.Label,
-            Style = (Style)Resources["SettingTitleTextStyle"]
-        });
-        headerTextStack.Children.Add(new TextBlock
-        {
-            Text = Localization.T("CustomWidget.Native.Detail.ModuleDescription"),
-            Style = (Style)Resources["SettingDescriptionTextStyle"]
-        });
-        Grid.SetColumn(headerTextStack, 1);
-        headerGrid.Children.Add(headerTextStack);
-
-        var countBadge = new TextBlock
-        {
-            Style = (Style)Resources["SettingDescriptionTextStyle"],
-            VerticalAlignment = VerticalAlignment.Center
-        };
-        Grid.SetColumn(countBadge, 2);
-        headerGrid.Children.Add(countBadge);
-        groupStack.Children.Add(headerGrid);
-
-        groupStack.Children.Add(new Border
-        {
-            Height = 1,
-            Background = ResolveBrush(
-                "DividerStrokeColorDefaultBrush",
-                Color.FromArgb(0x18, 0x80, 0x80, 0x80)),
-            Opacity = 0.72
-        });
-
-        var itemContainerStyle = new Style(typeof(ListViewItem));
-        if (Application.Current?.Resources is { } appRes &&
-            appRes.TryGetValue("DefaultListViewItemStyle", out object? baseObj) &&
-            baseObj is Style baseItemStyle)
-        {
-            itemContainerStyle.BasedOn = baseItemStyle;
-        }
-        itemContainerStyle.Setters.Add(new Setter(Control.HorizontalContentAlignmentProperty, HorizontalAlignment.Stretch));
-        itemContainerStyle.Setters.Add(new Setter(Control.VerticalContentAlignmentProperty, VerticalAlignment.Center));
-        itemContainerStyle.Setters.Add(new Setter(FrameworkElement.MinHeightProperty, 44d));
-        itemContainerStyle.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(12, 2, 16, 2)));
-        itemContainerStyle.Setters.Add(new Setter(FrameworkElement.MarginProperty, new Thickness(4, 1, 4, 1)));
-
         bool canDragReorderModules = !DragDropPermissionService.IsCurrentProcessElevatedCached();
-        var listView = new ListView
-        {
-            AllowDrop = canDragReorderModules,
-            CanDragItems = canDragReorderModules,
-            CanReorderItems = canDragReorderModules,
-            ReorderMode = canDragReorderModules ? ListViewReorderMode.Enabled : ListViewReorderMode.Disabled,
-            SelectionMode = ListViewSelectionMode.None,
-            IsItemClickEnabled = false,
-            Background = new SolidColorBrush(Colors.Transparent),
-            Padding = new Thickness(0, 4, 0, 4),
-            ItemContainerStyle = itemContainerStyle
-        };
-        ScrollViewer.SetHorizontalScrollBarVisibility(listView, ScrollBarVisibility.Disabled);
-        ScrollViewer.SetVerticalScrollBarVisibility(listView, ScrollBarVisibility.Disabled);
-
-        var rowRefs = new Dictionary<string, (TextBlock Label, ToggleSwitch Switch)>(StringComparer.Ordinal);
-        bool suppressSwitchEvents = false;
-
-        void RefreshRowVisualStates()
-        {
-            IReadOnlyList<CustomWidgetModuleEntry> parsed =
-                CustomWidgetModuleListHelper.ParseEntries(liveRaw, def.Options);
-            int enabledCount = parsed.Count(static e => e.Enabled);
-            countBadge.Text = Localization.Format(
-                "CustomWidget.Native.Detail.ModuleEnabledCount",
-                enabledCount,
-                parsed.Count);
-
-            suppressSwitchEvents = true;
-            try
-            {
-                foreach (CustomWidgetModuleEntry entry in parsed)
-                {
-                    if (rowRefs.TryGetValue(entry.Id, out var pair))
-                    {
-                        pair.Label.Opacity = entry.Enabled ? 1.0 : 0.56;
-                        if (pair.Switch.IsOn != entry.Enabled)
-                        {
-                            pair.Switch.IsOn = entry.Enabled;
-                        }
-                        pair.Switch.IsEnabled = !entry.Enabled || enabledCount > 1;
-                    }
-                }
-            }
-            finally
-            {
-                suppressSwitchEvents = false;
-            }
-        }
-
-        void PopulateListViewItems()
-        {
-            listView.Items.Clear();
-            rowRefs.Clear();
-
-            IReadOnlyList<CustomWidgetModuleEntry> entries =
-                CustomWidgetModuleListHelper.ParseEntries(liveRaw, def.Options);
-            int enabledCount = entries.Count(static e => e.Enabled);
-            countBadge.Text = Localization.Format(
-                "CustomWidget.Native.Detail.ModuleEnabledCount",
-                enabledCount,
-                entries.Count);
-
-            foreach (CustomWidgetModuleEntry entry in entries)
-            {
-                string moduleId = entry.Id;
-
-                var rowGrid = new Grid
-                {
-                    ColumnSpacing = 14,
-                    Background = new SolidColorBrush(Colors.Transparent)
-                };
-                rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-                rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-                var gripIcon = new FontIcon
-                {
-                    Glyph = "\uE784",
-                    FontSize = 14,
-                    Opacity = 0.45,
-                    VerticalAlignment = VerticalAlignment.Center
-                };
-                ToolTipService.SetToolTip(gripIcon, Localization.T("CustomWidget.Module.DragHint"));
-
-                rowGrid.PointerEntered += (_, _) => gripIcon.Opacity = 0.88;
-                rowGrid.PointerExited += (_, _) => gripIcon.Opacity = 0.45;
-
-                var labelTb = new TextBlock
-                {
-                    Text = entry.Label,
-                    FontSize = 14,
-                    Opacity = entry.Enabled ? 1.0 : 0.56,
-                    VerticalAlignment = VerticalAlignment.Center,
-                    TextTrimming = TextTrimming.CharacterEllipsis
-                };
-
-                var sw = new ToggleSwitch
-                {
-                    MinWidth = 0,
-                    OnContent = string.Empty,
-                    OffContent = string.Empty,
-                    IsOn = entry.Enabled,
-                    IsEnabled = !entry.Enabled || enabledCount > 1,
-                    VerticalAlignment = VerticalAlignment.Center
-                };
-                AutomationProperties.SetName(sw, entry.Label);
-
-                sw.Toggled += async (_, _) =>
-                {
-                    if (suppressSwitchEvents)
-                    {
-                        return;
-                    }
-
-                    liveRaw = CustomWidgetModuleListHelper.SetModuleEnabled(
-                        liveRaw,
-                        def.Options,
-                        moduleId,
-                        sw.IsOn);
-                    RefreshRowVisualStates();
-                    await SaveSingleWidgetSettingAsync(widgetId, settingKey, liveRaw);
-                };
-
-                Grid.SetColumn(gripIcon, 0);
-                Grid.SetColumn(labelTb, 1);
-                Grid.SetColumn(sw, 2);
-                rowGrid.Children.Add(gripIcon);
-                rowGrid.Children.Add(labelTb);
-                rowGrid.Children.Add(sw);
-
-                rowRefs[moduleId] = (labelTb, sw);
-
-                var lvi = new ListViewItem
-                {
-                    Tag = moduleId,
-                    Content = rowGrid
-                };
-                AutomationProperties.SetName(lvi, entry.Label);
-                listView.Items.Add(lvi);
-            }
-        }
-
-        listView.DragItemsCompleted += async (_, _) =>
-        {
-            IReadOnlyList<CustomWidgetModuleEntry> currentEntries =
-                CustomWidgetModuleListHelper.ParseEntries(liveRaw, def.Options);
-            var enabledMap = currentEntries.ToDictionary(
-                static e => e.Id,
-                static e => e.Enabled,
-                StringComparer.OrdinalIgnoreCase);
-
-            var reorderedTokens = new List<string>(listView.Items.Count);
-            for (int i = 0; i < listView.Items.Count; i++)
-            {
-                if (listView.Items[i] is ListViewItem { Tag: string id })
-                {
-                    bool isOn = !enabledMap.TryGetValue(id, out bool en) || en;
-                    reorderedTokens.Add(isOn ? id : "-" + id);
-                }
-            }
-
-            string nextRaw = CustomWidgetModuleListHelper.SerializeEntries(
-                CustomWidgetModuleListHelper.ParseEntries(
-                    string.Join(",", reorderedTokens),
-                    def.Options));
-
-            if (!string.Equals(nextRaw, liveRaw, StringComparison.Ordinal))
-            {
-                liveRaw = nextRaw;
-                RefreshRowVisualStates();
-                await SaveSingleWidgetSettingAsync(widgetId, settingKey, liveRaw);
-            }
-        };
-
-        PopulateListViewItems();
-
-        _detailSyncHandlers.Add(latestSettings =>
-        {
-            string synced = latestSettings.TryGetValue(settingKey, out string? v)
-                ? v
-                : def.DefaultValue;
-            if (!string.Equals(synced, liveRaw, StringComparison.Ordinal))
-            {
-                liveRaw = synced;
-                PopulateListViewItems();
-            }
-        });
-
-        groupStack.Children.Add(listView);
-        groupBorder.Child = groupStack;
-        return groupBorder;
+        return CustomWidgetSettingsFormBuilder.BuildModuleReorderGroupCard(
+            def,
+            initialRaw,
+            CreateSettingsFormOptions(widgetId),
+            canDragReorderModules,
+            groupStyle: Resources.TryGetValue("SettingsGroupStyle", out object? gs) ? gs as Style : null,
+            titleTextStyle: Resources.TryGetValue("SettingTitleTextStyle", out object? ts) ? ts as Style : null,
+            descriptionTextStyle: Resources.TryGetValue("SettingDescriptionTextStyle", out object? ds) ? ds as Style : null);
     }
 
     private SettingsCard BuildParameterSettingsCard(
         string widgetId,
         CustomWidgetSettingDefinition def,
-        string currentVal)
-    {
-        string settingKey = def.Key;
-        var card = new SettingsCard
-        {
-            HorizontalContentAlignment = HorizontalAlignment.Right,
-            Header = def.Label,
-            HeaderIcon = new FontIcon { Glyph = ResolveSettingIconGlyph(def) }
-        };
-
-        if (string.Equals(def.Type, "secret", StringComparison.OrdinalIgnoreCase))
-        {
-            string existingSecret = CustomWidgetSecretStore.Shared.GetSecret(widgetId, settingKey);
-            card.Description = LocalizationService.TranslateForCulture(
-                Localized.ActiveCultureName,
-                "CustomWidget.Secret.SettingsDpapiNote");
-
-            var pwdBox = new PasswordBox
-            {
-                Width = 200,
-                CornerRadius = new CornerRadius(6),
-                PlaceholderText = !string.IsNullOrWhiteSpace(existingSecret)
-                    ? $"{CustomWidgetSecretStore.MaskSecret(existingSecret)}"
-                    : LocalizationService.TranslateForCulture(Localized.ActiveCultureName, "CustomWidget.Secret.SettingsFieldPlaceholder"),
-                VerticalAlignment = VerticalAlignment.Center
-            };
-            AutomationProperties.SetName(pwdBox, def.Label);
-
-            var saveBtn = new Button
-            {
-                Content = Localized.T("Common.Save"),
-                CornerRadius = new CornerRadius(6),
-                VerticalAlignment = VerticalAlignment.Center
-            };
-            var clearBtn = new Button
-            {
-                Content = LocalizationService.TranslateForCulture(Localized.ActiveCultureName, "CustomWidget.Secret.SettingsClear"),
-                CornerRadius = new CornerRadius(6),
-                Visibility = !string.IsNullOrWhiteSpace(existingSecret) ? Visibility.Visible : Visibility.Collapsed,
-                VerticalAlignment = VerticalAlignment.Center
-            };
-
-            async Task CommitSecretAsync(string rawSecret)
-            {
-                await SaveWidgetSecretSettingAsync(widgetId, settingKey, rawSecret);
-                string latest = CustomWidgetSecretStore.Shared.GetSecret(widgetId, settingKey);
-                pwdBox.Password = string.Empty;
-                pwdBox.PlaceholderText = !string.IsNullOrWhiteSpace(latest)
-                    ? CustomWidgetSecretStore.MaskSecret(latest)
-                    : LocalizationService.TranslateForCulture(Localized.ActiveCultureName, "CustomWidget.Secret.SettingsFieldPlaceholder");
-                clearBtn.Visibility = !string.IsNullOrWhiteSpace(latest) ? Visibility.Visible : Visibility.Collapsed;
-            }
-
-            saveBtn.Click += async (_, _) =>
-            {
-                string typed = pwdBox.Password.Trim();
-                if (!string.IsNullOrEmpty(typed))
-                {
-                    await CommitSecretAsync(typed);
-                }
-            };
-            pwdBox.KeyDown += async (_, e) =>
-            {
-                if (e.Key == VirtualKey.Enter && !string.IsNullOrWhiteSpace(pwdBox.Password))
-                {
-                    e.Handled = true;
-                    await CommitSecretAsync(pwdBox.Password.Trim());
-                }
-            };
-            clearBtn.Click += async (_, _) => await CommitSecretAsync(string.Empty);
-
-            var secretRow = new StackPanel
-            {
-                Orientation = Orientation.Horizontal,
-                Spacing = 6,
-                VerticalAlignment = VerticalAlignment.Center
-            };
-            secretRow.Children.Add(pwdBox);
-            secretRow.Children.Add(saveBtn);
-            secretRow.Children.Add(clearBtn);
-            card.Content = secretRow;
-            return card;
-        }
-        else if (string.Equals(def.Type, "toggle", StringComparison.OrdinalIgnoreCase))
-        {
-            var toggle = new ToggleSwitch
-            {
-                MinWidth = 0,
-                OnContent = string.Empty,
-                OffContent = string.Empty,
-                IsOn = CustomWidgetExpressionEvaluator.IsTruthy(currentVal),
-                VerticalAlignment = VerticalAlignment.Center
-            };
-            AutomationProperties.SetName(toggle, def.Label);
-            bool suppress = false;
-            toggle.Toggled += async (_, _) =>
-            {
-                if (suppress)
-                {
-                    return;
-                }
-
-                suppress = true;
-                try
-                {
-                    await SaveSingleWidgetSettingAsync(widgetId, settingKey, toggle.IsOn ? "true" : "false");
-                }
-                finally
-                {
-                    suppress = false;
-                }
-            };
-            _detailSyncHandlers.Add(latestSettings =>
-            {
-                string synced = latestSettings.TryGetValue(settingKey, out string? v)
-                    ? v
-                    : def.DefaultValue;
-                bool wantOn = CustomWidgetExpressionEvaluator.IsTruthy(synced);
-                if (toggle.IsOn != wantOn)
-                {
-                    suppress = true;
-                    toggle.IsOn = wantOn;
-                    suppress = false;
-                }
-            });
-
-            card.Content = toggle;
-        }
-        else if (def.Options.Count > 0)
-        {
-            IReadOnlyList<CustomWidgetOptionSpec> effectiveOptions =
-                CustomWidgetContextMenuBuilder.ResolveEffectiveSettingOptions(def);
-
-            bool useInlineSegmented = effectiveOptions.Count is >= 2 and <= 3 &&
-                effectiveOptions.All(static o => !string.IsNullOrWhiteSpace(o.Label) && o.Label.Length <= 10);
-
-            if (useInlineSegmented)
-            {
-                var segmented = new Segmented
-                {
-                    VerticalAlignment = VerticalAlignment.Center
-                };
-                AutomationProperties.SetName(segmented, def.Label);
-                segmented.Loaded += (_, _) => WidgetSegmentedStyleHelper.ApplyNeutralPointerStates(segmented);
-
-                SegmentedItem? selectedSegment = null;
-                foreach (CustomWidgetOptionSpec opt in effectiveOptions)
-                {
-                    var segItem = new SegmentedItem
-                    {
-                        Padding = new Thickness(12, 4, 12, 4),
-                        Tag = opt.Value,
-                        Content = new TextBlock
-                        {
-                            Text = opt.Label,
-                            FontSize = 12.5
-                        }
-                    };
-                    segmented.Items.Add(segItem);
-                    if (string.Equals(opt.Value, currentVal, StringComparison.OrdinalIgnoreCase))
-                    {
-                        selectedSegment = segItem;
-                    }
-                }
-
-                segmented.SelectedItem = selectedSegment ?? segmented.Items.FirstOrDefault();
-                bool suppress = false;
-                segmented.SelectionChanged += async (_, _) =>
-                {
-                    if (suppress || segmented.SelectedItem is not SegmentedItem { Tag: string val })
-                    {
-                        return;
-                    }
-
-                    suppress = true;
-                    try
-                    {
-                        await SaveSingleWidgetSettingAsync(widgetId, settingKey, val);
-                    }
-                    finally
-                    {
-                        suppress = false;
-                    }
-                };
-                _detailSyncHandlers.Add(latestSettings =>
-                {
-                    string synced = latestSettings.TryGetValue(settingKey, out string? v)
-                        ? v
-                        : def.DefaultValue;
-                    SegmentedItem? match = segmented.Items
-                        .OfType<SegmentedItem>()
-                        .FirstOrDefault(i => i.Tag is string t && string.Equals(t, synced, StringComparison.OrdinalIgnoreCase));
-                    if (match is not null && !ReferenceEquals(segmented.SelectedItem, match))
-                    {
-                        suppress = true;
-                        segmented.SelectedItem = match;
-                        suppress = false;
-                    }
-                });
-
-                card.Content = segmented;
-            }
-            else
-            {
-                var combo = new ComboBox
-                {
-                    MinWidth = 188,
-                    CornerRadius = new CornerRadius(6),
-                    VerticalAlignment = VerticalAlignment.Center
-                };
-                AutomationProperties.SetName(combo, def.Label);
-
-                ComboBoxItem? selectedOption = null;
-                foreach (CustomWidgetOptionSpec opt in effectiveOptions)
-                {
-                    var item = new ComboBoxItem
-                    {
-                        Content = opt.Label,
-                        Tag = opt.Value
-                    };
-                    combo.Items.Add(item);
-                    if (string.Equals(opt.Value, currentVal, StringComparison.OrdinalIgnoreCase))
-                    {
-                        selectedOption = item;
-                    }
-                }
-
-                combo.SelectedItem = selectedOption ?? combo.Items.FirstOrDefault();
-                bool suppress = false;
-                combo.SelectionChanged += async (_, _) =>
-                {
-                    if (suppress || combo.SelectedItem is not ComboBoxItem { Tag: string val })
-                    {
-                        return;
-                    }
-
-                    suppress = true;
-                    try
-                    {
-                        await SaveSingleWidgetSettingAsync(widgetId, settingKey, val);
-                    }
-                    finally
-                    {
-                        suppress = false;
-                    }
-                };
-                _detailSyncHandlers.Add(latestSettings =>
-                {
-                    string synced = latestSettings.TryGetValue(settingKey, out string? v)
-                        ? v
-                        : def.DefaultValue;
-                    ComboBoxItem? match = combo.Items
-                        .OfType<ComboBoxItem>()
-                        .FirstOrDefault(i => i.Tag is string t && string.Equals(t, synced, StringComparison.OrdinalIgnoreCase));
-                    if (match is not null && !ReferenceEquals(combo.SelectedItem, match))
-                    {
-                        suppress = true;
-                        combo.SelectedItem = match;
-                        suppress = false;
-                    }
-                });
-
-                card.Content = combo;
-            }
-        }
-        else if (IsNumericParameterDefinition(def, out double defaultNumericValue))
-        {
-            double initialNumber = double.TryParse(
-                currentVal,
-                NumberStyles.Float,
-                CultureInfo.InvariantCulture,
-                out double parsedCurrent)
-                ? parsedCurrent
-                : defaultNumericValue;
-
-            bool isIntegerStep = Math.Abs(defaultNumericValue - Math.Truncate(defaultNumericValue)) < 1e-6 &&
-                                 Math.Abs(initialNumber - Math.Truncate(initialNumber)) < 1e-6 &&
-                                 !string.Equals(def.Type, "double", StringComparison.OrdinalIgnoreCase);
-
-            var numberBox = new NumberBox
-            {
-                MinWidth = 152,
-                CornerRadius = new CornerRadius(6),
-                SpinButtonPlacementMode = NumberBoxSpinButtonPlacementMode.Inline,
-                SmallChange = isIntegerStep ? 1 : 0.5,
-                LargeChange = isIntegerStep ? 5 : 2,
-                Minimum = defaultNumericValue >= 0 ? 0 : -1_000_000,
-                Maximum = 1_000_000,
-                Value = initialNumber,
-                VerticalAlignment = VerticalAlignment.Center
-            };
-            AutomationProperties.SetName(numberBox, def.Label);
-
-            string FormatNumericValue(double val) =>
-                isIntegerStep
-                    ? ((long)Math.Round(val)).ToString(CultureInfo.InvariantCulture)
-                    : val.ToString("0.##", CultureInfo.InvariantCulture);
-
-            string lastCommitted = FormatNumericValue(initialNumber);
-            bool suppress = false;
-            numberBox.ValueChanged += async (_, args) =>
-            {
-                if (suppress)
-                {
-                    return;
-                }
-
-                if (double.IsNaN(args.NewValue))
-                {
-                    suppress = true;
-                    numberBox.Value = double.IsNaN(args.OldValue) ? defaultNumericValue : args.OldValue;
-                    suppress = false;
-                    return;
-                }
-
-                string formatted = FormatNumericValue(args.NewValue);
-                if (!string.Equals(formatted, lastCommitted, StringComparison.Ordinal))
-                {
-                    lastCommitted = formatted;
-                    await SaveSingleWidgetSettingAsync(widgetId, settingKey, formatted);
-                }
-            };
-            _detailSyncHandlers.Add(latestSettings =>
-            {
-                string synced = latestSettings.TryGetValue(settingKey, out string? v)
-                    ? v
-                    : def.DefaultValue;
-                if (double.TryParse(synced, NumberStyles.Float, CultureInfo.InvariantCulture, out double syncedNum))
-                {
-                    string formatted = FormatNumericValue(syncedNum);
-                    if (!string.Equals(formatted, lastCommitted, StringComparison.Ordinal))
-                    {
-                        lastCommitted = formatted;
-                        suppress = true;
-                        numberBox.Value = syncedNum;
-                        suppress = false;
-                    }
-                }
-            });
-
-            card.Content = numberBox;
-        }
-        else
-        {
-            var inputBox = new TextBox
-            {
-                Width = 220,
-                CornerRadius = new CornerRadius(6),
-                Text = currentVal,
-                VerticalAlignment = VerticalAlignment.Center
-            };
-            AutomationProperties.SetName(inputBox, def.Label);
-
-            string lastCommitted = currentVal;
-            async Task CommitInputAsync()
-            {
-                string val = inputBox.Text.Trim();
-                if (!string.Equals(val, lastCommitted, StringComparison.Ordinal))
-                {
-                    lastCommitted = val;
-                    await SaveSingleWidgetSettingAsync(widgetId, settingKey, val);
-                }
-            }
-
-            inputBox.LostFocus += async (_, _) => await CommitInputAsync();
-            inputBox.KeyDown += async (_, e) =>
-            {
-                if (DeskBox.Helpers.ImeCompositionGuard.IsImeCompositionKeyEvent(e))
-                {
-                    return;
-                }
-
-                if (e.Key == VirtualKey.Enter)
-                {
-                    e.Handled = true;
-                    await CommitInputAsync();
-                }
-            };
-            _detailSyncHandlers.Add(latestSettings =>
-            {
-                string synced = latestSettings.TryGetValue(settingKey, out string? v)
-                    ? v
-                    : def.DefaultValue;
-                if (!string.Equals(inputBox.Text, synced, StringComparison.Ordinal))
-                {
-                    lastCommitted = synced;
-                    inputBox.Text = synced;
-                }
-            });
-
-            card.Content = inputBox;
-        }
-
-        return card;
-    }
-
-    private static bool IsNumericParameterDefinition(
-        CustomWidgetSettingDefinition def,
-        out double defaultNumericValue)
-    {
-        bool parsedDefault = double.TryParse(
-            def.DefaultValue,
-            NumberStyles.Float,
-            CultureInfo.InvariantCulture,
-            out defaultNumericValue);
-
-        if (string.Equals(def.Type, "number", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(def.Type, "int", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(def.Type, "integer", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(def.Type, "double", StringComparison.OrdinalIgnoreCase))
-        {
-            if (!parsedDefault)
-            {
-                defaultNumericValue = 0;
-            }
-            return true;
-        }
-
-        if (!parsedDefault)
-        {
-            return false;
-        }
-
-        string key = def.Key ?? string.Empty;
-        string[] numericKeyHints =
-        [
-            "count", "top", "max", "min", "limit", "goal", "target",
-            "minute", "hour", "second", "sec", "interval", "duration",
-            "step", "threshold", "days", "cups", "size", "refresh", "rate"
-        ];
-        foreach (string hint in numericKeyHints)
-        {
-            if (key.Contains(hint, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private static string ResolveSettingIconGlyph(CustomWidgetSettingDefinition def)
-    {
-        if (string.Equals(def.Type, "secret", StringComparison.OrdinalIgnoreCase))
-        {
-            return "\uE8D7";
-        }
-
-        string key = def.Key ?? string.Empty;
-        if (key.Contains("sort", StringComparison.OrdinalIgnoreCase))
-        {
-            return "\uE8CB";
-        }
-        if (key.Contains("count", StringComparison.OrdinalIgnoreCase) ||
-            key.Contains("top", StringComparison.OrdinalIgnoreCase))
-        {
-            return "\uE8FD";
-        }
-        if (key.Contains("interval", StringComparison.OrdinalIgnoreCase) ||
-            key.Contains("time", StringComparison.OrdinalIgnoreCase) ||
-            key.Contains("duration", StringComparison.OrdinalIgnoreCase) ||
-            key.Contains("minute", StringComparison.OrdinalIgnoreCase) ||
-            key.Contains("focus", StringComparison.OrdinalIgnoreCase))
-        {
-            return "\uE823";
-        }
-        if (key.Contains("break", StringComparison.OrdinalIgnoreCase) ||
-            key.Contains("rest", StringComparison.OrdinalIgnoreCase))
-        {
-            return "\uEC32";
-        }
-        if (key.Contains("goal", StringComparison.OrdinalIgnoreCase) ||
-            key.Contains("target", StringComparison.OrdinalIgnoreCase))
-        {
-            return "\uE734";
-        }
-        if (key.Contains("flow", StringComparison.OrdinalIgnoreCase) ||
-            key.Contains("cycle", StringComparison.OrdinalIgnoreCase) ||
-            key.Contains("rate", StringComparison.OrdinalIgnoreCase))
-        {
-            return "\uE895";
-        }
-        if (key.Contains("notify", StringComparison.OrdinalIgnoreCase) ||
-            key.Contains("remind", StringComparison.OrdinalIgnoreCase) ||
-            key.Contains("sound", StringComparison.OrdinalIgnoreCase))
-        {
-            return "\uEA8F";
-        }
-        if (key.Contains("drive", StringComparison.OrdinalIgnoreCase) ||
-            key.Contains("disk", StringComparison.OrdinalIgnoreCase) ||
-            key.Contains("folder", StringComparison.OrdinalIgnoreCase))
-        {
-            return "\uE8B7";
-        }
-        if (key.Contains("threshold", StringComparison.OrdinalIgnoreCase) ||
-            key.Contains("alert", StringComparison.OrdinalIgnoreCase) ||
-            key.Contains("warn", StringComparison.OrdinalIgnoreCase))
-        {
-            return "\uE945";
-        }
-
-        return string.Equals(def.Type, "toggle", StringComparison.OrdinalIgnoreCase)
-            ? "\uE713"
-            : "\uE8A5";
-    }
+        string currentVal) =>
+        CustomWidgetSettingsFormBuilder.BuildSettingsCard(
+            def,
+            currentVal,
+            CreateSettingsFormOptions(widgetId));
 
     private void EnsureDetailWatcher(string widgetId)
     {
+        if (!_isSectionLoaded)
+        {
+            DisposeDetailWatcher();
+            return;
+        }
+
         DisposeDetailWatcher();
         try
         {
+            if (!CustomWidgetDataStore.HasExistingWidgetDirectory(widgetId))
+            {
+                return;
+            }
+
             CustomWidgetDataStore store = CustomWidgetDataStore.ForWidget(widgetId);
             if (!Directory.Exists(store.WidgetDirectory))
             {
@@ -1988,10 +1278,18 @@ public sealed partial class CustomWidgetSettingsSection : UserControl
             return;
         }
 
-        _detailWatchDebounceCts?.Cancel();
+        if (!_isSectionLoaded)
+        {
+            return;
+        }
+
         var cts = new CancellationTokenSource();
-        _detailWatchDebounceCts = cts;
         CancellationToken token = cts.Token;
+        if (Interlocked.Exchange(ref _detailWatchDebounceCts, cts) is { } previousCts)
+        {
+            try { previousCts.Cancel(); } catch { }
+            try { previousCts.Dispose(); } catch { }
+        }
 
         _ = Task.Run(async () =>
         {
@@ -2000,6 +1298,10 @@ public sealed partial class CustomWidgetSettingsSection : UserControl
                 await Task.Delay(180, token);
             }
             catch (OperationCanceledException)
+            {
+                return;
+            }
+            catch (ObjectDisposedException)
             {
                 return;
             }
@@ -2025,6 +1327,11 @@ public sealed partial class CustomWidgetSettingsSection : UserControl
                         return;
                     }
 
+                    if (!CustomWidgetDataStore.HasExistingWidgetDirectory(widgetId))
+                    {
+                        return;
+                    }
+
                     CustomWidgetDataStore store = CustomWidgetDataStore.ForWidget(widgetId);
                     CustomWidgetStorePayload latest = await store.ReloadFromDiskAsync();
                     foreach (Action<IReadOnlyDictionary<string, string>> sync in _detailSyncHandlers)
@@ -2043,15 +1350,10 @@ public sealed partial class CustomWidgetSettingsSection : UserControl
 
     private void DisposeDetailWatcher()
     {
-        try
+        if (Interlocked.Exchange(ref _detailWatchDebounceCts, null) is { } debounceCts)
         {
-            _detailWatchDebounceCts?.Cancel();
-            _detailWatchDebounceCts?.Dispose();
-            _detailWatchDebounceCts = null;
-        }
-        catch
-        {
-            // Ignore disposal race.
+            try { debounceCts.Cancel(); } catch { }
+            try { debounceCts.Dispose(); } catch { }
         }
 
         if (_detailWatcher is { } watcher)
@@ -2650,478 +1952,14 @@ public sealed partial class CustomWidgetSettingsSection : UserControl
         string? currentEmoji,
         bool allowAutoMode,
         Func<string?, Task> onPickedAsync,
-        Func<string?>? resolveLiveEmoji = null)
-    {
-        var presenterStyle = new Style(typeof(FlyoutPresenter));
-        if (Application.Current?.Resources is { } res &&
-            res.TryGetValue(typeof(FlyoutPresenter), out object? implicitStyleObj) &&
-            implicitStyleObj is Style implicitStyle)
-        {
-            presenterStyle.BasedOn = implicitStyle;
-        }
-        else if (Application.Current?.Resources is { } defRes &&
-                 defRes.TryGetValue("DefaultFlyoutPresenterStyle", out object? defaultStyleObj) &&
-                 defaultStyleObj is Style defaultStyle)
-        {
-            presenterStyle.BasedOn = defaultStyle;
-        }
-        presenterStyle.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(12)));
-        presenterStyle.Setters.Add(new Setter(FrameworkElement.MinWidthProperty, 316d));
-        presenterStyle.Setters.Add(new Setter(FrameworkElement.MaxWidthProperty, 324d));
-        presenterStyle.Setters.Add(new Setter(Control.CornerRadiusProperty, new CornerRadius(8)));
-
-        var flyout = new Flyout
-        {
-            Placement = FlyoutPlacementMode.BottomEdgeAlignedLeft,
-            FlyoutPresenterStyle = presenterStyle
-        };
-
-        var host = new ContentControl
-        {
-            Width = 292,
-            HorizontalContentAlignment = HorizontalAlignment.Stretch
-        };
-
-        flyout.Opening += async (_, _) =>
-        {
-            host.RequestedTheme = ActualTheme;
-            string? active = resolveLiveEmoji is not null ? resolveLiveEmoji() : currentEmoji;
-            IReadOnlyList<string> recent = [];
-            try
-            {
-                recent = await WidgetTitleIconAssetStore.Current.LoadRecentEmojisAsync();
-            }
-            catch
-            {
-                // Ignore transient disk contention loading recent emojis.
-            }
-
-            host.Content = BuildEmojiPaletteContent(
-                currentEmoji: active,
-                recentEmojis: recent,
-                allowAutoMode: allowAutoMode,
-                onPickedAsync: async picked =>
-                {
-                    flyout.Hide();
-                    if (!string.IsNullOrWhiteSpace(picked))
-                    {
-                        _ = WidgetTitleIconAssetStore.Current.AddRecentEmojiAsync(picked.Trim());
-                    }
-                    await onPickedAsync(picked);
-                });
-        };
-
-        flyout.Content = host;
-        return flyout;
-    }
-
-    private FrameworkElement BuildEmojiPaletteContent(
-        string? currentEmoji,
-        IReadOnlyList<string> recentEmojis,
-        bool allowAutoMode,
-        Func<string?, Task> onPickedAsync)
-    {
-        var stack = new StackPanel { Spacing = 10 };
-
-        string[] featuredMerged = recentEmojis
-            .Concat(FeaturedWidgetEmojis)
-            .Where(static e => !string.IsNullOrWhiteSpace(e))
-            .Distinct(StringComparer.Ordinal)
-            .ToArray();
-
-        // Monochrome Segoe Fluent category glyphs (matching Windows 11 Win+. Emoji Panel)
-        var categories = new List<(string Glyph, string Label, string[] Emojis)>(
-            1 + WidgetTitleIconEmojiCatalog.Categories.Length)
-        {
-            ("\uE734", Localization.T("CustomWidget.Native.IconCategoryFeatured"), featuredMerged)
-        };
-
-        string[] categoryFluentGlyphs =
-        [
-            "\uE76E", // Smileys
-            "\uE8E1", // People
-            "\uE706", // Animals & Nature
-            "\uEC32", // Food & Drink
-            "\uE709", // Travel & Places
-            "\uE770", // Objects & Tech
-            "\uE945"  // Symbols
-        ];
-
-        for (int i = 0; i < WidgetTitleIconEmojiCatalog.Categories.Length; i++)
-        {
-            WidgetEmojiCategory cat = WidgetTitleIconEmojiCatalog.Categories[i];
-            string glyph = i < categoryFluentGlyphs.Length ? categoryFluentGlyphs[i] : "\uE734";
-            categories.Add((
-                glyph,
-                Localization.T("Widget.CustomIcon.Category." + cat.Id),
-                cat.Emojis));
-        }
-
-        // 1. Live Preview Header + Compact Actions
-        var headerGrid = new Grid { ColumnSpacing = 10 };
-        headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        headerGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-        var previewEmojiTb = new TextBlock
-        {
-            Text = CustomWidgetTemplates.IsEmojiIcon(currentEmoji) ? currentEmoji!.Trim() : "✨",
-            FontFamily = new FontFamily("Segoe UI Emoji"),
-            FontSize = 20,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center
-        };
-        WidgetTextShadow.SetCast(previewEmojiTb, false);
-
-        var previewTile = new Border
-        {
-            Width = 38,
-            Height = 38,
-            CornerRadius = new CornerRadius(8),
-            Background = ResolveBrush(
-                "CardBackgroundFillColorDefaultBrush",
-                Color.FromArgb(0x18, 0xFF, 0xFF, 0xFF)),
-            BorderBrush = ResolveBrush(
-                "CardStrokeColorDefaultBrush",
-                Color.FromArgb(0x20, 0x80, 0x80, 0x80)),
-            BorderThickness = new Thickness(1),
-            Child = previewEmojiTb
-        };
-        headerGrid.Children.Add(previewTile);
-
-        var headerTextStack = new StackPanel
-        {
-            Spacing = 1,
-            VerticalAlignment = VerticalAlignment.Center
-        };
-        headerTextStack.Children.Add(new TextBlock
-        {
-            Text = Localization.T("Widget.CustomIcon.Title"),
-            FontSize = 13,
-            FontWeight = FontWeights.SemiBold,
-            MaxLines = 1,
-            TextTrimming = TextTrimming.CharacterEllipsis
-        });
-        headerTextStack.Children.Add(new TextBlock
-        {
-            Text = Localization.T("CustomWidget.Native.IconPicker.Subtitle"),
-            FontSize = 11,
-            Foreground = ResolveBrush(
-                "TextFillColorSecondaryBrush",
-                Color.FromArgb(0xB0, 0x80, 0x80, 0x80)),
-            MaxLines = 1,
-            TextTrimming = TextTrimming.CharacterEllipsis
-        });
-        Grid.SetColumn(headerTextStack, 1);
-        headerGrid.Children.Add(headerTextStack);
-
-        var headerActions = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Spacing = 6,
-            VerticalAlignment = VerticalAlignment.Center
-        };
-
-        if (allowAutoMode)
-        {
-            var autoBtn = new Button
-            {
-                Height = 28,
-                MinHeight = 28,
-                Padding = new Thickness(8, 0, 8, 0),
-                CornerRadius = new CornerRadius(6),
-                FontSize = 12,
-                Content = Localization.T("Widget.CustomIcon.Reset")
-            };
-            ToolTipService.SetToolTip(autoBtn, Localization.T("CustomWidget.Native.IconAutoReset"));
-            autoBtn.Click += async (_, _) => await onPickedAsync(null);
-            headerActions.Children.Add(autoBtn);
-        }
-
-        var randomBtnPanel = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Spacing = 5,
-            VerticalAlignment = VerticalAlignment.Center
-        };
-        randomBtnPanel.Children.Add(new FontIcon { Glyph = "\uE8B1", FontSize = 11 });
-        randomBtnPanel.Children.Add(new TextBlock
-        {
-            Text = Localization.T("Widget.CustomIcon.Random"),
-            FontSize = 12,
-            VerticalAlignment = VerticalAlignment.Center
-        });
-
-        var randomBtn = new Button
-        {
-            Height = 28,
-            MinHeight = 28,
-            Padding = new Thickness(9, 0, 9, 0),
-            CornerRadius = new CornerRadius(6),
-            Content = randomBtnPanel
-        };
-        randomBtn.Click += async (_, _) =>
-        {
-            string[] all = FeaturedWidgetEmojis
-                .Concat(WidgetTitleIconEmojiCatalog.GetAllEmojis())
-                .Distinct(StringComparer.Ordinal)
-                .ToArray();
-            if (all.Length > 0)
-            {
-                string pick = all[Random.Shared.Next(all.Length)];
-                await onPickedAsync(pick);
-            }
-        };
-        headerActions.Children.Add(randomBtn);
-
-        Grid.SetColumn(headerActions, 2);
-        headerGrid.Children.Add(headerActions);
-        stack.Children.Add(headerGrid);
-
-        // 2. Monochrome Segoe Fluent Category Strip with Active Pill Indicator
-        var categoryRow = new Grid { ColumnSpacing = 2 };
-        for (int c = 0; c < categories.Count; c++)
-        {
-            categoryRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        }
-
-        const int GridColumns = 7;
-        var emojiMatrix = new Grid
-        {
-            ColumnSpacing = 4,
-            RowSpacing = 4
-        };
-        for (int col = 0; col < GridColumns; col++)
-        {
-            emojiMatrix.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        }
-
-        var emojiScroller = new ScrollViewer
-        {
-            Height = 196,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-            Content = emojiMatrix
-        };
-
-        var categorySlots = new List<(Button Btn, FontIcon Icon, Border Pill)>(categories.Count);
-        int selectedCategoryIndex = 0;
-
-        Brush subtleTabFill = ResolveBrush(
-            "SubtleFillColorSecondaryBrush",
-            Color.FromArgb(0x1C, 0x80, 0x80, 0x80));
-        Brush primaryFg = ResolveBrush("TextFillColorPrimaryBrush", Colors.White);
-        Brush secondaryFg = ResolveBrush(
-            "TextFillColorSecondaryBrush",
-            Color.FromArgb(0xB0, 0x80, 0x80, 0x80));
-        Brush accentBrush = ResolveBrush(
-            "AccentFillColorDefaultBrush",
-            Color.FromArgb(0xFF, 0x00, 0x78, 0xD4));
-
-        void RenderCategory(int categoryIdx)
-        {
-            selectedCategoryIndex = categoryIdx;
-            for (int i = 0; i < categorySlots.Count; i++)
-            {
-                bool active = i == selectedCategoryIndex;
-                categorySlots[i].Btn.Background = active
-                    ? subtleTabFill
-                    : new SolidColorBrush(Colors.Transparent);
-                categorySlots[i].Icon.Foreground = active ? primaryFg : secondaryFg;
-                categorySlots[i].Pill.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
-            }
-
-            emojiScroller.ChangeView(null, 0, null, disableAnimation: true);
-            emojiMatrix.Children.Clear();
-            emojiMatrix.RowDefinitions.Clear();
-
-            string[] items = categories[categoryIdx].Emojis;
-            int rows = (items.Length + GridColumns - 1) / GridColumns;
-            for (int r = 0; r < rows; r++)
-            {
-                emojiMatrix.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            }
-
-            for (int idx = 0; idx < items.Length; idx++)
-            {
-                string emoji = items[idx];
-                bool isCurrent = !string.IsNullOrWhiteSpace(currentEmoji) &&
-                                 string.Equals(emoji, currentEmoji.Trim(), StringComparison.Ordinal);
-
-                var tb = new TextBlock
-                {
-                    Text = emoji,
-                    FontFamily = new FontFamily("Segoe UI Emoji"),
-                    FontSize = 18,
-                    HorizontalAlignment = HorizontalAlignment.Center,
-                    VerticalAlignment = VerticalAlignment.Center
-                };
-                WidgetTextShadow.SetCast(tb, false);
-
-                var cellBtn = new Button
-                {
-                    Height = 36,
-                    MinHeight = 36,
-                    MinWidth = 0,
-                    HorizontalAlignment = HorizontalAlignment.Stretch,
-                    Padding = new Thickness(0),
-                    CornerRadius = new CornerRadius(6),
-                    Background = isCurrent
-                        ? subtleTabFill
-                        : new SolidColorBrush(Colors.Transparent),
-                    BorderThickness = new Thickness(isCurrent ? 1 : 0),
-                    BorderBrush = isCurrent
-                        ? ResolveBrush("CardStrokeColorDefaultBrush", Color.FromArgb(0x38, 0x80, 0x80, 0x80))
-                        : null,
-                    Content = tb
-                };
-                if (!isCurrent &&
-                    Application.Current?.Resources is { } appRes &&
-                    appRes.TryGetValue("SubtleButtonStyle", out object? subtleObj) &&
-                    subtleObj is Style subtleStyle)
-                {
-                    cellBtn.Style = subtleStyle;
-                    cellBtn.Height = 36;
-                    cellBtn.MinHeight = 36;
-                    cellBtn.MinWidth = 0;
-                    cellBtn.Padding = new Thickness(0);
-                    cellBtn.CornerRadius = new CornerRadius(6);
-                    cellBtn.HorizontalAlignment = HorizontalAlignment.Stretch;
-                }
-
-                AutomationProperties.SetName(cellBtn, emoji);
-                cellBtn.PointerEntered += (_, _) => previewEmojiTb.Text = emoji;
-                cellBtn.PointerExited += (_, _) =>
-                {
-                    previewEmojiTb.Text = CustomWidgetTemplates.IsEmojiIcon(currentEmoji)
-                        ? currentEmoji!.Trim()
-                        : "✨";
-                };
-                cellBtn.Click += async (_, _) => await onPickedAsync(emoji);
-                Grid.SetRow(cellBtn, idx / GridColumns);
-                Grid.SetColumn(cellBtn, idx % GridColumns);
-                emojiMatrix.Children.Add(cellBtn);
-            }
-        }
-
-        for (int i = 0; i < categories.Count; i++)
-        {
-            int captured = i;
-            var icon = new FontIcon
-            {
-                Glyph = categories[i].Glyph,
-                FontSize = 14,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center
-            };
-
-            var pill = new Border
-            {
-                Width = 14,
-                Height = 2.5,
-                CornerRadius = new CornerRadius(1.25),
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Bottom,
-                Margin = new Thickness(0, 0, 0, 2),
-                Background = accentBrush,
-                Visibility = Visibility.Collapsed
-            };
-
-            var tabGrid = new Grid
-            {
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                VerticalAlignment = VerticalAlignment.Stretch
-            };
-            tabGrid.Children.Add(icon);
-            tabGrid.Children.Add(pill);
-
-            var catBtn = new Button
-            {
-                Height = 32,
-                MinHeight = 32,
-                MinWidth = 0,
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                HorizontalContentAlignment = HorizontalAlignment.Stretch,
-                VerticalContentAlignment = VerticalAlignment.Stretch,
-                Padding = new Thickness(0),
-                CornerRadius = new CornerRadius(6),
-                BorderThickness = new Thickness(0),
-                Content = tabGrid
-            };
-            if (Application.Current?.Resources is { } appRes &&
-                appRes.TryGetValue("SubtleButtonStyle", out object? subtleObj) &&
-                subtleObj is Style subtleStyle)
-            {
-                catBtn.Style = subtleStyle;
-                catBtn.Height = 32;
-                catBtn.MinHeight = 32;
-                catBtn.MinWidth = 0;
-                catBtn.Padding = new Thickness(0);
-                catBtn.CornerRadius = new CornerRadius(6);
-                catBtn.HorizontalAlignment = HorizontalAlignment.Stretch;
-                catBtn.HorizontalContentAlignment = HorizontalAlignment.Stretch;
-                catBtn.VerticalContentAlignment = VerticalAlignment.Stretch;
-            }
-
-            ToolTipService.SetToolTip(catBtn, categories[i].Label);
-            AutomationProperties.SetName(catBtn, categories[i].Label);
-            catBtn.Click += (_, _) => RenderCategory(captured);
-            Grid.SetColumn(catBtn, i);
-            categorySlots.Add((catBtn, icon, pill));
-            categoryRow.Children.Add(catBtn);
-        }
-
-        stack.Children.Add(categoryRow);
-        stack.Children.Add(emojiScroller);
-
-        // 3. Instant-apply Custom Emoji Input (Win + . or Paste — no Save button needed)
-        var customEmojiBox = new TextBox
-        {
-            MaxLength = 32,
-            PlaceholderText = Localization.T("CustomWidget.Native.IconPicker.InputPlaceholder"),
-            FontSize = 12,
-            CornerRadius = new CornerRadius(6)
-        };
-        AutomationProperties.SetName(
-            customEmojiBox,
-            Localization.T("CustomWidget.Native.IconPicker.InputPlaceholder"));
-
-        bool committingTyped = false;
-        async Task TryCommitTypedEmojiAsync()
-        {
-            if (committingTyped || DeskBox.Helpers.ImeCompositionGuard.IsActivelyComposing(customEmojiBox))
-            {
-                return;
-            }
-
-            string candidate = customEmojiBox.Text.Trim();
-            if (CustomWidgetTemplates.IsEmojiIcon(candidate))
-            {
-                committingTyped = true;
-                await onPickedAsync(candidate);
-            }
-        }
-
-        customEmojiBox.TextChanged += async (_, _) => await TryCommitTypedEmojiAsync();
-        customEmojiBox.TextCompositionEnded += async (_, _) => await TryCommitTypedEmojiAsync();
-        customEmojiBox.KeyDown += async (_, e) =>
-        {
-            if (DeskBox.Helpers.ImeCompositionGuard.IsImeCompositionKeyEvent(e))
-            {
-                return;
-            }
-
-            if (e.Key == VirtualKey.Enter)
-            {
-                e.Handled = true;
-                await TryCommitTypedEmojiAsync();
-            }
-        };
-        stack.Children.Add(customEmojiBox);
-
-        RenderCategory(0);
-        return stack;
-    }
+        Func<string?>? resolveLiveEmoji = null) =>
+        EmojiPickerFlyoutHelper.BuildEmojiPickerFlyout(
+            () => ActualTheme,
+            k => Localization.T(k),
+            currentEmoji,
+            allowAutoMode,
+            onPickedAsync,
+            resolveLiveEmoji);
 
     private async Task UpdateWidgetManifestEmojiAsync(string widgetId, string newEmoji)
     {
@@ -3132,11 +1970,27 @@ public sealed partial class CustomWidgetSettingsSection : UserControl
 
         try
         {
+            if (!CustomWidgetDataStore.HasExistingWidgetDirectory(widgetId))
+            {
+                return;
+            }
+
+            string trimmedEmoji = newEmoji.Trim();
             Interlocked.Exchange(ref _lastLocalDetailWriteTick, Environment.TickCount64);
             CustomWidgetDataStore store = CustomWidgetDataStore.ForWidget(widgetId);
-            string rawJson = await store.ReadOrCreateManifestJsonAsync();
-            string updatedJson = CustomWidgetTemplates.WithUpdatedIconJson(rawJson, newEmoji.Trim());
+            string rawJson = await store.ReadOrCreateManifestJsonAsync(createIfMissing: false);
+            if (string.IsNullOrWhiteSpace(rawJson))
+            {
+                return;
+            }
+
+            string updatedJson = CustomWidgetTemplates.WithUpdatedIconJson(rawJson, trimmedEmoji);
             await store.WriteManifestJsonAsync(updatedJson, origin: this);
+            await EmojiPickerFlyoutHelper.SyncHostWidgetManifestIconAsync(widgetId, updatedJson);
+            if (_widgetActions is { IsHostAvailable: true })
+            {
+                await _widgetActions.ApplyCustomWidgetMutationAsync(new CustomWidgetSettingsMutation(widgetId));
+            }
             Interlocked.Exchange(ref _lastLocalDetailWriteTick, Environment.TickCount64);
             _highlightedWidgetId = widgetId;
             if (!IsDetailViewOpen)
@@ -3155,6 +2009,15 @@ public sealed partial class CustomWidgetSettingsSection : UserControl
     {
         try
         {
+            if (!CustomWidgetDataStore.HasExistingWidgetDirectory(widgetId))
+            {
+                return new InstanceCardMetadata(
+                    "🧩",
+                    Localization.T("CustomWidget.Studio.Card.DefaultDescription"),
+                    [],
+                    new Dictionary<string, string>(StringComparer.Ordinal));
+            }
+
             CustomWidgetDataStore store = CustomWidgetDataStore.ForWidget(widgetId);
             IReadOnlyDictionary<string, string> savedValues = new Dictionary<string, string>(StringComparer.Ordinal);
             if (File.Exists(store.StorePath))
@@ -3169,25 +2032,31 @@ public sealed partial class CustomWidgetSettingsSection : UserControl
                 CustomWidgetParseResult parsed = CustomWidgetManifestParser.Parse(raw);
                 if (parsed.Manifest is { } manifest)
                 {
+                    CustomWidgetLocaleCatalog locales = store.ReadLocaleCatalog();
+                    if (!locales.HasAnyLocale &&
+                        CustomWidgetTemplates.TryNormalizeKnownTemplateId(manifest.Id) is { } knownTplId &&
+                        CustomWidgetTemplates.GetTemplateBundle(knownTplId).Locales is { HasAnyLocale: true } tplLocales)
+                    {
+                        locales = tplLocales;
+                    }
+
+                    if (locales.HasAnyLocale)
+                    {
+                        manifest = manifest.WithLocales(locales);
+                    }
+
                     CustomWidgetPresetInfo? matchedPreset = CustomWidgetTemplates.MatchPresetOrNull(manifest.Id);
                     string localizedManifestDesc = manifest.ResolveLocalizedDescription(Localization.CurrentCultureName);
-                    string desc = matchedPreset is not null &&
-                                  manifest.Id.StartsWith("deskbox.", StringComparison.OrdinalIgnoreCase)
-                        ? Localization.T(matchedPreset.DescriptionKey)
-                        : !string.IsNullOrWhiteSpace(localizedManifestDesc)
-                            ? localizedManifestDesc
+                    string desc = !string.IsNullOrWhiteSpace(localizedManifestDesc) &&
+                                  !localizedManifestDesc.Contains("$i18n", StringComparison.Ordinal)
+                        ? localizedManifestDesc
+                        : matchedPreset is not null &&
+                          manifest.Id.StartsWith("deskbox.", StringComparison.OrdinalIgnoreCase)
+                            ? Localization.T(matchedPreset.DescriptionKey)
                             : Localization.T("CustomWidget.Studio.Card.DefaultDescription");
 
                     string glyph;
-                    if (App.Current.SettingsService.Settings.WidgetLayout.Widgets
-                            .FirstOrDefault(w => string.Equals(w.Id, widgetId, StringComparison.Ordinal)) is { } cfg &&
-                        WidgetTitleIconCustomization.GetEmojiOverride(cfg) is { } overrideEmoji &&
-                        !CustomWidgetTemplates.IsLegacyOfficialDefaultEmoji(manifest.Id, overrideEmoji))
-                    {
-                        glyph = overrideEmoji;
-                    }
-                    else if (CustomWidgetTemplates.IsEmojiIcon(manifest.Icon) &&
-                             !CustomWidgetTemplates.IsLegacyOfficialDefaultEmoji(manifest.Id, manifest.Icon))
+                    if (CustomWidgetTemplates.IsEmojiIcon(manifest.Icon))
                     {
                         glyph = manifest.Icon.Trim();
                     }
@@ -3283,7 +2152,7 @@ public sealed partial class CustomWidgetSettingsSection : UserControl
                     CustomWidgetFirstRunSetupOutcome outcome = await CustomWidgetFirstRunSetupDialogHelper.ShowAsync(
                         XamlRoot,
                         ActualTheme,
-                        Localization,
+                        _localization,
                         _ownerWindow,
                         previewManifest,
                         preflight,
@@ -3340,117 +2209,6 @@ public sealed partial class CustomWidgetSettingsSection : UserControl
         }
     }
 
-    private async Task PromptFirstRunSetupForImportedWidgetIfNeededAsync(string widgetId)
-    {
-        if (_isDialogOpen || XamlRoot is null || string.IsNullOrWhiteSpace(widgetId))
-        {
-            return;
-        }
-
-        try
-        {
-            CustomWidgetDataStore store = CustomWidgetDataStore.ForWidget(widgetId);
-            if (!File.Exists(store.ManifestPath))
-            {
-                return;
-            }
-
-            string rawManifest = await File.ReadAllTextAsync(store.ManifestPath);
-            CustomWidgetParseResult parsed = CustomWidgetManifestParser.Parse(rawManifest);
-            if (parsed.Manifest is not { } manifest)
-            {
-                return;
-            }
-
-            CustomWidgetLocaleCatalog locales = store.ReadLocaleCatalog();
-            if (locales.HasAnyLocale)
-            {
-                manifest = manifest.WithLocales(locales);
-            }
-
-            CustomWidgetStorePayload payload = File.Exists(store.StorePath)
-                ? await store.ReloadFromDiskAsync()
-                : new CustomWidgetStorePayload();
-            IReadOnlyDictionary<string, string> secrets = CustomWidgetSecretStore.Shared.GetSecretsForWidget(widgetId);
-
-            CustomWidgetSetupInspection inspection = CustomWidgetOnboardingHelper.InspectFirstRunSetupRequirements(
-                manifest,
-                Localization.CurrentCultureName,
-                payload.Settings,
-                secrets);
-            if (!inspection.RequiresAttention)
-            {
-                return;
-            }
-
-            _isDialogOpen = true;
-            CustomWidgetFirstRunSetupOutcome outcome;
-            try
-            {
-                outcome = await CustomWidgetFirstRunSetupDialogHelper.ShowAsync(
-                    XamlRoot,
-                    ActualTheme,
-                    Localization,
-                    _ownerWindow,
-                    manifest,
-                    inspection,
-                    Localization.CurrentCultureName);
-            }
-            finally
-            {
-                _isDialogOpen = false;
-            }
-
-            if (!outcome.Applied)
-            {
-                return;
-            }
-
-            if (_widgetActions is { IsHostAvailable: true })
-            {
-                await _widgetActions.ApplyCustomWidgetMutationAsync(new CustomWidgetSettingsMutation(
-                    widgetId,
-                    Settings: outcome.Settings.Count > 0
-                        ? new Dictionary<string, string>(outcome.Settings, StringComparer.Ordinal)
-                        : null,
-                    Secrets: outcome.Secrets.Count > 0
-                        ? new Dictionary<string, string>(outcome.Secrets, StringComparer.Ordinal)
-                        : null));
-                if (outcome.Secrets.Count > 0)
-                {
-                    CustomWidgetSecretStore.Shared.InvalidateCache();
-                }
-                return;
-            }
-
-            bool touchedSecrets = false;
-            foreach ((string secKey, string secVal) in outcome.Secrets)
-            {
-                CustomWidgetSecretStore.Shared.SetSecret(widgetId, secKey, secVal);
-                touchedSecrets = true;
-            }
-
-            CustomWidgetStorePayload latest = await store.ReloadFromDiskAsync();
-            bool touchedSettings = false;
-            foreach ((string key, string val) in outcome.Settings)
-            {
-                latest.Settings[key] = val;
-                touchedSettings = true;
-            }
-
-            if (touchedSettings || touchedSecrets)
-            {
-                Interlocked.Exchange(ref _lastLocalDetailWriteTick, Environment.TickCount64);
-                await store.SaveAsync(latest, origin: this);
-                Interlocked.Exchange(ref _lastLocalDetailWriteTick, Environment.TickCount64);
-            }
-        }
-        catch (Exception ex)
-        {
-            App.Log($"[CustomWidgetSettings] First-run setup prompt failed: {ex.Message}");
-        }
-    }
-
     private async Task ExportWidgetPackageAsync(string widgetId, string widgetName)
     {
         try
@@ -3460,6 +2218,12 @@ public sealed partial class CustomWidgetSettingsSection : UserControl
                 : null;
             if (string.IsNullOrWhiteSpace(targetFolder))
             {
+                return;
+            }
+
+            if (Services.DragDrop.StoreVirtualizedPathPolicy.IsWriteBlockedDestination(targetFolder))
+            {
+                ShowErrorBanner(Localization.T("Widget.DropBlocked.StoreVirtualizedAppData"));
                 return;
             }
 
@@ -3481,7 +2245,7 @@ public sealed partial class CustomWidgetSettingsSection : UserControl
                 StudioStatusInfoBar.IsOpen = true;
             }
 
-            Win32Helper.ShowInExplorer(exportPath);
+            Services.ShellLaunchService.FireAndForgetRevealInExplorer(exportPath);
         }
         catch (Exception ex)
         {
@@ -3497,10 +2261,7 @@ public sealed partial class CustomWidgetSettingsSection : UserControl
             await CustomWidgetTemplates.EnsureAiAgentWorkspaceDocsAsync();
             CustomWidgetDataStore store = CustomWidgetDataStore.ForWidget(widgetId);
             await CustomWidgetTemplates.EnsureAgentWorkspacePreparedAsync(store.WidgetDirectory);
-            Process.Start(new ProcessStartInfo(store.WidgetDirectory)
-            {
-                UseShellExecute = true
-            });
+            _ = await Services.ShellLaunchService.OpenPathAsync(store.WidgetDirectory);
         }
         catch (Exception ex)
         {
@@ -3632,7 +2393,6 @@ public sealed partial class CustomWidgetSettingsSection : UserControl
                 bool wasCurrentDetail = string.Equals(_detailWidgetId, widgetId, StringComparison.Ordinal);
                 DisposeDetailWatcher();
                 await _widgetActions.RemoveCustomWidgetAsync(widgetId);
-                CustomWidgetDataStore.DeleteWidgetDirectory(widgetId);
                 if (string.Equals(_highlightedWidgetId, widgetId, StringComparison.Ordinal))
                 {
                     _highlightedWidgetId = null;
@@ -3689,45 +2449,8 @@ public sealed partial class CustomWidgetSettingsSection : UserControl
         return dialog;
     }
 
-    private static void CopyToClipboard(string text)
-    {
-        try
-        {
-            var package = new DataPackage();
-            package.SetText(text);
-            Clipboard.SetContent(package);
-            try
-            {
-                Clipboard.Flush();
-            }
-            catch (Exception ex)
-            {
-                App.Log($"[CustomWidgetSettings] Clipboard content was set but flush failed: {ex.Message}");
-            }
-        }
-        catch (Exception ex)
-        {
-            App.Log($"[CustomWidgetSettings] Clipboard copy failed: {ex.Message}");
-        }
-    }
-
-    private static async Task<string> ReadClipboardTextAsync()
-    {
-        try
-        {
-            DataPackageView view = Clipboard.GetContent();
-            if (view.Contains(StandardDataFormats.Text))
-            {
-                return await view.GetTextAsync() ?? string.Empty;
-            }
-        }
-        catch (Exception ex)
-        {
-            App.Log($"[CustomWidgetSettings] Clipboard read failed: {ex.Message}");
-        }
-
-        return string.Empty;
-    }
+    private static void CopyToClipboard(string text) =>
+        McpQuickConnectPanelBuilder.CopyTextToClipboard(text);
 
     private static string CreateInstanceStateSignature(
         IEnumerable<GlanceWidgetInstanceInfo> instances) =>

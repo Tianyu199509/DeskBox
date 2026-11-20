@@ -1,0 +1,634 @@
+{
+  "schemaVersion": 1,
+  "id": "deskbox.todo-agenda",
+  "name": "${$i18n.widgetName}",
+  "description": "${$i18n.widgetDescription}",
+  "icon": "📆",
+  "version": "3.0.0",
+  "author": "DeskBox Official",
+  "origin": "official",
+  "capabilities": [
+    "calendar",
+    "calendar-grid",
+    "todo-progress-summary",
+    "pomodoro",
+    "script-sandbox",
+    "advanced-inputs-and-styling"
+  ],
+  "minSize": {
+    "width": 308,
+    "height": 356
+  },
+  "defaultSize": {
+    "width": 344,
+    "height": 396
+  },
+  "sources": [
+    {
+      "id": "cal",
+      "type": "calendar",
+      "intervalMs": 60000
+    },
+    {
+      "type": "todo",
+      "targetCollection": "tasks",
+      "maxItems": 150,
+      "intervalMs": 30000
+    },
+    {
+      "type": "pomodoro",
+      "intervalMs": 1000
+    }
+  ],
+  "script": {
+    "entry": "logic.js",
+    "tickIntervalMs": 60000
+  },
+  "settings": [
+    {
+      "key": "hideCompleted",
+      "type": "toggle",
+      "label": "${$i18n.setHideDone}",
+      "default": false
+    },
+    {
+      "key": "showHolidayBadge",
+      "type": "toggle",
+      "label": "${$i18n.setShowHoliday}",
+      "default": true
+    }
+  ],
+  "state": {
+    "selectedDate": "",
+    "lastTodayIso": "",
+    "calendarMonthOffset": 0,
+    "calMode": "week",
+    "filter": "day",
+    "draftTitle": "",
+    "draftPriority": "normal",
+    "showCompletedDrawer": false,
+    "focusTaskId": "",
+    "focusTaskTitle": "",
+    "currentTask": "",
+    "seeded": false
+  },
+  "collections": {
+    "tasks": {
+      "maxItems": 150,
+      "fields": [
+        "id",
+        "title",
+        "priority",
+        "important",
+        "dueIso",
+        "dueDate",
+        "dueText",
+        "isOverdue",
+        "done"
+      ]
+    }
+  },
+  "capsule": {
+    "title": "${$computed.capsuleTitle}",
+    "summary": "${$computed.capsuleSummary}",
+    "glyph": "${$computed.capsuleGlyph}",
+    "badge": "${$computed.capsuleBadge}",
+    "badgeIsWarning": "${$computed.capsuleWarn}",
+    "progress": "${$computed.capsuleProgress}",
+    "enableBounceOnUpdate": true,
+    "primaryAction": {
+      "icon": "${$computed.capsuleActionIcon}",
+      "tooltip": "${$computed.capsuleActionLabel}",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "onCapsulePrimaryAction"
+        }
+      ]
+    }
+  },
+  "root": "main",
+  "elements": {
+    "main": {
+      "type": "Grid",
+      "rows": "Auto,Auto,Auto,Auto,*",
+      "rowSpacing": 8,
+      "padding": "12",
+      "children": [
+        "calendar_card",
+        "focus_banner_card",
+        "filter_toolbar_grid",
+        "task_composer_stack",
+        "task_list_scroll"
+      ]
+    },
+    "calendar_card": {
+      "type": "Card",
+      "tone": "subtle",
+      "padding": "10,8,10,6",
+      "children": [
+        "calendar_agenda"
+      ],
+      "row": 0
+    },
+    "calendar_agenda": {
+      "type": "CalendarGrid",
+      "variant": "collapsible",
+      "bind": "selectedDate",
+      "collection": "tasks",
+      "dateField": "dueIso",
+      "onChange": [
+        {
+          "type": "script.run",
+          "fn": "onCalendarDatePicked",
+          "args": {
+            "showHoliday": "${$settings.showHolidayBadge}"
+          }
+        }
+      ]
+    },
+    "focus_banner_card": {
+      "type": "Card",
+      "when": "${$computed.focusActive == 'true'}",
+      "tone": "emerald",
+      "padding": "10,6",
+      "children": [
+        "focus_banner_grid"
+      ],
+      "row": 1
+    },
+    "focus_banner_grid": {
+      "type": "Grid",
+      "columns": "*,Auto,Auto,Auto",
+      "columnSpacing": 4,
+      "verticalAlignment": "center",
+      "children": [
+        "txt_focus_task_title",
+        "btn_toggle_focus_timer",
+        "btn_complete_focus_task",
+        "btn_stop_focus_task"
+      ]
+    },
+    "txt_focus_task_title": {
+      "type": "Text",
+      "column": 0,
+      "text": "🍅 ${$computed.focusTitle}",
+      "style": "caption",
+      "fontWeight": "semiBold",
+      "maxLines": 1,
+      "verticalAlignment": "center"
+    },
+    "btn_toggle_focus_timer": {
+      "type": "IconButton",
+      "column": 1,
+      "size": 24,
+      "icon": "${$computed.focusPlayIcon}",
+      "variant": "subtle",
+      "tooltip": "${$i18n.focusBannerPrefix}",
+      "onClick": [
+        {
+          "type": "pomodoro.toggle"
+        }
+      ]
+    },
+    "btn_complete_focus_task": {
+      "type": "IconButton",
+      "column": 2,
+      "size": 24,
+      "icon": "check",
+      "variant": "subtle",
+      "tooltip": "${$i18n.tipFinishFocus}",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "completeFocusTask"
+        }
+      ]
+    },
+    "btn_stop_focus_task": {
+      "type": "IconButton",
+      "column": 3,
+      "size": 24,
+      "icon": "close",
+      "variant": "subtle",
+      "tooltip": "${$i18n.tipStopFocus}",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "stopTaskFocus"
+        }
+      ]
+    },
+    "filter_toolbar_grid": {
+      "type": "Grid",
+      "columns": "*,Auto",
+      "columnSpacing": 6,
+      "verticalAlignment": "center",
+      "children": [
+        "filter_pills_row",
+        "txt_progress_summary"
+      ],
+      "row": 2
+    },
+    "filter_pills_row": {
+      "type": "Stack",
+      "column": 0,
+      "orientation": "horizontal",
+      "spacing": 4,
+      "verticalAlignment": "center",
+      "children": [
+        "btn_filter_day",
+        "btn_filter_all",
+        "btn_filter_overdue",
+        "btn_rollover_overdue"
+      ]
+    },
+    "btn_filter_day": {
+      "type": "Button",
+      "text": "${$computed.dayPillText}",
+      "variant": "${state.filter == 'day' ? 'standard' : 'subtle'}",
+      "fontWeight": "${state.filter == 'day' ? 'semiBold' : 'normal'}",
+      "padding": "8,3,8,3",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "setFilter",
+          "args": {
+            "filter": "day"
+          }
+        }
+      ]
+    },
+    "btn_filter_all": {
+      "type": "Button",
+      "text": "${$computed.allPillText}",
+      "variant": "${state.filter == 'all' ? 'standard' : 'subtle'}",
+      "fontWeight": "${state.filter == 'all' ? 'semiBold' : 'normal'}",
+      "padding": "8,3,8,3",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "setFilter",
+          "args": {
+            "filter": "all"
+          }
+        }
+      ]
+    },
+    "btn_filter_overdue": {
+      "type": "Button",
+      "when": "${$computed.showOverduePill == 'true'}",
+      "text": "${$computed.overduePillText}",
+      "variant": "${state.filter == 'overdue' ? 'standard' : 'subtle'}",
+      "color": "warning",
+      "fontWeight": "${state.filter == 'overdue' ? 'semiBold' : 'normal'}",
+      "padding": "8,3,8,3",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "setFilter",
+          "args": {
+            "filter": "overdue"
+          }
+        }
+      ]
+    },
+    "btn_rollover_overdue": {
+      "type": "IconButton",
+      "when": "${$computed.hasOverdue == 'true'}",
+      "size": 24,
+      "icon": "forward",
+      "variant": "subtle",
+      "tooltip": "${$i18n.tipRolloverOverdue}",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "rolloverOverdueTasks"
+        }
+      ]
+    },
+    "txt_progress_summary": {
+      "type": "Text",
+      "column": 1,
+      "text": "${$computed.progressSummaryText}",
+      "style": "caption",
+      "color": "secondary",
+      "verticalAlignment": "center"
+    },
+    "task_composer_stack": {
+      "type": "Stack",
+      "spacing": 4,
+      "children": [
+        "task_input_grid",
+        "parsed_tokens_row"
+      ],
+      "row": 3
+    },
+    "task_input_grid": {
+      "type": "Grid",
+      "columns": "*,Auto",
+      "columnSpacing": 6,
+      "verticalAlignment": "center",
+      "children": [
+        "inp_task_draft",
+        "btn_add_task"
+      ]
+    },
+    "inp_task_draft": {
+      "type": "Input",
+      "column": 0,
+      "bind": "state.draftTitle",
+      "placeholder": "${$i18n.inputPlaceholder}",
+      "onSubmit": [
+        {
+          "type": "script.run",
+          "fn": "submitDraft"
+        }
+      ]
+    },
+    "btn_add_task": {
+      "type": "Button",
+      "column": 1,
+      "icon": "add",
+      "variant": "standard",
+      "padding": "8,5,8,5",
+      "tooltip": "${$i18n.btnAddTip}",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "submitDraft"
+        }
+      ]
+    },
+    "parsed_tokens_row": {
+      "type": "Stack",
+      "when": "${$computed.hasParsedTokens == 'true'}",
+      "orientation": "horizontal",
+      "spacing": 4,
+      "children": [
+        "btn_clear_parsed_date",
+        "btn_clear_parsed_priority",
+        "btn_clear_parsed_tag"
+      ]
+    },
+    "btn_clear_parsed_date": {
+      "type": "Button",
+      "when": "${$computed.hasParsedDate == 'true'}",
+      "text": "${$computed.parsedDateChip} ×",
+      "variant": "subtle",
+      "padding": "6,2",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "clearParsedToken",
+          "args": {
+            "kind": "date"
+          }
+        }
+      ]
+    },
+    "btn_clear_parsed_priority": {
+      "type": "Button",
+      "when": "${$computed.hasParsedPriority == 'true'}",
+      "text": "${$computed.parsedPriorityChip} ×",
+      "variant": "subtle",
+      "padding": "6,2",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "clearParsedToken",
+          "args": {
+            "kind": "priority"
+          }
+        }
+      ]
+    },
+    "btn_clear_parsed_tag": {
+      "type": "Button",
+      "when": "${$computed.hasParsedTag == 'true'}",
+      "text": "${$computed.parsedTagChip} ×",
+      "variant": "subtle",
+      "padding": "6,2",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "clearParsedToken",
+          "args": {
+            "kind": "tag"
+          }
+        }
+      ]
+    },
+    "task_list_scroll": {
+      "type": "Scroll",
+      "row": 4,
+      "children": [
+        "task_list_card"
+      ]
+    },
+    "task_list_card": {
+      "type": "Card",
+      "tone": "subtle",
+      "padding": "10,4",
+      "spacing": 4,
+      "children": [
+        "list_pending_tasks",
+        "completed_drawer_header_grid",
+        "list_completed_tasks"
+      ]
+    },
+    "list_pending_tasks": {
+      "type": "List",
+      "items": "${$computed.pendingTasks}",
+      "variant": "divided",
+      "emptyState": {
+        "icon": "📆",
+        "title": "${$computed.emptyHintTitle}",
+        "subtitle": "${$computed.emptyHintSub}"
+      },
+      "itemTemplate": "row_pending_task_item",
+      "hoverActions": [
+        "btn_task_focus",
+        "btn_task_defer_tomorrow",
+        "btn_task_delete"
+      ]
+    },
+    "row_pending_task_item": {
+      "type": "Grid",
+      "columns": "Auto,Auto,*,Auto",
+      "columnSpacing": 6,
+      "verticalAlignment": "center",
+      "children": [
+        "chk_pending_task_done",
+        "badge_pending_task_tag",
+        "txt_pending_task_title",
+        "badge_pending_task_due"
+      ]
+    },
+    "chk_pending_task_done": {
+      "type": "CheckBox",
+      "column": 0,
+      "value": "${$item.done}",
+      "strikethrough": true,
+      "onChange": [
+        {
+          "type": "script.run",
+          "fn": "toggleTaskItem",
+          "args": {
+            "id": "${$item.id}"
+          }
+        }
+      ]
+    },
+    "badge_pending_task_tag": {
+      "type": "Badge",
+      "column": 1,
+      "when": "${$item.hasTag == 'true'}",
+      "text": "${$item.tagText}",
+      "tone": "emerald"
+    },
+    "txt_pending_task_title": {
+      "type": "Text",
+      "column": 2,
+      "text": "${$item.title}",
+      "style": "body",
+      "maxLines": 1,
+      "verticalAlignment": "center"
+    },
+    "badge_pending_task_due": {
+      "type": "Badge",
+      "column": 3,
+      "when": "${$item.hasDueBadge == 'true'}",
+      "text": "${$item.dueBadge}",
+      "tone": "${$item.isOverdue == 'true' ? 'warning' : 'neutral'}"
+    },
+    "btn_task_focus": {
+      "type": "IconButton",
+      "size": 22,
+      "icon": "timer",
+      "variant": "subtle",
+      "tooltip": "${$i18n.tipFocusTask}",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "startTaskFocus",
+          "args": {
+            "id": "${$item.id}",
+            "title": "${$item.title}"
+          }
+        }
+      ]
+    },
+    "btn_task_defer_tomorrow": {
+      "type": "IconButton",
+      "size": 22,
+      "icon": "forward",
+      "variant": "subtle",
+      "tooltip": "${$i18n.tipDeferTomorrow}",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "deferTaskTomorrow",
+          "args": {
+            "id": "${$item.id}"
+          }
+        }
+      ]
+    },
+    "btn_task_delete": {
+      "type": "IconButton",
+      "size": 22,
+      "icon": "delete",
+      "variant": "subtle",
+      "tooltip": "${$i18n.menuDelete}",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "removeTaskItem",
+          "args": {
+            "id": "${$item.id}"
+          }
+        }
+      ]
+    },
+    "completed_drawer_header_grid": {
+      "type": "Grid",
+      "when": "${!$settings.hideCompleted && $computed.hasCompleted == 'true'}",
+      "columns": "*,Auto",
+      "columnSpacing": 6,
+      "children": [
+        "btn_toggle_completed_drawer",
+        "btn_clear_completed_tasks"
+      ]
+    },
+    "btn_toggle_completed_drawer": {
+      "type": "Button",
+      "column": 0,
+      "text": "${$computed.completedDrawerLabel}",
+      "variant": "subtle",
+      "horizontalAlignment": "left",
+      "padding": "6,2",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "toggleCompletedDrawer"
+        }
+      ]
+    },
+    "btn_clear_completed_tasks": {
+      "type": "Button",
+      "column": 1,
+      "when": "${state.showCompletedDrawer == 'true'}",
+      "text": "${$i18n.clearDoneBtn}",
+      "variant": "subtle",
+      "padding": "6,2",
+      "onClick": [
+        {
+          "type": "script.run",
+          "fn": "clearCompletedTasks"
+        }
+      ]
+    },
+    "list_completed_tasks": {
+      "type": "List",
+      "when": "${!$settings.hideCompleted && state.showCompletedDrawer == 'true' && $computed.hasCompleted == 'true'}",
+      "items": "${$computed.completedTasks}",
+      "variant": "divided",
+      "itemTemplate": "row_completed_task_item"
+    },
+    "row_completed_task_item": {
+      "type": "Grid",
+      "columns": "Auto,*",
+      "columnSpacing": 6,
+      "verticalAlignment": "center",
+      "children": [
+        "chk_completed_task_done",
+        "txt_completed_task_title"
+      ]
+    },
+    "chk_completed_task_done": {
+      "type": "CheckBox",
+      "column": 0,
+      "value": "${$item.done}",
+      "onChange": [
+        {
+          "type": "script.run",
+          "fn": "toggleTaskItem",
+          "args": {
+            "id": "${$item.id}"
+          }
+        }
+      ]
+    },
+    "txt_completed_task_title": {
+      "type": "Text",
+      "column": 1,
+      "text": "${$item.title}",
+      "style": "caption",
+      "color": "secondary",
+      "strikethrough": true,
+      "maxLines": 1,
+      "verticalAlignment": "center"
+    }
+  }
+}

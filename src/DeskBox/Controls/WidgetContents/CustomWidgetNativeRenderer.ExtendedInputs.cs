@@ -83,10 +83,11 @@ public sealed partial class CustomWidgetNativeRenderer
         picker.Opened += (_, _) => BeginInteractiveSession(picker);
         picker.Closed += (_, _) => EndInteractiveSession(picker);
         picker.Unloaded += (_, _) => EndInteractiveSession(picker);
+        MarkInteractiveElement(picker);
 
         bool suppress = false;
         CustomWidgetEvaluationContext capturedCtx = ctx;
-        picker.DateChanged += async (_, e) =>
+        picker.DateChanged += (_, e) => FireAndForgetSafeUi(async () =>
         {
             if (suppress || _isNodeSelectionEnabled)
             {
@@ -105,7 +106,7 @@ public sealed partial class CustomWidgetNativeRenderer
                 {
                     await _viewModel.ExecuteActionsAsync(
                     [
-                        new CustomWidgetActionSpec("state.set", Key: bindKey, Value: "$value")
+                        new CustomWidgetActionSpec(ResolveBindSetActionType(bindKey), Key: bindKey, Value: "$value")
                     ], evCtx);
                 }
                 if (spec.OnChange.Count > 0)
@@ -117,7 +118,36 @@ public sealed partial class CustomWidgetNativeRenderer
             {
                 suppress = false;
             }
-        };
+        });
+
+        RegisterRetainedPatcher(liveCtx =>
+        {
+            capturedCtx = liveCtx;
+            if (_activeInteractions.Contains(picker))
+            {
+                return;
+            }
+
+            string liveRaw = !string.IsNullOrWhiteSpace(bindKey)
+                ? CustomWidgetExpressionEvaluator.EvaluateExpression(bindKey, liveCtx)
+                : CustomWidgetExpressionEvaluator.Interpolate(spec.Value, liveCtx);
+            DateTimeOffset? nextDate = !string.IsNullOrWhiteSpace(liveRaw) &&
+                DateTimeOffset.TryParse(liveRaw.Trim(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out DateTimeOffset parsedDate)
+                ? parsedDate
+                : null;
+            if (picker.Date?.Date != nextDate?.Date)
+            {
+                suppress = true;
+                try
+                {
+                    picker.Date = nextDate;
+                }
+                finally
+                {
+                    suppress = false;
+                }
+            }
+        });
 
         return WrapOptionalInputHeader(picker, spec, ctx);
     }
@@ -150,10 +180,11 @@ public sealed partial class CustomWidgetNativeRenderer
         picker.GotFocus += (_, _) => BeginInteractiveSession(picker);
         picker.LostFocus += (_, _) => EndInteractiveSession(picker);
         picker.Unloaded += (_, _) => EndInteractiveSession(picker);
+        MarkInteractiveElement(picker);
 
         bool suppress = false;
         CustomWidgetEvaluationContext capturedCtx = ctx;
-        picker.SelectedTimeChanged += async (_, e) =>
+        picker.SelectedTimeChanged += (_, e) => FireAndForgetSafeUi(async () =>
         {
             if (suppress || _isNodeSelectionEnabled)
             {
@@ -172,7 +203,7 @@ public sealed partial class CustomWidgetNativeRenderer
                 {
                     await _viewModel.ExecuteActionsAsync(
                     [
-                        new CustomWidgetActionSpec("state.set", Key: bindKey, Value: "$value")
+                        new CustomWidgetActionSpec(ResolveBindSetActionType(bindKey), Key: bindKey, Value: "$value")
                     ], evCtx);
                 }
                 if (spec.OnChange.Count > 0)
@@ -184,7 +215,35 @@ public sealed partial class CustomWidgetNativeRenderer
             {
                 suppress = false;
             }
-        };
+        });
+
+        RegisterRetainedPatcher(liveCtx =>
+        {
+            capturedCtx = liveCtx;
+            if (_activeInteractions.Contains(picker))
+            {
+                return;
+            }
+
+            string liveRaw = !string.IsNullOrWhiteSpace(bindKey)
+                ? CustomWidgetExpressionEvaluator.EvaluateExpression(bindKey, liveCtx)
+                : CustomWidgetExpressionEvaluator.Interpolate(spec.Value, liveCtx);
+            TimeSpan? nextTime = !string.IsNullOrWhiteSpace(liveRaw) && TryParseTimeSpanLoose(liveRaw.Trim(), out TimeSpan parsedTime)
+                ? parsedTime
+                : null;
+            if (picker.SelectedTime != nextTime)
+            {
+                suppress = true;
+                try
+                {
+                    picker.SelectedTime = nextTime;
+                }
+                finally
+                {
+                    suppress = false;
+                }
+            }
+        });
 
         return WrapOptionalInputHeader(picker, spec, ctx);
     }
@@ -218,7 +277,7 @@ public sealed partial class CustomWidgetNativeRenderer
             QueryIcon = new SymbolIcon(Symbol.Find),
             HorizontalAlignment = HorizontalAlignment.Stretch,
             CornerRadius = CornerSmall,
-            FontSize = spec.FontSize ?? BodyFontSize
+            FontSize = spec.FontSize is > 0 ? SnapLegacyFontSizeToHostTier(spec.FontSize.Value) : BodyFontSize
         };
 
         List<string> ResolveCandidates(CustomWidgetEvaluationContext evalCtx)
@@ -262,37 +321,53 @@ public sealed partial class CustomWidgetNativeRenderer
                 if (trimmed.StartsWith("$computed.", StringComparison.OrdinalIgnoreCase) ||
                     trimmed.StartsWith("computed.", StringComparison.OrdinalIgnoreCase))
                 {
-                    string compKey = trimmed.StartsWith('$') ? trimmed["$computed.".Length..] : trimmed["computed.".Length..];
-                    string? rawJson = evalCtx.Computed.TryGetValue(compKey, out JsonElement compEl)
-                        ? (compEl.ValueKind == JsonValueKind.String ? compEl.GetString() : compEl.GetRawText())
-                        : null;
-                    if (!string.IsNullOrWhiteSpace(rawJson) &&
-                        rawJson.TrimStart().StartsWith('['))
+                    static void AppendCandidatesFromJsonArray(JsonElement arrayEl, Action<string?> addCandidate)
                     {
-                        try
+                        foreach (JsonElement item in arrayEl.EnumerateArray())
                         {
-                            using JsonDocument doc = JsonDocument.Parse(rawJson);
-                            foreach (JsonElement item in doc.RootElement.EnumerateArray())
+                            if (item.ValueKind == JsonValueKind.String)
                             {
-                                if (item.ValueKind == JsonValueKind.String)
-                                {
-                                    AddCandidate(item.GetString());
-                                }
-                                else if (item.ValueKind == JsonValueKind.Object)
-                                {
-                                    string? label = item.TryGetProperty("label", out JsonElement lp) && lp.ValueKind == JsonValueKind.String
-                                        ? lp.GetString()
-                                        : item.TryGetProperty("title", out JsonElement tp) && tp.ValueKind == JsonValueKind.String
-                                            ? tp.GetString()
-                                            : item.TryGetProperty("name", out JsonElement np) && np.ValueKind == JsonValueKind.String
-                                                ? np.GetString()
-                                                : null;
-                                    AddCandidate(label);
-                                }
+                                addCandidate(item.GetString());
+                            }
+                            else if (item.ValueKind == JsonValueKind.Object)
+                            {
+                                string? label = item.TryGetProperty("label", out JsonElement lp) && lp.ValueKind == JsonValueKind.String
+                                    ? lp.GetString()
+                                    : item.TryGetProperty("title", out JsonElement tp) && tp.ValueKind == JsonValueKind.String
+                                        ? tp.GetString()
+                                        : item.TryGetProperty("name", out JsonElement np) && np.ValueKind == JsonValueKind.String
+                                            ? np.GetString()
+                                            : null;
+                                addCandidate(label);
                             }
                         }
-                        catch
+                    }
+
+                    string compKey = trimmed.StartsWith('$') ? trimmed["$computed.".Length..] : trimmed["computed.".Length..];
+                    if (evalCtx.Computed.TryGetValue(compKey, out JsonElement compEl))
+                    {
+                        if (compEl.ValueKind == JsonValueKind.Array)
                         {
+                            AppendCandidatesFromJsonArray(compEl, AddCandidate);
+                        }
+                        else if (compEl.ValueKind == JsonValueKind.String)
+                        {
+                            string? rawJson = compEl.GetString();
+                            if (!string.IsNullOrWhiteSpace(rawJson) &&
+                                rawJson.AsSpan().TrimStart().StartsWith('['))
+                            {
+                                try
+                                {
+                                    using JsonDocument doc = JsonDocument.Parse(rawJson);
+                                    if (doc.RootElement.ValueKind == JsonValueKind.Array)
+                                    {
+                                        AppendCandidatesFromJsonArray(doc.RootElement, AddCandidate);
+                                    }
+                                }
+                                catch
+                                {
+                                }
+                            }
                         }
                     }
                 }
@@ -323,17 +398,30 @@ public sealed partial class CustomWidgetNativeRenderer
         box.GotFocus += (_, _) => BeginInteractiveSession(box);
         box.LostFocus += (_, _) => EndInteractiveSession(box);
         box.Unloaded += (_, _) => EndInteractiveSession(box);
+        MarkInteractiveElement(box);
 
+        bool suppressSync = false;
         CustomWidgetEvaluationContext capturedCtx = ctx;
         box.TextChanged += (_, e) =>
         {
-            string text = box.Text ?? string.Empty;
-            if (!string.IsNullOrWhiteSpace(bindKey))
+            if (suppressSync)
             {
-                _viewModel.SetStateValueWithoutRebuild(bindKey, text);
+                return;
             }
 
-            if (e.Reason == AutoSuggestionBoxTextChangeReason.UserInput)
+            if (box.FocusState != FocusState.Unfocused)
+            {
+                BeginInteractiveSession(box);
+            }
+
+            string text = box.Text ?? string.Empty;
+            bool isComposing = DeskBox.Helpers.ImeCompositionGuard.IsActivelyComposing(box);
+            if (!string.IsNullOrWhiteSpace(bindKey))
+            {
+                _viewModel.SetStateValueWithoutRebuild(bindKey, text, notifyLiveBindings: !isComposing);
+            }
+
+            if (!isComposing && e.Reason == AutoSuggestionBoxTextChangeReason.UserInput)
             {
                 List<string> all = ResolveCandidates(_viewModel.CreateEvaluationContext());
                 box.ItemsSource = string.IsNullOrWhiteSpace(text)
@@ -341,8 +429,43 @@ public sealed partial class CustomWidgetNativeRenderer
                     : all.Where(item => item.Contains(text, StringComparison.OrdinalIgnoreCase)).Take(12).ToArray();
             }
         };
+        void OnAutoSuggestCompositionEnded(DependencyObject sender)
+        {
+            if (suppressSync || box.FocusState == FocusState.Unfocused)
+            {
+                return;
+            }
+            string committed = box.Text ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(bindKey))
+            {
+                _viewModel.SetStateValueWithoutRebuild(bindKey, committed, notifyLiveBindings: true);
+            }
+            List<string> all = ResolveCandidates(_viewModel.CreateEvaluationContext());
+            box.ItemsSource = string.IsNullOrWhiteSpace(committed)
+                ? all.Take(12).ToArray()
+                : all.Where(item => item.Contains(committed, StringComparison.OrdinalIgnoreCase)).Take(12).ToArray();
+        }
 
-        box.SuggestionChosen += async (_, e) =>
+        bool imeSubscribed = false;
+        DeskBox.Helpers.ImeCompositionGuard.AttachAncestors(box);
+        box.Loaded += (_, _) =>
+        {
+            if (!imeSubscribed)
+            {
+                imeSubscribed = true;
+                DeskBox.Helpers.ImeCompositionGuard.CompositionEnded += OnAutoSuggestCompositionEnded;
+            }
+        };
+        box.Unloaded += (_, _) =>
+        {
+            if (imeSubscribed)
+            {
+                imeSubscribed = false;
+                DeskBox.Helpers.ImeCompositionGuard.CompositionEnded -= OnAutoSuggestCompositionEnded;
+            }
+        };
+
+        box.SuggestionChosen += (_, e) => FireAndForgetSafeUi(async () =>
         {
             string chosen = e.SelectedItem?.ToString() ?? string.Empty;
             if (!string.IsNullOrWhiteSpace(bindKey))
@@ -354,9 +477,9 @@ public sealed partial class CustomWidgetNativeRenderer
             {
                 await _viewModel.ExecuteActionsAsync(spec.OnChange, capturedCtx.WithEventValue(chosen));
             }
-        };
+        });
 
-        box.QuerySubmitted += async (_, e) =>
+        box.QuerySubmitted += (_, e) => FireAndForgetSafeUi(async () =>
         {
             if (ImeCompositionGuard.IsComposingOrWithinGrace())
             {
@@ -376,7 +499,33 @@ public sealed partial class CustomWidgetNativeRenderer
             {
                 await _viewModel.ExecuteActionsAsync(actions, evCtx);
             }
-        };
+        });
+
+        RegisterRetainedPatcher(liveCtx =>
+        {
+            capturedCtx = liveCtx;
+            if (_activeInteractions.Contains(box) ||
+                ImeCompositionGuard.IsComposingOrWithinGrace())
+            {
+                return;
+            }
+
+            string liveText = !string.IsNullOrWhiteSpace(bindKey)
+                ? CustomWidgetExpressionEvaluator.EvaluateExpression(bindKey, liveCtx)
+                : CustomWidgetExpressionEvaluator.Interpolate(spec.Value, liveCtx);
+            if (!string.Equals(box.Text, liveText, StringComparison.Ordinal))
+            {
+                suppressSync = true;
+                try
+                {
+                    box.Text = liveText;
+                }
+                finally
+                {
+                    suppressSync = false;
+                }
+            }
+        });
 
         return WrapOptionalInputHeader(box, spec, ctx);
     }
@@ -407,7 +556,7 @@ public sealed partial class CustomWidgetNativeRenderer
             Width = 16,
             Height = 16,
             CornerRadius = new CornerRadius(4),
-            Background = new SolidColorBrush(currentColor),
+            Background = GetOrCreateSolidBrush(currentColor),
             BorderBrush = DividerBrush,
             BorderThickness = new Thickness(1),
             VerticalAlignment = VerticalAlignment.Center
@@ -416,7 +565,7 @@ public sealed partial class CustomWidgetNativeRenderer
         var hexTb = new TextBlock
         {
             Text = currentHex,
-            FontFamily = new FontFamily("Cascadia Mono, Consolas, Segoe UI"),
+            FontFamily = MonoFallbackFontFamily,
             FontSize = CaptionFontSize,
             Foreground = ResolveForegroundBrush("default"),
             VerticalAlignment = VerticalAlignment.Center
@@ -439,8 +588,28 @@ public sealed partial class CustomWidgetNativeRenderer
             HorizontalAlignment = HorizontalAlignment.Left
         };
         StyleStandardCommandButton(triggerBtn, CornerSmall);
+        MarkInteractiveElement(triggerBtn);
 
         CustomWidgetEvaluationContext capturedCtx = ctx;
+        RegisterRetainedPatcher(liveCtx =>
+        {
+            capturedCtx = liveCtx;
+            if (_activeOpenFlyouts.Count > 0)
+            {
+                return;
+            }
+
+            string liveRaw = !string.IsNullOrWhiteSpace(bindKey)
+                ? CustomWidgetExpressionEvaluator.EvaluateExpression(bindKey, liveCtx)
+                : CustomWidgetExpressionEvaluator.Interpolate(spec.Value, liveCtx);
+            if (TryParseRawColor(liveRaw, out Color liveCol) && liveCol != currentColor)
+            {
+                currentColor = liveCol;
+                swatchDot.Background = GetOrCreateSolidBrush(liveCol);
+                hexTb.Text = FormatColorHex(liveCol, enableAlpha);
+            }
+        });
+
         triggerBtn.Click += (_, _) =>
         {
             if (_isNodeSelectionEnabled)
@@ -484,7 +653,7 @@ public sealed partial class CustomWidgetNativeRenderer
                 currentColor = chosen;
                 committedColor = chosen;
                 string nextHex = FormatColorHex(chosen, enableAlpha);
-                swatchDot.Background = new SolidColorBrush(chosen);
+                swatchDot.Background = GetOrCreateSolidBrush(chosen);
                 hexTb.Text = nextHex;
 
                 CustomWidgetEvaluationContext evCtx = capturedCtx.WithEventValue(nextHex);
@@ -492,7 +661,7 @@ public sealed partial class CustomWidgetNativeRenderer
                 {
                     await _viewModel.ExecuteActionsAsync(
                     [
-                        new CustomWidgetActionSpec("state.set", Key: bindKey, Value: "$value")
+                        new CustomWidgetActionSpec(ResolveBindSetActionType(bindKey), Key: bindKey, Value: "$value")
                     ], evCtx);
                 }
                 if (spec.OnChange.Count > 0)
@@ -517,19 +686,19 @@ public sealed partial class CustomWidgetNativeRenderer
                     MinHeight = 22,
                     Padding = new Thickness(0),
                     CornerRadius = new CornerRadius(5),
-                    Background = new SolidColorBrush(presetCol),
+                    Background = GetOrCreateSolidBrush(presetCol),
                     BorderBrush = DividerBrush,
                     BorderThickness = new Thickness(1)
                 };
                 ToolTipService.SetToolTip(presetBtn, FormatColorHex(presetCol, enableAlpha));
                 Color capturedPreset = presetCol;
-                presetBtn.Click += async (_, _) =>
+                presetBtn.Click += (_, _) => FireAndForgetSafeUi(async () =>
                 {
                     draftColor = capturedPreset;
                     winUiPicker.Color = capturedPreset;
                     flyout.Hide();
                     await CommitSelectedColorAsync(capturedPreset);
-                };
+                });
                 swatchesWrap.Children.Add(presetBtn);
             }
 
@@ -541,7 +710,7 @@ public sealed partial class CustomWidgetNativeRenderer
             winUiPicker.ColorChanged += (_, args) =>
             {
                 draftColor = args.NewColor;
-                swatchDot.Background = new SolidColorBrush(draftColor);
+                swatchDot.Background = GetOrCreateSolidBrush(draftColor);
                 hexTb.Text = FormatColorHex(draftColor, enableAlpha);
             };
             panel.Children.Add(winUiPicker);
@@ -560,21 +729,21 @@ public sealed partial class CustomWidgetNativeRenderer
                 FontSize = CaptionFontSize
             };
             StyleAccentCommitButton(applyBtn);
-            applyBtn.Click += async (_, _) =>
+            applyBtn.Click += (_, _) => FireAndForgetSafeUi(async () =>
             {
                 flyout.Hide();
                 await CommitSelectedColorAsync(draftColor);
-            };
+            });
             actionRow.Children.Add(applyBtn);
             panel.Children.Add(actionRow);
 
-            flyout.Closed += async (_, _) =>
+            flyout.Closed += (_, _) => FireAndForgetSafeUi(async () =>
             {
                 if (!committed && draftColor != committedColor)
                 {
                     await CommitSelectedColorAsync(draftColor);
                 }
-            };
+            });
 
             flyout.Content = panel;
             ShowTrackedFlyoutAt(flyout, triggerBtn);
@@ -606,17 +775,20 @@ public sealed partial class CustomWidgetNativeRenderer
             MaxColumns = maxCols
         };
 
+        TextBlock? headerTb = null;
         if (!string.IsNullOrWhiteSpace(spec.Title))
         {
-            radios.Header = new TextBlock
+            headerTb = new TextBlock
             {
                 Text = CustomWidgetExpressionEvaluator.Interpolate(spec.Title, ctx),
                 FontSize = CaptionFontSize,
                 FontWeight = FontWeights.SemiBold,
                 Foreground = ResolveForegroundBrush("secondary")
             };
+            radios.Header = headerTb;
         }
 
+        var radioButtons = new List<RadioButton>(spec.Options.Count);
         int selectedIndex = -1;
         for (int i = 0; i < spec.Options.Count; i++)
         {
@@ -626,12 +798,13 @@ public sealed partial class CustomWidgetNativeRenderer
                 Content = CustomWidgetExpressionEvaluator.Interpolate(opt.Label, ctx),
                 Tag = opt.Value,
                 MinWidth = 0,
-                FontSize = spec.FontSize ?? BodyFontSize
+                FontSize = spec.FontSize is > 0 ? SnapLegacyFontSizeToHostTier(spec.FontSize.Value) : BodyFontSize
             };
             if (string.Equals(opt.Value, currentVal, StringComparison.Ordinal))
             {
                 selectedIndex = i;
             }
+            radioButtons.Add(rb);
             radios.Items.Add(rb);
         }
 
@@ -641,9 +814,10 @@ public sealed partial class CustomWidgetNativeRenderer
             radios.SelectedIndex = selectedIndex;
         }
         suppress = false;
+        MarkInteractiveElement(radios);
 
         CustomWidgetEvaluationContext capturedCtx = ctx;
-        radios.SelectionChanged += async (_, _) =>
+        radios.SelectionChanged += (_, _) =>
         {
             if (suppress || _isNodeSelectionEnabled)
             {
@@ -653,27 +827,78 @@ public sealed partial class CustomWidgetNativeRenderer
             if (radios.SelectedItem is RadioButton selectedRb && selectedRb.Tag is string val)
             {
                 suppress = true;
+                CustomWidgetEvaluationContext evCtx = capturedCtx.WithEventValue(val);
+                FireAndForgetSafeUi(async () =>
+                {
+                    try
+                    {
+                        if (!string.IsNullOrWhiteSpace(bindKey))
+                        {
+                            await _viewModel.ExecuteActionsAsync(
+                            [
+                                new CustomWidgetActionSpec(ResolveBindSetActionType(bindKey), Key: bindKey, Value: "$value")
+                            ], evCtx);
+                        }
+                        if (spec.OnChange.Count > 0)
+                        {
+                            await _viewModel.ExecuteActionsAsync(spec.OnChange, evCtx);
+                        }
+                    }
+                    finally
+                    {
+                        suppress = false;
+                    }
+                });
+            }
+        };
+
+        RegisterRetainedPatcher(liveCtx =>
+        {
+            capturedCtx = liveCtx;
+            if (headerTb is not null)
+            {
+                string nextHdr = CustomWidgetExpressionEvaluator.Interpolate(spec.Title, liveCtx);
+                if (!string.Equals(headerTb.Text, nextHdr, StringComparison.Ordinal))
+                {
+                    headerTb.Text = nextHdr;
+                }
+            }
+
+            for (int i = 0; i < spec.Options.Count && i < radioButtons.Count; i++)
+            {
+                string nextOptLbl = CustomWidgetExpressionEvaluator.Interpolate(spec.Options[i].Label, liveCtx);
+                if (!string.Equals(radioButtons[i].Content as string, nextOptLbl, StringComparison.Ordinal))
+                {
+                    radioButtons[i].Content = nextOptLbl;
+                }
+            }
+
+            string liveVal = !string.IsNullOrWhiteSpace(bindKey)
+                ? CustomWidgetExpressionEvaluator.EvaluateExpression(bindKey, liveCtx)
+                : CustomWidgetExpressionEvaluator.Interpolate(spec.Value, liveCtx);
+            int nextIdx = -1;
+            for (int i = 0; i < spec.Options.Count; i++)
+            {
+                if (string.Equals(spec.Options[i].Value, liveVal, StringComparison.Ordinal))
+                {
+                    nextIdx = i;
+                    break;
+                }
+            }
+
+            if (nextIdx >= 0 && radios.SelectedIndex != nextIdx)
+            {
+                suppress = true;
                 try
                 {
-                    CustomWidgetEvaluationContext evCtx = capturedCtx.WithEventValue(val);
-                    if (!string.IsNullOrWhiteSpace(bindKey))
-                    {
-                        await _viewModel.ExecuteActionsAsync(
-                        [
-                            new CustomWidgetActionSpec("state.set", Key: bindKey, Value: "$value")
-                        ], evCtx);
-                    }
-                    if (spec.OnChange.Count > 0)
-                    {
-                        await _viewModel.ExecuteActionsAsync(spec.OnChange, evCtx);
-                    }
+                    radios.SelectedIndex = nextIdx;
                 }
                 finally
                 {
                     suppress = false;
                 }
             }
-        };
+        });
 
         return radios;
     }
@@ -700,6 +925,7 @@ public sealed partial class CustomWidgetNativeRenderer
             HorizontalAlignment = HorizontalAlignment.Left,
             Value = initialRating
         };
+        MarkInteractiveElement(ratingControl);
 
         if (!string.IsNullOrWhiteSpace(spec.Placeholder))
         {
@@ -708,7 +934,7 @@ public sealed partial class CustomWidgetNativeRenderer
 
         bool suppress = false;
         CustomWidgetEvaluationContext capturedCtx = ctx;
-        ratingControl.ValueChanged += async (_, _) =>
+        ratingControl.ValueChanged += (_, _) => FireAndForgetSafeUi(async () =>
         {
             if (suppress || _isNodeSelectionEnabled)
             {
@@ -730,7 +956,7 @@ public sealed partial class CustomWidgetNativeRenderer
                 {
                     await _viewModel.ExecuteActionsAsync(
                     [
-                        new CustomWidgetActionSpec("state.set", Key: bindKey, Value: "$value")
+                        new CustomWidgetActionSpec(ResolveBindSetActionType(bindKey), Key: bindKey, Value: "$value")
                     ], evCtx);
                 }
                 if (spec.OnChange.Count > 0)
@@ -742,7 +968,30 @@ public sealed partial class CustomWidgetNativeRenderer
             {
                 suppress = false;
             }
-        };
+        });
+
+        RegisterRetainedPatcher(liveCtx =>
+        {
+            capturedCtx = liveCtx;
+            string liveRaw = !string.IsNullOrWhiteSpace(bindKey)
+                ? CustomWidgetExpressionEvaluator.EvaluateExpression(bindKey, liveCtx)
+                : CustomWidgetExpressionEvaluator.Interpolate(spec.Value, liveCtx);
+            double nextRating = double.TryParse(liveRaw, NumberStyles.Float, CultureInfo.InvariantCulture, out double lr) && lr > 0
+                ? Math.Clamp(lr, 0, maxStars)
+                : -1;
+            if (Math.Abs(ratingControl.Value - nextRating) > 0.001)
+            {
+                suppress = true;
+                try
+                {
+                    ratingControl.Value = nextRating;
+                }
+                finally
+                {
+                    suppress = false;
+                }
+            }
+        });
 
         return WrapOptionalInputHeader(ratingControl, spec, ctx);
     }
@@ -767,7 +1016,7 @@ public sealed partial class CustomWidgetNativeRenderer
     {
         if (_isNodeSelectionEnabled ||
             string.IsNullOrWhiteSpace(listSpec.InlineEditField) ||
-            string.IsNullOrWhiteSpace(resolvedCollectionName) ||
+            (string.IsNullOrWhiteSpace(resolvedCollectionName) && listSpec.OnInlineCommit.Count == 0) ||
             record is null ||
             string.IsNullOrWhiteSpace(record.Id))
         {
@@ -775,7 +1024,14 @@ public sealed partial class CustomWidgetNativeRenderer
         }
 
         string editField = listSpec.InlineEditField.Trim();
-        string itemId = record.Id;
+        CustomWidgetRecord currentRecord = record;
+        RegisterRetainedPatcher(liveCtx =>
+        {
+            if (liveCtx.CurrentItem is not null && !string.IsNullOrWhiteSpace(liveCtx.CurrentItem.Id))
+            {
+                currentRecord = liveCtx.CurrentItem;
+            }
+        });
         bool isEditing = false;
 
         cardBorder.DoubleTapped += (_, e) =>
@@ -789,7 +1045,8 @@ public sealed partial class CustomWidgetNativeRenderer
             isEditing = true;
             normalBodyElement.Visibility = Visibility.Collapsed;
 
-            string initialText = record.GetField(editField);
+            string itemId = currentRecord.Id;
+            string initialText = currentRecord.GetField(editField);
             var editor = new TextBox
             {
                 Text = initialText,
@@ -833,7 +1090,7 @@ public sealed partial class CustomWidgetNativeRenderer
                 }
             }
 
-            editor.KeyDown += async (_, ke) =>
+            editor.KeyDown += (_, ke) => FireAndForgetSafeUi(async () =>
             {
                 if (ImeCompositionGuard.IsImeCompositionKeyEvent(ke))
                 {
@@ -850,12 +1107,9 @@ public sealed partial class CustomWidgetNativeRenderer
                     ke.Handled = true;
                     await FinishEditAsync(save: false);
                 }
-            };
+            });
 
-            editor.LostFocus += async (_, _) =>
-            {
-                await FinishEditAsync(save: true);
-            };
+            editor.LostFocus += (_, _) => FireAndForgetSafeUi(() => FinishEditAsync(save: true));
 
             editor.Loaded += (_, _) =>
             {
@@ -887,16 +1141,7 @@ public sealed partial class CustomWidgetNativeRenderer
         rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-        var gripTb = new TextBlock
-        {
-            Text = "⋮⋮",
-            FontSize = 11,
-            FontWeight = FontWeights.Bold,
-            Foreground = ResolveForegroundBrush("muted"),
-            VerticalAlignment = VerticalAlignment.Center,
-            HorizontalAlignment = HorizontalAlignment.Center
-        };
-        WidgetTextShadow.SetCast(gripTb, false);
+        Microsoft.UI.Xaml.Shapes.Path gripIcon = CreateSixDotGripIcon(ResolveForegroundBrush("muted"));
 
         var gripHandle = new Border
         {
@@ -906,8 +1151,11 @@ public sealed partial class CustomWidgetNativeRenderer
             Background = GetOrCreateSolidBrush(Colors.Transparent),
             VerticalAlignment = VerticalAlignment.Stretch,
             Opacity = 0.48,
-            Child = gripTb
+            ManipulationMode = ManipulationModes.TranslateX | ManipulationModes.TranslateY,
+            Child = gripIcon
         };
+        MarkInteractiveElement(gripHandle);
+        TryApplyDragGripCursor(gripHandle);
         ToolTipService.SetToolTip(gripHandle, Tr("CustomWidget.Module.DragHint", ctx.CultureName));
         Grid.SetColumn(gripHandle, 0);
         rowGrid.Children.Add(gripHandle);
@@ -1034,12 +1282,22 @@ public sealed partial class CustomWidgetNativeRenderer
             if (commit && movedEnough && targetActualIndex != actualIndex)
             {
                 _activeInteractions.Remove(gripHandle);
-                await _viewModel.ReorderCollectionItemsAsync(
-                    resolvedCollectionName,
-                    actualIndex,
-                    targetActualIndex,
-                    listSpec.OnReorder);
-                NotifyIfAllInteractionsClosed();
+                try
+                {
+                    await _viewModel.ReorderCollectionItemsAsync(
+                        resolvedCollectionName,
+                        actualIndex,
+                        targetActualIndex,
+                        listSpec.OnReorder);
+                }
+                catch (Exception ex)
+                {
+                    App.Log($"[CustomWidget] List item reorder failed: {ex.Message}");
+                }
+                finally
+                {
+                    NotifyIfAllInteractionsClosed();
+                }
             }
             else
             {

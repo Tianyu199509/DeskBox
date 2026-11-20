@@ -1,31 +1,12 @@
 # DeskBox Remote Catalog (`catalog/`)
 
-本目录存放 DeskBox 自定义格子的远程 OTA 数据源（GitHub 镜像通道，同时作为官网 `https://deskbox.fun/widgets/` 的发布源）：
+本目录存放 DeskBox 自定义格子的官方远程数据源：
 
-- `widgets.v1.json`：官方格子远程目录（官网部署目标 URL 为 `https://deskbox.fun/widgets/catalog.v1.json`）
-- `prompts.v1.json`：AI 生成提示词与设计规则热更新包（官网部署目标 URL 为 `https://deskbox.fun/widgets/prompts.v1.json`）
+- `widgets.v1.json`：官方自定义格子远程目录镜像
+- `prompts.v1.json`：官方自定义格子设计规范与提示词规则包镜像
 
-## Agent / 开发者操作入口
+## 许可与边界说明
 
-**任何模板上架、版本热推送、下架（`deprecate`）或官网部署操作，请先完整阅读：**
+本目录下的官方远程目录定义（`widgets.v1.json`）与设计规范包（`prompts.v1.json`）属于 DeskBox 官方资产，适用主仓库的 **`GPL-3.0-only` + 商业双授权** 条款（详见 [../LICENSING.md](../LICENSING.md)）。任何竞品或闭源商业产品未经商业授权，不得抓取、复制或直接内置上述官方模板目录与提示词体系。
 
-- [自定义格子远程模板库与 AI 提示词 OTA 运维手册](../docs/architecture/custom-widget-remote-catalog-workflow.md)
-
-### 常用一键命令速查
-
-```powershell
-# 1. 查看当前远程目录条目与状态
-python scripts/publish_widget_catalog.py list
-
-# 2. 推送内置模板热更新（版本号自动 +0.0.1），并同步导出官网 catalog.v1.json
-python scripts/publish_widget_catalog.py --website-out ./artifacts/website-widgets/catalog.v1.json upsert --builtin pomodoro --bump patch
-
-# 3. 远程上架全新模板文件夹
-python scripts/publish_widget_catalog.py --website-out ./artifacts/website-widgets/catalog.v1.json upsert --dir ./path/to/widget --id my-widget --version 1.0.0
-
-# 4. 远程下架模板（含内置模板隐藏，必须用 deprecate 而非 remove）
-python scripts/publish_widget_catalog.py --website-out ./artifacts/website-widgets/catalog.v1.json deprecate --id my-widget
-
-# 5. 静态校验远程目录规范与体积上限
-python scripts/publish_widget_catalog.py validate
-```
+与此同时，社区用户或第三方作者使用 DeskBox 自定义组件规范独立创作的 `.dbxwidget` 组件包，依据 [../LICENSING.md](../LICENSING.md) 明确豁免主程序的 GPL 传染约束。

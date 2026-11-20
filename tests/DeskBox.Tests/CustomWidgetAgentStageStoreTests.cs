@@ -58,7 +58,7 @@ public sealed class CustomWidgetAgentStageStoreTests : IDisposable
     [Fact]
     public void Stage_ThenConsume_WithSameManifest_SucceedsOnlyOnce()
     {
-        const string manifest = "{\"id\":\"deskbox.test\",\"schemaVersion\":1}";
+        const string manifest = "{\"id\":\"deskbox.test\",\"schemaVersion\":1,\"root\":\"root\",\"elements\":{\"root\":{\"type\":\"Text\",\"text\":\"OK\"}}}";
         string stageId = Stage("widget-1", manifest);
 
         Assert.Equal(32, stageId.Length);
@@ -78,8 +78,8 @@ public sealed class CustomWidgetAgentStageStoreTests : IDisposable
     [Fact]
     public void Consume_RejectsDifferentManifest_AndKeepsStageUsable()
     {
-        const string manifest = "{\"id\":\"deskbox.test\",\"schemaVersion\":1}";
-        const string tampered = "{\"id\":\"deskbox.test\",\"schemaVersion\":2}";
+        const string manifest = "{\"id\":\"deskbox.test\",\"schemaVersion\":1,\"root\":\"root\",\"elements\":{\"root\":{\"type\":\"Text\",\"text\":\"A\"}}}";
+        const string tampered = "{\"id\":\"deskbox.test\",\"schemaVersion\":1,\"root\":\"root\",\"elements\":{\"root\":{\"type\":\"Text\",\"text\":\"B\"}}}";
         string stageId = Stage(null, manifest);
 
         bool ok = CustomWidgetAgentStageStore.TryConsume(stageId, tampered, out _, out string error);
@@ -107,7 +107,7 @@ public sealed class CustomWidgetAgentStageStoreTests : IDisposable
     [Fact]
     public void Stage_PreservesFullBundle_AndListPendingReturnsIt()
     {
-        const string manifest = "{\"id\":\"deskbox.test\",\"schemaVersion\":1}";
+        const string manifest = "{\"id\":\"deskbox.test\",\"schemaVersion\":1,\"root\":\"root\",\"elements\":{\"root\":{\"type\":\"Text\",\"text\":\"OK\"}}}";
         const string logic = "export function onInit(ctx) { ctx.computed.done = true; }";
         const string locales = "{\"zh-CN\":{\"t\":\"标题\"}}";
         string stageId = Stage("widget-3", manifest, logic, locales);
@@ -165,7 +165,7 @@ public sealed class CustomWidgetAgentStageStoreTests : IDisposable
     [Fact]
     public void TryDiscard_RemovesPendingStage_WithoutConsumingIt()
     {
-        const string manifest = "{\"id\":\"deskbox.test\",\"schemaVersion\":1}";
+        const string manifest = "{\"id\":\"deskbox.test\",\"schemaVersion\":1,\"root\":\"root\",\"elements\":{\"root\":{\"type\":\"Text\",\"text\":\"OK\"}}}";
         string stageId = Stage("widget-4", manifest);
         Assert.Single(CustomWidgetAgentStageStore.ListPending());
 
@@ -194,7 +194,7 @@ public sealed class CustomWidgetAgentStageStoreTests : IDisposable
     [Fact]
     public void TryConsume_RecordsCommittedState_ForIdempotentRetry()
     {
-        const string manifest = "{\"id\":\"deskbox.test\",\"schemaVersion\":1}";
+        const string manifest = "{\"id\":\"deskbox.test\",\"schemaVersion\":1,\"root\":\"root\",\"elements\":{\"root\":{\"type\":\"Text\",\"text\":\"OK\"}}}";
         string stageId = Stage("widget-4b", manifest);
 
         Assert.False(CustomWidgetAgentStageStore.TryGetCommitted(stageId, out _));
@@ -210,7 +210,7 @@ public sealed class CustomWidgetAgentStageStoreTests : IDisposable
     [Fact]
     public void RecordCommitted_OverwritesWidgetId_AfterRealUpsertResolvesIt()
     {
-        const string manifest = "{\"id\":\"deskbox.test\",\"schemaVersion\":1}";
+        const string manifest = "{\"id\":\"deskbox.test\",\"schemaVersion\":1,\"root\":\"root\",\"elements\":{\"root\":{\"type\":\"Text\",\"text\":\"OK\"}}}";
         // 暂存时 widgetId 为空（新格子由 manifest.id 决定），提交后才知道真实 id。
         string stageId = Stage(null, manifest);
         Assert.True(CustomWidgetAgentStageStore.TryConsume(stageId, manifest, out string? stagedWidgetId, out _));
@@ -267,7 +267,7 @@ public sealed class CustomWidgetAgentStageStoreTests : IDisposable
     [Fact]
     public async Task BridgeStageOps_ListGetDiscard_RoundTripWithoutTouchingDesktop()
     {
-        const string manifest = "{\"id\":\"deskbox.test\",\"schemaVersion\":1}";
+        const string manifest = "{\"id\":\"deskbox.test\",\"schemaVersion\":1,\"root\":\"root\",\"elements\":{\"root\":{\"type\":\"Text\",\"text\":\"OK\"}}}";
         string stageId = Stage("widget-7", manifest);
 
         await using var bridge = new DeskBoxAgentBridgeServer(
@@ -326,7 +326,7 @@ public sealed class CustomWidgetAgentStageStoreTests : IDisposable
         };
 
         string request = """
-            {"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"deskbox_upsert_widget","arguments":{"widgetId":"custom.x","manifestJson":"{\"manifestVersion\":1,\"id\":\"custom.x\"}","commit":true,"stageId":"0123456789abcdef0123456789abcdef"}}}
+            {"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"deskbox_upsert_widget","arguments":{"widgetId":"custom.x","manifestJson":"{\"schemaVersion\":1,\"id\":\"custom.x\",\"root\":\"root\",\"elements\":{\"root\":{\"type\":\"Text\",\"text\":\"X\"}}}","commit":true,"stageId":"0123456789abcdef0123456789abcdef"}}}
             """;
 
         string? response = await DeskBoxAgentCliEntry.HandleMcpRpcMessageAsync(
@@ -351,7 +351,7 @@ public sealed class CustomWidgetAgentStageStoreTests : IDisposable
     [Fact]
     public async Task McpUpsertPayload_RoundTripsThroughBridge_WithoutConsumingStage()
     {
-        const string manifest = "{\"id\":\"deskbox.test\",\"schemaVersion\":1}";
+        const string manifest = "{\"id\":\"deskbox.test\",\"schemaVersion\":1,\"root\":\"root\",\"elements\":{\"root\":{\"type\":\"Text\",\"text\":\"OK\"}}}";
         string stageId = Stage("widget-9", manifest);
         string capturedPayload = string.Empty;
 
@@ -403,7 +403,7 @@ public sealed class CustomWidgetAgentStageStoreTests : IDisposable
     [Fact]
     public async Task BridgeStageCommit_WhenManagerUnavailable_KeepsStagePending()
     {
-        const string manifest = "{\"id\":\"deskbox.test\",\"schemaVersion\":1}";
+        const string manifest = "{\"id\":\"deskbox.test\",\"schemaVersion\":1,\"root\":\"root\",\"elements\":{\"root\":{\"type\":\"Text\",\"text\":\"OK\"}}}";
         string stageId = Stage("widget-8", manifest);
 
         await using var bridge = new DeskBoxAgentBridgeServer(
@@ -424,7 +424,7 @@ public sealed class CustomWidgetAgentStageStoreTests : IDisposable
     [Fact]
     public void TryFindLatestPendingBundle_ResolvesByStageId_WidgetId_AndManifestId()
     {
-        const string manifest = "{\"id\":\"custom.hydration_tracker\",\"name\":\"喝水打卡\",\"schemaVersion\":1}";
+        const string manifest = "{\"id\":\"custom.hydration_tracker\",\"name\":\"喝水打卡\",\"schemaVersion\":1,\"root\":\"root\",\"elements\":{\"root\":{\"type\":\"Text\",\"text\":\"OK\"}}}";
         string stageId = Stage("widget-instance-42", manifest, "export function onInit() {}");
 
         Assert.True(CustomWidgetAgentStageStore.TryFindLatestPendingBundle(stageId, out AgentStageBundle? byStageId));
@@ -440,5 +440,147 @@ public sealed class CustomWidgetAgentStageStoreTests : IDisposable
         Assert.Equal(stageId, byManifestId.StageId);
 
         Assert.False(CustomWidgetAgentStageStore.TryFindLatestPendingBundle("non-existent-widget", out _));
+    }
+
+    [Fact]
+    public async Task StageIdOnlyCommit_ConsumesStagedBundleWithoutManifestEcho_AndToleratesCanonicalJsonFormatting()
+    {
+        const string compactManifest = "{\"id\":\"custom.stage_only\",\"name\":\"Stage Only\",\"schemaVersion\":1,\"root\":\"root\",\"elements\":{\"root\":{\"type\":\"Text\",\"text\":\"Hi\"}}}";
+        const string prettyReorderedManifest = """
+        {
+          "schemaVersion": 1,
+          "elements": {
+            "root": {
+              "text": "Hi",
+              "type": "Text"
+            }
+          },
+          "root": "root",
+          "name": "Stage Only",
+          "id": "custom.stage_only"
+        }
+        """;
+
+        Assert.Equal(
+            CustomWidgetAgentStageStore.ComputeCanonicalJsonHash(compactManifest),
+            CustomWidgetAgentStageStore.ComputeCanonicalJsonHash(prettyReorderedManifest));
+
+        // 1. Canonical JSON equivalence allows re-indented/re-ordered manifestJson on TryConsumeBundle
+        string stageFormatted = Stage("widget-canon", compactManifest);
+        Assert.True(
+            CustomWidgetAgentStageStore.TryConsumeBundle(
+                stageFormatted,
+                prettyReorderedManifest,
+                hasCallerLogicJs: false,
+                callerLogicJs: null,
+                hasCallerLocales: false,
+                callerLocalesJson: null,
+                out AgentStageBundle? canonBundle,
+                out string canonError),
+            canonError);
+        Assert.NotNull(canonBundle);
+        Assert.Equal("widget-canon", canonBundle.WidgetId);
+
+        // 2. stageId-only TryConsumeBundle (manifestJson: null) + idempotent TryGetCommitted(stageId, out ..., expectedManifestJson: null)
+        string stageNoEcho = Stage("widget-stage-only", compactManifest, "export function onInit() {}");
+        Assert.True(
+            CustomWidgetAgentStageStore.TryConsumeBundle(
+                stageNoEcho,
+                manifestJson: null,
+                hasCallerLogicJs: false,
+                callerLogicJs: null,
+                hasCallerLocales: false,
+                callerLocalesJson: null,
+                out AgentStageBundle? noEchoBundle,
+                out string noEchoError),
+            noEchoError);
+        Assert.NotNull(noEchoBundle);
+        Assert.Equal(compactManifest, noEchoBundle.ManifestJson);
+        Assert.True(noEchoBundle.HasLogicJs);
+        Assert.True(CustomWidgetAgentStageStore.TryGetCommitted(stageNoEcho, out string? committedId, expectedManifestJson: null));
+        Assert.Equal("widget-stage-only", committedId);
+
+        // 3. MCP deskbox_upsert_widget accepts commit:true + stageId without manifestJson and preserves stage when WidgetManager is unavailable
+        string stageForMcp = Stage("widget-mcp-stage-only", compactManifest);
+        string capturedBridgePayload = string.Empty;
+        Func<Action<Utf8JsonWriter>, CancellationToken, Task<string?>> sender = (writePayload, _) =>
+        {
+            using var ms = new MemoryStream();
+            using (var writer = new Utf8JsonWriter(ms))
+            {
+                writer.WriteStartObject();
+                writePayload(writer);
+                writer.WriteEndObject();
+            }
+
+            capturedBridgePayload = Encoding.UTF8.GetString(ms.ToArray());
+            return Task.FromResult<string?>("{\"ok\":true,\"result\":{\"staged\":false,\"committed\":true,\"widgetId\":\"widget-mcp-stage-only\"}}");
+        };
+
+        string mcpCall =
+            "{\"jsonrpc\":\"2.0\",\"id\":21,\"method\":\"tools/call\",\"params\":{\"name\":\"deskbox_upsert_widget\"," +
+            "\"arguments\":{\"commit\":true,\"stageId\":\"" + stageForMcp + "\"}}}";
+
+        string? mcpResp = await DeskBoxAgentCliEntry.HandleMcpRpcMessageAsync(
+            mcpCall,
+            pipeNameOverride: "unused",
+            cancellationToken: CancellationToken.None,
+            directBridgeSender: sender);
+
+        Assert.NotNull(mcpResp);
+        using (JsonDocument mcpDoc = JsonDocument.Parse(mcpResp!))
+        {
+            Assert.False(mcpDoc.RootElement.GetProperty("result").GetProperty("isError").GetBoolean());
+        }
+
+        using (JsonDocument bridgeReqDoc = JsonDocument.Parse(capturedBridgePayload))
+        {
+            Assert.Equal("upsert", bridgeReqDoc.RootElement.GetProperty("op").GetString());
+            Assert.True(bridgeReqDoc.RootElement.GetProperty("commit").GetBoolean());
+            Assert.Equal(stageForMcp, bridgeReqDoc.RootElement.GetProperty("stageId").GetString());
+            Assert.False(bridgeReqDoc.RootElement.TryGetProperty("manifestJson", out _));
+        }
+
+        await using var bridge = new DeskBoxAgentBridgeServer(
+            "DeskBox_StageOnly_Bridge_" + Guid.NewGuid().ToString("N"),
+            static () => null);
+        using JsonDocument bridgeResp = JsonDocument.Parse(
+            await bridge.DispatchRequestJsonAsync(capturedBridgePayload));
+        Assert.False(bridgeResp.RootElement.GetProperty("ok").GetBoolean());
+        Assert.Contains("WidgetManager", bridgeResp.RootElement.GetProperty("error").GetString());
+        Assert.Contains(CustomWidgetAgentStageStore.ListPending(), s => s.StageId == stageForMcp);
+    }
+
+    [Fact]
+    public void Stage_WithRawCallerManifest_AcceptsEitherNormalizedOrRawCallerManifestOnConsume()
+    {
+        const string rawCallerJson = """{"schemaVersion":1,"id":"deskbox.stage.norm","name":"Norm","root":"root","elements":{"root":{"type":"Text","text":"Hi","textColor":"accent"}}}""";
+        var engine = new StudioWorkspaceEngine(rawCallerJson);
+        Assert.True(engine.NormalizeDomInPlace());
+        string normalizedJson = engine.GetManifestJson(indented: true)!;
+
+        string stageId1 = CustomWidgetAgentStageStore.Stage(new AgentStageRequest(
+            "w-norm-1",
+            normalizedJson,
+            null,
+            false,
+            null,
+            false,
+            false,
+            RawCallerManifestJson: rawCallerJson));
+        Assert.True(CustomWidgetAgentStageStore.TryConsume(stageId1, rawCallerJson, out string? w1, out string err1), err1);
+        Assert.Equal("w-norm-1", w1);
+
+        string stageId2 = CustomWidgetAgentStageStore.Stage(new AgentStageRequest(
+            "w-norm-2",
+            normalizedJson,
+            null,
+            false,
+            null,
+            false,
+            false,
+            RawCallerManifestJson: rawCallerJson));
+        Assert.True(CustomWidgetAgentStageStore.TryConsume(stageId2, normalizedJson, out string? w2, out string err2), err2);
+        Assert.Equal("w-norm-2", w2);
     }
 }

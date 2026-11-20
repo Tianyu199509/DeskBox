@@ -9,6 +9,11 @@
         x:Name="RootGrid"
         Background="Transparent"
         KeyDown="RootGrid_KeyDown">
+        <Grid.Resources>
+            <DataTemplate x:Key="StudioGalleryCardSlotTemplate">
+                <Border Height="254" />
+            </DataTemplate>
+        </Grid.Resources>
         <Grid.RowDefinitions>
             <RowDefinition Height="38" />
             <RowDefinition Height="*" />
@@ -16,6 +21,7 @@
 
         <Grid
             x:Name="AppTitleBar"
+            FlowDirection="LeftToRight"
             Padding="14,0,148,0">
             <StackPanel
                 Orientation="Horizontal"
@@ -28,21 +34,6 @@
                     FontSize="12"
                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                     VerticalAlignment="Center" />
-                <Border
-                    x:Name="TitleBarContextBadge"
-                    CornerRadius="6"
-                    Padding="8,2,8,2"
-                    Background="{ThemeResource SubtleFillColorSecondaryBrush}"
-                    Visibility="Collapsed"
-                    VerticalAlignment="Center">
-                    <TextBlock
-                        x:Name="TitleBarContextText"
-                        FontSize="11.5"
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        MaxLines="1"
-                        TextTrimming="CharacterEllipsis"
-                        MaxWidth="260" />
-                </Border>
             </StackPanel>
         </Grid>
 
@@ -73,6 +64,15 @@
                     Style="{StaticResource WidgetMasterDetailSplitterStyle}" />
 
                 <Border
+                    x:Name="ApiDrawerOverlayScrim"
+                    Grid.Column="0"
+                    Grid.ColumnSpan="3"
+                    Canvas.ZIndex="8"
+                    Background="#36000000"
+                    Visibility="Collapsed"
+                    Tapped="ApiDrawerOverlayScrim_Tapped" />
+
+                <Border
                     x:Name="ApiDrawerBorder"
                     Grid.Column="2"
                     Canvas.ZIndex="10"
@@ -82,16 +82,5 @@
                     BorderThickness="1,0,0,0" />
             </Grid>
         </Border>
-
-        <Grid
-            x:Name="StudioOnboardingHost"
-            Grid.Row="1"
-            Canvas.ZIndex="40"
-            Visibility="Collapsed" />
-
-        <TeachingTip
-            x:Name="StudioOnboardingTeachingTip"
-            IsLightDismissEnabled="False"
-            PreferredPlacement="Bottom" />
     </Grid>
 </Window>

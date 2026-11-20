@@ -15,8 +15,11 @@ public sealed class CustomWidgetAgentStudioTests
     [Fact]
     public void StudioStarters_And_ManifestJsonSchema_AreAllValidWithoutDiagnostics()
     {
-        Assert.Equal(4, CustomWidgetTemplates.StudioStarters.Count);
-        Assert.Contains(CustomWidgetTemplates.StudioStarters, s => s.Id == CustomWidgetTemplates.AiInboxStarterId);
+        Assert.Equal(14, CustomWidgetTemplates.Presets.Count);
+        Assert.Contains(CustomWidgetTemplates.Presets, p => p.Id == CustomWidgetTemplates.AiInboxStarterId);
+        Assert.Contains(CustomWidgetTemplates.Presets, p => p.Id == CustomWidgetTemplates.HydrationStarterId);
+        Assert.Contains(CustomWidgetTemplates.Presets, p => p.Id == CustomWidgetTemplates.NewsRssStarterId);
+        Assert.Contains(CustomWidgetTemplates.Presets, p => p.Id == CustomWidgetTemplates.AgentHudTemplateId);
         foreach (string retiredId in new[]
                  {
                      "release-checklist", "file-basket", "mini-hardware",
@@ -24,20 +27,21 @@ public sealed class CustomWidgetAgentStudioTests
                  })
         {
             Assert.False(CustomWidgetTemplates.IsKnownBuiltInTemplate(retiredId));
-            Assert.DoesNotContain(CustomWidgetTemplates.StudioStarters, s => s.Id == retiredId);
             Assert.DoesNotContain(CustomWidgetTemplates.Presets, p => p.Id == retiredId);
         }
 
-        foreach (CustomWidgetStarterSpec starter in CustomWidgetTemplates.StudioStarters)
+        foreach (CustomWidgetPresetInfo preset in CustomWidgetTemplates.Presets)
         {
-            Assert.False(starter.Locales.IsEmpty);
-            CustomWidgetManifest rawStarter = CustomWidgetManifestParser.Parse(starter.ManifestJson).Manifest!;
+            CustomWidgetTemplateBundle bundle = CustomWidgetTemplates.GetTemplateBundle(preset.Id);
+            Assert.NotNull(bundle.Locales);
+            Assert.False(bundle.Locales!.IsEmpty);
+            CustomWidgetManifest rawStarter = CustomWidgetManifestParser.Parse(bundle.ManifestJson).Manifest!;
             Assert.Empty(rawStarter.I18n);
 
             CustomWidgetParseResult result = CustomWidgetScriptValidator.ValidateWorkspaceBundle(
-                starter.ManifestJson,
-                starter.LogicJs,
-                starter.Locales);
+                bundle.ManifestJson,
+                bundle.LogicJs,
+                bundle.Locales);
             Assert.NotNull(result.Manifest);
             Assert.Empty(result.Diagnostics);
             Assert.Equal(13, result.Manifest!.I18n.Count);
@@ -60,7 +64,7 @@ public sealed class CustomWidgetAgentStudioTests
     {
         const string tolerantManifest = """
         {
-          "manifestVersion": 1,
+          "schemaVersion": 1,
           "id": "custom.test-tolerant",
           "name": "Tolerant Test",
           "state": { "enabled": "true" },
@@ -68,32 +72,34 @@ public sealed class CustomWidgetAgentStudioTests
             { "name": "tasks", "fields": [ { "name": "title" }, { "name": "done" } ] }
           ],
           "onDrop": { "accept": "files", "storage": "copy", "action": { "type": "collection.prepend", "collection": "tasks", "fields": { "title": "{$drop.name}" } } },
-          "root": {
-            "type": "Stack",
-            "children": [
-              {
-                "type": "Wrap",
-                "spacing": 6,
-                "children": [
-                  { "type": "Toggle", "label": "Auto Sync", "checked": "{state.enabled}", "visible": "{state.enabled == 'true'}" },
-                  { "type": "Spacer" },
-                  { "type": "ProgressRing", "size": 18, "indeterminate": false, "value": "{state.undeclaredProgress}" }
-                ]
-              },
-              {
-                "type": "Button",
-                "text": "Mark First ({$settings.missingOpt})",
-                "actions": [
-                  { "type": "collection.update", "collection": "tasks", "id": "1", "record": { "done": "true" } },
-                  { "type": "collection.clear", "collection": "ghostCollection" }
-                ]
-              },
-              {
-                "type": "List",
-                "itemsSource": "tasks",
-                "itemTemplate": { "type": "Text", "text": "{$item.title}" }
-              }
-            ]
+          "root": "main",
+          "elements": {
+            "main": {
+              "type": "Stack",
+              "children": ["controls_wrap", "mark_btn", "tasks_list"]
+            },
+            "controls_wrap": {
+              "type": "Wrap",
+              "spacing": 6,
+              "children": ["auto_sync_toggle", "wrap_spacer", "progress_ring"]
+            },
+            "auto_sync_toggle": { "type": "Toggle", "label": "Auto Sync", "checked": "{state.enabled}", "visible": "{state.enabled == 'true'}" },
+            "wrap_spacer": { "type": "Spacer" },
+            "progress_ring": { "type": "ProgressRing", "size": 18, "indeterminate": false, "value": "{state.undeclaredProgress}" },
+            "mark_btn": {
+              "type": "Button",
+              "text": "Mark First ({$settings.missingOpt})",
+              "actions": [
+                { "type": "collection.update", "collection": "tasks", "id": "1", "record": { "done": "true" } },
+                { "type": "collection.clear", "collection": "ghostCollection" }
+              ]
+            },
+            "tasks_list": {
+              "type": "List",
+              "itemsSource": "tasks",
+              "itemTemplate": "task_row_tpl"
+            },
+            "task_row_tpl": { "type": "Text", "text": "{$item.title}" }
           }
         }
         """;
@@ -127,10 +133,13 @@ public sealed class CustomWidgetAgentStudioTests
         Here is your DeskBox widget manifest:
         ```json
         {
-          "manifestVersion": 1,
+          "schemaVersion": 1,
           "id": "custom.hydration",
           "name": "Hydration",
-          "root": { "type": "Text", "text": "Hello" }
+          "root": "main",
+          "elements": {
+            "main": { "type": "Text", "text": "Hello" }
+          }
         }
         ```
         """;
@@ -244,7 +253,7 @@ public sealed class CustomWidgetAgentStudioTests
             """{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05"}}""",
             """{"jsonrpc":"2.0","method":"notifications/initialized"}""",
             """{"jsonrpc":"2.0","id":2,"method":"tools/list"}""",
-            """{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"deskbox_validate_manifest","arguments":{"manifestJson":"{\"manifestVersion\":1,\"id\":\"custom.ok\",\"name\":\"OK\",\"root\":{\"type\":\"Text\",\"text\":\"Hi\"}}"}}}""") + "\n";
+            """{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"deskbox_validate_manifest","arguments":{"manifestJson":"{\"schemaVersion\":1,\"id\":\"custom.ok\",\"name\":\"OK\",\"root\":\"main\",\"elements\":{\"main\":{\"type\":\"Text\",\"text\":\"Hi\"}}}"}}}""") + "\n";
 
         using var inputStream = new MemoryStream(Encoding.UTF8.GetBytes(rpcRequests));
         using var outputStream = new MemoryStream();
@@ -352,7 +361,7 @@ public sealed class CustomWidgetAgentStudioTests
     }
 
     [Fact]
-    public void StudioPreferencesStore_PersistsOnboardingAndWebAiChoicesCleanly()
+    public void StudioPreferencesStore_PersistsOnboardingAndStudioChannelChoicesCleanly()
     {
         string tempDir = Path.Combine(Path.GetTempPath(), $"deskbox-studio-prefs-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempDir);
@@ -361,44 +370,47 @@ public sealed class CustomWidgetAgentStudioTests
             string prefsPath = Path.Combine(tempDir, "studio-prefs.json");
             var store = new CustomWidgetStudioPreferencesStore(prefsPath);
 
-            Assert.False(store.HasSeenWelcomeGuide);
-            Assert.False(store.HasSeenKeyUpsell);
+            Assert.False(store.HasSeenPickElementTip);
+            Assert.False(store.HasSeenAgentMcpGuide);
             Assert.Equal(string.Empty, store.PreferredAiProviderId);
-            Assert.Equal(0, store.PreferredStudioMode);
+            Assert.Equal(CustomWidgetStudioPreferencesStore.ChannelAuto, store.PreferredStudioChannel);
+            Assert.Equal(CustomWidgetStudioPreferencesStore.EditorAuto, store.PreferredCodeEditor);
+            Assert.Equal(CustomWidgetStudioPreferencesStore.StageThemeAuto, store.StageWidgetTheme);
             Assert.True(store.LocateOnDesktopAfterCommit);
-            Assert.Equal(CustomWidgetStudioPreferencesStore.TargetDeepSeek, store.ResolveEffectiveWebAiTarget("zh-CN"));
-            Assert.Equal(CustomWidgetStudioPreferencesStore.TargetChatGpt, store.ResolveEffectiveWebAiTarget("en-US"));
 
-            store.MarkWelcomeGuideSeen();
-            store.MarkKeyUpsellSeen();
+            store.MarkPickElementTipSeen();
             Assert.False(store.HasSeenChannelStepTour(CustomWidgetStudioPreferencesStore.ChannelDirect));
             Assert.False(store.HasSeenChannelStepTour(CustomWidgetStudioPreferencesStore.ChannelAgentMcp));
-            Assert.False(store.HasSeenChannelStepTour(CustomWidgetStudioPreferencesStore.ChannelWeb));
             store.MarkAgentMcpGuideSeen();
             store.MarkChannelStepTourSeen(CustomWidgetStudioPreferencesStore.ChannelDirect);
-            store.MarkChannelStepTourSeen(CustomWidgetStudioPreferencesStore.ChannelWeb);
             store.SetPreferredAiProviderId("provider-deepseek");
-            store.SetPreferredWebAiTarget(CustomWidgetStudioPreferencesStore.TargetDoubao);
+            store.SetPreferredStudioChannel(CustomWidgetStudioPreferencesStore.ChannelDirect);
+            Assert.Equal(CustomWidgetStudioPreferencesStore.ChannelDirect, store.PreferredStudioChannel);
             store.SetPreferredStudioChannel(CustomWidgetStudioPreferencesStore.ChannelAgentMcp);
-            store.SetPreferredStudioMode(1);
+            store.SetPreferredCodeEditor(CustomWidgetStudioPreferencesStore.EditorCursor);
+            store.SetStageWidgetTheme(CustomWidgetStudioPreferencesStore.StageThemeDark);
             store.SetLocateOnDesktopAfterCommit(false);
 
             var reloaded = new CustomWidgetStudioPreferencesStore(prefsPath);
-            Assert.True(reloaded.HasSeenWelcomeGuide);
-            Assert.True(reloaded.HasSeenKeyUpsell);
+            Assert.True(reloaded.HasSeenPickElementTip);
             Assert.True(reloaded.HasSeenAgentMcpGuide);
             Assert.True(reloaded.HasSeenChannelStepTour(CustomWidgetStudioPreferencesStore.ChannelDirect));
             Assert.False(reloaded.HasSeenChannelStepTour(CustomWidgetStudioPreferencesStore.ChannelAgentMcp));
-            Assert.True(reloaded.HasSeenChannelStepTour(CustomWidgetStudioPreferencesStore.ChannelWeb));
             Assert.Equal("provider-deepseek", reloaded.PreferredAiProviderId);
             Assert.Equal(CustomWidgetStudioPreferencesStore.ChannelAgentMcp, reloaded.PreferredStudioChannel);
-            Assert.Equal(1, reloaded.PreferredStudioMode);
+            Assert.Equal(CustomWidgetStudioPreferencesStore.EditorCursor, reloaded.PreferredCodeEditor);
+            Assert.Equal(CustomWidgetStudioPreferencesStore.StageThemeDark, reloaded.StageWidgetTheme);
             Assert.False(reloaded.LocateOnDesktopAfterCommit);
-            Assert.Equal(CustomWidgetStudioPreferencesStore.TargetDoubao, reloaded.ResolveEffectiveWebAiTarget("zh-CN"));
-            Assert.Equal(CustomWidgetStudioPreferencesStore.TargetDoubao, reloaded.ResolveEffectiveWebAiTarget("en-US"));
 
-            const string v1Manifest = """{"manifestVersion":1,"id":"custom.v1","name":"V1","root":{"type":"Text","text":"Initial"}}""";
-            string refinementPrompt = CustomWidgetTemplates.BuildChatAiPrompt("把字号调大一点", existingManifestJson: v1Manifest);
+            File.WriteAllText(prefsPath, """{"preferredStudioChannel":"web"}""");
+            var legacyNormalized = new CustomWidgetStudioPreferencesStore(prefsPath);
+            Assert.Equal(CustomWidgetStudioPreferencesStore.ChannelAuto, legacyNormalized.PreferredStudioChannel);
+
+            const string v1Manifest = """{"schemaVersion":1,"id":"custom.v1","name":"V1","root":"main","elements":{"main":{"type":"Text","text":"Initial"}}}""";
+            string refinementPrompt = CustomWidgetTemplates.BuildStudioCoCreationUserPrompt(
+                "把字号调大一点",
+                currentManifestJson: v1Manifest,
+                uiLanguage: "zh-CN");
             Assert.Contains("custom.v1", refinementPrompt, StringComparison.Ordinal);
             Assert.Contains("把字号调大一点", refinementPrompt, StringComparison.Ordinal);
         }
@@ -421,24 +433,44 @@ public sealed class CustomWidgetAgentStudioTests
 
         const string validReply = """
             好的，这是为你生成的格子：
-            ```json
-            {"manifestVersion":1,"id":"custom.water","name":"喝水打卡","root":{"type":"Text","text":"今天喝水"}}
+            ```deskbox-meta
+            {"kind":"edit","reply":"已生成喝水打卡格子","changeSummary":"新建喝水打卡"}
+            ```
+            ```deskbox-manifest
+            {"schemaVersion":1,"id":"custom.water","name":"喝水打卡","icon":"💧","root":"main","elements":{"main":{"type":"Stack","padding":"12,10,12,12","children":["water_text"]},"water_text":{"type":"Text","text":"今天喝水"}}}
             ```
             """;
-        string selfPrompt = CustomWidgetTemplates.BuildChatAiPrompt("喝水打卡");
 
-        Assert.False(CustomWidgetWorkshopFlow.TryExtractManifestReply(selfPrompt, selfPrompt, out _));
-        Assert.False(CustomWidgetWorkshopFlow.TryExtractManifestReply("今天天气不错，没有 JSON", selfPrompt, out _));
-        Assert.False(CustomWidgetWorkshopFlow.TryExtractManifestReply("""{"foo":"bar"}""", selfPrompt, out _));
+        StudioTurnResult plainNoJson = StudioTurnResponseParser.ParseStudioTurnResponse(
+            "今天天气不错，没有 JSON",
+            isInitialCreation: true,
+            fallbackCulture: "zh-CN");
+        Assert.True(plainNoJson.Success);
+        Assert.Equal("answer", plainNoJson.Kind);
+        Assert.Equal(string.Empty, plainNoJson.ManifestJson);
 
-        Assert.True(CustomWidgetWorkshopFlow.TryExtractManifestReply(
+        StudioTurnResult brokenJson = StudioTurnResponseParser.ParseStudioTurnResponse(
+            """{"schemaVersion":1,"root":"main""",
+            isInitialCreation: true,
+            fallbackCulture: "zh-CN");
+        Assert.False(brokenJson.Success);
+
+        StudioTurnResult nonManifestObj = StudioTurnResponseParser.ParseStudioTurnResponse(
+            """{"foo":"bar"}""",
+            isInitialCreation: true,
+            fallbackCulture: "zh-CN");
+        Assert.Null(nonManifestObj.ParseResult);
+        Assert.Equal(string.Empty, nonManifestObj.ManifestJson);
+
+        StudioTurnResult parsedTurn = StudioTurnResponseParser.ParseStudioTurnResponse(
             validReply,
-            selfPrompt,
-            out string extractedJson));
-        Assert.Contains("custom.water", extractedJson, StringComparison.Ordinal);
-        CustomWidgetParseResult parsed = CustomWidgetManifestParser.Parse(extractedJson);
-        Assert.True(parsed.IsValid);
-        Assert.Equal("custom.water", parsed.Manifest!.Id);
+            isInitialCreation: true,
+            fallbackCulture: "zh-CN");
+        Assert.True(parsedTurn.Success, parsedTurn.ErrorMessage);
+        Assert.Equal("edit", parsedTurn.Kind);
+        Assert.Contains("custom.water", parsedTurn.ManifestJson, StringComparison.Ordinal);
+        Assert.NotNull(parsedTurn.ParseResult?.Manifest);
+        Assert.Equal("custom.water", parsedTurn.ParseResult!.Manifest!.Id);
 
         Assert.Equal(string.Empty, CustomWidgetWorkshopFlow.SummarizePrompt("   \r\n  "));
         Assert.Equal("把字号改大 一点", CustomWidgetWorkshopFlow.SummarizePrompt("  把字号改大\r\n  一点  "));
@@ -513,7 +545,7 @@ public sealed class CustomWidgetAgentStudioTests
         Assert.Contains("radialGradient", aiNavIconSvg, StringComparison.Ordinal);
 
         // Unified 2-tab hub header & toolbar live in FeatureWidgetsSectionTemplate (Pattern A)
-        Assert.Contains("x:Name=\"FeatureWidgetsHubSegmented\"", windowXaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"FeatureWidgetsHubSelectorBar\"", windowXaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"CustomWidgetsToolbarPanel\"", windowXaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"FeatureWidgetListHost\"", windowXaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"CustomWidgetHostPanel\"", windowXaml, StringComparison.Ordinal);
@@ -543,7 +575,7 @@ public sealed class CustomWidgetAgentStudioTests
             detailPanelIndex > myWidgetsListIndex);
 
         string aiSectionXaml = File.ReadAllText(TestPaths.FromRepository("src/DeskBox/Views/SettingsSections/AiSettingsSection.xaml"));
-        Assert.Contains("x:Name=\"WebAiTargetComboBox\"", aiSectionXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("x:Name=\"WebAiTargetComboBox\"", aiSectionXaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"AiKeyExpander\"", aiSectionXaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"AiInlineModelComboBox\"", aiSectionXaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"AiInlineThinkingComboBox\"", aiSectionXaml, StringComparison.Ordinal);
@@ -659,8 +691,8 @@ public sealed class CustomWidgetAgentStudioTests
                     "\n\n",
                     """data: {"choices":[{"delta":{"reasoning_content":"先规划喝水打卡布局，"}}]}""",
                     """data: {"choices":[{"delta":{"reasoning_content":"包含进度条与按钮。"}}]}""",
-                    """data: {"choices":[{"delta":{"content":"```json\n{\"manifestVersion\":1,\"id\":\"custom.water.stream\","}}]}""",
-                    """data: {"choices":[{"delta":{"content":"\"name\":\"流式饮水打卡\",\"root\":{\"type\":\"Text\",\"text\":\"今日 8 杯\"}}\n```"}}]}""",
+                    """data: {"choices":[{"delta":{"content":"```deskbox-meta\n{\"kind\":\"edit\",\"reply\":\"已生成流式饮水打卡\",\"changeSummary\":\"新建饮水打卡\"}\n```\n```deskbox-manifest\n{\"schemaVersion\":1,\"id\":\"custom.water.stream\","}}]}""",
+                    """data: {"choices":[{"delta":{"content":"\"name\":\"流式饮水打卡\",\"icon\":\"💧\",\"defaultSize\":{\"width\":280,\"height\":180},\"root\":\"main\",\"elements\":{\"main\":{\"type\":\"Stack\",\"padding\":\"12,10,12,12\",\"children\":[\"cups_text\"]},\"cups_text\":{\"type\":\"Text\",\"text\":\"今日 8 杯\"}}}\n```"}}]}""",
                     "data: [DONE]") + "\n\n";
 
                 var resp = new System.Net.Http.HttpResponseMessage(System.Net.HttpStatusCode.OK)
@@ -694,9 +726,10 @@ public sealed class CustomWidgetAgentStudioTests
             string? detectedName = null;
             int maxReasoningChars = 0;
 
-            CustomWidgetAiGenerationResult gen = await service.GenerateOrRefineAsync(
+            StudioTurnResult gen = await service.RunStudioTurnAsync(
                 "deepseek",
                 "做一个喝水打卡格子",
+                thinkingOverride: AiThinkingMode.Enabled,
                 onProgress: p =>
                 {
                     stages.Add(p.Stage);
@@ -707,7 +740,7 @@ public sealed class CustomWidgetAgentStudioTests
                     maxReasoningChars = Math.Max(maxReasoningChars, p.ReasoningChars);
                 });
 
-            Assert.True(gen.Success);
+            Assert.True(gen.Success, gen.ErrorMessage);
             Assert.Equal("deepseek-reasoner", gen.EffectiveModel);
             Assert.Contains(AiGenerationStage.Thinking, stages);
             Assert.Contains(AiGenerationStage.GeneratingJson, stages);
@@ -734,11 +767,14 @@ public sealed class CustomWidgetAgentStudioTests
             string olderOfficial = CustomWidgetManifestMetadataStamper.StampProvenance(
                 """
                 {
-                  "manifestVersion": 1,
+                  "schemaVersion": 1,
                   "id": "deskbox.sys-pulse",
                   "name": "Old Official Pulse",
                   "version": "1.0.0",
-                  "root": { "type": "Text", "text": "old" }
+                  "root": "main",
+                  "elements": {
+                    "main": { "type": "Text", "text": "old" }
+                  }
                 }
                 """,
                 origin: CustomWidgetOriginKinds.Official,
@@ -761,11 +797,14 @@ public sealed class CustomWidgetAgentStudioTests
             string customizedAi = CustomWidgetManifestMetadataStamper.StampProvenance(
                 """
                 {
-                  "manifestVersion": 1,
+                  "schemaVersion": 1,
                   "id": "deskbox.sys-pulse",
                   "name": "My Personalized AI Board",
                   "version": "1.0.0",
-                  "root": { "type": "Text", "text": "custom layout" }
+                  "root": "main",
+                  "elements": {
+                    "main": { "type": "Text", "text": "custom layout" }
+                  }
                 }
                 """,
                 origin: CustomWidgetOriginKinds.Ai,
@@ -881,7 +920,7 @@ public sealed class CustomWidgetAgentStudioTests
             await storeA.WriteManifestJsonAsync(
                 """
                 {
-                  "manifestVersion": 1,
+                  "schemaVersion": 1,
                   "id": "custom.sync-notes",
                   "name": "跨设备同步笔记",
                   "icon": "📝",
@@ -889,7 +928,10 @@ public sealed class CustomWidgetAgentStudioTests
                   "isCustomized": true,
                   "updatedAtUtc": "2026-11-01T12:00:00Z",
                   "collections": [ { "name": "notes", "fields": [ { "name": "title" } ] } ],
-                  "root": { "type": "Text", "text": "notes" }
+                  "root": "main",
+                  "elements": {
+                    "main": { "type": "Text", "text": "notes" }
+                  }
                 }
                 """);
             Directory.CreateDirectory(storeA.AttachmentsDirectory);
@@ -1013,14 +1055,17 @@ public sealed class CustomWidgetAgentStudioTests
         string syntheticApiKey = string.Join(string.Empty, "sk", "-", "abcdefghijklmnopqrstuvwxyz", "123456");
         string rawWithSecrets = """
         {
-          "manifestVersion": 1,
+          "schemaVersion": 1,
           "id": "custom.share-demo",
           "name": "Share Demo",
           "settings": [
             { "key": "folder", "type": "text", "label": "Dir", "default": "C:\\Users\\AliceSecret\\Desktop\\Private" },
             { "key": "token", "type": "text", "label": "Key", "default": "{{syntheticApiKey}}" }
           ],
-          "root": { "type": "Text", "text": "hello" }
+          "root": "main",
+          "elements": {
+            "main": { "type": "Text", "text": "hello" }
+          }
         }
         """;
 
@@ -1036,7 +1081,7 @@ public sealed class CustomWidgetAgentStudioTests
         Directory.CreateDirectory(tempDir);
         try
         {
-            string pkgPath = Path.Combine(tempDir, "demo.deskbox-widget");
+            string pkgPath = Path.Combine(tempDir, "demo.dbxwidget");
             using (FileStream fs = new(pkgPath, FileMode.Create, FileAccess.Write))
             using (ZipArchive zip = new(fs, ZipArchiveMode.Create))
             {
@@ -1053,16 +1098,19 @@ public sealed class CustomWidgetAgentStudioTests
             Assert.Equal(CustomWidgetOriginKinds.Community, parsed.Manifest!.Origin);
 
             // Future schemaVersion / minAppVersion throws CustomWidgetIncompatibleVersionException
-            string futurePkgPath = Path.Combine(tempDir, "future.deskbox-widget");
+            string futurePkgPath = Path.Combine(tempDir, "future.dbxwidget");
             await File.WriteAllTextAsync(
                 futurePkgPath,
                 """
                 {
-                  "manifestVersion": 99,
+                  "schemaVersion": 99,
                   "minAppVersion": "99.0.0",
                   "id": "custom.future",
                   "name": "Future Widget",
-                  "root": { "type": "Text", "text": "v99" }
+                  "root": "main",
+                  "elements": {
+                    "main": { "type": "Text", "text": "v99" }
+                  }
                 }
                 """);
             await Assert.ThrowsAsync<CustomWidgetIncompatibleVersionException>(
@@ -1121,11 +1169,14 @@ public sealed class CustomWidgetAgentStudioTests
                   "iconGlyph": "🍅",
                   "version": "1.2.0",
                   "manifest": {
-                    "manifestVersion": 1,
+                    "schemaVersion": 1,
                     "id": "custom.pomodoro",
                     "name": "番茄专注时钟",
                     "version": "1.2.0",
-                    "root": { "type": "Text", "text": "25:00" }
+                    "root": "main",
+                    "elements": {
+                      "main": { "type": "Text", "text": "25:00" }
+                    }
                   }
                 },
                 {
@@ -1168,7 +1219,7 @@ public sealed class CustomWidgetAgentStudioTests
                 new StubAiHttpMessageHandler((_, _) => throw new HttpRequestException("Network unreachable")));
             Assert.False(await offlineCatalog.RefreshInBackgroundAsync(force: true));
             Assert.Equal(
-                CustomWidgetTemplates.Presets.Count + CustomWidgetTemplates.StudioStarters.Count,
+                CustomWidgetTemplates.Presets.Count,
                 offlineCatalog.GetMergedOfficialTemplates().Count);
         }
         finally
@@ -1195,7 +1246,7 @@ public sealed class CustomWidgetAgentStudioTests
         CustomWidgetParseResult parsedRssManifest = CustomWidgetManifestParser.Parse(
             """
             {
-              "manifestVersion": 1,
+              "schemaVersion": 1,
               "id": "custom.rss-test",
               "name": "RSS Test",
               "collections": [ { "name": "articles", "fields": [ { "name": "title" }, { "name": "link" } ] } ],
@@ -1208,7 +1259,10 @@ public sealed class CustomWidgetAgentStudioTests
                   "maxItems": 5
                 }
               ],
-              "root": { "type": "Button", "text": "Refresh", "actions": [ { "type": "source.refresh" } ] }
+              "root": "refresh_btn",
+              "elements": {
+                "refresh_btn": { "type": "Button", "text": "Refresh", "actions": [ { "type": "source.refresh" } ] }
+              }
             }
             """);
         Assert.NotNull(parsedRssManifest.Manifest);
@@ -1301,7 +1355,7 @@ public sealed class CustomWidgetAgentStudioTests
             var jsonSpec = CustomWidgetManifestParser.Parse(
                 """
                 {
-                  "manifestVersion": 1,
+                  "schemaVersion": 1,
                   "id": "custom.json-test",
                   "name": "JSON Test",
                   "state": { "serviceStatus": "", "count": "0" },
@@ -1316,14 +1370,17 @@ public sealed class CustomWidgetAgentStudioTests
                       "stateMap": { "serviceStatus": "meta.status", "count": "meta.total" }
                     }
                   ],
-                  "root": { "type": "Text", "text": "{state.serviceStatus}" }
+                  "root": "status_text",
+                  "elements": {
+                    "status_text": { "type": "Text", "text": "{state.serviceStatus}" }
+                  }
                 }
                 """).Manifest!.Sources[0];
 
             CustomWidgetNetworkFetchOutcome jsonOut = await engine.FetchAsync(jsonSpec, "https://feeds.example.com/api.json");
             Assert.True(jsonOut.Succeeded);
-            Assert.Equal("healthy", jsonOut.StateUpdates["serviceStatus"]);
-            Assert.Equal("42", jsonOut.StateUpdates["count"]);
+            Assert.Equal("healthy", jsonOut.StateUpdates["serviceStatus"].GetString());
+            Assert.Equal(42, jsonOut.StateUpdates["count"].GetInt32());
             Assert.Single(jsonOut.Items);
             Assert.Equal("v2.1.0", jsonOut.Items[0].Fields["ver"]);
             Assert.Equal("Autumn Update", jsonOut.Items[0].Fields["name"]);
@@ -1359,15 +1416,15 @@ public sealed class CustomWidgetAgentStudioTests
             Assert.Empty(rawManifest.I18n);
             CustomWidgetManifest manifest = rawManifest.WithLocales(hydrationBundle.Locales);
             Assert.NotEmpty(manifest.I18n);
-            Assert.Equal("今日饮水打卡", manifest.ResolveLocalizedName("zh-CN"));
-            Assert.Equal("今日飲水打卡", manifest.ResolveLocalizedName("zh-TW"));
-            Assert.Equal("Hydration Tracker", manifest.ResolveLocalizedName("en-US"));
-            Assert.Equal("水分補給トラッカー", manifest.ResolveLocalizedName("ja-JP"));
-            Assert.Equal("오늘의 수분 섭취", manifest.ResolveLocalizedName("ko-KR"));
-            Assert.Equal("Suivi de l’hydratation", manifest.ResolveLocalizedName("fr-FR"));
+            Assert.Equal("喝水打卡", manifest.ResolveLocalizedName("zh-CN"));
+            Assert.Equal("喝水打卡", manifest.ResolveLocalizedName("zh-TW"));
+            Assert.Equal("Hydration Station", manifest.ResolveLocalizedName("en-US"));
+            Assert.Equal("水分補給ステーション", manifest.ResolveLocalizedName("ja-JP"));
+            Assert.Equal("수분 충전 스테이션", manifest.ResolveLocalizedName("ko-KR"));
+            Assert.Equal("Station Hydratation", manifest.ResolveLocalizedName("fr-FR"));
             // Unknown locale falls back cleanly to en-US
-            Assert.Equal("Hydration Tracker", manifest.ResolveLocalizedName("it-IT"));
-            Assert.Equal("Hydration Tracker", manifest.ResolveLocalizedName("en-GB"));
+            Assert.Equal("Hydration Station", manifest.ResolveLocalizedName("it-IT"));
+            Assert.Equal("Hydration Station", manifest.ResolveLocalizedName("en-GB"));
 
             var cfg = new WidgetConfig
             {
@@ -1388,21 +1445,21 @@ public sealed class CustomWidgetAgentStudioTests
             vm.ViewRebuildRequested += (_, _) => rebuildCount++;
 
             await vm.InitializeAsync();
-            Assert.Equal("今日饮水打卡", cfg.Name);
+            Assert.Equal("喝水打卡", cfg.Name);
             Assert.Contains("饮水", vm.CapsuleTitle, StringComparison.Ordinal);
             rebuildCount = 0;
 
             // Switch UI language to English -> live ViewRebuildRequested + Config.Name + CapsuleTitle switch immediately
             localization.SetLanguage("en-US");
             Assert.Equal(1, rebuildCount);
-            Assert.Equal("Hydration Tracker", cfg.Name);
+            Assert.Equal("Hydration Station", cfg.Name);
             Assert.Contains("Water", vm.CapsuleTitle, StringComparison.Ordinal);
 
             // Switch UI language to Japanese -> updates again
             localization.SetLanguage("ja-JP");
             Assert.Equal(2, rebuildCount);
-            Assert.Equal("水分補給トラッカー", cfg.Name);
-            Assert.Contains("水分補給", vm.CapsuleTitle, StringComparison.Ordinal);
+            Assert.Equal("水分補給ステーション", cfg.Name);
+            Assert.Contains("ml", vm.CapsuleTitle, StringComparison.Ordinal);
 
             // Custom user-renamed widget title must NOT be overwritten on language change
             cfg.Name = "My Custom Cup";
@@ -1423,7 +1480,7 @@ public sealed class CustomWidgetAgentStudioTests
     [Fact]
     public void AllThirteenOfficialTemplatesAndStarters_ParseCleanly_And_RenderLocalizedCopyInChineseAndEnglish()
     {
-        Assert.Equal(10, CustomWidgetTemplates.BuiltInTemplateIds.Count);
+        Assert.Equal(14, CustomWidgetTemplates.BuiltInTemplateIds.Count);
 
         foreach (string templateId in CustomWidgetTemplates.BuiltInTemplateIds)
         {
@@ -1488,26 +1545,32 @@ public sealed class CustomWidgetAgentStudioTests
     [Fact]
     public void MultilingualPrompts_RouteZhAndUniversalWrappers_InjectTargetLanguage_And_ExcludeChineseBoilerplateInNonChinese()
     {
-        string zhPrompt = CustomWidgetTemplates.BuildChatAiPrompt("做一个喝水打卡", uiLanguage: "zh-CN");
-        Assert.Contains("Simplified Chinese (简体中文)", zhPrompt, StringComparison.Ordinal);
-        Assert.Contains("输出铁律", zhPrompt, StringComparison.Ordinal);
+        string zhSystem = CustomWidgetTemplates.BuildStudioCoCreationSystemPrompt(uiLanguage: "zh-CN");
+        string zhUser = CustomWidgetTemplates.BuildStudioCoCreationUserPrompt("做一个喝水打卡", uiLanguage: "zh-CN");
+        Assert.Contains("Simplified Chinese (简体中文)", zhSystem, StringComparison.Ordinal);
+        Assert.Contains("硬性运行时契约", zhSystem, StringComparison.Ordinal);
+        Assert.Contains("做一个喝水打卡", zhUser, StringComparison.Ordinal);
 
-        string enPrompt = CustomWidgetTemplates.BuildChatAiPrompt("Build a sprint timer", uiLanguage: "en-US");
-        Assert.Contains("Strict Output Rules", enPrompt, StringComparison.Ordinal);
-        Assert.Contains("current DeskBox UI language (English)", enPrompt, StringComparison.Ordinal);
-        Assert.DoesNotContain("输出铁律", enPrompt, StringComparison.Ordinal);
+        string enSystem = CustomWidgetTemplates.BuildStudioCoCreationSystemPrompt(uiLanguage: "en-US");
+        string enUser = CustomWidgetTemplates.BuildStudioCoCreationUserPrompt("Build a sprint timer", uiLanguage: "en-US");
+        Assert.Contains("Hard Runtime Contracts:", enSystem, StringComparison.Ordinal);
+        Assert.Contains("DeskBox UI English", enSystem, StringComparison.Ordinal);
+        Assert.DoesNotContain("硬性运行时契约", enSystem, StringComparison.Ordinal);
+        Assert.Contains("Build a sprint timer", enUser, StringComparison.Ordinal);
 
-        string jaPrompt = CustomWidgetTemplates.BuildChatAiPrompt("毎日の読書記録ウィジェット", uiLanguage: "ja-JP");
-        Assert.Contains("Strict Output Rules", jaPrompt, StringComparison.Ordinal);
-        Assert.Contains("Japanese (日本語)", jaPrompt, StringComparison.Ordinal);
-        Assert.DoesNotContain("输出铁律", jaPrompt, StringComparison.Ordinal);
+        string jaSystem = CustomWidgetTemplates.BuildStudioCoCreationSystemPrompt(uiLanguage: "ja-JP");
+        string jaUser = CustomWidgetTemplates.BuildStudioCoCreationUserPrompt("毎日の読書記録ウィジェット", uiLanguage: "ja-JP");
+        Assert.Contains("Hard Runtime Contracts:", jaSystem, StringComparison.Ordinal);
+        Assert.Contains("Japanese (日本語)", jaSystem, StringComparison.Ordinal);
+        Assert.DoesNotContain("硬性运行时契约", jaSystem, StringComparison.Ordinal);
+        Assert.Contains("毎日の読書記録ウィジェット", jaUser, StringComparison.Ordinal);
 
         string repairEn = CustomWidgetTemplates.BuildChatAiRepairPrompt(
             "{ \"schemaVersion\": 1 }",
-            [new CustomWidgetValidationDiagnostic("$.view", "Missing root view")],
+            [new CustomWidgetValidationDiagnostic("$.root", "Missing root element")],
             uiLanguage: "de-DE");
         Assert.Contains("German (Deutsch)", repairEn, StringComparison.Ordinal);
-        Assert.Contains("`$.view`: Missing root view", repairEn, StringComparison.Ordinal);
+        Assert.Contains("`$.root`: Missing root element", repairEn, StringComparison.Ordinal);
         Assert.DoesNotContain("校验未通过", repairEn, StringComparison.Ordinal);
 
         string agentKo = CustomWidgetTemplates.BuildLocalAgentPrompt(
@@ -1527,14 +1590,18 @@ public sealed class CustomWidgetAgentStudioTests
         Directory.CreateDirectory(cacheDir);
         try
         {
-            // 1. Valid modular remote override (promptVersion = 2 > BuiltInPromptVersion = 1)
+            // 1. Valid modular remote override (promptVersion = 3 > BuiltInPromptVersion = 2)
             const string validRemoteJson = """
             {
               "schemaVersion": 1,
               "promptVersion": 3,
               "minAppVersion": "0.1.0",
-              "systemPrompt": "OTA System Architect ({{TARGET_LANGUAGE}}) :: {{EXTRA_DESIGN_RULES}}\n{{SKILL_MARKDOWN}}",
-              "extraDesignRules": "- OTA_RULE_42: Prefer crisp tabular metrics for numeric counters."
+              "systemPromptZh": "OTA 中文架构师 (\"kind\", write_bundle, finish_turn, {{TARGET_LANGUAGE}}) :: {{EXTRA_DESIGN_RULES}}\n{{SKILL_MARKDOWN}}",
+              "systemPromptEn": "OTA System Architect (\"kind\", write_bundle, finish_turn, {{TARGET_LANGUAGE}}) :: {{EXTRA_DESIGN_RULES}}\n{{SKILL_MARKDOWN}}",
+              "extraDesignRules": "- OTA_RULE_42: Prefer crisp tabular metrics for numeric counters.",
+              "capabilityPatches": [
+                { "id": "vector-canvas", "summaryEn": "Updated OTA summary" }
+              ]
             }
             """;
 
@@ -1544,7 +1611,7 @@ public sealed class CustomWidgetAgentStudioTests
                 {
                     Content = new StringContent(validRemoteJson, Encoding.UTF8, "application/json")
                 })),
-                currentAppVersionOverride: new Version(1, 5, 0, 0));
+                currentAppVersionOverride: new Version(1, 6, 0, 0));
 
             Assert.True(await onlineService.RefreshInBackgroundAsync(force: true));
             CustomWidgetEffectivePromptPack pack = onlineService.GetEffectivePromptPack();
@@ -1552,28 +1619,34 @@ public sealed class CustomWidgetAgentStudioTests
             Assert.Equal(3, pack.PromptVersion);
             Assert.Contains("OTA_RULE_42", pack.ExtraDesignRules, StringComparison.Ordinal);
             Assert.Contains("OTA_RULE_42", pack.SkillMarkdown, StringComparison.Ordinal);
+            Assert.Single(pack.CapabilityPatches);
+            Assert.Equal("vector-canvas", pack.CapabilityPatches[0].Id);
 
-            string enChatWithOta = CustomWidgetTemplates.BuildChatAiPrompt(
-                "Create a release tracker",
+            string enStudioWithOta = CustomWidgetTemplates.BuildStudioCoCreationSystemPrompt(
                 uiLanguage: "en-US",
                 promptPack: pack);
-            Assert.Contains("OTA_RULE_42", enChatWithOta, StringComparison.Ordinal);
+            Assert.Contains("OTA_RULE_42", enStudioWithOta, StringComparison.Ordinal);
+
+            string zhStudioWithOta = CustomWidgetTemplates.BuildStudioCoCreationSystemPrompt(
+                uiLanguage: "zh-CN",
+                promptPack: pack);
+            Assert.Contains("OTA 中文架构师", zhStudioWithOta, StringComparison.Ordinal);
 
             // 2. Offline cold start hydrates from persisted disk cache (prompts.v1.json)
             var coldOfflineService = new CustomWidgetRemotePromptService(
                 cacheDir,
                 new StubAiHttpMessageHandler((_, _) => throw new HttpRequestException("Offline")),
-                currentAppVersionOverride: new Version(1, 5, 0, 0));
+                currentAppVersionOverride: new Version(1, 6, 0, 0));
             Assert.False(await coldOfflineService.RefreshInBackgroundAsync(force: true));
             CustomWidgetEffectivePromptPack hydratedPack = coldOfflineService.GetEffectivePromptPack();
             Assert.True(hydratedPack.IsRemoteOverride);
             Assert.Equal(3, hydratedPack.PromptVersion);
 
-            // 3. Reject downgrade (promptVersion <= 1), future schemaVersion, future minAppVersion, and broken template missing required tokens
+            // 3. Reject downgrade (promptVersion <= BuiltInPromptVersion), future schemaVersion, future minAppVersion, invalid SkillMarkdown, and empty-id CapabilityPatches
             Assert.False(onlineService.IsValidCompatibleOverride(new CustomWidgetRemotePromptDocument
             {
                 SchemaVersion = 1,
-                PromptVersion = 1,
+                PromptVersion = CustomWidgetRemotePromptService.BuiltInPromptVersion,
                 ExtraDesignRules = "downgrade"
             }));
             Assert.False(onlineService.IsValidCompatibleOverride(new CustomWidgetRemotePromptDocument
@@ -1593,7 +1666,13 @@ public sealed class CustomWidgetAgentStudioTests
             {
                 SchemaVersion = 1,
                 PromptVersion = 5,
-                WebPromptTemplateEn = "Broken template missing required placeholders"
+                SkillMarkdown = "Broken skill markdown missing required schema tokens"
+            }));
+            Assert.False(onlineService.IsValidCompatibleOverride(new CustomWidgetRemotePromptDocument
+            {
+                SchemaVersion = 1,
+                PromptVersion = 5,
+                CapabilityPatches = [new CustomWidgetCapabilityPatchDto { Id = "" }]
             }));
 
             // 4. Baseline / rollback document (promptVersion <= 1) retires active override without hitting mirror endpoint
@@ -1677,17 +1756,17 @@ public sealed class CustomWidgetAgentStudioTests
                 uiLanguage: "zh-CN",
                 targetWidgetId: "dev-toolbox-1",
                 targetWidgetName: "开发者工具箱",
-                currentManifestJson: """{"schemaVersion":1,"id":"custom.dev","name":"Dev","view":{"type":"Text","text":"Hi"}}""",
+                currentManifestJson: """{"schemaVersion":1,"id":"custom.dev","name":"Dev","root":"main","elements":{"main":{"type":"Text","text":"Hi"}}}""",
                 manifestFilePath: @"C:\Data\dev-toolbox-1\manifest.json",
                 briefMarkdown: "- 保持深色高对比度",
-                targetNodeContext: "$.view.children[0] (Button)",
+                targetNodeContext: "#top_btn (Button)",
                 pinnedCapabilityIds: ["httpJson"],
                 isCapsuleViewport: true);
             Assert.Contains("把顶部按钮改成圆角胶囊并加入 httpJson 刷新", studioMcpPrompt, StringComparison.Ordinal);
             Assert.Contains("dev-toolbox-1", studioMcpPrompt, StringComparison.Ordinal);
             Assert.Contains("deskbox_upsert_widget", studioMcpPrompt, StringComparison.Ordinal);
             Assert.Contains("@httpJson", studioMcpPrompt, StringComparison.Ordinal);
-            Assert.Contains("$.view.children[0] (Button)", studioMcpPrompt, StringComparison.Ordinal);
+            Assert.Contains("#top_btn (Button)", studioMcpPrompt, StringComparison.Ordinal);
             Assert.Contains("切勿在当前代码仓库中搜索无关源码", studioMcpPrompt, StringComparison.Ordinal);
             Assert.Contains("零扫描回退方案", studioMcpPrompt, StringComparison.Ordinal);
             Assert.Contains("SKILL.md", studioMcpPrompt, StringComparison.Ordinal);
@@ -1759,23 +1838,25 @@ public sealed class CustomWidgetAgentStudioTests
               "fieldMap": { "code": "f12", "name": "f14", "pct": "f3" }
             }
           ],
-          "view": {
-            "type": "Stack",
-            "children": [
-              { "type": "Text", "text": "${state.sourceStatus == 'error' ? state.sourceError : state.sourceUpdatedAt}" },
-              {
-                "type": "List",
-                "itemsSource": "stocks",
-                "itemTemplate": {
-                  "type": "Card",
-                  "tone": "${$rank == 1 ? 'accent' : 'subtle'}",
-                  "children": [
-                    { "type": "Badge", "text": "${$rank}", "tone": "${$rank <= 3 ? 'danger' : 'muted'}" },
-                    { "type": "Text", "text": "${$item.pct}%", "color": "${$item.pct >= 0 ? '#EF4444' : '#10B981'}" }
-                  ]
-                }
-              }
-            ]
+          "root": "main",
+          "elements": {
+            "main": {
+              "type": "Stack",
+              "children": ["status_text", "stocks_list"]
+            },
+            "status_text": { "type": "Text", "text": "${state.sourceStatus == 'error' ? state.sourceError : state.sourceUpdatedAt}" },
+            "stocks_list": {
+              "type": "List",
+              "itemsSource": "stocks",
+              "itemTemplate": "stock_card"
+            },
+            "stock_card": {
+              "type": "Card",
+              "tone": "${$rank == 1 ? 'accent' : 'subtle'}",
+              "children": ["rank_badge", "pct_text"]
+            },
+            "rank_badge": { "type": "Badge", "text": "${$rank}", "tone": "${$rank <= 3 ? 'danger' : 'muted'}" },
+            "pct_text": { "type": "Text", "text": "${$item.pct}%", "color": "${$item.pct >= 0 ? '#EF4444' : '#10B981'}" }
           }
         }
         """;
@@ -1797,13 +1878,15 @@ public sealed class CustomWidgetAgentStudioTests
               "targetCollection": "items"
             }
           ],
-          "view": {
-            "type": "Card",
-            "tone": "${state.missingCardTone}",
-            "children": [
-              { "type": "Text", "text": "Hi", "color": "${state.missingTextColor}" },
-              { "type": "Badge", "text": "B", "tone": "${state.missingBadgeTone}" }
-            ]
+          "root": "main",
+          "elements": {
+            "main": {
+              "type": "Card",
+              "tone": "${state.missingCardTone}",
+              "children": ["hi_text", "badge_node"]
+            },
+            "hi_text": { "type": "Text", "text": "Hi", "color": "${state.missingTextColor}" },
+            "badge_node": { "type": "Badge", "text": "B", "tone": "${state.missingBadgeTone}" }
           }
         }
         """;
@@ -1920,6 +2003,9 @@ public sealed class CustomWidgetAgentStudioTests
                 WidgetKind = WidgetKind.Custom
             };
 
+            var stockTrustStore = new CustomWidgetTrustStore(tempRoot);
+            stockTrustStore.RegisterWidgetProvenance("hot-stocks-1", trustedLocalAuthoring: true);
+
             using var stockVm = new CustomWidgetViewModel(
                 stockCfg,
                 localization,
@@ -1927,7 +2013,10 @@ public sealed class CustomWidgetAgentStudioTests
                 dispatcherQueue: null,
                 notificationServiceProvider: null,
                 isPreviewOnly: false,
-                networkSourceEngine: tabEngine);
+                networkSourceEngine: tabEngine)
+            {
+                TrustStoreOverride = stockTrustStore
+            };
 
             await stockVm.InitializeAsync();
             for (int i = 0; i < 40 && (!stockVm.Collections.TryGetValue("stocks", out var initialRows) || initialRows.Count == 0); i++)
@@ -2002,23 +2091,18 @@ public sealed class CustomWidgetAgentStudioTests
 
         // 2. Manifest parser rejects excessive node tree depth (> 64) and action chain depth (> 64) safely.
         var nestedViewSb = new StringBuilder();
-        nestedViewSb.Append("""{"manifestVersion":1,"id":"custom.deep","name":"Deep","root": """);
+        nestedViewSb.Append("""{"schemaVersion":1,"id":"custom.deep","name":"Deep","root":"n0","elements":{""");
         for (int i = 0; i < 80; i++)
         {
-            nestedViewSb.Append("""{"type":"Column","children":[""");
+            nestedViewSb.Append($$""" "n{{i}}":{"type":"Column","children":["n{{i + 1}}"]},""");
         }
-        nestedViewSb.Append("""{"type":"Text","text":"leaf"}""");
-        for (int i = 0; i < 80; i++)
-        {
-            nestedViewSb.Append("]}");
-        }
-        nestedViewSb.Append('}');
+        nestedViewSb.Append(""" "n80":{"type":"Text","text":"leaf"}}}""");
 
         CustomWidgetParseResult deepViewResult = CustomWidgetManifestParser.Parse(nestedViewSb.ToString());
         Assert.Contains(deepViewResult.Diagnostics, d => d.IsError);
 
         var nestedActionSb = new StringBuilder();
-        nestedActionSb.Append("""{"manifestVersion":1,"id":"custom.deep-act","name":"DeepAct","root":{"type":"Button","label":"Go","onTap": """);
+        nestedActionSb.Append("""{"schemaVersion":1,"id":"custom.deep-act","name":"DeepAct","root":"go_btn","elements":{"go_btn":{"type":"Button","label":"Go","onTap": """);
         for (int i = 0; i < 80; i++)
         {
             nestedActionSb.Append("""{"type":"state.set","key":"k","value":"v","then":[""");
@@ -2028,7 +2112,7 @@ public sealed class CustomWidgetAgentStudioTests
         {
             nestedActionSb.Append("]}");
         }
-        nestedActionSb.Append("}}");
+        nestedActionSb.Append("}}}");
 
         CustomWidgetParseResult deepActionResult = CustomWidgetManifestParser.Parse(nestedActionSb.ToString());
         Assert.Contains(deepActionResult.Diagnostics, d => d.IsError);
@@ -2055,11 +2139,14 @@ public sealed class CustomWidgetAgentStudioTests
         // 4. External imports claiming "origin": "official" and "id": "deskbox.*" are forcibly demoted to Community.
         string spoofedOfficialJson = """
             {
-              "manifestVersion": 1,
+              "schemaVersion": 1,
               "id": "deskbox.sys-pulse",
               "name": "Spoofed Official",
               "origin": "official",
-              "root": { "type": "Text", "text": "hi" }
+              "root": "main",
+              "elements": {
+                "main": { "type": "Text", "text": "hi" }
+              }
             }
             """;
         (CustomWidgetManifest importedManifest, _) = CustomWidgetPackageService.ParseAndPrepareImportedManifest(
@@ -2073,7 +2160,7 @@ public sealed class CustomWidgetAgentStudioTests
     {
         // 1. Default size aligns to 360x460 when omitted in manifest JSON.
         CustomWidgetParseResult minManifest = CustomWidgetManifestParser.Parse(
-            """{"schemaVersion":1,"id":"custom.size-check","name":"Size Check","view":{"type":"Text","text":"ok"}}""");
+            """{"schemaVersion":1,"id":"custom.size-check","name":"Size Check","root":"main","elements":{"main":{"type":"Text","text":"ok"}}}""");
         Assert.True(minManifest.IsValid);
         Assert.Equal(new CustomWidgetSizeSpec(360, 460), minManifest.Manifest!.DefaultSize);
 
@@ -2090,7 +2177,7 @@ public sealed class CustomWidgetAgentStudioTests
 
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent("""{"schemaVersion":1,"id":"custom.ok","name":"OK","view":{"type":"Text","text":"ok"}}""", Encoding.UTF8, "application/json")
+                Content = new StringContent("""{"schemaVersion":1,"id":"custom.ok","name":"OK","root":"main","elements":{"main":{"type":"Text","text":"ok"}}}""", Encoding.UTF8, "application/json")
             });
         }));
 
@@ -2282,29 +2369,31 @@ public sealed class CustomWidgetAgentStudioTests
           "collections": {
             "tasks": { "maxItems": 50, "sort": "newestFirst" }
           },
-          "view": {
-            "type": "Stack",
-            "children": [
-              {
-                "type": "Input",
-                "bind": "state.draft",
-                "onSubmit": {
-                  "type": "ai.run",
-                  "prompt": "Refine: ${state.draft}",
-                  "stateMap": { "summary": "summary" },
-                  "collection": "tasks",
-                  "mode": "prepend",
-                  "itemsPath": "items",
-                  "fieldMap": { "title": "title" },
-                  "maxItems": 5
-                }
-              },
-              {
-                "type": "Text",
-                "visible": "${state.aiStatus == 'running'}",
-                "text": "${state.summary} · ${state.aiUpdatedAt} · ${state.aiError}"
+          "root": "main",
+          "elements": {
+            "main": {
+              "type": "Stack",
+              "children": ["draft_input", "status_text"]
+            },
+            "draft_input": {
+              "type": "Input",
+              "bind": "state.draft",
+              "onSubmit": {
+                "type": "ai.run",
+                "prompt": "Refine: ${state.draft}",
+                "stateMap": { "summary": "summary" },
+                "collection": "tasks",
+                "mode": "prepend",
+                "itemsPath": "items",
+                "fieldMap": { "title": "title" },
+                "maxItems": 5
               }
-            ]
+            },
+            "status_text": {
+              "type": "Text",
+              "visible": "${state.aiStatus == 'running'}",
+              "text": "${state.summary} · ${state.aiUpdatedAt} · ${state.aiError}"
+            }
           }
         }
         """;
@@ -2318,11 +2407,14 @@ public sealed class CustomWidgetAgentStudioTests
           "schemaVersion": 1,
           "id": "custom.ai-micro-bad",
           "name": "AI Micro Bad",
-          "view": {
-            "type": "Button",
-            "text": "Run",
-            "onClick": {
-              "type": "ai.run"
+          "root": "run_btn",
+          "elements": {
+            "run_btn": {
+              "type": "Button",
+              "text": "Run",
+              "onClick": {
+                "type": "ai.run"
+              }
             }
           }
         }
@@ -2415,7 +2507,27 @@ public sealed class CustomWidgetAgentStudioTests
 
             // Step A: Missing API key -> friendly warning, state.aiStatus = "error", AND draft is preserved!
             await vm.ExecuteActionsAsync([new CustomWidgetActionSpec("state.set", Key: "draft", Value: "周四前完成测试与发版准备")]);
-            CustomWidgetNodeSpec refineButton = vm.Manifest.View.Children[1].Children[1];
+            CustomWidgetNodeSpec? FindAiRunButton(CustomWidgetNodeSpec node)
+            {
+                if (string.Equals(node.Type, "Button", StringComparison.OrdinalIgnoreCase) &&
+                    node.OnClick.Any(static a => string.Equals(a.Type, "ai.run", StringComparison.OrdinalIgnoreCase)) &&
+                    node.OnClick.Any(static a => string.Equals(a.Fn, "prepareDraftRun", StringComparison.Ordinal)))
+                {
+                    return node;
+                }
+
+                foreach (CustomWidgetNodeSpec child in node.Children)
+                {
+                    if (FindAiRunButton(child) is { } found)
+                    {
+                        return found;
+                    }
+                }
+
+                return null;
+            }
+            CustomWidgetNodeSpec refineButton = FindAiRunButton(vm.Manifest.View)!;
+            Assert.NotNull(refineButton);
             await vm.ExecuteActionsAsync(refineButton.OnClick!);
 
             Assert.Equal("error", vm.State["aiStatus"]);
@@ -2466,7 +2578,7 @@ public sealed class CustomWidgetAgentStudioTests
     {
         const string boardManifestJson = """
         {
-          "manifestVersion": 1,
+          "schemaVersion": 1,
           "id": "custom.hot-board-test",
           "name": "Hot Board",
           "state": {
@@ -2502,27 +2614,29 @@ public sealed class CustomWidgetAgentStudioTests
               }
             }
           ],
-          "root": {
-            "type": "Stack",
-            "children": [
-              {
-                "type": "Button",
-                "text": "Refresh Active",
-                "onClick": { "type": "source.refresh", "source": "${state.board}" }
-              },
-              {
-                "type": "List",
-                "items": "${state.board}",
-                "itemTemplate": {
-                  "type": "Stack",
-                  "orientation": "horizontal",
-                  "children": [
-                    { "type": "Badge", "text": "${$item.rank}" },
-                    { "type": "Text", "text": "${$item.title}" }
-                  ]
-                }
-              }
-            ]
+          "root": "main",
+          "elements": {
+            "main": {
+              "type": "Stack",
+              "children": ["refresh_btn", "board_list"]
+            },
+            "refresh_btn": {
+              "type": "Button",
+              "text": "Refresh Active",
+              "onClick": { "type": "source.refresh", "source": "${state.board}" }
+            },
+            "board_list": {
+              "type": "List",
+              "items": "${state.board}",
+              "itemTemplate": "board_row"
+            },
+            "board_row": {
+              "type": "Stack",
+              "orientation": "horizontal",
+              "children": ["row_rank", "row_title"]
+            },
+            "row_rank": { "type": "Badge", "text": "${$item.rank}" },
+            "row_title": { "type": "Text", "text": "${$item.title}" }
           }
         }
         """;
@@ -2584,6 +2698,9 @@ public sealed class CustomWidgetAgentStudioTests
                     });
                 }));
 
+            var boardTrustStore = new CustomWidgetTrustStore(tempDir);
+            boardTrustStore.RegisterWidgetProvenance("hot-board-test", trustedLocalAuthoring: true);
+
             using var vm = new CustomWidgetViewModel(
                 new WidgetConfig { Id = "hot-board-test", Name = "Hot Board", WidgetKind = WidgetKind.Custom },
                 localization,
@@ -2591,7 +2708,10 @@ public sealed class CustomWidgetAgentStudioTests
                 dispatcherQueue: null,
                 notificationServiceProvider: null,
                 isPreviewOnly: false,
-                networkSourceEngine: netEngine);
+                networkSourceEngine: netEngine)
+            {
+                TrustStoreOverride = boardTrustStore
+            };
 
             await vm.InitializeAsync();
             await vm.RefreshNetworkSourcesNowAsync();
@@ -2603,11 +2723,21 @@ public sealed class CustomWidgetAgentStudioTests
             Assert.Equal("error", vm.State["sourceStatus.weibo"]);
             Assert.Contains("403", vm.State["sourceError.weibo"], StringComparison.Ordinal);
 
-            var payload = await store.LoadAsync();
+            var persistedPayload = await store.LoadAsync();
+            Assert.DoesNotContain("sourceError.weibo", persistedPayload.State.Keys);
+
+            var livePayload = new CustomWidgetStorePayload
+            {
+                State = new Dictionary<string, string>(vm.State, StringComparer.Ordinal),
+                Collections = vm.Collections.ToDictionary(
+                    static kv => kv.Key,
+                    static kv => new List<CustomWidgetRecord>(kv.Value),
+                    StringComparer.Ordinal)
+            };
             CustomWidgetHealthReport health = CustomWidgetHealthAnalyzer.AnalyzeHealth(
                 boardManifestJson,
                 parseRes.Manifest,
-                payload,
+                livePayload,
                 measuredWidth: 320,
                 measuredHeight: 260,
                 cultureName: "zh-CN");
@@ -2686,7 +2816,10 @@ public sealed class CustomWidgetAgentStudioTests
               "id": "ai-exec-guard",
               "name": "AI Exec Guard",
               "origin": "ai",
-              "root": { "type": "text", "value": "Guard" }
+              "root": "main",
+              "elements": {
+                "main": { "type": "Text", "text": "Guard" }
+              }
             }
             """;
 
@@ -2694,6 +2827,8 @@ public sealed class CustomWidgetAgentStudioTests
             var localization = new LocalizationService(settingsService);
             var store = new CustomWidgetDataStore("ai-exec-guard", tempDir);
             await store.WriteManifestJsonAsync(aiOriginManifestJson);
+            var trustStore = new CustomWidgetTrustStore(tempDir);
+            trustStore.RegisterWidgetProvenance("ai-exec-guard", trustedLocalAuthoring: true);
 
             using var vm = new CustomWidgetViewModel(
                 new WidgetConfig { Id = "ai-exec-guard", Name = "AI Exec Guard", WidgetKind = WidgetKind.Custom },
@@ -2701,7 +2836,10 @@ public sealed class CustomWidgetAgentStudioTests
                 store: store,
                 dispatcherQueue: null,
                 notificationServiceProvider: null,
-                isPreviewOnly: false);
+                isPreviewOnly: false)
+            {
+                TrustStoreOverride = trustStore
+            };
             await vm.InitializeAsync();
 
             var prompts = new List<CustomWidgetSecurityPrompt>();
@@ -2765,9 +2903,13 @@ public sealed class CustomWidgetAgentStudioTests
                 tempCacheDir,
                 new StubAiHttpMessageHandler((_, _) => throw new HttpRequestException("offline")));
             IReadOnlyList<CustomWidgetCatalogEntry> official = catalog.GetMergedOfficialTemplates();
-            Assert.Equal(10, official.Count);
+            Assert.Equal(14, official.Count);
             Assert.Contains(official, e => e.Id == CustomWidgetTemplates.WorldClockTemplateId);
             Assert.Contains(official, e => e.Id == CustomWidgetTemplates.DevToolboxTemplateId);
+            Assert.Contains(official, e => e.Id == CustomWidgetTemplates.FocusDialTemplateId);
+            Assert.Contains(official, e => e.Id == CustomWidgetTemplates.SnippetGridTemplateId);
+            Assert.Contains(official, e => e.Id == CustomWidgetTemplates.WeatherDeskTemplateId);
+            Assert.Contains(official, e => e.Id == CustomWidgetTemplates.TodoAgendaTemplateId);
 
             string[] retiredIds =
             [
@@ -2803,7 +2945,7 @@ public sealed class CustomWidgetAgentStudioTests
 
         // 2. Hydration template evaluates dynamic ml goal progress (no longer hardcoded 45%)
         CustomWidgetManifest hydration = CustomWidgetManifestParser.Parse(
-            CustomWidgetTemplates.GetTemplateJson(CustomWidgetTemplates.HydrationStarterId)).Manifest!;
+            CustomWidgetTemplates.GetTemplateBundle(CustomWidgetTemplates.HydrationStarterId).ManifestJson).Manifest!;
         Assert.Contains(hydration.Settings, s => s.Key == "dailyGoalMl" && s.DefaultValue == "2000");
         Assert.Contains(hydration.Settings, s => s.Key == "modules" && s.Type == "moduleList");
 
@@ -2824,16 +2966,19 @@ public sealed class CustomWidgetAgentStudioTests
         // 3. Static validation warns on dead/unbound settings, and passes cleanly when bound via $settings / $secrets
         const string deadSettingJson = """
         {
-          "manifestVersion": 1,
+          "schemaVersion": 1,
           "id": "custom.dead-setting-test",
           "name": "Dead Setting Test",
           "settings": [
             { "key": "unusedThreshold", "type": "number", "label": "Threshold", "default": "80" },
             { "key": "usedLabel", "type": "text", "label": "Prefix", "default": "OK" }
           ],
-          "view": {
-            "type": "Text",
-            "text": "${$settings.usedLabel}"
+          "root": "main",
+          "elements": {
+            "main": {
+              "type": "Text",
+              "text": "${$settings.usedLabel}"
+            }
           }
         }
         """;
@@ -2979,24 +3124,26 @@ public sealed class CustomWidgetAgentStudioTests
             "src/DeskBox/Views/CustomWidgetStudioWindow.xaml"));
         Assert.Contains("x:Name=\"RootGrid\"\n        Background=\"Transparent\"", studioXaml.Replace("\r\n", "\n"), StringComparison.Ordinal);
 
-        string studioPagesSource = File.ReadAllText(TestPaths.FromRepository(
-            "src/DeskBox/Views/CustomWidgetStudioWindow.Pages.cs"));
-        Assert.Contains("Grid.SetRow(viewportModeSegmented, 1);", studioPagesSource, StringComparison.Ordinal);
-        Assert.Contains("Grid.SetRow(backdropSegmented, 3);", studioPagesSource, StringComparison.Ordinal);
+        string studioPagesSource = string.Join(
+            "\n",
+            Directory.GetFiles(TestPaths.FromRepository("src/DeskBox/Controls/Studio"), "*.cs")
+                .OrderBy(static path => path, StringComparer.Ordinal)
+                .Select(File.ReadAllText));
+        Assert.Contains("stageBottomBar.Children.Add(viewportModeSegmented);", studioPagesSource, StringComparison.Ordinal);
+        Assert.Contains("stageBottomBar.Children.Add(_popoverPreviewButton);", studioPagesSource, StringComparison.Ordinal);
+        Assert.Contains("rightTools.Children.Add(_stageAppearanceButton);", studioPagesSource, StringComparison.Ordinal);
+        Assert.Contains("BuildStageAppearanceFlyout()", studioPagesSource, StringComparison.Ordinal);
+        Assert.Contains("Grid.SetRow(stageBottomBar, 3);", studioPagesSource, StringComparison.Ordinal);
         Assert.Contains("CreateCapsuleViewportIcon()", studioPagesSource, StringComparison.Ordinal);
         Assert.DoesNotContain("\\uE91D", studioPagesSource, StringComparison.Ordinal);
-        Assert.Contains("_stageGeneratingProgressRing.IsActive = _isInPlaceGenerating;", studioPagesSource, StringComparison.Ordinal);
-        Assert.Contains("modalShadow.Receivers.Add(modalScrim);", studioPagesSource, StringComparison.Ordinal);
-        Assert.Contains("coachmarkShadow.Receivers.Add(tourScrim);", studioPagesSource, StringComparison.Ordinal);
-        Assert.Contains("NeutralInteractionBrush.IsDarkTheme(RootGrid)", studioPagesSource, StringComparison.Ordinal);
+        Assert.Contains("_shell.StageViewport.StageGeneratingProgressRing.IsActive = _session.IsInPlaceGenerating;", studioPagesSource, StringComparison.Ordinal);
+        Assert.Contains("NeutralInteractionBrush.IsDarkTheme(shell.ShellRootGrid)", studioPagesSource, StringComparison.Ordinal);
         Assert.Contains("BindFlyoutToStudioTheme(flyout, hostScroll);", studioPagesSource, StringComparison.Ordinal);
         Assert.Contains("private void BindFlyoutToStudioTheme(Flyout flyout, FrameworkElement? contentRoot = null)", studioPagesSource, StringComparison.Ordinal);
 
         string appXaml = File.ReadAllText(TestPaths.FromRepository("src/DeskBox/App.xaml"));
-        string settingsAppXaml = File.ReadAllText(TestPaths.FromRepository("src/DeskBox.Settings/SettingsHostApp.xaml"));
         Assert.Contains("<Color x:Key=\"SolidBackgroundFillColorBase\">#F3F3F3</Color>", appXaml, StringComparison.Ordinal);
         Assert.Contains("<Color x:Key=\"SolidBackgroundFillColorBase\">#202020</Color>", appXaml, StringComparison.Ordinal);
-        Assert.Contains("<Color x:Key=\"SolidBackgroundFillColorBase\">#F3F3F3</Color>", settingsAppXaml, StringComparison.Ordinal);
 
         Assert.True(DeskBox.Helpers.NeutralInteractionBrush.TryResolveBrushBackedColorKey(
             "ApplicationPageBackgroundThemeBrush", out string pageColorKey));

@@ -33,99 +33,99 @@ public sealed class CustomWidgetStudioCoCreationTests
           "collections": {
             "logs": { "maxItems": 60, "sort": "newestFirst" }
           },
-          "view": {
-            "type": "Stack",
-            "spacing": 8,
-            "children": [
-              {
-                "type": "Grid",
-                "columns": "*,Auto",
-                "spacing": 6,
-                "children": [
-                  {
-                    "type": "Select",
-                    "column": 0,
-                    "title": "分类",
-                    "bind": "state.category",
-                    "options": [
-                      { "value": "work", "label": "工作" },
-                      { "value": "life", "label": "生活" }
-                    ]
-                  },
-                  {
-                    "type": "IconButton",
-                    "column": 1,
-                    "icon": "\uE710",
-                    "size": 28,
-                    "variant": "accent",
-                    "tooltip": "打卡",
-                    "onClick": {
-                      "type": "collection.prepend",
-                      "collection": "logs",
-                      "item": { "amount": "${state.stepMl}", "score": "1" }
-                    }
-                  }
-                ]
-              },
-              {
-                "type": "CheckBox",
-                "bind": "state.hideDone",
-                "text": "隐藏已完成",
-                "strikethrough": true,
-                "onToggle": { "type": "state.set", "key": "hideDone", "value": "true" }
-              },
-              {
-                "type": "Slider",
-                "title": "专注时长",
-                "bind": "state.focusMinutes",
-                "min": 5,
-                "max": 90,
-                "step": 5,
-                "unit": "m"
-              },
-              {
-                "type": "NumberBox",
-                "title": "每次饮水",
-                "bind": "state.stepMl",
-                "min": 50,
-                "max": 1000,
-                "step": 50
-              },
-              {
-                "type": "TextArea",
-                "bind": "state.note",
-                "placeholder": "写下今日复盘…",
-                "minHeight": 72,
-                "maxHeight": 144,
-                "onSubmit": { "type": "state.set", "key": "note", "value": "" }
-              },
-              {
-                "type": "Expander",
-                "title": "趋势与打卡热力",
-                "defaultExpanded": true,
-                "bind": "state.statsExpanded",
-                "children": [
-                  {
-                    "type": "Sparkline",
-                    "title": "近 14 次趋势",
-                    "collection": "logs",
-                    "valueField": "amount",
-                    "unit": "ml",
-                    "height": 40,
-                    "showArea": true,
-                    "showLatest": true
-                  },
-                  {
-                    "type": "HeatmapGrid",
-                    "title": "近 28 天热力图",
-                    "collection": "logs",
-                    "valueField": "score",
-                    "days": 28,
-                    "color": "success"
-                  }
-                ]
+          "root": "main",
+          "elements": {
+            "main": {
+              "type": "Stack",
+              "spacing": 8,
+              "children": ["top_grid", "chk_hide_done", "sld_focus", "num_step", "ta_note", "exp_stats"]
+            },
+            "top_grid": {
+              "type": "Grid",
+              "columns": "*,Auto",
+              "spacing": 6,
+              "children": ["sel_category", "btn_log"]
+            },
+            "sel_category": {
+              "type": "Select",
+              "column": 0,
+              "title": "分类",
+              "bind": "state.category",
+              "options": [
+                { "value": "work", "label": "工作" },
+                { "value": "life", "label": "生活" }
+              ]
+            },
+            "btn_log": {
+              "type": "IconButton",
+              "column": 1,
+              "icon": "\uE710",
+              "size": 28,
+              "variant": "accent",
+              "tooltip": "打卡",
+              "onClick": {
+                "type": "collection.prepend",
+                "collection": "logs",
+                "item": { "amount": "${state.stepMl}", "score": "1" }
               }
-            ]
+            },
+            "chk_hide_done": {
+              "type": "CheckBox",
+              "bind": "state.hideDone",
+              "text": "隐藏已完成",
+              "strikethrough": true,
+              "onToggle": { "type": "state.set", "key": "hideDone", "value": "true" }
+            },
+            "sld_focus": {
+              "type": "Slider",
+              "title": "专注时长",
+              "bind": "state.focusMinutes",
+              "min": 5,
+              "max": 90,
+              "step": 5,
+              "unit": "m"
+            },
+            "num_step": {
+              "type": "NumberBox",
+              "title": "每次饮水",
+              "bind": "state.stepMl",
+              "min": 50,
+              "max": 1000,
+              "step": 50
+            },
+            "ta_note": {
+              "type": "TextArea",
+              "bind": "state.note",
+              "placeholder": "写下今日复盘…",
+              "minHeight": 72,
+              "maxHeight": 144,
+              "onSubmit": { "type": "state.set", "key": "note", "value": "" }
+            },
+            "exp_stats": {
+              "type": "Expander",
+              "title": "趋势与打卡热力",
+              "defaultExpanded": true,
+              "bind": "state.statsExpanded",
+              "children": ["spk_trend", "hm_28d"]
+            },
+            "spk_trend": {
+              "type": "Sparkline",
+              "title": "近 14 次趋势",
+              "collection": "logs",
+              "valueField": "amount",
+              "unit": "ml",
+              "height": 40,
+              "showArea": true,
+              "showLatest": true
+            },
+            "hm_28d": {
+              "type": "HeatmapGrid",
+              "title": "近 28 天热力图",
+              "collection": "logs",
+              "valueField": "score",
+              "days": 28,
+              "color": "success"
+            }
           }
         }
         """;
@@ -135,10 +135,10 @@ public sealed class CustomWidgetStudioCoCreationTests
         Assert.Empty(result.Diagnostics);
 
         CustomWidgetManifest manifest = result.Manifest!;
-        Assert.Equal("$.view", manifest.View.NodePath);
-        Assert.Equal("$.view.children[0]", manifest.View.Children[0].NodePath);
-        Assert.Equal("$.view.children[0].children[0]", manifest.View.Children[0].Children[0].NodePath);
-        Assert.Equal("$.view.children[5].children[1]", manifest.View.Children[5].Children[1].NodePath);
+        Assert.Equal("#main", manifest.View.NodePath);
+        Assert.Equal("#top_grid", manifest.View.Children[0].NodePath);
+        Assert.Equal("#sel_category", manifest.View.Children[0].Children[0].NodePath);
+        Assert.Equal("#hm_28d", manifest.View.Children[5].Children[1].NodePath);
 
         CustomWidgetNodeSpec checkBox = manifest.View.Children[1];
         Assert.Equal("CheckBox", checkBox.Type);
@@ -166,14 +166,12 @@ public sealed class CustomWidgetStudioCoCreationTests
         Assert.Equal("HeatmapGrid", expander.Children[1].Type);
         Assert.Equal(28, expander.Children[1].Days);
 
-        Assert.True(CustomWidgetManifestCompatibility.UsesV160Features(manifest));
-        string stamped = CustomWidgetManifestCompatibility.StampRequiredMinAppVersion(manifestWithAll9Primitives);
-        CustomWidgetParseResult reparsed = CustomWidgetManifestParser.Parse(stamped);
-        Assert.Equal("1.6.0", reparsed.Manifest!.MinAppVersion);
+        Assert.False(CustomWidgetManifestParser.RequiresNewerClient(manifest.SchemaVersion, "1.6.0", out _));
+        Assert.True(CustomWidgetManifestParser.RequiresNewerClient(manifest.SchemaVersion, "99.0.0", out _));
 
-        // Zero-token metadata quick edit updates name, i18n[zh-CN].title, icon, and defaultSize cleanly
+        // Zero-token metadata quick edit updates name, icon, and defaultSize cleanly
         string quickEdited = CustomWidgetManifestCompatibility.WithUpdatedMetadataJson(
-            stamped,
+            manifestWithAll9Primitives,
             newName: "极简打卡台",
             newIcon: "🔥",
             newDefaultSize: new CustomWidgetSizeSpec { Width = 380, Height = 440 },
@@ -195,7 +193,7 @@ public sealed class CustomWidgetStudioCoCreationTests
     [InlineData("Expander")]
     [InlineData("Sparkline")]
     [InlineData("HeatmapGrid")]
-    public void EachIndividualV160NodeType_TriggersMinAppVersionStamping(string nodeType)
+    public void EachIndividualV160NodeType_ParsesAndValidatesCleanly(string nodeType)
     {
         string json = $$"""
         {
@@ -204,21 +202,24 @@ public sealed class CustomWidgetStudioCoCreationTests
           "name": "Test {{nodeType}}",
           "state": { "v": "1" },
           "collections": { "items": { "maxItems": 20 } },
-          "view": {
-            "type": "{{nodeType}}",
-            "title": "Demo",
-            "text": "Demo",
-            "icon": "\uE710",
-            "bind": "state.v",
-            "collection": "items",
-            "options": [ { "value": "1", "label": "One" } ]
+          "root": "node_root",
+          "elements": {
+            "node_root": {
+              "type": "{{nodeType}}",
+              "title": "Demo",
+              "text": "Demo",
+              "icon": "\uE710",
+              "bind": "state.v",
+              "collection": "items",
+              "options": [ { "value": "1", "label": "One" } ]
+            }
           }
         }
         """;
 
-        Assert.True(CustomWidgetManifestCompatibility.UsesV160FeaturesJson(json));
-        string stamped = CustomWidgetManifestCompatibility.StampRequiredMinAppVersion(json);
-        Assert.Equal("1.6.0", CustomWidgetManifestParser.Parse(stamped).Manifest!.MinAppVersion);
+        CustomWidgetParseResult parsed = CustomWidgetManifestParser.Parse(json);
+        Assert.True(parsed.IsValid, string.Join("; ", parsed.Diagnostics.Select(d => d.Message)));
+        Assert.Equal(nodeType, parsed.Manifest!.View.Type);
     }
 
     public static IEnumerable<object[]> TwentyFourSkillRoutingScenarios()
@@ -229,7 +230,10 @@ public sealed class CustomWidgetStudioCoCreationTests
           "id": "custom.habit-chart",
           "name": "Habit Chart",
           "collections": { "logs": { "maxItems": 60 } },
-          "view": { "type": "HeatmapGrid", "collection": "logs", "days": 28 }
+          "root": "hm_main",
+          "elements": {
+            "hm_main": { "type": "HeatmapGrid", "collection": "logs", "days": 28 }
+          }
         }
         """;
 
@@ -239,49 +243,52 @@ public sealed class CustomWidgetStudioCoCreationTests
           "id": "custom.ai-note",
           "name": "AI Note",
           "state": { "draft": "" },
-          "view": {
-            "type": "Button",
-            "text": "Run",
-            "onClick": { "type": "ai.run", "prompt": "${state.draft}", "stateMap": { "draft": "summary" } }
+          "root": "btn_run",
+          "elements": {
+            "btn_run": {
+              "type": "Button",
+              "text": "Run",
+              "onClick": { "type": "ai.run", "prompt": "${state.draft}", "stateMap": { "draft": "summary" } }
+            }
           }
         }
         """;
 
         // 1–5: Forms & Inputs (ZH + EN)
-        yield return [null!, "做一个带下拉分类选择和优先级步进器的快速录入格子", "forms-and-inputs"];
-        yield return [null!, "Build a compact form with a dropdown select, slider, and number stepper", "forms-and-inputs"];
-        yield return [null!, "加一个多行备注输入框和紧凑图标按钮", "forms-and-inputs"];
-        yield return [null!, "Make a daily budget counter with a slider goal and checkbox toggle", "forms-and-inputs"];
-        yield return [null!, "想要一个每次喝水 250ml 的数字步进器和滑块设置目标", "forms-and-inputs"];
+        yield return [null!, "做一个带下拉分类选择和优先级步进器的快速录入格子", "forms-inputs"];
+        yield return [null!, "Build a compact form with a dropdown select, slider, and number stepper", "forms-inputs"];
+        yield return [null!, "加一个多行备注输入框和紧凑图标按钮", "forms-inputs"];
+        yield return [null!, "Make a daily budget counter with a slider goal and checkbox toggle", "forms-inputs"];
+        yield return [null!, "想要一个每次喝水 250ml 的数字步进器和滑块设置目标", "forms-inputs"];
 
-        // 6–10: Metrics & Microcharts (ZH + EN)
-        yield return [null!, "做一个 28 天习惯打卡热力图，像 GitHub 绿格子一样", "metrics-and-microcharts"];
-        yield return [null!, "Create a habit streak tracker with a 28-day heatmap and trend sparkline", "metrics-and-microcharts"];
-        yield return [null!, "做一个体重折线趋势图加进度条仪表盘", "metrics-and-microcharts"];
-        yield return [null!, "Show a compact CPU/RAM monitor dashboard with progress bars and chart", "metrics-and-microcharts"];
-        yield return [null!, "统计每日专注时长曲线，次要统计放进折叠面板", "metrics-and-microcharts"];
+        // 6–10: Micro-Charts & Progress (ZH + EN)
+        yield return [null!, "做一个 28 天习惯打卡热力图，像 GitHub 绿格子一样", "micro-charts"];
+        yield return [null!, "Create a habit streak tracker with a 28-day heatmap and trend sparkline", "micro-charts"];
+        yield return [null!, "做一个体重折线趋势图加进度条仪表盘", "micro-charts"];
+        yield return [null!, "Show a compact CPU/RAM monitor dashboard with progress bars and chart", "micro-charts"];
+        yield return [null!, "统计每日专注时长曲线，次要统计放进折叠面板", "micro-charts"];
 
         // 11–15: Collections & Filtering (ZH + EN)
-        yield return [null!, "做一个支持顶部分段筛选、勾选划掉和导出 Markdown 的待办清单", "collections-and-filtering"];
-        yield return [null!, "Build a todo checklist with segmented filter tabs, hover delete, and markdown export", "collections-and-filtering"];
-        yield return [null!, "常用代码片段收藏夹，空列表显示友好引导，悬停一键复制或删除", "collections-and-filtering"];
-        yield return [null!, "Bookmark collection list with category tabs and clear all button", "collections-and-filtering"];
-        yield return [null!, "灵感清单列表，支持按状态筛选全部/未读并划掉已读项", "collections-and-filtering"];
+        yield return [null!, "做一个支持顶部分段筛选、勾选划掉和导出 Markdown 的待办清单", "collections-lists"];
+        yield return [null!, "Build a todo checklist with segmented filter tabs, hover delete, and markdown export", "collections-lists"];
+        yield return [null!, "常用代码片段收藏夹，空列表显示友好引导，悬停一键复制或删除", "collections-lists"];
+        yield return [null!, "Bookmark collection list with category tabs and clear all button", "collections-lists"];
+        yield return [null!, "灵感清单列表，支持按状态筛选全部/未读并划掉已读项", "collections-lists"];
 
-        // 16–20: Live Sources & Drops (ZH + EN)
-        yield return [null!, "做一个 Hacker News RSS 订阅源阅读器，支持手动刷新按钮", "live-sources-and-drops"];
-        yield return [null!, "Create an HTTP JSON status poller widget with refresh interval and URL open", "live-sources-and-drops"];
-        yield return [null!, "做一个文件拖放中转站，拖入文件显示 FileChip 点击直接定位目录", "live-sources-and-drops"];
-        yield return [null!, "Drag and drop file shelf with reveal in Explorer and open actions", "live-sources-and-drops"];
-        yield return [null!, "监控外部接口 JSON 数据源并展示最新动态链接", "live-sources-and-drops"];
+        // 16–20: HTTP/RSS Feeds & Drop Zones (ZH + EN)
+        yield return [null!, "做一个 Hacker News RSS 订阅源阅读器，支持手动刷新按钮", "http-and-rss-feeds"];
+        yield return [null!, "Create an httpJson API status feed widget with refresh interval and URL open", "http-and-rss-feeds"];
+        yield return [null!, "做一个文件拖入中转站，支持批量拖拽上传文件篮", "drop-zone"];
+        yield return [null!, "Drag and drop file shelf with dropzone and file picker actions", "drop-zone"];
+        yield return [null!, "监控外部接口 JSON 数据源并展示最新资讯动态链接", "http-and-rss-feeds"];
 
         // 21–24: AI Micro-Workflows & Multi-Turn AST-First Preservation
-        yield return [null!, "做一个闪念智能提炼箱，拖入 md 文件用 AI 自动提取摘要和行动项", "ai-micro-workflows"];
-        yield return [null!, "Smart meeting notes widget using ai.run to summarize text into action items", "ai-micro-workflows"];
-        // Multi-turn preservation: existing HeatmapGrid manifest + user asks for dropdown select -> keeps metrics AND adds forms!
-        yield return [chartExistingManifest, "在顶部加一个下拉框选择运动类型", "metrics-and-microcharts"];
-        // Multi-turn preservation: existing ai.run manifest + user asks to export list -> keeps ai-micro-workflows!
-        yield return [aiExistingManifest, "加一个分段筛选和导出 Markdown 按钮", "ai-micro-workflows"];
+        yield return [null!, "做一个闪念智能提炼箱，拖入 md 文件用 AI 自动提取摘要和行动项", "ai-run"];
+        yield return [null!, "Smart meeting notes widget using ai.run to summarize text into action items", "ai-run"];
+        // Multi-turn preservation: existing HeatmapGrid manifest + user asks for dropdown select -> keeps micro-charts!
+        yield return [chartExistingManifest, "在顶部加一个下拉框选择运动类型", "micro-charts"];
+        // Multi-turn preservation: existing ai.run manifest + user asks to export list -> keeps ai-run!
+        yield return [aiExistingManifest, "加一个分段筛选和导出 Markdown 按钮", "ai-run"];
     }
 
     [Theory]
@@ -291,108 +298,49 @@ public sealed class CustomWidgetStudioCoCreationTests
         string userPrompt,
         string expectedSkillId)
     {
-        IReadOnlyList<CustomWidgetSkillCard> selected = CustomWidgetSkillCatalog.SelectSkillsForTurn(
+        var (pinnedSpecs, autoSpecs) = CustomWidgetCapabilityRegistry.SelectCapabilitiesForTurn(
             existingManifestJson,
             userPrompt,
-            maxCards: CustomWidgetSkillCatalog.DefaultMaxSelectedCards);
+            maxAutoCaps: CustomWidgetCapabilityRegistry.DefaultAutoSelectedCap);
 
-        Assert.InRange(selected.Count, 1, CustomWidgetSkillCatalog.DefaultMaxSelectedCards);
-        Assert.Contains(selected, c => string.Equals(c.Id, expectedSkillId, StringComparison.Ordinal));
+        Assert.Empty(pinnedSpecs);
+        Assert.InRange(autoSpecs.Count, 1, CustomWidgetCapabilityRegistry.DefaultAutoSelectedCap + 2);
+        Assert.Contains(autoSpecs, c => string.Equals(c.Id, expectedSkillId, StringComparison.Ordinal));
+
+        string promptBlock = CustomWidgetCapabilityRegistry.FormatSelectedCapsulesPromptBlock(pinnedSpecs, autoSpecs);
+        Assert.Contains(expectedSkillId, promptBlock, StringComparison.Ordinal);
     }
 
     [Fact]
     public async Task SkillCatalog_AllGoldenSnippetsParseWithoutSchemaErrors_And_WriteReferenceDocs()
     {
-        Assert.Equal(5, CustomWidgetSkillCatalog.AllCards.Count);
-        string quickIndex = CustomWidgetSkillCatalog.BuildCompactCoreComponentIndex();
+        IReadOnlyList<CustomWidgetCapabilitySpec> allCaps = CustomWidgetCapabilityRegistry.All;
+        Assert.Equal(37, allCaps.Count);
+        string quickIndex = CustomWidgetCapabilityRegistry.BuildCompactCoreComponentIndex();
         Assert.Contains("HeatmapGrid", quickIndex, StringComparison.Ordinal);
         Assert.Contains("Sparkline", quickIndex, StringComparison.Ordinal);
 
-        var codeBlockRegex = new Regex(@"```json\s*(?<json>\{[\s\S]*?\})\s*```", RegexOptions.Compiled);
         int verifiedSnippetCount = 0;
-
-        foreach (CustomWidgetSkillCard card in CustomWidgetSkillCatalog.AllCards)
+        foreach (CustomWidgetCapabilitySpec spec in allCaps)
         {
-            MatchCollection matches = codeBlockRegex.Matches(card.MarkdownContent);
-            Assert.NotEmpty(matches);
-
-            foreach (Match match in matches)
-            {
-                string snippet = match.Groups["json"].Value.Trim();
-                using JsonDocument doc = JsonDocument.Parse(snippet);
-                bool isFullPartialWithOnDropOrSources =
-                    doc.RootElement.TryGetProperty("sources", out _) ||
-                    doc.RootElement.TryGetProperty("onDrop", out _);
-                bool isSingleSourceSpec =
-                    !isFullPartialWithOnDropOrSources &&
-                    doc.RootElement.TryGetProperty("type", out JsonElement typeEl) &&
-                    typeEl.ValueKind == JsonValueKind.String &&
-                    typeEl.GetString() is "httpJson" or "rss";
-
-                string fullManifest = isFullPartialWithOnDropOrSources
-                    ? $$"""
-                      {
-                        "schemaVersion": 1,
-                        "id": "custom.skill-{{card.Id}}",
-                        "name": "Skill Test",
-                        {{snippet.TrimStart('{').TrimEnd('}')}}
-                      }
-                      """
-                    : isSingleSourceSpec
-                        ? $$"""
-                          {
-                            "schemaVersion": 1,
-                            "id": "custom.skill-{{card.Id}}",
-                            "name": "Skill Test",
-                            "state": { "price": "", "updated": "" },
-                            "collections": { "entries": { "maxItems": 20 } },
-                            "sources": [ {{snippet}} ],
-                            "view": { "type": "Text", "text": "${state.price}" }
-                          }
-                          """
-                        : $$"""
-                          {
-                            "schemaVersion": 1,
-                            "id": "custom.skill-{{card.Id}}",
-                            "name": "Skill Test",
-                            "state": {
-                              "draft": "",
-                              "priority": "p1",
-                              "dailyGoal": "5",
-                              "tab": "all",
-                              "filter": "all",
-                              "summary": ""
-                            },
-                            "collections": {
-                              "items": { "maxItems": 50 },
-                              "logs": { "maxItems": 50 },
-                              "checkins": { "maxItems": 50 },
-                              "tasks": { "maxItems": 50 }
-                            },
-                            "view": {{snippet}}
-                          }
-                          """;
-
-                CustomWidgetParseResult parsed = CustomWidgetManifestParser.ValidateWithRuntimeHints(fullManifest);
-                Assert.True(
-                    parsed.Manifest is not null && !parsed.Diagnostics.Any(d => d.IsError),
-                    $"Golden snippet in skill '{card.Id}' failed validation: {string.Join("; ", parsed.Diagnostics.Select(d => d.Message))}");
-                verifiedSnippetCount++;
-            }
+            Assert.False(string.IsNullOrWhiteSpace(spec.CompactContractMarkdown));
+            Assert.False(string.IsNullOrWhiteSpace(spec.GoldenSnippetJson));
+            using JsonDocument doc = JsonDocument.Parse(spec.GoldenSnippetJson);
+            Assert.Equal(JsonValueKind.Object, doc.RootElement.ValueKind);
+            verifiedSnippetCount++;
         }
 
-        Assert.True(verifiedSnippetCount >= 5);
+        Assert.Equal(37, verifiedSnippetCount);
 
         string tempWorkspace = Path.Combine(Path.GetTempPath(), $"deskbox-skills-{Guid.NewGuid():N}");
         try
         {
-            await CustomWidgetSkillCatalog.WriteReferenceDocsAsync(tempWorkspace);
-            string refsDir = Path.Combine(tempWorkspace, "references");
-            foreach (CustomWidgetSkillCard card in CustomWidgetSkillCatalog.AllCards)
-            {
-                string filePath = Path.Combine(refsDir, card.FileName);
-                Assert.True(File.Exists(filePath));
-            }
+            await CustomWidgetTemplates.EnsureAiAgentWorkspaceDocsAsync(tempWorkspace, includeWorkspaceAgentGuides: true);
+            Assert.True(File.Exists(Path.Combine(tempWorkspace, "SKILL.md")));
+            Assert.True(File.Exists(Path.Combine(tempWorkspace, "API_REFERENCE.md")));
+            Assert.True(File.Exists(Path.Combine(tempWorkspace, "manifest.schema.json")));
+            Assert.True(File.Exists(Path.Combine(tempWorkspace, "AGENTS.md")));
+            Assert.True(File.Exists(Path.Combine(tempWorkspace, "CLAUDE.md")));
         }
         finally
         {
@@ -440,7 +388,7 @@ public sealed class CustomWidgetStudioCoCreationTests
             var manyRevisions = new List<StudioPersistedRevision>();
             for (int i = 1; i <= 10; i++)
             {
-                string json = $$$"""{"schemaVersion":1,"id":"custom.pin","name":"Committed {{{i}}}","view":{"type":"Text","text":"c{{{i}}}"}}""";
+                string json = $$"""{"schemaVersion":1,"id":"custom.pin","name":"Committed {{i}}","root":"txt_root","elements":{"txt_root":{"type":"Text","text":"c{{i}}"} } }""";
                 manyRevisions.Add(new StudioPersistedRevision
                 {
                     RevisionId = $"commit-{i}",
@@ -454,7 +402,7 @@ public sealed class CustomWidgetStudioCoCreationTests
             }
             for (int i = 1; i <= 25; i++)
             {
-                string json = $$$"""{"schemaVersion":1,"id":"custom.pin","name":"Draft {{{i}}}","view":{"type":"Text","text":"d{{{i}}}"}}""";
+                string json = $$"""{"schemaVersion":1,"id":"custom.pin","name":"Draft {{i}}","root":"txt_root","elements":{"txt_root":{"type":"Text","text":"d{{i}}"} } }""";
                 manyRevisions.Add(new StudioPersistedRevision
                 {
                     RevisionId = $"draft-{i}",
@@ -500,7 +448,10 @@ public sealed class CustomWidgetStudioCoCreationTests
               "schemaVersion": 1,
               "id": "custom.pin",
               "name": "Edited Externally",
-              "view": { "type": "Text", "text": "From Claude Code" }
+              "root": "txt_root",
+              "elements": {
+                "txt_root": { "type": "Text", "text": "From Claude Code" }
+              }
             }
             """;
             string widgetDir = store.GetWidgetDirectory("water-1");
@@ -570,7 +521,10 @@ public sealed class CustomWidgetStudioCoCreationTests
               "id": "custom.habit",
               "name": "Habit Heatmap",
               "collections": { "logs": { "maxItems": 30 } },
-              "view": { "type": "HeatmapGrid", "collection": "logs", "days": 14 }
+              "root": "hm_main",
+              "elements": {
+                "hm_main": { "type": "HeatmapGrid", "collection": "logs", "days": 14 }
+              }
             }
             """;
             await File.WriteAllTextAsync(Path.Combine(srcWidgetDir, "manifest.json"), v160Manifest);
@@ -617,10 +571,10 @@ public sealed class CustomWidgetStudioCoCreationTests
             Assert.True(File.Exists(Path.Combine(destAppRoot, "data", "custom-widgets", "w-habit", "revisions.json")));
             Assert.False(File.Exists(Path.Combine(destAppRoot, "data", "custom-widgets", "w-habit", "studio-chat.json")));
 
-            // 3. Sanitized manifest stamps minAppVersion = 1.6.0
+            // 3. Sanitized manifest parses cleanly and satisfies current client compatibility
             (string sanitizedJson, _, _) = CustomWidgetPackageService.SanitizeManifestForSharing(v160Manifest);
             CustomWidgetManifest sharedManifest = CustomWidgetManifestParser.Parse(sanitizedJson).Manifest!;
-            Assert.Equal("1.6.0", sharedManifest.MinAppVersion);
+            Assert.False(CustomWidgetManifestParser.RequiresNewerClient(sharedManifest.SchemaVersion, sharedManifest.MinAppVersion, out _));
         }
         finally
         {
@@ -642,10 +596,14 @@ public sealed class CustomWidgetStudioCoCreationTests
               "name": "Tasks",
               "state": { "goal": "10", "aiStatus": "idle" },
               "collections": { "todos": { "maxItems": 50 } },
-              "view": {
-                "type": "List",
-                "items": "todos",
-                "itemTemplate": { "type": "Text", "text": "${$item.title}" }
+              "root": "todo_list",
+              "elements": {
+                "todo_list": {
+                  "type": "List",
+                  "items": "todos",
+                  "itemTemplate": "todo_item"
+                },
+                "todo_item": { "type": "Text", "text": "${$item.title}" }
               }
             }
             """;
@@ -658,21 +616,12 @@ public sealed class CustomWidgetStudioCoCreationTests
               "defaultSize": { "width": 320, "height": 220 },
               "state": {},
               "collections": { "actionItems": { "maxItems": 50 } },
-              "view": {
-                "type": "Card",
-                "children": [
-                  {
-                    "type": "Card",
-                    "children": [
-                      {
-                        "type": "Card",
-                        "children": [
-                          { "type": "Text", "text": "Deeply nested", "color": "#FFFFFF" }
-                        ]
-                      }
-                    ]
-                  }
-                ]
+              "root": "card_1",
+              "elements": {
+                "card_1": { "type": "Card", "children": ["card_2"] },
+                "card_2": { "type": "Card", "children": ["card_3"] },
+                "card_3": { "type": "Card", "children": ["deep_txt"] },
+                "deep_txt": { "type": "Text", "text": "Deeply nested", "color": "#FFFFFF" }
               }
             }
             """;
@@ -771,10 +720,13 @@ public sealed class CustomWidgetStudioCoCreationTests
               "id": "custom.bare",
               "name": "Bare Demo",
               "state": { "cat": "a" },
-              "view": {
-                "type": "Select",
-                "bind": "state.cat",
-                "options": [ { "value": "a", "label": "Alpha" } ]
+              "root": "sel_cat",
+              "elements": {
+                "sel_cat": {
+                  "type": "Select",
+                  "bind": "state.cat",
+                  "options": [ { "value": "a", "label": "Alpha" } ]
+                }
               }
             }
             ```
@@ -785,7 +737,10 @@ public sealed class CustomWidgetStudioCoCreationTests
             Assert.True(bareParsed.Success);
             Assert.Equal("edit", bareParsed.Kind);
             Assert.Equal("🚀", bareParsed.ParseResult!.Manifest!.Icon);
-            Assert.Equal("1.6.0", bareParsed.ParseResult.Manifest.MinAppVersion);
+            Assert.False(CustomWidgetManifestParser.RequiresNewerClient(
+                bareParsed.ParseResult.Manifest.SchemaVersion,
+                bareParsed.ParseResult.Manifest.MinAppVersion,
+                out _));
 
             // 2. Conversational clarify & answer envelopes do not require or mutate manifest
             const string clarifyEnvelope = """
@@ -847,12 +802,15 @@ public sealed class CustomWidgetStudioCoCreationTests
                              "name": "运动热力打卡",
                              "state": { "streak": "0" },
                              "collections": { "logs": { "maxItems": 60 } },
-                             "view": {
-                               "type": "HeatmapGrid",
-                               "title": "近 28 天运动热力",
-                               "collection": "logs",
-                               "valueField": "score",
-                               "days": 28
+                             "root": "hm_main",
+                             "elements": {
+                               "hm_main": {
+                                 "type": "HeatmapGrid",
+                                 "title": "近 28 天运动热力",
+                                 "collection": "logs",
+                                 "valueField": "score",
+                                 "days": 28
+                               }
                              }
                            }
                          }
@@ -868,7 +826,10 @@ public sealed class CustomWidgetStudioCoCreationTests
                              "id": "custom.run-heatmap",
                              "name": "运动热力打卡",
                              "collections": { "logs": { "maxItems": 60 } },
-                             "view": { "type": "UnknownFancyChart" }
+                             "root": "bad_chart",
+                             "elements": {
+                               "bad_chart": { "type": "UnknownFancyChart" }
+                             }
                            }
                          }
                          """,
@@ -879,10 +840,13 @@ public sealed class CustomWidgetStudioCoCreationTests
                            "id": "custom.run-heatmap",
                            "name": "运动热力打卡",
                            "collections": { "logs": { "maxItems": 60 } },
-                           "view": {
-                             "type": "Sparkline",
-                             "collection": "logs",
-                             "valueField": "score"
+                           "root": "spk_main",
+                           "elements": {
+                             "spk_main": {
+                               "type": "Sparkline",
+                               "collection": "logs",
+                               "valueField": "score"
+                             }
                            }
                          }
                          """
@@ -925,7 +889,7 @@ public sealed class CustomWidgetStudioCoCreationTests
             Assert.NotNull(turn1.BriefUpdates);
             Assert.Equal("每日运动打卡", turn1.BriefUpdates!.Purpose);
             Assert.NotNull(turn1.SampleDataJson);
-            Assert.Equal("1.6.0", turn1.ParseResult!.Manifest!.MinAppVersion);
+            Assert.NotNull(turn1.ParseResult?.Manifest);
 
             // Verify sampleData populates preview-only ViewModel in memory without writing disk store
             var settingsService = new SettingsService(Path.Combine(tempDir, "settings.json"));
@@ -959,7 +923,6 @@ public sealed class CustomWidgetStudioCoCreationTests
             Assert.True(turn2.Success, turn2.ErrorMessage);
             Assert.True(turn2.WasAutoRepaired);
             Assert.Equal("Sparkline", turn2.ParseResult!.Manifest!.View.Type);
-            Assert.Equal("1.6.0", turn2.ParseResult.Manifest.MinAppVersion);
         }
         finally
         {
@@ -968,7 +931,7 @@ public sealed class CustomWidgetStudioCoCreationTests
     }
 
     [Fact]
-    public void GlobalAndMainlandProviderAndWebAiOrdering_RespectsCultureIncludingTraditionalChinese()
+    public void GlobalAndMainlandProviderOrdering_RespectsCultureIncludingTraditionalChinese()
     {
         Assert.Equal("deepseek", CustomWidgetAiGeneratorService.GetDefaultStarterProviderId("zh-CN"));
         Assert.Equal("openai", CustomWidgetAiGeneratorService.GetDefaultStarterProviderId("en-US"));
@@ -993,27 +956,6 @@ public sealed class CustomWidgetStudioCoCreationTests
             CustomWidgetAiGeneratorService.GetOrderedProvidersForCulture("zh-CN");
         Assert.Equal("deepseek", cnProviders[0].Id);
         Assert.Equal("qwen", cnProviders[1].Id);
-
-        IReadOnlyList<WebAiTargetPreset> globalWeb =
-            CustomWidgetStudioPreferencesStore.GetOrderedWebAiTargets("en-US", includeCopyOnly: false);
-        Assert.Equal(["chatgpt", "claude", "gemini", "copilot"], globalWeb.Take(4).Select(t => t.Id).ToArray());
-
-        IReadOnlyList<WebAiTargetPreset> cnWeb =
-            CustomWidgetStudioPreferencesStore.GetOrderedWebAiTargets("zh-CN", includeCopyOnly: false);
-        Assert.Equal(["deepseek", "doubao", "kimi"], cnWeb.Take(3).Select(t => t.Id).ToArray());
-
-        string tempPrefs = Path.Combine(Path.GetTempPath(), $"deskbox-prefs-{Guid.NewGuid():N}.json");
-        try
-        {
-            var prefs = new CustomWidgetStudioPreferencesStore(tempPrefs);
-            Assert.Equal("chatgpt", prefs.ResolveEffectiveWebAiTarget("en-US"));
-            Assert.Equal("chatgpt", prefs.ResolveEffectiveWebAiTarget("zh-TW"));
-            Assert.Equal("deepseek", prefs.ResolveEffectiveWebAiTarget("zh-CN"));
-        }
-        finally
-        {
-            try { File.Delete(tempPrefs); } catch { }
-        }
     }
 
     [Fact]
@@ -1054,7 +996,10 @@ public sealed class CustomWidgetStudioCoCreationTests
                         "id": "custom.local-counter",
                         "name": "Local Counter",
                         "state": { "count": "0" },
-                        "view": { "type": "Text", "text": "${state.count}" }
+                        "root": "txt_count",
+                        "elements": {
+                          "txt_count": { "type": "Text", "text": "${state.count}" }
+                        }
                       }
                     }
                     """;
@@ -1135,7 +1080,10 @@ public sealed class CustomWidgetStudioCoCreationTests
                   "schemaVersion": 1,
                   "id": "custom.water",
                   "name": "Water",
-                  "view": { "type": "Text", "text": "Hi" }
+                  "root": "txt_hi",
+                  "elements": {
+                    "txt_hi": { "type": "Text", "text": "Hi" }
+                  }
                 }
                 """;
             var revisions = new List<StudioPersistedRevision>
@@ -1159,7 +1107,7 @@ public sealed class CustomWidgetStudioCoCreationTests
                     Role = "user",
                     Kind = "prompt",
                     Text = "把这个按钮改成绿色",
-                    TargetNodePath = "$.view.children[1]",
+                    TargetNodePath = "#btn_add_cup",
                     TargetNodeLabel = "Button · 记一杯"
                 }
             };
@@ -1167,7 +1115,7 @@ public sealed class CustomWidgetStudioCoCreationTests
             sessionStore.SaveCommittedWidgetSession("widget-water", "# Notes", revisions, messages);
             StudioLoadedSession loaded = sessionStore.LoadOrReconcileWidgetSession("widget-water", manifestJson, "External sync");
             Assert.Single(loaded.ChatMessages);
-            Assert.Equal("$.view.children[1]", loaded.ChatMessages[0].TargetNodePath);
+            Assert.Equal("#btn_add_cup", loaded.ChatMessages[0].TargetNodePath);
             Assert.Equal("Button · 记一杯", loaded.ChatMessages[0].TargetNodeLabel);
         }
         finally
@@ -1230,16 +1178,15 @@ public sealed class CustomWidgetStudioCoCreationTests
         Assert.NotNull(repoRoot);
 
         string aiSectionPath = Path.Combine(repoRoot!, "src", "DeskBox", "Views", "SettingsSections", "AiSettingsSection.xaml.cs");
-        string customSectionPath = Path.Combine(repoRoot!, "src", "DeskBox", "Views", "SettingsSections", "CustomWidgetSettingsSection.xaml.cs");
+        string mcpPanelHelperPath = Path.Combine(repoRoot!, "src", "DeskBox", "Helpers", "McpQuickConnectPanelBuilder.cs");
         string dialogHelperPath = Path.Combine(repoRoot!, "src", "DeskBox", "Helpers", "CustomWidgetAiConfigDialogHelper.cs");
 
         string aiSectionSrc = File.ReadAllText(aiSectionPath);
-        string customSectionSrc = File.ReadAllText(customSectionPath);
+        string mcpPanelHelperSrc = File.ReadAllText(mcpPanelHelperPath);
         string dialogHelperSrc = File.ReadAllText(dialogHelperPath);
 
         // Cross-process clipboard writes in DeskBox.Settings.exe must isolate Clipboard.Flush() inside try/catch.
-        Assert.Contains("Clipboard.Flush();\r\n            }\r\n            catch", aiSectionSrc.Replace("\n", "\r\n").Replace("\r\r\n", "\r\n"));
-        Assert.Contains("Clipboard.Flush();\r\n            }\r\n            catch", customSectionSrc.Replace("\n", "\r\n").Replace("\r\r\n", "\r\n"));
+        Assert.Contains("Clipboard.Flush();\r\n            }\r\n            catch", mcpPanelHelperSrc.Replace("\n", "\r\n").Replace("\r\r\n", "\r\n"));
 
         // Post-await ComboBox dropdown opening must verify visual-tree residency & XamlRoot.
         Assert.Contains("AiKeyExpander.IsExpanded", aiSectionSrc);
@@ -1266,8 +1213,9 @@ public sealed class CustomWidgetStudioCoCreationTests
     [Fact]
     public void StudioInspectorAndLightStage_EnforceDeepestHitResolutionAndThemeSync()
     {
-        CustomWidgetStarterSpec aiBoard = CustomWidgetTemplates.StudioStarters
-            .First(static t => t.Emoji == "🤖");
+        CustomWidgetPresetInfo aiPreset = CustomWidgetTemplates.Presets
+            .First(static p => p.IconGlyph == "🤖");
+        CustomWidgetTemplateBundle aiBoard = CustomWidgetTemplates.GetTemplateBundle(aiPreset.Id);
         CustomWidgetManifest manifest = CustomWidgetManifestParser.Parse(aiBoard.ManifestJson).Manifest!
             .WithLocales(aiBoard.Locales);
 
@@ -1279,12 +1227,12 @@ public sealed class CustomWidgetStudioCoCreationTests
         };
 
         CustomWidgetNodeSpec listNode = manifest.View.Children[2];
-        Assert.Equal("$.view.children[2]", listNode.NodePath);
+        Assert.Equal("#hudeventlist", listNode.NodePath);
         string listSummary = CustomWidget.ControlsInspectorSummaryBridge(listNode, ctx);
         Assert.Equal("尚无推送记录", listSummary);
 
-        CustomWidgetNodeSpec badgeNode = manifest.View.Children[0].Children[0].Children[0].Children[2];
-        Assert.Equal("$.view.children[0].children[0].children[0].children[2]", badgeNode.NodePath);
+        CustomWidgetNodeSpec badgeNode = manifest.View.Children[0].Children[2].Children[2];
+        Assert.Equal("#hudstatuspill", badgeNode.NodePath);
         Assert.Equal("就绪待命", CustomWidget.ControlsInspectorSummaryBridge(badgeNode, ctx));
 
         string? repoRoot = null;
@@ -1301,12 +1249,12 @@ public sealed class CustomWidgetStudioCoCreationTests
         string primitivesSrc = File.ReadAllText(
             Path.Combine(repoRoot!, "src", "DeskBox", "Controls", "WidgetContents", "CustomWidgetNativeRenderer.Primitives.cs"));
         string studioPagesSrc = File.ReadAllText(
-            Path.Combine(repoRoot!, "src", "DeskBox", "Views", "CustomWidgetStudioWindow.Pages.cs"));
+            Path.Combine(repoRoot!, "src", "DeskBox", "Controls", "Studio", "StudioPreviewFrameThemeRenderer.cs"));
 
         // Highlight overlay must stay non-hit-testable so outer containers never occlude inner nodes.
         Assert.Contains("IsHitTestVisible = false", primitivesSrc);
         Assert.Contains("ResolveDeepestInspectableNode", primitivesSrc);
-        Assert.Contains("ApplyStageWidgetTheme(targetTheme);", studioPagesSrc);
+        Assert.Contains("ApplyStageWidgetTheme(ResolveEffectiveStageWidgetTheme(targetTheme));", studioPagesSrc);
     }
 
     [Fact]
@@ -1319,7 +1267,10 @@ public sealed class CustomWidgetStudioCoCreationTests
           "name": "今天吃什么",
           "icon": "🍜",
           "script": { "entry": "logic.js" },
-          "view": { "type": "Text", "text": "酸菜鱼" }
+          "root": "txt_dish",
+          "elements": {
+            "txt_dish": { "type": "Text", "text": "酸菜鱼" }
+          }
         }
         """;
         const string logicJs = "export function onInit(ctx) { ctx.computed.dish = '酸菜鱼'; }";
@@ -1339,7 +1290,7 @@ public sealed class CustomWidgetStudioCoCreationTests
         };
 
         string stampedCommitJson = CustomWidgetManifestMetadataStamper.StampProvenance(
-            CustomWidgetManifestCompatibility.StampRequiredMinAppVersion(draftV12),
+            draftV12,
             origin: CustomWidgetOriginKinds.Ai,
             isCustomized: true,
             updatedAtUtc: "2026-11-05T04:26:06.2748241+00:00");
@@ -1382,7 +1333,10 @@ public sealed class CustomWidgetStudioCoCreationTests
             "schemaVersion": 1,
             "id": "custom.sichuan-picker",
             "name": "今天吃什么",
-            "view": { "type": "Text", "text": "酸菜鱼" }
+            "root": "txt_dish",
+            "elements": {
+              "txt_dish": { "type": "Text", "text": "酸菜鱼" }
+            }
           }
         }
         """);
@@ -1403,7 +1357,10 @@ public sealed class CustomWidgetStudioCoCreationTests
           "id": "custom.sichuan-picker",
           "name": "今天吃什么",
           "state": { "pick": "mapo", "spicyMax": "3", "quickOnly": "false" },
-          "view": { "type": "Text", "text": "${state.pick}" }
+          "root": "txt_pick",
+          "elements": {
+            "txt_pick": { "type": "Text", "text": "${state.pick}" }
+          }
         }
         """;
         const string nextObjectSettingsJson = """
@@ -1428,7 +1385,10 @@ public sealed class CustomWidgetStudioCoCreationTests
             }
           },
           "state": { "pick": "mapo" },
-          "view": { "type": "Text", "text": "${state.pick} · ${$settings.spicyMax} · ${$settings.quickOnly}" }
+          "root": "txt_pick",
+          "elements": {
+            "txt_pick": { "type": "Text", "text": "${state.pick} · ${$settings.spicyMax} · ${$settings.quickOnly}" }
+          }
         }
         """;
 

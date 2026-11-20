@@ -21,21 +21,44 @@ internal static partial class CustomWidgetStorageFileOps
     private const int StdOutputHandle = -11;
 
     internal static void CopyFileWithoutOverwrite(string sourcePath, string destinationPath) =>
-        File.Copy(sourcePath, destinationPath, overwrite: false);
+        DropStagingFileOps.CopyFileWithReadOnlyAndDecryptedFallback(sourcePath, destinationPath, overwrite: false);
 
     internal static void CopyFileOverwrite(string sourcePath, string destinationPath) =>
-        File.Copy(sourcePath, destinationPath, overwrite: true);
+        DropStagingFileOps.CopyFileWithReadOnlyAndDecryptedFallback(sourcePath, destinationPath, overwrite: true);
 
     internal static void DeleteFileIfExists(string filePath)
     {
         if (File.Exists(filePath))
         {
+            DropStagingFileOps.ClearReadOnlyAttributeIfPresent(filePath);
             File.Delete(filePath);
         }
     }
 
-    internal static void DeleteDirectoryRecursive(string directoryPath) =>
+    internal static void DeleteDirectoryRecursive(string directoryPath)
+    {
+        if (!Directory.Exists(directoryPath))
+        {
+            return;
+        }
+
+        try
+        {
+            foreach (string file in Directory.EnumerateFiles(directoryPath, "*", SearchOption.AllDirectories))
+            {
+                if (!StorageMigrationNativeMethods.IsFileSystemLinkOrMountPoint(file))
+                {
+                    DropStagingFileOps.ClearReadOnlyAttributeIfPresent(file);
+                }
+            }
+        }
+        catch
+        {
+            // Fall through to Directory.Delete so native IO error surfaces cleanly if unreadable.
+        }
+
         Directory.Delete(directoryPath, recursive: true);
+    }
 
     internal static void DeleteEmptyDirectoryIfExists(string directoryPath)
     {
@@ -47,6 +70,9 @@ internal static partial class CustomWidgetStorageFileOps
 
     internal static void MoveDirectory(string sourceDirectoryPath, string destinationDirectoryPath) =>
         Directory.Move(sourceDirectoryPath, destinationDirectoryPath);
+
+    internal static void MoveFileWithoutOverwrite(string sourceFilePath, string destinationFilePath) =>
+        File.Move(sourceFilePath, destinationFilePath, overwrite: false);
 
     internal static void MoveFileOverwrite(string sourceFilePath, string destinationFilePath) =>
         File.Move(sourceFilePath, destinationFilePath, overwrite: true);

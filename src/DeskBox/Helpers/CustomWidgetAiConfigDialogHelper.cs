@@ -18,21 +18,22 @@ public static class CustomWidgetAiConfigDialogHelper
     public static async Task<string?> ShowAsync(
         XamlRoot xamlRoot,
         ElementTheme requestedTheme,
-        LocalizationService loc,
+        LocalizationService? loc,
         string? initialProviderId,
-        bool expandAdvanced = false)
+        bool expandAdvanced = false,
+        bool hideThinkingOption = false)
     {
-        IReadOnlyList<CustomWidgetAiProviderPreset> providers =
-            DeskBoxAiService.GetOrderedProvidersForCulture(loc.CurrentCultureName);
-        string effectiveInitialId = string.IsNullOrWhiteSpace(initialProviderId)
-            ? DeskBoxAiService.GetDefaultStarterProviderId(loc.CurrentCultureName)
-            : initialProviderId;
-        CustomWidgetAiProviderPreset initialPreset = CustomWidgetAiGeneratorService.FindProviderPreset(effectiveInitialId);
+        string T(string k) => AiProviderConfigFormController.Translate(loc, k);
+        string F(string k, params object[] a) => AiProviderConfigFormController.Format(loc, k, a);
+        string culture = AiProviderConfigFormController.ResolveCultureName(loc);
+        var form = new AiProviderConfigFormController(T, F, () => culture);
 
         using var activeOpCtsBox = new OpCancellationHolder();
         using var pasteProbeCtsBox = new OpCancellationHolder();
         bool syncingProviderFields = false;
+        IReadOnlyList<string>? stagedFetchedModels = null;
         int lastPasswordLength = 0;
+        string lastPasswordValue = string.Empty;
         Brush ResolveThemeBrush(string key) => ResolveThemeBrushFor(key, requestedTheme);
 
         var scrollContent = new StackPanel
@@ -44,41 +45,21 @@ public static class CustomWidgetAiConfigDialogHelper
 
         scrollContent.Children.Add(new TextBlock
         {
-            Text = loc.T("CustomWidget.Studio.KeyDialog.Description"),
+            Text = T("CustomWidget.Studio.KeyDialog.Description"),
             FontSize = 12,
             Foreground = ResolveThemeBrush("TextFillColorSecondaryBrush"),
             TextWrapping = TextWrapping.Wrap
         });
 
-        // 1. Provider ComboBox (ordered for user's region/language)
         var providerCombo = new ComboBox
         {
-            Header = loc.T("CustomWidget.AiConfig.ProviderHeader"),
+            Header = T("CustomWidget.AiConfig.ProviderHeader"),
             HorizontalAlignment = HorizontalAlignment.Stretch
         };
-        IReadOnlyDictionary<string, AiProviderCredentialEntry> allSaved = CustomWidgetAiCredentialStore.Shared.GetAll();
-        int initialIndex = 0;
-        for (int i = 0; i < providers.Count; i++)
-        {
-            allSaved.TryGetValue(providers[i].Id, out AiProviderCredentialEntry? savedEntry);
-            bool isConfigured = DeskBoxAiService.IsProviderConfigured(providers[i], savedEntry);
-            string display = isConfigured
-                ? $"{providers[i].DisplayName}  ✓"
-                : providers[i].DisplayName;
-            providerCombo.Items.Add(new ComboBoxItem
-            {
-                Content = display,
-                Tag = providers[i].Id
-            });
-            if (string.Equals(providers[i].Id, initialPreset.Id, StringComparison.OrdinalIgnoreCase))
-            {
-                initialIndex = i;
-            }
-        }
-        providerCombo.SelectedIndex = initialIndex;
+        string selectedInitialId = form.PopulateProviderCombo(providerCombo, initialProviderId);
+        CustomWidgetAiProviderPreset initialPreset = CustomWidgetAiGeneratorService.FindProviderPreset(selectedInitialId);
         scrollContent.Children.Add(providerCombo);
 
-        // 2. API Key Section (with 1-click official Get API Key link, or keyless local hint)
         var keySection = new StackPanel { Spacing = 4 };
         var keyHeaderRow = new Grid { ColumnSpacing = 8 };
         keyHeaderRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -86,7 +67,7 @@ public static class CustomWidgetAiConfigDialogHelper
 
         var keyHeaderLabel = new TextBlock
         {
-            Text = loc.T("CustomWidget.AiConfig.ApiKeyHeader"),
+            Text = T("CustomWidget.AiConfig.ApiKeyHeader"),
             FontSize = 13,
             VerticalAlignment = VerticalAlignment.Center
         };
@@ -97,7 +78,7 @@ public static class CustomWidgetAiConfigDialogHelper
             Padding = new Thickness(6, 2, 6, 2),
             FontSize = 12,
             VerticalAlignment = VerticalAlignment.Center,
-            Content = loc.T("CustomWidget.AiConfig.GetApiKeyLink")
+            Content = T("CustomWidget.AiConfig.GetApiKeyLink")
         };
         Grid.SetColumn(getKeyLink, 1);
         keyHeaderRow.Children.Add(getKeyLink);
@@ -110,7 +91,7 @@ public static class CustomWidgetAiConfigDialogHelper
             HorizontalAlignment = HorizontalAlignment.Stretch,
             FlowDirection = FlowDirection.LeftToRight
         };
-        AutomationProperties.SetName(keyBox, loc.T("CustomWidget.AiConfig.ApiKeyHeader"));
+        AutomationProperties.SetName(keyBox, T("CustomWidget.AiConfig.ApiKeyHeader"));
         keySection.Children.Add(keyBox);
 
         var localNoKeyBanner = new Border
@@ -121,7 +102,7 @@ public static class CustomWidgetAiConfigDialogHelper
             Visibility = Visibility.Collapsed,
             Child = new TextBlock
             {
-                Text = loc.T("CustomWidget.AiConfig.LocalNoKeyHint"),
+                Text = T("CustomWidget.AiConfig.LocalNoKeyHint"),
                 FontSize = 12,
                 Foreground = ResolveThemeBrush("TextFillColorSecondaryBrush"),
                 TextWrapping = TextWrapping.Wrap
@@ -130,11 +111,10 @@ public static class CustomWidgetAiConfigDialogHelper
         keySection.Children.Add(localNoKeyBanner);
         scrollContent.Children.Add(keySection);
 
-        // 3. Model ComboBox (Editable) + Fetch Models button
         var modelSection = new StackPanel { Spacing = 6 };
         modelSection.Children.Add(new TextBlock
         {
-            Text = loc.T("CustomWidget.Studio.KeyDialog.ModelHeader"),
+            Text = T("CustomWidget.Studio.KeyDialog.ModelHeader"),
             FontSize = 13
         });
 
@@ -149,7 +129,7 @@ public static class CustomWidgetAiConfigDialogHelper
             PlaceholderText = initialPreset.DefaultModel,
             FlowDirection = FlowDirection.LeftToRight
         };
-        AutomationProperties.SetName(modelCombo, loc.T("CustomWidget.Studio.KeyDialog.ModelHeader"));
+        AutomationProperties.SetName(modelCombo, T("CustomWidget.Studio.KeyDialog.ModelHeader"));
         modelRow.Children.Add(modelCombo);
 
         var fetchModelsBtn = new Button
@@ -157,15 +137,14 @@ public static class CustomWidgetAiConfigDialogHelper
             Height = 32,
             Padding = new Thickness(12, 0, 12, 0),
             VerticalAlignment = VerticalAlignment.Center,
-            Content = CreateIconTextRow("\uE72C", loc.T("CustomWidget.AiConfig.FetchModels"))
+            Content = CreateIconTextRow("\uE72C", T("CustomWidget.AiConfig.FetchModels"))
         };
-        AutomationProperties.SetName(fetchModelsBtn, loc.T("CustomWidget.AiConfig.FetchModels"));
+        AutomationProperties.SetName(fetchModelsBtn, T("CustomWidget.AiConfig.FetchModels"));
         Grid.SetColumn(fetchModelsBtn, 1);
         modelRow.Children.Add(fetchModelsBtn);
         modelSection.Children.Add(modelRow);
         scrollContent.Children.Add(modelSection);
 
-        // 4. Live Connectivity Test Bar + InfoBar (placed prominently above collapsed Advanced section)
         var testRow = new Grid { ColumnSpacing = 10, Margin = new Thickness(0, 2, 0, 0) };
         testRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         testRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
@@ -175,14 +154,14 @@ public static class CustomWidgetAiConfigDialogHelper
             Height = 34,
             Padding = new Thickness(14, 0, 14, 0),
             CornerRadius = new CornerRadius(6),
-            Content = CreateIconTextRow("\uE945", loc.T("CustomWidget.AiConfig.TestConnection"))
+            Content = CreateIconTextRow("\uE945", T("CustomWidget.AiConfig.TestConnection"))
         };
-        AutomationProperties.SetName(testBtn, loc.T("CustomWidget.AiConfig.TestConnection"));
+        AutomationProperties.SetName(testBtn, T("CustomWidget.AiConfig.TestConnection"));
         testRow.Children.Add(testBtn);
 
         var testHintText = new TextBlock
         {
-            Text = loc.T("CustomWidget.AiConfig.TestHint"),
+            Text = T("CustomWidget.AiConfig.TestHint"),
             FontSize = 11.5,
             Foreground = ResolveThemeBrush("TextFillColorSecondaryBrush"),
             VerticalAlignment = VerticalAlignment.Center,
@@ -192,40 +171,47 @@ public static class CustomWidgetAiConfigDialogHelper
         testRow.Children.Add(testHintText);
         scrollContent.Children.Add(testRow);
 
-        var statusInfoBar = new InfoBar
-        {
-            IsClosable = true,
-            IsOpen = false
-        };
+        var statusInfoBar = new InfoBar { IsClosable = true, IsOpen = false };
         scrollContent.Children.Add(statusInfoBar);
 
-        // 5. Progressive Disclosure: Collapsible Advanced Section (Thinking Mode & Custom Endpoint)
         var advancedStack = new StackPanel { Spacing = 10 };
-
         var thinkingCombo = new ComboBox
         {
-            Header = loc.T("CustomWidget.AiConfig.ThinkingHeader"),
+            Header = T("CustomWidget.AiConfig.ThinkingHeader"),
             HorizontalAlignment = HorizontalAlignment.Stretch
         };
-        thinkingCombo.Items.Add(new ComboBoxItem { Content = loc.T("CustomWidget.AiConfig.ThinkingAuto"), Tag = "auto" });
-        thinkingCombo.Items.Add(new ComboBoxItem { Content = loc.T("CustomWidget.AiConfig.ThinkingEnabled"), Tag = "enabled" });
-        thinkingCombo.Items.Add(new ComboBoxItem { Content = loc.T("CustomWidget.AiConfig.ThinkingDisabled"), Tag = "disabled" });
-        thinkingCombo.SelectedIndex = 0;
-
-        var thinkingHintText = new TextBlock
+        if (!hideThinkingOption)
         {
-            Text = loc.T("CustomWidget.AiConfig.ThinkingHint"),
+            advancedStack.Children.Add(thinkingCombo);
+            advancedStack.Children.Add(new TextBlock
+            {
+                Text = T("CustomWidget.AiConfig.ThinkingHint"),
+                FontSize = 11.5,
+                Foreground = ResolveThemeBrush("TextFillColorSecondaryBrush"),
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, -4, 0, 0)
+            });
+        }
+
+        var contextWindowCombo = new ComboBox
+        {
+            Header = T("CustomWidget.AiConfig.ContextWindowHeader"),
+            HorizontalAlignment = HorizontalAlignment.Stretch
+        };
+        var contextWindowHintText = new TextBlock
+        {
+            Text = T("CustomWidget.AiConfig.ContextWindowDesc"),
             FontSize = 11.5,
             Foreground = ResolveThemeBrush("TextFillColorSecondaryBrush"),
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, -4, 0, 0)
         };
-        advancedStack.Children.Add(thinkingCombo);
-        advancedStack.Children.Add(thinkingHintText);
+        advancedStack.Children.Add(contextWindowCombo);
+        advancedStack.Children.Add(contextWindowHintText);
 
         var endpointBox = new TextBox
         {
-            Header = loc.T("CustomWidget.AiConfig.EndpointOptionalHeader"),
+            Header = T("CustomWidget.AiConfig.EndpointOptionalHeader"),
             HorizontalAlignment = HorizontalAlignment.Stretch,
             FlowDirection = FlowDirection.LeftToRight
         };
@@ -247,7 +233,7 @@ public static class CustomWidgetAiConfigDialogHelper
             HorizontalContentAlignment = HorizontalAlignment.Stretch,
             Header = new TextBlock
             {
-                Text = loc.T("CustomWidget.AiConfig.AdvancedExpanderHeader"),
+                Text = T("CustomWidget.AiConfig.AdvancedExpanderHeader"),
                 FontSize = 12.5,
                 FontWeight = FontWeights.SemiBold
             },
@@ -255,56 +241,38 @@ public static class CustomWidgetAiConfigDialogHelper
         };
         scrollContent.Children.Add(advancedExpander);
 
-        var scroller = new ScrollViewer
-        {
-            MaxHeight = 520,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-            Content = scrollContent
-        };
-
         var dialog = new ContentDialog
         {
             XamlRoot = xamlRoot,
             RequestedTheme = requestedTheme,
-            FlowDirection = CustomWidgetLocaleCatalog.IsRightToLeftCulture(loc.CurrentCultureName)
+            FlowDirection = CustomWidgetLocaleCatalog.IsRightToLeftCulture(culture)
                 ? FlowDirection.RightToLeft
                 : FlowDirection.LeftToRight,
-            Title = loc.T("CustomWidget.AiConfig.DialogTitle"),
-            Content = scroller,
-            PrimaryButtonText = loc.T("Common.Save"),
-            CloseButtonText = loc.T("Common.Cancel"),
+            Title = T("CustomWidget.AiConfig.DialogTitle"),
+            Content = new ScrollViewer
+            {
+                MaxHeight = 520,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                Content = scrollContent
+            },
+            PrimaryButtonText = T("Common.Save"),
+            CloseButtonText = T("Common.Cancel"),
             DefaultButton = ContentDialogButton.Primary
         };
-        if (Application.Current.Resources.TryGetValue("DefaultContentDialogStyle", out object? styleObj) &&
+        if (Application.Current?.Resources is { } res &&
+            res.TryGetValue("DefaultContentDialogStyle", out object? styleObj) &&
             styleObj is Style dialogStyle)
         {
             dialog.Style = dialogStyle;
         }
 
-        string ResolveSelectedProviderId() =>
-            (providerCombo.SelectedItem as ComboBoxItem)?.Tag as string ?? initialPreset.Id;
-
-        string ReadSelectedModelText(CustomWidgetAiProviderPreset preset)
+        void ShowDialogStatus(InfoBarSeverity severity, string message)
         {
-            string typed = modelCombo.Text?.Trim() ?? string.Empty;
-            if (!string.IsNullOrWhiteSpace(typed))
-            {
-                return typed;
-            }
-
-            if (modelCombo.SelectedItem is string s && !string.IsNullOrWhiteSpace(s))
-            {
-                return s.Trim();
-            }
-
-            return preset.DefaultModel;
-        }
-
-        AiThinkingMode ReadSelectedThinkingMode()
-        {
-            string? tag = (thinkingCombo.SelectedItem as ComboBoxItem)?.Tag as string;
-            return CustomWidgetAiGeneratorService.ParseThinkingMode(tag);
+            statusInfoBar.Severity = severity;
+            statusInfoBar.Title = string.Empty;
+            statusInfoBar.Message = message;
+            statusInfoBar.IsOpen = true;
         }
 
         void UpdateEndpointPreview()
@@ -317,31 +285,10 @@ public static class CustomWidgetAiConfigDialogHelper
             }
 
             string normalized = CustomWidgetAiGeneratorService.NormalizeChatCompletionsEndpoint(rawUrl);
-            endpointResolvedText.Text = loc.Format("CustomWidget.AiConfig.ResolvedUrl", normalized);
+            endpointResolvedText.Text = F("CustomWidget.AiConfig.ResolvedUrl", normalized);
             endpointResolvedText.Visibility = string.Equals(rawUrl.TrimEnd('/'), normalized, StringComparison.OrdinalIgnoreCase)
                 ? Visibility.Collapsed
                 : Visibility.Visible;
-        }
-
-        void PopulateModelItems(IReadOnlyList<string> models, string activeModel)
-        {
-            modelCombo.Items.Clear();
-            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            if (!string.IsNullOrWhiteSpace(activeModel) && seen.Add(activeModel))
-            {
-                modelCombo.Items.Add(activeModel);
-            }
-
-            foreach (string m in models)
-            {
-                if (!string.IsNullOrWhiteSpace(m) && seen.Add(m))
-                {
-                    modelCombo.Items.Add(m);
-                }
-            }
-
-            modelCombo.SelectedItem = activeModel;
-            modelCombo.Text = activeModel;
         }
 
         void LoadProviderIntoForm(string providerId)
@@ -355,27 +302,21 @@ public static class CustomWidgetAiConfigDialogHelper
 
                 CustomWidgetAiProviderPreset preset = CustomWidgetAiGeneratorService.FindProviderPreset(providerId);
                 AiProviderCredentialEntry? existing = CustomWidgetAiCredentialStore.Shared.Get(preset.Id);
-                bool isCustomProvider = string.Equals(
-                    preset.Id,
-                    CustomWidgetAiGeneratorService.CustomProviderId,
-                    StringComparison.OrdinalIgnoreCase);
+                stagedFetchedModels = existing?.FetchedModels;
+                bool isCustomProvider = string.Equals(preset.Id, CustomWidgetAiGeneratorService.CustomProviderId, StringComparison.OrdinalIgnoreCase);
 
                 keyBox.Password = existing?.ApiKey ?? string.Empty;
-                lastPasswordLength = keyBox.Password.Length;
-
+                lastPasswordValue = keyBox.Password.Trim();
+                lastPasswordLength = lastPasswordValue.Length;
                 keyBox.Visibility = preset.RequiresApiKey ? Visibility.Visible : Visibility.Collapsed;
                 localNoKeyBanner.Visibility = preset.RequiresApiKey ? Visibility.Collapsed : Visibility.Visible;
-                keyHeaderLabel.Text = preset.RequiresApiKey
-                    ? loc.T("CustomWidget.AiConfig.ApiKeyHeader")
-                    : loc.T("CustomWidget.AiConfig.LocalEngineHeader");
+                keyHeaderLabel.Text = T(preset.RequiresApiKey ? "CustomWidget.AiConfig.ApiKeyHeader" : "CustomWidget.AiConfig.LocalEngineHeader");
 
                 if (!string.IsNullOrWhiteSpace(preset.ConsoleUrl) &&
                     Uri.TryCreate(preset.ConsoleUrl, UriKind.Absolute, out Uri? consoleUri))
                 {
                     getKeyLink.NavigateUri = consoleUri;
-                    getKeyLink.Content = loc.T(preset.RequiresApiKey
-                        ? "CustomWidget.AiConfig.GetApiKeyLink"
-                        : "CustomWidget.AiConfig.LocalDocsLink");
+                    getKeyLink.Content = T(preset.RequiresApiKey ? "CustomWidget.AiConfig.GetApiKeyLink" : "CustomWidget.AiConfig.LocalDocsLink");
                     getKeyLink.Visibility = Visibility.Visible;
                 }
                 else
@@ -383,47 +324,30 @@ public static class CustomWidgetAiConfigDialogHelper
                     getKeyLink.Visibility = Visibility.Collapsed;
                 }
 
-                string savedModel = !string.IsNullOrWhiteSpace(existing?.CustomModel)
-                    ? existing!.CustomModel.Trim()
-                    : preset.DefaultModel;
-                modelCombo.PlaceholderText = preset.DefaultModel;
-                PopulateModelItems(preset.Models, savedModel);
+                ResolvedAiInvocation resolved = DeskBoxAiService.Shared.ResolveEffectiveSettings(preset.Id);
+                IReadOnlyList<string> selectableModels = DeskBoxAiService.Shared.GetSelectableModels(preset.Id, stagedFetchedModels);
+                AiProviderConfigFormController.PopulateModelCombo(modelCombo, preset, selectableModels, resolved.Model);
+                form.PopulateThinkingCombo(thinkingCombo, resolved.ThinkingMode, detailedLabels: true);
 
-                AiThinkingMode mode = CustomWidgetAiGeneratorService.ParseThinkingMode(existing?.ThinkingMode);
-                thinkingCombo.SelectedIndex = mode switch
-                {
-                    AiThinkingMode.Enabled => 1,
-                    AiThinkingMode.Disabled => 2,
-                    _ => 0
-                };
+                AiContextWindowMode contextMode = DeskBoxAiService.ParseContextWindowMode(existing?.ContextWindowMode);
+                form.PopulateContextWindowCombo(contextWindowCombo, contextMode);
+                contextWindowHintText.Text = form.BuildContextWindowDescription(resolved);
 
-                bool isGlobalDefault = string.Equals(existing?.Region, "global", StringComparison.OrdinalIgnoreCase) ||
-                                       (string.IsNullOrWhiteSpace(existing?.Region) &&
-                                        !DeskBoxAiService.IsSimplifiedChineseRegion(loc.CurrentCultureName));
-                string defaultEndpointPlaceholder = isGlobalDefault && !string.IsNullOrWhiteSpace(preset.GlobalDefaultEndpoint)
-                    ? preset.GlobalDefaultEndpoint!
-                    : preset.DefaultEndpoint;
-
-                endpointBox.Header = loc.T(isCustomProvider
-                    ? "CustomWidget.Studio.KeyDialog.EndpointHeader"
-                    : "CustomWidget.AiConfig.EndpointOptionalHeader");
-                endpointBox.PlaceholderText = defaultEndpointPlaceholder;
+                endpointBox.Header = T(isCustomProvider ? "CustomWidget.Studio.KeyDialog.EndpointHeader" : "CustomWidget.AiConfig.EndpointOptionalHeader");
+                endpointBox.PlaceholderText = form.ResolveEndpointPlaceholder(preset, existing);
                 endpointBox.Text = existing?.CustomEndpoint ?? string.Empty;
                 UpdateEndpointPreview();
 
                 advancedExpander.IsExpanded = expandAdvanced ||
                                               isCustomProvider ||
                                               !string.IsNullOrWhiteSpace(existing?.CustomEndpoint) ||
-                                              mode != AiThinkingMode.Auto;
+                                              (!hideThinkingOption && resolved.ThinkingMode != AiThinkingMode.Auto) ||
+                                              contextMode != AiContextWindowMode.Auto;
 
                 bool isConfigured = DeskBoxAiService.IsProviderConfigured(preset, existing);
-                dialog.PrimaryButtonText = loc.T(preset.RequiresApiKey || isConfigured
-                    ? "Common.Save"
-                    : "CustomWidget.AiConfig.EnableLocalButton");
+                dialog.PrimaryButtonText = T(preset.RequiresApiKey || isConfigured ? "Common.Save" : "CustomWidget.AiConfig.EnableLocalButton");
                 dialog.SecondaryButtonText = isConfigured
-                    ? loc.T(preset.RequiresApiKey
-                        ? "CustomWidget.Studio.KeyDialog.ClearButton"
-                        : "CustomWidget.AiConfig.DisableLocalButton")
+                    ? T(preset.RequiresApiKey ? "CustomWidget.Studio.KeyDialog.ClearButton" : "CustomWidget.AiConfig.DisableLocalButton")
                     : string.Empty;
             }
             finally
@@ -436,15 +360,83 @@ public static class CustomWidgetAiConfigDialogHelper
 
         providerCombo.SelectionChanged += (_, _) =>
         {
-            if (syncingProviderFields)
+            if (!syncingProviderFields)
+            {
+                LoadProviderIntoForm(form.ResolveSelectedProviderId(providerCombo));
+            }
+        };
+
+        modelCombo.SelectionChanged += (_, _) =>
+        {
+            if (syncingProviderFields || modelCombo.SelectedItem is not string selectedModel)
             {
                 return;
             }
 
-            LoadProviderIntoForm(ResolveSelectedProviderId());
+            CustomWidgetAiProviderPreset preset = CustomWidgetAiGeneratorService.FindProviderPreset(form.ResolveSelectedProviderId(providerCombo));
+            IReadOnlyList<string> availableModels = stagedFetchedModels ?? DeskBoxAiService.Shared.GetSelectableModels(preset.Id);
+            (_, string syncedThinkingWire) = DeskBoxAiService.SynchronizeModelAndThinkingSelection(
+                preset,
+                existingCustomModel: null,
+                existingThinkingWire: AiProviderConfigFormController.ReadThinkingWire(thinkingCombo),
+                newChosenModel: selectedModel,
+                newThinkingWire: null,
+                availableModels: availableModels);
+            syncingProviderFields = true;
+            try
+            {
+                modelCombo.Text = selectedModel;
+                thinkingCombo.SelectedIndex = DeskBoxAiService.ParseThinkingMode(syncedThinkingWire) switch
+                {
+                    AiThinkingMode.Enabled => 1,
+                    AiThinkingMode.Disabled => 2,
+                    _ => 0
+                };
+            }
+            finally
+            {
+                syncingProviderFields = false;
+            }
         };
 
-        endpointBox.TextChanged += (_, _) => UpdateEndpointPreview();
+        thinkingCombo.SelectionChanged += (_, _) =>
+        {
+            if (syncingProviderFields || (thinkingCombo.SelectedItem as ComboBoxItem)?.Tag is not string selectedWire)
+            {
+                return;
+            }
+
+            CustomWidgetAiProviderPreset preset = CustomWidgetAiGeneratorService.FindProviderPreset(form.ResolveSelectedProviderId(providerCombo));
+            IReadOnlyList<string> availableModels = stagedFetchedModels ?? DeskBoxAiService.Shared.GetSelectableModels(preset.Id);
+            (string syncedCustomModel, _) = DeskBoxAiService.SynchronizeModelAndThinkingSelection(
+                preset,
+                existingCustomModel: AiProviderConfigFormController.ReadModelComboText(modelCombo, preset, stagedFetchedModels),
+                existingThinkingWire: null,
+                newChosenModel: null,
+                newThinkingWire: selectedWire,
+                availableModels: availableModels);
+            string targetModel = string.IsNullOrWhiteSpace(syncedCustomModel)
+                ? (availableModels.FirstOrDefault() ?? preset.DefaultModel)
+                : syncedCustomModel;
+            syncingProviderFields = true;
+            try
+            {
+                AiProviderConfigFormController.PopulateModelCombo(modelCombo, preset, availableModels, targetModel);
+            }
+            finally
+            {
+                syncingProviderFields = false;
+            }
+        };
+
+        endpointBox.TextChanged += (_, _) =>
+        {
+            if (!syncingProviderFields)
+            {
+                stagedFetchedModels = null;
+            }
+            UpdateEndpointPreview();
+        };
 
         bool isDialogClosed = false;
         bool isTestingConnection = false;
@@ -455,7 +447,6 @@ public static class CustomWidgetAiConfigDialogHelper
             {
                 return;
             }
-
             if (isTestingConnection)
             {
                 if (!isAutoPasteProbe)
@@ -465,30 +456,32 @@ public static class CustomWidgetAiConfigDialogHelper
                 return;
             }
 
-            string providerId = ResolveSelectedProviderId();
+            string providerId = form.ResolveSelectedProviderId(providerCombo);
             CustomWidgetAiProviderPreset preset = CustomWidgetAiGeneratorService.FindProviderPreset(providerId);
+            if (isAutoPasteProbe &&
+                string.Equals(preset.Id, CustomWidgetAiGeneratorService.CustomProviderId, StringComparison.OrdinalIgnoreCase) &&
+                string.IsNullOrWhiteSpace(endpointBox.Text))
+            {
+                return;
+            }
             if (preset.RequiresApiKey && string.IsNullOrWhiteSpace(keyBox.Password))
             {
                 if (!isAutoPasteProbe)
                 {
-                    statusInfoBar.Severity = InfoBarSeverity.Warning;
-                    statusInfoBar.Title = string.Empty;
-                    statusInfoBar.Message = loc.T("CustomWidget.AiApi.Error.EnterApiKeyFirst");
-                    statusInfoBar.IsOpen = true;
+                    ShowDialogStatus(InfoBarSeverity.Warning, T("CustomWidget.AiApi.Error.EnterApiKeyFirst"));
                 }
                 return;
             }
 
-            string chosenModel = ReadSelectedModelText(preset);
-            AiThinkingMode chosenThinking = ReadSelectedThinkingMode();
+            string chosenModel = AiProviderConfigFormController.ReadModelComboText(modelCombo, preset, stagedFetchedModels);
+            AiThinkingMode chosenThinking = hideThinkingOption
+                ? DeskBoxAiService.ParseThinkingMode(CustomWidgetAiCredentialStore.Shared.Get(preset.Id)?.ThinkingMode)
+                : CustomWidgetAiGeneratorService.ParseThinkingMode(AiProviderConfigFormController.ReadThinkingWire(thinkingCombo));
 
             CancellationToken token = activeOpCtsBox.Reset();
             isTestingConnection = true;
-            testBtn.Content = CreateSpinnerRow(loc.T("Common.Cancel"));
-            statusInfoBar.Severity = InfoBarSeverity.Informational;
-            statusInfoBar.Title = string.Empty;
-            statusInfoBar.Message = loc.T("CustomWidget.AiConfig.TestingInProgress");
-            statusInfoBar.IsOpen = true;
+            testBtn.Content = CreateSpinnerRow(T("Common.Cancel"));
+            ShowDialogStatus(InfoBarSeverity.Informational, T("CustomWidget.AiConfig.TestingInProgress"));
 
             try
             {
@@ -500,33 +493,22 @@ public static class CustomWidgetAiConfigDialogHelper
                     thinkingOverride: chosenThinking,
                     cancellationToken: token);
 
-                if (isDialogClosed)
+                if (isDialogClosed || token.IsCancellationRequested)
                 {
-                    return;
-                }
-
-                if (token.IsCancellationRequested)
-                {
-                    statusInfoBar.IsOpen = false;
+                    if (!isDialogClosed)
+                    {
+                        statusInfoBar.IsOpen = false;
+                    }
                     return;
                 }
 
                 if (testResult.Success)
                 {
-                    statusInfoBar.Severity = InfoBarSeverity.Success;
-                    statusInfoBar.Title = string.Empty;
-                    statusInfoBar.Message = loc.Format(
-                        "CustomWidget.AiConfig.TestSuccess",
-                        testResult.LatencyMs,
-                        testResult.EffectiveModel);
-                    statusInfoBar.IsOpen = true;
+                    ShowDialogStatus(InfoBarSeverity.Success, form.FormatTestSuccess(testResult));
                 }
                 else
                 {
-                    statusInfoBar.Severity = InfoBarSeverity.Error;
-                    statusInfoBar.Title = string.Empty;
-                    statusInfoBar.Message = testResult.ErrorMessage ?? loc.T("CustomWidget.AiConfig.TestFailed");
-                    statusInfoBar.IsOpen = true;
+                    ShowDialogStatus(InfoBarSeverity.Error, form.FormatTestFailure(testResult));
                 }
             }
             catch (OperationCanceledException)
@@ -540,10 +522,7 @@ public static class CustomWidgetAiConfigDialogHelper
             {
                 if (!isDialogClosed)
                 {
-                    statusInfoBar.Severity = InfoBarSeverity.Error;
-                    statusInfoBar.Title = string.Empty;
-                    statusInfoBar.Message = ex.Message;
-                    statusInfoBar.IsOpen = true;
+                    ShowDialogStatus(InfoBarSeverity.Error, ex.Message);
                 }
             }
             finally
@@ -551,12 +530,11 @@ public static class CustomWidgetAiConfigDialogHelper
                 isTestingConnection = false;
                 if (!isDialogClosed)
                 {
-                    testBtn.Content = CreateIconTextRow("\uE945", loc.T("CustomWidget.AiConfig.TestConnection"));
+                    testBtn.Content = CreateIconTextRow("\uE945", T("CustomWidget.AiConfig.TestConnection"));
                 }
             }
         }
 
-        // Auto-probe connectivity right after user pastes an API key
         keyBox.PasswordChanged += async (_, _) =>
         {
             if (syncingProviderFields || isDialogClosed)
@@ -565,10 +543,18 @@ public static class CustomWidgetAiConfigDialogHelper
             }
 
             int prevLen = lastPasswordLength;
-            int newLen = keyBox.Password?.Trim().Length ?? 0;
+            string prevVal = lastPasswordValue;
+            string newVal = keyBox.Password?.Trim() ?? string.Empty;
+            int newLen = newVal.Length;
             lastPasswordLength = newLen;
+            lastPasswordValue = newVal;
 
-            if (prevLen == 0 && newLen >= 18)
+            bool isBulkPaste = newLen >= 18 &&
+                               !string.Equals(prevVal, newVal, StringComparison.Ordinal) &&
+                               (prevLen == 0 ||
+                                newLen - prevLen >= 8 ||
+                                (prevLen >= 10 && !newVal.StartsWith(prevVal[..Math.Min(prevVal.Length, Math.Max(1, newLen - 2))], StringComparison.Ordinal)));
+            if (isBulkPaste)
             {
                 CancellationToken debounceToken = pasteProbeCtsBox.Reset();
                 try
@@ -592,18 +578,17 @@ public static class CustomWidgetAiConfigDialogHelper
             {
                 return;
             }
-
             if (isFetchingModels)
             {
                 activeOpCtsBox.CancelCurrent();
                 return;
             }
 
-            string providerId = ResolveSelectedProviderId();
+            string providerId = form.ResolveSelectedProviderId(providerCombo);
             CustomWidgetAiProviderPreset preset = CustomWidgetAiGeneratorService.FindProviderPreset(providerId);
             CancellationToken token = activeOpCtsBox.Reset();
             isFetchingModels = true;
-            fetchModelsBtn.Content = CreateSpinnerRow(loc.T("Common.Cancel"));
+            fetchModelsBtn.Content = CreateSpinnerRow(T("Common.Cancel"));
             statusInfoBar.IsOpen = false;
 
             try
@@ -612,8 +597,8 @@ public static class CustomWidgetAiConfigDialogHelper
                     providerId,
                     endpointOverride: endpointBox.Text,
                     apiKeyOverride: keyBox.Password,
-                    cancellationToken: token);
-
+                    cancellationToken: token,
+                    persistDiscoveredModels: false);
                 if (token.IsCancellationRequested || isDialogClosed)
                 {
                     return;
@@ -621,27 +606,28 @@ public static class CustomWidgetAiConfigDialogHelper
 
                 if (listResult.Success && listResult.Models.Count > 0)
                 {
-                    string currentModel = ReadSelectedModelText(preset);
-                    string chosen = listResult.Models.Contains(currentModel, StringComparer.OrdinalIgnoreCase)
-                        ? currentModel
-                        : listResult.Models[0];
-                    PopulateModelItems(listResult.Models, chosen);
+                    stagedFetchedModels = CustomWidgetAiCredentialStore.NormalizeModelCatalog(listResult.Models) ?? listResult.Models;
+                    string currentModel = AiProviderConfigFormController.ReadModelComboText(modelCombo, preset, stagedFetchedModels);
+                    string chosen = stagedFetchedModels.FirstOrDefault(
+                        m => string.Equals(m, currentModel, StringComparison.OrdinalIgnoreCase)) ?? stagedFetchedModels[0];
+                    syncingProviderFields = true;
+                    try
+                    {
+                        AiProviderConfigFormController.PopulateModelCombo(modelCombo, preset, stagedFetchedModels, chosen);
+                    }
+                    finally
+                    {
+                        syncingProviderFields = false;
+                    }
                     if (!isDialogClosed && modelCombo.IsLoaded && modelCombo.XamlRoot is not null)
                     {
                         modelCombo.IsDropDownOpen = true;
                     }
-
-                    statusInfoBar.Severity = InfoBarSeverity.Success;
-                    statusInfoBar.Title = string.Empty;
-                    statusInfoBar.Message = loc.Format("CustomWidget.AiConfig.FetchModelsSuccess", listResult.Models.Count);
-                    statusInfoBar.IsOpen = true;
+                    ShowDialogStatus(InfoBarSeverity.Success, form.FormatFetchSuccess(stagedFetchedModels.Count));
                 }
                 else
                 {
-                    statusInfoBar.Severity = InfoBarSeverity.Warning;
-                    statusInfoBar.Title = string.Empty;
-                    statusInfoBar.Message = listResult.ErrorMessage ?? loc.T("CustomWidget.AiConfig.FetchModelsFailed");
-                    statusInfoBar.IsOpen = true;
+                    ShowDialogStatus(InfoBarSeverity.Warning, form.FormatFetchFailure(listResult));
                 }
             }
             catch (OperationCanceledException)
@@ -651,10 +637,7 @@ public static class CustomWidgetAiConfigDialogHelper
             {
                 if (!isDialogClosed)
                 {
-                    statusInfoBar.Severity = InfoBarSeverity.Warning;
-                    statusInfoBar.Title = string.Empty;
-                    statusInfoBar.Message = ex.Message;
-                    statusInfoBar.IsOpen = true;
+                    ShowDialogStatus(InfoBarSeverity.Warning, ex.Message);
                 }
             }
             finally
@@ -662,7 +645,7 @@ public static class CustomWidgetAiConfigDialogHelper
                 isFetchingModels = false;
                 if (!isDialogClosed)
                 {
-                    fetchModelsBtn.Content = CreateIconTextRow("\uE72C", loc.T("CustomWidget.AiConfig.FetchModels"));
+                    fetchModelsBtn.Content = CreateIconTextRow("\uE72C", T("CustomWidget.AiConfig.FetchModels"));
                 }
             }
         };
@@ -683,50 +666,28 @@ public static class CustomWidgetAiConfigDialogHelper
         };
 
         ContentDialogResult result = await dialog.ShowAsync();
-        string finalProviderId = ResolveSelectedProviderId();
+        string finalProviderId = form.ResolveSelectedProviderId(providerCombo);
         CustomWidgetAiProviderPreset finalPreset = CustomWidgetAiGeneratorService.FindProviderPreset(finalProviderId);
-        AiProviderCredentialEntry? prev = CustomWidgetAiCredentialStore.Shared.Get(finalPreset.Id);
-        string defaultRegion = DeskBoxAiService.IsSimplifiedChineseRegion(loc.CurrentCultureName) ? "cn" : "global";
 
         if (result == ContentDialogResult.Primary)
         {
-            string trimmedKey = keyBox.Password.Trim();
-            string customEndpoint = endpointBox.Text.Trim();
-            string chosenModel = ReadSelectedModelText(finalPreset);
-            string customModel = string.Equals(chosenModel, finalPreset.DefaultModel, StringComparison.OrdinalIgnoreCase)
-                ? string.Empty
-                : chosenModel;
-            string thinkingWire = CustomWidgetAiGeneratorService.ToThinkingWireValue(ReadSelectedThinkingMode());
-            bool enabledState = finalPreset.RequiresApiKey ? (prev?.Enabled ?? true) : true;
-
-            CustomWidgetAiCredentialStore.Shared.Upsert(new AiProviderCredentialEntry(
-                ProviderId: finalPreset.Id,
-                ApiKey: trimmedKey,
-                Region: prev?.Region ?? defaultRegion,
-                PlanTier: prev?.PlanTier ?? "pro",
-                Enabled: enabledState,
-                CustomEndpoint: customEndpoint,
-                CustomModel: customModel,
-                ThinkingMode: thinkingWire));
-
-            if (!finalPreset.RequiresApiKey || !string.IsNullOrWhiteSpace(trimmedKey))
-            {
-                CustomWidgetStudioPreferencesStore.Shared.SetPreferredAiProviderId(finalPreset.Id);
-            }
-
+            string rawThinkingWire = hideThinkingOption
+                ? (CustomWidgetAiCredentialStore.Shared.Get(finalPreset.Id)?.ThinkingMode ?? "auto")
+                : AiProviderConfigFormController.ReadThinkingWire(thinkingCombo);
+            form.SaveProviderSnapshot(
+                finalPreset.Id,
+                keyBox.Password,
+                endpointBox.Text,
+                AiProviderConfigFormController.ReadModelComboText(modelCombo, finalPreset, stagedFetchedModels),
+                rawThinkingWire,
+                AiProviderConfigFormController.ReadContextWindowWire(contextWindowCombo),
+                stagedFetchedModels);
             return finalPreset.Id;
         }
 
         if (result == ContentDialogResult.Secondary)
         {
-            if (finalPreset.RequiresApiKey)
-            {
-                CustomWidgetAiCredentialStore.Shared.RemoveKey(finalPreset.Id);
-            }
-            else if (prev is not null)
-            {
-                CustomWidgetAiCredentialStore.Shared.Upsert(prev with { Enabled = false, ApiKey = string.Empty });
-            }
+            AiProviderConfigFormController.ClearOrDisableProvider(finalPreset.Id);
             return finalPreset.Id;
         }
 
@@ -751,7 +712,7 @@ public static class CustomWidgetAiConfigDialogHelper
 
     private static Brush ResolveThemeBrushFor(string key, ElementTheme requestedTheme) =>
         NeutralInteractionBrush.ResolveThemedResource(key, requestedTheme)
-        ?? (Application.Current.Resources.TryGetValue(key, out object? value) && value is Brush brush
+        ?? (Application.Current?.Resources is { } res && res.TryGetValue(key, out object? value) && value is Brush brush
             ? brush
             : new SolidColorBrush(Colors.Gray));
 

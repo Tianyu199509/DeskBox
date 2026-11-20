@@ -26,16 +26,19 @@ public static class CustomWidgetFirstRunSetupDialogHelper
     public static async Task<CustomWidgetFirstRunSetupOutcome> ShowAsync(
         XamlRoot xamlRoot,
         ElementTheme requestedTheme,
-        LocalizationService loc,
+        LocalizationService? loc,
         IntPtr ownerHwnd,
         CustomWidgetManifest manifest,
         CustomWidgetSetupInspection inspection,
         string? activeCulture = null)
     {
         ArgumentNullException.ThrowIfNull(xamlRoot);
-        ArgumentNullException.ThrowIfNull(loc);
         ArgumentNullException.ThrowIfNull(manifest);
         ArgumentNullException.ThrowIfNull(inspection);
+
+        string T(string k) => AiProviderConfigFormController.Translate(loc, k);
+        string F(string k, params object[] a) => AiProviderConfigFormController.Format(loc, k, a);
+        string fallbackCulture = AiProviderConfigFormController.ResolveCultureName(loc);
 
         var collectedSettings = new Dictionary<string, string>(StringComparer.Ordinal);
         var collectedSecrets = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -44,7 +47,7 @@ public static class CustomWidgetFirstRunSetupDialogHelper
             return new CustomWidgetFirstRunSetupOutcome(false, collectedSettings, collectedSecrets);
         }
 
-        string culture = string.IsNullOrWhiteSpace(activeCulture) ? loc.CurrentCultureName : activeCulture;
+        string culture = string.IsNullOrWhiteSpace(activeCulture) ? fallbackCulture : activeCulture;
         string widgetName = manifest.ResolveLocalizedName(culture);
 
         var rootStack = new StackPanel
@@ -52,14 +55,14 @@ public static class CustomWidgetFirstRunSetupDialogHelper
             Spacing = 12,
             MinWidth = 420,
             MaxWidth = 520,
-            FlowDirection = CustomWidgetLocaleCatalog.IsRightToLeftCulture(loc.CurrentCultureName)
+            FlowDirection = CustomWidgetLocaleCatalog.IsRightToLeftCulture(fallbackCulture)
                 ? FlowDirection.RightToLeft
                 : FlowDirection.LeftToRight
         };
 
         rootStack.Children.Add(new TextBlock
         {
-            Text = loc.Format("CustomWidget.Onboarding.DialogSubtitle", widgetName),
+            Text = F("CustomWidget.Onboarding.DialogSubtitle", widgetName),
             FontSize = 12.5,
             LineHeight = 18.5,
             Opacity = 0.82,
@@ -88,7 +91,7 @@ public static class CustomWidgetFirstRunSetupDialogHelper
             });
             var vaultNote = new TextBlock
             {
-                Text = loc.T("CustomWidget.Onboarding.SecretVaultNotice"),
+                Text = T("CustomWidget.Onboarding.SecretVaultNotice"),
                 FontSize = 11.5,
                 LineHeight = 17,
                 Opacity = 0.86,
@@ -121,7 +124,7 @@ public static class CustomWidgetFirstRunSetupDialogHelper
                     CornerRadius = new CornerRadius(6),
                     PlaceholderText = !string.IsNullOrWhiteSpace(field.CurrentValue)
                         ? CustomWidgetSecretStore.MaskSecret(field.CurrentValue)
-                        : loc.T("CustomWidget.Secret.SettingsFieldPlaceholder")
+                        : T("CustomWidget.Secret.SettingsFieldPlaceholder")
                 };
                 AutomationProperties.SetName(pwdBox, label);
                 secGroup.Children.Add(pwdBox);
@@ -275,6 +278,7 @@ public static class CustomWidgetFirstRunSetupDialogHelper
             var textBox = new TextBox
             {
                 Text = initialText,
+                PlaceholderText = def.Placeholder ?? string.Empty,
                 CornerRadius = new CornerRadius(6),
                 HorizontalAlignment = HorizontalAlignment.Stretch
             };
@@ -295,7 +299,7 @@ public static class CustomWidgetFirstRunSetupDialogHelper
                 var browseBtn = new Button
                 {
                     CornerRadius = new CornerRadius(6),
-                    Content = loc.T(pickFile
+                    Content = T(pickFile
                         ? "CustomWidget.Onboarding.BrowseFileButton"
                         : "CustomWidget.Onboarding.BrowseFolderButton")
                 };
@@ -304,21 +308,14 @@ public static class CustomWidgetFirstRunSetupDialogHelper
                     browseBtn.IsEnabled = false;
                     try
                     {
-                        if (pickFile)
+                        string? pickedPath = await CustomWidgetOnboardingHelper.PickPathForSettingAsync(
+                            ownerHwnd,
+                            def,
+                            pickFile,
+                            textBox.Text);
+                        if (!string.IsNullOrWhiteSpace(pickedPath))
                         {
-                            IReadOnlyList<string> files = await FileOpenPickerService.PickFilesAsync(ownerHwnd);
-                            if (files.Count > 0 && !string.IsNullOrWhiteSpace(files[0]))
-                            {
-                                textBox.Text = files[0];
-                            }
-                        }
-                        else
-                        {
-                            string? pickedFolder = await FolderPickerService.PickFolderAsync(ownerHwnd, "widget-first-run");
-                            if (!string.IsNullOrWhiteSpace(pickedFolder))
-                            {
-                                textBox.Text = pickedFolder;
-                            }
+                            textBox.Text = pickedPath;
                         }
                     }
                     catch (Exception ex)
@@ -361,10 +358,10 @@ public static class CustomWidgetFirstRunSetupDialogHelper
             XamlRoot = xamlRoot,
             RequestedTheme = requestedTheme,
             FlowDirection = rootStack.FlowDirection,
-            Title = loc.T("CustomWidget.Onboarding.DialogTitle"),
+            Title = T("CustomWidget.Onboarding.DialogTitle"),
             Content = rootStack,
-            PrimaryButtonText = loc.T("CustomWidget.Onboarding.ApplyButton"),
-            CloseButtonText = loc.T("CustomWidget.Onboarding.SkipButton"),
+            PrimaryButtonText = T("CustomWidget.Onboarding.ApplyButton"),
+            CloseButtonText = T("CustomWidget.Onboarding.SkipButton"),
             DefaultButton = ContentDialogButton.Primary
         };
 

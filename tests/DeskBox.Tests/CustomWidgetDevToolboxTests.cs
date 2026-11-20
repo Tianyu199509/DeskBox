@@ -1,6 +1,8 @@
 using System.Globalization;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using DeskBox.Controls.WidgetContents;
 using DeskBox.Models;
 using DeskBox.Services;
 using Xunit;
@@ -404,7 +406,7 @@ public sealed class CustomWidgetDevToolboxTests
     [Fact]
     public void CapabilityRegistry_AcceptsJwtStateTokenAndKeeps27Modules()
     {
-        Assert.Equal(35, CustomWidgetCapabilityRegistry.All.Count);
+        Assert.Equal(37, CustomWidgetCapabilityRegistry.All.Count);
 
         var diagnostics = new List<CustomWidgetValidationDiagnostic>();
         CustomWidgetCapabilityRegistry.ValidateBuiltInTokensInExpression(
@@ -440,10 +442,10 @@ public sealed class CustomWidgetDevToolboxTests
 
         CustomWidgetManifest manifest = result.Manifest!;
         Assert.Equal("deskbox.dev-toolbox", manifest.Id);
-        Assert.Equal("\uE756", manifest.Icon);
-        Assert.Equal("\uE756", manifest.Capsule?.Glyph);
-        Assert.Equal(336, manifest.DefaultSize.Width);
-        Assert.Equal(392, manifest.DefaultSize.Height);
+        Assert.Equal("🛠️", manifest.Icon);
+        Assert.Equal("🛠️", manifest.Capsule?.Glyph);
+        Assert.Equal(344, manifest.DefaultSize.Width);
+        Assert.Equal(356, manifest.DefaultSize.Height);
         Assert.Equal(288, manifest.MinSize.Width);
         Assert.Equal(280, manifest.MinSize.Height);
 
@@ -470,97 +472,374 @@ public sealed class CustomWidgetDevToolboxTests
             manifest.Settings.Select(s => s.Key).ToArray());
     }
 
+    private static (CustomWidgetScriptExecutionResult Exec, CustomWidgetEvaluationContext Ctx) ExecuteDevToolboxScript(
+        CustomWidgetCompiledScript compiled,
+        string fn,
+        Dictionary<string, string> state,
+        Dictionary<string, string> settings,
+        IReadOnlyDictionary<string, string> i18n,
+        CustomWidgetClipboardSnapshot clipboard,
+        IReadOnlyDictionary<string, string>? args = null,
+        DateTimeOffset? now = null,
+        string culture = "zh-CN")
+    {
+        CustomWidgetScriptExecutionResult exec = CustomWidgetScriptEngine.Execute(
+            compiled,
+            fn,
+            new CustomWidgetScriptExecutionInput
+            {
+                ClockOverride = now ?? FixedNow,
+                CultureName = culture,
+                I18n = i18n,
+                State = state,
+                Settings = settings,
+                Clipboard = clipboard,
+                Args = args,
+                AllowCopy = true
+            });
+        Assert.True(exec.IsSuccess, exec.ErrorMessage);
+
+        foreach (string removed in exec.StateRemoved)
+        {
+            state.Remove(removed);
+        }
+
+        foreach ((string key, string val) in exec.StateSet)
+        {
+            state[key] = val;
+        }
+
+        var evalCtx = new CustomWidgetEvaluationContext
+        {
+            ClockOverride = now ?? FixedNow,
+            CultureName = culture,
+            I18n = i18n,
+            State = state,
+            Settings = settings,
+            Clipboard = clipboard,
+            Computed = exec.Computed
+        };
+        return (exec, evalCtx);
+    }
+
+    private static Dictionary<string, string> CreateDevToolboxState(string draft = "", string tab = "json") =>
+        new(StringComparer.Ordinal)
+        {
+            ["draft"] = draft,
+            ["output"] = "",
+            ["activeTab"] = tab,
+            ["editing"] = "false",
+            ["focusSeq"] = "0",
+            ["stepLabel"] = "",
+            ["historyJson"] = "[]",
+            ["jwtMode"] = "false",
+            ["jwtView"] = "payload",
+            ["jwtToken"] = "",
+            ["jwtHeaderJson"] = "",
+            ["jwtPayloadJson"] = "",
+            ["structKind"] = "",
+            ["kvUnit"] = "s",
+            ["lastSelfCopied"] = "",
+            ["dismissedClip"] = "",
+            ["copySeq"] = "0",
+            ["errorMsg"] = "",
+            ["errorOffset"] = "-1",
+            ["errorSeq"] = "0",
+            ["autoCopyOverride"] = ""
+        };
+
     [Fact]
     public void DevToolboxManifest_KeyExpressions_ResolveBySnifferKindAndJwtState()
     {
         CustomWidgetTemplateBundle bundle =
             CustomWidgetTemplates.GetTemplateBundle(CustomWidgetTemplates.DevToolboxTemplateId);
-        CustomWidgetManifest manifest = CustomWidgetManifestParser.Parse(bundle.ManifestJson).Manifest!
-            .WithLocales(bundle.Locales);
+        CustomWidgetWorkspaceValidationResult validated = CustomWidgetScriptValidator.ValidateWorkspaceBundle(
+            bundle.ManifestJson,
+            bundle.LogicJs,
+            bundle.Locales);
+        Assert.NotNull(validated.Manifest);
+        Assert.NotNull(validated.CompiledScript);
+        CustomWidgetManifest manifest = validated.Manifest!;
+        CustomWidgetCompiledScript compiled = validated.CompiledScript!;
+        IReadOnlyDictionary<string, string> zhI18n = manifest.ResolveI18nDictionary("zh-CN");
 
-        long exp = FixedNow.ToUnixTimeSeconds() + 3600;
+        long validExp = FixedNow.ToUnixTimeSeconds() + 3600;
         CustomWidgetClipboardSnapshot jwtSnap = CustomWidgetClipboardSnapshot.CreateFromText(
-            BuildJwt($"{{\"sub\":\"u\",\"exp\":{exp}}}"));
-        CustomWidgetTransformResult expiredTr = CustomWidgetUtilityEngine.ExecuteTextTransform(
-            BuildJwt($"{{\"exp\":{FixedNow.ToUnixTimeSeconds() - 60}}}"), "jwtDecode", FixedNow, "zh-CN");
+            BuildJwt($"{{\"sub\":\"u\",\"exp\":{validExp}}}"));
 
-        CustomWidgetEvaluationContext BuildCtx(
-            string sniffer = "true",
-            string indent = "2",
-            string uuidCase = "lower",
-            CustomWidgetTransformResult? transform = null) => new()
+        var settings = new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            ClockOverride = FixedNow,
-            CultureName = "zh-CN",
-            I18n = manifest.ResolveI18nDictionary("zh-CN"),
-            State = new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["draft"] = "",
-                ["output"] = "",
-                ["transformStatus"] = "error",
-                ["transformError"] = "",
-                ["activeTab"] = "json"
-            },
-            Settings = new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["autoCopyResult"] = "true",
-                ["enableClipboardSniffer"] = sniffer,
-                ["jsonIndent"] = indent,
-                ["uuidCase"] = uuidCase
-            },
-            Clipboard = jwtSnap,
-            TransformResult = transform
+            ["autoCopyResult"] = "true",
+            ["enableClipboardSniffer"] = "true",
+            ["jsonIndent"] = "2",
+            ["uuidCase"] = "lower"
         };
 
-        CustomWidgetEvaluationContext ctx = BuildCtx(transform: expiredTr);
+        // 1. Structured JWT clipboard shows compact handoff strip with "载入并解析"
+        Dictionary<string, string> state = CreateDevToolboxState();
+        (_, CustomWidgetEvaluationContext ctx) = ExecuteDevToolboxScript(
+            compiled, "onInit", state, settings, zhI18n, jwtSnap);
 
-        // Sniffer badge & preview follow the clipboard kind
-        Assert.Equal("JWT 令牌", CustomWidgetExpressionEvaluator.Interpolate(
-            "${$clipboard.kindLabel}", ctx));
-        Assert.StartsWith("eyJ", CustomWidgetExpressionEvaluator.Interpolate(
-            "${$clipboard.hasText == 'true' ? $clipboard.preview : $i18n.previewEmpty}", ctx), StringComparison.Ordinal);
+        Assert.Equal("true", CustomWidgetExpressionEvaluator.Interpolate("${$computed.showClipBanner}", ctx));
+        Assert.Equal("JWT", CustomWidgetExpressionEvaluator.Interpolate("${$computed.clipKindLabel}", ctx));
+        CustomWidgetNodeSpec clipCard = manifest.View.Children[0];
+        Assert.Equal("clip-accordion", clipCard.Id);
+        CustomWidgetNodeSpec clipActionBtn = clipCard.Children[0].Children[2];
+        Assert.Equal("Button", clipActionBtn.Type);
+        Assert.Equal("载入并解析", CustomWidgetExpressionEvaluator.Interpolate(clipActionBtn.Text!, ctx));
 
-        // Primary action label + routing format react to the sniffed JWT
-        CustomWidgetNodeSpec snifferCard = manifest.View.Children[0];
-        Assert.Equal("Card", snifferCard.Type);
-        CustomWidgetNodeSpec primaryButton = snifferCard.Children[0].Children[2];
-        Assert.Equal("Button", primaryButton.Type);
-        Assert.Equal("🔓 解码 JWT", CustomWidgetExpressionEvaluator.Interpolate(
-            primaryButton.Text!, ctx));
-        Assert.Equal("jwtDecode", CustomWidgetExpressionEvaluator.Interpolate(
-            primaryButton.OnClick[0].Format!, ctx));
+        // 2. Plain text clipboard stays non-intrusive ("粘贴" only, never auto-formats or errors)
+        CustomWidgetClipboardSnapshot plainSnap = CustomWidgetClipboardSnapshot.CreateFromText("hello plain note");
+        (_, ctx) = ExecuteDevToolboxScript(compiled, "onInit", state, settings, zhI18n, plainSnap);
+        Assert.Equal("纯文本", CustomWidgetExpressionEvaluator.Interpolate("${$computed.clipKindLabel}", ctx));
+        Assert.Equal("粘贴", CustomWidgetExpressionEvaluator.Interpolate(clipActionBtn.Text!, ctx));
 
-        // Capsule prioritizes the expired-JWT warning, then live sniff, then idle
-        Assert.Equal("⚠ JWT 已过期", CustomWidgetExpressionEvaluator.Interpolate(
-            manifest.Capsule!.Summary, ctx));
+        (_, ctx) = ExecuteDevToolboxScript(compiled, "loadClipboard", state, settings, zhI18n, plainSnap);
+        Assert.Equal("hello plain note", state["draft"]);
+        Assert.Equal(string.Empty, state["errorMsg"]);
+        Assert.Equal("false", CustomWidgetExpressionEvaluator.Interpolate("${$computed.showClipBanner}", ctx));
+
+        // 3. Self-copy loop protection: clipboard matching lastSelfCopied stays suppressed
+        state = CreateDevToolboxState();
+        state["lastSelfCopied"] = jwtSnap.Text;
+        (_, ctx) = ExecuteDevToolboxScript(compiled, "onInit", state, settings, zhI18n, jwtSnap);
+        Assert.Equal("false", CustomWidgetExpressionEvaluator.Interpolate("${$computed.showClipBanner}", ctx));
+
+        // 4. Sniffer disabled -> hides banner and switches empty capsule to idle UUID v7 generator
+        settings["enableClipboardSniffer"] = "false";
+        settings["jsonIndent"] = "4";
+        settings["uuidCase"] = "upper";
+        state = CreateDevToolboxState();
+        (_, ctx) = ExecuteDevToolboxScript(compiled, "onInit", state, settings, zhI18n, jwtSnap);
+        Assert.Equal("false", CustomWidgetExpressionEvaluator.Interpolate("${$computed.showClipBanner}", ctx));
+        Assert.Equal("UUID v7", CustomWidgetExpressionEvaluator.Interpolate(manifest.Capsule!.Badge, ctx));
+        Assert.Equal("空闲 · 生成并复制 UUID v7", CustomWidgetExpressionEvaluator.Interpolate(manifest.Capsule.Summary, ctx));
+        Assert.Equal(string.Empty, CustomWidgetExpressionEvaluator.Interpolate("${$computed.effectiveInput}", ctx));
+
+        // 5. jsonIndent=4 and uuidCase=upper govern quick transforms
+        state["draft"] = "{\"a\":{\"b\":1}}";
+        (_, ctx) = ExecuteDevToolboxScript(
+            compiled, "runTransform", state, settings, zhI18n, plainSnap,
+            new Dictionary<string, string>(StringComparer.Ordinal) { ["op"] = "jsonPretty" });
+        Assert.Contains("\n    \"a\"", state["draft"], StringComparison.Ordinal);
+
+        ExecuteDevToolboxScript(
+            compiled, "runTransform", state, settings, zhI18n, plainSnap,
+            new Dictionary<string, string>(StringComparer.Ordinal) { ["op"] = "uuidv7" });
+        Assert.Matches("^[0-9A-F]{8}-[0-9A-F]{4}-7[0-9A-F]{3}-[89AB][0-9A-F]{3}-[0-9A-F]{12}$", state["draft"]);
+
+        ExecuteDevToolboxScript(
+            compiled, "runTransform", state, settings, zhI18n, plainSnap,
+            new Dictionary<string, string>(StringComparer.Ordinal) { ["op"] = "uuidv4" });
+        Assert.Matches("^[0-9A-F]{8}-[0-9A-F]{4}-4[0-9A-F]{3}-[89AB][0-9A-F]{3}-[0-9A-F]{12}$", state["draft"]);
+
+        ExecuteDevToolboxScript(
+            compiled, "runTransform", state, settings, zhI18n, plainSnap,
+            new Dictionary<string, string>(StringComparer.Ordinal) { ["op"] = "uuidNodash" });
+        Assert.Matches("^[0-9A-F]{32}$", state["draft"]);
+
+        // 6. Expired JWT shows clean Payload JSON + danger status + warning capsule, with Header/Raw switching
+        string expiredJwt = BuildJwt($"{{\"sub\":\"u99\",\"exp\":{FixedNow.ToUnixTimeSeconds() - 120}}}");
+        state["draft"] = expiredJwt;
+        (_, ctx) = ExecuteDevToolboxScript(
+            compiled, "runTransform", state, settings, zhI18n, plainSnap,
+            new Dictionary<string, string>(StringComparer.Ordinal) { ["op"] = "jwtDecode" });
+        Assert.Equal("true", state["jwtMode"]);
+        Assert.Equal("danger", CustomWidgetExpressionEvaluator.Interpolate("${$computed.jwtStatusColor}", ctx));
         Assert.Equal("true", CustomWidgetExpressionEvaluator.Interpolate(manifest.Capsule.BadgeIsWarning, ctx));
+        using (JsonDocument payloadDoc = JsonDocument.Parse(state["draft"]))
+        {
+            Assert.Equal("u99", payloadDoc.RootElement.GetProperty("sub").GetString());
+        }
 
-        Assert.Equal("已嗅探剪贴板 · 展开秒解", CustomWidgetExpressionEvaluator.Interpolate(
-            manifest.Capsule!.Summary, BuildCtx()));
+        (_, ctx) = ExecuteDevToolboxScript(
+            compiled, "setJwtView", state, settings, zhI18n, plainSnap,
+            new Dictionary<string, string>(StringComparer.Ordinal) { ["view"] = "header" });
+        using (JsonDocument headerDoc = JsonDocument.Parse(state["draft"]))
+        {
+            Assert.Equal("HS256", headerDoc.RootElement.GetProperty("alg").GetString());
+        }
 
-        // Sniffer off -> capsule degrades to idle, effective input ignores clipboard
-        ctx = BuildCtx(sniffer: "false", indent: "4", uuidCase: "upper");
-        Assert.Equal("等待剪贴板或手动粘贴", CustomWidgetExpressionEvaluator.Interpolate(
-            manifest.Capsule!.Summary, ctx));
-        Assert.Equal(string.Empty, CustomWidgetExpressionEvaluator.Interpolate(
-            primaryButton.OnClick[0].Text!, ctx));
-        Assert.Equal("jsonPretty4", CustomWidgetExpressionEvaluator.Interpolate(
-            primaryButton.OnClick[0].Format!, ctx));
+        ExecuteDevToolboxScript(
+            compiled, "setJwtView", state, settings, zhI18n, plainSnap,
+            new Dictionary<string, string>(StringComparer.Ordinal) { ["view"] = "raw" });
+        Assert.Equal(expiredJwt, state["draft"]);
+    }
 
-        // jsonIndent & uuidCase settings are consumed by the tab buttons
-        string FindButtonFormat(string exactTextKey) => FindButtons(manifest.View)
-            .Single(b => string.Equals(b.Text, "${$i18n." + exactTextKey + "}", StringComparison.Ordinal))
-            .OnClick[0].Format!;
-        Assert.Equal("jsonPretty4", CustomWidgetExpressionEvaluator.Interpolate(
-            FindButtonFormat("bJsonPretty"), ctx));
-        Assert.Equal("timestampToDate", CustomWidgetExpressionEvaluator.Interpolate(
-            FindButtonFormat("bTsToDate"), ctx));
-        Assert.Equal("dateToTimestamp", CustomWidgetExpressionEvaluator.Interpolate(
-            FindButtonFormat("bDateToTs"), ctx));
-        Assert.Equal("uuidUpper", CustomWidgetExpressionEvaluator.Interpolate(
-            FindButtonFormat("bUuid"), ctx));
-        Assert.Equal("uuidNoDashUpper", CustomWidgetExpressionEvaluator.Interpolate(
-            FindButtonFormat("bUuidNoDash"), ctx));
+    [Fact]
+    public void UuidV7JwtPartsAndHtmlOps_ExecuteCleanlyInUtilityEngine()
+    {
+        CustomWidgetTransformResult v7 = CustomWidgetUtilityEngine.ExecuteTextTransform("", "uuidv7");
+        Assert.True(v7.Succeeded, v7.ErrorMessage);
+        Assert.Matches("^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", v7.ResultText);
+
+        Assert.Matches("^[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$",
+            CustomWidgetUtilityEngine.ExecuteTextTransform("", "uuidv7nodash").ResultText);
+        Assert.Matches("^[0-9A-F]{8}-[0-9A-F]{4}-7[0-9A-F]{3}-[89AB][0-9A-F]{3}-[0-9A-F]{12}$",
+            CustomWidgetUtilityEngine.ExecuteTextTransform("", "uuidv7upper").ResultText);
+
+        string jwt = BuildJwt($"{{\"sub\":\"dev-1\",\"exp\":{FixedNow.ToUnixTimeSeconds() + 3600}}}");
+        CustomWidgetTransformResult payload = CustomWidgetUtilityEngine.ExecuteTextTransform(jwt, "jwtPayload", FixedNow, "zh-CN");
+        Assert.True(payload.Succeeded, payload.ErrorMessage);
+        Assert.Equal("valid", payload.JwtState);
+        using (JsonDocument pDoc = JsonDocument.Parse(payload.ResultText))
+        {
+            Assert.Equal("dev-1", pDoc.RootElement.GetProperty("sub").GetString());
+        }
+
+        CustomWidgetTransformResult header = CustomWidgetUtilityEngine.ExecuteTextTransform(jwt, "jwtHeader", FixedNow, "zh-CN");
+        Assert.True(header.Succeeded, header.ErrorMessage);
+        using (JsonDocument hDoc = JsonDocument.Parse(header.ResultText))
+        {
+            Assert.Equal("HS256", hDoc.RootElement.GetProperty("alg").GetString());
+        }
+
+        const string htmlRaw = "<div data-id=\"1\" & 'x'></div>";
+        CustomWidgetTransformResult encoded = CustomWidgetUtilityEngine.ExecuteTextTransform(htmlRaw, "htmlEncode");
+        Assert.True(encoded.Succeeded, encoded.ErrorMessage);
+        Assert.Contains("&lt;div", encoded.ResultText, StringComparison.Ordinal);
+
+        CustomWidgetTransformResult decoded = CustomWidgetUtilityEngine.ExecuteTextTransform(encoded.ResultText, "htmlDecode");
+        Assert.True(decoded.Succeeded, decoded.ErrorMessage);
+        Assert.Equal(htmlRaw, decoded.ResultText);
+    }
+
+    [Fact]
+    public void WorkspaceHistoryAndSyntaxLocator_PreserveDraftAndUndoCleanly()
+    {
+        CustomWidgetTemplateBundle bundle =
+            CustomWidgetTemplates.GetTemplateBundle(CustomWidgetTemplates.DevToolboxTemplateId);
+        CustomWidgetWorkspaceValidationResult validated = CustomWidgetScriptValidator.ValidateWorkspaceBundle(
+            bundle.ManifestJson,
+            bundle.LogicJs,
+            bundle.Locales);
+        Assert.NotNull(validated.Manifest);
+        Assert.NotNull(validated.CompiledScript);
+        IReadOnlyDictionary<string, string> zhI18n = validated.Manifest!.ResolveI18nDictionary("zh-CN");
+        CustomWidgetClipboardSnapshot emptyClip = CustomWidgetClipboardSnapshot.CreateFromText(string.Empty);
+        var settings = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["autoCopyResult"] = "false",
+            ["enableClipboardSniffer"] = "false",
+            ["jsonIndent"] = "2",
+            ["uuidCase"] = "lower"
+        };
+
+        const string originalJson = "{\"b\": 2, \"a\": 1}";
+        Dictionary<string, string> state = CreateDevToolboxState(draft: originalJson);
+        ExecuteDevToolboxScript(
+            validated.CompiledScript!, "runTransform", state, settings, zhI18n, emptyClip,
+            new Dictionary<string, string>(StringComparer.Ordinal) { ["op"] = "jsonMinify" });
+        string minified = state["draft"];
+        Assert.Equal("{\"b\":2,\"a\":1}", minified);
+
+        (_, CustomWidgetEvaluationContext ctx) = ExecuteDevToolboxScript(
+            validated.CompiledScript!, "runTransform", state, settings, zhI18n, emptyClip,
+            new Dictionary<string, string>(StringComparer.Ordinal) { ["op"] = "base64Encode" });
+        Assert.Equal("true", CustomWidgetExpressionEvaluator.Interpolate("${$computed.canUndo}", ctx));
+        Assert.Equal("true", CustomWidgetExpressionEvaluator.Interpolate("${$computed.hasTrail0}", ctx));
+        Assert.Equal("true", CustomWidgetExpressionEvaluator.Interpolate("${$computed.hasTrail1}", ctx));
+
+        ExecuteDevToolboxScript(validated.CompiledScript!, "undoStep", state, settings, zhI18n, emptyClip);
+        Assert.Equal(minified, state["draft"]);
+
+        ExecuteDevToolboxScript(
+            validated.CompiledScript!, "jumpHistory", state, settings, zhI18n, emptyClip,
+            new Dictionary<string, string>(StringComparer.Ordinal) { ["index"] = "0" });
+        Assert.Equal(originalJson, state["draft"]);
+
+        // Invalid JSON keeps user input intact while reporting line/col and caret offset
+        const string brokenJson = "{\n  \"a\": 1,\n}";
+        state = CreateDevToolboxState(draft: brokenJson);
+        (_, ctx) = ExecuteDevToolboxScript(
+            validated.CompiledScript!, "runTransform", state, settings, zhI18n, emptyClip,
+            new Dictionary<string, string>(StringComparer.Ordinal) { ["op"] = "jsonPretty" });
+
+        Assert.Equal(brokenJson, state["draft"]);
+        Assert.Equal("true", CustomWidgetExpressionEvaluator.Interpolate("${$computed.hasError}", ctx));
+        Assert.Contains("3", state["errorMsg"], StringComparison.Ordinal);
+        Assert.True(int.TryParse(state["errorOffset"], out int errOffset) && errOffset >= 0);
+
+        ExecuteDevToolboxScript(validated.CompiledScript!, "focusError", state, settings, zhI18n, emptyClip);
+        Assert.Equal("true", state["editing"]);
+    }
+
+    [Fact]
+    public void QuickJsDigestsAndCapsuleAction_MatchDotNetVectorsAndDualMode()
+    {
+        CustomWidgetTemplateBundle bundle =
+            CustomWidgetTemplates.GetTemplateBundle(CustomWidgetTemplates.DevToolboxTemplateId);
+        CustomWidgetWorkspaceValidationResult validated = CustomWidgetScriptValidator.ValidateWorkspaceBundle(
+            bundle.ManifestJson,
+            bundle.LogicJs,
+            bundle.Locales);
+        IReadOnlyDictionary<string, string> zhI18n = validated.Manifest!.ResolveI18nDictionary("zh-CN");
+        CustomWidgetClipboardSnapshot emptyClip = CustomWidgetClipboardSnapshot.CreateFromText(string.Empty);
+        var settings = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["autoCopyResult"] = "false",
+            ["enableClipboardSniffer"] = "false",
+            ["jsonIndent"] = "2",
+            ["uuidCase"] = "lower"
+        };
+
+        const string sample = "DeskBox 开发者工具箱";
+        byte[] sampleUtf8 = Encoding.UTF8.GetBytes(sample);
+        string expectedSha256 = Convert.ToHexString(SHA256.HashData(sampleUtf8)).ToLowerInvariant();
+        string expectedMd5 = Convert.ToHexString(MD5.HashData(sampleUtf8)).ToLowerInvariant();
+
+        Dictionary<string, string> state = CreateDevToolboxState(draft: sample);
+        ExecuteDevToolboxScript(
+            validated.CompiledScript!, "runTransform", state, settings, zhI18n, emptyClip,
+            new Dictionary<string, string>(StringComparer.Ordinal) { ["op"] = "sha256" });
+        Assert.Equal(expectedSha256, state["draft"]);
+
+        state = CreateDevToolboxState(draft: sample);
+        ExecuteDevToolboxScript(
+            validated.CompiledScript!, "runTransform", state, settings, zhI18n, emptyClip,
+            new Dictionary<string, string>(StringComparer.Ordinal) { ["op"] = "md5" });
+        Assert.Equal(expectedMd5, state["draft"]);
+
+        // Idle capsule: generates UUID v7 and copies it
+        state = CreateDevToolboxState();
+        (CustomWidgetScriptExecutionResult idleCapExec, _) = ExecuteDevToolboxScript(
+            validated.CompiledScript!, "runCapsuleAction", state, settings, zhI18n, emptyClip);
+        Assert.Matches("^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", state["draft"]);
+        Assert.Contains(idleCapExec.UiOps, op => op.Type == "copy" && op.Text == state["draft"]);
+
+        // Active structured capsule: parses JSON and copies formatted output
+        state = CreateDevToolboxState(draft: "{\"k\":1}");
+        (CustomWidgetScriptExecutionResult activeCapExec, _) = ExecuteDevToolboxScript(
+            validated.CompiledScript!, "runCapsuleAction", state, settings, zhI18n, emptyClip);
+        Assert.Contains("\n  \"k\": 1", state["draft"], StringComparison.Ordinal);
+        Assert.Contains(activeCapExec.UiOps, op => op.Type == "copy" && op.Text == state["draft"]);
+    }
+
+    [Fact]
+    public void CodeWorkspaceHelpers_FormatLineNumbersAndTokenizeJson()
+    {
+        Assert.Equal("1", CustomWidgetNativeRenderer.FormatCodeLineNumbers(null));
+        Assert.Equal("1", CustomWidgetNativeRenderer.FormatCodeLineNumbers(string.Empty));
+        Assert.Equal("1", CustomWidgetNativeRenderer.FormatCodeLineNumbers("{\"ok\":true}"));
+        Assert.Equal("1\n2\n3", CustomWidgetNativeRenderer.FormatCodeLineNumbers("{\n  \"a\": 1\n}"));
+
+        const string sampleJson = "{\"k\":\"v\",\"n\":-12.5,\"b\":true}";
+        List<CustomWidgetNativeRenderer.CodeHighlightToken> tokens =
+            CustomWidgetNativeRenderer.TokenizeCodeForHighlight(sampleJson, "auto");
+
+        Assert.Equal(sampleJson, string.Concat(tokens.Select(static t => t.Text)));
+        Assert.Contains(tokens, t => t.Role == "key" && t.Text == "\"k\"");
+        Assert.Contains(tokens, t => t.Role == "string" && t.Text == "\"v\"");
+        Assert.Contains(tokens, t => t.Role == "number" && t.Text == "-12.5");
+        Assert.Contains(tokens, t => t.Role == "literal" && t.Text == "true");
+        Assert.Contains(tokens, t => t.Role == "punct");
+
+        // Plain-text mode leaves content unsplit
+        List<CustomWidgetNativeRenderer.CodeHighlightToken> plainTokens =
+            CustomWidgetNativeRenderer.TokenizeCodeForHighlight(sampleJson, "plain");
+        CustomWidgetNativeRenderer.CodeHighlightToken single = Assert.Single(plainTokens);
+        Assert.Equal("default", single.Role);
+        Assert.Equal(sampleJson, single.Text);
     }
 
     private static IEnumerable<CustomWidgetNodeSpec> FindButtons(CustomWidgetNodeSpec node)
@@ -588,14 +867,17 @@ public sealed class CustomWidgetDevToolboxTests
         Assert.Contains(CustomWidgetTemplates.Presets,
             p => p.Id == CustomWidgetTemplates.DevToolboxTemplateId &&
                  p.NameKey == "CustomWidget.Template.DevToolbox.Name" &&
-                 p.DefaultWidth == 336 && p.DefaultHeight == 392);
+                 p.DefaultWidth == 344 && p.DefaultHeight == 356);
+        CustomWidgetTemplateBundle bundle = CustomWidgetTemplates.GetTemplateBundle(CustomWidgetTemplates.DevToolboxTemplateId);
+        Assert.False(string.IsNullOrWhiteSpace(bundle.ManifestJson));
         Assert.Same(
-            CustomWidgetTemplates.GetTemplateBundle(CustomWidgetTemplates.DevToolboxTemplateId).ManifestJson,
-            CustomWidgetTemplates.GetTemplateJson(CustomWidgetTemplates.DevToolboxTemplateId));
+            bundle.ManifestJson,
+            CustomWidgetTemplates.GetTemplateBundle(CustomWidgetTemplates.DevToolboxTemplateId).ManifestJson);
 
-        // Offline catalog merge surfaces every preset + starter exactly once
+        // Offline catalog merge surfaces every preset + starter with Emoji IconGlyph and monochrome Fluent fallback
         Assert.True(CustomWidgetTemplates.Presets.All(p =>
-            CustomWidgetTemplates.IsSegoeFluentGlyph(p.IconGlyph)));
+            CustomWidgetTemplates.IsEmojiIcon(p.IconGlyph) &&
+            CustomWidgetTemplates.IsSegoeFluentGlyph(p.MonochromeFallbackGlyph)));
     }
 
     [Fact]
@@ -619,7 +901,7 @@ public sealed class CustomWidgetDevToolboxTests
         string? root = null;
         for (DirectoryInfo? dir = new(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
         {
-            if (File.Exists(Path.Combine(dir.FullName, "AGENTS.md")))
+            if (File.Exists(Path.Combine(dir.FullName, "DeskBox.sln")))
             {
                 root = dir.FullName;
                 break;

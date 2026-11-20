@@ -12,7 +12,8 @@
   7. 重复提交同一 stageId 必须幂等（Bridge 返回 idempotent，SKILL.md 有说明）；
   8. 每个暂存 op 都有工坊侧消费入口，且暂存文案真的被界面引用；
   9. 13 语用户文案不再宣称「桌面自动实时刷新 / 热重载到桌面」；
-  10. 远程 Prompt Pack 是否仍为空占位（提示，不阻塞）。
+  10. 统一使用纯 schemaVersion: 1 Flat Element Graph（root + elements）与 edit_manifest / upsertElements（移除 manifestOps、patch_manifest 与 flattener）；
+  11. 远程 Prompt Pack 是否仍为空占位（提示，不阻塞）。
 
 用法：python scripts/check_ai_widget_contract.py
 退出码：发现契约漂移为 1，否则为 0。
@@ -25,14 +26,18 @@ import re
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-CLI = ROOT / "src" / "DeskBox" / "Services" / "DeskBoxAgentCliEntry.cs"
-BRIDGE = ROOT / "src" / "DeskBox" / "Services" / "DeskBoxAgentBridgeServer.cs"
-TEMPLATES = ROOT / "src" / "DeskBox" / "Services" / "CustomWidgetTemplates.cs"
-CONNECTOR = ROOT / "src" / "DeskBox" / "Services" / "CustomWidgetAgentConnectorService.cs"
+CLI = ROOT / "src" / "DeskBox" / "Services" / "CustomWidgets" / "DeskBoxAgentCliEntry.cs"
+BRIDGE = ROOT / "src" / "DeskBox" / "Services" / "CustomWidgets" / "DeskBoxAgentBridgeServer.cs"
+TEMPLATES = ROOT / "src" / "DeskBox" / "Services" / "CustomWidgets" / "CustomWidgetTemplates.cs"
+CONNECTOR = ROOT / "src" / "DeskBox" / "Services" / "CustomWidgets" / "CustomWidgetAgentConnectorService.cs"
 STRINGS = ROOT / "src" / "DeskBox" / "Strings"
 PROMPT_PACK = ROOT / "catalog" / "prompts.v1.json"
 APP_STUDIO = ROOT / "src" / "DeskBox" / "App.CustomWidgetStudio.cs"
-STUDIO_PAGES = ROOT / "src" / "DeskBox" / "Views" / "CustomWidgetStudioWindow.Pages.cs"
+STUDIO_CONTROLS_DIR = ROOT / "src" / "DeskBox" / "Controls" / "Studio"
+STUDIO_SERVICES_DIR = ROOT / "src" / "DeskBox" / "Services" / "Studio"
+STUDIO_TOOL_TRANSPORT = STUDIO_SERVICES_DIR / "StudioToolTransport.cs"
+MANIFEST_PARSER = ROOT / "src" / "DeskBox" / "Models" / "CustomWidgetManifestParser.cs"
+MANIFEST_FLATTENER = ROOT / "src" / "DeskBox" / "Models" / "CustomWidgetManifestFlattener.cs"
 STUDIO_ROOT = ROOT / "src" / "DeskBox" / "Views" / "CustomWidgetStudioWindow.xaml.cs"
 
 # Bridge 暴露的暂存 op ↔ 工坊侧消费入口。协议加了 op 但 UI 没有对应入口，
@@ -96,9 +101,20 @@ def main() -> int:
     else:
         block = cli[upsert_start: upsert_end if upsert_end > upsert_start else upsert_start + 3500]
         props = set(PROP_NAME.findall(block))
-        for required in ("stageId", "commit", "widgetId", "manifestJson"):
+        for required in (
+            "stageId",
+            "commit",
+            "widgetId",
+            "manifestJson",
+            "upsertElements",
+            "removeElements",
+            "patchRoot",
+            "removeRootKeys",
+        ):
             if required not in props:
                 fail(problems, f"upsert 契约缺少属性 {required}")
+        if "manifestOps" in props:
+            fail(problems, "upsert 契约仍残留已废弃参数 manifestOps（请仅保留 Flat Element Graph 增量字段 upsertElements/removeElements/patchRoot/removeRootKeys）")
 
     # SKILL.md 中 upsert 一行的行为描述
     skill_line = next(
@@ -120,10 +136,29 @@ def main() -> int:
     if not doc_line:
         fail(problems, "SKILL.md 工具清单缺少 deskbox_upsert_widget 条目")
     else:
-        schema_props = set(PROP_NAME.findall(cli[upsert_start: upsert_end if upsert_end > upsert_start else upsert_start + 3500])) - {"properties"}
+        schema_props = set(PROP_NAME.findall(cli[upsert_start: upsert_end if upsert_end > upsert_start else upsert_start + 3500])) - {"properties", "items"}
         undocumented = sorted(p for p in schema_props if p not in doc_line)
         if undocumented:
             fail(problems, "SKILL.md 未记录 upsert 输入参数：" + ", ".join(undocumented))
+        if "manifestOps" in doc_line:
+            fail(problems, "SKILL.md 的 upsert 工具说明仍残留已移除参数 manifestOps")
+        if "schemaVersion 2" in doc_line or "schemaVersion: 2" in doc_line:
+            fail(problems, "SKILL.md 的 upsert 工具说明仍引用 schemaVersion 2（应统一为 schemaVersion: 1 Flat Element Graph）")
+
+    # Flat Element Graph 单一真源（schemaVersion: 1 + edit_manifest + upsertElements，无 flattener / patch_manifest / manifestOps）
+    if MANIFEST_FLATTENER.exists():
+        fail(problems, "已废弃的 CustomWidgetManifestFlattener.cs 仍然存在")
+    parser_text = MANIFEST_PARSER.read_text(encoding="utf-8-sig")
+    if "public const int CurrentSchemaVersion = 1;" not in parser_text:
+        fail(problems, "CustomWidgetManifestParser.CurrentSchemaVersion 必须为 1")
+    if '"enum": [1, 2]' in templates:
+        fail(problems, "SKILL.md JSON Schema 仍允许 schemaVersion enum [1, 2]（应仅允许 schemaVersion: 1）")
+    if STUDIO_TOOL_TRANSPORT.is_file():
+        transport_text = STUDIO_TOOL_TRANSPORT.read_text(encoding="utf-8-sig")
+        if '"edit_manifest"' not in transport_text:
+            fail(problems, "StudioToolTransport.cs 缺少 Flat Element Graph 增量编辑工具 edit_manifest")
+        if 'const string ToolPatchManifest' in transport_text or 'WriteString("name", "patch_manifest")' in transport_text:
+            fail(problems, "StudioToolTransport.cs 仍暴露已废弃的 patch_manifest 工具定义")
 
     upsert_copy = catalogs.get("zh-CN", {}).get("CustomWidget.AgentHub.Tool.Upsert", "")
     if "暂存" not in upsert_copy:
@@ -152,7 +187,12 @@ def main() -> int:
 
     bridge_text = BRIDGE.read_text(encoding="utf-8-sig")
     app_text = APP_STUDIO.read_text(encoding="utf-8-sig")
-    studio_text = STUDIO_PAGES.read_text(encoding="utf-8-sig") + STUDIO_ROOT.read_text(encoding="utf-8-sig")
+    studio_files = [
+        STUDIO_ROOT,
+        *sorted(STUDIO_CONTROLS_DIR.glob("*.cs")),
+        *sorted(STUDIO_SERVICES_DIR.glob("*.cs")),
+    ]
+    studio_text = "\n".join(path.read_text(encoding="utf-8-sig") for path in studio_files)
 
     for op, (file_name, entry) in STAGE_OPS.items():
         if f'"{op}"' not in bridge_text:
@@ -176,7 +216,7 @@ def main() -> int:
         if key not in studio_text:
             fail(problems, f"界面未引用暂存文案 {key}")
 
-    if "_pendingAgentStageId" not in studio_text:
+    if "PendingAgentStageId" not in studio_text:
         fail(problems, "CommitAsync 未区分待提交暂存批次，「放到桌面」会绕过 stage_commit")
 
     # 幂等：stageId 是服务端生成、绑定内容摘要且一次性的，重试提交必须返回成功而不是「不存在」。

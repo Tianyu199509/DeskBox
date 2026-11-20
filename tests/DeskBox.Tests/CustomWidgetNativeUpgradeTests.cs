@@ -58,14 +58,7 @@ public sealed class CustomWidgetNativeUpgradeTests
               "width": 300,
               "height": 220,
               "placement": "bottom",
-              "view": {
-                "type": "Stack",
-                "padding": "12",
-                "children": [
-                  { "type": "Markdown", "bind": "state.notes" },
-                  { "type": "Button", "text": "Close", "onClick": { "type": "popover.close", "popoverId": "quickEditor" } }
-                ]
-              }
+              "root": "pop_quick_editor"
             }
           },
           "capsule": {
@@ -74,109 +67,132 @@ public sealed class CustomWidgetNativeUpgradeTests
             "glyph": "🚀",
             "badge": "${state.stars}"
           },
-          "view": {
-            "type": "Stack",
-            "padding": "12,10,12,12",
-            "spacing": 8,
-            "children": [
-              {
-                "type": "Card",
-                "cornerRadius": 14,
-                "borderColor": "${state.accentColor}",
-                "borderWidth": "1",
-                "linearGradient": {
-                  "angle": 135,
-                  "stops": [
-                    { "offset": 0, "color": "#0F172A" },
-                    { "offset": 1, "color": "#1E293B" }
-                  ]
+          "root": "main",
+          "elements": {
+            "main": {
+              "type": "Stack",
+              "padding": "12,10,12,12",
+              "spacing": 8,
+              "children": [
+                "hero_card",
+                "due_date",
+                "due_time",
+                "query_suggest",
+                "accent_picker",
+                "mode_radio",
+                "stars_rating",
+                "metrics_donut",
+                "metrics_chart",
+                "metrics_table",
+                "vector_canvas",
+                "tasks_list",
+                "sync_btn"
+              ]
+            },
+            "hero_card": {
+              "type": "Card",
+              "cornerRadius": 14,
+              "borderColor": "${state.accentColor}",
+              "borderWidth": "1",
+              "linearGradient": {
+                "angle": 135,
+                "stops": [
+                  { "offset": 0, "color": "#0F172A" },
+                  { "offset": 1, "color": "#1E293B" }
+                ]
+              },
+              "children": ["hero_title", "open_notes_btn", "popover_trigger"]
+            },
+            "hero_title": { "type": "Text", "text": "Hero Surface", "textColor": "#F8FAFC", "fontSize": 16, "fontWeight": "bold" },
+            "open_notes_btn": { "type": "Button", "text": "Open Notes", "popover": "quickEditor" },
+            "popover_trigger": { "type": "Popover", "popoverId": "quickEditor", "text": "Trigger" },
+            "due_date": { "type": "DatePicker", "title": "Date", "bind": "state.dueDate" },
+            "due_time": { "type": "TimePicker", "title": "Time", "bind": "state.dueTime" },
+            "query_suggest": { "type": "AutoSuggestInput", "bind": "state.query", "suggestions": ["Alpha", "Beta"] },
+            "accent_picker": { "type": "ColorPicker", "bind": "state.accentColor", "presets": ["#38BDF8", "#10B981"] },
+            "mode_radio": {
+              "type": "RadioGroup",
+              "bind": "state.mode",
+              "orientation": "horizontal",
+              "options": [
+                { "value": "fast", "label": "Fast" },
+                { "value": "deep", "label": "Deep" }
+              ]
+            },
+            "stars_rating": { "type": "Rating", "bind": "state.stars", "max": 5, "allowHalfStar": true },
+            "metrics_donut": {
+              "type": "DonutChart",
+              "collection": "metrics",
+              "titleField": "name",
+              "valueField": "val",
+              "centerTitle": "Sum",
+              "centerValue": "100"
+            },
+            "metrics_chart": {
+              "type": "Chart",
+              "chartKind": "area",
+              "collection": "metrics",
+              "xField": "day",
+              "series": [
+                { "field": "val", "label": "Value", "color": "#38BDF8" }
+              ]
+            },
+            "metrics_table": {
+              "type": "Table",
+              "collection": "metrics",
+              "sortable": true,
+              "striped": true,
+              "columns": [
+                { "key": "day", "header": "Day", "width": "1*" },
+                { "key": "val", "header": "Value", "width": "1*", "align": "right" }
+              ],
+              "onRowClick": [
+                { "type": "script.run", "fn": "selectRow", "args": { "source": "table" } }
+              ]
+            },
+            "vector_canvas": {
+              "type": "Canvas",
+              "height": 120,
+              "viewBox": "0 0 200 120",
+              "elements": [
+                { "id": "dot", "kind": "circle", "cx": 60, "cy": 60, "r": 24, "fill": "#38BDF8" },
+                { "id": "arc", "kind": "path", "d": "M 10 10 L 90 10 L 50 80 Z", "stroke": "#10B981", "strokeWidth": 2 }
+              ],
+              "onItemClick": [
+                { "type": "script.run", "fn": "hitCanvas" }
+              ]
+            },
+            "tasks_list": {
+              "type": "List",
+              "items": "tasks",
+              "allowReorder": true,
+              "inlineEditField": "title",
+              "onReorder": { "type": "collection.reorder", "collection": "tasks", "fromIndex": "0", "toIndex": "1" },
+              "itemTemplate": "task_item_tpl"
+            },
+            "task_item_tpl": { "type": "Text", "text": "${$item.title}" },
+            "sync_btn": {
+              "type": "Button",
+              "text": "Sync Remote & Save",
+              "onClick": [
+                {
+                  "type": "http.request",
+                  "method": "POST",
+                  "url": "https://api.example.com/sync",
+                  "headers": { "Authorization": "Bearer ${$secrets.apiToken}" },
+                  "body": { "mode": "${state.mode}" }
                 },
-                "children": [
-                  { "type": "Text", "text": "Hero Surface", "textColor": "#F8FAFC", "fontSize": 16, "fontWeight": "bold" },
-                  { "type": "Button", "text": "Open Notes", "popover": "quickEditor" },
-                  { "type": "Popover", "popoverId": "quickEditor", "text": "Trigger" }
-                ]
-              },
-              { "type": "DatePicker", "title": "Date", "bind": "state.dueDate" },
-              { "type": "TimePicker", "title": "Time", "bind": "state.dueTime" },
-              { "type": "AutoSuggestInput", "bind": "state.query", "suggestions": ["Alpha", "Beta"] },
-              { "type": "ColorPicker", "bind": "state.accentColor", "presets": ["#38BDF8", "#10B981"] },
-              {
-                "type": "RadioGroup",
-                "bind": "state.mode",
-                "orientation": "horizontal",
-                "options": [
-                  { "value": "fast", "label": "Fast" },
-                  { "value": "deep", "label": "Deep" }
-                ]
-              },
-              { "type": "Rating", "bind": "state.stars", "max": 5, "allowHalfStar": true },
-              {
-                "type": "DonutChart",
-                "collection": "metrics",
-                "titleField": "name",
-                "valueField": "val",
-                "centerTitle": "Sum",
-                "centerValue": "100"
-              },
-              {
-                "type": "Chart",
-                "chartKind": "area",
-                "collection": "metrics",
-                "xField": "day",
-                "series": [
-                  { "field": "val", "label": "Value", "color": "#38BDF8" }
-                ]
-              },
-              {
-                "type": "Table",
-                "collection": "metrics",
-                "sortable": true,
-                "striped": true,
-                "columns": [
-                  { "key": "day", "header": "Day", "width": "1*" },
-                  { "key": "val", "header": "Value", "width": "1*", "align": "right" }
-                ],
-                "onRowClick": [
-                  { "type": "script.run", "fn": "selectRow", "args": { "source": "table" } }
-                ]
-              },
-              {
-                "type": "Canvas",
-                "height": 120,
-                "viewBox": "0 0 200 120",
-                "elements": [
-                  { "id": "dot", "kind": "circle", "cx": 60, "cy": 60, "r": 24, "fill": "#38BDF8" },
-                  { "id": "arc", "kind": "path", "d": "M 10 10 L 90 10 L 50 80 Z", "stroke": "#10B981", "strokeWidth": 2 }
-                ],
-                "onItemClick": [
-                  { "type": "script.run", "fn": "hitCanvas" }
-                ]
-              },
-              {
-                "type": "List",
-                "items": "tasks",
-                "allowReorder": true,
-                "inlineEditField": "title",
-                "onReorder": { "type": "collection.reorder", "collection": "tasks", "fromIndex": "0", "toIndex": "1" },
-                "itemTemplate": { "type": "Text", "text": "${$item.title}" }
-              },
-              {
-                "type": "Button",
-                "text": "Sync Remote & Save",
-                "onClick": [
-                  {
-                    "type": "http.request",
-                    "method": "POST",
-                    "url": "https://api.example.com/sync",
-                    "headers": { "Authorization": "Bearer ${$secrets.apiToken}" },
-                    "body": { "mode": "${state.mode}" }
-                  },
-                  { "type": "file.writeText", "path": "${$settings.notePath}", "text": "${state.notes}", "append": false },
-                  { "type": "command.run", "executable": "cmd.exe", "arguments": ["/c", "echo", "ok"] }
-                ]
-              }
-            ]
+                { "type": "file.writeText", "path": "${$settings.notePath}", "text": "${state.notes}", "append": false },
+                { "type": "command.run", "executable": "cmd.exe", "arguments": ["/c", "echo", "ok"] }
+              ]
+            },
+            "pop_quick_editor": {
+              "type": "Stack",
+              "padding": "12",
+              "children": ["pop_notes_md", "pop_close_btn"]
+            },
+            "pop_notes_md": { "type": "Markdown", "bind": "state.notes" },
+            "pop_close_btn": { "type": "Button", "text": "Close", "onClick": { "type": "popover.close", "popoverId": "quickEditor" } }
           }
         }
         """;
@@ -189,14 +205,16 @@ public sealed class CustomWidgetNativeUpgradeTests
         Assert.Single(m.Popovers);
         Assert.Equal("quickEditor", m.Popovers[0].PopoverId);
         Assert.NotEmpty(m.Popovers[0].Children);
-        Assert.True(CustomWidgetManifestCompatibility.UsesV160Features(m));
+        Assert.False(CustomWidgetManifestParser.RequiresNewerClient(m.SchemaVersion, m.MinAppVersion, out _));
 
-        string stamped = CustomWidgetManifestCompatibility.StampRequiredMinAppVersion(
-            CustomWidgetManifestMetadataStamper.StampProvenance(manifestJson, CustomWidgetOriginKinds.Local, isCustomized: false));
+        string stamped = CustomWidgetManifestMetadataStamper.StampProvenance(
+            manifestJson,
+            CustomWidgetOriginKinds.Local,
+            isCustomized: false);
         CustomWidgetParseResult reparsed = CustomWidgetManifestParser.Parse(stamped);
         Assert.NotNull(reparsed.Manifest);
         Assert.DoesNotContain(reparsed.Diagnostics, d => d.IsError);
-        Assert.Equal("1.6.0", reparsed.Manifest!.MinAppVersion);
+        Assert.Equal(CustomWidgetOriginKinds.Local, reparsed.Manifest!.Origin);
         Assert.Single(reparsed.Manifest.Popovers);
         Assert.Equal(2, reparsed.Manifest.Sources.Count);
 
@@ -208,7 +226,7 @@ public sealed class CustomWidgetNativeUpgradeTests
     }
 
     [Fact]
-    public void RawColorParser_SupportsHexRgbRgbaAndTransparent_And_HealthAnalyzer_ExemptsCustomStyledSurfaces()
+    public void RawColorParser_SupportsHexRgbRgbaAndTransparent_And_HealthAnalyzer_FlagsHardcodedSurfaceAndTextHex()
     {
         Assert.True(CustomWidgetNativeRenderer.TryParseRawColor("#09F", out Color c3));
         Assert.Equal(255, c3.A);
@@ -241,30 +259,33 @@ public sealed class CustomWidgetNativeUpgradeTests
             "detail": {
               "width": 260,
               "height": 180,
-              "view": { "type": "Text", "text": "Detail body" }
+              "root": "pop_detail_body"
             }
           },
           "capsule": { "title": "Dark", "summary": "OK", "glyph": "🎨" },
-          "view": {
-            "type": "Stack",
-            "padding": "12,10,12,12",
-            "children": [
-              {
-                "type": "Card",
-                "background": "#0F172A",
-                "children": [
-                  { "type": "Text", "text": "Crisp white copy on intentional dark surface", "color": "#FFFFFF" },
-                  { "type": "Button", "text": "Inspect", "popover": "detail" }
-                ]
-              }
-            ]
+          "root": "main",
+          "elements": {
+            "main": {
+              "type": "Stack",
+              "padding": "12,10,12,12",
+              "children": ["dark_card"]
+            },
+            "dark_card": {
+              "type": "Card",
+              "background": "#0F172A",
+              "children": ["dark_text", "inspect_btn"]
+            },
+            "dark_text": { "type": "Text", "text": "Crisp white copy on intentional dark surface", "color": "#FFFFFF" },
+            "inspect_btn": { "type": "Button", "text": "Inspect", "popover": "detail" },
+            "pop_detail_body": { "type": "Text", "text": "Detail body" }
           }
         }
         """;
 
         CustomWidgetManifest parsed = CustomWidgetManifestParser.Parse(styledManifest).Manifest!;
         CustomWidgetHealthReport report = CustomWidgetHealthAnalyzer.AnalyzeHealth(styledManifest, parsed, storePayload: null);
-        Assert.DoesNotContain(report.Issues, i => i.Code == "theme.hardcoded_hex");
+        Assert.Contains(report.Issues, i => i.Code == "theme.hardcoded_hex");
+        Assert.Contains(report.Issues, i => i.Code == "style.container_surface_override");
         Assert.DoesNotContain(report.Issues, i => i.Code == "interaction.dead_button");
     }
 
@@ -323,13 +344,16 @@ public sealed class CustomWidgetNativeUpgradeTests
                 { "type": "httpJson", "url": "http://127.0.0.1:8080/status", "intervalMs": 15000 },
                 { "type": "fileText", "path": "~/notes.md", "stateKey": "txt" }
               ],
-              "view": {
-                "type": "Button",
-                "text": "Run",
-                "onClick": [
-                  { "type": "command.run", "executable": "git" },
-                  { "type": "toast.show", "title": "Hi", "message": "Done" }
-                ]
+              "root": "run_btn",
+              "elements": {
+                "run_btn": {
+                  "type": "Button",
+                  "text": "Run",
+                  "onClick": [
+                    { "type": "command.run", "executable": "git" },
+                    { "type": "toast.show", "title": "Hi", "message": "Done" }
+                  ]
+                }
               }
             }
             """).Manifest!;
@@ -365,7 +389,10 @@ public sealed class CustomWidgetNativeUpgradeTests
               "state": { "cell": "none", "dispatchedVal": "0" },
               "collections": { "items": { "maxItems": 20 } },
               "script": { "entry": "logic.js" },
-              "view": { "type": "Text", "text": "${$computed.label}" }
+              "root": "main",
+              "elements": {
+                "main": { "type": "Text", "text": "${$computed.label}" }
+              }
             }
             """;
 
@@ -573,7 +600,7 @@ public sealed class CustomWidgetNativeUpgradeTests
             Assert.Equal("POST", capturedMethod);
             Assert.Equal("Bearer secret-xyz", capturedAuth);
             Assert.Equal("""{"task":"build"}""", capturedBody);
-            Assert.Equal("job-42", postRes.StateUpdates["lastJobId"]);
+            Assert.Equal("job-42", postRes.StateUpdates["lastJobId"].GetString());
 
             CustomWidgetRawEndpointProbeResult jsonProbe = await engine.ProbeRawEndpointAsync("https://api.example.com/v1/jobs");
             Assert.True(jsonProbe.Succeeded, jsonProbe.ErrorMessage);
@@ -598,7 +625,7 @@ public sealed class CustomWidgetNativeUpgradeTests
         { "kind": "edit", "reply": "Built!", "changeSummary": "Initial build" }
         ```
         ```deskbox-manifest
-        { "schemaVersion": 1, "id": "custom.clipboard-extract", "name": "Test", "view": { "type": "Text", "text": "Hi" } }
+        { "schemaVersion": 1, "id": "custom.clipboard-extract", "name": "Test", "root": "main", "elements": { "main": { "type": "Text", "text": "Hi" } } }
         ```
         ```deskbox-script
         export function onInit(ctx) {
@@ -661,31 +688,32 @@ public sealed class CustomWidgetNativeUpgradeTests
                     "glyph": "📡",
                     "badge": "${state.bpm}"
                   },
-                  "view": {
-                    "type": "Stack",
-                    "padding": "12,10,12,12",
-                    "spacing": 8,
-                    "children": [
-                      {
-                        "type": "Card",
-                        "linearGradient": {
-                          "angle": 135,
-                          "stops": [
-                            { "offset": 0, "color": "#0F172A" },
-                            { "offset": 1, "color": "#1E3A8A" }
-                          ]
-                        },
-                        "children": [
-                          { "type": "Text", "text": "${$computed.headline}", "textColor": "#F8FAFC", "fontWeight": "semiBold" },
-                          {
-                            "type": "Canvas",
-                            "height": 120,
-                            "viewBox": "0 0 200 120",
-                            "elementsSource": "${$computed.shapes}"
-                          }
+                  "root": "main",
+                  "elements": {
+                    "main": {
+                      "type": "Stack",
+                      "padding": "12,10,12,12",
+                      "spacing": 8,
+                      "children": ["pulse_card"]
+                    },
+                    "pulse_card": {
+                      "type": "Card",
+                      "linearGradient": {
+                        "angle": 135,
+                        "stops": [
+                          { "offset": 0, "color": "#0F172A" },
+                          { "offset": 1, "color": "#1E3A8A" }
                         ]
-                      }
-                    ]
+                      },
+                      "children": ["headline_text", "pulse_canvas"]
+                    },
+                    "headline_text": { "type": "Text", "text": "${$computed.headline}", "textColor": "#F8FAFC", "fontWeight": "semiBold" },
+                    "pulse_canvas": {
+                      "type": "Canvas",
+                      "height": 120,
+                      "viewBox": "0 0 200 120",
+                      "elementsSource": "${$computed.shapes}"
+                    }
                   }
                 }
                 ```
@@ -790,50 +818,52 @@ public sealed class CustomWidgetNativeUpgradeTests
           "popovers": {
             "detail": {
               "width": 280,
-              "view": {
-                "type": "Stack",
-                "children": [
-                  { "type": "Text", "text": "浮层详情说明" }
-                ]
-              }
+              "root": "pop_detail"
             }
           },
-          "view": {
-            "type": "Stack",
-            "children": [
-              {
-                "type": "Table",
-                "collection": "rows",
-                "columns": [
-                  { "key": "name", "header": "任务名称" },
-                  { "key": "status", "header": "执行状态" }
-                ],
-                "onRowClick": { "type": "toast.show", "title": "行点击", "message": "已选中任务" }
-              },
-              {
-                "type": "DonutChart",
-                "collection": "rows",
-                "titleField": "name",
-                "valueField": "val",
-                "centerTitle": "总完成率"
-              },
-              {
-                "type": "Chart",
-                "chartKind": "line",
-                "collection": "rows",
-                "xField": "day",
-                "series": [
-                  { "field": "val", "label": "每日耗时" }
-                ]
-              },
-              {
-                "type": "Canvas",
-                "viewBox": "0 0 100 60",
-                "elements": [
-                  { "kind": "text", "x": 50, "y": 30, "text": "画布核心指标" }
-                ]
-              }
-            ]
+          "root": "main",
+          "elements": {
+            "main": {
+              "type": "Stack",
+              "children": ["rows_table", "rows_donut", "rows_chart", "rows_canvas"]
+            },
+            "rows_table": {
+              "type": "Table",
+              "collection": "rows",
+              "columns": [
+                { "key": "name", "header": "任务名称" },
+                { "key": "status", "header": "执行状态" }
+              ],
+              "onRowClick": { "type": "toast.show", "title": "行点击", "message": "已选中任务" }
+            },
+            "rows_donut": {
+              "type": "DonutChart",
+              "collection": "rows",
+              "titleField": "name",
+              "valueField": "val",
+              "centerTitle": "总完成率"
+            },
+            "rows_chart": {
+              "type": "Chart",
+              "chartKind": "line",
+              "collection": "rows",
+              "xField": "day",
+              "series": [
+                { "field": "val", "label": "每日耗时" }
+              ]
+            },
+            "rows_canvas": {
+              "type": "Canvas",
+              "viewBox": "0 0 100 60",
+              "elements": [
+                { "kind": "text", "x": 50, "y": 30, "text": "画布核心指标" }
+              ]
+            },
+            "pop_detail": {
+              "type": "Stack",
+              "children": ["pop_detail_text"]
+            },
+            "pop_detail_text": { "type": "Text", "text": "浮层详情说明" }
           }
         }
         """;
@@ -873,10 +903,13 @@ public sealed class CustomWidgetNativeUpgradeTests
               "id": "{{canvasWidgetId}}",
               "name": "Canvas Fast",
               "script": { "entry": "logic.js" },
-              "view": {
-                "type": "Canvas",
-                "viewBox": "0 0 100 100",
-                "elementsSource": "${$computed.shapes}"
+              "root": "main",
+              "elements": {
+                "main": {
+                  "type": "Canvas",
+                  "viewBox": "0 0 100 100",
+                  "elementsSource": "${$computed.shapes}"
+                }
               }
             }
             """;
@@ -918,10 +951,13 @@ public sealed class CustomWidgetNativeUpgradeTests
               "id": "{{tableWidgetId}}",
               "name": "Table Rebuild",
               "script": { "entry": "logic.js" },
-              "view": {
-                "type": "Table",
-                "items": "$computed.rows",
-                "columns": [{ "key": "title", "header": "Title" }]
+              "root": "main",
+              "elements": {
+                "main": {
+                  "type": "Table",
+                  "items": "$computed.rows",
+                  "columns": [{ "key": "title", "header": "Title" }]
+                }
               }
             }
             """;
@@ -997,7 +1033,10 @@ public sealed class CustomWidgetNativeUpgradeTests
                 { "id": "doc", "type": "fileText", "path": {{JsonSerializer.Serialize(watchedFile)}}, "stateKey": "content", "intervalMs": 60000 }
               ],
               "script": { "entry": "logic.js" },
-              "view": { "type": "Text", "text": "${state.content}" }
+              "root": "main",
+              "elements": {
+                "main": { "type": "Text", "text": "${state.content}" }
+              }
             }
             """;
             const string logicJs = """
@@ -1066,7 +1105,10 @@ public sealed class CustomWidgetNativeUpgradeTests
                 "secretProbe": "LEAKED_INTERNAL_VALUE",
                 "doc": "- [ ] Task 1"
               },
-              "view": { "type": "Markdown", "bind": "state.doc", "text": "${state.doc}" }
+              "root": "main",
+              "elements": {
+                "main": { "type": "Markdown", "bind": "state.doc", "text": "${state.doc}" }
+              }
             }
             """;
 
@@ -1129,7 +1171,10 @@ public sealed class CustomWidgetNativeUpgradeTests
           "schemaVersion": 1,
           "id": "ext.untrusted-feed",
           "name": "External Feed",
-          "view": { "type": "Text", "text": "Hi" }
+          "root": "main",
+          "elements": {
+            "main": { "type": "Text", "text": "Hi" }
+          }
         }
         """;
         CustomWidgetForkBundleResult forked = CustomWidgetOnboardingHelper.CreateForkBundle(
@@ -1186,18 +1231,21 @@ public sealed class CustomWidgetNativeUpgradeTests
               "sources": [
                 { "id": "f1", "type": "fileText", "path": {{JsonSerializer.Serialize(watchedFile)}} }
               ],
-              "view": {
-                "type": "Button",
-                "text": "Fetch",
-                "onClick": [
-                  {
-                    "type": "http.request",
-                    "method": "GET",
-                    "url": "https://api.example.com/items",
-                    "collection": "rows",
-                    "mode": "replace"
-                  }
-                ]
+              "root": "fetch_btn",
+              "elements": {
+                "fetch_btn": {
+                  "type": "Button",
+                  "text": "Fetch",
+                  "onClick": [
+                    {
+                      "type": "http.request",
+                      "method": "GET",
+                      "url": "https://api.example.com/items",
+                      "collection": "rows",
+                      "mode": "replace"
+                    }
+                  ]
+                }
               }
             }
             """;
@@ -1264,35 +1312,37 @@ public sealed class CustomWidgetNativeUpgradeTests
           "sources": [
             { "id": "notes", "type": "fileText", "path": "~/notes.md" }
           ],
-          "view": {
-            "type": "Stack",
-            "padding": "0",
-            "children": [
-              {
-                "type": "Canvas",
-                "viewBox": "0 0 200 200",
-                "elementsSource": "${$computed.hands}",
-                "elements": [
-                  {
-                    "kind": "line",
-                    "x1": 100,
-                    "y1": 100,
-                    "x2": 100,
-                    "y2": 28,
-                    "cx": 100,
-                    "cy": 100,
-                    "rotation": "${$computed.deg}"
-                  },
-                  {
-                    "kind": "text",
-                    "x": 100,
-                    "y": 170,
-                    "fontWeight": "bold",
-                    "text": "${state.fileLineCount}"
-                  }
-                ]
-              }
-            ]
+          "root": "main",
+          "elements": {
+            "main": {
+              "type": "Stack",
+              "padding": "0",
+              "children": ["clock_canvas"]
+            },
+            "clock_canvas": {
+              "type": "Canvas",
+              "viewBox": "0 0 200 200",
+              "elementsSource": "${$computed.hands}",
+              "elements": [
+                {
+                  "kind": "line",
+                  "x1": 100,
+                  "y1": 100,
+                  "x2": 100,
+                  "y2": 28,
+                  "cx": 100,
+                  "cy": 100,
+                  "rotation": "${$computed.deg}"
+                },
+                {
+                  "kind": "text",
+                  "x": 100,
+                  "y": 170,
+                  "fontWeight": "bold",
+                  "text": "${state.fileLineCount}"
+                }
+              ]
+            }
           }
         }
         """;
@@ -1322,7 +1372,7 @@ public sealed class CustomWidgetNativeUpgradeTests
         Assert.Equal("${$computed.deg}", hand.RotationExpression);
         Assert.Equal("bold", canvasNode.Elements[1].FontWeight);
 
-        // 2. Studio deskbox-manifest-patch changing node "type" drops old type-specific props while keeping Grid column,
+        // 2. Studio deskbox-manifest-edit replacing a Grid child swaps node type cleanly while keeping Grid column,
         //    and deskbox-meta deleteScript removes logic.js cleanly
         const string priorManifest = """
         {
@@ -1331,19 +1381,22 @@ public sealed class CustomWidgetNativeUpgradeTests
           "name": "Swap Test",
           "script": { "entry": "logic.js" },
           "collections": { "rows": {} },
-          "view": {
-            "type": "Grid",
-            "columns": "*,*",
-            "children": [
-              { "type": "Text", "column": 0, "text": "Left" },
-              {
-                "type": "Stack",
-                "column": 1,
-                "orientation": "horizontal",
-                "spacing": 12,
-                "children": [{ "type": "Text", "text": "Old child" }]
-              }
-            ]
+          "root": "main",
+          "elements": {
+            "main": {
+              "type": "Grid",
+              "columns": "*,*",
+              "children": ["left_text", "right_pane"]
+            },
+            "left_text": { "type": "Text", "column": 0, "text": "Left" },
+            "right_pane": {
+              "type": "Stack",
+              "column": 1,
+              "orientation": "horizontal",
+              "spacing": 12,
+              "children": ["old_child"]
+            },
+            "old_child": { "type": "Text", "text": "Old child" }
           }
         }
         """;
@@ -1352,18 +1405,17 @@ public sealed class CustomWidgetNativeUpgradeTests
         ```deskbox-meta
         { "kind": "edit", "reply": "Replaced Stack with Table and removed script.", "deleteScript": true }
         ```
-        ```deskbox-manifest-patch
+        ```deskbox-manifest-edit
         {
-          "view": {
-            "children": [
-              { "type": "Text", "column": 0, "text": "Left" },
-              {
-                "type": "Table",
-                "items": "rows",
-                "columns": [{ "key": "title", "header": "Title" }]
-              }
-            ]
-          }
+          "upsertElements": {
+            "right_pane": {
+              "type": "Table",
+              "column": 1,
+              "items": "rows",
+              "columns": [{ "key": "title", "header": "Title" }]
+            }
+          },
+          "removeElements": ["old_child"]
         }
         ```
         """;

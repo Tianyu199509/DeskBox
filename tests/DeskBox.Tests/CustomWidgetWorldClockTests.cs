@@ -1,6 +1,8 @@
 using System.Globalization;
+using DeskBox.Controls.WidgetContents;
 using DeskBox.Models;
 using DeskBox.Services;
+using DeskBox.ViewModels;
 using Xunit;
 
 namespace DeskBox.Tests;
@@ -34,11 +36,13 @@ public sealed class CustomWidgetWorldClockTests
     public void WorldClockTemplate_ValidatesWithZeroErrorsAndZeroWarnings()
     {
         CustomWidgetTemplateBundle bundle = CustomWidgetTemplates.GetTemplateBundle(CustomWidgetTemplates.WorldClockTemplateId);
-        string json = CustomWidgetTemplates.GetTemplateJson(CustomWidgetTemplates.WorldClockTemplateId);
+        string json = CustomWidgetTemplates.GetTemplateBundle(CustomWidgetTemplates.WorldClockTemplateId).ManifestJson;
         Assert.Same(bundle.ManifestJson, json);
         Assert.Contains(
             CustomWidgetTemplates.Presets,
-            p => p.Id == CustomWidgetTemplates.WorldClockTemplateId && p.IconGlyph == "\uE774");
+            p => p.Id == CustomWidgetTemplates.WorldClockTemplateId &&
+                 p.IconGlyph == "🌍" &&
+                 p.MonochromeFallbackGlyph == "\uE774");
 
         CustomWidgetParseResult parsed = CustomWidgetScriptValidator.ValidateWorkspaceBundle(
             bundle.ManifestJson,
@@ -50,35 +54,41 @@ public sealed class CustomWidgetWorldClockTests
 
         CustomWidgetManifest m = parsed.Manifest!;
         Assert.Equal("deskbox.world-clock", m.Id);
-        Assert.Equal("\uE774", m.Icon);
-        Assert.Equal("1.0.0", m.Version);
+        Assert.Equal("🌍", m.Icon);
+        Assert.Equal("3.0.0", m.Version);
         Assert.Equal(332, m.DefaultSize.Width);
         Assert.Equal(368, m.DefaultSize.Height);
         Assert.Equal(276, m.MinSize.Width);
         Assert.Equal(220, m.MinSize.Height);
+        Assert.Contains("world-clock", m.Capabilities);
+        Assert.NotNull(m.Script);
+        Assert.Equal("logic.js", m.Script!.Entry);
         Assert.NotNull(m.Capsule);
-        Assert.Equal("\uE774", m.Capsule!.Glyph);
+        Assert.Equal("🌍", m.Capsule!.Glyph);
         Assert.Contains(m.Sources, s => s.Type == "clock");
+        Assert.Equal("local", m.State["focusSlot"]);
+        Assert.Equal("local", m.State["focusZone"]);
         Assert.Equal("0", m.State["scrubHours"]);
 
-        // Settings contract: modules + 4 city slots + workWindow + hourFormat + showDevUnix
+        // Settings contract: 4 city slots + dialStyle + hourFormat + workWindow + showDevUnix
         string[] settingKeys = m.Settings.Select(static s => s.Key).ToArray();
         Assert.Equal(
-            ["modules", "city1", "city2", "city3", "city4", "workWindow", "hourFormat", "showDevUnix"],
+            ["city1", "city2", "city3", "city4", "dialStyle", "hourFormat", "workWindow", "showDevUnix"],
             settingKeys);
 
-        CustomWidgetSettingDefinition modulesDef = Assert.Single(m.Settings, s => s.Key == "modules" && s.Type == "moduleList");
-        Assert.Equal("cities:1,scrubber:1", modulesDef.DefaultValue);
-
         CustomWidgetSettingDefinition city4 = Assert.Single(m.Settings, s => s.Key == "city4");
-        Assert.Equal("none", city4.DefaultValue);
+        Assert.Equal("America/New_York", city4.DefaultValue);
         Assert.Contains(city4.Options, o => o.Value == "none");
-        Assert.Equal(25, city4.Options.Count); // none + 24 built-in business cities
+        Assert.Contains(city4.Options, o => o.Value == "UTC");
+        Assert.Equal(26, city4.Options.Count); // none + 24 built-in business cities + UTC
 
         foreach (CustomWidgetSettingDefinition city in m.Settings.Where(s => s.Key.StartsWith("city", StringComparison.Ordinal)))
         {
-            // The shared 24-zone list: 6 Americas, 5 Europe, 6 Asia East/SE, 4 South Asia & ME, 3 Oceania
-            List<string> zoneValues = city.Options.Select(static o => o.Value).Where(v => v != "none").ToList();
+            // Shared 24-city localized roster plus UTC (and optional 'none' on city4).
+            List<string> zoneValues = city.Options
+                .Select(static o => o.Value)
+                .Where(v => v != "none" && v != "UTC")
+                .ToList();
             Assert.Equal(24, zoneValues.Count);
             Assert.Contains("America/Los_Angeles", zoneValues);
             Assert.Contains("America/New_York", zoneValues);
@@ -92,51 +102,65 @@ public sealed class CustomWidgetWorldClockTests
             Assert.Contains("Pacific/Auckland", zoneValues);
         }
 
+        CustomWidgetSettingDefinition dialStyle = Assert.Single(m.Settings, s => s.Key == "dialStyle");
+        Assert.Equal("modern", dialStyle.DefaultValue);
+        Assert.Equal(["modern", "classic"], dialStyle.Options.Select(static o => o.Value).ToArray());
+
         CustomWidgetSettingDefinition workWindow = Assert.Single(m.Settings, s => s.Key == "workWindow");
         Assert.Equal("09-18", workWindow.DefaultValue);
-        Assert.Equal(["09-18", "08-17", "10-19"], workWindow.Options.Select(static o => o.Value).ToArray());
+        Assert.Equal(["08-17", "09-18", "10-19"], workWindow.Options.Select(static o => o.Value).ToArray());
 
         CustomWidgetSettingDefinition hourFormat = Assert.Single(m.Settings, s => s.Key == "hourFormat");
         Assert.Equal(["24h", "12h"], hourFormat.Options.Select(static o => o.Value).ToArray());
 
-        Assert.Contains(m.Settings, s => s.Key == "showDevUnix" && s.Type == "toggle" && s.DefaultValue == "false");
+        Assert.Contains(m.Settings, s => s.Key == "showDevUnix" && s.Type == "toggle" && s.DefaultValue == "true");
 
-        // View shape: root Stack wrapping the ModuleStack (cities + scrubber) plus the dev bar,
-        // with a bound Slider node for the meeting-time scrubber.
+        // Popovers contract: scrubber + developer tools kept off the main desktop card.
+        Assert.Equal(["meetingPopover", "toolsPopover"], m.Popovers.Select(static p => p.Id).ToArray());
+        CustomWidgetNodeSpec meetingPopover = m.Popovers[0];
+        CustomWidgetNodeSpec toolsPopover = m.Popovers[1];
+
+        // Main view: composite Hero Focus Card + $computed.cities ItemsGrid (no inline top-level Slider clutter).
         Assert.Equal("Stack", m.View.Type);
-        Assert.Equal(2, m.View.Children.Count);
-        CustomWidgetNodeSpec moduleStack = m.View.Children[0];
-        Assert.Equal("ModuleStack", moduleStack.Type);
-        Assert.Equal("settings.modules", moduleStack.Bind);
-        Assert.Equal(["cities", "scrubber"], moduleStack.Children.Select(static c => c.Id).ToArray());
-        Assert.Contains("showDevUnix", m.View.Children[1].When!, StringComparison.Ordinal);
+        Assert.Null(FindNode(m.View, static n => n.Type == "Slider"));
+        Assert.NotNull(FindNode(m.View, static n =>
+            n.Type == "Card" && n.Tone != null && n.Tone.Contains("tzDayPhase", StringComparison.Ordinal)));
+        Assert.NotNull(FindNode(m.View, static n =>
+            n.Type == "ItemsGrid" && n.Items != null && n.Items.Contains("$computed.cities", StringComparison.Ordinal)));
+        Assert.NotNull(FindNode(m.View, static n =>
+            n.OnClick.Any(a => a.Type == "script.run" && a.Fn == "toggleFocus" && a.Args.TryGetValue("slot", out string? slot) && slot == "${$item.slot}")));
 
-        CustomWidgetNodeSpec? slider = FindNode(moduleStack, static n => n.Type == "Slider");
+        // Meeting popover houses the 24h overlap bar, golden-window jump, scrubber Slider, $computed.meetingRows preview, and copy script.
+        CustomWidgetNodeSpec? slider = FindNode(meetingPopover, static n => n.Type == "Slider");
         Assert.NotNull(slider);
         Assert.Equal("state.scrubHours", slider!.Bind);
         Assert.Equal(0, slider.Min);
-        Assert.Equal(23, slider.Max);
+        Assert.Equal(23.5, slider.Max);
         Assert.Equal(0.5, slider.Step);
 
-        CustomWidgetNodeSpec? scrubButtons = FindNode(moduleStack,
-            static n => n.Children.Any(c => c.Type == "Button"));
-        Assert.NotNull(scrubButtons);
-        Assert.Contains("scrubHours > 0", scrubButtons!.When!, StringComparison.Ordinal);
+        Assert.NotNull(FindNode(meetingPopover, static n =>
+            n.Type == "Button" && n.OnClick.Any(a => a.Type == "script.run" && a.Fn == "jumpBestOverlap")));
+        Assert.NotNull(FindNode(meetingPopover, static n =>
+            n.Type == "Button" && n.OnClick.Any(a => a.Type == "script.run" && a.Fn == "copyMeetingTimes")));
+        Assert.NotNull(FindNode(meetingPopover, static n =>
+            n.Type == "ItemsGrid" && n.Items != null && n.Items.Contains("$computed.meetingRows", StringComparison.Ordinal)));
 
-        // Copy actions branch on city4 visibility so hidden slots never leak into the text.
-        CustomWidgetNodeSpec? copyButton = FindNode(moduleStack, static n => n.Type == "Button" && n.Children.Count == 0 && n.OnClick.Count > 1);
-        Assert.NotNull(copyButton);
-        Assert.Equal(2, copyButton!.OnClick.Count);
-        Assert.All(copyButton.OnClick, a => Assert.Equal("clipboard.copy", a.Type));
-
-        CustomWidgetNodeSpec? city4Row = FindNode(moduleStack, static n => n.When != null && n.When.Contains("city4", StringComparison.Ordinal));
-        Assert.NotNull(city4Row);
+        // Tools popover binds direct settings controls and conditional Dev timestamps.
+        Assert.NotNull(FindNode(toolsPopover, static n => n.Type == "Segmented" && n.Bind == "$settings.dialStyle"));
+        Assert.NotNull(FindNode(toolsPopover, static n => n.Type == "Segmented" && n.Bind == "$settings.hourFormat"));
+        Assert.NotNull(FindNode(toolsPopover, static n => n.Type == "Select" && n.Bind == "$settings.city1"));
+        Assert.NotNull(FindNode(toolsPopover, static n => n.When != null && n.When.Contains("showDevUnix", StringComparison.Ordinal)));
 
         static CustomWidgetNodeSpec? FindNode(CustomWidgetNodeSpec root, Func<CustomWidgetNodeSpec, bool> match)
         {
             if (match(root))
             {
                 return root;
+            }
+
+            if (root.ItemTemplate is not null && FindNode(root.ItemTemplate, match) is { } tplHit)
+            {
+                return tplHit;
             }
 
             foreach (CustomWidgetNodeSpec child in root.Children)
@@ -458,7 +482,7 @@ public sealed class CustomWidgetWorldClockTests
     [Fact]
     public void WorldClockCapability_RegistryDocumentsTheNewFunctionFamily()
     {
-        Assert.Equal(35, CustomWidgetCapabilityRegistry.All.Count);
+        Assert.Equal(37, CustomWidgetCapabilityRegistry.All.Count);
         CustomWidgetCapabilitySpec spec = CustomWidgetCapabilityRegistry.All.Single(c => c.Id == "world-clock");
         Assert.Contains(spec.TriggerTokenPrefixes, p => p == "tzDiffLabel(");
         Assert.Contains(spec.TriggerTokenPrefixes, p => p == "tzWorkState(");
@@ -472,5 +496,200 @@ public sealed class CustomWidgetWorldClockTests
         string zhRef = CustomWidgetCapabilityRegistry.GenerateApiReferenceMarkdown(isChinese: true);
         Assert.Contains("tzWorkState", zhRef, StringComparison.Ordinal);
         Assert.Contains("tzCity", zhRef, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TzPhaseAndSolarHelpers_ClassifyPhasesProgressFloorAndShortDiff()
+    {
+        DateTimeOffset UtcAt(int hour, int minute = 0) => new(2026, 6, 1, hour, minute, 0, TimeSpan.Zero);
+
+        // tzHourFloat & tzFloorHour with scrub offset rollover across midnight.
+        Assert.Equal(12.5, CustomWidgetUtilityEngine.ResolveTimeZoneHourFloat("UTC", 0, UtcAt(12, 30)), precision: 3);
+        Assert.Equal(1, CustomWidgetUtilityEngine.ResolveTimeZoneFloorHour("UTC", 2.5, UtcAt(22, 45)));
+        Assert.Equal("12.5", CustomWidgetExpressionEvaluator.Interpolate("${tzHourFloat('UTC', 0.5)}", Context(UtcAt(12, 0))));
+        Assert.Equal("1", CustomWidgetExpressionEvaluator.Interpolate("${tzFloorHour('UTC', 2.5)}", Context(UtcAt(22, 45))));
+
+        // tzDayPhase across dawn (05-07), day (07-17), dusk (17-19), night (19-05).
+        Assert.Equal("dawn", CustomWidgetUtilityEngine.ResolveTimeZoneDayPhase("UTC", 0, UtcAt(5, 30)));
+        Assert.Equal("day", CustomWidgetUtilityEngine.ResolveTimeZoneDayPhase("UTC", 0, UtcAt(12, 0)));
+        Assert.Equal("dusk", CustomWidgetUtilityEngine.ResolveTimeZoneDayPhase("UTC", 0, UtcAt(18, 15)));
+        Assert.Equal("night", CustomWidgetUtilityEngine.ResolveTimeZoneDayPhase("UTC", 0, UtcAt(23, 0)));
+        Assert.Equal("night", CustomWidgetUtilityEngine.ResolveTimeZoneDayPhase("UTC", 0, UtcAt(3, 45)));
+        Assert.Equal("dusk", CustomWidgetExpressionEvaluator.Interpolate("${tzDayPhase('UTC', 6)}", Context(UtcAt(12, 0))));
+
+        // tzSolarProgress sweeps smoothly in [0, 1] across daytime (06..18) and nighttime (19..05).
+        double noonProgress = CustomWidgetUtilityEngine.ResolveTimeZoneSolarProgress("UTC", 0, UtcAt(12, 0));
+        double midnightProgress = CustomWidgetUtilityEngine.ResolveTimeZoneSolarProgress("UTC", 0, UtcAt(0, 0));
+        Assert.InRange(noonProgress, 0.49, 0.51);
+        Assert.InRange(midnightProgress, 0.49, 0.51);
+        double exprProgress = double.Parse(
+            CustomWidgetExpressionEvaluator.Interpolate("${tzSolarProgress('UTC', 0)}", Context(UtcAt(12, 0))),
+            CultureInfo.InvariantCulture);
+        Assert.InRange(exprProgress, 0.49, 0.51);
+
+        // tzShortDiff formats compact signed deltas relative to TimeZoneInfo.Local without assuming host zone.
+        DateTimeOffset probe = UtcAt(12, 0);
+        TimeSpan localOffset = TimeZoneInfo.Local.GetUtcOffset(probe);
+        int tokyoOffsetMinutes = CustomWidgetUtilityEngine.ResolveTimeZoneSnapshot("Asia/Tokyo", probe).OffsetMinutes;
+        double expectedHours = (tokyoOffsetMinutes - localOffset.TotalMinutes) / 60.0;
+        string tokyoShortEn = CustomWidgetUtilityEngine.ResolveTimeZoneShortDiff("Asia/Tokyo", 0, probe, "en-US");
+        string tokyoShortExpr = CustomWidgetExpressionEvaluator.Interpolate("${tzShortDiff('Asia/Tokyo', 0)}", Context(probe, "en-US"));
+        Assert.Equal(tokyoShortEn, tokyoShortExpr);
+        Assert.False(string.IsNullOrWhiteSpace(tokyoShortEn));
+        if (Math.Abs(expectedHours) < 0.01)
+        {
+            Assert.Contains("0", tokyoShortEn, StringComparison.Ordinal);
+        }
+        else
+        {
+            string expectedSign = expectedHours > 0 ? "+" : "-";
+            Assert.Contains(expectedSign, tokyoShortEn, StringComparison.Ordinal);
+        }
+
+        // Different zones never collide with identical offset formatting unless equal to local.
+        string nyShortZh = CustomWidgetUtilityEngine.ResolveTimeZoneShortDiff("America/New_York", 0, probe, "zh-CN");
+        Assert.False(string.IsNullOrWhiteSpace(nyShortZh));
+    }
+
+    [Fact]
+    public async Task WorldClockScriptAndActions_EndToEndWithClockZonesAndSettingsSet()
+    {
+        CustomWidgetTemplateBundle bundle = CustomWidgetTemplates.GetTemplateBundle(CustomWidgetTemplates.WorldClockTemplateId);
+        Assert.False(string.IsNullOrWhiteSpace(bundle.LogicJs));
+
+        string tempRoot = Path.Combine(Path.GetTempPath(), "DeskBoxWorldClock_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            string settingsDir = Path.Combine(tempRoot, "settings");
+            string widgetsDir = Path.Combine(tempRoot, "widgets");
+            Directory.CreateDirectory(settingsDir);
+            Directory.CreateDirectory(widgetsDir);
+
+            var settingsService = new SettingsService(settingsDir);
+            settingsService.Settings.Language = SettingsService.LanguageChinese;
+            var localizationService = new LocalizationService(settingsService);
+            var store = new CustomWidgetDataStore("w-world-clock", widgetsDir);
+            await store.WriteWorkspaceBundleAsync(bundle.ManifestJson, bundle.LogicJs, locales: bundle.Locales);
+
+            var config = new WidgetConfig
+            {
+                Id = "w-world-clock",
+                Name = "世界时钟",
+                WidgetKind = WidgetKind.Custom
+            };
+
+            using var vm = new CustomWidgetViewModel(config, localizationService, store);
+            await vm.InitializeAsync();
+            Assert.Null(vm.LastScriptError);
+
+            // onInit computes dials, solar ticks, and 24h overlap bars cleanly from env.clockZones.
+            Assert.Equal(12, CustomWidgetScriptEngine.ProjectComputedCollection("$computed.modernDialMarks", vm.Computed).Count);
+            Assert.Equal(64, CustomWidgetScriptEngine.ProjectComputedCollection("$computed.classicDialMarks", vm.Computed).Count);
+            Assert.Equal(5, CustomWidgetScriptEngine.ProjectComputedCollection("$computed.horizonTicks", vm.Computed).Count);
+            Assert.Equal(24, CustomWidgetScriptEngine.ProjectComputedCollection("$computed.overlapBars", vm.Computed).Count);
+            Assert.False(string.IsNullOrWhiteSpace(CustomWidgetScriptEngine.ResolveComputedToken("bestOverlapRange", vm.Computed)));
+            Assert.False(string.IsNullOrWhiteSpace(CustomWidgetScriptEngine.ResolveComputedToken("bestOverlapSummary", vm.Computed)));
+
+            // toggleFocus switches between a Bento city slot and local, and focusLocal returns cleanly.
+            await vm.ExecuteActionsAsync([
+                new CustomWidgetActionSpec("script.run", Fn: "toggleFocus", Args: new Dictionary<string, string>(StringComparer.Ordinal) { ["slot"] = "city2" })
+            ]);
+            Assert.Equal("city2", vm.State["focusSlot"]);
+            Assert.Equal("Europe/London", vm.State["focusZone"]);
+
+            await vm.ExecuteActionsAsync([
+                new CustomWidgetActionSpec("script.run", Fn: "toggleFocus", Args: new Dictionary<string, string>(StringComparer.Ordinal) { ["slot"] = "city2" })
+            ]);
+            Assert.Equal("local", vm.State["focusSlot"]);
+            Assert.Equal("local", vm.State["focusZone"]);
+
+            await vm.ExecuteActionsAsync([
+                new CustomWidgetActionSpec("script.run", Fn: "toggleFocus", Args: new Dictionary<string, string>(StringComparer.Ordinal) { ["slot"] = "city1" })
+            ]);
+            Assert.Equal("city1", vm.State["focusSlot"]);
+            await vm.ExecuteActionsAsync([new CustomWidgetActionSpec("script.run", Fn: "focusLocal")]);
+            Assert.Equal("local", vm.State["focusSlot"]);
+            Assert.Equal("local", vm.State["focusZone"]);
+
+            // jumpBestOverlap updates scrubHours to a 0.5-hour step in [0, 23.5].
+            await vm.ExecuteActionsAsync([new CustomWidgetActionSpec("script.run", Fn: "jumpBestOverlap")]);
+            Assert.True(double.TryParse(vm.State["scrubHours"], NumberStyles.Float, CultureInfo.InvariantCulture, out double jumpedHour));
+            Assert.InRange(jumpedHour, 0.0, 23.5);
+            Assert.Equal(0.0, (jumpedHour * 2.0) % 1.0, precision: 5);
+
+            // settings.set updates declared settings (including $settings.* selectors) and ignores undeclared keys.
+            Assert.Equal("settings.set", CustomWidgetNativeRenderer.ResolveBindSetActionType("$settings.dialStyle"));
+            Assert.Equal("state.set", CustomWidgetNativeRenderer.ResolveBindSetActionType("state.scrubHours"));
+
+            await vm.ExecuteActionsAsync([new CustomWidgetActionSpec("settings.set", Key: "$settings.dialStyle", Value: "classic")]);
+            Assert.Equal("classic", vm.Settings["dialStyle"]);
+
+            await vm.ExecuteActionsAsync([new CustomWidgetActionSpec("settings.set", Key: "$settings.undeclaredKey", Value: "ignored")]);
+            Assert.False(vm.Settings.ContainsKey("undeclaredKey"));
+
+            CustomWidgetStorePayload persisted = await store.ReloadFromDiskAsync();
+            Assert.Equal("classic", persisted.Settings["dialStyle"]);
+            Assert.False(persisted.Settings.ContainsKey("undeclaredKey"));
+
+            // Direct QuickJS verification of ClockZones DST injection + copyMeetingTimes uiOps.
+            CustomWidgetManifest zhManifest = CustomWidgetManifestParser.Parse(bundle.ManifestJson).Manifest!.WithLocales(bundle.Locales);
+            CustomWidgetScriptCompileResult compiled = CustomWidgetScriptEngine.Compile(bundle.LogicJs!);
+            Assert.True(compiled.IsSuccess, compiled.ErrorMessage);
+            CustomWidgetScriptExecutionResult copyExec = CustomWidgetScriptEngine.Execute(
+                compiled.Compiled!,
+                "copyMeetingTimes",
+                new CustomWidgetScriptExecutionInput
+                {
+                    AllowCopy = true,
+                    ClockOverride = new DateTimeOffset(2026, 6, 1, 12, 0, 0, TimeSpan.Zero),
+                    CultureName = "zh-CN",
+                    I18n = zhManifest.I18n["zh-CN"],
+                    ClockZones = ["local", "America/Los_Angeles", "Europe/London", "Asia/Tokyo", "America/New_York"],
+                    State = new Dictionary<string, string>(StringComparer.Ordinal) { ["scrubHours"] = "2" },
+                    Args = new Dictionary<string, string>(StringComparer.Ordinal)
+                    {
+                        ["localLabel"] = "本机",
+                        ["localTime"] = "06-01 22:00",
+                        ["c1Label"] = "旧金山",
+                        ["c1Time"] = "07:00",
+                        ["c2Label"] = "伦敦",
+                        ["c2Time"] = "15:00",
+                        ["c3Label"] = "东京",
+                        ["c3Time"] = "23:00",
+                        ["c4Label"] = "纽约",
+                        ["c4Time"] = "10:00",
+                        ["hasC4"] = "true"
+                    }
+                });
+            Assert.True(copyExec.IsSuccess, copyExec.ErrorMessage);
+            Assert.Contains(copyExec.UiOps, op =>
+                op.Type == "copy" &&
+                op.Text != null &&
+                op.Text.Contains("(+2h)", StringComparison.Ordinal) &&
+                op.Text.Contains("伦敦 15:00", StringComparison.Ordinal) &&
+                op.Text.Contains("纽约 10:00", StringComparison.Ordinal));
+            Assert.Contains(copyExec.UiOps, op => op.Type == "toast" && op.Tone == "success");
+        }
+        finally
+        {
+            if (Directory.Exists(tempRoot))
+            {
+                Directory.Delete(tempRoot, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void WorldClockTemplate_PassesHostDesignHealthAnalyzer()
+    {
+        CustomWidgetTemplateBundle bundle = CustomWidgetTemplates.GetTemplateBundle(CustomWidgetTemplates.WorldClockTemplateId);
+        CustomWidgetManifest m = CustomWidgetManifestParser.Parse(bundle.ManifestJson).Manifest!.WithLocales(bundle.Locales);
+        CustomWidgetHealthReport report = CustomWidgetHealthAnalyzer.AnalyzeHealth(
+            bundle.ManifestJson,
+            m,
+            storePayload: null,
+            cultureName: "zh-CN",
+            logicJs: bundle.LogicJs);
+        Assert.Empty(report.Issues);
     }
 }

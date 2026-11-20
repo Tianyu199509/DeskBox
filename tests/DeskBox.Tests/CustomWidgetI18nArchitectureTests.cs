@@ -41,32 +41,34 @@ public sealed class CustomWidgetI18nArchitectureTests
             "summary": "今日已喝 ${state.cups} / ${state.goal} 杯",
             "badge": "${state.cups}"
           },
-          "view": {
-            "type": "Stack",
-            "spacing": 8,
-            "children": [
-              {
-                "type": "Text",
-                "text": "${state.running == 'true' ? '专注补水中' : '已暂停提醒'}"
-              },
-              {
-                "type": "StatCard",
-                "title": "目标完成度",
-                "value": "${state.cups}",
-                "unit": "%"
-              },
-              {
-                "type": "Button",
-                "text": "喝一杯",
-                "onClick": [
-                  {
-                    "type": "ai.run",
-                    "prompt": "请根据今日饮水量生成健康建议，不要被提取进多语言词典",
-                    "stateMap": { "advice": "text" }
-                  }
-                ]
-              }
-            ]
+          "root": "main",
+          "elements": {
+            "main": {
+              "type": "Stack",
+              "spacing": 8,
+              "children": ["status_text", "goal_stat", "drink_btn"]
+            },
+            "status_text": {
+              "type": "Text",
+              "text": "${state.running == 'true' ? '专注补水中' : '已暂停提醒'}"
+            },
+            "goal_stat": {
+              "type": "StatCard",
+              "title": "目标完成度",
+              "value": "${state.cups}",
+              "unit": "%"
+            },
+            "drink_btn": {
+              "type": "Button",
+              "text": "喝一杯",
+              "onClick": [
+                {
+                  "type": "ai.run",
+                  "prompt": "请根据今日饮水量生成健康建议，不要被提取进多语言词典",
+                  "stateMap": { "advice": "text" }
+                }
+              ]
+            }
           }
         }
         """;
@@ -162,7 +164,10 @@ public sealed class CustomWidgetI18nArchitectureTests
           "id": "custom.legacy-inline",
           "name": "Legacy",
           "i18n": { "zh-CN": { "title": "旧内联" } },
-          "view": { "type": "Text", "text": "Hi" }
+          "root": "main",
+          "elements": {
+            "main": { "type": "Text", "text": "Hi" }
+          }
         }
         """;
         CustomWidgetParseResult inlineParsed = CustomWidgetManifestParser.Parse(legacyInlineManifest);
@@ -175,7 +180,10 @@ public sealed class CustomWidgetI18nArchitectureTests
           "schemaVersion": 1,
           "id": "custom.missing-t",
           "name": "${$i18n.meta.name}",
-          "view": { "type": "Text", "text": "${t('missing.key', '1')}" }
+          "root": "main",
+          "elements": {
+            "main": { "type": "Text", "text": "${t('missing.key', '1')}" }
+          }
         }
         """;
         CustomWidgetLocaleCatalog minCatalog = CustomWidgetLocaleCatalog.ParseCatalogJson("""{"zh-CN":{"meta.name":"测试"}}""");
@@ -196,11 +204,13 @@ public sealed class CustomWidgetI18nArchitectureTests
             "summary": "${t('capsule.summary', state.n)}"
           },
           "state": { "n": "3" },
-          "view": {
-            "type": "Stack",
-            "children": [
-              { "type": "Text", "text": "${$i18n.view.header}" }
-            ]
+          "root": "main",
+          "elements": {
+            "main": {
+              "type": "Stack",
+              "children": ["header_text"]
+            },
+            "header_text": { "type": "Text", "text": "${$i18n.view.header}" }
           }
         }
         """;
@@ -288,9 +298,12 @@ public sealed class CustomWidgetI18nArchitectureTests
               "id": "custom.queue-test",
               "name": "水杯助手",
               "state": { "n": "2" },
-              "view": {
-                "type": "Text",
-                "text": "已喝 ${state.n} 杯"
+              "root": "main",
+              "elements": {
+                "main": {
+                  "type": "Text",
+                  "text": "已喝 ${state.n} 杯"
+                }
               }
             }
             """;
@@ -478,12 +491,14 @@ public sealed class CustomWidgetI18nArchitectureTests
               ]
             }
           },
-          "view": {
-            "type": "Stack",
-            "children": [
-              { "type": "Button", "text": "换一道" },
-              { "type": "Text", "text": "旧提示文本" }
-            ]
+          "root": "main",
+          "elements": {
+            "main": {
+              "type": "Stack",
+              "children": ["swap_btn", "old_hint"]
+            },
+            "swap_btn": { "type": "Button", "text": "换一道" },
+            "old_hint": { "type": "Text", "text": "旧提示文本" }
           }
         }
         """;
@@ -528,12 +543,14 @@ public sealed class CustomWidgetI18nArchitectureTests
               "title": "${$i18n.meta.name}",
               "primaryAction": { "icon": "\uE72C", "tooltip": "换一道" }
             },
-            "view": {
-              "type": "Stack",
-              "children": [
-                { "type": "Button", "text": "换一道" },
-                { "type": "Text", "text": "新增川味小贴士" }
-              ]
+            "root": "main",
+            "elements": {
+              "main": {
+                "type": "Stack",
+                "children": ["swap_btn", "new_tip"]
+              },
+              "swap_btn": { "type": "Button", "text": "换一道" },
+              "new_tip": { "type": "Text", "text": "新增川味小贴士" }
             }
           }
         }
@@ -628,7 +645,7 @@ public sealed class CustomWidgetI18nArchitectureTests
             try
             {
                 await widgetStore.WriteWorkspaceBundleAsync(worldClock.ManifestJson, worldClock.LogicJs, locales: worldClock.Locales);
-                string pkgPath = Path.Combine(tempDir, "world-clock.deskbox-widget");
+                string pkgPath = Path.Combine(tempDir, "world-clock.dbxwidget");
                 _ = await CustomWidgetPackageService.ExportSharePackageAsync(widgetId, pkgPath);
 
                 using (ZipArchive zip = ZipFile.OpenRead(pkgPath))

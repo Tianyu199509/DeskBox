@@ -18,12 +18,12 @@ internal enum DeskBoxQjsNativeStatus : int
 internal readonly record struct DeskBoxQjsNativeCompileOutcome(
     DeskBoxQjsNativeStatus Status,
     byte[] Bytecode,
-    string ExportsJson,
+    byte[] ExportsJsonUtf8,
     string ErrorMessage);
 
 internal readonly record struct DeskBoxQjsNativeInvokeOutcome(
     DeskBoxQjsNativeStatus Status,
-    string ResultJson,
+    byte[] ResultJsonUtf8,
     string ErrorMessage);
 
 /// <summary>
@@ -129,7 +129,7 @@ internal static partial class CustomWidgetQuickJsInterop
             return new DeskBoxQjsNativeCompileOutcome(
                 DeskBoxQjsNativeStatus.EngineUnavailable,
                 [],
-                string.Empty,
+                [],
                 unavailableReason ?? "deskbox_qjs is unavailable.");
         }
 
@@ -164,12 +164,12 @@ internal static partial class CustomWidgetQuickJsInterop
             }
 
             byte[] bytecode = CopyBuffer(outBytecode, outBytecodeLen);
-            string exportsJson = DecodeUtf8Buffer(outExports, outExportsLen);
+            byte[] exportsJsonUtf8 = CopyBuffer(outExports, outExportsLen);
             string errorMsg = DecodeUtf8Buffer(outError, outErrorLen);
             return new DeskBoxQjsNativeCompileOutcome(
                 MapStatus(rawStatus),
                 bytecode,
-                exportsJson,
+                exportsJsonUtf8,
                 errorMsg);
         }
         finally
@@ -192,8 +192,17 @@ internal static partial class CustomWidgetQuickJsInterop
         {
             return new DeskBoxQjsNativeInvokeOutcome(
                 DeskBoxQjsNativeStatus.EngineUnavailable,
-                string.Empty,
+                [],
                 unavailableReason ?? "deskbox_qjs is unavailable.");
+        }
+
+        const int MaxPayloadJsonBytes = 4 * 1024 * 1024;
+        if (payloadJsonUtf8.Length > MaxPayloadJsonBytes)
+        {
+            return new DeskBoxQjsNativeInvokeOutcome(
+                DeskBoxQjsNativeStatus.InvalidArgument,
+                [],
+                "Input payload JSON exceeds 4 MB maximum size.");
         }
 
         byte[] fnBytes = BuildNullTerminatedUtf8(fnName);
@@ -226,11 +235,11 @@ internal static partial class CustomWidgetQuickJsInterop
                     out outErrorLen);
             }
 
-            string resultJson = DecodeUtf8Buffer(outResult, outResultLen);
+            byte[] resultJsonUtf8 = CopyBuffer(outResult, outResultLen);
             string errorMsg = DecodeUtf8Buffer(outError, outErrorLen);
             return new DeskBoxQjsNativeInvokeOutcome(
                 MapStatus(rawStatus),
-                resultJson,
+                resultJsonUtf8,
                 errorMsg);
         }
         finally

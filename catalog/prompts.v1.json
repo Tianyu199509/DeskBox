@@ -1,5 +1,6 @@
 {
   "schemaVersion": 1,
-  "promptVersion": 1,
-  "updatedAtUtc": "2026-11-04T00:00:00Z"
+  "promptVersion": 2,
+  "updatedAtUtc": "2026-11-18T00:00:00Z",
+  "capabilityPatches": []
 }

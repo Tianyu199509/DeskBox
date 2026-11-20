@@ -98,12 +98,14 @@ public sealed class CustomWidgetCapabilityEcosystemTests
             { "type": "weather", "intervalMs": 900000 },
             { "type": "systemMetrics", "intervalMs": 2000 }
           ],
-          "view": {
-            "type": "Stack",
-            "children": [
-              { "type": "Text", "text": "${$weather.barometerHpa}" },
-              { "type": "Text", "text": "${$sys.cpuTempCelsius}" }
-            ]
+          "root": "main",
+          "elements": {
+            "main": {
+              "type": "Stack",
+              "children": ["barometer_text", "cpu_temp_text"]
+            },
+            "barometer_text": { "type": "Text", "text": "${$weather.barometerHpa}" },
+            "cpu_temp_text": { "type": "Text", "text": "${$sys.cpuTempCelsius}" }
           }
         }
         """;
@@ -124,12 +126,14 @@ public sealed class CustomWidgetCapabilityEcosystemTests
             { "type": "countdown", "intervalMs": 60000 },
             { "type": "aiUsage", "intervalMs": 60000 }
           ],
-          "view": {
-            "type": "Stack",
-            "children": [
-              { "type": "Text", "text": "${$sys.ram.percent}% · ${$weather.temperature}°C" },
-              { "type": "Text", "text": "${$pomo.remaining} · ${$countdown.daysLeft} · ${$ai.tokens}" }
-            ]
+          "root": "main",
+          "elements": {
+            "main": {
+              "type": "Stack",
+              "children": ["sys_weather_text", "pomo_countdown_ai_text"]
+            },
+            "sys_weather_text": { "type": "Text", "text": "${$sys.ram.percent}% · ${$weather.temperature}°C" },
+            "pomo_countdown_ai_text": { "type": "Text", "text": "${$pomo.remaining} · ${$countdown.daysLeft} · ${$ai.tokens}" }
           }
         }
         """;
@@ -147,20 +151,23 @@ public sealed class CustomWidgetCapabilityEcosystemTests
           "schemaVersion": 1,
           "id": "custom.unwired-all-in-one",
           "name": "Unwired Hub",
-          "view": {
-            "type": "Stack",
-            "spacing": 8,
-            "children": [
-              { "type": "Text", "text": "${$weather.city} ${$weather.tempText} · ${state.activeTab}" },
-              { "type": "CalendarGrid", "eventsCollection": "birthdays", "dateField": "date", "bind": "selectedDate" },
-              {
-                "type": "ControlTile",
-                "title": "静音",
-                "icon": "Volume3",
-                "active": "${$device.muted}",
-                "onClick": [{ "type": "system.control", "target": "volume.muteToggle" }]
-              }
-            ]
+          "state": { "activeTab": "home" },
+          "root": "main",
+          "elements": {
+            "main": {
+              "type": "Stack",
+              "spacing": 8,
+              "children": ["weather_header", "birthdays_calendar", "mute_tile"]
+            },
+            "weather_header": { "type": "Text", "text": "${$weather.city} ${$weather.tempText} · ${state.activeTab}" },
+            "birthdays_calendar": { "type": "CalendarGrid", "eventsCollection": "birthdays", "dateField": "date", "bind": "selectedDate" },
+            "mute_tile": {
+              "type": "ControlTile",
+              "title": "静音",
+              "icon": "Volume3",
+              "active": "${$device.muted}",
+              "onClick": [{ "type": "system.control", "target": "volume.muteToggle" }]
+            }
           }
         }
         """;
@@ -255,14 +262,18 @@ public sealed class CustomWidgetCapabilityEcosystemTests
                   "fieldMap": { "title": "title" }
                 }
               ],
-              "view": { "type": "Text", "text": "OK" }
+              "root": "status_text",
+              "elements": {
+                "status_text": { "type": "Text", "text": "OK" }
+              }
             }
             """);
             Assert.NotNull(parseRes.Manifest);
 
             var evalCtx = new CustomWidgetEvaluationContext
             {
-                Secrets = store2.GetSecretsForWidget("widget-alpha")
+                Secrets = store2.GetSecretsForWidget("widget-alpha"),
+                AllowSecrets = true
             };
 
             CustomWidgetSourceSpec sourceSpec = parseRes.Manifest!.Sources[0];
@@ -300,16 +311,18 @@ public sealed class CustomWidgetCapabilityEcosystemTests
           "id": "custom.facade",
           "name": "Facade Check",
           "state": { "fakeWifi": "off" },
-          "view": {
-            "type": "Stack",
-            "children": [
-              { "type": "Button", "label": "Dead Button" },
-              {
-                "type": "Button",
-                "label": "Fake Toggle",
-                "onClick": [{ "type": "state.set", "key": "fakeWifi", "value": "on" }]
-              }
-            ]
+          "root": "main",
+          "elements": {
+            "main": {
+              "type": "Stack",
+              "children": ["dead_btn", "fake_toggle_btn"]
+            },
+            "dead_btn": { "type": "Button", "label": "Dead Button" },
+            "fake_toggle_btn": {
+              "type": "Button",
+              "label": "Fake Toggle",
+              "onClick": [{ "type": "state.set", "key": "fakeWifi", "value": "on" }]
+            }
           }
         }
         """).Manifest!;
@@ -388,10 +401,14 @@ public sealed class CustomWidgetCapabilityEcosystemTests
                               "fieldMap": { "title": "title", "url": "url" }
                             }
                           ],
-                          "view": {
-                            "type": "List",
-                            "items": "items",
-                            "itemTemplate": { "type": "Text", "text": "${$item.title}" }
+                          "root": "hot_list",
+                          "elements": {
+                            "hot_list": {
+                              "type": "List",
+                              "items": "items",
+                              "itemTemplate": "hot_row"
+                            },
+                            "hot_row": { "type": "Text", "text": "${$item.title}" }
                           }
                         }
                       }
@@ -411,10 +428,14 @@ public sealed class CustomWidgetCapabilityEcosystemTests
                             "fieldMap": { "title": "headline", "hot": "scoreText", "url": "linkUrl" }
                           }
                         ],
-                        "view": {
-                          "type": "List",
-                          "items": "items",
-                          "itemTemplate": { "type": "Text", "text": "${$item.title}" }
+                        "root": "hot_list",
+                        "elements": {
+                          "hot_list": {
+                            "type": "List",
+                            "items": "items",
+                            "itemTemplate": "hot_row"
+                          },
+                          "hot_row": { "type": "Text", "text": "${$item.title}" }
                         }
                       }
                       """;
@@ -694,7 +715,7 @@ public sealed class CustomWidgetCapabilityEcosystemTests
     public void V160Nodes_AutoFixer_CompatibilityVersion_DuplicateHeaderAudit_And_FormalDocs_WorkCleanly()
     {
         // 1. Formal 29-module registry & zero colloquial prose in generated API Reference
-        Assert.Equal(35, CustomWidgetCapabilityRegistry.All.Count);
+        Assert.Equal(37, CustomWidgetCapabilityRegistry.All.Count);
         string zhRef = CustomWidgetCapabilityRegistry.GenerateApiReferenceMarkdown(isChinese: true);
         Assert.Contains("## 架构与布局规范", zhRef, StringComparison.Ordinal);
         Assert.Contains("@script-sandbox", zhRef, StringComparison.Ordinal);
@@ -716,43 +737,45 @@ public sealed class CustomWidgetCapabilityEcosystemTests
           "id": "custom.command-deck",
           "name": "控制面板",
           "icon": "🎛️",
-          "view": {
-            "type": "Tabs",
-            "bind": "state.tab",
-            "children": [
-              {
-                "title": "设备",
-                "value": "dev",
-                "children": [
-                  {
-                    "type": "Slider",
-                    "title": "主音量",
-                    "value": "${$device.volume}",
-                    "min": 0,
-                    "max": 100,
-                    "onChange": { "type": "system.control", "targetId": "volume.set", "value": "${$value}" }
-                  },
-                  {
-                    "type": "Image",
-                    "src": "${$device.mediaCover}",
-                    "width": 40,
-                    "height": 40,
-                    "stretch": "uniformToFill"
-                  }
-                ]
-              },
-              {
-                "title": "存储与工具",
-                "value": "storage",
-                "children": [
-                  { "type": "RingGauge", "progress": "${$drives.primaryPercent}", "title": "主盘", "unit": "%" },
-                  { "type": "BarList", "collection": "drives", "titleField": "title", "valueField": "percent", "unit": "%" },
-                  { "type": "Text", "text": "${tz('UTC', 'HH:mm')} · ${$clipboard.kindLabel}" },
-                  { "type": "Button", "text": "JSON 格式化", "onClick": { "type": "text.transform", "format": "jsonPretty", "key": "outJson" } },
-                  { "type": "Button", "text": "截图", "onClick": { "type": "launcher.open", "targetId": "ms-screenclip:" } }
-                ]
-              }
-            ]
+          "root": "command_tabs",
+          "elements": {
+            "command_tabs": {
+              "type": "Tabs",
+              "bind": "state.tab",
+              "children": ["tab_device", "tab_storage"]
+            },
+            "tab_device": {
+              "type": "Stack",
+              "title": "设备",
+              "value": "dev",
+              "children": ["volume_slider", "media_cover_image"]
+            },
+            "volume_slider": {
+              "type": "Slider",
+              "title": "主音量",
+              "value": "${$device.volume}",
+              "min": 0,
+              "max": 100,
+              "onChange": { "type": "system.control", "targetId": "volume.set", "value": "${$value}" }
+            },
+            "media_cover_image": {
+              "type": "Image",
+              "src": "${$device.mediaCover}",
+              "width": 40,
+              "height": 40,
+              "stretch": "uniformToFill"
+            },
+            "tab_storage": {
+              "type": "Stack",
+              "title": "存储与工具",
+              "value": "storage",
+              "children": ["drive_ring", "drive_bars", "clock_clip_text", "format_json_btn", "screenshot_btn"]
+            },
+            "drive_ring": { "type": "RingGauge", "progress": "${$drives.primaryPercent}", "title": "主盘", "unit": "%" },
+            "drive_bars": { "type": "BarList", "collection": "drives", "titleField": "title", "valueField": "percent", "unit": "%" },
+            "clock_clip_text": { "type": "Text", "text": "${tz('UTC', 'HH:mm')} · ${$clipboard.kindLabel}" },
+            "format_json_btn": { "type": "Button", "text": "JSON 格式化", "onClick": { "type": "text.transform", "format": "jsonPretty", "key": "outJson" } },
+            "screenshot_btn": { "type": "Button", "text": "截图", "onClick": { "type": "launcher.open", "targetId": "ms-screenclip:" } }
           }
         }
         """;
@@ -770,8 +793,9 @@ public sealed class CustomWidgetCapabilityEcosystemTests
         Assert.True(m.Collections.ContainsKey("drives"));
         Assert.True(m.State.ContainsKey("tab"));
         Assert.True(m.State.ContainsKey("outJson"));
-        Assert.True(CustomWidgetManifestCompatibility.UsesV160Features(m));
-        Assert.True(CustomWidgetManifestCompatibility.UsesV160FeaturesJson(autoWired));
+        Assert.False(CustomWidgetManifestParser.RequiresNewerClient(m.SchemaVersion, m.MinAppVersion, out _));
+        Assert.True(CustomWidgetManifestParser.RequiresNewerClient(1, "99.0.0", out string futureVerLabel));
+        Assert.Equal("v99.0.0", futureVerLabel);
 
         // Clean Tabs root has zero duplicate-header warnings
         CustomWidgetHealthReport cleanHealth = CustomWidgetHealthAnalyzer.AnalyzeHealth(autoWired, m, null, cultureName: "zh-CN");
@@ -784,20 +808,21 @@ public sealed class CustomWidgetCapabilityEcosystemTests
           "id": "custom.dup-header",
           "name": "控制中心",
           "icon": "🎛️",
-          "view": {
-            "type": "Stack",
-            "spacing": 8,
-            "children": [
-              {
-                "type": "Grid",
-                "columns": "*,Auto",
-                "children": [
-                  { "type": "Text", "column": 0, "text": "🎛️ 控制中心", "style": "subtitle" },
-                  { "type": "IconButton", "column": 1, "icon": "\uE72C", "onClick": { "type": "source.refresh" } }
-                ]
-              },
-              { "type": "Text", "text": "正文区域" }
-            ]
+          "root": "main",
+          "elements": {
+            "main": {
+              "type": "Stack",
+              "spacing": 8,
+              "children": ["header_grid", "body_text"]
+            },
+            "header_grid": {
+              "type": "Grid",
+              "columns": "*,Auto",
+              "children": ["header_title", "refresh_btn"]
+            },
+            "header_title": { "type": "Text", "column": 0, "text": "🎛️ 控制中心", "style": "subtitle" },
+            "refresh_btn": { "type": "IconButton", "column": 1, "icon": "refresh", "onClick": { "type": "source.refresh" } },
+            "body_text": { "type": "Text", "text": "正文区域" }
           }
         }
         """;
@@ -809,13 +834,13 @@ public sealed class CustomWidgetCapabilityEcosystemTests
         Microsoft.UI.Xaml.Thickness defaultSafe = DeskBox.Controls.WidgetContents.CustomWidgetNativeRenderer.ResolveRootSafePadding(null);
         Assert.Equal(new Microsoft.UI.Xaml.Thickness(12, 10, 12, 12), defaultSafe);
         Assert.Equal(
-            new Microsoft.UI.Xaml.Thickness(12, 10, 12, 12),
+            new Microsoft.UI.Xaml.Thickness(0),
             DeskBox.Controls.WidgetContents.CustomWidgetNativeRenderer.ResolveRootSafePadding("0"));
         Assert.Equal(
             new Microsoft.UI.Xaml.Thickness(10, 6, 10, 10),
             DeskBox.Controls.WidgetContents.CustomWidgetNativeRenderer.ResolveRootSafePadding("10,6,10,10"));
         Assert.Equal(
-            new Microsoft.UI.Xaml.Thickness(10, 6, 10, 10),
+            new Microsoft.UI.Xaml.Thickness(4),
             DeskBox.Controls.WidgetContents.CustomWidgetNativeRenderer.ResolveRootSafePadding("4"));
 
         const string unpaddedAndAliasedJson = """
@@ -823,28 +848,28 @@ public sealed class CustomWidgetCapabilityEcosystemTests
           "schemaVersion": 1,
           "id": "custom.inbox-layout",
           "name": "灵感收集匣",
-          "view": {
-            "type": "Stack",
-            "direction": "vertical",
-            "spacing": 0,
-            "children": [
-              {
-                "type": "Row",
-                "spacing": 8,
-                "children": [
-                  { "type": "Text", "text": "标题" },
-                  { "type": "Badge", "text": "灵感" }
-                ]
-              },
-              {
-                "type": "Grid",
-                "columns": "*,Auto",
-                "children": [
-                  { "type": "Input", "placeholder": "速记" },
-                  { "type": "IconButton", "col": 1, "colSpan": 2, "icon": "\uE710" }
-                ]
-              }
-            ]
+          "root": "main",
+          "elements": {
+            "main": {
+              "type": "Stack",
+              "direction": "vertical",
+              "spacing": 0,
+              "children": ["header_row", "input_grid"]
+            },
+            "header_row": {
+              "type": "Row",
+              "spacing": 8,
+              "children": ["title_text", "tag_badge"]
+            },
+            "title_text": { "type": "Text", "text": "标题" },
+            "tag_badge": { "type": "Badge", "text": "灵感" },
+            "input_grid": {
+              "type": "Grid",
+              "columns": "*,Auto",
+              "children": ["quick_input", "add_btn"]
+            },
+            "quick_input": { "type": "Input", "placeholder": "速记" },
+            "add_btn": { "type": "IconButton", "col": 1, "colSpan": 2, "icon": "add" }
           }
         }
         """;
@@ -852,7 +877,7 @@ public sealed class CustomWidgetCapabilityEcosystemTests
         CustomWidgetParseResult aliasedParsed = CustomWidgetManifestParser.ValidateWithRuntimeHints(paddedJson);
         Assert.NotNull(aliasedParsed.Manifest);
         Assert.Empty(aliasedParsed.Diagnostics);
-        Assert.Equal("12,10,12,12", aliasedParsed.Manifest!.View.Padding);
+        Assert.Null(aliasedParsed.Manifest!.View.Padding);
         Assert.Equal("Stack", aliasedParsed.Manifest.View.Children[0].Type);
         Assert.Equal("horizontal", aliasedParsed.Manifest.View.Children[0].Orientation);
         Assert.Equal(1, aliasedParsed.Manifest.View.Children[1].Children[1].Column);

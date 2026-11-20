@@ -9,7 +9,7 @@ namespace DeskBox.Platform;
 /// Kept inside <c>DeskBox.Platform</c> so P/Invoke and COM vtable calls stay isolated
 /// to the platform boundary and remain 100% NativeAOT-compatible.
 /// </summary>
-internal static class CustomWidgetNativeMetrics
+internal static partial class CustomWidgetNativeMetrics
 {
     // Verified against Windows SDK 10.0.26100.0 shared/netioapi.h & shared/ifdef.h:
     // MIB_IF_TABLE2: NumEntries at 0, 4-byte align pad, Table[0] at 8.
@@ -54,6 +54,7 @@ internal static class CustomWidgetNativeMetrics
     private const int SystemProcessInformationClass = 5;
     private const int StatusInfoLengthMismatch = unchecked((int)0xC0000004);
     private const int SpiWorkingSetPrivateSizeOffset = 8;
+    private const int SpiCreateTimeOffset = 32;
     private const int SpiUserTimeOffset = 40;
     private const int SpiKernelTimeOffset = 48;
     private const int SpiImageNameLengthOffset = 56;
@@ -133,49 +134,36 @@ internal static class CustomWidgetNativeMetrics
 
     internal readonly record struct RawProcessSample(
         uint ProcessId,
-        string ExeName,
+        string GroupKey,
         ulong CpuTicks,
         long PrivateMemoryBytes);
 
-    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-    private delegate int EnumAdapters1Invoker(IntPtr self, uint index, out IntPtr adapter);
-
-    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-    private delegate int GetDesc1Invoker(IntPtr self, out DxgiAdapterDesc1 desc);
-
-    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
-    private delegate int QueryVideoMemoryInfoInvoker(
-        IntPtr self,
-        uint nodeIndex,
-        int memorySegmentGroup,
-        out DxgiQueryVideoMemoryInfo info);
-
-    [DllImport("kernel32.dll", EntryPoint = "GetSystemTimes", ExactSpelling = true, SetLastError = true)]
+    [LibraryImport("kernel32.dll", EntryPoint = "GetSystemTimes", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    internal static extern bool GetSystemTimes(
+    internal static partial bool GetSystemTimes(
         out SystemFileTime lpIdleTime,
         out SystemFileTime lpKernelTime,
         out SystemFileTime lpUserTime);
 
-    [DllImport("kernel32.dll", EntryPoint = "GlobalMemoryStatusEx", ExactSpelling = true, SetLastError = true)]
+    [LibraryImport("kernel32.dll", EntryPoint = "GlobalMemoryStatusEx", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    internal static extern bool GlobalMemoryStatusEx(ref MemoryStatusEx lpBuffer);
+    internal static partial bool GlobalMemoryStatusEx(ref MemoryStatusEx lpBuffer);
 
-    [DllImport("kernel32.dll", EntryPoint = "GetSystemPowerStatus", ExactSpelling = true, SetLastError = true)]
+    [LibraryImport("kernel32.dll", EntryPoint = "GetSystemPowerStatus", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    internal static extern bool GetSystemPowerStatus(out SystemPowerStatus lpSystemPowerStatus);
+    internal static partial bool GetSystemPowerStatus(out SystemPowerStatus lpSystemPowerStatus);
 
-    [DllImport("iphlpapi.dll", EntryPoint = "GetIfTable2", ExactSpelling = true)]
-    private static extern int GetIfTable2Native(out IntPtr table);
+    [LibraryImport("iphlpapi.dll", EntryPoint = "GetIfTable2")]
+    private static partial int GetIfTable2Native(out IntPtr table);
 
-    [DllImport("iphlpapi.dll", EntryPoint = "FreeMibTable", ExactSpelling = true)]
-    private static extern void FreeMibTableNative(IntPtr memory);
+    [LibraryImport("iphlpapi.dll", EntryPoint = "FreeMibTable")]
+    private static partial void FreeMibTableNative(IntPtr memory);
 
-    [DllImport("dxgi.dll", EntryPoint = "CreateDXGIFactory1", ExactSpelling = true)]
-    private static extern int CreateDXGIFactory1Native(ref Guid riid, out IntPtr ppFactory);
+    [LibraryImport("dxgi.dll", EntryPoint = "CreateDXGIFactory1")]
+    private static partial int CreateDXGIFactory1Native(ref Guid riid, out IntPtr ppFactory);
 
-    [DllImport("gdi32.dll", EntryPoint = "D3DKMTQueryStatistics", ExactSpelling = true)]
-    private static extern int D3DKMTQueryStatisticsNative(IntPtr queryStatistics);
+    [LibraryImport("gdi32.dll", EntryPoint = "D3DKMTQueryStatistics")]
+    private static partial int D3DKMTQueryStatisticsNative(IntPtr queryStatistics);
 
     // Verified against Windows SDK 10.0.26100.0 shared/d3dkmthk.h (64-bit layout):
     // D3DKMT_QUERYSTATISTICS: sizeof = 0x328, Type at +0x00, AdapterLuid at +0x04,
@@ -196,36 +184,73 @@ internal static class CustomWidgetNativeMetrics
     private const int D3dkmtQuerySegmentIdOffset = 0x320;
     private const int D3dkmtQueryNodeIdOffset = 0x320;
 
-    [DllImport("pdh.dll", EntryPoint = "PdhOpenQueryW", ExactSpelling = true)]
-    private static extern uint PdhOpenQueryNative(IntPtr szDataSource, IntPtr dwUserData, out IntPtr phQuery);
+    [LibraryImport("pdh.dll", EntryPoint = "PdhOpenQueryW")]
+    private static partial uint PdhOpenQueryNative(IntPtr szDataSource, IntPtr dwUserData, out IntPtr phQuery);
 
-    [DllImport("pdh.dll", EntryPoint = "PdhAddEnglishCounterW", ExactSpelling = true, CharSet = CharSet.Unicode)]
-    private static extern uint PdhAddEnglishCounterNative(
+    [LibraryImport("pdh.dll", EntryPoint = "PdhAddEnglishCounterW", StringMarshalling = StringMarshalling.Utf16)]
+    private static partial uint PdhAddEnglishCounterNative(
         IntPtr hQuery,
         string szFullCounterPath,
         IntPtr dwUserData,
         out IntPtr phCounter);
 
-    [DllImport("pdh.dll", EntryPoint = "PdhCollectQueryData", ExactSpelling = true)]
-    private static extern uint PdhCollectQueryDataNative(IntPtr hQuery);
+    [LibraryImport("pdh.dll", EntryPoint = "PdhCollectQueryData")]
+    private static partial uint PdhCollectQueryDataNative(IntPtr hQuery);
 
-    [DllImport("pdh.dll", EntryPoint = "PdhGetFormattedCounterArrayW", ExactSpelling = true)]
-    private static extern uint PdhGetFormattedCounterArrayNative(
+    [LibraryImport("pdh.dll", EntryPoint = "PdhGetFormattedCounterArrayW")]
+    private static partial uint PdhGetFormattedCounterArrayNative(
         IntPtr hCounter,
         uint dwFormat,
         ref uint lpdwBufferSize,
         out uint lpdwItemCount,
         IntPtr itemBuffer);
 
-    [DllImport("pdh.dll", EntryPoint = "PdhCloseQuery", ExactSpelling = true)]
-    private static extern uint PdhCloseQueryNative(IntPtr hQuery);
+    [LibraryImport("pdh.dll", EntryPoint = "PdhCloseQuery")]
+    private static partial uint PdhCloseQueryNative(IntPtr hQuery);
 
-    [DllImport("ntdll.dll", EntryPoint = "NtQuerySystemInformation", ExactSpelling = true)]
-    private static extern int NtQuerySystemInformationNative(
+    [LibraryImport("ntdll.dll", EntryPoint = "NtQuerySystemInformation")]
+    private static partial int NtQuerySystemInformationNative(
         int systemInformationClass,
         IntPtr systemInformation,
         uint systemInformationLength,
         out uint returnLength);
+
+    private static unsafe int DxgiEnumAdapters1(IntPtr factory, uint index, out IntPtr adapter)
+    {
+        var fn = (delegate* unmanaged[Stdcall]<IntPtr, uint, IntPtr*, int>)ComVtable.SlotPointer(
+            factory,
+            DxgiFactory1EnumAdapters1Slot);
+        fixed (IntPtr* adapterPtr = &adapter)
+        {
+            return fn(factory, index, adapterPtr);
+        }
+    }
+
+    private static unsafe int DxgiGetDesc1(IntPtr adapter, out DxgiAdapterDesc1 desc)
+    {
+        var fn = (delegate* unmanaged[Stdcall]<IntPtr, DxgiAdapterDesc1*, int>)ComVtable.SlotPointer(
+            adapter,
+            DxgiAdapter1GetDesc1Slot);
+        fixed (DxgiAdapterDesc1* descPtr = &desc)
+        {
+            return fn(adapter, descPtr);
+        }
+    }
+
+    private static unsafe int InvokeDxgiQueryVideoMemoryInfo(
+        IntPtr adapter3,
+        uint nodeIndex,
+        int memorySegmentGroup,
+        out DxgiQueryVideoMemoryInfo info)
+    {
+        var fn = (delegate* unmanaged[Stdcall]<IntPtr, uint, int, DxgiQueryVideoMemoryInfo*, int>)ComVtable.SlotPointer(
+            adapter3,
+            DxgiAdapter3QueryVideoMemoryInfoSlot);
+        fixed (DxgiQueryVideoMemoryInfo* infoPtr = &info)
+        {
+            return fn(adapter3, nodeIndex, memorySegmentGroup, infoPtr);
+        }
+    }
 
     /// <summary>
     /// Sums active non-loopback, non-tunnel, non-filter adapter octet counters
@@ -323,13 +348,12 @@ internal static class CustomWidgetNativeMetrics
                 return false;
             }
 
-            var enumAdapters = ComVtable.Slot<EnumAdapters1Invoker>(factory, DxgiFactory1EnumAdapters1Slot);
             DxgiAdapterDesc1 bestDesc = default;
             ulong bestScore = 0;
 
             for (uint index = 0; index < 16; index++)
             {
-                int hr = enumAdapters(factory, index, out IntPtr candidate);
+                int hr = DxgiEnumAdapters1(factory, index, out IntPtr candidate);
                 if (hr == DxgiErrorNotFound || hr < 0 || candidate == IntPtr.Zero)
                 {
                     break;
@@ -337,8 +361,7 @@ internal static class CustomWidgetNativeMetrics
 
                 try
                 {
-                    var getDesc1 = ComVtable.Slot<GetDesc1Invoker>(candidate, DxgiAdapter1GetDesc1Slot);
-                    if (getDesc1(candidate, out DxgiAdapterDesc1 desc) < 0)
+                    if (DxgiGetDesc1(candidate, out DxgiAdapterDesc1 desc) < 0)
                     {
                         continue;
                     }
@@ -504,17 +527,14 @@ internal static class CustomWidgetNativeMetrics
     {
         usedBytes = 0;
         totalBytes = 0;
-        var queryMem = ComVtable.Slot<QueryVideoMemoryInfoInvoker>(
-            adapter3,
-            DxgiAdapter3QueryVideoMemoryInfoSlot);
 
         if (useShared)
         {
             // UMA integrated GPUs expose their primary shared memory pool under Local (0) with NonLocal (1) Budget == 0.
-            int hr = queryMem(adapter3, 0, DxgiMemorySegmentGroupNonLocal, out DxgiQueryVideoMemoryInfo memInfo);
+            int hr = InvokeDxgiQueryVideoMemoryInfo(adapter3, 0, DxgiMemorySegmentGroupNonLocal, out DxgiQueryVideoMemoryInfo memInfo);
             if (hr < 0 || memInfo.Budget == 0)
             {
-                hr = queryMem(adapter3, 0, DxgiMemorySegmentGroupLocal, out memInfo);
+                hr = InvokeDxgiQueryVideoMemoryInfo(adapter3, 0, DxgiMemorySegmentGroupLocal, out memInfo);
             }
 
             if (hr >= 0)
@@ -527,7 +547,7 @@ internal static class CustomWidgetNativeMetrics
             return false;
         }
 
-        if (queryMem(adapter3, 0, DxgiMemorySegmentGroupLocal, out DxgiQueryVideoMemoryInfo localInfo) >= 0)
+        if (InvokeDxgiQueryVideoMemoryInfo(adapter3, 0, DxgiMemorySegmentGroupLocal, out DxgiQueryVideoMemoryInfo localInfo) >= 0)
         {
             totalBytes = dedicatedTotal > 0 ? dedicatedTotal : localInfo.Budget;
             usedBytes = totalBytes > 0 ? Math.Min(localInfo.CurrentUsage, totalBytes) : localInfo.CurrentUsage;
@@ -738,13 +758,12 @@ internal static class CustomWidgetNativeMetrics
                     return false;
                 }
 
-                var enumAdapters = ComVtable.Slot<EnumAdapters1Invoker>(factory, DxgiFactory1EnumAdapters1Slot);
                 DxgiAdapterDesc1 bestDesc = default;
                 ulong bestScore = 0;
 
                 for (uint index = 0; index < 16; index++)
                 {
-                    int hr = enumAdapters(factory, index, out IntPtr candidate);
+                    int hr = DxgiEnumAdapters1(factory, index, out IntPtr candidate);
                     if (hr == DxgiErrorNotFound || hr < 0 || candidate == IntPtr.Zero)
                     {
                         break;
@@ -752,8 +771,7 @@ internal static class CustomWidgetNativeMetrics
 
                     try
                     {
-                        var getDesc1 = ComVtable.Slot<GetDesc1Invoker>(candidate, DxgiAdapter1GetDesc1Slot);
-                        if (getDesc1(candidate, out DxgiAdapterDesc1 desc) < 0 ||
+                        if (DxgiGetDesc1(candidate, out DxgiAdapterDesc1 desc) < 0 ||
                             (desc.Flags & DxgiAdapterFlagSoftware) != 0)
                         {
                             continue;
@@ -1202,6 +1220,17 @@ internal static class CustomWidgetNativeMetrics
         }
     }
 
+    internal static ReadOnlySpan<char> NormalizeExeGroupKeySpan(ReadOnlySpan<char> exeName)
+    {
+        ReadOnlySpan<char> trimmed = exeName.Trim();
+        if (trimmed.EndsWith(".exe".AsSpan(), StringComparison.OrdinalIgnoreCase))
+        {
+            trimmed = trimmed[..^4];
+        }
+
+        return trimmed;
+    }
+
     /// <summary>
     /// Reads all active user/service processes in a single NTDLL kernel snapshot without
     /// allocating <c>System.Diagnostics.Process</c> instances or opening process handles.
@@ -1210,8 +1239,14 @@ internal static class CustomWidgetNativeMetrics
     {
         private IntPtr _buffer;
         private uint _bufferSize;
+        private Dictionary<string, string>? _knownRawNames;
+        private Dictionary<string, string>? _knownNormalizedGroupKeys;
 
-        public bool TryReadProcesses(List<RawProcessSample> output)
+        public unsafe bool TryReadProcesses(
+            List<RawProcessSample> output,
+            Dictionary<uint, (ulong CreateTime, string? GroupKey)>? pidGroupCache = null,
+            Func<string, string>? groupKeyNormalizer = null,
+            bool normalizeExeGroupKey = false)
         {
             output.Clear();
             if (IntPtr.Size != 8)
@@ -1254,6 +1289,11 @@ internal static class CustomWidgetNativeMetrics
                     return false;
                 }
 
+                if (pidGroupCache is { Count: > 2048 })
+                {
+                    pidGroupCache.Clear();
+                }
+
                 int offset = 0;
                 int maxOffset = (int)_bufferSize - SpiMinStructSize;
                 int guard = 0;
@@ -1266,29 +1306,69 @@ internal static class CustomWidgetNativeMetrics
                     // Skip System Idle Process (0) and kernel System (4)
                     if (pid is not 0 and not 4)
                     {
-                        ushort nameByteLen = unchecked((ushort)Marshal.ReadInt16(entryPtr, SpiImageNameLengthOffset));
-                        IntPtr nameBufPtr = Marshal.ReadIntPtr(entryPtr, SpiImageNameBufferOffset);
-                        int charLen = nameByteLen / 2;
-
-                        if (charLen > 0 && charLen <= 260 && nameBufPtr != IntPtr.Zero)
+                        ulong createTime = unchecked((ulong)Marshal.ReadInt64(entryPtr, SpiCreateTimeOffset));
+                        string? groupKey = null;
+                        bool resolvedFromCache = false;
+                        if (pidGroupCache is not null &&
+                            pidGroupCache.TryGetValue(pid, out (ulong CreateTime, string? GroupKey) cachedEntry) &&
+                            cachedEntry.CreateTime == createTime)
                         {
-                            string exeName = Marshal.PtrToStringUni(nameBufPtr, charLen);
-                            if (!IsKernelPseudoProcess(exeName))
-                            {
-                                ulong userTicks = unchecked((ulong)Marshal.ReadInt64(entryPtr, SpiUserTimeOffset));
-                                ulong kernelTicks = unchecked((ulong)Marshal.ReadInt64(entryPtr, SpiKernelTimeOffset));
-                                long privateBytes = Marshal.ReadInt64(entryPtr, SpiWorkingSetPrivateSizeOffset);
-                                if (privateBytes <= 0)
-                                {
-                                    privateBytes = Marshal.ReadIntPtr(entryPtr, SpiWorkingSetSizeOffset).ToInt64();
-                                }
+                            groupKey = cachedEntry.GroupKey;
+                            resolvedFromCache = true;
+                        }
 
-                                output.Add(new RawProcessSample(
-                                    pid,
-                                    exeName,
-                                    unchecked(userTicks + kernelTicks),
-                                    Math.Max(0, privateBytes)));
+                        if (!resolvedFromCache)
+                        {
+                            ushort nameByteLen = unchecked((ushort)Marshal.ReadInt16(entryPtr, SpiImageNameLengthOffset));
+                            IntPtr nameBufPtr = Marshal.ReadIntPtr(entryPtr, SpiImageNameBufferOffset);
+                            int charLen = nameByteLen / 2;
+
+                            if (charLen > 0 && charLen <= 260 && nameBufPtr != IntPtr.Zero)
+                            {
+                                ReadOnlySpan<char> exeNameSpan = new((char*)nameBufPtr, charLen);
+                                if (!IsKernelPseudoProcess(exeNameSpan))
+                                {
+                                    if (groupKeyNormalizer is not null)
+                                    {
+                                        string rawName = InternSpan(ref _knownRawNames, exeNameSpan, StringComparer.Ordinal);
+                                        groupKey = groupKeyNormalizer(rawName);
+                                    }
+                                    else if (normalizeExeGroupKey)
+                                    {
+                                        ReadOnlySpan<char> normalizedSpan = NormalizeExeGroupKeySpan(exeNameSpan);
+                                        if (!normalizedSpan.IsEmpty)
+                                        {
+                                            groupKey = InternSpan(ref _knownNormalizedGroupKeys, normalizedSpan, StringComparer.OrdinalIgnoreCase);
+                                        }
+                                    }
+                                    else
+                                    {
+                                        groupKey = InternSpan(ref _knownRawNames, exeNameSpan, StringComparer.Ordinal);
+                                    }
+                                }
                             }
+
+                            if (pidGroupCache is not null)
+                            {
+                                pidGroupCache[pid] = (createTime, groupKey);
+                            }
+                        }
+
+                        if (!string.IsNullOrEmpty(groupKey))
+                        {
+                            ulong userTicks = unchecked((ulong)Marshal.ReadInt64(entryPtr, SpiUserTimeOffset));
+                            ulong kernelTicks = unchecked((ulong)Marshal.ReadInt64(entryPtr, SpiKernelTimeOffset));
+                            long privateBytes = Marshal.ReadInt64(entryPtr, SpiWorkingSetPrivateSizeOffset);
+                            if (privateBytes <= 0)
+                            {
+                                privateBytes = Marshal.ReadIntPtr(entryPtr, SpiWorkingSetSizeOffset).ToInt64();
+                            }
+
+                            output.Add(new RawProcessSample(
+                                pid,
+                                groupKey,
+                                unchecked(userTicks + kernelTicks),
+                                Math.Max(0, privateBytes)));
                         }
                     }
 
@@ -1309,12 +1389,34 @@ internal static class CustomWidgetNativeMetrics
             }
         }
 
-        private static bool IsKernelPseudoProcess(string exeName) =>
-            string.Equals(exeName, "Registry", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(exeName, "MemCompression", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(exeName, "Memory Compression", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(exeName, "Secure System", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(exeName, "System Idle Process", StringComparison.OrdinalIgnoreCase);
+        private static string InternSpan(
+            ref Dictionary<string, string>? table,
+            ReadOnlySpan<char> span,
+            StringComparer comparer)
+        {
+            Dictionary<string, string> dict = table ??= new Dictionary<string, string>(128, comparer);
+            if (dict.Count > 1024)
+            {
+                dict.Clear();
+            }
+
+            Dictionary<string, string>.AlternateLookup<ReadOnlySpan<char>> lookup =
+                dict.GetAlternateLookup<ReadOnlySpan<char>>();
+            if (!lookup.TryGetValue(span, out string? interned))
+            {
+                interned = span.ToString();
+                dict[interned] = interned;
+            }
+
+            return interned;
+        }
+
+        private static bool IsKernelPseudoProcess(ReadOnlySpan<char> exeName) =>
+            exeName.Equals("Registry".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+            exeName.Equals("MemCompression".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+            exeName.Equals("Memory Compression".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+            exeName.Equals("Secure System".AsSpan(), StringComparison.OrdinalIgnoreCase) ||
+            exeName.Equals("System Idle Process".AsSpan(), StringComparison.OrdinalIgnoreCase);
 
         private void AllocateBuffer(uint sizeBytes)
         {
@@ -1337,6 +1439,9 @@ internal static class CustomWidgetNativeMetrics
                 _buffer = IntPtr.Zero;
                 _bufferSize = 0;
             }
+
+            _knownRawNames?.Clear();
+            _knownNormalizedGroupKeys?.Clear();
         }
     }
 }

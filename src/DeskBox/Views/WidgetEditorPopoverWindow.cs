@@ -40,7 +40,7 @@ internal enum WidgetPopoverPlacement
 /// by popup content sharing the owner widget's <see cref="XamlRoot"/> across
 /// separate top-level HWNDs at non-100% DPI scales.</para>
 /// </summary>
-internal sealed class WidgetEditorPopoverWindow : Window
+internal sealed partial class WidgetEditorPopoverWindow : Window
 {
     private const uint GwChild = 5;
     private const int VkProcessKey = 229;
@@ -63,17 +63,21 @@ internal sealed class WidgetEditorPopoverWindow : Window
     private static bool s_lastLightDismissHasCursor;
     private static long s_lastLightDismissTickMs;
 
+    internal static Func<string?>? DefaultCornerPreferenceProvider { get; set; }
+
     private readonly AppWindow _appWindow;
     private readonly IntPtr _ownerWindowHandle;
+    private readonly string? _cornerPreferenceOverride;
     private readonly Grid _hostRoot;
     private readonly Border _surfaceBorder;
     private readonly ScrollViewer _scrollViewer;
-    private readonly string _backdropKind;
+    private WidgetMaterialSystemBackdrop? _materialBackdrop;
+    private SolidTintSystemBackdrop? _fallbackTransparentBackdrop;
     private readonly KeyEventHandler _previewKeyDownHandler;
     private readonly KeyEventHandler _keyDownHandler;
     private readonly PointerEventHandler _pointerPressedHandler;
     private readonly RightTappedEventHandler _rightTappedHandler;
-    private readonly HashSet<Popup> _watchedChildPopups = [];
+    private readonly Dictionary<Popup, EventHandler<object>> _watchedChildPopups = [];
     private readonly HashSet<DependencyObject> _imeTrackedControls = [];
 
     private FlyoutBridgeBandPromoter? _bridgeBandPromoter;
@@ -100,10 +104,16 @@ internal sealed class WidgetEditorPopoverWindow : Window
     private int _activeCompositionCount;
     private long _lastCompositionEndedTickMs = -10_000;
 
-    public WidgetEditorPopoverWindow(IntPtr ownerWindowHandle, string? title = null)
+    public bool SuppressDeactivationDismiss { get; set; }
+
+    public WidgetEditorPopoverWindow(
+        IntPtr ownerWindowHandle,
+        string? title = null,
+        string? cornerPreference = null)
     {
         Title = string.IsNullOrWhiteSpace(title) ? "DeskBox Popover" : title;
         _ownerWindowHandle = ownerWindowHandle;
+        _cornerPreferenceOverride = cornerPreference;
 
         WindowHandle = WindowNative.GetWindowHandle(this);
         WindowId windowId = Win32Interop.GetWindowIdFromWindow(WindowHandle);
@@ -112,7 +122,6 @@ internal sealed class WidgetEditorPopoverWindow : Window
         WindowShellState.TryApplyBorderlessOverlappedPresenter(_appWindow);
 
         ConfigureWindowStyles();
-        _backdropKind = WindowsCompatibilityService.ApplySafeBackdrop(this, preferMica: false);
 
         _scrollViewer = new ScrollViewer
         {
@@ -122,17 +131,22 @@ internal sealed class WidgetEditorPopoverWindow : Window
             HorizontalScrollMode = ScrollMode.Disabled
         };
 
+        double initialCorner = ResolveEffectivePopoverCornerRadius();
         _surfaceBorder = new Border
         {
-            CornerRadius = WindowsCompatibilityService.SupportsNativeWindowCorners
-                ? new CornerRadius(8)
-                : new CornerRadius(0),
+            CornerRadius = new CornerRadius(initialCorner),
             BorderThickness = new Thickness(1),
             Padding = new Thickness(14, 12, 14, 14),
             Child = _scrollViewer
         };
 
+        var backdropElement = new SystemBackdropElement
+        {
+            IsHitTestVisible = false,
+            Visibility = Visibility.Collapsed
+        };
         _hostRoot = new Grid();
+        _hostRoot.Children.Add(backdropElement);
         _hostRoot.Children.Add(_surfaceBorder);
 
         _previewKeyDownHandler = new KeyEventHandler(HostRoot_PreviewKeyDown);
@@ -483,8 +497,7 @@ internal sealed class WidgetEditorPopoverWindow : Window
         _hostRoot.FlowDirection = anchor.FlowDirection;
         _hostRoot.RequestedTheme = isDark ? ElementTheme.Dark : ElementTheme.Light;
         Win32Helper.SetWindowTheme(WindowHandle, isDark);
-        Win32Helper.DisableWindowFrameShadow(WindowHandle);
-        ApplySurfaceThemeBrushes(isDark);
+        ApplyWindowAppearance(isDark);
 
         ++_showSessionId;
         RectInt32 targetBounds = MeasureAndComputeTargetBounds();
@@ -516,6 +529,14 @@ internal sealed class WidgetEditorPopoverWindow : Window
             Win32Helper.SWP_SHOWWINDOW | Win32Helper.SWP_NOOWNERZORDER);
 
         SetCloaked(false);
+        bool placedAboveAnchor = _anchor is { IsLoaded: true } &&
+                                 _ownerWindowHandle != IntPtr.Zero &&
+                                 Win32Helper.GetWindowRect(_ownerWindowHandle, out Win32Helper.RECT ownerBoundsForMotion) &&
+                                 targetBounds.Y < ownerBoundsForMotion.Top;
+        FluentMotionHelper.PlayEntranceSlideAndFade(
+            _hostRoot,
+            offsetY: placedAboveAnchor ? 6f : -6f,
+            durationMs: 150);
         ActivateInput(initialFocusTarget);
         App.Current?.WidgetManager?.ReassertRaisedWidgetGroupAfterDeskBoxActivation(
             _ownerWindowHandle,
@@ -690,7 +711,7 @@ internal sealed class WidgetEditorPopoverWindow : Window
 
         NotifyPopoverClosedOnce();
 
-        SystemBackdrop = null;
+        ReleaseAndDisposeBackdrops();
         _scrollViewer.Content = null;
         _content = null;
         _anchor = null;
@@ -887,9 +908,19 @@ internal sealed class WidgetEditorPopoverWindow : Window
         double chromeHorzDip = pad.Left + pad.Right + BorderStrokeHorizontalDip;
         double chromeVertDip = pad.Top + pad.Bottom + BorderStrokeVerticalDip;
 
-        double maxWindowHeightDip = Math.Max(
-            160,
-            ((workArea.Bottom - workArea.Top) / targetScale) - (ScreenMarginDip * 2));
+        double fullWorkHeightDip = ((workArea.Bottom - workArea.Top) / targetScale) - (ScreenMarginDip * 2);
+        double maxWindowHeightDip;
+        if (_placement is WidgetPopoverPlacement.Bottom or WidgetPopoverPlacement.BottomRight)
+        {
+            double roomBelowDip = ((workArea.Bottom - anchorRect.Bottom) / targetScale) - AnchorGapDip - ScreenMarginDip;
+            double roomAboveDip = ((anchorRect.Top - workArea.Top) / targetScale) - AnchorGapDip - ScreenMarginDip;
+            double bestDirectionalRoomDip = Math.Max(roomBelowDip, roomAboveDip);
+            maxWindowHeightDip = Math.Clamp(bestDirectionalRoomDip, 180, Math.Max(180, fullWorkHeightDip));
+        }
+        else
+        {
+            maxWindowHeightDip = Math.Max(160, fullWorkHeightDip);
+        }
         double maxContentWidthDip = Math.Max(140, _maxWidthDip - chromeHorzDip);
         double minContentWidthDip = Math.Max(120, _minWidthDip - chromeHorzDip);
 
@@ -1155,6 +1186,11 @@ internal sealed class WidgetEditorPopoverWindow : Window
             return;
         }
 
+        if (SuppressDeactivationDismiss)
+        {
+            return;
+        }
+
         bool hasCursor = Win32Helper.GetCursorPos(out Win32Helper.POINT deactivationCursor);
         long sessionId = _showSessionId;
 
@@ -1174,7 +1210,7 @@ internal sealed class WidgetEditorPopoverWindow : Window
 
     private void ReconcilePostDeactivation(long sessionId, Win32Helper.POINT? deactivationCursor)
     {
-        if (!IsShown || sessionId != _showSessionId)
+        if (!IsShown || sessionId != _showSessionId || SuppressDeactivationDismiss)
         {
             return;
         }
@@ -1262,7 +1298,7 @@ internal sealed class WidgetEditorPopoverWindow : Window
     {
         foreach (Popup popup in popups)
         {
-            if (!_watchedChildPopups.Add(popup))
+            if (_watchedChildPopups.ContainsKey(popup))
             {
                 continue;
             }
@@ -1291,12 +1327,19 @@ internal sealed class WidgetEditorPopoverWindow : Window
                 });
             }
 
-            captured.Closed += OnChildPopupClosed;
+            EventHandler<object> handler = OnChildPopupClosed;
+            _watchedChildPopups[captured] = handler;
+            captured.Closed += handler;
         }
     }
 
     private void UnwatchAllChildPopups()
     {
+        foreach ((Popup popup, EventHandler<object> handler) in _watchedChildPopups)
+        {
+            popup.Closed -= handler;
+        }
+
         _watchedChildPopups.Clear();
     }
 
@@ -1386,9 +1429,14 @@ internal sealed class WidgetEditorPopoverWindow : Window
 
         AttachImeCompositionTrackingSingle(root);
         int count = VisualTreeHelper.GetChildrenCount(root);
-        for (int i = 0; i < count; i++)
+        if (count > 0)
         {
-            AttachImeCompositionTrackingRecursive(VisualTreeHelper.GetChild(root, i));
+            for (int i = 0; i < count; i++)
+            {
+                AttachImeCompositionTrackingRecursive(VisualTreeHelper.GetChild(root, i));
+            }
+
+            return;
         }
 
         if (root is Panel panel)
@@ -1414,22 +1462,19 @@ internal sealed class WidgetEditorPopoverWindow : Window
 
     private void AttachImeCompositionTrackingSingle(DependencyObject node)
     {
-        for (DependencyObject? cur = node; cur is not null; cur = VisualTreeHelper.GetParent(cur))
+        if (node is TextBox tb && _imeTrackedControls.Add(tb))
         {
-            if (cur is TextBox tb && _imeTrackedControls.Add(tb))
-            {
-                tb.TextCompositionStarted += TextBox_TextCompositionStarted;
-                tb.TextCompositionEnded += TextBox_TextCompositionEnded;
-            }
-            else if (cur is RichEditBox reb && _imeTrackedControls.Add(reb))
-            {
-                reb.TextCompositionStarted += RichEditBox_TextCompositionStarted;
-                reb.TextCompositionEnded += RichEditBox_TextCompositionEnded;
-            }
-            else if (cur is AutoSuggestBox asb && _imeTrackedControls.Add(asb))
-            {
-                asb.Loaded += AutoSuggestBox_LoadedAttachIme;
-            }
+            tb.TextCompositionStarted += TextBox_TextCompositionStarted;
+            tb.TextCompositionEnded += TextBox_TextCompositionEnded;
+        }
+        else if (node is RichEditBox reb && _imeTrackedControls.Add(reb))
+        {
+            reb.TextCompositionStarted += RichEditBox_TextCompositionStarted;
+            reb.TextCompositionEnded += RichEditBox_TextCompositionEnded;
+        }
+        else if (node is AutoSuggestBox asb && _imeTrackedControls.Add(asb))
+        {
+            asb.Loaded += AutoSuggestBox_LoadedAttachIme;
         }
     }
 
@@ -1606,7 +1651,7 @@ internal sealed class WidgetEditorPopoverWindow : Window
             _hostRoot.GotFocus -= HostRoot_GotFocus;
         }
 
-        SystemBackdrop = null;
+        ReleaseAndDisposeBackdrops();
         _scrollViewer.Content = null;
         _content = null;
         _anchor = null;
@@ -1710,21 +1755,38 @@ internal sealed class WidgetEditorPopoverWindow : Window
             Win32Helper.SWP_NOACTIVATE |
             Win32Helper.SWP_FRAMECHANGED);
 
-        if (WindowsCompatibilityService.SupportsNativeWindowCorners)
-        {
-            int cornerPreference = Win32Helper.DWMWCP_ROUND;
-            Win32Helper.TrySetDwmWindowAttribute(
-                WindowHandle,
-                Win32Helper.DWMWA_WINDOW_CORNER_PREFERENCE,
-                ref cornerPreference);
-        }
-
         Win32Helper.DisableWindowFrameShadow(WindowHandle);
         SetCloaked(true);
     }
 
-    private void ApplySurfaceThemeBrushes(bool isDark)
+    private double ResolveEffectivePopoverCornerRadius()
     {
+        string? configured = !string.IsNullOrWhiteSpace(_cornerPreferenceOverride)
+            ? _cornerPreferenceOverride
+            : DefaultCornerPreferenceProvider?.Invoke();
+        string effectivePref = WindowsCompatibilityService.ResolveEffectiveWidgetCornerPreference(configured);
+        return WidgetCompactBoundsCalculator.ResolveOuterCornerRadius(effectivePref);
+    }
+
+    private SystemBackdropElement? FindBackdropElement()
+    {
+        foreach (UIElement child in _hostRoot.Children)
+        {
+            if (child is SystemBackdropElement sbe)
+            {
+                return sbe;
+            }
+        }
+
+        return null;
+    }
+
+    private void ApplyWindowAppearance(bool isDark)
+    {
+        Win32Helper.DisableWindowFrameShadow(WindowHandle);
+        double cornerRadius = ResolveEffectivePopoverCornerRadius();
+        _surfaceBorder.CornerRadius = new CornerRadius(cornerRadius);
+
         bool highContrast = false;
         try
         {
@@ -1736,32 +1798,122 @@ internal sealed class WidgetEditorPopoverWindow : Window
 
         if (highContrast)
         {
+            ReleaseAndDisposeBackdrops();
             var uiSettings = new UISettings();
             _surfaceBorder.Background = new SolidColorBrush(uiSettings.UIElementColor(UIElementType.Window));
             _surfaceBorder.BorderBrush = new SolidColorBrush(uiSettings.UIElementColor(UIElementType.WindowText));
             return;
         }
 
+        bool transparentHostAttached = false;
+        try
+        {
+            Win32Helper.EnableTransparentWindowHost(WindowHandle);
+            _fallbackTransparentBackdrop ??= new SolidTintSystemBackdrop(
+                Windows.UI.Color.FromArgb(0, 0, 0, 0));
+            if (!ReferenceEquals(SystemBackdrop, _fallbackTransparentBackdrop))
+            {
+                SystemBackdrop = _fallbackTransparentBackdrop;
+            }
+            transparentHostAttached = true;
+        }
+        catch
+        {
+            DisposeFallbackBackdrop();
+            SystemBackdrop = null;
+        }
+
+        SystemBackdropElement? backdropEl = FindBackdropElement();
+        bool materialActive = false;
+        if (transparentHostAttached &&
+            backdropEl is not null &&
+            WindowsCompatibilityService.SupportsDesktopAcrylic)
+        {
+            try
+            {
+                var appearance = new WidgetMaterialBackdropAppearance(
+                    SettingsService.WidgetMaterialTypeAcrylic,
+                    isDark,
+                    AccentColorHelper.DefaultAccentColor,
+                    SurfaceOpacity: isDark ? 0.88 : 0.90,
+                    MaterialIntensity: 0.52);
+                _materialBackdrop ??= new WidgetMaterialSystemBackdrop(
+                    appearance,
+                    closeElementTargetOnDisconnect: true);
+                _materialBackdrop.SetCornerRadius(Math.Max(0, cornerRadius));
+                _materialBackdrop.UpdateAppearance(appearance);
+                backdropEl.CornerRadius = default;
+                backdropEl.Visibility = Visibility.Visible;
+                if (!ReferenceEquals(backdropEl.SystemBackdrop, _materialBackdrop))
+                {
+                    backdropEl.SystemBackdrop = _materialBackdrop;
+                }
+                materialActive = true;
+            }
+            catch
+            {
+                backdropEl.Visibility = Visibility.Collapsed;
+                backdropEl.SystemBackdrop = null;
+                DisposeMaterialBackdrop();
+            }
+        }
+        else if (backdropEl is not null)
+        {
+            backdropEl.Visibility = Visibility.Collapsed;
+            backdropEl.SystemBackdrop = null;
+        }
+
         _surfaceBorder.BorderBrush =
             NeutralInteractionBrush.ResolveThemedResource("SurfaceStrokeColorFlyoutBrush", _hostRoot)
             ?? NeutralInteractionBrush.ResolveThemedResource("CardStrokeColorDefaultBrush", _hostRoot)
             ?? new SolidColorBrush(isDark
-                ? Windows.UI.Color.FromArgb(96, 255, 255, 255)
-                : Windows.UI.Color.FromArgb(64, 0, 0, 0));
+                ? Windows.UI.Color.FromArgb(72, 255, 255, 255)
+                : Windows.UI.Color.FromArgb(46, 0, 0, 0));
 
-        if (string.Equals(_backdropKind, "Solid", StringComparison.Ordinal) ||
-            !WindowsCompatibilityService.SupportsNativeWindowCorners)
+        if (materialActive)
         {
+            // Light contrast veil over rounded DesktopAcrylic matching StackPopoverHostWindow & Fluent 2 Flyout.
             _surfaceBorder.Background = new SolidColorBrush(isDark
-                ? Windows.UI.Color.FromArgb(255, 36, 36, 36)
-                : Windows.UI.Color.FromArgb(255, 249, 249, 249));
+                ? Windows.UI.Color.FromArgb(108, 30, 30, 34)
+                : Windows.UI.Color.FromArgb(132, 252, 252, 254));
         }
         else
         {
-            // Subtle tint over DesktopAcrylic so text and input controls match Fluent 2 Flyout contrast.
             _surfaceBorder.Background = new SolidColorBrush(isDark
-                ? Windows.UI.Color.FromArgb(148, 32, 32, 36)
-                : Windows.UI.Color.FromArgb(168, 250, 250, 252));
+                ? Windows.UI.Color.FromArgb(248, 36, 36, 40)
+                : Windows.UI.Color.FromArgb(248, 250, 250, 252));
+        }
+    }
+
+    private void ReleaseAndDisposeBackdrops()
+    {
+        if (FindBackdropElement() is { } backdropEl)
+        {
+            backdropEl.Visibility = Visibility.Collapsed;
+            backdropEl.SystemBackdrop = null;
+        }
+
+        DisposeMaterialBackdrop();
+        SystemBackdrop = null;
+        DisposeFallbackBackdrop();
+        Win32Helper.DisableTransparentWindowHost(WindowHandle);
+    }
+
+    private void DisposeMaterialBackdrop()
+    {
+        if (_materialBackdrop is not null)
+        {
+            try { _materialBackdrop.Dispose(); } catch { }
+            _materialBackdrop = null;
+        }
+    }
+
+    private void DisposeFallbackBackdrop()
+    {
+        if (_fallbackTransparentBackdrop is not null)
+        {
+            try { _fallbackTransparentBackdrop.Dispose(); } catch { }
+            _fallbackTransparentBackdrop = null;
         }
     }
 

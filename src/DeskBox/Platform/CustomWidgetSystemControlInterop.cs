@@ -8,6 +8,10 @@ internal static class CustomWidgetSystemControlInterop
     private const uint EsContinuous = 0x80000000;
     private const uint EsSystemRequired = 0x00000001;
     private const uint EsDisplayRequired = 0x00000002;
+    private const uint PowerRequestContextVersion = 0;
+    private const uint PowerRequestContextSimpleString = 0x00000001;
+    private const int PowerRequestDisplayRequired = 0;
+    private const int PowerRequestSystemRequired = 1;
     private const uint KeyEventfKeyUp = 0x0002;
 
     private const uint GenericRead = 0x80000000;
@@ -22,6 +26,45 @@ internal static class CustomWidgetSystemControlInterop
     private const byte DisplayPolicyBoth = 0x03;
 
     private const uint MonitorDefaultToPrimary = 0x00000001;
+    private const uint SndAsync = 0x0001;
+    private const uint SndNodefault = 0x0002;
+    private const uint SndMemory = 0x0004;
+
+    private static readonly object PlaySoundSync = new();
+    private static readonly object KeepAwakeSync = new();
+    private static byte[]? s_activePlaySoundBuffer;
+    private static IntPtr s_keepAwakePowerRequest;
+
+    [DllImport("winmm.dll", ExactSpelling = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool PlaySoundW(IntPtr pszSound, IntPtr hmod, uint fdwSound);
+
+    internal static void PlayPinnedWaveMemoryAsync(byte[] pinnedWav)
+    {
+        lock (PlaySoundSync)
+        {
+            if (s_activePlaySoundBuffer is not null)
+            {
+                _ = PlaySoundW(IntPtr.Zero, IntPtr.Zero, SndNodefault);
+            }
+
+            s_activePlaySoundBuffer = pinnedWav;
+            IntPtr bufferPtr = Marshal.UnsafeAddrOfPinnedArrayElement(pinnedWav, 0);
+            _ = PlaySoundW(bufferPtr, IntPtr.Zero, SndMemory | SndAsync | SndNodefault);
+        }
+    }
+
+    internal static void StopPinnedWaveMemory()
+    {
+        lock (PlaySoundSync)
+        {
+            if (s_activePlaySoundBuffer is not null)
+            {
+                _ = PlaySoundW(IntPtr.Zero, IntPtr.Zero, SndNodefault);
+                s_activePlaySoundBuffer = null;
+            }
+        }
+    }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct DisplayBrightness
@@ -38,17 +81,37 @@ internal static class CustomWidgetSystemControlInterop
         public int Y;
     }
 
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private struct PhysicalMonitor
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode, Pack = 1)]
+    public unsafe struct PhysicalMonitor
     {
         public IntPtr hPhysicalMonitor;
+        public fixed char szPhysicalMonitorDescription[128];
+    }
 
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
-        public string szPhysicalMonitorDescription;
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ReasonContext
+    {
+        public uint Version;
+        public uint Flags;
+        public IntPtr SimpleReasonString;
+        public uint Reserved1;
+        public uint Reserved2;
+        public IntPtr Reserved3;
     }
 
     [DllImport("kernel32.dll", ExactSpelling = true)]
     private static extern uint SetThreadExecutionState(uint esFlags);
+
+    [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
+    private static extern IntPtr PowerCreateRequest(ref ReasonContext context);
+
+    [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool PowerSetRequest(IntPtr powerRequest, int requestType);
+
+    [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool PowerClearRequest(IntPtr powerRequest, int requestType);
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true, ExactSpelling = true)]
     private static extern SafeFileHandle CreateFileW(
@@ -61,6 +124,7 @@ internal static class CustomWidgetSystemControlInterop
         IntPtr hTemplateFile);
 
     [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool DeviceIoControl(
         SafeFileHandle hDevice,
         uint dwIoControlCode,
@@ -72,6 +136,7 @@ internal static class CustomWidgetSystemControlInterop
         IntPtr lpOverlapped);
 
     [DllImport("user32.dll", ExactSpelling = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool LockWorkStation();
 
     [DllImport("user32.dll", ExactSpelling = true)]
@@ -81,15 +146,18 @@ internal static class CustomWidgetSystemControlInterop
     private static extern IntPtr MonitorFromPoint(NativePoint pt, uint dwFlags);
 
     [DllImport("dxva2.dll", ExactSpelling = true, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetNumberOfPhysicalMonitorsFromHMONITOR(IntPtr hMonitor, out uint pdwNumberOfPhysicalMonitors);
 
-    [DllImport("dxva2.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
-    private static extern bool GetPhysicalMonitorsFromHMONITOR(
+    [DllImport("dxva2.dll", ExactSpelling = true, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern unsafe bool GetPhysicalMonitorsFromHMONITOR(
         IntPtr hMonitor,
         uint dwPhysicalMonitorArraySize,
-        [Out] PhysicalMonitor[] pPhysicalMonitorArray);
+        PhysicalMonitor* pPhysicalMonitorArray);
 
     [DllImport("dxva2.dll", ExactSpelling = true, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetMonitorBrightness(
         IntPtr hMonitor,
         out uint pdwMinimumBrightness,
@@ -97,15 +165,55 @@ internal static class CustomWidgetSystemControlInterop
         out uint pdwMaximumBrightness);
 
     [DllImport("dxva2.dll", ExactSpelling = true, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool SetMonitorBrightness(IntPtr hMonitor, uint dwNewBrightness);
 
     [DllImport("dxva2.dll", ExactSpelling = true, SetLastError = true)]
-    private static extern bool DestroyPhysicalMonitors(
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern unsafe bool DestroyPhysicalMonitors(
         uint dwPhysicalMonitorArraySize,
-        [In] PhysicalMonitor[] pPhysicalMonitorArray);
+        PhysicalMonitor* pPhysicalMonitorArray);
 
     internal static void SetKeepAwakeExecutionState(bool enable)
     {
+        lock (KeepAwakeSync)
+        {
+            if (enable)
+            {
+                if (s_keepAwakePowerRequest == IntPtr.Zero || s_keepAwakePowerRequest == new IntPtr(-1))
+                {
+                    IntPtr reasonPtr = Marshal.StringToHGlobalUni("DeskBox Keep Awake");
+                    try
+                    {
+                        var context = new ReasonContext
+                        {
+                            Version = PowerRequestContextVersion,
+                            Flags = PowerRequestContextSimpleString,
+                            SimpleReasonString = reasonPtr
+                        };
+                        s_keepAwakePowerRequest = PowerCreateRequest(ref context);
+                    }
+                    finally
+                    {
+                        Marshal.FreeHGlobal(reasonPtr);
+                    }
+                }
+
+                if (s_keepAwakePowerRequest != IntPtr.Zero && s_keepAwakePowerRequest != new IntPtr(-1))
+                {
+                    _ = PowerSetRequest(s_keepAwakePowerRequest, PowerRequestSystemRequired);
+                    _ = PowerSetRequest(s_keepAwakePowerRequest, PowerRequestDisplayRequired);
+                    return;
+                }
+            }
+            else if (s_keepAwakePowerRequest != IntPtr.Zero && s_keepAwakePowerRequest != new IntPtr(-1))
+            {
+                _ = PowerClearRequest(s_keepAwakePowerRequest, PowerRequestDisplayRequired);
+                _ = PowerClearRequest(s_keepAwakePowerRequest, PowerRequestSystemRequired);
+                return;
+            }
+        }
+
         uint flags = enable
             ? EsContinuous | EsSystemRequired | EsDisplayRequired
             : EsContinuous;
@@ -172,21 +280,27 @@ internal static class CustomWidgetSystemControlInterop
                 count > 0 && count <= 8)
             {
                 var monitors = new PhysicalMonitor[count];
-                if (GetPhysicalMonitorsFromHMONITOR(hMon, count, monitors))
+                unsafe
                 {
-                    try
+                    fixed (PhysicalMonitor* pMonitors = monitors)
                     {
-                        if (GetMonitorBrightness(monitors[0].hPhysicalMonitor, out uint minB, out uint curB, out uint maxB) &&
-                            maxB > minB)
+                        if (GetPhysicalMonitorsFromHMONITOR(hMon, count, pMonitors))
                         {
-                            double normalized = (curB - minB) * 100.0 / (maxB - minB);
-                            percent = (int)Math.Clamp(Math.Round(normalized), 0, 100);
-                            return true;
+                            try
+                            {
+                                if (GetMonitorBrightness(pMonitors[0].hPhysicalMonitor, out uint minB, out uint curB, out uint maxB) &&
+                                    maxB > minB)
+                                {
+                                    double normalized = (curB - minB) * 100.0 / (maxB - minB);
+                                    percent = (int)Math.Clamp(Math.Round(normalized), 0, 100);
+                                    return true;
+                                }
+                            }
+                            finally
+                            {
+                                _ = DestroyPhysicalMonitors(count, pMonitors);
+                            }
                         }
-                    }
-                    finally
-                    {
-                        _ = DestroyPhysicalMonitors(count, monitors);
                     }
                 }
             }
@@ -249,26 +363,32 @@ internal static class CustomWidgetSystemControlInterop
                 count > 0 && count <= 8)
             {
                 var monitors = new PhysicalMonitor[count];
-                if (GetPhysicalMonitorsFromHMONITOR(hMon, count, monitors))
+                unsafe
                 {
-                    try
+                    fixed (PhysicalMonitor* pMonitors = monitors)
                     {
-                        if (GetMonitorBrightness(monitors[0].hPhysicalMonitor, out uint minB, out _, out uint maxB) &&
-                            maxB > minB)
+                        if (GetPhysicalMonitorsFromHMONITOR(hMon, count, pMonitors))
                         {
-                            uint mapped = (uint)Math.Clamp(
-                                Math.Round(minB + ((maxB - minB) * (clamped / 100.0))),
-                                minB,
-                                maxB);
-                            if (SetMonitorBrightness(monitors[0].hPhysicalMonitor, mapped))
+                            try
                             {
-                                return true;
+                                if (GetMonitorBrightness(pMonitors[0].hPhysicalMonitor, out uint minB, out _, out uint maxB) &&
+                                    maxB > minB)
+                                {
+                                    uint mapped = (uint)Math.Clamp(
+                                        Math.Round(minB + ((maxB - minB) * (clamped / 100.0))),
+                                        minB,
+                                        maxB);
+                                    if (SetMonitorBrightness(pMonitors[0].hPhysicalMonitor, mapped))
+                                    {
+                                        return true;
+                                    }
+                                }
+                            }
+                            finally
+                            {
+                                _ = DestroyPhysicalMonitors(count, pMonitors);
                             }
                         }
-                    }
-                    finally
-                    {
-                        _ = DestroyPhysicalMonitors(count, monitors);
                     }
                 }
             }

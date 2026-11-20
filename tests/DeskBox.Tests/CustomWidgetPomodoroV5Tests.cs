@@ -48,13 +48,15 @@ public sealed class CustomWidgetPomodoroV5Tests
 
         CustomWidgetManifest manifest = parsed.Manifest!;
         Assert.Equal("deskbox.pomodoro", manifest.Id);
-        Assert.Equal("5.0.0", manifest.Version);
-        Assert.Equal("番茄专注 & 久坐提醒", manifest.Name);
+        Assert.Equal("8.0.0", manifest.Version);
+        Assert.Equal("${$i18n.widgetName}", manifest.Name);
+        Assert.Equal("专注时段", manifest.ResolveLocalizedName("zh-CN"));
 
-        // New settings must default to the exact pre-v5 pomodoro behavior.
+        // New settings preserve pomodoro defaults and enable concurrent background posture tracking.
         Assert.Contains(manifest.Settings, s => s.Key == "rhythmMode" && s.DefaultValue == "pomodoro");
         Assert.Contains(manifest.Settings, s => s.Key == "sedentaryIntervalMin" && s.DefaultValue == "50");
         Assert.Contains(manifest.Settings, s => s.Key == "idleAutoResetMin" && s.DefaultValue == "5");
+        Assert.Contains(manifest.Settings, s => s.Key == "backgroundSedentary" && s.DefaultValue == "true");
 
         // Pomodoro-only modules are mode-gated; the health module appears only in sedentary mode.
         Assert.Equal("${$pomodoro.mode == 'pomodoro'}",
@@ -67,7 +69,7 @@ public sealed class CustomWidgetPomodoroV5Tests
             manifest.View.Children.Single(c => c.Id == "health").When);
 
         Assert.NotNull(manifest.Capsule);
-        Assert.Equal("${$pomodoro.isDue}", manifest.Capsule!.BadgeIsWarning);
+        Assert.Equal("${$pomodoro.isDue || $pomodoro.sedentaryIsDue == 'true'}", manifest.Capsule!.BadgeIsWarning);
     }
 
     [Fact]
@@ -88,6 +90,9 @@ public sealed class CustomWidgetPomodoroV5Tests
             "setRhythmMode", "optRhythmPomodoro", "optRhythmSedentary",
             "setSedentaryInterval", "optSed40", "optSed50", "optSed60", "optSed90",
             "setIdleReset", "optIdleOff", "optIdle5", "optIdle10",
+            "setBgSedentary", "bgSedDueBanner",
+            "soundPopoverTitle", "soundVolumeLabel", "soundShortOff", "soundShortRain",
+            "taskPopoverTitle", "todoListHeader", "emptyTaskPrompt",
             "modHealth", "nextMicroPrefix", "widgetName", "widgetDescription"
         ];
 
@@ -138,7 +143,7 @@ public sealed class CustomWidgetPomodoroV5Tests
     // ---------------------------------------------------------------- mode switching
 
     [Fact]
-    public void RhythmModeSwitch_ParksRunningPomodoroAndRestoresItSymmetrically()
+    public void RhythmModeSwitch_PreservesBothTracksConcurrentlyWithoutResetting()
     {
         var settings = new Dictionary<string, string>(StringComparer.Ordinal)
         {
@@ -149,28 +154,32 @@ public sealed class CustomWidgetPomodoroV5Tests
         DateTimeOffset t0 = At(9);
 
         CustomWidgetPomodoroEngine.ToggleStartPause(state, settings, t0);
-        Assert.True(CustomWidgetPomodoroEngine.IsRunning(state));
+        Assert.True(CustomWidgetPomodoroEngine.IsPomodoroRunning(state));
 
-        // Flip the live setting (exactly what SetSettingValueAsync does on change).
+        // Flip the view mode setting: Pomodoro keeps running on its track, Sedentary starts idle.
         settings["rhythmMode"] = "sedentary";
         settings["sedentaryIntervalMin"] = "50";
         settings["idleAutoResetMin"] = "5";
         CustomWidgetPomodoroEngine.SyncIdleDurationWithSettings(state, settings, "rhythmMode");
 
-        Assert.Equal(CustomWidgetPomodoroEngine.PhaseSedentary, state[CustomWidgetPomodoroEngine.KeyPhase]);
-        Assert.False(CustomWidgetPomodoroEngine.IsRunning(state));
-        CustomWidgetPomodoroSnapshot idle =
+        Assert.Equal(CustomWidgetPomodoroEngine.PhaseFocus, state[CustomWidgetPomodoroEngine.KeyPhase]);
+        Assert.True(CustomWidgetPomodoroEngine.IsPomodoroRunning(state));
+        Assert.False(CustomWidgetPomodoroEngine.IsSedentaryRunning(state));
+        CustomWidgetPomodoroSnapshot sedSnap =
             CustomWidgetPomodoroEngine.ComputeSnapshot(state, settings, t0, cultureName: ZhCn);
-        Assert.Equal(CustomWidgetPomodoroEngine.ModeSedentary, idle.Mode);
-        Assert.Equal(50 * 60, idle.TotalSeconds);
-        Assert.Equal(50 * 60, idle.RemainingSeconds);
-        Assert.Equal("久坐守护", idle.HeaderPillText);
+        Assert.Equal(CustomWidgetPomodoroEngine.ModeSedentary, sedSnap.Mode);
+        Assert.False(sedSnap.IsRunning);
+        Assert.True(sedSnap.PomodoroIsRunning);
+        Assert.Equal(50 * 60, sedSnap.TotalSeconds);
+        Assert.Equal(50 * 60, sedSnap.RemainingSeconds);
+        Assert.Equal("久坐守护", sedSnap.HeaderPillText);
 
-        // Daily health stats survive mode flips.
+        // Daily health stats and Pomodoro running timer survive mode flips.
         state[CustomWidgetPomodoroEngine.KeySedentaryStoodCount] = "3";
         settings["rhythmMode"] = "pomodoro";
         CustomWidgetPomodoroEngine.SyncIdleDurationWithSettings(state, settings, "rhythmMode");
         Assert.Equal(CustomWidgetPomodoroEngine.PhaseFocus, state[CustomWidgetPomodoroEngine.KeyPhase]);
+        Assert.True(CustomWidgetPomodoroEngine.IsPomodoroRunning(state));
         Assert.Equal("1500", state[CustomWidgetPomodoroEngine.KeyRemainingSec]);
         Assert.Equal("3", state[CustomWidgetPomodoroEngine.KeySedentaryStoodCount]);
     }
@@ -358,8 +367,12 @@ public sealed class CustomWidgetPomodoroV5Tests
         CustomWidgetPomodoroEngine.CyclePhase(state, settings, t0);
         CustomWidgetPomodoroEngine.SkipPhase(state, settings, t0);
 
-        Assert.Equal(CustomWidgetPomodoroEngine.PhaseSedentary, state[CustomWidgetPomodoroEngine.KeyPhase]);
-        Assert.True(CustomWidgetPomodoroEngine.IsRunning(state));
+        Assert.False(state.ContainsKey(CustomWidgetPomodoroEngine.KeyPhase));
+        Assert.True(CustomWidgetPomodoroEngine.IsSedentaryRunning(state));
+        Assert.False(CustomWidgetPomodoroEngine.IsPomodoroRunning(state));
+        Assert.Equal(
+            CustomWidgetPomodoroEngine.PhaseSedentary,
+            CustomWidgetPomodoroEngine.ComputeSnapshot(state, settings, t0, cultureName: ZhCn).Phase);
 
         // The legacy pomodoro completion pump must never run against a sedentary round.
         var collections = new Dictionary<string, List<CustomWidgetRecord>>(StringComparer.Ordinal);
@@ -437,5 +450,111 @@ public sealed class CustomWidgetPomodoroV5Tests
         Assert.True(CustomWidgetPomodoroEngine.IsSedentaryMode(custom));
 
         Assert.Equal(90 * 60, CustomWidgetPomodoroEngine.GetDefaultDurationSeconds("sedentary", custom));
+    }
+
+    // ---------------------------------------------------------------- v7 dual-track & integration
+
+    [Fact]
+    public void DualTrack_BackgroundSedentaryStartsWithPomodoroAndSurfacesDueFlag()
+    {
+        var settings = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["rhythmMode"] = "pomodoro",
+            ["focusMinutes"] = "25",
+            ["breakPreset"] = "5,15",
+            ["sedentaryIntervalMin"] = "40",
+            ["idleAutoResetMin"] = "5",
+            ["backgroundSedentary"] = "true"
+        };
+        var state = new Dictionary<string, string>(StringComparer.Ordinal);
+        var collections = new Dictionary<string, List<CustomWidgetRecord>>(StringComparer.Ordinal);
+        DateTimeOffset t0 = At(9);
+
+        // Starting Pomodoro with backgroundSedentary=true starts both tracks concurrently.
+        CustomWidgetPomodoroEngine.ToggleStartPause(state, settings, t0);
+        Assert.True(CustomWidgetPomodoroEngine.IsPomodoroRunning(state));
+        Assert.True(CustomWidgetPomodoroEngine.IsSedentaryRunning(state));
+
+        // At +40m01s, the first 25m focus round already transitioned and the sedentary guard fires due.
+        Assert.True(CustomWidgetPomodoroEngine.TryPumpForMode(
+            state, settings, collections, t0.AddMinutes(40).AddSeconds(1), idleSeconds: 1.0, out CustomWidgetPomodoroCompletionNotice? dueNotice, ZhCn));
+        Assert.NotNull(dueNotice);
+
+        CustomWidgetPomodoroSnapshot snap =
+            CustomWidgetPomodoroEngine.ComputeSnapshot(state, settings, t0.AddMinutes(40).AddSeconds(1), cultureName: ZhCn);
+        Assert.Equal(CustomWidgetPomodoroEngine.ModePomodoro, snap.Mode);
+        Assert.True(snap.SedentaryIsDue);
+        Assert.False(snap.IsDue); // primary view is pomodoro; badgeIsWarning expression catches sedentaryIsDue
+
+        CustomWidgetPomodoroEngine.ConfirmStoodUp(state, settings, t0.AddMinutes(41));
+        CustomWidgetPomodoroSnapshot afterConfirm =
+            CustomWidgetPomodoroEngine.ComputeSnapshot(state, settings, t0.AddMinutes(41), cultureName: ZhCn);
+        Assert.False(afterConfirm.SedentaryIsDue);
+        Assert.Equal(1, afterConfirm.StoodCount);
+        Assert.True(afterConfirm.SedentaryIsRunning);
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task DualTrack_LinkedTodoTitleAndSoundVolumeSync_WorksEndToEnd()
+    {
+        var settings = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["focusMinutes"] = "25",
+            ["breakPreset"] = "5,15",
+            ["flowMode"] = "manual"
+        };
+        var state = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [CustomWidgetPomodoroEngine.KeyLinkedTaskTitle] = "Draft Q4 Architecture Spec"
+        };
+        var collections = new Dictionary<string, List<CustomWidgetRecord>>(StringComparer.Ordinal);
+        DateTimeOffset t0 = At(10);
+
+        CustomWidgetPomodoroEngine.ToggleStartPause(state, settings, t0);
+        Assert.True(CustomWidgetPomodoroEngine.TryPumpForMode(
+            state, settings, collections, t0.AddMinutes(25).AddSeconds(1), idleSeconds: 0, out _, ZhCn));
+
+        CustomWidgetRecord session = Assert.Single(collections["sessions"]);
+        Assert.Equal("Draft Q4 Architecture Spec", session.Fields["task"]);
+
+        string tempDir = Path.Combine(Path.GetTempPath(), $"deskbox-pomo-v7-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+        string widgetId = $"pomo-v7-audio-{Guid.NewGuid():N}";
+        try
+        {
+            CustomWidgetTemplateBundle bundle =
+                CustomWidgetTemplates.GetTemplateBundle(CustomWidgetTemplates.PomodoroTemplateId);
+            var store = new CustomWidgetDataStore(widgetId, tempDir);
+            await store.WriteWorkspaceBundleAsync(bundle.ManifestJson, bundle.LogicJs, locales: bundle.Locales);
+
+            var settingsSvc = new SettingsService(Path.Combine(tempDir, "settings.json"));
+            var locSvc = new LocalizationService(settingsSvc);
+            using var vm = new DeskBox.ViewModels.CustomWidgetViewModel(
+                new WidgetConfig { Id = widgetId, Name = "Pomodoro v7" },
+                locSvc,
+                store: store,
+                dispatcherQueue: null,
+                settingsService: settingsSvc);
+            await vm.InitializeAsync();
+
+            await vm.SetSettingValueAsync("focusSoundscape", "rain");
+            await vm.ExecuteActionsAsync(
+                [new CustomWidgetActionSpec("pomodoro.toggle")],
+                vm.CreateEvaluationContext());
+
+            string trackId = $"ambient:{widgetId}";
+            Assert.True(CustomWidgetAudioService.Shared.IsTrackPlaying(trackId));
+            Assert.Equal(0.35, CustomWidgetAudioService.Shared.GetTrackVolume(trackId), precision: 2);
+
+            await vm.ExecuteActionsAsync(
+                [new CustomWidgetActionSpec("state.set", Key: "state.soundVolume", Value: "75")],
+                vm.CreateEvaluationContext());
+            Assert.Equal(0.75, CustomWidgetAudioService.Shared.GetTrackVolume(trackId), precision: 2);
+        }
+        finally
+        {
+            CustomWidgetAudioService.Shared.StopTracksForOwner(widgetId);
+            try { Directory.Delete(tempDir, recursive: true); } catch { }
+        }
     }
 }

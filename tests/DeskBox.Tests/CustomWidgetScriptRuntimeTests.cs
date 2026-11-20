@@ -40,17 +40,29 @@ public sealed class CustomWidgetScriptRuntimeTests
                   "onClick": { "type": "script.run", "fn": "onIncrement", "arg": "2" }
                 }
               },
-              "view": {
-                "type": "Stack",
-                "children": [
-                  { "type": "Text", "text": "${$computed.banner}" },
-                  {
-                    "type": "List",
-                    "items": "$computed.rows",
-                    "itemTemplate": { "type": "Text", "text": "${$item.label}: ${$item.val}" }
-                  },
-                  { "type": "Sparkline", "values": "${$computed.series}" }
-                ]
+              "root": "root",
+              "elements": {
+                "root": {
+                  "type": "Stack",
+                  "children": ["banner_text", "rows_list", "series_sparkline"]
+                },
+                "banner_text": {
+                  "type": "Text",
+                  "text": "${$computed.banner}"
+                },
+                "rows_list": {
+                  "type": "List",
+                  "items": "$computed.rows",
+                  "itemTemplate": "row_item"
+                },
+                "row_item": {
+                  "type": "Text",
+                  "text": "${$item.label}: ${$item.val}"
+                },
+                "series_sparkline": {
+                  "type": "Sparkline",
+                  "values": "${$computed.series}"
+                }
               }
             }
             """;
@@ -166,12 +178,20 @@ public sealed class CustomWidgetScriptRuntimeTests
                 "title": "${$i18n.widgetName}",
                 "summary": "${$computed.summaryText}"
               },
-              "view": {
-                "type": "Stack",
-                "children": [
-                  { "type": "Text", "text": "${$i18n.header}" },
-                  { "type": "Text", "text": "${$computed.summaryText}" }
-                ]
+              "root": "root",
+              "elements": {
+                "root": {
+                  "type": "Stack",
+                  "children": ["header_text", "summary_text"]
+                },
+                "header_text": {
+                  "type": "Text",
+                  "text": "${$i18n.header}"
+                },
+                "summary_text": {
+                  "type": "Text",
+                  "text": "${$computed.summaryText}"
+                }
               }
             }
             """;
@@ -273,15 +293,17 @@ public sealed class CustomWidgetScriptRuntimeTests
               "id": "custom.err-test",
               "name": "报错测试",
               "script": { "entry": "logic.js" },
-              "view": {
-                "type": "Stack",
-                "children": [
-                  {
-                    "type": "Button",
-                    "text": "触发",
-                    "onClick": { "type": "script.run", "fn": "onBrokenClick" }
-                  }
-                ]
+              "root": "root",
+              "elements": {
+                "root": {
+                  "type": "Stack",
+                  "children": ["trigger_btn"]
+                },
+                "trigger_btn": {
+                  "type": "Button",
+                  "text": "触发",
+                  "onClick": { "type": "script.run", "fn": "onBrokenClick" }
+                }
               }
             }
             """;

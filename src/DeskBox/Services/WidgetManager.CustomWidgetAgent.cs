@@ -1,4 +1,7 @@
 using System.Runtime.InteropServices.WindowsRuntime;
+using System.Text;
+using System.Text.Encodings.Web;
+using System.Text.Json;
 using DeskBox.Controls.WidgetContents;
 using DeskBox.FileSafety;
 using DeskBox.Helpers;
@@ -23,7 +26,20 @@ public sealed record CustomWidgetLiveRuntimeSnapshot(
     string DisplayMode,
     Dictionary<string, string> State,
     Dictionary<string, int> CollectionCounts,
-    Dictionary<string, List<Dictionary<string, string>>> SampleItems);
+    Dictionary<string, List<Dictionary<string, string>>> SampleItems,
+    IReadOnlyDictionary<string, JsonElement>? StateJson = null,
+    IReadOnlyDictionary<string, List<Dictionary<string, JsonElement>>>? SampleItemsJson = null);
+
+public sealed record CustomWidgetPreviewCaptureResult(
+    byte[]? PngBytes,
+    int Width,
+    int Height,
+    double MeasuredWidth,
+    double MeasuredHeight,
+    double VerticalOverflowPx,
+    bool HasOverflow,
+    string? Error,
+    double DpiScale = 1.0);
 
 public sealed partial class WidgetManager
 {
@@ -31,7 +47,9 @@ public sealed partial class WidgetManager
     internal Func<string?>? ResolveStudioAgentUpsertTargetWidgetId { get; set; }
     internal Action<string, string, string, string?, bool, CustomWidgetLocaleCatalog?, bool>? NotifyStudioAgentWidgetUpserted { get; set; }
 
-    internal WidgetConfig? ResolveCustomWidgetConfig(string? widgetIdOrTemplateId)
+    internal WidgetConfig? ResolveCustomWidgetConfig(
+        string? widgetIdOrTemplateId,
+        bool allowTemplateMetadataFallback = true)
     {
         if (string.IsNullOrWhiteSpace(widgetIdOrTemplateId))
         {
@@ -43,7 +61,7 @@ public sealed partial class WidgetManager
             w.WidgetKind == WidgetKind.Custom &&
             !IsDeleted(w.Id) &&
             string.Equals(w.Id, needle, StringComparison.OrdinalIgnoreCase));
-        if (byId is not null)
+        if (byId is not null || !allowTemplateMetadataFallback)
         {
             return byId;
         }
@@ -52,12 +70,69 @@ public sealed partial class WidgetManager
             ? needle["deskbox.".Length..]
             : $"deskbox.{needle}";
 
-        return _settingsService.Settings.WidgetLayout.Widgets.FirstOrDefault(w =>
+        WidgetConfig? byTemplate = _settingsService.Settings.WidgetLayout.Widgets.FirstOrDefault(w =>
             w.WidgetKind == WidgetKind.Custom &&
             !IsDeleted(w.Id) &&
             w.Metadata.TryGetValue(CustomWidgetViewModel.TemplateMetadataKey, out string? tpl) &&
             (string.Equals(tpl, needle, StringComparison.OrdinalIgnoreCase) ||
              string.Equals(tpl, altNeedle, StringComparison.OrdinalIgnoreCase)));
+        if (byTemplate is not null)
+        {
+            return byTemplate;
+        }
+
+        foreach (WidgetConfig w in _settingsService.Settings.WidgetLayout.Widgets)
+        {
+            if (w.WidgetKind != WidgetKind.Custom || IsDeleted(w.Id) || string.IsNullOrWhiteSpace(w.Id))
+            {
+                continue;
+            }
+
+            try
+            {
+                CustomWidgetDataStore store = CustomWidgetDataStore.ForWidget(w.Id);
+                if (!File.Exists(store.ManifestPath))
+                {
+                    continue;
+                }
+
+                using var fs = new FileStream(store.ManifestPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                using JsonDocument doc = JsonDocument.Parse(fs);
+                if (doc.RootElement.ValueKind != JsonValueKind.Object)
+                {
+                    continue;
+                }
+
+                if (doc.RootElement.TryGetProperty("forkedFromId", out JsonElement forkEl) &&
+                    forkEl.ValueKind == JsonValueKind.String)
+                {
+                    string? forkedFrom = forkEl.GetString();
+                    if (!string.IsNullOrWhiteSpace(forkedFrom) &&
+                        (string.Equals(forkedFrom, needle, StringComparison.OrdinalIgnoreCase) ||
+                         string.Equals(forkedFrom, altNeedle, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        return w;
+                    }
+                }
+
+                if (doc.RootElement.TryGetProperty("id", out JsonElement manifestIdEl) &&
+                    manifestIdEl.ValueKind == JsonValueKind.String)
+                {
+                    string? manifestId = manifestIdEl.GetString();
+                    if (!string.IsNullOrWhiteSpace(manifestId) &&
+                        (string.Equals(manifestId, needle, StringComparison.OrdinalIgnoreCase) ||
+                         string.Equals(manifestId, altNeedle, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        return w;
+                    }
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        return null;
     }
 
     public async Task<GlanceWidgetInstanceInfo> UpdateCustomWidgetManifestAsync(
@@ -96,7 +171,7 @@ public sealed partial class WidgetManager
             throw new InvalidDataException(msg);
         }
 
-        WidgetConfig? config = ResolveCustomWidgetConfig(widgetId);
+        WidgetConfig? config = ResolveCustomWidgetConfig(widgetId, allowTemplateMetadataFallback: false);
         if (config is null)
         {
             return await CreateCustomWidgetAsync(
@@ -177,7 +252,10 @@ public sealed partial class WidgetManager
             updateLogicJs: updateLogicJs,
             locales: locales,
             updateLocales: updateLocales);
-        await CustomWidgetTemplates.EnsureAgentWorkspacePreparedAsync(store.WidgetDirectory, config.Id);
+        if (File.Exists(Path.Combine(store.WidgetDirectory, "AGENTS.md")))
+        {
+            await CustomWidgetTemplates.EnsureAgentWorkspacePreparedAsync(store.WidgetDirectory, config.Id);
+        }
 
         CustomWidgetLocaleCatalog? effectiveLocales = updateLocales
             ? locales
@@ -189,8 +267,7 @@ public sealed partial class WidgetManager
 
         config.Metadata[CustomWidgetViewModel.TemplateMetadataKey] = manifest.Id;
         if (!string.IsNullOrWhiteSpace(manifest.Name) &&
-            !CustomWidgetTemplates.Presets.Any(p =>
-                string.Equals($"deskbox.{p.Id}", manifest.Id, StringComparison.OrdinalIgnoreCase)))
+            !CustomWidgetTemplates.IsKnownBuiltInTemplate(manifest.Id))
         {
             config.Name = manifest.ResolveLocalizedName(_localizationService.CurrentCultureName);
             config.IsDefaultTitle = false;
@@ -206,6 +283,12 @@ public sealed partial class WidgetManager
             config.Width = manifest.DefaultSize.Width;
             config.Height = manifest.DefaultSize.Height;
         }
+
+        ApplyCustomWidgetRevealOnUpdate(
+            config,
+            reveal,
+            () => GetFeatureWidgetEnabledState(WidgetKind.Custom),
+            () => SetFeatureWidgetEnabledState(WidgetKind.Custom, true));
 
         _settingsService.UpdateWidget(config);
         await _settingsService.SaveAsync();
@@ -225,6 +308,179 @@ public sealed partial class WidgetManager
             config.Id,
             config.Name,
             GetFeatureWidgetEnabledState(WidgetKind.Custom) && !config.IsDisabled);
+    }
+
+    internal static void ApplyCustomWidgetRevealOnUpdate(
+        WidgetConfig config,
+        bool reveal,
+        Func<bool> isFeatureEnabled,
+        Action enableFeature)
+    {
+        if (!reveal)
+        {
+            return;
+        }
+
+        if (!isFeatureEnabled())
+        {
+            enableFeature();
+        }
+
+        config.Metadata.Remove(CustomParkedByUserMetadataKey);
+        config.IsDisabled = false;
+        config.IsVisible = true;
+    }
+
+    public async Task<GlanceWidgetInstanceInfo?> UpdateCustomWidgetIconOnlyAsync(
+        string widgetId,
+        string? emojiIcon)
+    {
+        if (!HasUiThreadAccess())
+        {
+            return await RunOnUiThreadAsync(() => UpdateCustomWidgetIconOnlyAsync(widgetId, emojiIcon));
+        }
+
+        WidgetConfig? config = ResolveCustomWidgetConfig(widgetId, allowTemplateMetadataFallback: false);
+        if (config is null)
+        {
+            return null;
+        }
+
+        if (!string.IsNullOrEmpty(emojiIcon) && !CustomWidgetTemplates.IsEmojiIcon(emojiIcon))
+        {
+            throw new InvalidDataException("Invalid emoji icon.");
+        }
+
+        CustomWidgetDataStore store = CustomWidgetDataStore.ForWidget(config.Id);
+        string? existingManifestJson = await store.TryReadExistingManifestJsonAsync();
+        if (string.IsNullOrWhiteSpace(existingManifestJson))
+        {
+            if (config.Metadata.TryGetValue(CustomWidgetViewModel.TemplateMetadataKey, out string? tpl) &&
+                CustomWidgetTemplates.IsKnownBuiltInTemplate(tpl))
+            {
+                existingManifestJson = await store.ReadOrCreateManifestJsonAsync(tpl);
+            }
+            else
+            {
+                return null;
+            }
+        }
+
+        string updatedManifestJson;
+        if (!string.IsNullOrEmpty(emojiIcon))
+        {
+            string trimmedEmoji = emojiIcon.Trim();
+            updatedManifestJson = CustomWidgetTemplates.WithUpdatedIconJson(existingManifestJson, trimmedEmoji);
+            WidgetTitleIconCustomization.SetEmojiOverride(config, trimmedEmoji);
+        }
+        else
+        {
+            updatedManifestJson = ClearEmojiIconPropertiesJson(existingManifestJson);
+            WidgetTitleIconCustomization.SetEmojiOverride(config, null);
+        }
+
+        await store.WriteManifestJsonAsync(updatedManifestJson);
+
+        _settingsService.UpdateWidget(config);
+        await _settingsService.SaveAsync();
+
+        IReadOnlyList<CustomWidgetContentAdapter> liveAdapters = FindLiveCustomWidgetAdapters(config.Id);
+        foreach (CustomWidgetContentAdapter adapter in liveAdapters)
+        {
+            await adapter.ViewModel.ReloadManifestFromDiskAsync(notifyFeedback: true);
+        }
+
+        return new GlanceWidgetInstanceInfo(
+            config.Id,
+            config.Name,
+            GetFeatureWidgetEnabledState(WidgetKind.Custom) && !config.IsDisabled);
+    }
+
+    private static string ClearEmojiIconPropertiesJson(string rawManifestJson)
+    {
+        if (string.IsNullOrWhiteSpace(rawManifestJson))
+        {
+            return rawManifestJson;
+        }
+
+        try
+        {
+            using JsonDocument doc = JsonDocument.Parse(
+                rawManifestJson,
+                new JsonDocumentOptions
+                {
+                    AllowTrailingCommas = true,
+                    CommentHandling = JsonCommentHandling.Skip
+                });
+            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return rawManifestJson;
+            }
+
+            bool stripTopLevelIcon = doc.RootElement.TryGetProperty("icon", out JsonElement topIconEl) &&
+                                     (topIconEl.ValueKind == JsonValueKind.Null ||
+                                      (topIconEl.ValueKind == JsonValueKind.String &&
+                                       (string.IsNullOrWhiteSpace(topIconEl.GetString()) ||
+                                        CustomWidgetTemplates.IsEmojiIcon(topIconEl.GetString()))));
+            bool stripCapsuleEmojiGlyph = doc.RootElement.TryGetProperty("capsule", out JsonElement capsuleEl) &&
+                                          capsuleEl.ValueKind == JsonValueKind.Object &&
+                                          capsuleEl.TryGetProperty("glyph", out JsonElement capGlyphEl) &&
+                                          capGlyphEl.ValueKind == JsonValueKind.String &&
+                                          CustomWidgetTemplates.IsEmojiIcon(capGlyphEl.GetString());
+            if (!stripTopLevelIcon && !stripCapsuleEmojiGlyph)
+            {
+                return rawManifestJson;
+            }
+
+            using var stream = new MemoryStream();
+            using (var writer = new Utf8JsonWriter(
+                       stream,
+                       new JsonWriterOptions
+                       {
+                           Indented = true,
+                           Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+                       }))
+            {
+                writer.WriteStartObject();
+                foreach (JsonProperty prop in doc.RootElement.EnumerateObject())
+                {
+                    if (stripTopLevelIcon && string.Equals(prop.Name, "icon", StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
+                    if (stripCapsuleEmojiGlyph &&
+                        string.Equals(prop.Name, "capsule", StringComparison.Ordinal) &&
+                        prop.Value.ValueKind == JsonValueKind.Object)
+                    {
+                        writer.WritePropertyName("capsule");
+                        writer.WriteStartObject();
+                        foreach (JsonProperty capProp in prop.Value.EnumerateObject())
+                        {
+                            if (string.Equals(capProp.Name, "glyph", StringComparison.Ordinal))
+                            {
+                                continue;
+                            }
+
+                            capProp.WriteTo(writer);
+                        }
+
+                        writer.WriteEndObject();
+                        continue;
+                    }
+
+                    prop.WriteTo(writer);
+                }
+
+                writer.WriteEndObject();
+            }
+
+            return Encoding.UTF8.GetString(stream.ToArray());
+        }
+        catch
+        {
+            return rawManifestJson;
+        }
     }
 
     public async Task<GlanceWidgetInstanceInfo> UpsertCustomWidgetFromAgentAsync(
@@ -256,9 +512,18 @@ public sealed partial class WidgetManager
             manifestJson = CustomWidgetTemplates.SyncManifestScriptPropertyJson(manifestJson, logicJs);
         }
 
-        if (string.IsNullOrWhiteSpace(widgetId))
+        WidgetConfig? resolvedExisting = null;
+        if (!string.IsNullOrWhiteSpace(widgetId))
         {
-            widgetId = ResolveStudioAgentUpsertTargetWidgetId?.Invoke();
+            resolvedExisting = ResolveCustomWidgetConfig(widgetId, allowTemplateMetadataFallback: false);
+        }
+        else if (ResolveStudioAgentUpsertTargetWidgetId?.Invoke() is { Length: > 0 } studioWaitingTargetId)
+        {
+            resolvedExisting = ResolveCustomWidgetConfig(studioWaitingTargetId, allowTemplateMetadataFallback: false);
+            if (resolvedExisting is not null)
+            {
+                widgetId = resolvedExisting.Id;
+            }
         }
 
         CustomWidgetParseResult incomingParsed = CustomWidgetManifestParser.Parse(manifestJson);
@@ -266,17 +531,6 @@ public sealed partial class WidgetManager
             incomingParsed.Manifest?.Origin,
             CustomWidgetOriginKinds.Community,
             StringComparison.OrdinalIgnoreCase);
-
-        WidgetConfig? resolvedExisting = !string.IsNullOrWhiteSpace(widgetId)
-            ? ResolveCustomWidgetConfig(widgetId)
-            : null;
-        if (resolvedExisting is null &&
-            incomingParsed.Manifest is not null &&
-            !CustomWidgetTemplates.Presets.Any(p =>
-                string.Equals($"deskbox.{p.Id}", incomingParsed.Manifest.Id, StringComparison.OrdinalIgnoreCase)))
-        {
-            resolvedExisting = ResolveCustomWidgetConfig(incomingParsed.Manifest.Id);
-        }
 
         bool preserveCommunityOrigin = incomingIsCommunity;
         if (!preserveCommunityOrigin && resolvedExisting is not null)
@@ -298,6 +552,9 @@ public sealed partial class WidgetManager
         GlanceWidgetInstanceInfo upserted;
         if (resolvedExisting is not null)
         {
+            CustomWidgetTrustStore.Shared.RegisterWidgetProvenance(
+                resolvedExisting.Id,
+                trustedLocalAuthoring: false);
             upserted = await UpdateCustomWidgetManifestAsync(
                 resolvedExisting.Id,
                 agentStampedJson,
@@ -334,12 +591,21 @@ public sealed partial class WidgetManager
         IReadOnlyDictionary<string, string>? stateUpdates,
         string? collectionName = null,
         string? collectionMode = null,
-        IReadOnlyList<Dictionary<string, string>>? records = null)
+        IReadOnlyList<Dictionary<string, string>>? records = null,
+        IReadOnlyDictionary<string, JsonElement>? stateJsonUpdates = null,
+        IReadOnlyList<Dictionary<string, JsonElement>>? jsonRecords = null)
     {
         if (!HasUiThreadAccess())
         {
             return await RunOnUiThreadAsync(() =>
-                PushCustomWidgetDataAsync(widgetIdOrTemplateId, stateUpdates, collectionName, collectionMode, records));
+                PushCustomWidgetDataAsync(
+                    widgetIdOrTemplateId,
+                    stateUpdates,
+                    collectionName,
+                    collectionMode,
+                    records,
+                    stateJsonUpdates,
+                    jsonRecords));
         }
 
         WidgetConfig? config = ResolveCustomWidgetConfig(widgetIdOrTemplateId);
@@ -365,7 +631,9 @@ public sealed partial class WidgetManager
                     stateUpdates,
                     collectionName,
                     collectionMode,
-                    records);
+                    records,
+                    stateJsonUpdates,
+                    jsonRecords);
             }
             return (true, config.Id, null);
         }
@@ -377,88 +645,156 @@ public sealed partial class WidgetManager
             ? CustomWidgetManifestParser.Parse(rawManifestJson).Manifest
             : null;
 
-        if (stateUpdates is not null)
+        bool mutated = CustomWidgetStoreMutator.ApplyExternalDataPushToPayload(
+            payload,
+            diskManifest,
+            stateUpdates,
+            collectionName,
+            collectionMode,
+            records,
+            stateJsonUpdates,
+            jsonRecords);
+
+        if (mutated || !File.Exists(store.StorePath))
         {
-            foreach ((string k, string v) in stateUpdates)
-            {
-                if (!string.IsNullOrWhiteSpace(k))
-                {
-                    payload.State[k.StartsWith("state.", StringComparison.Ordinal) ? k["state.".Length..] : k] = v ?? string.Empty;
-                }
-            }
+            await store.SaveAsync(payload);
         }
 
-        if (!string.IsNullOrWhiteSpace(collectionName))
-        {
-            string col = collectionName.Trim();
-            if (!payload.Collections.TryGetValue(col, out List<CustomWidgetRecord>? list))
-            {
-                list = [];
-                payload.Collections[col] = list;
-            }
-
-            int maxItems = diskManifest is not null &&
-                           diskManifest.Collections.TryGetValue(col, out CustomWidgetCollectionSchema? schema)
-                ? Math.Clamp(schema.MaxItems, 1, 200)
-                : 200;
-
-            string mode = (collectionMode ?? "prepend").Trim().ToLowerInvariant();
-            if (mode is "clear" or "replace")
-            {
-                list.Clear();
-            }
-
-            if (records is { Count: > 0 } && mode != "clear")
-            {
-                for (int i = 0; i < records.Count; i++)
-                {
-                    var rec = new CustomWidgetRecord
-                    {
-                        Id = records[i].TryGetValue("id", out string? idVal) && !string.IsNullOrWhiteSpace(idVal)
-                            ? idVal.Trim()
-                            : Guid.NewGuid().ToString("N")[..10],
-                        CreatedAt = DateTimeOffset.Now
-                    };
-                    foreach ((string fk, string fv) in records[i])
-                    {
-                        if (!string.Equals(fk, "id", StringComparison.Ordinal))
-                        {
-                            rec.Fields[fk] = fv ?? string.Empty;
-                        }
-                    }
-
-                    if (mode == "upsert")
-                    {
-                        int existingIdx = list.FindIndex(r => string.Equals(r.Id, rec.Id, StringComparison.Ordinal));
-                        if (existingIdx >= 0)
-                        {
-                            rec.CreatedAtUtcTicks = list[existingIdx].CreatedAtUtcTicks;
-                            rec.UpdatedAtUtcTicks = DateTimeOffset.UtcNow.UtcTicks;
-                            list[existingIdx] = rec;
-                            continue;
-                        }
-                        list.Insert(0, rec);
-                    }
-                    else if (mode is "append" or "replace")
-                    {
-                        list.Add(rec);
-                    }
-                    else
-                    {
-                        list.Insert(i < list.Count ? i : list.Count, rec);
-                    }
-                }
-
-                if (list.Count > maxItems)
-                {
-                    list.RemoveRange(maxItems, list.Count - maxItems);
-                }
-            }
-        }
-
-        await store.SaveAsync(payload);
         return (true, config.Id, null);
     }
+
+    internal async Task<bool> TrySeedLiveCreatedWidgetAsync(
+        string widgetId,
+        IReadOnlyDictionary<string, string>? userState,
+        IReadOnlyDictionary<string, JsonElement>? userStateJson,
+        IReadOnlyDictionary<string, (List<Dictionary<string, string>> Items, List<Dictionary<string, JsonElement>> JsonItems)>? userCollections,
+        IReadOnlyDictionary<string, string>? sampleState,
+        IReadOnlyDictionary<string, JsonElement>? sampleStateJson,
+        IReadOnlyDictionary<string, (List<Dictionary<string, string>> Items, List<Dictionary<string, JsonElement>> JsonItems)>? sampleCollections)
+    {
+        if (!HasUiThreadAccess())
+        {
+            return await RunOnUiThreadAsync(() =>
+                TrySeedLiveCreatedWidgetAsync(
+                    widgetId,
+                    userState,
+                    userStateJson,
+                    userCollections,
+                    sampleState,
+                    sampleStateJson,
+                    sampleCollections));
+        }
+
+        IReadOnlyList<CustomWidgetContentAdapter> liveAdapters = FindLiveCustomWidgetAdapters(widgetId);
+        if (liveAdapters.Count == 0)
+        {
+            return false;
+        }
+
+        foreach (CustomWidgetContentAdapter adapter in liveAdapters)
+        {
+            CustomWidgetViewModel vm = adapter.ViewModel;
+            for (int waitIdx = 0; waitIdx < 5; waitIdx++)
+            {
+                if (!vm.State.TryGetValue("sourceStatus", out string? status) ||
+                    !string.Equals(status, "loading", StringComparison.OrdinalIgnoreCase))
+                {
+                    break;
+                }
+
+                await Task.Delay(40);
+            }
+
+            var mergedState = new Dictionary<string, string>(StringComparer.Ordinal);
+            var mergedStateJson = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+            if (sampleState is not null)
+            {
+                foreach ((string k, string v) in sampleState)
+                {
+                    if (!IsTransientRuntimeStateKey(k) &&
+                        (!vm.State.TryGetValue(k, out string? existing) || string.IsNullOrWhiteSpace(existing)))
+                    {
+                        mergedState[k] = v;
+                        if (sampleStateJson is not null && sampleStateJson.TryGetValue(k, out JsonElement jv))
+                        {
+                            mergedStateJson[k] = jv.Clone();
+                        }
+                    }
+                }
+            }
+
+            if (userState is not null)
+            {
+                foreach ((string k, string v) in userState)
+                {
+                    if (!IsTransientRuntimeStateKey(k) &&
+                        (!string.IsNullOrWhiteSpace(v) || !vm.State.TryGetValue(k, out string? existing) || string.IsNullOrWhiteSpace(existing)))
+                    {
+                        mergedState[k] = v;
+                        if (userStateJson is not null && userStateJson.TryGetValue(k, out JsonElement jv))
+                        {
+                            mergedStateJson[k] = jv.Clone();
+                        }
+                    }
+                }
+            }
+
+            var collectionsToApply = new Dictionary<string, (List<Dictionary<string, string>> Items, List<Dictionary<string, JsonElement>> JsonItems)>(StringComparer.Ordinal);
+            if (sampleCollections is not null)
+            {
+                foreach ((string col, var tuple) in sampleCollections)
+                {
+                    if (tuple.Items.Count > 0 &&
+                        (!vm.Collections.TryGetValue(col, out List<CustomWidgetRecord>? existing) || existing.Count == 0))
+                    {
+                        collectionsToApply[col] = tuple;
+                    }
+                }
+            }
+
+            if (userCollections is not null)
+            {
+                foreach ((string col, var tuple) in userCollections)
+                {
+                    if (tuple.Items.Count > 0 ||
+                        !vm.Collections.TryGetValue(col, out List<CustomWidgetRecord>? existing) ||
+                        existing.Count == 0)
+                    {
+                        collectionsToApply[col] = tuple;
+                    }
+                }
+            }
+
+            if (collectionsToApply.Count == 0)
+            {
+                if (mergedState.Count > 0)
+                {
+                    await vm.ApplyExternalDataPushAsync(mergedState, null, null, null, mergedStateJson, null);
+                }
+                continue;
+            }
+
+            bool stateSent = false;
+            foreach ((string col, var tuple) in collectionsToApply)
+            {
+                await vm.ApplyExternalDataPushAsync(
+                    stateSent ? null : (mergedState.Count > 0 ? mergedState : null),
+                    col,
+                    "replace",
+                    tuple.Items,
+                    stateSent ? null : (mergedStateJson.Count > 0 ? mergedStateJson : null),
+                    tuple.JsonItems);
+                stateSent = true;
+            }
+        }
+
+        return true;
+    }
+
+    internal static bool IsTransientRuntimeStateKey(string key) =>
+        string.Equals(key, "sourceStatus", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(key, "lastError", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(key, "updatedAt", StringComparison.OrdinalIgnoreCase);
 
     public async Task<CustomWidgetLiveRuntimeSnapshot?> TryGetCustomWidgetLiveSnapshotAsync(
         string widgetIdOrTemplateId)
@@ -494,13 +830,23 @@ public sealed partial class WidgetManager
         }
 
         var stateCopy = new Dictionary<string, string>(vm.State, StringComparer.Ordinal);
+        var stateJsonCopy = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        foreach ((string sk, JsonElement sv) in vm.StateJson)
+        {
+            if (sv.ValueKind != JsonValueKind.Undefined)
+            {
+                stateJsonCopy[sk] = sv.Clone();
+            }
+        }
         var countsCopy = new Dictionary<string, int>(StringComparer.Ordinal);
         var samplesCopy = new Dictionary<string, List<Dictionary<string, string>>>(StringComparer.Ordinal);
+        var samplesJsonCopy = new Dictionary<string, List<Dictionary<string, JsonElement>>>(StringComparer.Ordinal);
 
         foreach ((string colName, List<CustomWidgetRecord> records) in vm.Collections)
         {
             countsCopy[colName] = records.Count;
             var sampleList = new List<Dictionary<string, string>>(Math.Min(3, records.Count));
+            var sampleJsonList = new List<Dictionary<string, JsonElement>>(Math.Min(3, records.Count));
             for (int i = 0; i < records.Count && i < 3; i++)
             {
                 CustomWidgetRecord rec = records[i];
@@ -508,13 +854,27 @@ public sealed partial class WidgetManager
                 {
                     ["id"] = rec.Id
                 };
+                var itemJsonDict = new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+                {
+                    ["id"] = CustomWidgetScriptEngine.CreateStringJsonElement(rec.Id)
+                };
                 foreach ((string fk, string fv) in rec.Fields)
                 {
                     itemDict[fk] = fv;
                 }
+                foreach ((string fk, JsonElement fv) in rec.FieldsJson)
+                {
+                    if (!string.Equals(fk, "id", StringComparison.Ordinal) &&
+                        fv.ValueKind != JsonValueKind.Undefined)
+                    {
+                        itemJsonDict[fk] = fv.Clone();
+                    }
+                }
                 sampleList.Add(itemDict);
+                sampleJsonList.Add(itemJsonDict);
             }
             samplesCopy[colName] = sampleList;
+            samplesJsonCopy[colName] = sampleJsonList;
         }
 
         _contentWidgets.TryGetValue(config.Id, out Views.ContentWidgetWindow? hostWindow);
@@ -527,7 +887,9 @@ public sealed partial class WidgetManager
             DisplayMode: displayMode,
             State: stateCopy,
             CollectionCounts: countsCopy,
-            SampleItems: samplesCopy);
+            SampleItems: samplesCopy,
+            StateJson: stateJsonCopy,
+            SampleItemsJson: samplesJsonCopy);
     }
 
     public async Task<(byte[]? PngBytes, int Width, int Height, string? Error)> CaptureCustomWidgetPreviewPngAsync(
@@ -535,10 +897,24 @@ public sealed partial class WidgetManager
         string? themeOverride = null,
         string? mode = null)
     {
+        CustomWidgetPreviewCaptureResult result = await CaptureCustomWidgetPreviewWithTelemetryAsync(
+            widgetIdOrTemplateId,
+            themeOverride,
+            mode,
+            stageId: null);
+        return (result.PngBytes, result.Width, result.Height, result.Error);
+    }
+
+    public async Task<CustomWidgetPreviewCaptureResult> CaptureCustomWidgetPreviewWithTelemetryAsync(
+        string widgetIdOrTemplateId,
+        string? themeOverride = null,
+        string? mode = null,
+        string? stageId = null)
+    {
         if (!HasUiThreadAccess())
         {
             return await RunOnUiThreadAsync(() =>
-                CaptureCustomWidgetPreviewPngAsync(widgetIdOrTemplateId, themeOverride, mode));
+                CaptureCustomWidgetPreviewWithTelemetryAsync(widgetIdOrTemplateId, themeOverride, mode, stageId));
         }
 
         string effectiveMode = (mode ?? string.Empty).Trim().ToLowerInvariant() switch
@@ -548,20 +924,47 @@ public sealed partial class WidgetManager
             _ => "expanded"
         };
 
-        WidgetConfig? config = ResolveCustomWidgetConfig(widgetIdOrTemplateId);
+        WidgetConfig? config = !string.IsNullOrWhiteSpace(widgetIdOrTemplateId)
+            ? ResolveCustomWidgetConfig(widgetIdOrTemplateId)
+            : null;
+
+        if (!string.IsNullOrWhiteSpace(stageId))
+        {
+            if (CustomWidgetAgentStageStore.TryReadBundle(
+                    stageId.Trim(),
+                    out AgentStageBundle? explicitStage,
+                    out string stageErr,
+                    _localizationService.CurrentCultureName) &&
+                explicitStage is not null)
+            {
+                if (config is null && !string.IsNullOrWhiteSpace(explicitStage.WidgetId))
+                {
+                    config = ResolveCustomWidgetConfig(explicitStage.WidgetId);
+                }
+                return await CaptureStagedBundlePreviewWithTelemetryAsync(explicitStage, config, themeOverride, effectiveMode);
+            }
+
+            if (string.IsNullOrWhiteSpace(widgetIdOrTemplateId))
+            {
+                return new CustomWidgetPreviewCaptureResult(null, 0, 0, 0, 0, 0, false, stageErr);
+            }
+        }
 
         // P2：Agent 调用 deskbox_upsert_widget 默认进入暂存区（尚未上桌面或尚未覆盖桌面实例）。
         // 此时调用 deskbox_capture_widget_preview 做视觉自检，必须优先渲染最新暂存包，
         // 否则新格子会报 not found，已有格子会截到修改前的旧画面。
-        if (CustomWidgetAgentStageStore.TryFindLatestPendingBundle(widgetIdOrTemplateId, out AgentStageBundle? stagedBundle) &&
+        if (!string.IsNullOrWhiteSpace(widgetIdOrTemplateId) &&
+            CustomWidgetAgentStageStore.TryFindLatestPendingBundle(widgetIdOrTemplateId, out AgentStageBundle? stagedBundle) &&
             stagedBundle is not null)
         {
-            return await CaptureStagedBundlePreviewPngAsync(stagedBundle, config, themeOverride, effectiveMode);
+            return await CaptureStagedBundlePreviewWithTelemetryAsync(stagedBundle, config, themeOverride, effectiveMode);
         }
 
         if (config is null)
         {
-            return (null, 0, 0, $"Custom widget '{widgetIdOrTemplateId}' not found.");
+            return new CustomWidgetPreviewCaptureResult(
+                null, 0, 0, 0, 0, 0, false,
+                $"Custom widget '{widgetIdOrTemplateId}' not found.");
         }
 
         if (!_contentWidgets.TryGetValue(config.Id, out ContentWidgetWindow? window))
@@ -572,7 +975,9 @@ public sealed partial class WidgetManager
 
         if (window is null)
         {
-            return (null, 0, 0, $"Custom widget window '{config.Id}' could not be materialized.");
+            return new CustomWidgetPreviewCaptureResult(
+                null, 0, 0, 0, 0, 0, false,
+                $"Custom widget window '{config.Id}' could not be materialized.");
         }
 
         await window.ContentReadyTask;
@@ -598,7 +1003,7 @@ public sealed partial class WidgetManager
         UIElement? captureRoot = window.Content ?? window.CurrentContent?.View;
         if (captureRoot is not FrameworkElement fe)
         {
-            return (null, 0, 0, "Widget visual tree is not ready.");
+            return new CustomWidgetPreviewCaptureResult(null, 0, 0, 0, 0, 0, false, "Widget visual tree is not ready.");
         }
 
         if (!fe.IsLoaded || fe.ActualWidth < 4 || fe.ActualHeight < 4)
@@ -649,11 +1054,66 @@ public sealed partial class WidgetManager
                 await Task.Delay(40);
             }
 
-            return await RenderElementToPngAsync(fe, isDarkTheme, compositeOpaqueBackdrop: true);
+            (byte[]? pngBytes, int pxW, int pxH, string? err) =
+                await RenderElementToPngAsync(fe, isDarkTheme, compositeOpaqueBackdrop: true);
+
+            double measuredW = Math.Round(fe.ActualWidth > 0 ? fe.ActualWidth : config.Width, 1);
+            double measuredH = Math.Round(fe.ActualHeight > 0 ? fe.ActualHeight : config.Height, 1);
+            double overflowPx = 0;
+
+            if (effectiveMode != "capsule" && targetAdapter is not null)
+            {
+                double frameW = Math.Clamp(config.Width > 180 ? config.Width : targetAdapter.ViewModel.Manifest.DefaultSize.Width, 200.0, 640.0);
+                double frameH = Math.Clamp(config.Height > 60 ? config.Height : targetAdapter.ViewModel.Manifest.DefaultSize.Height, 64.0, 900.0);
+                double availBodyH = Math.Max(48.0, frameH - 38.0);
+                bool hasScrollRoot = CustomWidgetHealthAnalyzer.HasRootFlexibleListOrScroll(targetAdapter.ViewModel.Manifest.View);
+
+                if (targetAdapter.View is FrameworkElement liveBodyFe && liveBodyFe.ActualWidth > 20)
+                {
+                    double restoreW = liveBodyFe.ActualWidth;
+                    double restoreH = liveBodyFe.ActualHeight;
+                    liveBodyFe.Measure(new Windows.Foundation.Size(Math.Max(120.0, frameW - 2.0), double.PositiveInfinity));
+                    measuredW = Math.Round(liveBodyFe.DesiredSize.Width, 1);
+                    measuredH = Math.Round(liveBodyFe.DesiredSize.Height, 1);
+                    liveBodyFe.InvalidateMeasure();
+                    if (restoreW > 0 && restoreH > 0)
+                    {
+                        liveBodyFe.Measure(new Windows.Foundation.Size(restoreW, restoreH));
+                    }
+                }
+                else
+                {
+                    double estH = CustomWidgetHealthAnalyzer.EstimateManifestLayoutHeight(
+                        targetAdapter.ViewModel.Manifest,
+                        out _,
+                        out _);
+                    measuredW = Math.Round(frameW, 1);
+                    measuredH = Math.Round(estH, 1);
+                }
+
+                if (!hasScrollRoot && measuredH > availBodyH + 24.0)
+                {
+                    overflowPx = Math.Round(measuredH - availBodyH, 1);
+                }
+            }
+
+            double liveScale = fe.XamlRoot?.RasterizationScale is double rs && rs > 0 ? rs : 1.0;
+            return new CustomWidgetPreviewCaptureResult(
+                pngBytes,
+                pxW,
+                pxH,
+                measuredW,
+                measuredH,
+                overflowPx,
+                overflowPx > 0,
+                err,
+                liveScale);
         }
         catch (Exception ex)
         {
-            return (null, 0, 0, $"RenderTargetBitmap capture failed: {ex.Message}");
+            return new CustomWidgetPreviewCaptureResult(
+                null, 0, 0, 0, 0, 0, false,
+                $"RenderTargetBitmap capture failed: {ex.Message}");
         }
         finally
         {
@@ -664,36 +1124,49 @@ public sealed partial class WidgetManager
         }
     }
 
-    private async Task<(byte[]? PngBytes, int Width, int Height, string? Error)> CaptureStagedBundlePreviewPngAsync(
+    private async Task<CustomWidgetPreviewCaptureResult> CaptureStagedBundlePreviewWithTelemetryAsync(
         AgentStageBundle stagedBundle,
         WidgetConfig? existingConfig,
         string? themeOverride,
         string effectiveMode)
     {
-        CustomWidgetParseResult parsed = CustomWidgetManifestParser.Parse(stagedBundle.ManifestJson);
-        if (parsed.Manifest is null)
-        {
-            return (null, 0, 0, "Staged manifest could not be parsed.");
-        }
-
+        string rawStageManifestJson = stagedBundle.ManifestJson;
         CustomWidgetDataStore? existingStore = existingConfig is not null
             ? CustomWidgetDataStore.ForWidget(existingConfig.Id)
             : null;
         string? logicJs = stagedBundle.HasLogicJs
             ? stagedBundle.LogicJs
             : existingStore?.ReadLogicJsOrNull();
-        string effectivePreviewManifestJson = !string.IsNullOrWhiteSpace(logicJs)
-            ? CustomWidgetTemplates.SyncManifestScriptPropertyJson(stagedBundle.ManifestJson, logicJs)
-            : stagedBundle.ManifestJson;
-        CustomWidgetParseResult syncedParsed = !ReferenceEquals(effectivePreviewManifestJson, stagedBundle.ManifestJson)
-            ? CustomWidgetManifestParser.Parse(effectivePreviewManifestJson)
-            : parsed;
-        CustomWidgetManifest baseManifest = syncedParsed.Manifest ?? parsed.Manifest;
+
         CustomWidgetLocaleCatalog? locales = stagedBundle.HasLocales
             ? CustomWidgetLocaleCatalog.ParseCatalogJson(stagedBundle.LocalesJson)
             : (existingStore is not null && existingStore.ReadLocaleCatalog() is { HasAnyLocale: true } diskCat
                 ? diskCat
                 : null);
+
+        // Apply AST compiler normalization in memory so staged previews match Studio / commit rendering.
+        var normEngine = new StudioWorkspaceEngine(rawStageManifestJson, logicJs, locales);
+        if (normEngine.HasManifest)
+        {
+            normEngine.NormalizeDomInPlace();
+            rawStageManifestJson = normEngine.GetManifestJson(indented: true) ?? rawStageManifestJson;
+        }
+
+        CustomWidgetParseResult parsed = CustomWidgetManifestParser.Parse(rawStageManifestJson);
+        if (parsed.Manifest is null)
+        {
+            return new CustomWidgetPreviewCaptureResult(
+                null, 0, 0, 0, 0, 0, false,
+                "Staged manifest could not be parsed.");
+        }
+
+        string effectivePreviewManifestJson = !string.IsNullOrWhiteSpace(logicJs)
+            ? CustomWidgetTemplates.SyncManifestScriptPropertyJson(rawStageManifestJson, logicJs)
+            : rawStageManifestJson;
+        CustomWidgetParseResult syncedParsed = !ReferenceEquals(effectivePreviewManifestJson, rawStageManifestJson)
+            ? CustomWidgetManifestParser.Parse(effectivePreviewManifestJson)
+            : parsed;
+        CustomWidgetManifest baseManifest = syncedParsed.Manifest ?? parsed.Manifest;
 
         CustomWidgetManifest effectiveManifest = locales is { HasAnyLocale: true }
             ? baseManifest.WithLocales(locales)
@@ -760,7 +1233,7 @@ public sealed partial class WidgetManager
         }
     }
 
-    private async Task<(byte[]? PngBytes, int Width, int Height, string? Error)> CaptureSyntheticCustomWidgetFramePngAsync(
+    private async Task<CustomWidgetPreviewCaptureResult> CaptureSyntheticCustomWidgetFramePngAsync(
         WidgetConfig config,
         CustomWidgetViewModel vm,
         bool renderCapsule,
@@ -784,157 +1257,48 @@ public sealed partial class WidgetManager
                 Win32Helper.WS_EX_LAYERED |
                 Win32Helper.WS_EX_TRANSPARENT);
             Win32Helper.SetLayeredWindowAttributes(hwnd, 0, 0, Win32Helper.LWA_ALPHA);
+            Win32Helper.TrySetWindowCloaked(hwnd, cloaked: true);
             Win32Helper.SetWindowTheme(hwnd, isDarkTheme);
 
             double frameWidth = renderCapsule
                 ? 348.0
-                : Math.Clamp(config.Width > 180 ? config.Width : vm.Manifest.DefaultSize.Width, 240.0, 640.0);
+                : Math.Clamp(config.Width > 180 ? config.Width : vm.Manifest.DefaultSize.Width, 200.0, 640.0);
             double frameHeight = renderCapsule
                 ? 52.0
-                : Math.Clamp(config.Height > 160 ? config.Height : vm.Manifest.DefaultSize.Height, 180.0, 900.0);
+                : Math.Clamp(config.Height > 60 ? config.Height : vm.Manifest.DefaultSize.Height, 64.0, 900.0);
 
-            Color surfaceBg = isDarkTheme
-                ? Color.FromArgb(255, 32, 32, 32)
-                : Color.FromArgb(255, 249, 249, 249);
-            Color strokeColor = isDarkTheme
-                ? Color.FromArgb(32, 255, 255, 255)
-                : Color.FromArgb(22, 0, 0, 0);
-            Color primaryFg = isDarkTheme
-                ? Color.FromArgb(255, 255, 255, 255)
-                : Color.FromArgb(230, 0, 0, 0);
-            Color secondaryFg = isDarkTheme
-                ? Color.FromArgb(196, 255, 255, 255)
-                : Color.FromArgb(156, 0, 0, 0);
-
-            var frameBorder = new Border
-            {
-                Width = frameWidth,
-                Height = frameHeight,
-                RequestedTheme = isDarkTheme ? ElementTheme.Dark : ElementTheme.Light,
-                CornerRadius = new CornerRadius(renderCapsule ? 26 : 8),
-                BorderThickness = new Thickness(1),
-                BorderBrush = new SolidColorBrush(strokeColor),
-                Background = new SolidColorBrush(surfaceBg),
-                HorizontalAlignment = HorizontalAlignment.Left,
-                VerticalAlignment = VerticalAlignment.Top
-            };
-
-            string emoji = CustomWidgetTemplates.IsEmojiIcon(vm.Manifest.Icon)
-                ? vm.Manifest.Icon.Trim()
-                : "\u2728";
             string resolvedTitle = !string.IsNullOrWhiteSpace(config.Name)
                 ? config.Name
                 : vm.Manifest.ResolveLocalizedName(_localizationService.CurrentCultureName);
 
-            if (renderCapsule)
+            var bodyPlaceholder = new Border
             {
-                var capsuleRow = new Grid
-                {
-                    Padding = new Thickness(16, 0, 16, 0),
-                    ColumnSpacing = 10,
-                    VerticalAlignment = VerticalAlignment.Center
-                };
-                capsuleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-                capsuleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-                capsuleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                capsuleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-                capsuleRow.Children.Add(new TextBlock
-                {
-                    Text = emoji,
-                    FontFamily = new FontFamily("Segoe UI Emoji"),
-                    FontSize = 14,
-                    VerticalAlignment = VerticalAlignment.Center
-                });
-
-                var capTitle = new TextBlock
-                {
-                    Text = !string.IsNullOrWhiteSpace(vm.CapsuleTitle) ? vm.CapsuleTitle : resolvedTitle,
-                    FontSize = 13,
-                    FontWeight = FontWeights.SemiBold,
-                    Foreground = new SolidColorBrush(primaryFg),
-                    VerticalAlignment = VerticalAlignment.Center
-                };
-                Grid.SetColumn(capTitle, 1);
-                capsuleRow.Children.Add(capTitle);
-
-                var capSummary = new TextBlock
-                {
-                    Text = vm.CapsuleSummary ?? string.Empty,
-                    FontSize = 12,
-                    Foreground = new SolidColorBrush(secondaryFg),
-                    TextTrimming = TextTrimming.CharacterEllipsis,
-                    MaxLines = 1,
-                    VerticalAlignment = VerticalAlignment.Center
-                };
-                Grid.SetColumn(capSummary, 2);
-                capsuleRow.Children.Add(capSummary);
-
-                if (!string.IsNullOrWhiteSpace(vm.CapsuleBadge))
-                {
-                    var badgeText = new TextBlock
-                    {
-                        Text = vm.CapsuleBadge,
-                        FontSize = 11.5,
-                        FontWeight = FontWeights.SemiBold,
-                        Foreground = new SolidColorBrush(primaryFg),
-                        VerticalAlignment = VerticalAlignment.Center
-                    };
-                    Grid.SetColumn(badgeText, 3);
-                    capsuleRow.Children.Add(badgeText);
-                }
-
-                frameBorder.Child = capsuleRow;
-            }
-            else
+                RequestedTheme = isDarkTheme ? ElementTheme.Dark : ElementTheme.Light
+            };
+            UIElement? bodyElement = null;
+            FrameworkElement? bodyFeForMeasure = null;
+            if (!renderCapsule)
             {
-                var grid = new Grid();
-                grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(36) });
-                grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1) });
-                grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-
-                var head = new StackPanel
-                {
-                    Orientation = Orientation.Horizontal,
-                    Spacing = 8,
-                    Padding = new Thickness(12, 0, 12, 0),
-                    VerticalAlignment = VerticalAlignment.Center
-                };
-                head.Children.Add(new TextBlock
-                {
-                    Text = emoji,
-                    FontFamily = new FontFamily("Segoe UI Emoji"),
-                    FontSize = 13,
-                    VerticalAlignment = VerticalAlignment.Center
-                });
-                head.Children.Add(new TextBlock
-                {
-                    Text = resolvedTitle,
-                    FontSize = 13,
-                    FontWeight = FontWeights.SemiBold,
-                    Foreground = new SolidColorBrush(primaryFg),
-                    TextTrimming = TextTrimming.CharacterEllipsis,
-                    MaxLines = 1,
-                    VerticalAlignment = VerticalAlignment.Center
-                });
-                grid.Children.Add(head);
-
-                var divider = new Border { Background = new SolidColorBrush(strokeColor) };
-                Grid.SetRow(divider, 1);
-                grid.Children.Add(divider);
-
                 tempRenderer = new CustomWidgetNativeRenderer(
                     vm,
-                    frameBorder,
+                    bodyPlaceholder,
                     () => _settingsService.Settings.WidgetShell.TextSize);
-                UIElement bodyElement = tempRenderer.BuildRootElement();
-                if (bodyElement is FrameworkElement bodyFe)
-                {
-                    Grid.SetRow(bodyFe, 2);
-                }
-                grid.Children.Add(bodyElement);
-                frameBorder.Child = grid;
+                bodyElement = tempRenderer.BuildRootElement();
+                bodyFeForMeasure = bodyElement as FrameworkElement;
             }
+
+            Color accentColor = Color.FromArgb(0xFF, 0x00, 0x78, 0xD4);
+            Border frameBorder = Controls.Studio.StudioPreviewFrameThemeRenderer.CreateStandaloneCaptureFrame(
+                vm,
+                bodyElement,
+                resolvedTitle,
+                frameWidth,
+                frameHeight,
+                renderCapsule,
+                isDarkTheme,
+                accentColor,
+                _settingsService.Settings.WidgetShell.TextSize,
+                32.0);
 
             var stageHost = new Grid
             {
@@ -950,10 +1314,19 @@ public sealed partial class WidgetManager
             frameBorder.Loaded += (_, _) => loadedTcs.TrySetResult();
 
             hostWindow.Content = stageHost;
-            double scale = Win32Helper.GetDpiScaleForPoint(80, 80);
-            int physW = Math.Max(320, (int)Math.Ceiling((frameWidth + 48) * scale));
-            int physH = Math.Max(160, (int)Math.Ceiling((frameHeight + 64) * scale));
-            hostWindow.AppWindow.MoveAndResize(new RectInt32(80, 80, physW, physH));
+            RectInt32? primaryWork = Microsoft.UI.Windowing.DisplayArea.Primary?.WorkArea;
+            int dpiRefX = primaryWork is { } pw ? pw.X + 48 : 80;
+            int dpiRefY = primaryWork is { } py ? py.Y + 48 : 80;
+            double scale = Win32Helper.GetDpiScaleForPoint(dpiRefX, dpiRefY);
+            if (!double.IsFinite(scale) || scale <= 0)
+            {
+                scale = 1.0;
+            }
+
+            int physW = Math.Max(240, (int)Math.Ceiling((frameWidth + 48) * scale));
+            int physH = Math.Max(96, (int)Math.Ceiling((frameHeight + 64) * scale));
+            hostWindow.AppWindow.Move(new PointInt32(-32000, -32000));
+            hostWindow.AppWindow.MoveAndResize(new RectInt32(-32000, -32000, physW, physH));
             Win32Helper.ShowWindow(hwnd, Win32Helper.SW_SHOWNOACTIVATE);
 
             await Task.WhenAny(loadedTcs.Task, Task.Delay(350));
@@ -961,11 +1334,43 @@ public sealed partial class WidgetManager
             await Task.Delay(60);
             frameBorder.UpdateLayout();
 
-            return await RenderElementToPngAsync(frameBorder, isDarkTheme, compositeOpaqueBackdrop: false);
+            (byte[]? pngBytes, int pxW, int pxH, string? err) =
+                await RenderElementToPngAsync(frameBorder, isDarkTheme, compositeOpaqueBackdrop: false);
+
+            double measuredW = Math.Round(frameWidth, 1);
+            double measuredH = Math.Round(frameHeight, 1);
+            double overflowPx = 0;
+            if (!renderCapsule && bodyFeForMeasure is not null)
+            {
+                double availBodyW = Math.Max(120.0, frameWidth - 2.0);
+                double availBodyH = Math.Max(48.0, frameHeight - 38.0);
+                bodyFeForMeasure.Measure(new Windows.Foundation.Size(availBodyW, double.PositiveInfinity));
+                measuredW = Math.Round(bodyFeForMeasure.DesiredSize.Width, 1);
+                measuredH = Math.Round(bodyFeForMeasure.DesiredSize.Height, 1);
+                bool hasScrollRoot = CustomWidgetHealthAnalyzer.HasRootFlexibleListOrScroll(vm.Manifest.View);
+                if (!hasScrollRoot && measuredH > availBodyH + 24.0)
+                {
+                    overflowPx = Math.Round(measuredH - availBodyH, 1);
+                }
+            }
+
+            double offscreenScale = frameBorder.XamlRoot?.RasterizationScale is double rs && rs > 0 ? rs : scale;
+            return new CustomWidgetPreviewCaptureResult(
+                pngBytes,
+                pxW,
+                pxH,
+                measuredW,
+                measuredH,
+                overflowPx,
+                overflowPx > 0,
+                err,
+                offscreenScale);
         }
         catch (Exception ex)
         {
-            return (null, 0, 0, $"Offscreen expanded widget preview capture failed: {ex.Message}");
+            return new CustomWidgetPreviewCaptureResult(
+                null, 0, 0, 0, 0, 0, false,
+                $"Offscreen expanded widget preview capture failed: {ex.Message}");
         }
         finally
         {

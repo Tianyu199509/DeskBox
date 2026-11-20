@@ -22,7 +22,7 @@ public sealed partial class CustomWidgetSettingsSection
             return;
         }
 
-        _ = CustomWidgetApiDocsDialogHelper.ShowAsync(XamlRoot, ActualTheme, Localization);
+        _ = CustomWidgetApiDocsDialogHelper.ShowAsync(XamlRoot, ActualTheme, _localization);
     }
 
     public void TriggerImportPackage() =>

@@ -1,14 +1,13 @@
 using DeskBox.FileSafety;
 using DeskBox.Models;
 using DeskBox.Services;
-using DeskBox.Views;
+using DeskBox.Services.Studio;
 
 namespace DeskBox;
 
 public partial class App
 {
-    private CustomWidgetStudioWindow? _customWidgetStudioWindow;
-
+    private IStudioHostBridge? _inProcessStudioHostBridge;
     internal async Task HandleProtocolActivationUriAsync(string rawUri)
     {
         if (IsShuttingDown || string.IsNullOrWhiteSpace(rawUri))
@@ -67,37 +66,7 @@ public partial class App
             return;
         }
 
-        CancelBackgroundMemoryCleanup();
-        bool isForkRequest = !string.IsNullOrWhiteSpace(widgetId) &&
-                             widgetId.Trim().StartsWith("fork:", StringComparison.OrdinalIgnoreCase);
-        string? forkSourceId = isForkRequest ? widgetId!.Trim()["fork:".Length..].Trim() : null;
-
-        if (_customWidgetStudioWindow is null)
-        {
-            EnsureXamlLoopLifelineIfNoOtherWindows();
-            var window = new CustomWidgetStudioWindow(LocalizationService);
-            _customWidgetStudioWindow = window;
-            ThemeService.TrackWindow(window);
-            window.Closed += CustomWidgetStudioWindow_Closed;
-            if (isForkRequest && !string.IsNullOrWhiteSpace(forkSourceId))
-            {
-                window.InitializeForkFromWidget(forkSourceId, initialIdea, autoStartGeneration);
-            }
-            else
-            {
-                window.Initialize(widgetId, initialIdea, autoStartGeneration);
-            }
-        }
-        else if (isForkRequest && !string.IsNullOrWhiteSpace(forkSourceId))
-        {
-            _customWidgetStudioWindow.InitializeForkFromWidget(forkSourceId, initialIdea, autoStartGeneration);
-        }
-        else
-        {
-            _customWidgetStudioWindow.RequestTarget(widgetId, initialIdea, autoStartGeneration);
-        }
-
-        _customWidgetStudioWindow.ShowWindow();
+        ShowStudioViaHost(widgetId, initialIdea, autoStartGeneration);
     }
 
     public void ShowCustomWidgetStudioPreview(
@@ -112,75 +81,35 @@ public partial class App
             return;
         }
 
-        CancelBackgroundMemoryCleanup();
-        if (_customWidgetStudioWindow is null)
-        {
-            EnsureXamlLoopLifelineIfNoOtherWindows();
-            var window = new CustomWidgetStudioWindow(LocalizationService);
-            _customWidgetStudioWindow = window;
-            ThemeService.TrackWindow(window);
-            window.Closed += CustomWidgetStudioWindow_Closed;
-            window.Initialize(null, null);
-        }
-
-        _customWidgetStudioWindow.OpenExternalManifestPreview(
-            manifestJson,
-            sourceLabel,
-            logicJs,
-            locales,
-            originKind);
-        _customWidgetStudioWindow.ShowWindow();
+        ShowStudioPreviewViaHost(manifestJson, sourceLabel, logicJs, locales, originKind);
     }
 
     internal string? TryGetStudioTargetWidgetIdForAgentUpsert() =>
-        _customWidgetStudioWindow?.TryGetTargetWidgetIdForAgentUpsert();
+        IsStudioHostRunning ? _studioHostTargetWidgetId : null;
 
     internal async Task<string> BuildStudioContextResponseJsonAsync(bool includeManifest = true)
     {
-        CustomWidgetStudioWindow? studio = _customWidgetStudioWindow;
-        if (IsShuttingDown || studio is null)
+        if (!IsShuttingDown &&
+            await TryQueryRemoteStudioContextJsonAsync(includeManifest, TimeSpan.FromSeconds(2)) is { } remoteJson)
         {
-            return DeskBoxAgentBridgeServer.BuildHeadlessStudioContextResponseJson(
-                LocalizationService?.CurrentCultureName);
+            return remoteJson;
         }
 
-        if (studio.DispatcherQueue.HasThreadAccess)
-        {
-            return DeskBoxAgentBridgeServer.BuildSuccessJson(
-                writer => studio.WriteStudioContextTo(writer, includeManifest));
-        }
-
-        var tcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-        if (!studio.DispatcherQueue.TryEnqueue(() =>
-            {
-                try
-                {
-                    string json = DeskBoxAgentBridgeServer.BuildSuccessJson(
-                        writer => studio.WriteStudioContextTo(writer, includeManifest));
-                    tcs.TrySetResult(json);
-                }
-                catch (Exception ex)
-                {
-                    tcs.TrySetResult(DeskBoxAgentBridgeServer.BuildErrorJson(ex.Message));
-                }
-            }))
-        {
-            return DeskBoxAgentBridgeServer.BuildHeadlessStudioContextResponseJson(
-                LocalizationService?.CurrentCultureName);
-        }
-
-        try
-        {
-            return await tcs.Task.WaitAsync(TimeSpan.FromSeconds(2));
-        }
-        catch
-        {
-            return DeskBoxAgentBridgeServer.BuildHeadlessStudioContextResponseJson(
-                LocalizationService?.CurrentCultureName);
-        }
+        AppSettings? s = SettingsService?.Settings;
+        return DeskBoxAgentBridgeServer.BuildHeadlessStudioContextResponseJson(
+            LocalizationService?.CurrentCultureName,
+            s is not null && double.IsFinite(s.WidgetShell.DefaultWidgetWidth) ? (int)Math.Round(s.WidgetShell.DefaultWidgetWidth) : null,
+            s is not null && double.IsFinite(s.WidgetShell.DefaultWidgetHeight) ? (int)Math.Round(s.WidgetShell.DefaultWidgetHeight) : null);
     }
 
-    /// <summary>供工坊首屏列出「来自外部工具、待用户确认」的暂存批次。</summary>
+    /// <summary>Cached main-process bridge used by <see cref="StudioIpcRouter"/>.</summary>
+    private IStudioHostBridge GetStudioHostBridge() =>
+        _inProcessStudioHostBridge ??= new InProcessStudioHostBridge(
+            getWidgetManager: () => WidgetManager,
+            getNotificationService: () => NativeNotificationService,
+            commitAgentStageAsync: CommitAgentStageAsync,
+            discardAgentStageAsync: DiscardAgentStageAsync);
+
     internal IReadOnlyList<AgentStageSummary> GetPendingAgentStages() =>
         CustomWidgetAgentStageStore.ListPending();
 
@@ -227,35 +156,43 @@ public partial class App
         CustomWidgetLocaleCatalog? locales,
         bool hasLocales)
     {
-        if (IsShuttingDown || _customWidgetStudioWindow is null)
+        if (IsShuttingDown)
         {
             return;
         }
 
-        _customWidgetStudioWindow.OnExternalAgentWidgetUpserted(
-            widgetId,
-            widgetName,
-            manifestJson,
-            logicJs,
-            hasLogicJs,
-            locales,
-            hasLocales);
+        if (IsStudioHostRunning && HasConnectedStudioIpcClient)
+        {
+            string payload = SettingsIpcPayload.Encode(
+                new StudioAgentUpsertEventPayload(
+                    WidgetId: widgetId,
+                    WidgetName: widgetName,
+                    ManifestJson: manifestJson,
+                    LogicJs: logicJs,
+                    HasLogicJs: hasLogicJs,
+                    LocalesJson: StudioLocaleWireHelper.Serialize(locales),
+                    HasLocales: hasLocales && locales is { HasAnyLocale: true }),
+                SettingsIpcJsonContext.Default.StudioAgentUpsertEventPayload);
+            _ = PushStudioIpcEventAsync(StudioIpcMethods.AgentWidgetUpserted, payload);
+        }
     }
 
-    private void CustomWidgetStudioWindow_Closed(object sender, Microsoft.UI.Xaml.WindowEventArgs args)
+    internal void ConfigureCustomWidgetHostActionBridge()
     {
-        if (sender is not CustomWidgetStudioWindow window)
+        CustomWidgetHostActionBridge.OpenSearchPopupHandler = query =>
         {
-            return;
-        }
-
-        window.Closed -= CustomWidgetStudioWindow_Closed;
-        if (ReferenceEquals(_customWidgetStudioWindow, window))
-        {
-            _customWidgetStudioWindow = null;
-        }
-
-        ScheduleLightMemoryCleanup(completedHeavyOperation: true);
-        ScheduleBackgroundMemoryCleanup("custom-widget-studio-closed");
+            if (string.IsNullOrWhiteSpace(query))
+            {
+                OpenSearchPopup();
+            }
+            else
+            {
+                OpenSearchPopupWithQuery(query);
+            }
+        };
+        CustomWidgetHostActionBridge.ShowDesktopToastHandler = request =>
+            DesktopToastHudService.Shared.TryShow(request, SettingsService);
+        CustomWidgetHostActionBridge.RecycleEntryHandler = (path, ownerHwnd) =>
+            FileService.DeleteEntryAsync(path, recycle: true, ownerHandle: ownerHwnd);
     }
 }

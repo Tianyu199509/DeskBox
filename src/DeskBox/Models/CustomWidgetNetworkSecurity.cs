@@ -319,11 +319,169 @@ public static class CustomWidgetNetworkSecurity
         return false;
     }
 
+    internal static bool IsBenchmarkTunIpAddress(IPAddress address)
+    {
+        if (address.IsIPv4MappedToIPv6)
+        {
+            address = address.MapToIPv4();
+        }
+
+        if (address.AddressFamily == AddressFamily.InterNetwork)
+        {
+            byte[] bytes = address.GetAddressBytes();
+            return bytes.Length == 4 && bytes[0] == 198 && bytes[1] is 18 or 19;
+        }
+
+        return false;
+    }
+
+    internal static bool IsConfiguredSystemProxyEndpoint(
+        Uri? requestUri,
+        DnsEndPoint dnsEndPoint,
+        IWebProxy? proxy)
+    {
+        if (requestUri is null || proxy is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            if (proxy.IsBypassed(requestUri))
+            {
+                return false;
+            }
+
+            Uri? proxyUri = proxy.GetProxy(requestUri);
+            if (proxyUri is null ||
+                string.Equals(proxyUri.AbsoluteUri, requestUri.AbsoluteUri, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            string proxyHost = proxyUri.IdnHost.Trim().TrimEnd('.');
+            string requestHost = requestUri.IdnHost.Trim().TrimEnd('.');
+            if (string.Equals(proxyHost, requestHost, StringComparison.OrdinalIgnoreCase) &&
+                proxyUri.Port == requestUri.Port)
+            {
+                // Never treat a direct request targeting the proxy host:port itself as a proxied handoff.
+                return false;
+            }
+
+            string connectHost = dnsEndPoint.Host.Trim().TrimEnd('.');
+            return string.Equals(proxyHost, connectHost, StringComparison.OrdinalIgnoreCase) &&
+                   proxyUri.Port == dnsEndPoint.Port;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    internal static void ValidateTargetUriForProxyHandoff(Uri? requestUri, bool requirePublicIpOnly)
+    {
+        if (requestUri is null)
+        {
+            return;
+        }
+
+        string targetHost = requestUri.IdnHost.Trim().TrimEnd('.');
+        if (string.IsNullOrEmpty(targetHost))
+        {
+            throw new InvalidOperationException("Blocked proxied request with empty host.");
+        }
+
+        if (requirePublicIpOnly)
+        {
+            if (string.Equals(targetHost, "localhost", StringComparison.OrdinalIgnoreCase) ||
+                targetHost.EndsWith(".localhost", StringComparison.OrdinalIgnoreCase) ||
+                targetHost.EndsWith(".local", StringComparison.OrdinalIgnoreCase) ||
+                targetHost.EndsWith(".internal", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    $"Blocked proxied connection to non-public target host '{targetHost}'.");
+            }
+
+            if (IPAddress.TryParse(targetHost, out IPAddress? targetIp) &&
+                (IsBlockedIpAddress(targetIp) || IsBenchmarkTunIpAddress(targetIp)))
+            {
+                throw new InvalidOperationException(
+                    $"Blocked proxied connection to non-public target IP '{targetIp}'.");
+            }
+        }
+        else if (IPAddress.TryParse(targetHost, out IPAddress? targetIp) && IsAlwaysForbiddenWidgetIpAddress(targetIp))
+        {
+            throw new InvalidOperationException(
+                $"Blocked proxied connection to forbidden target IP '{targetIp}'.");
+        }
+    }
+
+    internal static async Task ValidateTargetUriForProxyHandoffAsync(
+        Uri? requestUri,
+        bool requirePublicIpOnly,
+        CancellationToken cancellationToken,
+        Func<string, CancellationToken, Task<IPAddress[]>>? dnsResolver = null)
+    {
+        ValidateTargetUriForProxyHandoff(requestUri, requirePublicIpOnly);
+        if (requestUri is null)
+        {
+            return;
+        }
+
+        string targetHost = requestUri.IdnHost.Trim().TrimEnd('.');
+        if (IPAddress.TryParse(targetHost, out _))
+        {
+            return;
+        }
+
+        if (!requirePublicIpOnly &&
+            (string.Equals(targetHost, "localhost", StringComparison.OrdinalIgnoreCase) ||
+             targetHost.EndsWith(".localhost", StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        using var dnsCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        dnsCts.CancelAfter(TimeSpan.FromSeconds(4));
+
+        IPAddress[] resolvedAddresses = dnsResolver is not null
+            ? await dnsResolver(targetHost, dnsCts.Token).ConfigureAwait(false)
+            : await Dns.GetHostAddressesAsync(targetHost, dnsCts.Token).ConfigureAwait(false);
+        if (resolvedAddresses is null || resolvedAddresses.Length == 0)
+        {
+            throw new SocketException((int)SocketError.HostNotFound);
+        }
+
+        foreach (IPAddress ip in resolvedAddresses)
+        {
+            bool blocked = requirePublicIpOnly
+                ? IsBlockedIpAddress(ip)
+                : IsAlwaysForbiddenWidgetIpAddress(ip);
+            if (blocked)
+            {
+                throw new InvalidOperationException(
+                    $"Blocked proxied connection to forbidden IP address '{ip}' resolved for '{targetHost}'.");
+            }
+        }
+    }
+
     public static async ValueTask<Stream> ConnectToValidatedPublicIpAsync(
         SocketsHttpConnectionContext context,
         CancellationToken cancellationToken)
     {
         string host = context.DnsEndPoint.Host.Trim().TrimEnd('.');
+        bool isSystemProxy = IsConfiguredSystemProxyEndpoint(
+            context.InitialRequestMessage.RequestUri,
+            context.DnsEndPoint,
+            HttpClient.DefaultProxy);
+        if (isSystemProxy)
+        {
+            await ValidateTargetUriForProxyHandoffAsync(
+                context.InitialRequestMessage.RequestUri,
+                requirePublicIpOnly: true,
+                cancellationToken).ConfigureAwait(false);
+        }
+
         IPAddress[] addresses = IPAddress.TryParse(host, out IPAddress? literalIp)
             ? [literalIp]
             : await Dns.GetHostAddressesAsync(host, cancellationToken).ConfigureAwait(false);
@@ -334,7 +492,7 @@ public static class CustomWidgetNetworkSecurity
 
         foreach (IPAddress ip in addresses)
         {
-            if (IsBlockedIpAddress(ip))
+            if (isSystemProxy ? IsAlwaysForbiddenWidgetIpAddress(ip) : IsBlockedIpAddress(ip))
             {
                 throw new InvalidOperationException(
                     $"Blocked connection to non-public IP address '{ip}' resolved for '{host}'.");
@@ -364,11 +522,40 @@ public static class CustomWidgetNetworkSecurity
         throw lastException ?? new SocketException((int)SocketError.HostUnreachable);
     }
 
-    public static async ValueTask<Stream> ConnectToValidatedLocalOrPublicIpAsync(
+    internal static readonly HttpRequestOptionsKey<bool> RequirePublicIpOnlyOption =
+        new("DeskBox.RequirePublicIpOnly");
+
+    public static ValueTask<Stream> ConnectToValidatedLocalOrPublicIpAsync(
         SocketsHttpConnectionContext context,
+        CancellationToken cancellationToken) =>
+        ConnectToValidatedLocalOrPublicIpCoreAsync(context, allowSystemProxy: true, cancellationToken);
+
+    internal static ValueTask<Stream> ConnectToValidatedLocalOrPublicIpDirectAsync(
+        SocketsHttpConnectionContext context,
+        CancellationToken cancellationToken) =>
+        ConnectToValidatedLocalOrPublicIpCoreAsync(context, allowSystemProxy: false, cancellationToken);
+
+    private static async ValueTask<Stream> ConnectToValidatedLocalOrPublicIpCoreAsync(
+        SocketsHttpConnectionContext context,
+        bool allowSystemProxy,
         CancellationToken cancellationToken)
     {
         string host = context.DnsEndPoint.Host.Trim().TrimEnd('.');
+        bool requirePublicIpOnly =
+            context.InitialRequestMessage.Options.TryGetValue(RequirePublicIpOnlyOption, out bool publicOnlyFlag) &&
+            publicOnlyFlag;
+        bool isSystemProxy = allowSystemProxy && IsConfiguredSystemProxyEndpoint(
+            context.InitialRequestMessage.RequestUri,
+            context.DnsEndPoint,
+            HttpClient.DefaultProxy);
+        if (isSystemProxy)
+        {
+            await ValidateTargetUriForProxyHandoffAsync(
+                context.InitialRequestMessage.RequestUri,
+                requirePublicIpOnly,
+                cancellationToken).ConfigureAwait(false);
+        }
+
         IPAddress[] addresses = IPAddress.TryParse(host, out IPAddress? literalIp)
             ? [literalIp]
             : await Dns.GetHostAddressesAsync(host, cancellationToken).ConfigureAwait(false);
@@ -379,10 +566,13 @@ public static class CustomWidgetNetworkSecurity
 
         foreach (IPAddress ip in addresses)
         {
-            if (IsAlwaysForbiddenWidgetIpAddress(ip))
+            bool blocked = isSystemProxy
+                ? IsAlwaysForbiddenWidgetIpAddress(ip)
+                : (requirePublicIpOnly ? IsBlockedIpAddress(ip) : IsAlwaysForbiddenWidgetIpAddress(ip));
+            if (blocked)
             {
                 throw new InvalidOperationException(
-                    $"Blocked connection to forbidden link-local/metadata IP address '{ip}' resolved for '{host}'.");
+                    $"Blocked connection to forbidden IP address '{ip}' resolved for '{host}'.");
             }
         }
 
@@ -519,5 +709,62 @@ public static class CustomWidgetNetworkSecurity
 
             return response;
         }
+    }
+
+    /// <summary>
+    /// Returns <see langword="true"/> when <paramref name="rawPathOrUri"/> points to a Windows UNC network share
+    /// (<c>\\server\share</c>, <c>//server/share</c>, <c>\??\UNC\...</c>) or a remote <c>file://server/...</c> URI.
+    /// Must be checked BEFORE any <see cref="System.IO.File.Exists"/> or <see cref="System.IO.Directory.Exists"/> call
+    /// to prevent outbound SMB handshakes and Net-NTLMv2 credential leaks.
+    /// </summary>
+    public static bool IsBlockedUncOrRemoteFileUri(string? rawPathOrUri)
+    {
+        if (string.IsNullOrWhiteSpace(rawPathOrUri))
+        {
+            return false;
+        }
+
+        if (IsRawUncOrRemoteFileString(rawPathOrUri))
+        {
+            return true;
+        }
+
+        string expanded = Environment.ExpandEnvironmentVariables(rawPathOrUri.Trim());
+        return !string.Equals(expanded, rawPathOrUri, StringComparison.Ordinal) &&
+               IsRawUncOrRemoteFileString(expanded);
+    }
+
+    private static bool IsRawUncOrRemoteFileString(string candidate)
+    {
+        string trimmed = candidate.Trim().Trim('"');
+        if (string.IsNullOrEmpty(trimmed))
+        {
+            return false;
+        }
+
+        if (trimmed.StartsWith(@"\\", StringComparison.Ordinal) ||
+            trimmed.StartsWith("//", StringComparison.Ordinal) ||
+            trimmed.StartsWith(@"\??\", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (trimmed.StartsWith("file:", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!Uri.TryCreate(trimmed, UriKind.Absolute, out Uri? fileUri) || !fileUri.IsFile)
+            {
+                return true;
+            }
+
+            if (fileUri.IsUnc ||
+                !string.IsNullOrEmpty(fileUri.Host) ||
+                fileUri.LocalPath.StartsWith(@"\\", StringComparison.Ordinal) ||
+                fileUri.LocalPath.StartsWith("//", StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

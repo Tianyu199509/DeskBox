@@ -29,19 +29,25 @@ public sealed class CustomWidgetScriptPhase3Tests
               ]
             }
           },
-          "view": {
-            "type": "Stack",
-            "spacing": 8,
-            "children": [
-              { "type": "Text", "text": "${$computed.banner}", "style": "bodyStrong" },
-              {
-                "type": "Button",
-                "text": "+1",
-                "onClick": [
-                  { "type": "script.run", "fn": "bump", "arg": "1" }
-                ]
-              }
-            ]
+          "root": "root",
+          "elements": {
+            "root": {
+              "type": "Stack",
+              "spacing": 8,
+              "children": ["banner_text", "bump_btn"]
+            },
+            "banner_text": {
+              "type": "Text",
+              "text": "${$computed.banner}",
+              "style": "bodyStrong"
+            },
+            "bump_btn": {
+              "type": "Button",
+              "text": "+1",
+              "onClick": [
+                { "type": "script.run", "fn": "bump", "arg": "1" }
+              ]
+            }
           }
         }
         """;
@@ -164,9 +170,25 @@ public sealed class CustomWidgetScriptPhase3Tests
         {
             File.WriteAllText(Path.Combine(tempDir, "zh-CN.json"), "{ invalid json", Encoding.UTF8);
             var diagnostics = new List<CustomWidgetValidationDiagnostic>();
-            CustomWidgetScriptValidator.ValidateLocalesDirectory(tempDir, diagnostics);
+            CustomWidgetScriptValidator.ValidateRawLocaleDirectoryFiles(tempDir, diagnostics);
 
             Assert.Contains(diagnostics, d => d.IsError && d.Path.StartsWith("locales/zh-CN.json", StringComparison.Ordinal));
+
+            File.WriteAllText(
+                Path.Combine(tempDir, "zh-CN.json"),
+                """{"title":"脚本计数器","ready":"已就绪","bump":"加一"}""",
+                Encoding.UTF8);
+            File.WriteAllText(
+                Path.Combine(tempDir, "en-US.json"),
+                """{"title":"Script Counter","ready":"Ready","bump":"Bump"}""",
+                Encoding.UTF8);
+            CustomWidgetLocaleCatalog? loadedCatalog = CustomWidgetLocaleCatalog.LoadFromDirectory(tempDir);
+            Assert.NotNull(loadedCatalog);
+            CustomWidgetWorkspaceValidationResult bundleResult = CustomWidgetScriptValidator.ValidateWorkspaceBundle(
+                BaseScriptManifestJson,
+                ValidLogicJs,
+                loadedCatalog);
+            Assert.True(bundleResult.IsValid);
         }
         finally
         {
@@ -185,7 +207,10 @@ public sealed class CustomWidgetScriptPhase3Tests
               "schemaVersion": 1,
               "id": "custom.tick-demo",
               "name": "Tick Demo",
-              "view": { "type": "Text", "text": "${$computed.clock}" }
+              "root": "root",
+              "elements": {
+                "root": { "type": "Text", "text": "${$computed.clock}" }
+              }
             }
             """;
         const string tickJs = """
@@ -259,7 +284,10 @@ public sealed class CustomWidgetScriptPhase3Tests
               "schemaVersion": 1,
               "id": "custom.pure",
               "name": "Pure Declarative",
-              "view": { "type": "Text", "text": "Hello" }
+              "root": "root",
+              "elements": {
+                "root": { "type": "Text", "text": "Hello" }
+              }
             }
             """;
         string removeEnvelope = $$"""
@@ -351,11 +379,14 @@ public sealed class CustomWidgetScriptPhase3Tests
         {
             Directory.CreateDirectory(tempDir);
             string dirtyLogicJs = ValidLogicJs + "\n// path C:\\Users\\Alice\\secret.txt token sk-1234567890abcdefghijklmnop";
-            await widgetStore.WriteManifestJsonAsync(BaseScriptManifestJson);
-            await widgetStore.WriteOrDeleteLogicJsAsync(dirtyLogicJs);
-            await widgetStore.WriteOrDeleteLocalesAsync(CreateValidLocales());
+            await widgetStore.WriteWorkspaceBundleAsync(
+                BaseScriptManifestJson,
+                dirtyLogicJs,
+                updateLogicJs: true,
+                locales: CreateValidLocales(),
+                updateLocales: true);
 
-            string sharePkgPath = Path.Combine(tempDir, "counter.deskbox-widget");
+            string sharePkgPath = Path.Combine(tempDir, "counter.dbxwidget");
             CustomWidgetExportReport shareReport = await CustomWidgetPackageService.ExportSharePackageAsync(widgetId, sharePkgPath);
             Assert.True(shareReport.SanitizedPathsCount >= 1);
             Assert.True(shareReport.StrippedSecretsCount >= 1);
@@ -369,12 +400,10 @@ public sealed class CustomWidgetScriptPhase3Tests
             Assert.Equal("脚本计数器", importedShare.Manifest.ResolveLocalizedName("zh-CN"));
             Assert.Equal("Script Counter", importedShare.Manifest.ResolveLocalizedName("en-US"));
 
-            string zipPkgPath = Path.Combine(tempDir, "counter.dbbox");
-            _ = await CustomWidgetPackageService.ExportSharePackageAsync(widgetId, zipPkgPath);
-            CustomWidgetImportedBundle importedZip = await CustomWidgetPackageService.ReadPackageBundleAsync(zipPkgPath);
-            Assert.NotNull(importedZip.LogicJs);
-            Assert.NotNull(importedZip.Locales);
-            Assert.Equal("Script Counter", importedZip.Manifest.ResolveLocalizedName("en-US"));
+            string legacyExtPath = Path.Combine(tempDir, "counter.dbbox");
+            File.Copy(sharePkgPath, legacyExtPath);
+            await Assert.ThrowsAsync<NotSupportedException>(
+                () => CustomWidgetPackageService.ReadPackageBundleAsync(legacyExtPath));
         }
         finally
         {
