@@ -135,3 +135,7 @@ native/prebuilt/
 .agents/
 .cursor/
 .gemini/
+
+# Python bytecode cache (scripts run locally)
+__pycache__/
+*.pyc
