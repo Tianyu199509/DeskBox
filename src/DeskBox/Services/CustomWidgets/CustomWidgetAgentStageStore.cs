@@ -48,6 +48,67 @@ internal static class CustomWidgetAgentStageStore
 {
     private static readonly object Gate = new();
     private static readonly TimeSpan MaxAge = TimeSpan.FromHours(24);
+    private static readonly Dictionary<string, PendingStageCommit> s_pendingCommits = new(StringComparer.Ordinal);
+
+    private sealed record PendingStageCommit(
+        string Dir,
+        string? WidgetId,
+        string ManifestSha256,
+        string ManifestCanonicalSha256,
+        string? RawCallerManifestCanonicalSha256,
+        bool HasLogicJs,
+        string LogicSha256,
+        bool HasLocales,
+        string LocalesSha256);
+
+    /// <summary>
+    /// 落盘成功后消费租约：删除批次目录并写幂等墓碑。崩溃时租约随进程消失，
+    /// 批次目录保留，客户端可重试。
+    /// </summary>
+    internal static void CompleteCommit(string stageId)
+    {
+        lock (Gate)
+        {
+            if (!s_pendingCommits.TryGetValue(stageId, out PendingStageCommit? pending))
+            {
+                return;
+            }
+
+            s_pendingCommits.Remove(stageId);
+            try
+            {
+                if (Directory.Exists(pending.Dir))
+                {
+                    Directory.Delete(pending.Dir, recursive: true);
+                }
+            }
+            catch
+            {
+                // Tombstone below still makes retries idempotent; sweep handles the leftovers.
+            }
+
+            RecordCommittedLocked(
+                stageId,
+                pending.WidgetId,
+                pending.ManifestSha256,
+                pending.ManifestCanonicalSha256,
+                pending.RawCallerManifestCanonicalSha256,
+                pending.HasLogicJs,
+                pending.LogicSha256,
+                pending.HasLocales,
+                pending.LocalesSha256);
+            NotifyChanged();
+        }
+    }
+
+    /// <summary>落盘失败时释放租约，保留暂存包供重试。</summary>
+    internal static void AbortCommit(string stageId)
+    {
+        lock (Gate)
+        {
+            s_pendingCommits.Remove(stageId);
+        }
+    }
 
     /// <summary>暂存区内容变化（新增 / 提交 / 忽略 / 过期清理），供工坊提示条实时刷新。</summary>
     internal static event Action? Changed;
@@ -605,11 +666,20 @@ internal static class CustomWidgetAgentStageStore
                         : ComputeCanonicalJsonHash(stagedLocalesJson))
                     : string.Empty;
 
-                Directory.Delete(dir, recursive: true);
-                // 消费后留一条幂等记录：客户端重试或 Agent 重放同一批次时，
-                // 应拿到「已提交」的成功结果，而不是「stageId 不存在」。
-                RecordCommittedLocked(
-                    stageId,
+                // Three-state commit lease: the stage directory and its idempotency
+                // tombstone are only consumed after the caller's workspace write
+                // succeeds (CompleteCommit). A failed write keeps the bundle retryable
+                // (AbortCommit), and a concurrent replay of the same stage is rejected
+                // while a commit is in flight instead of creating a duplicate widget.
+                if (s_pendingCommits.ContainsKey(stageId))
+                {
+                    bundle = null;
+                    error = T(cultureName, "CustomWidget.AgentStage.Error.CommitInProgress");
+                    return false;
+                }
+
+                s_pendingCommits[stageId] = new PendingStageCommit(
+                    dir,
                     widgetId,
                     recordedHash,
                     recordedCanonicalHash,
@@ -618,7 +688,6 @@ internal static class CustomWidgetAgentStageStore
                     effectiveLogicHash,
                     stagedHasLocales,
                     effectiveLocalesHash);
-                NotifyChanged();
                 return true;
             }
             catch (Exception ex)

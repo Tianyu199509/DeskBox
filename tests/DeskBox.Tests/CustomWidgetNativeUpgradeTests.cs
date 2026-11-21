@@ -303,7 +303,9 @@ public sealed class CustomWidgetNativeUpgradeTests
             Assert.True(localProfile.TrustedLocalAuthoring);
             Assert.True(localProfile.IsPermissionGranted(CustomWidgetPermissionKind.LocalNetwork));
             Assert.True(localProfile.IsPermissionGranted(CustomWidgetPermissionKind.LocalFileAccess));
-            Assert.True(localProfile.IsPermissionGranted(CustomWidgetPermissionKind.CommandExecution));
+            // Command execution is never granted implicitly, even for locally trusted
+            // widgets: the first run prompts, and only the explicit override carries it.
+            Assert.False(localProfile.IsPermissionGranted(CustomWidgetPermissionKind.CommandExecution));
 
             store.RegisterWidgetProvenance("custom.external-pkg", trustedLocalAuthoring: false);
             CustomWidgetTrustProfile extProfile = store.GetProfile("custom.external-pkg");

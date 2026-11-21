@@ -539,6 +539,10 @@ public sealed class CustomWidgetCatalogSyncAndSandboxTests
         Directory.CreateDirectory(tempRoot);
         try
         {
+            // Unsigned fixture catalog; offline ECDSA signing has dedicated coverage.
+            DeskBox.Services.CustomWidgets.CustomWidgetCatalogSignatureVerifier.VerifyOverrideForTests =
+                static (_, _, _, _) => true;
+
             string cacheDir = Path.Combine(tempRoot, "cache");
             string widgetsDir = Path.Combine(tempRoot, "widgets");
             Directory.CreateDirectory(cacheDir);
@@ -669,6 +673,7 @@ public sealed class CustomWidgetCatalogSyncAndSandboxTests
         }
         finally
         {
+            DeskBox.Services.CustomWidgets.CustomWidgetCatalogSignatureVerifier.VerifyOverrideForTests = null;
             TryDeleteDirectory(tempRoot);
         }
     }
@@ -821,6 +826,10 @@ public sealed class CustomWidgetCatalogSyncAndSandboxTests
         Directory.CreateDirectory(tempRoot);
         try
         {
+            // Unsigned fixture catalog; offline ECDSA signing has dedicated coverage.
+            DeskBox.Services.CustomWidgets.CustomWidgetCatalogSignatureVerifier.VerifyOverrideForTests =
+                static (_, _, _, _) => true;
+
             var settingsSvc = new SettingsService(Path.Combine(tempRoot, "settings"));
             var locSvc = new LocalizationService(settingsSvc);
             var catalogSvc = new CustomWidgetRemoteCatalogService(Path.Combine(tempRoot, "catalog-cache"));
@@ -946,6 +955,7 @@ public sealed class CustomWidgetCatalogSyncAndSandboxTests
         }
         finally
         {
+            DeskBox.Services.CustomWidgets.CustomWidgetCatalogSignatureVerifier.VerifyOverrideForTests = null;
             TryDeleteDirectory(tempRoot);
         }
     }

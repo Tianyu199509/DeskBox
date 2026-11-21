@@ -12,6 +12,17 @@ using DeskBox.Services.Ipc;
 namespace DeskBox.Services;
 
 /// <summary>
+/// Host-side approval request for external commits that overwrite an existing widget,
+/// clear its data, or declare privileged capabilities. "User confirmation" in the tool
+/// response is prompt text only; the approval provider is what actually enforces it.
+/// </summary>
+public sealed record AgentCommitApprovalRequest(
+    string WidgetId,
+    bool OverwritesExisting,
+    bool ClearsExistingData,
+    bool DeclaresPrivilegedCapabilities);
+
+/// <summary>
 /// Per-user, session-scoped Named Pipe bridge allowing external AI Agents (<c>DeskBox.exe --mcp</c>
 /// and <c>DeskBox.exe widget ...</c> CLI) to inspect, validate, stage-then-commit, visually capture
 /// PNG previews, and push live telemetry to DeskBox Custom Widgets. External writes are staged by
@@ -27,6 +38,7 @@ public sealed class DeskBoxAgentBridgeServer : IAsyncDisposable
     private readonly Func<bool, Task<string>>? _studioContextProvider;
     private readonly Func<(int Width, int Height)>? _hostDefaultSizeProvider;
     private readonly Func<string?, bool, TimeSpan, Task<(byte[] PngBytes, int Width, int Height, int OverflowPx)?>>? _studioPreviewCapturer;
+    private readonly Func<AgentCommitApprovalRequest, Task<bool>>? _commitApprovalProvider;
     private readonly CancellationTokenSource _cts = new();
     private readonly SemaphoreSlim _connectionSlots = new(MaxConcurrentClients, MaxConcurrentClients);
     private readonly List<Task> _workerTasks = [];
@@ -66,7 +78,8 @@ public sealed class DeskBoxAgentBridgeServer : IAsyncDisposable
         Func<WidgetManager?> widgetManagerProvider,
         Func<bool, Task<string>>? studioContextProvider = null,
         Func<(int Width, int Height)>? hostDefaultSizeProvider = null,
-        Func<string?, bool, TimeSpan, Task<(byte[] PngBytes, int Width, int Height, int OverflowPx)?>>? studioPreviewCapturer = null)
+        Func<string?, bool, TimeSpan, Task<(byte[] PngBytes, int Width, int Height, int OverflowPx)?>>? studioPreviewCapturer = null,
+        Func<AgentCommitApprovalRequest, Task<bool>>? commitApprovalProvider = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(pipeName);
         ArgumentNullException.ThrowIfNull(widgetManagerProvider);
@@ -75,6 +88,7 @@ public sealed class DeskBoxAgentBridgeServer : IAsyncDisposable
         _studioContextProvider = studioContextProvider;
         _hostDefaultSizeProvider = hostDefaultSizeProvider;
         _studioPreviewCapturer = studioPreviewCapturer;
+        _commitApprovalProvider = commitApprovalProvider;
     }
 
     public string PipeName => _pipeName;
@@ -1101,6 +1115,12 @@ public sealed class DeskBoxAgentBridgeServer : IAsyncDisposable
         });
     }
 
+    private static bool DeclaresPrivilegedCapabilities(IReadOnlyList<string>? capabilities) =>
+        capabilities is { Count: > 0 } &&
+        capabilities.Any(c =>
+            string.Equals(c, "local-files-and-commands", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(c, "network-and-feeds", StringComparison.OrdinalIgnoreCase));
+
     private async Task<string> HandleUpsertAsync(JsonElement root)
     {
         WidgetManager? manager = _widgetManagerProvider();
@@ -1464,6 +1484,40 @@ public sealed class DeskBoxAgentBridgeServer : IAsyncDisposable
             });
         }
 
+        // Host-side approval gate: an external Agent commit that overwrites an existing
+        // widget, drops its data, or declares privileged capabilities must be approved in
+        // DeskBox's own UI. "Confirm with the user" in the tool response is prompt text,
+        // not consent.
+        if (commit && !string.IsNullOrWhiteSpace(stageId) && _commitApprovalProvider is not null)
+        {
+            string approvalWidgetId = !string.IsNullOrWhiteSpace(widgetId) ? widgetId! : compiled.Manifest.Id;
+            bool overwritesExisting = manager.GetCustomWidgetInstances().Any(instance =>
+                string.Equals(instance.Id, approvalWidgetId, StringComparison.OrdinalIgnoreCase));
+            bool clearsExistingData = dataSafetyReport?.HasDataLossRisk == true;
+            bool declaresPrivileged = DeclaresPrivilegedCapabilities(compiled.Manifest.Capabilities);
+            if (overwritesExisting || clearsExistingData || declaresPrivileged)
+            {
+                bool approved = await _commitApprovalProvider(new AgentCommitApprovalRequest(
+                    approvalWidgetId,
+                    overwritesExisting,
+                    clearsExistingData,
+                    declaresPrivileged)).ConfigureAwait(false);
+                if (!approved)
+                {
+                    return BuildSuccessJson(writer =>
+                    {
+                        writer.WriteBoolean("committed", false);
+                        writer.WriteBoolean("staged", true);
+                        writer.WriteBoolean("requiresHostApproval", true);
+                        writer.WriteString("stageId", stageId);
+                        writer.WriteString("widgetId", approvalWidgetId);
+                        writer.WriteString("next",
+                            "The user declined this commit in DeskBox (or the approval prompt timed out). The staged bundle is preserved; do not retry without a fresh explicit user request.");
+                    });
+                }
+            }
+        }
+
         // P2 提交路径：stageId 必须来自此前一次暂存；若调用方同时传了 manifestJson 则按规范化 JSON 摘要校验一致性。
         if (!CustomWidgetAgentStageStore.TryConsumeBundle(
                 stageId,
@@ -1537,16 +1591,28 @@ public sealed class DeskBoxAgentBridgeServer : IAsyncDisposable
             ? compiled.NormalizedManifestJson
             : manifestJson;
 
-        GlanceWidgetInstanceInfo info = await manager.UpsertCustomWidgetFromAgentAsync(
-            widgetId,
-            manifestToCommit,
-            resizeToDefault,
-            reveal,
-            logicJs,
-            updateLogicJs,
-            locales,
-            updateLocales);
+        GlanceWidgetInstanceInfo info;
+        try
+        {
+            info = await manager.UpsertCustomWidgetFromAgentAsync(
+                widgetId,
+                manifestToCommit,
+                resizeToDefault,
+                reveal,
+                logicJs,
+                updateLogicJs,
+                locales,
+                updateLocales);
+        }
+        catch
+        {
+            // Keep the staged bundle retryable; only success consumes the lease.
+            CustomWidgetAgentStageStore.AbortCommit(stageId!);
+            throw;
+        }
+
         CustomWidgetDataStore store = CustomWidgetDataStore.ForWidget(info.Id);
+        CustomWidgetAgentStageStore.CompleteCommit(stageId!);
         // 用真实落盘 id 覆写幂等记录：暂存时 widgetId 可能为空，最终 id 由 manifest.id 决定。
         CustomWidgetAgentStageStore.RecordCommitted(stageId, info.Id);
 

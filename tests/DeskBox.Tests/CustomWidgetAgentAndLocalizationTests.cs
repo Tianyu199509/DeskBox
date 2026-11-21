@@ -145,6 +145,9 @@ public sealed class CustomWidgetAgentAndLocalizationTests
             Assert.Equal(localesJson, hydratedBundle.LocalesJson);
             Assert.True(hydratedBundle.ResizeToDefault);
 
+            // The lease only consumes on a successful workspace write.
+            CustomWidgetAgentStageStore.CompleteCommit(stageId);
+
             // Canonical JSON hash treats reordered/pretty-printed locales JSON identically
             Assert.Equal(
                 CustomWidgetAgentStageStore.ComputeCanonicalJsonHash(localesJson),

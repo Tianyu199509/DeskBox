@@ -68,6 +68,9 @@ public sealed class CustomWidgetAgentStageStoreTests : IDisposable
 
         Assert.True(ok, error);
         Assert.Equal("widget-1", widgetId);
+        // Three-state lease: the stage directory survives until the workspace write completes.
+        Assert.True(Directory.Exists(Path.Combine(_root, stageId)));
+        CustomWidgetAgentStageStore.CompleteCommit(stageId);
         Assert.False(Directory.Exists(Path.Combine(_root, stageId)));
 
         bool second = CustomWidgetAgentStageStore.TryConsume(stageId, manifest, out _, out string secondError);
@@ -200,6 +203,10 @@ public sealed class CustomWidgetAgentStageStoreTests : IDisposable
         Assert.False(CustomWidgetAgentStageStore.TryGetCommitted(stageId, out _));
 
         Assert.True(CustomWidgetAgentStageStore.TryConsume(stageId, manifest, out _, out string error), error);
+        // Lease acquired but not yet committed: the tombstone appears only after
+        // the workspace write completes.
+        Assert.False(CustomWidgetAgentStageStore.TryGetCommitted(stageId, out _));
+        CustomWidgetAgentStageStore.CompleteCommit(stageId);
 
         // 消费后应立即能查到幂等记录：重试提交走的是「已提交」而不是「stageId 不存在」。
         Assert.True(CustomWidgetAgentStageStore.TryGetCommitted(stageId, out string? committedWidgetId));
@@ -253,6 +260,8 @@ public sealed class CustomWidgetAgentStageStoreTests : IDisposable
         {
             string first = Stage("widget-5", "{}");
             Assert.True(CustomWidgetAgentStageStore.TryConsume(first, "{}", out _, out _));
+            // Completing the lease (directory delete + tombstone) notifies once.
+            CustomWidgetAgentStageStore.CompleteCommit(first);
             string second = Stage("widget-6", "{}");
             Assert.True(CustomWidgetAgentStageStore.TryDiscard(second, out _));
 
@@ -497,6 +506,7 @@ public sealed class CustomWidgetAgentStageStoreTests : IDisposable
         Assert.NotNull(noEchoBundle);
         Assert.Equal(compactManifest, noEchoBundle.ManifestJson);
         Assert.True(noEchoBundle.HasLogicJs);
+        CustomWidgetAgentStageStore.CompleteCommit(stageNoEcho);
         Assert.True(CustomWidgetAgentStageStore.TryGetCommitted(stageNoEcho, out string? committedId, expectedManifestJson: null));
         Assert.Equal("widget-stage-only", committedId);
 

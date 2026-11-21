@@ -992,6 +992,11 @@ public sealed partial class WidgetManager
                 updateLogicJs: true,
                 importedLocales,
                 updateLocales: true);
+            CustomWidgetTrustStore.Shared.RecordExecutableSurfaceAfterWrite(
+                config.Id,
+                importedManifestJson,
+                importedLogicJs,
+                trustedLocalAuthoring: !isExternalImport);
         }
         else
         {

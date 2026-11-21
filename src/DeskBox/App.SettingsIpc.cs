@@ -146,13 +146,51 @@ public partial class App
                     }
 
                     return await TryCaptureRemoteStudioPreviewAsync(capsuleMode, timeout);
-                });
+                },
+                request => ShowAgentCommitApprovalAsync(request));
             _agentBridgeServer.Start();
             _ = SyncAgentWorkspaceDocsOnStartupAsync();
         }
 
         Log("[SettingsIpc] Server started");
         StartStudioIpcServer();
+    }
+
+    private async Task<bool> ShowAgentCommitApprovalAsync(
+        Services.AgentCommitApprovalRequest request)
+    {
+        // Fail closed: no UI dispatcher / no window => the commit is denied.
+        var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (UiDispatcherQueue?.TryEnqueue(() =>
+            {
+                try
+                {
+                    string reasons =
+                        (request.OverwritesExisting
+                            ? LocalizationService.T("CustomWidget.AgentBridge.Approval.ReasonOverwrite")
+                            : string.Empty) +
+                        (request.ClearsExistingData
+                            ? LocalizationService.T("CustomWidget.AgentBridge.Approval.ReasonDataLoss")
+                            : string.Empty) +
+                        (request.DeclaresPrivilegedCapabilities
+                            ? LocalizationService.T("CustomWidget.AgentBridge.Approval.ReasonPrivileged")
+                            : string.Empty);
+                    var window = new Helpers.AgentCommitApprovalWindow(LocalizationService, request.WidgetId, reasons);
+                    window.Activate();
+                    _ = window.Result.ContinueWith(
+                        result => completion.TrySetResult(result.Result),
+                        TaskScheduler.Default);
+                }
+                catch
+                {
+                    completion.TrySetResult(false);
+                }
+            }) != true)
+        {
+            return false;
+        }
+
+        return await completion.Task.ConfigureAwait(false);
     }
 
     private async Task SyncAgentWorkspaceDocsOnStartupAsync()

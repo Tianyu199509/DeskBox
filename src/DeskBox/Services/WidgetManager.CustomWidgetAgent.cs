@@ -252,6 +252,23 @@ public sealed partial class WidgetManager
             updateLogicJs: updateLogicJs,
             locales: locales,
             updateLocales: updateLocales);
+
+        // Channel-scoped executable-surface fingerprint: Studio saves (Local/Official
+        // origin) extend trust silently; Agent/Community overwrites with a changed
+        // surface revoke positive privileged overrides.
+        string? effectiveSurfaceLogicJs = updateLogicJs
+            ? logicJs
+            : (File.Exists(store.LogicJsPath)
+                ? await File.ReadAllTextAsync(store.LogicJsPath)
+                : null);
+        CustomWidgetTrustStore.Shared.RecordExecutableSurfaceAfterWrite(
+            config.Id,
+            stampedJson,
+            effectiveSurfaceLogicJs,
+            trustedLocalAuthoring:
+                !string.Equals(manifest.Origin, CustomWidgetOriginKinds.Agent, StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(manifest.Origin, CustomWidgetOriginKinds.Community, StringComparison.OrdinalIgnoreCase));
+
         if (File.Exists(Path.Combine(store.WidgetDirectory, "AGENTS.md")))
         {
             await CustomWidgetTemplates.EnsureAgentWorkspacePreparedAsync(store.WidgetDirectory, config.Id);

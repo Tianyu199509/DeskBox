@@ -358,6 +358,11 @@ public sealed class CustomWidgetRemoteCatalogAndOtaTests
             var catalogService = new CustomWidgetRemoteCatalogService(
                 cacheDir,
                 new RoutingMockHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.NotFound)));
+            // The raw test catalog is unsigned; stand in for the offline ECDSA gate so
+            // this test exercises the upgrade pipeline itself. Signing behavior has
+            // dedicated coverage in CustomWidgetCatalogSigningTests.
+            DeskBox.Services.CustomWidgets.CustomWidgetCatalogSignatureVerifier.VerifyOverrideForTests =
+                static (_, _, _, _) => true;
             Assert.True(await catalogService.ApplyCatalogJsonAsync(catalogJson, "\"ota-etag\"", CustomWidgetRemoteCatalogService.PrimaryCatalogUrl));
 
             // 1. Official unmodified widget gets atomically upgraded with manifest.json + logic.js + locales/
@@ -392,6 +397,7 @@ public sealed class CustomWidgetRemoteCatalogAndOtaTests
         }
         finally
         {
+            DeskBox.Services.CustomWidgets.CustomWidgetCatalogSignatureVerifier.VerifyOverrideForTests = null;
             TryDeleteDirectory(tempRoot);
         }
     }

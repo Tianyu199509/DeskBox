@@ -51,6 +51,14 @@ public sealed record CustomWidgetTrustProfile(
             return explicitDecision;
         }
 
+        // Command execution is never granted implicitly — not by Official-origin default
+        // trust, not by Studio authoring. First run prompts the user; the explicit
+        // override above then carries the remembered decision.
+        if (kind == CustomWidgetPermissionKind.CommandExecution)
+        {
+            return false;
+        }
+
         if (TrustedLocalAuthoring)
         {
             return true;
@@ -85,6 +93,7 @@ public sealed class CustomWidgetTrustStore
     {
         public bool TrustedLocalAuthoring { get; set; } = true;
         public Dictionary<string, bool> Overrides { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+        public string? ExecutableSurfaceHash { get; set; }
     }
 
     public CustomWidgetTrustStore(string? rootDataDirectory = null)
@@ -347,6 +356,151 @@ public sealed class CustomWidgetTrustStore
                 entry.TrustedLocalAuthoring = trustedLocalAuthoring;
                 PersistNoLock();
             }
+        }
+    }
+
+    /// <summary>
+    /// Fingerprints everything that can execute or reach out: the newline-normalized
+    /// script plus the manifest's privileged declarative surface (capabilities list and
+    /// command/launcher nodes). Only the hex digest is persisted, never content.
+    /// </summary>
+    public static string ComputeExecutableSurfaceHash(string? manifestJson, string? logicJs)
+    {
+        string privilegedNodes = ExtractPrivilegedManifestNodes(manifestJson);
+        byte[] logicBytes = System.Text.Encoding.UTF8.GetBytes(
+            (logicJs ?? string.Empty).Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n'));
+        byte[] nodeBytes = System.Text.Encoding.UTF8.GetBytes(privilegedNodes);
+        byte[] combined = new byte[logicBytes.Length + 1 + nodeBytes.Length];
+        logicBytes.AsSpan().CopyTo(combined);
+        combined[logicBytes.Length] = 0;
+        nodeBytes.AsSpan().CopyTo(combined[(logicBytes.Length + 1)..]);
+        return Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(combined));
+    }
+
+    private static string ExtractPrivilegedManifestNodes(string? manifestJson)
+    {
+        if (string.IsNullOrWhiteSpace(manifestJson))
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            if (System.Text.Json.Nodes.JsonNode.Parse(manifestJson) is not { } root)
+            {
+                return string.Empty;
+            }
+
+            var fragments = new List<string>();
+            if (root["capabilities"] is System.Text.Json.Nodes.JsonArray caps)
+            {
+                fragments.AddRange(caps
+                    .Where(c => c is not null)
+                    .Select(c => c!.ToJsonString())
+                    .OrderBy(s => s, StringComparer.Ordinal));
+            }
+
+            CollectPrivilegedNodes(root, fragments);
+            return string.Join("\n", fragments.OrderBy(s => s, StringComparer.Ordinal));
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    private static void CollectPrivilegedNodes(System.Text.Json.Nodes.JsonNode node, List<string> fragments)
+    {
+        switch (node)
+        {
+            case System.Text.Json.Nodes.JsonObject obj:
+                if (obj.TryGetPropertyValue("type", out System.Text.Json.Nodes.JsonNode? typeNode) &&
+                    typeNode is System.Text.Json.Nodes.JsonValue typeValue &&
+                    typeValue.TryGetValue<string>(out string? type))
+                {
+                    if (string.Equals(type, "command.run", StringComparison.OrdinalIgnoreCase) ||
+                        (type.StartsWith("launcher", StringComparison.OrdinalIgnoreCase) && type.Contains('.')))
+                    {
+                        fragments.Add(obj.ToJsonString());
+                    }
+                }
+
+                foreach (System.Collections.Generic.KeyValuePair<string, System.Text.Json.Nodes.JsonNode?> child in obj.ToArray())
+                {
+                    if (child.Value is not null)
+                    {
+                        CollectPrivilegedNodes(child.Value, fragments);
+                    }
+                }
+
+                break;
+            case System.Text.Json.Nodes.JsonArray array:
+                foreach (System.Text.Json.Nodes.JsonNode? child in array)
+                {
+                    if (child is not null)
+                    {
+                        CollectPrivilegedNodes(child, fragments);
+                    }
+                }
+
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Records the executable surface after a workspace write. Studio (trusted) writes
+    /// extend the fingerprint silently; external channels (Agent/OTA/import) whose script
+    /// or privileged manifest nodes changed revoke positive privileged overrides so the
+    /// next execution asks the user again.
+    /// </summary>
+    public void RecordExecutableSurfaceAfterWrite(
+        string? widgetId,
+        string? manifestJson,
+        string? logicJs,
+        bool trustedLocalAuthoring)
+    {
+        if (string.IsNullOrWhiteSpace(widgetId))
+        {
+            return;
+        }
+
+        string key = widgetId.Trim();
+        string hash = ComputeExecutableSurfaceHash(manifestJson, logicJs);
+        lock (_sync)
+        {
+            EnsureLoadedNoLock();
+            if (!_cache!.TryGetValue(key, out StoredTrustEntry? entry))
+            {
+                _cache[key] = new StoredTrustEntry
+                {
+                    TrustedLocalAuthoring = trustedLocalAuthoring,
+                    ExecutableSurfaceHash = hash
+                };
+                PersistNoLock();
+                return;
+            }
+
+            bool surfaceChanged =
+                !string.IsNullOrEmpty(entry.ExecutableSurfaceHash) &&
+                !string.Equals(entry.ExecutableSurfaceHash, hash, StringComparison.Ordinal);
+            if (surfaceChanged && !trustedLocalAuthoring)
+            {
+                foreach (string privilegedKey in new[]
+                         {
+                             ToKey(CustomWidgetPermissionKind.LocalNetwork),
+                             ToKey(CustomWidgetPermissionKind.LocalFileAccess),
+                             ToKey(CustomWidgetPermissionKind.CommandExecution)
+                         })
+                {
+                    if (entry.Overrides.TryGetValue(privilegedKey, out bool enabled) && enabled)
+                    {
+                        entry.Overrides.Remove(privilegedKey);
+                    }
+                }
+            }
+
+            entry.ExecutableSurfaceHash = hash;
+            PersistNoLock();
         }
     }
 
@@ -732,10 +886,16 @@ public sealed class CustomWidgetTrustStore
                         }
                     }
 
+                    string? surfaceHash = prop.Value.TryGetProperty("executableSurfaceHash", out JsonElement shEl) &&
+                                          shEl.ValueKind == JsonValueKind.String
+                        ? shEl.GetString()
+                        : null;
+
                     loaded[prop.Name] = new StoredTrustEntry
                     {
                         TrustedLocalAuthoring = trusted,
-                        Overrides = overrides
+                        Overrides = overrides,
+                        ExecutableSurfaceHash = surfaceHash
                     };
                 }
             }
@@ -830,6 +990,10 @@ public sealed class CustomWidgetTrustStore
                     writer.WritePropertyName(widgetId);
                     writer.WriteStartObject();
                     writer.WriteBoolean("trustedLocalAuthoring", entry.TrustedLocalAuthoring);
+                    if (!string.IsNullOrWhiteSpace(entry.ExecutableSurfaceHash))
+                    {
+                        writer.WriteString("executableSurfaceHash", entry.ExecutableSurfaceHash);
+                    }
                     writer.WritePropertyName("overrides");
                     writer.WriteStartObject();
                     foreach ((string permKey, bool val) in entry.Overrides)

@@ -41,6 +41,8 @@ public sealed class CustomWidgetRemoteCatalogItemDto
     public string? BundleUrl { get; set; }
     public string? ManifestUrl { get; set; }
     public string? LogicUrl { get; set; }
+    public string? ContentSha256 { get; set; }
+    public string? Signature { get; set; }
     public JsonElement? Manifest { get; set; }
     public string? ManifestJson { get; set; }
     public string? LogicJs { get; set; }
@@ -712,6 +714,13 @@ public sealed class CustomWidgetRemoteCatalogService
                 out string? candidateLogicJs,
                 out CustomWidgetLocaleCatalog? candidateLocales) ||
             string.IsNullOrWhiteSpace(candidateJson))
+        {
+            return false;
+        }
+
+        // Supply-chain gate: unsigned or badly signed entries never auto-upgrade a
+        // widget, even when the catalog came over HTTPS from an official origin.
+        if (!CustomWidgets.CustomWidgetCatalogSignatureVerifier.VerifyEntry(match, candidateJson, candidateLogicJs, candidateLocales))
         {
             return false;
         }

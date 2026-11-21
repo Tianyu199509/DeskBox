@@ -704,7 +704,10 @@ public static partial class DeskBoxAgentCliEntry
         writer.WriteEndObject();
         writer.WriteEndObject();
         writer.WriteEndObject();
-        WriteToolAnnotations(writer, readOnlyHint: false, destructiveHint: false, idempotentHint: true);
+        // Overwrites widgets and can clear their state: a destructive tool. MCP clients
+        // surface their own confirmation for destructive tools; the host-side approval
+        // gate in DeskBoxAgentBridgeServer remains the actual enforcement.
+        WriteToolAnnotations(writer, readOnlyHint: false, destructiveHint: true, idempotentHint: true);
         writer.WriteEndObject();
 
         // 5. deskbox_capture_widget_preview
