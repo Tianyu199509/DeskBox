@@ -68,12 +68,52 @@ public sealed class UpgradeAndStoreCompatibilityTests : IDisposable
                 CancellationToken.None,
                 dnsResolver: (_, _) => Task.FromResult(new[] { IPAddress.Loopback })));
 
-        // Clash/mihomo TUN Fake-IP (198.18.x.x) returned by DNS for a public domain remains allowed.
+        // Clash/mihomo TUN Fake-IP (198.18.x.x) returned by DNS for a public domain remains
+        // allowed while a TUN adapter owns a fake-IP-range address (topology injected so the
+        // assertion does not depend on the machine's actual proxy software).
         await CustomWidgetNetworkSecurity.ValidateTargetUriForProxyHandoffAsync(
             new Uri("https://api.github.com/repos/example/demo"),
             requirePublicIpOnly: true,
             CancellationToken.None,
-            dnsResolver: (_, _) => Task.FromResult(new[] { IPAddress.Parse("198.18.0.42") }));
+            dnsResolver: (_, _) => Task.FromResult(new[] { IPAddress.Parse("198.18.0.42") }),
+            tunAddressProvider: () => new[] { IPAddress.Parse("198.18.0.1") });
+
+        // Without an active TUN adapter the same fake-IP answer is reserved-range probing.
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            CustomWidgetNetworkSecurity.ValidateTargetUriForProxyHandoffAsync(
+                new Uri("https://api.github.com/repos/example/demo"),
+                requirePublicIpOnly: true,
+                CancellationToken.None,
+                dnsResolver: (_, _) => Task.FromResult(new[] { IPAddress.Parse("198.18.0.42") }),
+                tunAddressProvider: () => Array.Empty<IPAddress>()));
+    }
+
+    [Fact]
+    public void FakeIpDnsGating_DependsOnActiveTunTopology_AndBlocksStackSpecials()
+    {
+        IPAddress[] noTun = Array.Empty<IPAddress>();
+        IPAddress[] tunActive = { IPAddress.Parse("198.18.0.1") };
+
+        // No TUN adapter: the whole 198.18.0.0/15 range is reserved and forbidden.
+        Assert.True(CustomWidgetNetworkSecurity.IsForbiddenFakeIpDnsResult(IPAddress.Parse("198.18.0.42"), noTun));
+        Assert.True(CustomWidgetNetworkSecurity.IsForbiddenFakeIpDnsResult(IPAddress.Parse("198.19.200.7"), noTun));
+
+        // Active TUN: the fake-IP pool is legitimate, but the adapter's own address and the
+        // stack's gateway/DNS specials stay forbidden.
+        Assert.False(CustomWidgetNetworkSecurity.IsForbiddenFakeIpDnsResult(IPAddress.Parse("198.18.0.42"), tunActive));
+        Assert.False(CustomWidgetNetworkSecurity.IsForbiddenFakeIpDnsResult(IPAddress.Parse("198.19.200.7"), tunActive));
+        Assert.True(CustomWidgetNetworkSecurity.IsForbiddenFakeIpDnsResult(IPAddress.Parse("198.18.0.1"), tunActive));
+        Assert.True(CustomWidgetNetworkSecurity.IsForbiddenFakeIpDnsResult(IPAddress.Parse("198.18.0.0"), tunActive));
+        Assert.True(CustomWidgetNetworkSecurity.IsForbiddenFakeIpDnsResult(IPAddress.Parse("198.18.0.2"), tunActive));
+        Assert.True(CustomWidgetNetworkSecurity.IsForbiddenFakeIpDnsResult(IPAddress.Parse("198.19.255.255"), tunActive));
+
+        // Public and private addresses are unaffected by this gate (other rules handle them).
+        Assert.False(CustomWidgetNetworkSecurity.IsForbiddenFakeIpDnsResult(IPAddress.Parse("8.8.8.8"), noTun));
+        Assert.False(CustomWidgetNetworkSecurity.IsForbiddenFakeIpDnsResult(IPAddress.Parse("192.168.1.1"), noTun));
+
+        // IPv4-mapped fake-IP answers normalize to the same verdict.
+        Assert.True(CustomWidgetNetworkSecurity.IsForbiddenFakeIpDnsResult(IPAddress.Parse("::ffff:198.18.0.42"), noTun));
+        Assert.False(CustomWidgetNetworkSecurity.IsForbiddenFakeIpDnsResult(IPAddress.Parse("::ffff:198.18.0.42"), tunActive));
     }
 
     [Fact]

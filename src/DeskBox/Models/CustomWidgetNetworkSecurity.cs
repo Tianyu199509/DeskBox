@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http;
+using System.Net.NetworkInformation;
 using System.Net.Sockets;
 
 namespace DeskBox.Models;
@@ -335,6 +336,95 @@ public static class CustomWidgetNetworkSecurity
         return false;
     }
 
+    private static readonly object s_tunProbeGate = new();
+    private static IPAddress[] s_tunUnicastAddresses = [];
+    private static long s_tunProbeTimestamp;
+    private static readonly TimeSpan TunProbeTtl = TimeSpan.FromSeconds(15);
+
+    /// <summary>
+    /// Fake-IP (198.18.0.0/15) DNS answers are only legitimate while a local TUN
+    /// adapter (Clash/mihomo fake-ip mode) owns an address in that range; adding
+    /// the range to <see cref="IsBlockedIpAddress"/> would cut off every proxied
+    /// widget request for those users. Probe failures fail closed (no TUN).
+    /// </summary>
+    internal static IReadOnlyList<IPAddress> GetActiveTunFakeIpUnicastAddresses()
+    {
+        lock (s_tunProbeGate)
+        {
+            long now = Environment.TickCount64;
+            if (now - s_tunProbeTimestamp < (long)TunProbeTtl.TotalMilliseconds)
+            {
+                return s_tunUnicastAddresses;
+            }
+
+            s_tunProbeTimestamp = now;
+            try
+            {
+                var found = new List<IPAddress>();
+                foreach (NetworkInterface nic in NetworkInterface.GetAllNetworkInterfaces())
+                {
+                    if (nic.OperationalStatus != OperationalStatus.Up)
+                    {
+                        continue;
+                    }
+
+                    foreach (UnicastIPAddressInformation unicast in nic.GetIPProperties().UnicastAddresses)
+                    {
+                        if (IsBenchmarkTunIpAddress(unicast.Address))
+                        {
+                            found.Add(unicast.Address);
+                        }
+                    }
+                }
+
+                s_tunUnicastAddresses = found.ToArray();
+            }
+            catch
+            {
+                s_tunUnicastAddresses = [];
+            }
+
+            return s_tunUnicastAddresses;
+        }
+    }
+
+    internal static bool IsForbiddenFakeIpDnsResult(IPAddress address) =>
+        IsForbiddenFakeIpDnsResult(address, GetActiveTunFakeIpUnicastAddresses());
+
+    internal static bool IsForbiddenFakeIpDnsResult(
+        IPAddress address,
+        IReadOnlyList<IPAddress> activeTunUnicastAddresses)
+    {
+        if (!IsBenchmarkTunIpAddress(address))
+        {
+            return false;
+        }
+
+        if (activeTunUnicastAddresses.Count == 0)
+        {
+            return true;
+        }
+
+        IPAddress v4 = address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address;
+        foreach (IPAddress own in activeTunUnicastAddresses)
+        {
+            IPAddress ownV4 = own.IsIPv4MappedToIPv6 ? own.MapToIPv4() : own;
+            if (ownV4.Equals(v4))
+            {
+                return true;
+            }
+        }
+
+        byte[] bytes = v4.GetAddressBytes();
+        // TUN stack gateway/DNS specials (198.18.0.0/.0.1/.0.2, 198.19.255.255).
+        if (bytes[0] == 198 && bytes[1] == 18 && bytes[2] == 0 && bytes[3] <= 2)
+        {
+            return true;
+        }
+
+        return bytes[0] == 198 && bytes[1] == 19 && bytes[2] == 255 && bytes[3] == 255;
+    }
+
     internal static bool IsConfiguredSystemProxyEndpoint(
         Uri? requestUri,
         DnsEndPoint dnsEndPoint,
@@ -420,7 +510,8 @@ public static class CustomWidgetNetworkSecurity
         Uri? requestUri,
         bool requirePublicIpOnly,
         CancellationToken cancellationToken,
-        Func<string, CancellationToken, Task<IPAddress[]>>? dnsResolver = null)
+        Func<string, CancellationToken, Task<IPAddress[]>>? dnsResolver = null,
+        Func<IReadOnlyList<IPAddress>>? tunAddressProvider = null)
     {
         ValidateTargetUriForProxyHandoff(requestUri, requirePublicIpOnly);
         if (requestUri is null)
@@ -452,10 +543,13 @@ public static class CustomWidgetNetworkSecurity
             throw new SocketException((int)SocketError.HostNotFound);
         }
 
+        IReadOnlyList<IPAddress> tunAddresses = tunAddressProvider is not null
+            ? tunAddressProvider()
+            : GetActiveTunFakeIpUnicastAddresses();
         foreach (IPAddress ip in resolvedAddresses)
         {
             bool blocked = requirePublicIpOnly
-                ? IsBlockedIpAddress(ip)
+                ? IsBlockedIpAddress(ip) || IsForbiddenFakeIpDnsResult(ip, tunAddresses)
                 : IsAlwaysForbiddenWidgetIpAddress(ip);
             if (blocked)
             {
@@ -492,7 +586,9 @@ public static class CustomWidgetNetworkSecurity
 
         foreach (IPAddress ip in addresses)
         {
-            if (isSystemProxy ? IsAlwaysForbiddenWidgetIpAddress(ip) : IsBlockedIpAddress(ip))
+            if (isSystemProxy
+                ? IsAlwaysForbiddenWidgetIpAddress(ip)
+                : IsBlockedIpAddress(ip) || IsForbiddenFakeIpDnsResult(ip))
             {
                 throw new InvalidOperationException(
                     $"Blocked connection to non-public IP address '{ip}' resolved for '{host}'.");

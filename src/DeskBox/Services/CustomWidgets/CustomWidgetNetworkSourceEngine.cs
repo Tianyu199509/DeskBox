@@ -265,7 +265,8 @@ public sealed partial class CustomWidgetNetworkSourceEngine
         {
             bool blocked = allowLocalAndHttp
                 ? CustomWidgetNetworkSecurity.IsAlwaysForbiddenWidgetIpAddress(ip)
-                : CustomWidgetNetworkSecurity.IsBlockedIpAddress(ip);
+                : CustomWidgetNetworkSecurity.IsBlockedIpAddress(ip) ||
+                  CustomWidgetNetworkSecurity.IsForbiddenFakeIpDnsResult(ip);
             if (blocked)
             {
                 throw new InvalidOperationException(
@@ -921,6 +922,13 @@ public sealed partial class CustomWidgetNetworkSourceEngine
             TryGetLoopbackSystemProxy(targetUri, out _) &&
             _loopbackProxyHttpClient is not null)
         {
+            // The loopback proxy client has no SSRF-hardened ConnectCallback; re-validate
+            // the target (including TUN-aware fake-IP gating) right before the handoff.
+            await CustomWidgetNetworkSecurity.ValidateTargetUriForProxyHandoffAsync(
+                targetUri,
+                requirePublicIpOnly: true,
+                ct,
+                _dnsResolver).ConfigureAwait(false);
             try
             {
                 using HttpRequestMessage proxyRequest = BuildHopRequest(
