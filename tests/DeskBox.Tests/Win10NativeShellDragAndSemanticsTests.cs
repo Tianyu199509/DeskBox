@@ -1108,6 +1108,9 @@ public sealed class Win10NativeShellDragAndSemanticsTests : IDisposable
 
         Win10DragImageAttachResult attachResult = default;
         bool hasDragWindow = false;
+        bool dragEntered = false;
+        nint dragWindowHandle = 0;
+        bool dragFullWindowsEnabled = false;
         Exception? threadError = null;
         var staThread = new Thread(() =>
         {
@@ -1131,10 +1134,13 @@ public sealed class Win10NativeShellDragAndSemanticsTests : IDisposable
                             guard,
                             new NativeDropTarget.POINT { X = 240, Y = 240 },
                             NativeDropEffectPolicy.Move);
+                        dragEntered = entered;
                         if (entered)
                         {
                             NativeDropImageManager.Show(dummyTarget, visible: true);
                             hasDragWindow = NativeDropDescriptionWriter.HasDragWindow(guard);
+                            dragWindowHandle = NativeDropDescriptionWriter.TryGetDragWindowHandleForDiagnostics(guard);
+                            dragFullWindowsEnabled = NativeDropDescriptionWriter.IsDragFullWindowsEnabled();
                             NativeDropImageManager.DragLeave(dummyTarget);
                         }
                     }
@@ -1162,7 +1168,12 @@ public sealed class Win10NativeShellDragAndSemanticsTests : IDisposable
         Assert.True(attachResult.HResult >= 0, $"Unexpected attach HRESULT: 0x{attachResult.HResult:X8}");
         Assert.True(attachResult.SizePx >= 48);
         Assert.Equal(2, attachResult.ItemCount);
-        Assert.True(hasDragWindow);
+        Assert.True(dragEntered, "IDropTargetHelper::DragEnter must accept the guarded data object");
+        // The shell drag window exists regardless of the machine's "show window contents
+        // while dragging" policy (off by default on CI server images), so probe the handle
+        // directly instead of the policy-gated HasDragWindow.
+        Assert.NotEqual(0, dragWindowHandle);
+        Assert.Equal(dragFullWindowsEnabled, hasDragWindow);
     }
 
     private static uint ReadDword(nint hGlobal)

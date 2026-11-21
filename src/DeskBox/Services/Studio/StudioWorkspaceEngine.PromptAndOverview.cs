@@ -1627,7 +1627,7 @@ public sealed partial class StudioWorkspaceEngine
         return lines;
     }
 
-    private static string NormalizeNewlines(string text) =>
+    internal static string NormalizeNewlines(string text) =>
         text.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
 
     private static string TruncateInline(string text, int maxLen) =>

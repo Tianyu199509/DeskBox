@@ -259,6 +259,18 @@ public sealed class CustomWidgetScriptPhase3Tests
             ValidLogicJs,
             CustomWidgetAiGeneratorService.ResolveEffectiveLogicJs(ValidLogicJs, keepTurn.LogicJsPatchMode, keepTurn.LogicJs));
 
+        // CRLF baseline (Windows clipboard / CRLF checkout) must also stay KeepExisting:
+        // the workspace newline-normalizes logic.js, so the mode comparison must too.
+        string crlfLogicJs = ValidLogicJs
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace("\n", "\r\n", StringComparison.Ordinal);
+        StudioTurnResult crlfKeepTurn = CustomWidgetAiGeneratorService.ParseStudioTurnResponse(
+            keepEnvelope,
+            currentLogicJs: crlfLogicJs,
+            currentLocales: validLocales);
+        Assert.True(crlfKeepTurn.Success);
+        Assert.Equal(StudioLogicJsPatchMode.KeepExisting, crlfKeepTurn.LogicJsPatchMode);
+
         string replaceEnvelope = $$"""
             {
               "kind": "edit",

@@ -1037,11 +1037,16 @@ internal static class StudioTurnResponseParser
         workspace.NormalizeDomInPlace();
         string manifestJson = workspace.GetManifestJson(indented: true) ?? currentManifestJson ?? string.Empty;
         string? effectiveLogicJs = workspace.LogicJs;
+        // workspace.LogicJs is newline-normalized; compare against a normalized baseline so a
+        // CRLF current script is not misreported as Replace on a script-less edit turn.
+        string? normalizedCurrentLogicJs = string.IsNullOrWhiteSpace(currentLogicJs)
+            ? null
+            : StudioWorkspaceEngine.NormalizeNewlines(currentLogicJs);
         StudioLogicJsPatchMode effectivePatchMode = effectiveLogicJs is null
-            ? (string.IsNullOrWhiteSpace(currentLogicJs)
+            ? (normalizedCurrentLogicJs is null
                 ? StudioLogicJsPatchMode.KeepExisting
                 : StudioLogicJsPatchMode.Remove)
-            : (string.Equals(effectiveLogicJs, currentLogicJs, StringComparison.Ordinal)
+            : (string.Equals(effectiveLogicJs, normalizedCurrentLogicJs, StringComparison.Ordinal)
                 ? StudioLogicJsPatchMode.KeepExisting
                 : StudioLogicJsPatchMode.Replace);
 

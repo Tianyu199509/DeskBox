@@ -2005,6 +2005,9 @@ public sealed class CustomWidgetRetainedRendererAndComponentsTests
         try
         {
             var settingsService = new SettingsService(Path.Combine(tempDir, "settings.json"));
+            // Pin zh-CN: the assertions below expect Chinese UI strings, and the default
+            // Language=System follows the machine UI culture (en-US on CI runners).
+            settingsService.Settings.Language = SettingsService.LanguageChinese;
             var localization = new LocalizationService(settingsService);
             var store = new CustomWidgetDataStore("ai-inbox-v4-test", Path.Combine(tempDir, "widgets"));
             var credStore = new CustomWidgetAiCredentialStore(Path.Combine(tempDir, "creds"));

@@ -178,6 +178,11 @@ public sealed class NativeAotAndCapsuleHydrationOptimizationTests
             var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             Assert.True(controller.DispatcherQueue.TryEnqueue(async () =>
             {
+                // The headless host installs no dispatcher sync context; without one, await
+                // continuations resume on thread-pool threads and race the low-priority slice
+                // callbacks mutating RenderedItems (observed as a mid-shrink count on CI).
+                SynchronizationContext.SetSynchronizationContext(
+                    new DispatcherQueueSynchronizationContext(controller.DispatcherQueue));
                 try
                 {
                     var settings = new SettingsService();

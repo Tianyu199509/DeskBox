@@ -89,15 +89,34 @@ internal static partial class NativeDropDescriptionWriter
             return false;
         }
 
+        return TryGetDragWindowHandleCore(dataObjectPointer) != 0;
+    }
+
+    /// <summary>
+    /// Policy-independent probe: the shell publishes the drag window handle even when
+    /// the "show window contents while dragging" setting is off (CI server defaults).
+    /// </summary>
+    internal static nint TryGetDragWindowHandleForDiagnostics(nint dataObjectPointer)
+    {
+        if (dataObjectPointer == 0)
+        {
+            return 0;
+        }
+
+        return TryGetDragWindowHandleCore(dataObjectPointer);
+    }
+
+    private static nint TryGetDragWindowHandleCore(nint dataObjectPointer)
+    {
         try
         {
             nint dragWindow = TryGetDragWindowHandle(
                 new NativeOleDataObject(dataObjectPointer));
-            return dragWindow != 0 && IsWindow(dragWindow);
+            return dragWindow != 0 && IsWindow(dragWindow) ? dragWindow : 0;
         }
         catch
         {
-            return false;
+            return 0;
         }
     }
 
