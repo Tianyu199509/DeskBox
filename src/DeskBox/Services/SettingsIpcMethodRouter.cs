@@ -1026,7 +1026,18 @@ public sealed class SettingsIpcMethodRouter
 
             case SettingsIpcMethods.BackupExport:
                 if (_backupCommands is null) return unavailable(method);
-                return (true, await _backupCommands.ExportAsync(payload ?? string.Empty, cancellationToken), null);
+                string exportPath = payload ?? string.Empty;
+                bool exportIncludeClipboard = false;
+                if (exportPath.TrimStart().StartsWith('{'))
+                {
+                    using JsonDocument exportArgs = JsonDocument.Parse(exportPath);
+                    exportPath = exportArgs.RootElement.TryGetProperty("path", out JsonElement pathEl)
+                        ? pathEl.GetString() ?? string.Empty
+                        : string.Empty;
+                    exportIncludeClipboard = exportArgs.RootElement.TryGetProperty("includeClipboard", out JsonElement clipEl) &&
+                        clipEl.ValueKind == JsonValueKind.True;
+                }
+                return (true, await _backupCommands.ExportAsync(exportPath, cancellationToken, exportIncludeClipboard), null);
 
             case SettingsIpcMethods.BackupUploadNow:
                 if (_backupCommands is null) return unavailable(method);

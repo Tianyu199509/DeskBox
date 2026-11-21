@@ -389,7 +389,8 @@ public sealed partial class DeskBoxDataBackupService
 
     public async Task<string> ExportBackupAsync(
         string destinationDirectory,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool includeClipboard = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(destinationDirectory);
         destinationDirectory = Path.GetFullPath(destinationDirectory);
@@ -406,7 +407,7 @@ public sealed partial class DeskBoxDataBackupService
             string backupPath = GetAvailableArchivePath(
                 destinationDirectory,
                 FormattableString.Invariant($"DeskBox-Backup-{DateTime.Now:yyyyMMdd-HHmmss}.zip"));
-            await CreateArchiveCoreAsync(backupPath, "manual", cancellationToken);
+            await CreateArchiveCoreAsync(backupPath, "manual", cancellationToken, includeClipboard: includeClipboard);
             App.Log($"[DataBackup] Exported backup '{backupPath}'.");
             return backupPath;
         }
@@ -3596,7 +3597,8 @@ public sealed partial class DeskBoxDataBackupService
         string archivePath,
         string backupKind,
         CancellationToken cancellationToken,
-        bool requireSettings = true)
+        bool requireSettings = true,
+        bool includeClipboard = true)
     {
         string snapshotRoot = Path.Combine(
             BackupSnapshotStagingDirectory,
@@ -3605,7 +3607,7 @@ public sealed partial class DeskBoxDataBackupService
         try
         {
             await CreateDataSnapshotAsync(
-                snapshotDataDirectory, cancellationToken, requireSettings, backupKind);
+                snapshotDataDirectory, cancellationToken, requireSettings, backupKind, includeClipboard);
             ValidateRestoreData(snapshotDataDirectory, requireSettings);
             await CreateArchiveFromSnapshotAsync(
                 archivePath,
@@ -3912,7 +3914,8 @@ public sealed partial class DeskBoxDataBackupService
         string snapshotDataDirectory,
         CancellationToken cancellationToken,
         bool requireSettings = true,
-        string backupKind = "manual")
+        string backupKind = "manual",
+        bool includeClipboard = true)
     {
         string settingsPath = Path.Combine(DataDirectory, "settings.json");
         if (requireSettings && !File.Exists(settingsPath))
@@ -3926,7 +3929,7 @@ public sealed partial class DeskBoxDataBackupService
                 SourcePath: path,
                 RelativePath: Path.GetRelativePath(DataDirectory, path)
                     .Replace(Path.DirectorySeparatorChar, '/')))
-            .Where(file => ShouldIncludeInBackup(file.RelativePath))
+            .Where(file => ShouldIncludeInBackup(file.RelativePath, includeClipboard))
             .OrderBy(file => file.RelativePath, StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
@@ -4311,8 +4314,16 @@ public sealed partial class DeskBoxDataBackupService
         relativePath.EndsWith(".json.bak", StringComparison.OrdinalIgnoreCase) ||
         relativePath.Contains(".json.corrupt-", StringComparison.OrdinalIgnoreCase);
 
-    private static bool ShouldIncludeInBackup(string relativePath)
+    private static bool ShouldIncludeInBackup(string relativePath, bool includeClipboard = true)
     {
+        // Manual exports leave the machine: clipboard history (passwords, tokens,
+        // screenshots) is opt-in there. On-device automatic/pre-restore snapshots
+        // keep it so local recovery stays complete.
+        if (!includeClipboard &&
+            relativePath.StartsWith("clipboard/", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
         // DeskBox-managed disposable subtrees first: nothing under them is
         // user data, and they can never contain a managed-attachments dir.
         // cache/ (widget image caches) and weather-cache.json regenerate on

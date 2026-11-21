@@ -54,11 +54,20 @@ public sealed class RemoteBackupCommands : IBackupCommands
         return result;
     }
 
-    public async Task<string> ExportAsync(string destinationDirectory, CancellationToken cancellationToken = default)
+    public async Task<string> ExportAsync(string destinationDirectory, CancellationToken cancellationToken = default, bool includeClipboard = false)
     {
+        using var buffer = new System.IO.MemoryStream();
+        using (var writer = new System.Text.Json.Utf8JsonWriter(buffer))
+        {
+            writer.WriteStartObject();
+            writer.WriteString("path", destinationDirectory);
+            writer.WriteBoolean("includeClipboard", includeClipboard);
+            writer.WriteEndObject();
+        }
+
         (bool ok, string? payload, string? error) = await _client.RequestAsync(
             SettingsIpcMethods.BackupExport,
-            destinationDirectory,
+            System.Text.Encoding.UTF8.GetString(buffer.ToArray()),
             cancellationToken);
         if (!ok || string.IsNullOrEmpty(payload))
         {

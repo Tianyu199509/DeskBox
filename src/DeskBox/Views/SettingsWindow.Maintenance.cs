@@ -173,10 +173,44 @@ public sealed partial class SettingsWindow
             return;
         }
 
+        var includeClipboardCheckBox = new CheckBox
+        {
+            Content = _localizationService.T("Settings.DataBackup.ExportIncludeClipboard"),
+            IsChecked = false
+        };
+        var exportOptionsDialog = new ContentDialog
+        {
+            XamlRoot = SettingsRoot.XamlRoot,
+            Title = _localizationService.T("Settings.DataBackup.ExportOptionsTitle"),
+            PrimaryButtonText = _localizationService.T("Common.Continue"),
+            CloseButtonText = _localizationService.T("Common.Cancel"),
+            DefaultButton = ContentDialogButton.Primary,
+            Content = new StackPanel
+            {
+                Spacing = 8,
+                Children =
+                {
+                    includeClipboardCheckBox,
+                    new TextBlock
+                    {
+                        Text = _localizationService.T("Settings.DataBackup.ExportIncludeClipboardNote"),
+                        TextWrapping = TextWrapping.Wrap,
+                        Opacity = 0.7,
+                        FontSize = 12
+                    }
+                }
+            }
+        };
+        if (await ShowDialogWhenFreeAsync(() => exportOptionsDialog) != ContentDialogResult.Primary)
+        {
+            return;
+        }
+
+        bool includeClipboard = includeClipboardCheckBox.IsChecked == true;
         ExportDataBackupButton.IsEnabled = false;
         try
         {
-            string backupPath = await _backupCommands.ExportAsync(folderPath);
+            string backupPath = await _backupCommands.ExportAsync(folderPath, includeClipboard: includeClipboard);
             if (_isClosed || _backupCommands.IsStopping) return;
             await ShowInfoDialogAsync(
                 _localizationService.T("Settings.DataBackup.SuccessTitle"),

@@ -12,6 +12,8 @@ using Windows.Storage;
 using Windows.Storage.Streams;
 using ClipboardHistoryItem = DeskBox.Models.ClipboardHistoryItem;
 
+using DeskBox.Features.Clipboard;
+
 namespace DeskBox.Services;
 
 public sealed record ClipboardDoubleCopyEventArgs(
@@ -52,6 +54,8 @@ public sealed partial class ClipboardHistoryService : IDisposable
     private volatile IReadOnlyList<ClipboardHistoryItem> _itemsSnapshot = Array.Empty<ClipboardHistoryItem>();
     private volatile IReadOnlyList<ClipboardObservedApp> _observedAppsSnapshot = Array.Empty<ClipboardObservedApp>();
     private volatile string? _currentClipboardContentHash;
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _inFlightMediaFiles =
+        new(StringComparer.OrdinalIgnoreCase);
     private volatile string? _lastExternalCapturedItemId;
     private static readonly Lazy<HttpClient> s_safeTitleHttpClient = new(CreateSafeUrlTitleHttpClient);
     private int _capturePendingCount;
@@ -529,7 +533,7 @@ public sealed partial class ClipboardHistoryService : IDisposable
                 out string? codeLanguage);
 
             bool isSecret = ClipboardClassifier.IsHighConfidenceSecret(trimmed);
-            string contentHash = ComputeNormalizedTextContentHash(trimmed);
+            string contentHash = ClipboardContentHashing.ComputeNormalizedTextContentHash(trimmed, _store.GetOrCreateContentHashKey());
 
             item.SubKind = subKind;
             item.ColorHex = colorHex;
@@ -771,6 +775,13 @@ public sealed partial class ClipboardHistoryService : IDisposable
             if (target is not null && !string.Equals(target.OcrText, extracted, StringComparison.Ordinal))
             {
                 target.OcrText = extracted;
+                // OCR can surface secrets (API tokens, private keys) from screenshots that
+                // were not sensitive at capture; reclassify so at-rest encryption applies.
+                if (!target.IsSensitive && ClipboardClassifier.IsHighConfidenceSecret(extracted))
+                {
+                    target.IsSensitive = true;
+                }
+
                 ScheduleSave();
                 RaiseHistoryChanged();
             }
@@ -1458,7 +1469,7 @@ public sealed partial class ClipboardHistoryService : IDisposable
             return 0;
         }
 
-        ClipboardHistoryItem item = BuildFilesHistoryItem(valid, sourceApp: null);
+        ClipboardHistoryItem item = BuildFilesHistoryItem(valid, sourceApp: null, _store.GetOrCreateContentHashKey());
         await IngestItemAsync(item).ConfigureAwait(false);
         await CopyItemToClipboardAsync(item, forcePlainText: false, recordReuse: false).ConfigureAwait(false);
         return valid.Length;
@@ -1476,7 +1487,8 @@ public sealed partial class ClipboardHistoryService : IDisposable
             htmlContent: null,
             rtfContent: null,
             sourceApp: null,
-            _settingsService.Settings.Clipboard);
+            _settingsService.Settings.Clipboard,
+            _store.GetOrCreateContentHashKey());
         if (item is null)
         {
             return false;
@@ -1711,7 +1723,7 @@ public sealed partial class ClipboardHistoryService : IDisposable
                         return;
                     }
 
-                    ClipboardHistoryItem filesItem = BuildFilesHistoryItem(droppedFiles, effectiveSourceApp);
+                    ClipboardHistoryItem filesItem = BuildFilesHistoryItem(droppedFiles, effectiveSourceApp, _store.GetOrCreateContentHashKey());
                     if (!DeskBoxClipboardWriteScope.ShouldIgnoreContentHash(filesItem.ContentHash))
                     {
                         await IngestItemAsync(filesItem, observedApp, fromExternalCapture: true).ConfigureAwait(false);
@@ -1798,7 +1810,8 @@ public sealed partial class ClipboardHistoryService : IDisposable
                 htmlFragment,
                 rtfText,
                 effectiveSourceApp,
-                slice);
+                slice,
+                _store.GetOrCreateContentHashKey());
             if (textItem is null)
             {
                 Interlocked.Exchange(ref _lastExternalCaptureSkipTickMs, Environment.TickCount64);
@@ -2248,16 +2261,14 @@ public sealed partial class ClipboardHistoryService : IDisposable
 
     private static ClipboardHistoryItem BuildFilesHistoryItem(
         IReadOnlyList<string> paths,
-        ClipboardSourceAppInfo? sourceApp)
+        ClipboardSourceAppInfo? sourceApp,
+        byte[]? contentHashKey = null)
     {
         string[] cleaned = paths
             .Where(p => !string.IsNullOrWhiteSpace(p))
             .Select(p => p.Trim())
             .ToArray();
-        string normalizedForHash = string.Join(
-            '\n',
-            cleaned.Select(p => p.TrimEnd('\\', '/').ToUpperInvariant()).OrderBy(p => p, StringComparer.Ordinal));
-        string hash = $"files:{Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(normalizedForHash)))}";
+        string hash = ClipboardContentHashing.ComputeFilesContentHash(paths, contentHashKey);
 
         string firstName = Path.GetFileName(cleaned[0].TrimEnd('\\', '/'));
         if (string.IsNullOrWhiteSpace(firstName))
@@ -2312,7 +2323,8 @@ public sealed partial class ClipboardHistoryService : IDisposable
         string? htmlContent,
         string? rtfContent,
         ClipboardSourceAppInfo? sourceApp,
-        ClipboardSettingsSlice slice)
+        ClipboardSettingsSlice slice,
+        byte[]? contentHashKey = null)
     {
         string trimmed = rawText.Trim();
         if (trimmed.Length == 0)
@@ -2344,7 +2356,7 @@ public sealed partial class ClipboardHistoryService : IDisposable
             _ = ClipboardClassifier.TryExtractHtmlAnchorTitle(htmlContent, trimmed, out urlTitle);
         }
 
-        string contentHash = ComputeNormalizedTextContentHash(trimmed);
+        string contentHash = ClipboardContentHashing.ComputeNormalizedTextContentHash(trimmed, contentHashKey);
 
         return new ClipboardHistoryItem
         {
@@ -2363,70 +2375,6 @@ public sealed partial class ClipboardHistoryService : IDisposable
             SourceAppName = sourceApp?.DisplayName,
             SourceAppPath = sourceApp?.ExecutablePath
         };
-    }
-
-    internal static string ComputeNormalizedTextContentHash(ReadOnlySpan<char> text)
-    {
-        const int ChunkChars = 4096;
-        Span<byte> digest = stackalloc byte[SHA256.HashSizeInBytes];
-        if (text.Length <= 512 && text.IndexOf('\r') < 0)
-        {
-            Span<byte> utf8Small = stackalloc byte[text.Length * 3];
-            SHA256.HashData(utf8Small[..Encoding.UTF8.GetBytes(text, utf8Small)], digest);
-        }
-        else
-        {
-            byte[] rentedUtf8 = System.Buffers.ArrayPool<byte>.Shared.Rent(ChunkChars * 3);
-            try
-            {
-                using var hasher = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-                Span<char> normChars = stackalloc char[ChunkChars];
-                ReadOnlySpan<char> rem = text;
-                while (!rem.IsEmpty)
-                {
-                    if (rem.IndexOf('\r') < 0)
-                    {
-                        int take = Math.Min(rem.Length, ChunkChars);
-                        if (take < rem.Length && char.IsHighSurrogate(rem[take - 1]) && char.IsLowSurrogate(rem[take])) take--;
-                        hasher.AppendData(rentedUtf8.AsSpan(0, Encoding.UTF8.GetBytes(rem[..take], rentedUtf8)));
-                        rem = rem[take..];
-                        continue;
-                    }
-
-                    int normLen = 0;
-                    while (!rem.IsEmpty && normLen < ChunkChars - 1)
-                    {
-                        int cr = rem.IndexOf('\r');
-                        if (cr != 0)
-                        {
-                            int take = Math.Min(cr < 0 ? rem.Length : cr, ChunkChars - normLen);
-                            if (take < rem.Length && take > 0 && char.IsHighSurrogate(rem[take - 1]) && char.IsLowSurrogate(rem[take])) take--;
-                            rem[..take].CopyTo(normChars[normLen..]);
-                            normLen += take;
-                            rem = rem[take..];
-                            if (cr < 0 || take < cr || normLen >= ChunkChars - 1) break;
-                        }
-
-                        bool isCrLf = rem.Length >= 2 && rem[1] == '\n';
-                        normChars[normLen++] = isCrLf ? '\n' : '\r';
-                        rem = rem[(isCrLf ? 2 : 1)..];
-                    }
-
-                    hasher.AppendData(rentedUtf8.AsSpan(0, Encoding.UTF8.GetBytes(normChars[..normLen], rentedUtf8)));
-                }
-
-                hasher.GetHashAndReset(digest);
-            }
-            finally
-            {
-                System.Buffers.ArrayPool<byte>.Shared.Return(rentedUtf8);
-            }
-        }
-
-        Span<char> outChars = stackalloc char[4 + (SHA256.HashSizeInBytes * 2)];
-        "txt:".CopyTo(outChars);
-        Convert.TryToHexStringLower(digest, outChars[4..], out _);
-        return new string(outChars);
     }
 
     private async Task TryResolveUrlTitleInBackgroundAsync(string itemId, string rawUrl)
@@ -2751,51 +2699,60 @@ public sealed partial class ClipboardHistoryService : IDisposable
             return;
         }
 
-        string sha256 = Convert.ToHexStringLower(SHA256.HashData(pngBytes));
-        string contentHash = $"img:{sha256}";
+        string contentHash = ClipboardContentHashing.ComputeImageContentHash(pngBytes, _store.GetOrCreateContentHashKey());
         if (DeskBoxClipboardWriteScope.ShouldIgnoreContentHash(contentHash))
         {
             return;
         }
 
-        string fileName = $"{sha256}.png";
+        string fileName = ClipboardContentHashing.MediaFileNameFromContentHash(contentHash);
         string imagePath = Path.Combine(_store.ImageDirectory, fileName);
-        await ClipboardStorageFileOps.WriteBytesIfMissingAsync(imagePath, pngBytes, token).ConfigureAwait(false);
-
-        string? thumbFileName;
-        if (preEncodedThumbBytes is { Length: > 0 })
+        // Media hits disk before IngestItemAsync registers it under _storeLock;
+        // keep the leaf whitelisted so a concurrent orphan sweep cannot delete it.
+        _inFlightMediaFiles[fileName] = 0;
+        try
         {
-            string thumbPath = Path.Combine(_store.ThumbnailDirectory, fileName);
-            await ClipboardStorageFileOps.WriteBytesIfMissingAsync(thumbPath, preEncodedThumbBytes, token)
-                .ConfigureAwait(false);
-            thumbFileName = fileName;
+            await ClipboardStorageFileOps.WriteBytesIfMissingAsync(imagePath, pngBytes, token).ConfigureAwait(false);
+
+            string? thumbFileName;
+            if (preEncodedThumbBytes is { Length: > 0 })
+            {
+                string thumbPath = Path.Combine(_store.ThumbnailDirectory, fileName);
+                await ClipboardStorageFileOps.WriteBytesIfMissingAsync(thumbPath, preEncodedThumbBytes, token)
+                    .ConfigureAwait(false);
+                thumbFileName = fileName;
+            }
+            else
+            {
+                thumbFileName = await EnsureThumbnailFromPngBytesAsync(pngBytes, width, height, fileName, token)
+                    .ConfigureAwait(false);
+            }
+
+            var imageItem = new ClipboardHistoryItem
+            {
+                Kind = ClipboardItemKind.Image,
+                ContentHash = contentHash,
+                Summary = $"{width} × {height}",
+                ImageFileName = fileName,
+                ThumbnailFileName = thumbFileName ?? fileName,
+                ImageWidth = width,
+                ImageHeight = height,
+                ByteSize = pngBytes.LongLength,
+                SourceAppName = effectiveSourceApp?.DisplayName,
+                SourceAppPath = effectiveSourceApp?.ExecutablePath
+            };
+
+            ClipboardHistoryItem? ingested = await IngestItemAsync(imageItem, observedApp, fromExternalCapture: true).ConfigureAwait(false);
+            if (ingested is not null &&
+                pngBytes.LongLength <= MaxBackgroundAutoOcrImageBytes &&
+                string.IsNullOrWhiteSpace(ingested.OcrText))
+            {
+                _ = TryPopulateImageOcrInBackgroundAsync(ingested.Id);
+            }
         }
-        else
+        finally
         {
-            thumbFileName = await EnsureThumbnailFromPngBytesAsync(pngBytes, width, height, fileName, token)
-                .ConfigureAwait(false);
-        }
-
-        var imageItem = new ClipboardHistoryItem
-        {
-            Kind = ClipboardItemKind.Image,
-            ContentHash = contentHash,
-            Summary = $"{width} × {height}",
-            ImageFileName = fileName,
-            ThumbnailFileName = thumbFileName ?? fileName,
-            ImageWidth = width,
-            ImageHeight = height,
-            ByteSize = pngBytes.LongLength,
-            SourceAppName = effectiveSourceApp?.DisplayName,
-            SourceAppPath = effectiveSourceApp?.ExecutablePath
-        };
-
-        ClipboardHistoryItem? ingested = await IngestItemAsync(imageItem, observedApp, fromExternalCapture: true).ConfigureAwait(false);
-        if (ingested is not null &&
-            pngBytes.LongLength <= MaxBackgroundAutoOcrImageBytes &&
-            string.IsNullOrWhiteSpace(ingested.OcrText))
-        {
-            _ = TryPopulateImageOcrInBackgroundAsync(ingested.Id);
+            _inFlightMediaFiles.TryRemove(fileName, out _);
         }
     }
 
@@ -2994,6 +2951,12 @@ public sealed partial class ClipboardHistoryService : IDisposable
             {
                 referencedPayloads.Add(item.RtfPayloadFileName);
             }
+        }
+
+        foreach (string inFlight in _inFlightMediaFiles.Keys)
+        {
+            referencedImages.Add(inFlight);
+            referencedThumbs.Add(inFlight);
         }
 
         ClipboardStorageFileOps.DeleteOrphanedFiles(_store.ImageDirectory, referencedImages);

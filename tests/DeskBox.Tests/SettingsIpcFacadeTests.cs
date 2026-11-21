@@ -1328,6 +1328,7 @@ public sealed class SettingsIpcFacadeTests : IDisposable
     {
         public bool Stopping;
         public string? ExportDir;
+        public bool ExportIncludeClipboard;
 
         public LocalBackupResult SnapshotResult = new(BackupOutcome.Succeeded);
 
@@ -1338,9 +1339,10 @@ public sealed class SettingsIpcFacadeTests : IDisposable
         public Task<LocalBackupResult> CreateSnapshotNowAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult(SnapshotResult);
 
-        public Task<string> ExportAsync(string destinationDirectory, CancellationToken cancellationToken = default)
+        public Task<string> ExportAsync(string destinationDirectory, CancellationToken cancellationToken = default, bool includeClipboard = false)
         {
             ExportDir = destinationDirectory;
+            ExportIncludeClipboard = includeClipboard;
             return Task.FromResult("C:\\backup.zip");
         }
 
@@ -1540,6 +1542,10 @@ public sealed class SettingsIpcFacadeTests : IDisposable
             Assert.Equal(BackupOutcome.Succeeded, snapshot.Outcome);
             Assert.Equal("C:\\backup.zip", await commands.ExportAsync("C:\\out"));
             Assert.Equal("C:\\out", loop.BackupCommands.ExportDir);
+            Assert.False(loop.BackupCommands.ExportIncludeClipboard);
+            Assert.Equal("C:\\backup.zip", await commands.ExportAsync("C:\\out2", includeClipboard: true));
+            Assert.Equal("C:\\out2", loop.BackupCommands.ExportDir);
+            Assert.True(loop.BackupCommands.ExportIncludeClipboard);
             CloudBackupRunResult upload = await commands.UploadNowAsync();
             Assert.True(upload.Uploaded);
 

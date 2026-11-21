@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using DeskBox.Helpers;
 using DeskBox.Models;
+using DeskBox.Features.Clipboard;
 using DeskBox.Platform;
 
 namespace DeskBox.Services;
@@ -110,6 +111,11 @@ public sealed class ClipboardStore
             }
 
             if (await ExternalizeItemPayloadsAsync(item).ConfigureAwait(false))
+            {
+                migratedInlinePayloads = true;
+            }
+
+            if (await MigrateLegacyContentHashAsync(item).ConfigureAwait(false))
             {
                 migratedInlinePayloads = true;
             }
@@ -728,6 +734,138 @@ public sealed class ClipboardStore
         await ClipboardStorageFileOps.WriteBytesIfMissingAsync(fullPath, utf8Bytes, cancellationToken)
             .ConfigureAwait(false);
         return fileName;
+    }
+
+    private byte[]? _contentHashKey;
+    private readonly object _contentHashKeyGate = new();
+
+    /// <summary>
+    /// Machine+user-local key for deterministic HMAC content addressing: dedup and
+    /// self-write suppression keep working, but persisted hashes no longer confirm
+    /// candidate plaintexts offline. DPAPI-bound; a cross-machine restore regenerates
+    /// the key (one-time dedup miss against pre-restore captures).
+    /// </summary>
+    internal byte[] GetOrCreateContentHashKey()
+    {
+        lock (_contentHashKeyGate)
+        {
+            if (_contentHashKey is not null)
+            {
+                return _contentHashKey;
+            }
+
+            string keyPath = Path.Combine(_rootDirectory, "hmac-key.bin");
+            try
+            {
+                if (File.Exists(keyPath))
+                {
+                    byte[] restored = Convert.FromBase64String(
+                        DpapiSecretProtector.UnprotectBase64ToUtf8(File.ReadAllText(keyPath)));
+                    if (restored.Length == 32)
+                    {
+                        _contentHashKey = restored;
+                        return restored;
+                    }
+                }
+            }
+            catch
+            {
+                // Corrupt or foreign-machine key: fall through and regenerate.
+            }
+
+            byte[] fresh = RandomNumberGenerator.GetBytes(32);
+            File.WriteAllText(keyPath, DpapiSecretProtector.ProtectUtf8ToBase64(Convert.ToBase64String(fresh)));
+            _contentHashKey = fresh;
+            return fresh;
+        }
+    }
+
+    private async Task<bool> MigrateLegacyContentHashAsync(ClipboardHistoryItem item)
+    {
+        string? hash = item.ContentHash;
+        if (string.IsNullOrEmpty(hash) || hash.Contains(":h1:", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        byte[] key = GetOrCreateContentHashKey();
+        if (hash.StartsWith("txt:", StringComparison.Ordinal))
+        {
+            string? text = item.TextContent;
+            if (string.IsNullOrEmpty(text) && !string.IsNullOrWhiteSpace(item.TextPayloadFileName))
+            {
+                text = await ReadPayloadTextAsync(item.TextPayloadFileName).ConfigureAwait(false);
+            }
+
+            if (string.IsNullOrEmpty(text))
+            {
+                return false;
+            }
+
+            item.ContentHash = ClipboardContentHashing.ComputeNormalizedTextContentHash(text, key);
+            return true;
+        }
+
+        if (hash.StartsWith("img:", StringComparison.Ordinal))
+        {
+            string oldLeaf = hash["img:".Length..] + ".png";
+            string imagePath = Path.Combine(ImageDirectory, oldLeaf);
+            if (!File.Exists(imagePath))
+            {
+                return false;
+            }
+
+            byte[] pngBytes = await File.ReadAllBytesAsync(imagePath).ConfigureAwait(false);
+            string newHash = ClipboardContentHashing.ComputeImageContentHash(pngBytes, key);
+            string newLeaf = ClipboardContentHashing.MediaFileNameFromContentHash(newHash);
+            if (!string.Equals(oldLeaf, newLeaf, StringComparison.OrdinalIgnoreCase))
+            {
+                if (!TryMoveMediaLeaf(ImageDirectory, oldLeaf, newLeaf))
+                {
+                    return false;
+                }
+
+                bool thumbReady = !File.Exists(Path.Combine(ThumbnailDirectory, oldLeaf)) ||
+                    TryMoveMediaLeaf(ThumbnailDirectory, oldLeaf, newLeaf);
+                item.ImageFileName = newLeaf;
+                if (thumbReady && string.Equals(item.ThumbnailFileName, oldLeaf, StringComparison.OrdinalIgnoreCase))
+                {
+                    item.ThumbnailFileName = newLeaf;
+                }
+            }
+
+            item.ContentHash = newHash;
+            return true;
+        }
+
+        if (hash.StartsWith("files:", StringComparison.Ordinal) && item.FilePaths.Count > 0)
+        {
+            item.ContentHash = ClipboardContentHashing.ComputeFilesContentHash(item.FilePaths, key);
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryMoveMediaLeaf(string directory, string oldLeaf, string newLeaf)
+    {
+        string source = Path.Combine(directory, oldLeaf);
+        string target = Path.Combine(directory, newLeaf);
+        try
+        {
+            if (!File.Exists(source))
+            {
+                return File.Exists(target);
+            }
+
+            ClipboardStorageFileOps.CopyFileOverwrite(source, target);
+            ClipboardStorageFileOps.TryDeleteFile(source);
+            return true;
+        }
+        catch
+        {
+            return File.Exists(target);
+        }
     }
 
     private async Task<(bool IsAvailable, bool NeedsResave)> HydrateAndMigrateSensitiveItemAsync(ClipboardHistoryItem item)
