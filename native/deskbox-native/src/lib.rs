@@ -58,6 +58,16 @@ pub const DESKBOX_NATIVE_E_INVALIDARG: i32 = 0x8007_0057_u32 as i32;
 pub const DESKBOX_NATIVE_HRESULT_INSUFFICIENT_BUFFER: i32 = 0x8007_007A_u32 as i32;
 pub const DESKBOX_NATIVE_HRESULT_NOT_ATTEMPTED: i32 = 0x8000_000A_u32 as i32;
 
+/// This DLL is loaded in-process; an unguarded panic would terminate the host
+/// DeskBox.exe. Degrade to INTERNAL_ERROR and leave the (possibly mid-write)
+/// result envelope untouched — the C# caller treats non-OK status as failure.
+fn ffi_status_guard(body: impl FnOnce() -> u32) -> u32 {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(body)) {
+        Ok(status) => status,
+        Err(_) => DESKBOX_NATIVE_STATUS_INTERNAL_ERROR,
+    }
+}
+
 pub const DESKBOX_SHORTCUT_READ_MODE_STORED_RAW: u32 = 1;
 pub const DESKBOX_SHORTCUT_READ_MODE_EFFECTIVE_DIAGNOSTIC: u32 = 2;
 pub const DESKBOX_SHORTCUT_WRITE_FLAG_SHELL_NAMESPACE_TARGET: u32 = 1 << 0;
@@ -1098,6 +1108,13 @@ pub unsafe extern "C" fn deskbox_shortcut_read_v2(
     request: *const DeskBoxShortcutReadRequestV2,
     result: *mut DeskBoxShortcutReadResultV2,
 ) -> u32 {
+    ffi_status_guard(|| unsafe { deskbox_shortcut_read_v2_inner(request, result) })
+}
+
+unsafe fn deskbox_shortcut_read_v2_inner(
+    request: *const DeskBoxShortcutReadRequestV2,
+    result: *mut DeskBoxShortcutReadResultV2,
+) -> u32 {
     // SAFETY: Pointer validity is part of the exported ABI's caller contract.
     let result_status = unsafe { validate_result_envelope(result) };
     if result_status != DESKBOX_NATIVE_STATUS_OK {
@@ -1132,6 +1149,13 @@ pub unsafe extern "C" fn deskbox_shortcut_read_v2(
 /// output buffer must be writable for its declared capacity.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn deskbox_shortcut_resolve_no_ui_v2(
+    request: *const DeskBoxShortcutResolveRequestV2,
+    result: *mut DeskBoxShortcutReadResultV2,
+) -> u32 {
+    ffi_status_guard(|| unsafe { deskbox_shortcut_resolve_no_ui_v2_inner(request, result) })
+}
+
+unsafe fn deskbox_shortcut_resolve_no_ui_v2_inner(
     request: *const DeskBoxShortcutResolveRequestV2,
     result: *mut DeskBoxShortcutReadResultV2,
 ) -> u32 {
@@ -1205,6 +1229,13 @@ pub unsafe extern "C" fn deskbox_shortcut_write_v2(
     request: *const DeskBoxShortcutWriteRequestV2,
     result: *mut DeskBoxShortcutWriteResultV2,
 ) -> u32 {
+    ffi_status_guard(|| unsafe { deskbox_shortcut_write_v2_inner(request, result) })
+}
+
+unsafe fn deskbox_shortcut_write_v2_inner(
+    request: *const DeskBoxShortcutWriteRequestV2,
+    result: *mut DeskBoxShortcutWriteResultV2,
+) -> u32 {
     // SAFETY: Pointer validity is part of the exported ABI's caller contract.
     let result_status = unsafe { validate_write_result_envelope(result) };
     if result_status != DESKBOX_NATIVE_STATUS_OK {
@@ -1244,6 +1275,13 @@ pub unsafe extern "C" fn deskbox_shortcut_resolve_with_ui_v2(
     request: *const DeskBoxShortcutUiResolveRequestV2,
     result: *mut DeskBoxShortcutUiResolveResultV2,
 ) -> u32 {
+    ffi_status_guard(|| unsafe { deskbox_shortcut_resolve_with_ui_v2_inner(request, result) })
+}
+
+unsafe fn deskbox_shortcut_resolve_with_ui_v2_inner(
+    request: *const DeskBoxShortcutUiResolveRequestV2,
+    result: *mut DeskBoxShortcutUiResolveResultV2,
+) -> u32 {
     // SAFETY: Pointer validity is part of the exported ABI's caller contract.
     let result_status = unsafe { validate_ui_resolve_result_envelope(result) };
     if result_status != DESKBOX_NATIVE_STATUS_OK {
@@ -1277,6 +1315,13 @@ pub unsafe extern "C" fn deskbox_shortcut_resolve_with_ui_v2(
 /// must remain readable and writable for the duration of the call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn deskbox_music_volume_v1(
+    request: *const DeskBoxMusicVolumeRequestV1,
+    result: *mut DeskBoxMusicVolumeResultV1,
+) -> u32 {
+    ffi_status_guard(|| unsafe { deskbox_music_volume_v1_inner(request, result) })
+}
+
+unsafe fn deskbox_music_volume_v1_inner(
     request: *const DeskBoxMusicVolumeRequestV1,
     result: *mut DeskBoxMusicVolumeResultV1,
 ) -> u32 {
@@ -1316,6 +1361,13 @@ pub unsafe extern "C" fn deskbox_music_volume_v1(
 /// `result` must remain readable and writable for the duration of the call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn deskbox_explorer_shell_launch_v1(
+    request: *const DeskBoxExplorerShellLaunchRequestV1,
+    result: *mut DeskBoxExplorerShellLaunchResultV1,
+) -> u32 {
+    ffi_status_guard(|| unsafe { deskbox_explorer_shell_launch_v1_inner(request, result) })
+}
+
+unsafe fn deskbox_explorer_shell_launch_v1_inner(
     request: *const DeskBoxExplorerShellLaunchRequestV1,
     result: *mut DeskBoxExplorerShellLaunchResultV1,
 ) -> u32 {
@@ -1361,6 +1413,13 @@ pub unsafe extern "C" fn deskbox_quick_access_v1(
     request: *const DeskBoxQuickAccessRequestV1,
     result: *mut DeskBoxQuickAccessResultV1,
 ) -> u32 {
+    ffi_status_guard(|| unsafe { deskbox_quick_access_v1_inner(request, result) })
+}
+
+unsafe fn deskbox_quick_access_v1_inner(
+    request: *const DeskBoxQuickAccessRequestV1,
+    result: *mut DeskBoxQuickAccessResultV1,
+) -> u32 {
     // SAFETY: Pointer validity is part of the exported ABI's caller contract.
     let result_status = unsafe { validate_quick_access_result_envelope(result) };
     if result_status != DESKBOX_NATIVE_STATUS_OK {
@@ -1403,6 +1462,13 @@ pub unsafe extern "C" fn deskbox_recycle_bin_v1(
     request: *const DeskBoxRecycleBinRequestV1,
     result: *mut DeskBoxRecycleBinResultV1,
 ) -> u32 {
+    ffi_status_guard(|| unsafe { deskbox_recycle_bin_v1_inner(request, result) })
+}
+
+unsafe fn deskbox_recycle_bin_v1_inner(
+    request: *const DeskBoxRecycleBinRequestV1,
+    result: *mut DeskBoxRecycleBinResultV1,
+) -> u32 {
     // SAFETY: Pointer validity is part of the exported ABI's caller contract.
     let result_status = unsafe { validate_recycle_bin_result_envelope(result) };
     if result_status != DESKBOX_NATIVE_STATUS_OK {
@@ -1432,6 +1498,13 @@ pub unsafe extern "C" fn deskbox_recycle_bin_v1(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ffi_status_guard_converts_panic_to_internal_error() {
+        let status = ffi_status_guard(|| panic!("simulated in-process edge-case panic"));
+        assert_eq!(status, DESKBOX_NATIVE_STATUS_INTERNAL_ERROR);
+        assert_eq!(ffi_status_guard(|| DESKBOX_NATIVE_STATUS_OK), DESKBOX_NATIVE_STATUS_OK);
+    }
     use std::{
         ffi::OsString,
         fs,

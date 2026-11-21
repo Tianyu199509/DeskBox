@@ -262,7 +262,14 @@ public sealed class AotPublishContractTests
         Assert.Contains("\"deskbox-native\"", workspace, StringComparison.Ordinal);
         Assert.Contains("\"deskbox-audio-session-fixture\"", workspace, StringComparison.Ordinal);
         Assert.DoesNotContain("\"deskbox-search-core\"", workspace, StringComparison.Ordinal);
-        Assert.Contains("panic = \"abort\"", workspace, StringComparison.Ordinal);
+        // The in-process DLL unwinds so its FFI exports can catch_unwind panics;
+        // the out-of-process thumbnail proxy keeps panic=abort via build flags.
+        Assert.DoesNotContain("panic = \"abort\"", workspace, StringComparison.Ordinal);
+        string proxyBuildScript = File.ReadAllText(
+            TestPaths.FromRepository("scripts/build-rust-thumbnail-proxy.ps1"));
+        Assert.Contains("\"panic=abort\"", proxyBuildScript, StringComparison.Ordinal);
+        Assert.Contains("catch_unwind", source, StringComparison.Ordinal);
+        Assert.Contains("ffi_status_guard", source, StringComparison.Ordinal);
         Assert.Contains("crate-type = [\"cdylib\"]", crate, StringComparison.Ordinal);
         Assert.Contains("rust-version = \"1.96\"", crate, StringComparison.Ordinal);
         Assert.Contains("windows = { version = \"0.62.2\"", crate, StringComparison.Ordinal);

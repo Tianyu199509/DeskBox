@@ -115,7 +115,9 @@ if (-not $ValidateOnly.IsPresent) {
     else {
         "target-feature=-crt-static"
     }
-    $encodedRustFlags = @("-C", $crtTargetFeature) -join [char]0x1F
+    # The workspace profile unwinds for the in-process deskbox-native FFI
+    # catch_unwind guards; this out-of-process proxy keeps panic=abort.
+    $encodedRustFlags = @("-C", $crtTargetFeature, "-C", "panic=abort") -join [char]0x1F
     try {
         [Environment]::SetEnvironmentVariable("CARGO_TERM_COLOR", "never", "Process")
         [Environment]::SetEnvironmentVariable(
